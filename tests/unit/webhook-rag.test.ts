@@ -50,7 +50,7 @@ function setup(opts: {
   embedder: EmbeddingClient;
   chat: ChatClient;
 }) {
-  const db = openDb({ path: ":memory:" });
+  const db = openDb({ path: ":memory:", embeddingDim: DIM });
   const sent: OutgoingCall[] = [];
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;

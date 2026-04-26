@@ -45,7 +45,7 @@ let db: ReturnType<typeof openDb>;
 let kb: KbRepo;
 
 beforeEach(() => {
-  db = openDb({ path: ":memory:" });
+  db = openDb({ path: ":memory:", embeddingDim: DIM });
   kb = new KbRepo(db);
 });
 afterEach(() => db.close());

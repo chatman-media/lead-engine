@@ -6,7 +6,7 @@ import { openDb } from "@/db/sqlite.ts";
 
 let db: ReturnType<typeof openDb>;
 beforeEach(() => {
-  db = openDb({ path: ":memory:" });
+  db = openDb({ path: ":memory:", embeddingDim: 1536 });
 });
 afterEach(() => db.close());
 

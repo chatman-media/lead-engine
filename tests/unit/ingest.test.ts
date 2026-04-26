@@ -39,7 +39,7 @@ let kb: KbRepo;
 
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "tg-ingest-"));
-  db = openDb({ path: ":memory:" });
+  db = openDb({ path: ":memory:", embeddingDim: DIM });
   kb = new KbRepo(db);
 });
 

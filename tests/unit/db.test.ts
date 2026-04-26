@@ -16,7 +16,7 @@ let db: ReturnType<typeof openDb>;
 beforeAll(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "tg-bot-db-"));
   dbPath = join(tmpDir, "test.db");
-  db = openDb({ path: dbPath });
+  db = openDb({ path: dbPath, embeddingDim: 1536 });
 });
 
 afterAll(() => {
