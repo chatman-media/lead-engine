@@ -1,0 +1,178 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { Server } from "bun";
+
+import { createRouter } from "@/app.ts";
+import { ConversationsRepo } from "@/db/repos/conversations.ts";
+import { MessagesRepo } from "@/db/repos/messages.ts";
+import { UsersRepo } from "@/db/repos/users.ts";
+import { openDb } from "@/db/sqlite.ts";
+import {
+  TelegramClient,
+  type FetchLike,
+} from "@/telegram/client.ts";
+import type { TgUpdate } from "@/telegram/types.ts";
+
+const SECRET = "test-secret";
+
+interface OutgoingCall {
+  method: string;
+  body: Record<string, unknown>;
+}
+
+function setup() {
+  const db = openDb({ path: ":memory:" });
+  const sent: OutgoingCall[] = [];
+  const fetchImpl: FetchLike = async (input, init) => {
+    const url = typeof input === "string" ? input : (input as Request).url;
+    const apiMethod = url.split("/").pop() ?? "";
+    const body =
+      typeof init?.body === "string" ? JSON.parse(init.body) : null;
+    sent.push({ method: apiMethod, body });
+    const result =
+      apiMethod === "sendMessage"
+        ? {
+            message_id: Math.floor(Math.random() * 1_000_000),
+            chat: { id: body.chat_id, type: "private" },
+            date: Math.floor(Date.now() / 1000),
+            text: body.text,
+          }
+        : true;
+    return new Response(JSON.stringify({ ok: true, result }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  const telegram = new TelegramClient({
+    token: "test-token",
+    fetch: fetchImpl,
+  });
+  const router = createRouter({
+    db,
+    telegram,
+    webhookSecret: SECRET,
+  });
+  const server = Bun.serve({
+    port: 0,
+    fetch: (req) => router.handle(req),
+  });
+  return { db, router, server, sent };
+}
+
+function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
+  s.server.stop(true);
+  s.db.close();
+}
+
+function update(
+  fromId: number,
+  text: string,
+  chatId = fromId,
+): TgUpdate {
+  return {
+    update_id: Math.floor(Math.random() * 1_000_000),
+    message: {
+      message_id: Math.floor(Math.random() * 1_000_000),
+      from: { id: fromId, is_bot: false, first_name: "T" },
+      chat: { id: chatId, type: "private" },
+      date: Math.floor(Date.now() / 1000),
+      text,
+    },
+  };
+}
+
+let ctx: ReturnType<typeof setup>;
+
+beforeEach(() => {
+  ctx = setup();
+});
+
+afterEach(() => {
+  teardown(ctx);
+});
+
+describe("/telegram/<secret> webhook", () => {
+  test("rejects wrong path secret with 403", async () => {
+    const url = `http://127.0.0.1:${ctx.server.port}/telegram/wrong-secret`;
+    const res = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify(update(1, "hi")),
+      headers: { "content-type": "application/json" },
+    });
+    expect(res.status).toBe(403);
+    expect(ctx.sent).toHaveLength(0);
+  });
+
+  test("rejects when X-Telegram-Bot-Api-Secret-Token header mismatches", async () => {
+    const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
+    const res = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify(update(1, "hi")),
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": "nope",
+      },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("ignores updates from non-whitelisted users (no DB writes, no outgoing calls)", async () => {
+    const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
+    const res = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify(update(999, "hi")),
+      headers: { "content-type": "application/json" },
+    });
+    expect(res.status).toBe(200);
+    expect(ctx.sent).toHaveLength(0);
+
+    const usersRepo = new UsersRepo(ctx.db);
+    expect(usersRepo.byTgId(999)).toBeNull();
+  });
+
+  test("whitelisted user: persists message + assistant placeholder + calls sendMessage", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const convsRepo = new ConversationsRepo(ctx.db);
+    const msgsRepo = new MessagesRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 555, tgUsername: "bob" });
+
+    const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
+    const res = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify(update(555, "hello world")),
+      headers: { "content-type": "application/json" },
+    });
+    expect(res.status).toBe(200);
+
+    expect(ctx.sent).toHaveLength(1);
+    expect(ctx.sent[0]!.method).toBe("sendMessage");
+    expect(ctx.sent[0]!.body.chat_id).toBe(555);
+
+    const conv = convsRepo.byUserId(u.id);
+    expect(conv).not.toBeNull();
+    const msgs = msgsRepo.listByConversation(conv!.id);
+    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(msgs[0]!.text).toBe("hello world");
+  });
+
+  test("mode=human: persists user message but does NOT call sendMessage", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const convsRepo = new ConversationsRepo(ctx.db);
+    const msgsRepo = new MessagesRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 777 });
+    const c = convsRepo.ensureForUser(u.id);
+    convsRepo.setMode(c.id, "human", 1);
+
+    const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
+    const res = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify(update(777, "I need help")),
+      headers: { "content-type": "application/json" },
+    });
+    expect(res.status).toBe(200);
+    expect(ctx.sent).toHaveLength(0);
+
+    const msgs = msgsRepo.listByConversation(c.id);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]!.role).toBe("user");
+  });
+});

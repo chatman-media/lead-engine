@@ -1,0 +1,86 @@
+import { useEffect, useState } from "react";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useNavigate,
+} from "react-router-dom";
+import { api, type Admin } from "./api.ts";
+import { Layout } from "./components/Layout.tsx";
+import { Chat } from "./pages/Chat.tsx";
+import { Chats } from "./pages/Chats.tsx";
+import { Login } from "./pages/Login.tsx";
+import { Users } from "./pages/Users.tsx";
+import { AdminWs } from "./ws.ts";
+
+export const ws = new AdminWs();
+
+interface AuthState {
+  loading: boolean;
+  admin: Admin | null;
+}
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<AuthState>({ loading: true, admin: null });
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    api
+      .me()
+      .then(({ admin }) => {
+        setState({ loading: false, admin });
+        ws.connect();
+      })
+      .catch(() => {
+        setState({ loading: false, admin: null });
+        navigate("/admin/login", { replace: true });
+      });
+  }, [navigate]);
+
+  if (state.loading) {
+    return (
+      <div
+        style={{
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--text-3)",
+          fontFamily: "var(--mono)",
+        }}
+      >
+        connecting…
+      </div>
+    );
+  }
+
+  if (!state.admin) return null;
+
+  return <Layout admin={state.admin}>{children}</Layout>;
+}
+
+export function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/admin/login" element={<Login />} />
+        <Route
+          path="/admin/*"
+          element={
+            <AuthGate>
+              <Routes>
+                <Route index element={<Navigate to="chats" replace />} />
+                <Route path="chats" element={<Chats />} />
+                <Route path="chats/:id" element={<Chat />} />
+                <Route path="users" element={<Users />} />
+                <Route path="*" element={<Navigate to="chats" replace />} />
+              </Routes>
+            </AuthGate>
+          }
+        />
+        <Route path="*" element={<Navigate to="/admin/chats" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}

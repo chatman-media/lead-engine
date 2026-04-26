@@ -1,0 +1,16 @@
+node_modules/
+data/
+.env
+.env.local
+.env.test.local
+dist/
+admin-ui/dist/
+playwright-report/
+test-results/
+.DS_Store
+*.log
+bun.lockb
+*.sqlite
+*.db-journal
+*.db-wal
+*.db-shm
