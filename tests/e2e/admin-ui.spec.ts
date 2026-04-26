@@ -186,6 +186,43 @@ test.describe("Admin Chat detail", () => {
     await expect(page.getByTestId("release-btn")).toBeVisible();
     await expect(page.getByTestId("mode-badge")).toHaveText("HUMAN");
   });
+
+  test("operator sends reply → appears in message list", async ({ page }) => {
+    await loginPage(page);
+    await page.goto(`/admin/chats/${convId}`);
+    // Take over the conversation
+    await page.getByTestId("take-btn").click();
+    await expect(page.getByTestId("reply-input")).toBeVisible();
+    // Type and send reply
+    await page.getByTestId("reply-input").fill("Добрый день, помогу!");
+    await page.getByTestId("send-btn").click();
+    // Message should appear in the messages list (not just the textarea)
+    await expect(
+      page.getByTestId("messages-list").getByText("Добрый день, помогу!"),
+    ).toBeVisible();
+    // Input cleared
+    await expect(page.getByTestId("reply-input")).toHaveValue("");
+  });
+
+  test("release returns conversation to ai mode", async ({
+    page,
+    request,
+  }) => {
+    // Take first via API
+    const c = await adminCookie(request);
+    await request.post(
+      `/admin/api/conversations/${convId}/take`,
+      { headers: { cookie: c } },
+    );
+
+    await loginPage(page);
+    await page.goto(`/admin/chats/${convId}`);
+    await expect(page.getByTestId("release-btn")).toBeVisible();
+    await page.getByTestId("release-btn").click();
+    // After release: take-btn visible again, reply box gone
+    await expect(page.getByTestId("take-btn")).toBeVisible();
+    await expect(page.getByTestId("reply-input")).not.toBeVisible();
+  });
 });
 
 /** Helper: get session cookie value for admin. */

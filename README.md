@@ -6,7 +6,7 @@ Telegram-бот с RAG по базе знаний, анкетой по токе�
 API и локальная Ollama (без расхода токенов).
 
 Разрабатывается через TDD: на каждый юнит сначала падающий тест, потом
-минимальная реализация. Текущее состояние: **88 unit + 12 e2e зелёных, 0 линтов.**
+минимальная реализация. Текущее состояние: **95 unit + 14 e2e зелёных, 0 линтов.**
 
 ## Быстрый старт
 
@@ -118,6 +118,7 @@ Telegram → /telegram/<secret> ─┬─► whitelist (UsersRepo)
 | `GET` | `/admin/api/conversations/:id` | Диалог + сообщения |
 | `POST` | `/admin/api/conversations/:id/take` | Переключить в `human` |
 | `POST` | `/admin/api/conversations/:id/release` | Вернуть в `ai` |
+| `POST` | `/admin/api/conversations/:id/reply` | Отправить ответ оператора в TG |
 | `WS` | `/admin/api/ws` | Realtime-события (`message:new`, `conversation:updated`) |
 
 ## Прогресс
@@ -136,5 +137,5 @@ Telegram → /telegram/<secret> ─┬─► whitelist (UsersRepo)
 | 10 | `admin-auth` — `Bun.password` + сессии + middleware `/admin/*` | ✅ |
 | 11 | `admin-api-ws` — REST + WebSocket-бродкаст для админки | ✅ |
 | 12 | `admin-ui` — React + Vite: Login / Users / Chats / Chat | ✅ |
-| 13 | `operator-reply` — ответ оператора → TG + WS + возврат `mode=ai` | ⏳ |
+| 13 | `operator-reply` — ответ оператора → TG + WS + возврат `mode=ai` | ✅ |
 | 14 | `smoke` — финальный happy-path E2E + чеклист релиза | ⏳ |

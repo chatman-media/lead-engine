@@ -5,6 +5,7 @@ import {
   createListConversationsHandler,
   createListUsersHandler,
   createReleaseHandler,
+  createReplyHandler,
   createTakeHandler,
 } from "./admin/api.ts";
 import {
@@ -74,8 +75,18 @@ export function createRouter(deps: AppDeps): Router {
 
   const apiDeps = {
     db: deps.db,
+    telegram: deps.telegram,
     onConversationChanged: (conversationId: number) => {
       deps.bus?.publish({ type: "conversation:updated", conversationId });
+    },
+    onMessageSent: ({
+      conversationId,
+      tgUserId,
+    }: {
+      conversationId: number;
+      tgUserId: number;
+    }) => {
+      deps.bus?.publish({ type: "message:new", conversationId, tgUserId });
     },
   };
   router.get("/admin/api/users", createListUsersHandler(apiDeps));
@@ -94,6 +105,10 @@ export function createRouter(deps: AppDeps): Router {
   router.post(
     "/admin/api/conversations/:id/release",
     createReleaseHandler(apiDeps),
+  );
+  router.post(
+    "/admin/api/conversations/:id/reply",
+    createReplyHandler(apiDeps),
   );
 
   if (deps.enableTestHooks) {
