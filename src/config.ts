@@ -18,6 +18,14 @@ function envInt(name: string, fallback: number): number {
   return n;
 }
 
+function envFloat(name: string, fallback?: number): number | undefined {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number.parseFloat(raw);
+  if (Number.isNaN(n)) throw new Error(`Env ${name} must be a number`);
+  return n;
+}
+
 function envEnum<T extends string>(
   name: string,
   allowed: readonly T[],
@@ -42,6 +50,9 @@ const llmProvider = envEnum<LlmProvider>(
   "openai",
 );
 
+export const PERSONA_ROLES = ["human", "assistant"] as const;
+export type PersonaRole = (typeof PERSONA_ROLES)[number];
+
 const ollamaDefaults = {
   chatModel: "llama3.1",
   embedModel: "nomic-embed-text",
@@ -58,6 +69,12 @@ export const config = {
   },
   llm: {
     provider: llmProvider,
+  },
+  rag: {
+    /** sqlite-vec L2 distance threshold; hits above are dropped before LLM. */
+    maxDistance: envFloat("RAG_MAX_DISTANCE"),
+    /** Top-K vector hits per query. */
+    topK: envInt("RAG_TOP_K", 5),
   },
   openai: {
     apiKey: envOptional("OPENAI_API_KEY"),
@@ -82,7 +99,18 @@ export const config = {
     sessionCookie: envOptional("ADMIN_SESSION_COOKIE", "tg_admin_sid"),
     sessionTtlDays: envInt("ADMIN_SESSION_TTL_DAYS", 14),
   },
+  persona: {
+    /** What the bot calls itself in chat. */
+    name: envOptional("BOT_PERSONA_NAME", "Менеджер"),
+    /** "human" → bot poses as a real person; "assistant" → openly an AI. */
+    role: envEnum<PersonaRole>("BOT_PERSONA_ROLE", PERSONA_ROLES, "human"),
+    /** Company / agency name (optional, used in greetings and signatures). */
+    company: envOptional("BOT_PERSONA_COMPANY", ""),
+  },
 } as const;
+
+export type AppConfig = typeof config;
+export type Persona = AppConfig["persona"];
 
 /** The single source of truth for the embedding dimension currently in use. */
 export function activeEmbeddingDim(c: typeof config = config): number {
@@ -95,7 +123,5 @@ export function activeEmbeddingDim(c: typeof config = config): number {
 export function llmIsConfigured(c: typeof config = config): boolean {
   return c.llm.provider === "ollama" ? !!c.ollama.host : !!c.openai.apiKey;
 }
-
-export type AppConfig = typeof config;
 
 export { env };

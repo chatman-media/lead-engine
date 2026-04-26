@@ -20,7 +20,11 @@ function ensureCustomSqlite() {
     ];
     for (const path of candidates) {
       if (existsSync(path)) {
-        Database.setCustomSQLite(path);
+        try {
+          Database.setCustomSQLite(path);
+        } catch {
+          // Already loaded on hot-reload — safe to ignore.
+        }
         customSqliteSet = true;
         return;
       }

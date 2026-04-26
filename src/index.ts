@@ -48,7 +48,17 @@ if (llmIsConfigured()) {
       `[server] LLM provider=openai chat=${config.openai.chatModel} embed=${config.openai.embeddingModel} dim=${config.openai.embeddingDim}`,
     );
   }
-  rag = { chat, embedder };
+  rag = {
+    chat,
+    embedder,
+    persona: config.persona,
+    topK: config.rag.topK,
+    maxDistance: config.rag.maxDistance,
+  };
+  console.log(
+    `[server] persona role=${config.persona.role} name="${config.persona.name}"` +
+      (config.persona.company ? ` company="${config.persona.company}"` : ""),
+  );
 } else {
   console.warn(
     `[server] LLM not configured (provider=${config.llm.provider}); bot will reply with placeholder text.`,

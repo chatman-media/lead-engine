@@ -13,12 +13,46 @@ import { OllamaEmbeddingClient } from "../src/rag/providers/ollama-embed.ts";
 import type { EmbeddingClient } from "../src/rag/embed.ts";
 import { ingestDirectory, ingestFile } from "../src/rag/ingest.ts";
 
-async function main() {
-  const target = process.argv[2];
-  if (!target) {
-    console.error("Usage: bun scripts/ingest.ts <file-or-directory>");
+interface CliOpts {
+  target: string;
+  maxChars?: number;
+  overlap?: number;
+}
+
+function parseCliArgs(): CliOpts {
+  const argv = process.argv.slice(2);
+  const positional: string[] = [];
+  let maxChars: number | undefined;
+  let overlap: number | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const v = argv[i]!;
+    if (v === "--max-chars") maxChars = parseInt(argv[++i] ?? "", 10);
+    else if (v === "--overlap") overlap = parseInt(argv[++i] ?? "", 10);
+    else if (v === "-h" || v === "--help") {
+      console.log(
+        "Usage: bun scripts/ingest.ts <file-or-directory>\n" +
+          "                            [--max-chars N]   default 1500\n" +
+          "                            [--overlap N]     default 150\n\n" +
+          "Tip: small embedding models have a 512-token context. For\n" +
+          "Russian text, prefer --max-chars 600 --overlap 80 (e.g. for\n" +
+          "all-minilm:l6-v2). Larger models like nomic-embed-text accept\n" +
+          "the default 1500/150.",
+      );
+      process.exit(0);
+    } else positional.push(v);
+  }
+  if (!positional[0]) {
+    console.error(
+      "Usage: bun scripts/ingest.ts <file-or-directory> [--max-chars N] [--overlap N]",
+    );
     process.exit(1);
   }
+  return { target: positional[0]!, maxChars, overlap };
+}
+
+async function main() {
+  const opts = parseCliArgs();
+  const target = opts.target;
   if (!llmIsConfigured()) {
     console.error(
       `LLM provider "${config.llm.provider}" is not configured. ` +
@@ -58,12 +92,22 @@ async function main() {
     );
   }
 
+  const chunkOpts: { maxChars?: number; overlapChars?: number } = {};
+  if (opts.maxChars !== undefined) chunkOpts.maxChars = opts.maxChars;
+  if (opts.overlap !== undefined) chunkOpts.overlapChars = opts.overlap;
+  if (Object.keys(chunkOpts).length > 0) {
+    console.log(
+      `[ingest] chunk override: maxChars=${chunkOpts.maxChars ?? "default"} overlap=${chunkOpts.overlapChars ?? "default"}`,
+    );
+  }
+
+  const deps = { kb, embedder, chunk: chunkOpts };
   const stat = statSync(target);
   if (stat.isDirectory()) {
-    const summary = await ingestDirectory(target, { kb, embedder });
+    const summary = await ingestDirectory(target, deps);
     console.log(JSON.stringify(summary, null, 2));
   } else {
-    const r = await ingestFile(target, { kb, embedder });
+    const r = await ingestFile(target, deps);
     console.log(JSON.stringify(r, null, 2));
   }
   db.close();

@@ -68,7 +68,7 @@ export async function ingestFile(
     contentHash: hash,
   });
 
-  const chunks = chunkText(raw, deps.chunk);
+  const chunks = chunkText(stripNonContent(raw), deps.chunk);
   if (chunks.length === 0) {
     return { source, documentId: doc.id, chunks: 0, created: true };
   }
@@ -140,4 +140,20 @@ function countChunksForDoc(db: Database, docId: number): number {
     )
     .get(docId);
   return r?.n ?? 0;
+}
+
+/**
+ * Removes non-content noise that pollutes embeddings: HTML comments
+ * (`<!-- ... -->`, including multi-line), and a leading YAML frontmatter
+ * block (`---\n...\n---\n`). The visible markdown body is preserved as-is.
+ */
+export function stripNonContent(raw: string): string {
+  let s = raw;
+  // Drop a single YAML frontmatter at the very top, if present.
+  s = s.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+  // Drop all HTML comments (greedy match within a single comment).
+  s = s.replace(/<!--[\s\S]*?-->/g, "");
+  // Collapse the trail of blank lines that the strip leaves behind.
+  s = s.replace(/\n{3,}/g, "\n\n").trim();
+  return s + "\n";
 }

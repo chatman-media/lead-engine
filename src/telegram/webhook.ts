@@ -5,7 +5,7 @@ import { KbRepo } from "../db/repos/kb.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
 import { UsersRepo } from "../db/repos/users.ts";
 import { json, type RouteHandler } from "../router.ts";
-import { answerWithRag, NO_CONTEXT_MARKER } from "../rag/answer.ts";
+import { answerWithRag, NO_CONTEXT_MARKER, type Persona } from "../rag/answer.ts";
 import type { ChatClient } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
 import type { TelegramClient } from "./client.ts";
@@ -16,6 +16,10 @@ export interface RagDeps {
   embedder: EmbeddingClient;
   chat: ChatClient;
   topK?: number;
+  /** sqlite-vec L2 distance threshold; hits above are dropped before LLM. */
+  maxDistance?: number;
+  /** How the bot identifies itself in answers (name, role, company). */
+  persona?: Persona;
 }
 
 export interface WebhookDeps {
@@ -115,6 +119,8 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       embedder: deps.rag.embedder,
       chat: deps.rag.chat,
       topK: deps.rag.topK ?? 5,
+      maxDistance: deps.rag.maxDistance,
+      persona: deps.rag.persona,
     });
 
     if (result.text === NO_CONTEXT_MARKER) {
@@ -127,15 +133,21 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
     return json({ ok: true, mode: "ai" });
 
     async function replyAndPersist(text: string, meta?: unknown) {
-      const sent = await deps.telegram.sendMessage({
-        chatId: message!.chat.id,
-        text,
-      });
+      let tgMessageId: number | undefined;
+      try {
+        const sent = await deps.telegram.sendMessage({
+          chatId: message!.chat.id,
+          text,
+        });
+        tgMessageId = sent.message_id;
+      } catch (err) {
+        console.error("[webhook] sendMessage failed (non-fatal):", err);
+      }
       messages.add({
         conversationId: conv.id,
         role: "assistant",
         text,
-        tgMessageId: sent.message_id,
+        tgMessageId,
         meta,
       });
     }
