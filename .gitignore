@@ -9,7 +9,6 @@ playwright-report/
 test-results/
 .DS_Store
 *.log
-bun.lockb
 *.sqlite
 *.db-journal
 *.db-wal
