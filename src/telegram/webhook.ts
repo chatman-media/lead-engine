@@ -1,15 +1,18 @@
 import type { Database } from "bun:sqlite";
 
 import { ConversationsRepo, type ConversationRow } from "../db/repos/conversations.ts";
+import { ExperimentsRepo, parseAllocationToExperiment } from "../db/repos/experiments.ts";
 import { KbRepo } from "../db/repos/kb.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
+import { StylesRepo } from "../db/repos/styles.ts";
 import { UsersRepo, type UserRow } from "../db/repos/users.ts";
 import { json, type RouteHandler } from "../router.ts";
 import { answerWithRag, NO_CONTEXT_MARKER, type Persona } from "../rag/answer.ts";
 import type { ChatClient } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
+import { pickVariant } from "../sales/ab-router.ts";
 import { nextStage } from "../sales/stage-router.ts";
-import type { FunnelStage, Style } from "../sales/types.ts";
+import { FUNNEL_STAGES, type FunnelStage, type Style } from "../sales/types.ts";
 import type { TelegramClient } from "./client.ts";
 import type { TgUpdate } from "./types.ts";
 import { containsEscalationTrigger } from "./escalation.ts";
@@ -24,10 +27,10 @@ export interface RagDeps {
    *  Used only when `style` is not provided. */
   persona?: Persona;
   /**
-   * Sales-engine style. When set, takes precedence over `persona` — the bot
-   * uses the composed sales prompt (persona + voice + framework + hooks +
-   * stage + guardrails + few-shot) instead of the simple persona prompt.
-   * Wired from `BOT_SALES_STYLE` env at app boot in `src/app.ts`.
+   * Sales-engine style FORCE-OVERRIDE. When set, this style is used for ALL
+   * conversations regardless of DB state — the operator's escape hatch via
+   * `BOT_SALES_STYLE` env. When unset, the bot picks a per-conversation
+   * style from the DB (`styles` + `experiments` tables) on first inbound.
    */
   style?: Style;
 }
@@ -74,6 +77,8 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.db);
   const messages = new MessagesRepo(deps.db);
   const kb = new KbRepo(deps.db);
+  const styles = new StylesRepo(deps.db);
+  const experiments = new ExperimentsRepo(deps.db);
 
   return async ({ req, params }) => {
     if (params.secret !== deps.webhookSecret) {
@@ -145,6 +150,8 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       messages,
       conversations,
       kb,
+      styles,
+      experiments,
       telegram: deps.telegram,
       rag: deps.rag,
       conv,
@@ -188,6 +195,8 @@ interface ProcessInboundDeps {
   messages: MessagesRepo;
   conversations: ConversationsRepo;
   kb: KbRepo;
+  styles: StylesRepo;
+  experiments: ExperimentsRepo;
   telegram: TelegramClient;
   rag?: RagDeps;
   conv: ConversationRow;
@@ -198,8 +207,94 @@ interface ProcessInboundDeps {
   onEvent?: (event: WebhookEvent) => void;
 }
 
+/**
+ * Resolves which sales-engine `Style` (if any) to use for a given conversation.
+ *
+ * Priority chain (highest wins):
+ *   1. `rag.style` — env-based force-override (`BOT_SALES_STYLE`).
+ *   2. `conv.style_id` — sticky per-conversation assignment from DB.
+ *   3. Running experiment in `experiments` table — assigns and persists now.
+ *   4. None — caller falls back to legacy `persona` path.
+ *
+ * Side-effect: when (3) fires, this function writes `conv.style_id` and
+ * `conv.experiment_id` so subsequent turns are sticky. Any other result has
+ * no DB writes.
+ *
+ * Returns `null` when no style applies — caller uses `rag.persona` instead.
+ */
+function resolveStyle(d: {
+  rag?: RagDeps;
+  conv: ConversationRow;
+  user: UserRow;
+  styles: StylesRepo;
+  experiments: ExperimentsRepo;
+  conversations: ConversationsRepo;
+}): Style | null {
+  // Priority 1: env force-override.
+  if (d.rag?.style) return d.rag.style;
+
+  // Priority 2: existing assignment.
+  if (d.conv.style_id != null) {
+    const row = d.styles.byId(d.conv.style_id);
+    if (!row) {
+      console.warn(
+        `[sales] conv ${d.conv.id} references style_id=${d.conv.style_id} that no longer exists; falling back`,
+      );
+      return null;
+    }
+    try {
+      return d.styles.parseRow(row);
+    } catch (err) {
+      console.error(`[sales] failed to parse style row id=${row.id}:`, err);
+      return null;
+    }
+  }
+
+  // Priority 3: running experiment → pickVariant + persist assignment.
+  const running = d.experiments.getRunning();
+  if (!running) return null;
+
+  const experiment = parseAllocationToExperiment(running);
+  if (!experiment) {
+    console.warn(
+      `[sales] experiment ${running.slug} has malformed allocation_json; skipping`,
+    );
+    return null;
+  }
+
+  const variantSlug = pickVariant(experiment, d.user.tg_user_id);
+  const variantRow = d.styles.bySlug(variantSlug);
+  if (!variantRow) {
+    console.warn(
+      `[sales] experiment ${running.slug} allocates to slug "${variantSlug}" that's missing/inactive in styles table`,
+    );
+    return null;
+  }
+
+  try {
+    const style = d.styles.parseRow(variantRow);
+    d.conversations.assignStyle(d.conv.id, variantRow.id, running.id);
+    // Reflect on the in-memory row so downstream code sees the assignment.
+    d.conv.style_id = variantRow.id;
+    d.conv.experiment_id = running.id;
+    return style;
+  } catch (err) {
+    console.error(`[sales] failed to parse style row id=${variantRow.id}:`, err);
+    return null;
+  }
+}
+
+const FUNNEL_STAGE_SET: ReadonlySet<string> = new Set(FUNNEL_STAGES);
+
+/** Coerce a string from `conversations.current_stage` into a typed FunnelStage,
+ *  or null if it's NULL / unrecognized (treat as fresh conversation). */
+function toFunnelStage(raw: string | null): FunnelStage | null {
+  if (raw === null) return null;
+  return FUNNEL_STAGE_SET.has(raw) ? (raw as FunnelStage) : null;
+}
+
 async function processInbound(d: ProcessInboundDeps): Promise<void> {
-  const reply = async (text: string, meta?: unknown) => {
+  const reply = async (text: string, meta?: unknown, stage?: FunnelStage) => {
     let tgMessageId: number | undefined;
     try {
       const sent = await d.telegram.sendMessage({
@@ -216,6 +311,7 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
       text,
       tgMessageId,
       meta,
+      ...(stage !== undefined ? { stage } : {}),
     });
     d.conversations.touch(d.conv.id);
     d.onEvent?.({
@@ -246,22 +342,34 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return;
   }
 
-  // Sales-engine path: when a Style is configured, derive the funnel stage
-  // from the user message + turn number. Phase 1 doesn't persist `currentStage`
-  // yet, so the router infers stage from message content alone (which is good
-  // enough for opener/pitch/objection detection — see src/sales/stage-router.ts).
-  // Phase 2 will read/write `conversations.current_stage` for multi-turn drift.
+  // Sales-engine resolution. Returns the active Style for this conversation
+  // (and persists the A/B assignment if it just fired), or null when the
+  // engine isn't active and we should use the legacy `persona` path.
+  const style = resolveStyle({
+    rag: d.rag,
+    conv: d.conv,
+    user: d.user,
+    styles: d.styles,
+    experiments: d.experiments,
+    conversations: d.conversations,
+  });
+
+  // When a style applies, compute the next funnel stage from previous stage
+  // (persisted on `conversations.current_stage`) + the new user message.
+  // `nextStage` factors in turn count too, so we count user messages from
+  // history. Persist the new stage so it survives restarts.
   let stage: FunnelStage | undefined;
   let includeFewShot: boolean | undefined;
-  if (d.rag.style) {
+  if (style) {
     const userMessageCount = d.messages
       .listByConversation(d.conv.id)
       .filter((m) => m.role === "user").length;
     stage = nextStage({
       turnNumber: userMessageCount,
-      currentStage: null,
+      currentStage: toFunnelStage(d.conv.current_stage),
       lastUserMessage: d.text,
     });
+    d.conversations.setCurrentStage(d.conv.id, stage);
     // Drop few-shot examples once turn 1 is in history — saves prompt tokens.
     includeFewShot = userMessageCount <= 1;
   }
@@ -274,7 +382,7 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     topK: d.rag.topK ?? 5,
     maxDistance: d.rag.maxDistance,
     persona: d.rag.persona,
-    style: d.rag.style,
+    ...(style ? { style } : {}),
     ...(stage !== undefined ? { stage } : {}),
     ...(includeFewShot !== undefined ? { includeFewShot } : {}),
   });
@@ -286,5 +394,5 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return;
   }
 
-  await reply(result.text, { used_chunk_ids: result.usedChunkIds });
+  await reply(result.text, { used_chunk_ids: result.usedChunkIds }, stage);
 }

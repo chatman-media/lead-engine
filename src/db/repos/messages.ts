@@ -10,6 +10,9 @@ export interface MessageRow {
   tg_message_id: number | null;
   meta_json: string | null;
   created_at: number;
+  /** Funnel stage at the time this message was processed (null on legacy
+   *  rows and on conversations that don't use the sales-style engine). */
+  stage: string | null;
 }
 
 export class MessagesRepo {
@@ -21,14 +24,17 @@ export class MessagesRepo {
     text: string;
     tgMessageId?: number | null;
     meta?: unknown;
+    /** Optional funnel stage tag. Set by the sales-style engine for
+     *  per-stage analytics; left null when the engine isn't active. */
+    stage?: string | null;
   }): MessageRow {
     const row = this.db
       .query<
         MessageRow,
-        [number, MessageRole, string, number | null, string | null]
+        [number, MessageRole, string, number | null, string | null, string | null]
       >(
-        `INSERT INTO messages (conversation_id, role, text, tg_message_id, meta_json)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO messages (conversation_id, role, text, tg_message_id, meta_json, stage)
+         VALUES (?, ?, ?, ?, ?, ?)
          RETURNING *`,
       )
       .get(
@@ -37,6 +43,7 @@ export class MessagesRepo {
         input.text,
         input.tgMessageId ?? null,
         input.meta === undefined ? null : JSON.stringify(input.meta),
+        input.stage ?? null,
       );
     if (!row) throw new Error("Failed to insert message");
     return row;

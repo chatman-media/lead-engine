@@ -1,4 +1,5 @@
 import { activeEmbeddingDim, config, llmIsConfigured } from "./config.ts";
+import { seedBuiltinStyles, StylesRepo } from "./db/repos/styles.ts";
 import { getDb } from "./db/sqlite.ts";
 import { OpenAIChatClient } from "./rag/chat.ts";
 import { OpenAIEmbeddingClient } from "./rag/embed.ts";
@@ -7,6 +8,7 @@ import { OllamaEmbeddingClient } from "./rag/providers/ollama-embed.ts";
 import type { ChatClient } from "./rag/chat.ts";
 import type { EmbeddingClient } from "./rag/embed.ts";
 import { getStyle } from "./sales/styles/index.ts";
+import { STYLES as BUILTIN_STYLES } from "./sales/styles/index.ts";
 import { createServer } from "./server.ts";
 import type { RagDeps } from "./telegram/webhook.ts";
 import { TelegramClient } from "./telegram/client.ts";
@@ -15,6 +17,24 @@ const db = getDb();
 const telegram = new TelegramClient({
   token: config.telegram.botToken || "missing-token",
 });
+
+// Phase 2a: ensure built-in sales styles exist in the DB on every boot.
+// Idempotent — admin's edits in the table win over the source-code styles.
+// Newly added builtins (added in source after a deploy) get inserted on next boot.
+{
+  const stylesRepo = new StylesRepo(db);
+  const seedResult = seedBuiltinStyles(stylesRepo, BUILTIN_STYLES);
+  if (seedResult.inserted.length > 0) {
+    console.log(
+      `[server] seeded built-in sales styles: ${seedResult.inserted.join(", ")}`,
+    );
+  }
+  if (seedResult.skipped.length > 0) {
+    console.log(
+      `[server] sales styles already present (kept DB version): ${seedResult.skipped.join(", ")}`,
+    );
+  }
+}
 
 let rag: RagDeps | undefined;
 if (llmIsConfigured()) {

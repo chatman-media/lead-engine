@@ -2,16 +2,37 @@
 
 Pluggable conversational personas with sales frameworks, Cialdini hooks, per-stage guidance, and few-shot anchoring. Composed into a system prompt at runtime, with KB-grounded RAG for facts.
 
-Originally prototyped in the sister `sales-guru` repo, ported into this codebase under `src/sales/`. The Phase-1 integration is **opt-in via env flag** — the existing `BOT_PERSONA_*` path keeps working as the default.
+Originally prototyped in the sister `sales-guru` repo, ported into this codebase under `src/sales/`. Two activation modes:
+
+| Mode | What | When |
+|---|---|---|
+| **Single forced style** | `BOT_SALES_STYLE=<slug>` env → all conversations use that style | demo, QA, single-persona deploy |
+| **Per-conversation A/B** | running row in `experiments` table → each conversation gets a deterministic variant | actually testing which persona converts best |
+| **Off (legacy)** | neither set → bot uses the env-based `BOT_PERSONA_*` persona prompt | default for back-compat |
 
 ## TL;DR — turn it on
+
+**Quick (single style for everyone):**
 
 ```bash
 # .env
 BOT_SALES_STYLE=flirty-belfort-v1
 ```
 
-That's it. Restart the server. The bot now uses the sales engine for every conversation. To revert: unset the variable.
+**Real A/B (different users get different styles):**
+
+```sql
+-- one row, one query, restart not needed
+INSERT INTO experiments (slug, status, allocation_json, started_at)
+VALUES (
+  'april-2026-recruit',
+  'running',
+  '{"flirty-belfort-v1": 50, "empathetic-nepq-v1": 25, "cold-direct-pas-v1": 25}',
+  unixepoch()
+);
+```
+
+In both modes you can revert by unsetting the env var or `UPDATE experiments SET status='paused'`. Existing conversations keep their assigned style — no mid-flight reshuffles.
 
 ## Built-in styles
 
@@ -36,14 +57,19 @@ Holding three constant and rotating one is what makes the A/B comparable.
 
 ## How a turn flows
 
-1. Telegram POST → [`src/telegram/webhook.ts:62`](../src/telegram/webhook.ts) `createWebhookHandler`.
+1. Telegram POST → [`src/telegram/webhook.ts`](../src/telegram/webhook.ts) `createWebhookHandler`.
 2. Persist user message, dedupe by `tg_message_id`, load conversation row.
-3. Compute funnel **stage** via [`src/sales/stage-router.ts`](../src/sales/stage-router.ts) — Cyrillic-aware regex on user message + turn count.
-4. Call `answerWithRag({ question, ..., style, stage, includeFewShot })`.
-5. [`src/rag/answer.ts:106`](../src/rag/answer.ts) embeds the question, runs vector search, formats `KB CONTEXT`.
-6. **Branch:** if `style` was passed → [`composeSystemPrompt(style, stage, kbContext)`](../src/sales/prompt.ts). Else legacy `buildSystemPrompt(persona, context)`.
-7. LLM call via existing `ChatClient` (Ollama or OpenAI) at the style's pinned `temperature`.
-8. Reply sanitized (`<think>` blocks stripped, prefixes trimmed) and sent.
+3. **Resolve style** via `resolveStyle()` — priority:
+   - `BOT_SALES_STYLE` env override (forces a single style)
+   - existing `conversations.style_id` (sticky per-conversation assignment)
+   - running experiment + `pickVariant()` → assigns and persists `style_id`
+   - none → legacy `BOT_PERSONA_*` path
+4. **Compute stage** via [`src/sales/stage-router.ts`](../src/sales/stage-router.ts) — Cyrillic-aware regex on user message + turn count + previous stage from `conversations.current_stage`. Persist new stage on conversation.
+5. Call `answerWithRag({ question, ..., style, stage, includeFewShot })`.
+6. [`src/rag/answer.ts`](../src/rag/answer.ts) embeds the question, runs vector search, formats `KB CONTEXT`.
+7. **Branch:** if `style` was passed → [`composeSystemPrompt(style, stage, kbContext)`](../src/sales/prompt.ts). Else legacy `buildSystemPrompt(persona, context)`.
+8. LLM call via existing `ChatClient` (Ollama or OpenAI) at the style's pinned `temperature`.
+9. Reply sanitized (`<think>` blocks stripped, prefixes trimmed) and sent. Assistant message persisted with `stage` tag for funnel analytics.
 
 ## What gets composed into the system prompt
 
@@ -72,22 +98,60 @@ Rule-based, zero LLM calls, predictable. Decision priority:
 
 ⚠️ Cyrillic regex caveat: JS `\b` is ASCII-only, so the routes use explicit Unicode delimiters `[^\p{L}\p{N}]` with the `u` flag. Reverting to `\b` silently breaks every Russian regex. There's a regression test in [`tests/unit/sales/stage-router.test.ts`](../tests/unit/sales/stage-router.test.ts) for this.
 
-## A/B routing (Phase 2 — not yet enabled)
+## A/B routing (Phase 2a — shipped)
 
-[`src/sales/ab-router.ts`](../src/sales/ab-router.ts) ships with a deterministic `pickVariant(experiment, userId)`:
+[`src/sales/ab-router.ts`](../src/sales/ab-router.ts) ships a deterministic `pickVariant(experiment, userId)`:
 
-- Same `(experiment.slug, userId)` always returns the same `styleSlug`.
-- Stable across process restarts.
+- Same `(experiment.slug, userId)` always returns the same `styleSlug` — sticky across restarts, sticky if the prospect comes back tomorrow.
 - Distribution proportional to integer weights.
 
-Not wired into `webhook.ts` yet — Phase 1 forces a single style for everyone via `BOT_SALES_STYLE`. To enable A/B in Phase 2 you'll need:
+Wired into the webhook: when an experiment is in `status='running'`, every NEW conversation gets allocated on its first inbound message. The `style_id` and `experiment_id` are persisted on the conversation row, so subsequent turns are deterministic — no chance of a prospect seeing a different persona because of a process restart or load-balancer hop.
 
-1. New tables `styles` and `experiments` (migration `003_*.sql`).
-2. Column `conversations.style_id` set on first message.
-3. Webhook calls `pickVariant(activeExperiment, user.tg_user_id)` and persists the assignment.
-4. Admin UI to edit styles and experiments.
+### DB schema (migration `003_sales_styles_and_experiments.sql`)
 
-The shape is documented in `sales-guru/docs/ARCHITECTURE.md § tg-chatbot integration` (sister repo) — keep that around for reference until Phase 2 is shipped.
+```sql
+CREATE TABLE styles (
+  id INTEGER PRIMARY KEY,
+  slug TEXT UNIQUE NOT NULL,
+  display_name TEXT NOT NULL,
+  config_json TEXT NOT NULL,        -- full Style as JSON, validated by Zod
+  is_active INTEGER NOT NULL DEFAULT 1,
+  version INTEGER NOT NULL DEFAULT 1,
+  parent_id INTEGER REFERENCES styles(id),  -- version chain
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+CREATE TABLE experiments (
+  id INTEGER PRIMARY KEY,
+  slug TEXT UNIQUE NOT NULL,
+  status TEXT NOT NULL,              -- 'draft'|'running'|'paused'|'done'
+  allocation_json TEXT NOT NULL,     -- {"flirty-v1": 50, "empathetic-v1": 50}
+  success_metric TEXT NOT NULL,      -- 'qualified'|'won'|'replied_3+'
+  started_at INTEGER, ended_at INTEGER,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+ALTER TABLE conversations ADD COLUMN style_id INTEGER REFERENCES styles(id);
+ALTER TABLE conversations ADD COLUMN experiment_id INTEGER REFERENCES experiments(id);
+ALTER TABLE conversations ADD COLUMN current_stage TEXT;
+ALTER TABLE messages ADD COLUMN stage TEXT;
+```
+
+### Boot-time seed
+
+[`seedBuiltinStyles`](../src/db/repos/styles.ts) inserts each source-defined style into the DB on every server start, **idempotent on slug** — admin's edits in the table always win. Newly added builtins (added in source code after a deploy) get inserted on next boot.
+
+### Style versioning
+
+The `version` + `parent_id` chain lets the admin UI edit a live style by inserting a new row (version+1, parent_id = old.id) and marking the old one inactive. Conversations already running keep their `style_id` pointer to the old row, so the prompt they were assigned remains pinned for the lifetime of that chat. (UI for this is Phase 2b.)
+
+### Failure modes — graceful degradation
+
+- Malformed `experiments.allocation_json` → bot logs warning, falls back to legacy persona.
+- Experiment references unknown style slug → same.
+- `styles.config_json` fails Zod schema → throws with field-level error pointing at the offending row.
+
+All three covered by [`tests/unit/sales/webhook-ab.test.ts`](../tests/unit/sales/webhook-ab.test.ts).
 
 ## Authoring a new style
 
@@ -140,6 +204,9 @@ Three provider categories represented:
 | `stage-router.test.ts` | Cyrillic regex regression, all transitions, precedence | 19 |
 | `prompt.test.ts` | All sections, persona-role branching, few-shot toggle, KB block, grounding | 20 |
 | `styles.test.ts` | All 3 sample styles + invariants + Zod rejection of bad input | 25 |
+| `styles-repo.test.ts` | StylesRepo CRUD, parseRow with Zod validation, soft-delete, idempotent seed | 14 |
+| `experiments-repo.test.ts` | ExperimentsRepo CRUD, getRunning, status transitions, allocation parsing | 17 |
+| `webhook-ab.test.ts` | End-to-end A/B: assignment, stickiness, two users, malformed experiment graceful fallback | 6 |
 
 Plus four integration tests in [`tests/unit/answer.test.ts`](../tests/unit/answer.test.ts) verifying that `answerWithRag` correctly branches between the legacy persona prompt and the sales-engine composed prompt.
 
@@ -147,8 +214,8 @@ Run: `bun test tests/unit`. The full unit suite is hermetic — no network, no l
 
 ## Future work
 
-- **Phase 2** — DB-backed `styles` table + per-conversation A/B via `pickVariant`. Admin UI for CRUD + experiment dashboard.
-- **Stage classifier upgrade** — replace regex stage router with a haiku-class LLM classifier (`{stage, confidence}`). Keep regex as fallback at low confidence.
-- **OpenRouter provider** — add `OpenRouterChatClient` for cheap Claude/GPT/Gemini access alongside the existing Ollama path.
+- **Phase 2b — Admin UI** for `styles` and `experiments` tables: list, create, edit (with versioning via parent_id chain), playground (test a single message against a style without persisting), funnel-conversion dashboard. SQL aggregation already works against the existing schema; UI wraps it.
+- **Phase 2c — OpenRouter provider** — add `OpenRouterChatClient` implementing the existing `ChatClient` interface. The model registry in `src/sales/models.ts` already lists Claude/GPT/Gemini entries; provider just needs wiring (~80 LOC). Enables per-style backbone choice.
+- **Stage classifier upgrade** — replace regex `nextStage` with a haiku-class LLM classifier returning `{stage, confidence}`. Keep regex as fallback at confidence < 0.6.
 - **Streaming replies** — switch the Ollama `/api/chat` call to SSE so partial replies show up as they're generated (helps UX on slow CPU inference).
 - **Per-style memory** — `conversations.style_memory_json` for persona-specific facts (e.g. "this prospect's name is Anya, lives in Yekaterinburg") that survive across turns.
