@@ -85,6 +85,16 @@ export class ConversationsRepo {
     );
   }
 
+  /**
+   * Hard-deletes a conversation and (via FK CASCADE) all its messages.
+   * The next inbound Telegram message from the same user will recreate
+   * a fresh conversation in default mode='ai', escalated_at=NULL.
+   */
+  deleteById(id: number): boolean {
+    const res = this.db.run(`DELETE FROM conversations WHERE id = ?`, [id]);
+    return res.changes > 0;
+  }
+
   list(opts: { onlyEscalated?: boolean; limit?: number } = {}): Array<
     ConversationRow & { tg_user_id: number; tg_username: string | null }
   > {

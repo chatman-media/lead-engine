@@ -39,18 +39,31 @@ OPENAI_EMBEDDING_DIM=1536
 ```bash
 LLM_PROVIDER=ollama
 OLLAMA_HOST=http://localhost:11434
-OLLAMA_CHAT_MODEL=llama3.1
-OLLAMA_EMBEDDING_MODEL=nomic-embed-text
-OLLAMA_EMBEDDING_DIM=768
+OLLAMA_CHAT_MODEL=qwen3:latest      # послушный к system-prompt, без «переспрашиваний»
+OLLAMA_EMBEDDING_MODEL=bge-m3:latest  # мультиязычный (ru/zh/ko), 1024-dim
+OLLAMA_EMBEDDING_DIM=1024
+RAG_MAX_DISTANCE=1.00                # bge-m3 даёт ~0.75–0.95 для on-topic, 1.05+ для шума
+RAG_TOP_K=5
 ```
 
 Перед стартом:
 
 ```bash
 ollama serve                       # или Ollama Desktop
-ollama pull llama3.1
-ollama pull nomic-embed-text
+ollama pull qwen3                  # 8B, q4_K_M, ~5 GB VRAM, 30K context
+ollama pull bge-m3                 # 567M, FP16, мультиязычный embedder
 ```
+
+Замечания по чат-моделям:
+
+- `qwen3` хорошо слушается system-prompt, по-русски естественен и
+  поддерживает «выключенный thinking»: бот шлёт `think:false` и подмешивает
+  `/no_think` в system-сообщение, иначе модель тратит токены на CoT-блок.
+- `llama3.1` / `llama3.2` — быстрее, но хуже выдерживают строгие негативные
+  правила («не переспрашивай», «не упоминай оператора»).
+- Модели семейства `gemma3` (включая фай-тюны вроде `rnj-1`) **не**
+  рекомендуются как чат-модель: они склонны переспрашивать «что именно
+  интересует?» вместо ответа.
 
 Размерность векторного индекса синхронизируется автоматически: если
 `OLLAMA_EMBEDDING_DIM` отличается от текущей, таблица `kb_vec` пересоздаётся
@@ -72,7 +85,7 @@ bun run dev:ui                                 # Vite dev-server с HMR на :51
 bun scripts/extract-tg.ts <result.json> <out>  # извлечь корпус из Telegram-экспорта
 bun scripts/transcribe.ts <result.json> [out]  # расшифровать голосовые через Whisper
 bun scripts/ingest.ts ./docs                   # индексация .md/.txt в KB
-bun scripts/create-admin.ts <email> <password> # создать аккаунт оператора
+bun scripts/create-admin.ts <email> <password> # создать аккаунт админа
 bun scripts/set-webhook.ts set <publicUrl>     # привязать webhook к Telegram
 bun scripts/set-webhook.ts info                # проверить статус
 bun scripts/set-webhook.ts delete              # отвязать
@@ -234,9 +247,67 @@ bun scripts/ingest.ts kb/curated
 ближайших чанков (L2-distance) → они склеиваются в системный
 промпт `«отвечай только по CONTEXT, иначе верни __NO_CONTEXT__»` →
 LLM генерирует ответ → если получили `__NO_CONTEXT__`, диалог
-переключается в `mode=queued` и эскалируется оператору, иначе
-ответ уходит в чат, а `used_chunk_ids` сохраняются в `meta_json`
-сообщения для аудита.
+уходит в `mode=queued` и в чат отправляется короткая «человеческая»
+заминка (см. ниже про персону), а админ перехватывает в админке.
+Иначе ответ уходит в чат, а `used_chunk_ids` сохраняются в
+`meta_json` сообщения для аудита.
+
+### Персона бота и фолбэк-фразы
+
+Бот говорит от лица живого менеджера — имя, роль и компания
+задаются в `.env`:
+
+```bash
+BOT_PERSONA_NAME=Алина
+BOT_PERSONA_ROLE=human       # human → притворяется человеком; assistant → честный AI
+BOT_PERSONA_COMPANY=INFINITY AGENCY
+```
+
+В режиме `human` системный промпт явно запрещает упоминать слова
+«бот», «ИИ», «ассистент», «оператор», «коллега», «свяжитесь с
+менеджером» — модель должна вести диалог сама. Когда в KB не
+нашлось ответа, бот не сочиняет: возвращает маркер
+`__NO_CONTEXT__`, а webhook отправляет короткую заминку и
+ставит чат в очередь админу. Тексты заминок живут как константы
+в `src/telegram/webhook.ts` (`ESCALATION_REPLY` /
+`QUEUED_REPLY` / `PLACEHOLDER_REPLY`) — все по-русски, в стиле
+«секунду, уточню и напишу», без слова «оператор».
+
+Чувствительность к «нет ответа» крутится через `RAG_MAX_DISTANCE`
+в `.env` (sqlite-vec L2): чем меньше — тем строже отсекаются
+слабые попадания, тем чаще диалог уйдёт в очередь вместо
+галлюцинации. Пустое значение = без порога (отдаём всё, что
+вернул top-K).
+
+Подбор порога зависит от эмбеддера и **корпуса**:
+
+- `bge-m3` (рекомендуется для ru/zh/ko корпусов): on-topic ~0.75–0.95,
+  off-topic ≥1.05 → разумный порог `RAG_MAX_DISTANCE=1.00`.
+- `nomic-embed-text` (английский, слабее на CJK): on-topic ~0.55–0.65,
+  off-topic 0.62+ — порог здесь почти не разделяет темы, поэтому RAG
+  может «галлюцинировать через соседнюю страну». Для нашего сценария
+  (Корея/Китай) недостаточно избирателен.
+
+Чтобы перейти на другой эмбеддер: поменять `OLLAMA_EMBEDDING_MODEL` +
+`OLLAMA_EMBEDDING_DIM`, очистить `kb_chunks` / `kb_documents` и
+прогнать `bun scripts/ingest.ts <корпус>` — таблица `kb_vec` пересоздаётся
+автоматически при изменении `dim`.
+
+### Скорость / латентность ответа
+
+`OllamaChatClient` явно ограничивает `num_ctx=4096` и `num_predict=256`
+и шлёт `keep_alive: "30m"`. Это:
+
+- держит KV-cache `qwen3` в районе 5–6 GB VRAM (а не 11 GB при
+  дефолтных 40K context) — модель помещается и быстрее обрабатывает
+  prompt;
+- кладёт верхнюю границу на длину ответа (бот не выдаёт «эссе»);
+- не даёт Ollama выгружать модель между сообщениями, чтобы не было
+  10-секундных холодных стартов.
+
+Ускорить дальше можно либо переходом на меньшую чат-модель
+(`llama3.2:3b` ≈ в 2–3× быстрее, ценой более слабого следования
+системным правилам), либо на облачную (`*:cloud` в Ollama).
 
 ## Тесты
 
@@ -280,7 +351,8 @@ Telegram → /telegram/<secret> ─┬─► whitelist (UsersRepo)
 | `GET` | `/admin/api/conversations/:id` | Диалог + сообщения |
 | `POST` | `/admin/api/conversations/:id/take` | Переключить в `human` |
 | `POST` | `/admin/api/conversations/:id/release` | Вернуть в `ai` |
-| `POST` | `/admin/api/conversations/:id/reply` | Отправить ответ оператора в TG |
+| `POST` | `/admin/api/conversations/:id/reply` | Отправить ответ из админки в TG |
+| `DELETE` | `/admin/api/conversations/:id` | Снести диалог + историю (статус `mode` сбросится при следующем сообщении) |
 | `WS` | `/admin/api/ws` | Realtime-события (`message:new`, `conversation:updated`) |
 
 ## Прогресс
@@ -299,5 +371,5 @@ Telegram → /telegram/<secret> ─┬─► whitelist (UsersRepo)
 | 10 | `admin-auth` — `Bun.password` + сессии + middleware `/admin/*` | ✅ |
 | 11 | `admin-api-ws` — REST + WebSocket-бродкаст для админки | ✅ |
 | 12 | `admin-ui` — React + Vite: Login / Users / Chats / Chat | ✅ |
-| 13 | `operator-reply` — ответ оператора → TG + WS + возврат `mode=ai` | ✅ |
+| 13 | `admin-reply` — ответ из админки → TG + WS + возврат `mode=ai` | ✅ |
 | 14 | `smoke` — финальный happy-path E2E + чеклист релиза | ✅ |

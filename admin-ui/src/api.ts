@@ -112,6 +112,12 @@ export const api = {
         body: JSON.stringify({ text }),
       },
     ),
+
+  deleteConversation: (id: number) =>
+    req<{ ok: boolean; deleted: number }>(
+      `/admin/api/conversations/${id}`,
+      { method: "DELETE" },
+    ),
 };
 
 export { ApiError };

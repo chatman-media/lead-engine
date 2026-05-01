@@ -107,6 +107,24 @@ export function createReleaseHandler(deps: AdminApiDeps): RouteHandler {
   };
 }
 
+export function createDeleteConversationHandler(
+  deps: AdminApiDeps,
+): RouteHandler {
+  const conversations = new ConversationsRepo(deps.db);
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const conv = conversations.byId(id);
+    if (!conv) return json({ error: "not found" }, { status: 404 });
+    const ok = conversations.deleteById(id);
+    if (!ok) return json({ error: "delete failed" }, { status: 500 });
+    deps.onConversationChanged?.(id);
+    return json({ ok: true, deleted: id });
+  };
+}
+
 export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.db);
   const messages = new MessagesRepo(deps.db);

@@ -63,6 +63,27 @@ export function Chats() {
       .finally(() => setLoading(false));
   }
 
+  async function handleDelete(c: Conversation, e: React.MouseEvent) {
+    e.stopPropagation();
+    const label = c.user.tg_username
+      ? `@${c.user.tg_username}`
+      : `tg:${c.user.tg_user_id}`;
+    if (
+      !confirm(
+        `Удалить чат с ${label}? Сообщения будут стёрты, статус сбросится. Действие необратимо.`,
+      )
+    ) {
+      return;
+    }
+    setConvs((prev) => prev.filter((x) => x.id !== c.id));
+    try {
+      await api.deleteConversation(c.id);
+    } catch (err) {
+      console.error("[chats] delete failed", err);
+      reload();
+    }
+  }
+
   useEffect(() => {
     reload();
     tickRef.current = setInterval(reload, 10_000);
@@ -169,6 +190,38 @@ export function Chats() {
                 </div>
               </div>
               {modeBadge(c.mode)}
+              <button
+                onClick={(e) => handleDelete(c, e)}
+                data-testid={`delete-chat-${c.id}`}
+                title="Удалить чат"
+                aria-label="Удалить чат"
+                style={{
+                  width: 26,
+                  height: 26,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  color: "var(--text-3)",
+                  fontFamily: "var(--mono)",
+                  fontSize: 14,
+                  lineHeight: 1,
+                  cursor: "pointer",
+                  transition: "color 0.1s, border-color 0.1s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = "var(--red, #ef4444)";
+                  e.currentTarget.style.borderColor = "var(--red, #ef4444)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = "var(--text-3)";
+                  e.currentTarget.style.borderColor = "var(--border)";
+                }}
+              >
+                ×
+              </button>
             </div>
           ))}
 

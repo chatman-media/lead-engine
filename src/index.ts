@@ -77,3 +77,27 @@ const server = createServer({
 });
 
 console.log(`[server] listening on http://localhost:${server.port}`);
+
+// Pre-load Ollama models in the background. Without this, the first user
+// message after server start has to wait for ~3 min of cold qwen3 weights
+// loading (8B Q4_K_M ≈ 5 GB). Once warm, keep_alive=30m holds them. We
+// don't await — server is up and serving, the warm-up just hides the
+// cold start from the very first inbound message.
+if (rag) {
+  const startedAt = Date.now();
+  Promise.all([
+    rag.embedder.embed(["warm-up"]).then(() => "embed").catch((err) => {
+      console.warn("[server] embed warm-up failed:", err?.message ?? err);
+      return null;
+    }),
+    rag.chat.complete([{ role: "user", content: "ok" }]).then(() => "chat").catch((err) => {
+      console.warn("[server] chat warm-up failed:", err?.message ?? err);
+      return null;
+    }),
+  ]).then((results) => {
+    const ok = results.filter(Boolean).join("+");
+    console.log(
+      `[server] LLM warm-up done in ${Math.round((Date.now() - startedAt) / 1000)}s (${ok || "all failed"})`,
+    );
+  });
+}

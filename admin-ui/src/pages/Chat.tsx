@@ -20,7 +20,7 @@ const ROLE_COLOR: Record<string, string> = {
 const ROLE_LABEL: Record<string, string> = {
   user: "user",
   assistant: "bot",
-  human: "operator",
+  human: "manager",
   system: "system",
 };
 
@@ -69,6 +69,21 @@ export function Chat() {
   async function handleRelease() {
     await api.release(convId);
     reload();
+  }
+
+  async function handleDelete() {
+    const userLabel = user?.tg_username
+      ? `@${user.tg_username}`
+      : `tg:${user?.tg_user_id}`;
+    if (
+      !confirm(
+        `Удалить чат с ${userLabel}? Сообщения будут стёрты, статус сбросится. Действие необратимо.`,
+      )
+    ) {
+      return;
+    }
+    await api.deleteConversation(convId);
+    navigate("/admin/chats");
   }
 
   async function handleSend() {
@@ -188,6 +203,15 @@ export function Chat() {
               Release
             </button>
           )}
+
+          <button
+            onClick={handleDelete}
+            data-testid="delete-btn"
+            title="Удалить чат и сбросить статус"
+            style={actionBtnStyle("var(--red, #ef4444)")}
+          >
+            Delete
+          </button>
         </div>
       </div>
 

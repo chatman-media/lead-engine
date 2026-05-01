@@ -14,6 +14,7 @@ import {
   type FetchLike,
 } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
+import { ESCALATION_REPLY } from "@/telegram/webhook.ts";
 
 const SECRET = "test-secret";
 const DIM = 1536;
@@ -77,6 +78,9 @@ function setup(opts: {
     telegram,
     webhookSecret: SECRET,
     rag: { embedder: opts.embedder, chat: opts.chat },
+    // Tests need deterministic post-conditions; production uses
+    // fire-and-forget so the Telegram ack stays under 60s.
+    awaitWebhookProcessing: true,
   });
   const server = Bun.serve({
     port: 0,
@@ -178,7 +182,11 @@ describe("webhook RAG integration", () => {
     expect(res.status).toBe(200);
 
     expect(ctx.sent).toHaveLength(1);
-    expect(String(ctx.sent[0]!.body.text)).toMatch(/оператор|operator/i);
+    const replyText = String(ctx.sent[0]!.body.text);
+    expect(replyText).toBe(ESCALATION_REPLY);
+    // The "human" persona must never leak the words "оператор" / "бот" /
+    // "ассистент" into user-visible fallback messages.
+    expect(replyText).not.toMatch(/оператор|operator|бот|ассистент/i);
 
     const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
     expect(conv.mode).toBe("queued");

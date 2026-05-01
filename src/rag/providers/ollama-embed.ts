@@ -7,6 +7,8 @@ export interface OllamaEmbeddingOptions {
   model: string;
   dim: number;
   fetch?: FetchLike;
+  /** See OllamaChatOptions.timeoutMs — same rationale (cold model load). */
+  timeoutMs?: number;
 }
 
 interface OllamaEmbedResponse {
@@ -19,12 +21,14 @@ export class OllamaEmbeddingClient implements EmbeddingClient {
   private readonly host: string;
   private readonly model: string;
   private readonly fetchImpl: FetchLike;
+  private readonly timeoutMs: number;
 
   constructor(opts: OllamaEmbeddingOptions) {
     this.host = opts.host.replace(/\/+$/, "");
     this.model = opts.model;
     this.dim = opts.dim;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
+    this.timeoutMs = opts.timeoutMs ?? 2 * 60_000;
   }
 
   async embed(inputs: string[]): Promise<number[][]> {
@@ -34,6 +38,7 @@ export class OllamaEmbeddingClient implements EmbeddingClient {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: this.model, input: inputs }),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");

@@ -14,6 +14,8 @@ interface RecordedCall {
     messages: ChatMessage[];
     stream: boolean;
     options?: Record<string, unknown>;
+    think?: boolean;
+    keep_alive?: string;
   };
 }
 
@@ -44,9 +46,17 @@ describe("OllamaChatClient", () => {
       expect(call.method).toBe("POST");
       expect(call.body.model).toBe("llama3.1");
       expect(call.body.stream).toBe(false);
+      // disableThinking defaults to true → request carries think:false +
+      // /no_think hint as a synthetic system message (idempotent).
+      expect(call.body.think).toBe(false);
       expect(call.body.messages).toEqual([
+        { role: "system", content: "/no_think" },
         { role: "user", content: "hi" },
       ]);
+      // Conservative defaults to keep KV-cache + reply length tight.
+      expect(call.body.options?.num_ctx).toBe(4096);
+      expect(call.body.options?.num_predict).toBe(256);
+      expect(call.body.keep_alive).toBe("30m");
       return ok({
         model: "llama3.1",
         message: { role: "assistant", content: "hello back" },
@@ -61,6 +71,40 @@ describe("OllamaChatClient", () => {
     const reply = await client.complete([{ role: "user", content: "hi" }]);
     expect(reply).toBe("hello back");
     expect(calls).toHaveLength(1);
+  });
+
+  test("disableThinking:false leaves messages untouched and omits think flag", async () => {
+    const { fetchImpl, calls } = fakeFetch(() =>
+      ok({ message: { role: "assistant", content: "x" }, done: true }),
+    );
+    const client = new OllamaChatClient({
+      host: "http://x:1",
+      model: "m",
+      fetch: fetchImpl,
+      disableThinking: false,
+    });
+    await client.complete([{ role: "user", content: "hi" }]);
+    expect(calls[0]!.body.messages).toEqual([{ role: "user", content: "hi" }]);
+    expect(calls[0]!.body.think).toBeUndefined();
+  });
+
+  test("/no_think hint is appended to existing system prompt, not duplicated", async () => {
+    const { fetchImpl, calls } = fakeFetch(() =>
+      ok({ message: { role: "assistant", content: "x" }, done: true }),
+    );
+    const client = new OllamaChatClient({
+      host: "http://x:1",
+      model: "m",
+      fetch: fetchImpl,
+    });
+    await client.complete([
+      { role: "system", content: "Speak Russian only." },
+      { role: "user", content: "hi" },
+    ]);
+    const sys = calls[0]!.body.messages[0]!;
+    expect(sys.role).toBe("system");
+    expect(sys.content).toBe("/no_think\n\nSpeak Russian only.");
+    expect(calls[0]!.body.messages).toHaveLength(2);
   });
 
   test("forwards temperature via options.temperature", async () => {

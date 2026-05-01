@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 
 import {
   createConversationDetailHandler,
+  createDeleteConversationHandler,
   createListConversationsHandler,
   createListUsersHandler,
   createReleaseHandler,
@@ -32,6 +33,11 @@ export interface AppDeps {
   bus?: AdminBus;
   /** Mounts /__test/* routes for Playwright; never enable in production. */
   enableTestHooks?: boolean;
+  /** When true, the Telegram webhook awaits the full RAG/sendMessage
+   *  pipeline before responding. Tests use this for deterministic
+   *  assertions; production keeps it false (fire-and-forget) so we
+   *  ack Bot API in <100ms and avoid retry storms. */
+  awaitWebhookProcessing?: boolean;
 }
 
 export function createRouter(deps: AppDeps): Router {
@@ -56,12 +62,25 @@ export function createRouter(deps: AppDeps): Router {
       telegram: deps.telegram,
       webhookSecret: deps.webhookSecret,
       rag: deps.rag,
-      onMessagePersisted: ({ conversationId, tgUserId }) => {
-        deps.bus?.publish({
-          type: "message:new",
-          conversationId,
-          tgUserId,
-        });
+      awaitProcessing: deps.awaitWebhookProcessing,
+      onEvent: (event) => {
+        if (!deps.bus) return;
+        switch (event.type) {
+          case "user-message-persisted":
+          case "assistant-replied":
+            deps.bus.publish({
+              type: "message:new",
+              conversationId: event.conversationId,
+              tgUserId: event.tgUserId,
+            });
+            return;
+          case "conversation-mode-changed":
+            deps.bus.publish({
+              type: "conversation:updated",
+              conversationId: event.conversationId,
+            });
+            return;
+        }
       },
     }),
   );
@@ -109,6 +128,10 @@ export function createRouter(deps: AppDeps): Router {
   router.post(
     "/admin/api/conversations/:id/reply",
     createReplyHandler(apiDeps),
+  );
+  router.delete(
+    "/admin/api/conversations/:id",
+    createDeleteConversationHandler(apiDeps),
   );
 
   if (deps.enableTestHooks) {

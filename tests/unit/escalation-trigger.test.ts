@@ -10,6 +10,7 @@ import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
 import type { ChatClient } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
+import { ESCALATION_REPLY } from "@/telegram/webhook.ts";
 
 describe("containsEscalationTrigger", () => {
   test("matches Russian and English variants regardless of case/punctuation", () => {
@@ -93,6 +94,8 @@ beforeEach(() => {
     telegram,
     webhookSecret: SECRET,
     rag: { embedder: fakeEmbedder(), chat: trackingChat },
+    // Tests assert post-conditions inline; production fires-and-forgets.
+    awaitProcessing: true,
   });
 });
 afterEach(() => db.close());
@@ -132,7 +135,9 @@ describe("webhook escalation trigger", () => {
 
     expect(chatCalls).toBe(0);
     expect(sent).toHaveLength(1);
-    expect(String(sent[0]!.body.text)).toMatch(/оператор/i);
+    const replyText = String(sent[0]!.body.text);
+    expect(replyText).toBe(ESCALATION_REPLY);
+    expect(replyText).not.toMatch(/оператор|operator|бот|ассистент/i);
 
     const conv = new ConversationsRepo(db).byUserId(u.id)!;
     expect(conv.mode).toBe("queued");

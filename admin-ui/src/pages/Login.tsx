@@ -75,7 +75,7 @@ export function Login() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="operator@example.com"
+              placeholder="admin@example.com"
               autoComplete="email"
               data-testid="email"
               style={inputStyle}
