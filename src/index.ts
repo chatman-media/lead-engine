@@ -6,6 +6,7 @@ import { OllamaChatClient } from "./rag/providers/ollama-chat.ts";
 import { OllamaEmbeddingClient } from "./rag/providers/ollama-embed.ts";
 import type { ChatClient } from "./rag/chat.ts";
 import type { EmbeddingClient } from "./rag/embed.ts";
+import { getStyle } from "./sales/styles/index.ts";
 import { createServer } from "./server.ts";
 import type { RagDeps } from "./telegram/webhook.ts";
 import { TelegramClient } from "./telegram/client.ts";
@@ -48,17 +49,38 @@ if (llmIsConfigured()) {
       `[server] LLM provider=openai chat=${config.openai.chatModel} embed=${config.openai.embeddingModel} dim=${config.openai.embeddingDim}`,
     );
   }
+  // Resolve sales style from BOT_SALES_STYLE env. When set, it takes
+  // precedence over the legacy BOT_PERSONA_* env vars: the bot uses the
+  // sales-engine prompt (persona + voice + framework + hooks + stage +
+  // few-shot) instead of the simpler persona prompt.
+  const salesSlug = config.sales.forcedStyleSlug;
+  const style = salesSlug ? getStyle(salesSlug) : undefined;
+  if (salesSlug && !style) {
+    console.warn(
+      `[server] BOT_SALES_STYLE="${salesSlug}" not found in registry — falling back to legacy persona. ` +
+        `See src/sales/styles/index.ts for available slugs.`,
+    );
+  }
+
   rag = {
     chat,
     embedder,
     persona: config.persona,
     topK: config.rag.topK,
     maxDistance: config.rag.maxDistance,
+    ...(style ? { style } : {}),
   };
-  console.log(
-    `[server] persona role=${config.persona.role} name="${config.persona.name}"` +
-      (config.persona.company ? ` company="${config.persona.company}"` : ""),
-  );
+
+  if (style) {
+    console.log(
+      `[server] sales-style engine active: slug="${style.slug}" persona="${style.persona.name}" framework=${style.framework}`,
+    );
+  } else {
+    console.log(
+      `[server] persona role=${config.persona.role} name="${config.persona.name}"` +
+        (config.persona.company ? ` company="${config.persona.company}"` : ""),
+    );
+  }
 } else {
   console.warn(
     `[server] LLM not configured (provider=${config.llm.provider}); bot will reply with placeholder text.`,

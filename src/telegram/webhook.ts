@@ -8,6 +8,8 @@ import { json, type RouteHandler } from "../router.ts";
 import { answerWithRag, NO_CONTEXT_MARKER, type Persona } from "../rag/answer.ts";
 import type { ChatClient } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
+import { nextStage } from "../sales/stage-router.ts";
+import type { FunnelStage, Style } from "../sales/types.ts";
 import type { TelegramClient } from "./client.ts";
 import type { TgUpdate } from "./types.ts";
 import { containsEscalationTrigger } from "./escalation.ts";
@@ -18,8 +20,16 @@ export interface RagDeps {
   topK?: number;
   /** sqlite-vec L2 distance threshold; hits above are dropped before LLM. */
   maxDistance?: number;
-  /** How the bot identifies itself in answers (name, role, company). */
+  /** How the bot identifies itself in answers (name, role, company).
+   *  Used only when `style` is not provided. */
   persona?: Persona;
+  /**
+   * Sales-engine style. When set, takes precedence over `persona` — the bot
+   * uses the composed sales prompt (persona + voice + framework + hooks +
+   * stage + guardrails + few-shot) instead of the simple persona prompt.
+   * Wired from `BOT_SALES_STYLE` env at app boot in `src/app.ts`.
+   */
+  style?: Style;
 }
 
 export type WebhookEvent =
@@ -236,6 +246,26 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return;
   }
 
+  // Sales-engine path: when a Style is configured, derive the funnel stage
+  // from the user message + turn number. Phase 1 doesn't persist `currentStage`
+  // yet, so the router infers stage from message content alone (which is good
+  // enough for opener/pitch/objection detection — see src/sales/stage-router.ts).
+  // Phase 2 will read/write `conversations.current_stage` for multi-turn drift.
+  let stage: FunnelStage | undefined;
+  let includeFewShot: boolean | undefined;
+  if (d.rag.style) {
+    const userMessageCount = d.messages
+      .listByConversation(d.conv.id)
+      .filter((m) => m.role === "user").length;
+    stage = nextStage({
+      turnNumber: userMessageCount,
+      currentStage: null,
+      lastUserMessage: d.text,
+    });
+    // Drop few-shot examples once turn 1 is in history — saves prompt tokens.
+    includeFewShot = userMessageCount <= 1;
+  }
+
   const result = await answerWithRag({
     question: d.text,
     kb: d.kb,
@@ -244,6 +274,9 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     topK: d.rag.topK ?? 5,
     maxDistance: d.rag.maxDistance,
     persona: d.rag.persona,
+    style: d.rag.style,
+    ...(stage !== undefined ? { stage } : {}),
+    ...(includeFewShot !== undefined ? { includeFewShot } : {}),
   });
 
   if (result.text === NO_CONTEXT_MARKER) {

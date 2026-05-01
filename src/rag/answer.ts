@@ -1,4 +1,6 @@
 import type { KbRepo, KbSearchHit } from "../db/repos/kb.ts";
+import { composeSystemPrompt } from "../sales/prompt.ts";
+import type { FunnelStage, Style } from "../sales/types.ts";
 import type { ChatClient, ChatMessage } from "./chat.ts";
 import type { EmbeddingClient } from "./embed.ts";
 
@@ -93,8 +95,28 @@ export interface AnswerInput {
   /** Used to drop noisy hits; sqlite-vec returns L2 distance (lower=closer). */
   maxDistance?: number;
   /** Persona settings (see buildSystemPrompt). Optional — defaults to a
-   *  generic AI-assistant persona for backward compatibility with tests. */
+   *  generic AI-assistant persona for backward compatibility with tests.
+   *  Mutually exclusive with `style`: when both are present, `style` wins. */
   persona?: Persona;
+  /**
+   * Sales style — when provided, the system prompt is composed via the sales
+   * engine (`composeSystemPrompt`) instead of the legacy `buildSystemPrompt`.
+   * `persona` is then ignored. See `src/sales/types.ts` for the schema and
+   * `docs/SALES_STYLES.md` for the integration plan.
+   */
+  style?: Style;
+  /**
+   * Current funnel stage. Required when `style` is set; ignored otherwise.
+   * Drives stage-specific guidance (opener vs pitch vs objection etc.) inside
+   * the composed system prompt.
+   */
+  stage?: FunnelStage;
+  /**
+   * Whether to include the style's few-shot examples in the system prompt.
+   * Default `true` (first turn). Pass `false` on follow-ups to save 200-500
+   * tokens once the style anchor is already in chat history.
+   */
+  includeFewShot?: boolean;
 }
 
 export interface AnswerResult {
@@ -124,7 +146,20 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
         `[#${i + 1}] (source: ${h.title})\n${h.text}`,
     )
     .join("\n\n");
-  const systemPrompt = buildSystemPrompt(input.persona ?? DEFAULT_PERSONA, context);
+
+  // Branch: sales-style engine vs legacy persona prompt.
+  // `style` wins over `persona` when both are passed.
+  let systemPrompt: string;
+  let temperature = 0.2;
+  if (input.style) {
+    const stage: FunnelStage = input.stage ?? "qualify";
+    systemPrompt = composeSystemPrompt(input.style, stage, context, {
+      includeFewShot: input.includeFewShot ?? true,
+    });
+    temperature = input.style.model.temperature;
+  } else {
+    systemPrompt = buildSystemPrompt(input.persona ?? DEFAULT_PERSONA, context);
+  }
 
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
@@ -132,7 +167,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     { role: "user", content: input.question },
   ];
 
-  const raw = await input.chat.complete(messages, { temperature: 0.2 });
+  const raw = await input.chat.complete(messages, { temperature });
   const text = sanitizeLlmOutput(raw);
   return {
     text,

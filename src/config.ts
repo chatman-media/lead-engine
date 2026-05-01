@@ -107,6 +107,20 @@ export const config = {
     /** Company / agency name (optional, used in greetings and signatures). */
     company: envOptional("BOT_PERSONA_COMPANY", ""),
   },
+  sales: {
+    /**
+     * When set, the bot uses the sales-style engine instead of the env-based
+     * persona. Value is a Style.slug — see `src/sales/styles/` for available
+     * slugs ("flirty-belfort-v1", "empathetic-nepq-v1", "cold-direct-pas-v1")
+     * or `bun run scripts/list-sales-styles.ts` if added later.
+     *
+     * Empty string = use the legacy `BOT_PERSONA_*` path.
+     *
+     * Phase 1: single forced style applied to ALL conversations.
+     * Phase 2: per-conversation A/B selection via DB-backed `styles` table.
+     */
+    forcedStyleSlug: envOptional("BOT_SALES_STYLE", ""),
+  },
 } as const;
 
 export type AppConfig = typeof config;

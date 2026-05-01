@@ -5,6 +5,7 @@ import { openDb } from "@/db/sqlite.ts";
 import { answerWithRag, NO_CONTEXT_MARKER } from "@/rag/answer.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
+import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
 
 const DIM = 1536;
 
@@ -111,6 +112,88 @@ describe("answerWithRag", () => {
     expect(result.text).toBe(NO_CONTEXT_MARKER);
     expect(result.usedChunkIds).toEqual([]);
     expect(chat.lastMessages).toBeNull();
+  });
+
+  test("when style is provided, the system prompt comes from composeSystemPrompt (sales engine)", async () => {
+    seed();
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("ok");
+    await answerWithRag({
+      question: "сколько в Дубае платят?",
+      kb,
+      embedder,
+      chat,
+      style: flirtyBelfort,
+      stage: "pitch",
+    });
+    const sys = chat.lastMessages?.[0];
+    expect(sys?.role).toBe("system");
+    // Style-specific markers
+    expect(sys?.content).toContain(flirtyBelfort.persona.name); // "Алина"
+    expect(sys?.content).toContain("ТЕКУЩИЙ ЭТАП: PITCH");
+    expect(sys?.content).toContain("ХУКИ"); // hooks block
+    expect(sys?.content).toContain("ФРЕЙМВОРК"); // framework block
+    // KB context still injected
+    expect(sys?.content).toContain("KB CONTEXT");
+    // Legacy marker NOT present (different prompt template)
+    expect(sys?.content).not.toContain("СТРОГИЕ ПРАВИЛА:");
+  });
+
+  test("style takes precedence over persona when both are provided", async () => {
+    seed();
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("ok");
+    await answerWithRag({
+      question: "hi",
+      kb,
+      embedder,
+      chat,
+      // legacy persona
+      persona: { name: "LegacyBot", role: "assistant" },
+      // sales-engine style
+      style: flirtyBelfort,
+      stage: "opener",
+    });
+    const sys = chat.lastMessages?.[0]?.content ?? "";
+    // Style's persona name wins
+    expect(sys).toContain(flirtyBelfort.persona.name);
+    expect(sys).not.toContain("LegacyBot");
+  });
+
+  test("includeFewShot=false skips few-shot block (used on follow-up turns)", async () => {
+    seed();
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("ok");
+    await answerWithRag({
+      question: "next message",
+      kb,
+      embedder,
+      chat,
+      style: flirtyBelfort,
+      stage: "qualify",
+      includeFewShot: false,
+    });
+    const sys = chat.lastMessages?.[0]?.content ?? "";
+    expect(sys).not.toContain("ПРИМЕРЫ ДИАЛОГА");
+  });
+
+  test("legacy persona path still works when no style is provided (back-compat)", async () => {
+    seed();
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("ok");
+    await answerWithRag({
+      question: "hi",
+      kb,
+      embedder,
+      chat,
+      persona: { name: "LegacyBot", role: "assistant", company: "Acme" },
+    });
+    const sys = chat.lastMessages?.[0]?.content ?? "";
+    expect(sys).toContain("LegacyBot");
+    expect(sys).toContain("СТРОГИЕ ПРАВИЛА:"); // legacy template marker
+    // Sales-engine markers absent
+    expect(sys).not.toContain("ФРЕЙМВОРК");
+    expect(sys).not.toContain("ТЕКУЩИЙ ЭТАП");
   });
 
   test("includes prior conversation messages between system and current user", async () => {

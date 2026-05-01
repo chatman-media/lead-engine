@@ -14,7 +14,8 @@
     "dev:ui": "bun run --cwd admin-ui dev"
   },
   "dependencies": {
-    "sqlite-vec": "^0.1.9"
+    "sqlite-vec": "^0.1.9",
+    "zod": "^4.4.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
