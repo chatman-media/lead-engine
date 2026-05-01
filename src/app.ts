@@ -2,11 +2,17 @@ import type { Database } from "bun:sqlite";
 
 import {
   createConversationDetailHandler,
+  createCreateExperimentHandler,
   createDeleteConversationHandler,
+  createExperimentFunnelHandler,
+  createGetStyleHandler,
   createListConversationsHandler,
+  createListExperimentsHandler,
+  createListStylesHandler,
   createListUsersHandler,
   createReleaseHandler,
   createReplyHandler,
+  createSetExperimentStatusHandler,
   createTakeHandler,
 } from "./admin/api.ts";
 import {
@@ -132,6 +138,23 @@ export function createRouter(deps: AppDeps): Router {
   router.delete(
     "/admin/api/conversations/:id",
     createDeleteConversationHandler(apiDeps),
+  );
+
+  // Sales-style engine endpoints (Phase 2b).
+  router.get("/admin/api/styles", createListStylesHandler(apiDeps));
+  router.get("/admin/api/styles/:id", createGetStyleHandler(apiDeps));
+  router.get("/admin/api/experiments", createListExperimentsHandler(apiDeps));
+  router.post(
+    "/admin/api/experiments",
+    createCreateExperimentHandler(apiDeps),
+  );
+  router.patch(
+    "/admin/api/experiments/:id",
+    createSetExperimentStatusHandler(apiDeps),
+  );
+  router.get(
+    "/admin/api/experiments/:id/funnel",
+    createExperimentFunnelHandler(apiDeps),
   );
 
   if (deps.enableTestHooks) {

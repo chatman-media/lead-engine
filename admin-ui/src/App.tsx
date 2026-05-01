@@ -10,7 +10,10 @@ import { api, type Admin } from "./api.ts";
 import { Layout } from "./components/Layout.tsx";
 import { Chat } from "./pages/Chat.tsx";
 import { Chats } from "./pages/Chats.tsx";
+import { Experiments } from "./pages/Experiments.tsx";
 import { Login } from "./pages/Login.tsx";
+import { StyleDetail } from "./pages/StyleDetail.tsx";
+import { Styles } from "./pages/Styles.tsx";
 import { Users } from "./pages/Users.tsx";
 import { AdminWs } from "./ws.ts";
 
@@ -74,6 +77,9 @@ export function App() {
                 <Route path="chats" element={<Chats />} />
                 <Route path="chats/:id" element={<Chat />} />
                 <Route path="users" element={<Users />} />
+                <Route path="styles" element={<Styles />} />
+                <Route path="styles/:id" element={<StyleDetail />} />
+                <Route path="experiments" element={<Experiments />} />
                 <Route path="*" element={<Navigate to="chats" replace />} />
               </Routes>
             </AuthGate>

@@ -118,6 +118,84 @@ export const api = {
       `/admin/api/conversations/${id}`,
       { method: "DELETE" },
     ),
+
+  // ─── Sales-style engine (Phase 2b) ───────────────────────────────────
+  styles: () => req<{ styles: StyleSummary[] }>("/admin/api/styles"),
+
+  style: (id: number) =>
+    req<{ style: StyleDetail }>(`/admin/api/styles/${id}`),
+
+  experiments: () =>
+    req<{ experiments: Experiment[] }>("/admin/api/experiments"),
+
+  createExperiment: (input: {
+    slug: string;
+    status?: ExperimentStatus;
+    successMetric?: SuccessMetric;
+    allocation: Record<string, number>;
+  }) =>
+    req<{ experiment: Experiment }>("/admin/api/experiments", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  setExperimentStatus: (id: number, status: ExperimentStatus) =>
+    req<{ experiment: Experiment }>(`/admin/api/experiments/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+
+  experimentFunnel: (id: number) =>
+    req<{
+      experiment_id: number;
+      success_metric: SuccessMetric;
+      funnel: FunnelRow[];
+    }>(`/admin/api/experiments/${id}/funnel`),
 };
+
+export type ExperimentStatus = "draft" | "running" | "paused" | "done";
+export type SuccessMetric = "qualified" | "won" | "replied_3+";
+
+export interface StyleSummary {
+  id: number;
+  slug: string;
+  display_name: string;
+  version: number;
+  parent_id: number | null;
+  is_active: boolean;
+  created_at: number;
+}
+
+export interface StyleDetail extends StyleSummary {
+  /** Parsed Style object (matches StyleSchema) when valid, null otherwise. */
+  config: unknown;
+  /** Raw JSON string from the DB — useful when `config` is null due to parse error. */
+  config_raw: string;
+  /** Set when Zod validation failed; null when `config` is usable. */
+  parse_error: string | null;
+}
+
+export interface Experiment {
+  id: number;
+  slug: string;
+  status: ExperimentStatus;
+  success_metric: SuccessMetric;
+  allocation: Record<string, number> | null;
+  started_at: number | null;
+  ended_at: number | null;
+  created_at: number;
+}
+
+export interface FunnelRow {
+  style_id: number;
+  slug: string;
+  display_name: string;
+  conversations: number;
+  qualified: number;
+  won: number;
+  lost: number;
+  pending: number;
+  escalated_to_human: number;
+}
 
 export { ApiError };

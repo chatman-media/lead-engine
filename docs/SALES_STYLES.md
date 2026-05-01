@@ -207,14 +207,49 @@ Three provider categories represented:
 | `styles-repo.test.ts` | StylesRepo CRUD, parseRow with Zod validation, soft-delete, idempotent seed | 14 |
 | `experiments-repo.test.ts` | ExperimentsRepo CRUD, getRunning, status transitions, allocation parsing | 17 |
 | `webhook-ab.test.ts` | End-to-end A/B: assignment, stickiness, two users, malformed experiment graceful fallback | 6 |
+| `admin-sales-api.test.ts` | 6 admin endpoints (auth, list/get styles, list/create/patch experiments, funnel SQL) | 19 |
 
 Plus four integration tests in [`tests/unit/answer.test.ts`](../tests/unit/answer.test.ts) verifying that `answerWithRag` correctly branches between the legacy persona prompt and the sales-engine composed prompt.
 
 Run: `bun test tests/unit`. The full unit suite is hermetic — no network, no live Ollama, no real DB beyond `:memory:`.
 
+## Phase 2b — Admin UI (shipped)
+
+Two new pages in the admin panel under [`admin-ui/src/pages/`](../admin-ui/src/pages/):
+
+- **`/admin/styles`** — list of active sales styles. Click any row to view the
+  full Zod-validated config (JSON tree). Read-only for now; edits go through
+  SQL or a future inline editor.
+- **`/admin/experiments`** — list of all A/B experiments with their
+  status badge (draft / running / paused / done), allocation, **per-style
+  funnel** (conversations · success · rate · escalated), and start / pause /
+  finish buttons. New experiments via the "+ new experiment" form: pick a
+  slug, set integer weights against any of the seeded styles, save as draft.
+  Activate by clicking *start*.
+
+Backend endpoints in [`src/admin/api.ts`](../src/admin/api.ts):
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/admin/api/styles` | list active styles (slug, name, version, created) |
+| GET | `/admin/api/styles/:id` | full row + parsed Zod config (or `parse_error` when malformed) |
+| GET | `/admin/api/experiments` | list all experiments with allocation pre-parsed |
+| POST | `/admin/api/experiments` | create draft. Validates slug shape, every variant slug exists, weights non-negative, total weight > 0 |
+| PATCH | `/admin/api/experiments/:id` | set status. Refuses to start a second running experiment, refuses to start one with malformed allocation |
+| GET | `/admin/api/experiments/:id/funnel` | per-style aggregates (conversations + qualified/won/lost counts + human-handoff rate) |
+
+Full coverage in [`tests/unit/sales/admin-sales-api.test.ts`](../tests/unit/sales/admin-sales-api.test.ts) — 19 tests across the 6 endpoints.
+
+**Operational guard rails baked into the API:**
+- Cannot create/start a second `running` experiment when one is already live (409).
+- Cannot start an experiment whose `allocation_json` is malformed (422 — fix the JSON first).
+- Cannot reference a style slug that's missing or `is_active=0` (400 with the offending slug).
+
+These match the runtime's graceful-fallback rules — together they make it hard to ship a misconfigured experiment that would silently degrade to legacy persona.
+
 ## Future work
 
-- **Phase 2b — Admin UI** for `styles` and `experiments` tables: list, create, edit (with versioning via parent_id chain), playground (test a single message against a style without persisting), funnel-conversion dashboard. SQL aggregation already works against the existing schema; UI wraps it.
+- **Phase 2b+ — inline style editor** with versioned saves (insert new row + bump `version` + set old `is_active=0`, never destructive). Current admin UI is read-only.
 - **Phase 2c — OpenRouter provider** — add `OpenRouterChatClient` implementing the existing `ChatClient` interface. The model registry in `src/sales/models.ts` already lists Claude/GPT/Gemini entries; provider just needs wiring (~80 LOC). Enables per-style backbone choice.
 - **Stage classifier upgrade** — replace regex `nextStage` with a haiku-class LLM classifier returning `{stage, confidence}`. Keep regex as fallback at confidence < 0.6.
 - **Streaming replies** — switch the Ollama `/api/chat` call to SSE so partial replies show up as they're generated (helps UX on slow CPU inference).

@@ -48,6 +48,9 @@ export class Router {
   delete(path: string, handler: RouteHandler) {
     return this.add("DELETE", path, handler);
   }
+  patch(path: string, handler: RouteHandler) {
+    return this.add("PATCH", path, handler);
+  }
 
   async handle(req: Request): Promise<Response> {
     const url = new URL(req.url);

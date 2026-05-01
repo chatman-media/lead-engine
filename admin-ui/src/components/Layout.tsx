@@ -57,6 +57,8 @@ export function Layout({ admin, children }: LayoutProps) {
           {[
             { to: "/admin/chats", label: "Chats" },
             { to: "/admin/users", label: "Users" },
+            { to: "/admin/styles", label: "Sales styles" },
+            { to: "/admin/experiments", label: "Experiments" },
           ].map(({ to, label }) => (
             <NavLink
               key={to}
