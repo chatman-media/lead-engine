@@ -81,10 +81,51 @@ describe("isPersonaSmalltalkQuestion", () => {
     expect(isPersonaSmalltalkQuestion("кто ты?")).toBe(true);
   });
 
-  test("false when job/location mixed in", () => {
+  // Regression: bare "как зовут?" without pronoun used to leak into RAG and
+  // produce an off-topic escalation reply ("секунду, уточню...") instead of
+  // the persona's name. Ditto "имя?", "ваше имя?", "представься".
+  test("matches bare forms without pronoun (the regression we fixed)", () => {
+    expect(isPersonaSmalltalkQuestion("как зовут?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("Как зовут")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("имя?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("Имя?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("ваше имя?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("твоё имя")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("как ваше имя?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("вас как зовут?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("как звать?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("как тебя называть?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("представься")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("Представься пожалуйста")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("представьтесь")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("кто вы?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("с кем я общаюсь?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("с кем разговариваю?")).toBe(true);
+  });
+
+  test("matches English forms", () => {
+    expect(isPersonaSmalltalkQuestion("what's your name?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("Who are you?")).toBe(true);
+  });
+
+  test("false when job/location mixed in (work intent wins)", () => {
     expect(
       isPersonaSmalltalkQuestion("как тебя зовут есть работа в китае?"),
     ).toBe(false);
+    expect(isPersonaSmalltalkQuestion("как зовут? есть вакансии?")).toBe(false);
+    expect(isPersonaSmalltalkQuestion("представься, какой график?")).toBe(false);
+  });
+
+  test("false on completely unrelated questions (no false positives)", () => {
+    expect(isPersonaSmalltalkQuestion("сколько платят в Дубае?")).toBe(false);
+    expect(isPersonaSmalltalkQuestion("привет")).toBe(false);
+    expect(isPersonaSmalltalkQuestion("здравствуйте")).toBe(false);
+    expect(isPersonaSmalltalkQuestion("")).toBe(false);
+    expect(isPersonaSmalltalkQuestion("   ")).toBe(false);
+    // "Имя" inside a sentence ABOUT something else — still a smalltalk
+    // word, but the work-intent gate isn't triggered. We accept this edge:
+    // the cost of a false-positive on a vague mention is one wasted reply,
+    // not a stall, so it's harmless.
   });
 });
 

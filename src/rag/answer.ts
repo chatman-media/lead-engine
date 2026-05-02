@@ -32,29 +32,62 @@ const DEFAULT_PERSONA: Persona = {
   company: "",
 };
 
-/** True when the message is only smalltalk about identity (name / who are you). */
+/**
+ * True when the message is only smalltalk about identity (name / who are you).
+ * Catches the common bare forms candidates actually type — "как зовут?",
+ * "имя?", "представься" — not just the textbook "как тебя зовут".
+ *
+ * Returns false when the message also has any work/offer intent — even
+ * "как тебя зовут есть работа в китае?" should land in RAG, not the
+ * smalltalk shortcut, because the candidate is asking about a job.
+ */
 export function isPersonaSmalltalkQuestion(question: string): boolean {
-  const q = question.trim().toLowerCase().replace(/\s+/g, " ");
-  if (!q) return false;
+  const trimmed = question.trim();
+  if (!trimmed) return false;
+  const q = trimmed.toLowerCase().replace(/\s+/g, " ");
+
   const hasJobOrOfferIntent =
     /(работ|ваканс|зарплат|виза|оффер|переезд|агентств|услов|\bофис\b|график|смен|жилье|жильё|рейс|кита|китай|коре|англ\b)/i.test(
       question,
     );
   if (hasJobOrOfferIntent) return false;
 
+  // Various phrasings of "what's your name". The bare forms ("как зовут?",
+  // "имя?", "ваше имя") are the ones that USED TO LEAK into RAG and produce
+  // an off-topic stall — the regression we just fixed.
   const nameCue =
     q.includes("как тебя зовут") ||
     q.includes("как вас зовут") ||
     q.includes("тебя как зовут") ||
-    /как\s+(твоё|твое)\s+имя/i.test(question);
-  const whoCue =
-    /^кто\s+ты\??$/i.test(question.trim()) ||
-    /^ты\s+кто\??$/i.test(question.trim());
+    q.includes("вас как зовут") ||
+    /^как\s+зовут\??$/.test(q) ||
+    /как\s+(твоё|твое|ваше)\s+имя/i.test(question) ||
+    /^(твоё|твое|ваше)\s+имя\??$/i.test(trimmed) ||
+    /^имя\??$/.test(q) ||
+    /как\s+звать/i.test(question) ||
+    /как\s+(тебя|вас)\s+называть/i.test(question);
 
-  const enName = /\bwhat\s+('?s\s+)?your\s+name\b/i.test(question);
+  // "представься" / "представься" / "представьтесь" — imperative forms of
+  // "introduce yourself". Matches both the -ся and -сь endings (singular/plural).
+  // Note: JS `\b` is ASCII-only and silently fails on Cyrillic word ends —
+  // we use a Unicode-property lookahead instead. Same trick as stage-router.ts.
+  const introCue =
+    /^представ(ь|ьте)?(ся|сь)(?!\p{L})/iu.test(trimmed) ||
+    /^представь(те)?\s+себя(?!\p{L})/iu.test(trimmed);
+
+  const whoCue =
+    /^кто\s+ты\??$/i.test(trimmed) ||
+    /^ты\s+кто\??$/i.test(trimmed) ||
+    /^кто\s+вы\??$/i.test(trimmed) ||
+    /^с\s+кем\s+(я\s+)?(общаюсь|разговариваю|переписываюсь)\??$/i.test(trimmed);
+
+  // English: "what's your name" / "what is your name" / "whats your name".
+  // The earlier `what\s+('?s\s+)?your\s+name` required whitespace BEFORE 's,
+  // which `what's` doesn't have — silent miss on the most common form.
+  const enName = /\bwhat(?:'?s|\s+is)?\s+your\s+name\b/i.test(question);
   const enWho = /\bwho\s+are\s+you\b/i.test(question);
 
-  return !!(nameCue || whoCue || enName || enWho);
+  return !!(nameCue || introCue || whoCue || enName || enWho);
 }
 
 /** Short reply derived from persona — no KB required. */

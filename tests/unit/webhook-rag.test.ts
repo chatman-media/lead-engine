@@ -54,6 +54,9 @@ interface OutgoingCall {
 function setup(opts: {
   embedder: EmbeddingClient;
   chat: ChatClient;
+  persona?: { name: string; role: "human" | "assistant"; company?: string };
+  /** When provided, lets a test count how many times the LLM was called. */
+  chatCallCounter?: { count: number };
 }) {
   const db = openDb({ path: ":memory:", embeddingDim: DIM });
   const sent: OutgoingCall[] = [];
@@ -81,7 +84,11 @@ function setup(opts: {
     db,
     telegram,
     webhookSecret: SECRET,
-    rag: { embedder: opts.embedder, chat: opts.chat },
+    rag: {
+      embedder: opts.embedder,
+      chat: opts.chat,
+      ...(opts.persona ? { persona: opts.persona } : {}),
+    },
     // Tests need deterministic post-conditions; production uses
     // fire-and-forget so the Telegram ack stays under 60s.
     awaitWebhookProcessing: true,
@@ -308,5 +315,63 @@ describe("webhook RAG integration", () => {
       new UsersRepo(ctx.db).byTgId(300)!.id,
     )!;
     expect(conv.mode).toBe("queued");
+  });
+
+  // Regression: bare "как зовут?" used to skip the persona-smalltalk shortcut
+  // and fall through to RAG, producing an off-topic ESCALATION_REPLIES line
+  // ("секунду, уточню...") instead of "Меня зовут Алина...". Now the
+  // shortcut catches it and the LLM is never called.
+  test("ai mode + smalltalk question: replies with persona name, LLM not called", async () => {
+    teardown(ctx);
+    let chatCalls = 0;
+    ctx = setup({
+      embedder: fakeEmbedder(),
+      chat: {
+        async complete() {
+          chatCalls++;
+          return "should-never-be-sent";
+        },
+      },
+      persona: {
+        name: "Алина",
+        role: "human",
+        company: "INFINITY AGENCY",
+      },
+    });
+    const users = new UsersRepo(ctx.db);
+    const kb = new KbRepo(ctx.db);
+    const u = users.create({ tgUserId: 700 });
+    // Seed a KB chunk so the search step has something — proves the
+    // shortcut runs BEFORE retrieval and bypasses both.
+    const doc = kb.upsertDocument({ source: "s", title: "doc", contentHash: "h" });
+    kb.insertChunkWithEmbedding({
+      documentId: doc.id,
+      chunkIndex: 0,
+      text: "irrelevant filler",
+      tokenCount: 3,
+      embedding: vec(99),
+    });
+
+    const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
+    for (const text of ["как зовут?", "имя?", "представься", "кто ты?"]) {
+      const res = await fetch(url, {
+        method: "POST",
+        body: JSON.stringify(update(700, text)),
+        headers: { "content-type": "application/json" },
+      });
+      expect(res.status).toBe(200);
+    }
+
+    // Four user messages → four replies, none from the LLM.
+    expect(ctx.sent).toHaveLength(4);
+    expect(chatCalls).toBe(0);
+    for (const call of ctx.sent) {
+      const text = String(call.body.text);
+      expect(text).toContain("Алина");
+      expect(text).toContain("INFINITY AGENCY");
+      // Conversation must NOT be queued — smalltalk replies don't escalate.
+    }
+    const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
+    expect(conv.mode).toBe("ai");
   });
 });
