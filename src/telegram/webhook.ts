@@ -23,6 +23,26 @@ import { FUNNEL_STAGES, type FunnelStage, type Style } from "../sales/types.ts";
 import type { TelegramClient } from "./client.ts";
 import type { TgUpdate } from "./types.ts";
 import { containsEscalationTrigger } from "./escalation.ts";
+import {
+  ESCALATION_REPLIES,
+  PLACEHOLDER_REPLIES,
+  PROCESSING_FAILURE_REPLIES,
+  QUEUED_REPLIES,
+  pickHumanStallPhrase,
+} from "./human-replies.ts";
+
+export {
+  ESCALATION_REPLIES,
+  PROCESSING_FAILURE_REPLIES,
+  PLACEHOLDER_REPLIES,
+  QUEUED_REPLIES,
+  pickHumanStallPhrase,
+} from "./human-replies.ts";
+
+/** Back-compat: canonical first line of each pool. */
+export const ESCALATION_REPLY = ESCALATION_REPLIES[0];
+export const QUEUED_REPLY = QUEUED_REPLIES[0];
+export const PLACEHOLDER_REPLY = PLACEHOLDER_REPLIES[0];
 
 export interface RagDeps {
   embedder: EmbeddingClient;
@@ -79,17 +99,6 @@ export interface WebhookDeps {
 
 const SECRET_HEADER = "x-telegram-bot-api-secret-token";
 
-/**
- * Fallback replies — sent verbatim, in Russian, in the persona of a real
- * human manager. Must NOT mention «оператор», «бот», «ассистент»,
- * «искусственный интеллект» — иначе сломаем легенду «живого человека».
- */
-export const ESCALATION_REPLY =
-  "Секунду, уточню по этому вопросу и напишу.";
-export const QUEUED_REPLY =
-  "Секунду, я ещё смотрю — отвечу совсем скоро.";
-export const PLACEHOLDER_REPLY = "Секунду, отвечу через минуту.";
-
 export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
   const users = new UsersRepo(deps.db);
   const conversations = new ConversationsRepo(deps.db);
@@ -119,20 +128,23 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       return json({ ok: true, ignored: "no-text-message" });
     }
 
-    const userExisting = users.byTgId(message.from.id);
+    const tgUserId = message.from.id;
+    const userMessageText = message.text;
+
+    const userExisting = users.byTgId(tgUserId);
     let user = userExisting;
     if (!user && telegramOpenAccess()) {
       user = users.create({
-        tgUserId: message.from.id,
+        tgUserId,
         tgUsername: message.from.username ?? null,
       });
       console.log(
-        `[webhook] TELEGRAM_OPEN_ACCESS: created user tg_user_id=${message.from.id}`,
+        `[webhook] TELEGRAM_OPEN_ACCESS: created user tg_user_id=${tgUserId}`,
       );
     }
     if (!user) {
       console.log(
-        `[webhook] ignoring message from non-whitelisted tg_user_id=${message.from.id}`,
+        `[webhook] ignoring message from non-whitelisted tg_user_id=${tgUserId}`,
       );
       return json({ ok: true, ignored: "not-whitelisted" });
     }
@@ -145,7 +157,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
     const persisted = messages.addUserMessageIfNew({
       conversationId: conv.id,
       tgMessageId: message.message_id,
-      text: message.text,
+      text: userMessageText,
     });
 
     if (!persisted.isNew) {
@@ -161,14 +173,14 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
     deps.onEvent?.({
       type: "user-message-persisted",
       conversationId: conv.id,
-      tgUserId: message.from.id,
+      tgUserId,
     });
 
     // Decide what we *intend* to do, synchronously, so the webhook
     // response can describe it for log aggregators and tests. The
     // heavy work below may further escalate (NO_CONTEXT → queued) but
     // by then Telegram has already received its 200 OK.
-    const intent = decideIntent(conv.mode, message.text, deps.rag !== undefined);
+    const intent = decideIntent(conv.mode, userMessageText, deps.rag !== undefined);
 
     // Heavy work (RAG, /sendMessage, write assistant reply) is detached
     // from the HTTP response so we ack Telegram immediately. Without this
@@ -185,11 +197,36 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       conv,
       user,
       chatId: message.chat.id,
-      text: message.text,
-      tgUserId: message.from.id,
+      text: userMessageText,
+      tgUserId,
       onEvent: deps.onEvent,
-    }).catch((err) => {
+    }).catch(async (err) => {
       console.error("[webhook] background processing failed:", err);
+      try {
+        const stall = pickHumanStallPhrase(
+          PROCESSING_FAILURE_REPLIES,
+          conv.id,
+          userMessageText,
+        );
+        const sent = await deps.telegram.sendMessage({
+          chatId: message.chat.id,
+          text: stall,
+        });
+        messages.add({
+          conversationId: conv.id,
+          role: "assistant",
+          text: stall,
+          tgMessageId: sent.message_id,
+        });
+        conversations.touch(conv.id);
+        deps.onEvent?.({
+          type: "assistant-replied",
+          conversationId: conv.id,
+          tgUserId,
+        });
+      } catch (e) {
+        console.error("[webhook] human fallback after processing failure:", e);
+      }
     });
 
     if (deps.awaitProcessing) {
@@ -423,11 +460,11 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
 
   if (d.conv.mode === "queued") {
     if (!d.rag) {
-      await reply(QUEUED_REPLY);
+      await reply(pickHumanStallPhrase(QUEUED_REPLIES, d.conv.id, d.text));
       return;
     }
     if (containsEscalationTrigger(d.text)) {
-      await reply(ESCALATION_REPLY);
+      await reply(pickHumanStallPhrase(ESCALATION_REPLIES, d.conv.id, d.text));
       return;
     }
     // Conversation was queued (typically after NO_CONTEXT on an off-topic
@@ -440,19 +477,19 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
       await reply(result.text, { used_chunk_ids: result.usedChunkIds }, stage);
       return;
     }
-    await reply(QUEUED_REPLY);
+    await reply(pickHumanStallPhrase(QUEUED_REPLIES, d.conv.id, d.text));
     return;
   }
 
   if (containsEscalationTrigger(d.text)) {
     d.conversations.setMode(d.conv.id, "queued");
     d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
-    await reply(ESCALATION_REPLY);
+    await reply(pickHumanStallPhrase(ESCALATION_REPLIES, d.conv.id, d.text));
     return;
   }
 
   if (!d.rag) {
-    await reply(PLACEHOLDER_REPLY);
+    await reply(pickHumanStallPhrase(PLACEHOLDER_REPLIES, d.conv.id, d.text));
     return;
   }
 
@@ -461,7 +498,7 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
   if (result.text === NO_CONTEXT_MARKER) {
     d.conversations.setMode(d.conv.id, "queued");
     d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
-    await reply(ESCALATION_REPLY);
+    await reply(pickHumanStallPhrase(ESCALATION_REPLIES, d.conv.id, d.text));
     return;
   }
 

@@ -46,7 +46,9 @@ for (const h of res.hits) {
 }
 console.log("\n[test] ANSWER:");
 if (res.text === NO_CONTEXT_MARKER) {
-  console.log("(NO_CONTEXT — would send ESCALATION_REPLY: «Секунду, уточню по этому вопросу и напишу.»)");
+  console.log(
+    "(NO_CONTEXT — в Telegram уйдёт одна из фраз «человеческого» ожидания из human-replies.)",
+  );
 } else {
   console.log(res.text);
 }

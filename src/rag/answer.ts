@@ -1,3 +1,4 @@
+import { config } from "../config.ts";
 import type { KbRepo, KbSearchHit } from "../db/repos/kb.ts";
 import { composeSystemPrompt } from "../sales/prompt.ts";
 import type { FunnelStage, Style } from "../sales/types.ts";
@@ -16,6 +17,13 @@ export interface Persona {
   role: "human" | "assistant";
   /** Optional company / agency name. */
   company?: string;
+}
+
+/** Legacy RAG temperature when sales `style` is not used (`answerWithRag` without `style`). */
+export function legacyRagSamplingTemperature(persona: Persona): number {
+  const t = config.rag.chatTemperature;
+  if (t !== undefined) return t;
+  return persona.role === "human" ? 0.55 : 0.38;
 }
 
 const DEFAULT_PERSONA: Persona = {
@@ -55,9 +63,9 @@ export function personaSmalltalkReply(persona: Persona): string {
   const company = persona.company?.trim();
   if (persona.role === "human") {
     if (company) {
-      return `Меня зовут ${name}, я менеджер в ${company}. Пиши, если нужна работа или условия — разберёмся.`;
+      return `Меня зовут ${name}, я менеджер в ${company}. Спрашивай по работе или условиям — расскажу по делу.`;
     }
-    return `Меня зовут ${name}.`;
+    return `Меня зовут ${name}. Если что‑то нужно по вакансиям — просто напиши.`;
   }
   if (company) return `Я ${name}, помощник агентства ${company}.`;
   return `Я ${name}.`;
@@ -91,6 +99,19 @@ export function buildSystemPrompt(persona: Persona, context: string): string {
       : `Тебя зовут ${persona.name}, ты ИИ-ассистент${company ? ` агентства ${company}` : ""}. ` +
         `Отвечай вежливо и по делу.`;
 
+  const conversational =
+    persona.role === "human"
+      ? `\nЖИВАЯ РЕЧЬ (Telegram):\n` +
+        `- Пиши так, чтобы это выглядело как переписка с реальным менеджером: естественные ` +
+        `опорные слова, можно «поняла/ок», «если вкратце», «по контрактам у нас…» — ` +
+        `без официоза («в соответствии с», «информирую Вас», «принято к сведению», ` +
+        `«настоящим сообщением»).\n` +
+        `- Связывай факты из CONTEXT связным текстом, а не как сухую выжимку из документа; ` +
+        `цифры и условия оставляй точными как в CONTEXT.\n` +
+        `- Не начинай с шаблонов вроде «Благодарю за вопрос» / «Отвечаю на ваш запрос». ` +
+        `Можешь входить сразу в содержание.\n`
+      : "";
+
   const rules =
     `СТРОГИЕ ПРАВИЛА:\n` +
     `1. Используй для фактов о вакансиях, условиях, странах и цифрах ТОЛЬКО ` +
@@ -123,7 +144,7 @@ export function buildSystemPrompt(persona: Persona, context: string): string {
     `из CONTEXT. Уточняющий встречный вопрос допустим только если без него ` +
     `ответ физически невозможен.`;
 
-  return `${personaLine}\n\n${rules}\n\nCONTEXT:\n${context}`;
+  return `${personaLine}${conversational}\n\n${rules}\n\nCONTEXT:\n${context}`;
 }
 
 export interface AnswerInput {
@@ -212,7 +233,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   // Branch: sales-style engine vs legacy persona prompt.
   // `style` wins over `persona` when both are passed.
   let systemPrompt: string;
-  let temperature = 0.2;
+  let temperature = legacyRagSamplingTemperature(activePersona);
   if (input.style) {
     const stage: FunnelStage = input.stage ?? "qualify";
     systemPrompt = composeSystemPrompt(input.style, stage, context, {

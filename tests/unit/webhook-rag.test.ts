@@ -14,7 +14,11 @@ import {
   type FetchLike,
 } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
-import { ESCALATION_REPLY, QUEUED_REPLY } from "@/telegram/webhook.ts";
+import {
+  ESCALATION_REPLIES,
+  QUEUED_REPLIES,
+  pickHumanStallPhrase,
+} from "@/telegram/webhook.ts";
 
 const SECRET = "test-secret";
 const DIM = 1536;
@@ -183,7 +187,10 @@ describe("webhook RAG integration", () => {
 
     expect(ctx.sent).toHaveLength(1);
     const replyText = String(ctx.sent[0]!.body.text);
-    expect(replyText).toBe(ESCALATION_REPLY);
+    const convId = new ConversationsRepo(ctx.db).byUserId(u.id)!.id;
+    expect(replyText).toBe(
+      pickHumanStallPhrase(ESCALATION_REPLIES, convId, "off-topic question"),
+    );
     // The "human" persona must never leak the words "оператор" / "бот" /
     // "ассистент" into user-visible fallback messages.
     expect(replyText).not.toMatch(/оператор|operator|бот|ассистент/i);
@@ -221,7 +228,10 @@ describe("webhook RAG integration", () => {
       headers: { "content-type": "application/json" },
     });
     expect(ctx.sent).toHaveLength(1);
-    expect(String(ctx.sent[0]!.body.text)).toBe(ESCALATION_REPLY);
+    const convId420 = new ConversationsRepo(ctx.db).byUserId(u.id)!.id;
+    expect(String(ctx.sent[0]!.body.text)).toBe(
+      pickHumanStallPhrase(ESCALATION_REPLIES, convId420, "off-topic"),
+    );
 
     await fetch(url, {
       method: "POST",
@@ -229,7 +239,9 @@ describe("webhook RAG integration", () => {
       headers: { "content-type": "application/json" },
     });
     expect(ctx.sent).toHaveLength(2);
-    expect(String(ctx.sent[1]!.body.text)).toBe(QUEUED_REPLY);
+    expect(String(ctx.sent[1]!.body.text)).toBe(
+      pickHumanStallPhrase(QUEUED_REPLIES, convId420, "still-off-topic"),
+    );
     expect(new ConversationsRepo(ctx.db).byUserId(u.id)!.mode).toBe("queued");
   });
 

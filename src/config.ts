@@ -99,6 +99,13 @@ export const config = {
     maxDistance: envFloat("RAG_MAX_DISTANCE"),
     /** Top-K vector hits per query. */
     topK: envInt("RAG_TOP_K", 5),
+    /**
+     * Sampling temperature for the legacy persona path (`BOT_PERSONA_*` без sales-style).
+     * Не действует когда включён BOT_SALES_STYLE — там температура из стиля.
+     * Если не задано: человек («human») ~0.55, ассистент ~0.38 — живее текста,
+     * но факты по-прежнему только из CONTEXT.
+     */
+    chatTemperature: envFloat("RAG_CHAT_TEMPERATURE"),
   },
   openai: {
     apiKey: envOptional("OPENAI_API_KEY"),

@@ -26,7 +26,10 @@ import type { EmbeddingClient } from "@/rag/embed.ts";
 import { createServer } from "@/server.ts";
 import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
-import { ESCALATION_REPLY } from "@/telegram/webhook.ts";
+import {
+  ESCALATION_REPLIES,
+  pickHumanStallPhrase,
+} from "@/telegram/webhook.ts";
 
 const SECRET = "lifecycle-secret";
 const DIM = 8;
@@ -239,9 +242,16 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     const conv = conversations.byUserId(u.id)!;
     expect(conv.mode).toBe("ai");
 
+    const escalateUserText = "позови оператора пожалуйста";
+    const escalationExpected = pickHumanStallPhrase(
+      ESCALATION_REPLIES,
+      conv.id,
+      escalateUserText,
+    );
+
     // --- Step 2: User explicitly asks for a human → escalate ---
     {
-      const res = await postWebhook("позови оператора пожалуйста");
+      const res = await postWebhook(escalateUserText);
       expect(res.status).toBe(200);
       const body = (await res.json()) as { mode: string; reason?: string };
       expect(body.mode).toBe("queued");
@@ -249,7 +259,7 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     }
     expect(ctx.sent).toHaveLength(2);
     const escalationOut = String(ctx.sent[1]!.body.text);
-    expect(escalationOut).toBe(ESCALATION_REPLY);
+    expect(escalationOut).toBe(escalationExpected);
     // Critical: the "human" persona reply must NOT leak words that would
     // out the bot to a candidate.
     expect(escalationOut).not.toMatch(/оператор|operator|бот\b|ассистент|нейросет/i);
@@ -386,8 +396,8 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     expect(finalMsgs).toEqual([
       { role: "user", text: "привет" },
       { role: "assistant", text: "AI говорит привет" },
-      { role: "user", text: "позови оператора пожалуйста" },
-      { role: "assistant", text: ESCALATION_REPLY },
+      { role: "user", text: escalateUserText },
+      { role: "assistant", text: escalationExpected },
       { role: "user", text: "я тут, жду ответа" },
       { role: "human", text: "Привет, я Алина. Сейчас помогу!" },
       { role: "user", text: "ещё вопрос" },

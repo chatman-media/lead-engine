@@ -5,12 +5,15 @@ import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
-import { createWebhookHandler } from "@/telegram/webhook.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
-import type { TgUpdate } from "@/telegram/types.ts";
 import type { ChatClient } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
-import { ESCALATION_REPLY } from "@/telegram/webhook.ts";
+import {
+  ESCALATION_REPLIES,
+  pickHumanStallPhrase,
+  createWebhookHandler,
+} from "@/telegram/webhook.ts";
+import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import type { TgUpdate } from "@/telegram/types.ts";
 
 describe("containsEscalationTrigger", () => {
   test("matches Russian and English variants regardless of case/punctuation", () => {
@@ -136,7 +139,14 @@ describe("webhook escalation trigger", () => {
     expect(chatCalls).toBe(0);
     expect(sent).toHaveLength(1);
     const replyText = String(sent[0]!.body.text);
-    expect(replyText).toBe(ESCALATION_REPLY);
+    const convId = new ConversationsRepo(db).byUserId(u.id)!.id;
+    expect(replyText).toBe(
+      pickHumanStallPhrase(
+        ESCALATION_REPLIES,
+        convId,
+        "Хочу позвать оператора",
+      ),
+    );
     expect(replyText).not.toMatch(/оператор|operator|бот|ассистент/i);
 
     const conv = new ConversationsRepo(db).byUserId(u.id)!;
