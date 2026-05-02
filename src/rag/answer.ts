@@ -213,6 +213,10 @@ export interface AnswerInput {
    * tokens once the style anchor is already in chat history.
    */
   includeFewShot?: boolean;
+  /** Optional output-token cap. When unset, the underlying ChatClient picks
+   *  its own default (256 for Ollama). Useful for tests / playground to
+   *  bound output time on slow CPU. */
+  numPredict?: number;
 }
 
 export interface AnswerResult {
@@ -283,7 +287,10 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     { role: "user", content: input.question },
   ];
 
-  const raw = await input.chat.complete(messages, { temperature });
+  const raw = await input.chat.complete(messages, {
+    temperature,
+    ...(input.numPredict !== undefined ? { numPredict: input.numPredict } : {}),
+  });
   const text = sanitizeLlmOutput(raw);
   return {
     text,

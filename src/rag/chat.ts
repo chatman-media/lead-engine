@@ -10,7 +10,12 @@ export interface ChatMessage {
 export interface ChatClient {
   complete(
     messages: ChatMessage[],
-    opts?: { temperature?: number },
+    opts?: {
+      temperature?: number;
+      /** Optional output-token cap (`num_predict` for Ollama, `max_tokens`
+       *  for OpenAI). Implementations free to ignore or pick a default. */
+      numPredict?: number;
+    },
   ): Promise<string>;
 }
 

@@ -7,8 +7,7 @@
  *
  * It catches regressions that slip through unit tests, e.g.:
  *  - the bus not being wired into the webhook handler,
- *  - escalation flow leaking forbidden words ("оператор", "бот", "ассистент")
- *    into the user-visible reply when persona.role = "human",
+ *  - escalation to queued does not spam canned Telegram stubs,
  *  - human mode accidentally still calling sendMessage,
  *  - release() failing to flip mode back to "ai" so the next user message
  *    is silently dropped.
@@ -26,10 +25,6 @@ import type { EmbeddingClient } from "@/rag/embed.ts";
 import { createServer } from "@/server.ts";
 import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
-import {
-  ESCALATION_REPLIES,
-  pickHumanStallPhrase,
-} from "@/telegram/webhook.ts";
 
 const SECRET = "lifecycle-secret";
 const DIM = 8;
@@ -209,11 +204,8 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
 
     const u = users.create({ tgUserId: TG_USER_ID, tgUsername: "tester" });
 
-    // Empty KB → answerWithRag returns NO_CONTEXT_MARKER even though the
-    // chat fake says "AI говорит привет". That's intentional: the very
-    // first message is off-topic (no KB hits) and must escalate.
-    // We verify that path separately below — first add a KB hit so the
-    // initial message goes through the AI path.
+    // Without a KB hit the first message would get NO_CONTEXT silently; seed
+    // a chunk so step 1 receives a normal AI reply before user-triggered queue.
     const kb = new (await import("@/db/repos/kb.ts")).KbRepo(ctx.db);
     const doc = kb.upsertDocument({
       source: "mem://t",
@@ -243,13 +235,8 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     expect(conv.mode).toBe("ai");
 
     const escalateUserText = "позови оператора пожалуйста";
-    const escalationExpected = pickHumanStallPhrase(
-      ESCALATION_REPLIES,
-      conv.id,
-      escalateUserText,
-    );
 
-    // --- Step 2: User explicitly asks for a human → escalate ---
+    // --- Step 2: User explicitly asks for a human → escalate (no stub in Telegram)
     {
       const res = await postWebhook(escalateUserText);
       expect(res.status).toBe(200);
@@ -257,12 +244,7 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
       expect(body.mode).toBe("queued");
       expect(body.reason).toBe("user-trigger");
     }
-    expect(ctx.sent).toHaveLength(2);
-    const escalationOut = String(ctx.sent[1]!.body.text);
-    expect(escalationOut).toBe(escalationExpected);
-    // Critical: the "human" persona reply must NOT leak words that would
-    // out the bot to a candidate.
-    expect(escalationOut).not.toMatch(/оператор|operator|бот\b|ассистент|нейросет/i);
+    expect(ctx.sent).toHaveLength(1); // only step-1 AI reply
     expect(conversations.byId(conv.id)!.mode).toBe("queued");
     expect(conversations.byId(conv.id)!.escalated_at).not.toBeNull();
 
@@ -397,7 +379,6 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
       { role: "user", text: "привет" },
       { role: "assistant", text: "AI говорит привет" },
       { role: "user", text: escalateUserText },
-      { role: "assistant", text: escalationExpected },
       { role: "user", text: "я тут, жду ответа" },
       { role: "human", text: "Привет, я Алина. Сейчас помогу!" },
       { role: "user", text: "ещё вопрос" },

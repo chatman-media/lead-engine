@@ -7,11 +7,7 @@ import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
-import {
-  ESCALATION_REPLIES,
-  pickHumanStallPhrase,
-  createWebhookHandler,
-} from "@/telegram/webhook.ts";
+import { createWebhookHandler } from "@/telegram/webhook.ts";
 import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
 
@@ -137,23 +133,13 @@ describe("webhook escalation trigger", () => {
     expect(res.status).toBe(200);
 
     expect(chatCalls).toBe(0);
-    expect(sent).toHaveLength(1);
-    const replyText = String(sent[0]!.body.text);
-    const convId = new ConversationsRepo(db).byUserId(u.id)!.id;
-    expect(replyText).toBe(
-      pickHumanStallPhrase(
-        ESCALATION_REPLIES,
-        convId,
-        "Хочу позвать оператора",
-      ),
-    );
-    expect(replyText).not.toMatch(/оператор|operator|бот|ассистент/i);
+    expect(sent).toHaveLength(0);
 
     const conv = new ConversationsRepo(db).byUserId(u.id)!;
     expect(conv.mode).toBe("queued");
 
     const msgs = new MessagesRepo(db).listByConversation(conv.id);
-    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(msgs.map((m) => m.role)).toEqual(["user"]);
   });
 
   test("non-trigger message in ai mode still goes through RAG", async () => {
@@ -167,12 +153,10 @@ describe("webhook escalation trigger", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    expect(chatCalls).toBe(0); // KB is empty -> NO_CONTEXT escalation, RAG short-circuits before chat
-    // But behaviorally: webhook should not have triggered queued via the keyword path.
+    expect(chatCalls).toBe(0); // KB is empty -> NO_CONTEXT without calling chat
     const conv = new ConversationsRepo(db).byUserId(
       new UsersRepo(db).byTgId(43)!.id,
     )!;
-    // Empty KB falls through to NO_CONTEXT path which also escalates -- that's fine.
-    expect(["queued", "ai"]).toContain(conv.mode);
+    expect(conv.mode).toBe("ai");
   });
 });

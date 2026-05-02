@@ -144,14 +144,15 @@ describe("/telegram/<secret> webhook", () => {
       });
       expect(res.status).toBe(200);
       expect(new UsersRepo(ctx.db).byTgId(888)).not.toBeNull();
-      expect(ctx.sent.length).toBeGreaterThanOrEqual(1);
+      // No RAG configured — no placeholder stub is sent to Telegram.
+      expect(ctx.sent).toHaveLength(0);
     } finally {
       if (prev === undefined) delete process.env.TELEGRAM_OPEN_ACCESS;
       else process.env.TELEGRAM_OPEN_ACCESS = prev;
     }
   });
 
-  test("whitelisted user: persists message + assistant placeholder + calls sendMessage", async () => {
+  test("whitelisted user without RAG: persists user message only, no sendMessage", async () => {
     const usersRepo = new UsersRepo(ctx.db);
     const convsRepo = new ConversationsRepo(ctx.db);
     const msgsRepo = new MessagesRepo(ctx.db);
@@ -165,14 +166,12 @@ describe("/telegram/<secret> webhook", () => {
     });
     expect(res.status).toBe(200);
 
-    expect(ctx.sent).toHaveLength(1);
-    expect(ctx.sent[0]!.method).toBe("sendMessage");
-    expect(ctx.sent[0]!.body.chat_id).toBe(555);
+    expect(ctx.sent).toHaveLength(0);
 
     const conv = convsRepo.byUserId(u.id);
     expect(conv).not.toBeNull();
     const msgs = msgsRepo.listByConversation(conv!.id);
-    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(msgs.map((m) => m.role)).toEqual(["user"]);
     expect(msgs[0]!.text).toBe("hello world");
   });
 

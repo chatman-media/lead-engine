@@ -23,26 +23,6 @@ import { FUNNEL_STAGES, type FunnelStage, type Style } from "../sales/types.ts";
 import type { TelegramClient } from "./client.ts";
 import type { TgUpdate } from "./types.ts";
 import { containsEscalationTrigger } from "./escalation.ts";
-import {
-  ESCALATION_REPLIES,
-  PLACEHOLDER_REPLIES,
-  PROCESSING_FAILURE_REPLIES,
-  QUEUED_REPLIES,
-  pickHumanStallPhrase,
-} from "./human-replies.ts";
-
-export {
-  ESCALATION_REPLIES,
-  PROCESSING_FAILURE_REPLIES,
-  PLACEHOLDER_REPLIES,
-  QUEUED_REPLIES,
-  pickHumanStallPhrase,
-} from "./human-replies.ts";
-
-/** Back-compat: canonical first line of each pool. */
-export const ESCALATION_REPLY = ESCALATION_REPLIES[0];
-export const QUEUED_REPLY = QUEUED_REPLIES[0];
-export const PLACEHOLDER_REPLY = PLACEHOLDER_REPLIES[0];
 
 export interface RagDeps {
   embedder: EmbeddingClient;
@@ -178,8 +158,9 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
 
     // Decide what we *intend* to do, synchronously, so the webhook
     // response can describe it for log aggregators and tests. The
-    // heavy work below may further escalate (NO_CONTEXT → queued) but
-    // by then Telegram has already received its 200 OK.
+    // heavy work below may send nothing (NO_CONTEXT / errors) while mode
+    // stays ai, or escalates on explicit operator keywords — by then Telegram
+    // has already received its 200 OK.
     const intent = decideIntent(conv.mode, userMessageText, deps.rag !== undefined);
 
     // Heavy work (RAG, /sendMessage, write assistant reply) is detached
@@ -200,33 +181,8 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       text: userMessageText,
       tgUserId,
       onEvent: deps.onEvent,
-    }).catch(async (err) => {
+    }).catch((err) => {
       console.error("[webhook] background processing failed:", err);
-      try {
-        const stall = pickHumanStallPhrase(
-          PROCESSING_FAILURE_REPLIES,
-          conv.id,
-          userMessageText,
-        );
-        const sent = await deps.telegram.sendMessage({
-          chatId: message.chat.id,
-          text: stall,
-        });
-        messages.add({
-          conversationId: conv.id,
-          role: "assistant",
-          text: stall,
-          tgMessageId: sent.message_id,
-        });
-        conversations.touch(conv.id);
-        deps.onEvent?.({
-          type: "assistant-replied",
-          conversationId: conv.id,
-          tgUserId,
-        });
-      } catch (e) {
-        console.error("[webhook] human fallback after processing failure:", e);
-      }
     });
 
     if (deps.awaitProcessing) {
@@ -460,16 +416,13 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
 
   if (d.conv.mode === "queued") {
     if (!d.rag) {
-      await reply(pickHumanStallPhrase(QUEUED_REPLIES, d.conv.id, d.text));
       return;
     }
     if (containsEscalationTrigger(d.text)) {
-      await reply(pickHumanStallPhrase(ESCALATION_REPLIES, d.conv.id, d.text));
       return;
     }
-    // Conversation was queued (typically after NO_CONTEXT on an off-topic
-    // question). Keep trying RAG on each inbound — if the user asks something
-    // that matches KB, resume normal AI replies instead of the stall loop.
+    // Conversation is queued (explicit operator request). Retry RAG on each
+    // inbound — a contextual hit returns mode to ai.
     const { result, stage } = await runRagForInbound(d);
     if (result.text !== NO_CONTEXT_MARKER) {
       d.conversations.setMode(d.conv.id, "ai");
@@ -477,28 +430,22 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
       await reply(result.text, { used_chunk_ids: result.usedChunkIds }, stage);
       return;
     }
-    await reply(pickHumanStallPhrase(QUEUED_REPLIES, d.conv.id, d.text));
     return;
   }
 
   if (containsEscalationTrigger(d.text)) {
     d.conversations.setMode(d.conv.id, "queued");
     d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
-    await reply(pickHumanStallPhrase(ESCALATION_REPLIES, d.conv.id, d.text));
     return;
   }
 
   if (!d.rag) {
-    await reply(pickHumanStallPhrase(PLACEHOLDER_REPLIES, d.conv.id, d.text));
     return;
   }
 
   const { result, stage } = await runRagForInbound(d);
 
   if (result.text === NO_CONTEXT_MARKER) {
-    d.conversations.setMode(d.conv.id, "queued");
-    d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
-    await reply(pickHumanStallPhrase(ESCALATION_REPLIES, d.conv.id, d.text));
     return;
   }
 

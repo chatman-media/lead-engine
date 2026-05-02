@@ -47,14 +47,15 @@ export class OllamaChatClient implements ChatClient {
 
   async complete(
     messages: ChatMessage[],
-    opts: { temperature?: number } = {},
+    opts: { temperature?: number; numPredict?: number } = {},
   ): Promise<string> {
     // num_ctx kept modest to keep KV-cache small (qwen3 default = 40K → 11GB
     // VRAM, way more than we need; 5 chunks × 1500 chars ≈ 1700 tokens).
-    // num_predict caps reply length so the bot never rambles.
+    // num_predict caps reply length so the bot never rambles. Tests can
+    // override to bound output time on slow CPU.
     const ollamaOptions: Record<string, unknown> = {
       num_ctx: 4096,
-      num_predict: 256,
+      num_predict: opts.numPredict ?? 256,
     };
     if (opts.temperature !== undefined) {
       ollamaOptions.temperature = opts.temperature;

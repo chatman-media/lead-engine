@@ -47,7 +47,7 @@ for (const h of res.hits) {
 console.log("\n[test] ANSWER:");
 if (res.text === NO_CONTEXT_MARKER) {
   console.log(
-    "(NO_CONTEXT — в Telegram уйдёт одна из фраз «человеческого» ожидания из human-replies.)",
+    "(NO_CONTEXT — в Telegram текст не отправляется, режим ai без изменений.)",
   );
 } else {
   console.log(res.text);

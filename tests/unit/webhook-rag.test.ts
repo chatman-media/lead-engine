@@ -14,11 +14,6 @@ import {
   type FetchLike,
 } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
-import {
-  ESCALATION_REPLIES,
-  QUEUED_REPLIES,
-  pickHumanStallPhrase,
-} from "@/telegram/webhook.ts";
 
 const SECRET = "test-secret";
 const DIM = 1536;
@@ -162,7 +157,7 @@ describe("webhook RAG integration", () => {
     expect(msgs[1]!.text).toBe("from RAG");
   });
 
-  test("ai mode + LLM returns NO_CONTEXT_MARKER: escalates to queued, no answer sent", async () => {
+  test("ai mode + LLM returns NO_CONTEXT_MARKER: stays ai, no Telegram message", async () => {
     teardown(ctx);
     ctx = setup({
       embedder: fakeEmbedder(),
@@ -192,21 +187,13 @@ describe("webhook RAG integration", () => {
     });
     expect(res.status).toBe(200);
 
-    expect(ctx.sent).toHaveLength(1);
-    const replyText = String(ctx.sent[0]!.body.text);
-    const convId = new ConversationsRepo(ctx.db).byUserId(u.id)!.id;
-    expect(replyText).toBe(
-      pickHumanStallPhrase(ESCALATION_REPLIES, convId, "off-topic question"),
-    );
-    // The "human" persona must never leak the words "оператор" / "бот" /
-    // "ассистент" into user-visible fallback messages.
-    expect(replyText).not.toMatch(/оператор|operator|бот|ассистент/i);
+    expect(ctx.sent).toHaveLength(0);
 
     const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
-    expect(conv.mode).toBe("queued");
+    expect(conv.mode).toBe("ai");
   });
 
-  test("queued mode + follow-up still NO_CONTEXT: sends QUEUED_REPLY", async () => {
+  test("two NO_CONTEXT in ai: no Telegram traffic, mode stays ai", async () => {
     teardown(ctx);
     ctx = setup({
       embedder: fakeEmbedder(),
@@ -234,25 +221,18 @@ describe("webhook RAG integration", () => {
       body: JSON.stringify(update(420, "off-topic")),
       headers: { "content-type": "application/json" },
     });
-    expect(ctx.sent).toHaveLength(1);
-    const convId420 = new ConversationsRepo(ctx.db).byUserId(u.id)!.id;
-    expect(String(ctx.sent[0]!.body.text)).toBe(
-      pickHumanStallPhrase(ESCALATION_REPLIES, convId420, "off-topic"),
-    );
+    expect(ctx.sent).toHaveLength(0);
 
     await fetch(url, {
       method: "POST",
       body: JSON.stringify(update(420, "still-off-topic")),
       headers: { "content-type": "application/json" },
     });
-    expect(ctx.sent).toHaveLength(2);
-    expect(String(ctx.sent[1]!.body.text)).toBe(
-      pickHumanStallPhrase(QUEUED_REPLIES, convId420, "still-off-topic"),
-    );
-    expect(new ConversationsRepo(ctx.db).byUserId(u.id)!.mode).toBe("queued");
+    expect(ctx.sent).toHaveLength(0);
+    expect(new ConversationsRepo(ctx.db).byUserId(u.id)!.mode).toBe("ai");
   });
 
-  test("queued mode + follow-up with RAG answer: clears queue and replies", async () => {
+  test("ai mode: NO_CONTEXT then on-topic question gets RAG reply", async () => {
     teardown(ctx);
     let turn = 0;
     ctx = setup({
@@ -292,15 +272,15 @@ describe("webhook RAG integration", () => {
       headers: { "content-type": "application/json" },
     });
 
-    expect(ctx.sent).toHaveLength(2);
-    expect(String(ctx.sent[1]!.body.text)).toBe(
+    expect(ctx.sent).toHaveLength(1);
+    expect(String(ctx.sent[0]!.body.text)).toBe(
       "Ответ из базы после очереди",
     );
     const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
     expect(conv.mode).toBe("ai");
   });
 
-  test("ai mode + KB empty: escalates to queued, no LLM answer", async () => {
+  test("kb empty: silent, stays ai", async () => {
     const users = new UsersRepo(ctx.db);
     users.create({ tgUserId: 300 });
 
@@ -314,13 +294,9 @@ describe("webhook RAG integration", () => {
     const conv = new ConversationsRepo(ctx.db).byUserId(
       new UsersRepo(ctx.db).byTgId(300)!.id,
     )!;
-    expect(conv.mode).toBe("queued");
+    expect(conv.mode).toBe("ai");
+    expect(ctx.sent).toHaveLength(0);
   });
-
-  // Regression: bare "как зовут?" used to skip the persona-smalltalk shortcut
-  // and fall through to RAG, producing an off-topic ESCALATION_REPLIES line
-  // ("секунду, уточню...") instead of "Меня зовут Алина...". Now the
-  // shortcut catches it and the LLM is never called.
   test("ai mode + smalltalk question: replies with persona name, LLM not called", async () => {
     teardown(ctx);
     let chatCalls = 0;
