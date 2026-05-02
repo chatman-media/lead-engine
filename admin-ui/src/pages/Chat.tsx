@@ -204,6 +204,21 @@ export function Chat() {
             </button>
           )}
 
+          <a
+            href={api.conversationExportUrl(convId)}
+            download={`conversation-${convId}.jsonl`}
+            data-testid="export-btn"
+            title="Скачать диалог в формате JSONL (one OpenAI fine-tune sample per line)"
+            style={{
+              ...actionBtnStyle("var(--text-3)"),
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+          >
+            ↓ JSONL
+          </a>
+
           <button
             onClick={handleDelete}
             data-testid="delete-btn"

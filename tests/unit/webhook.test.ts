@@ -83,6 +83,7 @@ function update(
 let ctx: ReturnType<typeof setup>;
 
 beforeEach(() => {
+  delete process.env.TELEGRAM_OPEN_ACCESS;
   ctx = setup();
 });
 
@@ -127,6 +128,27 @@ describe("/telegram/<secret> webhook", () => {
 
     const usersRepo = new UsersRepo(ctx.db);
     expect(usersRepo.byTgId(999)).toBeNull();
+  });
+
+  test("TELEGRAM_OPEN_ACCESS=1: registers unknown tg user on first message", async () => {
+    const prev = process.env.TELEGRAM_OPEN_ACCESS;
+    process.env.TELEGRAM_OPEN_ACCESS = "1";
+    try {
+      teardown(ctx);
+      ctx = setup();
+      const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
+      const res = await fetch(url, {
+        method: "POST",
+        body: JSON.stringify(update(888, "привет")),
+        headers: { "content-type": "application/json" },
+      });
+      expect(res.status).toBe(200);
+      expect(new UsersRepo(ctx.db).byTgId(888)).not.toBeNull();
+      expect(ctx.sent.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      if (prev === undefined) delete process.env.TELEGRAM_OPEN_ACCESS;
+      else process.env.TELEGRAM_OPEN_ACCESS = prev;
+    }
   });
 
   test("whitelisted user: persists message + assistant placeholder + calls sendMessage", async () => {

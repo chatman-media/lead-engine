@@ -1,12 +1,14 @@
 import type { Database } from "bun:sqlite";
 
 import {
+  createBulkExportConversationsHandler,
   createConversationDetailHandler,
   createCreateExperimentHandler,
   createCreateStyleHandler,
   createDeleteConversationHandler,
   createEditStyleHandler,
   createExperimentFunnelHandler,
+  createExportConversationHandler,
   createGetStyleHandler,
   createListConversationsHandler,
   createListExperimentsHandler,
@@ -137,6 +139,19 @@ export function createRouter(deps: AppDeps): Router {
     "/admin/api/conversations",
     createListConversationsHandler(apiDeps),
   );
+  // Conversation export — these MUST come before /admin/api/conversations/:id
+  // because the ":id" pattern is `[^/]+` and would otherwise capture the
+  // literal "export.jsonl" as `:id="export.jsonl"`. The router does linear
+  // first-match scan: register specific routes ahead of greedy ones.
+  router.get(
+    "/admin/api/conversations/export.jsonl",
+    createBulkExportConversationsHandler(apiDeps),
+  );
+  router.get(
+    "/admin/api/conversations/:id/export.jsonl",
+    createExportConversationHandler(apiDeps),
+  );
+
   router.get(
     "/admin/api/conversations/:id",
     createConversationDetailHandler(apiDeps),

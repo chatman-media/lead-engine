@@ -24,6 +24,45 @@ const DEFAULT_PERSONA: Persona = {
   company: "",
 };
 
+/** True when the message is only smalltalk about identity (name / who are you). */
+export function isPersonaSmalltalkQuestion(question: string): boolean {
+  const q = question.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!q) return false;
+  const hasJobOrOfferIntent =
+    /(работ|ваканс|зарплат|виза|оффер|переезд|агентств|услов|\bофис\b|график|смен|жилье|жильё|рейс|кита|китай|коре|англ\b)/i.test(
+      question,
+    );
+  if (hasJobOrOfferIntent) return false;
+
+  const nameCue =
+    q.includes("как тебя зовут") ||
+    q.includes("как вас зовут") ||
+    q.includes("тебя как зовут") ||
+    /как\s+(твоё|твое)\s+имя/i.test(question);
+  const whoCue =
+    /^кто\s+ты\??$/i.test(question.trim()) ||
+    /^ты\s+кто\??$/i.test(question.trim());
+
+  const enName = /\bwhat\s+('?s\s+)?your\s+name\b/i.test(question);
+  const enWho = /\bwho\s+are\s+you\b/i.test(question);
+
+  return !!(nameCue || whoCue || enName || enWho);
+}
+
+/** Short reply derived from persona — no KB required. */
+export function personaSmalltalkReply(persona: Persona): string {
+  const name = persona.name?.trim() || "Менеджер";
+  const company = persona.company?.trim();
+  if (persona.role === "human") {
+    if (company) {
+      return `Меня зовут ${name}, я менеджер в ${company}. Пиши, если нужна работа или условия — разберёмся.`;
+    }
+    return `Меня зовут ${name}.`;
+  }
+  if (company) return `Я ${name}, помощник агентства ${company}.`;
+  return `Я ${name}.`;
+}
+
 /**
  * Builds the system prompt. Two flavors keyed off `persona.role`:
  *
@@ -54,12 +93,12 @@ export function buildSystemPrompt(persona: Persona, context: string): string {
 
   const rules =
     `СТРОГИЕ ПРАВИЛА:\n` +
-    `1. Используй для ответа ТОЛЬКО факты из секции CONTEXT ниже (она уже ` +
-    `подобрана системой как релевантная вопросу). Если в CONTEXT есть ` +
-    `информация по теме вопроса — обязательно ответь по сути, передай факты ` +
-    `своими словами, дружелюбно и по-человечески. Не используй общие знания ` +
-    `о мире, не сочиняй цифры, цены, сроки, города, названия стран, которых ` +
-    `нет в CONTEXT.\n` +
+    `1. Используй для фактов о вакансиях, условиях, странах и цифрах ТОЛЬКО ` +
+    `секцию CONTEXT ниже. Если в CONTEXT есть информация по теме вопроса — ` +
+    `обязательно ответь по сути, передай факты своими словами, дружелюбно и ` +
+    `по-человечески. Не используй общие знания о мире, не сочиняй цифры, цены, ` +
+    `сроки, города, названия стран, которых нет в CONTEXT. ` +
+    `(Исключение: чисто персональный вопрос об имени/роли — см. п. 2a.)\n` +
     `2. Маркер "${NO_CONTEXT_MARKER}" верни РОВНО и БЕЗ каких-либо других ` +
     `слов в любом из этих случаев:\n` +
     `   - в CONTEXT нет фактов по теме вопроса;\n` +
@@ -70,6 +109,9 @@ export function buildSystemPrompt(persona: Persona, context: string): string {
     `именно их.\n` +
     `Если CONTEXT прямо отвечает на вопрос — отвечай по нему, не сваливайся ` +
     `на маркер.\n` +
+    `2a. Если вопрос только о твоём имени или кто ты («как тебя зовут», «кто ты») — ответь ` +
+    `по описанию в начале сообщения выше (имя, агентство). Никаких фактов о вакансиях ` +
+    `от себя не добавляй. Маркер "${NO_CONTEXT_MARKER}" в этом случае НЕ используй.\n` +
     `3. Пиши ТОЛЬКО на русском языке, даже если вопрос задан на другом. ` +
     `Без префиксов вроде "Ответ:", "Согласно контексту", "Based on…", ` +
     `"<think>" и т.п. Никаких служебных тегов и рассуждений вслух.\n` +
@@ -126,6 +168,26 @@ export interface AnswerResult {
 }
 
 export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
+  const activePersona: Persona =
+    input.style != null
+      ? {
+          name: input.style.persona.name,
+          role: input.style.persona.role,
+          ...(input.style.persona.company != null &&
+          input.style.persona.company.trim() !== ""
+            ? { company: input.style.persona.company.trim() }
+            : {}),
+        }
+      : (input.persona ?? DEFAULT_PERSONA);
+
+  if (isPersonaSmalltalkQuestion(input.question)) {
+    return {
+      text: personaSmalltalkReply(activePersona),
+      usedChunkIds: [],
+      hits: [],
+    };
+  }
+
   const topK = input.topK ?? 5;
   const [questionVec] = await input.embedder.embed([input.question]);
   if (!questionVec) throw new Error("Embedder returned no vector for question");

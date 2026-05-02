@@ -213,6 +213,243 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// Conversation export (Phase 3a).
+//
+// Operators want to download dialogues for offline review, dataset prep, or
+// fine-tuning their own model on winning conversations. JSONL is the lingua
+// franca: one "training example" per line, OpenAI fine-tune compatible.
+//
+// Two endpoints:
+//   GET /admin/api/conversations/:id/export.jsonl       single conversation
+//   GET /admin/api/conversations/export.jsonl?<filters>  bulk, ndjson stream
+//
+// Filters for bulk: style_id, experiment_id, user_status, mode, limit.
+// ════════════════════════════════════════════════════════════════════════════
+
+interface ExportedTurn {
+  role: "system" | "user" | "assistant" | "human";
+  content: string;
+  /** Funnel stage at the time this message was processed (sales engine only). */
+  stage?: string | null;
+}
+
+interface ExportedConversation {
+  /** Stable id — the local conversation row id. */
+  id: number;
+  tg_user_id: number;
+  tg_username: string | null;
+  user_status: string | null;
+  mode: string;
+  style_slug: string | null;
+  experiment_slug: string | null;
+  current_stage: string | null;
+  created_at: number;
+  /** OpenAI fine-tune compatible — one entry per turn, oldest-first. */
+  messages: ExportedTurn[];
+}
+
+interface ExportRow {
+  conv_id: number;
+  conv_mode: string;
+  conv_created_at: number;
+  conv_current_stage: string | null;
+  user_id: number;
+  tg_user_id: number;
+  tg_username: string | null;
+  user_status: string;
+  style_id: number | null;
+  style_slug: string | null;
+  experiment_id: number | null;
+  experiment_slug: string | null;
+}
+
+interface ExportMessageRow {
+  conversation_id: number;
+  role: "user" | "assistant" | "human" | "system";
+  text: string;
+  stage: string | null;
+  created_at: number;
+}
+
+const EXPORT_BULK_LIMIT_MAX = 1000;
+const EXPORT_BULK_LIMIT_DEFAULT = 100;
+
+/**
+ * Build the per-conversation header (everything except messages) — shared by
+ * single and bulk export. Joins users + styles + experiments so a downstream
+ * data scientist can filter by slug without re-joining themselves.
+ */
+function buildExportHeaders(
+  db: Database,
+  ids: readonly number[],
+): Map<number, ExportedConversation> {
+  if (ids.length === 0) return new Map();
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .query<ExportRow, number[]>(
+      `SELECT
+         c.id              AS conv_id,
+         c.mode            AS conv_mode,
+         c.created_at      AS conv_created_at,
+         c.current_stage   AS conv_current_stage,
+         u.id              AS user_id,
+         u.tg_user_id      AS tg_user_id,
+         u.tg_username     AS tg_username,
+         u.status          AS user_status,
+         c.style_id        AS style_id,
+         s.slug            AS style_slug,
+         c.experiment_id   AS experiment_id,
+         e.slug            AS experiment_slug
+       FROM conversations c
+       JOIN users u ON u.id = c.user_id
+       LEFT JOIN styles s ON s.id = c.style_id
+       LEFT JOIN experiments e ON e.id = c.experiment_id
+       WHERE c.id IN (${placeholders})`,
+    )
+    .all(...ids);
+
+  const out = new Map<number, ExportedConversation>();
+  for (const r of rows) {
+    out.set(r.conv_id, {
+      id: r.conv_id,
+      tg_user_id: r.tg_user_id,
+      tg_username: r.tg_username,
+      user_status: r.user_status,
+      mode: r.conv_mode,
+      style_slug: r.style_slug,
+      experiment_slug: r.experiment_slug,
+      current_stage: r.conv_current_stage,
+      created_at: r.conv_created_at,
+      messages: [],
+    });
+  }
+  return out;
+}
+
+/** Hydrate the message lists in-place. Single SELECT for all conversations. */
+function fillExportMessages(
+  db: Database,
+  conversations: Map<number, ExportedConversation>,
+): void {
+  if (conversations.size === 0) return;
+  const ids = [...conversations.keys()];
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .query<ExportMessageRow, number[]>(
+      `SELECT conversation_id, role, text, stage, created_at
+       FROM messages
+       WHERE conversation_id IN (${placeholders})
+       ORDER BY conversation_id, created_at ASC, id ASC`,
+    )
+    .all(...ids);
+  for (const r of rows) {
+    const conv = conversations.get(r.conversation_id);
+    if (!conv) continue;
+    conv.messages.push({ role: r.role, content: r.text, stage: r.stage });
+  }
+}
+
+function jsonlResponse(lines: ExportedConversation[], filename: string): Response {
+  const body = lines.map((l) => JSON.stringify(l)).join("\n") + (lines.length > 0 ? "\n" : "");
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "application/jsonl; charset=utf-8",
+      "content-disposition": `attachment; filename="${filename}"`,
+      // Hint to data-science clients that the format is one-conv-per-line.
+      "x-export-format": "jsonl-conversations-v1",
+      "x-export-count": String(lines.length),
+    },
+  });
+}
+
+export function createExportConversationHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    const headers = buildExportHeaders(deps.db, [id]);
+    if (headers.size === 0) return json({ error: "not found" }, { status: 404 });
+    fillExportMessages(deps.db, headers);
+
+    const conv = [...headers.values()][0]!;
+    return jsonlResponse([conv], `conversation-${id}.jsonl`);
+  };
+}
+
+export function createBulkExportConversationsHandler(
+  deps: AdminApiDeps,
+): RouteHandler {
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+
+    const url = new URL(req.url);
+    const styleId = parseIntParam(url.searchParams.get("style_id"));
+    const experimentId = parseIntParam(url.searchParams.get("experiment_id"));
+    const userStatus = url.searchParams.get("user_status")?.trim() || null;
+    const mode = url.searchParams.get("mode")?.trim() || null;
+    const requestedLimit = parseIntParam(url.searchParams.get("limit"));
+    const limit = Math.min(
+      Math.max(1, requestedLimit ?? EXPORT_BULK_LIMIT_DEFAULT),
+      EXPORT_BULK_LIMIT_MAX,
+    );
+
+    // Build a parameterized WHERE so we never interpolate user input.
+    const wheres: string[] = [];
+    const args: Array<number | string> = [];
+    if (styleId !== null) {
+      wheres.push("c.style_id = ?");
+      args.push(styleId);
+    }
+    if (experimentId !== null) {
+      wheres.push("c.experiment_id = ?");
+      args.push(experimentId);
+    }
+    if (userStatus) {
+      wheres.push("u.status = ?");
+      args.push(userStatus);
+    }
+    if (mode) {
+      wheres.push("c.mode = ?");
+      args.push(mode);
+    }
+    const whereClause = wheres.length ? `WHERE ${wheres.join(" AND ")}` : "";
+
+    const ids = deps.db
+      .query<{ id: number }, Array<number | string>>(
+        `SELECT c.id
+         FROM conversations c
+         JOIN users u ON u.id = c.user_id
+         ${whereClause}
+         ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
+         LIMIT ${limit}`,
+      )
+      .all(...args)
+      .map((r) => r.id);
+
+    const headers = buildExportHeaders(deps.db, ids);
+    fillExportMessages(deps.db, headers);
+
+    // Preserve the order from the SELECT (most recent first).
+    const out = ids
+      .map((id) => headers.get(id))
+      .filter((c): c is ExportedConversation => c !== undefined);
+
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    return jsonlResponse(out, `conversations-${stamp}.jsonl`);
+  };
+}
+
+function parseIntParam(raw: string | null): number | null {
+  if (raw === null || raw === "") return null;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // Sales-style engine admin API (Phase 2b).
 //
 // Endpoints:

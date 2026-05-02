@@ -119,6 +119,30 @@ export const api = {
       { method: "DELETE" },
     ),
 
+  /** URL of the per-conversation JSONL export. Open in a new tab to trigger
+   *  the browser's download flow (the server sets Content-Disposition). */
+  conversationExportUrl: (id: number) =>
+    `/admin/api/conversations/${id}/export.jsonl`,
+
+  /** URL of the bulk JSONL export. Filters are forwarded as query params. */
+  bulkConversationExportUrl: (filters: {
+    styleId?: number;
+    experimentId?: number;
+    userStatus?: string;
+    mode?: string;
+    limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (filters.styleId !== undefined) q.set("style_id", String(filters.styleId));
+    if (filters.experimentId !== undefined)
+      q.set("experiment_id", String(filters.experimentId));
+    if (filters.userStatus) q.set("user_status", filters.userStatus);
+    if (filters.mode) q.set("mode", filters.mode);
+    if (filters.limit !== undefined) q.set("limit", String(filters.limit));
+    const qs = q.toString();
+    return `/admin/api/conversations/export.jsonl${qs ? `?${qs}` : ""}`;
+  },
+
   // ─── Sales-style engine (Phase 2b) ───────────────────────────────────
   styles: () => req<{ styles: StyleSummary[] }>("/admin/api/styles"),
 

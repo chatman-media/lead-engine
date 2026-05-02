@@ -41,6 +41,12 @@ function envEnum<T extends string>(
   return raw as T;
 }
 
+function envTruthy(name: string, fallback = false): boolean {
+  const raw = process.env[name]?.toLowerCase()?.trim();
+  if (raw === undefined || raw === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(raw);
+}
+
 export const LLM_PROVIDERS = ["openai", "ollama", "openrouter"] as const;
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
@@ -193,3 +199,8 @@ export function llmIsConfigured(c: typeof config = config): boolean {
 }
 
 export { env };
+
+/** When true, every Telegram sender is accepted: missing users rows are created on first message. */
+export function telegramOpenAccess(): boolean {
+  return envTruthy("TELEGRAM_OPEN_ACCESS", false);
+}

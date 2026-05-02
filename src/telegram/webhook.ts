@@ -6,6 +6,7 @@ import { KbRepo } from "../db/repos/kb.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
 import { UsersRepo, type UserRow } from "../db/repos/users.ts";
+import { telegramOpenAccess } from "../config.ts";
 import { json, type RouteHandler } from "../router.ts";
 import {
   answerWithRag,
@@ -118,7 +119,17 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       return json({ ok: true, ignored: "no-text-message" });
     }
 
-    const user = users.byTgId(message.from.id);
+    const userExisting = users.byTgId(message.from.id);
+    let user = userExisting;
+    if (!user && telegramOpenAccess()) {
+      user = users.create({
+        tgUserId: message.from.id,
+        tgUsername: message.from.username ?? null,
+      });
+      console.log(
+        `[webhook] TELEGRAM_OPEN_ACCESS: created user tg_user_id=${message.from.id}`,
+      );
+    }
     if (!user) {
       console.log(
         `[webhook] ignoring message from non-whitelisted tg_user_id=${message.from.id}`,

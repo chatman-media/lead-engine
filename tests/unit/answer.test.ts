@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { KbRepo } from "@/db/repos/kb.ts";
 import { openDb } from "@/db/sqlite.ts";
-import { answerWithRag, NO_CONTEXT_MARKER } from "@/rag/answer.ts";
+import { answerWithRag, isPersonaSmalltalkQuestion, NO_CONTEXT_MARKER } from "@/rag/answer.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
@@ -74,6 +74,20 @@ function seed(): { qVec: number[] } {
   return { qVec: vec(1) };
 }
 
+describe("isPersonaSmalltalkQuestion", () => {
+  test("matches common Russian name intents", () => {
+    expect(isPersonaSmalltalkQuestion("тебя как зовут?")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("Как тебя зовут")).toBe(true);
+    expect(isPersonaSmalltalkQuestion("кто ты?")).toBe(true);
+  });
+
+  test("false when job/location mixed in", () => {
+    expect(
+      isPersonaSmalltalkQuestion("как тебя зовут есть работа в китае?"),
+    ).toBe(false);
+  });
+});
+
 describe("answerWithRag", () => {
   test("retrieves chunks, builds prompt with their text, returns LLM answer", async () => {
     const { qVec } = seed();
@@ -98,6 +112,44 @@ describe("answerWithRag", () => {
     const user = chat.lastMessages?.[chat.lastMessages.length - 1];
     expect(user?.role).toBe("user");
     expect(user?.content).toBe("How do refunds work?");
+  });
+
+  test("persona-only name question: no embed/LLM, uses env persona", async () => {
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("must not run");
+    const result = await answerWithRag({
+      question: "тебя как зовут?",
+      kb,
+      embedder,
+      chat,
+      persona: {
+        name: "Алина",
+        role: "human",
+        company: "INFINITY AGENCY",
+      },
+    });
+    expect(embedder.calls).toEqual([]);
+    expect(chat.lastMessages).toBeNull();
+    expect(result.text).toContain("Алина");
+    expect(result.text).toContain("INFINITY");
+    expect(result.usedChunkIds).toEqual([]);
+    expect(result.hits).toEqual([]);
+  });
+
+  test("persona-only with sales style: uses style persona name", async () => {
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("must not run");
+    const result = await answerWithRag({
+      question: "тебя как зовут?",
+      kb,
+      embedder,
+      chat,
+      style: flirtyBelfort,
+      stage: "opener",
+    });
+    expect(embedder.calls).toEqual([]);
+    expect(chat.lastMessages).toBeNull();
+    expect(result.text).toContain(flirtyBelfort.persona.name);
   });
 
   test("returns NO_CONTEXT_MARKER when retrieval is empty", async () => {
