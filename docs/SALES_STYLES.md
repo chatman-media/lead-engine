@@ -207,7 +207,8 @@ Three provider categories represented:
 | `styles-repo.test.ts` | StylesRepo CRUD, parseRow with Zod validation, soft-delete, idempotent seed | 14 |
 | `experiments-repo.test.ts` | ExperimentsRepo CRUD, getRunning, status transitions, allocation parsing | 17 |
 | `webhook-ab.test.ts` | End-to-end A/B: assignment, stickiness, two users, malformed experiment graceful fallback | 6 |
-| `admin-sales-api.test.ts` | 6 admin endpoints (auth, list/get styles, list/create/patch experiments, funnel SQL) | 19 |
+| `admin-sales-api.test.ts` | 7 admin endpoints (auth, list/get/edit styles, list/create/patch experiments, funnel SQL) + version-pin invariant | 27 |
+| `styles-repo.test.ts` (extended) | + `editAsNewVersion` (creates new version, deactivates old, refuses inactive/slug-change, transactional rollback) + `versionHistory` | 23 |
 
 Plus four integration tests in [`tests/unit/answer.test.ts`](../tests/unit/answer.test.ts) verifying that `answerWithRag` correctly branches between the legacy persona prompt and the sales-engine composed prompt.
 
@@ -217,9 +218,10 @@ Run: `bun test tests/unit`. The full unit suite is hermetic — no network, no l
 
 Two new pages in the admin panel under [`admin-ui/src/pages/`](../admin-ui/src/pages/):
 
-- **`/admin/styles`** — list of active sales styles. Click any row to view the
-  full Zod-validated config (JSON tree). Read-only for now; edits go through
-  SQL or a future inline editor.
+- **`/admin/styles`** — list of active sales styles. Click any row to view +
+  edit the full Zod-validated config (JSON editor with live parse-error
+  feedback). Saving creates a new version; the previous one stays in the DB
+  so any conversation pinned to it keeps the prompt it started with.
 - **`/admin/experiments`** — list of all A/B experiments with their
   status badge (draft / running / paused / done), allocation, **per-style
   funnel** (conversations · success · rate · escalated), and start / pause /
@@ -233,6 +235,7 @@ Backend endpoints in [`src/admin/api.ts`](../src/admin/api.ts):
 |---|---|---|
 | GET | `/admin/api/styles` | list active styles (slug, name, version, created) |
 | GET | `/admin/api/styles/:id` | full row + parsed Zod config (or `parse_error` when malformed) |
+| PATCH | `/admin/api/styles/:id` | save edit as new version (deactivates old, inserts new with `parent_id` chain) |
 | GET | `/admin/api/experiments` | list all experiments with allocation pre-parsed |
 | POST | `/admin/api/experiments` | create draft. Validates slug shape, every variant slug exists, weights non-negative, total weight > 0 |
 | PATCH | `/admin/api/experiments/:id` | set status. Refuses to start a second running experiment, refuses to start one with malformed allocation |
@@ -244,12 +247,28 @@ Full coverage in [`tests/unit/sales/admin-sales-api.test.ts`](../tests/unit/sale
 - Cannot create/start a second `running` experiment when one is already live (409).
 - Cannot start an experiment whose `allocation_json` is malformed (422 — fix the JSON first).
 - Cannot reference a style slug that's missing or `is_active=0` (400 with the offending slug).
+- Cannot edit a historical (already-inactive) style version (409 — fork from the current active version instead).
+- Cannot change `slug` across the version chain — slug is the identity (409).
+- Style edits that fail Zod validation surface field-level issues (422 with `{path, message}` array).
 
 These match the runtime's graceful-fallback rules — together they make it hard to ship a misconfigured experiment that would silently degrade to legacy persona.
 
-## Future work
+### Why version chain instead of in-place edit
 
-- **Phase 2b+ — inline style editor** with versioned saves (insert new row + bump `version` + set old `is_active=0`, never destructive). Current admin UI is read-only.
+A sales conversation in flight is pinned to its `style_id` for stickiness — restarting the bot mid-funnel can't change which persona is talking. If "edit" mutated the row in-place, the prompt every running conversation sees would shift mid-conversation: a prospect who started with the flirty opener could end up qualified by an empathetic bot.
+
+Solution (migration `004_style_versioning.sql`):
+
+- Drop `UNIQUE(slug)`. Multiple historical versions share the slug.
+- Add partial `UNIQUE(slug) WHERE is_active=1`. Exactly one current version.
+- Add `UNIQUE(slug, version)`. Each tuple is unique.
+- `parent_id` links to the row this one was forked from. The chain is auditable.
+
+`StylesRepo.editAsNewVersion(currentId, newConfig)` is atomic: deactivate old + insert new with `version+1`, `parent_id=currentId`. Wrapped in a transaction; if either op fails, both roll back and the old row stays active.
+
+Conversations with `conversations.style_id = old.id` keep reading the old row via `byId()` (which intentionally returns inactive rows too). New conversations resolve via `bySlug()` → only active rows → the new version. Both groups stay coherent forever.
+
+## Future work
 - **Phase 2c — OpenRouter provider** — add `OpenRouterChatClient` implementing the existing `ChatClient` interface. The model registry in `src/sales/models.ts` already lists Claude/GPT/Gemini entries; provider just needs wiring (~80 LOC). Enables per-style backbone choice.
 - **Stage classifier upgrade** — replace regex `nextStage` with a haiku-class LLM classifier returning `{stage, confidence}`. Keep regex as fallback at confidence < 0.6.
 - **Streaming replies** — switch the Ollama `/api/chat` call to SSE so partial replies show up as they're generated (helps UX on slow CPU inference).

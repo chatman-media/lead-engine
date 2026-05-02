@@ -142,6 +142,160 @@ describe("GET /admin/api/styles/:id", () => {
   });
 });
 
+describe("PATCH /admin/api/styles/:id (inline editor)", () => {
+  beforeEach(() => seedStyles(ctx.db));
+
+  test("requires auth", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const res = await fetch(url(`/admin/api/styles/${id}`), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ config: flirtyBelfort }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("creates a new version on save", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const v1 = repo.bySlug("flirty-belfort-v1")!;
+    const newConfig = { ...flirtyBelfort, displayName: "Алина — edited" };
+
+    const res = await fetch(
+      url(`/admin/api/styles/${v1.id}`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: newConfig }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      style: { id: number; version: number; parent_id: number | null; display_name: string };
+    };
+    expect(body.style.id).not.toBe(v1.id);
+    expect(body.style.version).toBe(2);
+    expect(body.style.parent_id).toBe(v1.id);
+    expect(body.style.display_name).toBe("Алина — edited");
+
+    // Old row deactivated, new is active.
+    expect(repo.byId(v1.id)?.is_active).toBe(0);
+    expect(repo.bySlug("flirty-belfort-v1")?.id).toBe(body.style.id);
+  });
+
+  test("conversations pinned to old version keep reading the original prompt", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const users = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+
+    const v1 = repo.bySlug("flirty-belfort-v1")!;
+    const u = users.create({ tgUserId: 999 });
+    const c = conversations.ensureForUser(u.id);
+    conversations.assignStyle(c.id, v1.id, null);
+
+    // Edit the style.
+    const newConfig = { ...flirtyBelfort, displayName: "post-edit" };
+    await fetch(
+      url(`/admin/api/styles/${v1.id}`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: newConfig }),
+      }),
+    );
+
+    // The conversation's pinned style_id still points at v1; reading it via
+    // byId returns the original config.
+    const stillPinnedTo = conversations.byUserId(u.id)?.style_id;
+    expect(stillPinnedTo).toBe(v1.id);
+    const oldRow = repo.byId(v1.id)!;
+    const oldStyle = repo.parseRow(oldRow);
+    expect(oldStyle.displayName).toBe(flirtyBelfort.displayName);
+    expect(oldStyle.displayName).not.toBe("post-edit");
+  });
+
+  test("422 on Zod schema validation failure", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const v1 = repo.bySlug("flirty-belfort-v1")!;
+    const broken = { ...flirtyBelfort, framework: "MADE_UP_FRAMEWORK" };
+
+    const res = await fetch(
+      url(`/admin/api/styles/${v1.id}`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: broken }),
+      }),
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      issues: Array<{ path: string; message: string }>;
+    };
+    expect(body.error).toContain("StyleSchema");
+    expect(body.issues.some((i) => i.path.includes("framework"))).toBe(true);
+  });
+
+  test("400 on missing config in body", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const v1 = repo.bySlug("flirty-belfort-v1")!;
+    const res = await fetch(
+      url(`/admin/api/styles/${v1.id}`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("404 for unknown id", async () => {
+    const res = await fetch(
+      url("/admin/api/styles/9999"),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: flirtyBelfort }),
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("409 when editing a historical (already-inactive) version", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const v1 = repo.bySlug("flirty-belfort-v1")!;
+    // Edit once to make v1 historical.
+    repo.editAsNewVersion(v1.id, { ...flirtyBelfort, displayName: "v2" });
+
+    const res = await fetch(
+      url(`/admin/api/styles/${v1.id}`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: flirtyBelfort }),
+      }),
+    );
+    expect(res.status).toBe(409);
+  });
+
+  test("409 when slug in config differs from row slug", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const v1 = repo.bySlug("flirty-belfort-v1")!;
+    const wrongSlug = { ...flirtyBelfort, slug: "different-slug" };
+
+    const res = await fetch(
+      url(`/admin/api/styles/${v1.id}`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: wrongSlug }),
+      }),
+    );
+    expect(res.status).toBe(409);
+  });
+});
+
 describe("POST /admin/api/experiments", () => {
   test("creates a draft and returns 201", async () => {
     seedStyles(ctx.db);

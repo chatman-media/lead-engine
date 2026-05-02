@@ -4,6 +4,7 @@ import {
   createConversationDetailHandler,
   createCreateExperimentHandler,
   createDeleteConversationHandler,
+  createEditStyleHandler,
   createExperimentFunnelHandler,
   createGetStyleHandler,
   createListConversationsHandler,
@@ -143,6 +144,7 @@ export function createRouter(deps: AppDeps): Router {
   // Sales-style engine endpoints (Phase 2b).
   router.get("/admin/api/styles", createListStylesHandler(apiDeps));
   router.get("/admin/api/styles/:id", createGetStyleHandler(apiDeps));
+  router.patch("/admin/api/styles/:id", createEditStyleHandler(apiDeps));
   router.get("/admin/api/experiments", createListExperimentsHandler(apiDeps));
   router.post(
     "/admin/api/experiments",

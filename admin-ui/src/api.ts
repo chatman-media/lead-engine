@@ -125,6 +125,12 @@ export const api = {
   style: (id: number) =>
     req<{ style: StyleDetail }>(`/admin/api/styles/${id}`),
 
+  editStyle: (id: number, config: unknown) =>
+    req<{ style: StyleDetail }>(`/admin/api/styles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ config }),
+    }),
+
   experiments: () =>
     req<{ experiments: Experiment[] }>("/admin/api/experiments"),
 

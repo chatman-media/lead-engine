@@ -119,6 +119,71 @@ export class StylesRepo {
     const res = this.db.run("UPDATE styles SET is_active = 0 WHERE id = ?", [id]);
     return res.changes > 0;
   }
+
+  /**
+   * Save an edit as a new version of an existing style.
+   *
+   * - Old row (`currentId`) is marked is_active=0 — historical, but still
+   *   readable by `byId()` so conversations already pinned to it (via
+   *   `conversations.style_id = currentId`) keep seeing the same prompt
+   *   they were assigned. This is the whole point of the version chain.
+   * - New row is inserted with version+1, parent_id=currentId, same slug.
+   * - `display_name` is sourced from `newConfig.displayName` so it never
+   *   diverges from the schema.
+   *
+   * Atomic — wrapped in a transaction. If the new row's UNIQUE(slug, version)
+   * collides with another version, both ops roll back.
+   *
+   * Throws if the target is already inactive (refuses to fork from history)
+   * or doesn't exist.
+   *
+   * Returns the new row.
+   */
+  editAsNewVersion(currentId: number, newConfig: Style): StyleRow {
+    const current = this.byId(currentId);
+    if (!current) {
+      throw new Error(`styles.id=${currentId} not found`);
+    }
+    if (current.is_active !== 1) {
+      throw new Error(
+        `styles.id=${currentId} (slug=${current.slug}) is not active — refusing to fork from a historical version. Edit the current active version instead.`,
+      );
+    }
+    if (newConfig.slug !== current.slug) {
+      throw new Error(
+        `slug mismatch: current row has "${current.slug}" but new config has "${newConfig.slug}" — slug is immutable across the version chain`,
+      );
+    }
+
+    const txn = this.db.transaction(() => {
+      this.db.run("UPDATE styles SET is_active = 0 WHERE id = ?", [currentId]);
+      const inserted = this.db
+        .query<StyleRow, [string, string, string, number, number]>(
+          `INSERT INTO styles (slug, display_name, config_json, version, parent_id)
+           VALUES (?, ?, ?, ?, ?)
+           RETURNING *`,
+        )
+        .get(
+          current.slug,
+          newConfig.displayName,
+          JSON.stringify(newConfig),
+          current.version + 1,
+          currentId,
+        );
+      if (!inserted) throw new Error("editAsNewVersion: INSERT returned no row");
+      return inserted;
+    });
+    return txn();
+  }
+
+  /** All versions of a slug, oldest → newest. Useful for an audit / history view. */
+  versionHistory(slug: string): StyleRow[] {
+    return this.db
+      .query<StyleRow, [string]>(
+        "SELECT * FROM styles WHERE slug = ? ORDER BY version ASC",
+      )
+      .all(slug);
+  }
 }
 
 /**

@@ -9,6 +9,7 @@ import {
 } from "../db/repos/experiments.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
+import { StyleSchema } from "../sales/types.ts";
 import { UsersRepo } from "../db/repos/users.ts";
 import { json, type RouteHandler } from "../router.ts";
 import type { TelegramClient } from "../telegram/client.ts";
@@ -265,6 +266,76 @@ export function createGetStyleHandler(deps: AdminApiDeps): RouteHandler {
         config: parsedConfig,
         config_raw: row.config_json,
         parse_error: parseError,
+      },
+    });
+  };
+}
+
+/**
+ * PATCH /admin/api/styles/:id — save edit as a NEW version.
+ *
+ * The current row is deactivated (is_active=0); a new row is inserted with
+ * version+1, parent_id pointing at the deactivated row. Conversations already
+ * pinned to the old version keep seeing the prompt they started with.
+ */
+export function createEditStyleHandler(deps: AdminApiDeps): RouteHandler {
+  const styles = new StylesRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    let body: { config?: unknown };
+    try {
+      body = (await req.json()) as { config?: unknown };
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    if (typeof body.config !== "object" || body.config === null) {
+      return json({ error: "body.config must be a Style object" }, { status: 400 });
+    }
+
+    const parseResult = StyleSchema.safeParse(body.config);
+    if (!parseResult.success) {
+      return json(
+        {
+          error: "config fails StyleSchema validation",
+          issues: parseResult.error.issues.map((i) => ({
+            path: i.path.join("."),
+            message: i.message,
+          })),
+        },
+        { status: 422 },
+      );
+    }
+
+    let newRow;
+    try {
+      newRow = styles.editAsNewVersion(id, parseResult.data);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not found")) {
+        return json({ error: msg }, { status: 404 });
+      }
+      if (msg.includes("not active") || msg.includes("slug mismatch")) {
+        return json({ error: msg }, { status: 409 });
+      }
+      throw err;
+    }
+
+    return json({
+      style: {
+        id: newRow.id,
+        slug: newRow.slug,
+        display_name: newRow.display_name,
+        version: newRow.version,
+        parent_id: newRow.parent_id,
+        is_active: newRow.is_active === 1,
+        created_at: newRow.created_at,
+        config: parseResult.data,
+        config_raw: newRow.config_json,
+        parse_error: null,
       },
     });
   };

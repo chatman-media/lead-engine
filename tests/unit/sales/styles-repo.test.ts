@@ -129,6 +129,151 @@ describe("StylesRepo — listActive + deactivate", () => {
   });
 });
 
+describe("StylesRepo — editAsNewVersion (versioning)", () => {
+  test("creates a new version, deactivates the old one", () => {
+    const v1 = repo.insert({
+      slug: flirtyBelfort.slug,
+      displayName: flirtyBelfort.displayName,
+      config: flirtyBelfort,
+    });
+    expect(v1.is_active).toBe(1);
+    expect(v1.version).toBe(1);
+
+    const newConfig = { ...flirtyBelfort, displayName: "Алина — edited" };
+    const v2 = repo.editAsNewVersion(v1.id, newConfig);
+
+    expect(v2.id).not.toBe(v1.id);
+    expect(v2.version).toBe(2);
+    expect(v2.parent_id).toBe(v1.id);
+    expect(v2.is_active).toBe(1);
+    expect(v2.display_name).toBe("Алина — edited");
+
+    const v1Reloaded = repo.byId(v1.id)!;
+    expect(v1Reloaded.is_active).toBe(0);
+  });
+
+  test("bySlug after edit returns the new active version", () => {
+    const v1 = repo.insert({
+      slug: empatheticNepq.slug,
+      displayName: empatheticNepq.displayName,
+      config: empatheticNepq,
+    });
+    repo.editAsNewVersion(v1.id, { ...empatheticNepq, displayName: "Маша v2" });
+
+    const active = repo.bySlug(empatheticNepq.slug)!;
+    expect(active.version).toBe(2);
+    expect(active.display_name).toBe("Маша v2");
+  });
+
+  test("byId still returns the old version (so live conversations keep working)", () => {
+    const v1 = repo.insert({
+      slug: coldDirectPas.slug,
+      displayName: coldDirectPas.displayName,
+      config: coldDirectPas,
+    });
+    repo.editAsNewVersion(v1.id, { ...coldDirectPas, displayName: "edited" });
+
+    // A conversation pinned to v1.id pre-edit should still be able to read it.
+    const old = repo.byId(v1.id)!;
+    expect(old.id).toBe(v1.id);
+    expect(old.is_active).toBe(0);
+    expect(old.display_name).toBe(coldDirectPas.displayName); // original
+    // And parsing it should still produce a valid Style.
+    expect(() => repo.parseRow(old)).not.toThrow();
+  });
+
+  test("refuses to edit an already-inactive (historical) row", () => {
+    const v1 = repo.insert({
+      slug: flirtyBelfort.slug,
+      displayName: flirtyBelfort.displayName,
+      config: flirtyBelfort,
+    });
+    repo.editAsNewVersion(v1.id, { ...flirtyBelfort, displayName: "v2" });
+
+    expect(() =>
+      repo.editAsNewVersion(v1.id, { ...flirtyBelfort, displayName: "from-history" }),
+    ).toThrow(/not active/);
+  });
+
+  test("refuses to change slug across the version chain", () => {
+    const v1 = repo.insert({
+      slug: flirtyBelfort.slug,
+      displayName: flirtyBelfort.displayName,
+      config: flirtyBelfort,
+    });
+    expect(() =>
+      repo.editAsNewVersion(v1.id, { ...flirtyBelfort, slug: "different-slug" }),
+    ).toThrow(/slug mismatch/);
+  });
+
+  test("404-style throw on unknown id", () => {
+    expect(() => repo.editAsNewVersion(9999, flirtyBelfort)).toThrow(/not found/);
+  });
+
+  test("multiple edits chain by parent_id", () => {
+    const v1 = repo.insert({
+      slug: flirtyBelfort.slug,
+      displayName: flirtyBelfort.displayName,
+      config: flirtyBelfort,
+    });
+    const v2 = repo.editAsNewVersion(v1.id, { ...flirtyBelfort, displayName: "v2" });
+    const v3 = repo.editAsNewVersion(v2.id, { ...flirtyBelfort, displayName: "v3" });
+
+    expect(v2.parent_id).toBe(v1.id);
+    expect(v3.parent_id).toBe(v2.id);
+    expect(v3.version).toBe(3);
+
+    // Only v3 is active.
+    expect(repo.bySlug(flirtyBelfort.slug)?.id).toBe(v3.id);
+    expect(repo.byId(v1.id)?.is_active).toBe(0);
+    expect(repo.byId(v2.id)?.is_active).toBe(0);
+  });
+
+  test("transactional — failure during INSERT does not leave the old row deactivated", () => {
+    // Force a UNIQUE(slug, version) collision: insert a row at version 2
+    // pre-emptively, then try to edit v1 → would also become v2 → conflict.
+    const v1 = repo.insert({
+      slug: flirtyBelfort.slug,
+      displayName: flirtyBelfort.displayName,
+      config: flirtyBelfort,
+    });
+    // Manually inject a v2 with same slug at version 2.
+    db.run(
+      `INSERT INTO styles (slug, display_name, config_json, is_active, version, parent_id)
+       VALUES (?, ?, ?, 0, 2, ?)`,
+      [flirtyBelfort.slug, "shadow v2", JSON.stringify(flirtyBelfort), v1.id],
+    );
+
+    expect(() =>
+      repo.editAsNewVersion(v1.id, { ...flirtyBelfort, displayName: "should-fail" }),
+    ).toThrow();
+
+    // Rollback should leave v1 still active.
+    expect(repo.byId(v1.id)?.is_active).toBe(1);
+  });
+});
+
+describe("StylesRepo — versionHistory", () => {
+  test("returns all versions of a slug oldest-first", () => {
+    const v1 = repo.insert({
+      slug: flirtyBelfort.slug,
+      displayName: flirtyBelfort.displayName,
+      config: flirtyBelfort,
+    });
+    const v2 = repo.editAsNewVersion(v1.id, { ...flirtyBelfort, displayName: "v2" });
+    const v3 = repo.editAsNewVersion(v2.id, { ...flirtyBelfort, displayName: "v3" });
+
+    const history = repo.versionHistory(flirtyBelfort.slug);
+    expect(history.map((r) => r.id)).toEqual([v1.id, v2.id, v3.id]);
+    expect(history.map((r) => r.version)).toEqual([1, 2, 3]);
+    expect(history.map((r) => r.is_active)).toEqual([0, 0, 1]);
+  });
+
+  test("empty array for unknown slug", () => {
+    expect(repo.versionHistory("does-not-exist")).toEqual([]);
+  });
+});
+
 describe("seedBuiltinStyles", () => {
   test("first call inserts all builtins, subsequent call is a no-op", () => {
     const first = seedBuiltinStyles(repo, [flirtyBelfort, empatheticNepq, coldDirectPas]);
