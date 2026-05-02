@@ -5,18 +5,30 @@ import { createRouter } from "@/app.ts";
 import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { ExperimentsRepo } from "@/db/repos/experiments.ts";
+import { KbRepo } from "@/db/repos/kb.ts";
 import { seedBuiltinStyles, StylesRepo } from "@/db/repos/styles.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
+import type { ChatClient } from "@/rag/chat.ts";
+import type { EmbeddingClient } from "@/rag/embed.ts";
 import { coldDirectPas } from "@/sales/styles/cold-direct-pas.ts";
 import { empatheticNepq } from "@/sales/styles/empathetic-nepq.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
 import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
 
 const SECRET = "s";
+const DIM = 1536;
+
+function vec(seed: number): number[] {
+  const arr = new Array<number>(DIM).fill(0);
+  arr[seed % DIM] = 1;
+  return arr;
+}
 
 function setup() {
-  const db = openDb({ path: ":memory:" });
+  // Pass embeddingDim so kb_vec is created. Required for the playground
+  // tests that pre-seed a KB chunk; harmless for the others.
+  const db = openDb({ path: ":memory:", embeddingDim: DIM });
   const fetchImpl: FetchLike = async () =>
     new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
   const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
@@ -139,6 +151,308 @@ describe("GET /admin/api/styles/:id", () => {
   test("404 for unknown id", async () => {
     const res = await fetch(url("/admin/api/styles/9999"), authed());
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /admin/api/styles/:id/playground", () => {
+  beforeEach(() => seedStyles(ctx.db));
+
+  test("503 when rag is not configured (LLM clients absent)", async () => {
+    // ctx is the default setup() which doesn't pass rag.
+    const repo = new StylesRepo(ctx.db);
+    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const res = await fetch(
+      url(`/admin/api/styles/${id}/playground`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userMessage: "привет" }),
+      }),
+    );
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("LLM");
+  });
+});
+
+describe("POST /admin/api/styles/:id/playground (with rag)", () => {
+  // Spin up a parallel server on the same DB but WITH a stub LLM. We can't
+  // mutate the existing ctx.server (already booted without rag), so we use
+  // a separate Bun.serve and tear it down explicitly.
+  let ragServer: Server;
+  let chatCalls: Array<{ messages: Array<{ role: string; content: string }> }>;
+
+  beforeEach(async () => {
+    seedStyles(ctx.db);
+    chatCalls = [];
+
+    // Pre-seed a KB chunk so kb.search returns something for grounded stages.
+    const kb = new KbRepo(ctx.db);
+    const doc = kb.upsertDocument({
+      source: "test",
+      title: "Дубай контракты",
+      contentHash: "h1",
+    });
+    kb.insertChunkWithEmbedding({
+      documentId: doc.id,
+      chunkIndex: 0,
+      text: "В Дубае гонорар $3000-8000/мес.",
+      tokenCount: 7,
+      embedding: vec(1),
+    });
+
+    const stubChat: ChatClient = {
+      async complete(messages) {
+        chatCalls.push({ messages: messages.slice() });
+        return "MOCK-LLM-REPLY";
+      },
+    };
+    const stubEmbedder: EmbeddingClient = {
+      dim: DIM,
+      async embed(inputs) {
+        return inputs.map((s) => vec(s.length));
+      },
+    };
+
+    const fetchImpl: FetchLike = async () =>
+      new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
+    const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
+    const ragRouter = createRouter({
+      db: ctx.db,
+      telegram,
+      webhookSecret: SECRET,
+      rag: { chat: stubChat, embedder: stubEmbedder },
+    });
+    ragServer = Bun.serve({ port: 0, fetch: (req) => ragRouter.handle(req) });
+
+    // Re-login against THIS server because the cookie is bound to its origin
+    // (different port → different cookie scope per browser semantics, but
+    // Bun's fetch sends cookies by Cookie header so origin doesn't matter
+    // for our purposes — we just need the same admin session to be readable).
+    // The DB is shared so the session row exists; we reuse the same cookie.
+  });
+
+  afterEach(() => {
+    ragServer.stop(true);
+  });
+
+  function ragUrl(path: string) {
+    return `http://127.0.0.1:${ragServer.port}${path}`;
+  }
+
+  test("happy path: stage auto-detected, KB pre-search runs, LLM called, prompt returned", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const res = await fetch(
+      ragUrl(`/admin/api/styles/${id}/playground`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userMessage: "сколько в Дубае платят?",
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      stage: string;
+      stage_source: string;
+      reply: string;
+      system_prompt: string;
+      kb_hits: Array<{ title: string }>;
+      duration_ms: number;
+      model: { id: string; temperature: number };
+    };
+
+    expect(body.stage).toBe("pitch"); // "сколько" triggers pricing → pitch
+    expect(body.stage_source).toBe("auto");
+    expect(body.reply).toBe("MOCK-LLM-REPLY");
+    expect(body.system_prompt).toContain("Алина"); // persona name in flirty-belfort
+    expect(body.system_prompt).toContain("KB CONTEXT"); // KB injected
+    expect(body.kb_hits.length).toBeGreaterThan(0);
+    expect(body.duration_ms).toBeGreaterThanOrEqual(0);
+    expect(body.model.id).toBeDefined();
+    expect(chatCalls.length).toBe(1);
+  });
+
+  test("stage override forces a specific stage", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const res = await fetch(
+      ragUrl(`/admin/api/styles/${id}/playground`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userMessage: "привет",
+          stage: "objection",
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stage: string; stage_source: string };
+    expect(body.stage).toBe("objection");
+    expect(body.stage_source).toBe("override");
+  });
+
+  test("invalid stage override is ignored, falls back to auto", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const res = await fetch(
+      ragUrl(`/admin/api/styles/${id}/playground`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userMessage: "привет",
+          stage: "made-up-stage",
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stage_source: string };
+    expect(body.stage_source).toBe("auto");
+  });
+
+  test("useKb=false skips embedder + kb, no injected KB block in prompt", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const res = await fetch(
+      ragUrl(`/admin/api/styles/${id}/playground`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userMessage: "сколько в Дубае платят?",
+          useKb: false,
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      kb_hits: unknown[];
+      system_prompt: string;
+    };
+    expect(body.kb_hits).toEqual([]);
+    // The actual injected block has a recognizable header. The string
+    // "KB CONTEXT" alone may also appear inside the grounding reminder
+    // text (which references the section by name), so we match the header.
+    expect(body.system_prompt).not.toContain(
+      "KB CONTEXT (актуальные факты агентства):",
+    );
+  });
+
+  test("dropFewShot=true removes few-shot block from system prompt", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const withFewShot = await fetch(
+      ragUrl(`/admin/api/styles/${id}/playground`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userMessage: "привет", useKb: false }),
+      }),
+    );
+    const withoutFewShot = await fetch(
+      ragUrl(`/admin/api/styles/${id}/playground`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userMessage: "привет",
+          useKb: false,
+          dropFewShot: true,
+        }),
+      }),
+    );
+    const a = (await withFewShot.json()) as { system_prompt: string };
+    const b = (await withoutFewShot.json()) as { system_prompt: string };
+    // The "ПРИМЕРЫ ДИАЛОГА" header is present in flirty-belfort few-shot block.
+    expect(a.system_prompt).toContain("ПРИМЕРЫ ДИАЛОГА");
+    expect(b.system_prompt).not.toContain("ПРИМЕРЫ ДИАЛОГА");
+    // Without few-shot the prompt is meaningfully shorter.
+    expect(b.system_prompt.length).toBeLessThan(a.system_prompt.length);
+  });
+
+  test("400 on missing userMessage", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const res = await fetch(
+      ragUrl(`/admin/api/styles/${id}/playground`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("400 on whitespace-only userMessage", async () => {
+    const repo = new StylesRepo(ctx.db);
+    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const res = await fetch(
+      ragUrl(`/admin/api/styles/${id}/playground`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userMessage: "   " }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("404 for unknown style id", async () => {
+    const res = await fetch(
+      ragUrl("/admin/api/styles/9999/playground"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userMessage: "привет" }),
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("502 when LLM call fails", async () => {
+    // Re-mount with a chat client that throws.
+    ragServer.stop(true);
+    const failChat: ChatClient = {
+      async complete() {
+        throw new Error("simulated LLM failure");
+      },
+    };
+    const stubEmbedder: EmbeddingClient = {
+      dim: DIM,
+      async embed(inputs) {
+        return inputs.map((s) => vec(s.length));
+      },
+    };
+    const fetchImpl: FetchLike = async () =>
+      new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
+    const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
+    const failRouter = createRouter({
+      db: ctx.db,
+      telegram,
+      webhookSecret: SECRET,
+      rag: { chat: failChat, embedder: stubEmbedder },
+    });
+    ragServer = Bun.serve({ port: 0, fetch: (req) => failRouter.handle(req) });
+
+    const repo = new StylesRepo(ctx.db);
+    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const res = await fetch(
+      ragUrl(`/admin/api/styles/${id}/playground`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userMessage: "привет" }),
+      }),
+    );
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("LLM call failed");
+    expect(body.error).toContain("simulated LLM failure");
   });
 });
 

@@ -131,6 +131,20 @@ export const api = {
       body: JSON.stringify({ config }),
     }),
 
+  playgroundStyle: (
+    id: number,
+    input: {
+      userMessage: string;
+      stage?: string;
+      useKb?: boolean;
+      dropFewShot?: boolean;
+    },
+  ) =>
+    req<PlaygroundResult>(`/admin/api/styles/${id}/playground`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
   experiments: () =>
     req<{ experiments: Experiment[] }>("/admin/api/experiments"),
 
@@ -190,6 +204,21 @@ export interface Experiment {
   started_at: number | null;
   ended_at: number | null;
   created_at: number;
+}
+
+export interface PlaygroundResult {
+  stage: string;
+  stage_source: "auto" | "override";
+  kb_hits: Array<{
+    chunk_id: number;
+    title: string;
+    text: string;
+    distance: number;
+  }>;
+  system_prompt: string;
+  reply: string;
+  duration_ms: number;
+  model: { id: string; temperature: number };
 }
 
 export interface FunnelRow {

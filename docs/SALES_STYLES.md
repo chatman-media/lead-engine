@@ -207,7 +207,7 @@ Three provider categories represented:
 | `styles-repo.test.ts` | StylesRepo CRUD, parseRow with Zod validation, soft-delete, idempotent seed | 14 |
 | `experiments-repo.test.ts` | ExperimentsRepo CRUD, getRunning, status transitions, allocation parsing | 17 |
 | `webhook-ab.test.ts` | End-to-end A/B: assignment, stickiness, two users, malformed experiment graceful fallback | 6 |
-| `admin-sales-api.test.ts` | 7 admin endpoints (auth, list/get/edit styles, list/create/patch experiments, funnel SQL) + version-pin invariant | 27 |
+| `admin-sales-api.test.ts` | 8 admin endpoints (auth, list/get/edit/playground styles, list/create/patch experiments, funnel SQL) + version-pin invariant | 37 |
 | `styles-repo.test.ts` (extended) | + `editAsNewVersion` (creates new version, deactivates old, refuses inactive/slug-change, transactional rollback) + `versionHistory` | 23 |
 
 Plus four integration tests in [`tests/unit/answer.test.ts`](../tests/unit/answer.test.ts) verifying that `answerWithRag` correctly branches between the legacy persona prompt and the sales-engine composed prompt.
@@ -221,7 +221,12 @@ Two new pages in the admin panel under [`admin-ui/src/pages/`](../admin-ui/src/p
 - **`/admin/styles`** — list of active sales styles. Click any row to view +
   edit the full Zod-validated config (JSON editor with live parse-error
   feedback). Saving creates a new version; the previous one stays in the DB
-  so any conversation pinned to it keeps the prompt it started with.
+  so any conversation pinned to it keeps the prompt it started with. Each
+  style detail page also has a **Playground** — collapsible section that
+  runs a sample prospect message through the live LLM with the current style
+  config, returning the auto-detected funnel stage, the KB hits that would
+  be injected, the full composed system prompt, and the model's reply. No
+  DB writes, no Telegram traffic — pure dry-run for iterating on prompts.
 - **`/admin/experiments`** — list of all A/B experiments with their
   status badge (draft / running / paused / done), allocation, **per-style
   funnel** (conversations · success · rate · escalated), and start / pause /
@@ -236,6 +241,7 @@ Backend endpoints in [`src/admin/api.ts`](../src/admin/api.ts):
 | GET | `/admin/api/styles` | list active styles (slug, name, version, created) |
 | GET | `/admin/api/styles/:id` | full row + parsed Zod config (or `parse_error` when malformed) |
 | PATCH | `/admin/api/styles/:id` | save edit as new version (deactivates old, inserts new with `parent_id` chain) |
+| POST | `/admin/api/styles/:id/playground` | dry-run a prospect message against the style — no persistence. Body: `{userMessage, stage?, useKb?, dropFewShot?}`. Returns: stage (auto or override), kb_hits, composed system_prompt, reply, duration_ms, model. Returns 503 if LLM not configured. |
 | GET | `/admin/api/experiments` | list all experiments with allocation pre-parsed |
 | POST | `/admin/api/experiments` | create draft. Validates slug shape, every variant slug exists, weights non-negative, total weight > 0 |
 | PATCH | `/admin/api/experiments/:id` | set status. Refuses to start a second running experiment, refuses to start one with malformed allocation |

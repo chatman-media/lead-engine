@@ -14,6 +14,7 @@ import {
   createReleaseHandler,
   createReplyHandler,
   createSetExperimentStatusHandler,
+  createStylePlaygroundHandler,
   createTakeHandler,
 } from "./admin/api.ts";
 import {
@@ -102,6 +103,21 @@ export function createRouter(deps: AppDeps): Router {
   const apiDeps = {
     db: deps.db,
     telegram: deps.telegram,
+    // Thread the LLM clients through so the style playground endpoint can
+    // run dry-run completions. Other admin endpoints don't need this; the
+    // playground returns 503 when rag is undefined.
+    ...(deps.rag
+      ? {
+          rag: {
+            chat: deps.rag.chat,
+            embedder: deps.rag.embedder,
+            ...(deps.rag.topK !== undefined ? { topK: deps.rag.topK } : {}),
+            ...(deps.rag.maxDistance !== undefined
+              ? { maxDistance: deps.rag.maxDistance }
+              : {}),
+          },
+        }
+      : {}),
     onConversationChanged: (conversationId: number) => {
       deps.bus?.publish({ type: "conversation:updated", conversationId });
     },
@@ -145,6 +161,10 @@ export function createRouter(deps: AppDeps): Router {
   router.get("/admin/api/styles", createListStylesHandler(apiDeps));
   router.get("/admin/api/styles/:id", createGetStyleHandler(apiDeps));
   router.patch("/admin/api/styles/:id", createEditStyleHandler(apiDeps));
+  router.post(
+    "/admin/api/styles/:id/playground",
+    createStylePlaygroundHandler(apiDeps),
+  );
   router.get("/admin/api/experiments", createListExperimentsHandler(apiDeps));
   router.post(
     "/admin/api/experiments",

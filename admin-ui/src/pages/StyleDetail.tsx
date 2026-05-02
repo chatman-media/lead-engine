@@ -1,6 +1,20 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ApiError, api, type StyleDetail as StyleDetailT } from "../api.ts";
+import {
+  ApiError,
+  api,
+  type PlaygroundResult,
+  type StyleDetail as StyleDetailT,
+} from "../api.ts";
+
+const FUNNEL_STAGES = [
+  "auto",
+  "opener",
+  "qualify",
+  "pitch",
+  "objection",
+  "close",
+] as const;
 
 export function StyleDetail() {
   const { id } = useParams();
@@ -259,8 +273,309 @@ export function StyleDetail() {
               {JSON.stringify(style.config, null, 2)}
             </pre>
           )}
+
+          {style.is_active && !style.parse_error && !editing ? (
+            <Playground styleId={style.id} />
+          ) : null}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Test the style against a sample prospect message — no DB writes, no
+ * Telegram traffic. Shows the auto-detected stage, the KB hits that would
+ * have been injected, the full composed system prompt, and the LLM reply.
+ *
+ * The "save and pray" antidote: edit JSON, click Run, see what comes back
+ * BEFORE versioning the row.
+ */
+function Playground({ styleId }: { styleId: number }) {
+  const [open, setOpen] = useState(false);
+  const [userMessage, setUserMessage] = useState("сколько в Дубае платят?");
+  const [stage, setStage] = useState<(typeof FUNNEL_STAGES)[number]>("auto");
+  const [useKb, setUseKb] = useState(true);
+  const [dropFewShot, setDropFewShot] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<PlaygroundResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setError(null);
+    setResult(null);
+    setRunning(true);
+    try {
+      const res = await api.playgroundStyle(styleId, {
+        userMessage,
+        ...(stage !== "auto" ? { stage } : {}),
+        useKb,
+        dropFewShot,
+      });
+      setResult(res);
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.message);
+      else setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: 24,
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        background: "var(--bg-1)",
+      }}
+    >
+      <button
+        onClick={() => setOpen((s) => !s)}
+        style={{
+          width: "100%",
+          padding: "12px 16px",
+          background: "transparent",
+          border: "none",
+          borderBottom: open ? "1px solid var(--border)" : "none",
+          color: "var(--amber)",
+          fontFamily: "var(--mono)",
+          fontSize: 13,
+          textAlign: "left",
+          cursor: "pointer",
+        }}
+      >
+        {open ? "▾" : "▸"} Playground — test this style against a sample message
+      </button>
+
+      {open ? (
+        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+          <label
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              fontSize: 12,
+              color: "var(--text-3)",
+            }}
+          >
+            prospect message
+            <textarea
+              value={userMessage}
+              onChange={(e) => setUserMessage(e.target.value)}
+              rows={2}
+              style={{
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                color: "var(--text)",
+                padding: "6px 10px",
+                fontSize: 13,
+                fontFamily: "var(--mono)",
+                resize: "vertical",
+              }}
+            />
+          </label>
+
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <label
+              style={{
+                display: "flex",
+                gap: 6,
+                alignItems: "center",
+                fontSize: 12,
+                color: "var(--text-3)",
+              }}
+            >
+              stage
+              <select
+                value={stage}
+                onChange={(e) =>
+                  setStage(e.target.value as (typeof FUNNEL_STAGES)[number])
+                }
+                style={{
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  color: "var(--text)",
+                  padding: "4px 8px",
+                  fontSize: 12,
+                  fontFamily: "var(--mono)",
+                }}
+              >
+                {FUNNEL_STAGES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label
+              style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}
+            >
+              <input
+                type="checkbox"
+                checked={useKb}
+                onChange={(e) => setUseKb(e.target.checked)}
+              />
+              <span style={{ color: "var(--text-3)" }}>inject KB context</span>
+            </label>
+
+            <label
+              style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}
+            >
+              <input
+                type="checkbox"
+                checked={dropFewShot}
+                onChange={(e) => setDropFewShot(e.target.checked)}
+              />
+              <span style={{ color: "var(--text-3)" }}>drop few-shot (turn-2+ mode)</span>
+            </label>
+
+            <button
+              onClick={run}
+              disabled={running || !userMessage.trim()}
+              style={{
+                padding: "6px 14px",
+                background: "var(--amber)",
+                border: "none",
+                borderRadius: "var(--radius)",
+                color: "var(--bg)",
+                fontFamily: "var(--mono)",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: running || !userMessage.trim() ? "default" : "pointer",
+                opacity: running || !userMessage.trim() ? 0.4 : 1,
+                marginLeft: "auto",
+              }}
+            >
+              {running ? "running…" : "Run"}
+            </button>
+          </div>
+
+          {error ? (
+            <pre
+              style={{
+                background: "var(--bg)",
+                border: "1px solid var(--red, #f55)",
+                color: "var(--red, #f55)",
+                padding: 12,
+                borderRadius: "var(--radius)",
+                fontSize: 12,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {error}
+            </pre>
+          ) : null}
+
+          {result ? <PlaygroundResultView result={result} /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PlaygroundResultView({ result }: { result: PlaygroundResult }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 4 }}>
+      <div
+        style={{
+          fontSize: 11,
+          color: "var(--text-3)",
+          fontFamily: "var(--mono)",
+        }}
+      >
+        stage={result.stage} ({result.stage_source}) · model={result.model.id} ·
+        T={result.model.temperature} · kb_hits={result.kb_hits.length} · dur=
+        {result.duration_ms}ms
+      </div>
+
+      <Section title="reply">
+        <div
+          style={{
+            background: "var(--bg)",
+            border: "1px solid var(--amber)",
+            borderRadius: "var(--radius)",
+            padding: 12,
+            color: "var(--text)",
+            fontSize: 14,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {result.reply}
+        </div>
+      </Section>
+
+      {result.kb_hits.length > 0 ? (
+        <Section title={`kb hits (${result.kb_hits.length})`}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {result.kb_hits.map((h, i) => (
+              <div
+                key={h.chunk_id}
+                style={{
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  padding: 8,
+                  fontSize: 12,
+                  fontFamily: "var(--mono)",
+                }}
+              >
+                <div style={{ color: "var(--text-3)", fontSize: 11 }}>
+                  [#{i + 1}] {h.title} · distance={h.distance.toFixed(3)}
+                </div>
+                <div style={{ color: "var(--text)", marginTop: 4 }}>{h.text}</div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
+
+      <Section title="composed system prompt">
+        <pre
+          style={{
+            background: "var(--bg)",
+            border: "1px solid var(--border)",
+            color: "var(--text-2)",
+            padding: 12,
+            borderRadius: "var(--radius)",
+            fontSize: 11,
+            fontFamily: "var(--mono)",
+            whiteSpace: "pre-wrap",
+            maxHeight: 300,
+            overflow: "auto",
+          }}
+        >
+          {result.system_prompt}
+        </pre>
+      </Section>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 11,
+          color: "var(--text-3)",
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+          marginBottom: 4,
+        }}
+      >
+        {title}
+      </div>
+      {children}
     </div>
   );
 }
