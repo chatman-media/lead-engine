@@ -131,6 +131,12 @@ export const api = {
       body: JSON.stringify({ config }),
     }),
 
+  createStyle: (config: unknown) =>
+    req<{ style: StyleDetail }>("/admin/api/styles", {
+      method: "POST",
+      body: JSON.stringify({ config }),
+    }),
+
   playgroundStyle: (
     id: number,
     input: {

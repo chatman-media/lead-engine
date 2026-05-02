@@ -3,6 +3,7 @@ import type { Database } from "bun:sqlite";
 import {
   createConversationDetailHandler,
   createCreateExperimentHandler,
+  createCreateStyleHandler,
   createDeleteConversationHandler,
   createEditStyleHandler,
   createExperimentFunnelHandler,
@@ -159,6 +160,7 @@ export function createRouter(deps: AppDeps): Router {
 
   // Sales-style engine endpoints (Phase 2b).
   router.get("/admin/api/styles", createListStylesHandler(apiDeps));
+  router.post("/admin/api/styles", createCreateStyleHandler(apiDeps));
   router.get("/admin/api/styles/:id", createGetStyleHandler(apiDeps));
   router.patch("/admin/api/styles/:id", createEditStyleHandler(apiDeps));
   router.post(

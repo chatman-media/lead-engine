@@ -12,6 +12,7 @@ import { Chat } from "./pages/Chat.tsx";
 import { Chats } from "./pages/Chats.tsx";
 import { Experiments } from "./pages/Experiments.tsx";
 import { Login } from "./pages/Login.tsx";
+import { NewStyle } from "./pages/NewStyle.tsx";
 import { StyleDetail } from "./pages/StyleDetail.tsx";
 import { Styles } from "./pages/Styles.tsx";
 import { Users } from "./pages/Users.tsx";
@@ -78,6 +79,7 @@ export function App() {
                 <Route path="chats/:id" element={<Chat />} />
                 <Route path="users" element={<Users />} />
                 <Route path="styles" element={<Styles />} />
+                <Route path="styles/new" element={<NewStyle />} />
                 <Route path="styles/:id" element={<StyleDetail />} />
                 <Route path="experiments" element={<Experiments />} />
                 <Route path="*" element={<Navigate to="chats" replace />} />

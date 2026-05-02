@@ -1,27 +1,98 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, type StyleSummary } from "../api.ts";
 
 export function Styles() {
   const [styles, setStyles] = useState<StyleSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cloneFrom, setCloneFrom] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     api
       .styles()
-      .then((res) => setStyles(res.styles))
+      .then((res) => {
+        setStyles(res.styles);
+        // Default the dropdown to the first style so "+ Create" is one click.
+        if (res.styles.length > 0 && !cloneFrom) setCloneFrom(res.styles[0]!.slug);
+      })
       .catch((err) => setError(err.message ?? String(err)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <div style={{ padding: "24px 32px" }}>
-      <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", marginTop: 0 }}>
-        Sales styles
-      </h2>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 4,
+        }}
+      >
+        <h2
+          style={{
+            fontFamily: "var(--mono)",
+            color: "var(--amber)",
+            margin: 0,
+          }}
+        >
+          Sales styles
+        </h2>
+
+        {styles && styles.length > 0 ? (
+          <div
+            style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}
+          >
+            <span style={{ color: "var(--text-3)", fontFamily: "var(--mono)" }}>
+              clone from:
+            </span>
+            <select
+              value={cloneFrom}
+              onChange={(e) => setCloneFrom(e.target.value)}
+              style={{
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                color: "var(--text)",
+                padding: "4px 8px",
+                fontSize: 12,
+                fontFamily: "var(--mono)",
+              }}
+            >
+              {styles.map((s) => (
+                <option key={s.id} value={s.slug}>
+                  {s.slug}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() =>
+                navigate(`/admin/styles/new?from=${encodeURIComponent(cloneFrom)}`)
+              }
+              disabled={!cloneFrom}
+              style={{
+                padding: "5px 12px",
+                background: "transparent",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                color: "var(--text-2)",
+                fontFamily: "var(--mono)",
+                fontSize: 12,
+                cursor: cloneFrom ? "pointer" : "default",
+                opacity: cloneFrom ? 1 : 0.4,
+              }}
+            >
+              + new style
+            </button>
+          </div>
+        ) : null}
+      </div>
       <p style={{ color: "var(--text-3)", fontSize: 13, marginBottom: 20 }}>
         Personas + sales frameworks + Cialdini hooks composed into the system
-        prompt at runtime. Read-only here; edits go through SQL or a future
-        editor.
+        prompt at runtime. Click any row to view + edit. New styles are created
+        by cloning an existing one as a template — pick a template above and
+        change slug + displayName + tone in the editor.
       </p>
 
       {error ? (

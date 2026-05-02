@@ -468,6 +468,90 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 /**
+ * POST /admin/api/styles — create a fresh sales style from scratch.
+ *
+ * Used by the "Clone from existing" UI flow: operator picks a template style,
+ * tweaks the JSON (slug, displayName, persona name, voice, hooks, …), saves.
+ * Resulting row is version=1, parent_id=null, is_active=1 — its own root of a
+ * new version chain.
+ *
+ * Slug uniqueness: enforced against ACTIVE rows only. A historical
+ * (deactivated) row with the same slug is fine — that means the slug was
+ * once used and edited many times; the chain is terminated and now the slug
+ * can be reused. This is not great practice but the CHECK lets operators
+ * recover from accidental deactivation without DB surgery.
+ */
+export function createCreateStyleHandler(deps: AdminApiDeps): RouteHandler {
+  const styles = new StylesRepo(deps.db);
+  return async ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+
+    let body: { config?: unknown };
+    try {
+      body = (await req.json()) as { config?: unknown };
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    if (typeof body.config !== "object" || body.config === null) {
+      return json({ error: "body.config must be a Style object" }, { status: 400 });
+    }
+
+    const parsed = StyleSchema.safeParse(body.config);
+    if (!parsed.success) {
+      return json(
+        {
+          error: "config fails StyleSchema validation",
+          issues: parsed.error.issues.map((i) => ({
+            path: i.path.join("."),
+            message: i.message,
+          })),
+        },
+        { status: 422 },
+      );
+    }
+    const config = parsed.data;
+
+    // Refuse if there's already an ACTIVE style with this slug. Deactivated
+    // rows with the same slug are tolerated (see comment block above).
+    if (styles.bySlug(config.slug)) {
+      return json(
+        {
+          error: `style with slug "${config.slug}" already exists. Edit the existing one or pick a different slug.`,
+        },
+        { status: 409 },
+      );
+    }
+
+    const inserted = styles.insert({
+      slug: config.slug,
+      displayName: config.displayName,
+      config,
+      version: 1,
+      parentId: null,
+    });
+
+    return json(
+      {
+        style: {
+          id: inserted.id,
+          slug: inserted.slug,
+          display_name: inserted.display_name,
+          version: inserted.version,
+          parent_id: inserted.parent_id,
+          is_active: inserted.is_active === 1,
+          created_at: inserted.created_at,
+          config,
+          config_raw: inserted.config_json,
+          parse_error: null,
+        },
+      },
+      { status: 201 },
+    );
+  };
+}
+
+/**
  * PATCH /admin/api/styles/:id — save edit as a NEW version.
  *
  * The current row is deactivated (is_active=0); a new row is inserted with

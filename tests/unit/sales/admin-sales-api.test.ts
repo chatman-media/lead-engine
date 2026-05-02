@@ -456,6 +456,199 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
   });
 });
 
+describe("POST /admin/api/styles (create from clone)", () => {
+  beforeEach(() => seedStyles(ctx.db));
+
+  test("requires auth", async () => {
+    const res = await fetch(url("/admin/api/styles"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        config: { ...flirtyBelfort, slug: "x-test" },
+      }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("happy path: returns 201 with the new row", async () => {
+    const newConfig = {
+      ...flirtyBelfort,
+      slug: "alina-v2-flirty",
+      displayName: "Алина 2.0 — флирт-рекрутер v2",
+    };
+    const res = await fetch(
+      url("/admin/api/styles"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: newConfig }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      style: {
+        id: number;
+        slug: string;
+        display_name: string;
+        version: number;
+        parent_id: number | null;
+        is_active: boolean;
+      };
+    };
+    expect(body.style.slug).toBe("alina-v2-flirty");
+    expect(body.style.display_name).toBe("Алина 2.0 — флирт-рекрутер v2");
+    expect(body.style.version).toBe(1);
+    expect(body.style.parent_id).toBeNull();
+    expect(body.style.is_active).toBe(true);
+
+    // The new row is readable by bySlug.
+    const repo = new StylesRepo(ctx.db);
+    expect(repo.bySlug("alina-v2-flirty")?.id).toBe(body.style.id);
+  });
+
+  test("does NOT collide with the original style — both coexist", async () => {
+    const newConfig = {
+      ...flirtyBelfort,
+      slug: "alina-fork",
+      displayName: "Алина fork",
+    };
+    await fetch(
+      url("/admin/api/styles"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: newConfig }),
+      }),
+    );
+    const repo = new StylesRepo(ctx.db);
+    expect(repo.bySlug("flirty-belfort-v1")).not.toBeNull(); // original still active
+    expect(repo.bySlug("alina-fork")).not.toBeNull(); // new one too
+  });
+
+  test("409 on slug collision with an active style", async () => {
+    const res = await fetch(
+      url("/admin/api/styles"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: flirtyBelfort }), // same slug as seeded
+      }),
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("flirty-belfort-v1");
+    expect(body.error).toContain("already exists");
+  });
+
+  test("422 with field-level issues on Zod validation failure", async () => {
+    const broken = { ...flirtyBelfort, slug: "valid-slug", framework: "MADE_UP" };
+    const res = await fetch(
+      url("/admin/api/styles"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: broken }),
+      }),
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      issues: Array<{ path: string; message: string }>;
+    };
+    expect(body.error).toContain("StyleSchema");
+    expect(body.issues.some((i) => i.path.includes("framework"))).toBe(true);
+  });
+
+  test("422 on non-kebab-case slug (Zod regex enforces it)", async () => {
+    const res = await fetch(
+      url("/admin/api/styles"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          config: { ...flirtyBelfort, slug: "Bad_Slug" },
+        }),
+      }),
+    );
+    expect(res.status).toBe(422);
+  });
+
+  test("400 on missing config in body", async () => {
+    const res = await fetch(
+      url("/admin/api/styles"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("400 on invalid JSON body", async () => {
+    const res = await fetch(
+      url("/admin/api/styles"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{not valid json",
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("after creation, the new style appears in GET /admin/api/styles", async () => {
+    const newConfig = {
+      ...flirtyBelfort,
+      slug: "appears-in-list",
+      displayName: "Test Listed",
+    };
+    await fetch(
+      url("/admin/api/styles"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: newConfig }),
+      }),
+    );
+    const list = await fetch(url("/admin/api/styles"), authed());
+    const body = (await list.json()) as {
+      styles: Array<{ slug: string }>;
+    };
+    expect(body.styles.map((s) => s.slug)).toContain("appears-in-list");
+  });
+
+  test("created style can be edited (creates v2) immediately after", async () => {
+    const newConfig = {
+      ...flirtyBelfort,
+      slug: "editable-after-create",
+      displayName: "Test",
+    };
+    const created = await fetch(
+      url("/admin/api/styles"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: newConfig }),
+      }),
+    );
+    const createdBody = (await created.json()) as { style: { id: number } };
+
+    const edited = { ...newConfig, displayName: "Test v2" };
+    const editRes = await fetch(
+      url(`/admin/api/styles/${createdBody.style.id}`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: edited }),
+      }),
+    );
+    expect(editRes.status).toBe(200);
+    const editedBody = (await editRes.json()) as { style: { version: number } };
+    expect(editedBody.style.version).toBe(2);
+  });
+});
+
 describe("PATCH /admin/api/styles/:id (inline editor)", () => {
   beforeEach(() => seedStyles(ctx.db));
 
