@@ -173,6 +173,133 @@ describe("webhook A/B — no experiment running", () => {
   });
 });
 
+describe("webhook with LLM stage classifier enabled", () => {
+  // Spin up a parallel server on the same DB but with stageClassifier="llm".
+  // The chat client routes by system-prompt content: the classifier's
+  // system prompt starts with "Ты — классификатор", actual answer prompts
+  // start with persona blocks ("Тебя зовут ..."). This lets us return
+  // different JSON / text per call without spinning up two clients.
+  let llmServer: Server;
+  let classifierCalls: ChatMessage[][];
+  let answerCalls: ChatMessage[][];
+
+  beforeEach(() => {
+    seedStylesIntoDb(ctx.db);
+    new ExperimentsRepo(ctx.db).insert({
+      slug: "classifier-test",
+      status: "running",
+      allocation: { "flirty-belfort-v1": 100 },
+      startedAt: 1,
+    });
+
+    classifierCalls = [];
+    answerCalls = [];
+
+    const routedChat: ChatClient = {
+      async complete(messages: ChatMessage[]) {
+        const sys = messages[0]?.content ?? "";
+        if (sys.includes("классификатор этапов")) {
+          classifierCalls.push(messages.slice());
+          return '{"stage": "objection", "confidence": 0.92}';
+        }
+        answerCalls.push(messages.slice());
+        return "LLM-REPLY";
+      },
+    };
+
+    const fetchImpl: FetchLike = async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      const apiMethod = url.split("/").pop() ?? "";
+      const body = JSON.parse((init?.body as string) ?? "{}");
+      const result =
+        apiMethod === "sendMessage"
+          ? {
+              message_id: Math.floor(Math.random() * 1_000_000),
+              chat: { id: body.chat_id, type: "private" },
+              date: Math.floor(Date.now() / 1000),
+              text: body.text,
+            }
+          : true;
+      return new Response(JSON.stringify({ ok: true, result }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
+
+    const router = createRouter({
+      db: ctx.db,
+      telegram,
+      webhookSecret: SECRET,
+      rag: {
+        embedder: fakeEmbedder(),
+        chat: routedChat,
+        stageClassifier: "llm",
+      },
+      awaitWebhookProcessing: true,
+    });
+    llmServer = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
+  });
+
+  afterEach(() => {
+    llmServer.stop(true);
+  });
+
+  test("classifier IS called and its stage decision wins over regex", async () => {
+    // Message: "сколько в Дубае платят?" — regex would route to "pitch".
+    // Classifier (mocked) returns "objection" with confidence 0.92.
+    // The LLM result should win.
+    await fetch(`http://127.0.0.1:${llmServer.port}/telegram/${SECRET}`, {
+      method: "POST",
+      body: JSON.stringify(update(100, "сколько в Дубае платят?")),
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(classifierCalls.length).toBe(1);
+    expect(answerCalls.length).toBe(1);
+
+    const conv = new ConversationsRepo(ctx.db).byUserId(
+      new UsersRepo(ctx.db).byTgId(100)!.id,
+    )!;
+    expect(conv.current_stage).toBe("objection"); // LLM, not regex's "pitch"
+
+    // The actual answer prompt was built for the LLM-classified stage.
+    const answerSys = answerCalls[0]?.[0]?.content ?? "";
+    expect(answerSys).toContain("ТЕКУЩИЙ ЭТАП: OBJECTION");
+  });
+
+  test("classifier sees the full message + previous stage", async () => {
+    // Send two messages so the second one has a previous stage to reference.
+    await fetch(`http://127.0.0.1:${llmServer.port}/telegram/${SECRET}`, {
+      method: "POST",
+      body: JSON.stringify(update(100, "первое сообщение")),
+      headers: { "content-type": "application/json" },
+    });
+    classifierCalls = []; // reset for the second call
+    await fetch(`http://127.0.0.1:${llmServer.port}/telegram/${SECRET}`, {
+      method: "POST",
+      body: JSON.stringify(update(100, "второе сообщение про деньги")),
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(classifierCalls.length).toBe(1);
+    const userPrompt = classifierCalls[0]![1]!.content;
+    expect(userPrompt).toContain("второе сообщение про деньги");
+    expect(userPrompt).toContain("objection"); // the previous stage we set
+  });
+});
+
+function seedStylesIntoDb(db: ReturnType<typeof openDb>) {
+  const styles = new StylesRepo(db);
+  if (!styles.bySlug("flirty-belfort-v1")) {
+    styles.insert({
+      slug: flirtyBelfort.slug,
+      displayName: flirtyBelfort.displayName,
+      config: flirtyBelfort,
+    });
+  }
+}
+
 describe("webhook A/B — running experiment assigns variant", () => {
   beforeEach(() => {
     new ExperimentsRepo(ctx.db).insert({

@@ -89,6 +89,31 @@ Up to 9 sections, separated by blank lines. Sections marked **conditional** are 
 
 ## Stage routing
 
+Two strategies, picked at boot via `SALES_STAGE_CLASSIFIER` env:
+
+| Strategy | When | Cost | Accuracy |
+|---|---|---|---|
+| `regex` (default) | Always | Sub-ms, free | Good on clear-cut signals |
+| `llm` (opt-in) | Per turn | One extra LLM call (5-30s on Ollama+CPU, ~$0.0001 on OpenRouter haiku) | Picks up nuance regex misses |
+
+The `llm` strategy is **self-healing**: every inbound goes through `classifyStage()` ([src/sales/stage-classifier.ts](../src/sales/stage-classifier.ts)) which calls the main `ChatClient` with a JSON-output prompt. Falls back silently to regex when:
+- LLM throws → reason `llm-error`
+- Output not parseable as JSON → reason `parse-error`
+- Returns a stage outside the 5-funnel set → reason `unknown-stage`
+- Confidence < `SALES_STAGE_CLASSIFIER_THRESHOLD` (default 0.6) → reason `low-confidence`
+
+Operators see source + reason in the per-turn log:
+
+```
+[sales] stage=objection source=llm confidence=0.92
+[sales] stage=pitch source=regex-fallback confidence=0.40 reason=low-confidence
+[sales] stage=opener source=regex-fallback confidence=0.00 reason=llm-error
+```
+
+The classifier prompt is locked to `temperature: 0` — same input → same output, deterministic for replay.
+
+### Regex fallback (always available)
+
 Rule-based, zero LLM calls, predictable. Decision priority:
 
 1. Message matches `objection` regex (`но`, `сомнев`, `боюсь`, `развод`, …) → `objection`.
@@ -206,7 +231,8 @@ Three provider categories represented:
 | `styles.test.ts` | All 3 sample styles + invariants + Zod rejection of bad input | 25 |
 | `styles-repo.test.ts` | StylesRepo CRUD, parseRow with Zod validation, soft-delete, idempotent seed | 14 |
 | `experiments-repo.test.ts` | ExperimentsRepo CRUD, getRunning, status transitions, allocation parsing | 17 |
-| `webhook-ab.test.ts` | End-to-end A/B: assignment, stickiness, two users, malformed experiment graceful fallback | 6 |
+| `webhook-ab.test.ts` | End-to-end A/B: assignment, stickiness, two users, malformed experiment graceful fallback + classifier integration | 8 |
+| `stage-classifier.test.ts` | LLM-output parser (10 cases: code fences, prose, clamping, malformed) + classify happy path + 4 fallback paths + threshold respected | 22 |
 | `admin-sales-api.test.ts` | 9 admin endpoints (auth, list/get/edit/create/playground styles, list/create/patch experiments, funnel SQL) + version-pin invariant | 47 |
 | `styles-repo.test.ts` (extended) | + `editAsNewVersion` (creates new version, deactivates old, refuses inactive/slug-change, transactional rollback) + `versionHistory` | 23 |
 

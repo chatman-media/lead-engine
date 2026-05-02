@@ -16,6 +16,7 @@ import {
 import type { ChatClient } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
 import { pickVariant } from "../sales/ab-router.ts";
+import { classifyStage } from "../sales/stage-classifier.ts";
 import { nextStage } from "../sales/stage-router.ts";
 import { FUNNEL_STAGES, type FunnelStage, type Style } from "../sales/types.ts";
 import type { TelegramClient } from "./client.ts";
@@ -38,6 +39,17 @@ export interface RagDeps {
    * style from the DB (`styles` + `experiments` tables) on first inbound.
    */
   style?: Style;
+  /**
+   * Funnel-stage routing strategy.
+   *   "regex" — fast regex-based router (default).
+   *   "llm"   — LLM classifies the message; falls back to regex when
+   *             confidence < `stageClassifierThreshold` or output is bad.
+   * Adds one LLM call per inbound message when enabled — pick a small/fast
+   * model if cost or latency matters.
+   */
+  stageClassifier?: "regex" | "llm";
+  /** Confidence threshold for the LLM classifier (0..1). Default 0.6. */
+  stageClassifierThreshold?: number;
 }
 
 export type WebhookEvent =
@@ -312,17 +324,41 @@ async function runRagForInbound(
     conversations: d.conversations,
   });
 
+  // Funnel-stage routing. Default is the regex router (sub-ms, predictable).
+  // When `rag.stageClassifier === "llm"` we delegate to an LLM-based
+  // classifier that falls back to regex on low confidence / parse errors.
+  // Persist the resolved stage on the conversation so it survives restarts.
   let stage: FunnelStage | undefined;
   let includeFewShot: boolean | undefined;
   if (style) {
     const userMessageCount = d.messages
       .listByConversation(d.conv.id)
       .filter((m) => m.role === "user").length;
-    stage = nextStage({
-      turnNumber: userMessageCount,
-      currentStage: toFunnelStage(d.conv.current_stage),
-      lastUserMessage: d.text,
-    });
+    const previousStage = toFunnelStage(d.conv.current_stage);
+
+    if (d.rag.stageClassifier === "llm") {
+      const result = await classifyStage({
+        chat: d.rag.chat,
+        userMessage: d.text,
+        currentStage: previousStage,
+        turnNumber: userMessageCount,
+        ...(d.rag.stageClassifierThreshold !== undefined
+          ? { confidenceThreshold: d.rag.stageClassifierThreshold }
+          : {}),
+      });
+      stage = result.stage;
+      console.log(
+        `[sales] stage=${stage} source=${result.source} confidence=${result.confidence.toFixed(2)}` +
+          (result.fallbackReason ? ` reason=${result.fallbackReason}` : ""),
+      );
+    } else {
+      stage = nextStage({
+        turnNumber: userMessageCount,
+        currentStage: previousStage,
+        lastUserMessage: d.text,
+      });
+    }
+
     d.conversations.setCurrentStage(d.conv.id, stage);
     includeFewShot = userMessageCount <= 1;
   }

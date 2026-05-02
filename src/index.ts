@@ -114,7 +114,19 @@ if (llmIsConfigured()) {
     topK: config.rag.topK,
     maxDistance: config.rag.maxDistance,
     ...(style ? { style } : {}),
+    stageClassifier: config.sales.stageClassifier,
+    ...(config.sales.stageClassifierThreshold !== undefined
+      ? { stageClassifierThreshold: config.sales.stageClassifierThreshold }
+      : {}),
   };
+
+  if (config.sales.stageClassifier === "llm") {
+    console.log(
+      `[server] funnel-stage routing: LLM classifier (threshold=${
+        config.sales.stageClassifierThreshold ?? 0.6
+      })`,
+    );
+  }
 
   if (style) {
     console.log(

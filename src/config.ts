@@ -148,6 +148,22 @@ export const config = {
      * Phase 2: per-conversation A/B selection via DB-backed `styles` table.
      */
     forcedStyleSlug: envOptional("BOT_SALES_STYLE", ""),
+    /**
+     * Funnel-stage routing strategy:
+     *   "regex" (default) — fast Cyrillic-aware regex in stage-router.ts.
+     *   "llm"             — LLM-based classifier with regex fallback below
+     *                        the confidence threshold. More accurate on
+     *                        nuanced messages, but adds one LLM call per
+     *                        inbound (5-30s extra on Ollama+CPU; ~$0.0001-
+     *                        0.001 extra on OpenRouter per turn).
+     */
+    stageClassifier: envEnum<"regex" | "llm">(
+      "SALES_STAGE_CLASSIFIER",
+      ["regex", "llm"] as const,
+      "regex",
+    ),
+    /** Below this confidence the LLM result is discarded for regex. Default 0.6. */
+    stageClassifierThreshold: envFloat("SALES_STAGE_CLASSIFIER_THRESHOLD", 0.6),
   },
 } as const;
 
