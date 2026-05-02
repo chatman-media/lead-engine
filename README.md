@@ -34,7 +34,11 @@ bun run dev
 
 ## Выбор LLM-провайдера
 
-В `.env` переключатель `LLM_PROVIDER`:
+`LLM_PROVIDER` управляет **чатом**, `EMBEDDING_PROVIDER` — **эмбеддингами**.
+Они разделены потому что у OpenRouter нет endpoint'а для embeddings — даже
+с `LLM_PROVIDER=openrouter` нужен второй провайдер для векторного поиска
+(обычно локальная Ollama, она и без GPU быстро считает 100M-параметровые
+embedder'ы).
 
 ### OpenAI / любой OpenAI-совместимый API
 
@@ -46,6 +50,46 @@ OPENAI_CHAT_MODEL=gpt-4o-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_EMBEDDING_DIM=1536
 ```
+
+### OpenRouter (Claude / GPT / Gemini одним ключом)
+
+Когда локальная Ollama слишком медленная, а платить OpenAI напрямую не
+хочется — OpenRouter даёт ~сотни моделей за один ключ. Особенно полезен
+для Claude (лучше всех держит стиль и few-shot) и для A/B-тестирования
+одной и той же персоны на разных backbone'ах.
+
+```bash
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_CHAT_MODEL=anthropic/claude-haiku-4.5
+
+# OpenRouter не делает embeddings — embedder отдельный.
+EMBEDDING_PROVIDER=ollama         # default когда chat=openrouter
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_EMBEDDING_MODEL=bge-m3:latest
+OLLAMA_EMBEDDING_DIM=1024
+
+# Или если хотите всё через облако:
+# EMBEDDING_PROVIDER=openai
+# OPENAI_API_KEY=sk-...
+```
+
+Опционально — атрибуция в OpenRouter dashboard (видна в их UI с подсчётом
+запросов/токенов на ваш проект):
+```bash
+OPENROUTER_SITE_URL=https://your-site.com
+OPENROUTER_APP_NAME=tg-chatbot
+```
+
+Рекомендуемые модели для sales-бота:
+
+| Модель | Цена ↓ | Русский | Стиль |
+|---|---|---|---|
+| `anthropic/claude-haiku-4.5` | $$ | excellent | холодный/тёплый держит ровно |
+| `anthropic/claude-sonnet-4.6` | $$$$ | excellent | лучшее follow для few-shot |
+| `openai/gpt-4o-mini` | $ | good | быстро, но стилистически блёкло |
+| `google/gemini-2.5-flash` | $ | good | дешевле всех frontier-class |
+| `qwen/qwen3-8b` | $ | good | то же что у тебя локально, но в облаке |
 
 ### Локальная Ollama (без токенов)
 

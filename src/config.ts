@@ -41,13 +41,30 @@ function envEnum<T extends string>(
   return raw as T;
 }
 
-export const LLM_PROVIDERS = ["openai", "ollama"] as const;
+export const LLM_PROVIDERS = ["openai", "ollama", "openrouter"] as const;
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
 const llmProvider = envEnum<LlmProvider>(
   "LLM_PROVIDER",
   LLM_PROVIDERS,
   "openai",
+);
+
+// Embeddings are decoupled from chat because OpenRouter only exposes chat
+// completions — it has no /embeddings endpoint. When LLM_PROVIDER=openrouter
+// you still need a place for vector search to live (OpenAI, or a local Ollama
+// running a small embedder like `nomic-embed-text`/`bge-m3`).
+//
+// Default: match LLM_PROVIDER when it's openai/ollama. When chat is on
+// OpenRouter, default the embedder to ollama (cheapest, runs locally on
+// even modest hardware since embedding models are 100M-500M params).
+export const EMBEDDING_PROVIDERS = ["openai", "ollama"] as const;
+export type EmbeddingProvider = (typeof EMBEDDING_PROVIDERS)[number];
+
+const embeddingProvider = envEnum<EmbeddingProvider>(
+  "EMBEDDING_PROVIDER",
+  EMBEDDING_PROVIDERS,
+  llmProvider === "openrouter" ? "ollama" : (llmProvider as EmbeddingProvider),
 );
 
 export const PERSONA_ROLES = ["human", "assistant"] as const;
@@ -69,6 +86,7 @@ export const config = {
   },
   llm: {
     provider: llmProvider,
+    embeddingProvider,
   },
   rag: {
     /** sqlite-vec L2 distance threshold; hits above are dropped before LLM. */
@@ -94,6 +112,16 @@ export const config = {
       ollamaDefaults.embedModel,
     ),
     embeddingDim: envInt("OLLAMA_EMBEDDING_DIM", ollamaDefaults.embedDim),
+  },
+  openrouter: {
+    apiKey: envOptional("OPENROUTER_API_KEY"),
+    baseUrl: envOptional("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+    /** OpenRouter slug, e.g. "anthropic/claude-haiku-4.5", "openai/gpt-4o-mini". */
+    chatModel: envOptional("OPENROUTER_CHAT_MODEL", "anthropic/claude-haiku-4.5"),
+    /** Optional analytics: sent as `HTTP-Referer`. */
+    siteUrl: envOptional("OPENROUTER_SITE_URL", ""),
+    /** Optional analytics: sent as `X-Title`. */
+    appName: envOptional("OPENROUTER_APP_NAME", "tg-chatbot"),
   },
   admin: {
     sessionCookie: envOptional("ADMIN_SESSION_COOKIE", "tg_admin_sid"),
@@ -126,16 +154,26 @@ export const config = {
 export type AppConfig = typeof config;
 export type Persona = AppConfig["persona"];
 
-/** The single source of truth for the embedding dimension currently in use. */
+/** The single source of truth for the embedding dimension currently in use.
+ *  Reads from the embedding provider, NOT the chat provider — these are decoupled. */
 export function activeEmbeddingDim(c: typeof config = config): number {
-  return c.llm.provider === "ollama"
+  return c.llm.embeddingProvider === "ollama"
     ? c.ollama.embeddingDim
     : c.openai.embeddingDim;
 }
 
-/** True when there is enough config for the bot to actually answer via LLM. */
+/** True when there is enough config for the bot to actually answer via LLM.
+ *  Both chat AND embeddings must be configured (RAG without embeddings = useless). */
 export function llmIsConfigured(c: typeof config = config): boolean {
-  return c.llm.provider === "ollama" ? !!c.ollama.host : !!c.openai.apiKey;
+  const chatOk =
+    c.llm.provider === "ollama"
+      ? !!c.ollama.host
+      : c.llm.provider === "openrouter"
+        ? !!c.openrouter.apiKey
+        : !!c.openai.apiKey;
+  const embedOk =
+    c.llm.embeddingProvider === "ollama" ? !!c.ollama.host : !!c.openai.apiKey;
+  return chatOk && embedOk;
 }
 
 export { env };

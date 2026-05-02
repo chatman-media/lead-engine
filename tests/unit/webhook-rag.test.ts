@@ -14,7 +14,7 @@ import {
   type FetchLike,
 } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
-import { ESCALATION_REPLY } from "@/telegram/webhook.ts";
+import { ESCALATION_REPLY, QUEUED_REPLY } from "@/telegram/webhook.ts";
 
 const SECRET = "test-secret";
 const DIM = 1536;
@@ -190,6 +190,95 @@ describe("webhook RAG integration", () => {
 
     const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
     expect(conv.mode).toBe("queued");
+  });
+
+  test("queued mode + follow-up still NO_CONTEXT: sends QUEUED_REPLY", async () => {
+    teardown(ctx);
+    ctx = setup({
+      embedder: fakeEmbedder(),
+      chat: fakeChat("__NO_CONTEXT__"),
+    });
+    const users = new UsersRepo(ctx.db);
+    const kb = new KbRepo(ctx.db);
+    const u = users.create({ tgUserId: 420 });
+    const doc = kb.upsertDocument({
+      source: "s://t",
+      title: "doc",
+      contentHash: "h",
+    });
+    kb.insertChunkWithEmbedding({
+      documentId: doc.id,
+      chunkIndex: 0,
+      text: "irrelevant",
+      tokenCount: 3,
+      embedding: vec(1),
+    });
+
+    const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
+    await fetch(url, {
+      method: "POST",
+      body: JSON.stringify(update(420, "off-topic")),
+      headers: { "content-type": "application/json" },
+    });
+    expect(ctx.sent).toHaveLength(1);
+    expect(String(ctx.sent[0]!.body.text)).toBe(ESCALATION_REPLY);
+
+    await fetch(url, {
+      method: "POST",
+      body: JSON.stringify(update(420, "still-off-topic")),
+      headers: { "content-type": "application/json" },
+    });
+    expect(ctx.sent).toHaveLength(2);
+    expect(String(ctx.sent[1]!.body.text)).toBe(QUEUED_REPLY);
+    expect(new ConversationsRepo(ctx.db).byUserId(u.id)!.mode).toBe("queued");
+  });
+
+  test("queued mode + follow-up with RAG answer: clears queue and replies", async () => {
+    teardown(ctx);
+    let turn = 0;
+    ctx = setup({
+      embedder: fakeEmbedder(),
+      chat: {
+        async complete() {
+          turn++;
+          return turn === 1 ? "__NO_CONTEXT__" : "Ответ из базы после очереди";
+        },
+      },
+    });
+    const users = new UsersRepo(ctx.db);
+    const kb = new KbRepo(ctx.db);
+    const u = users.create({ tgUserId: 500 });
+    const doc = kb.upsertDocument({
+      source: "s://t",
+      title: "vacancy-china",
+      contentHash: "h2",
+    });
+    kb.insertChunkWithEmbedding({
+      documentId: doc.id,
+      chunkIndex: 0,
+      text: "Вакансии в Китае: подробности в контексте.",
+      tokenCount: 8,
+      embedding: vec(3),
+    });
+
+    const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
+    await fetch(url, {
+      method: "POST",
+      body: JSON.stringify(update(500, "про рыбалку")),
+      headers: { "content-type": "application/json" },
+    });
+    await fetch(url, {
+      method: "POST",
+      body: JSON.stringify(update(500, "работа в Китае?")),
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(ctx.sent).toHaveLength(2);
+    expect(String(ctx.sent[1]!.body.text)).toBe(
+      "Ответ из базы после очереди",
+    );
+    const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
+    expect(conv.mode).toBe("ai");
   });
 
   test("ai mode + KB empty: escalates to queued, no LLM answer", async () => {

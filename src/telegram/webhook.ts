@@ -7,7 +7,12 @@ import { MessagesRepo } from "../db/repos/messages.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
 import { UsersRepo, type UserRow } from "../db/repos/users.ts";
 import { json, type RouteHandler } from "../router.ts";
-import { answerWithRag, NO_CONTEXT_MARKER, type Persona } from "../rag/answer.ts";
+import {
+  answerWithRag,
+  NO_CONTEXT_MARKER,
+  type AnswerResult,
+  type Persona,
+} from "../rag/answer.ts";
 import type { ChatClient } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
 import { pickVariant } from "../sales/ab-router.ts";
@@ -293,6 +298,50 @@ function toFunnelStage(raw: string | null): FunnelStage | null {
   return FUNNEL_STAGE_SET.has(raw) ? (raw as FunnelStage) : null;
 }
 
+async function runRagForInbound(
+  d: ProcessInboundDeps,
+): Promise<{ result: AnswerResult; stage?: FunnelStage }> {
+  if (!d.rag) throw new Error("runRagForInbound: rag deps required");
+
+  const style = resolveStyle({
+    rag: d.rag,
+    conv: d.conv,
+    user: d.user,
+    styles: d.styles,
+    experiments: d.experiments,
+    conversations: d.conversations,
+  });
+
+  let stage: FunnelStage | undefined;
+  let includeFewShot: boolean | undefined;
+  if (style) {
+    const userMessageCount = d.messages
+      .listByConversation(d.conv.id)
+      .filter((m) => m.role === "user").length;
+    stage = nextStage({
+      turnNumber: userMessageCount,
+      currentStage: toFunnelStage(d.conv.current_stage),
+      lastUserMessage: d.text,
+    });
+    d.conversations.setCurrentStage(d.conv.id, stage);
+    includeFewShot = userMessageCount <= 1;
+  }
+
+  const result = await answerWithRag({
+    question: d.text,
+    kb: d.kb,
+    embedder: d.rag.embedder,
+    chat: d.rag.chat,
+    topK: d.rag.topK ?? 5,
+    maxDistance: d.rag.maxDistance,
+    persona: d.rag.persona,
+    ...(style ? { style } : {}),
+    ...(stage !== undefined ? { stage } : {}),
+    ...(includeFewShot !== undefined ? { includeFewShot } : {}),
+  });
+  return { result, stage };
+}
+
 async function processInbound(d: ProcessInboundDeps): Promise<void> {
   const reply = async (text: string, meta?: unknown, stage?: FunnelStage) => {
     let tgMessageId: number | undefined;
@@ -326,6 +375,24 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
   }
 
   if (d.conv.mode === "queued") {
+    if (!d.rag) {
+      await reply(QUEUED_REPLY);
+      return;
+    }
+    if (containsEscalationTrigger(d.text)) {
+      await reply(ESCALATION_REPLY);
+      return;
+    }
+    // Conversation was queued (typically after NO_CONTEXT on an off-topic
+    // question). Keep trying RAG on each inbound — if the user asks something
+    // that matches KB, resume normal AI replies instead of the stall loop.
+    const { result, stage } = await runRagForInbound(d);
+    if (result.text !== NO_CONTEXT_MARKER) {
+      d.conversations.setMode(d.conv.id, "ai");
+      d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
+      await reply(result.text, { used_chunk_ids: result.usedChunkIds }, stage);
+      return;
+    }
     await reply(QUEUED_REPLY);
     return;
   }
@@ -342,50 +409,7 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return;
   }
 
-  // Sales-engine resolution. Returns the active Style for this conversation
-  // (and persists the A/B assignment if it just fired), or null when the
-  // engine isn't active and we should use the legacy `persona` path.
-  const style = resolveStyle({
-    rag: d.rag,
-    conv: d.conv,
-    user: d.user,
-    styles: d.styles,
-    experiments: d.experiments,
-    conversations: d.conversations,
-  });
-
-  // When a style applies, compute the next funnel stage from previous stage
-  // (persisted on `conversations.current_stage`) + the new user message.
-  // `nextStage` factors in turn count too, so we count user messages from
-  // history. Persist the new stage so it survives restarts.
-  let stage: FunnelStage | undefined;
-  let includeFewShot: boolean | undefined;
-  if (style) {
-    const userMessageCount = d.messages
-      .listByConversation(d.conv.id)
-      .filter((m) => m.role === "user").length;
-    stage = nextStage({
-      turnNumber: userMessageCount,
-      currentStage: toFunnelStage(d.conv.current_stage),
-      lastUserMessage: d.text,
-    });
-    d.conversations.setCurrentStage(d.conv.id, stage);
-    // Drop few-shot examples once turn 1 is in history — saves prompt tokens.
-    includeFewShot = userMessageCount <= 1;
-  }
-
-  const result = await answerWithRag({
-    question: d.text,
-    kb: d.kb,
-    embedder: d.rag.embedder,
-    chat: d.rag.chat,
-    topK: d.rag.topK ?? 5,
-    maxDistance: d.rag.maxDistance,
-    persona: d.rag.persona,
-    ...(style ? { style } : {}),
-    ...(stage !== undefined ? { stage } : {}),
-    ...(includeFewShot !== undefined ? { includeFewShot } : {}),
-  });
+  const { result, stage } = await runRagForInbound(d);
 
   if (result.text === NO_CONTEXT_MARKER) {
     d.conversations.setMode(d.conv.id, "queued");

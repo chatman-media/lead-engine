@@ -5,6 +5,7 @@ import { OpenAIChatClient } from "./rag/chat.ts";
 import { OpenAIEmbeddingClient } from "./rag/embed.ts";
 import { OllamaChatClient } from "./rag/providers/ollama-chat.ts";
 import { OllamaEmbeddingClient } from "./rag/providers/ollama-embed.ts";
+import { OpenRouterChatClient } from "./rag/providers/openrouter-chat.ts";
 import type { ChatClient } from "./rag/chat.ts";
 import type { EmbeddingClient } from "./rag/embed.ts";
 import { getStyle } from "./sales/styles/index.ts";
@@ -38,37 +39,61 @@ const telegram = new TelegramClient({
 
 let rag: RagDeps | undefined;
 if (llmIsConfigured()) {
+  // Chat and embedder are configured INDEPENDENTLY. OpenRouter has no
+  // embeddings endpoint, so when chat=openrouter the embedder still resolves
+  // to ollama or openai. Mixed setups (e.g. Claude chat via OpenRouter +
+  // local Ollama embeddings) are first-class.
   let chat: ChatClient;
-  let embedder: EmbeddingClient;
   if (config.llm.provider === "ollama") {
     chat = new OllamaChatClient({
       host: config.ollama.host,
       model: config.ollama.chatModel,
     });
-    embedder = new OllamaEmbeddingClient({
-      host: config.ollama.host,
-      model: config.ollama.embeddingModel,
-      dim: config.ollama.embeddingDim,
+  } else if (config.llm.provider === "openrouter") {
+    chat = new OpenRouterChatClient({
+      apiKey: config.openrouter.apiKey,
+      baseUrl: config.openrouter.baseUrl,
+      model: config.openrouter.chatModel,
+      ...(config.openrouter.siteUrl ? { siteUrl: config.openrouter.siteUrl } : {}),
+      ...(config.openrouter.appName ? { appName: config.openrouter.appName } : {}),
     });
-    console.log(
-      `[server] LLM provider=ollama host=${config.ollama.host} chat=${config.ollama.chatModel} embed=${config.ollama.embeddingModel} dim=${config.ollama.embeddingDim}`,
-    );
   } else {
     chat = new OpenAIChatClient({
       apiKey: config.openai.apiKey,
       baseUrl: config.openai.baseUrl,
       model: config.openai.chatModel,
     });
+  }
+
+  let embedder: EmbeddingClient;
+  if (config.llm.embeddingProvider === "ollama") {
+    embedder = new OllamaEmbeddingClient({
+      host: config.ollama.host,
+      model: config.ollama.embeddingModel,
+      dim: config.ollama.embeddingDim,
+    });
+  } else {
     embedder = new OpenAIEmbeddingClient({
       apiKey: config.openai.apiKey,
       baseUrl: config.openai.baseUrl,
       model: config.openai.embeddingModel,
       dim: config.openai.embeddingDim,
     });
-    console.log(
-      `[server] LLM provider=openai chat=${config.openai.chatModel} embed=${config.openai.embeddingModel} dim=${config.openai.embeddingDim}`,
-    );
   }
+
+  // Provider-specific summary line so operators see exactly what's wired.
+  const chatLine =
+    config.llm.provider === "ollama"
+      ? `ollama host=${config.ollama.host} model=${config.ollama.chatModel}`
+      : config.llm.provider === "openrouter"
+        ? `openrouter base=${config.openrouter.baseUrl} model=${config.openrouter.chatModel}`
+        : `openai base=${config.openai.baseUrl} model=${config.openai.chatModel}`;
+  const embedLine =
+    config.llm.embeddingProvider === "ollama"
+      ? `ollama model=${config.ollama.embeddingModel} dim=${config.ollama.embeddingDim}`
+      : `openai model=${config.openai.embeddingModel} dim=${config.openai.embeddingDim}`;
+  console.log(`[server] chat:    ${chatLine}`);
+  console.log(`[server] embed:   ${embedLine}`);
   // Resolve sales style from BOT_SALES_STYLE env. When set, it takes
   // precedence over the legacy BOT_PERSONA_* env vars: the bot uses the
   // sales-engine prompt (persona + voice + framework + hooks + stage +
