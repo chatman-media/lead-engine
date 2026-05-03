@@ -116,7 +116,7 @@ function update(fromId: number, text: string): TgUpdate {
 let ctx: ReturnType<typeof setup>;
 
 beforeEach(() => {
-  ctx = setup({ embedder: fakeEmbedder(), chat: fakeChat("from RAG") });
+  ctx = setup({ embedder: fakeEmbedder(), chat: fakeChat("From RAG") });
 });
 
 afterEach(() => teardown(ctx));
@@ -148,13 +148,13 @@ describe("webhook RAG integration", () => {
     expect(res.status).toBe(200);
 
     expect(ctx.sent).toHaveLength(1);
-    expect(ctx.sent[0]!.body.text).toBe("from RAG");
+    expect(ctx.sent[0]!.body.text).toBe("From RAG");
 
     const msgs = new MessagesRepo(ctx.db).listByConversation(
       new ConversationsRepo(ctx.db).byUserId(u.id)!.id,
     );
     expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
-    expect(msgs[1]!.text).toBe("from RAG");
+    expect(msgs[1]!.text).toBe("From RAG");
   });
 
   test("ai mode + LLM returns NO_CONTEXT_MARKER: stays ai, no Telegram message", async () => {
@@ -361,7 +361,7 @@ describe("webhook RAG integration", () => {
     const captureChat: ChatClient = {
       async complete(messages) {
         captured.push(messages.slice());
-        return "ok-reply";
+        return "Ok-reply";
       },
     };
     ctx = setup({
@@ -408,7 +408,7 @@ describe("webhook RAG integration", () => {
     expect(sandwichTexts).toContain("привет");
     expect(sandwichTexts).toContain("расскажи про работу");
     // And the assistant replies persisted from prior turns:
-    expect(sandwichTexts.filter((t) => t === "ok-reply").length).toBeGreaterThanOrEqual(2);
+    expect(sandwichTexts.filter((t) => t === "Ok-reply").length).toBeGreaterThanOrEqual(2);
     // The current-turn user message must NOT also appear in the sandwich
     // (would mean we forgot to dedupe the just-inserted row).
     expect(sandwichTexts).not.toContain("а условия?");

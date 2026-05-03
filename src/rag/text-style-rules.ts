@@ -101,21 +101,48 @@ export const stripAILeadIns: TextStyleRule = {
   },
 };
 
+/**
+ * Capitalise the first alphabetic character of the reply.
+ *
+ * Why: qwen3 (and other models) tend to mirror the candidate's casing —
+ * if the user types «привет», the model replies «привет, ...» in lowercase.
+ * Real recruiters in our corpus (`kb/extracted/dialogs/*`) consistently
+ * start replies with a capital letter («Здравствуйте», «Хорошо»),
+ * regardless of how the candidate wrote.
+ *
+ * Implementation finds the FIRST alphabetic codepoint (skipping leading
+ * whitespace, emoji, punctuation) and uppercases it. Idempotent.
+ */
+export const capitalizeFirstLetter: TextStyleRule = {
+  name: "capitalize-first-letter",
+  description: "первая буква реплики — заглавная",
+  apply: (s) => {
+    const match = /[\p{L}]/u.exec(s);
+    if (!match || match.index === undefined) return s;
+    const i = match.index;
+    const ch = s[i]!;
+    const upper = ch.toUpperCase();
+    if (ch === upper) return s;
+    return s.slice(0, i) + upper + s.slice(i + 1);
+  },
+};
+
 // ─── Default bundle ────────────────────────────────────────────────────
 
 /**
  * The standard rule set applied by `sanitizeLlmOutput`.
  *
- * Order matters only for rules whose outputs are inputs of others — for the
- * current set the rules are independent (commutative), but new rules may
- * not be: keep the order intentional.
+ * Order matters when one rule's output feeds another. Critical:
+ * `stripAILeadIns` MUST run before `capitalizeFirstLetter`, otherwise we
+ * just re-uppercase the «К» in «Конечно!» and the lead-in stays.
  */
 export const DEFAULT_STYLE_RULES: readonly TextStyleRule[] = [
   replaceEmDash,
   replaceEnDash,
   replaceOtherDashes,
   replaceEllipsis,
-  stripAILeadIns,
+  stripAILeadIns,        // strip first
+  capitalizeFirstLetter, // then ensure remaining first char is capital
 ];
 
 /**

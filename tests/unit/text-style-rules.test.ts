@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   applyStyleRules,
+  capitalizeFirstLetter,
   DEFAULT_STYLE_RULES,
   replaceEllipsis,
   replaceEmDash,
@@ -112,11 +113,67 @@ describe("stripAILeadIns", () => {
   });
 });
 
-describe("applyStyleRules — DEFAULT_STYLE_RULES bundle", () => {
-  test("compounds across rules (em-dash + ellipsis + lead-in)", () => {
+describe("capitalizeFirstLetter", () => {
+  test("uppercases the first alphabetic character (Cyrillic)", () => {
+    expect(capitalizeFirstLetter.apply("привет, как дела?")).toBe(
+      "Привет, как дела?",
+    );
+  });
+
+  test("uppercases the first alphabetic character (Latin)", () => {
+    expect(capitalizeFirstLetter.apply("hello there")).toBe("Hello there");
+  });
+
+  test("skips leading whitespace", () => {
+    expect(capitalizeFirstLetter.apply("   привет!")).toBe("   Привет!");
+  });
+
+  test("skips leading emoji and punctuation", () => {
+    expect(capitalizeFirstLetter.apply("🔥 привет!")).toBe("🔥 Привет!");
+    expect(capitalizeFirstLetter.apply("❗️ работа в Дубае")).toBe(
+      "❗️ Работа в Дубае",
+    );
+  });
+
+  test("idempotent (already-capitalised → no-op)", () => {
+    expect(capitalizeFirstLetter.apply("Привет!")).toBe("Привет!");
+  });
+
+  test("no-op on empty string", () => {
+    expect(capitalizeFirstLetter.apply("")).toBe("");
+  });
+
+  test("no-op on string without letters (numbers/symbols only)", () => {
+    expect(capitalizeFirstLetter.apply("123 !@#")).toBe("123 !@#");
+  });
+
+  test("only the first letter is touched, rest preserved as-is", () => {
     expect(
-      applyStyleRules("Конечно! Сейчас расскажу — там много нюансов…"),
+      capitalizeFirstLetter.apply("привет КАК дела УРА"),
+    ).toBe("Привет КАК дела УРА");
+  });
+});
+
+describe("applyStyleRules — DEFAULT_STYLE_RULES bundle", () => {
+  test("compounds across rules (em-dash + ellipsis + lead-in + capital)", () => {
+    expect(
+      applyStyleRules("Конечно! сейчас расскажу — там много нюансов…"),
     ).toBe("Сейчас расскажу - там много нюансов...");
+  });
+
+  test("lowercase-first-letter user reply gets capitalised", () => {
+    expect(applyStyleRules("привет, как дела?")).toBe("Привет, как дела?");
+  });
+
+  test("real-world LLM lowercase reply becomes natural Russian chat style", () => {
+    const aiOutput =
+      "привет! работа в китае — в топ-клубах шаосин и иу. график: 6 дней в неделю.";
+    expect(applyStyleRules(aiOutput)).toBe(
+      "Привет! работа в китае - в топ-клубах шаосин и иу. график: 6 дней в неделю.",
+    );
+    // Note: only sentence-start capitalisation (first letter of reply) is
+    // enforced. Mid-reply «работа», «график» stay lowercase — real-world
+    // Russian chat doesn't reliably capitalise after every period either.
   });
 
   test("idempotent across the whole bundle", () => {
@@ -133,11 +190,12 @@ describe("applyStyleRules — DEFAULT_STYLE_RULES bundle", () => {
 
   test("real LLM-style reply gets cleaned end-to-end", () => {
     const aiOutput =
-      "Конечно! У нас контракт в Дубае — от 1 до 3 месяцев, гонорар $3000–$8000/мес… Условия отличные, никаких скрытых платежей.";
+      "Конечно! у нас контракт в Дубае — от 1 до 3 месяцев, гонорар $3000–$8000/мес… Условия отличные, никаких скрытых платежей.";
     const cleaned = applyStyleRules(aiOutput);
     expect(cleaned).not.toMatch(/—|–|…|^Конечно/);
     expect(cleaned).toContain("$3000 - $8000");
     expect(cleaned).toContain("...");
+    expect(cleaned[0]).toBe("У"); // capital после strip
   });
 
   test("custom rule list — caller can override default bundle", () => {
@@ -160,5 +218,19 @@ describe("DEFAULT_STYLE_RULES — registry sanity", () => {
       names.add(rule.name);
     }
     expect(DEFAULT_STYLE_RULES.length).toBeGreaterThanOrEqual(4);
+  });
+
+  test("ordering: stripAILeadIns runs BEFORE capitalizeFirstLetter", () => {
+    // Otherwise «Конечно! привет» would become «Конечно! привет» (capital К
+    // already, lead-in stripper sees «Конечно!» and removes it, but only if
+    // it RUNS AFTER capitalizer's no-op — verify the order in the array).
+    const stripIdx = DEFAULT_STYLE_RULES.findIndex(
+      (r) => r.name === "strip-ai-lead-ins",
+    );
+    const capIdx = DEFAULT_STYLE_RULES.findIndex(
+      (r) => r.name === "capitalize-first-letter",
+    );
+    expect(stripIdx).toBeGreaterThan(-1);
+    expect(capIdx).toBeGreaterThan(stripIdx);
   });
 });

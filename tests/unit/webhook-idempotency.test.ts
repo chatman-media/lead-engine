@@ -69,7 +69,7 @@ function setup() {
     db,
     telegram,
     webhookSecret: SECRET,
-    rag: { embedder: fakeEmbedder(), chat: fakeChat("привет от бота") },
+    rag: { embedder: fakeEmbedder(), chat: fakeChat("Привет от бота") },
     awaitWebhookProcessing: true,
   });
   const server = Bun.serve({
@@ -152,7 +152,7 @@ describe("webhook idempotency (Telegram retry hardening)", () => {
 
     const assistantRows = msgs.filter((m) => m.role === "assistant");
     expect(assistantRows).toHaveLength(1);
-    expect(assistantRows[0]!.text).toBe("привет от бота");
+    expect(assistantRows[0]!.text).toBe("Привет от бота");
 
     const sendCalls = ctx.sent.filter((c) => c.method === "sendMessage");
     expect(sendCalls).toHaveLength(1);
