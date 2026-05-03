@@ -4,6 +4,7 @@ import { composeSystemPrompt } from "../sales/prompt.ts";
 import type { FunnelStage, Style } from "../sales/types.ts";
 import type { ChatClient, ChatMessage } from "./chat.ts";
 import type { EmbeddingClient } from "./embed.ts";
+import { applyStyleRules } from "./text-style-rules.ts";
 
 /** Sentinel returned when retrieval is empty (or LLM cannot answer from
  * CONTEXT alone). The webhook layer turns this into a polite stall
@@ -304,6 +305,8 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
  * - `<think>…</think>` reasoning blocks (qwen3, deepseek-r1 style).
  * - leading "Answer:" / "Ответ:" / "Согласно контексту" prefixes.
  * - surrounding whitespace.
+ * - "AI tells" — em-/en-dashes, unicode ellipsis, "Конечно!" lead-ins
+ *   (see `text-style-rules.ts` for the full list).
  *
  * Exported for unit tests.
  */
@@ -314,5 +317,8 @@ export function sanitizeLlmOutput(raw: string): string {
     /^\s*(?:answer|ответ|reply|response|согласно\s+контексту)\s*[:\-—]\s*/i,
     "",
   );
+  // Apply pluggable text-style rules (em-dash → hyphen, ellipsis → ..., etc).
+  // See src/rag/text-style-rules.ts to add new rules without touching this file.
+  s = applyStyleRules(s);
   return s.trim();
 }
