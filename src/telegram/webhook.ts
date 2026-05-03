@@ -367,11 +367,32 @@ async function runRagForInbound(
     includeFewShot = userMessageCount <= 1;
   }
 
+  // Conversation history — без неё каждый turn идёт изолированно и модель
+  // отвечает на «все» / «расскажи подробнее» наугад (без знания о чём была
+  // прошлая реплика). Берём 12 последних сообщений и КИДАЕМ только тот
+  // user-row, который мы только что вставили (он же в d.text), чтобы не
+  // дублировать его в финальном prompt.
+  const recent = d.messages.recentForContext(d.conv.id, 12);
+  const justInsertedIdx = recent
+    .map((m, i) => ({ m, i }))
+    .filter(({ m }) => m.role === "user" && m.text === d.text)
+    .pop()?.i;
+  const history = recent
+    .filter((_, i) => i !== justInsertedIdx)
+    .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "human")
+    .map((m) => ({
+      // Из перспективы LLM, ответы оператора (human) и AI (assistant) одинаковы:
+      // это всё «реплики бота-Алины». Кандидат не должен видеть разницу.
+      role: m.role === "human" ? ("assistant" as const) : (m.role as "user" | "assistant"),
+      content: m.text,
+    }));
+
   const result = await answerWithRag({
     question: d.text,
     kb: d.kb,
     embedder: d.rag.embedder,
     chat: d.rag.chat,
+    history,
     topK: d.rag.topK ?? 5,
     maxDistance: d.rag.maxDistance,
     persona: d.rag.persona,

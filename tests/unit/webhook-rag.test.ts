@@ -350,4 +350,67 @@ describe("webhook RAG integration", () => {
     const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
     expect(conv.mode).toBe("ai");
   });
+
+  // Regression: webhook used to call answerWithRag without `history`, so each
+  // turn was isolated. Real conversation broke at "все" / "расскажи подробнее"
+  // because model didn't see prior turns. Now we read recentForContext()
+  // and pass last 12 messages — assistant answers stay coherent across turns.
+  test("multi-turn: history is passed to LLM (chat receives prior messages)", async () => {
+    teardown(ctx);
+    const captured: ChatMessage[][] = [];
+    const captureChat: ChatClient = {
+      async complete(messages) {
+        captured.push(messages.slice());
+        return "ok-reply";
+      },
+    };
+    ctx = setup({
+      embedder: fakeEmbedder(),
+      chat: captureChat,
+    });
+    const users = new UsersRepo(ctx.db);
+    const kb = new KbRepo(ctx.db);
+    const u = users.create({ tgUserId: 800 });
+    const doc = kb.upsertDocument({
+      source: "s://t",
+      title: "doc",
+      contentHash: "h",
+    });
+    kb.insertChunkWithEmbedding({
+      documentId: doc.id,
+      chunkIndex: 0,
+      text: "Some KB text about jobs",
+      tokenCount: 5,
+      embedding: vec(7),
+    });
+
+    const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
+    // Three turns; the 3rd LLM call must see turns 1+2 as history.
+    for (const text of ["привет", "расскажи про работу", "а условия?"]) {
+      await fetch(url, {
+        method: "POST",
+        body: JSON.stringify(update(800, text)),
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    expect(captured).toHaveLength(3);
+    const thirdCall = captured[2]!;
+    // Shape: [system, ...history, user]. history must include turns 1+2.
+    expect(thirdCall[0]?.role).toBe("system");
+    const tail = thirdCall[thirdCall.length - 1];
+    expect(tail?.role).toBe("user");
+    expect(tail?.content).toBe("а условия?");
+    // History sandwich (everything between system and final user) MUST contain
+    // both prior user messages + their assistant replies.
+    const sandwich = thirdCall.slice(1, -1);
+    const sandwichTexts = sandwich.map((m) => m.content);
+    expect(sandwichTexts).toContain("привет");
+    expect(sandwichTexts).toContain("расскажи про работу");
+    // And the assistant replies persisted from prior turns:
+    expect(sandwichTexts.filter((t) => t === "ok-reply").length).toBeGreaterThanOrEqual(2);
+    // The current-turn user message must NOT also appear in the sandwich
+    // (would mean we forgot to dedupe the just-inserted row).
+    expect(sandwichTexts).not.toContain("а условия?");
+  });
 });
