@@ -6,7 +6,20 @@ Telegram-бот с RAG по базе знаний, анкетой по токе�
 API и локальная Ollama (без расхода токенов).
 
 Разрабатывается через TDD: на каждый юнит сначала падающий тест, потом
-минимальная реализация. Текущее состояние: **220+ unit + 14 e2e зелёных.**
+минимальная реализация. Текущее состояние: **478+ unit + 14 e2e зелёных.**
+
+**RAG layers** (опциональные надстройки over vanilla retrieval):
+hybrid retrieval (BM25 + vector + RRF), cross-session memory кандидата,
+query rewriting, reflection-проверка ответа на галлюцинации. Все включаются
+флагами в `.env`, по умолчанию off. Подробности — [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
+Текущее состояние и план — [docs/ROADMAP.md](docs/ROADMAP.md).
+
+### Documentation map
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — общая навигация: слои, request lifecycle, design decisions
+- [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md) — четыре опциональные надстройки RAG (hybrid, memory, rewrite, reflect): зачем, как работает, цена, тесты
+- [docs/SALES_STYLES.md](docs/SALES_STYLES.md) — sales-style engine: схема Style, A/B testing
+- [docs/ROADMAP.md](docs/ROADMAP.md) — что сделано, что в очереди (Tier 1/2/3 по ROI)
 
 **Conversation export**: операторы могут скачать диалог (или пачку
 с фильтрами по style/experiment/status/mode) как JSONL — `↓ JSONL`
@@ -371,6 +384,29 @@ webhook **молчит** в Telegram и оставляет режим `ai`. Оп
 (`llama3.2:3b` ≈ в 2–3× быстрее, ценой более слабого следования
 системным правилам), либо на облачную (`*:cloud` в Ollama).
 
+## RAG-надстройки (опциональные флаги в `.env`)
+
+Все четыре улучшения retrieval/answering пайплайна выключены по умолчанию.
+Включай по одному, проверяй качество на своём трафике, потом следующий.
+Подробное описание каждого слоя, цены и trade-off'ы — в
+[docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
+
+```bash
+# Hybrid retrieval (BM25 + vector + RRF). Без LLM-цены, чистый upgrade.
+RAG_HYBRID_SEARCH=true
+
+# Cross-session memory: бот запоминает факты о кандидате, не переспрашивает.
+# Видно и редактируется в админке: chat → MEMORY pane.
+RAG_USER_MEMORY=true
+
+# Query rewriting: "а в Стамбуле?" → "какие условия в Стамбуле" перед retrieval.
+RAG_QUERY_REWRITE=true
+
+# Reflection: ответ проверяется на галлюцинации перед отправкой.
+# Невалидные ответы → бот молчит (mode остаётся ai).
+RAG_REFLECT=true
+```
+
 ## Тесты
 
 - Бэкенд (юниты): `bun run test`
@@ -415,7 +451,10 @@ Telegram → /telegram/<secret> ─┬─► whitelist (UsersRepo)
 | `POST` | `/admin/api/conversations/:id/release` | Вернуть в `ai` |
 | `POST` | `/admin/api/conversations/:id/reply` | Отправить ответ из админки в TG |
 | `DELETE` | `/admin/api/conversations/:id` | Снести диалог + историю (статус `mode` сбросится при следующем сообщении) |
+| `PATCH` | `/admin/api/users/:id/memory` | Перезаписать `users.profile_json.memory.facts` (оператор корректирует извлечённые ботом факты) |
 | `WS` | `/admin/api/ws` | Realtime-события (`message:new`, `conversation:updated`) |
+
+В ответ `GET /admin/api/conversations/:id` включается поле `memory: { facts, updatedAt? }` — это и есть то, что админка показывает в раскрывающейся панели MEMORY на странице чата.
 
 ## Прогресс
 
