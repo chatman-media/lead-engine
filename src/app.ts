@@ -99,6 +99,13 @@ export function createRouter(deps: AppDeps): Router {
       webhookSecret: deps.webhookSecret,
       rag: deps.rag,
       awaitProcessing: deps.awaitWebhookProcessing,
+      // leadsChatId / visaChatId need to flow into the webhook itself
+      // (auto-intake gate, reply-to-card relay detection), not just
+      // the callback-query handler. Without this, runIntakeUpdate
+      // early-returns on `leadsChatId == null` and no auto-promotion
+      // ever happens — silently.
+      leadsChatId: deps.leadsChatId ?? null,
+      visaChatId: deps.visaChatId ?? null,
       onCallbackQuery: createLeadCallbackHandler({
         db: deps.db,
         telegram: deps.telegram,
