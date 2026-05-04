@@ -13,40 +13,8 @@ function relativeTime(unix: number | null) {
 }
 
 function modeBadge(mode: Conversation["mode"]) {
-  const styles: Record<
-    string,
-    { bg: string; color: string; label: string }
-  > = {
-    ai: { bg: "rgba(59,130,246,0.12)", color: "var(--blue)", label: "ai" },
-    queued: {
-      bg: "var(--amber-dim)",
-      color: "var(--amber)",
-      label: "queued",
-    },
-    human: {
-      bg: "rgba(34,197,94,0.12)",
-      color: "var(--green)",
-      label: "human",
-    },
-  };
-  const s = styles[mode]!;
   return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 8px",
-        background: s.bg,
-        color: s.color,
-        borderRadius: "var(--radius)",
-        fontFamily: "var(--mono)",
-        fontSize: 11,
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-      }}
-    >
-      {s.label}
-    </span>
+    <span className={`badge badge-${mode}`}>{mode}</span>
   );
 }
 
@@ -105,120 +73,47 @@ export function Chats() {
   const rest = convs.filter((c) => c.mode !== "queued");
 
   return (
-    <div style={{ padding: "28px 32px" }} className="fade-in">
-      <h1
-        style={{
-          fontFamily: "var(--mono)",
-          fontSize: 14,
-          fontWeight: 600,
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-          color: "var(--text-2)",
-          marginBottom: 20,
-        }}
-      >
-        Chats —{" "}
-        <span style={{ color: "var(--text)" }}>{convs.length}</span>
+    <div className="page fade-in">
+      <div className="page-header">
+        <span className="page-title">Chats</span>
+        <span className="page-count">— {convs.length}</span>
         {queued.length > 0 && (
-          <span
-            style={{
-              marginLeft: 12,
-              fontFamily: "var(--mono)",
-              fontSize: 12,
-              color: "var(--amber)",
-            }}
-            data-testid="queued-count"
-          >
+          <span className="queued-alert" data-testid="queued-count">
             ▲ {queued.length} needs attention
           </span>
         )}
-      </h1>
+      </div>
 
       {loading ? (
-        <div style={{ color: "var(--text-3)", fontFamily: "var(--mono)" }}>
-          loading…
-        </div>
+        <div className="loading-text">loading…</div>
       ) : (
         <div data-testid="chats-list">
-          {[...queued, ...rest].map((c, i) => (
+          {[...queued, ...rest].map((c) => (
             <div
               key={c.id}
               onClick={() => navigate(`/admin/chats/${c.id}`)}
               data-testid={`chat-row-${c.id}`}
               data-mode={c.mode}
-              className="fade-in"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 16,
-                padding: "12px 16px",
-                marginBottom: 4,
-                background: "var(--bg-1)",
-                border: `1px solid ${
-                  c.mode === "queued" ? "var(--amber)" : "var(--border)"
-                }`,
-                borderRadius: "var(--radius)",
-                cursor: "pointer",
-                transition: "border-color 0.15s, background 0.15s",
-                animation: `fade-in 0.15s ${i * 0.02}s ease both`,
-                ...(c.mode === "queued"
-                  ? { animation: "pulse-amber 2s infinite" }
-                  : {}),
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "var(--bg-2)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "var(--bg-1)";
-              }}
+              className={`chat-card fade-in${c.mode === "queued" ? " queued" : ""}`}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontFamily: "var(--mono)",
-                    fontSize: 13,
-                    color: "var(--text)",
-                    marginBottom: 3,
-                  }}
-                >
+                <div className="chat-name">
                   {c.user.tg_username
                     ? `@${c.user.tg_username}`
                     : `tg:${c.user.tg_user_id}`}
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text-3)" }}>
-                  {relativeTime(c.last_message_at)}
-                </div>
+                <div className="chat-time">{relativeTime(c.last_message_at)}</div>
               </div>
+
               {modeBadge(c.mode)}
+
               <button
                 onClick={(e) => handleDelete(c, e)}
                 data-testid={`delete-chat-${c.id}`}
                 title="Удалить чат"
                 aria-label="Удалить чат"
-                style={{
-                  width: 26,
-                  height: 26,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "transparent",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius)",
-                  color: "var(--text-3)",
-                  fontFamily: "var(--mono)",
-                  fontSize: 14,
-                  lineHeight: 1,
-                  cursor: "pointer",
-                  transition: "color 0.1s, border-color 0.1s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.color = "var(--red, #ef4444)";
-                  e.currentTarget.style.borderColor = "var(--red, #ef4444)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = "var(--text-3)";
-                  e.currentTarget.style.borderColor = "var(--border)";
-                }}
+                className="btn btn-ghost btn-icon"
+                style={{ fontSize: 16 }}
               >
                 ×
               </button>
@@ -226,16 +121,7 @@ export function Chats() {
           ))}
 
           {convs.length === 0 && (
-            <div
-              style={{
-                color: "var(--text-3)",
-                fontFamily: "var(--mono)",
-                textAlign: "center",
-                marginTop: 60,
-              }}
-            >
-              No conversations yet.
-            </div>
+            <div className="empty">No conversations yet.</div>
           )}
         </div>
       )}

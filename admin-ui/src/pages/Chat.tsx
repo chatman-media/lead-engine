@@ -32,6 +32,13 @@ const ROLE_LABEL: Record<string, string> = {
   system: "system",
 };
 
+const BUBBLE_CLASS: Record<string, string> = {
+  user: "bubble bubble-user",
+  assistant: "bubble bubble-bot",
+  human: "bubble bubble-human",
+  system: "bubble bubble-system",
+};
+
 export function Chat() {
   const { id } = useParams<{ id: string }>();
   const convId = Number(id);
@@ -114,87 +121,41 @@ export function Chat() {
   }
 
   if (!conv || !user) {
-    return (
-      <div
-        style={{
-          padding: 32,
-          color: "var(--text-3)",
-          fontFamily: "var(--mono)",
-        }}
-      >
-        loading…
-      </div>
-    );
+    return <div className="loading-text" style={{ padding: 32 }}>loading…</div>;
   }
 
   const isHuman = conv.mode === "human";
   const isQueued = conv.mode === "queued";
 
   return (
-    <div
-      style={{
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
-      className="fade-in"
-    >
+    <div className="chat-view fade-in">
       {/* Header */}
-      <div
-        style={{
-          padding: "16px 24px",
-          borderBottom: "1px solid var(--border)",
-          background: "var(--bg-1)",
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          flexShrink: 0,
-        }}
-      >
+      <div className="chat-header">
         <button
           onClick={() => navigate("/admin/chats")}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--text-3)",
-            fontSize: 18,
-            padding: "0 8px 0 0",
-          }}
+          className="btn btn-ghost btn-icon"
           title="Back"
+          style={{ fontSize: 18 }}
         >
           ←
         </button>
 
-        <div style={{ flex: 1 }}>
-          <div
-            style={{
-              fontFamily: "var(--mono)",
-              fontWeight: 600,
-              fontSize: 14,
-            }}
-          >
+        <div className="chat-header-info">
+          <div className="chat-header-name">
             {user.tg_username ? `@${user.tg_username}` : `tg:${user.tg_user_id}`}
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 2 }}>
+          <div className="chat-header-meta">
             status: {user.status} · tg_id: {user.tg_user_id}
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="chat-header-actions">
           {(isQueued || isHuman) && (
             <span
-              style={{
-                fontFamily: "var(--mono)",
-                fontSize: 11,
-                color: isQueued ? "var(--amber)" : "var(--green)",
-                padding: "3px 10px",
-                border: `1px solid ${isQueued ? "var(--amber)" : "var(--green)"}`,
-                borderRadius: "var(--radius)",
-              }}
+              className={`mode-chip ${conv.mode}`}
               data-testid="mode-badge"
             >
-              {conv.mode.toUpperCase()}
+              {conv.mode}
             </span>
           )}
 
@@ -202,7 +163,7 @@ export function Chat() {
             <button
               onClick={handleTake}
               data-testid="take-btn"
-              style={actionBtnStyle("var(--amber)")}
+              className="btn btn-warn btn-sm"
             >
               Take over
             </button>
@@ -212,7 +173,7 @@ export function Chat() {
             <button
               onClick={handleRelease}
               data-testid="release-btn"
-              style={actionBtnStyle("var(--text-3)")}
+              className="btn btn-ghost btn-sm"
             >
               Release
             </button>
@@ -222,7 +183,7 @@ export function Chat() {
             onClick={() => setDebug((d) => !d)}
             data-testid="debug-toggle"
             title="Показать диагностику ответов бота: путь, латентности, расстояния KB, reflect-вердикт"
-            style={actionBtnStyle(debug ? "var(--amber)" : "var(--text-3)")}
+            className={`btn btn-sm ${debug ? "btn-warn" : "btn-ghost"}`}
           >
             {debug ? "DEBUG ON" : "DEBUG"}
           </button>
@@ -232,12 +193,8 @@ export function Chat() {
             download={`conversation-${convId}.jsonl`}
             data-testid="export-btn"
             title="Скачать диалог в формате JSONL (one OpenAI fine-tune sample per line)"
-            style={{
-              ...actionBtnStyle("var(--text-3)"),
-              textDecoration: "none",
-              display: "inline-flex",
-              alignItems: "center",
-            }}
+            className="btn btn-ghost btn-sm"
+            style={{ textDecoration: "none" }}
           >
             ↓ JSONL
           </a>
@@ -245,8 +202,7 @@ export function Chat() {
           <button
             onClick={handleDelete}
             data-testid="delete-btn"
-            title="Удалить чат и сбросить статус"
-            style={actionBtnStyle("var(--red, #ef4444)")}
+            className="btn btn-danger btn-sm"
           >
             Delete
           </button>
@@ -263,59 +219,20 @@ export function Chat() {
       )}
 
       {/* Messages */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "24px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-        }}
-        data-testid="messages-list"
-      >
+      <div className="messages" data-testid="messages-list">
         {messages.map((m) => (
           <div
             key={m.id}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems:
-                m.role === "user" ? "flex-start" : "flex-end",
-              gap: 4,
-            }}
+            className={`msg ${m.role === "user" ? "msg-left" : "msg-right"}`}
           >
-            <div
-              style={{
-                maxWidth: "72%",
-                padding: "10px 14px",
-                background:
-                  m.role === "user" ? "var(--bg-2)" : "var(--bg-3)",
-                border: `1px solid ${
-                  m.role === "user" ? "var(--border)" : "transparent"
-                }`,
-                borderRadius: 6,
-                fontSize: 13,
-                lineHeight: 1.5,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-              }}
-            >
+            <div className={BUBBLE_CLASS[m.role] ?? "bubble bubble-user"}>
               {m.text}
             </div>
-            <div
-              style={{
-                fontFamily: "var(--mono)",
-                fontSize: 10,
-                color: ROLE_COLOR[m.role] ?? "var(--text-3)",
-                display: "flex",
-                gap: 6,
-              }}
-            >
-              <span>{ROLE_LABEL[m.role] ?? m.role}</span>
-              <span style={{ color: "var(--text-3)" }}>
-                {tsShort(m.created_at)}
+            <div className="msg-meta">
+              <span style={{ color: ROLE_COLOR[m.role] ?? "var(--text-3)" }}>
+                {ROLE_LABEL[m.role] ?? m.role}
               </span>
+              <span>{tsShort(m.created_at)}</span>
             </div>
             {debug && <TelemetryStrip message={m} />}
           </div>
@@ -325,16 +242,7 @@ export function Chat() {
 
       {/* Reply box — only in human mode */}
       {isHuman && (
-        <div
-          style={{
-            padding: "16px 24px",
-            borderTop: "1px solid var(--border)",
-            background: "var(--bg-1)",
-            display: "flex",
-            gap: 10,
-            flexShrink: 0,
-          }}
-        >
+        <div className="reply-box">
           <textarea
             value={replyText}
             onChange={(e) => setReplyText(e.target.value)}
@@ -344,38 +252,16 @@ export function Chat() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleSend();
             }}
-            style={{
-              flex: 1,
-              background: "var(--bg-2)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius)",
-              padding: "10px 12px",
-              color: "var(--text)",
-              fontFamily: "var(--mono)",
-              fontSize: 13,
-              resize: "none",
-              outline: "none",
-            }}
+            className="input"
+            style={{ flex: 1 }}
           />
           <button
             onClick={handleSend}
             disabled={sending || !replyText.trim()}
             data-testid="send-btn"
-            style={{
-              padding: "0 20px",
-              background: sending ? "var(--bg-3)" : "var(--amber)",
-              color: sending ? "var(--text-3)" : "#000",
-              border: "none",
-              borderRadius: "var(--radius)",
-              fontFamily: "var(--mono)",
-              fontWeight: 600,
-              fontSize: 12,
-              letterSpacing: "0.05em",
-              alignSelf: "stretch",
-              transition: "background 0.15s",
-            }}
+            className="btn btn-primary"
           >
-            SEND
+            Send
           </button>
         </div>
       )}
@@ -454,17 +340,3 @@ function TelemetryStrip({ message }: { message: Message }) {
   );
 }
 
-function actionBtnStyle(color: string): React.CSSProperties {
-  return {
-    padding: "6px 14px",
-    background: "transparent",
-    border: `1px solid ${color}`,
-    borderRadius: "var(--radius)",
-    color,
-    fontFamily: "var(--mono)",
-    fontSize: 12,
-    fontWeight: 600,
-    letterSpacing: "0.05em",
-    transition: "all 0.1s",
-  };
-}
