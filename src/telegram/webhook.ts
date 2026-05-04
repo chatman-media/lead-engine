@@ -98,6 +98,12 @@ export interface WebhookDeps {
    *  HTTP layer fans this out to AdminBus / WS subscribers. */
   onEvent?: (event: WebhookEvent) => void;
   /**
+   * Handler for inline-keyboard clicks on lead cards in the ops chat
+   * (`update.callback_query`). When unset, callback updates are silently
+   * ignored — useful in tests / setups without the leads module wired in.
+   */
+  onCallbackQuery?: (query: import("./types.ts").TgCallbackQuery) => Promise<void>;
+  /**
    * If true, the heavy part of processing (RAG + sendMessage + persist
    * assistant reply) is awaited inside the handler before the HTTP
    * response. Tests use this for deterministic assertions; production
@@ -131,6 +137,18 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       update = (await req.json()) as TgUpdate;
     } catch {
       return new Response("Bad Request", { status: 400 });
+    }
+
+    // Inline-keyboard click on a lead card in the ops chat. We dispatch
+    // approve/reject via a separate handler that lives outside the
+    // candidate-message pipeline (different state, different side-effects).
+    if (update.callback_query && deps.onCallbackQuery) {
+      try {
+        await deps.onCallbackQuery(update.callback_query);
+      } catch (err) {
+        console.error("[webhook] callback_query handler failed:", err);
+      }
+      return json({ ok: true, callback: true });
     }
 
     const message = update.message ?? update.edited_message;

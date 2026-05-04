@@ -89,6 +89,29 @@ export const config = {
   telegram: {
     botToken: envOptional("TELEGRAM_BOT_TOKEN"),
     webhookSecret: envOptional("TELEGRAM_WEBHOOK_SECRET", "dev-secret"),
+    /**
+     * Group chat where new lead cards are posted (with approve/reject
+     * inline buttons). When unset, lead creation still works through the
+     * admin UI but no Telegram card is posted. The bot must be added as
+     * a member of this chat (admin role recommended for editing cards).
+     */
+    leadsChatId: (() => {
+      const raw = envOptional("LEADS_CHAT_ID", "");
+      if (!raw) return null;
+      const n = parseInt(raw, 10);
+      return Number.isFinite(n) ? n : null;
+    })(),
+    /**
+     * Group chat where the visa-submission package is posted once the
+     * lead transitions to `docs_complete`. Same opt-in semantics as
+     * LEADS_CHAT_ID.
+     */
+    visaChatId: (() => {
+      const raw = envOptional("VISA_CHAT_ID", "");
+      if (!raw) return null;
+      const n = parseInt(raw, 10);
+      return Number.isFinite(n) ? n : null;
+    })(),
   },
   llm: {
     provider: llmProvider,

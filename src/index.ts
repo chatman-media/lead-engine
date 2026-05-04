@@ -166,7 +166,16 @@ const server = createServer({
   rag,
   enableTestHooks: process.env.TEST_HOOKS === "1",
   port: config.port,
+  leadsChatId: config.telegram.leadsChatId,
+  visaChatId: config.telegram.visaChatId,
 });
+
+if (config.telegram.leadsChatId) {
+  console.log(`[server] leads chat: ${config.telegram.leadsChatId}`);
+}
+if (config.telegram.visaChatId) {
+  console.log(`[server] visa chat: ${config.telegram.visaChatId}`);
+}
 
 console.log(`[server] listening on http://localhost:${server.port}`);
 

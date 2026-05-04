@@ -17,8 +17,10 @@ import type { EmbeddingClient } from "../rag/embed.ts";
 import { composeSystemPrompt } from "../sales/prompt.ts";
 import { nextStage } from "../sales/stage-router.ts";
 import { FUNNEL_STAGES, StyleSchema, type FunnelStage } from "../sales/types.ts";
+import { LeadsRepo, type LeadState } from "../db/repos/leads.ts";
 import { UsersRepo } from "../db/repos/users.ts";
 import { VacanciesRepo } from "../db/repos/vacancies.ts";
+import { LeadsService } from "../leads/service.ts";
 import { json, type RouteHandler } from "../router.ts";
 import type { TelegramClient } from "../telegram/client.ts";
 import { requireAdmin } from "./auth.ts";
@@ -29,6 +31,10 @@ export interface AdminApiDeps {
   /** Optional event hooks for the websocket layer (or other listeners). */
   onConversationChanged?: (conversationId: number) => void;
   onMessageSent?: (input: { conversationId: number; tgUserId: number }) => void;
+  /** Group chat where lead cards are posted (mirrors config.telegram.leadsChatId). */
+  leadsChatId?: number | null;
+  /** Group chat where the visa-submission package is posted. */
+  visaChatId?: number | null;
   /**
    * Optional LLM clients — required only by the style playground endpoint
    * (`POST /admin/api/styles/:id/playground`). When unset, the playground
@@ -83,6 +89,7 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
     const styles = new StylesRepo(deps.db);
     const experiments = new ExperimentsRepo(deps.db);
     const vacancies = new VacanciesRepo(deps.db);
+    const leadsRepo = new LeadsRepo(deps.db);
     let routingMode: "env_override" | "running_experiment" | "legacy_persona" | "none";
     let activeStyleSlug: string | null = null;
     let runningExperimentSlug: string | null = null;
@@ -215,6 +222,11 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
       },
       vacancies: {
         active: vacancies.countActive(),
+      },
+      leads: {
+        by_state: leadsRepo.countByState(),
+        leads_chat_configured: deps.leadsChatId != null,
+        visa_chat_configured: deps.visaChatId != null,
       },
     });
   };
@@ -1352,6 +1364,329 @@ function safeJson(text: string): unknown {
   } catch {
     return null;
   }
+}
+
+// ─── Leads (lead pipeline / approval gate / docs collection) ───────────
+
+function buildLeadsService(deps: AdminApiDeps): LeadsService | null {
+  if (!deps.telegram) return null;
+  return new LeadsService({
+    leads: new LeadsRepo(deps.db),
+    users: new UsersRepo(deps.db),
+    conversations: new ConversationsRepo(deps.db),
+    messages: new MessagesRepo(deps.db),
+    telegram: deps.telegram,
+    leadsChatId: deps.leadsChatId ?? null,
+    visaChatId: deps.visaChatId ?? null,
+  });
+}
+
+function recentMessagesForCard(
+  messages: MessagesRepo,
+  conversationId: number,
+): Array<{ role: string; text: string }> {
+  return messages
+    .recentForContext(conversationId, 8)
+    .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "human")
+    .map((m) => ({ role: m.role, text: m.text }));
+}
+
+const LEAD_STATES: LeadState[] = [
+  "intake_pending",
+  "intake_complete",
+  "approved",
+  "rejected",
+  "docs_pending",
+  "docs_complete",
+  "submitted",
+  "closed",
+];
+
+export function createListLeadsHandler(deps: AdminApiDeps): RouteHandler {
+  const leads = new LeadsRepo(deps.db);
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const url = new URL(req.url);
+    const stateParam = url.searchParams.get("state");
+    const state =
+      stateParam && (LEAD_STATES as string[]).includes(stateParam)
+        ? (stateParam as LeadState)
+        : null;
+    return json({
+      leads: leads.list({ ...(state ? { state } : {}) }),
+      counts: leads.countByState(),
+    });
+  };
+}
+
+/**
+ * Promote an existing conversation to a lead (or return the existing one).
+ * Idempotent — calling twice on the same conversation returns the same
+ * lead row. When LEADS_CHAT_ID is configured, also posts the lead card
+ * with approve/reject buttons.
+ */
+export function createPromoteLeadHandler(deps: AdminApiDeps): RouteHandler {
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const convId = Number(params.id);
+    if (!Number.isFinite(convId)) return json({ error: "bad id" }, { status: 400 });
+
+    const conversations = new ConversationsRepo(deps.db);
+    const users = new UsersRepo(deps.db);
+    const leadsRepo = new LeadsRepo(deps.db);
+    const messagesRepo = new MessagesRepo(deps.db);
+
+    const conv = conversations.byId(convId);
+    if (!conv) return json({ error: "conversation not found" }, { status: 404 });
+    const user = users.byId(conv.user_id);
+    if (!user) return json({ error: "user gone" }, { status: 404 });
+
+    let lead = leadsRepo.ensureForUser(user.id);
+    // Promotion implies "ready for operator decision" — bump intake state.
+    if (lead.state === "intake_pending") {
+      lead = leadsRepo.setState(lead.id, "intake_complete") ?? lead;
+    }
+
+    const service = buildLeadsService(deps);
+    if (service) {
+      lead = await service.postCardToOpsChat({
+        lead,
+        user,
+        recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+      });
+      // Notify the candidate that the request is being reviewed — this
+      // matches the operator's stock "отправила запрос в клуб" message.
+      await service.sendAwaitingApprovalNote({ user });
+    }
+    deps.onConversationChanged?.(conv.id);
+    return json({ lead });
+  };
+}
+
+export function createApproveLeadHandler(deps: AdminApiDeps): RouteHandler {
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    const leadsRepo = new LeadsRepo(deps.db);
+    const usersRepo = new UsersRepo(deps.db);
+    const messagesRepo = new MessagesRepo(deps.db);
+    const conversations = new ConversationsRepo(deps.db);
+
+    const lead = leadsRepo.byId(id);
+    if (!lead) return json({ error: "not found" }, { status: 404 });
+    if (lead.state === "approved" || lead.state === "rejected") {
+      return json({ error: `lead already ${lead.state}` }, { status: 409 });
+    }
+    const user = usersRepo.byId(lead.user_id);
+    if (!user) return json({ error: "user gone" }, { status: 404 });
+
+    const updated = leadsRepo.setState(id, "approved", { adminId: ctx.adminId });
+    if (!updated) return json({ error: "transition failed" }, { status: 500 });
+    // Move into docs_pending — bot will start collecting visa form.
+    const inDocs = leadsRepo.setState(id, "docs_pending") ?? updated;
+
+    const service = buildLeadsService(deps);
+    if (service) {
+      await service.sendApprovalMessages({ lead: inDocs, user });
+      const conv = conversations.byUserId(user.id);
+      if (conv) {
+        await service.refreshOpsCard({
+          lead: inDocs,
+          user,
+          recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+          decision: { state: "approved" },
+        });
+      }
+    }
+    return json({ lead: inDocs });
+  };
+}
+
+export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    let body: { reason?: unknown } = {};
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      // Optional body — empty is fine, default rejection text is used.
+    }
+    const reason =
+      typeof body.reason === "string" && body.reason.trim()
+        ? body.reason.trim()
+        : undefined;
+
+    const leadsRepo = new LeadsRepo(deps.db);
+    const usersRepo = new UsersRepo(deps.db);
+    const messagesRepo = new MessagesRepo(deps.db);
+    const conversations = new ConversationsRepo(deps.db);
+
+    const lead = leadsRepo.byId(id);
+    if (!lead) return json({ error: "not found" }, { status: 404 });
+    if (lead.state === "approved" || lead.state === "rejected") {
+      return json({ error: `lead already ${lead.state}` }, { status: 409 });
+    }
+    const user = usersRepo.byId(lead.user_id);
+    if (!user) return json({ error: "user gone" }, { status: 404 });
+
+    const rejectedReasonOpt: { rejectedReason?: string } = reason
+      ? { rejectedReason: reason }
+      : {};
+    const updated = leadsRepo.setState(id, "rejected", {
+      adminId: ctx.adminId,
+      ...rejectedReasonOpt,
+    });
+    if (!updated) return json({ error: "transition failed" }, { status: 500 });
+
+    const service = buildLeadsService(deps);
+    if (service) {
+      await service.sendRejection({
+        user,
+        ...(reason ? { customReason: reason } : {}),
+      });
+      const conv = conversations.byUserId(user.id);
+      if (conv) {
+        await service.refreshOpsCard({
+          lead: updated,
+          user,
+          recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+          decision: { state: "rejected" },
+        });
+      }
+    }
+    return json({ lead: updated });
+  };
+}
+
+/** Operator clicks "send intake template" — bot DMs the candidate the
+ *  7-item checklist. Useful when the bot's natural greeting hasn't yet
+ *  prompted the candidate to start submitting intake. */
+export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    const leadsRepo = new LeadsRepo(deps.db);
+    const usersRepo = new UsersRepo(deps.db);
+    const lead = leadsRepo.byId(id);
+    if (!lead) return json({ error: "not found" }, { status: 404 });
+    const user = usersRepo.byId(lead.user_id);
+    if (!user) return json({ error: "user gone" }, { status: 404 });
+
+    const service = buildLeadsService(deps);
+    if (!service) {
+      return json({ error: "telegram client not configured" }, { status: 503 });
+    }
+    await service.sendIntakeTemplate({ user });
+    return json({ ok: true });
+  };
+}
+
+export function createDeleteLeadHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const leadsRepo = new LeadsRepo(deps.db);
+    const ok = leadsRepo.delete(id);
+    if (!ok) return json({ error: "not found" }, { status: 404 });
+    return json({ ok: true, deleted: id });
+  };
+}
+
+/**
+ * The Telegram callback_query handler. Dispatches lead approve/reject
+ * inline-button clicks to the right service action. Handed to the
+ * webhook via WebhookDeps.onCallbackQuery.
+ *
+ * Returns a function (not a RouteHandler) — the webhook calls it
+ * directly with the parsed callback_query.
+ */
+export function createLeadCallbackHandler(deps: AdminApiDeps) {
+  return async (
+    query: import("../telegram/types.ts").TgCallbackQuery,
+  ): Promise<void> => {
+    if (!deps.telegram) return;
+    const data = query.data ?? "";
+    const match = /^lead:(approve|reject):(\d+)$/.exec(data);
+    if (!match) return;
+    const action = match[1] as "approve" | "reject";
+    const leadId = Number(match[2]);
+
+    const leadsRepo = new LeadsRepo(deps.db);
+    const usersRepo = new UsersRepo(deps.db);
+    const messagesRepo = new MessagesRepo(deps.db);
+    const conversations = new ConversationsRepo(deps.db);
+
+    const lead = leadsRepo.byId(leadId);
+    if (!lead) {
+      await deps.telegram.answerCallbackQuery({
+        callbackQueryId: query.id,
+        text: "Лид не найден",
+        showAlert: true,
+      });
+      return;
+    }
+    if (lead.state === "approved" || lead.state === "rejected") {
+      await deps.telegram.answerCallbackQuery({
+        callbackQueryId: query.id,
+        text: `Уже ${lead.state === "approved" ? "одобрен" : "отклонён"}`,
+      });
+      return;
+    }
+    const user = usersRepo.byId(lead.user_id);
+    if (!user) return;
+
+    const service = buildLeadsService(deps);
+    if (!service) return;
+
+    if (action === "approve") {
+      const approved = leadsRepo.setState(leadId, "approved") ?? lead;
+      const inDocs = leadsRepo.setState(leadId, "docs_pending") ?? approved;
+      await service.sendApprovalMessages({ lead: inDocs, user });
+      const conv = conversations.byUserId(user.id);
+      if (conv) {
+        await service.refreshOpsCard({
+          lead: inDocs,
+          user,
+          recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+          decision: { state: "approved" },
+        });
+      }
+      await deps.telegram.answerCallbackQuery({
+        callbackQueryId: query.id,
+        text: "Одобрено ✅",
+      });
+    } else {
+      const rejected = leadsRepo.setState(leadId, "rejected") ?? lead;
+      await service.sendRejection({ user });
+      const conv = conversations.byUserId(user.id);
+      if (conv) {
+        await service.refreshOpsCard({
+          lead: rejected,
+          user,
+          recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+          decision: { state: "rejected" },
+        });
+      }
+      await deps.telegram.answerCallbackQuery({
+        callbackQueryId: query.id,
+        text: "Отклонено ❌",
+      });
+    }
+  };
 }
 
 // ─── Vacancies (admin-managed list of currently-open offers) ───────────

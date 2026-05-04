@@ -75,6 +75,7 @@ export function Status() {
         <RagFlagsCard status={status} />
         <ProvidersCard status={status} />
         <KbCard status={status} />
+        <LeadsCard status={status} />
         <VacanciesCard status={status} />
         <ConversationsCard status={status} />
         <UsersCard status={status} />
@@ -289,6 +290,44 @@ function UsersCard({ status }: { status: SystemStatus }) {
           mono
           hint="extracted facts"
         />
+      )}
+    </Card>
+  );
+}
+
+function LeadsCard({ status }: { status: SystemStatus }) {
+  const c = status.leads.by_state;
+  const ready = c.intake_complete;
+  const inDocs = c.docs_pending;
+  const forSubmit = c.docs_complete;
+  const closed = c.rejected + c.closed;
+  return (
+    <Card title="Leads pipeline" accent="var(--amber)">
+      {ready > 0 && (
+        <Row
+          label="ready for review"
+          value={<span style={{ color: "var(--amber)", fontWeight: 600 }}>{ready}</span>}
+          mono
+        />
+      )}
+      <Row label="intake_pending" value={String(c.intake_pending)} mono />
+      <Row label="approved → docs" value={String(inDocs)} mono />
+      {forSubmit > 0 && (
+        <Row
+          label="ready for visa submit"
+          value={<span style={{ color: "var(--green, #2ea043)", fontWeight: 600 }}>{forSubmit}</span>}
+          mono
+        />
+      )}
+      <Row label="submitted" value={String(c.submitted)} mono />
+      <Row label="closed/rejected" value={String(closed)} mono />
+      <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-3)" }}>
+        <a href="/admin/leads" style={{ color: "var(--amber)" }}>open pipeline →</a>
+      </div>
+      {!status.leads.leads_chat_configured && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "var(--amber)" }}>
+          ⚠ <code>LEADS_CHAT_ID</code> не задан — карточки в TG-чат не постятся (только в админке).
+        </div>
       )}
     </Card>
   );

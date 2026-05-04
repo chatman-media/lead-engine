@@ -100,6 +100,48 @@ export class TelegramClient {
     return this.call<TgSendMessageResult>("sendMessage", params);
   }
 
+  /**
+   * Edit a message we previously sent (commonly the lead card after the
+   * operator clicks approve/reject — the card stays in the ops chat with
+   * the new state visible). `text` replaces the body; `replyMarkup`
+   * replaces the inline keyboard (pass `{}` to remove the buttons
+   * entirely on a finalized state).
+   */
+  editMessageText(input: {
+    chatId: number | string;
+    messageId: number;
+    text: string;
+    parseMode?: "MarkdownV2" | "HTML" | "Markdown";
+    replyMarkup?: TgReplyMarkup;
+  }): Promise<TgSendMessageResult | true> {
+    const params: Record<string, unknown> = {
+      chat_id: input.chatId,
+      message_id: input.messageId,
+      text: input.text,
+    };
+    if (input.parseMode) params.parse_mode = input.parseMode;
+    if (input.replyMarkup) params.reply_markup = input.replyMarkup;
+    return this.call<TgSendMessageResult | true>("editMessageText", params);
+  }
+
+  /**
+   * Acknowledge an inline-keyboard click. Telegram requires a response
+   * within a few seconds or the spinner on the user's button keeps
+   * rotating. Pass `text` to flash a small notification ("Approved!").
+   */
+  answerCallbackQuery(input: {
+    callbackQueryId: string;
+    text?: string;
+    showAlert?: boolean;
+  }): Promise<true> {
+    const params: Record<string, unknown> = {
+      callback_query_id: input.callbackQueryId,
+    };
+    if (input.text) params.text = input.text;
+    if (input.showAlert) params.show_alert = input.showAlert;
+    return this.call<true>("answerCallbackQuery", params);
+  }
+
   sendChatAction(input: {
     chatId: number | string;
     action:

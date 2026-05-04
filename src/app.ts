@@ -14,8 +14,15 @@ import {
   createListExperimentsHandler,
   createListStylesHandler,
   createListUsersHandler,
+  createApproveLeadHandler,
+  createDeleteLeadHandler,
+  createLeadCallbackHandler,
+  createListLeadsHandler,
+  createPromoteLeadHandler,
+  createRejectLeadHandler,
   createReleaseHandler,
   createReplyHandler,
+  createSendIntakeHandler,
   createCreateVacancyHandler,
   createDeleteVacancyHandler,
   createListVacanciesHandler,
@@ -55,6 +62,12 @@ export interface AppDeps {
    *  assertions; production keeps it false (fire-and-forget) so we
    *  ack Bot API in <100ms and avoid retry storms. */
   awaitWebhookProcessing?: boolean;
+  /** Group chat where new lead cards are posted (with approve/reject
+   *  inline buttons). Optional — when unset, no TG card is posted but
+   *  the admin UI flow still works. */
+  leadsChatId?: number | null;
+  /** Group chat where the visa-submission package is posted. */
+  visaChatId?: number | null;
 }
 
 export function createRouter(deps: AppDeps): Router {
@@ -72,6 +85,9 @@ export function createRouter(deps: AppDeps): Router {
     ),
   );
 
+  // Eagerly build the leads-callback handler so the webhook can dispatch
+  // inline-keyboard clicks. Built outside the route closure so apiDeps
+  // is captured by reference once.
   router.post(
     "/telegram/:secret",
     createWebhookHandler({
@@ -80,6 +96,12 @@ export function createRouter(deps: AppDeps): Router {
       webhookSecret: deps.webhookSecret,
       rag: deps.rag,
       awaitProcessing: deps.awaitWebhookProcessing,
+      onCallbackQuery: createLeadCallbackHandler({
+        db: deps.db,
+        telegram: deps.telegram,
+        leadsChatId: deps.leadsChatId ?? null,
+        visaChatId: deps.visaChatId ?? null,
+      }),
       onEvent: (event) => {
         if (!deps.bus) return;
         switch (event.type) {
@@ -139,6 +161,8 @@ export function createRouter(deps: AppDeps): Router {
     }) => {
       deps.bus?.publish({ type: "message:new", conversationId, tgUserId });
     },
+    leadsChatId: deps.leadsChatId ?? null,
+    visaChatId: deps.visaChatId ?? null,
   };
   router.get("/admin/api/status", createStatusHandler(apiDeps));
   router.get("/admin/api/users", createListUsersHandler(apiDeps));
@@ -213,6 +237,17 @@ export function createRouter(deps: AppDeps): Router {
   router.post("/admin/api/vacancies", createCreateVacancyHandler(apiDeps));
   router.patch("/admin/api/vacancies/:id", createUpdateVacancyHandler(apiDeps));
   router.delete("/admin/api/vacancies/:id", createDeleteVacancyHandler(apiDeps));
+
+  // Leads — pipeline state machine: intake → approve/reject → docs → submitted.
+  router.get("/admin/api/leads", createListLeadsHandler(apiDeps));
+  router.post(
+    "/admin/api/leads/from-conversation/:id",
+    createPromoteLeadHandler(apiDeps),
+  );
+  router.post("/admin/api/leads/:id/approve", createApproveLeadHandler(apiDeps));
+  router.post("/admin/api/leads/:id/reject", createRejectLeadHandler(apiDeps));
+  router.post("/admin/api/leads/:id/send-intake", createSendIntakeHandler(apiDeps));
+  router.delete("/admin/api/leads/:id", createDeleteLeadHandler(apiDeps));
 
   if (deps.enableTestHooks) {
     mountTestHooks(router, deps.db);
