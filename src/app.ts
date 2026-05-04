@@ -28,6 +28,7 @@ import {
   createUpdateVisaDocsHandler,
   createCreateVacancyHandler,
   createDeleteVacancyHandler,
+  createDownloadFileHandler,
   createListVacanciesHandler,
   createSetExperimentStatusHandler,
   createStatusHandler,
@@ -176,6 +177,12 @@ export function createRouter(deps: AppDeps): Router {
   };
   router.get("/admin/api/status", createStatusHandler(apiDeps));
   router.get("/admin/api/users", createListUsersHandler(apiDeps));
+  // Telegram file proxy — browsers hit this URL from <img>/<video> tags
+  // in the admin chat view; admin session cookie is the auth.
+  router.get(
+    "/admin/api/tg-files/:fileId",
+    createDownloadFileHandler(apiDeps),
+  );
   router.patch(
     "/admin/api/users/:id/memory",
     createUpdateUserMemoryHandler(apiDeps),

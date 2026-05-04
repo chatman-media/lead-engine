@@ -386,6 +386,11 @@ export const api = {
   conversationExportUrl: (id: number) =>
     `/admin/api/conversations/${id}/export.jsonl`,
 
+  /** Same-origin proxy URL for a Telegram file_id. Auth via admin
+   *  session cookie. Used directly in <img src> / <video src>. */
+  tgFileUrl: (fileId: string) =>
+    `/admin/api/tg-files/${encodeURIComponent(fileId)}`,
+
   /** URL of the bulk JSONL export. Filters are forwarded as query params. */
   bulkConversationExportUrl: (filters: {
     styleId?: number;

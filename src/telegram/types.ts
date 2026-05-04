@@ -21,6 +21,20 @@ export interface TgChat {
  * sizes per photo (thumbnail / medium / original) — we record the
  * largest for diagnostic purposes; counting is by message, not by size.
  */
+/**
+ * Result of `getFile`. `file_path` is a relative path the Bot File API
+ * appends to `https://api.telegram.org/file/bot<TOKEN>/...` to download
+ * the bytes. The path is short-lived (~1 hour) and tied to the token.
+ */
+export interface TgFile {
+  file_id: string;
+  file_unique_id: string;
+  file_size?: number;
+  /** Relative path. Undefined when the file is too large (Telegram caps
+   *  download API at ~20 MB). */
+  file_path?: string;
+}
+
 export interface TgPhotoSize {
   file_id: string;
   file_unique_id: string;

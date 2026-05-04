@@ -256,7 +256,7 @@ export function Chat() {
             className={`msg ${m.role === "user" ? "msg-left" : "msg-right"}`}
           >
             <div className={BUBBLE_CLASS[m.role] ?? "bubble bubble-user"}>
-              {m.text}
+              <MessageBody message={m} />
             </div>
             <div className="msg-meta">
               <span style={{ color: ROLE_COLOR[m.role] ?? "var(--text-3)" }}>
@@ -306,6 +306,109 @@ export function Chat() {
  * code path the answer took, latencies per stage, top-k retrieval distances,
  * the rewritten query (if any), and reflection verdict (if any).
  */
+/**
+ * Renders the body of a message bubble. Three cases:
+ *   - text-only message → render `m.text` plain
+ *   - media message with caption → render media + caption text below
+ *   - media message without caption → render media only (skip the
+ *     auto-stamped placeholder like "[photo]" / "[video]")
+ *
+ * Media is fetched through /admin/api/tg-files/:fileId — same-origin
+ * proxy that holds the bot token. Authentication is the admin session
+ * cookie (auto-sent on same-origin <img>/<video> requests).
+ */
+function MessageBody({ message }: { message: Message }) {
+  let media: { type: string; file_id: string } | null = null;
+  if (message.meta_json) {
+    try {
+      const parsed = JSON.parse(message.meta_json) as {
+        media?: { type: string; file_id: string };
+      };
+      if (parsed.media?.file_id) media = parsed.media;
+    } catch {
+      // ignore — non-JSON meta or schema drift
+    }
+  }
+
+  if (!media) {
+    return <>{message.text}</>;
+  }
+
+  // Caption: hide the placeholder text the webhook auto-stamps
+  // ("[photo]" / "[video]" / "[document]" / "[voice]") since the
+  // media itself is the content. Real captions stay visible.
+  const isPlaceholder = /^\[(photo|video|document|voice)\]$/.test(message.text);
+  const caption = isPlaceholder ? "" : message.text;
+  const url = api.tgFileUrl(media.file_id);
+
+  let preview: React.ReactNode = null;
+  if (media.type === "photo") {
+    preview = (
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        <img
+          src={url}
+          alt="photo"
+          loading="lazy"
+          style={{
+            maxWidth: "100%",
+            maxHeight: 360,
+            borderRadius: 4,
+            display: "block",
+          }}
+        />
+      </a>
+    );
+  } else if (media.type === "video") {
+    preview = (
+      <video
+        src={url}
+        controls
+        preload="metadata"
+        style={{
+          maxWidth: "100%",
+          maxHeight: 360,
+          borderRadius: 4,
+          display: "block",
+        }}
+      />
+    );
+  } else if (media.type === "voice") {
+    preview = (
+      <audio
+        src={url}
+        controls
+        preload="metadata"
+        style={{ maxWidth: "100%" }}
+      />
+    );
+  } else {
+    // document — just a download link with a paperclip glyph
+    preview = (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ color: "var(--blue)", textDecoration: "underline" }}
+      >
+        📎 document
+      </a>
+    );
+  }
+
+  return (
+    <div
+      data-testid="message-media"
+      data-media-type={media.type}
+      style={{ display: "flex", flexDirection: "column", gap: 4 }}
+    >
+      {preview}
+      {caption && (
+        <div style={{ marginTop: 4 }}>{caption}</div>
+      )}
+    </div>
+  );
+}
+
 function TelemetryStrip({ message }: { message: Message }) {
   if (!message.meta_json) return null;
   let parsed: { telemetry?: MessageTelemetry; used_chunk_ids?: number[] } = {};
