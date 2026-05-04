@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
 import type { KbRepo } from "../db/repos/kb.ts";
 import { chunkText, type ChunkOptions } from "./chunk.ts";
@@ -13,6 +13,10 @@ export interface IngestDeps {
   kb: KbRepo;
   embedder: EmbeddingClient;
   chunk?: Partial<ChunkOptions>;
+  /** Optional topic tag for the document(s) being ingested. NULL leaves
+   *  docs untagged (still searchable by topic-routed queries via the
+   *  NULL fallback). See `kb_documents.topic` and topic-classifier.ts. */
+  topic?: string | null;
 }
 
 export interface IngestFileResult {
@@ -66,6 +70,7 @@ export async function ingestFile(
     source,
     title,
     contentHash: hash,
+    ...(deps.topic !== undefined ? { topic: deps.topic } : {}),
   });
 
   const chunks = chunkText(stripNonContent(raw), deps.chunk);
@@ -106,16 +111,44 @@ export async function ingestDirectory(
     chunks: 0,
     skipped: 0,
   };
-  for (const file of walk(resolve(dir))) {
+  const root = resolve(dir);
+  // When `deps.topic` is explicitly set, every file inherits it. Otherwise
+  // derive per-file from the IMMEDIATE sub-directory name — a common
+  // organisational convention in this codebase: `kb/curated/visa/*.md`,
+  // `kb/curated/payment/*.md` etc. Files directly under `dir` (no
+  // intermediate folder) stay untagged.
+  for (const file of walk(root)) {
     if (!SUPPORTED_EXTS.has(extname(file).toLowerCase())) {
       summary.skipped++;
       continue;
     }
-    const r = await ingestFile(file, deps);
+    const fileDeps: IngestDeps =
+      deps.topic !== undefined
+        ? deps
+        : { ...deps, topic: deriveTopicFromPath(file, root) };
+    const r = await ingestFile(file, fileDeps);
     summary.documents++;
     summary.chunks += r.chunks;
   }
   return summary;
+}
+
+/**
+ * Returns the immediate sub-directory name of `file` relative to `root`,
+ * or null when the file is directly under `root`. Examples (root=`kb/curated`):
+ *   visa/foo.md → "visa"
+ *   visa/sub/foo.md → "visa"  (only the FIRST level under root counts)
+ *   foo.md → null  (no enclosing topic dir)
+ *
+ * Exported for unit tests.
+ */
+export function deriveTopicFromPath(file: string, root: string): string | null {
+  const rel = relative(root, dirname(file));
+  // ".." means file is OUTSIDE root (or equal to root) — no usable topic.
+  if (!rel || rel === "." || rel.startsWith("..")) return null;
+  // `relative` may use OS separators; normalise.
+  const first = rel.split(/[\/\\]/)[0]!;
+  return first || null;
 }
 
 function* walk(dir: string): Generator<string> {

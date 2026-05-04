@@ -7,6 +7,7 @@ import type { EmbeddingClient } from "./embed.ts";
 import { verifyAnswer } from "./reflect.ts";
 import { rewriteQuery } from "./rewrite-query.ts";
 import { applyStyleRules } from "./text-style-rules.ts";
+import { classifyTopic } from "./topic-classifier.ts";
 
 /** Sentinel returned when retrieval is empty (or LLM cannot answer from
  * CONTEXT alone). The webhook layer turns this into a polite stall
@@ -390,6 +391,15 @@ export interface AnswerInput {
    * whatever is currently stored.
    */
   conversationSummary?: string;
+  /**
+   * Topic-routed retrieval: when true and `classifyTopic(question)` returns
+   * a deterministic match, only KB docs tagged with that topic (or untagged)
+   * are searched. Falls back to global search when classifier returns null
+   * OR the topic-filtered search yields zero hits — never reduces recall,
+   * only sharpens precision when the classifier is confident.
+   * Free at query time (regex classifier, no LLM).
+   */
+  topicRouting?: boolean;
 }
 
 /**
@@ -413,6 +423,9 @@ export interface AnswerTelemetry {
   top_distances?: number[];
   /** True when hybrid (BM25 + vector) was used instead of vector-only. */
   hybrid?: boolean;
+  /** Topic the question was routed to ("visa", "payment", …) or null when
+   *  classifier was inconclusive or topic filter fell back to global. */
+  topic?: string | null;
   /** Original user question, when query was rewritten before retrieval. */
   original_query?: string;
   /** Rewritten search query, when different from `original_query`. */
@@ -484,12 +497,34 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   const [questionVec] = await input.embedder.embed([searchQuery]);
   if (!questionVec) throw new Error("Embedder returned no vector for question");
 
+  // Topic routing: classify the QUESTION (not the rewritten query — it
+  // matches the cleaner regex anchors better). When the classifier is
+  // confident AND the topic-filtered search yields hits, use those;
+  // otherwise fall through to a global search. Never reduces recall.
+  const topic = input.topicRouting ? classifyTopic(input.question) : null;
+
   // Hybrid retrieval (vector + BM25 + RRF) catches exact-match queries that
   // pure embedding search ranks poorly. When enabled, `maxDistance` is
   // skipped because the fused rank is on a different scale than L2 distance.
-  const allHits = input.hybridSearch
-    ? input.kb.hybridSearch({ embedding: questionVec, query: searchQuery, k: topK })
-    : input.kb.search(questionVec, topK);
+  const runSearch = (filterTopic: string | null) =>
+    input.hybridSearch
+      ? input.kb.hybridSearch({
+          embedding: questionVec,
+          query: searchQuery,
+          k: topK,
+          ...(filterTopic !== null ? { topic: filterTopic } : {}),
+        })
+      : input.kb.search(questionVec, topK, filterTopic);
+
+  let allHits = runSearch(topic);
+  let usedTopic: string | null = topic;
+  if (topic !== null && allHits.length === 0) {
+    // Topic filter starved retrieval — fall back to global. The miss is
+    // either: classifier wrongly identified topic, OR no docs are tagged
+    // with that topic yet. Either way, we'd rather return SOMETHING.
+    allHits = runSearch(null);
+    usedTopic = null;
+  }
   const hits =
     input.hybridSearch || input.maxDistance === undefined
       ? allHits
@@ -504,6 +539,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     retrieval_ms: retrievalMs,
     top_distances: hits.map((h) => Math.round(h.distance * 10000) / 10000),
     ...(input.hybridSearch ? { hybrid: true } : {}),
+    ...(input.topicRouting && topic !== null ? { topic: usedTopic } : {}),
     ...(searchQuery !== input.question
       ? { original_query: input.question, rewritten_query: searchQuery }
       : {}),

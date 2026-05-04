@@ -146,6 +146,16 @@ export const config = {
      * staleness threshold is 8 messages). Default: off.
      */
     conversationSummary: envTruthy("RAG_CONVERSATION_SUMMARY", false),
+    /**
+     * Topic-routed retrieval: when the question's topic can be classified
+     * deterministically (regex over visa / payment / schedule / housing /
+     * locations / application keywords), filter KB search to docs tagged
+     * with that topic. Falls back to global search on ambiguous questions
+     * or when topic-filtered retrieval yields zero hits. Free at query time
+     * (no LLM); requires KB docs to be tagged at ingest (--topic flag or
+     * `<topic>/` directory layout in `bun scripts/ingest.ts`). Default: off.
+     */
+    topicRouting: envTruthy("RAG_TOPIC_ROUTING", false),
   },
   openai: {
     apiKey: envOptional("OPENAI_API_KEY"),

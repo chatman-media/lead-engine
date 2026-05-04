@@ -6,19 +6,20 @@ Telegram-бот с RAG по базе знаний, анкетой по токе�
 API и локальная Ollama (без расхода токенов).
 
 Разрабатывается через TDD: на каждый юнит сначала падающий тест, потом
-минимальная реализация. Текущее состояние: **500+ unit + 14 e2e зелёных.**
+минимальная реализация. Текущее состояние: **520+ unit + 14 e2e зелёных.**
 
 **RAG layers** (опциональные надстройки over vanilla retrieval):
 hybrid retrieval (BM25 + vector + RRF), cross-session memory кандидата,
 query rewriting, reflection-проверка ответа на галлюцинации, conversation
-summarization для длинных диалогов. Все включаются флагами в `.env`, по
-умолчанию off. Подробности — [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
-Текущее состояние и план — [docs/ROADMAP.md](docs/ROADMAP.md).
+summarization для длинных диалогов, topic-routed retrieval (фильтр по
+теме документа). Все включаются флагами в `.env`, по умолчанию off.
+Подробности — [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md). Текущее состояние
+и план — [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ### Documentation map
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — общая навигация: слои, request lifecycle, design decisions
-- [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md) — пять опциональных надстроек RAG (hybrid, memory, rewrite, reflect, summary): зачем, как работает, цена, тесты
+- [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md) — шесть опциональных надстроек RAG (hybrid, memory, rewrite, reflect, summary, topic routing): зачем, как работает, цена, тесты
 - [docs/SALES_STYLES.md](docs/SALES_STYLES.md) — sales-style engine: схема Style, A/B testing
 - [docs/ROADMAP.md](docs/ROADMAP.md) — что сделано, что в очереди (Tier 1/2/3 по ROI)
 
@@ -411,6 +412,13 @@ RAG_REFLECT=true
 # сжимается в paragraph и подмешивается в системный промпт. Ленивый refresh
 # раз в ~8 сообщений, не на каждом turn.
 RAG_CONVERSATION_SUMMARY=true
+
+# Topic-routed retrieval: regex классификатор маппит вопрос на тему
+# (visa/payment/schedule/housing/locations/application), KB ищется только
+# среди тегированных этой темой документов. Сначала тегируй ingest:
+#   bun scripts/ingest.ts ./kb/curated --topic visa
+# или сложи документы по поддиректориям (kb/curated/visa/*.md → topic=visa).
+RAG_TOPIC_ROUTING=true
 ```
 
 ## Тесты

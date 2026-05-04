@@ -43,6 +43,8 @@ export interface RagDeps {
   reflect?: boolean;
   /** Hybrid BM25+vector retrieval with RRF fusion — see `answerWithRag.hybridSearch`. */
   hybridSearch?: boolean;
+  /** Topic-routed retrieval — see `answerWithRag.topicRouting`. */
+  topicRouting?: boolean;
   /**
    * Conversation summarization for long chats: when total messages exceeds
    * `summaryStartThreshold` (default 30), older turns get compressed into a
@@ -448,6 +450,7 @@ async function runRagForInbound(
     ...(d.rag.queryRewrite ? { rewriteQueryBeforeRetrieval: true } : {}),
     ...(d.rag.reflect ? { reflect: true } : {}),
     ...(d.rag.hybridSearch ? { hybridSearch: true } : {}),
+    ...(d.rag.topicRouting ? { topicRouting: true } : {}),
   });
   return { result, stage };
 }

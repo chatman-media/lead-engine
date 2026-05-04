@@ -451,6 +451,67 @@ describe("answerWithRag", () => {
     expect(sys).not.toContain("ИЗ РАННЕЙ ПЕРЕПИСКИ");
   });
 
+  test("topicRouting=true filters retrieval to classified topic, falls back when no match", async () => {
+    const visaDoc = kb.upsertDocument({
+      source: "kb://v",
+      title: "v",
+      contentHash: "v",
+      topic: "visa",
+    });
+    const paymentDoc = kb.upsertDocument({
+      source: "kb://p",
+      title: "p",
+      contentHash: "p",
+      topic: "payment",
+    });
+    const visaChunk = kb.insertChunkWithEmbedding({
+      documentId: visaDoc.id,
+      chunkIndex: 0,
+      text: "Виза 30 дней",
+      tokenCount: 3,
+      embedding: vec(1),
+    });
+    kb.insertChunkWithEmbedding({
+      documentId: paymentDoc.id,
+      chunkIndex: 0,
+      text: "1500 в день",
+      tokenCount: 3,
+      embedding: vec(2),
+    });
+
+    const embedder = fakeEmbedder({ "какая виза нужна?": vec(2) });
+    const chat = fakeChat("ok");
+
+    const result = await answerWithRag({
+      question: "какая виза нужна?",
+      kb,
+      embedder,
+      chat,
+      topK: 5,
+      topicRouting: true,
+    });
+    // Even though embedding seed favors payment chunk, topic filter
+    // restricts to visa-tagged docs → only visa chunk is returned.
+    expect(result.usedChunkIds).toContain(visaChunk.id);
+    expect(result.usedChunkIds).not.toContain(paymentDoc.id);
+    expect(result.telemetry.topic).toBe("visa");
+  });
+
+  test("topicRouting falls back to global when classifier returns null", async () => {
+    seed();
+    const embedder = fakeEmbedder({ "привет": vec(1) });
+    const chat = fakeChat("Reply text");
+    const result = await answerWithRag({
+      question: "привет", // doesn't match any topic
+      kb,
+      embedder,
+      chat,
+      topicRouting: true,
+    });
+    expect(result.text).toBe("Reply text");
+    expect(result.telemetry.topic).toBeUndefined();
+  });
+
   test("hybridSearch=true uses BM25+vector fusion for retrieval", async () => {
     const doc = kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
     // Two chunks with disjoint topics. The query mentions "Стамбул" which is

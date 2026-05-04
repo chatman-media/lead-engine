@@ -17,6 +17,7 @@ interface CliOpts {
   target: string;
   maxChars?: number;
   overlap?: number;
+  topic?: string;
 }
 
 function parseCliArgs(): CliOpts {
@@ -24,15 +25,22 @@ function parseCliArgs(): CliOpts {
   const positional: string[] = [];
   let maxChars: number | undefined;
   let overlap: number | undefined;
+  let topic: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i]!;
     if (v === "--max-chars") maxChars = parseInt(argv[++i] ?? "", 10);
     else if (v === "--overlap") overlap = parseInt(argv[++i] ?? "", 10);
+    else if (v === "--topic") topic = argv[++i];
     else if (v === "-h" || v === "--help") {
       console.log(
         "Usage: bun scripts/ingest.ts <file-or-directory>\n" +
           "                            [--max-chars N]   default 1500\n" +
-          "                            [--overlap N]     default 150\n\n" +
+          "                            [--overlap N]     default 150\n" +
+          "                            [--topic SLUG]    tag every doc with this topic;\n" +
+          "                                              in directory mode without --topic,\n" +
+          "                                              the immediate sub-dir name becomes\n" +
+          "                                              the topic (kb/curated/visa/*.md\n" +
+          "                                              → topic=visa)\n\n" +
           "Tip: small embedding models have a 512-token context. For\n" +
           "Russian text, prefer --max-chars 600 --overlap 80 (e.g. for\n" +
           "all-minilm:l6-v2). Larger models like nomic-embed-text accept\n" +
@@ -43,11 +51,15 @@ function parseCliArgs(): CliOpts {
   }
   if (!positional[0]) {
     console.error(
-      "Usage: bun scripts/ingest.ts <file-or-directory> [--max-chars N] [--overlap N]",
+      "Usage: bun scripts/ingest.ts <file-or-directory> [--max-chars N] [--overlap N] [--topic SLUG]",
     );
     process.exit(1);
   }
-  return { target: positional[0]!, maxChars, overlap };
+  const result: CliOpts = { target: positional[0]! };
+  if (maxChars !== undefined) result.maxChars = maxChars;
+  if (overlap !== undefined) result.overlap = overlap;
+  if (topic !== undefined) result.topic = topic;
+  return result;
 }
 
 async function main() {
@@ -101,7 +113,15 @@ async function main() {
     );
   }
 
-  const deps = { kb, embedder, chunk: chunkOpts };
+  const deps: { kb: KbRepo; embedder: EmbeddingClient; chunk: typeof chunkOpts; topic?: string } = {
+    kb,
+    embedder,
+    chunk: chunkOpts,
+  };
+  if (opts.topic !== undefined) {
+    deps.topic = opts.topic;
+    console.log(`[ingest] applying topic="${opts.topic}" to all ingested docs`);
+  }
   const stat = statSync(target);
   if (stat.isDirectory()) {
     const summary = await ingestDirectory(target, deps);

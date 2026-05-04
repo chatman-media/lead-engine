@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { KbRepo } from "@/db/repos/kb.ts";
 import { openDb } from "@/db/sqlite.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
-import { ingestDirectory, ingestFile } from "@/rag/ingest.ts";
+import { deriveTopicFromPath, ingestDirectory, ingestFile } from "@/rag/ingest.ts";
 
 const DIM = 1536;
 
@@ -114,5 +114,67 @@ describe("ingestFile", () => {
     const summary = await ingestDirectory(tmp, { kb, embedder });
     expect(summary.documents).toBe(2);
     expect(kb.countDocuments()).toBe(2);
+  });
+
+  test("ingestFile applies deps.topic to the inserted document", async () => {
+    const file = join(tmp, "doc.md");
+    writeFileSync(file, "content", "utf8");
+    const embedder = fakeEmbedder();
+    await ingestFile(file, { kb, embedder, topic: "visa" });
+    const row = db
+      .query<{ topic: string | null }, []>("SELECT topic FROM kb_documents")
+      .get();
+    expect(row?.topic).toBe("visa");
+  });
+
+  test("ingestDirectory derives topic from immediate sub-directory", async () => {
+    const visaDir = join(tmp, "visa");
+    const paymentDir = join(tmp, "payment");
+    require("node:fs").mkdirSync(visaDir, { recursive: true });
+    require("node:fs").mkdirSync(paymentDir, { recursive: true });
+    writeFileSync(join(visaDir, "v1.md"), "visa doc 1", "utf8");
+    writeFileSync(join(paymentDir, "p1.md"), "payment doc 1", "utf8");
+    // File directly under tmp gets no topic
+    writeFileSync(join(tmp, "untagged.md"), "untagged doc", "utf8");
+
+    const embedder = fakeEmbedder();
+    await ingestDirectory(tmp, { kb, embedder });
+    const rows = db
+      .query<{ title: string; topic: string | null }, []>(
+        "SELECT title, topic FROM kb_documents ORDER BY title",
+      )
+      .all();
+    const byTitle = new Map(rows.map((r) => [r.title, r.topic]));
+    expect(byTitle.get("v1.md")).toBe("visa");
+    expect(byTitle.get("p1.md")).toBe("payment");
+    expect(byTitle.get("untagged.md")).toBeNull();
+  });
+
+  test("ingestDirectory: explicit deps.topic overrides directory layout", async () => {
+    const visaDir = join(tmp, "visa");
+    require("node:fs").mkdirSync(visaDir, { recursive: true });
+    writeFileSync(join(visaDir, "v.md"), "doc", "utf8");
+
+    const embedder = fakeEmbedder();
+    await ingestDirectory(tmp, { kb, embedder, topic: "manual-override" });
+    const row = db
+      .query<{ topic: string | null }, []>("SELECT topic FROM kb_documents")
+      .get();
+    expect(row?.topic).toBe("manual-override");
+  });
+});
+
+describe("deriveTopicFromPath", () => {
+  test("returns immediate sub-directory name", () => {
+    expect(deriveTopicFromPath("/root/visa/file.md", "/root")).toBe("visa");
+    expect(deriveTopicFromPath("/root/payment/sub/file.md", "/root")).toBe("payment");
+  });
+
+  test("returns null for files directly under root", () => {
+    expect(deriveTopicFromPath("/root/file.md", "/root")).toBeNull();
+  });
+
+  test("returns null when file equals root (edge case)", () => {
+    expect(deriveTopicFromPath("/root", "/root")).toBeNull();
   });
 });
