@@ -249,6 +249,26 @@ extract new candidate facts → merge into user memory
 
 Если включаешь все четыре сразу: суммарная стоимость ≈ +2.5 LLM-вызова на средний turn (rewrite — на 25% turns, reflect — на 80% grounded turns, memory extraction — на каждом turn но after-reply, не на критическом пути).
 
+## Telemetry
+
+Каждый вызов `answerWithRag` возвращает `AnswerResult.telemetry` ([src/rag/answer.ts](../src/rag/answer.ts)) — диагностический блок, который webhook кладёт в `messages.meta_json.telemetry` для каждого ответа бота.
+
+```ts
+{
+  path: "smalltalk" | "persona_fact" | "no_context" | "ungrounded" | "ok",
+  total_ms: 1340,
+  retrieval_ms: 80,
+  generation_ms: 1200,
+  top_distances: [0.83, 0.91, 1.04],
+  hybrid: true,                                    // когда RAG_HYBRID_SEARCH=true
+  original_query: "а в стамбуле?",                 // только когда rewrite сработал
+  rewritten_query: "какие условия в Стамбуле",
+  reflect: { grounded: false, reason: "..." }      // когда RAG_REFLECT=true
+}
+```
+
+В админке: на странице чата есть кнопка **DEBUG**. Включение → под каждым ответом бота появляется `TelemetryStrip` — одна строка с диагностикой (цвет по `path`: зелёный = ok, жёлтый = no_context, красный = ungrounded). Нужен чтобы локализовать regressions: «качество просело — это retrieval, generation или reflect?». Без перезапуска LLM, по уже сохранённым данным.
+
 ## Тесты
 
 | Слой | Файл с тестами | Покрытие |
@@ -258,3 +278,4 @@ extract new candidate facts → merge into user memory
 | Memory API | [tests/unit/admin-api.test.ts](../tests/unit/admin-api.test.ts) | `GET /conversations/:id` includes memory; `PATCH /users/:id/memory` |
 | Query rewrite | [tests/unit/rewrite-query.test.ts](../tests/unit/rewrite-query.test.ts) | heuristic, sanitize, fallback на ошибки |
 | Reflect | [tests/unit/reflect.test.ts](../tests/unit/reflect.test.ts) | parse, fail-open, skip empty answer/context |
+| Telemetry | [tests/unit/answer.test.ts](../tests/unit/answer.test.ts) | path tags, latencies, top_distances, hybrid marker, rewrite passthrough |

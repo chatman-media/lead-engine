@@ -436,6 +436,87 @@ describe("answerWithRag", () => {
     expect(result.usedChunkIds).toContain(istanbul.id);
   });
 
+  test("telemetry: smalltalk path skips retrieval/generation, marks path", async () => {
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("nope");
+    const result = await answerWithRag({
+      question: "тебя как зовут?",
+      kb,
+      embedder,
+      chat,
+      persona: { name: "Алина", role: "human", company: "X" },
+    });
+    expect(result.telemetry.path).toBe("smalltalk");
+    expect(result.telemetry.total_ms).toBeGreaterThanOrEqual(0);
+    expect(result.telemetry.retrieval_ms).toBeUndefined();
+    expect(result.telemetry.generation_ms).toBeUndefined();
+  });
+
+  test("telemetry: persona_fact path", async () => {
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("nope");
+    const result = await answerWithRag({
+      question: "где живешь?",
+      kb,
+      embedder,
+      chat,
+      persona: { name: "Алина", role: "human", facts: { city: "Шаохинге" } },
+    });
+    expect(result.telemetry.path).toBe("persona_fact");
+  });
+
+  test("telemetry: no_context path when retrieval is empty", async () => {
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("ignored");
+    const result = await answerWithRag({
+      question: "anything",
+      kb,
+      embedder,
+      chat,
+    });
+    expect(result.telemetry.path).toBe("no_context");
+    expect(result.telemetry.retrieval_ms).toBeGreaterThanOrEqual(0);
+    expect(result.telemetry.top_distances).toEqual([]);
+  });
+
+  test("telemetry: ok path with top_distances + generation_ms", async () => {
+    const { qVec } = seed();
+    const embedder = fakeEmbedder({ "How do refunds work?": qVec });
+    const chat = fakeChat("Refunds take 5 business days.");
+
+    const result = await answerWithRag({
+      question: "How do refunds work?",
+      kb,
+      embedder,
+      chat,
+      topK: 2,
+    });
+
+    expect(result.telemetry.path).toBe("ok");
+    expect(result.telemetry.top_distances).toBeDefined();
+    expect(result.telemetry.top_distances!.length).toBeGreaterThan(0);
+    expect(result.telemetry.generation_ms).toBeGreaterThanOrEqual(0);
+    expect(result.telemetry.retrieval_ms).toBeGreaterThanOrEqual(0);
+    expect(result.telemetry.total_ms).toBeGreaterThanOrEqual(0);
+    expect(result.telemetry.hybrid).toBeUndefined();
+    expect(result.telemetry.original_query).toBeUndefined();
+  });
+
+  test("telemetry: hybrid=true marker when hybrid retrieval is used", async () => {
+    const { qVec } = seed();
+    const embedder = fakeEmbedder({ "test": qVec });
+    const chat = fakeChat("ok");
+    const result = await answerWithRag({
+      question: "test",
+      kb,
+      embedder,
+      chat,
+      hybridSearch: true,
+      topK: 2,
+    });
+    expect(result.telemetry.hybrid).toBe(true);
+  });
+
   test("includes prior conversation messages between system and current user", async () => {
     seed();
     const embedder = fakeEmbedder({});

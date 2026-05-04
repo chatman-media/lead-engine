@@ -368,13 +368,44 @@ export interface AnswerInput {
   hybridSearch?: boolean;
 }
 
+/**
+ * Per-turn telemetry — captured for every `answerWithRag` call so the webhook
+ * can persist it into `messages.meta_json` and admins can diagnose quality
+ * regressions ("when did groundedness drop?", "is hybrid retrieval helping?")
+ * without re-running the LLM. Fields are optional because not every turn
+ * exercises every layer (smalltalk skips embed/retrieve, NO_CONTEXT skips
+ * generation, reflection only fires on grounded turns).
+ */
+export interface AnswerTelemetry {
+  /** "smalltalk" | "persona_fact" | "no_context" | "ungrounded" | "ok" */
+  path: "smalltalk" | "persona_fact" | "no_context" | "ungrounded" | "ok";
+  /** Number of milliseconds from `answerWithRag` entry to return. */
+  total_ms?: number;
+  /** Number of milliseconds spent in retrieval (embed + kb.search). */
+  retrieval_ms?: number;
+  /** Number of milliseconds spent in the main generator chat call. */
+  generation_ms?: number;
+  /** L2 distances (or fused ranks) of the top-k hits, in order. */
+  top_distances?: number[];
+  /** True when hybrid (BM25 + vector) was used instead of vector-only. */
+  hybrid?: boolean;
+  /** Original user question, when query was rewritten before retrieval. */
+  original_query?: string;
+  /** Rewritten search query, when different from `original_query`. */
+  rewritten_query?: string;
+  /** Reflection verdict (`grounded`) and reason, when reflection ran. */
+  reflect?: { grounded: boolean; reason?: string };
+}
+
 export interface AnswerResult {
   text: string;
   usedChunkIds: number[];
   hits: KbSearchHit[];
+  telemetry: AnswerTelemetry;
 }
 
 export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
+  const startedAt = Date.now();
   const activePersona: Persona =
     input.style != null
       ? {
@@ -392,6 +423,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       text: personaSmalltalkReply(activePersona),
       usedChunkIds: [],
       hits: [],
+      telemetry: { path: "smalltalk", total_ms: Date.now() - startedAt },
     };
   }
 
@@ -399,7 +431,12 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   if (factKey) {
     const factReply = personaFactReply(activePersona, factKey);
     if (factReply) {
-      return { text: factReply, usedChunkIds: [], hits: [] };
+      return {
+        text: factReply,
+        usedChunkIds: [],
+        hits: [],
+        telemetry: { path: "persona_fact", total_ms: Date.now() - startedAt },
+      };
     }
     // Fact not configured → fall through to RAG
   }
@@ -419,6 +456,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       })
     : input.question;
 
+  const retrievalStart = Date.now();
   const [questionVec] = await input.embedder.embed([searchQuery]);
   if (!questionVec) throw new Error("Embedder returned no vector for question");
 
@@ -432,9 +470,28 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     input.hybridSearch || input.maxDistance === undefined
       ? allHits
       : allHits.filter((h) => h.distance <= input.maxDistance!);
+  const retrievalMs = Date.now() - retrievalStart;
+
+  // Telemetry common to every retrieval-based path. Distances are rounded to
+  // 4 decimals to keep meta_json readable in admin dumps; precision past 4
+  // decimals isn't useful for diagnosis.
+  const baseTelemetry: AnswerTelemetry = {
+    path: "ok",
+    retrieval_ms: retrievalMs,
+    top_distances: hits.map((h) => Math.round(h.distance * 10000) / 10000),
+    ...(input.hybridSearch ? { hybrid: true } : {}),
+    ...(searchQuery !== input.question
+      ? { original_query: input.question, rewritten_query: searchQuery }
+      : {}),
+  };
 
   if (hits.length === 0) {
-    return { text: NO_CONTEXT_MARKER, usedChunkIds: [], hits: [] };
+    return {
+      text: NO_CONTEXT_MARKER,
+      usedChunkIds: [],
+      hits: [],
+      telemetry: { ...baseTelemetry, path: "no_context", total_ms: Date.now() - startedAt },
+    };
   }
 
   const context = hits
@@ -469,11 +526,18 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     { role: "user", content: input.question },
   ];
 
+  const generationStart = Date.now();
   const raw = await input.chat.complete(messages, {
     temperature,
     ...(input.numPredict !== undefined ? { numPredict: input.numPredict } : {}),
   });
   const text = sanitizeLlmOutput(raw);
+  const generationMs = Date.now() - generationStart;
+
+  const telemetry: AnswerTelemetry = {
+    ...baseTelemetry,
+    generation_ms: generationMs,
+  };
 
   // If the generator returned the NO_CONTEXT marker, don't waste an LLM call
   // verifying it — pass through unchanged.
@@ -484,6 +548,9 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       context,
       chat: input.chat,
     });
+    telemetry.reflect = verdict.grounded
+      ? { grounded: true }
+      : { grounded: false, ...(verdict.reason ? { reason: verdict.reason } : {}) };
     if (!verdict.grounded) {
       console.warn(
         `[reflect] dropping ungrounded answer: ${verdict.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
@@ -492,14 +559,20 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
         text: NO_CONTEXT_MARKER,
         usedChunkIds: hits.map((h) => h.chunk_id),
         hits,
+        telemetry: { ...telemetry, path: "ungrounded", total_ms: Date.now() - startedAt },
       };
     }
+  }
+
+  if (text === NO_CONTEXT_MARKER) {
+    telemetry.path = "no_context";
   }
 
   return {
     text,
     usedChunkIds: hits.map((h) => h.chunk_id),
     hits,
+    telemetry: { ...telemetry, total_ms: Date.now() - startedAt },
   };
 }
 

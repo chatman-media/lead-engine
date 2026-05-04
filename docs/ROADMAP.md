@@ -37,10 +37,8 @@ All four default OFF — turn on one at a time and watch metrics on a small slic
 #### ~~1. Hybrid retrieval (BM25 + vector + RRF fusion)~~ ✅ done
 Migration 005 added FTS5 + sync triggers; `KbRepo.hybridSearch` does RRF fusion over vector + BM25; opt-in via `RAG_HYBRID_SEARCH=true`. Note: FTS5 prefix matching is forward-only — Russian morphology is partially covered (query "виз" hits "виза"/"визу"/"визой", but reverse direction needs a stemmer). The vector side bridges this gap end-to-end.
 
-#### 2. Memory-aware fact extraction (don't re-extract known data)
-**Why now:** the current extractor sees ALL messages each run. After 50 messages it re-confirms the same facts every turn.
-**How:** the `lastExtractedFromMsgId` cursor is already in place — pass only the slice since the cursor to the extractor (already done in webhook). Add a hard cap on slice size (last 8 messages max) so the extraction call stays cheap on long chats.
-**Estimated lift:** ~70% cheaper extraction on long conversations, same accuracy.
+#### ~~2. Memory-aware fact extraction (don't re-extract known data)~~ ✅ done
+[`runMemoryExtraction`](src/telegram/webhook.ts) hard-caps the slice at 16 messages tail (constant `MAX_EXTRACTION_SLICE`). The cursor still advances to the last RAW fresh message id (not the slice end) so skipped older messages don't re-enter on the next turn. Combined with the `existingFacts` parameter the LLM already sees, extraction cost is now O(1) per turn regardless of chat length.
 
 #### ~~3. Operator-visible memory pane in admin UI~~ ✅ done
 `MemoryPane` component on the chat page (collapsible, top of messages area). `PATCH /admin/api/users/:id/memory` writes operator-edited facts wholesale (no merge — operator is authoritative over extractor mistakes). `GET /admin/api/conversations/:id` now includes `memory` field. Files: [`admin-ui/src/components/MemoryPane.tsx`](admin-ui/src/components/MemoryPane.tsx), [`src/admin/api.ts`](src/admin/api.ts) (`createUpdateUserMemoryHandler`), [`src/db/repos/users.ts`](src/db/repos/users.ts) (`setMemoryFacts`).
@@ -49,10 +47,8 @@ Migration 005 added FTS5 + sync triggers; `KbRepo.hybridSearch` does RRF fusion 
 
 ### Tier 2 — medium impact, medium complexity
 
-#### 4. Per-message confidence telemetry
-**Why now:** when the bot starts giving worse answers, there's no signal to localize the regression — retrieval, generation, or reflection?
-**How:** persist per-turn metrics in `messages.meta_json`: top-k distances, query-rewrite delta, reflection verdict + reason, latency per stage. Expose in the admin conversation view as a debug panel.
-**Estimated lift:** quality regressions become diagnosable in minutes instead of hours.
+#### ~~4. Per-message confidence telemetry~~ ✅ done
+`AnswerResult.telemetry` ([src/rag/answer.ts](src/rag/answer.ts)) — every turn captures `path` (smalltalk / persona_fact / no_context / ungrounded / ok), `total_ms` / `retrieval_ms` / `generation_ms`, `top_distances` (top-k KB hit distances rounded to 4dp), `hybrid` flag, `original_query` + `rewritten_query` when rewrite changed the search query, `reflect` verdict + reason. Webhook persists this in `messages.meta_json.telemetry` alongside `used_chunk_ids`. Admin UI: DEBUG toggle in chat header reveals a one-line `TelemetryStrip` under each assistant message — color-coded by path (green=ok, amber=no_context, red=ungrounded).
 
 #### 5. Conversation summarization (token budget for long chats)
 **Why now:** `recentForContext(conv.id, 12)` is a fixed window. Once a conversation is 50+ messages, the LLM loses context from turns 1–38. The user-memory layer covers facts but not nuance ("we discussed apartment options last week").

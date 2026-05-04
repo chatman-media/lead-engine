@@ -4,6 +4,7 @@ import {
   api,
   type Conversation,
   type Message,
+  type MessageTelemetry,
   type User,
   type UserMemory,
 } from "../api.ts";
@@ -42,6 +43,10 @@ export function Chat() {
   const [memory, setMemory] = useState<UserMemory | null>(null);
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
+  // Debug toggle: when on, each assistant/human message gets a small
+  // telemetry strip beneath it (path, latencies, distances, reflect verdict).
+  // Off by default — most operators only want the conversation view.
+  const [debug, setDebug] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   function reload() {
@@ -213,6 +218,15 @@ export function Chat() {
             </button>
           )}
 
+          <button
+            onClick={() => setDebug((d) => !d)}
+            data-testid="debug-toggle"
+            title="Показать диагностику ответов бота: путь, латентности, расстояния KB, reflect-вердикт"
+            style={actionBtnStyle(debug ? "var(--amber)" : "var(--text-3)")}
+          >
+            {debug ? "DEBUG ON" : "DEBUG"}
+          </button>
+
           <a
             href={api.conversationExportUrl(convId)}
             download={`conversation-${convId}.jsonl`}
@@ -303,6 +317,7 @@ export function Chat() {
                 {tsShort(m.created_at)}
               </span>
             </div>
+            {debug && <TelemetryStrip message={m} />}
           </div>
         ))}
         <div ref={bottomRef} />
@@ -362,6 +377,77 @@ export function Chat() {
           >
             SEND
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One-line diagnostic strip rendered under each message when debug is on.
+ * Reads `message.meta_json` (set by webhook on assistant replies) and
+ * surfaces only the parts an operator actually uses for diagnosis: which
+ * code path the answer took, latencies per stage, top-k retrieval distances,
+ * the rewritten query (if any), and reflection verdict (if any).
+ */
+function TelemetryStrip({ message }: { message: Message }) {
+  if (!message.meta_json) return null;
+  let parsed: { telemetry?: MessageTelemetry; used_chunk_ids?: number[] } = {};
+  try {
+    parsed = JSON.parse(message.meta_json);
+  } catch {
+    return null;
+  }
+  const t = parsed.telemetry;
+  if (!t) return null;
+
+  const pieces: string[] = [];
+  pieces.push(`path=${t.path}`);
+  if (t.total_ms !== undefined) pieces.push(`total=${t.total_ms}ms`);
+  if (t.retrieval_ms !== undefined) pieces.push(`retr=${t.retrieval_ms}ms`);
+  if (t.generation_ms !== undefined) pieces.push(`gen=${t.generation_ms}ms`);
+  if (t.hybrid) pieces.push("hybrid");
+  if (t.top_distances?.length) {
+    pieces.push(`d=[${t.top_distances.map((d) => d.toFixed(3)).join(", ")}]`);
+  }
+  if (t.reflect) {
+    pieces.push(
+      t.reflect.grounded
+        ? "reflect=ok"
+        : `reflect=FAIL${t.reflect.reason ? ` (${t.reflect.reason})` : ""}`,
+    );
+  }
+
+  const color =
+    t.path === "ungrounded"
+      ? "var(--red, #ef4444)"
+      : t.path === "no_context"
+        ? "var(--amber)"
+        : t.path === "ok"
+          ? "var(--green)"
+          : "var(--text-3)";
+
+  return (
+    <div
+      data-testid="telemetry-strip"
+      style={{
+        maxWidth: "72%",
+        marginTop: 4,
+        padding: "4px 8px",
+        fontFamily: "var(--mono)",
+        fontSize: 10,
+        color,
+        background: "var(--bg-2)",
+        border: "1px solid var(--border)",
+        borderRadius: 4,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+      }}
+    >
+      {pieces.join(" · ")}
+      {t.original_query !== undefined && (
+        <div style={{ marginTop: 2, color: "var(--text-3)" }}>
+          rewrite: {t.original_query} → {t.rewritten_query}
         </div>
       )}
     </div>

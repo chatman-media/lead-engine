@@ -31,6 +31,26 @@ export interface Message {
   text: string;
   tg_message_id: number | null;
   created_at: number;
+  /** Free-form per-message metadata. Set by the webhook when persisting
+   *  assistant replies — `used_chunk_ids` (KB hits used for the answer) and
+   *  `telemetry` (per-turn diagnostics: retrieval distances, latencies,
+   *  reflection verdict, …). The frontend treats this opaquely except
+   *  for the optional `telemetry` block surfaced in the debug panel. */
+  meta_json?: string | null;
+}
+
+/** Per-turn telemetry — mirrors `AnswerTelemetry` in src/rag/answer.ts.
+ *  Surfaced in the chat debug panel so operators can diagnose quality. */
+export interface MessageTelemetry {
+  path: "smalltalk" | "persona_fact" | "no_context" | "ungrounded" | "ok";
+  total_ms?: number;
+  retrieval_ms?: number;
+  generation_ms?: number;
+  top_distances?: number[];
+  hybrid?: boolean;
+  original_query?: string;
+  rewritten_query?: string;
+  reflect?: { grounded: boolean; reason?: string };
 }
 
 export interface UserMemory {

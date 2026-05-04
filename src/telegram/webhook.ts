@@ -447,10 +447,24 @@ async function runMemoryExtraction(d: ProcessInboundDeps): Promise<void> {
   const fresh = all.filter((m) => m.id > sinceId && (m.role === "user" || m.role === "assistant"));
   if (fresh.length === 0) return;
 
-  const slice = fresh.map((m) => ({
+  // Hard-cap the slice fed to the extractor. Without this, a candidate who
+  // hasn't been processed in a while (e.g. extractor was disabled then
+  // re-enabled, or the cursor got reset) hands the LLM 100+ messages in one
+  // call — slow, expensive, and the model loses precision past ~16 turns.
+  // Trimming to the most recent N messages keeps cost bounded; older facts
+  // are already accumulated in `stored.facts` from prior runs.
+  const MAX_EXTRACTION_SLICE = 16;
+  const slicedFresh =
+    fresh.length > MAX_EXTRACTION_SLICE
+      ? fresh.slice(-MAX_EXTRACTION_SLICE)
+      : fresh;
+
+  const slice = slicedFresh.map((m) => ({
     role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
     content: m.text,
   }));
+  // Cursor advances to the last RAW fresh message even when we trimmed —
+  // skipped older messages would otherwise be re-considered next turn.
   const lastId = fresh[fresh.length - 1]!.id;
 
   try {
@@ -512,7 +526,11 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     if (result.text !== NO_CONTEXT_MARKER) {
       d.conversations.setMode(d.conv.id, "ai");
       d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
-      await reply(result.text, { used_chunk_ids: result.usedChunkIds }, stage);
+      await reply(
+      result.text,
+      { used_chunk_ids: result.usedChunkIds, telemetry: result.telemetry },
+      stage,
+    );
       return;
     }
     return;
@@ -538,6 +556,10 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return;
   }
 
-  await reply(result.text, { used_chunk_ids: result.usedChunkIds }, stage);
+  await reply(
+      result.text,
+      { used_chunk_ids: result.usedChunkIds, telemetry: result.telemetry },
+      stage,
+    );
   await runMemoryExtraction(d);
 }
