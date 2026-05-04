@@ -16,12 +16,60 @@ export interface TgChat {
   username?: string;
 }
 
+/**
+ * One frame of a Telegram photo upload. Telegram delivers an array of
+ * sizes per photo (thumbnail / medium / original) — we record the
+ * largest for diagnostic purposes; counting is by message, not by size.
+ */
+export interface TgPhotoSize {
+  file_id: string;
+  file_unique_id: string;
+  width: number;
+  height: number;
+  file_size?: number;
+}
+
+export interface TgVideo {
+  file_id: string;
+  file_unique_id: string;
+  width: number;
+  height: number;
+  duration: number;
+  mime_type?: string;
+  file_size?: number;
+}
+
+export interface TgVoice {
+  file_id: string;
+  file_unique_id: string;
+  duration: number;
+  mime_type?: string;
+  file_size?: number;
+}
+
+export interface TgDocument {
+  file_id: string;
+  file_unique_id: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
+}
+
 export interface TgMessage {
   message_id: number;
   from?: TgUser;
   chat: TgChat;
   date: number;
   text?: string;
+  /** Caption that can accompany media uploads (photo / video / document /
+   *  voice). Treated as the message's "text" by the persistence layer
+   *  so RAG / extractors see the candidate's words. */
+  caption?: string;
+  /** Photo upload — present on photo messages, includes all delivered sizes. */
+  photo?: TgPhotoSize[];
+  video?: TgVideo;
+  voice?: TgVoice;
+  document?: TgDocument;
 }
 
 export interface TgCallbackQuery {

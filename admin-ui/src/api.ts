@@ -277,6 +277,12 @@ export const api = {
       method: "POST",
     }),
 
+  submitLeadToVisa: (id: number) =>
+    req<{ lead: Lead; application_id: string }>(
+      `/admin/api/leads/${id}/submit-to-visa`,
+      { method: "POST" },
+    ),
+
   deleteLead: (id: number) =>
     req<{ ok: boolean; deleted: number }>(`/admin/api/leads/${id}`, {
       method: "DELETE",
