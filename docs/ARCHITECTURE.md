@@ -23,6 +23,7 @@ POST /telegram/<secret>      ─┬─► users.byTgId / whitelist (TELEGRAM_OPE
                                                             │ users.getMemory       (RAG_USER_MEMORY)    │
                                                             │ conversations.getSummary (RAG_CONVERSATION_SUMMARY) │
                                                             │ rewriteQuery          (RAG_QUERY_REWRITE)  │
+                                                            │ classifyTopic         (RAG_TOPIC_ROUTING)  │
                                                             │ kb.hybridSearch       (RAG_HYBRID_SEARCH)  │
                                                             │ composeSystemPrompt                        │
                                                             │ chat.complete                              │
@@ -38,7 +39,7 @@ POST /telegram/<secret>      ─┬─► users.byTgId / whitelist (TELEGRAM_OPE
                                                               summarizeConversation → setSummary
 ```
 
-Все пять RAG-надстроек **опциональны** и независимы. Подробности в [RAG_LAYERS.md](RAG_LAYERS.md).
+Все шесть RAG-надстроек **опциональны** и независимы. Подробности в [RAG_LAYERS.md](RAG_LAYERS.md).
 
 ## Слои
 
@@ -143,7 +144,7 @@ WS `/admin/api/ws` стримит события в реальном време�
 | `users` | whitelisted Telegram-юзеры, `status` для воронки, `profile_json.memory.facts` для cross-session памяти |
 | `conversations` | одна на юзера, `mode` ∈ ai/queued/human, `current_stage`, `style_id`+`experiment_id` (A/B-сtiky), `summary_json` (long-conversation summary) |
 | `messages` | `role` ∈ user/assistant/human/system, idempotent по `tg_message_id`, `meta_json` для `used_chunk_ids`, `stage` для funnel-аналитики |
-| `kb_documents` | source файлы для RAG, dedup по `content_hash` |
+| `kb_documents` | source файлы для RAG, dedup по `content_hash`, optional `topic` тег для topic-routed retrieval |
 | `kb_chunks` | чанки ≈1500 символов с overlap 150 |
 | `kb_vec` | vector index (sqlite-vec, dim из конфига) |
 | `kb_chunks_fts` | BM25 keyword index (FTS5, unicode61 tokenizer) — синхронизирован триггерами |
@@ -156,7 +157,7 @@ WS `/admin/api/ws` стримит события в реальном време�
 
 - [README.md](../README.md) — настройка, env, провайдеры, CLI, KB pipeline, full setup guide
 - [docs/ARCHITECTURE.md](ARCHITECTURE.md) — этот файл, общая навигация
-- [docs/RAG_LAYERS.md](RAG_LAYERS.md) — пять опциональных надстроек (hybrid, memory, rewrite, reflect, summary): зачем, как, цена, тесты
+- [docs/RAG_LAYERS.md](RAG_LAYERS.md) — шесть опциональных надстроек (hybrid, memory, rewrite, reflect, summary, topic routing): зачем, как, цена, тесты
 - [docs/SALES_STYLES.md](SALES_STYLES.md) — sales-style engine: схема Style, A/B testing, integration с RAG
 - [docs/ROADMAP.md](ROADMAP.md) — что сделано, что в очереди (Tier 1/2/3 по ROI)
 

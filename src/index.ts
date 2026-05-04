@@ -123,6 +123,7 @@ if (llmIsConfigured()) {
     reflect: config.rag.reflect,
     hybridSearch: config.rag.hybridSearch,
     conversationSummary: config.rag.conversationSummary,
+    topicRouting: config.rag.topicRouting,
   };
 
   if (config.rag.userMemory) console.log(`[server] cross-session user memory: ON`);
@@ -130,6 +131,7 @@ if (llmIsConfigured()) {
   if (config.rag.reflect) console.log(`[server] answer reflection: ON`);
   if (config.rag.hybridSearch) console.log(`[server] hybrid retrieval (BM25+vector+RRF): ON`);
   if (config.rag.conversationSummary) console.log(`[server] conversation summarization: ON`);
+  if (config.rag.topicRouting) console.log(`[server] topic-routed retrieval: ON`);
 
   if (config.sales.stageClassifier === "llm") {
     console.log(

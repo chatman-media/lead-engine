@@ -2,7 +2,7 @@
 
 ## What just landed
 
-Five layers were added on top of the existing RAG+persona+funnel pipeline. All are **opt-in via env flags** — defaults are off so existing deployments are unaffected.
+Six layers were added on top of the existing RAG+persona+funnel pipeline. All are **opt-in via env flags** — defaults are off so existing deployments are unaffected.
 
 | Feature | Env flag | What it does | Cost per turn |
 |---------|----------|--------------|---------------|
@@ -11,8 +11,9 @@ Five layers were added on top of the existing RAG+persona+funnel pipeline. All a
 | Reflection | `RAG_REFLECT=true` | After generation, verifies every fact in the answer is grounded in CONTEXT; ungrounded answers become `NO_CONTEXT_MARKER` (silent) | +1 LLM call on grounded turns |
 | Hybrid retrieval | `RAG_HYBRID_SEARCH=true` | BM25 (FTS5) + vector + RRF fusion; catches exact-match queries (numbers, proper nouns) that pure embeddings misrank | 0 extra LLM calls (1 extra SQL FTS5 query) |
 | Conversation summarization | `RAG_CONVERSATION_SUMMARY=true` | Compresses old turns of long chats into a paragraph stored in `conversations.summary_json`, injected as "ИЗ РАННЕЙ ПЕРЕПИСКИ" | +1 LLM call only when summary is stale (every ~8 messages on long chats) |
+| Topic-routed retrieval | `RAG_TOPIC_ROUTING=true` | Regex classifier maps the question to a topic (visa / payment / schedule / housing / locations / application); KB search filters by `kb_documents.topic`. Falls back to global on ambiguous or zero-hit | 0 extra LLM calls (regex classifier) |
 
-All five default OFF — turn on one at a time and watch metrics on a small slice of traffic before enabling globally.
+All six default OFF — turn on one at a time and watch metrics on a small slice of traffic before enabling globally.
 
 ### Files added
 - [`src/rag/extract-user-facts.ts`](src/rag/extract-user-facts.ts) — fact-extraction LLM wrapper
@@ -54,10 +55,8 @@ Migration 005 added FTS5 + sync triggers; `KbRepo.hybridSearch` does RRF fusion 
 #### ~~5. Conversation summarization (token budget for long chats)~~ ✅ done
 Migration 006 adds `conversations.summary_json`. [`summarizeConversation`](src/rag/summarize-conversation.ts) compresses old turns into a paragraph; webhook reads stored summary into the system prompt as "ИЗ РАННЕЙ ПЕРЕПИСКИ:" and refreshes lazily after each reply (fire-and-forget). Thresholds: kicks in past 30 total messages, refreshes when 8 messages drift past the last summarized id, refines existing summary instead of regenerating from scratch. Opt-in via `RAG_CONVERSATION_SUMMARY=true`.
 
-#### 6. Multi-vector retrieval (separate KB indexes per topic)
-**Why now:** one global KB for visa info + payment info + city info means embeddings are crowded. Topic-specific routing reduces noise.
-**How:** tag KB documents at ingest time (`source: "visa"`, `source: "payment"`). At query time, classify the question (regex or small LLM) and search only the relevant index.
-**Estimated lift:** +5–15% precision; faster too (smaller indexes).
+#### ~~6. Multi-vector retrieval (separate KB indexes per topic)~~ ✅ done
+Migration 007 adds `kb_documents.topic`. [`KbRepo.search` / `searchBm25` / `hybridSearch`](src/db/repos/kb.ts) accept optional `topic` filter (NULL-topic docs always pass — back-compat). [`classifyTopic`](src/rag/topic-classifier.ts) is a deterministic regex over Cyrillic + Latin (visa / payment / schedule / housing / locations / application). [`answerWithRag`](src/rag/answer.ts) routes via topic when `topicRouting=true`, falling back to global on classifier null OR zero topic-filtered hits — never reduces recall. Ingest CLI: `--topic SLUG` flag tags every doc, OR put files under `kb/curated/<topic>/*.md` and the immediate sub-directory becomes the topic automatically. Opt-in via `RAG_TOPIC_ROUTING=true`. Telemetry surfaces the chosen topic via `meta_json.telemetry.topic`.
 
 ---
 

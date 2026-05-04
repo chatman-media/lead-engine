@@ -208,6 +208,100 @@ describe("reciprocalRankFusion", () => {
   });
 });
 
+describe("topic-filtered search", () => {
+  function seedTopical() {
+    const doc1 = kb.upsertDocument({
+      source: "kb://visa/v1",
+      title: "v1",
+      contentHash: "hv1",
+      topic: "visa",
+    });
+    const doc2 = kb.upsertDocument({
+      source: "kb://payment/p1",
+      title: "p1",
+      contentHash: "hp1",
+      topic: "payment",
+    });
+    const doc3 = kb.upsertDocument({
+      source: "kb://untagged/u1",
+      title: "u1",
+      contentHash: "hu1",
+    });
+    const visaChunk = kb.insertChunkWithEmbedding({
+      documentId: doc1.id,
+      chunkIndex: 0,
+      text: "Виза оформляется на 30 дней",
+      tokenCount: 5,
+      embedding: vec(1),
+    });
+    const paymentChunk = kb.insertChunkWithEmbedding({
+      documentId: doc2.id,
+      chunkIndex: 0,
+      text: "Платят 1500 в день",
+      tokenCount: 4,
+      embedding: vec(2),
+    });
+    const untaggedChunk = kb.insertChunkWithEmbedding({
+      documentId: doc3.id,
+      chunkIndex: 0,
+      text: "Общая информация про работу",
+      tokenCount: 4,
+      embedding: vec(3),
+    });
+    return {
+      visaChunkId: visaChunk.id,
+      paymentChunkId: paymentChunk.id,
+      untaggedChunkId: untaggedChunk.id,
+    };
+  }
+
+  test("vector search filters out docs from other topics", () => {
+    const ids = seedTopical();
+    const hits = kb.search(vec(2), 10, "visa");
+    const found = hits.map((h) => h.chunk_id);
+    expect(found).toContain(ids.visaChunkId);
+    expect(found).toContain(ids.untaggedChunkId); // NULL topic always passes
+    expect(found).not.toContain(ids.paymentChunkId);
+  });
+
+  test("BM25 search filters out docs from other topics", () => {
+    const ids = seedTopical();
+    // Query "общ" matches the untagged chunk ("Общая ..."). "Платят" /
+    // "оформ" cover payment / visa chunks respectively for the prefix
+    // matcher.
+    const hits = kb.searchBm25("оформляется общ", 10, "visa");
+    const found = hits.map((h) => h.chunk_id);
+    expect(found).toContain(ids.visaChunkId);
+    expect(found).toContain(ids.untaggedChunkId);
+    expect(found).not.toContain(ids.paymentChunkId);
+  });
+
+  test("topic=null behaves as no filter (back-compat)", () => {
+    seedTopical();
+    const all = kb.search(vec(1), 10);
+    const filtered = kb.search(vec(1), 10, null);
+    expect(filtered.length).toBe(all.length);
+  });
+
+  test("hybridSearch passes topic to both sides", () => {
+    const ids = seedTopical();
+    const hits = kb.hybridSearch({
+      embedding: vec(2),
+      query: "работа",
+      k: 10,
+      topic: "visa",
+    });
+    const found = hits.map((h) => h.chunk_id);
+    expect(found).not.toContain(ids.paymentChunkId);
+  });
+
+  test("upsertDocument persists the topic and search returns it correctly", () => {
+    const ids = seedTopical();
+    const hits = kb.searchBm25("Виза", 5, "visa");
+    expect(hits[0]!.chunk_id).toBe(ids.visaChunkId);
+  });
+});
+
 describe("KbRepo.hybridSearch", () => {
   test("falls back to vector-only when BM25 has no hits", () => {
     const ids = seedDocs();

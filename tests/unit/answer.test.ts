@@ -286,6 +286,34 @@ describe("answerWithRag", () => {
     expect(result.text).toContain("INFINITY");
     expect(result.usedChunkIds).toEqual([]);
     expect(result.hits).toEqual([]);
+    // Em-dashes are post-processed away even on the shortcut path:
+    // env-configured persona / company values can smuggle unicode in.
+    expect(result.text).not.toContain("—");
+    expect(result.text).not.toContain("–");
+  });
+
+  test("smalltalk reply varies across calls (no fixed scripted tail)", async () => {
+    // 30 calls — with a 6-element tail pool the chance all match the same
+    // reply is ~6 * (1/6)^30 ≈ 1.6e-23. Even with 4-element pool it's safe.
+    const persona = {
+      name: "Алина",
+      role: "human" as const,
+      company: "INFINITY AGENCY",
+    };
+    const seen = new Set<string>();
+    for (let i = 0; i < 30; i++) {
+      const embedder = fakeEmbedder({});
+      const chat = fakeChat("never");
+      const result = await answerWithRag({
+        question: "как тебя зовут?",
+        kb,
+        embedder,
+        chat,
+        persona,
+      });
+      seen.add(result.text);
+    }
+    expect(seen.size).toBeGreaterThan(1);
   });
 
   test("persona-only with sales style: uses style persona name", async () => {
@@ -449,6 +477,67 @@ describe("answerWithRag", () => {
     });
     const sys = chat.lastMessages?.[0]?.content ?? "";
     expect(sys).not.toContain("ИЗ РАННЕЙ ПЕРЕПИСКИ");
+  });
+
+  test("topicRouting=true filters retrieval to classified topic, falls back when no match", async () => {
+    const visaDoc = kb.upsertDocument({
+      source: "kb://v",
+      title: "v",
+      contentHash: "v",
+      topic: "visa",
+    });
+    const paymentDoc = kb.upsertDocument({
+      source: "kb://p",
+      title: "p",
+      contentHash: "p",
+      topic: "payment",
+    });
+    const visaChunk = kb.insertChunkWithEmbedding({
+      documentId: visaDoc.id,
+      chunkIndex: 0,
+      text: "Виза 30 дней",
+      tokenCount: 3,
+      embedding: vec(1),
+    });
+    kb.insertChunkWithEmbedding({
+      documentId: paymentDoc.id,
+      chunkIndex: 0,
+      text: "1500 в день",
+      tokenCount: 3,
+      embedding: vec(2),
+    });
+
+    const embedder = fakeEmbedder({ "какая виза нужна?": vec(2) });
+    const chat = fakeChat("ok");
+
+    const result = await answerWithRag({
+      question: "какая виза нужна?",
+      kb,
+      embedder,
+      chat,
+      topK: 5,
+      topicRouting: true,
+    });
+    // Even though embedding seed favors payment chunk, topic filter
+    // restricts to visa-tagged docs → only visa chunk is returned.
+    expect(result.usedChunkIds).toContain(visaChunk.id);
+    expect(result.usedChunkIds).not.toContain(paymentDoc.id);
+    expect(result.telemetry.topic).toBe("visa");
+  });
+
+  test("topicRouting falls back to global when classifier returns null", async () => {
+    seed();
+    const embedder = fakeEmbedder({ "привет": vec(1) });
+    const chat = fakeChat("Reply text");
+    const result = await answerWithRag({
+      question: "привет", // doesn't match any topic
+      kb,
+      embedder,
+      chat,
+      topicRouting: true,
+    });
+    expect(result.text).toBe("Reply text");
+    expect(result.telemetry.topic).toBeUndefined();
   });
 
   test("hybridSearch=true uses BM25+vector fusion for retrieval", async () => {

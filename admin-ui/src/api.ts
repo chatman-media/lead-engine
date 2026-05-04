@@ -59,6 +59,69 @@ export interface UserMemory {
   updatedAt?: number;
 }
 
+export interface ConversationSummary {
+  summary: string;
+  summarizedThroughMsgId: number;
+  updatedAt: number;
+}
+
+export interface Vacancy {
+  id: number;
+  title: string;
+  body: string;
+  is_active: 0 | 1;
+  created_at: number;
+  updated_at: number;
+}
+
+/** Mirror of the GET /admin/api/status response — see src/admin/api.ts. */
+export interface SystemStatus {
+  rag: {
+    userMemory: boolean;
+    queryRewrite: boolean;
+    reflect: boolean;
+    hybridSearch: boolean;
+    conversationSummary: boolean;
+    topicRouting: boolean;
+    topK: number;
+    maxDistance: number | null;
+  };
+  providers: {
+    chat: { provider: string; model: string };
+    embed: { provider: string; model: string; dim: number };
+  };
+  routing: {
+    mode: "env_override" | "running_experiment" | "legacy_persona" | "none";
+    active_style_slug: string | null;
+    running_experiment_slug: string | null;
+    legacy_persona: { name: string; role: string; company: string | null } | null;
+    stage_classifier: "regex" | "llm";
+  };
+  kb: {
+    documents: number;
+    chunks: number;
+    by_topic: Array<{ topic: string | null; documents: number; chunks: number }>;
+    styles: number;
+  };
+  conversations: {
+    total: number;
+    by_mode: Record<string, number>;
+    with_summary: number;
+  };
+  users: {
+    total: number;
+    by_status: Record<string, number>;
+    with_memory: number;
+  };
+  messages: {
+    total: number;
+    by_role: Record<string, number>;
+  };
+  vacancies: {
+    active: number;
+  };
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -117,7 +180,32 @@ export const api = {
       user: User;
       messages: Message[];
       memory: UserMemory;
+      summary: ConversationSummary | null;
     }>(`/admin/api/conversations/${id}`),
+
+  status: () => req<SystemStatus>("/admin/api/status"),
+
+  vacancies: () => req<{ vacancies: Vacancy[] }>("/admin/api/vacancies"),
+
+  createVacancy: (input: { title: string; body: string; is_active?: boolean }) =>
+    req<{ vacancy: Vacancy }>("/admin/api/vacancies", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  updateVacancy: (
+    id: number,
+    patch: { title?: string; body?: string; is_active?: boolean },
+  ) =>
+    req<{ vacancy: Vacancy }>(`/admin/api/vacancies/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deleteVacancy: (id: number) =>
+    req<{ ok: boolean; deleted: number }>(`/admin/api/vacancies/${id}`, {
+      method: "DELETE",
+    }),
 
   updateUserMemory: (userId: number, facts: Record<string, string>) =>
     req<{ memory: UserMemory }>(`/admin/api/users/${userId}/memory`, {

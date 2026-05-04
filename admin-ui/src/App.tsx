@@ -13,9 +13,11 @@ import { Chats } from "./pages/Chats.tsx";
 import { Experiments } from "./pages/Experiments.tsx";
 import { Login } from "./pages/Login.tsx";
 import { NewStyle } from "./pages/NewStyle.tsx";
+import { Status } from "./pages/Status.tsx";
 import { StyleDetail } from "./pages/StyleDetail.tsx";
 import { Styles } from "./pages/Styles.tsx";
 import { Users } from "./pages/Users.tsx";
+import { Vacancies } from "./pages/Vacancies.tsx";
 import { AdminWs } from "./ws.ts";
 
 export const ws = new AdminWs();
@@ -74,15 +76,17 @@ export function App() {
           element={
             <AuthGate>
               <Routes>
-                <Route index element={<Navigate to="chats" replace />} />
+                <Route index element={<Navigate to="status" replace />} />
+                <Route path="status" element={<Status />} />
                 <Route path="chats" element={<Chats />} />
                 <Route path="chats/:id" element={<Chat />} />
                 <Route path="users" element={<Users />} />
+                <Route path="vacancies" element={<Vacancies />} />
                 <Route path="styles" element={<Styles />} />
                 <Route path="styles/new" element={<NewStyle />} />
                 <Route path="styles/:id" element={<StyleDetail />} />
                 <Route path="experiments" element={<Experiments />} />
-                <Route path="*" element={<Navigate to="chats" replace />} />
+                <Route path="*" element={<Navigate to="status" replace />} />
               </Routes>
             </AuthGate>
           }

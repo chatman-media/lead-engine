@@ -1,6 +1,6 @@
 # RAG layers
 
-Пять опциональных надстроек над базовым `RAG = embed → kb.search → LLM` пайплайном. Каждая решает одну конкретную проблему «vanilla RAG», все включаются независимыми env-флагами, по умолчанию выключены.
+Шесть опциональных надстроек над базовым `RAG = embed → kb.search → LLM` пайплайном. Каждая решает одну конкретную проблему «vanilla RAG», все включаются независимыми env-флагами, по умолчанию выключены.
 
 ## Зачем это нужно
 
@@ -13,6 +13,7 @@
 | «А там?» / «и сколько?» — vector search на одном слове промахивается | **Query rewriting** |
 | LLM выдумывает цифры/города, которых нет в KB | **Reflection** |
 | В длинных диалогах теряется контекст из turn'ов 1–N (recent window = 12) | **Conversation summarization** |
+| KB растёт, embeddings смешивают темы (visa/payment/locations/...) — precision падает | **Topic-routed retrieval** |
 
 Все слои вместе превращают «AI assistant» tier (по таксономии arxiv:2601.12560) в нижний слой «Agentic AI» — без monolithic-→-multi-agent рефакторинга и при том же количестве кода.
 
@@ -264,6 +265,68 @@ processInbound → reply → fire-and-forget runConversationSummaryRefresh
 
 ---
 
+---
+
+## 6. Topic-routed retrieval — `RAG_TOPIC_ROUTING=true`
+
+### Проблема
+
+Когда KB растёт за 30+ документов, embeddings всё хуже разделяют темы. На запрос "виза 30 дней" может всплыть chunk про "сроки контракта в Дубае" — семантически близкий, но не то что спросили. На "сколько платят в Стамбуле" приходит "общая информация про работу" из несвязанной заметки. Эту проблему называют "embedding crowding": в едином пространстве близких по смыслу документов precision падает быстрее чем растёт recall.
+
+### Решение
+
+Тегируем документы темой при ingest, классифицируем вопрос регекспом, фильтруем поиск по тегу. **Никаких LLM-вызовов** — классификатор полностью deterministic.
+
+```
+question → classifyTopic (regex) ─┐
+                                   │
+                                   ├── matched 1 topic? → kb.search(vec, k, topic=visa)
+                                   │                       │
+                                   │                       └── 0 hits? → fallback: kb.search(vec, k) (global)
+                                   │
+                                   └── 0 or 2+ matches? → kb.search(vec, k) (global, no filter)
+```
+
+Никогда не уменьшает recall — fallback на global search срабатывает когда:
+- классификатор не уверен (нет/несколько матчей)
+- topic-фильтр вернул 0 хитов
+
+NULL-topic документы всегда проходят фильтр — back-compat для legacy untagged корпусов.
+
+### Архитектура
+
+- Миграция: [migrations/007_kb_topic.sql](migrations/007_kb_topic.sql) — `ALTER TABLE kb_documents ADD COLUMN topic TEXT` + partial index
+- Классификатор: [src/rag/topic-classifier.ts](src/rag/topic-classifier.ts) — `classifyTopic(q)` возвращает slug или null. 6 тем по умолчанию: `visa`, `payment`, `schedule`, `housing`, `locations`, `application`. Cyrillic-aware (Unicode property lookbehind, не `\b`)
+- KB search: [src/db/repos/kb.ts](src/db/repos/kb.ts) — `search(vec, k, topic?)`, `searchBm25(query, k, topic?)`, `hybridSearch({..., topic})`
+- Ingest: [`scripts/ingest.ts`](scripts/ingest.ts) поддерживает `--topic SLUG` или авто-derives из директории (`kb/curated/visa/foo.md` → topic=visa). См. [`deriveTopicFromPath`](src/rag/ingest.ts)
+
+### Цена
+
+- **0 LLM-вызовов** — классификатор это regex, sub-ms
+- При hybrid search: топик фильтрует обе стороны (vector + BM25)
+- Для vector index — over-fetch 3*k и фильтр после (sqlite-vec не комбинирует MATCH с произвольным WHERE)
+
+### Как добавить новые темы
+
+В [`topic-classifier.ts`](src/rag/topic-classifier.ts) добавь блок в `TOPIC_PATTERNS`. Например для темы `interview`:
+
+```ts
+{
+  topic: "interview",
+  pattern: new RegExp(`${NW}(собеседован|интервью|interview|видео-?звон)`, "iu"),
+}
+```
+
+Slug должен совпадать с тегом, который ты используешь при ingest (директория или `--topic`). Тесты в [tests/unit/topic-classifier.test.ts](../tests/unit/topic-classifier.test.ts).
+
+### Что важно
+
+- Классификатор **намеренно консервативен**: при amb iguity (несколько тем) возвращает null. Лучше пропустить routing, чем форсить не ту тему.
+- Telemetry: когда topic применился, в `meta_json.telemetry.topic` будет slug. В DEBUG-панели админки видно — операторы могут диагностировать "почему RAG промахнулся" по этому полю.
+- Fallback на global retrieval гарантирует **monotonic recall** — включение этого слоя не уменьшает что бот находил раньше, только улучшает precision когда классификация надёжна.
+
+---
+
 ## Все вместе
 
 ```
@@ -297,10 +360,11 @@ refresh summary if stale → setSummary
 ## Рекомендованный порядок включения
 
 1. **Сначала** `RAG_HYBRID_SEARCH=true` — нет LLM-цены, нет риска извлечения, чистый upgrade retrieval.
-2. **Потом** `RAG_USER_MEMORY=true` — посмотри неделю на extraction quality в админке, поправь явные ошибки.
-3. **Потом** `RAG_QUERY_REWRITE=true` — особенно если у тебя длинные follow-up диалоги.
-4. **Потом** `RAG_REFLECT=true` — это самый дорогой слой (по латентности — удваивает время до ответа).
-5. **Если есть длинные диалоги (>30 turn'ов)** — `RAG_CONVERSATION_SUMMARY=true`. Не нужно если все чаты короткие.
+2. **Если KB > 30 документов и темы делятся чисто** — `RAG_TOPIC_ROUTING=true`. Тоже нет LLM-цены. Сначала тегируй документы (`--topic` или директории), потом включай флаг.
+3. **Потом** `RAG_USER_MEMORY=true` — посмотри неделю на extraction quality в админке, поправь явные ошибки.
+4. **Потом** `RAG_QUERY_REWRITE=true` — особенно если у тебя длинные follow-up диалоги.
+5. **Потом** `RAG_REFLECT=true` — это самый дорогой слой (по латентности — удваивает время до ответа).
+6. **Если есть длинные диалоги (>30 turn'ов)** — `RAG_CONVERSATION_SUMMARY=true`. Не нужно если все чаты короткие.
 
 Если включаешь все пять сразу: суммарная стоимость ≈ +2.6 LLM-вызова на средний turn (rewrite — на 25% turns, reflect — на 80% grounded turns, memory extraction — на каждом turn но after-reply, summary refresh — раз в ~8 turns на длинных чатах). Только reflect добавляет к latency до отправки — остальные либо after-reply, либо до retrieval (быстрая модель за <500ms).
 
@@ -335,3 +399,4 @@ refresh summary if stale → setSummary
 | Reflect | [tests/unit/reflect.test.ts](../tests/unit/reflect.test.ts) | parse, fail-open, skip empty answer/context |
 | Telemetry | [tests/unit/answer.test.ts](../tests/unit/answer.test.ts) | path tags, latencies, top_distances, hybrid marker, rewrite passthrough |
 | Summary | [tests/unit/summarize-conversation.test.ts](../tests/unit/summarize-conversation.test.ts) + [tests/unit/db.test.ts](../tests/unit/db.test.ts) + [tests/unit/answer.test.ts](../tests/unit/answer.test.ts) | clean parsing, refine-mode prompt, repo round-trip, prompt injection (legacy + sales) |
+| Topic routing | [tests/unit/topic-classifier.test.ts](../tests/unit/topic-classifier.test.ts) + [tests/unit/hybrid-search.test.ts](../tests/unit/hybrid-search.test.ts) + [tests/unit/ingest.test.ts](../tests/unit/ingest.test.ts) + [tests/unit/answer.test.ts](../tests/unit/answer.test.ts) | classifier (Cyrillic + word boundaries + ambiguity), KbRepo topic filter, ingest topic-from-path, end-to-end routing fallback |

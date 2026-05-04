@@ -18,6 +18,7 @@ import type { ChatClient } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
 import { extractUserFacts } from "../rag/extract-user-facts.ts";
 import { summarizeConversation } from "../rag/summarize-conversation.ts";
+import { renderVacanciesBlock, VacanciesRepo } from "../db/repos/vacancies.ts";
 import { pickVariant } from "../sales/ab-router.ts";
 import { classifyStage } from "../sales/stage-classifier.ts";
 import { nextStage } from "../sales/stage-router.ts";
@@ -43,6 +44,8 @@ export interface RagDeps {
   reflect?: boolean;
   /** Hybrid BM25+vector retrieval with RRF fusion — see `answerWithRag.hybridSearch`. */
   hybridSearch?: boolean;
+  /** Topic-routed retrieval — see `answerWithRag.topicRouting`. */
+  topicRouting?: boolean;
   /**
    * Conversation summarization for long chats: when total messages exceeds
    * `summaryStartThreshold` (default 30), older turns get compressed into a
@@ -112,6 +115,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
   const kb = new KbRepo(deps.db);
   const styles = new StylesRepo(deps.db);
   const experiments = new ExperimentsRepo(deps.db);
+  const vacancies = new VacanciesRepo(deps.db);
 
   return async ({ req, params }) => {
     if (params.secret !== deps.webhookSecret) {
@@ -200,6 +204,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       styles,
       experiments,
       users,
+      vacancies,
       telegram: deps.telegram,
       rag: deps.rag,
       conv,
@@ -246,6 +251,7 @@ interface ProcessInboundDeps {
   styles: StylesRepo;
   experiments: ExperimentsRepo;
   users: UsersRepo;
+  vacancies: VacanciesRepo;
   telegram: TelegramClient;
   rag?: RagDeps;
   conv: ConversationRow;
@@ -431,6 +437,10 @@ async function runRagForInbound(
     ? (d.conversations.getSummary(d.conv.id)?.summary ?? undefined)
     : undefined;
 
+  // Active vacancies (admin-managed). Fast SQL read on every turn.
+  // Empty when none configured — answerWithRag treats "" as "no block".
+  const vacanciesBlock = renderVacanciesBlock(d.vacancies.listActive());
+
   const result = await answerWithRag({
     question: d.text,
     kb: d.kb,
@@ -448,6 +458,8 @@ async function runRagForInbound(
     ...(d.rag.queryRewrite ? { rewriteQueryBeforeRetrieval: true } : {}),
     ...(d.rag.reflect ? { reflect: true } : {}),
     ...(d.rag.hybridSearch ? { hybridSearch: true } : {}),
+    ...(d.rag.topicRouting ? { topicRouting: true } : {}),
+    ...(vacanciesBlock ? { vacanciesBlock } : {}),
   });
   return { result, stage };
 }

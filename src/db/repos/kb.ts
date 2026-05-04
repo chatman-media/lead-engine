@@ -6,6 +6,10 @@ export interface KbDocumentRow {
   source: string;
   title: string;
   content_hash: string;
+  /** Optional thematic tag set at ingest time (visa / payment / locations /
+   *  ...). NULL on legacy untagged docs — they're returned unconditionally
+   *  by topic-filtered searches so back-compat is automatic. */
+  topic: string | null;
   created_at: number;
 }
 
@@ -34,6 +38,10 @@ export class KbRepo {
     source: string;
     title: string;
     contentHash: string;
+    /** Thematic tag (e.g. "visa", "payment"). NULL = untagged. Migration
+     *  007 adds the column; existing tagged docs keep their tag through
+     *  the unique-on-content_hash early-return below. */
+    topic?: string | null;
   }): KbDocumentRow {
     const existing = this.db
       .query<KbDocumentRow, [string, string]>(
@@ -42,12 +50,13 @@ export class KbRepo {
       )
       .get(input.source, input.contentHash);
     if (existing) return existing;
+    const topic = input.topic ?? null;
     const row = this.db
-      .query<KbDocumentRow, [string, string, string]>(
-        `INSERT INTO kb_documents (source, title, content_hash)
-         VALUES (?, ?, ?) RETURNING *`,
+      .query<KbDocumentRow, [string, string, string, string | null]>(
+        `INSERT INTO kb_documents (source, title, content_hash, topic)
+         VALUES (?, ?, ?, ?) RETURNING *`,
       )
-      .get(input.source, input.title, input.contentHash);
+      .get(input.source, input.title, input.contentHash, topic);
     if (!row) throw new Error("Failed to insert kb_document");
     return row;
   }
@@ -89,22 +98,54 @@ export class KbRepo {
     return chunk;
   }
 
-  search(embedding: number[], k = 5): KbSearchHit[] {
-    return this.db
-      .query<KbSearchHit, [Uint8Array, number]>(
+  search(embedding: number[], k = 5, topic?: string | null): KbSearchHit[] {
+    // The vector index returns chunks first; we then drop those whose
+    // document doesn't match the requested topic. Filtering AFTER `MATCH`
+    // is necessary because sqlite-vec's `MATCH` clause and arbitrary WHERE
+    // predicates can't be combined in one query — the engine needs `k`
+    // to do the KNN scan, and adding a topic filter would shrink the
+    // candidate pool unpredictably. Over-fetch (3*k) when a topic is set
+    // so we still hand back ~k useful hits after the filter.
+    if (topic == null) {
+      return this.db
+        .query<KbSearchHit, [Uint8Array, number]>(
+          `SELECT v.chunk_id AS chunk_id,
+                  v.distance AS distance,
+                  c.text AS text,
+                  c.document_id AS document_id,
+                  d.source AS source,
+                  d.title AS title
+           FROM kb_vec v
+           JOIN kb_chunks c ON c.id = v.chunk_id
+           JOIN kb_documents d ON d.id = c.document_id
+           WHERE v.embedding MATCH ? AND k = ?
+           ORDER BY v.distance ASC`,
+        )
+        .all(encodeVector(embedding), k);
+    }
+    const overFetched = this.db
+      .query<KbSearchHit & { topic: string | null }, [Uint8Array, number]>(
         `SELECT v.chunk_id AS chunk_id,
                 v.distance AS distance,
                 c.text AS text,
                 c.document_id AS document_id,
                 d.source AS source,
-                d.title AS title
+                d.title AS title,
+                d.topic AS topic
          FROM kb_vec v
          JOIN kb_chunks c ON c.id = v.chunk_id
          JOIN kb_documents d ON d.id = c.document_id
          WHERE v.embedding MATCH ? AND k = ?
          ORDER BY v.distance ASC`,
       )
-      .all(encodeVector(embedding), k);
+      .all(encodeVector(embedding), k * 3);
+    // Keep only docs tagged with the requested topic OR untagged
+    // (NULL topic acts as "neutral" — won't be excluded). Strip the
+    // `topic` field before returning so the row shape stays canonical.
+    return overFetched
+      .filter((h) => h.topic === topic || h.topic === null)
+      .slice(0, k)
+      .map(({ topic: _t, ...rest }) => rest);
   }
 
   /**
@@ -120,12 +161,18 @@ export class KbRepo {
    *   - FTS5 rejects the query as malformed (operator chars in user input)
    * In both cases hybridSearch falls through to vector-only retrieval.
    */
-  searchBm25(query: string, k = 5): KbSearchHit[] {
+  searchBm25(query: string, k = 5, topic?: string | null): KbSearchHit[] {
     const ftsQuery = sanitizeFtsQuery(query);
     if (!ftsQuery) return [];
+    // FTS5 plays well with extra WHERE clauses, so the topic filter goes
+    // straight into the SQL — no over-fetch needed (unlike the vector
+    // side which has the AND-with-MATCH limitation).
+    const topicWhere = topic == null ? "" : "AND (d.topic = ? OR d.topic IS NULL)";
+    const params: Array<string | number> =
+      topic == null ? [ftsQuery, k] : [ftsQuery, topic, k];
     try {
       return this.db
-        .query<KbSearchHit, [string, number]>(
+        .query<KbSearchHit, typeof params>(
           `SELECT f.rowid AS chunk_id,
                   bm25(kb_chunks_fts) AS distance,
                   c.text AS text,
@@ -135,11 +182,11 @@ export class KbRepo {
            FROM kb_chunks_fts f
            JOIN kb_chunks c ON c.id = f.rowid
            JOIN kb_documents d ON d.id = c.document_id
-           WHERE kb_chunks_fts MATCH ?
+           WHERE kb_chunks_fts MATCH ? ${topicWhere}
            ORDER BY bm25(kb_chunks_fts) ASC
            LIMIT ?`,
         )
-        .all(ftsQuery, k);
+        .all(...params);
     } catch (err) {
       // FTS5 throws SQLITE_ERROR on malformed queries (e.g. unbalanced
       // parens, dangling operators). Treat those as "no BM25 hits" rather
@@ -175,13 +222,16 @@ export class KbRepo {
     candidatesPerSide?: number;
     /** RRF constant. Default 60 (the value from the original 2009 paper). */
     rrfK?: number;
+    /** Restrict both sides to docs with this topic (or NULL). */
+    topic?: string | null;
   }): KbSearchHit[] {
     const k = input.k ?? 5;
     const cands = input.candidatesPerSide ?? k * 2;
     const rrfK = input.rrfK ?? 60;
+    const topic = input.topic ?? null;
 
-    const vectorHits = this.search(input.embedding, cands);
-    const bm25Hits = this.searchBm25(input.query, cands);
+    const vectorHits = this.search(input.embedding, cands, topic);
+    const bm25Hits = this.searchBm25(input.query, cands, topic);
 
     if (bm25Hits.length === 0) return vectorHits.slice(0, k);
     if (vectorHits.length === 0) return bm25Hits.slice(0, k);

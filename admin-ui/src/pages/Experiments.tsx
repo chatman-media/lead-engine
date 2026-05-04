@@ -5,19 +5,26 @@ import {
   type ExperimentStatus,
   type FunnelRow,
   type StyleSummary,
+  type SystemStatus,
 } from "../api.ts";
 
 export function Experiments() {
   const [experiments, setExperiments] = useState<Experiment[] | null>(null);
   const [styles, setStyles] = useState<StyleSummary[] | null>(null);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 
   async function refresh() {
     try {
-      const [eRes, sRes] = await Promise.all([api.experiments(), api.styles()]);
+      const [eRes, sRes, stRes] = await Promise.all([
+        api.experiments(),
+        api.styles(),
+        api.status().catch(() => null),
+      ]);
       setExperiments(eRes.experiments);
       setStyles(sRes.styles);
+      setSystemStatus(stRes);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -69,6 +76,8 @@ export function Experiments() {
         SHA-256 hash; the assignment is sticky for the lifetime of the chat.
       </p>
 
+      {systemStatus && <ActiveRoutingBanner status={systemStatus} />}
+
       {error ? (
         <div style={{ color: "var(--red, #f55)", marginBottom: 12 }}>
           error: {error}
@@ -89,9 +98,7 @@ export function Experiments() {
       {experiments === null ? (
         <div style={{ color: "var(--text-3)" }}>loading…</div>
       ) : experiments.length === 0 ? (
-        <div style={{ color: "var(--text-3)" }}>
-          no experiments yet — click "new experiment" to create one.
-        </div>
+        <EmptyState envOverride={systemStatus?.routing.mode === "env_override"} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {experiments.map((e) => (
@@ -99,6 +106,115 @@ export function Experiments() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ActiveRoutingBanner({ status }: { status: SystemStatus }) {
+  const r = status.routing;
+  let body: React.ReactNode;
+  let accent = "var(--text-3)";
+  if (r.mode === "env_override") {
+    body = (
+      <>
+        <strong style={{ color: "var(--amber)" }}>env override active</strong>
+        <span style={{ color: "var(--text-3)" }}> — </span>
+        all conversations are forced to <code>{r.active_style_slug}</code> via{" "}
+        <code>BOT_SALES_STYLE</code>. Experiments below are visible but{" "}
+        <strong>do not affect routing</strong>.
+      </>
+    );
+    accent = "var(--amber)";
+  } else if (r.mode === "running_experiment") {
+    body = (
+      <>
+        <strong style={{ color: "var(--green, #2ea043)" }}>experiment running</strong>
+        <span style={{ color: "var(--text-3)" }}> — </span>
+        <code>{r.running_experiment_slug}</code> is currently routing new
+        conversations.
+      </>
+    );
+    accent = "var(--green, #2ea043)";
+  } else if (r.mode === "legacy_persona") {
+    body = (
+      <>
+        <strong style={{ color: "var(--text)" }}>legacy persona active</strong>
+        <span style={{ color: "var(--text-3)" }}> — </span>
+        sales-style engine is OFF; all chats use <code>BOT_PERSONA_*</code>.
+        Experiments are scaffolding for when you switch on a sales style.
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <strong>no routing configured</strong>
+        <span style={{ color: "var(--text-3)" }}> — </span>
+        bot replies with a generic AI persona. Set <code>BOT_PERSONA_*</code>{" "}
+        or <code>BOT_SALES_STYLE</code>, or start an experiment below.
+      </>
+    );
+  }
+  return (
+    <div
+      style={{
+        background: "var(--bg-1)",
+        border: `1px solid ${accent}`,
+        borderLeft: `3px solid ${accent}`,
+        borderRadius: "var(--radius)",
+        padding: "10px 14px",
+        marginBottom: 16,
+        fontSize: 13,
+        fontFamily: "var(--sans)",
+        color: "var(--text-2)",
+      }}
+    >
+      {body}
+    </div>
+  );
+}
+
+function EmptyState({ envOverride }: { envOverride: boolean }) {
+  return (
+    <div
+      style={{
+        border: "1px dashed var(--border)",
+        borderRadius: "var(--radius)",
+        padding: 24,
+        background: "var(--bg-1)",
+        color: "var(--text-2)",
+        fontSize: 13,
+        lineHeight: 1.6,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-3)" }}>
+        no experiments yet
+      </div>
+      <div>
+        Use this when you want to A/B test two or more sales styles on real
+        candidates — e.g. flirt-recruiter vs. empathetic-consultant.
+      </div>
+      <div style={{ color: "var(--text-3)" }}>
+        Workflow:{" "}
+        <span style={{ color: "var(--text-2)" }}>
+          create as draft → set variant weights → start
+        </span>
+        . Each new candidate gets a deterministic variant via SHA-256 hash;
+        existing chats keep their assigned style. Per-style funnel
+        conversion shows up here once traffic accumulates.
+      </div>
+      {envOverride && (
+        <div style={{ color: "var(--amber)", marginTop: 4 }}>
+          ⚠ <code>BOT_SALES_STYLE</code> is currently set in env — even if you
+          start an experiment, it won't actually route until you unset that
+          env var.
+        </div>
+      )}
+      <div style={{ marginTop: 4 }}>
+        <button onClick={() => undefined} style={{ display: "none" }} />
+      </div>
     </div>
   );
 }

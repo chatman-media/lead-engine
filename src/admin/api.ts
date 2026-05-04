@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 
+import { activeEmbeddingDim, config } from "../config.ts";
 import { ConversationsRepo } from "../db/repos/conversations.ts";
 import {
   ExperimentsRepo,
@@ -17,6 +18,7 @@ import { composeSystemPrompt } from "../sales/prompt.ts";
 import { nextStage } from "../sales/stage-router.ts";
 import { FUNNEL_STAGES, StyleSchema, type FunnelStage } from "../sales/types.ts";
 import { UsersRepo } from "../db/repos/users.ts";
+import { VacanciesRepo } from "../db/repos/vacancies.ts";
 import { json, type RouteHandler } from "../router.ts";
 import type { TelegramClient } from "../telegram/client.ts";
 import { requireAdmin } from "./auth.ts";
@@ -47,6 +49,174 @@ export function createListUsersHandler(deps: AdminApiDeps): RouteHandler {
     const ctx = requireAdmin(deps.db, req);
     if (ctx instanceof Response) return ctx;
     return json({ users: users.list(500) });
+  };
+}
+
+/**
+ * Admin dashboard data: which RAG layers are enabled, which providers/models
+ * are wired, KB stats by topic, and aggregate counts. Lets operators see at
+ * a glance what's running without SSHing into the server.
+ *
+ * NEVER returns API keys or other secrets — only flags, model names, and
+ * counts. Safe to render to any authenticated admin.
+ */
+export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+
+    // Provider config — names and dims only, no API keys.
+    const chatProvider = config.llm.provider;
+    const embedProvider = config.llm.embeddingProvider;
+    const chatModel =
+      chatProvider === "ollama"
+        ? config.ollama.chatModel
+        : chatProvider === "openrouter"
+          ? config.openrouter.chatModel
+          : config.openai.chatModel;
+    const embedModel =
+      embedProvider === "ollama"
+        ? config.ollama.embeddingModel
+        : config.openai.embeddingModel;
+
+    // Active routing: env override > running experiment > legacy persona > none.
+    const styles = new StylesRepo(deps.db);
+    const experiments = new ExperimentsRepo(deps.db);
+    const vacancies = new VacanciesRepo(deps.db);
+    let routingMode: "env_override" | "running_experiment" | "legacy_persona" | "none";
+    let activeStyleSlug: string | null = null;
+    let runningExperimentSlug: string | null = null;
+    if (config.sales.forcedStyleSlug) {
+      routingMode = "env_override";
+      activeStyleSlug = config.sales.forcedStyleSlug;
+    } else {
+      const running = experiments.getRunning();
+      if (running) {
+        routingMode = "running_experiment";
+        runningExperimentSlug = running.slug;
+      } else if (config.persona.name) {
+        routingMode = "legacy_persona";
+      } else {
+        routingMode = "none";
+      }
+    }
+
+    // KB stats grouped by topic. NULL groups together as "untagged" so the
+    // UI can render them distinctly. Single CROSS JOIN for aggregate count.
+    const kbByTopic = deps.db
+      .query<
+        { topic: string | null; documents: number; chunks: number },
+        []
+      >(
+        `SELECT d.topic AS topic,
+                COUNT(DISTINCT d.id) AS documents,
+                COUNT(c.id) AS chunks
+         FROM kb_documents d
+         LEFT JOIN kb_chunks c ON c.document_id = d.id
+         GROUP BY d.topic
+         ORDER BY documents DESC, topic ASC`,
+      )
+      .all();
+    const kbTotals = deps.db
+      .query<{ documents: number; chunks: number }, []>(
+        `SELECT (SELECT COUNT(*) FROM kb_documents) AS documents,
+                (SELECT COUNT(*) FROM kb_chunks) AS chunks`,
+      )
+      .get()!;
+
+    const convsByMode = deps.db
+      .query<{ mode: string; count: number }, []>(
+        `SELECT mode, COUNT(*) AS count FROM conversations GROUP BY mode`,
+      )
+      .all();
+    const convTotal = convsByMode.reduce((s, r) => s + r.count, 0);
+
+    const usersByStatus = deps.db
+      .query<{ status: string; count: number }, []>(
+        `SELECT status, COUNT(*) AS count FROM users GROUP BY status`,
+      )
+      .all();
+    const usersTotal = usersByStatus.reduce((s, r) => s + r.count, 0);
+
+    const messagesByRole = deps.db
+      .query<{ role: string; count: number }, []>(
+        `SELECT role, COUNT(*) AS count FROM messages GROUP BY role`,
+      )
+      .all();
+    const messagesTotal = messagesByRole.reduce((s, r) => s + r.count, 0);
+
+    // How many conversations have a long-conversation summary stored?
+    // Useful signal for whether RAG_CONVERSATION_SUMMARY is actually doing
+    // anything on this corpus.
+    const summarizedConvs = deps.db
+      .query<{ count: number }, []>(
+        `SELECT COUNT(*) AS count FROM conversations WHERE summary_json IS NOT NULL`,
+      )
+      .get()!.count;
+
+    // How many users have memory facts extracted? Same diagnostic value
+    // for RAG_USER_MEMORY.
+    const usersWithMemory = deps.db
+      .query<{ count: number }, []>(
+        `SELECT COUNT(*) AS count FROM users
+         WHERE profile_json IS NOT NULL
+           AND json_extract(profile_json, '$.memory.facts') IS NOT NULL`,
+      )
+      .get()!.count;
+
+    return json({
+      rag: {
+        userMemory: config.rag.userMemory,
+        queryRewrite: config.rag.queryRewrite,
+        reflect: config.rag.reflect,
+        hybridSearch: config.rag.hybridSearch,
+        conversationSummary: config.rag.conversationSummary,
+        topicRouting: config.rag.topicRouting,
+        topK: config.rag.topK,
+        maxDistance: config.rag.maxDistance ?? null,
+      },
+      providers: {
+        chat: { provider: chatProvider, model: chatModel },
+        embed: { provider: embedProvider, model: embedModel, dim: activeEmbeddingDim() },
+      },
+      routing: {
+        mode: routingMode,
+        active_style_slug: activeStyleSlug,
+        running_experiment_slug: runningExperimentSlug,
+        legacy_persona: routingMode === "legacy_persona"
+          ? {
+              name: config.persona.name,
+              role: config.persona.role,
+              company: config.persona.company || null,
+            }
+          : null,
+        stage_classifier: config.sales.stageClassifier,
+      },
+      kb: {
+        documents: kbTotals.documents,
+        chunks: kbTotals.chunks,
+        by_topic: kbByTopic,
+        // Number of active styles seeded in DB (just count for UI hint).
+        styles: styles.listActive().length,
+      },
+      conversations: {
+        total: convTotal,
+        by_mode: Object.fromEntries(convsByMode.map((r) => [r.mode, r.count])),
+        with_summary: summarizedConvs,
+      },
+      users: {
+        total: usersTotal,
+        by_status: Object.fromEntries(usersByStatus.map((r) => [r.status, r.count])),
+        with_memory: usersWithMemory,
+      },
+      messages: {
+        total: messagesTotal,
+        by_role: Object.fromEntries(messagesByRole.map((r) => [r.role, r.count])),
+      },
+      vacancies: {
+        active: vacancies.countActive(),
+      },
+    });
   };
 }
 
@@ -98,11 +268,16 @@ export function createConversationDetailHandler(
     // is `{ facts: {} }` and the UI just shows an empty pane. Keeping the
     // shape stable on/off avoids a frontend feature flag.
     const memory = users.getMemory(user.id);
+    // Long-conversation summary (RAG_CONVERSATION_SUMMARY). Null when the
+    // chat is too short to have triggered summarization yet, which the UI
+    // handles by hiding the summary pane.
+    const summary = conversations.getSummary(id);
     return json({
       conversation: conv,
       user,
       messages: messages.listByConversation(id, 200),
       memory,
+      summary,
     });
   };
 }
@@ -1177,4 +1352,109 @@ function safeJson(text: string): unknown {
   } catch {
     return null;
   }
+}
+
+// ─── Vacancies (admin-managed list of currently-open offers) ───────────
+
+const VACANCY_TITLE_MAX = 200;
+const VACANCY_BODY_MAX = 4000;
+
+export function createListVacanciesHandler(deps: AdminApiDeps): RouteHandler {
+  const vacancies = new VacanciesRepo(deps.db);
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const url = new URL(req.url);
+    // Default = all (operators want to see closed too, to re-enable);
+    // ?active=1 narrows for any internal callers that need the same
+    // shape the bot uses.
+    const onlyActive = url.searchParams.get("active") === "1";
+    const list = onlyActive ? vacancies.listActive() : vacancies.listAll();
+    return json({ vacancies: list });
+  };
+}
+
+export function createCreateVacancyHandler(deps: AdminApiDeps): RouteHandler {
+  const vacancies = new VacanciesRepo(deps.db);
+  return async ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+
+    let body: { title?: unknown; body?: unknown; is_active?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    const text = typeof body.body === "string" ? body.body.trim() : "";
+    if (!title) return json({ error: "title is required" }, { status: 400 });
+    if (!text) return json({ error: "body is required" }, { status: 400 });
+    if (title.length > VACANCY_TITLE_MAX) {
+      return json({ error: `title > ${VACANCY_TITLE_MAX}` }, { status: 400 });
+    }
+    if (text.length > VACANCY_BODY_MAX) {
+      return json({ error: `body > ${VACANCY_BODY_MAX}` }, { status: 400 });
+    }
+
+    const created = vacancies.create({
+      title,
+      body: text,
+      isActive: body.is_active === false ? false : true,
+    });
+    return json({ vacancy: created });
+  };
+}
+
+export function createUpdateVacancyHandler(deps: AdminApiDeps): RouteHandler {
+  const vacancies = new VacanciesRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    let body: { title?: unknown; body?: unknown; is_active?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    const patch: { title?: string; body?: string; isActive?: boolean } = {};
+    if (typeof body.title === "string") {
+      const trimmed = body.title.trim();
+      if (!trimmed) return json({ error: "title is empty" }, { status: 400 });
+      if (trimmed.length > VACANCY_TITLE_MAX) {
+        return json({ error: `title > ${VACANCY_TITLE_MAX}` }, { status: 400 });
+      }
+      patch.title = trimmed;
+    }
+    if (typeof body.body === "string") {
+      const trimmed = body.body.trim();
+      if (!trimmed) return json({ error: "body is empty" }, { status: 400 });
+      if (trimmed.length > VACANCY_BODY_MAX) {
+        return json({ error: `body > ${VACANCY_BODY_MAX}` }, { status: 400 });
+      }
+      patch.body = trimmed;
+    }
+    if (typeof body.is_active === "boolean") {
+      patch.isActive = body.is_active;
+    }
+    const updated = vacancies.update(id, patch);
+    if (!updated) return json({ error: "not found" }, { status: 404 });
+    return json({ vacancy: updated });
+  };
+}
+
+export function createDeleteVacancyHandler(deps: AdminApiDeps): RouteHandler {
+  const vacancies = new VacanciesRepo(deps.db);
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const ok = vacancies.delete(id);
+    if (!ok) return json({ error: "not found" }, { status: 404 });
+    return json({ ok: true, deleted: id });
+  };
 }

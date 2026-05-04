@@ -7,6 +7,7 @@ import type { EmbeddingClient } from "./embed.ts";
 import { verifyAnswer } from "./reflect.ts";
 import { rewriteQuery } from "./rewrite-query.ts";
 import { applyStyleRules } from "./text-style-rules.ts";
+import { classifyTopic } from "./topic-classifier.ts";
 
 /** Sentinel returned when retrieval is empty (or LLM cannot answer from
  * CONTEXT alone). The webhook layer turns this into a polite stall
@@ -180,15 +181,49 @@ export function personaFactReply(persona: Persona, key: string): string | null {
   return val;
 }
 
-/** Short reply derived from persona — no KB required. */
+/**
+ * Short tail phrases tacked onto the smalltalk introduction. Picked at
+ * random per call so a candidate asking "как тебя зовут?" twice in a row
+ * doesn't get a verbatim repeat — the giveaway "I'm a script" pattern.
+ *
+ * All entries use ASCII hyphens (not em-dashes); the smalltalk path
+ * bypasses `sanitizeLlmOutput`, so anything here ends up in the wire
+ * message exactly as written.
+ */
+const HUMAN_SMALLTALK_TAILS_WITH_COMPANY: readonly string[] = [
+  "Что хотел узнать?",
+  "По чему интересно?",
+  "Чем помочь?",
+  "Что подсказать?",
+  "По работе что-то?",
+  "", // sometimes just the introduction, no tail at all
+];
+
+const HUMAN_SMALLTALK_TAILS_NO_COMPANY: readonly string[] = [
+  "Чем помочь?",
+  "Что хотел узнать?",
+  "Если что по вакансиям - просто напиши.",
+  "",
+];
+
+function pickTail(pool: readonly string[]): string {
+  const idx = Math.floor(Math.random() * pool.length);
+  return pool[idx] ?? "";
+}
+
+/** Short reply derived from persona - no KB required. */
 export function personaSmalltalkReply(persona: Persona): string {
   const name = persona.name?.trim() || "Менеджер";
   const company = persona.company?.trim();
   if (persona.role === "human") {
     if (company) {
-      return `Меня зовут ${name}, я менеджер в ${company}. Спрашивай по работе или условиям — расскажу по делу.`;
+      const tail = pickTail(HUMAN_SMALLTALK_TAILS_WITH_COMPANY);
+      const head = `Меня зовут ${name}, я в ${company}.`;
+      return tail ? `${head} ${tail}` : head;
     }
-    return `Меня зовут ${name}. Если что‑то нужно по вакансиям — просто напиши.`;
+    const tail = pickTail(HUMAN_SMALLTALK_TAILS_NO_COMPANY);
+    const head = `Меня зовут ${name}.`;
+    return tail ? `${head} ${tail}` : head;
   }
   if (company) return `Я ${name}, помощник агентства ${company}.`;
   return `Я ${name}.`;
@@ -390,6 +425,27 @@ export interface AnswerInput {
    * whatever is currently stored.
    */
   conversationSummary?: string;
+  /**
+   * Topic-routed retrieval: when true and `classifyTopic(question)` returns
+   * a deterministic match, only KB docs tagged with that topic (or untagged)
+   * are searched. Falls back to global search when classifier returns null
+   * OR the topic-filtered search yields zero hits — never reduces recall,
+   * only sharpens precision when the classifier is confident.
+   * Free at query time (regex classifier, no LLM).
+   */
+  topicRouting?: boolean;
+  /**
+   * Pre-rendered "АКТУАЛЬНЫЕ ВАКАНСИИ" block from admin-managed vacancies
+   * (see VacanciesRepo + renderVacanciesBlock). Prepended to the KB context
+   * so the bot answers from the freshest operator-curated info; KB hits
+   * still appear below as background. Empty string = no active vacancies,
+   * skip the heading.
+   *
+   * Important side effect: when set AND non-empty, retrieval may return
+   * 0 KB hits and we still produce an answer (vacancies alone are enough
+   * grounding). NO_CONTEXT_MARKER only fires when BOTH are empty.
+   */
+  vacanciesBlock?: string;
 }
 
 /**
@@ -413,6 +469,9 @@ export interface AnswerTelemetry {
   top_distances?: number[];
   /** True when hybrid (BM25 + vector) was used instead of vector-only. */
   hybrid?: boolean;
+  /** Topic the question was routed to ("visa", "payment", …) or null when
+   *  classifier was inconclusive or topic filter fell back to global. */
+  topic?: string | null;
   /** Original user question, when query was rewritten before retrieval. */
   original_query?: string;
   /** Rewritten search query, when different from `original_query`. */
@@ -443,8 +502,11 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       : (input.persona ?? DEFAULT_PERSONA);
 
   if (isPersonaSmalltalkQuestion(input.question)) {
+    // Apply text-style rules (em-dash → hyphen, ellipsis → ..., etc) even
+    // on the shortcut path: env-configured persona names/companies could
+    // smuggle in unicode chars that the LLM-output sanitizer would catch.
     return {
-      text: personaSmalltalkReply(activePersona),
+      text: applyStyleRules(personaSmalltalkReply(activePersona)),
       usedChunkIds: [],
       hits: [],
       telemetry: { path: "smalltalk", total_ms: Date.now() - startedAt },
@@ -456,7 +518,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     const factReply = personaFactReply(activePersona, factKey);
     if (factReply) {
       return {
-        text: factReply,
+        text: applyStyleRules(factReply),
         usedChunkIds: [],
         hits: [],
         telemetry: { path: "persona_fact", total_ms: Date.now() - startedAt },
@@ -484,12 +546,34 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   const [questionVec] = await input.embedder.embed([searchQuery]);
   if (!questionVec) throw new Error("Embedder returned no vector for question");
 
+  // Topic routing: classify the QUESTION (not the rewritten query — it
+  // matches the cleaner regex anchors better). When the classifier is
+  // confident AND the topic-filtered search yields hits, use those;
+  // otherwise fall through to a global search. Never reduces recall.
+  const topic = input.topicRouting ? classifyTopic(input.question) : null;
+
   // Hybrid retrieval (vector + BM25 + RRF) catches exact-match queries that
   // pure embedding search ranks poorly. When enabled, `maxDistance` is
   // skipped because the fused rank is on a different scale than L2 distance.
-  const allHits = input.hybridSearch
-    ? input.kb.hybridSearch({ embedding: questionVec, query: searchQuery, k: topK })
-    : input.kb.search(questionVec, topK);
+  const runSearch = (filterTopic: string | null) =>
+    input.hybridSearch
+      ? input.kb.hybridSearch({
+          embedding: questionVec,
+          query: searchQuery,
+          k: topK,
+          ...(filterTopic !== null ? { topic: filterTopic } : {}),
+        })
+      : input.kb.search(questionVec, topK, filterTopic);
+
+  let allHits = runSearch(topic);
+  let usedTopic: string | null = topic;
+  if (topic !== null && allHits.length === 0) {
+    // Topic filter starved retrieval — fall back to global. The miss is
+    // either: classifier wrongly identified topic, OR no docs are tagged
+    // with that topic yet. Either way, we'd rather return SOMETHING.
+    allHits = runSearch(null);
+    usedTopic = null;
+  }
   const hits =
     input.hybridSearch || input.maxDistance === undefined
       ? allHits
@@ -504,12 +588,19 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     retrieval_ms: retrievalMs,
     top_distances: hits.map((h) => Math.round(h.distance * 10000) / 10000),
     ...(input.hybridSearch ? { hybrid: true } : {}),
+    ...(input.topicRouting && topic !== null ? { topic: usedTopic } : {}),
     ...(searchQuery !== input.question
       ? { original_query: input.question, rewritten_query: searchQuery }
       : {}),
   };
 
-  if (hits.length === 0) {
+  // Active vacancies (from admin) are prepended as the freshest grounding;
+  // KB hits follow as background. When BOTH are empty, fall through to
+  // NO_CONTEXT — vacancies alone are enough to answer "что у вас сейчас?"
+  // even on cold KB.
+  const vacBlock = (input.vacanciesBlock ?? "").trim();
+
+  if (hits.length === 0 && !vacBlock) {
     return {
       text: NO_CONTEXT_MARKER,
       usedChunkIds: [],
@@ -518,12 +609,18 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     };
   }
 
-  const context = hits
+  const kbContextStr = hits
     .map(
       (h, i) =>
         `[#${i + 1}] (source: ${h.title})\n${h.text}`,
     )
     .join("\n\n");
+
+  const context = vacBlock
+    ? kbContextStr
+      ? `${vacBlock}\n\n${kbContextStr}`
+      : vacBlock
+    : kbContextStr;
 
   // Branch: sales-style engine vs legacy persona prompt.
   // `style` wins over `persona` when both are passed.

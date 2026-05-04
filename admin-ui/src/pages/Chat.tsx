@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   api,
   type Conversation,
+  type ConversationSummary,
   type Message,
   type MessageTelemetry,
   type User,
@@ -10,6 +11,7 @@ import {
 } from "../api";
 import { ws } from "../App";
 import { MemoryPane } from "../components/MemoryPane";
+import { SummaryPane } from "../components/SummaryPane";
 
 function tsShort(unix: number) {
   return new Date(unix * 1000).toLocaleTimeString("ru-RU", {
@@ -48,6 +50,7 @@ export function Chat() {
   const [user, setUser] = useState<User | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [memory, setMemory] = useState<UserMemory | null>(null);
+  const [summary, setSummary] = useState<ConversationSummary | null>(null);
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
   // Debug toggle: when on, each assistant/human message gets a small
@@ -57,11 +60,12 @@ export function Chat() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   function reload() {
-    api.conversation(convId).then(({ conversation, user, messages, memory }) => {
+    api.conversation(convId).then(({ conversation, user, messages, memory, summary }) => {
       setConv(conversation);
       setUser(user);
       setMessages(messages);
       setMemory(memory);
+      setSummary(summary);
     });
   }
 
@@ -217,6 +221,9 @@ export function Chat() {
           onSaved={(next) => setMemory(next)}
         />
       )}
+
+      {/* Long-conversation summary (only rendered when one exists) */}
+      <SummaryPane summary={summary} />
 
       {/* Messages */}
       <div className="messages" data-testid="messages-list">
