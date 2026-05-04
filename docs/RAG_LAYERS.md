@@ -1,6 +1,6 @@
 # RAG layers
 
-Четыре опциональные надстройки над базовым `RAG = embed → kb.search → LLM` пайплайном. Каждая решает одну конкретную проблему «vanilla RAG», все включаются независимыми env-флагами, по умолчанию выключены.
+Пять опциональных надстроек над базовым `RAG = embed → kb.search → LLM` пайплайном. Каждая решает одну конкретную проблему «vanilla RAG», все включаются независимыми env-флагами, по умолчанию выключены.
 
 ## Зачем это нужно
 
@@ -12,6 +12,7 @@
 | Бот переспрашивает то, что уже знает из прошлой сессии | **Cross-session memory** |
 | «А там?» / «и сколько?» — vector search на одном слове промахивается | **Query rewriting** |
 | LLM выдумывает цифры/города, которых нет в KB | **Reflection** |
+| В длинных диалогах теряется контекст из turn'ов 1–N (recent window = 12) | **Conversation summarization** |
 
 Все слои вместе превращают «AI assistant» tier (по таксономии arxiv:2601.12560) в нижний слой «Agentic AI» — без monolithic-→-multi-agent рефакторинга и при том же количестве кода.
 
@@ -213,31 +214,84 @@ RAG → answer → if (config.reflect) → verifyAnswer({question, answer, conte
 
 ---
 
+---
+
+## 5. Conversation summarization — `RAG_CONVERSATION_SUMMARY=true`
+
+### Проблема
+
+`recentForContext(conv.id, 12)` — фиксированное окно. На 30+ turn диалогах turns 1..N-12 уже не попадают в системный промпт. User-memory покрывает **факты** про кандидата ("Аня, 25, Москва"), но не **нюансы**: "обещал прислать договор завтра", "кандидат сомневался по визе", "уже отправили ссылку на анкету".
+
+### Решение
+
+Старая часть переписки сжимается LLM-вызовом в один абзац (3-6 предложений в третьем лице). Хранится в `conversations.summary_json` как `{ summary, summarizedThroughMsgId, updatedAt }`. Инжектится в систему как `ИЗ РАННЕЙ ПЕРЕПИСКИ:` блок.
+
+Refresh **ленивый**: после каждой реплики проверяем gap между `summarizedThroughMsgId` и текущим последним «summary-eligible» message id. Если gap ≥ 8 — рефрешим. Иначе используем то что есть.
+
+При refresh передаём предыдущее summary + новые сообщения → LLM **обновляет** existing summary, а не пересчитывает всё с нуля. Это держит cost и latency константными независимо от длины чата.
+
+### Архитектура
+
+```
+processInbound → reply → fire-and-forget runConversationSummaryRefresh
+                            │
+                            ├── total messages < 30? → skip
+                            │
+                            ├── gap < 8 messages from lastSummarizedId? → skip
+                            │
+                            └── summarizeConversation({
+                                  messagesToSummarize: новый slice,
+                                  previousSummary: stored.summary,
+                                })
+                                → conversations.setSummary(...)
+```
+
+- Файлы: [src/rag/summarize-conversation.ts](src/rag/summarize-conversation.ts), [src/db/repos/conversations.ts](src/db/repos/conversations.ts) (`getSummary` / `setSummary`)
+- Миграция: [migrations/006_conversation_summary.sql](migrations/006_conversation_summary.sql) — `ALTER TABLE conversations ADD COLUMN summary_json TEXT`
+- Триггер refresh'а: [`runConversationSummaryRefresh`](src/telegram/webhook.ts) — те же thresholds (`SUMMARY_START_THRESHOLD=30`, `SUMMARY_RECENT_WINDOW=12`, `SUMMARY_STALENESS=8`)
+
+### Цена
+
+- **0 LLM-вызовов на короткие чаты** (порог в 30 turn'ов)
+- **+1 LLM-вызов раз в 8 turn'ов** на длинных — благодаря refine-вместо-regenerate, размер каждого вызова не растёт с длиной чата
+- Fire-and-forget — не блокирует ответ кандидату
+
+### Что важно
+
+- Summary — это **дополнение**, не замена `recentForContext`. Последние 12 turn'ов всё равно попадают в промпт сырыми. Summary даёт continuity для всего что старше.
+- Memory facts работают параллельно: facts хранят кто кандидат (имя/город/возраст), summary хранит что уже обсуждалось (обещания/сомнения/explained-vs-open).
+- Пороги (30 / 12 / 8) — константы в `webhook.ts`, не env-переменные. Это quality knobs не deployment knobs, и они должны быть скоординированы.
+
+---
+
 ## Все вместе
 
 ```
 inbound message
    │
    ▼
-[1] read user memory → inject candidate facts into system prompt
+[1] read user memory  → inject candidate facts into system prompt
+[2] read conversation summary → inject "ИЗ РАННЕЙ ПЕРЕПИСКИ" block
    │
    ▼
-[2] questionNeedsRewrite? → rewriteQuery → use rewritten for retrieval
+[3] questionNeedsRewrite? → rewriteQuery → use rewritten for retrieval
    │
    ▼
-[3] hybridSearch (BM25 + vector + RRF)
+[4] hybridSearch (BM25 + vector + RRF)
    │
    ▼
-LLM with system prompt (persona + persona facts + user facts + KB context)
+LLM with system prompt
+  (persona + persona facts + summary + user facts + KB context)
    │
    ▼
-[4] reflect: is the answer grounded?
+[5] reflect: is the answer grounded?
    │   ├── yes → send to TG
    │   └── no → drop, stay silent
    │
    ▼
 [after reply, fire-and-forget]
-extract new candidate facts → merge into user memory
+extract new candidate facts → mergeMemoryFacts
+refresh summary if stale → setSummary
 ```
 
 ## Рекомендованный порядок включения
@@ -245,9 +299,10 @@ extract new candidate facts → merge into user memory
 1. **Сначала** `RAG_HYBRID_SEARCH=true` — нет LLM-цены, нет риска извлечения, чистый upgrade retrieval.
 2. **Потом** `RAG_USER_MEMORY=true` — посмотри неделю на extraction quality в админке, поправь явные ошибки.
 3. **Потом** `RAG_QUERY_REWRITE=true` — особенно если у тебя длинные follow-up диалоги.
-4. **В последнюю очередь** `RAG_REFLECT=true` — это самый дорогой слой (по латентности — удваивает время до ответа).
+4. **Потом** `RAG_REFLECT=true` — это самый дорогой слой (по латентности — удваивает время до ответа).
+5. **Если есть длинные диалоги (>30 turn'ов)** — `RAG_CONVERSATION_SUMMARY=true`. Не нужно если все чаты короткие.
 
-Если включаешь все четыре сразу: суммарная стоимость ≈ +2.5 LLM-вызова на средний turn (rewrite — на 25% turns, reflect — на 80% grounded turns, memory extraction — на каждом turn но after-reply, не на критическом пути).
+Если включаешь все пять сразу: суммарная стоимость ≈ +2.6 LLM-вызова на средний turn (rewrite — на 25% turns, reflect — на 80% grounded turns, memory extraction — на каждом turn но after-reply, summary refresh — раз в ~8 turns на длинных чатах). Только reflect добавляет к latency до отправки — остальные либо after-reply, либо до retrieval (быстрая модель за <500ms).
 
 ## Telemetry
 
@@ -279,3 +334,4 @@ extract new candidate facts → merge into user memory
 | Query rewrite | [tests/unit/rewrite-query.test.ts](../tests/unit/rewrite-query.test.ts) | heuristic, sanitize, fallback на ошибки |
 | Reflect | [tests/unit/reflect.test.ts](../tests/unit/reflect.test.ts) | parse, fail-open, skip empty answer/context |
 | Telemetry | [tests/unit/answer.test.ts](../tests/unit/answer.test.ts) | path tags, latencies, top_distances, hybrid marker, rewrite passthrough |
+| Summary | [tests/unit/summarize-conversation.test.ts](../tests/unit/summarize-conversation.test.ts) + [tests/unit/db.test.ts](../tests/unit/db.test.ts) + [tests/unit/answer.test.ts](../tests/unit/answer.test.ts) | clean parsing, refine-mode prompt, repo round-trip, prompt injection (legacy + sales) |

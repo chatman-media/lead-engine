@@ -1,4 +1,4 @@
-import { renderUserFactsBlock } from "../rag/answer.ts";
+import { renderSummaryBlock, renderUserFactsBlock } from "../rag/answer.ts";
 import type { FunnelStage, Hook, Style } from "./types.ts";
 
 const HOOK_LABELS: Record<Hook["kind"], string> = {
@@ -43,6 +43,12 @@ export interface ComposeOptions {
    * КАНДИДАТЕ" block so the LLM doesn't re-ask things known from past chats.
    */
   userFacts?: Record<string, string>;
+  /**
+   * Compressed summary of older turns of this same conversation. Injected
+   * before the few-shot block so the model has continuity past the
+   * recent-history window.
+   */
+  conversationSummary?: string;
 }
 
 /**
@@ -148,6 +154,7 @@ export function composeSystemPrompt(
     : "";
 
   const userFactsBlock = renderUserFactsBlock(options.userFacts);
+  const summaryBlock = renderSummaryBlock(options.conversationSummary);
 
   const needsGroundingReminder =
     stageCfg?.groundingRequired === true && !preFetchedKbContext;
@@ -159,6 +166,7 @@ export function composeSystemPrompt(
     frameworkBlock,
     hooksBlock,
     stageBlock,
+    summaryBlock,
     userFactsBlock,
     needsGroundingReminder ? kbGroundingReminder(persona.role) : "",
     guardrailBlock,

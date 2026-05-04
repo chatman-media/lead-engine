@@ -6,18 +6,19 @@ Telegram-бот с RAG по базе знаний, анкетой по токе�
 API и локальная Ollama (без расхода токенов).
 
 Разрабатывается через TDD: на каждый юнит сначала падающий тест, потом
-минимальная реализация. Текущее состояние: **478+ unit + 14 e2e зелёных.**
+минимальная реализация. Текущее состояние: **500+ unit + 14 e2e зелёных.**
 
 **RAG layers** (опциональные надстройки over vanilla retrieval):
 hybrid retrieval (BM25 + vector + RRF), cross-session memory кандидата,
-query rewriting, reflection-проверка ответа на галлюцинации. Все включаются
-флагами в `.env`, по умолчанию off. Подробности — [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
+query rewriting, reflection-проверка ответа на галлюцинации, conversation
+summarization для длинных диалогов. Все включаются флагами в `.env`, по
+умолчанию off. Подробности — [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
 Текущее состояние и план — [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ### Documentation map
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — общая навигация: слои, request lifecycle, design decisions
-- [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md) — четыре опциональные надстройки RAG (hybrid, memory, rewrite, reflect): зачем, как работает, цена, тесты
+- [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md) — пять опциональных надстроек RAG (hybrid, memory, rewrite, reflect, summary): зачем, как работает, цена, тесты
 - [docs/SALES_STYLES.md](docs/SALES_STYLES.md) — sales-style engine: схема Style, A/B testing
 - [docs/ROADMAP.md](docs/ROADMAP.md) — что сделано, что в очереди (Tier 1/2/3 по ROI)
 
@@ -386,7 +387,7 @@ webhook **молчит** в Telegram и оставляет режим `ai`. Оп
 
 ## RAG-надстройки (опциональные флаги в `.env`)
 
-Все четыре улучшения retrieval/answering пайплайна выключены по умолчанию.
+Все пять улучшений retrieval/answering пайплайна выключены по умолчанию.
 Включай по одному, проверяй качество на своём трафике, потом следующий.
 Подробное описание каждого слоя, цены и trade-off'ы — в
 [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
@@ -405,6 +406,11 @@ RAG_QUERY_REWRITE=true
 # Reflection: ответ проверяется на галлюцинации перед отправкой.
 # Невалидные ответы → бот молчит (mode остаётся ai).
 RAG_REFLECT=true
+
+# Conversation summarization: на длинных чатах (>30 turn) старая часть
+# сжимается в paragraph и подмешивается в системный промпт. Ленивый refresh
+# раз в ~8 сообщений, не на каждом turn.
+RAG_CONVERSATION_SUMMARY=true
 ```
 
 ## Тесты

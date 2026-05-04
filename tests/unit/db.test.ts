@@ -194,6 +194,51 @@ describe("conversations + messages", () => {
   });
 });
 
+describe("conversations summary", () => {
+  test("getSummary returns null on conversations without one", () => {
+    const users = new UsersRepo(db);
+    const convs = new ConversationsRepo(db);
+    const u = users.create({ tgUserId: 700 });
+    const c = convs.ensureForUser(u.id);
+    expect(convs.getSummary(c.id)).toBeNull();
+  });
+
+  test("setSummary + getSummary round-trip", () => {
+    const users = new UsersRepo(db);
+    const convs = new ConversationsRepo(db);
+    const u = users.create({ tgUserId: 701 });
+    const c = convs.ensureForUser(u.id);
+
+    convs.setSummary(c.id, "кандидат интересовался Дубаем", 42);
+    const got = convs.getSummary(c.id);
+    expect(got).not.toBeNull();
+    expect(got!.summary).toBe("кандидат интересовался Дубаем");
+    expect(got!.summarizedThroughMsgId).toBe(42);
+    expect(got!.updatedAt).toBeGreaterThan(0);
+  });
+
+  test("setSummary replaces previous (not appends)", () => {
+    const users = new UsersRepo(db);
+    const convs = new ConversationsRepo(db);
+    const u = users.create({ tgUserId: 702 });
+    const c = convs.ensureForUser(u.id);
+
+    convs.setSummary(c.id, "first", 10);
+    convs.setSummary(c.id, "second", 20);
+    expect(convs.getSummary(c.id)?.summary).toBe("second");
+    expect(convs.getSummary(c.id)?.summarizedThroughMsgId).toBe(20);
+  });
+
+  test("getSummary returns null on malformed JSON (graceful)", () => {
+    const users = new UsersRepo(db);
+    const convs = new ConversationsRepo(db);
+    const u = users.create({ tgUserId: 703 });
+    const c = convs.ensureForUser(u.id);
+    db.run("UPDATE conversations SET summary_json = 'not-json' WHERE id = ?", [c.id]);
+    expect(convs.getSummary(c.id)).toBeNull();
+  });
+});
+
 describe("kb_vec KNN with sqlite-vec", () => {
   test("nearest-neighbour search returns chunks ordered by distance", () => {
     const kb = new KbRepo(db);

@@ -18,24 +18,27 @@ POST /telegram/<secret>      ─┬─► users.byTgId / whitelist (TELEGRAM_OPE
                                                                               │
                                                                               ▼
                                                             ┌─────────────────────────────────┐
-                                                            │ resolveStyle (env ▸ DB ▸ A/B)   │
-                                                            │ classifyStage (regex / LLM)     │
-                                                            │ users.getMemory  (RAG_USER_MEMORY) │
-                                                            │ rewriteQuery     (RAG_QUERY_REWRITE) │
-                                                            │ kb.hybridSearch  (RAG_HYBRID_SEARCH) │
-                                                            │ composeSystemPrompt              │
-                                                            │ chat.complete                    │
-                                                            │ verifyAnswer     (RAG_REFLECT)  │
-                                                            └─────────────────────────────────┘
+                                                            │ resolveStyle (env ▸ DB ▸ A/B)              │
+                                                            │ classifyStage (regex / LLM)                │
+                                                            │ users.getMemory       (RAG_USER_MEMORY)    │
+                                                            │ conversations.getSummary (RAG_CONVERSATION_SUMMARY) │
+                                                            │ rewriteQuery          (RAG_QUERY_REWRITE)  │
+                                                            │ kb.hybridSearch       (RAG_HYBRID_SEARCH)  │
+                                                            │ composeSystemPrompt                        │
+                                                            │ chat.complete                              │
+                                                            │ verifyAnswer          (RAG_REFLECT)        │
+                                                            └────────────────────────────────────────────┘
                                                                               │
                                                        ┌──────────────────────┼─────────────────────┐
                                                        ▼                      ▼                     ▼
                                                 send to TG          NO_CONTEXT_MARKER       ungrounded → silent
                                                        │
-                                                       └─► fire-and-forget: extractUserFacts → mergeMemoryFacts
+                                                       └─► fire-and-forget:
+                                                              extractUserFacts → mergeMemoryFacts
+                                                              summarizeConversation → setSummary
 ```
 
-Все четыре RAG-надстройки **опциональны** и независимы. Подробности в [RAG_LAYERS.md](RAG_LAYERS.md).
+Все пять RAG-надстроек **опциональны** и независимы. Подробности в [RAG_LAYERS.md](RAG_LAYERS.md).
 
 ## Слои
 
@@ -93,7 +96,7 @@ POST /telegram/<secret>      ─┬─► users.byTgId / whitelist (TELEGRAM_OPE
 
 ### Stateless webhook, sticky DB state
 
-Webhook ackает Telegram в <100ms (Bot API таймаут — 60s, retries дублируют сообщения). Тяжёлая обработка (RAG → LLM → sendMessage) detached в `processInbound()`. State (mode, current_stage, style_id, memory) хранится в БД — рестарты сервера ничего не теряют.
+Webhook ackает Telegram в <100ms (Bot API таймаут — 60s, retries дублируют сообщения). Тяжёлая обработка (RAG → LLM → sendMessage) detached в `processInbound()`. State (mode, current_stage, style_id, memory, summary) хранится в БД — рестарты сервера ничего не теряют.
 
 ### Один conversation на user
 
@@ -138,7 +141,7 @@ WS `/admin/api/ws` стримит события в реальном време�
 | Таблица | Назначение |
 |---------|-----------|
 | `users` | whitelisted Telegram-юзеры, `status` для воронки, `profile_json.memory.facts` для cross-session памяти |
-| `conversations` | одна на юзера, `mode` ∈ ai/queued/human, `current_stage`, `style_id`+`experiment_id` (A/B-стiky) |
+| `conversations` | одна на юзера, `mode` ∈ ai/queued/human, `current_stage`, `style_id`+`experiment_id` (A/B-сtiky), `summary_json` (long-conversation summary) |
 | `messages` | `role` ∈ user/assistant/human/system, idempotent по `tg_message_id`, `meta_json` для `used_chunk_ids`, `stage` для funnel-аналитики |
 | `kb_documents` | source файлы для RAG, dedup по `content_hash` |
 | `kb_chunks` | чанки ≈1500 символов с overlap 150 |
@@ -153,7 +156,7 @@ WS `/admin/api/ws` стримит события в реальном време�
 
 - [README.md](../README.md) — настройка, env, провайдеры, CLI, KB pipeline, full setup guide
 - [docs/ARCHITECTURE.md](ARCHITECTURE.md) — этот файл, общая навигация
-- [docs/RAG_LAYERS.md](RAG_LAYERS.md) — четыре опциональные надстройки (hybrid, memory, rewrite, reflect): зачем, как, цена, тесты
+- [docs/RAG_LAYERS.md](RAG_LAYERS.md) — пять опциональных надстроек (hybrid, memory, rewrite, reflect, summary): зачем, как, цена, тесты
 - [docs/SALES_STYLES.md](SALES_STYLES.md) — sales-style engine: схема Style, A/B testing, integration с RAG
 - [docs/ROADMAP.md](ROADMAP.md) — что сделано, что в очереди (Tier 1/2/3 по ROI)
 

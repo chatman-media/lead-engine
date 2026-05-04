@@ -15,6 +15,23 @@ export interface ConversationRow {
   style_id: number | null;
   experiment_id: number | null;
   current_stage: string | null;
+  // Long-conversation summary (migration 006). Null until the chat crosses
+  // the length threshold and the summarizer first runs. See ConversationSummary.
+  summary_json: string | null;
+}
+
+/**
+ * Periodically-refreshed compressed summary of older turns in a long
+ * conversation. Stored in `conversations.summary_json` as JSON.
+ *
+ * `summarizedThroughMsgId` is the highest message id covered by the
+ * summary — refresh logic checks `currentLatestMsgId - summarizedThroughMsgId`
+ * against a staleness threshold to decide if regeneration is needed.
+ */
+export interface ConversationSummary {
+  summary: string;
+  summarizedThroughMsgId: number;
+  updatedAt: number;
 }
 
 export class ConversationsRepo {
@@ -105,6 +122,48 @@ export class ConversationsRepo {
   /** Persist the latest funnel stage so it survives process restarts. */
   setCurrentStage(id: number, stage: string): void {
     this.db.run(`UPDATE conversations SET current_stage = ? WHERE id = ?`, [stage, id]);
+  }
+
+  /**
+   * Read the long-conversation summary if one exists. Returns null when the
+   * column is empty (chat hasn't crossed the summarization threshold yet)
+   * or contains malformed JSON (treated as "no summary" — caller falls
+   * back to the recent-history window only).
+   */
+  getSummary(id: number): ConversationSummary | null {
+    const row = this.byId(id);
+    if (!row?.summary_json) return null;
+    try {
+      const parsed = JSON.parse(row.summary_json) as ConversationSummary;
+      if (
+        typeof parsed.summary === "string" &&
+        typeof parsed.summarizedThroughMsgId === "number"
+      ) {
+        return parsed;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Replace the stored summary. Always sets `updatedAt` to current unix time.
+   */
+  setSummary(
+    id: number,
+    summary: string,
+    summarizedThroughMsgId: number,
+  ): void {
+    const payload: ConversationSummary = {
+      summary,
+      summarizedThroughMsgId,
+      updatedAt: Math.floor(Date.now() / 1000),
+    };
+    this.db.run(
+      `UPDATE conversations SET summary_json = ? WHERE id = ?`,
+      [JSON.stringify(payload), id],
+    );
   }
 
   /**

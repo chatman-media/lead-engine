@@ -400,6 +400,57 @@ describe("answerWithRag", () => {
     expect(sys).not.toContain("ТЕКУЩИЙ ЭТАП");
   });
 
+  test("conversationSummary is injected into legacy persona prompt", async () => {
+    seed();
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("ok");
+    await answerWithRag({
+      question: "что было раньше",
+      kb,
+      embedder,
+      chat,
+      persona: { name: "Алина", role: "human" },
+      conversationSummary: "ранее кандидат уточнял про Дубай и контракт",
+    });
+    const sys = chat.lastMessages?.[0]?.content ?? "";
+    expect(sys).toContain("ИЗ РАННЕЙ ПЕРЕПИСКИ");
+    expect(sys).toContain("Дубай");
+  });
+
+  test("conversationSummary is injected into sales-style prompt", async () => {
+    seed();
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("ok");
+    await answerWithRag({
+      question: "вопрос",
+      kb,
+      embedder,
+      chat,
+      style: flirtyBelfort,
+      stage: "qualify",
+      conversationSummary: "до этого обсуждали релокацию в Стамбул",
+    });
+    const sys = chat.lastMessages?.[0]?.content ?? "";
+    expect(sys).toContain("ИЗ РАННЕЙ ПЕРЕПИСКИ");
+    expect(sys).toContain("Стамбул");
+  });
+
+  test("empty conversationSummary does NOT inject the heading", async () => {
+    seed();
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("ok");
+    await answerWithRag({
+      question: "вопрос",
+      kb,
+      embedder,
+      chat,
+      persona: { name: "Алина", role: "human" },
+      conversationSummary: "   ",
+    });
+    const sys = chat.lastMessages?.[0]?.content ?? "";
+    expect(sys).not.toContain("ИЗ РАННЕЙ ПЕРЕПИСКИ");
+  });
+
   test("hybridSearch=true uses BM25+vector fusion for retrieval", async () => {
     const doc = kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
     // Two chunks with disjoint topics. The query mentions "Стамбул" which is

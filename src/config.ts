@@ -137,6 +137,15 @@ export const config = {
      * Default: off (opt-in until you've migrated the FTS5 backfill).
      */
     hybridSearch: envTruthy("RAG_HYBRID_SEARCH", false),
+    /**
+     * Conversation summarization: when total messages exceed ~30, older
+     * turns get compressed into a paragraph stored in
+     * `conversations.summary_json` and injected into the system prompt so
+     * the LLM has continuity beyond the last 12 raw messages. Refreshed
+     * lazily after each reply (1 LLM call per refresh, NOT per turn —
+     * staleness threshold is 8 messages). Default: off.
+     */
+    conversationSummary: envTruthy("RAG_CONVERSATION_SUMMARY", false),
   },
   openai: {
     apiKey: envOptional("OPENAI_API_KEY"),

@@ -205,6 +205,18 @@ export function personaSmalltalkReply(persona: Persona): string {
  * the bare `NO_CONTEXT_MARKER` if the answer is not in CONTEXT.
  */
 /**
+ * Renders the conversation-summary block. Returns "" when summary is missing
+ * or whitespace so the prompt isn't inflated by a useless heading.
+ * Exported for the sales-style composer.
+ */
+export function renderSummaryBlock(summary?: string): string {
+  if (!summary) return "";
+  const trimmed = summary.trim();
+  if (!trimmed) return "";
+  return `ИЗ РАННЕЙ ПЕРЕПИСКИ (контекст уже обсуждённого, не повторяй буквально):\n${trimmed}`;
+}
+
+/**
  * Renders the user-facts memory block. Returns "" when empty so it doesn't
  * inflate the prompt with a meaningless heading. Exported for use by the
  * sales-style prompt composer.
@@ -223,6 +235,7 @@ export function buildSystemPrompt(
   persona: Persona,
   context: string,
   userFacts?: Record<string, string>,
+  conversationSummary?: string,
 ): string {
   const company = persona.company?.trim();
   const personaLine =
@@ -295,7 +308,10 @@ export function buildSystemPrompt(
   const userFactsBlock = renderUserFactsBlock(userFacts);
   const userFactsSection = userFactsBlock ? `\n\n${userFactsBlock}` : "";
 
-  return `${personaLine}${conversational}${factsBlock}${userFactsSection}\n\n${rules}\n\nCONTEXT:\n${context}`;
+  const summaryBlock = renderSummaryBlock(conversationSummary);
+  const summarySection = summaryBlock ? `\n\n${summaryBlock}` : "";
+
+  return `${personaLine}${conversational}${factsBlock}${summarySection}${userFactsSection}\n\n${rules}\n\nCONTEXT:\n${context}`;
 }
 
 export interface AnswerInput {
@@ -366,6 +382,14 @@ export interface AnswerInput {
    * alongside this flag, it's IGNORED (fused ranks aren't on the L2 scale).
    */
   hybridSearch?: boolean;
+  /**
+   * Compressed summary of older turns (before the recent-history window).
+   * Injected into the system prompt as "ИЗ РАННЕЙ ПЕРЕПИСКИ:" so the LLM
+   * has continuity beyond the last 12 raw messages. Generated lazily by
+   * the webhook (see runConversationSummaryRefresh) — caller just passes
+   * whatever is currently stored.
+   */
+  conversationSummary?: string;
 }
 
 /**
@@ -510,6 +534,9 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     systemPrompt = composeSystemPrompt(input.style, stage, context, {
       includeFewShot: input.includeFewShot ?? true,
       ...(input.userFacts ? { userFacts: input.userFacts } : {}),
+      ...(input.conversationSummary
+        ? { conversationSummary: input.conversationSummary }
+        : {}),
     });
     temperature = input.style.model.temperature;
   } else {
@@ -517,6 +544,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       input.persona ?? DEFAULT_PERSONA,
       context,
       input.userFacts,
+      input.conversationSummary,
     );
   }
 

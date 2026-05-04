@@ -2,7 +2,7 @@
 
 ## What just landed
 
-Four layers were added on top of the existing RAG+persona+funnel pipeline. All are **opt-in via env flags** — defaults are off so existing deployments are unaffected.
+Five layers were added on top of the existing RAG+persona+funnel pipeline. All are **opt-in via env flags** — defaults are off so existing deployments are unaffected.
 
 | Feature | Env flag | What it does | Cost per turn |
 |---------|----------|--------------|---------------|
@@ -10,8 +10,9 @@ Four layers were added on top of the existing RAG+persona+funnel pipeline. All a
 | Query rewriting | `RAG_QUERY_REWRITE=true` | Rewrites elliptical/follow-up questions ("а там?") into self-contained search queries before vector retrieval | +1 LLM call only on flagged turns (~20–30%) |
 | Reflection | `RAG_REFLECT=true` | After generation, verifies every fact in the answer is grounded in CONTEXT; ungrounded answers become `NO_CONTEXT_MARKER` (silent) | +1 LLM call on grounded turns |
 | Hybrid retrieval | `RAG_HYBRID_SEARCH=true` | BM25 (FTS5) + vector + RRF fusion; catches exact-match queries (numbers, proper nouns) that pure embeddings misrank | 0 extra LLM calls (1 extra SQL FTS5 query) |
+| Conversation summarization | `RAG_CONVERSATION_SUMMARY=true` | Compresses old turns of long chats into a paragraph stored in `conversations.summary_json`, injected as "ИЗ РАННЕЙ ПЕРЕПИСКИ" | +1 LLM call only when summary is stale (every ~8 messages on long chats) |
 
-All four default OFF — turn on one at a time and watch metrics on a small slice of traffic before enabling globally.
+All five default OFF — turn on one at a time and watch metrics on a small slice of traffic before enabling globally.
 
 ### Files added
 - [`src/rag/extract-user-facts.ts`](src/rag/extract-user-facts.ts) — fact-extraction LLM wrapper
@@ -25,7 +26,7 @@ All four default OFF — turn on one at a time and watch metrics on a small slic
 - [`src/rag/answer.ts`](src/rag/answer.ts) — `userFacts`, `rewriteQueryBeforeRetrieval`, `reflect`, `hybridSearch` flags + `renderUserFactsBlock` helper
 - [`src/sales/prompt.ts`](src/sales/prompt.ts) — reuses `renderUserFactsBlock` for the sales-style path
 - [`src/telegram/webhook.ts`](src/telegram/webhook.ts) — wires memory before RAG, runs extraction after reply
-- [`src/config.ts`](src/config.ts) — four new env flags
+- [`src/config.ts`](src/config.ts) — five new env flags
 - [`src/index.ts`](src/index.ts) — passes flags into `RagDeps`
 
 ---
@@ -50,10 +51,8 @@ Migration 005 added FTS5 + sync triggers; `KbRepo.hybridSearch` does RRF fusion 
 #### ~~4. Per-message confidence telemetry~~ ✅ done
 `AnswerResult.telemetry` ([src/rag/answer.ts](src/rag/answer.ts)) — every turn captures `path` (smalltalk / persona_fact / no_context / ungrounded / ok), `total_ms` / `retrieval_ms` / `generation_ms`, `top_distances` (top-k KB hit distances rounded to 4dp), `hybrid` flag, `original_query` + `rewritten_query` when rewrite changed the search query, `reflect` verdict + reason. Webhook persists this in `messages.meta_json.telemetry` alongside `used_chunk_ids`. Admin UI: DEBUG toggle in chat header reveals a one-line `TelemetryStrip` under each assistant message — color-coded by path (green=ok, amber=no_context, red=ungrounded).
 
-#### 5. Conversation summarization (token budget for long chats)
-**Why now:** `recentForContext(conv.id, 12)` is a fixed window. Once a conversation is 50+ messages, the LLM loses context from turns 1–38. The user-memory layer covers facts but not nuance ("we discussed apartment options last week").
-**How:** when conversation length crosses a threshold (e.g. 30 messages), summarize messages 1..N-12 into a single "PRIOR DISCUSSION SUMMARY" string. Store in `conversations.summary_json`. Re-summarize in background when stale.
-**Estimated lift:** quality stops degrading on long chats; tokens-per-turn stays bounded.
+#### ~~5. Conversation summarization (token budget for long chats)~~ ✅ done
+Migration 006 adds `conversations.summary_json`. [`summarizeConversation`](src/rag/summarize-conversation.ts) compresses old turns into a paragraph; webhook reads stored summary into the system prompt as "ИЗ РАННЕЙ ПЕРЕПИСКИ:" and refreshes lazily after each reply (fire-and-forget). Thresholds: kicks in past 30 total messages, refreshes when 8 messages drift past the last summarized id, refines existing summary instead of regenerating from scratch. Opt-in via `RAG_CONVERSATION_SUMMARY=true`.
 
 #### 6. Multi-vector retrieval (separate KB indexes per topic)
 **Why now:** one global KB for visa info + payment info + city info means embeddings are crowded. Topic-specific routing reduces noise.
