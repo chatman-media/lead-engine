@@ -101,6 +101,52 @@ export class TelegramClient {
   }
 
   /**
+   * Re-send a photo by file_id. Used by the operator-relay path: when the
+   * operator uploads a photo to the ops chat as a reply to a lead card,
+   * the webhook hands the largest size's file_id straight to this method
+   * — Telegram is happy to re-deliver media we've already seen, no need
+   * to download and re-upload bytes.
+   */
+  sendPhoto(input: {
+    chatId: number | string;
+    photoFileId: string;
+    caption?: string;
+  }): Promise<TgSendMessageResult> {
+    const params: Record<string, unknown> = {
+      chat_id: input.chatId,
+      photo: input.photoFileId,
+    };
+    if (input.caption) params.caption = input.caption;
+    return this.call<TgSendMessageResult>("sendPhoto", params);
+  }
+
+  sendVideo(input: {
+    chatId: number | string;
+    videoFileId: string;
+    caption?: string;
+  }): Promise<TgSendMessageResult> {
+    const params: Record<string, unknown> = {
+      chat_id: input.chatId,
+      video: input.videoFileId,
+    };
+    if (input.caption) params.caption = input.caption;
+    return this.call<TgSendMessageResult>("sendVideo", params);
+  }
+
+  sendDocument(input: {
+    chatId: number | string;
+    documentFileId: string;
+    caption?: string;
+  }): Promise<TgSendMessageResult> {
+    const params: Record<string, unknown> = {
+      chat_id: input.chatId,
+      document: input.documentFileId,
+    };
+    if (input.caption) params.caption = input.caption;
+    return this.call<TgSendMessageResult>("sendDocument", params);
+  }
+
+  /**
    * Edit a message we previously sent (commonly the lead card after the
    * operator clicks approve/reject — the card stays in the ops chat with
    * the new state visible). `text` replaces the body; `replyMarkup`

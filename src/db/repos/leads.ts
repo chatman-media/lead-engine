@@ -57,6 +57,24 @@ export class LeadsRepo {
   }
 
   /**
+   * Look up a lead by its ops-chat card message. Used by the relay
+   * handler in webhook: when the operator replies to a lead card in
+   * the ops chat, Telegram delivers `reply_to_message.message_id` and
+   * we need to find which lead that card belongs to.
+   */
+  byOpsMessage(chatId: number, messageId: number): LeadRow | null {
+    return (
+      this.db
+        .query<LeadRow, [number, number]>(
+          `SELECT * FROM leads
+           WHERE ops_chat_id = ? AND ops_message_id = ?
+           LIMIT 1`,
+        )
+        .get(chatId, messageId) ?? null
+    );
+  }
+
+  /**
    * Idempotent — returns existing lead for the user when one exists, else
    * creates a fresh `intake_pending` lead. The `user_id` UNIQUE constraint
    * means at most one lead row per candidate; closed/rejected leads must

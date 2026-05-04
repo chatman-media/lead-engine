@@ -89,6 +89,16 @@ describe("LeadsRepo", () => {
     expect(after?.ops_message_id).toBe(555);
   });
 
+  test("byOpsMessage round-trips and returns null on miss", () => {
+    const u = users.create({ tgUserId: 301 });
+    const lead = leads.ensureForUser(u.id);
+    leads.setOpsCardMessage(lead.id, -100456, 777);
+    const found = leads.byOpsMessage(-100456, 777);
+    expect(found?.id).toBe(lead.id);
+    expect(leads.byOpsMessage(-100456, 999)).toBeNull();
+    expect(leads.byOpsMessage(-100999, 777)).toBeNull();
+  });
+
   test("countByState returns zero baseline + observed counts", () => {
     const u1 = users.create({ tgUserId: 400 });
     const u2 = users.create({ tgUserId: 401 });
