@@ -23,6 +23,7 @@ import { LeadsRepo } from "../db/repos/leads.ts";
 import { countMediaForConversation, extractIntake } from "../leads/intake.ts";
 import { LeadsService } from "../leads/service.ts";
 import { isIntakeComplete, type IntakeFields } from "../leads/templates.ts";
+import { extractVisaDocs, type VisaFields } from "../leads/visa-docs.ts";
 import { pickVariant } from "../sales/ab-router.ts";
 import { classifyStage } from "../sales/stage-classifier.ts";
 import { nextStage } from "../sales/stage-router.ts";
@@ -721,6 +722,63 @@ function parseIntakeJson(raw: string | null): IntakeFields | undefined {
   }
 }
 
+/**
+ * After each candidate message during the docs collection phase,
+ * extract structured visa-application fields from the conversation
+ * and accumulate them in `lead.visa_docs_json`. Operator's manual
+ * edits via PATCH /admin/api/leads/:id/visa-docs are preserved
+ * because the LLM extractor only returns NEWLY-mentioned fields
+ * (existing values stay intact when not re-mentioned).
+ *
+ * Same gating as runIntakeUpdate: requires LEADS_CHAT_ID configured
+ * (without an ops chat, the parsing is busy work). Skipped when the
+ * lead isn't in `docs_pending` — operator owns the lead in approved/
+ * docs_complete/submitted/rejected states.
+ */
+async function runVisaDocsUpdate(d: ProcessInboundDeps): Promise<void> {
+  if (!d.rag) return;
+  if (d.leadsChatId == null) return;
+
+  const lead = d.leads.byUserId(d.user.id);
+  if (!lead) return;
+  if (lead.state !== "docs_pending") return;
+
+  // Read recent messages from the conversation. The visa form is
+  // typically sent by the candidate as one or two long messages, so
+  // 30 turns of context is plenty (and a hard upper bound on cost).
+  const recent = d.messages.recentForContext(d.conv.id, 30);
+  const messagesForLlm = recent
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({
+      role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+      content: m.text,
+    }));
+
+  const existing = parseVisaDocsJson(lead.visa_docs_json);
+  const merged = await extractVisaDocs({
+    messages: messagesForLlm,
+    chat: d.rag.chat,
+    ...(existing ? { existingDocs: existing } : {}),
+  });
+
+  // Only persist when the merge produced any change at all — avoids
+  // bumping updated_at + WS noise on every silent turn.
+  const before = JSON.stringify(existing ?? {});
+  const after = JSON.stringify(merged);
+  if (before !== after) {
+    d.leads.setVisaDocs(lead.id, after);
+  }
+}
+
+function parseVisaDocsJson(raw: string | null): VisaFields | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as VisaFields;
+  } catch {
+    return undefined;
+  }
+}
+
 async function runConversationSummaryRefresh(
   d: ProcessInboundDeps,
 ): Promise<void> {
@@ -849,6 +907,7 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     await runMemoryExtraction(d);
     await runConversationSummaryRefresh(d);
     await runIntakeUpdate(d);
+    await runVisaDocsUpdate(d);
     return;
   }
 
@@ -860,4 +919,5 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
   await runMemoryExtraction(d);
   await runConversationSummaryRefresh(d);
   await runIntakeUpdate(d);
+  await runVisaDocsUpdate(d);
 }

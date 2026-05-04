@@ -157,6 +157,19 @@ export function isPersonalFactQuestion(question: string): string | null {
 
   if (statusCue) return "status";
 
+  // Phone / contact requests. Common phrasings: "твой номер", "номер
+  // телефона", "дай номер", "whatsapp есть?". Also catches the "+1 …"
+  // / "+7 …" style request where a candidate asks where to message.
+  const phoneCue =
+    /(?<![\p{L}\p{N}])(номер\s+(твой|телефона|тел))/iu.test(q) ||
+    /(?<![\p{L}\p{N}])(твой|какой|есть)\s+(номер|телефон|whatsapp|вотсап|whatsap)/iu.test(q) ||
+    /(?<![\p{L}\p{N}])(дай|скинь|пришли)\s+(номер|телефон|whatsapp)/iu.test(q) ||
+    /^номер\??$/.test(q) ||
+    /^телефон\??$/.test(q) ||
+    /^whatsapp\??$/i.test(q);
+
+  if (phoneCue) return "phone";
+
   return null;
 }
 
@@ -177,7 +190,12 @@ export function personaFactReply(persona: Persona, key: string): string | null {
     // If value already contains letters (e.g. "26 лет") return as-is, else append " лет"
     return /\d/.test(val) && !/[а-яё]/i.test(val) ? `${val} лет.` : `${val}.`;
   }
-  // "status" and "experience" — operator writes the full reply
+  if (key === "phone") {
+    // The configured value is the raw number. Wrap with a natural
+    // sentence so the bot doesn't sound like a database row.
+    return `Мой номер: ${val}. Можно писать в WhatsApp / Telegram.`;
+  }
+  // "status" / "experience" / other — operator writes the full reply
   return val;
 }
 

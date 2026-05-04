@@ -1650,6 +1650,129 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
   };
 }
 
+/**
+ * Single-lead detail. Returns the lead row joined with the user info,
+ * plus parsed `intake` and `visa_docs` so the UI doesn't have to
+ * re-parse JSON in the browser, plus the most recent ~30 messages.
+ */
+export function createLeadDetailHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    const leadsRepo = new LeadsRepo(deps.db);
+    const usersRepo = new UsersRepo(deps.db);
+    const conversations = new ConversationsRepo(deps.db);
+    const messagesRepo = new MessagesRepo(deps.db);
+
+    const lead = leadsRepo.byId(id);
+    if (!lead) return json({ error: "not found" }, { status: 404 });
+    const user = usersRepo.byId(lead.user_id);
+    if (!user) return json({ error: "user gone" }, { status: 404 });
+    const conv = conversations.byUserId(user.id);
+    return json({
+      lead,
+      user,
+      intake: lead.intake_json ? safeJson(lead.intake_json) : null,
+      visa_docs: lead.visa_docs_json ? safeJson(lead.visa_docs_json) : null,
+      conversation_id: conv?.id ?? null,
+      recent_messages: conv ? recentMessagesForCard(messagesRepo, conv.id) : [],
+    });
+  };
+}
+
+const VISA_DOCS_FIELD_KEYS = [
+  "family_name",
+  "given_name",
+  "date_of_birth",
+  "country_of_birth",
+  "city_of_birth",
+  "marital_status",
+  "current_nationality",
+  "national_id_number",
+  "passport_number",
+  "passport_issuing_country",
+  "passport_issuing_place",
+  "passport_expiration_date",
+  "current_address",
+  "phone",
+  "email",
+  "father_name",
+  "father_nationality",
+  "father_dob",
+  "mother_name",
+  "mother_nationality",
+  "mother_dob",
+  "been_to_china",
+  "previous_chinese_visa",
+  "work_experience",
+  "education",
+  "travel_history_12mo",
+  "family_other",
+] as const;
+const VISA_DOCS_FIELD_KEY_SET: ReadonlySet<string> = new Set(VISA_DOCS_FIELD_KEYS);
+const VISA_DOCS_VALUE_MAX = 1500;
+
+/**
+ * Operator-driven manual edit of the auto-extracted visa-application
+ * fields. The body shape is `{ docs: { field: value, ... } }` — only
+ * known keys are accepted (others silently dropped); an empty-string
+ * value clears the field. The update is MERGED on top of existing
+ * stored docs so the operator can fix one field without retyping all.
+ */
+export function createUpdateVisaDocsHandler(deps: AdminApiDeps): RouteHandler {
+  const leadsRepo = new LeadsRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    const lead = leadsRepo.byId(id);
+    if (!lead) return json({ error: "not found" }, { status: 404 });
+
+    let body: { docs?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    if (
+      typeof body.docs !== "object" ||
+      body.docs === null ||
+      Array.isArray(body.docs)
+    ) {
+      return json({ error: "docs must be an object" }, { status: 400 });
+    }
+
+    const incoming = body.docs as Record<string, unknown>;
+    const existing = (lead.visa_docs_json
+      ? safeJson(lead.visa_docs_json)
+      : {}) as Record<string, string>;
+    const merged: Record<string, string> = { ...existing };
+    for (const [k, v] of Object.entries(incoming)) {
+      if (!VISA_DOCS_FIELD_KEY_SET.has(k)) continue;
+      if (v === null || v === undefined) {
+        delete merged[k];
+        continue;
+      }
+      const str = typeof v === "string" ? v : String(v);
+      const trimmed = str.trim();
+      if (!trimmed) {
+        delete merged[k];
+        continue;
+      }
+      if (trimmed.length > VISA_DOCS_VALUE_MAX) continue;
+      merged[k] = trimmed;
+    }
+
+    leadsRepo.setVisaDocs(id, JSON.stringify(merged));
+    return json({ visa_docs: merged });
+  };
+}
+
 export function createDeleteLeadHandler(deps: AdminApiDeps): RouteHandler {
   return ({ req, params }) => {
     const ctx = requireAdmin(deps.db, req);

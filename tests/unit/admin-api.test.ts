@@ -227,6 +227,107 @@ describe("leads endpoints", () => {
     expect(b.application_id).toBe(a.application_id);
   });
 
+  test("GET /admin/api/leads/:id returns lead detail with parsed intake/visa_docs", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9300 });
+    const c = conversations.ensureForUser(u.id);
+    const { lead } = (await (
+      await fetch(
+        url(`/admin/api/leads/from-conversation/${c.id}`),
+        authed({ method: "POST" }),
+      )
+    ).json()) as { lead: { id: number } };
+
+    const r = await fetch(url(`/admin/api/leads/${lead.id}`), authed());
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      lead: { id: number };
+      user: { tg_user_id: number };
+      intake: unknown;
+      visa_docs: unknown;
+      conversation_id: number | null;
+      recent_messages: unknown[];
+    };
+    expect(body.lead.id).toBe(lead.id);
+    expect(body.user.tg_user_id).toBe(9300);
+    expect(body.conversation_id).toBe(c.id);
+  });
+
+  test("PATCH /admin/api/leads/:id/visa-docs merges patch with existing", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9301 });
+    const c = conversations.ensureForUser(u.id);
+    const { lead } = (await (
+      await fetch(
+        url(`/admin/api/leads/from-conversation/${c.id}`),
+        authed({ method: "POST" }),
+      )
+    ).json()) as { lead: { id: number } };
+
+    // First patch — sets two fields
+    const r1 = await fetch(
+      url(`/admin/api/leads/${lead.id}/visa-docs`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          docs: { family_name: "Ivanova", phone: "+79991234567" },
+        }),
+      }),
+    );
+    expect(r1.status).toBe(200);
+    const body1 = (await r1.json()) as {
+      visa_docs: Record<string, string>;
+    };
+    expect(body1.visa_docs.family_name).toBe("Ivanova");
+    expect(body1.visa_docs.phone).toBe("+79991234567");
+
+    // Second patch — adds one + clears one with empty string
+    const r2 = await fetch(
+      url(`/admin/api/leads/${lead.id}/visa-docs`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          docs: { given_name: "Anna", phone: "" },
+        }),
+      }),
+    );
+    const body2 = (await r2.json()) as { visa_docs: Record<string, string> };
+    expect(body2.visa_docs.family_name).toBe("Ivanova"); // preserved
+    expect(body2.visa_docs.given_name).toBe("Anna"); // added
+    expect(body2.visa_docs.phone).toBeUndefined(); // cleared
+  });
+
+  test("PATCH /admin/api/leads/:id/visa-docs drops unknown keys", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9302 });
+    const c = conversations.ensureForUser(u.id);
+    const { lead } = (await (
+      await fetch(
+        url(`/admin/api/leads/from-conversation/${c.id}`),
+        authed({ method: "POST" }),
+      )
+    ).json()) as { lead: { id: number } };
+
+    const r = await fetch(
+      url(`/admin/api/leads/${lead.id}/visa-docs`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          docs: { family_name: "Ivanova", arbitrary_hack: "evil" },
+        }),
+      }),
+    );
+    const body = (await r.json()) as { visa_docs: Record<string, string> };
+    expect(body.visa_docs.family_name).toBe("Ivanova");
+    expect(body.visa_docs.arbitrary_hack).toBeUndefined();
+  });
+
   test("submit-to-visa rejects leads in wrong state with 409", async () => {
     const usersRepo = new UsersRepo(ctx.db);
     const conversations = new ConversationsRepo(ctx.db);
