@@ -1,4 +1,5 @@
 import type {
+  TgFile,
   TgReplyMarkup,
   TgSendMessageResult,
   TgUser,
@@ -77,6 +78,39 @@ export class TelegramClient {
 
   getMe(): Promise<TgUser> {
     return this.call<TgUser>("getMe", {});
+  }
+
+  /**
+   * Resolve a file_id to a downloadable path. The path returned is
+   * appended to `<baseUrl>/file/bot<token>/...` (NOT the regular
+   * `<baseUrl>/bot<token>/...` API endpoint) — see `downloadFile` for
+   * the right URL shape.
+   */
+  getFile(fileId: string): Promise<TgFile> {
+    return this.call<TgFile>("getFile", { file_id: fileId });
+  }
+
+  /**
+   * Two-step download for any file_id we hold:
+   *   1. getFile → returns `file_path`
+   *   2. fetch the bytes from `<baseUrl>/file/bot<token>/<file_path>`
+   *
+   * Returns the raw `Response` so the admin layer can stream the body
+   * straight to the browser without buffering. Throws when the file is
+   * too large for the Bot Download API (Telegram's ~20 MB cap leaves
+   * `file_path` undefined).
+   *
+   * The token is held privately by the client — the admin endpoint
+   * proxies through this helper rather than getting the token directly,
+   * so secrets never leave the server.
+   */
+  async downloadFile(fileId: string): Promise<Response> {
+    const info = await this.getFile(fileId);
+    if (!info.file_path) {
+      throw new Error(`Telegram file ${fileId} has no file_path (too large?)`);
+    }
+    const url = `${this.baseUrl}/file/bot${this.token}/${info.file_path}`;
+    return this.fetchImpl(url);
   }
 
   sendMessage(input: {
