@@ -7,9 +7,9 @@ import {
   type MessageTelemetry,
   type User,
   type UserMemory,
-} from "../api.ts";
-import { ws } from "../App.tsx";
-import { MemoryPane } from "../components/MemoryPane.tsx";
+} from "../api";
+import { ws } from "../App";
+import { MemoryPane } from "../components/MemoryPane";
 
 function tsShort(unix: number) {
   return new Date(unix * 1000).toLocaleTimeString("ru-RU", {

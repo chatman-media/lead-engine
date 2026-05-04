@@ -100,25 +100,30 @@ function titleFromBody(body: string, fallback: string): string {
   return noEmoji.slice(0, 80) || fallback;
 }
 
-function parseArgs(): { input: string; outDir: string; agentId: string } {
+function parseArgs(): { input: string; outDir: string; agentIds: Set<string> } {
   const args = process.argv.slice(2);
   const positional: string[] = [];
-  let agentId = DEFAULT_AGENT_ID;
+  const agentIds = new Set<string>();
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--agent") {
-      agentId = args[++i] ?? agentId;
+      // Comma-separated list lets you pull broadcasts from a channel +
+      // dialogs from a personal account in one pass:
+      //   --agent user1234,channel5678
+      const raw = args[++i] ?? "";
+      raw.split(",").map((s) => s.trim()).filter(Boolean).forEach((s) => agentIds.add(s));
     } else {
       positional.push(args[i]!);
     }
   }
+  if (agentIds.size === 0) agentIds.add(DEFAULT_AGENT_ID);
   const [input, outDir] = positional;
   if (!input || !outDir) {
     console.error(
-      "Usage: bun scripts/extract-tg.ts <result.json> <outDir> [--agent <from_id>]",
+      "Usage: bun scripts/extract-tg.ts <result.json> <outDir> [--agent <id1,id2,...>]",
     );
     process.exit(1);
   }
-  return { input: resolve(input), outDir: resolve(outDir), agentId };
+  return { input: resolve(input), outDir: resolve(outDir), agentIds };
 }
 
 interface BroadcastRecord {
@@ -137,8 +142,9 @@ interface Turn {
 }
 
 function main() {
-  const { input, outDir, agentId } = parseArgs();
+  const { input, outDir, agentIds } = parseArgs();
   console.log(`[extract] reading ${input}`);
+  console.log(`[extract] agent ids: ${[...agentIds].join(", ")}`);
   const data = JSON.parse(readFileSync(input, "utf8")) as TgExport;
   const chats = data.chats.list;
 
@@ -188,7 +194,7 @@ function main() {
     for (const m of msgs) {
       if (m.type !== "message") continue;
       const text = msgText(m).trim();
-      const isAgent = m.from_id === agentId;
+      const isAgent = m.from_id ? agentIds.has(m.from_id) : false;
 
       // Voice messages from agent → queue for transcription
       if (m.media_type === "voice_message" && isAgent && m.file) {
@@ -377,7 +383,7 @@ function main() {
   summary.push("# kb/extracted");
   summary.push("");
   summary.push(`Источник: \`${input}\``);
-  summary.push(`Агент: \`${agentId}\``);
+  summary.push(`Агент(ы): \`${[...agentIds].join(", ")}\``);
   summary.push("");
   summary.push("## Статистика");
   summary.push("");
