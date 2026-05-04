@@ -434,6 +434,18 @@ export interface AnswerInput {
    * Free at query time (regex classifier, no LLM).
    */
   topicRouting?: boolean;
+  /**
+   * Pre-rendered "АКТУАЛЬНЫЕ ВАКАНСИИ" block from admin-managed vacancies
+   * (see VacanciesRepo + renderVacanciesBlock). Prepended to the KB context
+   * so the bot answers from the freshest operator-curated info; KB hits
+   * still appear below as background. Empty string = no active vacancies,
+   * skip the heading.
+   *
+   * Important side effect: when set AND non-empty, retrieval may return
+   * 0 KB hits and we still produce an answer (vacancies alone are enough
+   * grounding). NO_CONTEXT_MARKER only fires when BOTH are empty.
+   */
+  vacanciesBlock?: string;
 }
 
 /**
@@ -582,7 +594,13 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       : {}),
   };
 
-  if (hits.length === 0) {
+  // Active vacancies (from admin) are prepended as the freshest grounding;
+  // KB hits follow as background. When BOTH are empty, fall through to
+  // NO_CONTEXT — vacancies alone are enough to answer "что у вас сейчас?"
+  // even on cold KB.
+  const vacBlock = (input.vacanciesBlock ?? "").trim();
+
+  if (hits.length === 0 && !vacBlock) {
     return {
       text: NO_CONTEXT_MARKER,
       usedChunkIds: [],
@@ -591,12 +609,18 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     };
   }
 
-  const context = hits
+  const kbContextStr = hits
     .map(
       (h, i) =>
         `[#${i + 1}] (source: ${h.title})\n${h.text}`,
     )
     .join("\n\n");
+
+  const context = vacBlock
+    ? kbContextStr
+      ? `${vacBlock}\n\n${kbContextStr}`
+      : vacBlock
+    : kbContextStr;
 
   // Branch: sales-style engine vs legacy persona prompt.
   // `style` wins over `persona` when both are passed.

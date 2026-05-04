@@ -53,6 +53,108 @@ function authed(extra: RequestInit = {}): RequestInit {
   };
 }
 
+describe("vacancies endpoints", () => {
+  test("GET /admin/api/vacancies requires auth and returns []", async () => {
+    expect((await fetch(url("/admin/api/vacancies"))).status).toBe(401);
+
+    const r = await fetch(url("/admin/api/vacancies"), authed());
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { vacancies: unknown[] };
+    expect(body.vacancies).toEqual([]);
+  });
+
+  test("POST creates a vacancy; PATCH edits; DELETE removes", async () => {
+    const create = await fetch(
+      url("/admin/api/vacancies"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Шаохинг", body: "3000/смена" }),
+      }),
+    );
+    expect(create.status).toBe(200);
+    const created = (await create.json()) as {
+      vacancy: { id: number; title: string; is_active: number };
+    };
+    expect(created.vacancy.title).toBe("Шаохинг");
+    expect(created.vacancy.is_active).toBe(1);
+
+    const patch = await fetch(
+      url(`/admin/api/vacancies/${created.vacancy.id}`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ is_active: false }),
+      }),
+    );
+    expect(patch.status).toBe(200);
+    const patched = (await patch.json()) as { vacancy: { is_active: number } };
+    expect(patched.vacancy.is_active).toBe(0);
+
+    const del = await fetch(
+      url(`/admin/api/vacancies/${created.vacancy.id}`),
+      authed({ method: "DELETE" }),
+    );
+    expect(del.status).toBe(200);
+  });
+
+  test("POST validates required title + body", async () => {
+    const noTitle = await fetch(
+      url("/admin/api/vacancies"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body: "x" }),
+      }),
+    );
+    expect(noTitle.status).toBe(400);
+
+    const noBody = await fetch(
+      url("/admin/api/vacancies"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "x" }),
+      }),
+    );
+    expect(noBody.status).toBe(400);
+  });
+
+  test("PATCH 404 on missing id", async () => {
+    const r = await fetch(
+      url("/admin/api/vacancies/99999"),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "x" }),
+      }),
+    );
+    expect(r.status).toBe(404);
+  });
+
+  test("status endpoint reports active vacancy count", async () => {
+    await fetch(
+      url("/admin/api/vacancies"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "v1", body: "b1" }),
+      }),
+    );
+    await fetch(
+      url("/admin/api/vacancies"),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "v2", body: "b2" }),
+      }),
+    );
+    const r = await fetch(url("/admin/api/status"), authed());
+    const body = (await r.json()) as { vacancies: { active: number } };
+    expect(body.vacancies.active).toBe(2);
+  });
+});
+
 describe("GET /admin/api/status", () => {
   test("requires auth", async () => {
     const res = await fetch(url("/admin/api/status"));

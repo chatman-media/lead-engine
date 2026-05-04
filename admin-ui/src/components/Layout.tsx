@@ -28,6 +28,7 @@ export function Layout({ admin, children }: LayoutProps) {
             { to: "/admin/status", label: "Status" },
             { to: "/admin/chats", label: "Chats" },
             { to: "/admin/users", label: "Users" },
+            { to: "/admin/vacancies", label: "Vacancies" },
             { to: "/admin/styles", label: "Sales styles" },
             { to: "/admin/experiments", label: "Experiments" },
           ].map(({ to, label }) => (

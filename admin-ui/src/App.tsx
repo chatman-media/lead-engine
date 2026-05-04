@@ -17,6 +17,7 @@ import { Status } from "./pages/Status.tsx";
 import { StyleDetail } from "./pages/StyleDetail.tsx";
 import { Styles } from "./pages/Styles.tsx";
 import { Users } from "./pages/Users.tsx";
+import { Vacancies } from "./pages/Vacancies.tsx";
 import { AdminWs } from "./ws.ts";
 
 export const ws = new AdminWs();
@@ -80,6 +81,7 @@ export function App() {
                 <Route path="chats" element={<Chats />} />
                 <Route path="chats/:id" element={<Chat />} />
                 <Route path="users" element={<Users />} />
+                <Route path="vacancies" element={<Vacancies />} />
                 <Route path="styles" element={<Styles />} />
                 <Route path="styles/new" element={<NewStyle />} />
                 <Route path="styles/:id" element={<StyleDetail />} />

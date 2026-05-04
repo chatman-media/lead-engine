@@ -18,6 +18,7 @@ import { composeSystemPrompt } from "../sales/prompt.ts";
 import { nextStage } from "../sales/stage-router.ts";
 import { FUNNEL_STAGES, StyleSchema, type FunnelStage } from "../sales/types.ts";
 import { UsersRepo } from "../db/repos/users.ts";
+import { VacanciesRepo } from "../db/repos/vacancies.ts";
 import { json, type RouteHandler } from "../router.ts";
 import type { TelegramClient } from "../telegram/client.ts";
 import { requireAdmin } from "./auth.ts";
@@ -81,6 +82,7 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
     // Active routing: env override > running experiment > legacy persona > none.
     const styles = new StylesRepo(deps.db);
     const experiments = new ExperimentsRepo(deps.db);
+    const vacancies = new VacanciesRepo(deps.db);
     let routingMode: "env_override" | "running_experiment" | "legacy_persona" | "none";
     let activeStyleSlug: string | null = null;
     let runningExperimentSlug: string | null = null;
@@ -210,6 +212,9 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
       messages: {
         total: messagesTotal,
         by_role: Object.fromEntries(messagesByRole.map((r) => [r.role, r.count])),
+      },
+      vacancies: {
+        active: vacancies.countActive(),
       },
     });
   };
@@ -1347,4 +1352,109 @@ function safeJson(text: string): unknown {
   } catch {
     return null;
   }
+}
+
+// ─── Vacancies (admin-managed list of currently-open offers) ───────────
+
+const VACANCY_TITLE_MAX = 200;
+const VACANCY_BODY_MAX = 4000;
+
+export function createListVacanciesHandler(deps: AdminApiDeps): RouteHandler {
+  const vacancies = new VacanciesRepo(deps.db);
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const url = new URL(req.url);
+    // Default = all (operators want to see closed too, to re-enable);
+    // ?active=1 narrows for any internal callers that need the same
+    // shape the bot uses.
+    const onlyActive = url.searchParams.get("active") === "1";
+    const list = onlyActive ? vacancies.listActive() : vacancies.listAll();
+    return json({ vacancies: list });
+  };
+}
+
+export function createCreateVacancyHandler(deps: AdminApiDeps): RouteHandler {
+  const vacancies = new VacanciesRepo(deps.db);
+  return async ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+
+    let body: { title?: unknown; body?: unknown; is_active?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    const text = typeof body.body === "string" ? body.body.trim() : "";
+    if (!title) return json({ error: "title is required" }, { status: 400 });
+    if (!text) return json({ error: "body is required" }, { status: 400 });
+    if (title.length > VACANCY_TITLE_MAX) {
+      return json({ error: `title > ${VACANCY_TITLE_MAX}` }, { status: 400 });
+    }
+    if (text.length > VACANCY_BODY_MAX) {
+      return json({ error: `body > ${VACANCY_BODY_MAX}` }, { status: 400 });
+    }
+
+    const created = vacancies.create({
+      title,
+      body: text,
+      isActive: body.is_active === false ? false : true,
+    });
+    return json({ vacancy: created });
+  };
+}
+
+export function createUpdateVacancyHandler(deps: AdminApiDeps): RouteHandler {
+  const vacancies = new VacanciesRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    let body: { title?: unknown; body?: unknown; is_active?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    const patch: { title?: string; body?: string; isActive?: boolean } = {};
+    if (typeof body.title === "string") {
+      const trimmed = body.title.trim();
+      if (!trimmed) return json({ error: "title is empty" }, { status: 400 });
+      if (trimmed.length > VACANCY_TITLE_MAX) {
+        return json({ error: `title > ${VACANCY_TITLE_MAX}` }, { status: 400 });
+      }
+      patch.title = trimmed;
+    }
+    if (typeof body.body === "string") {
+      const trimmed = body.body.trim();
+      if (!trimmed) return json({ error: "body is empty" }, { status: 400 });
+      if (trimmed.length > VACANCY_BODY_MAX) {
+        return json({ error: `body > ${VACANCY_BODY_MAX}` }, { status: 400 });
+      }
+      patch.body = trimmed;
+    }
+    if (typeof body.is_active === "boolean") {
+      patch.isActive = body.is_active;
+    }
+    const updated = vacancies.update(id, patch);
+    if (!updated) return json({ error: "not found" }, { status: 404 });
+    return json({ vacancy: updated });
+  };
+}
+
+export function createDeleteVacancyHandler(deps: AdminApiDeps): RouteHandler {
+  const vacancies = new VacanciesRepo(deps.db);
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const ok = vacancies.delete(id);
+    if (!ok) return json({ error: "not found" }, { status: 404 });
+    return json({ ok: true, deleted: id });
+  };
 }

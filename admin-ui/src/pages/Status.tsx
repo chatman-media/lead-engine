@@ -75,6 +75,7 @@ export function Status() {
         <RagFlagsCard status={status} />
         <ProvidersCard status={status} />
         <KbCard status={status} />
+        <VacanciesCard status={status} />
         <ConversationsCard status={status} />
         <UsersCard status={status} />
         <MessagesCard status={status} />
@@ -288,6 +289,31 @@ function UsersCard({ status }: { status: SystemStatus }) {
           mono
           hint="extracted facts"
         />
+      )}
+    </Card>
+  );
+}
+
+function VacanciesCard({ status }: { status: SystemStatus }) {
+  return (
+    <Card title="Vacancies">
+      <Row label="active" value={String(status.vacancies.active)} mono />
+      <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 8 }}>
+        Prepended to RAG context as АКТУАЛЬНЫЕ ВАКАНСИИ on every turn.{" "}
+        <a href="/admin/vacancies" style={{ color: "var(--amber)" }}>
+          manage →
+        </a>
+      </div>
+      {status.vacancies.active === 0 && (
+        <div
+          style={{
+            marginTop: 6,
+            fontSize: 11,
+            color: "var(--text-3)",
+          }}
+        >
+          No active vacancies — bot answers from KB only.
+        </div>
       )}
     </Card>
   );

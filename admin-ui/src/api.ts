@@ -65,6 +65,15 @@ export interface ConversationSummary {
   updatedAt: number;
 }
 
+export interface Vacancy {
+  id: number;
+  title: string;
+  body: string;
+  is_active: 0 | 1;
+  created_at: number;
+  updated_at: number;
+}
+
 /** Mirror of the GET /admin/api/status response — see src/admin/api.ts. */
 export interface SystemStatus {
   rag: {
@@ -107,6 +116,9 @@ export interface SystemStatus {
   messages: {
     total: number;
     by_role: Record<string, number>;
+  };
+  vacancies: {
+    active: number;
   };
 }
 
@@ -172,6 +184,28 @@ export const api = {
     }>(`/admin/api/conversations/${id}`),
 
   status: () => req<SystemStatus>("/admin/api/status"),
+
+  vacancies: () => req<{ vacancies: Vacancy[] }>("/admin/api/vacancies"),
+
+  createVacancy: (input: { title: string; body: string; is_active?: boolean }) =>
+    req<{ vacancy: Vacancy }>("/admin/api/vacancies", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  updateVacancy: (
+    id: number,
+    patch: { title?: string; body?: string; is_active?: boolean },
+  ) =>
+    req<{ vacancy: Vacancy }>(`/admin/api/vacancies/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deleteVacancy: (id: number) =>
+    req<{ ok: boolean; deleted: number }>(`/admin/api/vacancies/${id}`, {
+      method: "DELETE",
+    }),
 
   updateUserMemory: (userId: number, facts: Record<string, string>) =>
     req<{ memory: UserMemory }>(`/admin/api/users/${userId}/memory`, {

@@ -16,11 +16,15 @@ import {
   createListUsersHandler,
   createReleaseHandler,
   createReplyHandler,
+  createCreateVacancyHandler,
+  createDeleteVacancyHandler,
+  createListVacanciesHandler,
   createSetExperimentStatusHandler,
   createStatusHandler,
   createStylePlaygroundHandler,
   createTakeHandler,
   createUpdateUserMemoryHandler,
+  createUpdateVacancyHandler,
 } from "./admin/api.ts";
 import {
   createLoginHandler,
@@ -202,6 +206,13 @@ export function createRouter(deps: AppDeps): Router {
     "/admin/api/experiments/:id/funnel",
     createExperimentFunnelHandler(apiDeps),
   );
+
+  // Vacancies — admin-managed list of currently-open offers, prepended
+  // to the RAG context on every turn.
+  router.get("/admin/api/vacancies", createListVacanciesHandler(apiDeps));
+  router.post("/admin/api/vacancies", createCreateVacancyHandler(apiDeps));
+  router.patch("/admin/api/vacancies/:id", createUpdateVacancyHandler(apiDeps));
+  router.delete("/admin/api/vacancies/:id", createDeleteVacancyHandler(apiDeps));
 
   if (deps.enableTestHooks) {
     mountTestHooks(router, deps.db);
