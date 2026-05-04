@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { KbRepo } from "@/db/repos/kb.ts";
 import { openDb } from "@/db/sqlite.ts";
-import { answerWithRag, isPersonaSmalltalkQuestion, NO_CONTEXT_MARKER } from "@/rag/answer.ts";
+import {
+  answerWithRag,
+  isPersonalFactQuestion,
+  isPersonaSmalltalkQuestion,
+  NO_CONTEXT_MARKER,
+  personaFactReply,
+} from "@/rag/answer.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
@@ -129,6 +135,79 @@ describe("isPersonaSmalltalkQuestion", () => {
   });
 });
 
+describe("isPersonalFactQuestion", () => {
+  test("detects city questions", () => {
+    expect(isPersonalFactQuestion("где живешь?")).toBe("city");
+    expect(isPersonalFactQuestion("где ты живешь?")).toBe("city");
+    expect(isPersonalFactQuestion("где живёшь")).toBe("city");
+    expect(isPersonalFactQuestion("откуда ты?")).toBe("city");
+    expect(isPersonalFactQuestion("из какого города?")).toBe("city");
+    expect(isPersonalFactQuestion("в каком городе?")).toBe("city");
+    expect(isPersonalFactQuestion("где ты сейчас?")).toBe("city");
+    expect(isPersonalFactQuestion("где находишься?")).toBe("city");
+  });
+
+  test("detects age questions", () => {
+    expect(isPersonalFactQuestion("сколько тебе лет?")).toBe("age");
+    expect(isPersonalFactQuestion("сколько лет?")).toBe("age");
+    expect(isPersonalFactQuestion("тебе сколько лет?")).toBe("age");
+    expect(isPersonalFactQuestion("какой возраст?")).toBe("age");
+    expect(isPersonalFactQuestion("твой возраст?")).toBe("age");
+    expect(isPersonalFactQuestion("возраст?")).toBe("age");
+  });
+
+  test("detects relationship status questions", () => {
+    expect(isPersonalFactQuestion("ты замужем?")).toBe("status");
+    expect(isPersonalFactQuestion("замужем?")).toBe("status");
+    expect(isPersonalFactQuestion("есть парень?")).toBe("status");
+    expect(isPersonalFactQuestion("есть муж?")).toBe("status");
+    expect(isPersonalFactQuestion("в отношениях?")).toBe("status");
+    expect(isPersonalFactQuestion("ты одна?")).toBe("status");
+  });
+
+  test("returns null when job/offer intent is mixed in", () => {
+    expect(isPersonalFactQuestion("где живешь, есть работа в китае?")).toBeNull();
+    expect(isPersonalFactQuestion("сколько лет и какая зарплата?")).toBeNull();
+    expect(isPersonalFactQuestion("ты замужем и какой график?")).toBeNull();
+  });
+
+  test("returns null on unrelated questions", () => {
+    expect(isPersonalFactQuestion("привет")).toBeNull();
+    expect(isPersonalFactQuestion("как дела?")).toBeNull();
+    expect(isPersonalFactQuestion("")).toBeNull();
+    expect(isPersonalFactQuestion("   ")).toBeNull();
+  });
+});
+
+describe("personaFactReply", () => {
+  const persona = {
+    name: "Алина",
+    role: "human" as const,
+    facts: { city: "Шаохинге", age: "26", status: "Не замужем." },
+  };
+
+  test("city fact wraps in natural sentence", () => {
+    const reply = personaFactReply(persona, "city");
+    expect(reply).toContain("Шаохинге");
+    expect(reply).toBeTruthy();
+  });
+
+  test("age fact appends лет when value is digits only", () => {
+    const reply = personaFactReply(persona, "age");
+    expect(reply).toContain("26");
+    expect(reply).toContain("лет");
+  });
+
+  test("status returned verbatim", () => {
+    expect(personaFactReply(persona, "status")).toBe("Не замужем.");
+  });
+
+  test("returns null when fact key not configured", () => {
+    expect(personaFactReply({ name: "Алина", role: "human" }, "city")).toBeNull();
+    expect(personaFactReply({ name: "Алина", role: "human", facts: {} }, "city")).toBeNull();
+  });
+});
+
 describe("answerWithRag", () => {
   test("retrieves chunks, builds prompt with their text, returns LLM answer", async () => {
     const { qVec } = seed();
@@ -153,6 +232,38 @@ describe("answerWithRag", () => {
     const user = chat.lastMessages?.[chat.lastMessages.length - 1];
     expect(user?.role).toBe("user");
     expect(user?.content).toBe("How do refunds work?");
+  });
+
+  test("personal fact question with facts configured: no embed/LLM call", async () => {
+    const embedder = fakeEmbedder({});
+    const chat = fakeChat("must not run");
+    const result = await answerWithRag({
+      question: "где живешь?",
+      kb,
+      embedder,
+      chat,
+      persona: { name: "Алина", role: "human", facts: { city: "Шаохинге" } },
+    });
+    expect(embedder.calls).toEqual([]);
+    expect(chat.lastMessages).toBeNull();
+    expect(result.text).toContain("Шаохинге");
+    expect(result.usedChunkIds).toEqual([]);
+  });
+
+  test("personal fact question without facts configured: falls through to RAG", async () => {
+    seed();
+    const embedder = fakeEmbedder({ "где живешь?": vec(1) });
+    const chat = fakeChat("RAG answer");
+    const result = await answerWithRag({
+      question: "где живешь?",
+      kb,
+      embedder,
+      chat,
+      persona: { name: "Алина", role: "human" }, // no facts
+    });
+    // Embedder was called (RAG ran)
+    expect(embedder.calls).toContain("где живешь?");
+    expect(result.text).toBe("RAG answer");
   });
 
   test("persona-only name question: no embed/LLM, uses env persona", async () => {
@@ -287,6 +398,42 @@ describe("answerWithRag", () => {
     // Sales-engine markers absent
     expect(sys).not.toContain("ФРЕЙМВОРК");
     expect(sys).not.toContain("ТЕКУЩИЙ ЭТАП");
+  });
+
+  test("hybridSearch=true uses BM25+vector fusion for retrieval", async () => {
+    const doc = kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
+    // Two chunks with disjoint topics. The query mentions "Стамбул" which is
+    // an exact-match keyword only in chunk #2 — pure vector search seeded
+    // with vec(1) would return chunk #1 first, but BM25 lifts chunk #2 via
+    // the keyword. RRF fusion should land chunk #2 in top-1.
+    kb.insertChunkWithEmbedding({
+      documentId: doc.id,
+      chunkIndex: 0,
+      text: "Refunds in 5 business days",
+      tokenCount: 10,
+      embedding: vec(1),
+    });
+    const istanbul = kb.insertChunkWithEmbedding({
+      documentId: doc.id,
+      chunkIndex: 1,
+      text: "Стамбул контракт 60 дней оплата в долларах",
+      tokenCount: 10,
+      embedding: vec(2),
+    });
+
+    const embedder = fakeEmbedder({ "что в Стамбуле?": vec(1) });
+    const chat = fakeChat("ok");
+
+    const result = await answerWithRag({
+      question: "что в Стамбуле?",
+      kb,
+      embedder,
+      chat,
+      topK: 2,
+      hybridSearch: true,
+    });
+
+    expect(result.usedChunkIds).toContain(istanbul.id);
   });
 
   test("includes prior conversation messages between system and current user", async () => {

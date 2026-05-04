@@ -118,7 +118,16 @@ if (llmIsConfigured()) {
     ...(config.sales.stageClassifierThreshold !== undefined
       ? { stageClassifierThreshold: config.sales.stageClassifierThreshold }
       : {}),
+    userMemory: config.rag.userMemory,
+    queryRewrite: config.rag.queryRewrite,
+    reflect: config.rag.reflect,
+    hybridSearch: config.rag.hybridSearch,
   };
+
+  if (config.rag.userMemory) console.log(`[server] cross-session user memory: ON`);
+  if (config.rag.queryRewrite) console.log(`[server] query rewriting: ON`);
+  if (config.rag.reflect) console.log(`[server] answer reflection: ON`);
+  if (config.rag.hybridSearch) console.log(`[server] hybrid retrieval (BM25+vector+RRF): ON`);
 
   if (config.sales.stageClassifier === "llm") {
     console.log(

@@ -4,6 +4,8 @@ import { composeSystemPrompt } from "../sales/prompt.ts";
 import type { FunnelStage, Style } from "../sales/types.ts";
 import type { ChatClient, ChatMessage } from "./chat.ts";
 import type { EmbeddingClient } from "./embed.ts";
+import { verifyAnswer } from "./reflect.ts";
+import { rewriteQuery } from "./rewrite-query.ts";
 import { applyStyleRules } from "./text-style-rules.ts";
 
 /** Sentinel returned when retrieval is empty (or LLM cannot answer from
@@ -18,6 +20,16 @@ export interface Persona {
   role: "human" | "assistant";
   /** Optional company / agency name. */
   company?: string;
+  /**
+   * Fixed personal facts about the persona — bypasses RAG for direct personal
+   * questions and injects into the system prompt as inviolable grounding.
+   * Known keys: "city" (city name), "age" (plain number or "26 лет"),
+   * "status" (full natural reply for relationship/marital questions),
+   * "experience" (full natural reply for "how long working" questions).
+   * Values for "city" and "age" are auto-wrapped into sentences; values for
+   * "status" and "experience" are returned verbatim as the bot reply.
+   */
+  facts?: Record<string, string>;
 }
 
 /** Legacy RAG temperature when sales `style` is not used (`answerWithRag` without `style`). */
@@ -91,6 +103,83 @@ export function isPersonaSmalltalkQuestion(question: string): boolean {
   return !!(nameCue || introCue || whoCue || enName || enWho);
 }
 
+/**
+ * Returns a fact key ("city" | "age" | "status" | "experience") when the
+ * question is ONLY about that personal attribute of the persona, or `null`
+ * when it also contains job/offer intent (route to RAG in that case).
+ *
+ * Mirrors the `isPersonaSmalltalkQuestion` guard: same job-intent block list,
+ * same design — pure function, no side effects, safe to call unconditionally.
+ */
+export function isPersonalFactQuestion(question: string): string | null {
+  const trimmed = question.trim();
+  if (!trimmed) return null;
+
+  const hasJobOrOfferIntent =
+    /(работ|ваканс|зарплат|виза|оффер|переезд|агентств|услов|\bофис\b|график|смен|жилье|жильё|рейс|кита|китай|коре|англ\b)/i.test(
+      question,
+    );
+  if (hasJobOrOfferIntent) return null;
+
+  const q = trimmed.toLowerCase().replace(/\s+/g, " ");
+
+  const cityCue =
+    /где\s+(ты\s+)?(живёшь|живешь)/i.test(q) ||
+    /откуда\s+ты/i.test(q) ||
+    /из\s+какого\s+города/i.test(q) ||
+    /в\s+каком\s+городе/i.test(q) ||
+    /где\s+(ты\s+)?сейчас/i.test(q) ||
+    /где\s+(ты\s+)?находишься/i.test(q) ||
+    /в\s+каком\s+месте/i.test(q);
+
+  if (cityCue) return "city";
+
+  const ageCue =
+    /сколько\s+(тебе\s+)?лет/i.test(q) ||
+    /тебе\s+сколько\s+лет/i.test(q) ||
+    /какой\s+(у\s+тебя\s+)?возраст/i.test(q) ||
+    /твой\s+возраст/i.test(q) ||
+    /тебе\s+сколько/i.test(q) ||
+    /^возраст\??$/.test(q);
+
+  if (ageCue) return "age";
+
+  const statusCue =
+    /ты\s+замужем/i.test(q) ||
+    /замужем\s+ты/i.test(q) ||
+    /^замужем\??$/.test(q) ||
+    /есть\s+(парень|муж|молодой\s+человек)/i.test(q) ||
+    /в\s+отношениях/i.test(q) ||
+    /одна\s+(живёшь|живешь)/i.test(q) ||
+    /^ты\s+одна\??$/.test(q) ||
+    /^отношения(\s+есть)?\??$/.test(q);
+
+  if (statusCue) return "status";
+
+  return null;
+}
+
+/**
+ * Builds a short deterministic reply from `persona.facts[key]`.
+ * Returns `null` when the fact is not configured (caller falls through to RAG).
+ *
+ * "city" / "age" values are wrapped in natural templates; "status" /
+ * "experience" values are returned verbatim — the operator writes the full
+ * natural reply for these (e.g. "Не замужем, работа всё время занимает").
+ */
+export function personaFactReply(persona: Persona, key: string): string | null {
+  const val = persona.facts?.[key]?.trim();
+  if (!val) return null;
+
+  if (key === "city") return `Живу в ${val}.`;
+  if (key === "age") {
+    // If value already contains letters (e.g. "26 лет") return as-is, else append " лет"
+    return /\d/.test(val) && !/[а-яё]/i.test(val) ? `${val} лет.` : `${val}.`;
+  }
+  // "status" and "experience" — operator writes the full reply
+  return val;
+}
+
 /** Short reply derived from persona — no KB required. */
 export function personaSmalltalkReply(persona: Persona): string {
   const name = persona.name?.trim() || "Менеджер";
@@ -115,7 +204,26 @@ export function personaSmalltalkReply(persona: Persona): string {
  * In both modes the model is forbidden from inventing facts and MUST emit
  * the bare `NO_CONTEXT_MARKER` if the answer is not in CONTEXT.
  */
-export function buildSystemPrompt(persona: Persona, context: string): string {
+/**
+ * Renders the user-facts memory block. Returns "" when empty so it doesn't
+ * inflate the prompt with a meaningless heading. Exported for use by the
+ * sales-style prompt composer.
+ */
+export function renderUserFactsBlock(userFacts?: Record<string, string>): string {
+  if (!userFacts) return "";
+  const entries = Object.entries(userFacts).filter(([, v]) => v.trim());
+  if (entries.length === 0) return "";
+  return (
+    `ЗНАЕМ О КАНДИДАТЕ (из прошлых разговоров — НЕ переспрашивай):\n` +
+    entries.map(([k, v]) => `- ${k}: ${v}`).join("\n")
+  );
+}
+
+export function buildSystemPrompt(
+  persona: Persona,
+  context: string,
+  userFacts?: Record<string, string>,
+): string {
   const company = persona.company?.trim();
   const personaLine =
     persona.role === "human"
@@ -178,7 +286,16 @@ export function buildSystemPrompt(persona: Persona, context: string): string {
     `из CONTEXT. Уточняющий встречный вопрос допустим только если без него ` +
     `ответ физически невозможен.`;
 
-  return `${personaLine}${conversational}\n\n${rules}\n\nCONTEXT:\n${context}`;
+  const factsEntries = persona.facts ? Object.entries(persona.facts).filter(([, v]) => v.trim()) : [];
+  const factsBlock = factsEntries.length
+    ? `\nЛИЧНЫЕ ФАКТЫ (используй строго эти данные, не изменяй):\n` +
+      factsEntries.map(([k, v]) => `- ${k}: ${v}`).join("\n")
+    : "";
+
+  const userFactsBlock = renderUserFactsBlock(userFacts);
+  const userFactsSection = userFactsBlock ? `\n\n${userFactsBlock}` : "";
+
+  return `${personaLine}${conversational}${factsBlock}${userFactsSection}\n\n${rules}\n\nCONTEXT:\n${context}`;
 }
 
 export interface AnswerInput {
@@ -218,6 +335,37 @@ export interface AnswerInput {
    *  its own default (256 for Ollama). Useful for tests / playground to
    *  bound output time on slow CPU. */
   numPredict?: number;
+  /**
+   * Cross-session memory facts about the CANDIDATE (city, age, intent, …).
+   * Survive conversation deletion (stored in users.profile_json.memory).
+   * Injected into the system prompt as a "ЗНАЕМ О КАНДИДАТЕ" block so the
+   * LLM doesn't re-ask things the candidate already told us in past sessions.
+   */
+  userFacts?: Record<string, string>;
+  /**
+   * When true, the question is passed through `rewriteQuery` before vector
+   * retrieval. Resolves pronouns/elliptical follow-ups using `history`.
+   * Adds one LLM call BEFORE retrieval (only when the heuristic flags the
+   * question as ambiguous — typically ~20-30% of turns).
+   */
+  rewriteQueryBeforeRetrieval?: boolean;
+  /**
+   * When true, the generated answer is passed through `verifyAnswer` to
+   * confirm every concrete fact it cites is present in the retrieved
+   * context. Ungrounded answers are converted to NO_CONTEXT_MARKER (the
+   * webhook then stays silent rather than send a hallucinated reply).
+   * Adds one LLM call AFTER generation, only on turns that actually used
+   * KB context (skipped for smalltalk/persona-fact short-circuits).
+   */
+  reflect?: boolean;
+  /**
+   * Hybrid retrieval: combine vector search and BM25 keyword search via
+   * Reciprocal Rank Fusion. Catches exact-match queries (numbers, proper
+   * nouns) that pure embedding search ranks poorly. No extra LLM calls —
+   * just a second SQL query to the FTS5 index. When `maxDistance` is set
+   * alongside this flag, it's IGNORED (fused ranks aren't on the L2 scale).
+   */
+  hybridSearch?: boolean;
 }
 
 export interface AnswerResult {
@@ -247,13 +395,41 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     };
   }
 
+  const factKey = isPersonalFactQuestion(input.question);
+  if (factKey) {
+    const factReply = personaFactReply(activePersona, factKey);
+    if (factReply) {
+      return { text: factReply, usedChunkIds: [], hits: [] };
+    }
+    // Fact not configured → fall through to RAG
+  }
+
   const topK = input.topK ?? 5;
-  const [questionVec] = await input.embedder.embed([input.question]);
+
+  // Optional query rewriting: resolve "а там?", "это сколько?" type follow-ups
+  // into self-contained search queries so vector retrieval lands the right
+  // KB chunks. The rewrite is used ONLY for embedding/retrieval — the
+  // original `input.question` is still what the LLM answers, so the user's
+  // exact phrasing remains in the prompt and conversation history.
+  const searchQuery = input.rewriteQueryBeforeRetrieval
+    ? await rewriteQuery({
+        question: input.question,
+        ...(input.history ? { history: input.history } : {}),
+        chat: input.chat,
+      })
+    : input.question;
+
+  const [questionVec] = await input.embedder.embed([searchQuery]);
   if (!questionVec) throw new Error("Embedder returned no vector for question");
 
-  const allHits = input.kb.search(questionVec, topK);
+  // Hybrid retrieval (vector + BM25 + RRF) catches exact-match queries that
+  // pure embedding search ranks poorly. When enabled, `maxDistance` is
+  // skipped because the fused rank is on a different scale than L2 distance.
+  const allHits = input.hybridSearch
+    ? input.kb.hybridSearch({ embedding: questionVec, query: searchQuery, k: topK })
+    : input.kb.search(questionVec, topK);
   const hits =
-    input.maxDistance === undefined
+    input.hybridSearch || input.maxDistance === undefined
       ? allHits
       : allHits.filter((h) => h.distance <= input.maxDistance!);
 
@@ -276,10 +452,15 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     const stage: FunnelStage = input.stage ?? "qualify";
     systemPrompt = composeSystemPrompt(input.style, stage, context, {
       includeFewShot: input.includeFewShot ?? true,
+      ...(input.userFacts ? { userFacts: input.userFacts } : {}),
     });
     temperature = input.style.model.temperature;
   } else {
-    systemPrompt = buildSystemPrompt(input.persona ?? DEFAULT_PERSONA, context);
+    systemPrompt = buildSystemPrompt(
+      input.persona ?? DEFAULT_PERSONA,
+      context,
+      input.userFacts,
+    );
   }
 
   const messages: ChatMessage[] = [
@@ -293,6 +474,28 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     ...(input.numPredict !== undefined ? { numPredict: input.numPredict } : {}),
   });
   const text = sanitizeLlmOutput(raw);
+
+  // If the generator returned the NO_CONTEXT marker, don't waste an LLM call
+  // verifying it — pass through unchanged.
+  if (input.reflect && text !== NO_CONTEXT_MARKER && text.trim().length > 0) {
+    const verdict = await verifyAnswer({
+      question: input.question,
+      answer: text,
+      context,
+      chat: input.chat,
+    });
+    if (!verdict.grounded) {
+      console.warn(
+        `[reflect] dropping ungrounded answer: ${verdict.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
+      );
+      return {
+        text: NO_CONTEXT_MARKER,
+        usedChunkIds: hits.map((h) => h.chunk_id),
+        hits,
+      };
+    }
+  }
+
   return {
     text,
     usedChunkIds: hits.map((h) => h.chunk_id),

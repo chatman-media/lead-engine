@@ -70,6 +70,100 @@ describe("users repo", () => {
     repo.setStatus(created.id, "qualified");
     expect(repo.byId(created.id)?.status).toBe("qualified");
   });
+
+  test("getMemory returns empty when no profile_json set", () => {
+    const repo = new UsersRepo(db);
+    const u = repo.create({ tgUserId: 300 });
+    expect(repo.getMemory(u.id)).toEqual({ facts: {} });
+  });
+
+  test("mergeMemoryFacts persists facts and round-trips via getMemory", () => {
+    const repo = new UsersRepo(db);
+    const u = repo.create({ tgUserId: 301 });
+
+    repo.mergeMemoryFacts(u.id, { city: "Москва", age: "25" }, 5);
+    const m1 = repo.getMemory(u.id);
+    expect(m1.facts).toEqual({ city: "Москва", age: "25" });
+    expect(m1.lastExtractedFromMsgId).toBe(5);
+    expect(m1.updatedAt).toBeGreaterThan(0);
+  });
+
+  test("mergeMemoryFacts merges with existing facts (latest wins)", () => {
+    const repo = new UsersRepo(db);
+    const u = repo.create({ tgUserId: 302 });
+
+    repo.mergeMemoryFacts(u.id, { city: "Москва", age: "25" });
+    repo.mergeMemoryFacts(u.id, { age: "26", intent: "Дубай" });
+
+    const m = repo.getMemory(u.id);
+    expect(m.facts).toEqual({ city: "Москва", age: "26", intent: "Дубай" });
+  });
+
+  test("mergeMemoryFacts removes a key when value is empty/whitespace", () => {
+    const repo = new UsersRepo(db);
+    const u = repo.create({ tgUserId: 303 });
+
+    repo.mergeMemoryFacts(u.id, { city: "Москва", age: "25" });
+    repo.mergeMemoryFacts(u.id, { city: "  " });
+
+    expect(repo.getMemory(u.id).facts).toEqual({ age: "25" });
+  });
+
+  test("mergeMemoryFacts preserves other profile_json fields", () => {
+    const repo = new UsersRepo(db);
+    const u = repo.create({ tgUserId: 304 });
+    repo.setProfile(u.id, { source: "tg-ad", utm: "x123" });
+
+    repo.mergeMemoryFacts(u.id, { city: "Сочи" });
+
+    const row = repo.byId(u.id);
+    const parsed = JSON.parse(row!.profile_json!);
+    expect(parsed.source).toBe("tg-ad");
+    expect(parsed.utm).toBe("x123");
+    expect(parsed.memory.facts).toEqual({ city: "Сочи" });
+  });
+
+  test("getMemory tolerates malformed profile_json gracefully", () => {
+    const repo = new UsersRepo(db);
+    const u = repo.create({ tgUserId: 305 });
+    db.run("UPDATE users SET profile_json = 'not-json' WHERE id = ?", [u.id]);
+    expect(repo.getMemory(u.id)).toEqual({ facts: {} });
+  });
+
+  test("setMemoryFacts replaces facts wholesale (no merge)", () => {
+    const repo = new UsersRepo(db);
+    const u = repo.create({ tgUserId: 306 });
+    repo.mergeMemoryFacts(u.id, { city: "Москва", age: "25", intent: "Дубай" });
+    repo.setMemoryFacts(u.id, { city: "Сочи", language: "ru" });
+    expect(repo.getMemory(u.id).facts).toEqual({ city: "Сочи", language: "ru" });
+  });
+
+  test("setMemoryFacts trims keys/values and drops empty ones", () => {
+    const repo = new UsersRepo(db);
+    const u = repo.create({ tgUserId: 307 });
+    repo.setMemoryFacts(u.id, { "  city  ": "  Москва  ", empty: " ", "": "x" });
+    expect(repo.getMemory(u.id).facts).toEqual({ city: "Москва" });
+  });
+
+  test("setMemoryFacts preserves lastExtractedFromMsgId from prior memory", () => {
+    const repo = new UsersRepo(db);
+    const u = repo.create({ tgUserId: 308 });
+    repo.mergeMemoryFacts(u.id, { city: "x" }, 42);
+    repo.setMemoryFacts(u.id, { age: "26" });
+    expect(repo.getMemory(u.id).lastExtractedFromMsgId).toBe(42);
+  });
+
+  test("setMemoryFacts preserves other profile_json fields", () => {
+    const repo = new UsersRepo(db);
+    const u = repo.create({ tgUserId: 309 });
+    repo.setProfile(u.id, { source: "tg-ad" });
+    repo.setMemoryFacts(u.id, { city: "Сочи" });
+
+    const row = repo.byId(u.id);
+    const parsed = JSON.parse(row!.profile_json!);
+    expect(parsed.source).toBe("tg-ad");
+    expect(parsed.memory.facts).toEqual({ city: "Сочи" });
+  });
 });
 
 describe("conversations + messages", () => {

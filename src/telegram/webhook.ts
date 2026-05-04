@@ -16,6 +16,7 @@ import {
 } from "../rag/answer.ts";
 import type { ChatClient } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
+import { extractUserFacts } from "../rag/extract-user-facts.ts";
 import { pickVariant } from "../sales/ab-router.ts";
 import { classifyStage } from "../sales/stage-classifier.ts";
 import { nextStage } from "../sales/stage-router.ts";
@@ -27,6 +28,20 @@ import { containsEscalationTrigger } from "./escalation.ts";
 export interface RagDeps {
   embedder: EmbeddingClient;
   chat: ChatClient;
+  /**
+   * Enable cross-session memory: after each turn, extract facts about the
+   * candidate and persist them in users.profile_json.memory. Facts are
+   * injected into the system prompt on subsequent turns so the bot doesn't
+   * re-ask things the candidate already volunteered. Adds one async LLM call
+   * after the reply (does NOT block the reply itself).
+   */
+  userMemory?: boolean;
+  /** Query rewriting before retrieval — see `answerWithRag.rewriteQueryBeforeRetrieval`. */
+  queryRewrite?: boolean;
+  /** Post-generation hallucination check — see `answerWithRag.reflect`. */
+  reflect?: boolean;
+  /** Hybrid BM25+vector retrieval with RRF fusion — see `answerWithRag.hybridSearch`. */
+  hybridSearch?: boolean;
   topK?: number;
   /** sqlite-vec L2 distance threshold; hits above are dropped before LLM. */
   maxDistance?: number;
@@ -173,6 +188,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       kb,
       styles,
       experiments,
+      users,
       telegram: deps.telegram,
       rag: deps.rag,
       conv,
@@ -218,6 +234,7 @@ interface ProcessInboundDeps {
   kb: KbRepo;
   styles: StylesRepo;
   experiments: ExperimentsRepo;
+  users: UsersRepo;
   telegram: TelegramClient;
   rag?: RagDeps;
   conv: ConversationRow;
@@ -387,6 +404,14 @@ async function runRagForInbound(
       content: m.text,
     }));
 
+  // Cross-session memory: pull facts learned in past turns (and past
+  // conversations) so the bot doesn't re-ask the candidate's city/age/etc.
+  // Read is cheap (single DB row); facts from current message land on the
+  // NEXT turn (extraction runs after the reply, see processInbound).
+  const userFacts = d.rag.userMemory
+    ? d.users.getMemory(d.user.id).facts
+    : undefined;
+
   const result = await answerWithRag({
     question: d.text,
     kb: d.kb,
@@ -399,8 +424,47 @@ async function runRagForInbound(
     ...(style ? { style } : {}),
     ...(stage !== undefined ? { stage } : {}),
     ...(includeFewShot !== undefined ? { includeFewShot } : {}),
+    ...(userFacts && Object.keys(userFacts).length > 0 ? { userFacts } : {}),
+    ...(d.rag.queryRewrite ? { rewriteQueryBeforeRetrieval: true } : {}),
+    ...(d.rag.reflect ? { reflect: true } : {}),
+    ...(d.rag.hybridSearch ? { hybridSearch: true } : {}),
   });
   return { result, stage };
+}
+
+/**
+ * Fire-and-forget fact extraction after a reply. We deliberately don't await
+ * this in the hot path — extraction is a second LLM call, and blocking the
+ * webhook on it would double our reply latency for a memory layer that only
+ * matters NEXT turn anyway. Errors are logged and swallowed.
+ */
+async function runMemoryExtraction(d: ProcessInboundDeps): Promise<void> {
+  if (!d.rag?.userMemory) return;
+
+  const stored = d.users.getMemory(d.user.id);
+  const sinceId = stored.lastExtractedFromMsgId ?? 0;
+  const all = d.messages.listByConversation(d.conv.id, 200);
+  const fresh = all.filter((m) => m.id > sinceId && (m.role === "user" || m.role === "assistant"));
+  if (fresh.length === 0) return;
+
+  const slice = fresh.map((m) => ({
+    role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+    content: m.text,
+  }));
+  const lastId = fresh[fresh.length - 1]!.id;
+
+  try {
+    const newFacts = await extractUserFacts({
+      messages: slice,
+      chat: d.rag.chat,
+      existingFacts: stored.facts,
+    });
+    if (Object.keys(newFacts).length > 0 || lastId !== sinceId) {
+      d.users.mergeMemoryFacts(d.user.id, newFacts, lastId);
+    }
+  } catch (err) {
+    console.error("[memory] extraction failed:", err);
+  }
 }
 
 async function processInbound(d: ProcessInboundDeps): Promise<void> {
@@ -467,8 +531,13 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
   const { result, stage } = await runRagForInbound(d);
 
   if (result.text === NO_CONTEXT_MARKER) {
+    // Run memory extraction even on silent turns — the user message itself
+    // may carry persistent facts ("I'm Anya, 25, from Moscow") that we want
+    // remembered regardless of whether RAG could answer.
+    await runMemoryExtraction(d);
     return;
   }
 
   await reply(result.text, { used_chunk_ids: result.usedChunkIds }, stage);
+  await runMemoryExtraction(d);
 }

@@ -47,6 +47,8 @@ export const PersonaSchema = z.object({
   name: z.string().min(1),
   role: z.enum(["human", "assistant"]),
   company: z.string().optional(),
+  /** Fixed personal facts — see `Persona.facts` in `src/rag/answer.ts` for key semantics. */
+  facts: z.record(z.string(), z.string()).optional(),
 });
 export type Persona = z.infer<typeof PersonaSchema>;
 

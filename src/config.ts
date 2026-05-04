@@ -106,6 +106,37 @@ export const config = {
      * но факты по-прежнему только из CONTEXT.
      */
     chatTemperature: envFloat("RAG_CHAT_TEMPERATURE"),
+    /**
+     * Cross-session memory: extract facts about the candidate after each
+     * turn and inject them into the next system prompt. Adds one async LLM
+     * call per turn AFTER the reply (does not delay the reply itself).
+     * Default: off (opt-in until you've seen the extraction quality on your model).
+     */
+    userMemory: envTruthy("RAG_USER_MEMORY", false),
+    /**
+     * Query rewriting: rephrase the user question into a search-friendly
+     * query before vector retrieval. Resolves pronouns ("это", "там") using
+     * recent history — solves the "follow-up question loses context" issue.
+     * Adds one LLM call per turn BEFORE the reply (small models are <500ms).
+     * Default: off.
+     */
+    queryRewrite: envTruthy("RAG_QUERY_REWRITE", false),
+    /**
+     * Reflection: after generating an answer, verify all factual claims are
+     * grounded in CONTEXT. If not, return NO_CONTEXT instead of sending a
+     * potentially hallucinated reply. Adds one LLM call per turn — only
+     * fires on grounded turns (skipped for smalltalk / fact / NO_CONTEXT).
+     * Default: off.
+     */
+    reflect: envTruthy("RAG_REFLECT", false),
+    /**
+     * Hybrid retrieval: combine vector search with BM25 keyword search and
+     * fuse via Reciprocal Rank Fusion. Catches exact-match queries (numbers,
+     * proper nouns, technical terms) that pure embedding search misranks.
+     * No extra LLM calls — only one extra SQLite FTS5 query per turn.
+     * Default: off (opt-in until you've migrated the FTS5 backfill).
+     */
+    hybridSearch: envTruthy("RAG_HYBRID_SEARCH", false),
   },
   openai: {
     apiKey: envOptional("OPENAI_API_KEY"),
@@ -147,6 +178,21 @@ export const config = {
     role: envEnum<PersonaRole>("BOT_PERSONA_ROLE", PERSONA_ROLES, "human"),
     /** Company / agency name (optional, used in greetings and signatures). */
     company: envOptional("BOT_PERSONA_COMPANY", ""),
+    /**
+     * JSON object of fixed personal facts, e.g.:
+     * BOT_PERSONA_FACTS='{"city":"Шаохинг","age":"26","status":"Не замужем."}'
+     * Known keys: city, age, status, experience. Bypasses RAG for direct
+     * personal questions and grounds the system prompt.
+     */
+    facts: (() => {
+      const raw = envOptional("BOT_PERSONA_FACTS", "");
+      if (!raw) return undefined;
+      try {
+        return JSON.parse(raw) as Record<string, string>;
+      } catch {
+        return undefined;
+      }
+    })(),
   },
   sales: {
     /**

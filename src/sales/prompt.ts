@@ -1,3 +1,4 @@
+import { renderUserFactsBlock } from "../rag/answer.ts";
 import type { FunnelStage, Hook, Style } from "./types.ts";
 
 const HOOK_LABELS: Record<Hook["kind"], string> = {
@@ -37,6 +38,11 @@ export interface ComposeOptions {
    * is the difference between a 1-min and a 10-min reply.
    */
   includeFewShot?: boolean;
+  /**
+   * Cross-session memory facts about the candidate. Injected as a "ЗНАЕМ О
+   * КАНДИДАТЕ" block so the LLM doesn't re-ask things known from past chats.
+   */
+  userFacts?: Record<string, string>;
 }
 
 /**
@@ -55,6 +61,13 @@ export function composeSystemPrompt(
   const { persona, voice, hooks, stages, guardrails, fewShot } = style;
   const stageCfg = stages[stage];
 
+  const factsEntries = persona.facts
+    ? (Object.entries(persona.facts) as [string, string][]).filter(([, v]) => v.trim())
+    : [];
+  const factsSection = factsEntries.length
+    ? ` ЛИЧНЫЕ ФАКТЫ (используй строго эти данные): ${factsEntries.map(([k, v]) => `${k}: ${v}`).join("; ")}.`
+    : "";
+
   const personaBlock =
     persona.role === "human"
       ? `Тебя зовут ${persona.name}${persona.company ? `, ты менеджер агентства ${persona.company}` : ""}. ` +
@@ -63,9 +76,11 @@ export function composeSystemPrompt(
         `без отчётного тона и без отсылок к «базе знаний» или «контексту». ` +
         (guardrails.botDisclosureOnDirectQuestion
           ? `Если кандидат прямо спрашивает «ты бот?» — ЧЕСТНО ответь, что ты ИИ-ассистент агентства.`
-          : `Если кандидат прямо спрашивает «ты бот?» — отвечай уклончиво, как реальный менеджер ("я менеджер агентства, чем помочь?").`)
+          : `Если кандидат прямо спрашивает «ты бот?» — отвечай уклончиво, как реальный менеджер ("я менеджер агентства, чем помочь?").`) +
+        factsSection
       : `Тебя зовут ${persona.name}, ты ИИ-ассистент${persona.company ? ` агентства ${persona.company}` : ""}. ` +
-        `Отвечай вежливо и по делу. Пиши как в мессенджере — тепло и разговорно, без канцелярита.`;
+        `Отвечай вежливо и по делу. Пиши как в мессенджере — тепло и разговорно, без канцелярита.` +
+        factsSection;
 
   const telegramShapeBlock =
     persona.role === "human"
@@ -132,6 +147,8 @@ export function composeSystemPrompt(
     ? `KB CONTEXT (актуальные факты агентства):\n${preFetchedKbContext}`
     : "";
 
+  const userFactsBlock = renderUserFactsBlock(options.userFacts);
+
   const needsGroundingReminder =
     stageCfg?.groundingRequired === true && !preFetchedKbContext;
 
@@ -142,6 +159,7 @@ export function composeSystemPrompt(
     frameworkBlock,
     hooksBlock,
     stageBlock,
+    userFactsBlock,
     needsGroundingReminder ? kbGroundingReminder(persona.role) : "",
     guardrailBlock,
     fewShotBlock,
