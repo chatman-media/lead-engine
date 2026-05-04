@@ -181,15 +181,49 @@ export function personaFactReply(persona: Persona, key: string): string | null {
   return val;
 }
 
-/** Short reply derived from persona — no KB required. */
+/**
+ * Short tail phrases tacked onto the smalltalk introduction. Picked at
+ * random per call so a candidate asking "как тебя зовут?" twice in a row
+ * doesn't get a verbatim repeat — the giveaway "I'm a script" pattern.
+ *
+ * All entries use ASCII hyphens (not em-dashes); the smalltalk path
+ * bypasses `sanitizeLlmOutput`, so anything here ends up in the wire
+ * message exactly as written.
+ */
+const HUMAN_SMALLTALK_TAILS_WITH_COMPANY: readonly string[] = [
+  "Что хотел узнать?",
+  "По чему интересно?",
+  "Чем помочь?",
+  "Что подсказать?",
+  "По работе что-то?",
+  "", // sometimes just the introduction, no tail at all
+];
+
+const HUMAN_SMALLTALK_TAILS_NO_COMPANY: readonly string[] = [
+  "Чем помочь?",
+  "Что хотел узнать?",
+  "Если что по вакансиям - просто напиши.",
+  "",
+];
+
+function pickTail(pool: readonly string[]): string {
+  const idx = Math.floor(Math.random() * pool.length);
+  return pool[idx] ?? "";
+}
+
+/** Short reply derived from persona - no KB required. */
 export function personaSmalltalkReply(persona: Persona): string {
   const name = persona.name?.trim() || "Менеджер";
   const company = persona.company?.trim();
   if (persona.role === "human") {
     if (company) {
-      return `Меня зовут ${name}, я менеджер в ${company}. Спрашивай по работе или условиям — расскажу по делу.`;
+      const tail = pickTail(HUMAN_SMALLTALK_TAILS_WITH_COMPANY);
+      const head = `Меня зовут ${name}, я в ${company}.`;
+      return tail ? `${head} ${tail}` : head;
     }
-    return `Меня зовут ${name}. Если что‑то нужно по вакансиям — просто напиши.`;
+    const tail = pickTail(HUMAN_SMALLTALK_TAILS_NO_COMPANY);
+    const head = `Меня зовут ${name}.`;
+    return tail ? `${head} ${tail}` : head;
   }
   if (company) return `Я ${name}, помощник агентства ${company}.`;
   return `Я ${name}.`;
@@ -456,8 +490,11 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       : (input.persona ?? DEFAULT_PERSONA);
 
   if (isPersonaSmalltalkQuestion(input.question)) {
+    // Apply text-style rules (em-dash → hyphen, ellipsis → ..., etc) even
+    // on the shortcut path: env-configured persona names/companies could
+    // smuggle in unicode chars that the LLM-output sanitizer would catch.
     return {
-      text: personaSmalltalkReply(activePersona),
+      text: applyStyleRules(personaSmalltalkReply(activePersona)),
       usedChunkIds: [],
       hits: [],
       telemetry: { path: "smalltalk", total_ms: Date.now() - startedAt },
@@ -469,7 +506,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     const factReply = personaFactReply(activePersona, factKey);
     if (factReply) {
       return {
-        text: factReply,
+        text: applyStyleRules(factReply),
         usedChunkIds: [],
         hits: [],
         telemetry: { path: "persona_fact", total_ms: Date.now() - startedAt },

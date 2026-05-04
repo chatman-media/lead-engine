@@ -286,6 +286,34 @@ describe("answerWithRag", () => {
     expect(result.text).toContain("INFINITY");
     expect(result.usedChunkIds).toEqual([]);
     expect(result.hits).toEqual([]);
+    // Em-dashes are post-processed away even on the shortcut path:
+    // env-configured persona / company values can smuggle unicode in.
+    expect(result.text).not.toContain("—");
+    expect(result.text).not.toContain("–");
+  });
+
+  test("smalltalk reply varies across calls (no fixed scripted tail)", async () => {
+    // 30 calls — with a 6-element tail pool the chance all match the same
+    // reply is ~6 * (1/6)^30 ≈ 1.6e-23. Even with 4-element pool it's safe.
+    const persona = {
+      name: "Алина",
+      role: "human" as const,
+      company: "INFINITY AGENCY",
+    };
+    const seen = new Set<string>();
+    for (let i = 0; i < 30; i++) {
+      const embedder = fakeEmbedder({});
+      const chat = fakeChat("never");
+      const result = await answerWithRag({
+        question: "как тебя зовут?",
+        kb,
+        embedder,
+        chat,
+        persona,
+      });
+      seen.add(result.text);
+    }
+    expect(seen.size).toBeGreaterThan(1);
   });
 
   test("persona-only with sales style: uses style persona name", async () => {
