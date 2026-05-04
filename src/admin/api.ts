@@ -59,6 +59,64 @@ export function createListUsersHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 /**
+ * In-memory bot-health cache. The `getMe` Telegram call is cheap but
+ * the Status dashboard could be opened by multiple admins / refreshed
+ * frequently — caching for ~60s avoids burning the rate limit just to
+ * show a green dot. The cache is per-process (single Node-style
+ * process; no Redis), so a deploy restart re-pings on first request.
+ */
+type BotHealth =
+  | {
+      ok: true;
+      bot_id: number;
+      username: string | null;
+      first_name: string | null;
+      checked_at: number;
+    }
+  | { ok: false; error: string; checked_at: number };
+
+let botHealthCache: BotHealth | null = null;
+const BOT_HEALTH_TTL_SEC = 60;
+
+/** Drop the cached bot-health probe — tests reset this between cases
+ *  so a stub `getMe` from one test doesn't bleed into another. Safe to
+ *  call from production code too; the next /status hit re-pings. */
+export function __resetBotHealthCacheForTesting(): void {
+  botHealthCache = null;
+}
+
+async function readBotHealth(deps: AdminApiDeps): Promise<BotHealth> {
+  const now = Math.floor(Date.now() / 1000);
+  if (
+    botHealthCache !== null &&
+    now - botHealthCache.checked_at < BOT_HEALTH_TTL_SEC
+  ) {
+    return botHealthCache;
+  }
+  if (!deps.telegram) {
+    return { ok: false, error: "telegram client not configured", checked_at: now };
+  }
+  try {
+    const me = await deps.telegram.getMe();
+    botHealthCache = {
+      ok: true,
+      bot_id: me.id,
+      username: me.username ?? null,
+      first_name: me.first_name ?? null,
+      checked_at: now,
+    };
+    return botHealthCache;
+  } catch (err) {
+    botHealthCache = {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      checked_at: now,
+    };
+    return botHealthCache;
+  }
+}
+
+/**
  * Admin dashboard data: which RAG layers are enabled, which providers/models
  * are wired, KB stats by topic, and aggregate counts. Lets operators see at
  * a glance what's running without SSHing into the server.
@@ -67,7 +125,7 @@ export function createListUsersHandler(deps: AdminApiDeps): RouteHandler {
  * counts. Safe to render to any authenticated admin.
  */
 export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req }) => {
+  return async ({ req }) => {
     const ctx = requireAdmin(deps.db, req);
     if (ctx instanceof Response) return ctx;
 
@@ -228,6 +286,7 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
         leads_chat_configured: deps.leadsChatId != null,
         visa_chat_configured: deps.visaChatId != null,
       },
+      bot_health: await readBotHealth(deps),
     });
   };
 }
@@ -818,6 +877,10 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
         { status: 503 },
       );
     }
+    // Capture under a local so TS narrowing carries through the async
+    // closures below — without this, every `deps.rag.foo` access has
+    // to either non-null-assert or re-narrow.
+    const rag = deps.rag;
 
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
@@ -881,14 +944,14 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
 
     if (useKb) {
       try {
-        const [vec] = await deps.rag.embedder.embed([userMessage]);
+        const [vec] = await rag.embedder.embed([userMessage]);
         if (vec) {
-          const topK = deps.rag.topK ?? 5;
+          const topK = rag.topK ?? 5;
           const all = kb.search(vec, topK);
           const filtered =
-            deps.rag.maxDistance === undefined
+            rag.maxDistance === undefined
               ? all
-              : all.filter((h) => h.distance <= deps.rag.maxDistance!);
+              : all.filter((h) => h.distance <= rag.maxDistance!);
           kbHits = filtered.map((h) => ({
             chunk_id: h.chunk_id,
             title: h.title,
@@ -925,7 +988,7 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
 
     let reply: string;
     try {
-      const raw = await deps.rag.chat.complete(messages, {
+      const raw = await rag.chat.complete(messages, {
         temperature: style.model.temperature,
       });
       reply = sanitizeLlmOutput(raw);
@@ -1325,7 +1388,7 @@ export function createExperimentFunnelHandler(deps: AdminApiDeps): RouteHandler 
     // received any traffic yet still appear with zero counts (helps the UI
     // distinguish "nobody assigned" from "assigned, didn't qualify").
     const funnel = deps.db
-      .query<FunnelRow, [number]>(
+      .query<FunnelRow, [number, number]>(
         `SELECT
            s.id AS style_id,
            s.slug AS slug,

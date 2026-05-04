@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
+import { __resetBotHealthCacheForTesting } from "@/admin/api.ts";
 import { createRouter } from "@/app.ts";
 import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
@@ -30,6 +31,10 @@ let ctx: ReturnType<typeof setup>;
 let cookie: string;
 
 beforeEach(async () => {
+  // Bot-health cache is module-level — without this reset the first
+  // /status probe in test N persists into test N+1, hiding stub
+  // behaviour from later cases.
+  __resetBotHealthCacheForTesting();
   ctx = setup();
   const admins = new AdminsRepo(ctx.db);
   await admins.create({ email: "op@x.test", password: "longenough" });
@@ -516,6 +521,106 @@ describe("GET /admin/api/status", () => {
     expect(body.conversations).toBeDefined();
     expect(body.users).toBeDefined();
     expect(body.messages).toBeDefined();
+  });
+
+  test("bot_health surfaces getMe result; cache prevents back-to-back upstream calls", async () => {
+    // Re-create the test stack with a fetch impl that returns a real
+    // getMe shape, and counts upstream calls. The default setup() stub
+    // returns `result: true` which doesn't match TgUser — fine for the
+    // smoke check, not for asserting bot_health fields.
+    teardown(ctx);
+    __resetBotHealthCacheForTesting();
+    const calls: string[] = [];
+    const fetchImpl: FetchLike = async (input) => {
+      const u = typeof input === "string" ? input : (input as Request).url;
+      calls.push(u);
+      if (u.includes("/getMe")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id: 1234,
+              is_bot: true,
+              first_name: "Алина",
+              username: "alina_bot",
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true, result: true }), {
+        status: 200,
+      });
+    };
+    const db = openDb({ path: ":memory:" });
+    const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
+    const router = createRouter({ db, telegram, webhookSecret: SECRET });
+    const server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
+    const admins = new AdminsRepo(db);
+    await admins.create({ email: "op@x.test", password: "longenough" });
+    const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+    });
+    const localCookie = login.headers.get("set-cookie")!.split(";")[0]!;
+    const localUrl = (p: string) => `http://127.0.0.1:${server.port}${p}`;
+
+    const r1 = await fetch(localUrl("/admin/api/status"), {
+      headers: { cookie: localCookie },
+    });
+    const body1 = (await r1.json()) as {
+      bot_health: { ok: boolean; bot_id?: number; username?: string | null };
+    };
+    expect(body1.bot_health.ok).toBe(true);
+    expect(body1.bot_health.bot_id).toBe(1234);
+    expect(body1.bot_health.username).toBe("alina_bot");
+    const getMeCallsAfterFirst = calls.filter((u) => u.includes("/getMe")).length;
+    expect(getMeCallsAfterFirst).toBe(1);
+
+    // Second hit within TTL → cache hit, no extra getMe.
+    await fetch(localUrl("/admin/api/status"), {
+      headers: { cookie: localCookie },
+    });
+    const getMeCallsAfterSecond = calls.filter((u) => u.includes("/getMe")).length;
+    expect(getMeCallsAfterSecond).toBe(1);
+
+    server.stop(true);
+    db.close();
+    // Re-set ctx so afterEach's teardown(ctx) doesn't double-stop.
+    ctx = setup();
+  });
+
+  test("bot_health.ok is false when telegram getMe rejects", async () => {
+    teardown(ctx);
+    __resetBotHealthCacheForTesting();
+    const fetchImpl: FetchLike = async () =>
+      new Response(JSON.stringify({ ok: false, description: "unauthorized" }), {
+        status: 401,
+      });
+    const db = openDb({ path: ":memory:" });
+    const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
+    const router = createRouter({ db, telegram, webhookSecret: SECRET });
+    const server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
+    const admins = new AdminsRepo(db);
+    await admins.create({ email: "op@x.test", password: "longenough" });
+    const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+    });
+    const localCookie = login.headers.get("set-cookie")!.split(";")[0]!;
+
+    const r = await fetch(`http://127.0.0.1:${server.port}/admin/api/status`, {
+      headers: { cookie: localCookie },
+    });
+    const body = (await r.json()) as { bot_health: { ok: boolean; error?: string } };
+    expect(body.bot_health.ok).toBe(false);
+    expect(typeof body.bot_health.error).toBe("string");
+
+    server.stop(true);
+    db.close();
+    ctx = setup();
   });
 
   test("rag block reflects all six layer flags", async () => {

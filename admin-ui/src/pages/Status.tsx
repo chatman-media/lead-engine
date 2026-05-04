@@ -71,6 +71,7 @@ export function Status() {
       )}
 
       <div style={gridStyle()}>
+        <BotHealthCard status={status} />
         <RoutingCard status={status} />
         <RagFlagsCard status={status} />
         <ProvidersCard status={status} />
@@ -82,6 +83,53 @@ export function Status() {
         <MessagesCard status={status} />
       </div>
     </div>
+  );
+}
+
+function BotHealthCard({ status }: { status: SystemStatus }) {
+  const h = status.bot_health;
+  const ok = h.ok;
+  const accent = ok ? "var(--green, #2ea043)" : "var(--red, #ef4444)";
+  const checkedAgo = Math.max(0, Math.floor(Date.now() / 1000) - h.checked_at);
+  return (
+    <Card title="Bot health" accent={accent}>
+      <Row
+        label="status"
+        value={
+          <span style={{ color: accent, fontWeight: 600 }}>
+            {ok ? "● connected" : "✗ unreachable"}
+          </span>
+        }
+      />
+      {ok ? (
+        <>
+          <Row
+            label="username"
+            value={h.username ? `@${h.username}` : "—"}
+            mono
+          />
+          <Row label="first name" value={h.first_name ?? "—"} mono />
+          <Row label="bot_id" value={String(h.bot_id)} mono />
+        </>
+      ) : (
+        <Row
+          label="error"
+          value={<span style={{ color: accent }}>{h.error}</span>}
+          mono
+        />
+      )}
+      <Row
+        label="last check"
+        value={`${checkedAgo}s ago`}
+        hint="cached 60s"
+      />
+      {!ok && (
+        <div style={{ marginTop: 6, fontSize: 11, color: accent }}>
+          ⚠ getMe failing — invalid TELEGRAM_BOT_TOKEN, bot deleted, or
+          Telegram API down.
+        </div>
+      )}
+    </Card>
   );
 }
 
