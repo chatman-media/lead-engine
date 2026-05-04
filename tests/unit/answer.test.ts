@@ -165,6 +165,15 @@ describe("isPersonalFactQuestion", () => {
     expect(isPersonalFactQuestion("ты одна?")).toBe("status");
   });
 
+  test("detects phone / contact requests", () => {
+    expect(isPersonalFactQuestion("какой твой номер?")).toBe("phone");
+    expect(isPersonalFactQuestion("дай номер")).toBe("phone");
+    expect(isPersonalFactQuestion("номер?")).toBe("phone");
+    expect(isPersonalFactQuestion("телефон?")).toBe("phone");
+    expect(isPersonalFactQuestion("есть whatsapp?")).toBe("phone");
+    expect(isPersonalFactQuestion("скинь номер телефона")).toBe("phone");
+  });
+
   test("returns null when job/offer intent is mixed in", () => {
     expect(isPersonalFactQuestion("где живешь, есть работа в китае?")).toBeNull();
     expect(isPersonalFactQuestion("сколько лет и какая зарплата?")).toBeNull();
@@ -200,6 +209,17 @@ describe("personaFactReply", () => {
 
   test("status returned verbatim", () => {
     expect(personaFactReply(persona, "status")).toBe("Не замужем.");
+  });
+
+  test("phone fact wraps in a natural sentence", () => {
+    const p = {
+      name: "Алина",
+      role: "human" as const,
+      facts: { phone: "+1 365 860 2690" },
+    };
+    const reply = personaFactReply(p, "phone");
+    expect(reply).toContain("+1 365 860 2690");
+    expect(reply).toContain("Мой номер");
   });
 
   test("returns null when fact key not configured", () => {
