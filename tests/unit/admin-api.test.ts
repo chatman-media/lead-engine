@@ -227,6 +227,39 @@ describe("leads endpoints", () => {
     expect(b.application_id).toBe(a.application_id);
   });
 
+  test("GET /admin/api/leads/:id includes the timeline events array", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9_350 });
+    const c = conversations.ensureForUser(u.id);
+    const promoted = await fetch(
+      url(`/admin/api/leads/from-conversation/${c.id}`),
+      authed({ method: "POST" }),
+    );
+    const { lead } = (await promoted.json()) as { lead: { id: number } };
+    await fetch(
+      url(`/admin/api/leads/${lead.id}/approve`),
+      authed({ method: "POST" }),
+    );
+
+    const r = await fetch(url(`/admin/api/leads/${lead.id}`), authed());
+    const body = (await r.json()) as {
+      events: Array<{
+        from_state: string | null;
+        to_state: string;
+        by_admin_id: number | null;
+      }>;
+    };
+    // Expect at least: created + intake_pending → intake_complete +
+    // intake_complete → approved + approved → docs_pending = 4 events.
+    expect(body.events.length).toBeGreaterThanOrEqual(4);
+    expect(body.events[0]!.from_state).toBeNull();
+    expect(body.events[0]!.to_state).toBe("intake_pending");
+    const approved = body.events.find((e) => e.to_state === "approved");
+    expect(approved).toBeDefined();
+    expect(approved!.by_admin_id).not.toBeNull();
+  });
+
   test("GET /admin/api/leads/:id returns lead detail with parsed intake/visa_docs", async () => {
     const usersRepo = new UsersRepo(ctx.db);
     const conversations = new ConversationsRepo(ctx.db);

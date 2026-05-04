@@ -1755,6 +1755,7 @@ export function createLeadDetailHandler(deps: AdminApiDeps): RouteHandler {
       visa_docs: lead.visa_docs_json ? safeJson(lead.visa_docs_json) : null,
       conversation_id: conv?.id ?? null,
       recent_messages: conv ? recentMessagesForCard(messagesRepo, conv.id) : [],
+      events: leadsRepo.events(id),
     });
   };
 }
