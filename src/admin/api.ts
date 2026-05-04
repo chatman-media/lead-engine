@@ -1593,6 +1593,63 @@ export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
   };
 }
 
+/**
+ * Phase 2C: hand off a lead to the visa-submission queue. Allocates a
+ * sequential application_id, posts the package to VISA_CHAT_ID, and
+ * transitions the lead into `docs_complete`. Bot DMs the candidate
+ * a "your file is being submitted" ack.
+ *
+ * Idempotent on application_id allocation — calling twice returns the
+ * same id. State guard: must be in approved / docs_pending / docs_complete.
+ */
+export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    const leadsRepo = new LeadsRepo(deps.db);
+    const usersRepo = new UsersRepo(deps.db);
+    const messagesRepo = new MessagesRepo(deps.db);
+    const conversations = new ConversationsRepo(deps.db);
+
+    const lead = leadsRepo.byId(id);
+    if (!lead) return json({ error: "not found" }, { status: 404 });
+    if (
+      lead.state !== "approved" &&
+      lead.state !== "docs_pending" &&
+      lead.state !== "docs_complete"
+    ) {
+      return json(
+        { error: `lead state ${lead.state} cannot be submitted to visa` },
+        { status: 409 },
+      );
+    }
+    const user = usersRepo.byId(lead.user_id);
+    if (!user) return json({ error: "user gone" }, { status: 404 });
+
+    const applicationId = leadsRepo.allocateApplicationId(id);
+    const transitioned = leadsRepo.setState(id, "docs_complete") ?? lead;
+
+    const service = buildLeadsService(deps);
+    if (service) {
+      const conv = conversations.byUserId(user.id);
+      if (conv) {
+        await service.postVisaSubmissionPackage({
+          lead: transitioned,
+          user,
+          recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+          applicationId,
+        });
+      }
+      // Acknowledge to the candidate so they're not left in the dark.
+      await service.sendDocsCompleteAck({ user });
+    }
+    return json({ lead: transitioned, application_id: applicationId });
+  };
+}
+
 export function createDeleteLeadHandler(deps: AdminApiDeps): RouteHandler {
   return ({ req, params }) => {
     const ctx = requireAdmin(deps.db, req);

@@ -19,12 +19,16 @@ import type { EmbeddingClient } from "../rag/embed.ts";
 import { extractUserFacts } from "../rag/extract-user-facts.ts";
 import { summarizeConversation } from "../rag/summarize-conversation.ts";
 import { renderVacanciesBlock, VacanciesRepo } from "../db/repos/vacancies.ts";
+import { LeadsRepo } from "../db/repos/leads.ts";
+import { countMediaForConversation, extractIntake } from "../leads/intake.ts";
+import { LeadsService } from "../leads/service.ts";
+import { isIntakeComplete, type IntakeFields } from "../leads/templates.ts";
 import { pickVariant } from "../sales/ab-router.ts";
 import { classifyStage } from "../sales/stage-classifier.ts";
 import { nextStage } from "../sales/stage-router.ts";
 import { FUNNEL_STAGES, type FunnelStage, type Style } from "../sales/types.ts";
 import type { TelegramClient } from "./client.ts";
-import type { TgUpdate } from "./types.ts";
+import type { TgMessage, TgUpdate } from "./types.ts";
 import { containsEscalationTrigger } from "./escalation.ts";
 
 export interface RagDeps {
@@ -94,6 +98,10 @@ export interface WebhookDeps {
   /** Optional: when present, bot answers via RAG. Otherwise it sends a stub
    *  reply (useful when no LLM keys are configured yet). */
   rag?: RagDeps;
+  /** Group chat where lead cards are auto-posted on intake_complete. */
+  leadsChatId?: number | null;
+  /** Group chat where the visa-submission package is posted (Phase 2C). */
+  visaChatId?: number | null;
   /** Single sink for all dialog-state changes the webhook produces. The
    *  HTTP layer fans this out to AdminBus / WS subscribers. */
   onEvent?: (event: WebhookEvent) => void;
@@ -114,6 +122,62 @@ export interface WebhookDeps {
 
 const SECRET_HEADER = "x-telegram-bot-api-secret-token";
 
+/**
+ * Detected media payload of an inbound Telegram message. Stored under
+ * `messages.meta_json.media` so the intake auto-detector can count
+ * photo / video uploads via SQL `json_extract`. Bare flag — we do NOT
+ * download files in this layer; the file_id stays in case a later
+ * phase wants to fetch the bytes.
+ */
+type MediaInfo = {
+  type: "photo" | "video" | "voice" | "document";
+  file_id: string;
+  file_size?: number;
+  mime_type?: string;
+};
+
+/**
+ * Pull media info off the Telegram message envelope. Photo arrays
+ * arrive as multiple sizes — we keep the largest's file_id (Telegram
+ * sorts smallest-first, last entry is original). Returns null when
+ * the message has no recognised media attachment.
+ */
+function extractMediaInfo(m: TgMessage): MediaInfo | null {
+  if (m.photo && m.photo.length > 0) {
+    const largest = m.photo[m.photo.length - 1]!;
+    return {
+      type: "photo",
+      file_id: largest.file_id,
+      ...(largest.file_size !== undefined ? { file_size: largest.file_size } : {}),
+    };
+  }
+  if (m.video) {
+    return {
+      type: "video",
+      file_id: m.video.file_id,
+      ...(m.video.file_size !== undefined ? { file_size: m.video.file_size } : {}),
+      ...(m.video.mime_type ? { mime_type: m.video.mime_type } : {}),
+    };
+  }
+  if (m.voice) {
+    return {
+      type: "voice",
+      file_id: m.voice.file_id,
+      ...(m.voice.file_size !== undefined ? { file_size: m.voice.file_size } : {}),
+      ...(m.voice.mime_type ? { mime_type: m.voice.mime_type } : {}),
+    };
+  }
+  if (m.document) {
+    return {
+      type: "document",
+      file_id: m.document.file_id,
+      ...(m.document.file_size !== undefined ? { file_size: m.document.file_size } : {}),
+      ...(m.document.mime_type ? { mime_type: m.document.mime_type } : {}),
+    };
+  }
+  return null;
+}
+
 export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
   const users = new UsersRepo(deps.db);
   const conversations = new ConversationsRepo(deps.db);
@@ -122,6 +186,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
   const styles = new StylesRepo(deps.db);
   const experiments = new ExperimentsRepo(deps.db);
   const vacancies = new VacanciesRepo(deps.db);
+  const leadsRepo = new LeadsRepo(deps.db);
 
   return async ({ req, params }) => {
     if (params.secret !== deps.webhookSecret) {
@@ -152,12 +217,20 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
     }
 
     const message = update.message ?? update.edited_message;
-    if (!message || !message.from || !message.text) {
-      return json({ ok: true, ignored: "no-text-message" });
+    if (!message || !message.from) {
+      return json({ ok: true, ignored: "no-message-or-from" });
+    }
+    const mediaInfo = extractMediaInfo(message);
+    // Accept text OR caption-bearing media OR bare media (photo/video/...).
+    // Bare media without text becomes "[photo]" / "[video]" placeholders so
+    // the persistence layer doesn't reject the row (text is NOT NULL).
+    if (!message.text && !mediaInfo) {
+      return json({ ok: true, ignored: "unsupported-message" });
     }
 
     const tgUserId = message.from.id;
-    const userMessageText = message.text;
+    const userMessageText =
+      message.text ?? message.caption ?? `[${mediaInfo!.type}]`;
 
     const userExisting = users.byTgId(tgUserId);
     let user = userExisting;
@@ -186,6 +259,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       conversationId: conv.id,
       tgMessageId: message.message_id,
       text: userMessageText,
+      ...(mediaInfo ? { meta: { media: mediaInfo } } : {}),
     });
 
     if (!persisted.isNew) {
@@ -223,7 +297,10 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       experiments,
       users,
       vacancies,
+      leads: leadsRepo,
       telegram: deps.telegram,
+      leadsChatId: deps.leadsChatId ?? null,
+      visaChatId: deps.visaChatId ?? null,
       rag: deps.rag,
       conv,
       user,
@@ -270,8 +347,11 @@ interface ProcessInboundDeps {
   experiments: ExperimentsRepo;
   users: UsersRepo;
   vacancies: VacanciesRepo;
+  leads: LeadsRepo;
   telegram: TelegramClient;
   rag?: RagDeps;
+  leadsChatId?: number | null;
+  visaChatId?: number | null;
   conv: ConversationRow;
   user: UserRow;
   chatId: number;
@@ -548,6 +628,99 @@ const SUMMARY_STALENESS = 8; // refresh once we drift this many msgs past last s
  *
  * Fire-and-forget — errors logged, current turn already replied.
  */
+/**
+ * After each candidate message, refresh the lead's intake fields
+ * (text-extracted via LLM + media counts via SQL) and auto-promote
+ * when the 7-item checklist is complete. Idempotent — re-running on
+ * the same conversation just re-merges the same fields.
+ *
+ * Promotion rules:
+ *   - if no lead exists yet: create one in intake_pending
+ *   - update lead.intake_json with the merged IntakeFields
+ *   - when isIntakeComplete && state == intake_pending:
+ *       transition → intake_complete
+ *       post lead card to LEADS_CHAT_ID (if configured)
+ *       send "ждите, отправили запрос в клуб" to candidate
+ *
+ * Skips entirely when RAG isn't configured (no LLM = no extraction).
+ */
+async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
+  if (!d.rag) return;
+  // Auto-intake only when an ops chat is configured — otherwise the
+  // promotion has no place to surface and the LLM call would be wasted.
+  // Operators without LEADS_CHAT_ID can still promote manually via
+  // /admin/api/leads/from-conversation/:id.
+  if (d.leadsChatId == null) return;
+
+  const lead = d.leads.ensureForUser(d.user.id);
+  // Once decided one way or the other, intake auto-update is dormant —
+  // operator owns the lead from there. Same for any state past
+  // intake_complete — re-running extraction would erase manual edits.
+  if (lead.state !== "intake_pending") return;
+
+  const recent = d.messages.recentForContext(d.conv.id, 30);
+  const messagesForLlm = recent
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({
+      role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+      content: m.text,
+    }));
+
+  const mediaCounts = countMediaForConversation(
+    (d.messages as unknown as { db: import("bun:sqlite").Database }).db,
+    d.conv.id,
+  );
+
+  const existing = parseIntakeJson(lead.intake_json);
+  const intake = await extractIntake({
+    messages: messagesForLlm,
+    chat: d.rag.chat,
+    mediaCounts,
+    ...(existing ? { existingIntake: existing } : {}),
+  });
+
+  d.leads.setIntake(lead.id, JSON.stringify(intake));
+
+  if (!isIntakeComplete(intake)) return;
+
+  // Transition + post the operator-facing card. The auto-promote path
+  // mirrors the manual /admin/api/leads/from-conversation/:id flow.
+  const promoted = d.leads.setState(lead.id, "intake_complete");
+  if (!promoted) return;
+
+  const service = new LeadsService({
+    leads: d.leads,
+    users: d.users,
+    conversations: d.conversations,
+    messages: d.messages,
+    telegram: d.telegram,
+    leadsChatId: d.leadsChatId ?? null,
+    visaChatId: d.visaChatId ?? null,
+  });
+  const recentForCard = recent
+    .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "human")
+    .map((m) => ({ role: m.role, text: m.text }));
+  const withCard = await service.postCardToOpsChat({
+    lead: promoted,
+    user: d.user,
+    recentMessages: recentForCard,
+  });
+  await service.sendAwaitingApprovalNote({ user: d.user });
+  console.log(
+    `[leads] auto-promoted lead ${promoted.id} (user ${d.user.id}) on intake completion` +
+      (withCard.ops_message_id ? ` (card msg=${withCard.ops_message_id})` : ""),
+  );
+}
+
+function parseIntakeJson(raw: string | null): IntakeFields | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as IntakeFields;
+  } catch {
+    return undefined;
+  }
+}
+
 async function runConversationSummaryRefresh(
   d: ProcessInboundDeps,
 ): Promise<void> {
@@ -675,6 +848,7 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     // remembered regardless of whether RAG could answer.
     await runMemoryExtraction(d);
     await runConversationSummaryRefresh(d);
+    await runIntakeUpdate(d);
     return;
   }
 
@@ -685,4 +859,5 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     );
   await runMemoryExtraction(d);
   await runConversationSummaryRefresh(d);
+  await runIntakeUpdate(d);
 }

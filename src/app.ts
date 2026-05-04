@@ -23,6 +23,7 @@ import {
   createReleaseHandler,
   createReplyHandler,
   createSendIntakeHandler,
+  createSubmitToVisaHandler,
   createCreateVacancyHandler,
   createDeleteVacancyHandler,
   createListVacanciesHandler,
@@ -247,6 +248,10 @@ export function createRouter(deps: AppDeps): Router {
   router.post("/admin/api/leads/:id/approve", createApproveLeadHandler(apiDeps));
   router.post("/admin/api/leads/:id/reject", createRejectLeadHandler(apiDeps));
   router.post("/admin/api/leads/:id/send-intake", createSendIntakeHandler(apiDeps));
+  router.post(
+    "/admin/api/leads/:id/submit-to-visa",
+    createSubmitToVisaHandler(apiDeps),
+  );
   router.delete("/admin/api/leads/:id", createDeleteLeadHandler(apiDeps));
 
   if (deps.enableTestHooks) {

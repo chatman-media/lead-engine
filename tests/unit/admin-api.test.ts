@@ -165,6 +165,87 @@ describe("leads endpoints", () => {
     expect(r.status).toBe(404);
   });
 
+  test("POST /admin/api/leads/:id/submit-to-visa allocates application_id and transitions to docs_complete", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9210 });
+    const c = conversations.ensureForUser(u.id);
+    const promoted = await fetch(
+      url(`/admin/api/leads/from-conversation/${c.id}`),
+      authed({ method: "POST" }),
+    );
+    const { lead } = (await promoted.json()) as { lead: { id: number } };
+    await fetch(
+      url(`/admin/api/leads/${lead.id}/approve`),
+      authed({ method: "POST" }),
+    );
+
+    const submit = await fetch(
+      url(`/admin/api/leads/${lead.id}/submit-to-visa`),
+      authed({ method: "POST" }),
+    );
+    expect(submit.status).toBe(200);
+    const body = (await submit.json()) as {
+      lead: { state: string; application_id: string | null };
+      application_id: string;
+    };
+    expect(body.lead.state).toBe("docs_complete");
+    expect(body.lead.application_id).toBeTruthy();
+    expect(body.application_id).toBe(body.lead.application_id!);
+    const year = new Date().getFullYear();
+    expect(body.application_id.startsWith(`VS-${year}-`)).toBe(true);
+  });
+
+  test("submit-to-visa is idempotent on application_id (re-submit returns same id)", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9211 });
+    const c = conversations.ensureForUser(u.id);
+    const { lead } = (await (
+      await fetch(
+        url(`/admin/api/leads/from-conversation/${c.id}`),
+        authed({ method: "POST" }),
+      )
+    ).json()) as { lead: { id: number } };
+    await fetch(
+      url(`/admin/api/leads/${lead.id}/approve`),
+      authed({ method: "POST" }),
+    );
+
+    const a = (await (
+      await fetch(
+        url(`/admin/api/leads/${lead.id}/submit-to-visa`),
+        authed({ method: "POST" }),
+      )
+    ).json()) as { application_id: string };
+    const b = (await (
+      await fetch(
+        url(`/admin/api/leads/${lead.id}/submit-to-visa`),
+        authed({ method: "POST" }),
+      )
+    ).json()) as { application_id: string };
+    expect(b.application_id).toBe(a.application_id);
+  });
+
+  test("submit-to-visa rejects leads in wrong state with 409", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9212 });
+    const c = conversations.ensureForUser(u.id);
+    const { lead } = (await (
+      await fetch(
+        url(`/admin/api/leads/from-conversation/${c.id}`),
+        authed({ method: "POST" }),
+      )
+    ).json()) as { lead: { id: number } };
+    // Promoted = intake_complete; submit-to-visa requires approved/docs_*.
+    const r = await fetch(
+      url(`/admin/api/leads/${lead.id}/submit-to-visa`),
+      authed({ method: "POST" }),
+    );
+    expect(r.status).toBe(409);
+  });
+
   test("status endpoint reports leads.by_state counts", async () => {
     const usersRepo = new UsersRepo(ctx.db);
     const conversations = new ConversationsRepo(ctx.db);

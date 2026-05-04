@@ -150,6 +150,16 @@ export function Leads() {
                   prompt("Причина отказа (Enter для шаблонной формулировки):") ?? "";
                 return withBusy(lead.id, () => api.rejectLead(lead.id, reason || undefined));
               }}
+              onSubmitToVisa={() => {
+                if (
+                  !confirm(
+                    "Передать в подачу на визу? Бот сгенерирует номер заявки, опубликует пакет в VISA_CHAT_ID и отметит лида как готового к консулу.",
+                  )
+                ) {
+                  return Promise.resolve();
+                }
+                return withBusy(lead.id, () => api.submitLeadToVisa(lead.id));
+              }}
               onDelete={() => {
                 if (!confirm(`Удалить лид #${lead.id}? Нельзя будет его восстановить.`)) return;
                 return withBusy(lead.id, () => api.deleteLead(lead.id));
@@ -162,6 +172,26 @@ export function Leads() {
   );
 }
 
+interface IntakeFields {
+  height?: string;
+  weight?: string;
+  city?: string;
+  departure_readiness?: string;
+  photos_count?: number;
+  videos_count?: number;
+  passport_photo_received?: boolean;
+  dance_video_received?: boolean;
+}
+
+function parseIntake(json: string | null): IntakeFields | null {
+  if (!json) return null;
+  try {
+    return JSON.parse(json) as IntakeFields;
+  } catch {
+    return null;
+  }
+}
+
 function LeadCard({
   lead,
   busy,
@@ -169,6 +199,7 @@ function LeadCard({
   onSendIntake,
   onApprove,
   onReject,
+  onSubmitToVisa,
   onDelete,
 }: {
   lead: Lead;
@@ -177,6 +208,7 @@ function LeadCard({
   onSendIntake: () => void;
   onApprove: () => void;
   onReject: () => void;
+  onSubmitToVisa: () => void | Promise<void>;
   onDelete: () => void;
 }) {
   const accent = STATE_ACCENT[lead.state];
@@ -187,6 +219,11 @@ function LeadCard({
     lead.state === "docs_pending" ||
     lead.state === "docs_complete" ||
     lead.state === "submitted";
+  const canSubmitToVisa =
+    lead.state === "approved" ||
+    lead.state === "docs_pending" ||
+    lead.state === "docs_complete";
+  const intake = parseIntake(lead.intake_json);
   return (
     <div
       data-testid="lead-card"
@@ -290,6 +327,21 @@ function LeadCard({
               </button>
             </>
           )}
+          {canSubmitToVisa && (
+            <button
+              onClick={() => void onSubmitToVisa()}
+              className="btn btn-primary btn-sm"
+              disabled={busy}
+              data-testid="lead-submit-visa"
+              title={
+                lead.application_id
+                  ? "Перепостить пакет в VISA_CHAT_ID (id уже выдан)"
+                  : "Сгенерировать номер заявки и опубликовать в VISA_CHAT_ID"
+              }
+            >
+              {lead.application_id ? "↻ resend visa" : "→ visa submit"}
+            </button>
+          )}
           <button
             onClick={onDelete}
             className="btn btn-danger btn-sm"
@@ -300,6 +352,67 @@ function LeadCard({
           </button>
         </div>
       </div>
+
+      {intake && (lead.state === "intake_pending" || lead.state === "intake_complete") && (
+        <IntakeProgress intake={intake} />
+      )}
+    </div>
+  );
+}
+
+function IntakeProgress({ intake }: { intake: IntakeFields }) {
+  const items: Array<[string, string | undefined, boolean]> = [
+    ["рост", intake.height, !!intake.height],
+    ["вес", intake.weight, !!intake.weight],
+    ["город", intake.city, !!intake.city],
+    ["выезд", intake.departure_readiness, !!intake.departure_readiness],
+    [
+      "фото 6+",
+      intake.photos_count !== undefined ? String(intake.photos_count) : "0",
+      (intake.photos_count ?? 0) >= 6,
+    ],
+    [
+      "видео 2+",
+      intake.videos_count !== undefined ? String(intake.videos_count) : "0",
+      (intake.videos_count ?? 0) >= 2,
+    ],
+    [
+      "загранпаспорт",
+      intake.passport_photo_received ? "получено" : undefined,
+      intake.passport_photo_received === true,
+    ],
+    [
+      "видео танца",
+      intake.dance_video_received ? "получено" : undefined,
+      intake.dance_video_received === true,
+    ],
+  ];
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 6,
+        flexWrap: "wrap",
+        fontFamily: "var(--mono)",
+        fontSize: 10,
+        marginTop: 4,
+      }}
+    >
+      {items.map(([label, value, ok]) => (
+        <span
+          key={label}
+          style={{
+            padding: "2px 8px",
+            borderRadius: "var(--radius)",
+            background: ok ? "rgba(46,160,67,0.15)" : "var(--bg-3)",
+            color: ok ? "var(--green, #2ea043)" : "var(--text-3)",
+            border: `1px solid ${ok ? "rgba(46,160,67,0.3)" : "var(--border)"}`,
+          }}
+        >
+          {ok ? "✓" : "·"} {label}
+          {value && ok ? `: ${value}` : ""}
+        </span>
+      ))}
     </div>
   );
 }

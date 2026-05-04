@@ -249,6 +249,69 @@ export class LeadsService {
   }
 
   /**
+   * Phase 2C handoff: post a fully-collected lead's package to the
+   * visa-submission ops chat with the auto-allocated application id,
+   * the candidate's identifiers, intake fields, and the recent message
+   * trail. Operator submits to the consulate from there.
+   *
+   * Caller is responsible for:
+   *  - allocating application_id (via LeadsRepo.allocateApplicationId)
+   *  - transitioning the state (this only handles the side effect)
+   */
+  async postVisaSubmissionPackage(input: {
+    lead: LeadRow;
+    user: UserRow;
+    recentMessages: Array<{ role: string; text: string }>;
+    applicationId: string;
+  }): Promise<void> {
+    if (this.deps.visaChatId == null) return;
+    const intake = parseJson<IntakeFields>(input.lead.intake_json);
+    const lines: string[] = [];
+    lines.push(`📋 ПОДАЧА НА ВИЗУ · ${input.applicationId}`);
+    lines.push(
+      `${input.user.tg_username ? "@" + input.user.tg_username : "tg:" + input.user.tg_user_id}` +
+        ` · lead #${input.lead.id}`,
+    );
+    lines.push("");
+
+    if (intake) {
+      lines.push("Анкета:");
+      const renderField = (label: string, value: unknown) => {
+        if (value === undefined || value === null || value === false) return;
+        lines.push(`  · ${label}: ${value}`);
+      };
+      renderField("рост", intake.height);
+      renderField("вес", intake.weight);
+      renderField("город", intake.city);
+      renderField("выезд", intake.departure_readiness);
+      renderField("фото", intake.photos_count ?? 0);
+      renderField("видео", intake.videos_count ?? 0);
+      lines.push("");
+    }
+
+    if (input.recentMessages.length > 0) {
+      lines.push("Последние реплики:");
+      for (const m of input.recentMessages.slice(-10)) {
+        const who = m.role === "user" ? "девочка" : "бот";
+        const trimmed = m.text.length > 300 ? m.text.slice(0, 300) + "…" : m.text;
+        lines.push(`  ${who}: ${trimmed}`);
+      }
+    }
+
+    try {
+      await this.deps.telegram.sendMessage({
+        chatId: this.deps.visaChatId,
+        text: lines.join("\n"),
+      });
+    } catch (err) {
+      console.error(
+        `[leads] failed to post visa package to VISA_CHAT_ID=${this.deps.visaChatId}:`,
+        err,
+      );
+    }
+  }
+
+  /**
    * Re-renders the lead card with the decision header / no buttons and
    * pushes editMessageText. Best-effort.
    */

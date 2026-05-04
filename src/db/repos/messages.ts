@@ -64,20 +64,25 @@ export class MessagesRepo {
     conversationId: number;
     text: string;
     tgMessageId: number;
+    /** Optional metadata for media messages — `{ media: { type, file_id, ... } }`.
+     *  Stored as JSON in `meta_json`. Lets the intake auto-detector count
+     *  photo / video uploads via `json_extract`. */
+    meta?: unknown;
   }): { isNew: boolean; message: MessageRow } {
+    const metaJson = input.meta === undefined ? null : JSON.stringify(input.meta);
     const inserted = this.db
       .query<
         MessageRow,
-        [number, string, number]
+        [number, string, number, string | null]
       >(
-        `INSERT INTO messages (conversation_id, role, text, tg_message_id)
-         VALUES (?, 'user', ?, ?)
+        `INSERT INTO messages (conversation_id, role, text, tg_message_id, meta_json)
+         VALUES (?, 'user', ?, ?, ?)
          ON CONFLICT(conversation_id, tg_message_id)
            WHERE role = 'user' AND tg_message_id IS NOT NULL
            DO NOTHING
          RETURNING *`,
       )
-      .get(input.conversationId, input.text, input.tgMessageId);
+      .get(input.conversationId, input.text, input.tgMessageId, metaJson);
     if (inserted) return { isNew: true, message: inserted };
 
     const existing = this.db
