@@ -149,4 +149,77 @@ describe("LeadsRepo", () => {
     expect(leads.delete(l.id)).toBe(true);
     expect(leads.byId(l.id)).toBeNull();
   });
+
+  test("ensureForUser writes a synthetic 'created' event", () => {
+    const u = users.create({ tgUserId: 800 });
+    const l = leads.ensureForUser(u.id);
+    const evs = leads.events(l.id);
+    expect(evs.length).toBe(1);
+    expect(evs[0]!.from_state).toBeNull();
+    expect(evs[0]!.to_state).toBe("intake_pending");
+    expect(evs[0]!.by_admin_id).toBeNull();
+  });
+
+  test("setState appends a transition event with admin + notes", () => {
+    const u = users.create({ tgUserId: 801 });
+    const l = leads.ensureForUser(u.id);
+    leads.setState(l.id, "intake_complete");
+    leads.setState(l.id, "rejected", {
+      adminId,
+      rejectedReason: "не подходит",
+    });
+    const evs = leads.events(l.id);
+    expect(evs.length).toBe(3); // created + 2 transitions
+    expect(evs[1]!.from_state).toBe("intake_pending");
+    expect(evs[1]!.to_state).toBe("intake_complete");
+    expect(evs[1]!.by_admin_id).toBeNull();
+    expect(evs[1]!.notes).toBeNull();
+
+    expect(evs[2]!.from_state).toBe("intake_complete");
+    expect(evs[2]!.to_state).toBe("rejected");
+    expect(evs[2]!.by_admin_id).toBe(adminId);
+    expect(evs[2]!.notes).toBe("не подходит");
+  });
+
+  test("setState skips event when state is unchanged (no-op transitions)", () => {
+    const u = users.create({ tgUserId: 802 });
+    const l = leads.ensureForUser(u.id);
+    leads.setState(l.id, "intake_pending"); // same as current
+    const evs = leads.events(l.id);
+    expect(evs.length).toBe(1); // only the synthetic 'created'
+  });
+
+  test("allocateApplicationId emits a self-loop event with the id in notes", () => {
+    const u = users.create({ tgUserId: 803 });
+    const l = leads.ensureForUser(u.id);
+    leads.setState(l.id, "intake_complete");
+    leads.setState(l.id, "approved", { adminId });
+    const appId = leads.allocateApplicationId(l.id);
+
+    const evs = leads.events(l.id);
+    const idEv = evs.find((e) => e.notes?.startsWith("application_id="));
+    expect(idEv).toBeDefined();
+    expect(idEv!.notes).toBe(`application_id=${appId}`);
+    // self-loop: from === to (state didn't change just because of allocation)
+    expect(idEv!.from_state).toBe(idEv!.to_state);
+  });
+
+  test("allocateApplicationId is still idempotent — second call doesn't double-log", () => {
+    const u = users.create({ tgUserId: 804 });
+    const l = leads.ensureForUser(u.id);
+    leads.allocateApplicationId(l.id);
+    const eventsAfterFirst = leads.events(l.id).length;
+    leads.allocateApplicationId(l.id); // should be no-op
+    const eventsAfterSecond = leads.events(l.id).length;
+    expect(eventsAfterSecond).toBe(eventsAfterFirst);
+  });
+
+  test("delete cascades — events for a deleted lead disappear", () => {
+    const u = users.create({ tgUserId: 805 });
+    const l = leads.ensureForUser(u.id);
+    leads.setState(l.id, "intake_complete");
+    expect(leads.events(l.id).length).toBe(2);
+    leads.delete(l.id);
+    expect(leads.events(l.id).length).toBe(0);
+  });
 });

@@ -155,6 +155,16 @@ export interface IntakeFields {
   dance_video_received?: boolean;
 }
 
+export interface LeadEvent {
+  id: number;
+  lead_id: number;
+  from_state: LeadState | null;
+  to_state: LeadState;
+  by_admin_id: number | null;
+  notes: string | null;
+  created_at: number;
+}
+
 export interface LeadDetail {
   lead: Lead;
   user: User;
@@ -162,6 +172,7 @@ export interface LeadDetail {
   visa_docs: VisaDocs | null;
   conversation_id: number | null;
   recent_messages: Array<{ role: string; text: string }>;
+  events: LeadEvent[];
 }
 
 /** Mirror of the GET /admin/api/status response — see src/admin/api.ts. */

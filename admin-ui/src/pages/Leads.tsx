@@ -4,6 +4,7 @@ import {
   api,
   type Lead,
   type LeadCounts,
+  type LeadEvent,
   type LeadState,
   type VisaDocs,
 } from "../api.ts";
@@ -457,6 +458,139 @@ function LeadCard({
       {(lead.state === "docs_pending" ||
         lead.state === "docs_complete" ||
         lead.state === "submitted") && <VisaDocsPane leadId={lead.id} />}
+
+      <TimelinePane leadId={lead.id} />
+    </div>
+  );
+}
+
+/**
+ * Collapsible audit-trail of every state transition on the lead, plus
+ * application-id allocation. Lazy-loaded on first expand to avoid a
+ * fetch storm on the list view. Detail endpoint is the same one
+ * VisaDocsPane already uses, so two opens hit the cache once.
+ */
+function TimelinePane({ leadId }: { leadId: number }) {
+  const [open, setOpen] = useState(false);
+  const [events, setEvents] = useState<LeadEvent[] | null>(null);
+
+  async function ensureLoaded() {
+    if (events !== null) return;
+    try {
+      const detail = await api.leadDetail(leadId);
+      setEvents(detail.events);
+    } catch (err) {
+      console.error("[timeline] load failed", err);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        borderTop: "1px solid var(--border)",
+        paddingTop: 8,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          if (!open) void ensureLoaded();
+        }}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--text-3)",
+          fontFamily: "var(--mono)",
+          fontSize: 11,
+          cursor: "pointer",
+          padding: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+        }}
+        data-testid="timeline-toggle"
+      >
+        <span style={{ width: 10, display: "inline-block" }}>
+          {open ? "▾" : "▸"}
+        </span>
+        <span>TIMELINE</span>
+        {events !== null && (
+          <span style={{ color: "var(--text-2)" }}>
+            {events.length} events
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            fontFamily: "var(--mono)",
+            fontSize: 11,
+          }}
+        >
+          {events === null ? (
+            <div style={{ color: "var(--text-3)" }}>loading…</div>
+          ) : events.length === 0 ? (
+            <div style={{ color: "var(--text-3)" }}>no events yet</div>
+          ) : (
+            events.map((ev) => <TimelineRow key={ev.id} event={ev} />)
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimelineRow({ event: ev }: { event: LeadEvent }) {
+  const ts = new Date(ev.created_at * 1000).toLocaleString("ru-RU");
+  const isCreate = ev.from_state === null;
+  const isApplicationId =
+    ev.from_state === ev.to_state && ev.notes?.startsWith("application_id=");
+  const arrow = isCreate
+    ? "✨ created"
+    : isApplicationId
+      ? "🪪 id allocated"
+      : `${ev.from_state} → ${ev.to_state}`;
+  const accent =
+    ev.to_state === "approved" || ev.to_state === "docs_complete"
+      ? "var(--green, #2ea043)"
+      : ev.to_state === "rejected"
+        ? "var(--red, #ef4444)"
+        : ev.to_state === "intake_complete" || isApplicationId
+          ? "var(--amber)"
+          : "var(--text-3)";
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "150px 1fr",
+        gap: 8,
+        alignItems: "baseline",
+      }}
+      data-testid="timeline-row"
+    >
+      <span style={{ color: "var(--text-3)" }}>{ts}</span>
+      <span>
+        <span style={{ color: accent, fontWeight: 600 }}>{arrow}</span>
+        {ev.by_admin_id !== null && (
+          <span style={{ color: "var(--text-3)" }}> · admin#{ev.by_admin_id}</span>
+        )}
+        {ev.notes && !isApplicationId && (
+          <span style={{ color: "var(--text-3)" }}> · {ev.notes}</span>
+        )}
+        {isApplicationId && (
+          <span style={{ color: "var(--amber)" }}>
+            {" "}· {ev.notes!.replace(/^application_id=/, "")}
+          </span>
+        )}
+      </span>
     </div>
   );
 }

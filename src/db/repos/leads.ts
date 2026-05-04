@@ -35,6 +35,21 @@ export interface LeadRow {
   updated_at: number;
 }
 
+/**
+ * Append-only audit-trail row. See migration 010 for the rationale —
+ * `leads.state` is the current cursor, `lead_events` is the history
+ * the admin timeline panel renders.
+ */
+export interface LeadEventRow {
+  id: number;
+  lead_id: number;
+  from_state: LeadState | null;
+  to_state: LeadState;
+  by_admin_id: number | null;
+  notes: string | null;
+  created_at: number;
+}
+
 export class LeadsRepo {
   constructor(private db: Database) {}
 
@@ -89,7 +104,48 @@ export class LeadsRepo {
       )
       .get(userId);
     if (!row) throw new Error("Failed to insert lead");
+    // Synthetic "created" event — `from_state` NULL, to_state matches
+    // the lead's default. Marks the start of the timeline.
+    this.appendEvent(row.id, {
+      fromState: null,
+      toState: row.state,
+      byAdminId: null,
+      notes: null,
+    });
     return row;
+  }
+
+  /**
+   * Append a row to `lead_events`. Internal helper — prefer the
+   * higher-level mutation methods (`setState`, `allocateApplicationId`,
+   * `ensureForUser`) which call this automatically. Made public so
+   * tests can inject events without going through a transition.
+   */
+  appendEvent(
+    leadId: number,
+    input: {
+      fromState: LeadState | null;
+      toState: LeadState;
+      byAdminId: number | null;
+      notes: string | null;
+    },
+  ): void {
+    this.db.run(
+      `INSERT INTO lead_events (lead_id, from_state, to_state, by_admin_id, notes)
+       VALUES (?, ?, ?, ?, ?)`,
+      [leadId, input.fromState, input.toState, input.byAdminId, input.notes],
+    );
+  }
+
+  /** Timeline for one lead, oldest first. */
+  events(leadId: number): LeadEventRow[] {
+    return this.db
+      .query<LeadEventRow, [number]>(
+        `SELECT * FROM lead_events
+         WHERE lead_id = ?
+         ORDER BY created_at ASC, id ASC`,
+      )
+      .all(leadId);
   }
 
   /**
@@ -102,6 +158,15 @@ export class LeadsRepo {
     state: LeadState,
     opts: { adminId?: number; rejectedReason?: string } = {},
   ): LeadRow | null {
+    // Capture the prior state for the audit-trail row. When the lead
+    // doesn't exist, return null without writing anything.
+    const before = this.byId(id);
+    if (!before) return null;
+    // No-op transitions (re-emitting the same state) skip the event
+    // log to keep the timeline meaningful — operators don't want to
+    // see "intake_pending → intake_pending" rows.
+    const sameState = before.state === state;
+
     const isDecision = state === "approved" || state === "rejected";
     if (isDecision) {
       this.db.run(
@@ -121,6 +186,16 @@ export class LeadsRepo {
         `UPDATE leads SET state = ?, updated_at = unixepoch() WHERE id = ?`,
         [state, id],
       );
+    }
+    if (!sameState) {
+      this.appendEvent(id, {
+        fromState: before.state,
+        toState: state,
+        byAdminId: opts.adminId ?? null,
+        // Only carry the rejection reason on the rejected event;
+        // approved leads have no operator-typed note.
+        notes: state === "rejected" ? opts.rejectedReason ?? null : null,
+      });
     }
     return this.byId(id);
   }
@@ -178,6 +253,21 @@ export class LeadsRepo {
       `UPDATE leads SET application_id = ?, updated_at = unixepoch() WHERE id = ?`,
       [applicationId, id],
     );
+    // Surface the allocation in the timeline. The lead's state
+    // doesn't change (the caller transitions to `docs_complete`
+    // separately and that emits its own event), so we use a self-
+    // loop pseudo-event with the current state on both sides and
+    // the application id in `notes` — distinct from a state-change
+    // event because from===to.
+    const current = this.byId(id);
+    if (current) {
+      this.appendEvent(id, {
+        fromState: current.state,
+        toState: current.state,
+        byAdminId: null,
+        notes: `application_id=${applicationId}`,
+      });
+    }
     return applicationId;
   }
 
