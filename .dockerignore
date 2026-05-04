@@ -1,0 +1,55 @@
+# Don't ship dev-only / runtime / secret files into the image. The
+# build-context size also matters — sending node_modules across the
+# build daemon can push image build to 2x slower.
+
+# Node / Bun deps & caches — installed inside the image
+**/node_modules
+**/.bun
+**/.cache
+**/dist
+admin-ui/dist
+
+# Local data + logs — must come from a volume in production
+data/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+logs/
+*.log
+
+# Secrets — operators mount their .env at run time, never in the image
+.env
+.env.local
+.env.*.local
+sec/
+
+# VCS / CI / IDE
+.git
+.github
+.gitignore
+.husky
+.vscode
+.idea
+.claude
+
+# Tests / coverage — production image runs nothing of this
+tests/
+playwright.config.ts
+playwright-report/
+test-results/
+coverage/
+
+# Source artifacts of the KB pipeline (large, transient)
+kb/
+
+# OS junk
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Documentation that doesn't ship to runtime
+docs/
+README.md
+*.md

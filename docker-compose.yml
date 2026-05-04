@@ -1,0 +1,89 @@
+# tg-chatbot production stack.
+#
+# Default profile:  app + persistent SQLite volume.
+# Optional profile: ollama for fully-local inference (chat + embeddings).
+#
+# Quick start:
+#   cp .env.example .env && edit .env
+#   docker compose up -d        # backend only — uses OpenAI / OpenRouter
+#   docker compose --profile ollama up -d
+#                              # full local stack: bot + ollama at :11434
+#
+# The bot listens on PORT (default 3000). Behind a reverse proxy, point
+# the proxy at the container — the Telegram Bot API requires HTTPS for
+# the webhook URL, which the bot itself doesn't terminate. See
+# docs/DEPLOY.md for nginx + Let's Encrypt + Cloudflare-tunnel options.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tg-chatbot:latest
+    container_name: tg-chatbot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Container-internal paths. Compose v2 lets env_file values
+      # override `environment:` keys, so when running with the ollama
+      # profile, set `OLLAMA_HOST=http://ollama:11434` in your .env —
+      # the .env.example default of `http://localhost:11434` won't
+      # reach the sibling container.
+      DB_PATH: /app/data/bot.db
+      PORT: 3000
+      SERVE_UI: "1"
+    volumes:
+      # Single named volume holds the SQLite DB + future media uploads
+      # so a `docker compose down && up` doesn't wipe state.
+      - bot-data:/app/data
+      # Optional: bring in a host-side KB tree if you want to ingest
+      # without exec'ing into the container. Comment-out if not used.
+      # - ./kb:/app/kb:ro
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    # Wait for ollama (when used) before starting the bot warm-up — but
+    # only require the network to be up, not a full readiness handshake,
+    # so this stays light.
+    depends_on:
+      ollama:
+        condition: service_started
+        required: false
+
+  # Local LLM. Skipped unless `--profile ollama` is passed.
+  # Pull a model into the volume after first boot:
+  #   docker compose --profile ollama exec ollama ollama pull qwen3
+  #   docker compose --profile ollama exec ollama ollama pull bge-m3
+  ollama:
+    image: ollama/ollama:latest
+    container_name: tg-chatbot-ollama
+    restart: unless-stopped
+    profiles: ["ollama"]
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      # Optional: expose to host so you can `ollama list` from the host
+      # without exec'ing in. Comment out if you don't need it.
+      - "${OLLAMA_HOST_PORT:-11434}:11434"
+    # Hint to NVIDIA users: uncomment to enable GPU pass-through. Falls
+    # back to CPU automatically when the GPU runtime isn't available
+    # (so this stays compatible with hosts that don't have nvidia-docker).
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  bot-data:
+    name: tg-chatbot-data
+  ollama-models:
+    name: tg-chatbot-ollama-models
