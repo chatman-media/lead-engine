@@ -5,7 +5,104 @@ import {
   type Lead,
   type LeadCounts,
   type LeadState,
+  type VisaDocs,
 } from "../api.ts";
+
+/**
+ * Subset of visa fields the admin shows as "required" — mirrors
+ * VISA_REQUIRED_FIELDS in src/leads/visa-docs.ts. New required fields
+ * MUST be kept in sync between backend and frontend.
+ */
+const VISA_REQUIRED: Array<keyof VisaDocs> = [
+  "family_name",
+  "given_name",
+  "date_of_birth",
+  "country_of_birth",
+  "city_of_birth",
+  "marital_status",
+  "current_nationality",
+  "national_id_number",
+  "passport_number",
+  "passport_issuing_country",
+  "passport_expiration_date",
+  "current_address",
+  "phone",
+  "email",
+  "father_name",
+  "mother_name",
+  "been_to_china",
+];
+
+/** All visa fields in display order. Keep in sync with VISA_FIELD_LABELS
+ *  in src/leads/visa-docs.ts. */
+const VISA_FIELD_ORDER: Array<keyof VisaDocs> = [
+  "family_name",
+  "given_name",
+  "date_of_birth",
+  "country_of_birth",
+  "city_of_birth",
+  "marital_status",
+  "current_nationality",
+  "national_id_number",
+  "passport_number",
+  "passport_issuing_country",
+  "passport_issuing_place",
+  "passport_expiration_date",
+  "current_address",
+  "phone",
+  "email",
+  "father_name",
+  "father_nationality",
+  "father_dob",
+  "mother_name",
+  "mother_nationality",
+  "mother_dob",
+  "been_to_china",
+  "previous_chinese_visa",
+  "work_experience",
+  "education",
+  "travel_history_12mo",
+  "family_other",
+];
+
+const VISA_FIELD_LABELS: Record<keyof VisaDocs, string> = {
+  family_name: "Family name",
+  given_name: "Given name",
+  date_of_birth: "Date of birth",
+  country_of_birth: "Country of birth",
+  city_of_birth: "City of birth",
+  marital_status: "Marital status",
+  current_nationality: "Current nationality",
+  national_id_number: "National ID number",
+  passport_number: "Passport number",
+  passport_issuing_country: "Passport issuing country",
+  passport_issuing_place: "Passport issuing place",
+  passport_expiration_date: "Passport expiration",
+  current_address: "Current address",
+  phone: "Phone",
+  email: "Email",
+  father_name: "Father name",
+  father_nationality: "Father nationality",
+  father_dob: "Father DOB",
+  mother_name: "Mother name",
+  mother_nationality: "Mother nationality",
+  mother_dob: "Mother DOB",
+  been_to_china: "Been to China?",
+  previous_chinese_visa: "Previous Chinese visa",
+  work_experience: "Work experience",
+  education: "Education",
+  travel_history_12mo: "Travel last 12mo",
+  family_other: "Spouse / children",
+};
+
+const VISA_LONG_FIELDS: ReadonlySet<keyof VisaDocs> = new Set([
+  "current_address",
+  "work_experience",
+  "education",
+  "travel_history_12mo",
+  "family_other",
+  "previous_chinese_visa",
+]);
 
 /**
  * Lead pipeline view. Each row is a candidate at some stage of the
@@ -355,6 +452,234 @@ function LeadCard({
 
       {intake && (lead.state === "intake_pending" || lead.state === "intake_complete") && (
         <IntakeProgress intake={intake} />
+      )}
+
+      {(lead.state === "docs_pending" ||
+        lead.state === "docs_complete" ||
+        lead.state === "submitted") && <VisaDocsPane leadId={lead.id} />}
+    </div>
+  );
+}
+
+function VisaDocsPane({ leadId }: { leadId: number }) {
+  const [open, setOpen] = useState(false);
+  const [docs, setDocs] = useState<VisaDocs | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [editingKey, setEditingKey] = useState<keyof VisaDocs | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Lazy-load on first expand so the list view doesn't trigger a fetch
+  // per card on mount. After load, the operator can re-collapse and
+  // we keep the state.
+  async function ensureLoaded() {
+    if (loaded) return;
+    try {
+      const detail = await api.leadDetail(leadId);
+      setDocs(detail.visa_docs ?? {});
+      setLoaded(true);
+    } catch (err) {
+      console.error("[visa-docs] load failed", err);
+    }
+  }
+
+  function startEdit(key: keyof VisaDocs) {
+    setEditingKey(key);
+    setEditValue(docs?.[key] ?? "");
+  }
+
+  async function commitEdit() {
+    if (!editingKey) return;
+    setSaving(true);
+    try {
+      const patch: Partial<VisaDocs> = { [editingKey]: editValue.trim() } as Partial<VisaDocs>;
+      const { visa_docs } = await api.updateVisaDocs(leadId, patch);
+      setDocs(visa_docs);
+      setEditingKey(null);
+      setEditValue("");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const filled = docs
+    ? VISA_REQUIRED.filter((k) => {
+        const v = docs[k];
+        return typeof v === "string" && v.trim();
+      }).length
+    : 0;
+  const totalRequired = VISA_REQUIRED.length;
+  const pct = totalRequired > 0 ? Math.round((filled / totalRequired) * 100) : 0;
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        borderTop: "1px solid var(--border)",
+        paddingTop: 8,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          if (!open) void ensureLoaded();
+        }}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--text-3)",
+          fontFamily: "var(--mono)",
+          fontSize: 11,
+          cursor: "pointer",
+          padding: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+        }}
+        data-testid="visa-docs-toggle"
+      >
+        <span style={{ width: 10, display: "inline-block" }}>{open ? "▾" : "▸"}</span>
+        <span>VISA DOCS</span>
+        <span
+          style={{
+            color: pct >= 100 ? "var(--green, #2ea043)" : "var(--amber)",
+            fontWeight: 600,
+          }}
+        >
+          {filled}/{totalRequired} required ({pct}%)
+        </span>
+      </button>
+
+      {open && (
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
+        >
+          {!loaded ? (
+            <div
+              style={{
+                fontFamily: "var(--mono)",
+                fontSize: 11,
+                color: "var(--text-3)",
+              }}
+            >
+              loading…
+            </div>
+          ) : (
+            VISA_FIELD_ORDER.map((key) => {
+              const value = docs?.[key] ?? "";
+              const required = (VISA_REQUIRED as ReadonlyArray<keyof VisaDocs>).includes(key);
+              const isLong = VISA_LONG_FIELDS.has(key);
+              const editing = editingKey === key;
+              return (
+                <div
+                  key={key}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "180px 1fr auto",
+                    gap: 8,
+                    alignItems: "start",
+                    fontSize: 12,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "var(--mono)",
+                      color: "var(--text-3)",
+                      paddingTop: 4,
+                    }}
+                  >
+                    {VISA_FIELD_LABELS[key]}
+                    {required && (
+                      <span style={{ color: "var(--red, #ef4444)", marginLeft: 4 }}>*</span>
+                    )}
+                  </div>
+                  {editing ? (
+                    isLong ? (
+                      <textarea
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        rows={4}
+                        className="input"
+                        style={{ fontSize: 12, fontFamily: "var(--sans)" }}
+                        data-testid={`visa-docs-textarea-${key}`}
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        className="input"
+                        style={{ fontSize: 12 }}
+                        data-testid={`visa-docs-input-${key}`}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void commitEdit();
+                          else if (e.key === "Escape") {
+                            setEditingKey(null);
+                            setEditValue("");
+                          }
+                        }}
+                        autoFocus
+                      />
+                    )
+                  ) : (
+                    <div
+                      style={{
+                        color: value ? "var(--text)" : "var(--text-3)",
+                        fontStyle: value ? "normal" : "italic",
+                        wordBreak: "break-word",
+                        whiteSpace: "pre-wrap",
+                        paddingTop: 4,
+                      }}
+                    >
+                      {value || "—"}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {editing ? (
+                      <>
+                        <button
+                          onClick={commitEdit}
+                          disabled={saving}
+                          className="btn btn-primary btn-sm"
+                          style={{ fontSize: 11, padding: "4px 8px" }}
+                        >
+                          save
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingKey(null);
+                            setEditValue("");
+                          }}
+                          disabled={saving}
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 11, padding: "4px 8px" }}
+                        >
+                          ✕
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => startEdit(key)}
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontSize: 11, padding: "4px 8px" }}
+                        data-testid={`visa-docs-edit-${key}`}
+                      >
+                        edit
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       )}
     </div>
   );

@@ -113,6 +113,57 @@ export interface LeadCounts {
   closed: number;
 }
 
+/** Mirrors `VisaFields` in src/leads/visa-docs.ts. All fields optional. */
+export interface VisaDocs {
+  family_name?: string;
+  given_name?: string;
+  date_of_birth?: string;
+  country_of_birth?: string;
+  city_of_birth?: string;
+  marital_status?: string;
+  current_nationality?: string;
+  national_id_number?: string;
+  passport_number?: string;
+  passport_issuing_country?: string;
+  passport_issuing_place?: string;
+  passport_expiration_date?: string;
+  current_address?: string;
+  phone?: string;
+  email?: string;
+  father_name?: string;
+  father_nationality?: string;
+  father_dob?: string;
+  mother_name?: string;
+  mother_nationality?: string;
+  mother_dob?: string;
+  been_to_china?: string;
+  previous_chinese_visa?: string;
+  work_experience?: string;
+  education?: string;
+  travel_history_12mo?: string;
+  family_other?: string;
+}
+
+export interface IntakeFields {
+  height?: string;
+  weight?: string;
+  city?: string;
+  departure_readiness?: string;
+  photos_count?: number;
+  videos_count?: number;
+  passport_photo_received?: boolean;
+  dance_video_received?: boolean;
+}
+
+export interface LeadDetail {
+  lead: Lead;
+  user: User;
+  intake: IntakeFields | null;
+  visa_docs: VisaDocs | null;
+  conversation_id: number | null;
+  recent_messages: Array<{ role: string; text: string }>;
+}
+
 /** Mirror of the GET /admin/api/status response — see src/admin/api.ts. */
 export interface SystemStatus {
   rag: {
@@ -282,6 +333,15 @@ export const api = {
       `/admin/api/leads/${id}/submit-to-visa`,
       { method: "POST" },
     ),
+
+  leadDetail: (id: number) =>
+    req<LeadDetail>(`/admin/api/leads/${id}`),
+
+  updateVisaDocs: (id: number, docs: Partial<VisaDocs>) =>
+    req<{ visa_docs: VisaDocs }>(`/admin/api/leads/${id}/visa-docs`, {
+      method: "PATCH",
+      body: JSON.stringify({ docs }),
+    }),
 
   deleteLead: (id: number) =>
     req<{ ok: boolean; deleted: number }>(`/admin/api/leads/${id}`, {

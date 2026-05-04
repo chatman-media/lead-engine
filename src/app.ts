@@ -17,6 +17,7 @@ import {
   createApproveLeadHandler,
   createDeleteLeadHandler,
   createLeadCallbackHandler,
+  createLeadDetailHandler,
   createListLeadsHandler,
   createPromoteLeadHandler,
   createRejectLeadHandler,
@@ -24,6 +25,7 @@ import {
   createReplyHandler,
   createSendIntakeHandler,
   createSubmitToVisaHandler,
+  createUpdateVisaDocsHandler,
   createCreateVacancyHandler,
   createDeleteVacancyHandler,
   createListVacanciesHandler,
@@ -251,6 +253,14 @@ export function createRouter(deps: AppDeps): Router {
   router.post(
     "/admin/api/leads/:id/submit-to-visa",
     createSubmitToVisaHandler(apiDeps),
+  );
+  // Detail / patch routes — register AFTER all `/leads/:id/<action>`
+  // sub-paths so the literal sub-path matches first (router does
+  // linear first-match scanning).
+  router.get("/admin/api/leads/:id", createLeadDetailHandler(apiDeps));
+  router.patch(
+    "/admin/api/leads/:id/visa-docs",
+    createUpdateVisaDocsHandler(apiDeps),
   );
   router.delete("/admin/api/leads/:id", createDeleteLeadHandler(apiDeps));
 
