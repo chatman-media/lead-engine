@@ -349,6 +349,100 @@ export class LeadsService {
   }
 
   /**
+   * Operator-driven relay: operator replies to a lead card in the ops
+   * chat with text and/or a media attachment, this method forwards
+   * everything to the candidate. Recorded in the `messages` table as
+   * `role='human'` (an operator-originated message) so the admin chat
+   * view distinguishes it from the bot's auto-replies.
+   *
+   * Returns false when neither text nor a recognised media kind is
+   * present (caller can ack the operator with a hint to include
+   * something).
+   */
+  async relayFromOperator(input: {
+    lead: LeadRow;
+    user: UserRow;
+    text?: string;
+    media?: {
+      type: "photo" | "video" | "voice" | "document";
+      file_id: string;
+    };
+  }): Promise<boolean> {
+    const conv = this.deps.conversations.byUserId(input.user.id);
+    if (!conv) {
+      console.warn(`[leads] relay: no conversation for user ${input.user.id}`);
+      return false;
+    }
+    const text = input.text?.trim() ?? "";
+    const media = input.media;
+    if (!text && !media) return false;
+
+    const candidateChatId = input.user.tg_user_id;
+    let tgMessageId: number | undefined;
+
+    try {
+      if (media?.type === "photo") {
+        const sent = await this.deps.telegram.sendPhoto({
+          chatId: candidateChatId,
+          photoFileId: media.file_id,
+          ...(text ? { caption: text } : {}),
+        });
+        tgMessageId = sent.message_id;
+      } else if (media?.type === "video") {
+        const sent = await this.deps.telegram.sendVideo({
+          chatId: candidateChatId,
+          videoFileId: media.file_id,
+          ...(text ? { caption: text } : {}),
+        });
+        tgMessageId = sent.message_id;
+      } else if (media?.type === "document") {
+        const sent = await this.deps.telegram.sendDocument({
+          chatId: candidateChatId,
+          documentFileId: media.file_id,
+          ...(text ? { caption: text } : {}),
+        });
+        tgMessageId = sent.message_id;
+      } else if (media?.type === "voice") {
+        // Voice notes have no first-class send-by-file-id helper here;
+        // fall back to sendDocument so the bytes still reach the
+        // candidate (Telegram unwraps documents that were originally
+        // voice messages on its side).
+        const sent = await this.deps.telegram.sendDocument({
+          chatId: candidateChatId,
+          documentFileId: media.file_id,
+          ...(text ? { caption: text } : {}),
+        });
+        tgMessageId = sent.message_id;
+      } else {
+        const sent = await this.deps.telegram.sendMessage({
+          chatId: candidateChatId,
+          text,
+        });
+        tgMessageId = sent.message_id;
+      }
+    } catch (err) {
+      console.error("[leads] relay sendMessage failed:", err);
+      return false;
+    }
+
+    // Persist as `role='human'` (operator origin) with media metadata
+    // attached so the admin chat view can render the same way it
+    // renders the candidate's media.
+    this.deps.messages.add({
+      conversationId: conv.id,
+      role: "human",
+      text: text || `[${media?.type ?? "message"}]`,
+      ...(tgMessageId !== undefined ? { tgMessageId } : {}),
+      meta: {
+        source: "operator-relay",
+        ...(media ? { media } : {}),
+      },
+    });
+    this.deps.conversations.touch(conv.id);
+    return true;
+  }
+
+  /**
    * Send a message FROM the bot TO the candidate, AND record it in the
    * messages table as `role=assistant` so the admin chat view sees it.
    * Mirrors what the webhook does on a normal RAG reply but for these

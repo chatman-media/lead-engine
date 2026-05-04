@@ -229,6 +229,65 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       return json({ ok: true, ignored: "unsupported-message" });
     }
 
+    // Operator relay: when a message arrives in the ops chat as a reply
+    // to a lead card we previously posted, route it to the candidate
+    // instead of going through the candidate-message pipeline. Phase 4
+    // of the lead workflow — see src/leads/service.ts:relayFromOperator.
+    if (
+      deps.leadsChatId != null &&
+      message.chat.id === deps.leadsChatId &&
+      message.reply_to_message?.message_id !== undefined
+    ) {
+      const parentMessageId = message.reply_to_message.message_id;
+      const lead = leadsRepo.byOpsMessage(deps.leadsChatId, parentMessageId);
+      if (lead) {
+        const opUser = users.byId(lead.user_id);
+        if (opUser) {
+          const service = new LeadsService({
+            leads: leadsRepo,
+            users,
+            conversations,
+            messages,
+            telegram: deps.telegram,
+            leadsChatId: deps.leadsChatId,
+            visaChatId: deps.visaChatId ?? null,
+          });
+          const relayInput: Parameters<typeof service.relayFromOperator>[0] = {
+            lead,
+            user: opUser,
+            ...(message.text || message.caption
+              ? { text: message.text ?? message.caption ?? "" }
+              : {}),
+            ...(mediaInfo
+              ? { media: { type: mediaInfo.type, file_id: mediaInfo.file_id } }
+              : {}),
+          };
+          const ok = await service.relayFromOperator(relayInput);
+          if (ok) {
+            // React in the ops chat so the operator sees their relay
+            // landed. Best-effort — don't fail the webhook if Telegram
+            // hiccups.
+            await deps.telegram
+              .sendMessage({
+                chatId: deps.leadsChatId,
+                text: `✅ отправлено в lead #${lead.id}`,
+                replyToMessageId: message.message_id,
+              })
+              .catch(() => undefined);
+          } else {
+            await deps.telegram
+              .sendMessage({
+                chatId: deps.leadsChatId,
+                text: `⚠ relay #${lead.id}: пусто (нужен текст или медиа)`,
+                replyToMessageId: message.message_id,
+              })
+              .catch(() => undefined);
+          }
+          return json({ ok: true, relayed: lead.id });
+        }
+      }
+    }
+
     const tgUserId = message.from.id;
     const userMessageText =
       message.text ?? message.caption ?? `[${mediaInfo!.type}]`;

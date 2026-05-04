@@ -70,6 +70,11 @@ export interface TgMessage {
   video?: TgVideo;
   voice?: TgVoice;
   document?: TgDocument;
+  /** When this message is a reply to another, Telegram inlines the
+   *  parent message here. We use it to detect operator replies to lead
+   *  cards (matched by the parent's `message_id` against
+   *  `leads.ops_message_id`). */
+  reply_to_message?: TgMessage;
 }
 
 export interface TgCallbackQuery {
