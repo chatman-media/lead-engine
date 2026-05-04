@@ -21,6 +21,7 @@ summarization для длинных диалогов, topic-routed retrieval (ф
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — общая навигация: слои, request lifecycle, design decisions
 - [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md) — шесть опциональных надстроек RAG (hybrid, memory, rewrite, reflect, summary, topic routing): зачем, как работает, цена, тесты
 - [docs/SALES_STYLES.md](docs/SALES_STYLES.md) — sales-style engine: схема Style, A/B testing
+- [docs/DEPLOY.md](docs/DEPLOY.md) — Docker / docker-compose / nginx / Cloudflare Tunnel / backups / KB ingest в проде
 - [docs/ROADMAP.md](docs/ROADMAP.md) — что сделано, что в очереди (Tier 1/2/3 по ROI)
 
 **Conversation export**: операторы могут скачать диалог (или пачку
