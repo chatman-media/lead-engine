@@ -6,7 +6,7 @@ Telegram-бот с RAG по базе знаний, анкетой по токе�
 API и локальная Ollama (без расхода токенов).
 
 Разрабатывается через TDD: на каждый юнит сначала падающий тест, потом
-минимальная реализация. Текущее состояние: **520+ unit + 14 e2e зелёных.**
+минимальная реализация. Текущее состояние: **600+ unit + 14 e2e зелёных.**
 
 **RAG layers** (опциональные надстройки over vanilla retrieval):
 hybrid retrieval (BM25 + vector + RRF), cross-session memory кандидата,
@@ -21,6 +21,7 @@ summarization для длинных диалогов, topic-routed retrieval (ф
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — общая навигация: слои, request lifecycle, design decisions
 - [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md) — шесть опциональных надстроек RAG (hybrid, memory, rewrite, reflect, summary, topic routing): зачем, как работает, цена, тесты
 - [docs/SALES_STYLES.md](docs/SALES_STYLES.md) — sales-style engine: схема Style, A/B testing
+- [docs/LEADS.md](docs/LEADS.md) — lead pipeline: state machine, intake/visa-docs schemas, operator workflow, templates, tests
 - [docs/DEPLOY.md](docs/DEPLOY.md) — Docker / docker-compose / nginx / Cloudflare Tunnel / backups / KB ingest в проде
 - [docs/ROADMAP.md](docs/ROADMAP.md) — что сделано, что в очереди (Tier 1/2/3 по ROI)
 
@@ -44,13 +45,49 @@ NEPQ/Belfort), хуками Чалдини, посменными промпта�
 
 Подробности, схема БД, API и тесты — [docs/SALES_STYLES.md](docs/SALES_STYLES.md).
 
+**Lead pipeline**: воронка кандидатов от знакомства до подачи на визу,
+управляемая из админки (`/admin/leads`) и через TG-чат «Лиды». Бот
+авто-собирает intake (рост / вес / город / дата выезда / 6+ фото / 2+
+видео / загранпаспорт / танец-видео), постит карточку с inline-кнопками
+**[Одобрить]** / **[Отклонить]** в `LEADS_CHAT_ID`. Оператор жмёт →
+бот шлёт девушке шаблон визовой анкеты на английском, авто-парсит
+заполненные поля в `leads.visa_docs_json`, и по кнопке `→ visa submit`
+постит финальный пакет с автогенерируемым `application_id` в
+`VISA_CHAT_ID`. Оператор может ответить на лид-карточку текстом /
+фото / видео / документом — бот пересылает в DM кандидату (relay).
+
+5 фаз пайплайна: state machine + approval gate · auto-intake +
+submit-to-visa · structured visa-docs editor · operator relay ·
+Docker deploy. Подробности — [docs/LEADS.md](docs/LEADS.md).
+
+**Vacancies**: админ-управляемый список открытых офферов
+(`/admin/vacancies`). В отличие от KB (медленные факты) — это
+быстро-меняющийся слой: edit в админке → следующий ответ бота уже
+видит изменение, без re-embedding pipeline. Активные вакансии
+prepended к RAG context на каждом turn'е.
+
 ## Быстрый старт
+
+### Bun (dev)
 
 ```bash
 bun install
 cp .env.example .env        # отредактируйте под себя
 bun run dev
 ```
+
+### Docker (production)
+
+```bash
+cp .env.example .env        # заполните токены, RAG_*, LEADS_CHAT_ID, VISA_CHAT_ID
+docker compose up -d
+docker compose logs -f app
+# опционально полностью локальный стек с Ollama:
+# docker compose --profile ollama up -d
+```
+
+Полная инструкция (reverse proxy / HTTPS / бэкапы / sizing) —
+[docs/DEPLOY.md](docs/DEPLOY.md).
 
 Сервер слушает `PORT` (по умолчанию 3000). Health-чек:
 [http://localhost:3000/health](http://localhost:3000/health).
@@ -389,7 +426,7 @@ webhook **молчит** в Telegram и оставляет режим `ai`. Оп
 
 ## RAG-надстройки (опциональные флаги в `.env`)
 
-Все пять улучшений retrieval/answering пайплайна выключены по умолчанию.
+Все шесть улучшений retrieval/answering пайплайна выключены по умолчанию.
 Включай по одному, проверяй качество на своём трафике, потом следующий.
 Подробное описание каждого слоя, цены и trade-off'ы — в
 [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
@@ -467,9 +504,23 @@ Telegram → /telegram/<secret> ─┬─► whitelist (UsersRepo)
 | `POST` | `/admin/api/conversations/:id/reply` | Отправить ответ из админки в TG |
 | `DELETE` | `/admin/api/conversations/:id` | Снести диалог + историю (статус `mode` сбросится при следующем сообщении) |
 | `PATCH` | `/admin/api/users/:id/memory` | Перезаписать `users.profile_json.memory.facts` (оператор корректирует извлечённые ботом факты) |
+| `GET` | `/admin/api/status` | Дашборд: RAG-флаги, провайдеры, KB-статистика по темам, счётчики |
+| `GET` | `/admin/api/leads` | Список лидов + counts по state |
+| `GET` | `/admin/api/leads/:id` | Detail лида + parsed intake / visa_docs |
+| `POST` | `/admin/api/leads/from-conversation/:id` | Promote чат в лид (постит карточку в LEADS_CHAT_ID) |
+| `POST` | `/admin/api/leads/:id/approve` | Одобрить → бот шлёт визовую анкету |
+| `POST` | `/admin/api/leads/:id/reject` | Отклонить (опционально reason) |
+| `POST` | `/admin/api/leads/:id/send-intake` | Отправить шаблон с 7 пунктами intake |
+| `POST` | `/admin/api/leads/:id/submit-to-visa` | Allocate `application_id`, post в VISA_CHAT_ID |
+| `PATCH` | `/admin/api/leads/:id/visa-docs` | Manual edit извлечённых полей анкеты |
+| `DELETE` | `/admin/api/leads/:id` | Hard delete лида |
+| `GET` | `/admin/api/vacancies` | Список вакансий (active + closed) |
+| `POST` | `/admin/api/vacancies` | Создать вакансию |
+| `PATCH` | `/admin/api/vacancies/:id` | Edit / toggle is_active |
+| `DELETE` | `/admin/api/vacancies/:id` | Hard delete |
 | `WS` | `/admin/api/ws` | Realtime-события (`message:new`, `conversation:updated`) |
 
-В ответ `GET /admin/api/conversations/:id` включается поле `memory: { facts, updatedAt? }` — это и есть то, что админка показывает в раскрывающейся панели MEMORY на странице чата.
+В ответ `GET /admin/api/conversations/:id` включается поле `memory: { facts, updatedAt? }` и `summary: { ... } | null` — это и есть то, что админка показывает в раскрывающихся панелях MEMORY и SUMMARY на странице чата.
 
 ## Прогресс
 
@@ -489,3 +540,11 @@ Telegram → /telegram/<secret> ─┬─► whitelist (UsersRepo)
 | 12 | `admin-ui` — React + Vite: Login / Users / Chats / Chat | ✅ |
 | 13 | `admin-reply` — ответ из админки → TG + WS + возврат `mode=ai` | ✅ |
 | 14 | `smoke` — финальный happy-path E2E + чеклист релиза | ✅ |
+| 15 | `sales-styles` — A/B-движок: stage router, Cialdini hooks, A/B-experiments | ✅ |
+| 16 | `rag-layers` — 6 opt-in надстроек: hybrid / memory / rewrite / reflect / summary / topic-routing | ✅ |
+| 17 | `vacancies` — админ CRUD активных офферов, prepended к RAG context | ✅ |
+| 18 | `leads-1` — lead state machine + approval gate (TG inline buttons) + visa-anketa templates | ✅ |
+| 19 | `leads-2` — auto-intake detection (text + media), submit-to-visa с `application_id` | ✅ |
+| 20 | `leads-3` — visa-docs auto-extraction (27 fields) + admin inline editor | ✅ |
+| 21 | `leads-4` — operator relay через reply-to-card (text/photo/video/document → DM) | ✅ |
+| 22 | `deploy` — Dockerfile, docker-compose (+ optional Ollama profile), DEPLOY.md | ✅ |
