@@ -93,11 +93,72 @@ export function createConversationDetailHandler(
     if (!conv) return json({ error: "not found" }, { status: 404 });
     const user = users.byId(conv.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
+    // Cross-session memory pulled from `users.profile_json.memory`. Always
+    // included — when memory extraction is off (RAG_USER_MEMORY=false) this
+    // is `{ facts: {} }` and the UI just shows an empty pane. Keeping the
+    // shape stable on/off avoids a frontend feature flag.
+    const memory = users.getMemory(user.id);
     return json({
       conversation: conv,
       user,
       messages: messages.listByConversation(id, 200),
+      memory,
     });
+  };
+}
+
+/**
+ * Operator override of extracted candidate facts. Used when the LLM
+ * extractor mis-attributes ("intent: путешествие" instead of "работа") —
+ * operator edits replace stored memory wholesale (no merge), then the
+ * next bot turn picks them up via the standard `getMemory` read path.
+ */
+export function createUpdateUserMemoryHandler(
+  deps: AdminApiDeps,
+): RouteHandler {
+  const users = new UsersRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    const user = users.byId(id);
+    if (!user) return json({ error: "not found" }, { status: 404 });
+
+    let body: { facts?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    if (
+      typeof body.facts !== "object" ||
+      body.facts === null ||
+      Array.isArray(body.facts)
+    ) {
+      return json({ error: "facts must be an object" }, { status: 400 });
+    }
+
+    // Coerce: accept any-typed values from JSON (string|number|bool) and
+    // normalize to string. Reject keys/values longer than reasonable —
+    // memory is for facts, not pasted essays.
+    const incoming = body.facts as Record<string, unknown>;
+    const cleaned: Record<string, string> = {};
+    for (const [k, v] of Object.entries(incoming)) {
+      if (typeof k !== "string") continue;
+      const trimmedKey = k.trim();
+      if (!trimmedKey || trimmedKey.length > 40) continue;
+      if (v === null || v === undefined) continue;
+      const str = typeof v === "string" ? v : String(v);
+      const trimmed = str.trim();
+      if (!trimmed || trimmed.length > 200) continue;
+      cleaned[trimmedKey] = trimmed;
+    }
+
+    users.setMemoryFacts(id, cleaned);
+    return json({ memory: users.getMemory(id) });
   };
 }
 

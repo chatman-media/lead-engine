@@ -19,6 +19,7 @@ import {
   createSetExperimentStatusHandler,
   createStylePlaygroundHandler,
   createTakeHandler,
+  createUpdateUserMemoryHandler,
 } from "./admin/api.ts";
 import {
   createLoginHandler,
@@ -135,6 +136,10 @@ export function createRouter(deps: AppDeps): Router {
     },
   };
   router.get("/admin/api/users", createListUsersHandler(apiDeps));
+  router.patch(
+    "/admin/api/users/:id/memory",
+    createUpdateUserMemoryHandler(apiDeps),
+  );
   router.get(
     "/admin/api/conversations",
     createListConversationsHandler(apiDeps),

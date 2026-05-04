@@ -132,6 +132,150 @@ describe("GET /admin/api/conversations/:id", () => {
     const res = await fetch(url("/admin/api/conversations/999999"), authed());
     expect(res.status).toBe(404);
   });
+
+  test("includes empty memory object when no facts stored", async () => {
+    const users = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = users.create({ tgUserId: 510 });
+    const c = conversations.ensureForUser(u.id);
+
+    const res = await fetch(url(`/admin/api/conversations/${c.id}`), authed());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { memory: { facts: Record<string, string> } };
+    expect(body.memory).toBeDefined();
+    expect(body.memory.facts).toEqual({});
+  });
+
+  test("includes stored memory facts", async () => {
+    const users = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = users.create({ tgUserId: 511 });
+    const c = conversations.ensureForUser(u.id);
+    users.mergeMemoryFacts(u.id, { city: "Москва", age: "25" });
+
+    const res = await fetch(url(`/admin/api/conversations/${c.id}`), authed());
+    const body = (await res.json()) as {
+      memory: { facts: Record<string, string>; updatedAt?: number };
+    };
+    expect(body.memory.facts).toEqual({ city: "Москва", age: "25" });
+    expect(body.memory.updatedAt).toBeGreaterThan(0);
+  });
+});
+
+describe("PATCH /admin/api/users/:id/memory", () => {
+  test("requires auth", async () => {
+    const users = new UsersRepo(ctx.db);
+    const u = users.create({ tgUserId: 600 });
+    const res = await fetch(url(`/admin/api/users/${u.id}/memory`), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ facts: { city: "x" } }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("replaces facts wholesale (operator edit is authoritative)", async () => {
+    const users = new UsersRepo(ctx.db);
+    const u = users.create({ tgUserId: 601 });
+    users.mergeMemoryFacts(u.id, { city: "Москва", age: "25", intent: "Дубай" });
+
+    const res = await fetch(
+      url(`/admin/api/users/${u.id}/memory`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ facts: { city: "Сочи", language: "ru" } }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { memory: { facts: Record<string, string> } };
+    // age and intent are GONE — operator edit replaces, not merges.
+    expect(body.memory.facts).toEqual({ city: "Сочи", language: "ru" });
+
+    // Persists across re-reads.
+    const reread = users.getMemory(u.id);
+    expect(reread.facts).toEqual({ city: "Сочи", language: "ru" });
+  });
+
+  test("trims whitespace and drops empty values", async () => {
+    const users = new UsersRepo(ctx.db);
+    const u = users.create({ tgUserId: 602 });
+
+    const res = await fetch(
+      url(`/admin/api/users/${u.id}/memory`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          facts: { city: "  Москва  ", empty: "  ", age: "26" },
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { memory: { facts: Record<string, string> } };
+    expect(body.memory.facts).toEqual({ city: "Москва", age: "26" });
+  });
+
+  test("rejects 400 when facts is not an object", async () => {
+    const users = new UsersRepo(ctx.db);
+    const u = users.create({ tgUserId: 603 });
+    const res = await fetch(
+      url(`/admin/api/users/${u.id}/memory`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ facts: ["not", "an", "object"] }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("returns 404 for missing user", async () => {
+    const res = await fetch(
+      url("/admin/api/users/999999/memory"),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ facts: {} }),
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("clears memory when facts is empty object", async () => {
+    const users = new UsersRepo(ctx.db);
+    const u = users.create({ tgUserId: 604 });
+    users.mergeMemoryFacts(u.id, { city: "x" });
+
+    const res = await fetch(
+      url(`/admin/api/users/${u.id}/memory`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ facts: {} }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(users.getMemory(u.id).facts).toEqual({});
+  });
+
+  test("caps oversized values to keep memory factual not essay-length", async () => {
+    const users = new UsersRepo(ctx.db);
+    const u = users.create({ tgUserId: 605 });
+    const huge = "x".repeat(500);
+    const res = await fetch(
+      url(`/admin/api/users/${u.id}/memory`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ facts: { ok: "fine", huge } }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { memory: { facts: Record<string, string> } };
+    expect(body.memory.facts.ok).toBe("fine");
+    expect(body.memory.facts.huge).toBeUndefined();
+  });
 });
 
 describe("POST /admin/api/conversations/:id/take and /release", () => {

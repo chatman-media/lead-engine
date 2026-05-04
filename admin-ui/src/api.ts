@@ -33,6 +33,12 @@ export interface Message {
   created_at: number;
 }
 
+export interface UserMemory {
+  facts: Record<string, string>;
+  lastExtractedFromMsgId?: number;
+  updatedAt?: number;
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -90,7 +96,14 @@ export const api = {
       conversation: Conversation;
       user: User;
       messages: Message[];
+      memory: UserMemory;
     }>(`/admin/api/conversations/${id}`),
+
+  updateUserMemory: (userId: number, facts: Record<string, string>) =>
+    req<{ memory: UserMemory }>(`/admin/api/users/${userId}/memory`, {
+      method: "PATCH",
+      body: JSON.stringify({ facts }),
+    }),
 
   take: (id: number) =>
     req<{ conversation: Conversation }>(

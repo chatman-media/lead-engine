@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, type Conversation, type Message, type User } from "../api.ts";
+import {
+  api,
+  type Conversation,
+  type Message,
+  type User,
+  type UserMemory,
+} from "../api.ts";
 import { ws } from "../App.tsx";
+import { MemoryPane } from "../components/MemoryPane.tsx";
 
 function tsShort(unix: number) {
   return new Date(unix * 1000).toLocaleTimeString("ru-RU", {
@@ -32,15 +39,17 @@ export function Chat() {
   const [conv, setConv] = useState<Conversation | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [memory, setMemory] = useState<UserMemory | null>(null);
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   function reload() {
-    api.conversation(convId).then(({ conversation, user, messages }) => {
+    api.conversation(convId).then(({ conversation, user, messages, memory }) => {
       setConv(conversation);
       setUser(user);
       setMessages(messages);
+      setMemory(memory);
     });
   }
 
@@ -229,6 +238,15 @@ export function Chat() {
           </button>
         </div>
       </div>
+
+      {/* Cross-session memory pane (collapsed by default) */}
+      {memory && (
+        <MemoryPane
+          userId={user.id}
+          initialMemory={memory}
+          onSaved={(next) => setMemory(next)}
+        />
+      )}
 
       {/* Messages */}
       <div
