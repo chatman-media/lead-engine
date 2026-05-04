@@ -163,7 +163,7 @@ export class LeadsRepo {
     const year = new Date().getFullYear();
     const prefix = `VS-${year}-`;
     const row = this.db
-      .query<{ next_seq: number }, [string]>(
+      .query<{ next_seq: number }, [number, string]>(
         `SELECT COALESCE(
            MAX(CAST(SUBSTR(application_id, ?) AS INTEGER)),
            0
@@ -171,7 +171,7 @@ export class LeadsRepo {
          FROM leads
          WHERE application_id LIKE ? || '%'`,
       )
-      .get(String(prefix.length + 1), prefix);
+      .get(prefix.length + 1, prefix);
     const seq = row?.next_seq ?? 1;
     const applicationId = `${prefix}${String(seq).padStart(4, "0")}`;
     this.db.run(

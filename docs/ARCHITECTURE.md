@@ -80,6 +80,7 @@ POST /telegram/<secret>      ─┬─► users.byTgId / whitelist (TELEGRAM_OPE
 │   repos/                                                                  │
 │     users.ts         conversations.ts    messages.ts                      │
 │     kb.ts            styles.ts           experiments.ts                   │
+│     leads.ts         vacancies.ts                                         │
 │     admins.ts        sessions.ts         questionnaire_tokens.ts          │
 └────────────────────────────────────────────────────────────────────────────┘
                    │
@@ -88,7 +89,7 @@ POST /telegram/<secret>      ─┬─► users.byTgId / whitelist (TELEGRAM_OPE
 │ data/bot.db (SQLite, WAL)                                                 │
 │   users / conversations / messages                                        │
 │   kb_documents / kb_chunks / kb_vec / kb_chunks_fts                       │
-│   styles / experiments                                                    │
+│   styles / experiments / leads / vacancies                                │
 │   admins / sessions / questionnaire_tokens                                │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -143,6 +144,8 @@ WS `/admin/api/ws` стримит события в реальном време�
 |---------|-----------|
 | `users` | whitelisted Telegram-юзеры, `status` для воронки, `profile_json.memory.facts` для cross-session памяти |
 | `conversations` | одна на юзера, `mode` ∈ ai/queued/human, `current_stage`, `style_id`+`experiment_id` (A/B-сtiky), `summary_json` (long-conversation summary) |
+| `leads` | воронка кандидата, `state` ∈ intake_pending → intake_complete → approved/rejected → docs_pending → docs_complete → submitted/closed; `intake_json`, `visa_docs_json`, `application_id` (VS-YYYY-NNNN), `ops_chat_id`+`ops_message_id` для редактирования карточки в TG |
+| `vacancies` | админ-управляемый список открытых офферов, prepended к RAG context |
 | `messages` | `role` ∈ user/assistant/human/system, idempotent по `tg_message_id`, `meta_json` для `used_chunk_ids`, `stage` для funnel-аналитики |
 | `kb_documents` | source файлы для RAG, dedup по `content_hash`, optional `topic` тег для topic-routed retrieval |
 | `kb_chunks` | чанки ≈1500 символов с overlap 150 |
@@ -159,6 +162,8 @@ WS `/admin/api/ws` стримит события в реальном време�
 - [docs/ARCHITECTURE.md](ARCHITECTURE.md) — этот файл, общая навигация
 - [docs/RAG_LAYERS.md](RAG_LAYERS.md) — шесть опциональных надстроек (hybrid, memory, rewrite, reflect, summary, topic routing): зачем, как, цена, тесты
 - [docs/SALES_STYLES.md](SALES_STYLES.md) — sales-style engine: схема Style, A/B testing, integration с RAG
+- [docs/LEADS.md](LEADS.md) — lead pipeline: state machine, intake/visa-docs auto-extract, operator workflow, шаблоны
+- [docs/DEPLOY.md](DEPLOY.md) — Docker / docker-compose / nginx / Cloudflare Tunnel / backups
 - [docs/ROADMAP.md](ROADMAP.md) — что сделано, что в очереди (Tier 1/2/3 по ROI)
 
 ## Тестовая стратегия

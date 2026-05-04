@@ -1,8 +1,24 @@
 # Architecture roadmap
 
-## What just landed
+## Lead pipeline — 5 phases, all shipped ✅
 
-Six layers were added on top of the existing RAG+persona+funnel pipeline. All are **opt-in via env flags** — defaults are off so existing deployments are unaffected.
+The end-to-end lead workflow operator described (intake → approval → docs collection → consulate handoff) is implemented across 5 incremental phases. Detail in [docs/LEADS.md](LEADS.md).
+
+| Phase | What landed | Migration | Files |
+|-------|------------|-----------|-------|
+| 1 | Lead state machine + approval gate (inline buttons in TG) + visa-anketa templates + admin Leads page | 009 | [`src/db/repos/leads.ts`](../src/db/repos/leads.ts), [`src/leads/templates.ts`](../src/leads/templates.ts), [`src/leads/service.ts`](../src/leads/service.ts), [`admin-ui/src/pages/Leads.tsx`](../admin-ui/src/pages/Leads.tsx) |
+| 2 | Auto-intake detection (text fields via LLM + media counts via SQL) → auto-promote · submit-to-visa with `application_id` | — | [`src/leads/intake.ts`](../src/leads/intake.ts), webhook hook + `/admin/api/leads/:id/submit-to-visa` |
+| 3 | Visa-docs auto-extraction (27-field schema) + admin inline editor | — | [`src/leads/visa-docs.ts`](../src/leads/visa-docs.ts) + `PATCH /admin/api/leads/:id/visa-docs` |
+| 4 | Operator relay via reply-to-card (text / photo / video / document → candidate DM) | — | [`src/leads/service.ts`](../src/leads/service.ts) `relayFromOperator` + webhook dispatch |
+| 5 | Docker / docker-compose / DEPLOY.md | — | [Dockerfile](../Dockerfile), [docker-compose.yml](../docker-compose.yml), [docs/DEPLOY.md](DEPLOY.md) |
+
+Plus auxiliary admin features added alongside: `/admin/status` dashboard, `/admin/vacancies` CRUD (RAG-prepended), MemoryPane / SummaryPane / TelemetryStrip on chat page, persona personal-facts (city/age/status/phone) deterministic short-circuit, smalltalk-tail variation.
+
+---
+
+## RAG layers — 6 opt-in flags, all shipped ✅
+
+Six layers added on top of the existing RAG+persona+funnel pipeline. All are **opt-in via env flags** — defaults are off so existing deployments are unaffected.
 
 | Feature | Env flag | What it does | Cost per turn |
 |---------|----------|--------------|---------------|

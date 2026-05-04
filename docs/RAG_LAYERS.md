@@ -366,7 +366,7 @@ refresh summary if stale → setSummary
 5. **Потом** `RAG_REFLECT=true` — это самый дорогой слой (по латентности — удваивает время до ответа).
 6. **Если есть длинные диалоги (>30 turn'ов)** — `RAG_CONVERSATION_SUMMARY=true`. Не нужно если все чаты короткие.
 
-Если включаешь все пять сразу: суммарная стоимость ≈ +2.6 LLM-вызова на средний turn (rewrite — на 25% turns, reflect — на 80% grounded turns, memory extraction — на каждом turn но after-reply, summary refresh — раз в ~8 turns на длинных чатах). Только reflect добавляет к latency до отправки — остальные либо after-reply, либо до retrieval (быстрая модель за <500ms).
+Если включаешь все шесть сразу: суммарная стоимость ≈ +2.6 LLM-вызова на средний turn (rewrite — на 25% turns, reflect — на 80% grounded turns, memory extraction — на каждом turn но after-reply, summary refresh — раз в ~8 turns на длинных чатах, hybrid + topic routing — без LLM). Только reflect добавляет к latency до отправки — остальные либо after-reply, либо до retrieval (быстрая модель за <500ms).
 
 ## Telemetry
 
