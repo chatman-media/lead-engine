@@ -5,6 +5,7 @@ import {
   type Lead,
   type LeadCounts,
   type LeadEvent,
+  type LeadNote,
   type LeadState,
   type VisaDocs,
 } from "../api.ts";
@@ -459,7 +460,219 @@ function LeadCard({
         lead.state === "docs_complete" ||
         lead.state === "submitted") && <VisaDocsPane leadId={lead.id} />}
 
+      <NotesPane leadId={lead.id} />
       <TimelinePane leadId={lead.id} />
+    </div>
+  );
+}
+
+/**
+ * Operator-facing note panel: free-form commentary on a lead, distinct
+ * from the bot-driven message log and the auto-tracked timeline.
+ * Add via inline form, delete with × per note. Lazy-loaded on first
+ * expand (same pattern as TimelinePane / VisaDocsPane).
+ */
+function NotesPane({ leadId }: { leadId: number }) {
+  const [open, setOpen] = useState(false);
+  const [notes, setNotes] = useState<LeadNote[] | null>(null);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function ensureLoaded() {
+    if (notes !== null) return;
+    try {
+      const detail = await api.leadDetail(leadId);
+      setNotes(detail.notes);
+    } catch (err) {
+      console.error("[notes] load failed", err);
+    }
+  }
+
+  async function handleAdd() {
+    const body = draft.trim();
+    if (!body) return;
+    setSaving(true);
+    try {
+      const { note } = await api.addLeadNote(leadId, body);
+      setNotes((prev) => (prev ? [note, ...prev] : [note]));
+      setDraft("");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(noteId: number) {
+    if (!confirm("Удалить заметку?")) return;
+    try {
+      await api.deleteLeadNote(leadId, noteId);
+      setNotes((prev) => prev?.filter((n) => n.id !== noteId) ?? null);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        borderTop: "1px solid var(--border)",
+        paddingTop: 8,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          if (!open) void ensureLoaded();
+        }}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--text-3)",
+          fontFamily: "var(--mono)",
+          fontSize: 11,
+          cursor: "pointer",
+          padding: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+        }}
+        data-testid="notes-toggle"
+      >
+        <span style={{ width: 10, display: "inline-block" }}>
+          {open ? "▾" : "▸"}
+        </span>
+        <span>NOTES</span>
+        {notes !== null && (
+          <span style={{ color: "var(--text-2)" }}>{notes.length}</span>
+        )}
+      </button>
+
+      {open && (
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div style={{ display: "flex", gap: 6 }}>
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Внутренняя заметка для оператора (не отправляется девушке)..."
+              rows={2}
+              className="input"
+              style={{
+                flex: 1,
+                fontSize: 12,
+                fontFamily: "var(--sans)",
+                resize: "vertical",
+              }}
+              data-testid="notes-input"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                  void handleAdd();
+                }
+              }}
+            />
+            <button
+              onClick={handleAdd}
+              disabled={saving || !draft.trim()}
+              className="btn btn-primary btn-sm"
+              data-testid="notes-add"
+              style={{ alignSelf: "flex-start", fontSize: 11 }}
+            >
+              {saving ? "saving…" : "add"}
+            </button>
+          </div>
+
+          {notes === null ? (
+            <div
+              style={{
+                fontFamily: "var(--mono)",
+                fontSize: 11,
+                color: "var(--text-3)",
+              }}
+            >
+              loading…
+            </div>
+          ) : notes.length === 0 ? (
+            <div
+              style={{
+                fontFamily: "var(--mono)",
+                fontSize: 11,
+                color: "var(--text-3)",
+                padding: "4px 0",
+              }}
+            >
+              нет заметок
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {notes.map((n) => (
+                <div
+                  key={n.id}
+                  data-testid="notes-row"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto",
+                    gap: 8,
+                    alignItems: "start",
+                    padding: "6px 8px",
+                    borderRadius: "var(--radius)",
+                    background: "var(--bg-2)",
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        color: "var(--text)",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {n.body}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontFamily: "var(--mono)",
+                        fontSize: 10,
+                        color: "var(--text-3)",
+                        display: "flex",
+                        gap: 8,
+                      }}
+                    >
+                      <span>
+                        {new Date(n.created_at * 1000).toLocaleString("ru-RU")}
+                      </span>
+                      {n.by_admin_id !== null && (
+                        <span>admin#{n.by_admin_id}</span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleDelete(n.id)}
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: 11, padding: "2px 8px" }}
+                    title="Удалить заметку"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

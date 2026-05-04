@@ -15,7 +15,9 @@ import {
   createListStylesHandler,
   createListUsersHandler,
   createApproveLeadHandler,
+  createCreateLeadNoteHandler,
   createDeleteLeadHandler,
+  createDeleteLeadNoteHandler,
   createLeadCallbackHandler,
   createLeadDetailHandler,
   createListLeadsHandler,
@@ -267,6 +269,16 @@ export function createRouter(deps: AppDeps): Router {
   router.post(
     "/admin/api/leads/:id/submit-to-visa",
     createSubmitToVisaHandler(apiDeps),
+  );
+  // Notes — sub-resource of a lead. Register before the catch-all
+  // `/leads/:id` so /:id/notes doesn't get captured as a literal id.
+  router.post(
+    "/admin/api/leads/:id/notes",
+    createCreateLeadNoteHandler(apiDeps),
+  );
+  router.delete(
+    "/admin/api/leads/:id/notes/:noteId",
+    createDeleteLeadNoteHandler(apiDeps),
   );
   // Detail / patch routes — register AFTER all `/leads/:id/<action>`
   // sub-paths so the literal sub-path matches first (router does

@@ -1819,7 +1819,76 @@ export function createLeadDetailHandler(deps: AdminApiDeps): RouteHandler {
       conversation_id: conv?.id ?? null,
       recent_messages: conv ? recentMessagesForCard(messagesRepo, conv.id) : [],
       events: leadsRepo.events(id),
+      notes: leadsRepo.notes(id),
     });
+  };
+}
+
+const NOTE_BODY_MAX = 2000;
+
+/** Append a note to a lead. Body required; admin id is taken from the
+ *  authenticated session so the note carries an attribution row. */
+export function createCreateLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    const leadsRepo = new LeadsRepo(deps.db);
+    if (!leadsRepo.byId(id)) {
+      return json({ error: "lead not found" }, { status: 404 });
+    }
+
+    let body: { body?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    const text = typeof body.body === "string" ? body.body.trim() : "";
+    if (!text) return json({ error: "body is required" }, { status: 400 });
+    if (text.length > NOTE_BODY_MAX) {
+      return json({ error: `body > ${NOTE_BODY_MAX} chars` }, { status: 400 });
+    }
+
+    const note = leadsRepo.addNote({
+      leadId: id,
+      body: text,
+      byAdminId: ctx.adminId,
+    });
+    return json({ note });
+  };
+}
+
+/** Hard-delete a note. Operator can clean up typos / mistaken entries.
+ *  Belongs-to check: the note must reference the lead in the URL, not
+ *  some other lead — prevents cross-lead deletion via guessed note ids. */
+export function createDeleteLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+
+    const leadId = Number(params.id);
+    const noteId = Number(params.noteId);
+    if (!Number.isFinite(leadId) || !Number.isFinite(noteId)) {
+      return json({ error: "bad id" }, { status: 400 });
+    }
+
+    const owner = deps.db
+      .query<{ lead_id: number }, [number]>(
+        "SELECT lead_id FROM lead_notes WHERE id = ?",
+      )
+      .get(noteId);
+    if (!owner) return json({ error: "note not found" }, { status: 404 });
+    if (owner.lead_id !== leadId) {
+      return json({ error: "note does not belong to this lead" }, { status: 404 });
+    }
+
+    const leadsRepo = new LeadsRepo(deps.db);
+    leadsRepo.deleteNote(noteId);
+    return json({ ok: true, deleted: noteId });
   };
 }
 

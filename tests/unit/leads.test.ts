@@ -222,4 +222,47 @@ describe("LeadsRepo", () => {
     leads.delete(l.id);
     expect(leads.events(l.id).length).toBe(0);
   });
+
+  test("addNote / notes round-trip, ordered freshest first", async () => {
+    const u = users.create({ tgUserId: 900 });
+    const l = leads.ensureForUser(u.id);
+    leads.addNote({ leadId: l.id, body: "first", byAdminId: adminId });
+    await new Promise((r) => setTimeout(r, 1100)); // unixepoch is integer-second
+    leads.addNote({ leadId: l.id, body: "second", byAdminId: adminId });
+    const list = leads.notes(l.id);
+    expect(list.map((n) => n.body)).toEqual(["second", "first"]);
+    expect(list[0]!.by_admin_id).toBe(adminId);
+  });
+
+  test("addNote rejects whitespace-only body", () => {
+    const u = users.create({ tgUserId: 901 });
+    const l = leads.ensureForUser(u.id);
+    expect(() => leads.addNote({ leadId: l.id, body: "   " })).toThrow();
+    expect(leads.notes(l.id).length).toBe(0);
+  });
+
+  test("addNote trims whitespace edges of body", () => {
+    const u = users.create({ tgUserId: 902 });
+    const l = leads.ensureForUser(u.id);
+    leads.addNote({ leadId: l.id, body: "  trim me  " });
+    expect(leads.notes(l.id)[0]!.body).toBe("trim me");
+  });
+
+  test("deleteNote removes the row, returns false on missing id", () => {
+    const u = users.create({ tgUserId: 903 });
+    const l = leads.ensureForUser(u.id);
+    const note = leads.addNote({ leadId: l.id, body: "kill me" });
+    expect(leads.deleteNote(note.id)).toBe(true);
+    expect(leads.notes(l.id).length).toBe(0);
+    expect(leads.deleteNote(note.id)).toBe(false);
+  });
+
+  test("delete cascades — notes for a deleted lead disappear", () => {
+    const u = users.create({ tgUserId: 904 });
+    const l = leads.ensureForUser(u.id);
+    leads.addNote({ leadId: l.id, body: "n1" });
+    leads.addNote({ leadId: l.id, body: "n2" });
+    leads.delete(l.id);
+    expect(leads.notes(l.id).length).toBe(0);
+  });
 });

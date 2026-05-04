@@ -165,6 +165,14 @@ export interface LeadEvent {
   created_at: number;
 }
 
+export interface LeadNote {
+  id: number;
+  lead_id: number;
+  by_admin_id: number | null;
+  body: string;
+  created_at: number;
+}
+
 export interface LeadDetail {
   lead: Lead;
   user: User;
@@ -173,6 +181,7 @@ export interface LeadDetail {
   conversation_id: number | null;
   recent_messages: Array<{ role: string; text: string }>;
   events: LeadEvent[];
+  notes: LeadNote[];
 }
 
 /** Mirror of the GET /admin/api/status response — see src/admin/api.ts. */
@@ -362,6 +371,18 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ docs }),
     }),
+
+  addLeadNote: (leadId: number, body: string) =>
+    req<{ note: LeadNote }>(`/admin/api/leads/${leadId}/notes`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    }),
+
+  deleteLeadNote: (leadId: number, noteId: number) =>
+    req<{ ok: boolean }>(
+      `/admin/api/leads/${leadId}/notes/${noteId}`,
+      { method: "DELETE" },
+    ),
 
   deleteLead: (id: number) =>
     req<{ ok: boolean; deleted: number }>(`/admin/api/leads/${id}`, {
