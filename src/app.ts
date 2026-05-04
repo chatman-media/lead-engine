@@ -17,6 +17,7 @@ import {
   createReleaseHandler,
   createReplyHandler,
   createSetExperimentStatusHandler,
+  createStatusHandler,
   createStylePlaygroundHandler,
   createTakeHandler,
   createUpdateUserMemoryHandler,
@@ -135,6 +136,7 @@ export function createRouter(deps: AppDeps): Router {
       deps.bus?.publish({ type: "message:new", conversationId, tgUserId });
     },
   };
+  router.get("/admin/api/status", createStatusHandler(apiDeps));
   router.get("/admin/api/users", createListUsersHandler(apiDeps));
   router.patch(
     "/admin/api/users/:id/memory",

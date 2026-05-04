@@ -25,6 +25,7 @@ export function Layout({ admin, children }: LayoutProps) {
 
         <nav className="sidebar-nav">
           {[
+            { to: "/admin/status", label: "Status" },
             { to: "/admin/chats", label: "Chats" },
             { to: "/admin/users", label: "Users" },
             { to: "/admin/styles", label: "Sales styles" },

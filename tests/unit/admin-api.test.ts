@@ -53,6 +53,95 @@ function authed(extra: RequestInit = {}): RequestInit {
   };
 }
 
+describe("GET /admin/api/status", () => {
+  test("requires auth", async () => {
+    const res = await fetch(url("/admin/api/status"));
+    expect(res.status).toBe(401);
+  });
+
+  test("returns the expected top-level shape", async () => {
+    const res = await fetch(url("/admin/api/status"), authed());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.rag).toBeDefined();
+    expect(body.providers).toBeDefined();
+    expect(body.routing).toBeDefined();
+    expect(body.kb).toBeDefined();
+    expect(body.conversations).toBeDefined();
+    expect(body.users).toBeDefined();
+    expect(body.messages).toBeDefined();
+  });
+
+  test("rag block reflects all six layer flags", async () => {
+    const res = await fetch(url("/admin/api/status"), authed());
+    const body = (await res.json()) as { rag: Record<string, unknown> };
+    for (const flag of [
+      "userMemory",
+      "queryRewrite",
+      "reflect",
+      "hybridSearch",
+      "conversationSummary",
+      "topicRouting",
+    ]) {
+      expect(body.rag[flag]).toBeDefined();
+      expect(typeof body.rag[flag]).toBe("boolean");
+    }
+    expect(typeof body.rag.topK).toBe("number");
+  });
+
+  test("kb counts by topic include untagged docs as null group", async () => {
+    const users = new UsersRepo(ctx.db);
+    users.create({ tgUserId: 800 }); // unrelated noise
+    // Insert docs with mixed topics directly via SQL (KbRepo would do
+    // the same thing).
+    ctx.db.run(
+      "INSERT INTO kb_documents (source, title, content_hash, topic) VALUES ('s1','t1','h1','visa')",
+    );
+    ctx.db.run(
+      "INSERT INTO kb_documents (source, title, content_hash, topic) VALUES ('s2','t2','h2','payment')",
+    );
+    ctx.db.run(
+      "INSERT INTO kb_documents (source, title, content_hash, topic) VALUES ('s3','t3','h3',NULL)",
+    );
+
+    const res = await fetch(url("/admin/api/status"), authed());
+    const body = (await res.json()) as {
+      kb: { documents: number; by_topic: Array<{ topic: string | null; documents: number }> };
+    };
+    expect(body.kb.documents).toBe(3);
+    const topics = body.kb.by_topic.map((r) => r.topic);
+    expect(topics).toContain("visa");
+    expect(topics).toContain("payment");
+    expect(topics).toContain(null);
+  });
+
+  test("conversations.with_summary counts non-null summary_json rows", async () => {
+    const users = new UsersRepo(ctx.db);
+    const convs = new ConversationsRepo(ctx.db);
+    const u = users.create({ tgUserId: 801 });
+    const c = convs.ensureForUser(u.id);
+    convs.setSummary(c.id, "обсуждали Дубай и сроки", 10);
+
+    const res = await fetch(url("/admin/api/status"), authed());
+    const body = (await res.json()) as {
+      conversations: { with_summary: number; total: number };
+    };
+    expect(body.conversations.with_summary).toBe(1);
+    expect(body.conversations.total).toBe(1);
+  });
+
+  test("users.with_memory counts users with extracted facts", async () => {
+    const users = new UsersRepo(ctx.db);
+    const u = users.create({ tgUserId: 802 });
+    users.mergeMemoryFacts(u.id, { city: "Москва" });
+
+    const res = await fetch(url("/admin/api/status"), authed());
+    const body = (await res.json()) as { users: { with_memory: number; total: number } };
+    expect(body.users.with_memory).toBe(1);
+    expect(body.users.total).toBe(1);
+  });
+});
+
 describe("GET /admin/api/users", () => {
   test("requires auth", async () => {
     const res = await fetch(url("/admin/api/users"));
