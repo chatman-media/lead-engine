@@ -50,6 +50,15 @@ export interface LeadEventRow {
   created_at: number;
 }
 
+/** Operator-facing free-form notes on a lead. Migration 011. */
+export interface LeadNoteRow {
+  id: number;
+  lead_id: number;
+  by_admin_id: number | null;
+  body: string;
+  created_at: number;
+}
+
 export class LeadsRepo {
   constructor(private db: Database) {}
 
@@ -146,6 +155,45 @@ export class LeadsRepo {
          ORDER BY created_at ASC, id ASC`,
       )
       .all(leadId);
+  }
+
+  /**
+   * Operator-typed note on a lead. Body is required; whitespace-only
+   * input is rejected to keep the notes panel clean. Returns the
+   * inserted row so the caller can echo it back to the UI without
+   * a re-fetch.
+   */
+  addNote(input: {
+    leadId: number;
+    body: string;
+    byAdminId?: number;
+  }): LeadNoteRow {
+    const trimmed = input.body.trim();
+    if (!trimmed) throw new Error("note body is empty");
+    const row = this.db
+      .query<LeadNoteRow, [number, number | null, string]>(
+        `INSERT INTO lead_notes (lead_id, by_admin_id, body)
+         VALUES (?, ?, ?) RETURNING *`,
+      )
+      .get(input.leadId, input.byAdminId ?? null, trimmed);
+    if (!row) throw new Error("failed to insert lead note");
+    return row;
+  }
+
+  /** All notes for a lead, freshest first. */
+  notes(leadId: number): LeadNoteRow[] {
+    return this.db
+      .query<LeadNoteRow, [number]>(
+        `SELECT * FROM lead_notes
+         WHERE lead_id = ?
+         ORDER BY created_at DESC, id DESC`,
+      )
+      .all(leadId);
+  }
+
+  deleteNote(noteId: number): boolean {
+    const res = this.db.run("DELETE FROM lead_notes WHERE id = ?", [noteId]);
+    return res.changes > 0;
   }
 
   /**

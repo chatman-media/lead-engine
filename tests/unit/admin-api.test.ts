@@ -232,6 +232,113 @@ describe("leads endpoints", () => {
     expect(b.application_id).toBe(a.application_id);
   });
 
+  test("notes: POST creates, lead detail returns the list, DELETE removes", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9_400 });
+    const c = conversations.ensureForUser(u.id);
+    const promoted = await fetch(
+      url(`/admin/api/leads/from-conversation/${c.id}`),
+      authed({ method: "POST" }),
+    );
+    const { lead } = (await promoted.json()) as { lead: { id: number } };
+
+    // Create
+    const create = await fetch(
+      url(`/admin/api/leads/${lead.id}/notes`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body: "сомневается по визе" }),
+      }),
+    );
+    expect(create.status).toBe(200);
+    const { note } = (await create.json()) as {
+      note: { id: number; body: string; by_admin_id: number | null };
+    };
+    expect(note.body).toBe("сомневается по визе");
+    expect(note.by_admin_id).not.toBeNull();
+
+    // Detail returns the note
+    const detail = await fetch(url(`/admin/api/leads/${lead.id}`), authed());
+    const detailBody = (await detail.json()) as { notes: Array<{ id: number }> };
+    expect(detailBody.notes.length).toBe(1);
+    expect(detailBody.notes[0]!.id).toBe(note.id);
+
+    // Delete
+    const del = await fetch(
+      url(`/admin/api/leads/${lead.id}/notes/${note.id}`),
+      authed({ method: "DELETE" }),
+    );
+    expect(del.status).toBe(200);
+    const detail2 = await fetch(url(`/admin/api/leads/${lead.id}`), authed());
+    const body2 = (await detail2.json()) as { notes: unknown[] };
+    expect(body2.notes.length).toBe(0);
+  });
+
+  test("notes: empty body rejected with 400", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9_401 });
+    const c = conversations.ensureForUser(u.id);
+    const { lead } = (await (
+      await fetch(
+        url(`/admin/api/leads/from-conversation/${c.id}`),
+        authed({ method: "POST" }),
+      )
+    ).json()) as { lead: { id: number } };
+
+    const r = await fetch(
+      url(`/admin/api/leads/${lead.id}/notes`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body: "   " }),
+      }),
+    );
+    expect(r.status).toBe(400);
+  });
+
+  test("notes: cross-lead delete is rejected (note belongs to another lead)", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const ua = usersRepo.create({ tgUserId: 9_410 });
+    const ub = usersRepo.create({ tgUserId: 9_411 });
+    const ca = conversations.ensureForUser(ua.id);
+    const cb = conversations.ensureForUser(ub.id);
+    const leadA = (await (
+      await fetch(
+        url(`/admin/api/leads/from-conversation/${ca.id}`),
+        authed({ method: "POST" }),
+      )
+    ).json()) as { lead: { id: number } };
+    const leadB = (await (
+      await fetch(
+        url(`/admin/api/leads/from-conversation/${cb.id}`),
+        authed({ method: "POST" }),
+      )
+    ).json()) as { lead: { id: number } };
+
+    const noteA = (await (
+      await fetch(
+        url(`/admin/api/leads/${leadA.lead.id}/notes`),
+        authed({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ body: "for lead A" }),
+        }),
+      )
+    ).json()) as { note: { id: number } };
+
+    // Try to delete leadA's note via leadB's URL — should 404 even
+    // though the note id is real.
+    const r = await fetch(
+      url(`/admin/api/leads/${leadB.lead.id}/notes/${noteA.note.id}`),
+      authed({ method: "DELETE" }),
+    );
+    expect(r.status).toBe(404);
+  });
+
   test("GET /admin/api/leads/:id includes the timeline events array", async () => {
     const usersRepo = new UsersRepo(ctx.db);
     const conversations = new ConversationsRepo(ctx.db);
