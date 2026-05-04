@@ -96,6 +96,20 @@ export function Chat() {
     reload();
   }
 
+  async function handlePromoteLead() {
+    try {
+      const { lead } = await api.promoteLead(convId);
+      navigate(`/admin/leads`);
+      // Navigate is synchronous router push; the toast-equivalent hint
+      // is intentionally absent — Leads page shows the new card.
+      void lead;
+    } catch (err) {
+      alert(
+        `Не удалось продвинуть в лиды: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   async function handleDelete() {
     const userLabel = user?.tg_username
       ? `@${user.tg_username}`
@@ -182,6 +196,15 @@ export function Chat() {
               Release
             </button>
           )}
+
+          <button
+            onClick={handlePromoteLead}
+            data-testid="promote-lead-btn"
+            title="Создать лида из этого диалога — бот запостит карточку в LEADS_CHAT_ID с кнопками одобрить/отклонить"
+            className="btn btn-warn btn-sm"
+          >
+            → Lead
+          </button>
 
           <button
             onClick={() => setDebug((d) => !d)}

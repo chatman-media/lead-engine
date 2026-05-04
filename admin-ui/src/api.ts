@@ -74,6 +74,45 @@ export interface Vacancy {
   updated_at: number;
 }
 
+export type LeadState =
+  | "intake_pending"
+  | "intake_complete"
+  | "approved"
+  | "rejected"
+  | "docs_pending"
+  | "docs_complete"
+  | "submitted"
+  | "closed";
+
+export interface Lead {
+  id: number;
+  user_id: number;
+  state: LeadState;
+  intake_json: string | null;
+  visa_docs_json: string | null;
+  application_id: string | null;
+  ops_chat_id: number | null;
+  ops_message_id: number | null;
+  rejected_reason: string | null;
+  decided_by_admin_id: number | null;
+  decided_at: number | null;
+  created_at: number;
+  updated_at: number;
+  tg_user_id: number;
+  tg_username: string | null;
+}
+
+export interface LeadCounts {
+  intake_pending: number;
+  intake_complete: number;
+  approved: number;
+  rejected: number;
+  docs_pending: number;
+  docs_complete: number;
+  submitted: number;
+  closed: number;
+}
+
 /** Mirror of the GET /admin/api/status response — see src/admin/api.ts. */
 export interface SystemStatus {
   rag: {
@@ -119,6 +158,11 @@ export interface SystemStatus {
   };
   vacancies: {
     active: number;
+  };
+  leads: {
+    by_state: LeadCounts;
+    leads_chat_configured: boolean;
+    visa_chat_configured: boolean;
   };
 }
 
@@ -204,6 +248,37 @@ export const api = {
 
   deleteVacancy: (id: number) =>
     req<{ ok: boolean; deleted: number }>(`/admin/api/vacancies/${id}`, {
+      method: "DELETE",
+    }),
+
+  // Lead pipeline
+  leads: (state?: LeadState) =>
+    req<{ leads: Lead[]; counts: LeadCounts }>(
+      `/admin/api/leads${state ? `?state=${state}` : ""}`,
+    ),
+
+  promoteLead: (conversationId: number) =>
+    req<{ lead: Lead }>(
+      `/admin/api/leads/from-conversation/${conversationId}`,
+      { method: "POST" },
+    ),
+
+  approveLead: (id: number) =>
+    req<{ lead: Lead }>(`/admin/api/leads/${id}/approve`, { method: "POST" }),
+
+  rejectLead: (id: number, reason?: string) =>
+    req<{ lead: Lead }>(`/admin/api/leads/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
+    }),
+
+  sendIntakeTemplate: (id: number) =>
+    req<{ ok: boolean }>(`/admin/api/leads/${id}/send-intake`, {
+      method: "POST",
+    }),
+
+  deleteLead: (id: number) =>
+    req<{ ok: boolean; deleted: number }>(`/admin/api/leads/${id}`, {
       method: "DELETE",
     }),
 

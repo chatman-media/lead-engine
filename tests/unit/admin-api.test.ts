@@ -53,6 +53,135 @@ function authed(extra: RequestInit = {}): RequestInit {
   };
 }
 
+describe("leads endpoints", () => {
+  test("GET /admin/api/leads requires auth and returns counts baseline", async () => {
+    expect((await fetch(url("/admin/api/leads"))).status).toBe(401);
+
+    const r = await fetch(url("/admin/api/leads"), authed());
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      leads: unknown[];
+      counts: Record<string, number>;
+    };
+    expect(body.leads).toEqual([]);
+    expect(body.counts.intake_pending).toBe(0);
+    expect(body.counts.approved).toBe(0);
+  });
+
+  test("POST /admin/api/leads/from-conversation/:id promotes idempotently", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9001 });
+    const c = conversations.ensureForUser(u.id);
+
+    const first = await fetch(
+      url(`/admin/api/leads/from-conversation/${c.id}`),
+      authed({ method: "POST" }),
+    );
+    expect(first.status).toBe(200);
+    const body1 = (await first.json()) as {
+      lead: { id: number; user_id: number; state: string };
+    };
+    expect(body1.lead.user_id).toBe(u.id);
+    expect(body1.lead.state).toBe("intake_complete");
+
+    // Calling again with the same conversation returns the same lead.
+    const second = await fetch(
+      url(`/admin/api/leads/from-conversation/${c.id}`),
+      authed({ method: "POST" }),
+    );
+    const body2 = (await second.json()) as { lead: { id: number } };
+    expect(body2.lead.id).toBe(body1.lead.id);
+  });
+
+  test("POST /admin/api/leads/:id/approve transitions through docs_pending", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9002 });
+    const c = conversations.ensureForUser(u.id);
+    const promoted = await fetch(
+      url(`/admin/api/leads/from-conversation/${c.id}`),
+      authed({ method: "POST" }),
+    );
+    const { lead } = (await promoted.json()) as { lead: { id: number } };
+
+    const r = await fetch(
+      url(`/admin/api/leads/${lead.id}/approve`),
+      authed({ method: "POST" }),
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      lead: { state: string; decided_by_admin_id: number | null };
+    };
+    // After approve we transition into docs_pending so the bot starts
+    // collecting visa form fields.
+    expect(body.lead.state).toBe("docs_pending");
+  });
+
+  test("POST /admin/api/leads/:id/reject records reason and locks state", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9003 });
+    const c = conversations.ensureForUser(u.id);
+    const promoted = await fetch(
+      url(`/admin/api/leads/from-conversation/${c.id}`),
+      authed({ method: "POST" }),
+    );
+    const { lead } = (await promoted.json()) as { lead: { id: number } };
+
+    const r = await fetch(
+      url(`/admin/api/leads/${lead.id}/reject`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "не подходит по возрасту" }),
+      }),
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      lead: { state: string; rejected_reason: string };
+    };
+    expect(body.lead.state).toBe("rejected");
+    expect(body.lead.rejected_reason).toBe("не подходит по возрасту");
+
+    // Subsequent approve attempt is 409 conflict.
+    const conflict = await fetch(
+      url(`/admin/api/leads/${lead.id}/approve`),
+      authed({ method: "POST" }),
+    );
+    expect(conflict.status).toBe(409);
+  });
+
+  test("approve/reject return 404 for missing lead", async () => {
+    const a = await fetch(
+      url(`/admin/api/leads/99999/approve`),
+      authed({ method: "POST" }),
+    );
+    expect(a.status).toBe(404);
+    const r = await fetch(
+      url(`/admin/api/leads/99999/reject`),
+      authed({ method: "POST" }),
+    );
+    expect(r.status).toBe(404);
+  });
+
+  test("status endpoint reports leads.by_state counts", async () => {
+    const usersRepo = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const u = usersRepo.create({ tgUserId: 9100 });
+    const c = conversations.ensureForUser(u.id);
+    await fetch(
+      url(`/admin/api/leads/from-conversation/${c.id}`),
+      authed({ method: "POST" }),
+    );
+    const r = await fetch(url("/admin/api/status"), authed());
+    const body = (await r.json()) as {
+      leads: { by_state: Record<string, number> };
+    };
+    expect(body.leads.by_state.intake_complete).toBe(1);
+  });
+});
+
 describe("vacancies endpoints", () => {
   test("GET /admin/api/vacancies requires auth and returns []", async () => {
     expect((await fetch(url("/admin/api/vacancies"))).status).toBe(401);
