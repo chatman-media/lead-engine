@@ -226,6 +226,15 @@ export interface SystemStatus {
     leads_chat_configured: boolean;
     visa_chat_configured: boolean;
   };
+  bot_health:
+    | {
+        ok: true;
+        bot_id: number;
+        username: string | null;
+        first_name: string | null;
+        checked_at: number;
+      }
+    | { ok: false; error: string; checked_at: number };
 }
 
 class ApiError extends Error {

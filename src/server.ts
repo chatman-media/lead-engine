@@ -32,14 +32,14 @@ export interface CreateServerOptions extends Omit<AppDeps, "bus"> {
   serveUi?: boolean;
 }
 
-export function createServer(opts: CreateServerOptions): Server {
+export function createServer(opts: CreateServerOptions): Server<AdminWsData> {
   const wsPath = opts.wsPath ?? "/admin/api/ws";
   const shouldServeUi = opts.serveUi ?? process.env.SERVE_UI === "1";
   const bus = new AdminBus();
   const router = createRouter({ ...opts, bus });
   const db = opts.db;
 
-  return Bun.serve<AdminWsData, undefined>({
+  return Bun.serve<AdminWsData>({
     port: opts.port,
     async fetch(req, server) {
       const url = new URL(req.url);
