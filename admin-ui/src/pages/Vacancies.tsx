@@ -36,7 +36,11 @@ export function Vacancies() {
     refresh();
   }, []);
 
-  async function handleCreate(input: { title: string; body: string }) {
+  async function handleCreate(input: {
+    title: string;
+    body: string;
+    url: string | null;
+  }) {
     setError(null);
     try {
       await api.createVacancy(input);
@@ -49,7 +53,12 @@ export function Vacancies() {
 
   async function handleUpdate(
     id: number,
-    patch: { title?: string; body?: string; is_active?: boolean },
+    patch: {
+      title?: string;
+      body?: string;
+      url?: string | null;
+      is_active?: boolean;
+    },
   ) {
     setError(null);
     try {
@@ -244,16 +253,46 @@ function VacancyCard({
       >
         {v.body}
       </div>
+      {v.url && (
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: 12,
+            fontFamily: "var(--mono)",
+            color: "var(--text-3)",
+          }}
+        >
+          ссылка:{" "}
+          <a
+            href={v.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "var(--amber)" }}
+          >
+            {v.url}
+          </a>
+        </div>
+      )}
     </div>
   );
 }
 
-function AddForm({ onSubmit }: { onSubmit: (input: { title: string; body: string }) => void }) {
+function AddForm({
+  onSubmit,
+}: {
+  onSubmit: (input: { title: string; body: string; url: string | null }) => void;
+}) {
   return (
     <FormShell
       submitLabel="create"
-      initial={{ title: "", body: "" }}
-      onSubmit={(values) => onSubmit({ title: values.title, body: values.body })}
+      initial={{ title: "", body: "", url: "" }}
+      onSubmit={(values) =>
+        onSubmit({
+          title: values.title,
+          body: values.body,
+          url: values.url ? values.url : null,
+        })
+      }
     />
   );
 }
@@ -264,14 +303,28 @@ function EditForm({
   onCancel,
 }: {
   vacancy: Vacancy;
-  onSubmit: (patch: { title: string; body: string }) => void;
+  onSubmit: (patch: {
+    title: string;
+    body: string;
+    url: string | null;
+  }) => void;
   onCancel: () => void;
 }) {
   return (
     <FormShell
       submitLabel="save"
-      initial={{ title: vacancy.title, body: vacancy.body }}
-      onSubmit={onSubmit}
+      initial={{
+        title: vacancy.title,
+        body: vacancy.body,
+        url: vacancy.url ?? "",
+      }}
+      onSubmit={(values) =>
+        onSubmit({
+          title: values.title,
+          body: values.body,
+          url: values.url ? values.url : null,
+        })
+      }
       onCancel={onCancel}
     />
   );
@@ -284,12 +337,13 @@ function FormShell({
   onCancel,
 }: {
   submitLabel: string;
-  initial: { title: string; body: string };
-  onSubmit: (values: { title: string; body: string }) => void;
+  initial: { title: string; body: string; url: string };
+  onSubmit: (values: { title: string; body: string; url: string }) => void;
   onCancel?: () => void;
 }) {
   const [title, setTitle] = useState(initial.title);
   const [body, setBody] = useState(initial.body);
+  const [url, setUrl] = useState(initial.url);
   const canSubmit = title.trim().length > 0 && body.trim().length > 0;
 
   return (
@@ -297,7 +351,7 @@ function FormShell({
       onSubmit={(e) => {
         e.preventDefault();
         if (!canSubmit) return;
-        onSubmit({ title: title.trim(), body: body.trim() });
+        onSubmit({ title: title.trim(), body: body.trim(), url: url.trim() });
       }}
       style={{
         background: "var(--bg-1)",
@@ -327,6 +381,15 @@ function FormShell({
         rows={8}
         data-testid="vacancy-body-input"
         style={{ width: "100%", resize: "vertical", fontFamily: "var(--sans)" }}
+      />
+      <input
+        type="url"
+        placeholder="optional link — t.me/channel/123 или invite-ссылка (бот даст её, если кандидат спросит «где почитать»)"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        className="input"
+        data-testid="vacancy-url-input"
+        style={{ width: "100%" }}
       />
       <div style={{ display: "flex", gap: 8 }}>
         <button

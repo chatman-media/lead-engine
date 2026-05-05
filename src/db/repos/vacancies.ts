@@ -13,6 +13,11 @@ export interface VacancyRow {
   id: number;
   title: string;
   body: string;
+  /** Optional canonical link — Telegram channel post, group invite,
+   *  external page. Surfaced to the bot so it can drop a "подробнее: …"
+   *  line when the candidate asks for a link. Empty string normalised
+   *  to NULL by the repo. */
+  url: string | null;
   is_active: 0 | 1;
   created_at: number;
   updated_at: number;
@@ -49,14 +54,20 @@ export class VacanciesRepo {
     );
   }
 
-  create(input: { title: string; body: string; isActive?: boolean }): VacancyRow {
+  create(input: {
+    title: string;
+    body: string;
+    url?: string | null;
+    isActive?: boolean;
+  }): VacancyRow {
     const isActive = input.isActive === false ? 0 : 1;
+    const url = normaliseUrl(input.url);
     const row = this.db
-      .query<VacancyRow, [string, string, number]>(
-        `INSERT INTO vacancies (title, body, is_active)
-         VALUES (?, ?, ?) RETURNING *`,
+      .query<VacancyRow, [string, string, string | null, number]>(
+        `INSERT INTO vacancies (title, body, url, is_active)
+         VALUES (?, ?, ?, ?) RETURNING *`,
       )
-      .get(input.title.trim(), input.body.trim(), isActive);
+      .get(input.title.trim(), input.body.trim(), url, isActive);
     if (!row) throw new Error("Failed to insert vacancy");
     return row;
   }
@@ -68,12 +79,18 @@ export class VacanciesRepo {
    */
   update(
     id: number,
-    patch: { title?: string; body?: string; isActive?: boolean },
+    patch: {
+      title?: string;
+      body?: string;
+      url?: string | null;
+      isActive?: boolean;
+    },
   ): VacancyRow | null {
     const existing = this.byId(id);
     if (!existing) return null;
     const title = patch.title !== undefined ? patch.title.trim() : existing.title;
     const body = patch.body !== undefined ? patch.body.trim() : existing.body;
+    const url = patch.url !== undefined ? normaliseUrl(patch.url) : existing.url;
     const isActive =
       patch.isActive === undefined
         ? existing.is_active
@@ -82,9 +99,9 @@ export class VacanciesRepo {
           : 0;
     this.db.run(
       `UPDATE vacancies
-       SET title = ?, body = ?, is_active = ?, updated_at = unixepoch()
+       SET title = ?, body = ?, url = ?, is_active = ?, updated_at = unixepoch()
        WHERE id = ?`,
-      [title, body, isActive, id],
+      [title, body, url, isActive, id],
     );
     return this.byId(id);
   }
@@ -116,10 +133,27 @@ export function renderVacanciesBlock(vacancies: VacancyRow[]): string {
   const active = vacancies.filter((v) => v.is_active === 1);
   if (active.length === 0) return "";
   const items = active
-    .map((v, i) => `[В${i + 1}] ${v.title}\n${v.body}`)
+    .map((v, i) => {
+      const head = `[В${i + 1}] ${v.title}`;
+      const link = v.url ? `\nСсылка: ${v.url}` : "";
+      return `${head}\n${v.body}${link}`;
+    })
     .join("\n\n");
   return (
-    `АКТУАЛЬНЫЕ ВАКАНСИИ (свежие, из админки — отвечай по ним в первую очередь):\n` +
+    `АКТУАЛЬНЫЕ ВАКАНСИИ (свежие, из админки — отвечай по ним в первую очередь). ` +
+    `Если у вакансии есть строка "Ссылка:" — давай её ТОЛЬКО когда кандидат сам спрашивает ` +
+    `«где почитать», «дай ссылку», «куда писать», «канал», «пост». Не вставляй ссылки на каждом ходу.\n` +
     items
   );
+}
+
+/** Empty / whitespace → NULL. URLs without a scheme get an `https://` prefix
+ *  so the bot copies a clickable form into Telegram. Anything that already
+ *  has a scheme (https / http / tg / tonsite) passes through. */
+function normaliseUrl(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
 }

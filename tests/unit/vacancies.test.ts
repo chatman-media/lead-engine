@@ -107,4 +107,55 @@ describe("renderVacanciesBlock", () => {
     expect(block).not.toContain("Closed");
     expect(a.id).toBeGreaterThan(0);
   });
+
+  test("renders the URL line + link-handling instruction when set", () => {
+    repo.create({
+      title: "Корея",
+      body: "оклад ₩110k",
+      url: "https://t.me/infinity_agency_world",
+    });
+    repo.create({ title: "Шаохинг", body: "10k юаней" }); // no url
+    const block = renderVacanciesBlock(repo.listActive());
+    expect(block).toContain("Ссылка: https://t.me/infinity_agency_world");
+    // The instruction telling the bot when to drop the link.
+    expect(block).toContain("ТОЛЬКО когда кандидат сам спрашивает");
+    // Vacancy without URL → no "Ссылка:" line on its block
+    const vacanciesText = block.split("[В")[2] ?? ""; // chunk for the 2nd vacancy
+    expect(vacanciesText).not.toContain("Ссылка:");
+  });
+});
+
+describe("VacanciesRepo URL handling", () => {
+  test("create stores trimmed url + auto-prefixes scheme", () => {
+    const a = repo.create({ title: "T", body: "B", url: "  t.me/foo  " });
+    expect(a.url).toBe("https://t.me/foo");
+    const b = repo.create({ title: "T2", body: "B2", url: "https://x.com" });
+    expect(b.url).toBe("https://x.com");
+    const c = repo.create({ title: "T3", body: "B3", url: "tg://resolve?domain=foo" });
+    expect(c.url).toBe("tg://resolve?domain=foo");
+  });
+
+  test("create normalises empty/whitespace url to null", () => {
+    const a = repo.create({ title: "T", body: "B", url: "" });
+    expect(a.url).toBeNull();
+    const b = repo.create({ title: "T2", body: "B2", url: "   " });
+    expect(b.url).toBeNull();
+    const c = repo.create({ title: "T3", body: "B3" });
+    expect(c.url).toBeNull();
+  });
+
+  test("update can clear url with null and replace with a new value", () => {
+    const v = repo.create({ title: "T", body: "B", url: "t.me/a" });
+    expect(v.url).toBe("https://t.me/a");
+    const cleared = repo.update(v.id, { url: null });
+    expect(cleared?.url).toBeNull();
+    const set = repo.update(v.id, { url: "t.me/b" });
+    expect(set?.url).toBe("https://t.me/b");
+  });
+
+  test("update keeps existing url when patch omits it", () => {
+    const v = repo.create({ title: "T", body: "B", url: "t.me/a" });
+    const patched = repo.update(v.id, { title: "T2" });
+    expect(patched?.url).toBe("https://t.me/a");
+  });
 });
