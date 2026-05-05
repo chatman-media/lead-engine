@@ -59,6 +59,53 @@ export function createListUsersHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 /**
+ * Detail dossier for a single user — combines profile, conversation pointer,
+ * lead state, memory facts, and a recent-messages tail. Operators land here
+ * when they need a "who is this person" view that's broader than a single
+ * conversation thread (memory facts come from past sessions; the lead row
+ * may pre-date the current conversation).
+ *
+ * Designed so the page makes ONE HTTP call — no waterfall — at the cost of
+ * a bigger response. Last 30 messages is the cap; full history lives in
+ * /admin/chats/:id (the conversation view).
+ */
+export function createUserDetailHandler(deps: AdminApiDeps): RouteHandler {
+  const users = new UsersRepo(deps.db);
+  const conversations = new ConversationsRepo(deps.db);
+  const leads = new LeadsRepo(deps.db);
+  const messages = new MessagesRepo(deps.db);
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const user = users.byId(id);
+    if (!user) return json({ error: "not found" }, { status: 404 });
+    const conversation = conversations.byUserId(id);
+    const lead = leads.byUserId(id);
+    const memory = users.getMemory(id);
+    const recentMessages = conversation
+      ? messages
+          .listByConversation(conversation.id, 30)
+          .map((m) => ({
+            id: m.id,
+            role: m.role,
+            text: m.text,
+            tg_message_id: m.tg_message_id,
+            created_at: m.created_at,
+          }))
+      : [];
+    return json({
+      user,
+      conversation,
+      lead,
+      memory,
+      recent_messages: recentMessages,
+    });
+  };
+}
+
+/**
  * In-memory bot-health cache. The `getMe` Telegram call is cheap but
  * the Status dashboard could be opened by multiple admins / refreshed
  * frequently — caching for ~60s avoids burning the rate limit just to
@@ -2182,3 +2229,106 @@ export function createDeleteVacancyHandler(deps: AdminApiDeps): RouteHandler {
     return json({ ok: true, deleted: id });
   };
 }
+
+// ─── KB management (operator-facing CRUD over indexed documents) ───────
+
+const KB_TOPIC_MAX = 64;
+
+export function createListKbDocumentsHandler(
+  deps: AdminApiDeps,
+): RouteHandler {
+  const kb = new KbRepo(deps.db);
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const url = new URL(req.url);
+    // Sentinel "__untagged__" lets the UI request NULL-topic docs without
+    // overloading the empty string. Other values pass through verbatim.
+    const topicParam = url.searchParams.get("topic");
+    const q = url.searchParams.get("q") ?? undefined;
+    const opts: { topic?: string | null; q?: string; limit?: number } = {};
+    if (topicParam !== null) opts.topic = topicParam;
+    if (q) opts.q = q;
+    const documents = kb.listDocuments(opts);
+    return json({
+      documents,
+      topics: kb.listTopics(),
+      totals: { documents: kb.countDocuments(), chunks: kb.countChunks() },
+    });
+  };
+}
+
+export function createGetKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
+  const kb = new KbRepo(deps.db);
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const doc = kb.getDocument(id);
+    if (!doc) return json({ error: "not found" }, { status: 404 });
+    // Truncate chunk text in the listing — full text is rarely useful at the
+    // overview level and balloons the JSON response on long docs.
+    const chunks = kb.listChunks(id).map((c) => ({
+      id: c.id,
+      chunk_index: c.chunk_index,
+      token_count: c.token_count,
+      text: c.text,
+    }));
+    return json({ document: doc, chunks });
+  };
+}
+
+export function createUpdateKbDocumentHandler(
+  deps: AdminApiDeps,
+): RouteHandler {
+  const kb = new KbRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    let body: { topic?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    // `null` (or empty string) clears the tag; any string trims + length-checks.
+    let nextTopic: string | null;
+    if (body.topic === null || body.topic === "") {
+      nextTopic = null;
+    } else if (typeof body.topic === "string") {
+      const trimmed = body.topic.trim();
+      if (!trimmed) {
+        nextTopic = null;
+      } else if (trimmed.length > KB_TOPIC_MAX) {
+        return json({ error: `topic > ${KB_TOPIC_MAX}` }, { status: 400 });
+      } else {
+        nextTopic = trimmed;
+      }
+    } else {
+      return json({ error: "topic must be string or null" }, { status: 400 });
+    }
+    const updated = kb.setTopic(id, nextTopic);
+    if (!updated) return json({ error: "not found" }, { status: 404 });
+    return json({ document: updated });
+  };
+}
+
+export function createDeleteKbDocumentHandler(
+  deps: AdminApiDeps,
+): RouteHandler {
+  const kb = new KbRepo(deps.db);
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const ok = kb.deleteDocument(id);
+    if (!ok) return json({ error: "not found" }, { status: 404 });
+    return json({ ok: true, deleted: id });
+  };
+}
+

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, type User } from "../api.ts";
 
 function ts(unix: number) {
@@ -43,7 +44,14 @@ export function Users() {
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
-                <td>{u.tg_user_id}</td>
+                <td>
+                  <Link
+                    to={`/admin/users/${u.id}`}
+                    style={{ color: "var(--amber)", fontFamily: "var(--mono)" }}
+                  >
+                    {u.tg_user_id}
+                  </Link>
+                </td>
                 <td style={{ color: "var(--text-2)" }}>
                   {u.tg_username ? `@${u.tg_username}` : "—"}
                 </td>

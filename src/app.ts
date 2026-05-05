@@ -30,14 +30,19 @@ import {
   createUpdateVisaDocsHandler,
   createCreateVacancyHandler,
   createDeleteVacancyHandler,
+  createDeleteKbDocumentHandler,
   createDownloadFileHandler,
+  createGetKbDocumentHandler,
+  createListKbDocumentsHandler,
   createListVacanciesHandler,
+  createUpdateKbDocumentHandler,
   createSetExperimentStatusHandler,
   createStatusHandler,
   createStylePlaygroundHandler,
   createTakeHandler,
   createUpdateUserMemoryHandler,
   createUpdateVacancyHandler,
+  createUserDetailHandler,
 } from "./admin/api.ts";
 import {
   createLoginHandler,
@@ -189,6 +194,9 @@ export function createRouter(deps: AppDeps): Router {
     "/admin/api/users/:id/memory",
     createUpdateUserMemoryHandler(apiDeps),
   );
+  // Detail view — register AFTER the more-specific :id/memory sub-path so
+  // the literal sub-path matches first (router does linear scan).
+  router.get("/admin/api/users/:id", createUserDetailHandler(apiDeps));
   router.get(
     "/admin/api/conversations",
     createListConversationsHandler(apiDeps),
@@ -256,6 +264,21 @@ export function createRouter(deps: AppDeps): Router {
   router.post("/admin/api/vacancies", createCreateVacancyHandler(apiDeps));
   router.patch("/admin/api/vacancies/:id", createUpdateVacancyHandler(apiDeps));
   router.delete("/admin/api/vacancies/:id", createDeleteVacancyHandler(apiDeps));
+
+  // KB management — list/inspect/delete/re-tag indexed documents.
+  router.get("/admin/api/kb/documents", createListKbDocumentsHandler(apiDeps));
+  router.get(
+    "/admin/api/kb/documents/:id",
+    createGetKbDocumentHandler(apiDeps),
+  );
+  router.patch(
+    "/admin/api/kb/documents/:id",
+    createUpdateKbDocumentHandler(apiDeps),
+  );
+  router.delete(
+    "/admin/api/kb/documents/:id",
+    createDeleteKbDocumentHandler(apiDeps),
+  );
 
   // Leads — pipeline state machine: intake → approve/reject → docs → submitted.
   router.get("/admin/api/leads", createListLeadsHandler(apiDeps));

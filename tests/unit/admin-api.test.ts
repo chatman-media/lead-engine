@@ -1059,3 +1059,110 @@ describe("POST /admin/api/conversations/:id/take and /release", () => {
     expect(after.assigned_admin_id).toBeNull();
   });
 });
+
+describe("user detail endpoint", () => {
+  test("GET /admin/api/users/:id returns dossier with conversation + memory", async () => {
+    const users = new UsersRepo(ctx.db);
+    const conversations = new ConversationsRepo(ctx.db);
+    const messages = new MessagesRepo(ctx.db);
+    const u = users.create({ tgUserId: 9001, tgUsername: "vasya" });
+    const c = conversations.ensureForUser(u.id);
+    messages.add({
+      conversationId: c.id,
+      role: "user",
+      text: "hello",
+      tgMessageId: 1,
+    });
+    users.mergeMemoryFacts(u.id, { city: "Moscow", age: "25" });
+
+    const r = await fetch(url(`/admin/api/users/${u.id}`), authed());
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      user: { tg_user_id: number; tg_username: string | null };
+      conversation: { id: number } | null;
+      lead: unknown;
+      memory: { facts: Record<string, string> };
+      recent_messages: Array<{ text: string }>;
+    };
+    expect(body.user.tg_user_id).toBe(9001);
+    expect(body.user.tg_username).toBe("vasya");
+    expect(body.conversation?.id).toBe(c.id);
+    expect(body.lead).toBeNull();
+    expect(body.memory.facts.city).toBe("Moscow");
+    expect(body.recent_messages.length).toBe(1);
+    expect(body.recent_messages[0]!.text).toBe("hello");
+  });
+
+  test("GET /admin/api/users/:id returns 404 on missing", async () => {
+    const r = await fetch(url("/admin/api/users/99999"), authed());
+    expect(r.status).toBe(404);
+  });
+
+  test("GET /admin/api/users/:id requires auth", async () => {
+    const r = await fetch(url("/admin/api/users/1"));
+    expect(r.status).toBe(401);
+  });
+});
+
+describe("kb management endpoints", () => {
+  test("GET /admin/api/kb/documents requires auth + returns shape", async () => {
+    expect((await fetch(url("/admin/api/kb/documents"))).status).toBe(401);
+    const r = await fetch(url("/admin/api/kb/documents"), authed());
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      documents: unknown[];
+      topics: string[];
+      totals: { documents: number; chunks: number };
+    };
+    expect(Array.isArray(body.documents)).toBe(true);
+    expect(Array.isArray(body.topics)).toBe(true);
+    expect(typeof body.totals.documents).toBe("number");
+  });
+
+  test("PATCH /admin/api/kb/documents/:id retags + DELETE removes", async () => {
+    // Seed one doc directly (no need to embed — we just want a row).
+    ctx.db.run(
+      `INSERT INTO kb_documents (source, title, content_hash, topic) VALUES (?, ?, ?, ?)`,
+      ["x.md", "X", "hash-x", null],
+    );
+    const id = (
+      ctx.db
+        .query<{ id: number }, []>(`SELECT id FROM kb_documents`)
+        .get()
+    )!.id;
+
+    const patch = await fetch(
+      url(`/admin/api/kb/documents/${id}`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ topic: "visa" }),
+      }),
+    );
+    expect(patch.status).toBe(200);
+    expect(((await patch.json()) as { document: { topic: string } }).document.topic).toBe(
+      "visa",
+    );
+
+    const clear = await fetch(
+      url(`/admin/api/kb/documents/${id}`),
+      authed({
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ topic: null }),
+      }),
+    );
+    expect(clear.status).toBe(200);
+    expect(
+      ((await clear.json()) as { document: { topic: string | null } }).document.topic,
+    ).toBeNull();
+
+    const del = await fetch(
+      url(`/admin/api/kb/documents/${id}`),
+      authed({ method: "DELETE" }),
+    );
+    expect(del.status).toBe(200);
+    const miss = await fetch(url(`/admin/api/kb/documents/${id}`), authed());
+    expect(miss.status).toBe(404);
+  });
+});

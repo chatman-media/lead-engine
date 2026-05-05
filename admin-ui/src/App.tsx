@@ -11,12 +11,14 @@ import { Layout } from "./components/Layout.tsx";
 import { Chat } from "./pages/Chat.tsx";
 import { Chats } from "./pages/Chats.tsx";
 import { Experiments } from "./pages/Experiments.tsx";
+import { Kb } from "./pages/Kb.tsx";
 import { Login } from "./pages/Login.tsx";
 import { NewStyle } from "./pages/NewStyle.tsx";
 import { Leads } from "./pages/Leads.tsx";
 import { Status } from "./pages/Status.tsx";
 import { StyleDetail } from "./pages/StyleDetail.tsx";
 import { Styles } from "./pages/Styles.tsx";
+import { UserDetail } from "./pages/UserDetail.tsx";
 import { Users } from "./pages/Users.tsx";
 import { Vacancies } from "./pages/Vacancies.tsx";
 import { AdminWs } from "./ws.ts";
@@ -82,8 +84,10 @@ export function App() {
                 <Route path="chats" element={<Chats />} />
                 <Route path="chats/:id" element={<Chat />} />
                 <Route path="users" element={<Users />} />
+                <Route path="users/:id" element={<UserDetail />} />
                 <Route path="leads" element={<Leads />} />
                 <Route path="vacancies" element={<Vacancies />} />
+                <Route path="kb" element={<Kb />} />
                 <Route path="styles" element={<Styles />} />
                 <Route path="styles/new" element={<NewStyle />} />
                 <Route path="styles/:id" element={<StyleDetail />} />
