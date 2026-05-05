@@ -30,6 +30,7 @@ export function Layout({ admin, children }: LayoutProps) {
             { to: "/admin/leads", label: "Leads" },
             { to: "/admin/users", label: "Users" },
             { to: "/admin/vacancies", label: "Vacancies" },
+            { to: "/admin/kb", label: "Knowledge base" },
             { to: "/admin/styles", label: "Sales styles" },
             { to: "/admin/experiments", label: "Experiments" },
           ].map(({ to, label }) => (

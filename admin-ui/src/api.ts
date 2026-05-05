@@ -65,6 +65,24 @@ export interface ConversationSummary {
   updatedAt: number;
 }
 
+export interface KbDocument {
+  id: number;
+  source: string;
+  title: string;
+  content_hash: string;
+  topic: string | null;
+  created_at: number;
+  /** Present on list responses; absent on single-doc detail. */
+  chunk_count?: number;
+}
+
+export interface KbChunkPreview {
+  id: number;
+  chunk_index: number;
+  token_count: number;
+  text: string;
+}
+
 export interface Vacancy {
   id: number;
   title: string;
@@ -293,6 +311,21 @@ export const api = {
   users: () =>
     req<{ users: User[] }>("/admin/api/users"),
 
+  userDetail: (id: number) =>
+    req<{
+      user: User;
+      conversation: Conversation | null;
+      lead: Lead | null;
+      memory: UserMemory;
+      recent_messages: Array<{
+        id: number;
+        role: "user" | "assistant" | "human" | "system";
+        text: string;
+        tg_message_id: number | null;
+        created_at: number;
+      }>;
+    }>(`/admin/api/users/${id}`),
+
   conversations: (escalated?: boolean) =>
     req<{ conversations: Conversation[] }>(
       `/admin/api/conversations${escalated ? "?escalated=1" : ""}`,
@@ -328,6 +361,37 @@ export const api = {
 
   deleteVacancy: (id: number) =>
     req<{ ok: boolean; deleted: number }>(`/admin/api/vacancies/${id}`, {
+      method: "DELETE",
+    }),
+
+  // KB management — operator-facing CRUD over indexed documents.
+  kbDocuments: (opts?: { topic?: string | null; q?: string }) => {
+    const qs = new URLSearchParams();
+    if (opts?.topic !== undefined) {
+      qs.set("topic", opts.topic === null ? "__untagged__" : opts.topic);
+    }
+    if (opts?.q) qs.set("q", opts.q);
+    const tail = qs.toString() ? `?${qs.toString()}` : "";
+    return req<{
+      documents: KbDocument[];
+      topics: string[];
+      totals: { documents: number; chunks: number };
+    }>(`/admin/api/kb/documents${tail}`);
+  },
+
+  kbDocument: (id: number) =>
+    req<{ document: KbDocument; chunks: KbChunkPreview[] }>(
+      `/admin/api/kb/documents/${id}`,
+    ),
+
+  updateKbDocument: (id: number, patch: { topic: string | null }) =>
+    req<{ document: KbDocument }>(`/admin/api/kb/documents/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deleteKbDocument: (id: number) =>
+    req<{ ok: boolean; deleted: number }>(`/admin/api/kb/documents/${id}`, {
       method: "DELETE",
     }),
 

@@ -296,9 +296,11 @@ NULL-topic документы всегда проходят фильтр — bac
 ### Архитектура
 
 - Миграция: [migrations/007_kb_topic.sql](migrations/007_kb_topic.sql) — `ALTER TABLE kb_documents ADD COLUMN topic TEXT` + partial index
-- Классификатор: [src/rag/topic-classifier.ts](src/rag/topic-classifier.ts) — `classifyTopic(q)` возвращает slug или null. 6 тем по умолчанию: `visa`, `payment`, `schedule`, `housing`, `locations`, `application`. Cyrillic-aware (Unicode property lookbehind, не `\b`)
+- Классификатор: [src/rag/topic-classifier.ts](src/rag/topic-classifier.ts) — `classifyTopic(q)` возвращает slug или null. 8 тем по умолчанию: `visa`, `payment`, `schedule`, `housing`, `locations`, `application`, `vacancy` (запросы про офферы / KTV / хостес), `requirements` (рост / возраст / опыт). Cyrillic-aware (Unicode property lookbehind, не `\b`). Документы с тегом `noise` или `faq` классификатор не эмитит — `noise` исключается из любого topic-filtered поиска (мусор больше не в retrieval), `faq` подмешивается только в global fallback (когда классификатор вернул null)
 - KB search: [src/db/repos/kb.ts](src/db/repos/kb.ts) — `search(vec, k, topic?)`, `searchBm25(query, k, topic?)`, `hybridSearch({..., topic})`
 - Ingest: [`scripts/ingest.ts`](scripts/ingest.ts) поддерживает `--topic SLUG` или авто-derives из директории (`kb/curated/visa/foo.md` → topic=visa). См. [`deriveTopicFromPath`](src/rag/ingest.ts)
+- Bulk re-tag уже проиндексированной базы: [`scripts/tag-kb-by-keyword.ts`](scripts/tag-kb-by-keyword.ts) — keyword-классификатор по чанкам, idempotent, тегает только untagged-доки. Полезно когда KB ингестилась без тегов и нужно категоризировать без переиндексации.
+- Управление и просмотр документов: `/admin/kb` — список с фильтром по topic (включая sentinel "(untagged)") и поиском по title/source, expand для preview чанков, inline retag, delete с каскадом по векторному индексу
 
 ### Цена
 

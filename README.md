@@ -6,7 +6,7 @@ Telegram-бот с RAG по базе знаний, анкетой по токе�
 API и локальная Ollama (без расхода токенов).
 
 Разрабатывается через TDD: на каждый юнит сначала падающий тест, потом
-минимальная реализация. Текущее состояние: **600+ unit + 14 e2e зелёных.**
+минимальная реализация. Текущее состояние: **640+ unit + 14 e2e зелёных.**
 
 **RAG layers** (опциональные надстройки over vanilla retrieval):
 hybrid retrieval (BM25 + vector + RRF), cross-session memory кандидата,
@@ -452,10 +452,14 @@ RAG_REFLECT=true
 RAG_CONVERSATION_SUMMARY=true
 
 # Topic-routed retrieval: regex классификатор маппит вопрос на тему
-# (visa/payment/schedule/housing/locations/application), KB ищется только
-# среди тегированных этой темой документов. Сначала тегируй ingest:
+# (visa / payment / schedule / housing / locations / application / vacancy /
+# requirements), KB ищется только среди тегированных этой темой документов.
+# Сначала тегируй ingest:
 #   bun scripts/ingest.ts ./kb/curated --topic visa
 # или сложи документы по поддиректориям (kb/curated/visa/*.md → topic=visa).
+# Уже проиндексированную базу можно прокатить через keyword-классификатор
+# одним проходом: `bun run scripts/tag-kb-by-keyword.ts` (idempotent, тегает
+# только untagged-доки). Управление и просмотр документов — `/admin/kb`.
 RAG_TOPIC_ROUTING=true
 ```
 

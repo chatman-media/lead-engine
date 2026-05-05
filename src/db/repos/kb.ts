@@ -239,6 +239,98 @@ export class KbRepo {
     return reciprocalRankFusion(vectorHits, bm25Hits, k, rrfK);
   }
 
+  /**
+   * List documents with chunk counts. Used by the admin KB management UI to
+   * show what's indexed without paging through individual chunks. Sorted by
+   * `created_at DESC` so freshly ingested docs appear at the top.
+   *
+   * Optional `topic` filter — pass `"__untagged__"` to match `topic IS NULL`
+   * (sentinel value because we can't bind NULL through `?` for an `IS` check).
+   * Optional `q` filter — substring match on title/source (LIKE, case-folded).
+   */
+  listDocuments(opts?: {
+    topic?: string | null;
+    q?: string;
+    limit?: number;
+  }): Array<KbDocumentRow & { chunk_count: number }> {
+    const limit = Math.min(Math.max(opts?.limit ?? 200, 1), 1000);
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    if (opts?.topic === "__untagged__") {
+      where.push("d.topic IS NULL");
+    } else if (typeof opts?.topic === "string") {
+      where.push("d.topic = ?");
+      params.push(opts.topic);
+    }
+    if (opts?.q && opts.q.trim()) {
+      where.push("(LOWER(d.title) LIKE ? OR LOWER(d.source) LIKE ?)");
+      const pat = `%${opts.q.trim().toLowerCase()}%`;
+      params.push(pat, pat);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    params.push(limit);
+    return this.db
+      .query<KbDocumentRow & { chunk_count: number }, typeof params>(
+        `SELECT d.*, (SELECT COUNT(*) FROM kb_chunks c WHERE c.document_id = d.id) AS chunk_count
+         FROM kb_documents d
+         ${whereSql}
+         ORDER BY d.created_at DESC
+         LIMIT ?`,
+      )
+      .all(...params);
+  }
+
+  getDocument(id: number): KbDocumentRow | null {
+    return (
+      this.db
+        .query<KbDocumentRow, [number]>(`SELECT * FROM kb_documents WHERE id = ?`)
+        .get(id) ?? null
+    );
+  }
+
+  listChunks(documentId: number): KbChunkRow[] {
+    return this.db
+      .query<KbChunkRow, [number]>(
+        `SELECT * FROM kb_chunks WHERE document_id = ? ORDER BY chunk_index ASC`,
+      )
+      .all(documentId);
+  }
+
+  /** All distinct topics currently in use, sorted alphabetically. NULL is
+   *  excluded — operators see "(untagged)" as a separate filter option. */
+  listTopics(): string[] {
+    return this.db
+      .query<{ topic: string }, []>(
+        `SELECT DISTINCT topic FROM kb_documents WHERE topic IS NOT NULL ORDER BY topic ASC`,
+      )
+      .all()
+      .map((r) => r.topic);
+  }
+
+  /** Re-tag a document. Pass `null` to clear the tag (back to untagged).
+   *  Returns the updated row, or null if id missing. */
+  setTopic(id: number, topic: string | null): KbDocumentRow | null {
+    return (
+      this.db
+        .query<KbDocumentRow, [string | null, number]>(
+          `UPDATE kb_documents SET topic = ? WHERE id = ? RETURNING *`,
+        )
+        .get(topic, id) ?? null
+    );
+  }
+
+  /**
+   * Delete a document and all its chunks (incl. vector index rows).
+   * Returns true when a row was actually removed. The deletion order is
+   * vec → chunks → document so a partial failure can't leave dangling
+   * vector entries pointing at vanished chunks.
+   */
+  deleteDocument(id: number): boolean {
+    this.deleteChunksByDocument(id);
+    const res = this.db.run(`DELETE FROM kb_documents WHERE id = ?`, [id]);
+    return res.changes > 0;
+  }
+
   countDocuments(): number {
     const r = this.db
       .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM kb_documents")
