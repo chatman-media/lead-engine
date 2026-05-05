@@ -191,6 +191,16 @@ function TopicFilter({
   );
 }
 
+/** Strips noisy `file:///abs/path/to/kb/...` prefix so the source column
+ *  shows just the file's place inside the KB tree. Falls back to the full
+ *  string when no `kb/` segment is found. */
+function shortenSource(src: string): string {
+  const m = src.match(/\/kb\/(.+)$/);
+  if (m) return m[1]!;
+  // For non-file sources (URLs, raw paths) drop the protocol if any.
+  return src.replace(/^file:\/\//, "");
+}
+
 function KbDocCard({
   doc,
   isOpen,
@@ -227,10 +237,26 @@ function KbDocCard({
         <button
           onClick={onToggle}
           className="btn btn-ghost btn-sm"
-          style={{ flex: 1, textAlign: "left", fontFamily: "var(--sans)" }}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            textAlign: "left",
+            fontFamily: "var(--sans)",
+          }}
           data-testid="kb-doc-toggle"
         >
-          <div style={{ fontWeight: 600, fontSize: 13 }}>{doc.title}</div>
+          <div
+            style={{
+              fontWeight: 600,
+              fontSize: 13,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={doc.title}
+          >
+            {doc.title}
+          </div>
           <div
             style={{
               fontSize: 11,
@@ -240,13 +266,38 @@ function KbDocCard({
               display: "flex",
               gap: 12,
               flexWrap: "wrap",
+              alignItems: "center",
             }}
           >
             <span>id={doc.id}</span>
-            <span>{doc.source}</span>
+            <span
+              style={{
+                maxWidth: 280,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={doc.source}
+            >
+              {shortenSource(doc.source)}
+            </span>
             <span>{doc.chunk_count ?? 0} chunks</span>
-            <span>topic: {doc.topic ?? "(untagged)"}</span>
-            <span>{new Date(doc.created_at * 1000).toLocaleString("ru-RU")}</span>
+            <span>
+              topic:{" "}
+              <span
+                style={{
+                  color:
+                    doc.topic === "noise"
+                      ? "var(--red, #ef4444)"
+                      : doc.topic
+                        ? "var(--amber)"
+                        : "var(--text-3)",
+                }}
+              >
+                {doc.topic ?? "(untagged)"}
+              </span>
+            </span>
+            <span>{new Date(doc.created_at * 1000).toLocaleDateString("ru-RU")}</span>
           </div>
         </button>
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -296,7 +347,7 @@ function RetagControl({
     );
   }
   return (
-    <div style={{ display: "flex", gap: 4 }}>
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
       <input
         type="text"
         value={val}
@@ -304,7 +355,7 @@ function RetagControl({
         list="kb-known-topics"
         placeholder="topic (empty = untagged)"
         className="input"
-        style={{ width: 180, fontSize: 12 }}
+        style={{ width: 140, fontSize: 12 }}
         autoFocus
       />
       <datalist id="kb-known-topics">
