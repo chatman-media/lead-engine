@@ -69,6 +69,23 @@ const TOPIC_PATTERNS: Array<{ topic: string; pattern: RegExp }> = [
     ),
   },
   {
+    topic: "vacancy",
+    // Прямые вопросы про офферы / "что у вас сейчас", виды клубов (KTV).
+    // NOT triggered by location words alone — those go to "locations".
+    pattern: new RegExp(
+      `${NW}(ваканс|оффер|какие\\s+(есть|у\\s+вас)|что\\s+у\\s+вас\\s+(есть|сеичас|сейчас)|чем\\s+(можете|можно)|ktv|караоке\\s+хостес|хостес)`,
+      "iu",
+    ),
+  },
+  {
+    topic: "requirements",
+    // Требования к кандидату: рост, вес, возраст, опыт, фото/портфолио.
+    pattern: new RegExp(
+      `${NW}(рост|вес\\b|возраст|сколько\\s+лет|портфолио|фотосет|какие\\s+треб|нужно\\s+ли\\s+знать|опыт\\s+(работ|в))`,
+      "iu",
+    ),
+  },
+  {
     topic: "application",
     // Анкета, форма подачи / форма для, заявка, подать.
     pattern: new RegExp(

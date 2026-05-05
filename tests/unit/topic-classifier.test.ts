@@ -42,6 +42,20 @@ describe("classifyTopic", () => {
     expect(classifyTopic("Корея условия?")).toBe("locations");
   });
 
+  test("classifies vacancy-related questions", () => {
+    expect(classifyTopic("какие у вас вакансии?")).toBe("vacancy");
+    expect(classifyTopic("что у вас сейчас?")).toBe("vacancy");
+    expect(classifyTopic("есть KTV?")).toBe("vacancy");
+    expect(classifyTopic("ищу хостес")).toBe("vacancy");
+  });
+
+  test("classifies requirements-related questions", () => {
+    expect(classifyTopic("какой нужен рост?")).toBe("requirements");
+    expect(classifyTopic("во сколько лет можно?")).toBe("requirements");
+    expect(classifyTopic("нужно ли портфолио?")).toBe("requirements");
+    expect(classifyTopic("какие требования?")).toBe("requirements");
+  });
+
   test("classifies application-related questions", () => {
     expect(classifyTopic("где анкета?")).toBe("application");
     expect(classifyTopic("как подать заявку?")).toBe("application");
@@ -87,5 +101,7 @@ describe("KNOWN_TOPICS", () => {
     expect(KNOWN_TOPICS).toContain("housing");
     expect(KNOWN_TOPICS).toContain("locations");
     expect(KNOWN_TOPICS).toContain("application");
+    expect(KNOWN_TOPICS).toContain("vacancy");
+    expect(KNOWN_TOPICS).toContain("requirements");
   });
 });

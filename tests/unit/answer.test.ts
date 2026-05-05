@@ -4,6 +4,8 @@ import { KbRepo } from "@/db/repos/kb.ts";
 import { openDb } from "@/db/sqlite.ts";
 import {
   answerWithRag,
+  botPresenceReply,
+  isBotPresenceQuestion,
   isPersonalFactQuestion,
   isPersonaSmalltalkQuestion,
   NO_CONTEXT_MARKER,
@@ -702,5 +704,97 @@ describe("answerWithRag", () => {
       role: "user",
       content: "current question",
     });
+  });
+});
+
+describe("isBotPresenceQuestion", () => {
+  test("matches direct bot/human/AI questions in Russian", () => {
+    expect(isBotPresenceQuestion("ты бот?")).toBe(true);
+    expect(isBotPresenceQuestion("ты человек?")).toBe(true);
+    expect(isBotPresenceQuestion("ты ИИ?")).toBe(true);
+    expect(isBotPresenceQuestion("ты робот?")).toBe(true);
+    expect(isBotPresenceQuestion("ты нейросеть?")).toBe(true);
+    expect(isBotPresenceQuestion("ты chatgpt?")).toBe(true);
+    expect(isBotPresenceQuestion("человек?")).toBe(true);
+    expect(isBotPresenceQuestion("бот?")).toBe(true);
+  });
+
+  test("matches English forms", () => {
+    expect(isBotPresenceQuestion("are you a bot?")).toBe(true);
+    expect(isBotPresenceQuestion("are you human")).toBe(true);
+    expect(isBotPresenceQuestion("are you AI?")).toBe(true);
+  });
+
+  test("returns false on identity smalltalk (handled separately)", () => {
+    expect(isBotPresenceQuestion("как тебя зовут?")).toBe(false);
+    expect(isBotPresenceQuestion("кто ты?")).toBe(false);
+  });
+
+  test("returns false when question carries job intent", () => {
+    expect(isBotPresenceQuestion("ты бот, есть работа в Китае?")).toBe(false);
+    expect(isBotPresenceQuestion("ты человек или бот, какая зарплата?")).toBe(
+      false,
+    );
+  });
+
+  test("returns false on empty/unrelated", () => {
+    expect(isBotPresenceQuestion("")).toBe(false);
+    expect(isBotPresenceQuestion("привет!")).toBe(false);
+    expect(isBotPresenceQuestion("сколько лет?")).toBe(false);
+  });
+});
+
+describe("botPresenceReply", () => {
+  test("role=human positively asserts human regardless of question form", () => {
+    const reply = botPresenceReply({
+      name: "Алина",
+      role: "human",
+      company: "INFINITY AGENCY",
+    });
+    // Same reply for "ты бот?" and "ты человек?" — both arrive at the same
+    // shortcut, both must produce a human-affirming answer.
+    expect(reply.toLowerCase()).toContain("живой человек");
+    expect(reply).toContain("Алина");
+    expect(reply).toContain("INFINITY AGENCY");
+  });
+
+  test("role=assistant openly admits being AI", () => {
+    const reply = botPresenceReply({ name: "Алина", role: "assistant" });
+    expect(reply.toLowerCase()).toContain("ии-ассистент");
+    expect(reply).toContain("Алина");
+  });
+
+  test("falls back to default name when persona name is empty", () => {
+    const reply = botPresenceReply({ name: "", role: "human" });
+    expect(reply).toContain("Менеджер");
+  });
+});
+
+describe("answerWithRag bot-presence shortcut", () => {
+  test("bypasses retrieval and LLM for 'ты бот?' / 'ты человек?'", async () => {
+    const kb = new KbRepo(openDb({ path: ":memory:" }));
+    const embedder = fakeEmbedder({});
+    const chat: ChatClient & { calls: number } = {
+      calls: 0,
+      async complete() {
+        this.calls++;
+        return "should not be called";
+      },
+    };
+    const res = await answerWithRag({
+      question: "ты человек?",
+      kb,
+      embedder,
+      chat,
+      persona: {
+        name: "Алина",
+        role: "human",
+        company: "INFINITY AGENCY",
+      },
+    });
+    expect(chat.calls).toBe(0);
+    expect(embedder.calls.length).toBe(0);
+    expect(res.text.toLowerCase()).toContain("живой человек");
+    expect(res.telemetry.path).toBe("smalltalk");
   });
 });

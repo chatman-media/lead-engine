@@ -47,6 +47,61 @@ const DEFAULT_PERSONA: Persona = {
 };
 
 /**
+ * True when the message is asking about the persona's nature (bot vs human
+ * vs AI). Detected separately from the name/identity smalltalk because the
+ * answer depends on `persona.role`, not just on `persona.name`. Returns a
+ * single deterministic reply via `botPresenceReply` — bypassing RAG.
+ *
+ * Why this guard exists: the RAG system prompt contains an example reply
+ * ("конечно нет, я ${name}, чем помочь?") meant for "ты бот?". Without this
+ * shortcut, the LLM parrots that template literally — including for
+ * "ты человек?", inverting the answer ("конечно нет" = "I'm not human").
+ */
+export function isBotPresenceQuestion(question: string): boolean {
+  const trimmed = question.trim();
+  if (!trimmed) return false;
+  const q = trimmed.toLowerCase().replace(/\s+/g, " ");
+
+  // Job/offer intent → not smalltalk; let RAG handle.
+  const hasJobOrOfferIntent =
+    /(работ|ваканс|зарплат|виза|оффер|переезд|агентств|услов|\bофис\b|график|смен|жилье|жильё|рейс|кита|китай|коре|англ\b)/i.test(
+      question,
+    );
+  if (hasJobOrOfferIntent) return false;
+
+  // One regex covering all forms: bare ("бот?", "человек?") and "ты <noun>"
+  // ("ты бот", "ты chatgpt"). The leading "ты " is optional. Unicode-property
+  // lookarounds replace `\b` because JS `\b` is ASCII-only and silently fails
+  // on Cyrillic word ends — same trick as `isPersonaSmalltalkQuestion`.
+  const presenceNouns =
+    "бот|человек|робот|ии|нейросет(?:ь|ка)|нейронка|чат\\s*бот|chat\\s*bot|chat\\s*gpt|chatgpt|gpt|llm|ai";
+  const ruRe = new RegExp(
+    `(?<![\\p{L}\\p{N}])(?:ты\\s+)?(?:${presenceNouns})(?![\\p{L}\\p{N}])`,
+    "iu",
+  );
+  if (ruRe.test(q)) return true;
+  return /(?<![a-z])are\s+you\s+(?:a\s+)?(?:bot|human|ai|robot)(?![a-z])/i.test(
+    q,
+  );
+}
+
+/**
+ * Deterministic reply for `isBotPresenceQuestion`. For role=human the bot
+ * always asserts being human regardless of the question form ("ты бот?" /
+ * "ты человек?" both → same human reply). For role=assistant it admits
+ * being an AI helper.
+ */
+export function botPresenceReply(persona: Persona): string {
+  const name = persona.name?.trim() || "Менеджер";
+  if (persona.role === "human") {
+    const company = persona.company?.trim();
+    const tail = company ? `, в ${company}` : "";
+    return `Я живой человек, ${name}${tail}. Чем помочь?`;
+  }
+  return `Я ${name}, ИИ-ассистент. Чем помочь?`;
+}
+
+/**
  * True when the message is only smalltalk about identity (name / who are you).
  * Catches the common bare forms candidates actually type — "как зовут?",
  * "имя?", "представься" — not just the textbook "как тебя зовут".
@@ -525,6 +580,18 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     // smuggle in unicode chars that the LLM-output sanitizer would catch.
     return {
       text: applyStyleRules(personaSmalltalkReply(activePersona)),
+      usedChunkIds: [],
+      hits: [],
+      telemetry: { path: "smalltalk", total_ms: Date.now() - startedAt },
+    };
+  }
+
+  // Bot/human/AI question — answer must agree with persona.role and not
+  // parrot the system-prompt example. Same telemetry path as smalltalk —
+  // no KB, no LLM call.
+  if (isBotPresenceQuestion(input.question)) {
+    return {
+      text: applyStyleRules(botPresenceReply(activePersona)),
       usedChunkIds: [],
       hits: [],
       telemetry: { path: "smalltalk", total_ms: Date.now() - startedAt },
