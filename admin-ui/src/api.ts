@@ -87,6 +87,7 @@ export interface Vacancy {
   id: number;
   title: string;
   body: string;
+  url: string | null;
   is_active: 0 | 1;
   created_at: number;
   updated_at: number;
@@ -344,7 +345,12 @@ export const api = {
 
   vacancies: () => req<{ vacancies: Vacancy[] }>("/admin/api/vacancies"),
 
-  createVacancy: (input: { title: string; body: string; is_active?: boolean }) =>
+  createVacancy: (input: {
+    title: string;
+    body: string;
+    url?: string | null;
+    is_active?: boolean;
+  }) =>
     req<{ vacancy: Vacancy }>("/admin/api/vacancies", {
       method: "POST",
       body: JSON.stringify(input),
@@ -352,7 +358,12 @@ export const api = {
 
   updateVacancy: (
     id: number,
-    patch: { title?: string; body?: string; is_active?: boolean },
+    patch: {
+      title?: string;
+      body?: string;
+      url?: string | null;
+      is_active?: boolean;
+    },
   ) =>
     req<{ vacancy: Vacancy }>(`/admin/api/vacancies/${id}`, {
       method: "PATCH",

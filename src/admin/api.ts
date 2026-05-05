@@ -2129,6 +2129,7 @@ export function createLeadCallbackHandler(deps: AdminApiDeps) {
 
 const VACANCY_TITLE_MAX = 200;
 const VACANCY_BODY_MAX = 4000;
+const VACANCY_URL_MAX = 500;
 
 export function createListVacanciesHandler(deps: AdminApiDeps): RouteHandler {
   const vacancies = new VacanciesRepo(deps.db);
@@ -2151,7 +2152,12 @@ export function createCreateVacancyHandler(deps: AdminApiDeps): RouteHandler {
     const ctx = requireAdmin(deps.db, req);
     if (ctx instanceof Response) return ctx;
 
-    let body: { title?: unknown; body?: unknown; is_active?: unknown };
+    let body: {
+      title?: unknown;
+      body?: unknown;
+      url?: unknown;
+      is_active?: unknown;
+    };
     try {
       body = (await req.json()) as typeof body;
     } catch {
@@ -2167,10 +2173,19 @@ export function createCreateVacancyHandler(deps: AdminApiDeps): RouteHandler {
     if (text.length > VACANCY_BODY_MAX) {
       return json({ error: `body > ${VACANCY_BODY_MAX}` }, { status: 400 });
     }
+    let url: string | null = null;
+    if (typeof body.url === "string") {
+      const trimmed = body.url.trim();
+      if (trimmed.length > VACANCY_URL_MAX) {
+        return json({ error: `url > ${VACANCY_URL_MAX}` }, { status: 400 });
+      }
+      url = trimmed || null;
+    }
 
     const created = vacancies.create({
       title,
       body: text,
+      url,
       isActive: body.is_active === false ? false : true,
     });
     return json({ vacancy: created });
@@ -2185,13 +2200,23 @@ export function createUpdateVacancyHandler(deps: AdminApiDeps): RouteHandler {
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
 
-    let body: { title?: unknown; body?: unknown; is_active?: unknown };
+    let body: {
+      title?: unknown;
+      body?: unknown;
+      url?: unknown;
+      is_active?: unknown;
+    };
     try {
       body = (await req.json()) as typeof body;
     } catch {
       return json({ error: "invalid JSON" }, { status: 400 });
     }
-    const patch: { title?: string; body?: string; isActive?: boolean } = {};
+    const patch: {
+      title?: string;
+      body?: string;
+      url?: string | null;
+      isActive?: boolean;
+    } = {};
     if (typeof body.title === "string") {
       const trimmed = body.title.trim();
       if (!trimmed) return json({ error: "title is empty" }, { status: 400 });
@@ -2207,6 +2232,15 @@ export function createUpdateVacancyHandler(deps: AdminApiDeps): RouteHandler {
         return json({ error: `body > ${VACANCY_BODY_MAX}` }, { status: 400 });
       }
       patch.body = trimmed;
+    }
+    if (typeof body.url === "string") {
+      const trimmed = body.url.trim();
+      if (trimmed.length > VACANCY_URL_MAX) {
+        return json({ error: `url > ${VACANCY_URL_MAX}` }, { status: 400 });
+      }
+      patch.url = trimmed || null;
+    } else if (body.url === null) {
+      patch.url = null;
     }
     if (typeof body.is_active === "boolean") {
       patch.isActive = body.is_active;
