@@ -1,4 +1,5 @@
 import type { Style } from "../types.ts";
+import { alinaInfinity } from "./alina-infinity.ts";
 import { flirtyBelfort } from "./flirty-belfort.ts";
 import { empatheticNepq } from "./empathetic-nepq.ts";
 import { coldDirectPas } from "./cold-direct-pas.ts";
@@ -7,7 +8,12 @@ import { coldDirectPas } from "./cold-direct-pas.ts";
  * In-memory style registry. For Phase 1 (env-flag opt-in) this is the source
  * of truth. For Phase 2, swap to a SQLite-backed `styles` table loaded at boot.
  */
-export const STYLES: readonly Style[] = [flirtyBelfort, empatheticNepq, coldDirectPas];
+export const STYLES: readonly Style[] = [
+  alinaInfinity,
+  flirtyBelfort,
+  empatheticNepq,
+  coldDirectPas,
+];
 
 export function listStyles(): readonly Style[] {
   return STYLES;
