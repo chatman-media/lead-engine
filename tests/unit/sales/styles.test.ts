@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { alinaInfinity } from "../../../src/sales/styles/alina-infinity.ts";
 import { coldDirectPas } from "../../../src/sales/styles/cold-direct-pas.ts";
 import { empatheticNepq } from "../../../src/sales/styles/empathetic-nepq.ts";
 import { flirtyBelfort } from "../../../src/sales/styles/flirty-belfort.ts";
@@ -7,10 +8,11 @@ import { StyleSchema } from "../../../src/sales/types.ts";
 
 describe("style registry", () => {
   test("listStyles() returns all registered styles", () => {
-    expect(listStyles().length).toBe(3);
+    expect(listStyles().length).toBe(4);
   });
 
   test("getStyle() returns the style by slug", () => {
+    expect(getStyle("alina-infinity-v1")?.slug).toBe("alina-infinity-v1");
     expect(getStyle("flirty-belfort-v1")?.slug).toBe("flirty-belfort-v1");
     expect(getStyle("empathetic-nepq-v1")?.slug).toBe("empathetic-nepq-v1");
     expect(getStyle("cold-direct-pas-v1")?.slug).toBe("cold-direct-pas-v1");
@@ -31,7 +33,7 @@ describe("style registry", () => {
   });
 });
 
-const SAMPLES = [flirtyBelfort, empatheticNepq, coldDirectPas];
+const SAMPLES = [alinaInfinity, flirtyBelfort, empatheticNepq, coldDirectPas];
 
 describe("sample styles — schema validity", () => {
   test.each(SAMPLES.map((s) => [s.slug, s] as const))(
