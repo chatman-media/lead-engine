@@ -27,6 +27,20 @@ function kbGroundingReminder(personaRole: Style["persona"]["role"]): string {
     : base + "скажи prospect, что уточнишь у руководства.";
 }
 
+/**
+ * A skill, in the shape `composeSystemPrompt` consumes — slug + display
+ * name + prompt fragment + applicable stages. Sourced by the webhook
+ * from `SkillsRepo.skillsForStyle(styleId)`. Decoupled from the DB row
+ * shape on purpose so the prompt module stays pure.
+ */
+export interface SkillForPrompt {
+  slug: string;
+  displayName: string;
+  promptFragment: string;
+  /** Stages where this skill is most effective. Empty array = always applicable. */
+  applicableStages: readonly FunnelStage[];
+}
+
 export interface ComposeOptions {
   /**
    * Inject the style's `fewShot` examples into the system prompt.
@@ -47,6 +61,13 @@ export interface ComposeOptions {
    * recent-history window.
    */
   conversationSummary?: string;
+  /**
+   * Persuasion skills attached to this style. Filtered by current stage:
+   * skills whose `applicableStages` is empty OR contains the current stage
+   * are surfaced to the LLM. Caller is expected to have already filtered
+   * by `is_enabled` on the catalogue side.
+   */
+  skills?: readonly SkillForPrompt[];
 }
 
 /**
@@ -104,6 +125,18 @@ export function composeSystemPrompt(
       hooks.map((h) => `- ${HOOK_LABELS[h.kind]}: ${h.text}`).join("\n")
     : "";
 
+  // Skills filtered to the current stage (empty applicableStages = always
+  // applicable). Compact one-line-per-skill listing — the LLM picks which
+  // to apply per turn, instead of being forced to use all of them.
+  const skillsForStage =
+    options.skills?.filter(
+      (s) => s.applicableStages.length === 0 || s.applicableStages.includes(stage),
+    ) ?? [];
+  const skillsBlock = skillsForStage.length
+    ? `ПРИЁМЫ (используй уместные, не все сразу — выбирай по контексту):\n` +
+      skillsForStage.map((s) => `- ${s.displayName} — ${s.promptFragment}`).join("\n")
+    : "";
+
   const stageBlock = stageCfg
     ? `ТЕКУЩИЙ ЭТАП: ${stage.toUpperCase()}.\n` +
       `ЦЕЛЬ ЭТАПА: ${stageCfg.goal}.` +
@@ -153,6 +186,7 @@ export function composeSystemPrompt(
     voiceBlock,
     frameworkBlock,
     hooksBlock,
+    skillsBlock,
     stageBlock,
     summaryBlock,
     userFactsBlock,

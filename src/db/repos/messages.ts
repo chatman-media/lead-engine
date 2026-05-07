@@ -117,4 +117,23 @@ export class MessagesRepo {
       .all(conversationId, limit);
     return rows.reverse();
   }
+
+  /**
+   * Patch `meta_json` on an existing message — used by post-reply
+   * analytics (skill grading, reflection verdicts that arrive late).
+   * Caller produces the merged JSON object; this is a blind UPDATE.
+   * Returns true when a row was actually updated.
+   */
+  setMeta(id: number, meta: unknown): boolean {
+    const json = meta === null || meta === undefined ? null : JSON.stringify(meta);
+    const r = this.db.run(`UPDATE messages SET meta_json = ? WHERE id = ?`, [json, id]);
+    return r.changes > 0;
+  }
+
+  byId(id: number): MessageRow | null {
+    return (
+      this.db.query<MessageRow, [number]>(`SELECT * FROM messages WHERE id = ? LIMIT 1`).get(id) ??
+      null
+    );
+  }
 }

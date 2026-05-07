@@ -76,6 +76,19 @@ export interface KbDocument {
   chunk_count?: number;
 }
 
+export interface SkillDto {
+  id: number;
+  slug: string;
+  family: "cialdini" | "voss" | "nlp" | "sales" | "custom";
+  display_name: string;
+  description: string;
+  prompt_fragment: string;
+  applicable_stages: string[];
+  intent: string;
+  is_enabled: boolean;
+  attached_to_styles: number;
+}
+
 export interface KbChunkPreview {
   id: number;
   chunk_index: number;
@@ -430,6 +443,20 @@ export const api = {
       hybrid_count: number;
       rewrite_count: number;
     }>(`/admin/api/analytics?window=${window}`),
+
+  // Skill catalogue
+  skills: () => req<{ skills: SkillDto[] }>("/admin/api/skills"),
+  setSkillEnabled: (slug: string, enabled: boolean) =>
+    req<{ skill: SkillDto }>(`/admin/api/skills/${encodeURIComponent(slug)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_enabled: enabled }),
+    }),
+  styleSkills: (styleId: number) => req<{ slugs: string[] }>(`/admin/api/styles/${styleId}/skills`),
+  setStyleSkills: (styleId: number, slugs: string[]) =>
+    req<{ ok: true; attached: number }>(`/admin/api/styles/${styleId}/skills`, {
+      method: "PUT",
+      body: JSON.stringify({ slugs }),
+    }),
 
   ingestKbDocument: (input: { title: string; body: string; topic?: string | null }) =>
     req<{ ok: true; document_id: number; chunks: number; created: boolean }>(

@@ -1,4 +1,5 @@
 import { activeEmbeddingDim, config, llmIsConfigured } from "./config.ts";
+import { SkillsRepo, seedSkillCatalogue } from "./db/repos/skills.ts";
 import { StylesRepo, seedBuiltinStyles } from "./db/repos/styles.ts";
 import { getDb } from "./db/sqlite.ts";
 import type { ChatClient } from "./rag/chat.ts";
@@ -31,6 +32,16 @@ const telegram = new TelegramClient({
     console.log(
       `[server] sales styles already present (kept DB version): ${seedResult.skipped.join(", ")}`,
     );
+  }
+}
+
+// Seed the skill catalogue — refreshes copy/prompt-fragments on every boot
+// (operator-toggleable `is_enabled` is preserved across upserts).
+{
+  const skillsRepo = new SkillsRepo(db);
+  const r = seedSkillCatalogue(skillsRepo);
+  if (r.inserted > 0 || r.updated > 0) {
+    console.log(`[server] skill catalogue: ${r.inserted} inserted, ${r.updated} refreshed`);
   }
 }
 

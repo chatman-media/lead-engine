@@ -20,6 +20,7 @@ import {
   createExportConversationHandler,
   createGetKbDocumentHandler,
   createGetStyleHandler,
+  createGetStyleSkillsHandler,
   createIngestKbDocumentHandler,
   createLeadCallbackHandler,
   createLeadDetailHandler,
@@ -27,6 +28,7 @@ import {
   createListExperimentsHandler,
   createListKbDocumentsHandler,
   createListLeadsHandler,
+  createListSkillsHandler,
   createListStylesHandler,
   createListUsersHandler,
   createListVacanciesHandler,
@@ -36,11 +38,13 @@ import {
   createReplyHandler,
   createSendIntakeHandler,
   createSetExperimentStatusHandler,
+  createSetStyleSkillsHandler,
   createStatusHandler,
   createStylePlaygroundHandler,
   createSubmitToVisaHandler,
   createTakeHandler,
   createUpdateKbDocumentHandler,
+  createUpdateSkillHandler,
   createUpdateUserMemoryHandler,
   createUpdateVacancyHandler,
   createUpdateVisaDocsHandler,
@@ -202,6 +206,12 @@ export function createRouter(deps: AppDeps): Router {
   router.get("/admin/api/styles/:id", createGetStyleHandler(apiDeps));
   router.patch("/admin/api/styles/:id", createEditStyleHandler(apiDeps));
   router.post("/admin/api/styles/:id/playground", createStylePlaygroundHandler(apiDeps));
+  router.get("/admin/api/styles/:id/skills", createGetStyleSkillsHandler(apiDeps));
+  router.put("/admin/api/styles/:id/skills", createSetStyleSkillsHandler(apiDeps));
+
+  // Skill catalogue (read-only list + global enable/disable toggle).
+  router.get("/admin/api/skills", createListSkillsHandler(apiDeps));
+  router.patch("/admin/api/skills/:slug", createUpdateSkillHandler(apiDeps));
   router.get("/admin/api/experiments", createListExperimentsHandler(apiDeps));
   router.post("/admin/api/experiments", createCreateExperimentHandler(apiDeps));
   router.patch("/admin/api/experiments/:id", createSetExperimentStatusHandler(apiDeps));

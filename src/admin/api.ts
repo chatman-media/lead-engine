@@ -11,6 +11,7 @@ import {
 import { KbRepo } from "../db/repos/kb.ts";
 import { type LeadState, LeadsRepo } from "../db/repos/leads.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
+import { SkillsRepo } from "../db/repos/skills.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
 import { UsersRepo } from "../db/repos/users.ts";
 import { VacanciesRepo } from "../db/repos/vacancies.ts";
@@ -21,6 +22,7 @@ import type { EmbeddingClient } from "../rag/embed.ts";
 import { ingestText } from "../rag/ingest.ts";
 import { json, type RouteHandler } from "../router.ts";
 import { composeSystemPrompt } from "../sales/prompt.ts";
+import { SKILL_BY_SLUG } from "../sales/skills/catalogue.ts";
 import { nextStage } from "../sales/stage-router.ts";
 import { FUNNEL_STAGES, type FunnelStage, StyleSchema } from "../sales/types.ts";
 import type { TelegramClient } from "../telegram/client.ts";
@@ -2564,5 +2566,136 @@ export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
       hybrid_count: hybrid,
       rewrite_count: rewrites,
     });
+  };
+}
+
+// ─── Skills (catalogue + per-style attachments) ──────────────────────
+
+interface SkillDto {
+  id: number;
+  slug: string;
+  family: string;
+  display_name: string;
+  description: string;
+  prompt_fragment: string;
+  applicable_stages: string[];
+  intent: string;
+  is_enabled: boolean;
+  attached_to_styles: number;
+}
+
+function rowToSkillDto(
+  row: ReturnType<SkillsRepo["bySlug"]>,
+  attachmentCount: number,
+): SkillDto | null {
+  if (!row) return null;
+  let stages: string[] = [];
+  try {
+    const parsed = JSON.parse(row.applicable_stages_json);
+    if (Array.isArray(parsed)) stages = parsed.filter((s): s is string => typeof s === "string");
+  } catch {
+    /* malformed JSON → empty stages list */
+  }
+  return {
+    id: row.id,
+    slug: row.slug,
+    family: row.family,
+    display_name: row.display_name,
+    description: row.description,
+    prompt_fragment: row.prompt_fragment,
+    applicable_stages: stages,
+    intent: row.intent,
+    is_enabled: row.is_enabled === 1,
+    attached_to_styles: attachmentCount,
+  };
+}
+
+/** GET /admin/api/skills — full catalogue with attachment counts. */
+export function createListSkillsHandler(deps: AdminApiDeps): RouteHandler {
+  const skills = new SkillsRepo(deps.db);
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const counts = skills.attachmentCounts();
+    const rows = skills.list();
+    const dtos = rows
+      .map((r) => rowToSkillDto(r, counts.get(r.slug) ?? 0))
+      .filter((d): d is SkillDto => d !== null);
+    return json({ skills: dtos });
+  };
+}
+
+/** PATCH /admin/api/skills/:slug — toggle is_enabled (operator can globally
+ *  silence a noisy skill). Other fields are read-only — they come from the
+ *  source-controlled catalogue. */
+export function createUpdateSkillHandler(deps: AdminApiDeps): RouteHandler {
+  const skills = new SkillsRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const slug = params.slug;
+    const row = skills.bySlug(slug);
+    if (!row) return json({ error: "skill not found" }, { status: 404 });
+
+    let body: { is_enabled?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    if (typeof body.is_enabled !== "boolean") {
+      return json({ error: "is_enabled (boolean) required" }, { status: 400 });
+    }
+    skills.setEnabled(row.id, body.is_enabled);
+    const updated = skills.bySlug(slug);
+    const counts = skills.attachmentCounts();
+    return json({ skill: rowToSkillDto(updated, counts.get(slug) ?? 0) });
+  };
+}
+
+/** GET /admin/api/styles/:id/skills — slugs attached to this style. */
+export function createGetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
+  const skills = new SkillsRepo(deps.db);
+  const styles = new StylesRepo(deps.db);
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    if (!styles.byId(id)) return json({ error: "style not found" }, { status: 404 });
+    const rows = skills.skillsForStyle(id);
+    return json({ slugs: rows.map((r) => r.slug) });
+  };
+}
+
+/** PUT /admin/api/styles/:id/skills — replace the attached set. Body: {slugs: string[]}. */
+export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
+  const skills = new SkillsRepo(deps.db);
+  const styles = new StylesRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    if (!styles.byId(id)) return json({ error: "style not found" }, { status: 404 });
+
+    let body: { slugs?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    if (!Array.isArray(body.slugs)) {
+      return json({ error: "slugs (array) required" }, { status: 400 });
+    }
+    // Reject any unknown slugs upfront so the operator gets an explicit
+    // error rather than silent drop. Catalogue is the source of truth.
+    const slugs = body.slugs.filter((s): s is string => typeof s === "string");
+    const unknown = slugs.filter((s) => !SKILL_BY_SLUG.has(s));
+    if (unknown.length > 0) {
+      return json({ error: `unknown skill slugs: ${unknown.join(", ")}` }, { status: 400 });
+    }
+    const r = skills.setSkillsForStyle(id, slugs);
+    return json({ ok: true, attached: r.attached });
   };
 }

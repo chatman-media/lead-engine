@@ -1,10 +1,11 @@
 import type { Database } from "bun:sqlite";
-import { telegramOpenAccess } from "../config.ts";
+import { config, telegramOpenAccess } from "../config.ts";
 import { type ConversationRow, ConversationsRepo } from "../db/repos/conversations.ts";
 import { ExperimentsRepo, parseAllocationToExperiment } from "../db/repos/experiments.ts";
 import { KbRepo } from "../db/repos/kb.ts";
 import { LeadsRepo } from "../db/repos/leads.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
+import { SkillsRepo } from "../db/repos/skills.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
 import { type UserRow, UsersRepo } from "../db/repos/users.ts";
 import { renderVacanciesBlock, VacanciesRepo } from "../db/repos/vacancies.ts";
@@ -21,9 +22,11 @@ import {
 import type { ChatClient } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
 import { extractUserFacts } from "../rag/extract-user-facts.ts";
+import { gradeSkills } from "../rag/grade-skills.ts";
 import { summarizeConversation } from "../rag/summarize-conversation.ts";
 import { json, type RouteHandler } from "../router.ts";
 import { pickVariant } from "../sales/ab-router.ts";
+import type { SkillForPrompt } from "../sales/prompt.ts";
 import { classifyStage } from "../sales/stage-classifier.ts";
 import { nextStage } from "../sales/stage-router.ts";
 import { FUNNEL_STAGES, type FunnelStage, type Style } from "../sales/types.ts";
@@ -184,6 +187,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
   const messages = new MessagesRepo(deps.db);
   const kb = new KbRepo(deps.db);
   const styles = new StylesRepo(deps.db);
+  const skills = new SkillsRepo(deps.db);
   const experiments = new ExperimentsRepo(deps.db);
   const vacancies = new VacanciesRepo(deps.db);
   const leadsRepo = new LeadsRepo(deps.db);
@@ -346,6 +350,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       conversations,
       kb,
       styles,
+      skills,
       experiments,
       users,
       vacancies,
@@ -396,6 +401,7 @@ interface ProcessInboundDeps {
   conversations: ConversationsRepo;
   kb: KbRepo;
   styles: StylesRepo;
+  skills: SkillsRepo;
   experiments: ExperimentsRepo;
   users: UsersRepo;
   vacancies: VacanciesRepo;
@@ -498,7 +504,7 @@ function toFunnelStage(raw: string | null): FunnelStage | null {
 
 async function runRagForInbound(
   d: ProcessInboundDeps,
-): Promise<{ result: AnswerResult; stage?: FunnelStage }> {
+): Promise<{ result: AnswerResult; stage?: FunnelStage; skillSlugs: string[] }> {
   if (!d.rag) throw new Error("runRagForInbound: rag deps required");
 
   const style = resolveStyle({
@@ -509,6 +515,28 @@ async function runRagForInbound(
     experiments: d.experiments,
     conversations: d.conversations,
   });
+
+  // Resolve skills attached to this style. `style_id` on the conversation
+  // is the canonical pointer (set by resolveStyle when forking via A/B);
+  // for env-forced styles we look up by slug. Both filtered by catalogue's
+  // is_enabled flag so operators can globally disable a noisy skill.
+  let resolvedSkills: SkillForPrompt[] | undefined;
+  if (style) {
+    let styleId: number | null = d.conv.style_id;
+    if (styleId == null) {
+      const row = d.styles.bySlug(style.slug);
+      styleId = row?.id ?? null;
+    }
+    if (styleId != null) {
+      const rows = d.skills.skillsForStyle(styleId).filter((r) => r.is_enabled === 1);
+      resolvedSkills = rows.map((r) => ({
+        slug: r.slug,
+        displayName: r.display_name,
+        promptFragment: r.prompt_fragment,
+        applicableStages: parseStagesJson(r.applicable_stages_json),
+      }));
+    }
+  }
 
   // Funnel-stage routing. Default is the regex router (sub-ms, predictable).
   // When `rag.stageClassifier === "llm"` we delegate to an LLM-based
@@ -606,8 +634,28 @@ async function runRagForInbound(
     ...(d.rag.hybridSearch ? { hybridSearch: true } : {}),
     ...(d.rag.topicRouting ? { topicRouting: true } : {}),
     ...(vacanciesBlock ? { vacanciesBlock } : {}),
+    ...(resolvedSkills && resolvedSkills.length > 0 ? { skills: resolvedSkills } : {}),
   });
-  return { result, stage };
+  return {
+    result,
+    stage,
+    skillSlugs: resolvedSkills?.map((s) => s.slug) ?? [],
+  };
+}
+
+/** Parse the `applicable_stages_json` JSON-array string from skills row.
+ *  Falls back to [] on any parse error so a corrupt row doesn't 500
+ *  the whole webhook. */
+function parseStagesJson(raw: string): readonly FunnelStage[] {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((s): s is FunnelStage =>
+      ["opener", "qualify", "pitch", "objection", "close"].includes(s),
+    );
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -616,6 +664,43 @@ async function runRagForInbound(
  * webhook on it would double our reply latency for a memory layer that only
  * matters NEXT turn anyway. Errors are logged and swallowed.
  */
+/**
+ * Self-grade the just-sent reply: ask the LLM which configured skills it
+ * actually used, then patch the message's meta_json with the result.
+ * Fire-and-forget — doesn't block the candidate. Errors are logged.
+ */
+async function runSkillGrading(
+  d: ProcessInboundDeps,
+  args: {
+    messageId: number;
+    question: string;
+    reply: string;
+    usedChunkIds: number[];
+    telemetry: unknown;
+    skillSlugs: string[];
+  },
+): Promise<void> {
+  if (!d.rag?.chat) return;
+  try {
+    const used = await gradeSkills({
+      question: args.question,
+      reply: args.reply,
+      availableSlugs: args.skillSlugs,
+      chat: d.rag.chat,
+    });
+    // Merge `skills_used` into existing telemetry blob without losing
+    // the other fields the webhook persisted on the message.
+    const existing = (args.telemetry ?? {}) as Record<string, unknown>;
+    const mergedTelemetry = { ...existing, skills_used: used };
+    d.messages.setMeta(args.messageId, {
+      used_chunk_ids: args.usedChunkIds,
+      telemetry: mergedTelemetry,
+    });
+  } catch (err) {
+    console.warn("[skill-grading] failed:", err);
+  }
+}
+
 async function runMemoryExtraction(d: ProcessInboundDeps): Promise<void> {
   if (!d.rag?.userMemory) return;
 
@@ -877,7 +962,11 @@ async function runConversationSummaryRefresh(d: ProcessInboundDeps): Promise<voi
 }
 
 async function processInbound(d: ProcessInboundDeps): Promise<void> {
-  const reply = async (text: string, meta?: unknown, stage?: FunnelStage) => {
+  const reply = async (
+    text: string,
+    meta?: unknown,
+    stage?: FunnelStage,
+  ): Promise<{ messageId: number }> => {
     let tgMessageId: number | undefined;
     try {
       const sent = await d.telegram.sendMessage({
@@ -888,7 +977,7 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     } catch (err) {
       console.error("[webhook] sendMessage failed (non-fatal):", err);
     }
-    d.messages.add({
+    const inserted = d.messages.add({
       conversationId: d.conv.id,
       role: "assistant",
       text,
@@ -902,6 +991,7 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
       conversationId: d.conv.id,
       tgUserId: d.tgUserId,
     });
+    return { messageId: inserted.id };
   };
 
   if (d.conv.mode === "human") {
@@ -941,7 +1031,7 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return;
   }
 
-  const { result, stage } = await runRagForInbound(d);
+  const { result, stage, skillSlugs } = await runRagForInbound(d);
 
   if (result.text === NO_CONTEXT_MARKER) {
     // Run memory extraction even on silent turns — the user message itself
@@ -954,7 +1044,7 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return;
   }
 
-  await reply(
+  const { messageId } = await reply(
     result.text,
     { used_chunk_ids: result.usedChunkIds, telemetry: result.telemetry },
     stage,
@@ -963,4 +1053,18 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
   await runConversationSummaryRefresh(d);
   await runIntakeUpdate(d);
   await runVisaDocsUpdate(d);
+
+  // Fire-and-forget: self-grade which skills the reply demonstrated, write
+  // the result back into meta_json. Gated by RAG_SKILL_GRADING because
+  // it's an extra LLM call per turn.
+  if (config.rag.skillGrading && d.rag?.chat && skillSlugs.length > 0) {
+    void runSkillGrading(d, {
+      messageId,
+      question: d.text,
+      reply: result.text,
+      usedChunkIds: result.usedChunkIds,
+      telemetry: result.telemetry,
+      skillSlugs,
+    });
+  }
 }

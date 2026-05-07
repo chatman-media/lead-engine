@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ApiError, api, type PlaygroundResult, type StyleDetail as StyleDetailT } from "../api.ts";
+import {
+  ApiError,
+  api,
+  type PlaygroundResult,
+  type SkillDto,
+  type StyleDetail as StyleDetailT,
+} from "../api.ts";
 
 const FUNNEL_STAGES = ["auto", "opener", "qualify", "pitch", "objection", "close"] as const;
 
@@ -258,7 +264,10 @@ export function StyleDetail() {
           )}
 
           {style.is_active && !style.parse_error && !editing ? (
-            <Playground styleId={style.id} />
+            <>
+              <SkillsPicker styleId={style.id} />
+              <Playground styleId={style.id} />
+            </>
           ) : null}
         </>
       )}
@@ -558,4 +567,195 @@ function btnStyle(): React.CSSProperties {
     fontFamily: "var(--mono)",
     cursor: "pointer",
   };
+}
+
+/**
+ * Per-style skill attachment picker. Loads the full catalogue + the
+ * style's currently-attached set, lets the operator toggle skills, and
+ * persists with PUT /admin/api/styles/:id/skills. "Dirty" state is
+ * surfaced explicitly with a save button — checkbox clicks don't auto-
+ * persist, to avoid surprise prompt regressions when scrolling fast.
+ */
+function SkillsPicker({ styleId }: { styleId: number }) {
+  const [open, setOpen] = useState(false);
+  const [catalogue, setCatalogue] = useState<SkillDto[] | null>(null);
+  const [attached, setAttached] = useState<Set<string>>(new Set());
+  const [pristine, setPristine] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([api.skills(), api.styleSkills(styleId)])
+      .then(([cat, mine]) => {
+        if (cancelled) return;
+        setCatalogue(cat.skills);
+        const set = new Set(mine.slugs);
+        setAttached(set);
+        setPristine(new Set(set));
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [styleId]);
+
+  const dirty =
+    catalogue != null &&
+    (attached.size !== pristine.size || [...attached].some((s) => !pristine.has(s)));
+
+  function toggle(slug: string) {
+    setAttached((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+  }
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.setStyleSkills(styleId, [...attached]);
+      setPristine(new Set(attached));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Group by family for readable browsing.
+  const grouped = (() => {
+    if (!catalogue) return [];
+    const fams: SkillDto["family"][] = ["cialdini", "voss", "nlp", "sales", "custom"];
+    return fams
+      .map((f) => ({
+        family: f,
+        skills: catalogue.filter((s) => s.family === f && s.is_enabled),
+      }))
+      .filter((g) => g.skills.length > 0);
+  })();
+
+  return (
+    <section
+      style={{
+        marginTop: 24,
+        background: "var(--bg-1)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        padding: 16,
+      }}
+    >
+      <button
+        onClick={() => setOpen((s) => !s)}
+        style={{
+          width: "100%",
+          textAlign: "left",
+          background: "none",
+          border: "none",
+          color: "var(--text)",
+          fontFamily: "var(--mono)",
+          fontSize: 13,
+          cursor: "pointer",
+          padding: 0,
+        }}
+        data-testid="skills-picker-toggle"
+      >
+        {open ? "▾" : "▸"} Persuasion skills — {attached.size} attached
+        {dirty && !saving && (
+          <span style={{ color: "var(--amber, #d97706)", marginLeft: 8 }}>(unsaved)</span>
+        )}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.5 }}>
+            Выбранные приёмы добавляются в system prompt этого стиля. Описание и текст приёма — на
+            странице <code>/admin/skills</code>.
+          </div>
+
+          {error && (
+            <div
+              style={{
+                color: "var(--red, #ef4444)",
+                fontFamily: "var(--mono)",
+                fontSize: 12,
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {!catalogue && <div className="loading-text">loading catalogue…</div>}
+
+          {grouped.map(({ family, skills }) => (
+            <div key={family}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-3)",
+                  fontFamily: "var(--mono)",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  marginBottom: 4,
+                }}
+              >
+                {family}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {skills.map((s) => {
+                  const on = attached.has(s.slug);
+                  return (
+                    <button
+                      key={s.slug}
+                      onClick={() => toggle(s.slug)}
+                      title={s.description}
+                      data-testid={`skill-chip-${s.slug}`}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 999,
+                        border: `1px solid ${on ? "var(--amber, #d97706)" : "var(--border)"}`,
+                        background: on ? "var(--amber, #d97706)" : "transparent",
+                        color: on ? "var(--bg)" : "var(--text-2)",
+                        fontFamily: "var(--mono)",
+                        fontSize: 11,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {on ? "✓ " : ""}
+                      {s.display_name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              onClick={save}
+              disabled={!dirty || saving}
+              className="btn btn-primary btn-sm"
+              data-testid="skills-picker-save"
+              style={{ opacity: !dirty || saving ? 0.5 : 1 }}
+            >
+              {saving ? "saving…" : `save (${attached.size} skills)`}
+            </button>
+            {dirty && (
+              <button
+                onClick={() => setAttached(new Set(pristine))}
+                className="btn btn-ghost btn-sm"
+              >
+                revert
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }

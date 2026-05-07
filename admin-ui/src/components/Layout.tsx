@@ -33,7 +33,10 @@ export function Layout({ admin, children }: LayoutProps) {
             { to: "/admin/vacancies", label: "Vacancies" },
             { to: "/admin/kb", label: "Knowledge base" },
             { to: "/admin/styles", label: "Sales styles" },
-            { to: "/admin/experiments", label: "Experiments" },
+            { to: "/admin/skills", label: "Skills" },
+            // Experiments hidden from nav for the single-persona setup.
+            // Route + backend still work — visit /admin/experiments directly.
+            // See docs/SALES_STYLES.md "When to bring back experiments" for criteria.
           ].map(({ to, label }) => (
             <NavLink key={to} to={to} className="nav-item">
               {label}
