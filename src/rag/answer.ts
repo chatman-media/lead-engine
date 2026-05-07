@@ -1,6 +1,6 @@
 import { config } from "../config.ts";
 import type { KbRepo, KbSearchHit } from "../db/repos/kb.ts";
-import { composeSystemPrompt } from "../sales/prompt.ts";
+import { composeSystemPrompt, type SkillForPrompt } from "../sales/prompt.ts";
 import type { FunnelStage, Style } from "../sales/types.ts";
 import type { ChatClient, ChatMessage } from "./chat.ts";
 import type { EmbeddingClient } from "./embed.ts";
@@ -519,6 +519,12 @@ export interface AnswerInput {
    * grounding). NO_CONTEXT_MARKER only fires when BOTH are empty.
    */
   vacanciesBlock?: string;
+  /**
+   * Persuasion skills attached to the active style. Loaded from the DB
+   * (SkillsRepo.skillsForStyle) by the webhook and threaded through to
+   * `composeSystemPrompt`. Filtered by current stage at compose time.
+   */
+  skills?: readonly SkillForPrompt[];
 }
 
 /**
@@ -713,6 +719,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       includeFewShot: input.includeFewShot ?? true,
       ...(input.userFacts ? { userFacts: input.userFacts } : {}),
       ...(input.conversationSummary ? { conversationSummary: input.conversationSummary } : {}),
+      ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
     });
     temperature = input.style.model.temperature;
   } else {

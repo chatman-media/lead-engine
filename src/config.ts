@@ -169,6 +169,16 @@ export const config = {
      * `<topic>/` directory layout in `bun scripts/ingest.ts`). Default: off.
      */
     topicRouting: envTruthy("RAG_TOPIC_ROUTING", false),
+    /**
+     * Self-grade each assistant reply against the configured skill set:
+     * after generation, ask the LLM which skills were demonstrably used.
+     * Result is appended to `messages.meta_json.telemetry.skills_used`
+     * for later attribution (Phase 2 ELO, analytics dashboards).
+     *
+     * +1 LLM call per turn — fire-and-forget after reply, doesn't block
+     * the candidate. Default off; flip on during research windows.
+     */
+    skillGrading: envTruthy("RAG_SKILL_GRADING", false),
   },
   openai: {
     apiKey: envOptional("OPENAI_API_KEY"),
