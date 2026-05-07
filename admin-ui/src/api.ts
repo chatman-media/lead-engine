@@ -87,6 +87,23 @@ export interface SkillDto {
   intent: string;
   is_enabled: boolean;
   attached_to_styles: number;
+  outcomes: {
+    count: number;
+    wins: number;
+    losses: number;
+    draws: number;
+    win_rate: number | null;
+  };
+}
+
+export interface StyleRatingDto {
+  style_slug: string;
+  elo: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  last_outcome_at: number | null;
+  updated_at: number;
 }
 
 export interface KbChunkPreview {
@@ -452,6 +469,7 @@ export const api = {
       body: JSON.stringify({ is_enabled: enabled }),
     }),
   styleSkills: (styleId: number) => req<{ slugs: string[] }>(`/admin/api/styles/${styleId}/skills`),
+  styleRatings: () => req<{ ratings: StyleRatingDto[] }>("/admin/api/style-ratings"),
   setStyleSkills: (styleId: number, slugs: string[]) =>
     req<{ ok: true; attached: number }>(`/admin/api/styles/${styleId}/skills`, {
       method: "PUT",

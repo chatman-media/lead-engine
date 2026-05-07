@@ -187,6 +187,25 @@ if (config.telegram.visaChatId) {
 
 console.log(`[server] listening on http://localhost:${server.port}`);
 
+// Stale-lead sweep: every 6h, auto-close non-terminal leads that haven't
+// transitioned in 14d → records `lost` outcomes for skills the bot used.
+// This populates the loss side of the leaderboard; otherwise the win-rate
+// table would be biased by counting only the explicit `submitted`/`rejected`.
+{
+  const { scheduleStaleLeadSweep } = await import("./leads/stale-sweep.ts");
+  const { ConversationsRepo } = await import("./db/repos/conversations.ts");
+  const { MessagesRepo } = await import("./db/repos/messages.ts");
+  const { SkillOutcomesRepo, StyleRatingsRepo } = await import("./db/repos/skill-outcomes.ts");
+  scheduleStaleLeadSweep({
+    db,
+    outcomes: new SkillOutcomesRepo(db),
+    ratings: new StyleRatingsRepo(db),
+    messages: new MessagesRepo(db),
+    conversations: new ConversationsRepo(db),
+    styles: new StylesRepo(db),
+  });
+}
+
 // Pre-load Ollama models in the background. Without this, the first user
 // message after server start has to wait for ~3 min of cold qwen3 weights
 // loading (8B Q4_K_M ≈ 5 GB). Once warm, keep_alive=30m holds them. We

@@ -29,6 +29,7 @@ import {
   createListKbDocumentsHandler,
   createListLeadsHandler,
   createListSkillsHandler,
+  createListStyleRatingsHandler,
   createListStylesHandler,
   createListUsersHandler,
   createListVacanciesHandler,
@@ -212,6 +213,9 @@ export function createRouter(deps: AppDeps): Router {
   // Skill catalogue (read-only list + global enable/disable toggle).
   router.get("/admin/api/skills", createListSkillsHandler(apiDeps));
   router.patch("/admin/api/skills/:slug", createUpdateSkillHandler(apiDeps));
+
+  // Style ELO leaderboard (Phase 2 outcome attribution).
+  router.get("/admin/api/style-ratings", createListStyleRatingsHandler(apiDeps));
   router.get("/admin/api/experiments", createListExperimentsHandler(apiDeps));
   router.post("/admin/api/experiments", createCreateExperimentHandler(apiDeps));
   router.patch("/admin/api/experiments/:id", createSetExperimentStatusHandler(apiDeps));
