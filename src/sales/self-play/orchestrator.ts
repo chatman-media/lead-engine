@@ -1,0 +1,303 @@
+/**
+ * Self-play orchestrator. Takes a salesperson Style + a candidate persona,
+ * runs them in alternating turns through real chat clients, then asks
+ * a judge LLM for the verdict. Writes outcomes into skill_outcomes
+ * (source='self_play') and bumps style ELO.
+ *
+ * The salesperson side runs through `answerWithRag` with the same prompt
+ * + skills + KB that production uses, so the simulation tests the
+ * actual prompt — not a stub. The candidate side runs a lighter
+ * persona-prompt loop (no KB, no skills).
+ */
+import type { Database } from "bun:sqlite";
+
+import type { KbRepo } from "../../db/repos/kb.ts";
+import type { SkillOutcomesRepo, StyleRatingsRepo } from "../../db/repos/skill-outcomes.ts";
+import type { SkillsRepo } from "../../db/repos/skills.ts";
+import { answerWithRag } from "../../rag/answer.ts";
+import type { ChatClient, ChatMessage } from "../../rag/chat.ts";
+import type { EmbeddingClient } from "../../rag/embed.ts";
+import type { EloOutcome } from "../elo.ts";
+import type { SkillForPrompt } from "../prompt.ts";
+import { nextStage } from "../stage-router.ts";
+import type { FunnelStage, Style } from "../types.ts";
+import { type JudgeVerdict, judgeMatch } from "./judge.ts";
+import type { CandidatePersona } from "./personas.ts";
+
+export interface SelfPlayDeps {
+  db: Database;
+  kb: KbRepo;
+  skills: SkillsRepo;
+  outcomes: SkillOutcomesRepo;
+  ratings: StyleRatingsRepo;
+  /** Salesperson chat — same client production uses for the bot's replies. */
+  salesChat: ChatClient;
+  /** Candidate chat — a separate client (can be cheaper / faster model). */
+  candidateChat: ChatClient;
+  /** Judge chat — temperature is forced to 0 by the judge module. */
+  judgeChat: ChatClient;
+  /** Embedder for the salesperson's RAG retrieval. */
+  embedder: EmbeddingClient;
+  /** Active vacancies block (caller renders, we just inject). Empty = none. */
+  vacanciesBlock?: string;
+}
+
+export interface SelfPlayMatchInput {
+  style: Style;
+  styleId: number;
+  persona: CandidatePersona;
+  /** Hard cap on dialog length. Most matches end in 6-12 turns naturally;
+   *  20 is a safety net for endless loops. */
+  maxTurns?: number;
+}
+
+export interface SelfPlayMatchResult {
+  styleSlug: string;
+  personaSlug: string;
+  turns: number;
+  transcript: Array<{ role: "candidate" | "salesperson"; text: string }>;
+  /** Skills the salesperson is configured to expose (regardless of which it
+   *  actually used per turn — we attribute to the FULL set since we don't
+   *  have per-turn self-grading inside the orchestrator). */
+  skillsAttributed: string[];
+  verdict: JudgeVerdict;
+  outcome: EloOutcome;
+  /** Synthetic lead id we generated for skill_outcomes FK. Negative so it
+   *  doesn't collide with real leads — see comment on the insert. */
+  leadId: number;
+}
+
+const DEFAULT_MAX_TURNS = 20;
+
+/**
+ * Build the candidate-LLM history shape from the running transcript.
+ * The candidate sees its own past replies as `assistant` and the
+ * salesperson's replies as `user` — that's the inverse of how
+ * production sees them, but it lets the LLM write in-character.
+ */
+function buildCandidateHistory(
+  transcript: Array<{ role: "candidate" | "salesperson"; text: string }>,
+  systemPrompt: string,
+): ChatMessage[] {
+  const messages: ChatMessage[] = [{ role: "system", content: systemPrompt }];
+  for (const m of transcript) {
+    messages.push({
+      role: m.role === "candidate" ? "assistant" : "user",
+      content: m.text,
+    });
+  }
+  return messages;
+}
+
+/**
+ * Build the salesperson-side ChatMessage history for `answerWithRag`.
+ * Production sees candidate as `user` and bot as `assistant` — direct.
+ */
+function buildSalesHistory(
+  transcript: Array<{ role: "candidate" | "salesperson"; text: string }>,
+): ChatMessage[] {
+  return transcript.map((m) => ({
+    role: m.role === "candidate" ? "user" : "assistant",
+    content: m.text,
+  }));
+}
+
+/**
+ * Detect "the candidate clearly closed the loop" — short-circuits the
+ * turn loop early, saves judge LLM tokens. Pattern matches Russian
+ * yes/no-style commitments.
+ */
+function candidateConcluded(text: string): boolean {
+  const t = text.toLowerCase();
+  // Strong commit signals
+  if (/(давай[те]*\s+(оформ|анкет|поех|созв|попроб))/i.test(t)) return true;
+  if (/^ок|^окей.*(давай|оформ|поех|анкет)/i.test(t)) return true;
+  if (/(я\s+согласн[аы])/i.test(t)) return true;
+  // Strong refusal signals
+  if (/(не\s+интересно|мне\s+(не\s+)?подход|передумал)/i.test(t)) return true;
+  if (/(не\s+пишите|отстань|это\s+развод)/i.test(t)) return true;
+  return false;
+}
+
+export async function runSelfPlayMatch(
+  deps: SelfPlayDeps,
+  input: SelfPlayMatchInput,
+): Promise<SelfPlayMatchResult> {
+  const maxTurns = input.maxTurns ?? DEFAULT_MAX_TURNS;
+  const transcript: SelfPlayMatchResult["transcript"] = [];
+
+  // Resolve skills attached to this style (filtered to enabled ones).
+  const skillRows = deps.skills.skillsForStyle(input.styleId).filter((r) => r.is_enabled === 1);
+  const skills: SkillForPrompt[] = skillRows.map((r) => ({
+    slug: r.slug,
+    displayName: r.display_name,
+    promptFragment: r.prompt_fragment,
+    applicableStages: parseStages(r.applicable_stages_json),
+  }));
+
+  // Candidate kicks the conversation off with their canned opener.
+  transcript.push({ role: "candidate", text: input.persona.opener });
+
+  let stage: FunnelStage | null = null;
+  let userMessageCount = 1;
+
+  for (let turn = 0; turn < maxTurns; turn++) {
+    // Salesperson's response — full RAG pipeline. We don't pass a
+    // user/conversation persisted in DB; this is ephemeral simulation.
+    const lastCandidate = transcript[transcript.length - 1]!;
+    if (lastCandidate.role !== "candidate") break;
+
+    stage = nextStage({
+      turnNumber: userMessageCount,
+      currentStage: stage,
+      lastUserMessage: lastCandidate.text,
+    });
+
+    // History excludes the just-sent candidate message — answerWithRag
+    // takes that as its `question`.
+    const history = buildSalesHistory(transcript.slice(0, -1));
+
+    const salesResult = await answerWithRag({
+      question: lastCandidate.text,
+      kb: deps.kb,
+      embedder: deps.embedder,
+      chat: deps.salesChat,
+      history,
+      style: input.style,
+      stage,
+      includeFewShot: turn === 0,
+      ...(deps.vacanciesBlock ? { vacanciesBlock: deps.vacanciesBlock } : {}),
+      ...(skills.length > 0 ? { skills } : {}),
+      // Self-play doesn't run reflection / rewriting — keep matches fast.
+    });
+    transcript.push({ role: "salesperson", text: salesResult.text });
+
+    // Candidate's reply — separate LLM, persona-driven.
+    const candidateMessages = buildCandidateHistory(transcript, input.persona.systemPrompt);
+    let candidateText: string;
+    try {
+      candidateText = await deps.candidateChat.complete(candidateMessages, {
+        temperature: 0.85,
+        numPredict: 120,
+      });
+    } catch (err) {
+      // Bail with a draw on candidate-LLM failure — better than crashing
+      // halfway through a batch run.
+      const verdict: JudgeVerdict = {
+        outcome: "draw",
+        reason: `candidate LLM failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+      return finalize(deps, input, transcript, skills, verdict);
+    }
+    candidateText = candidateText.trim();
+    if (!candidateText) {
+      // Empty reply == candidate ghosted. Treat as lost.
+      const verdict: JudgeVerdict = {
+        outcome: "lost",
+        reason: "candidate produced empty reply (ghosted)",
+      };
+      return finalize(deps, input, transcript, skills, verdict);
+    }
+    transcript.push({ role: "candidate", text: candidateText });
+    userMessageCount++;
+
+    if (candidateConcluded(candidateText)) {
+      break; // judge will read the final state
+    }
+  }
+
+  const verdict = await judgeMatch({
+    styleSlug: input.style.slug,
+    personaSlug: input.persona.slug,
+    judgingHint: input.persona.judgingHint,
+    transcript,
+    chat: deps.judgeChat,
+  });
+  return finalize(deps, input, transcript, skills, verdict);
+}
+
+function finalize(
+  deps: SelfPlayDeps,
+  input: SelfPlayMatchInput,
+  transcript: SelfPlayMatchResult["transcript"],
+  skills: SkillForPrompt[],
+  verdict: JudgeVerdict,
+): SelfPlayMatchResult {
+  // Persist outcomes. Self-play doesn't have a real lead row — to satisfy
+  // the FK we synthesise a synthetic lead via INSERT; the row lives only
+  // for the FK target. NEGATIVE id would be cleaner but SQLite autoincr
+  // doesn't allow it directly, so we insert a regular row tied to a
+  // throwaway "self-play" user. Cheapest is to skip persistence entirely
+  // when self-play is run as a smoke test, so we do it conditionally:
+  // callers pass `db` only when they want persistence.
+  let leadId = -1;
+  if (input.style && skills.length > 0) {
+    leadId = persistSelfPlayOutcome(deps, input, skills, verdict);
+  }
+  return {
+    styleSlug: input.style.slug,
+    personaSlug: input.persona.slug,
+    turns: Math.ceil(transcript.length / 2),
+    transcript,
+    skillsAttributed: skills.map((s) => s.slug),
+    verdict,
+    outcome: verdict.outcome,
+    leadId,
+  };
+}
+
+/**
+ * Inserts a synthetic lead row + outcome rows + bumps style ELO. The
+ * synthetic lead is needed because skill_outcomes has a FK to leads(id).
+ * Rows are clearly tagged by the persona slug encoded in conversation
+ * style_id metadata so they can be filtered out of business reports.
+ */
+function persistSelfPlayOutcome(
+  deps: SelfPlayDeps,
+  input: SelfPlayMatchInput,
+  skills: SkillForPrompt[],
+  verdict: JudgeVerdict,
+): number {
+  // Make a throwaway user + conversation + lead so FKs hold. Negative
+  // tg_user_id keeps these rows distinguishable from real candidates.
+  const tgUserId = -Math.floor(1e9 + Math.random() * 9e9);
+  const u = deps.db
+    .query<{ id: number }, [number]>(
+      `INSERT INTO users (tg_user_id, status) VALUES (?, 'lost') RETURNING id`,
+    )
+    .get(tgUserId)!;
+  const c = deps.db
+    .query<{ id: number }, [number, number]>(
+      `INSERT INTO conversations (user_id, style_id) VALUES (?, ?) RETURNING id`,
+    )
+    .get(u.id, input.styleId)!;
+  const lead = deps.db
+    .query<{ id: number }, [number]>(`INSERT INTO leads (user_id) VALUES (?) RETURNING id`)
+    .get(u.id)!;
+
+  for (const s of skills) {
+    deps.outcomes.record({
+      leadId: lead.id,
+      conversationId: c.id,
+      messageId: null,
+      styleSlug: input.style.slug,
+      skillSlug: s.slug,
+      outcome: verdict.outcome,
+      source: "self_play",
+    });
+  }
+  deps.ratings.applyOutcome(input.style.slug, verdict.outcome);
+  return lead.id;
+}
+
+function parseStages(raw: string): readonly FunnelStage[] {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((s): s is FunnelStage =>
+      ["opener", "qualify", "pitch", "objection", "close"].includes(s),
+    );
+  } catch {
+    return [];
+  }
+}

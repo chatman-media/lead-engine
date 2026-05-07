@@ -18,7 +18,7 @@ export interface SkillOutcomeRow {
   style_slug: string | null;
   skill_slug: string;
   outcome: EloOutcome;
-  source: "lead_submitted" | "lead_rejected" | "lead_ghosted" | "manual";
+  source: "lead_submitted" | "lead_rejected" | "lead_ghosted" | "manual" | "self_play";
   created_at: number;
 }
 
