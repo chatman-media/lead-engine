@@ -108,6 +108,25 @@ describe("renderVacanciesBlock", () => {
     expect(a.id).toBeGreaterThan(0);
   });
 
+  test("renders ОТКРЫТЫЕ ЛОКАЦИИ from titles + hard redirect rule", () => {
+    repo.create({ title: "Корея — Караоке хостес", body: "₩110k" });
+    repo.create({ title: "Шаохинг / Иу — Premium хостес", body: "10k юаней" });
+    repo.create({ title: "Менеджер — Шаохинг / Иу / Корея", body: "..." });
+    const block = renderVacanciesBlock(repo.listActive());
+
+    // Headline is auto-extracted before " — " separator; deduped preserving order.
+    expect(block).toContain("ОТКРЫТЫЕ ЛОКАЦИИ:");
+    expect(block).toMatch(/ОТКРЫТЫЕ ЛОКАЦИИ:.*Корея/);
+    expect(block).toMatch(/ОТКРЫТЫЕ ЛОКАЦИИ:.*Шаохинг \/ Иу/);
+    expect(block).toMatch(/ОТКРЫТЫЕ ЛОКАЦИИ:.*Менеджер/);
+
+    // The hard redirect rule must be present so the LLM stops answering about
+    // unsupported locations from KB chunks.
+    expect(block).toContain("ЖЁСТКОЕ ПРАВИЛО");
+    expect(block).toContain("Дубай");
+    expect(block).toContain("НЕ переноси цифры");
+  });
+
   test("renders the URL line + link-handling instruction when set", () => {
     repo.create({
       title: "Корея",
