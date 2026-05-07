@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { type Admin, api } from "./api.ts";
 import { Layout } from "./components/Layout.tsx";
+import { Analytics } from "./pages/Analytics.tsx";
 import { Chat } from "./pages/Chat.tsx";
 import { Chats } from "./pages/Chats.tsx";
 import { Experiments } from "./pages/Experiments.tsx";
@@ -75,6 +76,7 @@ export function App() {
               <Routes>
                 <Route index element={<Navigate to="status" replace />} />
                 <Route path="status" element={<Status />} />
+                <Route path="analytics" element={<Analytics />} />
                 <Route path="chats" element={<Chats />} />
                 <Route path="chats/:id" element={<Chat />} />
                 <Route path="users" element={<Users />} />

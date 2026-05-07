@@ -395,6 +395,51 @@ export const api = {
       method: "DELETE",
     }),
 
+  analytics: (window: "1h" | "24h" | "7d" | "30d" = "24h") =>
+    req<{
+      window: string;
+      window_seconds: number;
+      since_unix: number;
+      total_assistant_messages: number;
+      by_path: Array<{ path: string; count: number }>;
+      by_topic: Array<{ topic: string; count: number }>;
+      latency: {
+        total_ms: {
+          p50: number | null;
+          p95: number | null;
+          p99: number | null;
+          avg: number | null;
+          count: number;
+        };
+        retrieval_ms: {
+          p50: number | null;
+          p95: number | null;
+          p99: number | null;
+          avg: number | null;
+          count: number;
+        };
+        generation_ms: {
+          p50: number | null;
+          p95: number | null;
+          p99: number | null;
+          avg: number | null;
+          count: number;
+        };
+      };
+      ungrounded_count: number;
+      hybrid_count: number;
+      rewrite_count: number;
+    }>(`/admin/api/analytics?window=${window}`),
+
+  ingestKbDocument: (input: { title: string; body: string; topic?: string | null }) =>
+    req<{ ok: true; document_id: number; chunks: number; created: boolean }>(
+      "/admin/api/kb/ingest",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    ),
+
   // Lead pipeline
   leads: (state?: LeadState) =>
     req<{ leads: Lead[]; counts: LeadCounts }>(`/admin/api/leads${state ? `?state=${state}` : ""}`),

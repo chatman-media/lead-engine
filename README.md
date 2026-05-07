@@ -1,5 +1,7 @@
 # tg-chatbot
 
+[![CI](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml/badge.svg)](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml)
+
 Telegram-бот с RAG по базе знаний, анкетой по токену и админкой с ручным
 перехватом диалога. Всё на чистом Bun без HTTP-фреймворка, БД — встроенный
 `bun:sqlite` + расширение `sqlite-vec`. Поддерживаются OpenAI-совместимые
