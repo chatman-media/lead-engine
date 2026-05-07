@@ -23,6 +23,67 @@ async function serveStatic(pathname: string): Promise<Response | null> {
   return null;
 }
 
+/**
+ * Standard security headers applied to every response served by this
+ * process. CSP is the lock — admin SPA loads same-origin JS/CSS only,
+ * inline `style="..."` attributes from React require `'unsafe-inline'`
+ * for style-src (low risk), but no inline scripts so script-src stays
+ * tight.
+ *
+ * `frame-ancestors 'none'` prevents clickjacking on the admin SPA.
+ * `Strict-Transport-Security` is set unconditionally — production runs
+ * behind ngrok/CF tunnel which terminates TLS, and HSTS on plaintext
+ * dev (localhost) is harmless because browsers ignore HSTS for
+ * loopback addresses.
+ *
+ * Telegram file proxy responses have a different CSP-frame profile,
+ * but applying these headers globally is fine: image responses don't
+ * execute CSP-restricted content anyway.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  "content-security-policy": [
+    "default-src 'self'",
+    "script-src 'self'",
+    // 'unsafe-inline' for style-src is needed for React inline styles
+    // (`style={{...}}`). No inline `<style>` blocks elsewhere — limited blast radius.
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    // wss: for the AdminWs connection on the same origin — Bun upgrades
+    // ws/wss based on the request scheme so listing both keeps dev (ws)
+    // and prod (wss) working.
+    "connect-src 'self' ws: wss:",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+  ].join("; "),
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "strict-origin-when-cross-origin",
+  // HSTS: 1 year, with subdomains. Browsers ignore on http://localhost
+  // so this is safe for dev too. preload omitted — let ops opt in later.
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
+  // Telegram bot itself has no need for browser features; lock all of
+  // them down. Comma-separated list per the Permissions-Policy spec.
+  "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()",
+};
+
+/** Wraps a Response so every outbound message carries the security
+ *  headers above. Existing headers on the response take precedence so
+ *  per-route overrides (e.g. `cache-control: no-store`) still work. */
+function withSecurityHeaders(res: Response): Response {
+  const headers = new Headers(res.headers);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
+    if (!headers.has(k)) headers.set(k, v);
+  }
+  return new Response(res.body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
+  });
+}
+
 export interface CreateServerOptions extends Omit<AppDeps, "bus"> {
   port: number;
   /** Path of the WebSocket endpoint. Defaults to /admin/api/ws. */
@@ -57,10 +118,10 @@ export function createServer(opts: CreateServerOptions): Server<AdminWsData> {
         !url.pathname.startsWith("/admin/api/")
       ) {
         const staticRes = await serveStatic(url.pathname);
-        if (staticRes) return staticRes;
+        if (staticRes) return withSecurityHeaders(staticRes);
       }
 
-      return router.handle(req);
+      return withSecurityHeaders(await router.handle(req));
     },
     websocket: {
       open(ws: ServerWebSocket<AdminWsData>) {
