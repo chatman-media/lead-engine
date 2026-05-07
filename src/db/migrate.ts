@@ -4,6 +4,11 @@ import { join, resolve } from "node:path";
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../migrations");
 
+function isDuplicateColumnError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.includes("duplicate column name");
+}
+
 export function runMigrations(db: Database, dir: string = MIGRATIONS_DIR) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS _migrations (
@@ -26,10 +31,22 @@ export function runMigrations(db: Database, dir: string = MIGRATIONS_DIR) {
   for (const file of files) {
     if (applied.has(file)) continue;
     const sql = readFileSync(join(dir, file), "utf8");
-    db.transaction(() => {
+    let schemaAlreadyMatched = false;
+    try {
       db.exec(sql);
+    } catch (e) {
+      // ALTER ADD COLUMN fails if someone applied the DDL out-of-band or the
+      // DB drifted vs `_migrations`. Record the migration so newer files can run.
+      if (!isDuplicateColumnError(e)) throw e;
+      schemaAlreadyMatched = true;
+    }
+    db.transaction(() => {
       db.run("INSERT INTO _migrations (name) VALUES (?)", [file]);
     })();
-    console.log(`[migrate] applied ${file}`);
+    console.log(
+      schemaAlreadyMatched
+        ? `[migrate] marked ${file} (schema already had change)`
+        : `[migrate] applied ${file}`,
+    );
   }
 }
