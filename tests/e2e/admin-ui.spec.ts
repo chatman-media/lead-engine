@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 
 const ADMIN_EMAIL = "playwright@admin.test";
 const ADMIN_PASSWORD = "playwright-pw";
@@ -19,11 +19,7 @@ async function loginPage(page: Page) {
   await page.waitForURL("**/admin/chats");
 }
 
-async function login(
-  req: APIRequestContext,
-  email = ADMIN_EMAIL,
-  password = ADMIN_PASSWORD,
-) {
+async function login(req: APIRequestContext, email = ADMIN_EMAIL, password = ADMIN_PASSWORD) {
   return req.post("/admin/api/login", {
     data: { email, password },
   });
@@ -117,14 +113,11 @@ test.describe("Admin Chats page", () => {
     const { conversations } = (await convRes.json()) as {
       conversations: Array<{ id: number; user: { tg_user_id: number } }>;
     };
-    const charlieConv = conversations.find(
-      (c) => c.user.tg_user_id === 300,
-    );
+    const charlieConv = conversations.find((c) => c.user.tg_user_id === 300);
     if (charlieConv) {
-      await request.post(
-        `/admin/api/conversations/${charlieConv.id}/take`,
-        { headers: { cookie: await adminCookie(request) } },
-      );
+      await request.post(`/admin/api/conversations/${charlieConv.id}/take`, {
+        headers: { cookie: await adminCookie(request) },
+      });
       // Then put back in queued via a re-seed won't work — instead just verify
       // take works and the badge shows
     }
@@ -197,23 +190,15 @@ test.describe("Admin Chat detail", () => {
     await page.getByTestId("reply-input").fill("Добрый день, помогу!");
     await page.getByTestId("send-btn").click();
     // Message should appear in the messages list (not just the textarea)
-    await expect(
-      page.getByTestId("messages-list").getByText("Добрый день, помогу!"),
-    ).toBeVisible();
+    await expect(page.getByTestId("messages-list").getByText("Добрый день, помогу!")).toBeVisible();
     // Input cleared
     await expect(page.getByTestId("reply-input")).toHaveValue("");
   });
 
-  test("release returns conversation to ai mode", async ({
-    page,
-    request,
-  }) => {
+  test("release returns conversation to ai mode", async ({ page, request }) => {
     // Take first via API
     const c = await adminCookie(request);
-    await request.post(
-      `/admin/api/conversations/${convId}/take`,
-      { headers: { cookie: c } },
-    );
+    await request.post(`/admin/api/conversations/${convId}/take`, { headers: { cookie: c } });
 
     await loginPage(page);
     await page.goto(`/admin/chats/${convId}`);

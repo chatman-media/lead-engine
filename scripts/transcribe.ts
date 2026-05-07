@@ -200,9 +200,7 @@ async function main() {
 
   console.log(`[transcribe] ${tasks.length} voice messages found`);
   console.log(`             ${done} already cached, ${todo.length} to process`);
-  console.log(
-    `             ~${Math.round(totalSec / 60)}min audio queued (${totalSec}s)`,
-  );
+  console.log(`             ~${Math.round(totalSec / 60)}min audio queued (${totalSec}s)`);
 
   if (args.dryRun) {
     console.log("[transcribe] dry-run: not calling API. Files that would be transcribed:");
@@ -240,7 +238,7 @@ async function main() {
     const tag = `[${i + 1}/${todo.length}] ${t.chat} (${t.duration}s)`;
     try {
       const text = await transcribeOne(t, cfg);
-      writeFileSync(t.cachePath, text + "\n", "utf8");
+      writeFileSync(t.cachePath, `${text}\n`, "utf8");
       ok++;
       const preview = text.replace(/\s+/g, " ").slice(0, 60);
       console.log(`  ${tag}  ✓  ${preview}${text.length > 60 ? "…" : ""}`);
@@ -250,9 +248,7 @@ async function main() {
     }
   }
   console.log(`[transcribe] done: ${ok} ok, ${failed} failed, cached in ${transcriptsDir}`);
-  console.log(
-    `[transcribe] re-run "extract-tg.ts" to inline transcripts into dialog files.`,
-  );
+  console.log(`[transcribe] re-run "extract-tg.ts" to inline transcripts into dialog files.`);
 }
 
 main().catch((err) => {

@@ -6,13 +6,13 @@ import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { ExperimentsRepo } from "@/db/repos/experiments.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
-import { seedBuiltinStyles, StylesRepo } from "@/db/repos/styles.ts";
+import { StylesRepo, seedBuiltinStyles } from "@/db/repos/styles.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
 import { coldDirectPas } from "@/sales/styles/cold-direct-pas.ts";
 import { empatheticNepq } from "@/sales/styles/empathetic-nepq.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 
 const SECRET = "s";
 
@@ -38,14 +38,11 @@ beforeEach(async () => {
   ctx = setup();
   const admins = new AdminsRepo(ctx.db);
   await admins.create({ email: "op@x.test", password: "longenough" });
-  const login = await fetch(
-    `http://127.0.0.1:${ctx.server.port}/admin/api/login`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
-    },
-  );
+  const login = await fetch(`http://127.0.0.1:${ctx.server.port}/admin/api/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+  });
   const set = login.headers.get("set-cookie")!;
   cookie = set.split(";")[0]!;
 }, 30_000);
@@ -151,15 +148,10 @@ describe("GET /admin/api/conversations/:id/export.jsonl", () => {
         { user: "Аня, 24", assistant: "круто, расскажи про опыт" },
       ],
     });
-    const res = await fetch(
-      url(`/admin/api/conversations/${id}/export.jsonl`),
-      authed(),
-    );
+    const res = await fetch(url(`/admin/api/conversations/${id}/export.jsonl`), authed());
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/jsonl");
-    expect(res.headers.get("content-disposition")).toContain(
-      `filename="conversation-${id}.jsonl"`,
-    );
+    expect(res.headers.get("content-disposition")).toContain(`filename="conversation-${id}.jsonl"`);
     expect(res.headers.get("x-export-count")).toBe("1");
 
     const body = await res.text();
@@ -196,10 +188,7 @@ describe("GET /admin/api/conversations/:id/export.jsonl", () => {
       stage: "qualify",
       exchanges: [{ user: "hi", assistant: "yo", stage: "opener" }],
     });
-    const res = await fetch(
-      url(`/admin/api/conversations/${id}/export.jsonl`),
-      authed(),
-    );
+    const res = await fetch(url(`/admin/api/conversations/${id}/export.jsonl`), authed());
     const conv = parseJsonl(await res.text())[0]!;
     expect(conv.style_slug).toBe("flirty-belfort-v1");
     expect(conv.experiment_slug).toBe("april-test");
@@ -208,27 +197,18 @@ describe("GET /admin/api/conversations/:id/export.jsonl", () => {
   });
 
   test("404 for unknown id", async () => {
-    const res = await fetch(
-      url("/admin/api/conversations/9999/export.jsonl"),
-      authed(),
-    );
+    const res = await fetch(url("/admin/api/conversations/9999/export.jsonl"), authed());
     expect(res.status).toBe(404);
   });
 
   test("400 for non-numeric id", async () => {
-    const res = await fetch(
-      url("/admin/api/conversations/abc/export.jsonl"),
-      authed(),
-    );
+    const res = await fetch(url("/admin/api/conversations/abc/export.jsonl"), authed());
     expect(res.status).toBe(400);
   });
 
   test("conversation with no messages is exported with empty messages[]", async () => {
     const id = seedConversation({ tgUserId: 300, exchanges: [] });
-    const res = await fetch(
-      url(`/admin/api/conversations/${id}/export.jsonl`),
-      authed(),
-    );
+    const res = await fetch(url(`/admin/api/conversations/${id}/export.jsonl`), authed());
     const conv = parseJsonl(await res.text())[0]!;
     expect(conv.messages).toEqual([]);
   });
@@ -236,11 +216,7 @@ describe("GET /admin/api/conversations/:id/export.jsonl", () => {
 
 describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
   beforeEach(() => {
-    seedBuiltinStyles(new StylesRepo(ctx.db), [
-      flirtyBelfort,
-      empatheticNepq,
-      coldDirectPas,
-    ]);
+    seedBuiltinStyles(new StylesRepo(ctx.db), [flirtyBelfort, empatheticNepq, coldDirectPas]);
   });
 
   test("requires auth", async () => {
@@ -257,10 +233,7 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
       tgUserId: 2,
       exchanges: [{ user: "ku", assistant: "ka" }],
     });
-    const res = await fetch(
-      url("/admin/api/conversations/export.jsonl"),
-      authed(),
-    );
+    const res = await fetch(url("/admin/api/conversations/export.jsonl"), authed());
     expect(res.status).toBe(200);
     const lines = parseJsonl(await res.text());
     expect(lines.length).toBe(2);
@@ -351,10 +324,7 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
       mode: "ai",
       exchanges: [{ user: "a", assistant: "b" }],
     });
-    const res = await fetch(
-      url("/admin/api/conversations/export.jsonl?mode=human"),
-      authed(),
-    );
+    const res = await fetch(url("/admin/api/conversations/export.jsonl?mode=human"), authed());
     const lines = parseJsonl(await res.text());
     expect(lines.length).toBe(1);
     expect(lines[0]!.tg_user_id).toBe(80);
@@ -368,10 +338,7 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
         exchanges: [{ user: "a", assistant: "b" }],
       });
     }
-    const res = await fetch(
-      url("/admin/api/conversations/export.jsonl?limit=2"),
-      authed(),
-    );
+    const res = await fetch(url("/admin/api/conversations/export.jsonl?limit=2"), authed());
     const lines = parseJsonl(await res.text());
     expect(lines.length).toBe(2);
   });
@@ -383,10 +350,7 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
       tgUserId: 9999,
       exchanges: [{ user: "a", assistant: "b" }],
     });
-    const res = await fetch(
-      url("/admin/api/conversations/export.jsonl?limit=99999"),
-      authed(),
-    );
+    const res = await fetch(url("/admin/api/conversations/export.jsonl?limit=99999"), authed());
     expect(res.status).toBe(200);
   });
 
@@ -395,20 +359,14 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
       tgUserId: 5000,
       exchanges: [{ user: "a", assistant: "b" }],
     });
-    const res = await fetch(
-      url("/admin/api/conversations/export.jsonl?limit=abc"),
-      authed(),
-    );
+    const res = await fetch(url("/admin/api/conversations/export.jsonl?limit=abc"), authed());
     expect(res.status).toBe(200);
     const lines = parseJsonl(await res.text());
     expect(lines.length).toBe(1);
   });
 
   test("empty result returns 200 with empty body and count=0", async () => {
-    const res = await fetch(
-      url(`/admin/api/conversations/export.jsonl?style_id=99999`),
-      authed(),
-    );
+    const res = await fetch(url(`/admin/api/conversations/export.jsonl?style_id=99999`), authed());
     expect(res.status).toBe(200);
     expect(res.headers.get("x-export-count")).toBe("0");
     expect((await res.text()).trim()).toBe("");
@@ -436,9 +394,7 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
 
     const flirty = new StylesRepo(ctx.db).bySlug("flirty-belfort-v1")!;
     const res = await fetch(
-      url(
-        `/admin/api/conversations/export.jsonl?style_id=${flirty.id}&user_status=qualified`,
-      ),
+      url(`/admin/api/conversations/export.jsonl?style_id=${flirty.id}&user_status=qualified`),
       authed(),
     );
     const lines = parseJsonl(await res.text());

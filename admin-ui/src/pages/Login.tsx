@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api.ts";
 import { ws } from "../App.tsx";
+import { api } from "../api.ts";
 
 export function Login() {
   const navigate = useNavigate();
@@ -39,7 +39,9 @@ export function Login() {
 
         <form onSubmit={handleSubmit} noValidate data-testid="login-form">
           <div className="field">
-            <label className="field-label" htmlFor="login-email">Email</label>
+            <label className="field-label" htmlFor="login-email">
+              Email
+            </label>
             <input
               id="login-email"
               type="email"
@@ -53,7 +55,9 @@ export function Login() {
           </div>
 
           <div className="field" style={{ marginBottom: 24 }}>
-            <label className="field-label" htmlFor="login-password">Password</label>
+            <label className="field-label" htmlFor="login-password">
+              Password
+            </label>
             <input
               id="login-password"
               type="password"

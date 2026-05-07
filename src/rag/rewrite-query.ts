@@ -46,10 +46,7 @@ const SYSTEM_PROMPT = `Ты переформулируешь вопрос кан
  * Saves an LLM call (and thus latency + $) on the majority of inbound
  * messages which are full standalone questions, not follow-ups.
  */
-export function questionNeedsRewrite(
-  question: string,
-  history?: ChatMessage[],
-): boolean {
+export function questionNeedsRewrite(question: string, history?: ChatMessage[]): boolean {
   const trimmed = question.trim();
   if (!trimmed) return false;
 
@@ -111,16 +108,15 @@ export async function rewriteQuery(input: RewriteQueryInput): Promise<string> {
 
 /** Strips think-tags, "ответ:" prefixes, markdown, line breaks. Falls back
  *  to original on empty/garbage output. Exported for unit tests. */
-export function sanitizeRewritten(
-  raw: string,
-  fallback: string,
-  maxLength: number,
-): string {
+export function sanitizeRewritten(raw: string, fallback: string, maxLength: number): string {
   let s = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
   s = s.replace(/```[\s\S]*?```/g, "");
   s = s.replace(/^\s*(ответ|answer)\s*[:\-—]\s*/i, "");
   // Take first non-empty line — the model occasionally adds explanations after.
-  const firstLine = s.split("\n").map((l) => l.trim()).find((l) => l.length > 0);
+  const firstLine = s
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
   if (!firstLine) return fallback;
   const trimmed = firstLine.length > maxLength ? firstLine.slice(0, maxLength) : firstLine;
   return trimmed || fallback;

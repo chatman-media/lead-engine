@@ -274,10 +274,7 @@ class ApiError extends Error {
   }
 }
 
-async function req<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
+async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     ...init,
     headers: {
@@ -288,10 +285,7 @@ async function req<T>(
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(
-      res.status,
-      (body as { error?: string }).error ?? res.statusText,
-    );
+    throw new ApiError(res.status, (body as { error?: string }).error ?? res.statusText);
   }
   return res.json() as Promise<T>;
 }
@@ -303,14 +297,11 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
 
-  logout: () =>
-    req<{ ok: boolean }>("/admin/api/logout", { method: "POST" }),
+  logout: () => req<{ ok: boolean }>("/admin/api/logout", { method: "POST" }),
 
-  me: () =>
-    req<{ admin: Admin }>("/admin/api/me"),
+  me: () => req<{ admin: Admin }>("/admin/api/me"),
 
-  users: () =>
-    req<{ users: User[] }>("/admin/api/users"),
+  users: () => req<{ users: User[] }>("/admin/api/users"),
 
   userDetail: (id: number) =>
     req<{
@@ -391,9 +382,7 @@ export const api = {
   },
 
   kbDocument: (id: number) =>
-    req<{ document: KbDocument; chunks: KbChunkPreview[] }>(
-      `/admin/api/kb/documents/${id}`,
-    ),
+    req<{ document: KbDocument; chunks: KbChunkPreview[] }>(`/admin/api/kb/documents/${id}`),
 
   updateKbDocument: (id: number, patch: { topic: string | null }) =>
     req<{ document: KbDocument }>(`/admin/api/kb/documents/${id}`, {
@@ -408,15 +397,10 @@ export const api = {
 
   // Lead pipeline
   leads: (state?: LeadState) =>
-    req<{ leads: Lead[]; counts: LeadCounts }>(
-      `/admin/api/leads${state ? `?state=${state}` : ""}`,
-    ),
+    req<{ leads: Lead[]; counts: LeadCounts }>(`/admin/api/leads${state ? `?state=${state}` : ""}`),
 
   promoteLead: (conversationId: number) =>
-    req<{ lead: Lead }>(
-      `/admin/api/leads/from-conversation/${conversationId}`,
-      { method: "POST" },
-    ),
+    req<{ lead: Lead }>(`/admin/api/leads/from-conversation/${conversationId}`, { method: "POST" }),
 
   approveLead: (id: number) =>
     req<{ lead: Lead }>(`/admin/api/leads/${id}/approve`, { method: "POST" }),
@@ -433,13 +417,11 @@ export const api = {
     }),
 
   submitLeadToVisa: (id: number) =>
-    req<{ lead: Lead; application_id: string }>(
-      `/admin/api/leads/${id}/submit-to-visa`,
-      { method: "POST" },
-    ),
+    req<{ lead: Lead; application_id: string }>(`/admin/api/leads/${id}/submit-to-visa`, {
+      method: "POST",
+    }),
 
-  leadDetail: (id: number) =>
-    req<LeadDetail>(`/admin/api/leads/${id}`),
+  leadDetail: (id: number) => req<LeadDetail>(`/admin/api/leads/${id}`),
 
   updateVisaDocs: (id: number, docs: Partial<VisaDocs>) =>
     req<{ visa_docs: VisaDocs }>(`/admin/api/leads/${id}/visa-docs`, {
@@ -454,10 +436,7 @@ export const api = {
     }),
 
   deleteLeadNote: (leadId: number, noteId: number) =>
-    req<{ ok: boolean }>(
-      `/admin/api/leads/${leadId}/notes/${noteId}`,
-      { method: "DELETE" },
-    ),
+    req<{ ok: boolean }>(`/admin/api/leads/${leadId}/notes/${noteId}`, { method: "DELETE" }),
 
   deleteLead: (id: number) =>
     req<{ ok: boolean; deleted: number }>(`/admin/api/leads/${id}`, {
@@ -471,41 +450,29 @@ export const api = {
     }),
 
   take: (id: number) =>
-    req<{ conversation: Conversation }>(
-      `/admin/api/conversations/${id}/take`,
-      { method: "POST" },
-    ),
+    req<{ conversation: Conversation }>(`/admin/api/conversations/${id}/take`, { method: "POST" }),
 
   release: (id: number) =>
-    req<{ conversation: Conversation }>(
-      `/admin/api/conversations/${id}/release`,
-      { method: "POST" },
-    ),
+    req<{ conversation: Conversation }>(`/admin/api/conversations/${id}/release`, {
+      method: "POST",
+    }),
 
   sendMessage: (id: number, text: string) =>
-    req<{ ok: boolean }>(
-      `/admin/api/conversations/${id}/reply`,
-      {
-        method: "POST",
-        body: JSON.stringify({ text }),
-      },
-    ),
+    req<{ ok: boolean }>(`/admin/api/conversations/${id}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
 
   deleteConversation: (id: number) =>
-    req<{ ok: boolean; deleted: number }>(
-      `/admin/api/conversations/${id}`,
-      { method: "DELETE" },
-    ),
+    req<{ ok: boolean; deleted: number }>(`/admin/api/conversations/${id}`, { method: "DELETE" }),
 
   /** URL of the per-conversation JSONL export. Open in a new tab to trigger
    *  the browser's download flow (the server sets Content-Disposition). */
-  conversationExportUrl: (id: number) =>
-    `/admin/api/conversations/${id}/export.jsonl`,
+  conversationExportUrl: (id: number) => `/admin/api/conversations/${id}/export.jsonl`,
 
   /** Same-origin proxy URL for a Telegram file_id. Auth via admin
    *  session cookie. Used directly in <img src> / <video src>. */
-  tgFileUrl: (fileId: string) =>
-    `/admin/api/tg-files/${encodeURIComponent(fileId)}`,
+  tgFileUrl: (fileId: string) => `/admin/api/tg-files/${encodeURIComponent(fileId)}`,
 
   /** URL of the bulk JSONL export. Filters are forwarded as query params. */
   bulkConversationExportUrl: (filters: {
@@ -517,8 +484,7 @@ export const api = {
   }) => {
     const q = new URLSearchParams();
     if (filters.styleId !== undefined) q.set("style_id", String(filters.styleId));
-    if (filters.experimentId !== undefined)
-      q.set("experiment_id", String(filters.experimentId));
+    if (filters.experimentId !== undefined) q.set("experiment_id", String(filters.experimentId));
     if (filters.userStatus) q.set("user_status", filters.userStatus);
     if (filters.mode) q.set("mode", filters.mode);
     if (filters.limit !== undefined) q.set("limit", String(filters.limit));
@@ -529,8 +495,7 @@ export const api = {
   // ─── Sales-style engine (Phase 2b) ───────────────────────────────────
   styles: () => req<{ styles: StyleSummary[] }>("/admin/api/styles"),
 
-  style: (id: number) =>
-    req<{ style: StyleDetail }>(`/admin/api/styles/${id}`),
+  style: (id: number) => req<{ style: StyleDetail }>(`/admin/api/styles/${id}`),
 
   editStyle: (id: number, config: unknown) =>
     req<{ style: StyleDetail }>(`/admin/api/styles/${id}`, {
@@ -558,8 +523,7 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  experiments: () =>
-    req<{ experiments: Experiment[] }>("/admin/api/experiments"),
+  experiments: () => req<{ experiments: Experiment[] }>("/admin/api/experiments"),
 
   createExperiment: (input: {
     slug: string;

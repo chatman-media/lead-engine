@@ -1,18 +1,17 @@
 import { activeEmbeddingDim, config, llmIsConfigured } from "./config.ts";
-import { seedBuiltinStyles, StylesRepo } from "./db/repos/styles.ts";
+import { StylesRepo, seedBuiltinStyles } from "./db/repos/styles.ts";
 import { getDb } from "./db/sqlite.ts";
+import type { ChatClient } from "./rag/chat.ts";
 import { OpenAIChatClient } from "./rag/chat.ts";
+import type { EmbeddingClient } from "./rag/embed.ts";
 import { OpenAIEmbeddingClient } from "./rag/embed.ts";
 import { OllamaChatClient } from "./rag/providers/ollama-chat.ts";
 import { OllamaEmbeddingClient } from "./rag/providers/ollama-embed.ts";
 import { OpenRouterChatClient } from "./rag/providers/openrouter-chat.ts";
-import type { ChatClient } from "./rag/chat.ts";
-import type { EmbeddingClient } from "./rag/embed.ts";
-import { getStyle } from "./sales/styles/index.ts";
-import { STYLES as BUILTIN_STYLES } from "./sales/styles/index.ts";
+import { STYLES as BUILTIN_STYLES, getStyle } from "./sales/styles/index.ts";
 import { createServer } from "./server.ts";
-import type { RagDeps } from "./telegram/webhook.ts";
 import { TelegramClient } from "./telegram/client.ts";
+import type { RagDeps } from "./telegram/webhook.ts";
 
 const db = getDb();
 const telegram = new TelegramClient({
@@ -26,9 +25,7 @@ const telegram = new TelegramClient({
   const stylesRepo = new StylesRepo(db);
   const seedResult = seedBuiltinStyles(stylesRepo, BUILTIN_STYLES);
   if (seedResult.inserted.length > 0) {
-    console.log(
-      `[server] seeded built-in sales styles: ${seedResult.inserted.join(", ")}`,
-    );
+    console.log(`[server] seeded built-in sales styles: ${seedResult.inserted.join(", ")}`);
   }
   if (seedResult.skipped.length > 0) {
     console.log(
@@ -187,14 +184,20 @@ console.log(`[server] listening on http://localhost:${server.port}`);
 if (rag) {
   const startedAt = Date.now();
   Promise.all([
-    rag.embedder.embed(["warm-up"]).then(() => "embed").catch((err) => {
-      console.warn("[server] embed warm-up failed:", err?.message ?? err);
-      return null;
-    }),
-    rag.chat.complete([{ role: "user", content: "ok" }]).then(() => "chat").catch((err) => {
-      console.warn("[server] chat warm-up failed:", err?.message ?? err);
-      return null;
-    }),
+    rag.embedder
+      .embed(["warm-up"])
+      .then(() => "embed")
+      .catch((err) => {
+        console.warn("[server] embed warm-up failed:", err?.message ?? err);
+        return null;
+      }),
+    rag.chat
+      .complete([{ role: "user", content: "ok" }])
+      .then(() => "chat")
+      .catch((err) => {
+        console.warn("[server] chat warm-up failed:", err?.message ?? err);
+        return null;
+      }),
   ]).then((results) => {
     const ok = results.filter(Boolean).join("+");
     console.log(

@@ -4,11 +4,7 @@ import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
-import {
-  countMediaForConversation,
-  extractIntake,
-  parseIntakeJson,
-} from "@/leads/intake.ts";
+import { countMediaForConversation, extractIntake, parseIntakeJson } from "@/leads/intake.ts";
 import { isIntakeComplete } from "@/leads/templates.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 
@@ -44,7 +40,7 @@ describe("parseIntakeJson", () => {
   });
 
   test("strips think tags and code fences", () => {
-    const raw = "<think>...</think>\n```json\n{\"city\":\"Сочи\"}\n```";
+    const raw = '<think>...</think>\n```json\n{"city":"Сочи"}\n```';
     expect(parseIntakeJson(raw)).toEqual({ city: "Сочи" });
   });
 
@@ -55,9 +51,7 @@ describe("parseIntakeJson", () => {
   });
 
   test("ignores non-string values and oversized strings", () => {
-    const out = parseIntakeJson(
-      `{"height":165,"city":"${"x".repeat(200)}","weight":"52"}`,
-    );
+    const out = parseIntakeJson(`{"height":165,"city":"${"x".repeat(200)}","weight":"52"}`);
     expect(out.height).toBeUndefined();
     expect(out.city).toBeUndefined();
     expect(out.weight).toBe("52");
@@ -126,9 +120,7 @@ describe("extractIntake + isIntakeComplete", () => {
   test("merges existing facts with extractor output and media counts", async () => {
     const chat = fakeChat('{"height":"165","weight":"52"}');
     const intake = await extractIntake({
-      messages: [
-        { role: "user", content: "165 рост, 52 вес" },
-      ],
+      messages: [{ role: "user", content: "165 рост, 52 вес" }],
       mediaCounts: { photos: 8, videos: 3 },
       chat,
       existingIntake: { city: "Москва" },

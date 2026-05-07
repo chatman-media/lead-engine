@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  ChatApiError,
-  OpenAIChatClient,
-  type ChatMessage,
-  type FetchLike,
-} from "@/rag/chat.ts";
+import { ChatApiError, type ChatMessage, type FetchLike, OpenAIChatClient } from "@/rag/chat.ts";
 
 interface RecordedCall {
   url: string;
@@ -14,9 +9,10 @@ interface RecordedCall {
   body: { model: string; messages: ChatMessage[]; temperature?: number };
 }
 
-function fakeFetch(
-  responder: (call: RecordedCall) => Response,
-): { fetchImpl: FetchLike; calls: RecordedCall[] } {
+function fakeFetch(responder: (call: RecordedCall) => Response): {
+  fetchImpl: FetchLike;
+  calls: RecordedCall[];
+} {
   const calls: RecordedCall[] = [];
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
@@ -43,13 +39,11 @@ describe("OpenAIChatClient", () => {
   test("posts /chat/completions and returns assistant text", async () => {
     const { fetchImpl, calls } = fakeFetch((call) => {
       expect(call.url).toBe("https://api.test/v1/chat/completions");
-      expect(call.headers["authorization"]).toBe("Bearer K");
+      expect(call.headers.authorization).toBe("Bearer K");
       expect(call.body.model).toBe("gpt-4o-mini");
       return new Response(
         JSON.stringify({
-          choices: [
-            { index: 0, message: { role: "assistant", content: "hello back" } },
-          ],
+          choices: [{ index: 0, message: { role: "assistant", content: "hello back" } }],
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       );

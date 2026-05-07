@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
-import {
-  cleanSummary,
-  summarizeConversation,
-} from "@/rag/summarize-conversation.ts";
+import { cleanSummary, summarizeConversation } from "@/rag/summarize-conversation.ts";
 
 function fakeChat(reply: string): ChatClient & {
   calls: number;
@@ -30,9 +27,7 @@ describe("cleanSummary", () => {
   });
 
   test("strips markdown fences", () => {
-    expect(cleanSummary("```\nкандидат хотел уехать.\n```", 600)).toBe(
-      "кандидат хотел уехать.",
-    );
+    expect(cleanSummary("```\nкандидат хотел уехать.\n```", 600)).toBe("кандидат хотел уехать.");
   });
 
   test("strips Summary:/Ответ:/answer: prefix", () => {

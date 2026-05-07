@@ -64,9 +64,7 @@ export class OllamaEmbeddingClient implements EmbeddingClient {
     }
     for (const v of vectors) {
       if (v.length !== this.dim) {
-        throw new Error(
-          `Embedding dim mismatch: expected ${this.dim}, got ${v.length}`,
-        );
+        throw new Error(`Embedding dim mismatch: expected ${this.dim}, got ${v.length}`);
       }
     }
     return vectors;

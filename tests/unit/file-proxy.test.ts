@@ -7,7 +7,7 @@ import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 
 const SECRET = "s";
 const KNOWN_FILE_ID = "AgADseen1234";
@@ -73,14 +73,11 @@ beforeEach(async () => {
 
   const admins = new AdminsRepo(db);
   await admins.create({ email: "op@x.test", password: "longenough" });
-  const login = await fetch(
-    `http://127.0.0.1:${server.port}/admin/api/login`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
-    },
-  );
+  const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+  });
   cookie = login.headers.get("set-cookie")!.split(";")[0]!;
 
   // Seed one message that references KNOWN_FILE_ID via meta_json so
@@ -153,10 +150,10 @@ describe("GET /admin/api/tg-files/:fileId", () => {
     const fetchImpl: FetchLike = async (input) => {
       const u = typeof input === "string" ? input : (input as Request).url;
       if (u.includes("/getFile")) {
-        return new Response(
-          JSON.stringify({ ok: false, description: "file not found" }),
-          { status: 400, headers: { "content-type": "application/json" } },
-        );
+        return new Response(JSON.stringify({ ok: false, description: "file not found" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
       }
       return new Response("nope", { status: 404 });
     };
@@ -165,14 +162,11 @@ describe("GET /admin/api/tg-files/:fileId", () => {
     server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
     const admins = new AdminsRepo(db);
     await admins.create({ email: "op@x.test", password: "longenough" });
-    const login = await fetch(
-      `http://127.0.0.1:${server.port}/admin/api/login`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
-      },
-    );
+    const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+    });
     cookie = login.headers.get("set-cookie")!.split(";")[0]!;
     const u = new UsersRepo(db).create({ tgUserId: 8888 });
     const c = new ConversationsRepo(db).ensureForUser(u.id);

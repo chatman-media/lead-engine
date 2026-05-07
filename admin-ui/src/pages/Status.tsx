@@ -43,15 +43,17 @@ export function Status() {
     );
   }
   if (!status) {
-    return <div className="loading-text" style={{ padding: 32 }}>loading…</div>;
+    return (
+      <div className="loading-text" style={{ padding: 32 }}>
+        loading…
+      </div>
+    );
   }
 
   return (
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>
-          Status
-        </h2>
+        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Status</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {loadedAt && (
             <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-3)" }}>
@@ -103,30 +105,17 @@ function BotHealthCard({ status }: { status: SystemStatus }) {
       />
       {ok ? (
         <>
-          <Row
-            label="username"
-            value={h.username ? `@${h.username}` : "—"}
-            mono
-          />
+          <Row label="username" value={h.username ? `@${h.username}` : "—"} mono />
           <Row label="first name" value={h.first_name ?? "—"} mono />
           <Row label="bot_id" value={String(h.bot_id)} mono />
         </>
       ) : (
-        <Row
-          label="error"
-          value={<span style={{ color: accent }}>{h.error}</span>}
-          mono
-        />
+        <Row label="error" value={<span style={{ color: accent }}>{h.error}</span>} mono />
       )}
-      <Row
-        label="last check"
-        value={`${checkedAgo}s ago`}
-        hint="cached 60s"
-      />
+      <Row label="last check" value={`${checkedAgo}s ago`} hint="cached 60s" />
       {!ok && (
         <div style={{ marginTop: 6, fontSize: 11, color: accent }}>
-          ⚠ getMe failing — invalid TELEGRAM_BOT_TOKEN, bot deleted, or
-          Telegram API down.
+          ⚠ getMe failing — invalid TELEGRAM_BOT_TOKEN, bot deleted, or Telegram API down.
         </div>
       )}
     </Card>
@@ -271,7 +260,9 @@ function KbCard({ status }: { status: SystemStatus }) {
             <tbody>
               {status.kb.by_topic.map((row) => (
                 <tr key={row.topic ?? "_null"}>
-                  <td style={tdStyle()}>{row.topic ?? <i style={{ color: "var(--text-3)" }}>untagged</i>}</td>
+                  <td style={tdStyle()}>
+                    {row.topic ?? <i style={{ color: "var(--text-3)" }}>untagged</i>}
+                  </td>
                   <td style={tdStyle()}>{row.documents}</td>
                   <td style={tdStyle()}>{row.chunks}</td>
                 </tr>
@@ -289,8 +280,8 @@ function KbCard({ status }: { status: SystemStatus }) {
             fontFamily: "var(--mono)",
           }}
         >
-          ⚠ topic routing is ON but no documents are tagged. Re-run ingest with --topic
-          or under kb/&lt;topic&gt;/ to benefit from filtering.
+          ⚠ topic routing is ON but no documents are tagged. Re-run ingest with --topic or under
+          kb/&lt;topic&gt;/ to benefit from filtering.
         </div>
       )}
     </Card>
@@ -323,8 +314,7 @@ function ConversationsCard({ status }: { status: SystemStatus }) {
 
 function UsersCard({ status }: { status: SystemStatus }) {
   const memCount = status.users.with_memory;
-  const memPct =
-    status.users.total > 0 ? Math.round((memCount / status.users.total) * 100) : 0;
+  const memPct = status.users.total > 0 ? Math.round((memCount / status.users.total) * 100) : 0;
   return (
     <Card title="Users">
       <Row label="total" value={String(status.users.total)} mono />
@@ -332,12 +322,7 @@ function UsersCard({ status }: { status: SystemStatus }) {
         <Row key={s} label={s} value={String(c)} mono />
       ))}
       {status.rag.userMemory && (
-        <Row
-          label="with memory"
-          value={`${memCount} (${memPct}%)`}
-          mono
-          hint="extracted facts"
-        />
+        <Row label="with memory" value={`${memCount} (${memPct}%)`} mono hint="extracted facts" />
       )}
     </Card>
   );
@@ -363,14 +348,18 @@ function LeadsCard({ status }: { status: SystemStatus }) {
       {forSubmit > 0 && (
         <Row
           label="ready for visa submit"
-          value={<span style={{ color: "var(--green, #2ea043)", fontWeight: 600 }}>{forSubmit}</span>}
+          value={
+            <span style={{ color: "var(--green, #2ea043)", fontWeight: 600 }}>{forSubmit}</span>
+          }
           mono
         />
       )}
       <Row label="submitted" value={String(c.submitted)} mono />
       <Row label="closed/rejected" value={String(closed)} mono />
       <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-3)" }}>
-        <a href="/admin/leads" style={{ color: "var(--amber)" }}>open pipeline →</a>
+        <a href="/admin/leads" style={{ color: "var(--amber)" }}>
+          open pipeline →
+        </a>
       </div>
       {!status.leads.leads_chat_configured && (
         <div style={{ marginTop: 6, fontSize: 11, color: "var(--amber)" }}>
@@ -467,7 +456,9 @@ function Row({
   mono?: boolean;
 }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+    <div
+      style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}
+    >
       <div
         style={{
           fontFamily: "var(--mono)",
@@ -476,9 +467,7 @@ function Row({
         }}
       >
         {label}
-        {hint && (
-          <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.7 }}>({hint})</span>
-        )}
+        {hint && <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.7 }}>({hint})</span>}
       </div>
       <div
         style={{

@@ -80,9 +80,7 @@ export function isBotPresenceQuestion(question: string): boolean {
     "iu",
   );
   if (ruRe.test(q)) return true;
-  return /(?<![a-z])are\s+you\s+(?:a\s+)?(?:bot|human|ai|robot)(?![a-z])/i.test(
-    q,
-  );
+  return /(?<![a-z])are\s+you\s+(?:a\s+)?(?:bot|human|ai|robot)(?![a-z])/i.test(q);
 }
 
 /**
@@ -407,7 +405,9 @@ export function buildSystemPrompt(
     `из CONTEXT. Уточняющий встречный вопрос допустим только если без него ` +
     `ответ физически невозможен.`;
 
-  const factsEntries = persona.facts ? Object.entries(persona.facts).filter(([, v]) => v.trim()) : [];
+  const factsEntries = persona.facts
+    ? Object.entries(persona.facts).filter(([, v]) => v.trim())
+    : [];
   const factsBlock = factsEntries.length
     ? `\nЛИЧНЫЕ ФАКТЫ (используй строго эти данные, не изменяй):\n` +
       factsEntries.map(([k, v]) => `- ${k}: ${v}`).join("\n")
@@ -567,8 +567,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       ? {
           name: input.style.persona.name,
           role: input.style.persona.role,
-          ...(input.style.persona.company != null &&
-          input.style.persona.company.trim() !== ""
+          ...(input.style.persona.company != null && input.style.persona.company.trim() !== ""
             ? { company: input.style.persona.company.trim() }
             : {}),
         }
@@ -695,10 +694,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   }
 
   const kbContextStr = hits
-    .map(
-      (h, i) =>
-        `[#${i + 1}] (source: ${h.title})\n${h.text}`,
-    )
+    .map((h, i) => `[#${i + 1}] (source: ${h.title})\n${h.text}`)
     .join("\n\n");
 
   const context = vacBlock
@@ -716,9 +712,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     systemPrompt = composeSystemPrompt(input.style, stage, context, {
       includeFewShot: input.includeFewShot ?? true,
       ...(input.userFacts ? { userFacts: input.userFacts } : {}),
-      ...(input.conversationSummary
-        ? { conversationSummary: input.conversationSummary }
-        : {}),
+      ...(input.conversationSummary ? { conversationSummary: input.conversationSummary } : {}),
     });
     temperature = input.style.model.temperature;
   } else {
@@ -799,10 +793,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
 export function sanitizeLlmOutput(raw: string): string {
   let s = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
   s = s.replace(/^\s*<think\b[^>]*>[\s\S]*$/i, "");
-  s = s.replace(
-    /^\s*(?:answer|ответ|reply|response|согласно\s+контексту)\s*[:\-—]\s*/i,
-    "",
-  );
+  s = s.replace(/^\s*(?:answer|ответ|reply|response|согласно\s+контексту)\s*[:\-—]\s*/i, "");
   // Apply pluggable text-style rules (em-dash → hyphen, ellipsis → ..., etc).
   // See src/rag/text-style-rules.ts to add new rules without touching this file.
   s = applyStyleRules(s);

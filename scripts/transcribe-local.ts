@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Local transcription via `nodejs-whisper` (whisper.cpp wrapper).
  * No cloud API, no Docker. The whisper model is downloaded on first run.
@@ -31,15 +32,9 @@
  *   large   2.9 GB   ~6×+  realtime  best, slow on CPU
  */
 
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, extname, join, resolve } from "node:path";
 
 interface TgMessage {
   type: string;
@@ -89,17 +84,18 @@ function parseArgs(): Args {
     if (v === "--all") all = true;
     else if (v === "--agent") {
       const raw = a[++i] ?? "";
-      raw
+      for (const s of raw
         .split(",")
         .map((s) => s.trim())
-        .filter(Boolean)
-        .forEach((s) => agentIds.add(s));
+        .filter(Boolean)) {
+        agentIds.add(s);
+      }
     } else if (v === "--model") model = a[++i] ?? model;
     else if (v === "--language") language = a[++i] ?? language;
     else if (v === "--limit") limit = parseInt(a[++i] ?? "", 10);
     else positional.push(v);
   }
-  if (agentIds.size === 0) DEFAULT_AGENTS.forEach((id) => agentIds.add(id));
+  if (agentIds.size === 0) for (const id of DEFAULT_AGENTS) agentIds.add(id);
   if (!positional[0]) {
     console.error(
       "Usage: bun scripts/transcribe-local.ts <result.json> [outDir] " +
@@ -109,9 +105,7 @@ function parseArgs(): Args {
   }
   return {
     input: resolve(positional[0]!),
-    outDir: resolve(
-      positional[1] ?? join(dirname(resolve(positional[0]!)), "extracted"),
-    ),
+    outDir: resolve(positional[1] ?? join(dirname(resolve(positional[0]!)), "extracted")),
     agentIds,
     all,
     model,
@@ -138,8 +132,7 @@ function collectTasks(args: Args): Task[] {
   const tasks: Task[] = [];
   for (const c of data.chats.list) {
     for (const m of c.messages ?? []) {
-      if (m.type !== "message" || m.media_type !== "voice_message" || !m.file)
-        continue;
+      if (m.type !== "message" || m.media_type !== "voice_message" || !m.file) continue;
       const fromAgent = m.from_id ? args.agentIds.has(m.from_id) : false;
       if (!args.all && !fromAgent) continue;
       const parts = m.file.split("/");
@@ -170,18 +163,7 @@ function hasFfmpeg(): boolean {
 function convertToWav(oggPath: string, wavPath: string): boolean {
   const r = spawnSync(
     "ffmpeg",
-    [
-      "-y",
-      "-i",
-      oggPath,
-      "-ar",
-      "16000",
-      "-ac",
-      "1",
-      "-loglevel",
-      "error",
-      wavPath,
-    ],
+    ["-y", "-i", oggPath, "-ar", "16000", "-ac", "1", "-loglevel", "error", wavPath],
     { stdio: ["ignore", "ignore", "inherit"] },
   );
   return r.status === 0;
@@ -239,9 +221,7 @@ async function main() {
   console.log(
     `                   queue duration:  ~${Math.round(totalSec / 60)} min (${totalSec}s)`,
   );
-  console.log(
-    `                   model:           ${args.model}    language: ${args.language}`,
-  );
+  console.log(`                   model:           ${args.model}    language: ${args.language}`);
 
   if (todo.length === 0) {
     console.log("[transcribe-local] nothing to do.");
@@ -319,7 +299,7 @@ async function main() {
         // Empty audio is still a result — write empty file to mark "done"
         writeFileSync(t.cachePath, "", "utf8");
       } else {
-        writeFileSync(t.cachePath, cleaned + "\n", "utf8");
+        writeFileSync(t.cachePath, `${cleaned}\n`, "utf8");
       }
       ok++;
       const preview = cleaned.slice(0, 80);
@@ -339,9 +319,7 @@ async function main() {
   }
 
   const elapsed = Math.round((Date.now() - startedAt) / 1000);
-  console.log(
-    `\n[transcribe-local] done in ${elapsed}s: ${ok} ok, ${fail} failed.`,
-  );
+  console.log(`\n[transcribe-local] done in ${elapsed}s: ${ok} ok, ${fail} failed.`);
   console.log(`[transcribe-local] cache: ${transcriptsDir}`);
   console.log(
     `[transcribe-local] next: bun scripts/extract-tg.ts ${args.input} ${args.outDir}` +

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { pickVariant, type Experiment } from "../../../src/sales/ab-router.ts";
+import { type Experiment, pickVariant } from "../../../src/sales/ab-router.ts";
 
 const TWO_WAY: Experiment = {
   slug: "test-exp",

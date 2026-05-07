@@ -26,17 +26,11 @@ function envFloat(name: string, fallback?: number): number | undefined {
   return n;
 }
 
-function envEnum<T extends string>(
-  name: string,
-  allowed: readonly T[],
-  fallback: T,
-): T {
+function envEnum<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
   const raw = process.env[name];
   if (!raw) return fallback;
   if (!allowed.includes(raw as T)) {
-    throw new Error(
-      `Env ${name} must be one of ${allowed.join(", ")} (got "${raw}")`,
-    );
+    throw new Error(`Env ${name} must be one of ${allowed.join(", ")} (got "${raw}")`);
   }
   return raw as T;
 }
@@ -50,11 +44,7 @@ function envTruthy(name: string, fallback = false): boolean {
 export const LLM_PROVIDERS = ["openai", "ollama", "openrouter"] as const;
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
-const llmProvider = envEnum<LlmProvider>(
-  "LLM_PROVIDER",
-  LLM_PROVIDERS,
-  "openai",
-);
+const llmProvider = envEnum<LlmProvider>("LLM_PROVIDER", LLM_PROVIDERS, "openai");
 
 // Embeddings are decoupled from chat because OpenRouter only exposes chat
 // completions — it has no /embeddings endpoint. When LLM_PROVIDER=openrouter
@@ -184,19 +174,13 @@ export const config = {
     apiKey: envOptional("OPENAI_API_KEY"),
     baseUrl: envOptional("OPENAI_BASE_URL", "https://api.openai.com/v1"),
     chatModel: envOptional("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
-    embeddingModel: envOptional(
-      "OPENAI_EMBEDDING_MODEL",
-      "text-embedding-3-small",
-    ),
+    embeddingModel: envOptional("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
     embeddingDim: envInt("OPENAI_EMBEDDING_DIM", envInt("EMBEDDING_DIM", 1536)),
   },
   ollama: {
     host: envOptional("OLLAMA_HOST", "http://localhost:11434"),
     chatModel: envOptional("OLLAMA_CHAT_MODEL", ollamaDefaults.chatModel),
-    embeddingModel: envOptional(
-      "OLLAMA_EMBEDDING_MODEL",
-      ollamaDefaults.embedModel,
-    ),
+    embeddingModel: envOptional("OLLAMA_EMBEDDING_MODEL", ollamaDefaults.embedModel),
     embeddingDim: envInt("OLLAMA_EMBEDDING_DIM", ollamaDefaults.embedDim),
   },
   openrouter: {
@@ -274,9 +258,7 @@ export type Persona = AppConfig["persona"];
 /** The single source of truth for the embedding dimension currently in use.
  *  Reads from the embedding provider, NOT the chat provider — these are decoupled. */
 export function activeEmbeddingDim(c: typeof config = config): number {
-  return c.llm.embeddingProvider === "ollama"
-    ? c.ollama.embeddingDim
-    : c.openai.embeddingDim;
+  return c.llm.embeddingProvider === "ollama" ? c.ollama.embeddingDim : c.openai.embeddingDim;
 }
 
 /** True when there is enough config for the bot to actually answer via LLM.
@@ -288,8 +270,7 @@ export function llmIsConfigured(c: typeof config = config): boolean {
       : c.llm.provider === "openrouter"
         ? !!c.openrouter.apiKey
         : !!c.openai.apiKey;
-  const embedOk =
-    c.llm.embeddingProvider === "ollama" ? !!c.ollama.host : !!c.openai.apiKey;
+  const embedOk = c.llm.embeddingProvider === "ollama" ? !!c.ollama.host : !!c.openai.apiKey;
   return chatOk && embedOk;
 }
 

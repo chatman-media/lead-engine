@@ -27,10 +27,7 @@ const TOPIC_PATTERNS: Array<{ topic: string; pattern: RegExp }> = [
   {
     topic: "visa",
     // Виза, visa, оформление документов на въезд.
-    pattern: new RegExp(
-      `${NW}(виз|visa|загранпаспорт|invitation|приглашен)`,
-      "iu",
-    ),
+    pattern: new RegExp(`${NW}(виз|visa|загранпаспорт|invitation|приглашен)`, "iu"),
   },
   {
     topic: "payment",
@@ -46,19 +43,13 @@ const TOPIC_PATTERNS: Array<{ topic: string; pattern: RegExp }> = [
   {
     topic: "schedule",
     // График, смены, часы, выходные.
-    pattern: new RegExp(
-      `${NW}(график|смен|часов|выходн|расписан|schedule|shift)`,
-      "iu",
-    ),
+    pattern: new RegExp(`${NW}(график|смен|часов|выходн|расписан|schedule|shift)`, "iu"),
   },
   {
     topic: "housing",
     // Жильё, проживание, общежитие, квартира. Both Russian verb stems
     // "жил-" (past) and "жит-" (infinitive) are needed.
-    pattern: new RegExp(
-      `${NW}(жил|жит[ьея]|проживан|общежит|квартир|комнат|hous|accommod)`,
-      "iu",
-    ),
+    pattern: new RegExp(`${NW}(жил|жит[ьея]|проживан|общежит|квартир|комнат|hous|accommod)`, "iu"),
   },
   {
     topic: "locations",
@@ -88,10 +79,7 @@ const TOPIC_PATTERNS: Array<{ topic: string; pattern: RegExp }> = [
   {
     topic: "application",
     // Анкета, форма подачи / форма для, заявка, подать.
-    pattern: new RegExp(
-      `${NW}(анкет|форм[аыу]\\s+(подач|для)|заявк|подать|application)`,
-      "iu",
-    ),
+    pattern: new RegExp(`${NW}(анкет|форм[аыу]\\s+(подач|для)|заявк|подать|application)`, "iu"),
   },
 ];
 
@@ -101,7 +89,7 @@ const TOPIC_PATTERNS: Array<{ topic: string; pattern: RegExp }> = [
  * forcing one topic would silently drop docs from the other.
  */
 export function classifyTopic(question: string): string | null {
-  if (!question || !question.trim()) return null;
+  if (!question?.trim()) return null;
   const matches: string[] = [];
   for (const { topic, pattern } of TOPIC_PATTERNS) {
     if (pattern.test(question)) matches.push(topic);
@@ -112,7 +100,7 @@ export function classifyTopic(question: string): string | null {
 
 /** Exposed for tests + admin debugging — lets callers see ALL matches. */
 export function classifyTopicAll(question: string): string[] {
-  if (!question || !question.trim()) return [];
+  if (!question?.trim()) return [];
   const matches: string[] = [];
   for (const { topic, pattern } of TOPIC_PATTERNS) {
     if (pattern.test(question)) matches.push(topic);

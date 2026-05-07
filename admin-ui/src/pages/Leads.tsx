@@ -172,20 +172,19 @@ export function Leads() {
   return (
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>
-          Leads
-        </h2>
+        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Leads</h2>
         <div style={{ fontSize: 12, color: "var(--text-3)", fontFamily: "var(--mono)" }}>
-          {counts ? `${counts.intake_complete} ready · ${counts.docs_complete} for visa submit` : "—"}
+          {counts
+            ? `${counts.intake_complete} ready · ${counts.docs_complete} for visa submit`
+            : "—"}
         </div>
       </div>
 
       <p style={{ color: "var(--text-3)", fontSize: 12, margin: 0, lineHeight: 1.6 }}>
-        Воронка лидов: бот собирает анкету → ты одобряешь/отклоняешь → бот
-        автоматически шлёт девочке шаблоны → собирает визовую анкету → отдаёт
-        тебе на подачу. Карточка с inline-кнопками постится в группу{" "}
-        <code>LEADS_CHAT_ID</code> (если задана), оттуда можно жать одобрить/отклонить
-        прямо из Telegram.
+        Воронка лидов: бот собирает анкету → ты одобряешь/отклоняешь → бот автоматически шлёт
+        девочке шаблоны → собирает визовую анкету → отдаёт тебе на подачу. Карточка с
+        inline-кнопками постится в группу <code>LEADS_CHAT_ID</code> (если задана), оттуда можно
+        жать одобрить/отклонить прямо из Telegram.
       </p>
 
       {error && (
@@ -236,17 +235,14 @@ export function Leads() {
                 fetch(`/admin/api/conversations`, { credentials: "include" })
                   .then((r) => r.json())
                   .then((d: { conversations: Array<{ id: number; user: { id: number } }> }) => {
-                    const conv = d.conversations.find(
-                      (c) => c.user.id === lead.user_id,
-                    );
+                    const conv = d.conversations.find((c) => c.user.id === lead.user_id);
                     if (conv) navigate(`/admin/chats/${conv.id}`);
                   })
               }
               onSendIntake={() => withBusy(lead.id, () => api.sendIntakeTemplate(lead.id))}
               onApprove={() => withBusy(lead.id, () => api.approveLead(lead.id))}
               onReject={() => {
-                const reason =
-                  prompt("Причина отказа (Enter для шаблонной формулировки):") ?? "";
+                const reason = prompt("Причина отказа (Enter для шаблонной формулировки):") ?? "";
                 return withBusy(lead.id, () => api.rejectLead(lead.id, reason || undefined));
               }}
               onSubmitToVisa={() => {
@@ -319,9 +315,7 @@ function LeadCard({
     lead.state === "docs_complete" ||
     lead.state === "submitted";
   const canSubmitToVisa =
-    lead.state === "approved" ||
-    lead.state === "docs_pending" ||
-    lead.state === "docs_complete";
+    lead.state === "approved" || lead.state === "docs_pending" || lead.state === "docs_complete";
   const intake = parseIntake(lead.intake_json);
   return (
     <div
@@ -354,12 +348,9 @@ function LeadCard({
               color: "var(--text)",
             }}
           >
-            #{lead.id} ·{" "}
-            {lead.tg_username ? `@${lead.tg_username}` : `tg:${lead.tg_user_id}`}
+            #{lead.id} · {lead.tg_username ? `@${lead.tg_username}` : `tg:${lead.tg_user_id}`}
             {lead.application_id && (
-              <span style={{ marginLeft: 12, color: "var(--amber)" }}>
-                {lead.application_id}
-              </span>
+              <span style={{ marginLeft: 12, color: "var(--amber)" }}>{lead.application_id}</span>
             )}
           </div>
           <div
@@ -372,9 +363,7 @@ function LeadCard({
               gap: 12,
             }}
           >
-            <span style={{ color: accent, fontWeight: 600 }}>
-              {STATE_LABEL[lead.state]}
-            </span>
+            <span style={{ color: accent, fontWeight: 600 }}>{STATE_LABEL[lead.state]}</span>
             <span>updated {new Date(lead.updated_at * 1000).toLocaleString("ru-RU")}</span>
             {lead.ops_message_id && <span>card in ops chat</span>}
           </div>
@@ -542,13 +531,9 @@ function NotesPane({ leadId }: { leadId: number }) {
         }}
         data-testid="notes-toggle"
       >
-        <span style={{ width: 10, display: "inline-block" }}>
-          {open ? "▾" : "▸"}
-        </span>
+        <span style={{ width: 10, display: "inline-block" }}>{open ? "▾" : "▸"}</span>
         <span>NOTES</span>
-        {notes !== null && (
-          <span style={{ color: "var(--text-2)" }}>{notes.length}</span>
-        )}
+        {notes !== null && <span style={{ color: "var(--text-2)" }}>{notes.length}</span>}
       </button>
 
       {open && (
@@ -651,12 +636,8 @@ function NotesPane({ leadId }: { leadId: number }) {
                         gap: 8,
                       }}
                     >
-                      <span>
-                        {new Date(n.created_at * 1000).toLocaleString("ru-RU")}
-                      </span>
-                      {n.by_admin_id !== null && (
-                        <span>admin#{n.by_admin_id}</span>
-                      )}
+                      <span>{new Date(n.created_at * 1000).toLocaleString("ru-RU")}</span>
+                      {n.by_admin_id !== null && <span>admin#{n.by_admin_id}</span>}
                     </div>
                   </div>
                   <button
@@ -726,15 +707,9 @@ function TimelinePane({ leadId }: { leadId: number }) {
         }}
         data-testid="timeline-toggle"
       >
-        <span style={{ width: 10, display: "inline-block" }}>
-          {open ? "▾" : "▸"}
-        </span>
+        <span style={{ width: 10, display: "inline-block" }}>{open ? "▾" : "▸"}</span>
         <span>TIMELINE</span>
-        {events !== null && (
-          <span style={{ color: "var(--text-2)" }}>
-            {events.length} events
-          </span>
-        )}
+        {events !== null && <span style={{ color: "var(--text-2)" }}>{events.length} events</span>}
       </button>
 
       {open && (
@@ -764,8 +739,7 @@ function TimelinePane({ leadId }: { leadId: number }) {
 function TimelineRow({ event: ev }: { event: LeadEvent }) {
   const ts = new Date(ev.created_at * 1000).toLocaleString("ru-RU");
   const isCreate = ev.from_state === null;
-  const isApplicationId =
-    ev.from_state === ev.to_state && ev.notes?.startsWith("application_id=");
+  const isApplicationId = ev.from_state === ev.to_state && ev.notes?.startsWith("application_id=");
   const arrow = isCreate
     ? "✨ created"
     : isApplicationId
@@ -800,7 +774,8 @@ function TimelineRow({ event: ev }: { event: LeadEvent }) {
         )}
         {isApplicationId && (
           <span style={{ color: "var(--amber)" }}>
-            {" "}· {ev.notes!.replace(/^application_id=/, "")}
+            {" "}
+            · {ev.notes!.replace(/^application_id=/, "")}
           </span>
         )}
       </span>
@@ -972,7 +947,6 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
                             setEditValue("");
                           }
                         }}
-                        autoFocus
                       />
                     )
                   ) : (
@@ -1132,13 +1106,15 @@ function EmptyState({ filter }: { filter: LeadState | null }) {
         lineHeight: 1.6,
       }}
     >
-      <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-3)", marginBottom: 8 }}>
+      <div
+        style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-3)", marginBottom: 8 }}
+      >
         no leads {filter ? `in state "${filter}"` : "yet"}
       </div>
       <div>
-        Лиды появляются здесь когда оператор нажимает <strong>Promote to lead</strong>
-        {" "}на странице чата (TODO в этой фазе) или когда бот автоматически детектит, что
-        анкета заполнена (Phase 2).
+        Лиды появляются здесь когда оператор нажимает <strong>Promote to lead</strong> на странице
+        чата (TODO в этой фазе) или когда бот автоматически детектит, что анкета заполнена (Phase
+        2).
       </div>
       <div style={{ marginTop: 8, color: "var(--text-3)" }}>
         Для теста: создай лид через <code>POST /admin/api/leads/from-conversation/:convId</code> —

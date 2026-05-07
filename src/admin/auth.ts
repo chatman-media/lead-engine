@@ -35,10 +35,7 @@ function buildCookie(value: string, maxAgeSeconds: number): string {
 }
 
 /** Look up the current admin from the request's session cookie, if any. */
-export function currentAdmin(
-  db: Database,
-  req: Request,
-): AuthContext | null {
+export function currentAdmin(db: Database, req: Request): AuthContext | null {
   const sid = readSessionCookie(req);
   if (!sid) return null;
   const sessions = new SessionsRepo(db);
@@ -68,10 +65,7 @@ export function createLoginHandler(db: Database): RouteHandler {
     const email = typeof body.email === "string" ? body.email.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
     if (!email || !password) {
-      return json(
-        { error: "email and password are required" },
-        { status: 400 },
-      );
+      return json({ error: "email and password are required" }, { status: 400 });
     }
     const admin = await admins.verifyPassword(email, password);
     if (!admin) return json({ error: "invalid credentials" }, { status: 401 });
@@ -90,10 +84,7 @@ export function createLogoutHandler(db: Database): RouteHandler {
   return ({ req }) => {
     const sid = readSessionCookie(req);
     if (sid) sessions.revoke(sid);
-    return json(
-      { ok: true },
-      { headers: { "set-cookie": buildCookie("", 0) } },
-    );
+    return json({ ok: true }, { headers: { "set-cookie": buildCookie("", 0) } });
   };
 }
 

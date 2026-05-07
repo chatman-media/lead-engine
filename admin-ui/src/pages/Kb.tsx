@@ -80,18 +80,15 @@ export function Kb() {
             fontFamily: "var(--mono)",
           }}
         >
-          {totals
-            ? `${totals.documents} documents · ${totals.chunks} chunks indexed`
-            : "loading…"}
+          {totals ? `${totals.documents} documents · ${totals.chunks} chunks indexed` : "loading…"}
         </div>
       </div>
 
       <p style={{ color: "var(--text-3)", fontSize: 12, margin: 0, lineHeight: 1.6 }}>
-        Документы, которые бот использует как фон для ответов. Удаление чистит
-        и векторный индекс — изменения вступают в силу со следующего сообщения
-        кандидата без переиндексации. Тэг (topic) сужает поиск: если задан, бот
-        ищет только в этом тэге плюс untagged. Свежие вакансии живут отдельно
-        в /admin/vacancies — этот раздел для slowly-changing справочной базы.
+        Документы, которые бот использует как фон для ответов. Удаление чистит и векторный индекс —
+        изменения вступают в силу со следующего сообщения кандидата без переиндексации. Тэг (topic)
+        сужает поиск: если задан, бот ищет только в этом тэге плюс untagged. Свежие вакансии живут
+        отдельно в /admin/vacancies — этот раздел для slowly-changing справочной базы.
       </p>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
@@ -111,11 +108,7 @@ export function Kb() {
           search
         </button>
         <div style={{ flex: 1 }} />
-        <TopicFilter
-          topics={topics}
-          value={topicFilter}
-          onChange={setTopicFilter}
-        />
+        <TopicFilter topics={topics} value={topicFilter} onChange={setTopicFilter} />
       </div>
 
       {error && (
@@ -301,16 +294,8 @@ function KbDocCard({
           </div>
         </button>
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-          <RetagControl
-            current={doc.topic}
-            knownTopics={knownTopics}
-            onSet={onRetag}
-          />
-          <button
-            onClick={onDelete}
-            className="btn btn-danger btn-sm"
-            data-testid="kb-doc-delete"
-          >
+          <RetagControl current={doc.topic} knownTopics={knownTopics} onSet={onRetag} />
+          <button onClick={onDelete} className="btn btn-danger btn-sm" data-testid="kb-doc-delete">
             delete
           </button>
         </div>
@@ -356,7 +341,6 @@ function RetagControl({
         placeholder="topic (empty = untagged)"
         className="input"
         style={{ width: 140, fontSize: 12 }}
-        autoFocus
       />
       <datalist id="kb-known-topics">
         {knownTopics.map((t) => (
@@ -372,10 +356,7 @@ function RetagControl({
       >
         save
       </button>
-      <button
-        onClick={() => setEditing(false)}
-        className="btn btn-ghost btn-sm"
-      >
+      <button onClick={() => setEditing(false)} className="btn btn-ghost btn-sm">
         cancel
       </button>
     </div>
@@ -391,9 +372,7 @@ function ChunksPane({ docId }: { docId: number }) {
     api
       .kbDocument(docId)
       .then((res) => setChunks(res.chunks))
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : String(err)),
-      );
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, [docId]);
 
   if (error) {
@@ -482,13 +461,15 @@ function EmptyState() {
         lineHeight: 1.6,
       }}
     >
-      <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-3)", marginBottom: 8 }}>
+      <div
+        style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-3)", marginBottom: 8 }}
+      >
         ничего не найдено
       </div>
       <div>
-        Под выбранный фильтр документов нет. KB наполняется через CLI
-        (<code>bun run scripts/ingest-kb.ts</code>); этот раздел только для
-        управления уже проиндексированными данными.
+        Под выбранный фильтр документов нет. KB наполняется через CLI (
+        <code>bun run scripts/ingest-kb.ts</code>); этот раздел только для управления уже
+        проиндексированными данными.
       </div>
     </div>
   );

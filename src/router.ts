@@ -4,9 +4,7 @@ export type RouteContext = {
   params: Record<string, string>;
 };
 
-export type RouteHandler = (
-  ctx: RouteContext,
-) => Response | Promise<Response>;
+export type RouteHandler = (ctx: RouteContext) => Response | Promise<Response>;
 
 type CompiledRoute = {
   method: string;

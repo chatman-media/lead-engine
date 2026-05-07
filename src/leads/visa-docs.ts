@@ -168,9 +168,7 @@ export async function extractVisaDocs(input: ExtractVisaInput): Promise<VisaFiel
   const merged: VisaFields = { ...(input.existingDocs ?? {}) };
   if (userMessages.length === 0) return merged;
 
-  const conversation = input.messages
-    .map((m) => `${m.role}: ${m.content}`)
-    .join("\n");
+  const conversation = input.messages.map((m) => `${m.role}: ${m.content}`).join("\n");
   const existingJson = JSON.stringify(input.existingDocs ?? {});
 
   let raw: string;
@@ -194,9 +192,9 @@ export async function extractVisaDocs(input: ExtractVisaInput): Promise<VisaFiel
   return { ...merged, ...extracted };
 }
 
-const ALL_FIELDS: ReadonlyArray<keyof VisaFields> = Object.keys(
-  VISA_FIELD_LABELS,
-) as Array<keyof VisaFields>;
+const ALL_FIELDS: ReadonlyArray<keyof VisaFields> = Object.keys(VISA_FIELD_LABELS) as Array<
+  keyof VisaFields
+>;
 
 const MAX_FIELD_LEN = 1500;
 

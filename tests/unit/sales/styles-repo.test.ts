@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { seedBuiltinStyles, StylesRepo } from "@/db/repos/styles.ts";
+import { StylesRepo, seedBuiltinStyles } from "@/db/repos/styles.ts";
 import { openDb } from "@/db/sqlite.ts";
 import { coldDirectPas } from "@/sales/styles/cold-direct-pas.ts";
 import { empatheticNepq } from "@/sales/styles/empathetic-nepq.ts";
@@ -78,19 +78,21 @@ describe("StylesRepo — parseRow", () => {
   });
 
   test("throws helpful error on invalid JSON", () => {
-    db.run(
-      `INSERT INTO styles (slug, display_name, config_json) VALUES (?, ?, ?)`,
-      ["broken", "Broken", "{not valid json"],
-    );
+    db.run(`INSERT INTO styles (slug, display_name, config_json) VALUES (?, ?, ?)`, [
+      "broken",
+      "Broken",
+      "{not valid json",
+    ]);
     const row = repo.bySlug("broken")!;
     expect(() => repo.parseRow(row)).toThrow(/not valid JSON/);
   });
 
   test("throws on schema mismatch (e.g. invalid framework)", () => {
-    db.run(
-      `INSERT INTO styles (slug, display_name, config_json) VALUES (?, ?, ?)`,
-      ["bad-framework", "Bad", JSON.stringify({ ...flirtyBelfort, framework: "MADEUP" })],
-    );
+    db.run(`INSERT INTO styles (slug, display_name, config_json) VALUES (?, ?, ?)`, [
+      "bad-framework",
+      "Bad",
+      JSON.stringify({ ...flirtyBelfort, framework: "MADEUP" }),
+    ]);
     const row = repo.bySlug("bad-framework")!;
     expect(() => repo.parseRow(row)).toThrow(/StyleSchema/);
   });

@@ -58,10 +58,7 @@ export class OpenAIChatClient implements ChatClient {
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
-  async complete(
-    messages: ChatMessage[],
-    opts: { temperature?: number } = {},
-  ): Promise<string> {
+  async complete(messages: ChatMessage[], opts: { temperature?: number } = {}): Promise<string> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages,
@@ -84,17 +81,11 @@ export class OpenAIChatClient implements ChatClient {
       throw new ChatApiError(res.status, "non-JSON response");
     }
     if (!res.ok) {
-      throw new ChatApiError(
-        res.status,
-        payload.error?.message ?? "unexpected error",
-      );
+      throw new ChatApiError(res.status, payload.error?.message ?? "unexpected error");
     }
     const first = payload.choices?.[0]?.message?.content;
     if (!first) {
-      throw new ChatApiError(
-        res.status,
-        "no choices returned by model",
-      );
+      throw new ChatApiError(res.status, "no choices returned by model");
     }
     return first;
   }

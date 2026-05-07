@@ -40,9 +40,7 @@ const SYSTEM_PROMPT = `Ты сжимаешь старую часть переп�
 
 Пиши ТОЛЬКО текст summary. Никаких префиксов, кавычек, "Ответ:".`;
 
-export async function summarizeConversation(
-  input: SummarizeInput,
-): Promise<string> {
+export async function summarizeConversation(input: SummarizeInput): Promise<string> {
   if (input.messagesToSummarize.length === 0) return input.previousSummary ?? "";
 
   const dialogue = input.messagesToSummarize
@@ -84,10 +82,6 @@ export function cleanSummary(raw: string, maxLength: number): string {
   // Truncate at the last sentence-ending punctuation inside the cap so we
   // don't end mid-word. Falls back to a hard slice if no punctuation found.
   const head = s.slice(0, maxLength);
-  const lastPunct = Math.max(
-    head.lastIndexOf("."),
-    head.lastIndexOf("!"),
-    head.lastIndexOf("?"),
-  );
+  const lastPunct = Math.max(head.lastIndexOf("."), head.lastIndexOf("!"), head.lastIndexOf("?"));
   return lastPunct > maxLength * 0.6 ? head.slice(0, lastPunct + 1) : head;
 }

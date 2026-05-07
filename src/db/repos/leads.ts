@@ -64,18 +64,14 @@ export class LeadsRepo {
 
   byId(id: number): LeadRow | null {
     return (
-      this.db
-        .query<LeadRow, [number]>("SELECT * FROM leads WHERE id = ? LIMIT 1")
-        .get(id) ?? null
+      this.db.query<LeadRow, [number]>("SELECT * FROM leads WHERE id = ? LIMIT 1").get(id) ?? null
     );
   }
 
   byUserId(userId: number): LeadRow | null {
     return (
       this.db
-        .query<LeadRow, [number]>(
-          "SELECT * FROM leads WHERE user_id = ? LIMIT 1",
-        )
+        .query<LeadRow, [number]>("SELECT * FROM leads WHERE user_id = ? LIMIT 1")
         .get(userId) ?? null
     );
   }
@@ -108,9 +104,7 @@ export class LeadsRepo {
     const existing = this.byUserId(userId);
     if (existing) return existing;
     const row = this.db
-      .query<LeadRow, [number]>(
-        `INSERT INTO leads (user_id) VALUES (?) RETURNING *`,
-      )
+      .query<LeadRow, [number]>(`INSERT INTO leads (user_id) VALUES (?) RETURNING *`)
       .get(userId);
     if (!row) throw new Error("Failed to insert lead");
     // Synthetic "created" event — `from_state` NULL, to_state matches
@@ -163,11 +157,7 @@ export class LeadsRepo {
    * inserted row so the caller can echo it back to the UI without
    * a re-fetch.
    */
-  addNote(input: {
-    leadId: number;
-    body: string;
-    byAdminId?: number;
-  }): LeadNoteRow {
+  addNote(input: { leadId: number; body: string; byAdminId?: number }): LeadNoteRow {
     const trimmed = input.body.trim();
     if (!trimmed) throw new Error("note body is empty");
     const row = this.db
@@ -225,15 +215,12 @@ export class LeadsRepo {
         [
           state,
           opts.adminId ?? null,
-          state === "rejected" ? opts.rejectedReason ?? null : null,
+          state === "rejected" ? (opts.rejectedReason ?? null) : null,
           id,
         ],
       );
     } else {
-      this.db.run(
-        `UPDATE leads SET state = ?, updated_at = unixepoch() WHERE id = ?`,
-        [state, id],
-      );
+      this.db.run(`UPDATE leads SET state = ?, updated_at = unixepoch() WHERE id = ?`, [state, id]);
     }
     if (!sameState) {
       this.appendEvent(id, {
@@ -242,7 +229,7 @@ export class LeadsRepo {
         byAdminId: opts.adminId ?? null,
         // Only carry the rejection reason on the rejected event;
         // approved leads have no operator-typed note.
-        notes: state === "rejected" ? opts.rejectedReason ?? null : null,
+        notes: state === "rejected" ? (opts.rejectedReason ?? null) : null,
       });
     }
     return this.byId(id);
@@ -250,17 +237,17 @@ export class LeadsRepo {
 
   /** Stores the parsed intake fields. Caller serializes to JSON. */
   setIntake(id: number, intakeJson: string): void {
-    this.db.run(
-      `UPDATE leads SET intake_json = ?, updated_at = unixepoch() WHERE id = ?`,
-      [intakeJson, id],
-    );
+    this.db.run(`UPDATE leads SET intake_json = ?, updated_at = unixepoch() WHERE id = ?`, [
+      intakeJson,
+      id,
+    ]);
   }
 
   setVisaDocs(id: number, visaDocsJson: string): void {
-    this.db.run(
-      `UPDATE leads SET visa_docs_json = ?, updated_at = unixepoch() WHERE id = ?`,
-      [visaDocsJson, id],
-    );
+    this.db.run(`UPDATE leads SET visa_docs_json = ?, updated_at = unixepoch() WHERE id = ?`, [
+      visaDocsJson,
+      id,
+    ]);
   }
 
   /**
@@ -297,10 +284,10 @@ export class LeadsRepo {
       .get(prefix.length + 1, prefix);
     const seq = row?.next_seq ?? 1;
     const applicationId = `${prefix}${String(seq).padStart(4, "0")}`;
-    this.db.run(
-      `UPDATE leads SET application_id = ?, updated_at = unixepoch() WHERE id = ?`,
-      [applicationId, id],
-    );
+    this.db.run(`UPDATE leads SET application_id = ?, updated_at = unixepoch() WHERE id = ?`, [
+      applicationId,
+      id,
+    ]);
     // Surface the allocation in the timeline. The lead's state
     // doesn't change (the caller transitions to `docs_complete`
     // separately and that emits its own event), so we use a self-
@@ -319,16 +306,13 @@ export class LeadsRepo {
     return applicationId;
   }
 
-  list(opts: { state?: LeadState | null; limit?: number } = {}): Array<
-    LeadRow & { tg_user_id: number; tg_username: string | null }
-  > {
+  list(
+    opts: { state?: LeadState | null; limit?: number } = {},
+  ): Array<LeadRow & { tg_user_id: number; tg_username: string | null }> {
     const limit = opts.limit ?? 200;
     if (opts.state) {
       return this.db
-        .query<
-          LeadRow & { tg_user_id: number; tg_username: string | null },
-          [LeadState, number]
-        >(
+        .query<LeadRow & { tg_user_id: number; tg_username: string | null }, [LeadState, number]>(
           `SELECT l.*, u.tg_user_id, u.tg_username
            FROM leads l
            JOIN users u ON u.id = l.user_id
@@ -339,10 +323,7 @@ export class LeadsRepo {
         .all(opts.state, limit);
     }
     return this.db
-      .query<
-        LeadRow & { tg_user_id: number; tg_username: string | null },
-        [number]
-      >(
+      .query<LeadRow & { tg_user_id: number; tg_username: string | null }, [number]>(
         `SELECT l.*, u.tg_user_id, u.tg_username
          FROM leads l
          JOIN users u ON u.id = l.user_id

@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
-import {
-  classifyStage,
-  parseClassifierOutput,
-} from "@/sales/stage-classifier.ts";
+import { classifyStage, parseClassifierOutput } from "@/sales/stage-classifier.ts";
 
 interface CallRecord {
   messages: ChatMessage[];
@@ -33,9 +30,7 @@ describe("parseClassifierOutput", () => {
   });
 
   test("strips markdown code fences (```json ... ```)", () => {
-    const out = parseClassifierOutput(
-      '```json\n{"stage": "qualify", "confidence": 0.9}\n```',
-    );
+    const out = parseClassifierOutput('```json\n{"stage": "qualify", "confidence": 0.9}\n```');
     expect(out).toEqual({ stage: "qualify", confidence: 0.9 });
   });
 
@@ -76,9 +71,7 @@ describe("parseClassifierOutput", () => {
   });
 
   test("returns null when confidence is non-numeric", () => {
-    expect(
-      parseClassifierOutput('{"stage": "pitch", "confidence": "high"}'),
-    ).toBeNull();
+    expect(parseClassifierOutput('{"stage": "pitch", "confidence": "high"}')).toBeNull();
   });
 
   test("returns null for empty string", () => {
@@ -86,17 +79,13 @@ describe("parseClassifierOutput", () => {
   });
 
   test("returns null for malformed JSON", () => {
-    expect(
-      parseClassifierOutput('{"stage": "pitch", "confidence": 0.9'),
-    ).toBeNull();
+    expect(parseClassifierOutput('{"stage": "pitch", "confidence": 0.9')).toBeNull();
   });
 });
 
 describe("classifyStage — happy path (LLM accepted)", () => {
   test("returns LLM stage when confidence above threshold", async () => {
-    const { client, calls } = captureChat(
-      '{"stage": "pitch", "confidence": 0.85}',
-    );
+    const { client, calls } = captureChat('{"stage": "pitch", "confidence": 0.85}');
     const out = await classifyStage({
       chat: client,
       userMessage: "сколько в Дубае платят?",
@@ -189,9 +178,7 @@ describe("classifyStage — fallback paths", () => {
   });
 
   test("LLM returns unknown stage → reason='unknown-stage'", async () => {
-    const { client } = captureChat(
-      '{"stage": "made-up-stage", "confidence": 0.9}',
-    );
+    const { client } = captureChat('{"stage": "made-up-stage", "confidence": 0.9}');
     const out = await classifyStage({
       chat: client,
       userMessage: "сколько в Дубае платят?",

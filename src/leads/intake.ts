@@ -63,9 +63,7 @@ user: я в Москве
  * `mediaCounts` from the SQL aggregator. Returns an updated
  * `IntakeFields` merging existing + newly-extracted + media counts.
  */
-export async function extractIntake(
-  input: IntakeExtractInput,
-): Promise<IntakeFields> {
+export async function extractIntake(input: IntakeExtractInput): Promise<IntakeFields> {
   const userMessages = input.messages.filter((m) => m.role === "user");
   const merged: IntakeFields = { ...(input.existingIntake ?? {}) };
 
@@ -88,9 +86,7 @@ export async function extractIntake(
   // Skip the LLM call when there are no candidate messages to read.
   if (userMessages.length === 0) return merged;
 
-  const conversation = input.messages
-    .map((m) => `${m.role}: ${m.content}`)
-    .join("\n");
+  const conversation = input.messages.map((m) => `${m.role}: ${m.content}`).join("\n");
   const existingJson = JSON.stringify({
     height: merged.height,
     weight: merged.weight,
@@ -119,8 +115,7 @@ export async function extractIntake(
   if (extracted.height) merged.height = extracted.height;
   if (extracted.weight) merged.weight = extracted.weight;
   if (extracted.city) merged.city = extracted.city;
-  if (extracted.departure_readiness)
-    merged.departure_readiness = extracted.departure_readiness;
+  if (extracted.departure_readiness) merged.departure_readiness = extracted.departure_readiness;
 
   return merged;
 }

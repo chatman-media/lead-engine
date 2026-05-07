@@ -1,4 +1,4 @@
-import { StyleSchema, type Style } from "../types.ts";
+import { type Style, StyleSchema } from "../types.ts";
 
 export const empatheticNepq: Style = StyleSchema.parse({
   slug: "empathetic-nepq-v1",
@@ -21,7 +21,10 @@ export const empatheticNepq: Style = StyleSchema.parse({
   },
   framework: "NEPQ",
   hooks: [
-    { kind: "reciprocity", text: "сначала помоги — поделись инфой о рынке, прежде чем что-то предлагать" },
+    {
+      kind: "reciprocity",
+      text: "сначала помоги — поделись инфой о рынке, прежде чем что-то предлагать",
+    },
     {
       kind: "commitment",
       text: "пусть prospect сам сформулирует, что хочет — потом возвращай ему его собственные слова",

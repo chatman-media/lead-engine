@@ -36,9 +36,7 @@ export function MemoryPane({
   }, [userId, initialMemory]);
 
   function setRow(i: number, patch: Partial<{ key: string; value: string }>) {
-    setRows((rs) =>
-      rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)),
-    );
+    setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   }
 
   function removeRow(i: number) {
@@ -108,13 +106,9 @@ export function MemoryPane({
           gap: 8,
         }}
       >
-        <span style={{ width: 10, display: "inline-block" }}>
-          {collapsed ? "▸" : "▾"}
-        </span>
+        <span style={{ width: 10, display: "inline-block" }}>{collapsed ? "▸" : "▾"}</span>
         <span>MEMORY</span>
-        <span style={{ color: "var(--text)", fontWeight: 600 }}>
-          {factCount}
-        </span>
+        <span style={{ color: "var(--text)", fontWeight: 600 }}>{factCount}</span>
         {savedAt !== null && (
           <span style={{ marginLeft: "auto", fontSize: 10 }}>
             updated {new Date(savedAt * 1000).toLocaleString("ru-RU")}

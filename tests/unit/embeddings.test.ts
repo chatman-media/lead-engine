@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  EmbeddingApiError,
-  OpenAIEmbeddingClient,
-  type FetchLike,
-} from "@/rag/embed.ts";
+import { EmbeddingApiError, type FetchLike, OpenAIEmbeddingClient } from "@/rag/embed.ts";
 
 interface RecordedCall {
   url: string;
@@ -13,9 +9,10 @@ interface RecordedCall {
   body: unknown;
 }
 
-function fakeFetch(
-  responder: (call: RecordedCall) => Response,
-): { fetchImpl: FetchLike; calls: RecordedCall[] } {
+function fakeFetch(responder: (call: RecordedCall) => Response): {
+  fetchImpl: FetchLike;
+  calls: RecordedCall[];
+} {
   const calls: RecordedCall[] = [];
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
@@ -25,8 +22,7 @@ function fakeFetch(
         headers[k] = v;
       });
     }
-    const body =
-      typeof init?.body === "string" ? JSON.parse(init.body) : null;
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
     const call: RecordedCall = {
       url,
       method: init?.method ?? "GET",
@@ -53,7 +49,7 @@ describe("OpenAIEmbeddingClient", () => {
       const body = call.body as { model: string; input: string[] };
       expect(call.url).toBe("https://api.test/v1/embeddings");
       expect(call.method).toBe("POST");
-      expect(call.headers["authorization"]).toBe("Bearer KEY");
+      expect(call.headers.authorization).toBe("Bearer KEY");
       expect(body.model).toBe("text-embedding-3-small");
       expect(body.input).toEqual(["a", "b"]);
       return jsonResponse({
@@ -99,9 +95,7 @@ describe("OpenAIEmbeddingClient", () => {
   });
 
   test("throws EmbeddingApiError on non-2xx with description", async () => {
-    const { fetchImpl } = fakeFetch(() =>
-      jsonResponse({ error: { message: "bad key" } }, 401),
-    );
+    const { fetchImpl } = fakeFetch(() => jsonResponse({ error: { message: "bad key" } }, 401));
     const client = new OpenAIEmbeddingClient({
       apiKey: "k",
       baseUrl: "http://x",

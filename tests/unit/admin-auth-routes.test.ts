@@ -4,7 +4,7 @@ import type { Server } from "bun";
 import { createRouter } from "@/app.ts";
 import { AdminsRepo } from "@/db/repos/admins.ts";
 import { openDb } from "@/db/sqlite.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 
 const SECRET = "s";
 const COOKIE_NAME = "tg_admin_sid";

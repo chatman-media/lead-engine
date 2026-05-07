@@ -44,7 +44,11 @@ export function UserDetail() {
     );
   }
   if (!data) {
-    return <div className="loading-text" style={{ padding: 24 }}>loading…</div>;
+    return (
+      <div className="loading-text" style={{ padding: 24 }}>
+        loading…
+      </div>
+    );
   }
 
   const { user, conversation, lead, memory, recent_messages } = data;
@@ -122,12 +126,12 @@ export function UserDetail() {
             }}
           >
             <div>id: {lead.id}</div>
-            <div>state: <strong>{lead.state}</strong></div>
+            <div>
+              state: <strong>{lead.state}</strong>
+            </div>
             {lead.application_id && <div>application_id: {lead.application_id}</div>}
             {lead.rejected_reason && (
-              <div style={{ color: "var(--red, #ef4444)" }}>
-                rejected: {lead.rejected_reason}
-              </div>
+              <div style={{ color: "var(--red, #ef4444)" }}>rejected: {lead.rejected_reason}</div>
             )}
             <Link
               to="/admin/leads"
@@ -145,8 +149,7 @@ export function UserDetail() {
       <Section title={`Memory (${factsEntries.length})`}>
         {factsEntries.length === 0 ? (
           <Empty>
-            No facts learned. Memory is auto-extracted from past chats; edits live in the chat
-            view.
+            No facts learned. Memory is auto-extracted from past chats; edits live in the chat view.
           </Empty>
         ) : (
           <table className="data-table" style={{ marginTop: 0 }}>
@@ -265,8 +268,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ color: "var(--text-3)", fontSize: 12, fontStyle: "italic" }}>
-      {children}
-    </div>
+    <div style={{ color: "var(--text-3)", fontSize: 12, fontStyle: "italic" }}>{children}</div>
   );
 }

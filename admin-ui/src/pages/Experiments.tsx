@@ -63,25 +63,20 @@ export function Experiments() {
         >
           A/B experiments
         </h2>
-        <button
-          onClick={() => setShowCreate((s) => !s)}
-          style={btnStyle()}
-        >
+        <button onClick={() => setShowCreate((s) => !s)} style={btnStyle()}>
           {showCreate ? "cancel" : "+ new experiment"}
         </button>
       </div>
       <p style={{ color: "var(--text-3)", fontSize: 13, marginBottom: 20 }}>
-        At most one experiment may be in <code>running</code> at a time. New
-        conversations get a deterministic per-user variant assignment via
-        SHA-256 hash; the assignment is sticky for the lifetime of the chat.
+        At most one experiment may be in <code>running</code> at a time. New conversations get a
+        deterministic per-user variant assignment via SHA-256 hash; the assignment is sticky for the
+        lifetime of the chat.
       </p>
 
       {systemStatus && <ActiveRoutingBanner status={systemStatus} />}
 
       {error ? (
-        <div style={{ color: "var(--red, #f55)", marginBottom: 12 }}>
-          error: {error}
-        </div>
+        <div style={{ color: "var(--red, #f55)", marginBottom: 12 }}>error: {error}</div>
       ) : null}
 
       {showCreate && styles ? (
@@ -130,8 +125,7 @@ function ActiveRoutingBanner({ status }: { status: SystemStatus }) {
       <>
         <strong style={{ color: "var(--green, #2ea043)" }}>experiment running</strong>
         <span style={{ color: "var(--text-3)" }}> — </span>
-        <code>{r.running_experiment_slug}</code> is currently routing new
-        conversations.
+        <code>{r.running_experiment_slug}</code> is currently routing new conversations.
       </>
     );
     accent = "var(--green, #2ea043)";
@@ -140,8 +134,8 @@ function ActiveRoutingBanner({ status }: { status: SystemStatus }) {
       <>
         <strong style={{ color: "var(--text)" }}>legacy persona active</strong>
         <span style={{ color: "var(--text-3)" }}> — </span>
-        sales-style engine is OFF; all chats use <code>BOT_PERSONA_*</code>.
-        Experiments are scaffolding for when you switch on a sales style.
+        sales-style engine is OFF; all chats use <code>BOT_PERSONA_*</code>. Experiments are
+        scaffolding for when you switch on a sales style.
       </>
     );
   } else {
@@ -149,8 +143,8 @@ function ActiveRoutingBanner({ status }: { status: SystemStatus }) {
       <>
         <strong>no routing configured</strong>
         <span style={{ color: "var(--text-3)" }}> — </span>
-        bot replies with a generic AI persona. Set <code>BOT_PERSONA_*</code>{" "}
-        or <code>BOT_SALES_STYLE</code>, or start an experiment below.
+        bot replies with a generic AI persona. Set <code>BOT_PERSONA_*</code> or{" "}
+        <code>BOT_SALES_STYLE</code>, or start an experiment below.
       </>
     );
   }
@@ -193,23 +187,21 @@ function EmptyState({ envOverride }: { envOverride: boolean }) {
         no experiments yet
       </div>
       <div>
-        Use this when you want to A/B test two or more sales styles on real
-        candidates — e.g. flirt-recruiter vs. empathetic-consultant.
+        Use this when you want to A/B test two or more sales styles on real candidates — e.g.
+        flirt-recruiter vs. empathetic-consultant.
       </div>
       <div style={{ color: "var(--text-3)" }}>
         Workflow:{" "}
         <span style={{ color: "var(--text-2)" }}>
           create as draft → set variant weights → start
         </span>
-        . Each new candidate gets a deterministic variant via SHA-256 hash;
-        existing chats keep their assigned style. Per-style funnel
-        conversion shows up here once traffic accumulates.
+        . Each new candidate gets a deterministic variant via SHA-256 hash; existing chats keep
+        their assigned style. Per-style funnel conversion shows up here once traffic accumulates.
       </div>
       {envOverride && (
         <div style={{ color: "var(--amber)", marginTop: 4 }}>
-          ⚠ <code>BOT_SALES_STYLE</code> is currently set in env — even if you
-          start an experiment, it won't actually route until you unset that
-          env var.
+          ⚠ <code>BOT_SALES_STYLE</code> is currently set in env — even if you start an experiment,
+          it won't actually route until you unset that env var.
         </div>
       )}
       <div style={{ marginTop: 4 }}>
@@ -275,9 +267,7 @@ function ExperimentCard({
             {e.started_at
               ? `started ${new Date(e.started_at * 1000).toISOString().slice(0, 10)}`
               : "not started"}
-            {e.ended_at
-              ? ` · ended ${new Date(e.ended_at * 1000).toISOString().slice(0, 10)}`
-              : ""}
+            {e.ended_at ? ` · ended ${new Date(e.ended_at * 1000).toISOString().slice(0, 10)}` : ""}
           </div>
         </div>
         <StatusBadge status={e.status} />
@@ -295,42 +285,21 @@ function ExperimentCard({
         >
           allocation
         </div>
-        <code style={{ fontSize: 12, color: "var(--text-2)" }}>
-          {JSON.stringify(e.allocation)}
-        </code>
+        <code style={{ fontSize: 12, color: "var(--text-2)" }}>{JSON.stringify(e.allocation)}</code>
       </div>
 
       {funnel === null ? (
-        <div style={{ color: "var(--text-3)", fontSize: 12 }}>
-          loading funnel…
-        </div>
+        <div style={{ color: "var(--text-3)", fontSize: 12 }}>loading funnel…</div>
       ) : funnel.length === 0 ? (
-        <div style={{ color: "var(--text-3)", fontSize: 12 }}>
-          no traffic yet
-        </div>
+        <div style={{ color: "var(--text-3)", fontSize: 12 }}>no traffic yet</div>
       ) : (
         <FunnelTable funnel={funnel} successMetric={e.success_metric} />
       )}
 
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <StatusButton
-          experiment={e}
-          target="running"
-          label="start"
-          onStatus={onStatus}
-        />
-        <StatusButton
-          experiment={e}
-          target="paused"
-          label="pause"
-          onStatus={onStatus}
-        />
-        <StatusButton
-          experiment={e}
-          target="done"
-          label="finish"
-          onStatus={onStatus}
-        />
+        <StatusButton experiment={e} target="running" label="start" onStatus={onStatus} />
+        <StatusButton experiment={e} target="paused" label="pause" onStatus={onStatus} />
+        <StatusButton experiment={e} target="done" label="finish" onStatus={onStatus} />
       </div>
     </div>
   );
@@ -396,8 +365,7 @@ function FunnelTable({
   funnel: FunnelRow[];
   successMetric: "qualified" | "won" | "replied_3+";
 }) {
-  const successKey: keyof FunnelRow =
-    successMetric === "won" ? "won" : "qualified";
+  const successKey: keyof FunnelRow = successMetric === "won" ? "won" : "qualified";
   return (
     <table
       style={{
@@ -422,19 +390,12 @@ function FunnelTable({
           const success = r[successKey] as number;
           const rate = r.conversations > 0 ? (success / r.conversations) * 100 : 0;
           return (
-            <tr
-              key={r.style_id}
-              style={{ borderBottom: "1px solid var(--border)" }}
-            >
+            <tr key={r.style_id} style={{ borderBottom: "1px solid var(--border)" }}>
               <td style={tdStyle()}>{r.slug}</td>
               <td style={tdStyle()}>{r.conversations}</td>
               <td style={tdStyle()}>{success}</td>
-              <td style={tdStyle({ color: "var(--amber)" })}>
-                {rate.toFixed(1)}%
-              </td>
-              <td style={tdStyle({ color: "var(--text-3)" })}>
-                {r.escalated_to_human}
-              </td>
+              <td style={tdStyle({ color: "var(--amber)" })}>{rate.toFixed(1)}%</td>
+              <td style={tdStyle({ color: "var(--text-3)" })}>{r.escalated_to_human}</td>
             </tr>
           );
         })}
@@ -549,9 +510,7 @@ function CreateExperimentForm({
                 min="0"
                 step="1"
                 value={weights[s.slug] ?? ""}
-                onChange={(ev) =>
-                  setWeights((w) => ({ ...w, [s.slug]: ev.target.value }))
-                }
+                onChange={(ev) => setWeights((w) => ({ ...w, [s.slug]: ev.target.value }))}
                 placeholder="0"
                 style={{ ...inputStyle(), width: 80 }}
               />

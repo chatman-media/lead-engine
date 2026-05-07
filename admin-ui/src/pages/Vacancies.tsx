@@ -36,11 +36,7 @@ export function Vacancies() {
     refresh();
   }, []);
 
-  async function handleCreate(input: {
-    title: string;
-    body: string;
-    url: string | null;
-  }) {
+  async function handleCreate(input: { title: string; body: string; url: string | null }) {
     setError(null);
     try {
       await api.createVacancy(input);
@@ -71,7 +67,7 @@ export function Vacancies() {
   }
 
   async function handleToggleActive(v: Vacancy) {
-    await handleUpdate(v.id, { is_active: v.is_active === 1 ? false : true });
+    await handleUpdate(v.id, { is_active: v.is_active !== 1 });
   }
 
   async function handleDelete(v: Vacancy) {
@@ -91,9 +87,7 @@ export function Vacancies() {
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div>
-          <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>
-            Vacancies
-          </h2>
+          <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Vacancies</h2>
           <div
             style={{
               fontSize: 12,
@@ -111,9 +105,8 @@ export function Vacancies() {
       </div>
 
       <p style={{ color: "var(--text-3)", fontSize: 12, margin: 0, lineHeight: 1.6 }}>
-        Свежие вакансии. Бот использует ИХ в первую очередь, KB остаётся
-        для общих фактов про визу, проживание, страны. Изменения видны на
-        следующем сообщении кандидата — без переиндексации.
+        Свежие вакансии. Бот использует ИХ в первую очередь, KB остаётся для общих фактов про визу,
+        проживание, страны. Изменения видны на следующем сообщении кандидата — без переиндексации.
       </p>
 
       {error && (
@@ -233,11 +226,7 @@ function VacancyCard({
           <button onClick={onEdit} className="btn btn-ghost btn-sm" data-testid="vacancy-edit">
             edit
           </button>
-          <button
-            onClick={onDelete}
-            className="btn btn-danger btn-sm"
-            data-testid="vacancy-delete"
-          >
+          <button onClick={onDelete} className="btn btn-danger btn-sm" data-testid="vacancy-delete">
             delete
           </button>
         </div>
@@ -303,11 +292,7 @@ function EditForm({
   onCancel,
 }: {
   vacancy: Vacancy;
-  onSubmit: (patch: {
-    title: string;
-    body: string;
-    url: string | null;
-  }) => void;
+  onSubmit: (patch: { title: string; body: string; url: string | null }) => void;
   onCancel: () => void;
 }) {
   return (
@@ -436,9 +421,9 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         no vacancies yet
       </div>
       <div>
-        Добавь актуальные вакансии — заголовок (страна / город / ставка) +
-        тело (условия, требования, что входит). Бот будет ссылаться на них
-        в ответах вместо устаревших постов из чатов.
+        Добавь актуальные вакансии — заголовок (страна / город / ставка) + тело (условия,
+        требования, что входит). Бот будет ссылаться на них в ответах вместо устаревших постов из
+        чатов.
       </div>
       <button onClick={onAdd} className="btn btn-primary btn-sm">
         + add the first vacancy

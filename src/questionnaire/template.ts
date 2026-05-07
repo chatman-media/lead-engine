@@ -44,9 +44,7 @@ export function renderForm(opts: {
     autocomplete?: string,
   ): string {
     const value = escapeHtml(v[name] ?? "");
-    const err = errors[name]
-      ? `<div class="error">${escapeHtml(errors[name]!)}</div>`
-      : "";
+    const err = errors[name] ? `<div class="error">${escapeHtml(errors[name]!)}</div>` : "";
     const control =
       type === "textarea"
         ? `<textarea name="${name}" required>${value}</textarea>`

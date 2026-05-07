@@ -11,10 +11,10 @@ import {
   DOCS_COMPLETE_REPLY,
   INTAKE_FIELD_LABELS,
   INTAKE_TEMPLATE,
+  type IntakeFields,
   REJECTION_DEFAULT,
   VISA_ANKETA_TEMPLATE,
   VISA_PHOTO_REQUIREMENTS,
-  type IntakeFields,
 } from "./templates.ts";
 
 export interface LeadsServiceDeps {
@@ -67,7 +67,7 @@ export class LeadsService {
           : "🆕 НОВЫЙ ЛИД";
     lines.push(`${stateBadge} #${lead.id}`);
     lines.push(
-      `${user.tg_username ? "@" + user.tg_username : "tg:" + user.tg_user_id} · status=${user.status}`,
+      `${user.tg_username ? `@${user.tg_username}` : `tg:${user.tg_user_id}`} · status=${user.status}`,
     );
     lines.push("");
 
@@ -87,14 +87,8 @@ export class LeadsService {
       renderField("departure_readiness", intake.departure_readiness);
       renderField("photos_count", intake.photos_count ?? 0);
       renderField("videos_count", intake.videos_count ?? 0);
-      renderField(
-        "passport_photo_received",
-        intake.passport_photo_received ? "получено" : false,
-      );
-      renderField(
-        "dance_video_received",
-        intake.dance_video_received ? "получено" : false,
-      );
+      renderField("passport_photo_received", intake.passport_photo_received ? "получено" : false);
+      renderField("dance_video_received", intake.dance_video_received ? "получено" : false);
       lines.push("");
     }
 
@@ -102,7 +96,7 @@ export class LeadsService {
       lines.push("Последние реплики:");
       for (const m of recentMessages.slice(-5)) {
         const who = m.role === "user" ? "девочка" : "бот";
-        const trimmed = m.text.length > 200 ? m.text.slice(0, 200) + "…" : m.text;
+        const trimmed = m.text.length > 200 ? `${m.text.slice(0, 200)}…` : m.text;
         lines.push(`  ${who}: ${trimmed}`);
       }
       lines.push("");
@@ -159,17 +153,10 @@ export class LeadsService {
         text,
         replyMarkup: { inline_keyboard: this.approvalKeyboard(input.lead.id) },
       });
-      this.deps.leads.setOpsCardMessage(
-        input.lead.id,
-        this.deps.leadsChatId,
-        sent.message_id,
-      );
+      this.deps.leads.setOpsCardMessage(input.lead.id, this.deps.leadsChatId, sent.message_id);
       return this.deps.leads.byId(input.lead.id) ?? input.lead;
     } catch (err) {
-      console.error(
-        `[leads] failed to post card to LEADS_CHAT_ID=${this.deps.leadsChatId}:`,
-        err,
-      );
+      console.error(`[leads] failed to post card to LEADS_CHAT_ID=${this.deps.leadsChatId}:`, err);
       return input.lead;
     }
   }
@@ -180,10 +167,7 @@ export class LeadsService {
    * Telegram message (and a separate `messages` row) so the admin can
    * see them and they're not crammed into one wall.
    */
-  async sendApprovalMessages(input: {
-    lead: LeadRow;
-    user: UserRow;
-  }): Promise<void> {
+  async sendApprovalMessages(input: { lead: LeadRow; user: UserRow }): Promise<void> {
     const conv = this.deps.conversations.byUserId(input.user.id);
     if (!conv) {
       console.warn(`[leads] no conversation for user ${input.user.id}`);
@@ -224,10 +208,7 @@ export class LeadsService {
     });
   }
 
-  async sendRejection(input: {
-    user: UserRow;
-    customReason?: string;
-  }): Promise<void> {
+  async sendRejection(input: { user: UserRow; customReason?: string }): Promise<void> {
     const conv = this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
     const text = input.customReason?.trim() || REJECTION_DEFAULT;
@@ -269,7 +250,7 @@ export class LeadsService {
     const lines: string[] = [];
     lines.push(`📋 ПОДАЧА НА ВИЗУ · ${input.applicationId}`);
     lines.push(
-      `${input.user.tg_username ? "@" + input.user.tg_username : "tg:" + input.user.tg_user_id}` +
+      `${input.user.tg_username ? `@${input.user.tg_username}` : `tg:${input.user.tg_user_id}`}` +
         ` · lead #${input.lead.id}`,
     );
     lines.push("");
@@ -293,7 +274,7 @@ export class LeadsService {
       lines.push("Последние реплики:");
       for (const m of input.recentMessages.slice(-10)) {
         const who = m.role === "user" ? "девочка" : "бот";
-        const trimmed = m.text.length > 300 ? m.text.slice(0, 300) + "…" : m.text;
+        const trimmed = m.text.length > 300 ? `${m.text.slice(0, 300)}…` : m.text;
         lines.push(`  ${who}: ${trimmed}`);
       }
     }

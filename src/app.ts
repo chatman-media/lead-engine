@@ -1,61 +1,54 @@
 import type { Database } from "bun:sqlite";
 
 import {
+  createApproveLeadHandler,
   createBulkExportConversationsHandler,
   createConversationDetailHandler,
   createCreateExperimentHandler,
+  createCreateLeadNoteHandler,
   createCreateStyleHandler,
+  createCreateVacancyHandler,
   createDeleteConversationHandler,
+  createDeleteKbDocumentHandler,
+  createDeleteLeadHandler,
+  createDeleteLeadNoteHandler,
+  createDeleteVacancyHandler,
+  createDownloadFileHandler,
   createEditStyleHandler,
   createExperimentFunnelHandler,
   createExportConversationHandler,
+  createGetKbDocumentHandler,
   createGetStyleHandler,
-  createListConversationsHandler,
-  createListExperimentsHandler,
-  createListStylesHandler,
-  createListUsersHandler,
-  createApproveLeadHandler,
-  createCreateLeadNoteHandler,
-  createDeleteLeadHandler,
-  createDeleteLeadNoteHandler,
   createLeadCallbackHandler,
   createLeadDetailHandler,
+  createListConversationsHandler,
+  createListExperimentsHandler,
+  createListKbDocumentsHandler,
   createListLeadsHandler,
+  createListStylesHandler,
+  createListUsersHandler,
+  createListVacanciesHandler,
   createPromoteLeadHandler,
   createRejectLeadHandler,
   createReleaseHandler,
   createReplyHandler,
   createSendIntakeHandler,
-  createSubmitToVisaHandler,
-  createUpdateVisaDocsHandler,
-  createCreateVacancyHandler,
-  createDeleteVacancyHandler,
-  createDeleteKbDocumentHandler,
-  createDownloadFileHandler,
-  createGetKbDocumentHandler,
-  createListKbDocumentsHandler,
-  createListVacanciesHandler,
-  createUpdateKbDocumentHandler,
   createSetExperimentStatusHandler,
   createStatusHandler,
   createStylePlaygroundHandler,
+  createSubmitToVisaHandler,
   createTakeHandler,
+  createUpdateKbDocumentHandler,
   createUpdateUserMemoryHandler,
   createUpdateVacancyHandler,
+  createUpdateVisaDocsHandler,
   createUserDetailHandler,
 } from "./admin/api.ts";
-import {
-  createLoginHandler,
-  createLogoutHandler,
-  createMeHandler,
-} from "./admin/auth.ts";
-import { AdminBus } from "./admin/bus.ts";
-import {
-  createQuestionnaireGet,
-  createQuestionnairePost,
-} from "./questionnaire/routes.ts";
+import { createLoginHandler, createLogoutHandler, createMeHandler } from "./admin/auth.ts";
+import type { AdminBus } from "./admin/bus.ts";
+import { createQuestionnaireGet, createQuestionnairePost } from "./questionnaire/routes.ts";
 import { html, Router } from "./router.ts";
-import { TelegramClient } from "./telegram/client.ts";
+import type { TelegramClient } from "./telegram/client.ts";
 import { createWebhookHandler, type RagDeps } from "./telegram/webhook.ts";
 import { mountTestHooks } from "./test-hooks.ts";
 
@@ -161,22 +154,14 @@ export function createRouter(deps: AppDeps): Router {
             chat: deps.rag.chat,
             embedder: deps.rag.embedder,
             ...(deps.rag.topK !== undefined ? { topK: deps.rag.topK } : {}),
-            ...(deps.rag.maxDistance !== undefined
-              ? { maxDistance: deps.rag.maxDistance }
-              : {}),
+            ...(deps.rag.maxDistance !== undefined ? { maxDistance: deps.rag.maxDistance } : {}),
           },
         }
       : {}),
     onConversationChanged: (conversationId: number) => {
       deps.bus?.publish({ type: "conversation:updated", conversationId });
     },
-    onMessageSent: ({
-      conversationId,
-      tgUserId,
-    }: {
-      conversationId: number;
-      tgUserId: number;
-    }) => {
+    onMessageSent: ({ conversationId, tgUserId }: { conversationId: number; tgUserId: number }) => {
       deps.bus?.publish({ type: "message:new", conversationId, tgUserId });
     },
     leadsChatId: deps.leadsChatId ?? null,
@@ -186,21 +171,12 @@ export function createRouter(deps: AppDeps): Router {
   router.get("/admin/api/users", createListUsersHandler(apiDeps));
   // Telegram file proxy — browsers hit this URL from <img>/<video> tags
   // in the admin chat view; admin session cookie is the auth.
-  router.get(
-    "/admin/api/tg-files/:fileId",
-    createDownloadFileHandler(apiDeps),
-  );
-  router.patch(
-    "/admin/api/users/:id/memory",
-    createUpdateUserMemoryHandler(apiDeps),
-  );
+  router.get("/admin/api/tg-files/:fileId", createDownloadFileHandler(apiDeps));
+  router.patch("/admin/api/users/:id/memory", createUpdateUserMemoryHandler(apiDeps));
   // Detail view — register AFTER the more-specific :id/memory sub-path so
   // the literal sub-path matches first (router does linear scan).
   router.get("/admin/api/users/:id", createUserDetailHandler(apiDeps));
-  router.get(
-    "/admin/api/conversations",
-    createListConversationsHandler(apiDeps),
-  );
+  router.get("/admin/api/conversations", createListConversationsHandler(apiDeps));
   // Conversation export — these MUST come before /admin/api/conversations/:id
   // because the ":id" pattern is `[^/]+` and would otherwise capture the
   // literal "export.jsonl" as `:id="export.jsonl"`. The router does linear
@@ -209,54 +185,24 @@ export function createRouter(deps: AppDeps): Router {
     "/admin/api/conversations/export.jsonl",
     createBulkExportConversationsHandler(apiDeps),
   );
-  router.get(
-    "/admin/api/conversations/:id/export.jsonl",
-    createExportConversationHandler(apiDeps),
-  );
+  router.get("/admin/api/conversations/:id/export.jsonl", createExportConversationHandler(apiDeps));
 
-  router.get(
-    "/admin/api/conversations/:id",
-    createConversationDetailHandler(apiDeps),
-  );
-  router.post(
-    "/admin/api/conversations/:id/take",
-    createTakeHandler(apiDeps),
-  );
-  router.post(
-    "/admin/api/conversations/:id/release",
-    createReleaseHandler(apiDeps),
-  );
-  router.post(
-    "/admin/api/conversations/:id/reply",
-    createReplyHandler(apiDeps),
-  );
-  router.delete(
-    "/admin/api/conversations/:id",
-    createDeleteConversationHandler(apiDeps),
-  );
+  router.get("/admin/api/conversations/:id", createConversationDetailHandler(apiDeps));
+  router.post("/admin/api/conversations/:id/take", createTakeHandler(apiDeps));
+  router.post("/admin/api/conversations/:id/release", createReleaseHandler(apiDeps));
+  router.post("/admin/api/conversations/:id/reply", createReplyHandler(apiDeps));
+  router.delete("/admin/api/conversations/:id", createDeleteConversationHandler(apiDeps));
 
   // Sales-style engine endpoints (Phase 2b).
   router.get("/admin/api/styles", createListStylesHandler(apiDeps));
   router.post("/admin/api/styles", createCreateStyleHandler(apiDeps));
   router.get("/admin/api/styles/:id", createGetStyleHandler(apiDeps));
   router.patch("/admin/api/styles/:id", createEditStyleHandler(apiDeps));
-  router.post(
-    "/admin/api/styles/:id/playground",
-    createStylePlaygroundHandler(apiDeps),
-  );
+  router.post("/admin/api/styles/:id/playground", createStylePlaygroundHandler(apiDeps));
   router.get("/admin/api/experiments", createListExperimentsHandler(apiDeps));
-  router.post(
-    "/admin/api/experiments",
-    createCreateExperimentHandler(apiDeps),
-  );
-  router.patch(
-    "/admin/api/experiments/:id",
-    createSetExperimentStatusHandler(apiDeps),
-  );
-  router.get(
-    "/admin/api/experiments/:id/funnel",
-    createExperimentFunnelHandler(apiDeps),
-  );
+  router.post("/admin/api/experiments", createCreateExperimentHandler(apiDeps));
+  router.patch("/admin/api/experiments/:id", createSetExperimentStatusHandler(apiDeps));
+  router.get("/admin/api/experiments/:id/funnel", createExperimentFunnelHandler(apiDeps));
 
   // Vacancies — admin-managed list of currently-open offers, prepended
   // to the RAG context on every turn.
@@ -267,50 +213,26 @@ export function createRouter(deps: AppDeps): Router {
 
   // KB management — list/inspect/delete/re-tag indexed documents.
   router.get("/admin/api/kb/documents", createListKbDocumentsHandler(apiDeps));
-  router.get(
-    "/admin/api/kb/documents/:id",
-    createGetKbDocumentHandler(apiDeps),
-  );
-  router.patch(
-    "/admin/api/kb/documents/:id",
-    createUpdateKbDocumentHandler(apiDeps),
-  );
-  router.delete(
-    "/admin/api/kb/documents/:id",
-    createDeleteKbDocumentHandler(apiDeps),
-  );
+  router.get("/admin/api/kb/documents/:id", createGetKbDocumentHandler(apiDeps));
+  router.patch("/admin/api/kb/documents/:id", createUpdateKbDocumentHandler(apiDeps));
+  router.delete("/admin/api/kb/documents/:id", createDeleteKbDocumentHandler(apiDeps));
 
   // Leads — pipeline state machine: intake → approve/reject → docs → submitted.
   router.get("/admin/api/leads", createListLeadsHandler(apiDeps));
-  router.post(
-    "/admin/api/leads/from-conversation/:id",
-    createPromoteLeadHandler(apiDeps),
-  );
+  router.post("/admin/api/leads/from-conversation/:id", createPromoteLeadHandler(apiDeps));
   router.post("/admin/api/leads/:id/approve", createApproveLeadHandler(apiDeps));
   router.post("/admin/api/leads/:id/reject", createRejectLeadHandler(apiDeps));
   router.post("/admin/api/leads/:id/send-intake", createSendIntakeHandler(apiDeps));
-  router.post(
-    "/admin/api/leads/:id/submit-to-visa",
-    createSubmitToVisaHandler(apiDeps),
-  );
+  router.post("/admin/api/leads/:id/submit-to-visa", createSubmitToVisaHandler(apiDeps));
   // Notes — sub-resource of a lead. Register before the catch-all
   // `/leads/:id` so /:id/notes doesn't get captured as a literal id.
-  router.post(
-    "/admin/api/leads/:id/notes",
-    createCreateLeadNoteHandler(apiDeps),
-  );
-  router.delete(
-    "/admin/api/leads/:id/notes/:noteId",
-    createDeleteLeadNoteHandler(apiDeps),
-  );
+  router.post("/admin/api/leads/:id/notes", createCreateLeadNoteHandler(apiDeps));
+  router.delete("/admin/api/leads/:id/notes/:noteId", createDeleteLeadNoteHandler(apiDeps));
   // Detail / patch routes — register AFTER all `/leads/:id/<action>`
   // sub-paths so the literal sub-path matches first (router does
   // linear first-match scanning).
   router.get("/admin/api/leads/:id", createLeadDetailHandler(apiDeps));
-  router.patch(
-    "/admin/api/leads/:id/visa-docs",
-    createUpdateVisaDocsHandler(apiDeps),
-  );
+  router.patch("/admin/api/leads/:id/visa-docs", createUpdateVisaDocsHandler(apiDeps));
   router.delete("/admin/api/leads/:id", createDeleteLeadHandler(apiDeps));
 
   if (deps.enableTestHooks) {

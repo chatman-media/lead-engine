@@ -27,7 +27,9 @@ export function Users() {
     <div className="page fade-in">
       <div className="page-header">
         <span className="page-title">Users</span>
-        <span className="page-count" data-testid="user-count">— {users.length}</span>
+        <span className="page-count" data-testid="user-count">
+          — {users.length}
+        </span>
       </div>
 
       {loading ? (

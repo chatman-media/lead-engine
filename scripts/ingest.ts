@@ -1,17 +1,13 @@
 #!/usr/bin/env bun
 import { statSync } from "node:fs";
 
-import {
-  activeEmbeddingDim,
-  config,
-  llmIsConfigured,
-} from "../src/config.ts";
+import { activeEmbeddingDim, config, llmIsConfigured } from "../src/config.ts";
 import { KbRepo } from "../src/db/repos/kb.ts";
 import { openDb } from "../src/db/sqlite.ts";
-import { OpenAIEmbeddingClient } from "../src/rag/embed.ts";
-import { OllamaEmbeddingClient } from "../src/rag/providers/ollama-embed.ts";
 import type { EmbeddingClient } from "../src/rag/embed.ts";
+import { OpenAIEmbeddingClient } from "../src/rag/embed.ts";
 import { ingestDirectory, ingestFile } from "../src/rag/ingest.ts";
+import { OllamaEmbeddingClient } from "../src/rag/providers/ollama-embed.ts";
 
 interface CliOpts {
   target: string;
@@ -99,9 +95,7 @@ async function main() {
     );
   }
   if (embedder.dim !== activeEmbeddingDim()) {
-    throw new Error(
-      `Embedder dim ${embedder.dim} != active dim ${activeEmbeddingDim()}`,
-    );
+    throw new Error(`Embedder dim ${embedder.dim} != active dim ${activeEmbeddingDim()}`);
   }
 
   const chunkOpts: { maxChars?: number; overlapChars?: number } = {};

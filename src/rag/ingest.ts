@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
 import type { KbRepo } from "../db/repos/kb.ts";
-import { chunkText, type ChunkOptions } from "./chunk.ts";
+import { type ChunkOptions, chunkText } from "./chunk.ts";
 import type { EmbeddingClient } from "./embed.ts";
 
 const SUPPORTED_EXTS = new Set([".md", ".txt"]);
@@ -32,10 +32,7 @@ interface ExistingDoc {
   content_hash: string;
 }
 
-export async function ingestFile(
-  path: string,
-  deps: IngestDeps,
-): Promise<IngestFileResult> {
+export async function ingestFile(path: string, deps: IngestDeps): Promise<IngestFileResult> {
   const abs = resolve(path);
   const raw = readFileSync(abs, "utf8");
   const hash = createHash("sha256").update(raw).digest("hex");
@@ -123,9 +120,7 @@ export async function ingestDirectory(
       continue;
     }
     const fileDeps: IngestDeps =
-      deps.topic !== undefined
-        ? deps
-        : { ...deps, topic: deriveTopicFromPath(file, root) };
+      deps.topic !== undefined ? deps : { ...deps, topic: deriveTopicFromPath(file, root) };
     const r = await ingestFile(file, fileDeps);
     summary.documents++;
     summary.chunks += r.chunks;
@@ -147,7 +142,7 @@ export function deriveTopicFromPath(file: string, root: string): string | null {
   // ".." means file is OUTSIDE root (or equal to root) — no usable topic.
   if (!rel || rel === "." || rel.startsWith("..")) return null;
   // `relative` may use OS separators; normalise.
-  const first = rel.split(/[\/\\]/)[0]!;
+  const first = rel.split(/[/\\]/)[0]!;
   return first || null;
 }
 
@@ -168,9 +163,7 @@ function getDb(kb: KbRepo): Database {
 
 function countChunksForDoc(db: Database, docId: number): number {
   const r = db
-    .query<{ n: number }, [number]>(
-      "SELECT COUNT(*) AS n FROM kb_chunks WHERE document_id = ?",
-    )
+    .query<{ n: number }, [number]>("SELECT COUNT(*) AS n FROM kb_chunks WHERE document_id = ?")
     .get(docId);
   return r?.n ?? 0;
 }
@@ -188,5 +181,5 @@ export function stripNonContent(raw: string): string {
   s = s.replace(/<!--[\s\S]*?-->/g, "");
   // Collapse the trail of blank lines that the strip leaves behind.
   s = s.replace(/\n{3,}/g, "\n\n").trim();
-  return s + "\n";
+  return `${s}\n`;
 }

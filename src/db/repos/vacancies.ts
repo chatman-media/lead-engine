@@ -30,9 +30,7 @@ export class VacanciesRepo {
    *  inbound message to build the prompt block — keep it cheap. */
   listActive(): VacancyRow[] {
     return this.db
-      .query<VacancyRow, []>(
-        `SELECT * FROM vacancies WHERE is_active = 1 ORDER BY updated_at DESC`,
-      )
+      .query<VacancyRow, []>(`SELECT * FROM vacancies WHERE is_active = 1 ORDER BY updated_at DESC`)
       .all();
   }
 
@@ -40,17 +38,14 @@ export class VacanciesRepo {
    *  view — operators want to see closed ones too (to re-enable). */
   listAll(): VacancyRow[] {
     return this.db
-      .query<VacancyRow, []>(
-        `SELECT * FROM vacancies ORDER BY is_active DESC, updated_at DESC`,
-      )
+      .query<VacancyRow, []>(`SELECT * FROM vacancies ORDER BY is_active DESC, updated_at DESC`)
       .all();
   }
 
   byId(id: number): VacancyRow | null {
     return (
-      this.db
-        .query<VacancyRow, [number]>("SELECT * FROM vacancies WHERE id = ? LIMIT 1")
-        .get(id) ?? null
+      this.db.query<VacancyRow, [number]>("SELECT * FROM vacancies WHERE id = ? LIMIT 1").get(id) ??
+      null
     );
   }
 
@@ -91,12 +86,7 @@ export class VacanciesRepo {
     const title = patch.title !== undefined ? patch.title.trim() : existing.title;
     const body = patch.body !== undefined ? patch.body.trim() : existing.body;
     const url = patch.url !== undefined ? normaliseUrl(patch.url) : existing.url;
-    const isActive =
-      patch.isActive === undefined
-        ? existing.is_active
-        : patch.isActive
-          ? 1
-          : 0;
+    const isActive = patch.isActive === undefined ? existing.is_active : patch.isActive ? 1 : 0;
     this.db.run(
       `UPDATE vacancies
        SET title = ?, body = ?, url = ?, is_active = ?, updated_at = unixepoch()
@@ -115,9 +105,7 @@ export class VacanciesRepo {
 
   countActive(): number {
     const r = this.db
-      .query<{ n: number }, []>(
-        "SELECT COUNT(*) AS n FROM vacancies WHERE is_active = 1",
-      )
+      .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM vacancies WHERE is_active = 1")
       .get();
     return r?.n ?? 0;
   }
@@ -141,9 +129,7 @@ export function renderVacanciesBlock(vacancies: VacancyRow[]): string {
     .join("\n\n");
   const openLocations = extractOpenLocations(active);
   const locationsLine =
-    openLocations.length > 0
-      ? `ОТКРЫТЫЕ ЛОКАЦИИ: ${openLocations.join(", ")}.\n`
-      : "";
+    openLocations.length > 0 ? `ОТКРЫТЫЕ ЛОКАЦИИ: ${openLocations.join(", ")}.\n` : "";
   return (
     `АКТУАЛЬНЫЕ ВАКАНСИИ (свежие, из админки — отвечай по ним в первую очередь).\n` +
     `${locationsLine}` +

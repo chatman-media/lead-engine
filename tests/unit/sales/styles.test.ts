@@ -36,61 +36,54 @@ describe("style registry", () => {
 const SAMPLES = [alinaInfinity, flirtyBelfort, empatheticNepq, coldDirectPas];
 
 describe("sample styles — schema validity", () => {
-  test.each(SAMPLES.map((s) => [s.slug, s] as const))(
-    "%s parses against StyleSchema",
-    (_slug, style) => {
-      // Parsing the already-parsed object should be a no-op identity.
-      expect(() => StyleSchema.parse(style)).not.toThrow();
-    },
-  );
+  test.each(
+    SAMPLES.map((s) => [s.slug, s] as const),
+  )("%s parses against StyleSchema", (_slug, style) => {
+    // Parsing the already-parsed object should be a no-op identity.
+    expect(() => StyleSchema.parse(style)).not.toThrow();
+  });
 
-  test.each(SAMPLES.map((s) => [s.slug, s] as const))(
-    "%s has at least one hook",
-    (_slug, style) => {
-      expect(style.hooks.length).toBeGreaterThanOrEqual(1);
-    },
-  );
+  test.each(
+    SAMPLES.map((s) => [s.slug, s] as const),
+  )("%s has at least one hook", (_slug, style) => {
+    expect(style.hooks.length).toBeGreaterThanOrEqual(1);
+  });
 
-  test.each(SAMPLES.map((s) => [s.slug, s] as const))(
-    "%s has all 5 funnel stages defined",
-    (_slug, style) => {
-      const stages = style.stages;
-      expect(stages.opener).toBeDefined();
-      expect(stages.qualify).toBeDefined();
-      expect(stages.pitch).toBeDefined();
-      expect(stages.objection).toBeDefined();
-      expect(stages.close).toBeDefined();
-    },
-  );
+  test.each(
+    SAMPLES.map((s) => [s.slug, s] as const),
+  )("%s has all 5 funnel stages defined", (_slug, style) => {
+    const stages = style.stages;
+    expect(stages.opener).toBeDefined();
+    expect(stages.qualify).toBeDefined();
+    expect(stages.pitch).toBeDefined();
+    expect(stages.objection).toBeDefined();
+    expect(stages.close).toBeDefined();
+  });
 
-  test.each(SAMPLES.map((s) => [s.slug, s] as const))(
-    "%s pitch stage requires grounding",
-    (_slug, style) => {
-      expect(style.stages.pitch?.groundingRequired).toBe(true);
-    },
-  );
+  test.each(
+    SAMPLES.map((s) => [s.slug, s] as const),
+  )("%s pitch stage requires grounding", (_slug, style) => {
+    expect(style.stages.pitch?.groundingRequired).toBe(true);
+  });
 
-  test.each(SAMPLES.map((s) => [s.slug, s] as const))(
-    "%s guardrails block minors",
-    (_slug, style) => {
-      expect(style.guardrails.noMinors).toBe(true);
-    },
-  );
+  test.each(
+    SAMPLES.map((s) => [s.slug, s] as const),
+  )("%s guardrails block minors", (_slug, style) => {
+    expect(style.guardrails.noMinors).toBe(true);
+  });
 
-  test.each(SAMPLES.map((s) => [s.slug, s] as const))(
-    "%s pins a non-empty model id",
-    (_slug, style) => {
-      expect(style.model.id.length).toBeGreaterThan(0);
-    },
-  );
+  test.each(
+    SAMPLES.map((s) => [s.slug, s] as const),
+  )("%s pins a non-empty model id", (_slug, style) => {
+    expect(style.model.id.length).toBeGreaterThan(0);
+  });
 
-  test.each(SAMPLES.map((s) => [s.slug, s] as const))(
-    "%s temperature is in valid sampling range",
-    (_slug, style) => {
-      expect(style.model.temperature).toBeGreaterThanOrEqual(0);
-      expect(style.model.temperature).toBeLessThanOrEqual(2);
-    },
-  );
+  test.each(
+    SAMPLES.map((s) => [s.slug, s] as const),
+  )("%s temperature is in valid sampling range", (_slug, style) => {
+    expect(style.model.temperature).toBeGreaterThanOrEqual(0);
+    expect(style.model.temperature).toBeLessThanOrEqual(2);
+  });
 });
 
 describe("schema rejection — bad input", () => {

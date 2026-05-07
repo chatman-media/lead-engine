@@ -1,9 +1,8 @@
 import { config } from "../src/config.ts";
-import { getDb } from "../src/db/sqlite.ts";
 import { KbRepo } from "../src/db/repos/kb.ts";
-import { OllamaChatClient } from "../src/rag/providers/ollama-chat.ts";
-import { OllamaEmbeddingClient } from "../src/rag/providers/ollama-embed.ts";
+import { getDb } from "../src/db/sqlite.ts";
 import { buildSystemPrompt } from "../src/rag/answer.ts";
+import { OllamaEmbeddingClient } from "../src/rag/providers/ollama-embed.ts";
 
 const question = process.argv.slice(2).join(" ") || "расскажи про работу в Корее";
 
@@ -21,20 +20,18 @@ const allHits = kb.search(vec, config.rag.topK);
 const hits = allHits.filter((h) =>
   config.rag.maxDistance === undefined ? true : h.distance <= config.rag.maxDistance,
 );
-const context = hits
-  .map((h, i) => `[#${i + 1}] (source: ${h.title})\n${h.text}`)
-  .join("\n\n");
+const context = hits.map((h, i) => `[#${i + 1}] (source: ${h.title})\n${h.text}`).join("\n\n");
 const systemPrompt = buildSystemPrompt(config.persona, context);
 
 const t0 = Date.now();
-const url = config.ollama.host.replace(/\/+$/, "") + "/api/chat";
+const url = `${config.ollama.host.replace(/\/+$/, "")}/api/chat`;
 const res = await fetch(url, {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify({
     model: config.ollama.chatModel,
     messages: [
-      { role: "system", content: "/no_think\n\n" + systemPrompt },
+      { role: "system", content: `/no_think\n\n${systemPrompt}` },
       { role: "user", content: question },
     ],
     stream: false,

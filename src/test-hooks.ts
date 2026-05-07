@@ -9,7 +9,7 @@ import { AdminsRepo } from "./db/repos/admins.ts";
 import { ConversationsRepo } from "./db/repos/conversations.ts";
 import { QuestionnaireTokensRepo } from "./db/repos/questionnaire_tokens.ts";
 import { UsersRepo } from "./db/repos/users.ts";
-import { json, Router } from "./router.ts";
+import { json, type Router } from "./router.ts";
 
 export function mountTestHooks(router: Router, db: Database): void {
   const admins = new AdminsRepo(db);
@@ -42,12 +42,7 @@ export function mountTestHooks(router: Router, db: Database): void {
     const body = (await req.json()) as {
       tgUserId: number;
       tgUsername?: string;
-      status?:
-        | "new"
-        | "questionnaire_pending"
-        | "qualified"
-        | "won"
-        | "lost";
+      status?: "new" | "questionnaire_pending" | "qualified" | "won" | "lost";
     };
     const existing = users.byTgId(body.tgUserId);
     const u =

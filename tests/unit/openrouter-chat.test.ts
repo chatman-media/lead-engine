@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  ChatApiError,
-  type FetchLike,
-  type ChatMessage,
-} from "@/rag/chat.ts";
+import { ChatApiError, type ChatMessage, type FetchLike } from "@/rag/chat.ts";
 import { OpenRouterChatClient } from "@/rag/providers/openrouter-chat.ts";
 
 interface CapturedRequest {
@@ -13,9 +9,10 @@ interface CapturedRequest {
   body: Record<string, unknown>;
 }
 
-function captureFetch(
-  impl: (req: CapturedRequest) => Response | Promise<Response>,
-): { fetch: FetchLike; calls: CapturedRequest[] } {
+function captureFetch(impl: (req: CapturedRequest) => Response | Promise<Response>): {
+  fetch: FetchLike;
+  calls: CapturedRequest[];
+} {
   const calls: CapturedRequest[] = [];
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
@@ -37,9 +34,7 @@ function ok(content: string): Response {
   return new Response(
     JSON.stringify({
       id: "chatcmpl-test",
-      choices: [
-        { message: { role: "assistant", content }, finish_reason: "stop" },
-      ],
+      choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }],
     }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
@@ -67,9 +62,9 @@ describe("OpenRouterChatClient — construction", () => {
   });
 
   test("throws on missing model", () => {
-    expect(
-      () => new OpenRouterChatClient({ apiKey: "sk-or-v1-test", model: "" }),
-    ).toThrow(/model required/);
+    expect(() => new OpenRouterChatClient({ apiKey: "sk-or-v1-test", model: "" })).toThrow(
+      /model required/,
+    );
   });
 });
 
@@ -97,9 +92,7 @@ describe("OpenRouterChatClient — request shape", () => {
       fetch: cap.fetch,
     });
     await c.complete([{ role: "user", content: "hi" }]);
-    expect(cap.calls[0]!.url).toBe(
-      "https://my-or-proxy.example.com/v1/chat/completions",
-    );
+    expect(cap.calls[0]!.url).toBe("https://my-or-proxy.example.com/v1/chat/completions");
   });
 
   test("siteUrl + appName produce HTTP-Referer + X-Title headers", async () => {
@@ -112,9 +105,7 @@ describe("OpenRouterChatClient — request shape", () => {
       fetch: cap.fetch,
     });
     await c.complete([{ role: "user", content: "hi" }]);
-    expect(cap.calls[0]!.headers["HTTP-Referer"]).toBe(
-      "https://my-app.example.com",
-    );
+    expect(cap.calls[0]!.headers["HTTP-Referer"]).toBe("https://my-app.example.com");
     expect(cap.calls[0]!.headers["X-Title"]).toBe("tg-chatbot-test");
   });
 
@@ -204,10 +195,10 @@ describe("OpenRouterChatClient — error paths", () => {
   test("HTTP 401 throws ChatApiError with status + message from payload.error", async () => {
     const cap = captureFetch(
       () =>
-        new Response(
-          JSON.stringify({ error: { message: "Invalid API key" } }),
-          { status: 401, headers: { "content-type": "application/json" } },
-        ),
+        new Response(JSON.stringify({ error: { message: "Invalid API key" } }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        }),
     );
     const c = new OpenRouterChatClient({
       apiKey: "sk-or-v1-bad",
@@ -228,37 +219,33 @@ describe("OpenRouterChatClient — error paths", () => {
   test("HTTP 429 throws with rate-limit message", async () => {
     const cap = captureFetch(
       () =>
-        new Response(
-          JSON.stringify({ error: { message: "rate limit hit" } }),
-          { status: 429, headers: { "content-type": "application/json" } },
-        ),
+        new Response(JSON.stringify({ error: { message: "rate limit hit" } }), {
+          status: 429,
+          headers: { "content-type": "application/json" },
+        }),
     );
     const c = new OpenRouterChatClient({
       apiKey: "sk-or-v1-test",
       model: "test/model",
       fetch: cap.fetch,
     });
-    await expect(
-      c.complete([{ role: "user", content: "hi" }]),
-    ).rejects.toThrow(/rate limit/);
+    await expect(c.complete([{ role: "user", content: "hi" }])).rejects.toThrow(/rate limit/);
   });
 
   test("payload.error on 200 also throws (OR's pattern for some errors)", async () => {
     const cap = captureFetch(
       () =>
-        new Response(
-          JSON.stringify({ error: { message: "model not found", code: 404 } }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
+        new Response(JSON.stringify({ error: { message: "model not found", code: 404 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
     );
     const c = new OpenRouterChatClient({
       apiKey: "sk-or-v1-test",
       model: "made-up/model",
       fetch: cap.fetch,
     });
-    await expect(
-      c.complete([{ role: "user", content: "hi" }]),
-    ).rejects.toThrow(/model not found/);
+    await expect(c.complete([{ role: "user", content: "hi" }])).rejects.toThrow(/model not found/);
   });
 
   test("missing choices[0].message.content throws", async () => {
@@ -274,9 +261,7 @@ describe("OpenRouterChatClient — error paths", () => {
       model: "test/model",
       fetch: cap.fetch,
     });
-    await expect(
-      c.complete([{ role: "user", content: "hi" }]),
-    ).rejects.toThrow(/no choices/);
+    await expect(c.complete([{ role: "user", content: "hi" }])).rejects.toThrow(/no choices/);
   });
 
   test("empty content treated as protocol violation", async () => {
@@ -286,9 +271,7 @@ describe("OpenRouterChatClient — error paths", () => {
       model: "test/model",
       fetch: cap.fetch,
     });
-    await expect(
-      c.complete([{ role: "user", content: "hi" }]),
-    ).rejects.toThrow(/no choices/);
+    await expect(c.complete([{ role: "user", content: "hi" }])).rejects.toThrow(/no choices/);
   });
 
   test("network error wraps as 'OpenRouter unreachable'", async () => {
@@ -323,8 +306,6 @@ describe("OpenRouterChatClient — error paths", () => {
       model: "test/model",
       fetch: cap.fetch,
     });
-    await expect(
-      c.complete([{ role: "user", content: "hi" }]),
-    ).rejects.toThrow(/non-JSON/);
+    await expect(c.complete([{ role: "user", content: "hi" }])).rejects.toThrow(/non-JSON/);
   });
 });

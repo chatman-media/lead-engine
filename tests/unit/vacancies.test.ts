@@ -32,7 +32,12 @@ describe("VacanciesRepo", () => {
     const b = repo.create({ title: "B", body: "b body" });
     repo.update(b.id, { isActive: false });
     expect(repo.listActive().map((v) => v.id)).toEqual([a.id]);
-    expect(repo.listAll().map((v) => v.id).sort()).toEqual([a.id, b.id].sort());
+    expect(
+      repo
+        .listAll()
+        .map((v) => v.id)
+        .sort(),
+    ).toEqual([a.id, b.id].sort());
   });
 
   test("listActive ordering: freshest update first", async () => {

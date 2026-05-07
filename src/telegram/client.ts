@@ -1,9 +1,4 @@
-import type {
-  TgFile,
-  TgReplyMarkup,
-  TgSendMessageResult,
-  TgUser,
-} from "./types.ts";
+import type { TgFile, TgReplyMarkup, TgSendMessageResult, TgUser } from "./types.ts";
 
 export type FetchLike = typeof fetch;
 
@@ -44,10 +39,7 @@ export class TelegramClient {
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
-  private async call<T>(
-    method: string,
-    params: Record<string, unknown>,
-  ): Promise<T> {
+  private async call<T>(method: string, params: Record<string, unknown>): Promise<T> {
     const url = `${this.baseUrl}/bot${this.token}/${method}`;
     const res = await this.fetchImpl(url, {
       method: "POST",
@@ -127,10 +119,8 @@ export class TelegramClient {
     };
     if (input.parseMode) params.parse_mode = input.parseMode;
     if (input.replyMarkup) params.reply_markup = input.replyMarkup;
-    if (input.disableWebPagePreview)
-      params.disable_web_page_preview = input.disableWebPagePreview;
-    if (input.replyToMessageId !== undefined)
-      params.reply_to_message_id = input.replyToMessageId;
+    if (input.disableWebPagePreview) params.disable_web_page_preview = input.disableWebPagePreview;
+    if (input.replyToMessageId !== undefined) params.reply_to_message_id = input.replyToMessageId;
     return this.call<TgSendMessageResult>("sendMessage", params);
   }
 
@@ -224,12 +214,7 @@ export class TelegramClient {
 
   sendChatAction(input: {
     chatId: number | string;
-    action:
-      | "typing"
-      | "upload_photo"
-      | "record_video"
-      | "upload_voice"
-      | "upload_document";
+    action: "typing" | "upload_photo" | "record_video" | "upload_voice" | "upload_document";
   }): Promise<true> {
     return this.call<true>("sendChatAction", {
       chat_id: input.chatId,
@@ -258,9 +243,6 @@ export class TelegramClient {
   }
 
   getWebhookInfo(): Promise<{ url: string; pending_update_count: number }> {
-    return this.call<{ url: string; pending_update_count: number }>(
-      "getWebhookInfo",
-      {},
-    );
+    return this.call<{ url: string; pending_update_count: number }>("getWebhookInfo", {});
   }
 }

@@ -1,19 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
 import { EmbeddingApiError } from "@/rag/embed.ts";
-import {
-  OllamaEmbeddingClient,
-  type FetchLike,
-} from "@/rag/providers/ollama-embed.ts";
+import { type FetchLike, OllamaEmbeddingClient } from "@/rag/providers/ollama-embed.ts";
 
 interface RecordedCall {
   url: string;
   body: { model: string; input: string[] | string };
 }
 
-function fakeFetch(
-  responder: (call: RecordedCall) => Response,
-): { fetchImpl: FetchLike; calls: RecordedCall[] } {
+function fakeFetch(responder: (call: RecordedCall) => Response): {
+  fetchImpl: FetchLike;
+  calls: RecordedCall[];
+} {
   const calls: RecordedCall[] = [];
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
@@ -60,9 +58,7 @@ describe("OllamaEmbeddingClient", () => {
   });
 
   test("throws EmbeddingApiError on non-2xx", async () => {
-    const { fetchImpl } = fakeFetch(
-      () => new Response("nope", { status: 500 }),
-    );
+    const { fetchImpl } = fakeFetch(() => new Response("nope", { status: 500 }));
     const client = new OllamaEmbeddingClient({
       host: "http://x:1",
       model: "m",
@@ -73,9 +69,7 @@ describe("OllamaEmbeddingClient", () => {
   });
 
   test("throws when returned vector dim mismatches configured dim", async () => {
-    const { fetchImpl } = fakeFetch(() =>
-      ok({ embeddings: [[1, 2, 3]] }),
-    );
+    const { fetchImpl } = fakeFetch(() => ok({ embeddings: [[1, 2, 3]] }));
     const client = new OllamaEmbeddingClient({
       host: "http://x:1",
       model: "m",
@@ -102,9 +96,7 @@ describe("OllamaEmbeddingClient", () => {
   });
 
   test("throws when count of returned vectors mismatches inputs", async () => {
-    const { fetchImpl } = fakeFetch(() =>
-      ok({ embeddings: [[1, 0]] }),
-    );
+    const { fetchImpl } = fakeFetch(() => ok({ embeddings: [[1, 0]] }));
     const client = new OllamaEmbeddingClient({
       host: "http://x:1",
       model: "m",

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import {
+  type ExperimentRow,
   ExperimentsRepo,
   parseAllocationToExperiment,
-  type ExperimentRow,
 } from "@/db/repos/experiments.ts";
 import { openDb } from "@/db/sqlite.ts";
 
@@ -139,9 +139,7 @@ describe("parseAllocationToExperiment", () => {
   }
 
   test("parses a valid allocation into Experiment shape", () => {
-    const exp = parseAllocationToExperiment(
-      fakeRow(JSON.stringify({ a: 50, b: 30, c: 20 })),
-    );
+    const exp = parseAllocationToExperiment(fakeRow(JSON.stringify({ a: 50, b: 30, c: 20 })));
     expect(exp).not.toBeNull();
     expect(exp!.slug).toBe("exp");
     expect(exp!.variants.length).toBe(3);
@@ -159,9 +157,7 @@ describe("parseAllocationToExperiment", () => {
   });
 
   test("returns null when a weight is non-numeric", () => {
-    expect(
-      parseAllocationToExperiment(fakeRow(JSON.stringify({ a: "fifty" }))),
-    ).toBeNull();
+    expect(parseAllocationToExperiment(fakeRow(JSON.stringify({ a: "fifty" })))).toBeNull();
   });
 
   test("returns null when a weight is negative", () => {
@@ -173,9 +169,7 @@ describe("parseAllocationToExperiment", () => {
   });
 
   test("zero weight is allowed (variant simply never wins)", () => {
-    const exp = parseAllocationToExperiment(
-      fakeRow(JSON.stringify({ a: 100, b: 0 })),
-    );
+    const exp = parseAllocationToExperiment(fakeRow(JSON.stringify({ a: 100, b: 0 })));
     expect(exp).not.toBeNull();
     expect(exp!.variants.length).toBe(2);
   });

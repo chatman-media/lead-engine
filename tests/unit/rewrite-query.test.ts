@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
-import {
-  questionNeedsRewrite,
-  rewriteQuery,
-  sanitizeRewritten,
-} from "@/rag/rewrite-query.ts";
+import { questionNeedsRewrite, rewriteQuery, sanitizeRewritten } from "@/rag/rewrite-query.ts";
 
-function fakeChat(reply: string): ChatClient & { calls: number; lastMessages: ChatMessage[] | null } {
+function fakeChat(
+  reply: string,
+): ChatClient & { calls: number; lastMessages: ChatMessage[] | null } {
   const wrapper = {
     calls: 0,
     lastMessages: null as ChatMessage[] | null,
@@ -47,10 +45,7 @@ describe("questionNeedsRewrite", () => {
   test("returns false on self-contained long question", () => {
     const history: ChatMessage[] = [{ role: "assistant", content: "..." }];
     expect(
-      questionNeedsRewrite(
-        "сколько платят моделям по контракту в Дубае на 30 дней?",
-        history,
-      ),
+      questionNeedsRewrite("сколько платят моделям по контракту в Дубае на 30 дней?", history),
     ).toBe(false);
   });
 });

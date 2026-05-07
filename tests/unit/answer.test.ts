@@ -117,9 +117,7 @@ describe("isPersonaSmalltalkQuestion", () => {
   });
 
   test("false when job/location mixed in (work intent wins)", () => {
-    expect(
-      isPersonaSmalltalkQuestion("как тебя зовут есть работа в китае?"),
-    ).toBe(false);
+    expect(isPersonaSmalltalkQuestion("как тебя зовут есть работа в китае?")).toBe(false);
     expect(isPersonaSmalltalkQuestion("как зовут? есть вакансии?")).toBe(false);
     expect(isPersonaSmalltalkQuestion("представься, какой график?")).toBe(false);
   });
@@ -549,7 +547,7 @@ describe("answerWithRag", () => {
 
   test("topicRouting falls back to global when classifier returns null", async () => {
     seed();
-    const embedder = fakeEmbedder({ "привет": vec(1) });
+    const embedder = fakeEmbedder({ привет: vec(1) });
     const chat = fakeChat("Reply text");
     const result = await answerWithRag({
       question: "привет", // doesn't match any topic
@@ -666,7 +664,7 @@ describe("answerWithRag", () => {
 
   test("telemetry: hybrid=true marker when hybrid retrieval is used", async () => {
     const { qVec } = seed();
-    const embedder = fakeEmbedder({ "test": qVec });
+    const embedder = fakeEmbedder({ test: qVec });
     const chat = fakeChat("ok");
     const result = await answerWithRag({
       question: "test",
@@ -732,9 +730,7 @@ describe("isBotPresenceQuestion", () => {
 
   test("returns false when question carries job intent", () => {
     expect(isBotPresenceQuestion("ты бот, есть работа в Китае?")).toBe(false);
-    expect(isBotPresenceQuestion("ты человек или бот, какая зарплата?")).toBe(
-      false,
-    );
+    expect(isBotPresenceQuestion("ты человек или бот, какая зарплата?")).toBe(false);
   });
 
   test("returns false on empty/unrelated", () => {

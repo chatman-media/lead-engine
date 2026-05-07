@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
-
-import {
-  extractUserFacts,
-  parseFactsFromLlmOutput,
-} from "@/rag/extract-user-facts.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
+import { extractUserFacts, parseFactsFromLlmOutput } from "@/rag/extract-user-facts.ts";
 
 function fakeChat(reply: string): ChatClient & { lastMessages: ChatMessage[] | null } {
   const wrapper = {
@@ -26,9 +22,7 @@ describe("parseFactsFromLlmOutput", () => {
   });
 
   test("strips markdown code fences", () => {
-    expect(
-      parseFactsFromLlmOutput("```json\n{\"city\":\"Москва\"}\n```"),
-    ).toEqual({ city: "Москва" });
+    expect(parseFactsFromLlmOutput('```json\n{"city":"Москва"}\n```')).toEqual({ city: "Москва" });
   });
 
   test("strips think tags before parsing", () => {

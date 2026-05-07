@@ -32,10 +32,7 @@ db.transaction(() => {
   db.exec(`DELETE FROM kb_chunks`);
   db.exec(`DELETE FROM kb_documents`);
 
-  const ftsSql = readFileSync(
-    resolve(scriptDir, "../migrations/005_kb_fts.sql"),
-    "utf8",
-  );
+  const ftsSql = readFileSync(resolve(scriptDir, "../migrations/005_kb_fts.sql"), "utf8");
   db.exec(ftsSql);
 })();
 
