@@ -141,6 +141,49 @@ describe("nextStage — flow transitions", () => {
     ).toBe("close");
   });
 
+  test("'давай по всем вакансиям' on first turn → pitch (not opener)", () => {
+    // Regression: bot was parroting its opener self-intro when candidate
+    // already asked to see vacancies. The pricing pattern now includes
+    // "ваканс|оффер|по всем" so the routing escapes the turn≤1 default.
+    expect(
+      nextStage({
+        turnNumber: 1,
+        currentStage: null,
+        lastUserMessage: "давай по всем вакансиям",
+      }),
+    ).toBe("pitch");
+  });
+
+  test("'какие у вас вакансии?' → pitch", () => {
+    expect(
+      nextStage({
+        turnNumber: 1,
+        currentStage: null,
+        lastUserMessage: "какие у вас вакансии?",
+      }),
+    ).toBe("pitch");
+  });
+
+  test("'что у вас сейчас?' → pitch", () => {
+    expect(
+      nextStage({
+        turnNumber: 1,
+        currentStage: null,
+        lastUserMessage: "что у вас сейчас?",
+      }),
+    ).toBe("pitch");
+  });
+
+  test("'расскажи про KTV' → pitch", () => {
+    expect(
+      nextStage({
+        turnNumber: 2,
+        currentStage: "qualify",
+        lastUserMessage: "расскажи про KTV",
+      }),
+    ).toBe("pitch");
+  });
+
   test("falls back to qualify when nothing matches", () => {
     expect(
       nextStage({
