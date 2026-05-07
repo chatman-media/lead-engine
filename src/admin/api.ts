@@ -9,12 +9,14 @@ import {
   type SuccessMetric,
 } from "../db/repos/experiments.ts";
 import { KbRepo } from "../db/repos/kb.ts";
-import { type LeadState, LeadsRepo } from "../db/repos/leads.ts";
+import { type LeadRow, type LeadState, LeadsRepo } from "../db/repos/leads.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
+import { SkillOutcomesRepo, StyleRatingsRepo } from "../db/repos/skill-outcomes.ts";
 import { SkillsRepo } from "../db/repos/skills.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
 import { UsersRepo } from "../db/repos/users.ts";
 import { VacanciesRepo } from "../db/repos/vacancies.ts";
+import { attributeLeadOutcome } from "../leads/outcome-attribution.ts";
 import { LeadsService } from "../leads/service.ts";
 import { sanitizeLlmOutput } from "../rag/answer.ts";
 import type { ChatClient, ChatMessage } from "../rag/chat.ts";
@@ -1531,6 +1533,32 @@ function recentMessagesForCard(
     .map((m) => ({ role: m.role, text: m.text }));
 }
 
+/**
+ * Run skill-outcome attribution + ELO update for a lead that just hit
+ * a terminal state. Idempotent (UNIQUE constraint on (lead, skill, source)
+ * + applyOutcome conditional on fresh inserts) — safe to call after every
+ * setState even when the new state isn't terminal. Errors are logged and
+ * swallowed: attribution is analytics, not critical path.
+ */
+function runAttribution(deps: AdminApiDeps, leadRow: LeadRow | null): void {
+  if (!leadRow) return;
+  try {
+    attributeLeadOutcome(
+      {
+        db: deps.db,
+        outcomes: new SkillOutcomesRepo(deps.db),
+        ratings: new StyleRatingsRepo(deps.db),
+        messages: new MessagesRepo(deps.db),
+        conversations: new ConversationsRepo(deps.db),
+        styles: new StylesRepo(deps.db),
+      },
+      leadRow,
+    );
+  } catch (err) {
+    console.warn("[attribution] failed for lead", leadRow.id, err);
+  }
+}
+
 const LEAD_STATES: LeadState[] = [
   "intake_pending",
   "intake_complete",
@@ -1682,6 +1710,7 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
       ...rejectedReasonOpt,
     });
     if (!updated) return json({ error: "transition failed" }, { status: 500 });
+    runAttribution(deps, updated);
 
     const service = buildLeadsService(deps);
     if (service) {
@@ -1767,6 +1796,7 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
 
     const applicationId = leadsRepo.allocateApplicationId(id);
     const transitioned = leadsRepo.setState(id, "docs_complete") ?? lead;
+    runAttribution(deps, transitioned);
 
     const service = buildLeadsService(deps);
     if (service) {
@@ -2050,6 +2080,7 @@ export function createLeadCallbackHandler(deps: AdminApiDeps) {
       });
     } else {
       const rejected = leadsRepo.setState(leadId, "rejected") ?? lead;
+      runAttribution(deps, rejected);
       await service.sendRejection({ user });
       const conv = conversations.byUserId(user.id);
       if (conv) {
@@ -2582,11 +2613,20 @@ interface SkillDto {
   intent: string;
   is_enabled: boolean;
   attached_to_styles: number;
+  /** Phase 2 outcome aggregates. NaN win_rate is sent as null. */
+  outcomes: {
+    count: number;
+    wins: number;
+    losses: number;
+    draws: number;
+    win_rate: number | null;
+  };
 }
 
 function rowToSkillDto(
   row: ReturnType<SkillsRepo["bySlug"]>,
   attachmentCount: number,
+  outcomes: { count: number; wins: number; losses: number; draws: number; win_rate: number },
 ): SkillDto | null {
   if (!row) return null;
   let stages: string[] = [];
@@ -2607,21 +2647,45 @@ function rowToSkillDto(
     intent: row.intent,
     is_enabled: row.is_enabled === 1,
     attached_to_styles: attachmentCount,
+    outcomes: {
+      count: outcomes.count,
+      wins: outcomes.wins,
+      losses: outcomes.losses,
+      draws: outcomes.draws,
+      win_rate: Number.isFinite(outcomes.win_rate) ? outcomes.win_rate : null,
+    },
   };
 }
 
-/** GET /admin/api/skills — full catalogue with attachment counts. */
+const EMPTY_OUTCOME = { count: 0, wins: 0, losses: 0, draws: 0, win_rate: Number.NaN };
+
+/** GET /admin/api/skills — full catalogue with attachment counts +
+ *  outcome aggregates (Phase 2 win-rates). */
 export function createListSkillsHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.db);
+  const outcomesRepo = new SkillOutcomesRepo(deps.db);
   return ({ req }) => {
     const ctx = requireAdmin(deps.db, req);
     if (ctx instanceof Response) return ctx;
     const counts = skills.attachmentCounts();
+    const aggregates = new Map(outcomesRepo.aggregate().map((a) => [a.skill_slug, a]));
     const rows = skills.list();
     const dtos = rows
-      .map((r) => rowToSkillDto(r, counts.get(r.slug) ?? 0))
+      .map((r) =>
+        rowToSkillDto(r, counts.get(r.slug) ?? 0, aggregates.get(r.slug) ?? EMPTY_OUTCOME),
+      )
       .filter((d): d is SkillDto => d !== null);
     return json({ skills: dtos });
+  };
+}
+
+/** GET /admin/api/style-ratings — per-style ELO leaderboard. */
+export function createListStyleRatingsHandler(deps: AdminApiDeps): RouteHandler {
+  const repo = new StyleRatingsRepo(deps.db);
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    return json({ ratings: repo.list() });
   };
 }
 
@@ -2630,6 +2694,7 @@ export function createListSkillsHandler(deps: AdminApiDeps): RouteHandler {
  *  source-controlled catalogue. */
 export function createUpdateSkillHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.db);
+  const outcomesRepo = new SkillOutcomesRepo(deps.db);
   return async ({ req, params }) => {
     const ctx = requireAdmin(deps.db, req);
     if (ctx instanceof Response) return ctx;
@@ -2649,7 +2714,8 @@ export function createUpdateSkillHandler(deps: AdminApiDeps): RouteHandler {
     skills.setEnabled(row.id, body.is_enabled);
     const updated = skills.bySlug(slug);
     const counts = skills.attachmentCounts();
-    return json({ skill: rowToSkillDto(updated, counts.get(slug) ?? 0) });
+    const outcomes = outcomesRepo.aggregate().find((a) => a.skill_slug === slug) ?? EMPTY_OUTCOME;
+    return json({ skill: rowToSkillDto(updated, counts.get(slug) ?? 0, outcomes) });
   };
 }
 

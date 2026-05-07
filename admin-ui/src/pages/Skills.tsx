@@ -140,6 +140,13 @@ export function Skills() {
   );
 }
 
+function winRateColor(rate: number | null): string {
+  if (rate === null) return "var(--text-3)";
+  if (rate >= 0.6) return "var(--green, #2ea043)";
+  if (rate >= 0.3) return "var(--amber, #d97706)";
+  return "var(--red, #ef4444)";
+}
+
 function SkillCard({ skill, onToggle }: { skill: SkillDto; onToggle: (enabled: boolean) => void }) {
   return (
     <div
@@ -182,6 +189,17 @@ function SkillCard({ skill, onToggle }: { skill: SkillDto; onToggle: (enabled: b
               <span>stages: {skill.applicable_stages.join(", ")}</span>
             )}
             <span>used by {skill.attached_to_styles} styles</span>
+            {skill.outcomes.count > 0 ? (
+              <span style={{ color: winRateColor(skill.outcomes.win_rate) }}>
+                {skill.outcomes.count} outcomes ·{" "}
+                {skill.outcomes.win_rate !== null
+                  ? `${(skill.outcomes.win_rate * 100).toFixed(0)}% win`
+                  : "—"}{" "}
+                ({skill.outcomes.wins}W / {skill.outcomes.losses}L / {skill.outcomes.draws}D)
+              </span>
+            ) : (
+              <span style={{ color: "var(--text-3)" }}>no outcomes yet</span>
+            )}
           </div>
         </div>
         <button
