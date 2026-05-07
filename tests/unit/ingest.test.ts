@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { KbRepo } from "@/db/repos/kb.ts";
 import { openDb } from "@/db/sqlite.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
-import { deriveTopicFromPath, ingestDirectory, ingestFile } from "@/rag/ingest.ts";
+import { deriveTopicFromPath, ingestDirectory, ingestFile, ingestText } from "@/rag/ingest.ts";
 
 const DIM = 1536;
 
@@ -168,5 +168,48 @@ describe("deriveTopicFromPath", () => {
 
   test("returns null when file equals root (edge case)", () => {
     expect(deriveTopicFromPath("/root", "/root")).toBeNull();
+  });
+});
+
+describe("ingestText", () => {
+  test("inserts a document, chunks, and embeds — like ingestFile but inline", async () => {
+    const embedder = fakeEmbedder();
+    const result = await ingestText(
+      { title: "korea-faq.md", body: `para one\n\n${"x".repeat(200)}\n\npara three` },
+      { kb, embedder, chunk: { maxChars: 80, overlapChars: 10 } },
+    );
+    expect(result.created).toBe(true);
+    expect(result.chunks).toBeGreaterThanOrEqual(2);
+    expect(kb.countDocuments()).toBe(1);
+    expect(kb.countChunks()).toBe(result.chunks);
+    expect(embedder.calls.length).toBe(1);
+    expect(result.source.startsWith("inline:")).toBe(true);
+  });
+
+  test("identical body returns the existing document (idempotent)", async () => {
+    const embedder = fakeEmbedder();
+    const r1 = await ingestText({ title: "x", body: "stable content" }, { kb, embedder });
+    const r2 = await ingestText({ title: "x", body: "stable content" }, { kb, embedder });
+    expect(r1.created).toBe(true);
+    expect(r2.created).toBe(false);
+    expect(r1.documentId).toBe(r2.documentId);
+    expect(kb.countDocuments()).toBe(1);
+  });
+
+  test("topic is applied to the inserted document when set", async () => {
+    const embedder = fakeEmbedder();
+    await ingestText({ title: "v.md", body: "visa info" }, { kb, embedder, topic: "visa" });
+    const row = db
+      .query<{ topic: string | null }, []>(`SELECT topic FROM kb_documents LIMIT 1`)
+      .get();
+    expect(row?.topic).toBe("visa");
+  });
+
+  test("empty title falls back to 'untitled'", async () => {
+    const embedder = fakeEmbedder();
+    const r = await ingestText({ title: "  ", body: "some body" }, { kb, embedder });
+    expect(r.created).toBe(true);
+    const row = db.query<{ title: string }, []>(`SELECT title FROM kb_documents LIMIT 1`).get();
+    expect(row?.title).toBe("untitled");
   });
 });

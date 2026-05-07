@@ -93,6 +93,72 @@ export async function ingestFile(path: string, deps: IngestDeps): Promise<Ingest
   };
 }
 
+/**
+ * Ingest a raw text document directly (no file system). Used by the
+ * admin-UI "+ ADD" path so operators can paste markdown without a
+ * shell. Source is synthesised as `inline:<sha256[:12]>` so subsequent
+ * uploads of identical content dedupe via the existing `source` UNIQUE
+ * lookup. Otherwise mirrors `ingestFile`'s semantics: chunk → embed →
+ * insert with the same content-hash short-circuit.
+ */
+export async function ingestText(
+  input: { title: string; body: string },
+  deps: IngestDeps,
+): Promise<IngestFileResult> {
+  const raw = input.body;
+  const hash = createHash("sha256").update(raw).digest("hex");
+  const source = `inline:${hash.slice(0, 12)}`;
+  const title = input.title.trim() || "untitled";
+  const db = getDb(deps.kb);
+
+  const existing = db
+    .query<ExistingDoc, [string]>(
+      "SELECT id, content_hash FROM kb_documents WHERE source = ? LIMIT 1",
+    )
+    .get(source);
+
+  if (existing && existing.content_hash === hash) {
+    const chunks = countChunksForDoc(db, existing.id);
+    if (chunks > 0) {
+      return { source, documentId: existing.id, chunks, created: false };
+    }
+  }
+
+  if (existing) {
+    deps.kb.deleteChunksByDocument(existing.id);
+    db.run("DELETE FROM kb_documents WHERE id = ?", [existing.id]);
+  }
+
+  const doc = deps.kb.upsertDocument({
+    source,
+    title,
+    contentHash: hash,
+    ...(deps.topic !== undefined ? { topic: deps.topic } : {}),
+  });
+
+  const chunks = chunkText(stripNonContent(raw), deps.chunk);
+  if (chunks.length === 0) {
+    return { source, documentId: doc.id, chunks: 0, created: true };
+  }
+
+  const vectors = await deps.embedder.embed(chunks.map((c) => c.text));
+  for (let i = 0; i < chunks.length; i++) {
+    deps.kb.insertChunkWithEmbedding({
+      documentId: doc.id,
+      chunkIndex: chunks[i]!.index,
+      text: chunks[i]!.text,
+      tokenCount: chunks[i]!.tokenCount,
+      embedding: vectors[i]!,
+    });
+  }
+  return {
+    source,
+    documentId: doc.id,
+    chunks: chunks.length,
+    created: true,
+  };
+}
+
 export interface IngestDirectorySummary {
   documents: number;
   chunks: number;

@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 
 import {
+  createAnalyticsHandler,
   createApproveLeadHandler,
   createBulkExportConversationsHandler,
   createConversationDetailHandler,
@@ -19,6 +20,7 @@ import {
   createExportConversationHandler,
   createGetKbDocumentHandler,
   createGetStyleHandler,
+  createIngestKbDocumentHandler,
   createLeadCallbackHandler,
   createLeadDetailHandler,
   createListConversationsHandler,
@@ -168,6 +170,7 @@ export function createRouter(deps: AppDeps): Router {
     visaChatId: deps.visaChatId ?? null,
   };
   router.get("/admin/api/status", createStatusHandler(apiDeps));
+  router.get("/admin/api/analytics", createAnalyticsHandler(apiDeps));
   router.get("/admin/api/users", createListUsersHandler(apiDeps));
   // Telegram file proxy — browsers hit this URL from <img>/<video> tags
   // in the admin chat view; admin session cookie is the auth.
@@ -213,6 +216,10 @@ export function createRouter(deps: AppDeps): Router {
 
   // KB management — list/inspect/delete/re-tag indexed documents.
   router.get("/admin/api/kb/documents", createListKbDocumentsHandler(apiDeps));
+  // Ingest must come BEFORE the :id detail/patch/delete paths — router does
+  // linear first-match scan on a `[^/]+` pattern, so without this order the
+  // literal "ingest" segment would be captured as `:id="ingest"`.
+  router.post("/admin/api/kb/ingest", createIngestKbDocumentHandler(apiDeps));
   router.get("/admin/api/kb/documents/:id", createGetKbDocumentHandler(apiDeps));
   router.patch("/admin/api/kb/documents/:id", createUpdateKbDocumentHandler(apiDeps));
   router.delete("/admin/api/kb/documents/:id", createDeleteKbDocumentHandler(apiDeps));

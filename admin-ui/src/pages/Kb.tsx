@@ -19,6 +19,8 @@ export function Kb() {
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showIngest, setShowIngest] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
 
   async function refresh() {
     try {
@@ -50,6 +52,23 @@ export function Kb() {
     try {
       await api.deleteKbDocument(d.id);
       if (openId === d.id) setOpenId(null);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleIngest(input: { title: string; body: string; topic: string | null }) {
+    setError(null);
+    setFlash(null);
+    try {
+      const res = await api.ingestKbDocument(input);
+      setShowIngest(false);
+      setFlash(
+        res.created
+          ? `Загружено: doc #${res.document_id}, ${res.chunks} чанков`
+          : `Уже было: doc #${res.document_id}, ${res.chunks} чанков (контент не изменился)`,
+      );
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -109,7 +128,34 @@ export function Kb() {
         </button>
         <div style={{ flex: 1 }} />
         <TopicFilter topics={topics} value={topicFilter} onChange={setTopicFilter} />
+        <button
+          onClick={() => {
+            setShowIngest((s) => !s);
+            setFlash(null);
+          }}
+          className="btn btn-primary btn-sm"
+          data-testid="kb-ingest-toggle"
+        >
+          {showIngest ? "cancel" : "+ ADD"}
+        </button>
       </div>
+
+      {flash && (
+        <div
+          style={{
+            color: "var(--green, #2ea043)",
+            fontFamily: "var(--mono)",
+            fontSize: 12,
+            padding: "8px 12px",
+            border: "1px solid var(--green, #2ea043)",
+            borderRadius: "var(--radius)",
+          }}
+        >
+          {flash}
+        </div>
+      )}
+
+      {showIngest && <IngestForm knownTopics={topics} onSubmit={handleIngest} />}
 
       {error && (
         <div
@@ -146,6 +192,112 @@ export function Kb() {
         </div>
       )}
     </div>
+  );
+}
+
+function IngestForm({
+  knownTopics,
+  onSubmit,
+}: {
+  knownTopics: string[];
+  onSubmit: (input: { title: string; body: string; topic: string | null }) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [topic, setTopic] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const canSubmit = title.trim().length > 0 && body.trim().length > 0;
+
+  return (
+    <form
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!canSubmit) return;
+        setSubmitting(true);
+        try {
+          await onSubmit({
+            title: title.trim(),
+            body: body.trim(),
+            topic: topic.trim() ? topic.trim().toLowerCase() : null,
+          });
+          setTitle("");
+          setBody("");
+          setTopic("");
+        } finally {
+          setSubmitting(false);
+        }
+      }}
+      style={{
+        background: "var(--bg-1)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        padding: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+      data-testid="kb-ingest-form"
+    >
+      <div
+        style={{
+          fontFamily: "var(--mono)",
+          fontSize: 12,
+          color: "var(--text-3)",
+          textTransform: "uppercase",
+          letterSpacing: 1,
+        }}
+      >
+        Add a document
+      </div>
+      <input
+        type="text"
+        placeholder="title (e.g. visa-faq.md or 'Korea housing')"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        className="input"
+        data-testid="kb-ingest-title"
+        style={{ width: "100%" }}
+      />
+      <textarea
+        placeholder="markdown / plain text body — chunked, embedded and indexed for retrieval"
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        className="input"
+        rows={12}
+        data-testid="kb-ingest-body"
+        style={{ width: "100%", resize: "vertical", fontFamily: "var(--mono)", fontSize: 13 }}
+      />
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <input
+          type="text"
+          placeholder="topic (optional — visa / payment / housing / faq …)"
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+          list="kb-ingest-known-topics"
+          className="input"
+          data-testid="kb-ingest-topic"
+          style={{ flex: 1, minWidth: 240 }}
+        />
+        <datalist id="kb-ingest-known-topics">
+          {knownTopics.map((t) => (
+            <option key={t} value={t} />
+          ))}
+        </datalist>
+        <button
+          type="submit"
+          disabled={!canSubmit || submitting}
+          className="btn btn-primary btn-sm"
+          data-testid="kb-ingest-submit"
+        >
+          {submitting ? "ingesting…" : "ingest"}
+        </button>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-3)", lineHeight: 1.4 }}>
+        Тело будет разбито на чанки и проиндексировано векторно — операция идёт через embedder,
+        может занять несколько секунд. Идёмпотентна: повторная загрузка идентичного контента вернёт
+        существующий документ.
+      </div>
+    </form>
   );
 }
 

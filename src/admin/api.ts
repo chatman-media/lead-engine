@@ -18,6 +18,7 @@ import { LeadsService } from "../leads/service.ts";
 import { sanitizeLlmOutput } from "../rag/answer.ts";
 import type { ChatClient, ChatMessage } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
+import { ingestText } from "../rag/ingest.ts";
 import { json, type RouteHandler } from "../router.ts";
 import { composeSystemPrompt } from "../sales/prompt.ts";
 import { nextStage } from "../sales/stage-router.ts";
@@ -2297,5 +2298,271 @@ export function createDeleteKbDocumentHandler(deps: AdminApiDeps): RouteHandler 
     const ok = kb.deleteDocument(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
+  };
+}
+
+const KB_TITLE_MAX = 200;
+const KB_BODY_MAX = 200_000; // 200KB upper bound — enough for any single doc
+
+/**
+ * Ingest a single document from inline text. Used by the admin UI "+ ADD"
+ * form so operators can paste markdown / plain text into the KB without
+ * a shell. Pipes through `ingestText` (chunking + embedding).
+ *
+ * Returns 503 when `rag` deps are absent — without an embedder we can't
+ * insert vectors, and inserting a document with zero retrievable chunks
+ * is silently broken. Better to fail loud.
+ *
+ * Idempotent: identical body content (same SHA-256) returns the existing
+ * document row instead of creating a duplicate. Re-ingest after a tag
+ * change deletes + re-creates with the new topic.
+ */
+export function createIngestKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
+  return async ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+
+    if (!deps.rag?.embedder) {
+      return json(
+        { error: "embedder not configured — set OLLAMA_HOST or LLM_PROVIDER" },
+        { status: 503 },
+      );
+    }
+
+    let body: { title?: unknown; body?: unknown; topic?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    const text = typeof body.body === "string" ? body.body : "";
+    if (!title) return json({ error: "title is required" }, { status: 400 });
+    if (!text.trim()) return json({ error: "body is required" }, { status: 400 });
+    if (title.length > KB_TITLE_MAX) {
+      return json({ error: `title > ${KB_TITLE_MAX}` }, { status: 400 });
+    }
+    if (text.length > KB_BODY_MAX) {
+      return json({ error: `body > ${KB_BODY_MAX} bytes` }, { status: 400 });
+    }
+
+    let topic: string | null = null;
+    if (typeof body.topic === "string") {
+      const trimmed = body.topic.trim();
+      if (trimmed.length > KB_TOPIC_MAX) {
+        return json({ error: `topic > ${KB_TOPIC_MAX}` }, { status: 400 });
+      }
+      // Match the slug shape the rest of the topic system uses (kebab-ish:
+      // letters, digits, hyphen, underscore). Anything else is rejected
+      // so we don't accumulate garbage like "  Visa  " vs "visa".
+      if (trimmed && !/^[a-z][a-z0-9_-]{0,49}$/i.test(trimmed)) {
+        return json({ error: "topic must be alphanumeric / hyphen / underscore" }, { status: 400 });
+      }
+      topic = trimmed.toLowerCase() || null;
+    }
+
+    const kb = new KbRepo(deps.db);
+    try {
+      const result = await ingestText(
+        { title, body: text },
+        {
+          kb,
+          embedder: deps.rag.embedder,
+          ...(topic !== null ? { topic } : {}),
+        },
+      );
+      return json({
+        ok: true,
+        document_id: result.documentId,
+        chunks: result.chunks,
+        created: result.created,
+      });
+    } catch (err) {
+      console.error("[admin] ingestText failed:", err);
+      return json(
+        { error: `ingest failed: ${err instanceof Error ? err.message : String(err)}` },
+        { status: 500 },
+      );
+    }
+  };
+}
+
+// ─── Analytics (per-turn telemetry aggregates) ─────────────────────────
+
+const WINDOW_SECONDS: Record<string, number> = {
+  "1h": 60 * 60,
+  "24h": 24 * 60 * 60,
+  "7d": 7 * 24 * 60 * 60,
+  "30d": 30 * 24 * 60 * 60,
+};
+
+interface PathRow {
+  path: string;
+  count: number;
+}
+interface TopicRow {
+  topic: string;
+  count: number;
+}
+interface LatencyRow {
+  p50: number | null;
+  p95: number | null;
+  p99: number | null;
+  avg: number | null;
+  count: number;
+}
+
+/**
+ * Aggregates per-turn RAG telemetry stored in `messages.meta_json`. Used by
+ * the admin /admin/analytics page so operators can see retrieval quality,
+ * latency, and the no_context / ungrounded rate over a rolling window
+ * (1h / 24h / 7d / 30d, default 24h).
+ *
+ * All extraction goes through `json_extract(meta_json, '$.telemetry.…')`
+ * so this is one SQL pass per metric — no in-memory parsing of every
+ * row's full meta blob. Indexes already exist on `created_at`.
+ */
+export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, url }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+
+    const windowKey = url.searchParams.get("window") ?? "24h";
+    const windowSec = WINDOW_SECONDS[windowKey];
+    if (windowSec === undefined) {
+      return json(
+        {
+          error: `bad window — supported: ${Object.keys(WINDOW_SECONDS).join(", ")}`,
+        },
+        { status: 400 },
+      );
+    }
+    const since = Math.floor(Date.now() / 1000) - windowSec;
+
+    // Total assistant messages with telemetry in window. We scope to
+    // role='assistant' because user messages don't carry telemetry.
+    const total = deps.db
+      .query<{ n: number }, [number]>(
+        `SELECT COUNT(*) AS n
+         FROM messages
+         WHERE role = 'assistant'
+           AND created_at >= ?
+           AND meta_json IS NOT NULL`,
+      )
+      .get(since)!.n;
+
+    // Per-path breakdown (smalltalk / persona_fact / no_context / ungrounded / ok).
+    const byPath = deps.db
+      .query<PathRow, [number]>(
+        `SELECT json_extract(meta_json, '$.telemetry.path') AS path,
+                COUNT(*) AS count
+         FROM messages
+         WHERE role = 'assistant'
+           AND created_at >= ?
+           AND meta_json IS NOT NULL
+           AND json_extract(meta_json, '$.telemetry.path') IS NOT NULL
+         GROUP BY path
+         ORDER BY count DESC`,
+      )
+      .all(since);
+
+    // Latency aggregates — total / retrieval / generation. We compute
+    // approximate percentiles by ranking. Cheap on the message-count
+    // scale we'd ever see (<1M turns over any reasonable window).
+    function latencyFor(field: string): LatencyRow {
+      const rows = deps.db
+        .query<{ v: number }, [number]>(
+          `SELECT json_extract(meta_json, '$.telemetry.${field}') AS v
+           FROM messages
+           WHERE role = 'assistant'
+             AND created_at >= ?
+             AND json_extract(meta_json, '$.telemetry.${field}') IS NOT NULL
+           ORDER BY v ASC`,
+        )
+        .all(since)
+        .map((r) => r.v)
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      if (rows.length === 0) {
+        return { p50: null, p95: null, p99: null, avg: null, count: 0 };
+      }
+      const pick = (q: number) => rows[Math.min(rows.length - 1, Math.floor(rows.length * q))]!;
+      const sum = rows.reduce((a, b) => a + b, 0);
+      return {
+        p50: pick(0.5),
+        p95: pick(0.95),
+        p99: pick(0.99),
+        avg: Math.round(sum / rows.length),
+        count: rows.length,
+      };
+    }
+
+    const latency = {
+      total_ms: latencyFor("total_ms"),
+      retrieval_ms: latencyFor("retrieval_ms"),
+      generation_ms: latencyFor("generation_ms"),
+    };
+
+    // Topic distribution — which topics the classifier hit (only when
+    // RAG_TOPIC_ROUTING was on for that turn).
+    const byTopic = deps.db
+      .query<TopicRow, [number]>(
+        `SELECT json_extract(meta_json, '$.telemetry.topic') AS topic,
+                COUNT(*) AS count
+         FROM messages
+         WHERE role = 'assistant'
+           AND created_at >= ?
+           AND json_extract(meta_json, '$.telemetry.topic') IS NOT NULL
+         GROUP BY topic
+         ORDER BY count DESC
+         LIMIT 20`,
+      )
+      .all(since);
+
+    // Reflection ungrounded count (when reflect was on and dropped the answer).
+    const ungrounded = deps.db
+      .query<{ n: number }, [number]>(
+        `SELECT COUNT(*) AS n
+         FROM messages
+         WHERE role = 'assistant'
+           AND created_at >= ?
+           AND json_extract(meta_json, '$.telemetry.reflect.grounded') = 0`,
+      )
+      .get(since)!.n;
+
+    // Hybrid retrieval usage rate.
+    const hybrid = deps.db
+      .query<{ n: number }, [number]>(
+        `SELECT COUNT(*) AS n
+         FROM messages
+         WHERE role = 'assistant'
+           AND created_at >= ?
+           AND json_extract(meta_json, '$.telemetry.hybrid') = 1`,
+      )
+      .get(since)!.n;
+
+    // Query rewrites (when query_rewrite was on AND the heuristic flagged the turn).
+    const rewrites = deps.db
+      .query<{ n: number }, [number]>(
+        `SELECT COUNT(*) AS n
+         FROM messages
+         WHERE role = 'assistant'
+           AND created_at >= ?
+           AND json_extract(meta_json, '$.telemetry.rewritten_query') IS NOT NULL`,
+      )
+      .get(since)!.n;
+
+    return json({
+      window: windowKey,
+      window_seconds: windowSec,
+      since_unix: since,
+      total_assistant_messages: total,
+      by_path: byPath,
+      by_topic: byTopic,
+      latency,
+      ungrounded_count: ungrounded,
+      hybrid_count: hybrid,
+      rewrite_count: rewrites,
+    });
   };
 }
