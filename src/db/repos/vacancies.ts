@@ -139,12 +139,47 @@ export function renderVacanciesBlock(vacancies: VacancyRow[]): string {
       return `${head}\n${v.body}${link}`;
     })
     .join("\n\n");
+  const openLocations = extractOpenLocations(active);
+  const locationsLine =
+    openLocations.length > 0
+      ? `ОТКРЫТЫЕ ЛОКАЦИИ: ${openLocations.join(", ")}.\n`
+      : "";
   return (
-    `АКТУАЛЬНЫЕ ВАКАНСИИ (свежие, из админки — отвечай по ним в первую очередь). ` +
+    `АКТУАЛЬНЫЕ ВАКАНСИИ (свежие, из админки — отвечай по ним в первую очередь).\n` +
+    `${locationsLine}` +
+    `ЖЁСТКОЕ ПРАВИЛО: список ниже — это ПОЛНЫЙ перечень открытых вакансий. ` +
+    `Если кандидат спрашивает про страну/город/локацию, которой здесь НЕТ ` +
+    `(например Дубай, Стамбул, Турция, Европа, США), — НЕ переноси цифры/условия ` +
+    `из CONTEXT (KB) на эту локацию, НЕ выдумывай. Ответь по-человечески: ` +
+    `«сейчас в [N] мы не работаем, открыты вот эти направления: [перечисли]. ` +
+    `Что-то из этого подойдёт?» — и больше ничего.\n` +
     `Если у вакансии есть строка "Ссылка:" — давай её ТОЛЬКО когда кандидат сам спрашивает ` +
     `«где почитать», «дай ссылку», «куда писать», «канал», «пост». Не вставляй ссылки на каждом ходу.\n` +
     items
   );
+}
+
+/**
+ * Pull the headline location(s) from each active vacancy. Operators title
+ * vacancies as "Город / Город — Роль (детали)" or "Страна — Роль (детали)";
+ * we split on " — " and take the part before it. The result feeds into the
+ * "ОТКРЫТЫЕ ЛОКАЦИИ:" line so the LLM has a concise allow-list it can echo
+ * when redirecting "сколько в Дубае?" → "в Дубае не работаем".
+ *
+ * Falls back to the full title when there's no " — " separator. Deduplicated
+ * preserving first occurrence so the order matches operator priority.
+ */
+function extractOpenLocations(active: VacancyRow[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of active) {
+    const head = v.title.split(/\s+[—–-]\s+/)[0]?.trim();
+    if (!head) continue;
+    if (seen.has(head)) continue;
+    seen.add(head);
+    out.push(head);
+  }
+  return out;
 }
 
 /** Empty / whitespace → NULL. URLs without a scheme get an `https://` prefix
