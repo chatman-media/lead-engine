@@ -1,10 +1,9 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
-
-import { createRouter, type AppDeps } from "./app.ts";
 import { currentAdmin } from "./admin/auth.ts";
 import { AdminBus, type AdminWsData } from "./admin/bus.ts";
+import { type AppDeps, createRouter } from "./app.ts";
 
 const UI_DIST = resolve(import.meta.dir, "../admin-ui/dist");
 
@@ -48,9 +47,7 @@ export function createServer(opts: CreateServerOptions): Server<AdminWsData> {
         const ctx = currentAdmin(db, req);
         if (!ctx) return new Response("Unauthorized", { status: 401 });
         const ok = server.upgrade(req, { data: { adminId: ctx.adminId } });
-        return ok
-          ? undefined
-          : new Response("Upgrade failed", { status: 500 });
+        return ok ? undefined : new Response("Upgrade failed", { status: 500 });
       }
 
       // Serve SPA for /admin/* paths that are not API routes

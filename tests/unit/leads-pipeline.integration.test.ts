@@ -8,7 +8,7 @@ import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
 
 /**
@@ -70,8 +70,7 @@ function scriptedChat(): ChatClient {
   return {
     async complete(messages: ChatMessage[]) {
       const system = messages.find((m) => m.role === "system")?.content ?? "";
-      const lastUser =
-        [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+      const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
 
       // Intake extractor — pulls 4 text fields.
       if (system.includes("извлекаешь 4 поля анкеты")) {
@@ -79,8 +78,7 @@ function scriptedChat(): ChatClient {
         if (/165/.test(lastUser)) out.height = "165";
         if (/52/.test(lastUser)) out.weight = "52";
         if (/Москв|москв/i.test(lastUser)) out.city = "Москва";
-        if (/1\s+апрел/i.test(lastUser))
-          out.departure_readiness = "с 1 апреля";
+        if (/1\s+апрел/i.test(lastUser)) out.departure_readiness = "с 1 апреля";
         return JSON.stringify(out);
       }
 
@@ -90,8 +88,7 @@ function scriptedChat(): ChatClient {
         if (/Ivanova/i.test(lastUser)) out.family_name = "Ivanova";
         if (/Anna/i.test(lastUser)) out.given_name = "Anna";
         if (/2000-01-15/.test(lastUser)) out.date_of_birth = "2000-01-15";
-        if (/RUSSIAN|Russia/i.test(lastUser))
-          out.current_nationality = "Russian Federation";
+        if (/RUSSIAN|Russia/i.test(lastUser)) out.current_nationality = "Russian Federation";
         if (/Moscow.*Russia/i.test(lastUser)) out.country_of_birth = "Russia";
         if (/Moscow/i.test(lastUser)) out.city_of_birth = "Moscow";
         if (/1234567890/.test(lastUser)) out.passport_number = "1234567890";
@@ -286,9 +283,7 @@ describe("lead pipeline e2e", () => {
       // The conversation was just created by ensureForUser; any of its rows
       // will do for the meta inspection.
       ctx.db
-        .query<{ id: number }, [number]>(
-          "SELECT id FROM conversations WHERE user_id = ? LIMIT 1",
-        )
+        .query<{ id: number }, [number]>("SELECT id FROM conversations WHERE user_id = ? LIMIT 1")
         .get(u!.id)!.id,
     );
     expect(list.length).toBeGreaterThan(0);
@@ -325,15 +320,14 @@ describe("lead pipeline e2e", () => {
       (c) =>
         c.method === "sendMessage" &&
         c.body.chat_id === LEADS_CHAT_ID &&
-        Array.isArray(
-          (c.body.reply_markup as { inline_keyboard?: unknown[][] })
-            ?.inline_keyboard,
-        ),
+        Array.isArray((c.body.reply_markup as { inline_keyboard?: unknown[][] })?.inline_keyboard),
     );
     expect(cardCalls.length).toBe(1);
-    const keyboard = (cardCalls[0]!.body.reply_markup as {
-      inline_keyboard: Array<Array<{ callback_data: string }>>;
-    }).inline_keyboard;
+    const keyboard = (
+      cardCalls[0]!.body.reply_markup as {
+        inline_keyboard: Array<Array<{ callback_data: string }>>;
+      }
+    ).inline_keyboard;
     expect(keyboard[0]?.map((b) => b.callback_data)).toEqual([
       `lead:approve:${lead!.id}`,
       `lead:reject:${lead!.id}`,
@@ -415,13 +409,13 @@ describe("lead pipeline e2e", () => {
     // Card was edited in place (no buttons after the decision).
     const edits = ctx.tg.sent
       .slice(sentBefore)
-      .filter(
-        (c) => c.method === "editMessageText" && c.body.chat_id === LEADS_CHAT_ID,
-      );
+      .filter((c) => c.method === "editMessageText" && c.body.chat_id === LEADS_CHAT_ID);
     expect(edits.length).toBe(1);
-    const kb = (edits[0]!.body.reply_markup as {
-      inline_keyboard: unknown[][];
-    }).inline_keyboard;
+    const kb = (
+      edits[0]!.body.reply_markup as {
+        inline_keyboard: unknown[][];
+      }
+    ).inline_keyboard;
     expect(kb).toEqual([]);
 
     // Telegram callback was answered (no spinner left on the operator's button).
@@ -485,14 +479,10 @@ describe("lead pipeline e2e", () => {
     // Photo went to the candidate via sendPhoto with the caption attached.
     const photoSends = ctx.tg.sent
       .slice(sentBefore)
-      .filter(
-        (c) => c.method === "sendPhoto" && c.body.chat_id === CANDIDATE_TG_ID,
-      );
+      .filter((c) => c.method === "sendPhoto" && c.body.chat_id === CANDIDATE_TG_ID);
     expect(photoSends.length).toBe(1);
     expect(photoSends[0]!.body.photo).toBe("AgADrelay-large"); // largest size
-    expect(photoSends[0]!.body.caption).toBe(
-      "вот образец визы как заполнять",
-    );
+    expect(photoSends[0]!.body.caption).toBe("вот образец визы как заполнять");
 
     // Bot acknowledged in the ops chat under the operator's message.
     const acks = ctx.tg.sent
@@ -510,9 +500,7 @@ describe("lead pipeline e2e", () => {
     // distinguishes it from the bot's auto replies.
     const messagesRepo = new MessagesRepo(ctx.db);
     const conv = ctx.db
-      .query<{ id: number }, [number]>(
-        "SELECT id FROM conversations WHERE user_id = ? LIMIT 1",
-      )
+      .query<{ id: number }, [number]>("SELECT id FROM conversations WHERE user_id = ? LIMIT 1")
       .get(u.id)!;
     const list = messagesRepo.listByConversation(conv.id);
     const human = list.filter((m) => m.role === "human");
@@ -544,9 +532,7 @@ describe("lead pipeline e2e", () => {
 
     // No card was posted to the ops chat.
     const cardCalls = ctx.tg.sent.filter(
-      (c) =>
-        c.method === "sendMessage" &&
-        c.body.chat_id === LEADS_CHAT_ID,
+      (c) => c.method === "sendMessage" && c.body.chat_id === LEADS_CHAT_ID,
     );
     expect(cardCalls.length).toBe(0);
   });

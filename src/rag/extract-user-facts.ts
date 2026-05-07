@@ -52,20 +52,15 @@ user: ищу работу в дубае, хочу заработать
 const MAX_RETURNED_KEYS = 20;
 const MAX_VALUE_LEN = 200;
 
-export async function extractUserFacts(
-  input: ExtractFactsInput,
-): Promise<Record<string, string>> {
+export async function extractUserFacts(input: ExtractFactsInput): Promise<Record<string, string>> {
   // No new messages → nothing to extract. Skip LLM call entirely.
   const userMessages = input.messages.filter((m) => m.role === "user");
   if (userMessages.length === 0) return {};
 
-  const conversation = input.messages
-    .map((m) => `${m.role}: ${m.content}`)
-    .join("\n");
+  const conversation = input.messages.map((m) => `${m.role}: ${m.content}`).join("\n");
   const existingJson = JSON.stringify(input.existingFacts ?? {});
 
-  const userPrompt =
-    `Сообщения:\n${conversation}\n\nСуществующие факты: ${existingJson}\n\nОтвет:`;
+  const userPrompt = `Сообщения:\n${conversation}\n\nСуществующие факты: ${existingJson}\n\nОтвет:`;
 
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },

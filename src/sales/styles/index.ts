@@ -1,8 +1,8 @@
 import type { Style } from "../types.ts";
 import { alinaInfinity } from "./alina-infinity.ts";
-import { flirtyBelfort } from "./flirty-belfort.ts";
-import { empatheticNepq } from "./empathetic-nepq.ts";
 import { coldDirectPas } from "./cold-direct-pas.ts";
+import { empatheticNepq } from "./empathetic-nepq.ts";
+import { flirtyBelfort } from "./flirty-belfort.ts";
 
 /**
  * In-memory style registry. For Phase 1 (env-flag opt-in) this is the source

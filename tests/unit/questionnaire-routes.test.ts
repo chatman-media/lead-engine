@@ -5,7 +5,7 @@ import { createRouter } from "@/app.ts";
 import { QuestionnaireTokensRepo } from "@/db/repos/questionnaire_tokens.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 
 const SECRET = "test-secret";
 
@@ -46,23 +46,19 @@ describe("GET /q/:token", () => {
     users.setStatus(u.id, "questionnaire_pending");
     const token = tokens.issue(u.id);
 
-    const res = await fetch(
-      `http://127.0.0.1:${ctx.server.port}/q/${token}`,
-    );
+    const res = await fetch(`http://127.0.0.1:${ctx.server.port}/q/${token}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const body = await res.text();
     expect(body).toContain('action="/q/');
     expect(body).toContain(token);
-    expect(body).toContain("name=\"name\"");
-    expect(body).toContain("name=\"email\"");
-    expect(body).toContain("name=\"goal\"");
+    expect(body).toContain('name="name"');
+    expect(body).toContain('name="email"');
+    expect(body).toContain('name="goal"');
   });
 
   test("returns 404 for unknown / expired / used token", async () => {
-    const res = await fetch(
-      `http://127.0.0.1:${ctx.server.port}/q/does-not-exist`,
-    );
+    const res = await fetch(`http://127.0.0.1:${ctx.server.port}/q/does-not-exist`);
     expect(res.status).toBe(404);
   });
 });
@@ -80,15 +76,12 @@ describe("POST /q/:token", () => {
       email: "a@b.test",
       goal: "Buy stuff",
     });
-    const res = await fetch(
-      `http://127.0.0.1:${ctx.server.port}/q/${token}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: form.toString(),
-        redirect: "manual",
-      },
-    );
+    const res = await fetch(`http://127.0.0.1:${ctx.server.port}/q/${token}`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+      redirect: "manual",
+    });
     expect([200, 303]).toContain(res.status);
 
     const reloaded = users.byId(u.id)!;
@@ -103,14 +96,11 @@ describe("POST /q/:token", () => {
 
     expect(tokens.getValid(token)).toBeNull();
 
-    const res2 = await fetch(
-      `http://127.0.0.1:${ctx.server.port}/q/${token}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: form.toString(),
-      },
-    );
+    const res2 = await fetch(`http://127.0.0.1:${ctx.server.port}/q/${token}`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
     expect(res2.status).toBe(404);
   });
 
@@ -126,14 +116,11 @@ describe("POST /q/:token", () => {
       email: "not-an-email",
       goal: "test",
     });
-    const res = await fetch(
-      `http://127.0.0.1:${ctx.server.port}/q/${token}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: form.toString(),
-      },
-    );
+    const res = await fetch(`http://127.0.0.1:${ctx.server.port}/q/${token}`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
     expect(res.status).toBe(400);
     expect(tokens.getValid(token)).not.toBeNull();
     expect(users.byId(u.id)!.status).toBe("questionnaire_pending");

@@ -51,11 +51,7 @@ afterEach(() => {
 describe("ingestFile", () => {
   test("inserts a document, chunks, and equal-count vectors", async () => {
     const file = join(tmp, "doc.md");
-    writeFileSync(
-      file,
-      "para one\n\n" + "x".repeat(200) + "\n\npara three",
-      "utf8",
-    );
+    writeFileSync(file, `para one\n\n${"x".repeat(200)}\n\npara three`, "utf8");
     const embedder = fakeEmbedder();
 
     const result = await ingestFile(file, {
@@ -121,9 +117,7 @@ describe("ingestFile", () => {
     writeFileSync(file, "content", "utf8");
     const embedder = fakeEmbedder();
     await ingestFile(file, { kb, embedder, topic: "visa" });
-    const row = db
-      .query<{ topic: string | null }, []>("SELECT topic FROM kb_documents")
-      .get();
+    const row = db.query<{ topic: string | null }, []>("SELECT topic FROM kb_documents").get();
     expect(row?.topic).toBe("visa");
   });
 
@@ -157,9 +151,7 @@ describe("ingestFile", () => {
 
     const embedder = fakeEmbedder();
     await ingestDirectory(tmp, { kb, embedder, topic: "manual-override" });
-    const row = db
-      .query<{ topic: string | null }, []>("SELECT topic FROM kb_documents")
-      .get();
+    const row = db.query<{ topic: string | null }, []>("SELECT topic FROM kb_documents").get();
     expect(row?.topic).toBe("manual-override");
   });
 });

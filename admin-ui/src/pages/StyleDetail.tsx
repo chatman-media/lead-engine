@@ -1,20 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import {
-  ApiError,
-  api,
-  type PlaygroundResult,
-  type StyleDetail as StyleDetailT,
-} from "../api.ts";
+import { ApiError, api, type PlaygroundResult, type StyleDetail as StyleDetailT } from "../api.ts";
 
-const FUNNEL_STAGES = [
-  "auto",
-  "opener",
-  "qualify",
-  "pitch",
-  "objection",
-  "close",
-] as const;
+const FUNNEL_STAGES = ["auto", "opener", "qualify", "pitch", "objection", "close"] as const;
 
 export function StyleDetail() {
   const { id } = useParams();
@@ -67,7 +55,8 @@ export function StyleDetail() {
       setEditing(false);
     } catch (err) {
       if (err instanceof ApiError) {
-        const issues = (err as unknown as { issues?: Array<{ path: string; message: string }> }).issues;
+        const issues = (err as unknown as { issues?: Array<{ path: string; message: string }> })
+          .issues;
         if (issues && issues.length > 0) {
           setSaveError(
             `Schema errors:\n${issues.map((i) => `  ${i.path}: ${i.message}`).join("\n")}`,
@@ -93,9 +82,7 @@ export function StyleDetail() {
       </Link>
 
       {error ? (
-        <div style={{ color: "var(--red, #f55)", marginTop: 16 }}>
-          error: {error}
-        </div>
+        <div style={{ color: "var(--red, #f55)", marginTop: 16 }}>error: {error}</div>
       ) : style === null ? (
         <div style={{ color: "var(--text-3)", marginTop: 16 }}>loading…</div>
       ) : (
@@ -161,11 +148,10 @@ export function StyleDetail() {
                       style={{
                         ...btnStyle(),
                         opacity: saving || draftParseError !== null ? 0.4 : 1,
-                        cursor:
-                          saving || draftParseError !== null ? "default" : "pointer",
+                        cursor: saving || draftParseError !== null ? "default" : "pointer",
                       }}
                     >
-                      {saving ? "saving…" : "save as v" + (style.version + 1)}
+                      {saving ? "saving…" : `save as v${style.version + 1}`}
                     </button>
                   </>
                 ) : (
@@ -230,9 +216,8 @@ export function StyleDetail() {
                     marginBottom: 8,
                   }}
                 >
-                  Saving creates v{style.version + 1}. The current version stays
-                  in the DB so any conversation already pinned to it keeps the
-                  original prompt.
+                  Saving creates v{style.version + 1}. The current version stays in the DB so any
+                  conversation already pinned to it keeps the original prompt.
                 </div>
               )}
               <textarea
@@ -243,9 +228,7 @@ export function StyleDetail() {
                   width: "100%",
                   minHeight: "60vh",
                   background: "var(--bg-1)",
-                  border: `1px solid ${
-                    draftParseError ? "var(--red, #f55)" : "var(--border)"
-                  }`,
+                  border: `1px solid ${draftParseError ? "var(--red, #f55)" : "var(--border)"}`,
                   color: "var(--text)",
                   padding: 12,
                   borderRadius: "var(--radius)",
@@ -390,9 +373,7 @@ function Playground({ styleId }: { styleId: number }) {
               stage
               <select
                 value={stage}
-                onChange={(e) =>
-                  setStage(e.target.value as (typeof FUNNEL_STAGES)[number])
-                }
+                onChange={(e) => setStage(e.target.value as (typeof FUNNEL_STAGES)[number])}
                 style={{
                   background: "var(--bg)",
                   border: "1px solid var(--border)",
@@ -411,20 +392,12 @@ function Playground({ styleId }: { styleId: number }) {
               </select>
             </label>
 
-            <label
-              style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}
-            >
-              <input
-                type="checkbox"
-                checked={useKb}
-                onChange={(e) => setUseKb(e.target.checked)}
-              />
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+              <input type="checkbox" checked={useKb} onChange={(e) => setUseKb(e.target.checked)} />
               <span style={{ color: "var(--text-3)" }}>inject KB context</span>
             </label>
 
-            <label
-              style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}
-            >
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
               <input
                 type="checkbox"
                 checked={dropFewShot}
@@ -487,8 +460,8 @@ function PlaygroundResultView({ result }: { result: PlaygroundResult }) {
           fontFamily: "var(--mono)",
         }}
       >
-        stage={result.stage} ({result.stage_source}) · model={result.model.id} ·
-        T={result.model.temperature} · kb_hits={result.kb_hits.length} · dur=
+        stage={result.stage} ({result.stage_source}) · model={result.model.id} · T=
+        {result.model.temperature} · kb_hits={result.kb_hits.length} · dur=
         {result.duration_ms}ms
       </div>
 
@@ -555,13 +528,7 @@ function PlaygroundResultView({ result }: { result: PlaygroundResult }) {
   );
 }
 
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
       <div

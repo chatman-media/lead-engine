@@ -14,9 +14,7 @@ import {
 
 describe("replaceEmDash", () => {
   test("replaces typographic em-dash with hyphen, normalising spaces", () => {
-    expect(replaceEmDash.apply("Привет — рад тебя видеть")).toBe(
-      "Привет - рад тебя видеть",
-    );
+    expect(replaceEmDash.apply("Привет — рад тебя видеть")).toBe("Привет - рад тебя видеть");
   });
 
   test("handles em-dash without surrounding spaces", () => {
@@ -24,9 +22,7 @@ describe("replaceEmDash", () => {
   });
 
   test("handles multiple em-dashes in one line", () => {
-    expect(replaceEmDash.apply("раз — два — три — четыре")).toBe(
-      "раз - два - три - четыре",
-    );
+    expect(replaceEmDash.apply("раз — два — три — четыре")).toBe("раз - два - три - четыре");
   });
 
   test("idempotent (running twice gives the same result)", () => {
@@ -44,9 +40,7 @@ describe("replaceEmDash", () => {
   test("doesn't collapse single spaces in normal text", () => {
     // Without em-dash the apply path still hits the `  +` collapser.
     // Verify it doesn't eat single spaces.
-    expect(replaceEmDash.apply("два слова и три слова")).toBe(
-      "два слова и три слова",
-    );
+    expect(replaceEmDash.apply("два слова и три слова")).toBe("два слова и три слова");
   });
 });
 
@@ -80,15 +74,11 @@ describe("replaceEllipsis", () => {
 
 describe("stripAILeadIns", () => {
   test("removes 'Конечно!' opener and uppercases the next word", () => {
-    expect(stripAILeadIns.apply("Конечно! давай расскажу.")).toBe(
-      "Давай расскажу.",
-    );
+    expect(stripAILeadIns.apply("Конечно! давай расскажу.")).toBe("Давай расскажу.");
   });
 
   test("removes 'Безусловно,' opener", () => {
-    expect(stripAILeadIns.apply("Безусловно, могу помочь")).toBe(
-      "Могу помочь",
-    );
+    expect(stripAILeadIns.apply("Безусловно, могу помочь")).toBe("Могу помочь");
   });
 
   test("removes 'Отлично!' / 'Разумеется!' / 'Хорошо!'", () => {
@@ -102,9 +92,7 @@ describe("stripAILeadIns", () => {
   });
 
   test("doesn't strip mid-sentence occurrences", () => {
-    expect(stripAILeadIns.apply("Это конечно неудобно")).toBe(
-      "Это конечно неудобно",
-    );
+    expect(stripAILeadIns.apply("Это конечно неудобно")).toBe("Это конечно неудобно");
   });
 
   test("idempotent", () => {
@@ -115,9 +103,7 @@ describe("stripAILeadIns", () => {
 
 describe("capitalizeFirstLetter", () => {
   test("uppercases the first alphabetic character (Cyrillic)", () => {
-    expect(capitalizeFirstLetter.apply("привет, как дела?")).toBe(
-      "Привет, как дела?",
-    );
+    expect(capitalizeFirstLetter.apply("привет, как дела?")).toBe("Привет, как дела?");
   });
 
   test("uppercases the first alphabetic character (Latin)", () => {
@@ -130,9 +116,7 @@ describe("capitalizeFirstLetter", () => {
 
   test("skips leading emoji and punctuation", () => {
     expect(capitalizeFirstLetter.apply("🔥 привет!")).toBe("🔥 Привет!");
-    expect(capitalizeFirstLetter.apply("❗️ работа в Дубае")).toBe(
-      "❗️ Работа в Дубае",
-    );
+    expect(capitalizeFirstLetter.apply("❗️ работа в Дубае")).toBe("❗️ Работа в Дубае");
   });
 
   test("idempotent (already-capitalised → no-op)", () => {
@@ -148,17 +132,15 @@ describe("capitalizeFirstLetter", () => {
   });
 
   test("only the first letter is touched, rest preserved as-is", () => {
-    expect(
-      capitalizeFirstLetter.apply("привет КАК дела УРА"),
-    ).toBe("Привет КАК дела УРА");
+    expect(capitalizeFirstLetter.apply("привет КАК дела УРА")).toBe("Привет КАК дела УРА");
   });
 });
 
 describe("applyStyleRules — DEFAULT_STYLE_RULES bundle", () => {
   test("compounds across rules (em-dash + ellipsis + lead-in + capital)", () => {
-    expect(
-      applyStyleRules("Конечно! сейчас расскажу — там много нюансов…"),
-    ).toBe("Сейчас расскажу - там много нюансов...");
+    expect(applyStyleRules("Конечно! сейчас расскажу — там много нюансов…")).toBe(
+      "Сейчас расскажу - там много нюансов...",
+    );
   });
 
   test("lowercase-first-letter user reply gets capitalised", () => {
@@ -166,8 +148,7 @@ describe("applyStyleRules — DEFAULT_STYLE_RULES bundle", () => {
   });
 
   test("real-world LLM lowercase reply becomes natural Russian chat style", () => {
-    const aiOutput =
-      "привет! работа в китае — в топ-клубах шаосин и иу. график: 6 дней в неделю.";
+    const aiOutput = "привет! работа в китае — в топ-клубах шаосин и иу. график: 6 дней в неделю.";
     expect(applyStyleRules(aiOutput)).toBe(
       "Привет! работа в китае - в топ-клубах шаосин и иу. график: 6 дней в неделю.",
     );
@@ -224,12 +205,8 @@ describe("DEFAULT_STYLE_RULES — registry sanity", () => {
     // Otherwise «Конечно! привет» would become «Конечно! привет» (capital К
     // already, lead-in stripper sees «Конечно!» and removes it, but only if
     // it RUNS AFTER capitalizer's no-op — verify the order in the array).
-    const stripIdx = DEFAULT_STYLE_RULES.findIndex(
-      (r) => r.name === "strip-ai-lead-ins",
-    );
-    const capIdx = DEFAULT_STYLE_RULES.findIndex(
-      (r) => r.name === "capitalize-first-letter",
-    );
+    const stripIdx = DEFAULT_STYLE_RULES.findIndex((r) => r.name === "strip-ai-lead-ins");
+    const capIdx = DEFAULT_STYLE_RULES.findIndex((r) => r.name === "capitalize-first-letter");
     expect(stripIdx).toBeGreaterThan(-1);
     expect(capIdx).toBeGreaterThan(stripIdx);
   });

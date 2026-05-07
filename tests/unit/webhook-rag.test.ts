@@ -9,10 +9,7 @@ import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
-import {
-  TelegramClient,
-  type FetchLike,
-} from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
 
 const SECRET = "test-secret";
@@ -273,9 +270,7 @@ describe("webhook RAG integration", () => {
     });
 
     expect(ctx.sent).toHaveLength(1);
-    expect(String(ctx.sent[0]!.body.text)).toBe(
-      "Ответ из базы после очереди",
-    );
+    expect(String(ctx.sent[0]!.body.text)).toBe("Ответ из базы после очереди");
     const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
     expect(conv.mode).toBe("ai");
   });
@@ -291,9 +286,7 @@ describe("webhook RAG integration", () => {
       headers: { "content-type": "application/json" },
     });
     expect(res.status).toBe(200);
-    const conv = new ConversationsRepo(ctx.db).byUserId(
-      new UsersRepo(ctx.db).byTgId(300)!.id,
-    )!;
+    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(300)!.id)!;
     expect(conv.mode).toBe("ai");
     expect(ctx.sent).toHaveLength(0);
   });
@@ -370,7 +363,7 @@ describe("webhook RAG integration", () => {
     });
     const users = new UsersRepo(ctx.db);
     const kb = new KbRepo(ctx.db);
-    const u = users.create({ tgUserId: 800 });
+    const _u = users.create({ tgUserId: 800 });
     const doc = kb.upsertDocument({
       source: "s://t",
       title: "doc",

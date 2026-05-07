@@ -1,4 +1,4 @@
-import { StyleSchema, type Style } from "../types.ts";
+import { type Style, StyleSchema } from "../types.ts";
 
 export const flirtyBelfort: Style = StyleSchema.parse({
   slug: "flirty-belfort-v1",
@@ -26,19 +26,27 @@ export const flirtyBelfort: Style = StyleSchema.parse({
   },
   framework: "straight_line",
   hooks: [
-    { kind: "social_proof", text: "у нас 200+ моделей релоцированы в Дубай и Стамбул за последний год" },
+    {
+      kind: "social_proof",
+      text: "у нас 200+ моделей релоцированы в Дубай и Стамбул за последний год",
+    },
     { kind: "scarcity", text: "набираем 5 человек в апрельский поток, осталось 2 места" },
-    { kind: "liking", text: "искренний комплимент в первом сообщении (по фото — внешность/энергия)" },
+    {
+      kind: "liking",
+      text: "искренний комплимент в первом сообщении (по фото — внешность/энергия)",
+    },
   ],
   stages: {
     opener: {
       goal: "зацепить за 1-2 реплики, получить ответ",
-      guidance: "Открывай комплиментом + интрига про возможность. Не продавай сразу. Одна реплика, не две.",
+      guidance:
+        "Открывай комплиментом + интрига про возможность. Не продавай сразу. Одна реплика, не две.",
       maxTurns: 1,
     },
     qualify: {
       goal: "узнать возраст, город, опыт, готовность к релокации",
-      guidance: "По одному вопросу за реплику. Это не анкета — это флирт-разговор. Реагируй на ответы живо.",
+      guidance:
+        "По одному вопросу за реплику. Это не анкета — это флирт-разговор. Реагируй на ответы живо.",
       groundingRequired: false,
     },
     pitch: {

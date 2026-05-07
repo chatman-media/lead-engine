@@ -22,10 +22,11 @@ export class QuestionnaireTokensRepo {
     const token = generateToken();
     const ttl = opts.ttlSeconds ?? DEFAULT_TTL_SECONDS;
     const expiresAt = Math.floor(Date.now() / 1000) + ttl;
-    this.db.run(
-      `INSERT INTO questionnaire_tokens (token, user_id, expires_at) VALUES (?, ?, ?)`,
-      [token, userId, expiresAt],
-    );
+    this.db.run(`INSERT INTO questionnaire_tokens (token, user_id, expires_at) VALUES (?, ?, ?)`, [
+      token,
+      userId,
+      expiresAt,
+    ]);
     return token;
   }
 
@@ -44,10 +45,7 @@ export class QuestionnaireTokensRepo {
   consume(token: string): number | null {
     const row = this.getValid(token);
     if (!row) return null;
-    this.db.run(
-      `UPDATE questionnaire_tokens SET used_at = unixepoch() WHERE token = ?`,
-      [token],
-    );
+    this.db.run(`UPDATE questionnaire_tokens SET used_at = unixepoch() WHERE token = ?`, [token]);
     return row.user_id;
   }
 }

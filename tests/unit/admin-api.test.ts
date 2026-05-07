@@ -8,7 +8,7 @@ import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 
 const SECRET = "s";
 
@@ -110,10 +110,7 @@ describe("leads endpoints", () => {
     );
     const { lead } = (await promoted.json()) as { lead: { id: number } };
 
-    const r = await fetch(
-      url(`/admin/api/leads/${lead.id}/approve`),
-      authed({ method: "POST" }),
-    );
+    const r = await fetch(url(`/admin/api/leads/${lead.id}/approve`), authed({ method: "POST" }));
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       lead: { state: string; decided_by_admin_id: number | null };
@@ -158,15 +155,9 @@ describe("leads endpoints", () => {
   });
 
   test("approve/reject return 404 for missing lead", async () => {
-    const a = await fetch(
-      url(`/admin/api/leads/99999/approve`),
-      authed({ method: "POST" }),
-    );
+    const a = await fetch(url(`/admin/api/leads/99999/approve`), authed({ method: "POST" }));
     expect(a.status).toBe(404);
-    const r = await fetch(
-      url(`/admin/api/leads/99999/reject`),
-      authed({ method: "POST" }),
-    );
+    const r = await fetch(url(`/admin/api/leads/99999/reject`), authed({ method: "POST" }));
     expect(r.status).toBe(404);
   });
 
@@ -180,10 +171,7 @@ describe("leads endpoints", () => {
       authed({ method: "POST" }),
     );
     const { lead } = (await promoted.json()) as { lead: { id: number } };
-    await fetch(
-      url(`/admin/api/leads/${lead.id}/approve`),
-      authed({ method: "POST" }),
-    );
+    await fetch(url(`/admin/api/leads/${lead.id}/approve`), authed({ method: "POST" }));
 
     const submit = await fetch(
       url(`/admin/api/leads/${lead.id}/submit-to-visa`),
@@ -207,27 +195,15 @@ describe("leads endpoints", () => {
     const u = usersRepo.create({ tgUserId: 9211 });
     const c = conversations.ensureForUser(u.id);
     const { lead } = (await (
-      await fetch(
-        url(`/admin/api/leads/from-conversation/${c.id}`),
-        authed({ method: "POST" }),
-      )
+      await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
-    await fetch(
-      url(`/admin/api/leads/${lead.id}/approve`),
-      authed({ method: "POST" }),
-    );
+    await fetch(url(`/admin/api/leads/${lead.id}/approve`), authed({ method: "POST" }));
 
     const a = (await (
-      await fetch(
-        url(`/admin/api/leads/${lead.id}/submit-to-visa`),
-        authed({ method: "POST" }),
-      )
+      await fetch(url(`/admin/api/leads/${lead.id}/submit-to-visa`), authed({ method: "POST" }))
     ).json()) as { application_id: string };
     const b = (await (
-      await fetch(
-        url(`/admin/api/leads/${lead.id}/submit-to-visa`),
-        authed({ method: "POST" }),
-      )
+      await fetch(url(`/admin/api/leads/${lead.id}/submit-to-visa`), authed({ method: "POST" }))
     ).json()) as { application_id: string };
     expect(b.application_id).toBe(a.application_id);
   });
@@ -282,10 +258,7 @@ describe("leads endpoints", () => {
     const u = usersRepo.create({ tgUserId: 9_401 });
     const c = conversations.ensureForUser(u.id);
     const { lead } = (await (
-      await fetch(
-        url(`/admin/api/leads/from-conversation/${c.id}`),
-        authed({ method: "POST" }),
-      )
+      await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
 
     const r = await fetch(
@@ -307,16 +280,10 @@ describe("leads endpoints", () => {
     const ca = conversations.ensureForUser(ua.id);
     const cb = conversations.ensureForUser(ub.id);
     const leadA = (await (
-      await fetch(
-        url(`/admin/api/leads/from-conversation/${ca.id}`),
-        authed({ method: "POST" }),
-      )
+      await fetch(url(`/admin/api/leads/from-conversation/${ca.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
     const leadB = (await (
-      await fetch(
-        url(`/admin/api/leads/from-conversation/${cb.id}`),
-        authed({ method: "POST" }),
-      )
+      await fetch(url(`/admin/api/leads/from-conversation/${cb.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
 
     const noteA = (await (
@@ -349,10 +316,7 @@ describe("leads endpoints", () => {
       authed({ method: "POST" }),
     );
     const { lead } = (await promoted.json()) as { lead: { id: number } };
-    await fetch(
-      url(`/admin/api/leads/${lead.id}/approve`),
-      authed({ method: "POST" }),
-    );
+    await fetch(url(`/admin/api/leads/${lead.id}/approve`), authed({ method: "POST" }));
 
     const r = await fetch(url(`/admin/api/leads/${lead.id}`), authed());
     const body = (await r.json()) as {
@@ -378,10 +342,7 @@ describe("leads endpoints", () => {
     const u = usersRepo.create({ tgUserId: 9300 });
     const c = conversations.ensureForUser(u.id);
     const { lead } = (await (
-      await fetch(
-        url(`/admin/api/leads/from-conversation/${c.id}`),
-        authed({ method: "POST" }),
-      )
+      await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
 
     const r = await fetch(url(`/admin/api/leads/${lead.id}`), authed());
@@ -405,10 +366,7 @@ describe("leads endpoints", () => {
     const u = usersRepo.create({ tgUserId: 9301 });
     const c = conversations.ensureForUser(u.id);
     const { lead } = (await (
-      await fetch(
-        url(`/admin/api/leads/from-conversation/${c.id}`),
-        authed({ method: "POST" }),
-      )
+      await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
 
     // First patch — sets two fields
@@ -452,10 +410,7 @@ describe("leads endpoints", () => {
     const u = usersRepo.create({ tgUserId: 9302 });
     const c = conversations.ensureForUser(u.id);
     const { lead } = (await (
-      await fetch(
-        url(`/admin/api/leads/from-conversation/${c.id}`),
-        authed({ method: "POST" }),
-      )
+      await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
 
     const r = await fetch(
@@ -479,10 +434,7 @@ describe("leads endpoints", () => {
     const u = usersRepo.create({ tgUserId: 9212 });
     const c = conversations.ensureForUser(u.id);
     const { lead } = (await (
-      await fetch(
-        url(`/admin/api/leads/from-conversation/${c.id}`),
-        authed({ method: "POST" }),
-      )
+      await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
     // Promoted = intake_complete; submit-to-visa requires approved/docs_*.
     const r = await fetch(
@@ -497,10 +449,7 @@ describe("leads endpoints", () => {
     const conversations = new ConversationsRepo(ctx.db);
     const u = usersRepo.create({ tgUserId: 9100 });
     const c = conversations.ensureForUser(u.id);
-    await fetch(
-      url(`/admin/api/leads/from-conversation/${c.id}`),
-      authed({ method: "POST" }),
-    );
+    await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }));
     const r = await fetch(url("/admin/api/status"), authed());
     const body = (await r.json()) as {
       leads: { by_state: Record<string, number> };
@@ -1125,11 +1074,7 @@ describe("kb management endpoints", () => {
       `INSERT INTO kb_documents (source, title, content_hash, topic) VALUES (?, ?, ?, ?)`,
       ["x.md", "X", "hash-x", null],
     );
-    const id = (
-      ctx.db
-        .query<{ id: number }, []>(`SELECT id FROM kb_documents`)
-        .get()
-    )!.id;
+    const id = ctx.db.query<{ id: number }, []>(`SELECT id FROM kb_documents`).get()!.id;
 
     const patch = await fetch(
       url(`/admin/api/kb/documents/${id}`),
@@ -1140,9 +1085,7 @@ describe("kb management endpoints", () => {
       }),
     );
     expect(patch.status).toBe(200);
-    expect(((await patch.json()) as { document: { topic: string } }).document.topic).toBe(
-      "visa",
-    );
+    expect(((await patch.json()) as { document: { topic: string } }).document.topic).toBe("visa");
 
     const clear = await fetch(
       url(`/admin/api/kb/documents/${id}`),
@@ -1157,10 +1100,7 @@ describe("kb management endpoints", () => {
       ((await clear.json()) as { document: { topic: string | null } }).document.topic,
     ).toBeNull();
 
-    const del = await fetch(
-      url(`/admin/api/kb/documents/${id}`),
-      authed({ method: "DELETE" }),
-    );
+    const del = await fetch(url(`/admin/api/kb/documents/${id}`), authed({ method: "DELETE" }));
     expect(del.status).toBe(200);
     const miss = await fetch(url(`/admin/api/kb/documents/${id}`), authed());
     expect(miss.status).toBe(404);

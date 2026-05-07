@@ -3,9 +3,7 @@ import type { Database } from "bun:sqlite";
 /** Reads the configured dimension from the `kb_vec` virtual table SQL. */
 export function getKbVecDim(db: Database): number | null {
   const row = db
-    .query<{ sql: string | null }, []>(
-      "SELECT sql FROM sqlite_master WHERE name = 'kb_vec'",
-    )
+    .query<{ sql: string | null }, []>("SELECT sql FROM sqlite_master WHERE name = 'kb_vec'")
     .get();
   if (!row?.sql) return null;
   const match = /FLOAT\[(\d+)\]/i.exec(row.sql);

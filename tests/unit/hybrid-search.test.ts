@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import {
-  KbRepo,
-  reciprocalRankFusion,
-  sanitizeFtsQuery,
-  type KbSearchHit,
-} from "@/db/repos/kb.ts";
+import { KbRepo, type KbSearchHit, reciprocalRankFusion, sanitizeFtsQuery } from "@/db/repos/kb.ts";
 import { openDb } from "@/db/sqlite.ts";
 
 const DIM = 1536;

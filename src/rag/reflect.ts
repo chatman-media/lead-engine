@@ -54,8 +54,7 @@ export async function verifyAnswer(input: ReflectInput): Promise<ReflectResult> 
     return { grounded: true };
   }
 
-  const userPrompt =
-    `ВОПРОС: ${input.question}\n\nКОНТЕКСТ:\n${input.context}\n\nОТВЕТ: ${trimmed}\n\nJSON:`;
+  const userPrompt = `ВОПРОС: ${input.question}\n\nКОНТЕКСТ:\n${input.context}\n\nОТВЕТ: ${trimmed}\n\nJSON:`;
 
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },

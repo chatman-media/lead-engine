@@ -41,12 +41,8 @@ export function Styles() {
         </h2>
 
         {styles && styles.length > 0 ? (
-          <div
-            style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}
-          >
-            <span style={{ color: "var(--text-3)", fontFamily: "var(--mono)" }}>
-              clone from:
-            </span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
+            <span style={{ color: "var(--text-3)", fontFamily: "var(--mono)" }}>clone from:</span>
             <select
               value={cloneFrom}
               onChange={(e) => setCloneFrom(e.target.value)}
@@ -67,9 +63,7 @@ export function Styles() {
               ))}
             </select>
             <button
-              onClick={() =>
-                navigate(`/admin/styles/new?from=${encodeURIComponent(cloneFrom)}`)
-              }
+              onClick={() => navigate(`/admin/styles/new?from=${encodeURIComponent(cloneFrom)}`)}
               disabled={!cloneFrom}
               style={{
                 padding: "5px 12px",
@@ -89,10 +83,9 @@ export function Styles() {
         ) : null}
       </div>
       <p style={{ color: "var(--text-3)", fontSize: 13, marginBottom: 20 }}>
-        Personas + sales frameworks + Cialdini hooks composed into the system
-        prompt at runtime. Click any row to view + edit. New styles are created
-        by cloning an existing one as a template — pick a template above and
-        change slug + displayName + tone in the editor.
+        Personas + sales frameworks + Cialdini hooks composed into the system prompt at runtime.
+        Click any row to view + edit. New styles are created by cloning an existing one as a
+        template — pick a template above and change slug + displayName + tone in the editor.
       </p>
 
       {error ? (
@@ -171,10 +164,7 @@ function Th(props: { children: React.ReactNode }) {
   );
 }
 
-function Td(props: {
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-}) {
+function Td(props: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <td style={{ padding: "10px 12px", color: "var(--text)", ...(props.style ?? {}) }}>
       {props.children}

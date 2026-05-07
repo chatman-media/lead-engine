@@ -11,13 +11,24 @@
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install --with-deps chromium",
     "build:ui": "bun run --cwd admin-ui build",
-    "dev:ui": "bun run --cwd admin-ui dev"
+    "dev:ui": "bun run --cwd admin-ui dev",
+    "lint": "biome lint src admin-ui/src tests scripts",
+    "lint:fix": "biome lint --write src admin-ui/src tests scripts",
+    "format": "biome format --write src admin-ui/src tests scripts",
+    "check": "biome check src admin-ui/src tests scripts",
+    "check:fix": "biome check --write src admin-ui/src tests scripts",
+    "typecheck": "tsc --noEmit --skipLibCheck --ignoreDeprecations 6.0 -p tsconfig.src.json",
+    "typecheck:all": "tsc --noEmit --skipLibCheck --ignoreDeprecations 6.0",
+    "audit": "bun audit",
+    "secret-scan": "bun run scripts/scan-secrets.ts",
+    "ci": "bun run typecheck && bun run check && bun run secret-scan && bun test tests/unit"
   },
   "dependencies": {
     "sqlite-vec": "^0.1.9",
     "zod": "^4.4.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.14",
     "@playwright/test": "^1.59.1",
     "@types/bun": "^1.3.13",
     "nodejs-whisper": "^0.3.0",

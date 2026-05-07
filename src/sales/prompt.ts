@@ -20,13 +20,11 @@ const FRAMEWORK_BLURB: Record<Style["framework"], string> = {
 };
 
 function kbGroundingReminder(personaRole: Style["persona"]["role"]): string {
-  const base =
-    "Никогда не выдумывай цифры, суммы, сроки, условия. Если фактов нет в KB CONTEXT — ";
+  const base = "Никогда не выдумывай цифры, суммы, сроки, условия. Если фактов нет в KB CONTEXT — ";
   return personaRole === "human"
     ? base +
-      "напиши по-человечески, что сейчас уточнишь детали (без официоза вроде «обращусь к руководству»), если этих фактов нет в контексте."
-    : base +
-      "скажи prospect, что уточнишь у руководства.";
+        "напиши по-человечески, что сейчас уточнишь детали (без официоза вроде «обращусь к руководству»), если этих фактов нет в контексте."
+    : base + "скажи prospect, что уточнишь у руководства.";
 }
 
 export interface ComposeOptions {
@@ -115,9 +113,7 @@ export function composeSystemPrompt(
         : "")
     : `ТЕКУЩИЙ ЭТАП: ${stage}. (Специфических правил для этапа нет — используй общий стиль.)`;
 
-  const minorRule = guardrails.noMinors
-    ? "- Если prospect <18 лет — вежливо заверши диалог."
-    : "";
+  const minorRule = guardrails.noMinors ? "- Если prospect <18 лет — вежливо заверши диалог." : "";
   const topicsRule = guardrails.forbiddenTopics.length
     ? `- Запрещённые темы: ${guardrails.forbiddenTopics.join(", ")}.`
     : "";
@@ -127,14 +123,7 @@ export function composeSystemPrompt(
         `Списком с номерами — только если человек сам просит структуру.`
       : `- Пиши коротко: 1-3 предложения. Без markdown-заголовков и нумерованных списков.`;
   const guardrailBlock =
-    `ЖЁСТКИЕ ПРАВИЛА:\n` +
-    [
-      minorRule,
-      topicsRule,
-      brevityRule,
-    ]
-      .filter(Boolean)
-      .join("\n");
+    `ЖЁСТКИЕ ПРАВИЛА:\n` + [minorRule, topicsRule, brevityRule].filter(Boolean).join("\n");
 
   const fewShotBlock =
     includeFewShot && fewShot.length
@@ -156,8 +145,7 @@ export function composeSystemPrompt(
   const userFactsBlock = renderUserFactsBlock(options.userFacts);
   const summaryBlock = renderSummaryBlock(options.conversationSummary);
 
-  const needsGroundingReminder =
-    stageCfg?.groundingRequired === true && !preFetchedKbContext;
+  const needsGroundingReminder = stageCfg?.groundingRequired === true && !preFetchedKbContext;
 
   return [
     personaBlock,

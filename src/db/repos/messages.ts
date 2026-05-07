@@ -71,10 +71,7 @@ export class MessagesRepo {
   }): { isNew: boolean; message: MessageRow } {
     const metaJson = input.meta === undefined ? null : JSON.stringify(input.meta);
     const inserted = this.db
-      .query<
-        MessageRow,
-        [number, string, number, string | null]
-      >(
+      .query<MessageRow, [number, string, number, string | null]>(
         `INSERT INTO messages (conversation_id, role, text, tg_message_id, meta_json)
          VALUES (?, 'user', ?, ?, ?)
          ON CONFLICT(conversation_id, tg_message_id)
@@ -93,9 +90,7 @@ export class MessagesRepo {
       )
       .get(input.conversationId, input.tgMessageId);
     if (!existing) {
-      throw new Error(
-        "addUserMessageIfNew: insert was no-op but no existing row found",
-      );
+      throw new Error("addUserMessageIfNew: insert was no-op but no existing row found");
     }
     return { isNew: false, message: existing };
   }

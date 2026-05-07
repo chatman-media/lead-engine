@@ -40,9 +40,7 @@ export class ConversationsRepo {
   byUserId(userId: number): ConversationRow | null {
     return (
       this.db
-        .query<ConversationRow, [number]>(
-          "SELECT * FROM conversations WHERE user_id = ? LIMIT 1",
-        )
+        .query<ConversationRow, [number]>("SELECT * FROM conversations WHERE user_id = ? LIMIT 1")
         .get(userId) ?? null
     );
   }
@@ -50,9 +48,7 @@ export class ConversationsRepo {
   byId(id: number): ConversationRow | null {
     return (
       this.db
-        .query<ConversationRow, [number]>(
-          "SELECT * FROM conversations WHERE id = ? LIMIT 1",
-        )
+        .query<ConversationRow, [number]>("SELECT * FROM conversations WHERE id = ? LIMIT 1")
         .get(id) ?? null
     );
   }
@@ -69,11 +65,7 @@ export class ConversationsRepo {
     return row;
   }
 
-  setMode(
-    id: number,
-    mode: ConversationMode,
-    assignedAdminId: number | null = null,
-  ) {
+  setMode(id: number, mode: ConversationMode, assignedAdminId: number | null = null) {
     if (mode === "ai") {
       this.db.run(
         `UPDATE conversations
@@ -101,10 +93,7 @@ export class ConversationsRepo {
   }
 
   touch(id: number) {
-    this.db.run(
-      "UPDATE conversations SET last_message_at = unixepoch() WHERE id = ?",
-      [id],
-    );
+    this.db.run("UPDATE conversations SET last_message_at = unixepoch() WHERE id = ?", [id]);
   }
 
   /**
@@ -113,10 +102,11 @@ export class ConversationsRepo {
    * MUST stick (else a prospect on retry could see a different persona).
    */
   assignStyle(id: number, styleId: number, experimentId: number | null = null): void {
-    this.db.run(
-      `UPDATE conversations SET style_id = ?, experiment_id = ? WHERE id = ?`,
-      [styleId, experimentId, id],
-    );
+    this.db.run(`UPDATE conversations SET style_id = ?, experiment_id = ? WHERE id = ?`, [
+      styleId,
+      experimentId,
+      id,
+    ]);
   }
 
   /** Persist the latest funnel stage so it survives process restarts. */
@@ -135,10 +125,7 @@ export class ConversationsRepo {
     if (!row?.summary_json) return null;
     try {
       const parsed = JSON.parse(row.summary_json) as ConversationSummary;
-      if (
-        typeof parsed.summary === "string" &&
-        typeof parsed.summarizedThroughMsgId === "number"
-      ) {
+      if (typeof parsed.summary === "string" && typeof parsed.summarizedThroughMsgId === "number") {
         return parsed;
       }
       return null;
@@ -150,20 +137,16 @@ export class ConversationsRepo {
   /**
    * Replace the stored summary. Always sets `updatedAt` to current unix time.
    */
-  setSummary(
-    id: number,
-    summary: string,
-    summarizedThroughMsgId: number,
-  ): void {
+  setSummary(id: number, summary: string, summarizedThroughMsgId: number): void {
     const payload: ConversationSummary = {
       summary,
       summarizedThroughMsgId,
       updatedAt: Math.floor(Date.now() / 1000),
     };
-    this.db.run(
-      `UPDATE conversations SET summary_json = ? WHERE id = ?`,
-      [JSON.stringify(payload), id],
-    );
+    this.db.run(`UPDATE conversations SET summary_json = ? WHERE id = ?`, [
+      JSON.stringify(payload),
+      id,
+    ]);
   }
 
   /**
@@ -176,16 +159,13 @@ export class ConversationsRepo {
     return res.changes > 0;
   }
 
-  list(opts: { onlyEscalated?: boolean; limit?: number } = {}): Array<
-    ConversationRow & { tg_user_id: number; tg_username: string | null }
-  > {
+  list(
+    opts: { onlyEscalated?: boolean; limit?: number } = {},
+  ): Array<ConversationRow & { tg_user_id: number; tg_username: string | null }> {
     const limit = opts.limit ?? 100;
     const where = opts.onlyEscalated ? "WHERE c.mode IN ('queued','human')" : "";
     return this.db
-      .query<
-        ConversationRow & { tg_user_id: number; tg_username: string | null },
-        [number]
-      >(
+      .query<ConversationRow & { tg_user_id: number; tg_username: string | null }, [number]>(
         `SELECT c.*, u.tg_user_id, u.tg_username
          FROM conversations c
          JOIN users u ON u.id = c.user_id

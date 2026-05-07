@@ -6,7 +6,7 @@ import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { ExperimentsRepo } from "@/db/repos/experiments.ts";
 import { KbRepo } from "@/db/repos/kb.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
-import { seedBuiltinStyles, StylesRepo } from "@/db/repos/styles.ts";
+import { StylesRepo, seedBuiltinStyles } from "@/db/repos/styles.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
@@ -14,7 +14,7 @@ import type { EmbeddingClient } from "@/rag/embed.ts";
 import { coldDirectPas } from "@/sales/styles/cold-direct-pas.ts";
 import { empatheticNepq } from "@/sales/styles/empathetic-nepq.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
 
 const SECRET = "test-secret";
@@ -157,9 +157,7 @@ describe("webhook A/B — no experiment running", () => {
   test("legacy persona path: conversation has no style_id, no stage", async () => {
     await send(ctx.port, 100, "hello");
 
-    const conv = new ConversationsRepo(ctx.db).byUserId(
-      new UsersRepo(ctx.db).byTgId(100)!.id,
-    )!;
+    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
     expect(conv.style_id).toBeNull();
     expect(conv.experiment_id).toBeNull();
     expect(conv.current_stage).toBeNull();
@@ -258,9 +256,7 @@ describe("webhook with LLM stage classifier enabled", () => {
     expect(classifierCalls.length).toBe(1);
     expect(answerCalls.length).toBe(1);
 
-    const conv = new ConversationsRepo(ctx.db).byUserId(
-      new UsersRepo(ctx.db).byTgId(100)!.id,
-    )!;
+    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
     expect(conv.current_stage).toBe("objection"); // LLM, not regex's "pitch"
 
     // The actual answer prompt was built for the LLM-classified stage.
@@ -313,9 +309,7 @@ describe("webhook A/B — running experiment assigns variant", () => {
   test("first message → assigns style_id + experiment_id, persists current_stage", async () => {
     await send(ctx.port, 100, "привет");
 
-    const conv = new ConversationsRepo(ctx.db).byUserId(
-      new UsersRepo(ctx.db).byTgId(100)!.id,
-    )!;
+    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
     expect(conv.style_id).not.toBeNull();
     expect(conv.experiment_id).not.toBeNull();
     expect(conv.current_stage).toBe("opener");
@@ -334,15 +328,11 @@ describe("webhook A/B — running experiment assigns variant", () => {
 
   test("same user on second message → style is sticky (same style_id)", async () => {
     await send(ctx.port, 100, "привет");
-    const conv1 = new ConversationsRepo(ctx.db).byUserId(
-      new UsersRepo(ctx.db).byTgId(100)!.id,
-    )!;
+    const conv1 = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
     const firstStyleId = conv1.style_id;
 
     await send(ctx.port, 100, "сколько в Дубае платят?");
-    const conv2 = new ConversationsRepo(ctx.db).byUserId(
-      new UsersRepo(ctx.db).byTgId(100)!.id,
-    )!;
+    const conv2 = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
     expect(conv2.style_id).toBe(firstStyleId);
     // Stage advanced because of pricing keyword.
     expect(conv2.current_stage).toBe("pitch");
@@ -374,9 +364,7 @@ describe("webhook A/B — running experiment assigns variant", () => {
     );
 
     await send(ctx.port, 100, "hi");
-    const conv = new ConversationsRepo(ctx.db).byUserId(
-      new UsersRepo(ctx.db).byTgId(100)!.id,
-    )!;
+    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
     // No assignment happened — sales-engine fell back gracefully.
     expect(conv.style_id).toBeNull();
     // Legacy persona prompt was used.
@@ -392,9 +380,7 @@ describe("webhook A/B — running experiment assigns variant", () => {
     );
 
     await send(ctx.port, 100, "hi");
-    const conv = new ConversationsRepo(ctx.db).byUserId(
-      new UsersRepo(ctx.db).byTgId(100)!.id,
-    )!;
+    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
     expect(conv.style_id).toBeNull();
   });
 });

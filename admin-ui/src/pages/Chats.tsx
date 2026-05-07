@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type Conversation } from "../api.ts";
 import { ws } from "../App.tsx";
+import { api, type Conversation } from "../api.ts";
 
 function relativeTime(unix: number | null) {
   if (!unix) return "—";
@@ -13,9 +13,7 @@ function relativeTime(unix: number | null) {
 }
 
 function modeBadge(mode: Conversation["mode"]) {
-  return (
-    <span className={`badge badge-${mode}`}>{mode}</span>
-  );
+  return <span className={`badge badge-${mode}`}>{mode}</span>;
 }
 
 export function Chats() {
@@ -33,9 +31,7 @@ export function Chats() {
 
   async function handleDelete(c: Conversation, e: React.MouseEvent) {
     e.stopPropagation();
-    const label = c.user.tg_username
-      ? `@${c.user.tg_username}`
-      : `tg:${c.user.tg_user_id}`;
+    const label = c.user.tg_username ? `@${c.user.tg_username}` : `tg:${c.user.tg_user_id}`;
     if (
       !confirm(
         `Удалить чат с ${label}? Сообщения будут стёрты, статус сбросится. Действие необратимо.`,
@@ -56,10 +52,7 @@ export function Chats() {
     reload();
     tickRef.current = setInterval(reload, 10_000);
     const unsub = ws.on((evt) => {
-      if (
-        evt.type === "message:new" ||
-        evt.type === "conversation:updated"
-      ) {
+      if (evt.type === "message:new" || evt.type === "conversation:updated") {
         reload();
       }
     });
@@ -98,9 +91,7 @@ export function Chats() {
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="chat-name">
-                  {c.user.tg_username
-                    ? `@${c.user.tg_username}`
-                    : `tg:${c.user.tg_user_id}`}
+                  {c.user.tg_username ? `@${c.user.tg_username}` : `tg:${c.user.tg_user_id}`}
                 </div>
                 <div className="chat-time">{relativeTime(c.last_message_at)}</div>
               </div>
@@ -120,9 +111,7 @@ export function Chats() {
             </div>
           ))}
 
-          {convs.length === 0 && (
-            <div className="empty">No conversations yet.</div>
-          )}
+          {convs.length === 0 && <div className="empty">No conversations yet.</div>}
         </div>
       )}
     </div>

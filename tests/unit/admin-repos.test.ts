@@ -47,16 +47,14 @@ describe("AdminsRepo", () => {
   test("creating with duplicate email throws", async () => {
     const admins = new AdminsRepo(db);
     await admins.create({ email: "dup@x.test", password: "longenough1" });
-    await expect(
-      admins.create({ email: "DUP@x.test", password: "longenough2" }),
-    ).rejects.toThrow();
+    await expect(admins.create({ email: "DUP@x.test", password: "longenough2" })).rejects.toThrow();
   });
 
   test("rejects too-short password", async () => {
     const admins = new AdminsRepo(db);
-    await expect(
-      admins.create({ email: "x@y.test", password: "short" }),
-    ).rejects.toThrow(/password/i);
+    await expect(admins.create({ email: "x@y.test", password: "short" })).rejects.toThrow(
+      /password/i,
+    );
   });
 });
 
@@ -79,11 +77,7 @@ describe("SessionsRepo", () => {
     const a = await admins.create({ email: "s2@x.test", password: "longenough" });
     const sid = sessions.issue(a.id, { ttlSeconds: -10 });
     expect(sessions.adminIdFor(sid)).toBeNull();
-    expect(
-      db
-        .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sessions")
-        .get()?.n,
-    ).toBe(0);
+    expect(db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sessions").get()?.n).toBe(0);
   });
 
   test("revoke removes the session", async () => {

@@ -1,4 +1,4 @@
-import { useNavigate, NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import type { Admin } from "../api.ts";
 import { api } from "../api.ts";
 
@@ -42,18 +42,13 @@ export function Layout({ admin, children }: LayoutProps) {
 
         <div className="sidebar-footer">
           <div className="sidebar-email">{admin.email}</div>
-          <button
-            className="btn btn-ghost btn-sm btn-block"
-            onClick={handleLogout}
-          >
+          <button className="btn btn-ghost btn-sm btn-block" onClick={handleLogout}>
             Sign out
           </button>
         </div>
       </aside>
 
-      <main style={{ flex: 1, overflow: "auto", background: "var(--bg)" }}>
-        {children}
-      </main>
+      <main style={{ flex: 1, overflow: "auto", background: "var(--bg)" }}>{children}</main>
     </div>
   );
 }

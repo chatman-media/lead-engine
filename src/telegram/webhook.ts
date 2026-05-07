@@ -1,36 +1,35 @@
 import type { Database } from "bun:sqlite";
-
-import { ConversationsRepo, type ConversationRow } from "../db/repos/conversations.ts";
+import { telegramOpenAccess } from "../config.ts";
+import { type ConversationRow, ConversationsRepo } from "../db/repos/conversations.ts";
 import { ExperimentsRepo, parseAllocationToExperiment } from "../db/repos/experiments.ts";
 import { KbRepo } from "../db/repos/kb.ts";
+import { LeadsRepo } from "../db/repos/leads.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
-import { UsersRepo, type UserRow } from "../db/repos/users.ts";
-import { telegramOpenAccess } from "../config.ts";
-import { json, type RouteHandler } from "../router.ts";
+import { type UserRow, UsersRepo } from "../db/repos/users.ts";
+import { renderVacanciesBlock, VacanciesRepo } from "../db/repos/vacancies.ts";
+import { countMediaForConversation, extractIntake } from "../leads/intake.ts";
+import { LeadsService } from "../leads/service.ts";
+import { type IntakeFields, isIntakeComplete } from "../leads/templates.ts";
+import { extractVisaDocs, type VisaFields } from "../leads/visa-docs.ts";
 import {
+  type AnswerResult,
   answerWithRag,
   NO_CONTEXT_MARKER,
-  type AnswerResult,
   type Persona,
 } from "../rag/answer.ts";
 import type { ChatClient } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
 import { extractUserFacts } from "../rag/extract-user-facts.ts";
 import { summarizeConversation } from "../rag/summarize-conversation.ts";
-import { renderVacanciesBlock, VacanciesRepo } from "../db/repos/vacancies.ts";
-import { LeadsRepo } from "../db/repos/leads.ts";
-import { countMediaForConversation, extractIntake } from "../leads/intake.ts";
-import { LeadsService } from "../leads/service.ts";
-import { isIntakeComplete, type IntakeFields } from "../leads/templates.ts";
-import { extractVisaDocs, type VisaFields } from "../leads/visa-docs.ts";
+import { json, type RouteHandler } from "../router.ts";
 import { pickVariant } from "../sales/ab-router.ts";
 import { classifyStage } from "../sales/stage-classifier.ts";
 import { nextStage } from "../sales/stage-router.ts";
 import { FUNNEL_STAGES, type FunnelStage, type Style } from "../sales/types.ts";
 import type { TelegramClient } from "./client.ts";
-import type { TgMessage, TgUpdate } from "./types.ts";
 import { containsEscalationTrigger } from "./escalation.ts";
+import type { TgMessage, TgUpdate } from "./types.ts";
 
 export interface RagDeps {
   embedder: EmbeddingClient;
@@ -218,7 +217,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
     }
 
     const message = update.message ?? update.edited_message;
-    if (!message || !message.from) {
+    if (!message?.from) {
       return json({ ok: true, ignored: "no-message-or-from" });
     }
     const mediaInfo = extractMediaInfo(message);
@@ -258,9 +257,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
             ...(message.text || message.caption
               ? { text: message.text ?? message.caption ?? "" }
               : {}),
-            ...(mediaInfo
-              ? { media: { type: mediaInfo.type, file_id: mediaInfo.file_id } }
-              : {}),
+            ...(mediaInfo ? { media: { type: mediaInfo.type, file_id: mediaInfo.file_id } } : {}),
           };
           const ok = await service.relayFromOperator(relayInput);
           if (ok) {
@@ -289,8 +286,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
     }
 
     const tgUserId = message.from.id;
-    const userMessageText =
-      message.text ?? message.caption ?? `[${mediaInfo!.type}]`;
+    const userMessageText = message.text ?? message.caption ?? `[${mediaInfo!.type}]`;
 
     const userExisting = users.byTgId(tgUserId);
     let user = userExisting;
@@ -299,14 +295,10 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
         tgUserId,
         tgUsername: message.from.username ?? null,
       });
-      console.log(
-        `[webhook] TELEGRAM_OPEN_ACCESS: created user tg_user_id=${tgUserId}`,
-      );
+      console.log(`[webhook] TELEGRAM_OPEN_ACCESS: created user tg_user_id=${tgUserId}`);
     }
     if (!user) {
-      console.log(
-        `[webhook] ignoring message from non-whitelisted tg_user_id=${tgUserId}`,
-      );
+      console.log(`[webhook] ignoring message from non-whitelisted tg_user_id=${tgUserId}`);
       return json({ ok: true, ignored: "not-whitelisted" });
     }
 
@@ -469,9 +461,7 @@ function resolveStyle(d: {
 
   const experiment = parseAllocationToExperiment(running);
   if (!experiment) {
-    console.warn(
-      `[sales] experiment ${running.slug} has malformed allocation_json; skipping`,
-    );
+    console.warn(`[sales] experiment ${running.slug} has malformed allocation_json; skipping`);
     return null;
   }
 
@@ -583,9 +573,7 @@ async function runRagForInbound(
   // conversations) so the bot doesn't re-ask the candidate's city/age/etc.
   // Read is cheap (single DB row); facts from current message land on the
   // NEXT turn (extraction runs after the reply, see processInbound).
-  const userFacts = d.rag.userMemory
-    ? d.users.getMemory(d.user.id).facts
-    : undefined;
+  const userFacts = d.rag.userMemory ? d.users.getMemory(d.user.id).facts : undefined;
 
   // Long-conversation summary (when feature is on AND a summary exists).
   // Refresh decision happens AFTER reply (see runConversationSummaryRefresh)
@@ -645,9 +633,7 @@ async function runMemoryExtraction(d: ProcessInboundDeps): Promise<void> {
   // are already accumulated in `stored.facts` from prior runs.
   const MAX_EXTRACTION_SLICE = 16;
   const slicedFresh =
-    fresh.length > MAX_EXTRACTION_SLICE
-      ? fresh.slice(-MAX_EXTRACTION_SLICE)
-      : fresh;
+    fresh.length > MAX_EXTRACTION_SLICE ? fresh.slice(-MAX_EXTRACTION_SLICE) : fresh;
 
   const slice = slicedFresh.map((m) => ({
     role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
@@ -838,16 +824,14 @@ function parseVisaDocsJson(raw: string | null): VisaFields | undefined {
   }
 }
 
-async function runConversationSummaryRefresh(
-  d: ProcessInboundDeps,
-): Promise<void> {
+async function runConversationSummaryRefresh(d: ProcessInboundDeps): Promise<void> {
   if (!d.rag?.conversationSummary) return;
 
   const all = d.messages.listByConversation(d.conv.id, 500);
   if (all.length < SUMMARY_START_THRESHOLD) return;
 
   const stored = d.conversations.getSummary(d.conv.id);
-  const latestId = all[all.length - 1]!.id;
+  const _latestId = all[all.length - 1]!.id;
   const lastSummarizedId = stored?.summarizedThroughMsgId ?? 0;
 
   // Anything strictly older than the recent window is fair game for the
@@ -938,10 +922,10 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
       d.conversations.setMode(d.conv.id, "ai");
       d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
       await reply(
-      result.text,
-      { used_chunk_ids: result.usedChunkIds, telemetry: result.telemetry },
-      stage,
-    );
+        result.text,
+        { used_chunk_ids: result.usedChunkIds, telemetry: result.telemetry },
+        stage,
+      );
       return;
     }
     return;
@@ -971,10 +955,10 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
   }
 
   await reply(
-      result.text,
-      { used_chunk_ids: result.usedChunkIds, telemetry: result.telemetry },
-      stage,
-    );
+    result.text,
+    { used_chunk_ids: result.usedChunkIds, telemetry: result.telemetry },
+    stage,
+  );
   await runMemoryExtraction(d);
   await runConversationSummaryRefresh(d);
   await runIntakeUpdate(d);

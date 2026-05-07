@@ -41,10 +41,7 @@ test("user opens link, submits valid form, status flips to qualified", async ({
   });
 });
 
-test("invalid email shows inline error and does not consume token", async ({
-  page,
-  request,
-}) => {
+test("invalid email shows inline error and does not consume token", async ({ page, request }) => {
   const issued = await request.post("/__test/issue-token", {
     data: { tgUserId: TG_USER_ID },
   });

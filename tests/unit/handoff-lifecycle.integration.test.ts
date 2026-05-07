@@ -13,7 +13,6 @@
  *    is silently dropped.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { Server } from "bun";
 
 import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
@@ -23,7 +22,7 @@ import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { createServer } from "@/server.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
 
 const SECRET = "lifecycle-secret";
@@ -65,8 +64,7 @@ function setup() {
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
     const apiMethod = url.split("/").pop() ?? "";
-    const body =
-      typeof init?.body === "string" ? JSON.parse(init.body) : {};
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
     sent.push({ method: apiMethod, body });
     const result =
       apiMethod === "sendMessage"
@@ -183,10 +181,7 @@ function connectAdminWs(cookie: string): Promise<WsHandle> {
   });
 }
 
-async function waitFor<T>(
-  cond: () => T | undefined,
-  timeoutMs = 1500,
-): Promise<T> {
+async function waitFor<T>(cond: () => T | undefined, timeoutMs = 1500): Promise<T> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const v = cond();
@@ -252,10 +247,9 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     const cookie = await loginAsAdmin();
     const wsHandle = await connectAdminWs(cookie);
 
-    const listRes = await fetch(
-      `${origin()}/admin/api/conversations?escalated=1`,
-      { headers: { cookie } },
-    );
+    const listRes = await fetch(`${origin()}/admin/api/conversations?escalated=1`, {
+      headers: { cookie },
+    });
     expect(listRes.status).toBe(200);
     const list = (await listRes.json()) as {
       conversations: Array<{ id: number; mode: string; user: { tg_user_id: number } }>;
@@ -267,10 +261,10 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
 
     // --- Step 4: Admin takes the conversation → mode=human + WS event ---
     const sendCountBeforeTake = ctx.sent.length;
-    const takeRes = await fetch(
-      `${origin()}/admin/api/conversations/${conv.id}/take`,
-      { method: "POST", headers: { cookie } },
-    );
+    const takeRes = await fetch(`${origin()}/admin/api/conversations/${conv.id}/take`, {
+      method: "POST",
+      headers: { cookie },
+    });
     expect(takeRes.status).toBe(200);
     expect(conversations.byId(conv.id)!.mode).toBe("human");
     expect(conversations.byId(conv.id)!.assigned_admin_id).not.toBeNull();
@@ -313,14 +307,11 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     // --- Step 6: Admin replies → Telegram receives it, persisted as role=human,
     //              WS broadcasts message:new ---
     const eventsBeforeReply = wsHandle.events.length;
-    const replyRes = await fetch(
-      `${origin()}/admin/api/conversations/${conv.id}/reply`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json", cookie },
-        body: JSON.stringify({ text: "Привет, я Алина. Сейчас помогу!" }),
-      },
-    );
+    const replyRes = await fetch(`${origin()}/admin/api/conversations/${conv.id}/reply`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ text: "Привет, я Алина. Сейчас помогу!" }),
+    });
     expect(replyRes.status).toBe(200);
 
     const lastSend = ctx.sent.at(-1)!;
@@ -349,10 +340,10 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     expect(conversations.byId(conv.id)!.mode).toBe("human");
 
     // --- Step 7: Admin releases → mode flips back to ai, assignment cleared ---
-    const releaseRes = await fetch(
-      `${origin()}/admin/api/conversations/${conv.id}/release`,
-      { method: "POST", headers: { cookie } },
-    );
+    const releaseRes = await fetch(`${origin()}/admin/api/conversations/${conv.id}/release`, {
+      method: "POST",
+      headers: { cookie },
+    });
     expect(releaseRes.status).toBe(200);
     const released = conversations.byId(conv.id)!;
     expect(released.mode).toBe("ai");
@@ -399,14 +390,11 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     expect(c.mode).toBe("ai");
 
     const cookie = await loginAsAdmin();
-    const res = await fetch(
-      `${origin()}/admin/api/conversations/${c.id}/reply`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json", cookie },
-        body: JSON.stringify({ text: "should not be sent" }),
-      },
-    );
+    const res = await fetch(`${origin()}/admin/api/conversations/${c.id}/reply`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ text: "should not be sent" }),
+    });
     expect(res.status).toBe(409);
     expect(ctx.sent).toHaveLength(0);
     const msgs = new MessagesRepo(ctx.db).listByConversation(c.id);

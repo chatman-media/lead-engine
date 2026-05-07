@@ -1,4 +1,4 @@
-import { StyleSchema, type Style } from "../types.ts";
+import { type Style, StyleSchema } from "../types.ts";
 
 /**
  * Alina @ INFINITY AGENCY — production sales-style mirroring (and slightly
@@ -114,8 +114,7 @@ export const alinaInfinity: Style = StyleSchema.parse({
     {
       stage: "qualify",
       user: "хочу попробовать",
-      assistant:
-        "Ок, поняла 😊 Давай по порядку. Сколько тебе лет и из какого ты города?",
+      assistant: "Ок, поняла 😊 Давай по порядку. Сколько тебе лет и из какого ты города?",
     },
     {
       stage: "pitch",

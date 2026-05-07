@@ -3,25 +3,25 @@ import type { Database } from "bun:sqlite";
 import { activeEmbeddingDim, config } from "../config.ts";
 import { ConversationsRepo } from "../db/repos/conversations.ts";
 import {
+  type ExperimentStatus,
   ExperimentsRepo,
   parseAllocationToExperiment,
-  type ExperimentStatus,
   type SuccessMetric,
 } from "../db/repos/experiments.ts";
 import { KbRepo } from "../db/repos/kb.ts";
+import { type LeadState, LeadsRepo } from "../db/repos/leads.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
-import { sanitizeLlmOutput } from "../rag/answer.ts";
-import type { ChatClient, ChatMessage } from "../rag/chat.ts";
-import type { EmbeddingClient } from "../rag/embed.ts";
-import { composeSystemPrompt } from "../sales/prompt.ts";
-import { nextStage } from "../sales/stage-router.ts";
-import { FUNNEL_STAGES, StyleSchema, type FunnelStage } from "../sales/types.ts";
-import { LeadsRepo, type LeadState } from "../db/repos/leads.ts";
 import { UsersRepo } from "../db/repos/users.ts";
 import { VacanciesRepo } from "../db/repos/vacancies.ts";
 import { LeadsService } from "../leads/service.ts";
+import { sanitizeLlmOutput } from "../rag/answer.ts";
+import type { ChatClient, ChatMessage } from "../rag/chat.ts";
+import type { EmbeddingClient } from "../rag/embed.ts";
 import { json, type RouteHandler } from "../router.ts";
+import { composeSystemPrompt } from "../sales/prompt.ts";
+import { nextStage } from "../sales/stage-router.ts";
+import { FUNNEL_STAGES, type FunnelStage, StyleSchema } from "../sales/types.ts";
 import type { TelegramClient } from "../telegram/client.ts";
 import { requireAdmin } from "./auth.ts";
 
@@ -85,15 +85,13 @@ export function createUserDetailHandler(deps: AdminApiDeps): RouteHandler {
     const lead = leads.byUserId(id);
     const memory = users.getMemory(id);
     const recentMessages = conversation
-      ? messages
-          .listByConversation(conversation.id, 30)
-          .map((m) => ({
-            id: m.id,
-            role: m.role,
-            text: m.text,
-            tg_message_id: m.tg_message_id,
-            created_at: m.created_at,
-          }))
+      ? messages.listByConversation(conversation.id, 30).map((m) => ({
+          id: m.id,
+          role: m.role,
+          text: m.text,
+          tg_message_id: m.tg_message_id,
+          created_at: m.created_at,
+        }))
       : [];
     return json({
       user,
@@ -134,10 +132,7 @@ export function __resetBotHealthCacheForTesting(): void {
 
 async function readBotHealth(deps: AdminApiDeps): Promise<BotHealth> {
   const now = Math.floor(Date.now() / 1000);
-  if (
-    botHealthCache !== null &&
-    now - botHealthCache.checked_at < BOT_HEALTH_TTL_SEC
-  ) {
+  if (botHealthCache !== null && now - botHealthCache.checked_at < BOT_HEALTH_TTL_SEC) {
     return botHealthCache;
   }
   if (!deps.telegram) {
@@ -186,9 +181,7 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
           ? config.openrouter.chatModel
           : config.openai.chatModel;
     const embedModel =
-      embedProvider === "ollama"
-        ? config.ollama.embeddingModel
-        : config.openai.embeddingModel;
+      embedProvider === "ollama" ? config.ollama.embeddingModel : config.openai.embeddingModel;
 
     // Active routing: env override > running experiment > legacy persona > none.
     const styles = new StylesRepo(deps.db);
@@ -216,10 +209,7 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
     // KB stats grouped by topic. NULL groups together as "untagged" so the
     // UI can render them distinctly. Single CROSS JOIN for aggregate count.
     const kbByTopic = deps.db
-      .query<
-        { topic: string | null; documents: number; chunks: number },
-        []
-      >(
+      .query<{ topic: string | null; documents: number; chunks: number }, []>(
         `SELECT d.topic AS topic,
                 COUNT(DISTINCT d.id) AS documents,
                 COUNT(c.id) AS chunks
@@ -295,13 +285,14 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
         mode: routingMode,
         active_style_slug: activeStyleSlug,
         running_experiment_slug: runningExperimentSlug,
-        legacy_persona: routingMode === "legacy_persona"
-          ? {
-              name: config.persona.name,
-              role: config.persona.role,
-              company: config.persona.company || null,
-            }
-          : null,
+        legacy_persona:
+          routingMode === "legacy_persona"
+            ? {
+                name: config.persona.name,
+                role: config.persona.role,
+                company: config.persona.company || null,
+              }
+            : null,
         stage_classifier: config.sales.stageClassifier,
       },
       kb: {
@@ -338,9 +329,7 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
   };
 }
 
-export function createListConversationsHandler(
-  deps: AdminApiDeps,
-): RouteHandler {
+export function createListConversationsHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.db);
   return ({ req }) => {
     const ctx = requireAdmin(deps.db, req);
@@ -348,27 +337,23 @@ export function createListConversationsHandler(
     const url = new URL(req.url);
     const onlyEscalated = url.searchParams.get("escalated") === "1";
     return json({
-      conversations: conversations
-        .list({ onlyEscalated, limit: 200 })
-        .map((row) => ({
-          id: row.id,
-          mode: row.mode,
-          escalated_at: row.escalated_at,
-          last_message_at: row.last_message_at,
-          assigned_admin_id: row.assigned_admin_id,
-          user: {
-            id: row.user_id,
-            tg_user_id: row.tg_user_id,
-            tg_username: row.tg_username,
-          },
-        })),
+      conversations: conversations.list({ onlyEscalated, limit: 200 }).map((row) => ({
+        id: row.id,
+        mode: row.mode,
+        escalated_at: row.escalated_at,
+        last_message_at: row.last_message_at,
+        assigned_admin_id: row.assigned_admin_id,
+        user: {
+          id: row.user_id,
+          tg_user_id: row.tg_user_id,
+          tg_username: row.tg_username,
+        },
+      })),
     });
   };
 }
 
-export function createConversationDetailHandler(
-  deps: AdminApiDeps,
-): RouteHandler {
+export function createConversationDetailHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.db);
   const users = new UsersRepo(deps.db);
   const messages = new MessagesRepo(deps.db);
@@ -406,9 +391,7 @@ export function createConversationDetailHandler(
  * operator edits replace stored memory wholesale (no merge), then the
  * next bot turn picks them up via the standard `getMemory` read path.
  */
-export function createUpdateUserMemoryHandler(
-  deps: AdminApiDeps,
-): RouteHandler {
+export function createUpdateUserMemoryHandler(deps: AdminApiDeps): RouteHandler {
   const users = new UsersRepo(deps.db);
   return async ({ req, params }) => {
     const ctx = requireAdmin(deps.db, req);
@@ -426,11 +409,7 @@ export function createUpdateUserMemoryHandler(
     } catch {
       return json({ error: "invalid JSON" }, { status: 400 });
     }
-    if (
-      typeof body.facts !== "object" ||
-      body.facts === null ||
-      Array.isArray(body.facts)
-    ) {
+    if (typeof body.facts !== "object" || body.facts === null || Array.isArray(body.facts)) {
       return json({ error: "facts must be an object" }, { status: 400 });
     }
 
@@ -487,9 +466,7 @@ export function createReleaseHandler(deps: AdminApiDeps): RouteHandler {
   };
 }
 
-export function createDeleteConversationHandler(
-  deps: AdminApiDeps,
-): RouteHandler {
+export function createDeleteConversationHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.db);
   return ({ req, params }) => {
     const ctx = requireAdmin(deps.db, req);
@@ -520,10 +497,7 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
     const conv = conversations.byId(id);
     if (!conv) return json({ error: "not found" }, { status: 404 });
     if (conv.mode !== "human") {
-      return json(
-        { error: "conversation is not in human mode" },
-        { status: 409 },
-      );
+      return json({ error: "conversation is not in human mode" }, { status: 409 });
     }
 
     let body: { text?: unknown };
@@ -532,8 +506,7 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
     } catch {
       return json({ error: "invalid JSON" }, { status: 400 });
     }
-    const text =
-      typeof body.text === "string" ? body.text.trim() : "";
+    const text = typeof body.text === "string" ? body.text.trim() : "";
     if (!text) return json({ error: "text is required" }, { status: 400 });
 
     const user = users.byId(conv.user_id);
@@ -681,10 +654,7 @@ function buildExportHeaders(
 }
 
 /** Hydrate the message lists in-place. Single SELECT for all conversations. */
-function fillExportMessages(
-  db: Database,
-  conversations: Map<number, ExportedConversation>,
-): void {
+function fillExportMessages(db: Database, conversations: Map<number, ExportedConversation>): void {
   if (conversations.size === 0) return;
   const ids = [...conversations.keys()];
   const placeholders = ids.map(() => "?").join(",");
@@ -733,9 +703,7 @@ export function createExportConversationHandler(deps: AdminApiDeps): RouteHandle
   };
 }
 
-export function createBulkExportConversationsHandler(
-  deps: AdminApiDeps,
-): RouteHandler {
+export function createBulkExportConversationsHandler(deps: AdminApiDeps): RouteHandler {
   return ({ req }) => {
     const ctx = requireAdmin(deps.db, req);
     if (ctx instanceof Response) return ctx;
@@ -823,11 +791,7 @@ const VALID_EXPERIMENT_STATUSES: readonly ExperimentStatus[] = [
   "paused",
   "done",
 ];
-const VALID_SUCCESS_METRICS: readonly SuccessMetric[] = [
-  "qualified",
-  "won",
-  "replied_3+",
-];
+const VALID_SUCCESS_METRICS: readonly SuccessMetric[] = ["qualified", "won", "replied_3+"];
 
 export function createListStylesHandler(deps: AdminApiDeps): RouteHandler {
   const styles = new StylesRepo(deps.db);
@@ -934,12 +898,14 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
     const row = styles.byId(id);
     if (!row) return json({ error: "not found" }, { status: 404 });
 
-    let style;
+    let style: ReturnType<typeof styles.parseRow>;
     try {
       style = styles.parseRow(row);
     } catch (err) {
       return json(
-        { error: `style config_json fails StyleSchema: ${err instanceof Error ? err.message : String(err)}` },
+        {
+          error: `style config_json fails StyleSchema: ${err instanceof Error ? err.message : String(err)}`,
+        },
         { status: 422 },
       );
     }
@@ -950,8 +916,7 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
     } catch {
       return json({ error: "invalid JSON" }, { status: 400 });
     }
-    const userMessage =
-      typeof body.userMessage === "string" ? body.userMessage.trim() : "";
+    const userMessage = typeof body.userMessage === "string" ? body.userMessage.trim() : "";
     if (!userMessage) {
       return json({ error: "userMessage is required" }, { status: 400 });
     }
@@ -996,9 +961,7 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
           const topK = rag.topK ?? 5;
           const all = kb.search(vec, topK);
           const filtered =
-            rag.maxDistance === undefined
-              ? all
-              : all.filter((h) => h.distance <= rag.maxDistance!);
+            rag.maxDistance === undefined ? all : all.filter((h) => h.distance <= rag.maxDistance!);
           kbHits = filtered.map((h) => ({
             chunk_id: h.chunk_id,
             title: h.title,
@@ -1007,10 +970,7 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
           }));
           if (filtered.length > 0) {
             kbContext = filtered
-              .map(
-                (h, i) =>
-                  `[#${i + 1}] (source: ${h.title})\n${h.text}`,
-              )
+              .map((h, i) => `[#${i + 1}] (source: ${h.title})\n${h.text}`)
               .join("\n\n");
           }
         }
@@ -1185,7 +1145,7 @@ export function createEditStyleHandler(deps: AdminApiDeps): RouteHandler {
       );
     }
 
-    let newRow;
+    let newRow: ReturnType<typeof styles.editAsNewVersion>;
     try {
       newRow = styles.editAsNewVersion(id, parseResult.data);
     } catch (err) {
@@ -1275,10 +1235,7 @@ export function createCreateExperimentHandler(deps: AdminApiDeps): RouteHandler 
         : "qualified";
 
     if (typeof body.allocation !== "object" || body.allocation === null) {
-      return json(
-        { error: "allocation must be an object {styleSlug: weight}" },
-        { status: 400 },
-      );
+      return json({ error: "allocation must be an object {styleSlug: weight}" }, { status: 400 });
     }
     const allocation: Record<string, number> = {};
     for (const [k, v] of Object.entries(body.allocation as Record<string, unknown>)) {
@@ -1286,10 +1243,7 @@ export function createCreateExperimentHandler(deps: AdminApiDeps): RouteHandler 
         return json({ error: `bad allocation key: ${k}` }, { status: 400 });
       }
       if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
-        return json(
-          { error: `weight for "${k}" must be a non-negative number` },
-          { status: 400 },
-        );
+        return json({ error: `weight for "${k}" must be a non-negative number` }, { status: 400 });
       }
       // Verify the referenced style exists & is active. Otherwise the
       // experiment will silently allocate to a missing slug and graceful-
@@ -1347,9 +1301,7 @@ interface PatchExperimentBody {
   status?: unknown;
 }
 
-export function createSetExperimentStatusHandler(
-  deps: AdminApiDeps,
-): RouteHandler {
+export function createSetExperimentStatusHandler(deps: AdminApiDeps): RouteHandler {
   const experiments = new ExperimentsRepo(deps.db);
   return async ({ req, params }) => {
     const ctx = requireAdmin(deps.db, req);
@@ -1540,8 +1492,7 @@ export function createDownloadFileHandler(deps: AdminApiDeps): RouteHandler {
     // Forward content-type so the browser renders <img>/<video>
     // correctly. Telegram includes one for known media kinds; default
     // to octet-stream for unknown documents.
-    const contentType =
-      upstream.headers.get("content-type") ?? "application/octet-stream";
+    const contentType = upstream.headers.get("content-type") ?? "application/octet-stream";
     const headers: Record<string, string> = {
       "content-type": contentType,
       "cache-control": "private, max-age=3600",
@@ -1707,9 +1658,7 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
       // Optional body — empty is fine, default rejection text is used.
     }
     const reason =
-      typeof body.reason === "string" && body.reason.trim()
-        ? body.reason.trim()
-        : undefined;
+      typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : undefined;
 
     const leadsRepo = new LeadsRepo(deps.db);
     const usersRepo = new UsersRepo(deps.db);
@@ -1724,9 +1673,7 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
     const user = usersRepo.byId(lead.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
 
-    const rejectedReasonOpt: { rejectedReason?: string } = reason
-      ? { rejectedReason: reason }
-      : {};
+    const rejectedReasonOpt: { rejectedReason?: string } = reason ? { rejectedReason: reason } : {};
     const updated = leadsRepo.setState(id, "rejected", {
       adminId: ctx.adminId,
       ...rejectedReasonOpt,
@@ -1924,9 +1871,7 @@ export function createDeleteLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
     }
 
     const owner = deps.db
-      .query<{ lead_id: number }, [number]>(
-        "SELECT lead_id FROM lead_notes WHERE id = ?",
-      )
+      .query<{ lead_id: number }, [number]>("SELECT lead_id FROM lead_notes WHERE id = ?")
       .get(noteId);
     if (!owner) return json({ error: "note not found" }, { status: 404 });
     if (owner.lead_id !== leadId) {
@@ -1995,18 +1940,15 @@ export function createUpdateVisaDocsHandler(deps: AdminApiDeps): RouteHandler {
     } catch {
       return json({ error: "invalid JSON" }, { status: 400 });
     }
-    if (
-      typeof body.docs !== "object" ||
-      body.docs === null ||
-      Array.isArray(body.docs)
-    ) {
+    if (typeof body.docs !== "object" || body.docs === null || Array.isArray(body.docs)) {
       return json({ error: "docs must be an object" }, { status: 400 });
     }
 
     const incoming = body.docs as Record<string, unknown>;
-    const existing = (lead.visa_docs_json
-      ? safeJson(lead.visa_docs_json)
-      : {}) as Record<string, string>;
+    const existing = (lead.visa_docs_json ? safeJson(lead.visa_docs_json) : {}) as Record<
+      string,
+      string
+    >;
     const merged: Record<string, string> = { ...existing };
     for (const [k, v] of Object.entries(incoming)) {
       if (!VISA_DOCS_FIELD_KEY_SET.has(k)) continue;
@@ -2051,9 +1993,7 @@ export function createDeleteLeadHandler(deps: AdminApiDeps): RouteHandler {
  * directly with the parsed callback_query.
  */
 export function createLeadCallbackHandler(deps: AdminApiDeps) {
-  return async (
-    query: import("../telegram/types.ts").TgCallbackQuery,
-  ): Promise<void> => {
+  return async (query: import("../telegram/types.ts").TgCallbackQuery): Promise<void> => {
     if (!deps.telegram) return;
     const data = query.data ?? "";
     const match = /^lead:(approve|reject):(\d+)$/.exec(data);
@@ -2186,7 +2126,7 @@ export function createCreateVacancyHandler(deps: AdminApiDeps): RouteHandler {
       title,
       body: text,
       url,
-      isActive: body.is_active === false ? false : true,
+      isActive: body.is_active !== false,
     });
     return json({ vacancy: created });
   };
@@ -2268,9 +2208,7 @@ export function createDeleteVacancyHandler(deps: AdminApiDeps): RouteHandler {
 
 const KB_TOPIC_MAX = 64;
 
-export function createListKbDocumentsHandler(
-  deps: AdminApiDeps,
-): RouteHandler {
+export function createListKbDocumentsHandler(deps: AdminApiDeps): RouteHandler {
   const kb = new KbRepo(deps.db);
   return ({ req }) => {
     const ctx = requireAdmin(deps.db, req);
@@ -2313,9 +2251,7 @@ export function createGetKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
   };
 }
 
-export function createUpdateKbDocumentHandler(
-  deps: AdminApiDeps,
-): RouteHandler {
+export function createUpdateKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
   const kb = new KbRepo(deps.db);
   return async ({ req, params }) => {
     const ctx = requireAdmin(deps.db, req);
@@ -2351,9 +2287,7 @@ export function createUpdateKbDocumentHandler(
   };
 }
 
-export function createDeleteKbDocumentHandler(
-  deps: AdminApiDeps,
-): RouteHandler {
+export function createDeleteKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
   const kb = new KbRepo(deps.db);
   return ({ req, params }) => {
     const ctx = requireAdmin(deps.db, req);
@@ -2365,4 +2299,3 @@ export function createDeleteKbDocumentHandler(
     return json({ ok: true, deleted: id });
   };
 }
-

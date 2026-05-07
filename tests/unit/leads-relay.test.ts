@@ -6,7 +6,7 @@ import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
 import { LeadsService } from "@/leads/service.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 
 interface SentCall {
   method: string;
@@ -19,11 +19,14 @@ function fakeTelegram(): {
 } {
   const calls: SentCall[] = [];
   const fetchImpl: FetchLike = (async (input: unknown) => {
-    const url = typeof input === "string" ? input : (input as { url?: string }).url ?? "";
+    const url = typeof input === "string" ? input : ((input as { url?: string }).url ?? "");
     const method = url.match(/\/bot[^/]+\/(\w+)/)?.[1] ?? "";
     calls.push({ method, body: {} });
     return new Response(
-      JSON.stringify({ ok: true, result: { message_id: 9999, chat: { id: 0, type: "private" }, date: 0 } }),
+      JSON.stringify({
+        ok: true,
+        result: { message_id: 9999, chat: { id: 0, type: "private" }, date: 0 },
+      }),
       { status: 200, headers: { "content-type": "application/json" } },
     );
   }) as FetchLike;

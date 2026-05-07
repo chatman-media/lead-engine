@@ -1,15 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-
-import { containsEscalationTrigger } from "@/telegram/escalation.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
-import { createWebhookHandler } from "@/telegram/webhook.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
+import { containsEscalationTrigger } from "@/telegram/escalation.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
+import { createWebhookHandler } from "@/telegram/webhook.ts";
 
 describe("containsEscalationTrigger", () => {
   test("matches Russian and English variants regardless of case/punctuation", () => {
@@ -42,7 +41,11 @@ describe("containsEscalationTrigger", () => {
 const SECRET = "s";
 
 function fakeChat(reply: string): ChatClient {
-  return { async complete() { return reply; } };
+  return {
+    async complete() {
+      return reply;
+    },
+  };
 }
 
 function fakeEmbedder(): EmbeddingClient {
@@ -54,7 +57,10 @@ function fakeEmbedder(): EmbeddingClient {
   };
 }
 
-interface OutgoingCall { method: string; body: Record<string, unknown> }
+interface OutgoingCall {
+  method: string;
+  body: Record<string, unknown>;
+}
 
 let db: ReturnType<typeof openDb>;
 let sent: OutgoingCall[];
@@ -75,7 +81,12 @@ beforeEach(() => {
         ok: true,
         result:
           apiMethod === "sendMessage"
-            ? { message_id: 1, chat: { id: body.chat_id, type: "private" }, date: 0, text: body.text }
+            ? {
+                message_id: 1,
+                chat: { id: body.chat_id, type: "private" },
+                date: 0,
+                text: body.text,
+              }
             : true,
       }),
       { status: 200, headers: { "content-type": "application/json" } },
@@ -154,9 +165,7 @@ describe("webhook escalation trigger", () => {
       }),
     );
     expect(chatCalls).toBe(0); // KB is empty -> NO_CONTEXT without calling chat
-    const conv = new ConversationsRepo(db).byUserId(
-      new UsersRepo(db).byTgId(43)!.id,
-    )!;
+    const conv = new ConversationsRepo(db).byUserId(new UsersRepo(db).byTgId(43)!.id)!;
     expect(conv.mode).toBe("ai");
   });
 });

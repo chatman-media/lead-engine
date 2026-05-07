@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  classifyTopic,
-  classifyTopicAll,
-  KNOWN_TOPICS,
-} from "@/rag/topic-classifier.ts";
+import { classifyTopic, classifyTopicAll, KNOWN_TOPICS } from "@/rag/topic-classifier.ts";
 
 describe("classifyTopic", () => {
   test("returns null on empty/whitespace", () => {

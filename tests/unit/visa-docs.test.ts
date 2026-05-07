@@ -1,12 +1,11 @@
 import { describe, expect, test } from "bun:test";
-
-import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import {
   extractVisaDocs,
   parseVisaDocsJson,
-  visaDocsCompleteness,
   type VisaFields,
+  visaDocsCompleteness,
 } from "@/leads/visa-docs.ts";
+import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 
 function fakeChat(reply: string): ChatClient & { calls: number } {
   const wrapper = {
@@ -30,7 +29,7 @@ describe("parseVisaDocsJson", () => {
   });
 
   test("strips think tags + code fences", () => {
-    const raw = "<think>...</think>\n```json\n{\"phone\":\"+79991234567\"}\n```";
+    const raw = '<think>...</think>\n```json\n{"phone":"+79991234567"}\n```';
     expect(parseVisaDocsJson(raw)).toEqual({ phone: "+79991234567" });
   });
 
@@ -41,9 +40,7 @@ describe("parseVisaDocsJson", () => {
   });
 
   test("ignores unknown keys", () => {
-    const out = parseVisaDocsJson(
-      `{"family_name":"Ivanova","unknown_field":"hack"}`,
-    );
+    const out = parseVisaDocsJson(`{"family_name":"Ivanova","unknown_field":"hack"}`);
     expect(out.family_name).toBe("Ivanova");
     expect((out as Record<string, unknown>).unknown_field).toBeUndefined();
   });
@@ -61,13 +58,9 @@ describe("parseVisaDocsJson", () => {
 
 describe("extractVisaDocs", () => {
   test("merges existing + extracted, new wins", async () => {
-    const chat = fakeChat(
-      `{"phone":"+79991234567","email":"a@b.c"}`,
-    );
+    const chat = fakeChat(`{"phone":"+79991234567","email":"a@b.c"}`);
     const merged = await extractVisaDocs({
-      messages: [
-        { role: "user", content: "telephone +79991234567 email a@b.c" },
-      ],
+      messages: [{ role: "user", content: "telephone +79991234567 email a@b.c" }],
       chat,
       existingDocs: { family_name: "Ivanova", phone: "old" },
     });

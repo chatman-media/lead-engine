@@ -7,7 +7,7 @@ import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 
 interface SentMessage {
   chatId: number;
@@ -29,7 +29,12 @@ function setup() {
       return new Response(
         JSON.stringify({
           ok: true,
-          result: { message_id: 99, chat: { id: body.chat_id, type: "private" }, date: 0, text: body.text },
+          result: {
+            message_id: 99,
+            chat: { id: body.chat_id, type: "private" },
+            date: 0,
+            text: body.text,
+          },
         }),
         { status: 200 },
       );
@@ -45,10 +50,7 @@ function setup() {
   return { db, server, sent };
 }
 
-function teardown(s: {
-  db: ReturnType<typeof openDb>;
-  server: Server;
-}) {
+function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
   s.server.stop(true);
   s.db.close();
 }
@@ -65,14 +67,11 @@ beforeEach(async () => {
   // Create admin + get session cookie
   const admins = new AdminsRepo(db);
   await admins.create({ email: "op@x.test", password: "longenough" });
-  const login = await fetch(
-    `http://127.0.0.1:${ctx.server.port}/admin/api/login`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
-    },
-  );
+  const login = await fetch(`http://127.0.0.1:${ctx.server.port}/admin/api/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+  });
   cookie = login.headers.get("set-cookie")!.split(";")[0]!;
 
   // Create user + conversation in human mode
@@ -186,6 +185,7 @@ describe("POST /admin/api/conversations/:id/reply", () => {
     expect(body.ok).toBe(true);
     expect(body.tgUserId).toBe(tgUserId);
     expect(body.conversationId).toBe(convId);
-    void events; void wsUrl;
+    void events;
+    void wsUrl;
   });
 });

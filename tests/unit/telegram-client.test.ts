@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  TelegramApiError,
-  TelegramClient,
-  type FetchLike,
-} from "@/telegram/client.ts";
+import { type FetchLike, TelegramApiError, TelegramClient } from "@/telegram/client.ts";
 
 interface RecordedCall {
   url: string;
@@ -13,9 +9,10 @@ interface RecordedCall {
   headers: Record<string, string>;
 }
 
-function makeFetch(
-  responder: (call: RecordedCall) => unknown,
-): { fetchImpl: FetchLike; calls: RecordedCall[] } {
+function makeFetch(responder: (call: RecordedCall) => unknown): {
+  fetchImpl: FetchLike;
+  calls: RecordedCall[];
+} {
   const calls: RecordedCall[] = [];
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
@@ -76,9 +73,7 @@ describe("TelegramClient", () => {
       secretToken: "sec",
       allowedUpdates: ["message"],
     });
-    expect(calls[0]!.url).toBe(
-      "https://api.telegram.org/botT/setWebhook",
-    );
+    expect(calls[0]!.url).toBe("https://api.telegram.org/botT/setWebhook");
     expect(calls[0]!.body).toEqual({
       url: "https://x.test/telegram/sec",
       secret_token: "sec",
@@ -93,14 +88,12 @@ describe("TelegramClient", () => {
       description: "Unauthorized",
     }));
     const client = new TelegramClient({ token: "BAD", fetch: fetchImpl });
-    await expect(
-      client.sendMessage({ chatId: 1, text: "x" }),
-    ).rejects.toBeInstanceOf(TelegramApiError);
+    await expect(client.sendMessage({ chatId: 1, text: "x" })).rejects.toBeInstanceOf(
+      TelegramApiError,
+    );
   });
 
   test("constructor rejects empty token", () => {
-    expect(
-      () => new TelegramClient({ token: "" }),
-    ).toThrow(/token is required/);
+    expect(() => new TelegramClient({ token: "" })).toThrow(/token is required/);
   });
 });

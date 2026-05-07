@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { nextStage } from "../../../src/sales/stage-router.ts";
 import type { FunnelStage } from "../../../src/sales/types.ts";
 
-const start = (lastUserMessage: string): {
+const start = (
+  lastUserMessage: string,
+): {
   turnNumber: number;
   currentStage: FunnelStage | null;
   lastUserMessage: string;
@@ -15,7 +17,11 @@ const start = (lastUserMessage: string): {
 describe("nextStage — Cyrillic-aware regex (regression for the \\b bug)", () => {
   test("'сколько в Дубае платят?' → pitch (the original bug)", () => {
     expect(
-      nextStage({ turnNumber: 2, currentStage: "qualify", lastUserMessage: "а сколько в Дубае платят?" }),
+      nextStage({
+        turnNumber: 2,
+        currentStage: "qualify",
+        lastUserMessage: "а сколько в Дубае платят?",
+      }),
     ).toBe("pitch");
   });
 
@@ -27,7 +33,11 @@ describe("nextStage — Cyrillic-aware regex (regression for the \\b bug)", () =
 
   test("'нужна виза для Турции?' → pitch", () => {
     expect(
-      nextStage({ turnNumber: 2, currentStage: "qualify", lastUserMessage: "нужна виза для Турции?" }),
+      nextStage({
+        turnNumber: 2,
+        currentStage: "qualify",
+        lastUserMessage: "нужна виза для Турции?",
+      }),
     ).toBe("pitch");
   });
 

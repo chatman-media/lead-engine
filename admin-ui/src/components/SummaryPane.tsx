@@ -50,9 +50,7 @@ export function SummaryPane({ summary }: { summary: ConversationSummary | null }
           gap: 8,
         }}
       >
-        <span style={{ width: 10, display: "inline-block" }}>
-          {collapsed ? "▸" : "▾"}
-        </span>
+        <span style={{ width: 10, display: "inline-block" }}>{collapsed ? "▸" : "▾"}</span>
         <span>SUMMARY</span>
         <span style={{ color: "var(--text)", fontWeight: 600 }}>
           to msg #{summary.summarizedThroughMsgId}

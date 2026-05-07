@@ -63,9 +63,7 @@ export class KbRepo {
 
   deleteChunksByDocument(documentId: number) {
     const ids = this.db
-      .query<{ id: number }, [number]>(
-        "SELECT id FROM kb_chunks WHERE document_id = ?",
-      )
+      .query<{ id: number }, [number]>("SELECT id FROM kb_chunks WHERE document_id = ?")
       .all(documentId)
       .map((r) => r.id);
     if (ids.length === 0) return;
@@ -91,10 +89,10 @@ export class KbRepo {
       )
       .get(input.documentId, input.chunkIndex, input.text, input.tokenCount);
     if (!chunk) throw new Error("Failed to insert kb_chunk");
-    this.db.run(
-      `INSERT INTO kb_vec (chunk_id, embedding) VALUES (?, ?)`,
-      [chunk.id, encodeVector(input.embedding)],
-    );
+    this.db.run(`INSERT INTO kb_vec (chunk_id, embedding) VALUES (?, ?)`, [
+      chunk.id,
+      encodeVector(input.embedding),
+    ]);
     return chunk;
   }
 
@@ -168,8 +166,7 @@ export class KbRepo {
     // straight into the SQL — no over-fetch needed (unlike the vector
     // side which has the AND-with-MATCH limitation).
     const topicWhere = topic == null ? "" : "AND (d.topic = ? OR d.topic IS NULL)";
-    const params: Array<string | number> =
-      topic == null ? [ftsQuery, k] : [ftsQuery, topic, k];
+    const params: Array<string | number> = topic == null ? [ftsQuery, k] : [ftsQuery, topic, k];
     try {
       return this.db
         .query<KbSearchHit, typeof params>(
@@ -262,7 +259,7 @@ export class KbRepo {
       where.push("d.topic = ?");
       params.push(opts.topic);
     }
-    if (opts?.q && opts.q.trim()) {
+    if (opts?.q?.trim()) {
       where.push("(LOWER(d.title) LIKE ? OR LOWER(d.source) LIKE ?)");
       const pat = `%${opts.q.trim().toLowerCase()}%`;
       params.push(pat, pat);
@@ -282,9 +279,8 @@ export class KbRepo {
 
   getDocument(id: number): KbDocumentRow | null {
     return (
-      this.db
-        .query<KbDocumentRow, [number]>(`SELECT * FROM kb_documents WHERE id = ?`)
-        .get(id) ?? null
+      this.db.query<KbDocumentRow, [number]>(`SELECT * FROM kb_documents WHERE id = ?`).get(id) ??
+      null
     );
   }
 
@@ -332,16 +328,12 @@ export class KbRepo {
   }
 
   countDocuments(): number {
-    const r = this.db
-      .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM kb_documents")
-      .get();
+    const r = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM kb_documents").get();
     return r?.n ?? 0;
   }
 
   countChunks(): number {
-    const r = this.db
-      .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM kb_chunks")
-      .get();
+    const r = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM kb_chunks").get();
     return r?.n ?? 0;
   }
 }
@@ -366,9 +358,7 @@ export class KbRepo {
 export function sanitizeFtsQuery(raw: string): string {
   if (!raw) return "";
   // FTS5 query operators we don't want users to control via raw text.
-  const stripped = raw
-    .replace(/["'()*:.\\^]/g, " ")
-    .replace(/\s+(AND|OR|NOT|NEAR)\s+/gi, " ");
+  const stripped = raw.replace(/["'()*:.\\^]/g, " ").replace(/\s+(AND|OR|NOT|NEAR)\s+/gi, " ");
   const tokens = stripped
     .split(/\s+/)
     .map((t) => t.trim())

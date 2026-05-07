@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-
-import { KbRepo } from "@/db/repos/kb.ts";
 import { ensureKbVec, getKbVecDim } from "@/db/ensure-kb-vec.ts";
+import { KbRepo } from "@/db/repos/kb.ts";
 import { openDb } from "@/db/sqlite.ts";
 
 let db: ReturnType<typeof openDb>;
@@ -38,9 +37,7 @@ describe("ensureKbVec", () => {
     expect(action).toBe("recreated");
     expect(getKbVecDim(db)).toBe(768);
 
-    const count = db
-      .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM kb_vec")
-      .get();
+    const count = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM kb_vec").get();
     expect(count?.n).toBe(0);
   });
 

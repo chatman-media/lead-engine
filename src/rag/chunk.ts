@@ -79,11 +79,7 @@ export function chunkText(text: string, opts: Partial<ChunkOptions> = {}): Chunk
   }));
 }
 
-function splitLong(
-  text: string,
-  maxChars: number,
-  overlapChars: number,
-): string[] {
+function splitLong(text: string, maxChars: number, overlapChars: number): string[] {
   const out: string[] = [];
   const step = Math.max(1, maxChars - overlapChars);
   for (let i = 0; i < text.length; i += step) {

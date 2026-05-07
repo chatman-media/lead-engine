@@ -64,9 +64,7 @@ export class ExperimentsRepo {
         .all(opts.status);
     }
     return this.db
-      .query<ExperimentRow, []>(
-        "SELECT * FROM experiments ORDER BY created_at DESC",
-      )
+      .query<ExperimentRow, []>("SELECT * FROM experiments ORDER BY created_at DESC")
       .all();
   }
 
@@ -78,10 +76,7 @@ export class ExperimentsRepo {
     startedAt?: number | null;
   }): ExperimentRow {
     const row = this.db
-      .query<
-        ExperimentRow,
-        [string, ExperimentStatus, string, SuccessMetric, number | null]
-      >(
+      .query<ExperimentRow, [string, ExperimentStatus, string, SuccessMetric, number | null]>(
         `INSERT INTO experiments (slug, status, allocation_json, success_metric, started_at)
          VALUES (?, ?, ?, ?, ?)
          RETURNING *`,
@@ -107,10 +102,9 @@ export class ExperimentsRepo {
       return;
     }
     if (status === "done") {
-      this.db.run(
-        `UPDATE experiments SET status = 'done', ended_at = unixepoch() WHERE id = ?`,
-        [id],
-      );
+      this.db.run(`UPDATE experiments SET status = 'done', ended_at = unixepoch() WHERE id = ?`, [
+        id,
+      ]);
       return;
     }
     this.db.run("UPDATE experiments SET status = ? WHERE id = ?", [status, id]);

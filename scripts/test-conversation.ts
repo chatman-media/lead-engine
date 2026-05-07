@@ -6,17 +6,17 @@
  * Запуск: bun run scripts/test-conversation.ts
  */
 import { activeEmbeddingDim, config } from "../src/config.ts";
-import { getDb } from "../src/db/sqlite.ts";
 import { KbRepo } from "../src/db/repos/kb.ts";
-import { OllamaChatClient } from "../src/rag/providers/ollama-chat.ts";
-import { OllamaEmbeddingClient } from "../src/rag/providers/ollama-embed.ts";
+import { renderVacanciesBlock, VacanciesRepo } from "../src/db/repos/vacancies.ts";
+import { getDb } from "../src/db/sqlite.ts";
 import {
   answerWithRag,
   isPersonalFactQuestion,
   isPersonaSmalltalkQuestion,
   NO_CONTEXT_MARKER,
 } from "../src/rag/answer.ts";
-import { renderVacanciesBlock, VacanciesRepo } from "../src/db/repos/vacancies.ts";
+import { OllamaChatClient } from "../src/rag/providers/ollama-chat.ts";
+import { OllamaEmbeddingClient } from "../src/rag/providers/ollama-embed.ts";
 import { classifyTopic } from "../src/rag/topic-classifier.ts";
 
 /**
@@ -48,14 +48,14 @@ const QUESTIONS = [
   "Расскажи про KTV",
 
   // topic-routed (классификатор должен попасть в нужный slug)
-  "Какая нужна виза?",                 // → visa
-  "Где жить будем?",                   // → housing
-  "Какой нужен рост?",                 // → requirements
-  "Как подать анкету?",                // → application
-  "Какой график работы?",              // → schedule
+  "Какая нужна виза?", // → visa
+  "Где жить будем?", // → housing
+  "Какой нужен рост?", // → requirements
+  "Как подать анкету?", // → application
+  "Какой график работы?", // → schedule
 
   // ambiguous (классификатор должен вернуть null → global)
-  "Виза в Корею как?",                 // visa + locations
+  "Виза в Корею как?", // visa + locations
 
   // no-context / шум
   "skldjfslkdjf",
@@ -106,20 +106,23 @@ console.log(`chat model:    ${config.ollama.chatModel}`);
 console.log(`embed model:   ${config.ollama.embeddingModel} (dim=${activeEmbeddingDim()})`);
 console.log(`max distance:  ${config.rag.maxDistance ?? "(off)"}`);
 console.log(`top-K:         ${config.rag.topK}`);
-console.log(`persona:       ${config.persona.name} / ${config.persona.role} / ${config.persona.company}`);
+console.log(
+  `persona:       ${config.persona.name} / ${config.persona.role} / ${config.persona.company}`,
+);
 console.log(`stage classifier: ${config.sales.stageClassifier}`);
 console.log(`forced style:  ${config.sales.forcedStyleSlug || "(none — legacy persona path)"}`);
 const activeVacancies = vacancies.listActive().length;
-const ragLayers = [
-  config.rag.hybridSearch && "hybrid",
-  config.rag.queryRewrite && "rewrite",
-  config.rag.reflect && "reflect",
-  config.rag.topicRouting && "topic",
-  config.rag.userMemory && "memory",
-  config.rag.conversationSummary && "summary",
-]
-  .filter(Boolean)
-  .join(", ") || "(none)";
+const ragLayers =
+  [
+    config.rag.hybridSearch && "hybrid",
+    config.rag.queryRewrite && "rewrite",
+    config.rag.reflect && "reflect",
+    config.rag.topicRouting && "topic",
+    config.rag.userMemory && "memory",
+    config.rag.conversationSummary && "summary",
+  ]
+    .filter(Boolean)
+    .join(", ") || "(none)";
 console.log(`vacancies:     ${activeVacancies} active`);
 console.log(`rag layers on: ${ragLayers}`);
 console.log(`persona facts: ${Object.keys(config.persona.facts ?? {}).join(", ") || "(none)"}`);
@@ -130,11 +133,7 @@ interface TurnReport {
   reply: string;
   hits: number;
   durationMs: number;
-  source:
-    | "smalltalk-shortcut"
-    | "persona-fact-shortcut"
-    | "rag-with-kb"
-    | "no-context-escalation";
+  source: "smalltalk-shortcut" | "persona-fact-shortcut" | "rag-with-kb" | "no-context-escalation";
   bannedHits: string[];
   topHits: Array<{ title: string; distance: number; preview: string }>;
   classifiedTopic: string | null;
@@ -179,10 +178,7 @@ for (let i = 0; i < QUESTIONS.length; i++) {
   } else if (isPersonaSmalltalkQuestion(q)) {
     userVisible = res.text;
     source = "smalltalk-shortcut";
-  } else if (
-    isPersonalFactQuestion(q) &&
-    res.telemetry?.path === "persona_fact"
-  ) {
+  } else if (isPersonalFactQuestion(q) && res.telemetry?.path === "persona_fact") {
     userVisible = res.text;
     source = "persona-fact-shortcut";
   } else {
@@ -190,9 +186,7 @@ for (let i = 0; i < QUESTIONS.length; i++) {
     source = "rag-with-kb";
   }
 
-  const bannedHits = banned
-    .filter((re) => re.test(userVisible))
-    .map((re) => re.source);
+  const bannedHits = banned.filter((re) => re.test(userVisible)).map((re) => re.source);
 
   console.log(`\nALINA: ${userVisible}`);
   console.log("");

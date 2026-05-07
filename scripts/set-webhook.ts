@@ -35,10 +35,7 @@ async function main() {
     return;
   }
 
-  const baseUrl =
-    typeof args.url === "string" && args.url
-      ? args.url
-      : config.publicBaseUrl;
+  const baseUrl = typeof args.url === "string" && args.url ? args.url : config.publicBaseUrl;
   if (!baseUrl || baseUrl.startsWith("http://localhost")) {
     console.error(
       "Webhook URL must be a public HTTPS URL. Pass --url=https://your.host or set PUBLIC_BASE_URL.",

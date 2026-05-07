@@ -62,10 +62,7 @@ export class OpenAIEmbeddingClient implements EmbeddingClient {
       throw new EmbeddingApiError(res.status, "non-JSON response");
     }
     if (!res.ok || !body.data) {
-      throw new EmbeddingApiError(
-        res.status,
-        body.error?.message ?? `unexpected response shape`,
-      );
+      throw new EmbeddingApiError(res.status, body.error?.message ?? `unexpected response shape`);
     }
     const sorted = [...body.data].sort((a, b) => a.index - b.index);
     if (sorted.length !== inputs.length) {

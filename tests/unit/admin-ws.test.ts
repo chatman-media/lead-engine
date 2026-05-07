@@ -6,7 +6,7 @@ import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
 import { createServer } from "@/server.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 
 function makeServer() {
   const db = openDb({ path: ":memory:" });
@@ -29,14 +29,11 @@ beforeEach(async () => {
   ctx = makeServer();
   const admins = new AdminsRepo(ctx.db);
   await admins.create({ email: "ws@x.test", password: "longenough" });
-  const login = await fetch(
-    `http://127.0.0.1:${ctx.server.port}/admin/api/login`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "ws@x.test", password: "longenough" }),
-    },
-  );
+  const login = await fetch(`http://127.0.0.1:${ctx.server.port}/admin/api/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "ws@x.test", password: "longenough" }),
+  });
   cookie = login.headers.get("set-cookie")!.split(";")[0]!;
 });
 
@@ -51,10 +48,9 @@ function connect(headers: Record<string, string> = {}): Promise<{
   closed: Promise<{ code: number }>;
 }> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(
-      `ws://127.0.0.1:${ctx.server.port}/admin/api/ws`,
-      { headers } as unknown as string,
-    );
+    const ws = new WebSocket(`ws://127.0.0.1:${ctx.server.port}/admin/api/ws`, {
+      headers,
+    } as unknown as string);
     const events: unknown[] = [];
     const closed = new Promise<{ code: number }>((r) =>
       ws.addEventListener("close", (e) => r({ code: e.code })),
@@ -72,10 +68,7 @@ function connect(headers: Record<string, string> = {}): Promise<{
   });
 }
 
-async function waitFor<T>(
-  cond: () => T | undefined,
-  timeoutMs = 1500,
-): Promise<T> {
+async function waitFor<T>(cond: () => T | undefined, timeoutMs = 1500): Promise<T> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const v = cond();
@@ -123,31 +116,26 @@ describe("/admin/api/ws", () => {
 
     const { ws, events } = await connect({ cookie });
 
-    const res = await fetch(
-      `http://127.0.0.1:${ctx.server.port}/telegram/s`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          update_id: 1,
-          message: {
-            message_id: 1,
-            from: { id: 333, is_bot: false, first_name: "X" },
-            chat: { id: 333, type: "private" },
-            date: 0,
-            text: "hello",
-          },
-        }),
-      },
-    );
+    const res = await fetch(`http://127.0.0.1:${ctx.server.port}/telegram/s`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        update_id: 1,
+        message: {
+          message_id: 1,
+          from: { id: 333, is_bot: false, first_name: "X" },
+          chat: { id: 333, type: "private" },
+          date: 0,
+          text: "hello",
+        },
+      }),
+    });
     expect(res.status).toBe(200);
 
     const evt = (await waitFor(() =>
       events.find(
         (e): e is { type: string; tgUserId: number } =>
-          typeof e === "object" &&
-          e !== null &&
-          (e as { type?: string }).type === "message:new",
+          typeof e === "object" && e !== null && (e as { type?: string }).type === "message:new",
       ),
     )) as { type: string; tgUserId: number };
     expect(evt.tgUserId).toBe(333);

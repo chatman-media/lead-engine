@@ -21,10 +21,11 @@ export class SessionsRepo {
     const id = generateId();
     const ttl = opts.ttlSeconds ?? DEFAULT_TTL_SECONDS;
     const expiresAt = Math.floor(Date.now() / 1000) + ttl;
-    this.db.run(
-      `INSERT INTO sessions (id, admin_id, expires_at) VALUES (?, ?, ?)`,
-      [id, adminId, expiresAt],
-    );
+    this.db.run(`INSERT INTO sessions (id, admin_id, expires_at) VALUES (?, ?, ?)`, [
+      id,
+      adminId,
+      expiresAt,
+    ]);
     return id;
   }
 
@@ -48,13 +49,11 @@ export class SessionsRepo {
 
   /** Bulk delete expired sessions; useful for startup or cron. */
   purgeExpired(): number {
-    const before = this.db
-      .query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM sessions`)
-      .get()?.n ?? 0;
+    const before =
+      this.db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM sessions`).get()?.n ?? 0;
     this.db.run(`DELETE FROM sessions WHERE expires_at <= unixepoch()`);
-    const after = this.db
-      .query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM sessions`)
-      .get()?.n ?? 0;
+    const after =
+      this.db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM sessions`).get()?.n ?? 0;
     return before - after;
   }
 }

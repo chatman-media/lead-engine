@@ -1,4 +1,4 @@
-import { StyleSchema, type Style } from "../types.ts";
+import { type Style, StyleSchema } from "../types.ts";
 
 export const coldDirectPas: Style = StyleSchema.parse({
   slug: "cold-direct-pas-v1",
@@ -53,7 +53,8 @@ export const coldDirectPas: Style = StyleSchema.parse({
     {
       stage: "objection",
       user: "а почему именно ваше агентство?",
-      assistant: "10 лет на рынке, контракты с Storm и Elite. Если интересны конкретные условия — спрашивай.",
+      assistant:
+        "10 лет на рынке, контракты с Storm и Elite. Если интересны конкретные условия — спрашивай.",
     },
   ],
   guardrails: {

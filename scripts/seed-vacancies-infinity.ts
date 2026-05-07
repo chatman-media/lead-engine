@@ -70,5 +70,7 @@ for (const v of VACANCIES) {
   console.log(`  + id=${row.id}: ${row.title}`);
   inserted++;
 }
-console.log(`\nDone. inserted=${inserted}, skipped=${skipped}, total active=${repo.listActive().length}`);
+console.log(
+  `\nDone. inserted=${inserted}, skipped=${skipped}, total active=${repo.listActive().length}`,
+);
 db.close();

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { composeSystemPrompt } from "../../../src/sales/prompt.ts";
-import { flirtyBelfort } from "../../../src/sales/styles/flirty-belfort.ts";
 import { empatheticNepq } from "../../../src/sales/styles/empathetic-nepq.ts";
-import { StyleSchema, type Style } from "../../../src/sales/types.ts";
+import { flirtyBelfort } from "../../../src/sales/styles/flirty-belfort.ts";
+import { type Style, StyleSchema } from "../../../src/sales/types.ts";
 
 describe("composeSystemPrompt — sections always present", () => {
   test("includes persona name", () => {

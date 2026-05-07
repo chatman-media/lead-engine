@@ -19,7 +19,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
 
 interface TgTextEntity {
   type?: string;
@@ -55,7 +55,7 @@ interface TgExport {
 const DEFAULT_AGENT_ID = "user8201160309";
 const MIN_BROADCAST_LEN = 250; // chars; agent messages shorter than this are not "posts"
 const SHORT_AGENT_REPLY_MIN_LEN = 8; // skip "ага", "ок", "👍"
-const MAX_GAP_SECONDS = 60 * 60 * 6; // 6h between user msg and agent reply still counts as same Q&A
+const _MAX_GAP_SECONDS = 60 * 60 * 6; // 6h between user msg and agent reply still counts as same Q&A
 
 const WORK_RE =
   /(агентств|работ|ваканс|зарплат|резюм|собеседован|оффер|деньг|оплат|клиент|сотрудни|команд|проект|менедж|фриланс|инфлюенс|блогер|ставк|подряд|контракт|прайс|дедлайн|infinity|инфинити|ктв|ktv|караоке|выезд|жил|билет|анкет|хостес|корея|корей|китай|саудов|дубай|ливан|шанхай|шаосинь|санья|чжэцзян|^иу$|гусан|чай|гост|клуб)/i;
@@ -64,9 +64,7 @@ function msgText(m: TgMessage): string {
   const t = m.text;
   if (typeof t === "string") return t;
   if (Array.isArray(t)) {
-    return t
-      .map((x) => (typeof x === "string" ? x : (x?.text ?? "")))
-      .join("");
+    return t.map((x) => (typeof x === "string" ? x : (x?.text ?? ""))).join("");
   }
   return "";
 }
@@ -92,9 +90,18 @@ function ensureDir(p: string) {
 }
 
 function titleFromBody(body: string, fallback: string): string {
-  const firstLine = body.split("\n").find((l) => l.trim().length > 0)?.trim() ?? "";
+  const firstLine =
+    body
+      .split("\n")
+      .find((l) => l.trim().length > 0)
+      ?.trim() ?? "";
+  // Strip emoji + ZWJ (U+200D) + variation selector-16 (U+FE0F) — they
+  // can't sit inside the same character class as Extended_Pictographic
+  // because each ZWJ-joined sequence forms a single grapheme. Doing them
+  // as separate alternations sidesteps biome's noMisleadingCharacterClass.
   const noEmoji = firstLine
-    .replace(/[\p{Extended_Pictographic}‍️]/gu, "")
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/‍|️/g, "")
     .replace(/\s+/g, " ")
     .trim();
   return noEmoji.slice(0, 80) || fallback;
@@ -110,7 +117,12 @@ function parseArgs(): { input: string; outDir: string; agentIds: Set<string> } {
       // dialogs from a personal account in one pass:
       //   --agent user1234,channel5678
       const raw = args[++i] ?? "";
-      raw.split(",").map((s) => s.trim()).filter(Boolean).forEach((s) => agentIds.add(s));
+      for (const s of raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)) {
+        agentIds.add(s);
+      }
     } else {
       positional.push(args[i]!);
     }
@@ -226,9 +238,7 @@ function main() {
             // Long agent voice → also dedupe as a "post" candidate, so a
             // monologue that explains conditions ends up in posts/ as a
             // standalone document.
-            const h = createHash("sha256")
-              .update(normalizeForHash(transcript))
-              .digest("hex");
+            const h = createHash("sha256").update(normalizeForHash(transcript)).digest("hex");
             let rec = broadcasts.get(h);
             if (!rec) {
               rec = { hash: h, text: transcript, occurrences: [] };
@@ -250,9 +260,7 @@ function main() {
 
         // Broadcast post candidate
         if (text.length >= MIN_BROADCAST_LEN) {
-          const h = createHash("sha256")
-            .update(normalizeForHash(text))
-            .digest("hex");
+          const h = createHash("sha256").update(normalizeForHash(text)).digest("hex");
           let rec = broadcasts.get(h);
           if (!rec) {
             rec = { hash: h, text, occurrences: [] };
@@ -290,9 +298,7 @@ function main() {
     const slug = safeName(title, `post-${postIdx}`);
     const fname = `${String(postIdx).padStart(3, "0")}-${slug}.md`;
     const fpath = join(postsDir, fname);
-    const occurrences = rec.occurrences
-      .slice()
-      .sort((a, b) => a.date.localeCompare(b.date));
+    const occurrences = rec.occurrences.slice().sort((a, b) => a.date.localeCompare(b.date));
     // Keep the metadata at the END of the file so it stays visible to
     // humans but does not pollute the top of every chunk's embedding.
     // (The ingest pipeline also strips HTML comments as a safety net.)
@@ -318,7 +324,7 @@ function main() {
     for (const t of d.turns) {
       const last = blocks[blocks.length - 1];
       if (last && last.who === t.who) {
-        last.text += "\n" + t.text;
+        last.text += `\n${t.text}`;
       } else {
         blocks.push({ who: t.who, text: t.text, date: t.date });
       }
@@ -335,9 +341,7 @@ function main() {
     const lines: string[] = [];
     lines.push(`# Диалог: ${d.chat}`);
     lines.push("");
-    lines.push(
-      `<!-- ${blocks.length} реплик, work-релевантность: ${d.workHits} -->`,
-    );
+    lines.push(`<!-- ${blocks.length} реплик, work-релевантность: ${d.workHits} -->`);
     lines.push("");
     for (const b of blocks) {
       const label = b.who === "user" ? "**Кандидат**" : "**Агент**";
@@ -390,9 +394,7 @@ function main() {
   summary.push(`- Всего чатов в экспорте: **${chats.length}**`);
   summary.push(`- Чатов с участием агента: **${totalChatsWithAgent}**`);
   summary.push(`- Сообщений агента: **${totalAgentMsgs}**`);
-  summary.push(
-    `- Уникальных «постов» агента (длинных, дедуплицированы): **${broadcasts.size}**`,
-  );
+  summary.push(`- Уникальных «постов» агента (длинных, дедуплицированы): **${broadcasts.size}**`);
   summary.push(`- Извлечено диалогов с Q&A: **${dialogs.length}**`);
   summary.push(`- Голосовых от агента к расшифровке: **${voiceQueue.length}**`);
   summary.push("");

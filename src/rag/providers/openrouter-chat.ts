@@ -69,10 +69,7 @@ export class OpenRouterChatClient implements ChatClient {
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
-  async complete(
-    messages: ChatMessage[],
-    opts: { temperature?: number } = {},
-  ): Promise<string> {
+  async complete(messages: ChatMessage[], opts: { temperature?: number } = {}): Promise<string> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages,
@@ -124,10 +121,7 @@ export class OpenRouterChatClient implements ChatClient {
 
     const content = payload.choices?.[0]?.message?.content;
     if (!content || content.trim().length === 0) {
-      throw new ChatApiError(
-        res.status,
-        "no choices[0].message.content in OpenRouter response",
-      );
+      throw new ChatApiError(res.status, "no choices[0].message.content in OpenRouter response");
     }
     return content.trim();
   }

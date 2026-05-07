@@ -25,12 +25,9 @@ function validate(form: URLSearchParams): ValidationResult {
     goal: (form.get("goal") ?? "").trim(),
   };
   const errors: Record<string, string> = {};
-  if (values.name.length < 2)
-    errors.name = "Имя слишком короткое";
-  if (!EMAIL_RE.test(values.email))
-    errors.email = "Введите корректный email";
-  if (values.goal.length < 3)
-    errors.goal = "Опишите чуть подробнее";
+  if (values.name.length < 2) errors.name = "Имя слишком короткое";
+  if (!EMAIL_RE.test(values.email)) errors.email = "Введите корректный email";
+  if (values.goal.length < 3) errors.goal = "Опишите чуть подробнее";
   return { values, errors };
 }
 
@@ -51,8 +48,7 @@ export function createQuestionnairePost(db: Database): RouteHandler {
   return async ({ req, params }) => {
     const token = params.token;
     if (!token) return html(renderNotFound(), { status: 404 });
-    if (!tokens.getValid(token))
-      return html(renderNotFound(), { status: 404 });
+    if (!tokens.getValid(token)) return html(renderNotFound(), { status: 404 });
 
     const text = await req.text();
     const form = new URLSearchParams(text);

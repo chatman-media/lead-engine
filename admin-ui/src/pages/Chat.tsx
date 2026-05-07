@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { ws } from "../App";
 import {
   api,
   type Conversation,
@@ -9,7 +10,6 @@ import {
   type User,
   type UserMemory,
 } from "../api";
-import { ws } from "../App";
 import { MemoryPane } from "../components/MemoryPane";
 import { SummaryPane } from "../components/SummaryPane";
 
@@ -104,16 +104,12 @@ export function Chat() {
       // is intentionally absent — Leads page shows the new card.
       void lead;
     } catch (err) {
-      alert(
-        `Не удалось продвинуть в лиды: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      alert(`Не удалось продвинуть в лиды: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   async function handleDelete() {
-    const userLabel = user?.tg_username
-      ? `@${user.tg_username}`
-      : `tg:${user?.tg_user_id}`;
+    const userLabel = user?.tg_username ? `@${user.tg_username}` : `tg:${user?.tg_user_id}`;
     if (
       !confirm(
         `Удалить чат с ${userLabel}? Сообщения будут стёрты, статус сбросится. Действие необратимо.`,
@@ -139,7 +135,11 @@ export function Chat() {
   }
 
   if (!conv || !user) {
-    return <div className="loading-text" style={{ padding: 32 }}>loading…</div>;
+    return (
+      <div className="loading-text" style={{ padding: 32 }}>
+        loading…
+      </div>
+    );
   }
 
   const isHuman = conv.mode === "human";
@@ -169,20 +169,13 @@ export function Chat() {
 
         <div className="chat-header-actions">
           {(isQueued || isHuman) && (
-            <span
-              className={`mode-chip ${conv.mode}`}
-              data-testid="mode-badge"
-            >
+            <span className={`mode-chip ${conv.mode}`} data-testid="mode-badge">
               {conv.mode}
             </span>
           )}
 
           {!isHuman && (
-            <button
-              onClick={handleTake}
-              data-testid="take-btn"
-              className="btn btn-warn btn-sm"
-            >
+            <button onClick={handleTake} data-testid="take-btn" className="btn btn-warn btn-sm">
               Take over
             </button>
           )}
@@ -226,11 +219,7 @@ export function Chat() {
             ↓ JSONL
           </a>
 
-          <button
-            onClick={handleDelete}
-            data-testid="delete-btn"
-            className="btn btn-danger btn-sm"
-          >
+          <button onClick={handleDelete} data-testid="delete-btn" className="btn btn-danger btn-sm">
             Delete
           </button>
         </div>
@@ -238,11 +227,7 @@ export function Chat() {
 
       {/* Cross-session memory pane (collapsed by default) */}
       {memory && (
-        <MemoryPane
-          userId={user.id}
-          initialMemory={memory}
-          onSaved={(next) => setMemory(next)}
-        />
+        <MemoryPane userId={user.id} initialMemory={memory} onSaved={(next) => setMemory(next)} />
       )}
 
       {/* Long-conversation summary (only rendered when one exists) */}
@@ -251,10 +236,7 @@ export function Chat() {
       {/* Messages */}
       <div className="messages" data-testid="messages-list">
         {messages.map((m) => (
-          <div
-            key={m.id}
-            className={`msg ${m.role === "user" ? "msg-left" : "msg-right"}`}
-          >
+          <div key={m.id} className={`msg ${m.role === "user" ? "msg-left" : "msg-right"}`}>
             <div className={BUBBLE_CLASS[m.role] ?? "bubble bubble-user"}>
               <MessageBody message={m} />
             </div>
@@ -373,14 +355,7 @@ function MessageBody({ message }: { message: Message }) {
       />
     );
   } else if (media.type === "voice") {
-    preview = (
-      <audio
-        src={url}
-        controls
-        preload="metadata"
-        style={{ maxWidth: "100%" }}
-      />
-    );
+    preview = <audio src={url} controls preload="metadata" style={{ maxWidth: "100%" }} />;
   } else {
     // document — just a download link with a paperclip glyph
     preview = (
@@ -402,9 +377,7 @@ function MessageBody({ message }: { message: Message }) {
       style={{ display: "flex", flexDirection: "column", gap: 4 }}
     >
       {preview}
-      {caption && (
-        <div style={{ marginTop: 4 }}>{caption}</div>
-      )}
+      {caption && <div style={{ marginTop: 4 }}>{caption}</div>}
     </div>
   );
 }
@@ -472,4 +445,3 @@ function TelemetryStrip({ message }: { message: Message }) {
     </div>
   );
 }
-

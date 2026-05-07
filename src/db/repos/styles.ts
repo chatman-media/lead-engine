@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 
-import { StyleSchema, type Style } from "../../sales/types.ts";
+import { type Style, StyleSchema } from "../../sales/types.ts";
 
 export interface StyleRow {
   id: number;
@@ -31,7 +31,9 @@ export class StylesRepo {
       raw = JSON.parse(row.config_json);
     } catch (err) {
       const cause = err instanceof Error ? err.message : String(err);
-      throw new Error(`styles.id=${row.id} (slug=${row.slug}): config_json is not valid JSON — ${cause}`);
+      throw new Error(
+        `styles.id=${row.id} (slug=${row.slug}): config_json is not valid JSON — ${cause}`,
+      );
     }
     const result = StyleSchema.safeParse(raw);
     if (!result.success) {
@@ -45,18 +47,14 @@ export class StylesRepo {
 
   byId(id: number): StyleRow | null {
     return (
-      this.db
-        .query<StyleRow, [number]>("SELECT * FROM styles WHERE id = ? LIMIT 1")
-        .get(id) ?? null
+      this.db.query<StyleRow, [number]>("SELECT * FROM styles WHERE id = ? LIMIT 1").get(id) ?? null
     );
   }
 
   bySlug(slug: string): StyleRow | null {
     return (
       this.db
-        .query<StyleRow, [string]>(
-          "SELECT * FROM styles WHERE slug = ? AND is_active = 1 LIMIT 1",
-        )
+        .query<StyleRow, [string]>("SELECT * FROM styles WHERE slug = ? AND is_active = 1 LIMIT 1")
         .get(slug) ?? null
     );
   }
@@ -64,9 +62,7 @@ export class StylesRepo {
   /** All active styles, ordered by display name — useful for admin UI lists. */
   listActive(): StyleRow[] {
     return this.db
-      .query<StyleRow, []>(
-        "SELECT * FROM styles WHERE is_active = 1 ORDER BY display_name",
-      )
+      .query<StyleRow, []>("SELECT * FROM styles WHERE is_active = 1 ORDER BY display_name")
       .all();
   }
 
@@ -179,9 +175,7 @@ export class StylesRepo {
   /** All versions of a slug, oldest → newest. Useful for an audit / history view. */
   versionHistory(slug: string): StyleRow[] {
     return this.db
-      .query<StyleRow, [string]>(
-        "SELECT * FROM styles WHERE slug = ? ORDER BY version ASC",
-      )
+      .query<StyleRow, [string]>("SELECT * FROM styles WHERE slug = ? ORDER BY version ASC")
       .all(slug);
   }
 }
@@ -191,7 +185,10 @@ export class StylesRepo {
  * into the DB if its slug is missing. Edits in the DB persist; the seed is
  * a safety net for fresh installs / new deployments only.
  */
-export function seedBuiltinStyles(repo: StylesRepo, builtins: readonly Style[]): {
+export function seedBuiltinStyles(
+  repo: StylesRepo,
+  builtins: readonly Style[],
+): {
   inserted: string[];
   skipped: string[];
 } {

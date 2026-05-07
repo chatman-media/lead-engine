@@ -6,7 +6,7 @@ import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { ExperimentsRepo } from "@/db/repos/experiments.ts";
 import { KbRepo } from "@/db/repos/kb.ts";
-import { seedBuiltinStyles, StylesRepo } from "@/db/repos/styles.ts";
+import { StylesRepo, seedBuiltinStyles } from "@/db/repos/styles.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient } from "@/rag/chat.ts";
@@ -14,7 +14,7 @@ import type { EmbeddingClient } from "@/rag/embed.ts";
 import { coldDirectPas } from "@/sales/styles/cold-direct-pas.ts";
 import { empatheticNepq } from "@/sales/styles/empathetic-nepq.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
-import { TelegramClient, type FetchLike } from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 
 const SECRET = "s";
 const DIM = 1536;
@@ -41,11 +41,7 @@ function setup() {
  *  beforeEach to mirror admin-api.test.ts setup (which apparently has the
  *  exact CPU budget for the bcrypt hash + login fetch and nothing else). */
 function seedStyles(db: ReturnType<typeof openDb>) {
-  seedBuiltinStyles(new StylesRepo(db), [
-    flirtyBelfort,
-    empatheticNepq,
-    coldDirectPas,
-  ]);
+  seedBuiltinStyles(new StylesRepo(db), [flirtyBelfort, empatheticNepq, coldDirectPas]);
 }
 
 function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
@@ -96,9 +92,7 @@ describe("GET /admin/api/styles", () => {
     };
     expect(body.styles.length).toBe(3);
     const slugs = body.styles.map((s) => s.slug).sort();
-    expect(slugs).toEqual(
-      ["cold-direct-pas-v1", "empathetic-nepq-v1", "flirty-belfort-v1"].sort(),
-    );
+    expect(slugs).toEqual(["cold-direct-pas-v1", "empathetic-nepq-v1", "flirty-belfort-v1"].sort());
     expect(body.styles.every((s) => s.is_active)).toBe(true);
   });
 
@@ -120,7 +114,11 @@ describe("GET /admin/api/styles/:id", () => {
     const res = await fetch(url(`/admin/api/styles/${row.id}`), authed());
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      style: { slug: string; config: { persona: { name: string } } | null; parse_error: string | null };
+      style: {
+        slug: string;
+        config: { persona: { name: string } } | null;
+        parse_error: string | null;
+      };
     };
     expect(body.style.slug).toBe("flirty-belfort-v1");
     expect(body.style.parse_error).toBeNull();
@@ -128,17 +126,14 @@ describe("GET /admin/api/styles/:id", () => {
   });
 
   test("malformed config_json surfaces parse_error but doesn't crash", async () => {
-    ctx.db.run(
-      `INSERT INTO styles (slug, display_name, config_json) VALUES (?, ?, ?)`,
-      ["broken", "Broken", "{not json"],
-    );
-    const id = (
-      ctx.db
-        .query<{ id: number }, [string]>(
-          "SELECT id FROM styles WHERE slug = ?",
-        )
-        .get("broken")
-    )!.id;
+    ctx.db.run(`INSERT INTO styles (slug, display_name, config_json) VALUES (?, ?, ?)`, [
+      "broken",
+      "Broken",
+      "{not json",
+    ]);
+    const id = ctx.db
+      .query<{ id: number }, [string]>("SELECT id FROM styles WHERE slug = ?")
+      .get("broken")!.id;
     const res = await fetch(url(`/admin/api/styles/${id}`), authed());
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -337,9 +332,7 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
     // The actual injected block has a recognizable header. The string
     // "KB CONTEXT" alone may also appear inside the grounding reminder
     // text (which references the section by name), so we match the header.
-    expect(body.system_prompt).not.toContain(
-      "KB CONTEXT (актуальные факты агентства):",
-    );
+    expect(body.system_prompt).not.toContain("KB CONTEXT (актуальные факты агентства):");
   });
 
   test("dropFewShot=true removes few-shot block from system prompt", async () => {
@@ -1009,11 +1002,9 @@ describe("PATCH /admin/api/experiments/:id", () => {
       `INSERT INTO experiments (slug, status, allocation_json, success_metric)
        VALUES ('broken', 'draft', '{not json', 'qualified')`,
     );
-    const id = (
-      ctx.db
-        .query<{ id: number }, [string]>("SELECT id FROM experiments WHERE slug = ?")
-        .get("broken")
-    )!.id;
+    const id = ctx.db
+      .query<{ id: number }, [string]>("SELECT id FROM experiments WHERE slug = ?")
+      .get("broken")!.id;
     const res = await fetch(
       url(`/admin/api/experiments/${id}`),
       authed({

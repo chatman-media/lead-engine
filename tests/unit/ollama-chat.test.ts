@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
-
-import {
-  OllamaChatClient,
-  type FetchLike,
-} from "@/rag/providers/ollama-chat.ts";
 import { ChatApiError, type ChatMessage } from "@/rag/chat.ts";
+import { type FetchLike, OllamaChatClient } from "@/rag/providers/ollama-chat.ts";
 
 interface RecordedCall {
   url: string;
@@ -19,9 +15,10 @@ interface RecordedCall {
   };
 }
 
-function fakeFetch(
-  responder: (call: RecordedCall) => Response,
-): { fetchImpl: FetchLike; calls: RecordedCall[] } {
+function fakeFetch(responder: (call: RecordedCall) => Response): {
+  fetchImpl: FetchLike;
+  calls: RecordedCall[];
+} {
   const calls: RecordedCall[] = [];
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
@@ -134,9 +131,7 @@ describe("OllamaChatClient", () => {
   });
 
   test("throws ChatApiError on non-2xx", async () => {
-    const { fetchImpl } = fakeFetch(
-      () => new Response("bad", { status: 500 }),
-    );
+    const { fetchImpl } = fakeFetch(() => new Response("bad", { status: 500 }));
     const client = new OllamaChatClient({
       host: "http://x:1",
       model: "m",

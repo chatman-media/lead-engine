@@ -52,14 +52,7 @@ const RULES: Array<{ topic: string; patterns: RegExp[] }> = [
   // 3. Visa / paperwork.
   {
     topic: "visa",
-    patterns: [
-      /\bвиз[аеуы]/i,
-      /паспорт/i,
-      /посольств/i,
-      /консульств/i,
-      /оформлен/i,
-      /приглашен/i,
-    ],
+    patterns: [/\bвиз[аеуы]/i, /паспорт/i, /посольств/i, /консульств/i, /оформлен/i, /приглашен/i],
   },
   // 4. Payment / earnings (without specific city — generic).
   {
@@ -144,13 +137,9 @@ for (const [topic, n] of Object.entries(counts).sort((a, b) => b[1] - a[1])) {
   console.log(`  ${topic.padEnd(14)} ${n}`);
 }
 
-const totalAll = db
-  .query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM kb_documents`)
-  .get()!.n;
+const totalAll = db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM kb_documents`).get()!.n;
 const stillUntagged = db
-  .query<{ n: number }, []>(
-    `SELECT COUNT(*) AS n FROM kb_documents WHERE topic IS NULL`,
-  )
+  .query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM kb_documents WHERE topic IS NULL`)
   .get()!.n;
 console.log(
   `\nTotal docs: ${totalAll}, still untagged: ${stillUntagged} (acts as neutral in topic-filtered search).`,

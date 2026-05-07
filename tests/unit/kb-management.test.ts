@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-
-import { KbRepo } from "@/db/repos/kb.ts";
 import { activeEmbeddingDim } from "@/config.ts";
+import { KbRepo } from "@/db/repos/kb.ts";
 import { openDb } from "@/db/sqlite.ts";
 
 let db: ReturnType<typeof openDb>;
@@ -61,15 +60,9 @@ describe("KbRepo management methods", () => {
     const pay = seed("pay.md", "Payment", "payment");
     const free = seed("misc.md", "Misc");
 
-    expect(kb.listDocuments({ topic: "visa" }).map((d) => d.id)).toEqual([
-      visa.id,
-    ]);
-    expect(kb.listDocuments({ topic: "payment" }).map((d) => d.id)).toEqual([
-      pay.id,
-    ]);
-    expect(kb.listDocuments({ topic: "__untagged__" }).map((d) => d.id)).toEqual([
-      free.id,
-    ]);
+    expect(kb.listDocuments({ topic: "visa" }).map((d) => d.id)).toEqual([visa.id]);
+    expect(kb.listDocuments({ topic: "payment" }).map((d) => d.id)).toEqual([pay.id]);
+    expect(kb.listDocuments({ topic: "__untagged__" }).map((d) => d.id)).toEqual([free.id]);
   });
 
   test("listDocuments q-filter matches title + source case-insensitively", () => {

@@ -6,10 +6,7 @@ import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { openDb } from "@/db/sqlite.ts";
-import {
-  TelegramClient,
-  type FetchLike,
-} from "@/telegram/client.ts";
+import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
 
 const SECRET = "test-secret";
@@ -25,8 +22,7 @@ function setup() {
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
     const apiMethod = url.split("/").pop() ?? "";
-    const body =
-      typeof init?.body === "string" ? JSON.parse(init.body) : null;
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
     sent.push({ method: apiMethod, body });
     const result =
       apiMethod === "sendMessage"
@@ -63,11 +59,7 @@ function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
   s.db.close();
 }
 
-function update(
-  fromId: number,
-  text: string,
-  chatId = fromId,
-): TgUpdate {
+function update(fromId: number, text: string, chatId = fromId): TgUpdate {
   return {
     update_id: Math.floor(Math.random() * 1_000_000),
     message: {

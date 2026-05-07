@@ -31,9 +31,7 @@ describe("chunkText", () => {
 
   test("ignores empty input", () => {
     expect(chunkText("", { maxChars: 100, overlapChars: 10 })).toEqual([]);
-    expect(chunkText("   \n\n   ", { maxChars: 100, overlapChars: 10 })).toEqual(
-      [],
-    );
+    expect(chunkText("   \n\n   ", { maxChars: 100, overlapChars: 10 })).toEqual([]);
   });
 
   test("overlap copies tail of previous chunk into next", () => {

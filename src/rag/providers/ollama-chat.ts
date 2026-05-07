@@ -62,9 +62,7 @@ export class OllamaChatClient implements ChatClient {
     }
     const body: Record<string, unknown> = {
       model: this.model,
-      messages: this.disableThinking
-        ? injectNoThinkHint(messages)
-        : messages,
+      messages: this.disableThinking ? injectNoThinkHint(messages) : messages,
       stream: false,
       // Keep the model resident — avoids 5–10 sec re-loads between Telegram
       // messages while still freeing memory after long idle.
@@ -110,9 +108,7 @@ export class OllamaChatClient implements ChatClient {
  */
 function injectNoThinkHint(messages: ChatMessage[]): ChatMessage[] {
   const HINT = "/no_think";
-  const hasHint = messages.some(
-    (m) => typeof m.content === "string" && m.content.includes(HINT),
-  );
+  const hasHint = messages.some((m) => typeof m.content === "string" && m.content.includes(HINT));
   if (hasHint) return messages;
 
   const sysIdx = messages.findIndex((m) => m.role === "system");

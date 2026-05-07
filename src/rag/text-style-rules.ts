@@ -37,7 +37,7 @@ export interface TextStyleRule {
 export const replaceEmDash: TextStyleRule = {
   name: "replace-em-dash",
   description: "U+2014 «—» → «-» (с нормализацией пробелов)",
-  apply: (s) => s.replace(/\s*—\s*/g, " - ").replace(/  +/g, " "),
+  apply: (s) => s.replace(/\s*—\s*/g, " - ").replace(/ {2,}/g, " "),
 };
 
 /**
@@ -47,7 +47,7 @@ export const replaceEmDash: TextStyleRule = {
 export const replaceEnDash: TextStyleRule = {
   name: "replace-en-dash",
   description: "U+2013 «–» → «-»",
-  apply: (s) => s.replace(/\s*–\s*/g, " - ").replace(/  +/g, " "),
+  apply: (s) => s.replace(/\s*–\s*/g, " - ").replace(/ {2,}/g, " "),
 };
 
 /**
@@ -57,7 +57,7 @@ export const replaceEnDash: TextStyleRule = {
 export const replaceOtherDashes: TextStyleRule = {
   name: "replace-other-dashes",
   description: "U+2015 «―» / U+2012 «‒» → «-»",
-  apply: (s) => s.replace(/\s*[‒―]\s*/g, " - ").replace(/  +/g, " "),
+  apply: (s) => s.replace(/\s*[‒―]\s*/g, " - ").replace(/ {2,}/g, " "),
 };
 
 /**
@@ -82,19 +82,14 @@ export const replaceEllipsis: TextStyleRule = {
  */
 export const stripAILeadIns: TextStyleRule = {
   name: "strip-ai-lead-ins",
-  description:
-    "удалить «Конечно/Безусловно/Разумеется/Отлично/Хорошо!» в начале реплики",
+  description: "удалить «Конечно/Безусловно/Разумеется/Отлично/Хорошо!» в начале реплики",
   apply: (s) => {
     const stripped = s.replace(
       /^\s*(?:Конечно|Безусловно|Разумеется|Отлично|Хорошо)\s*[!,.]\s*/iu,
       "",
     );
     // Восстанавливаем заглавную букву если её срезали.
-    if (
-      stripped !== s &&
-      stripped.length > 0 &&
-      /[a-zа-яё]/u.test(stripped[0]!)
-    ) {
+    if (stripped !== s && stripped.length > 0 && /[a-zа-яё]/u.test(stripped[0]!)) {
       return stripped[0]!.toUpperCase() + stripped.slice(1);
     }
     return stripped.length === 0 ? s : stripped;
@@ -141,7 +136,7 @@ export const DEFAULT_STYLE_RULES: readonly TextStyleRule[] = [
   replaceEnDash,
   replaceOtherDashes,
   replaceEllipsis,
-  stripAILeadIns,        // strip first
+  stripAILeadIns, // strip first
   capitalizeFirstLetter, // then ensure remaining first char is capital
 ];
 

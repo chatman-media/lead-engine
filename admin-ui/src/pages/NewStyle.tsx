@@ -71,14 +71,14 @@ export function NewStyle() {
       navigate(`/admin/styles/${res.style.id}`, { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
-        const issues = (err as unknown as {
-          issues?: Array<{ path: string; message: string }>;
-        }).issues;
+        const issues = (
+          err as unknown as {
+            issues?: Array<{ path: string; message: string }>;
+          }
+        ).issues;
         if (issues && issues.length > 0) {
           setSaveError(
-            `Schema errors:\n${issues
-              .map((i) => `  ${i.path}: ${i.message}`)
-              .join("\n")}`,
+            `Schema errors:\n${issues.map((i) => `  ${i.path}: ${i.message}`).join("\n")}`,
           );
         } else {
           setSaveError(err.message);
@@ -201,10 +201,9 @@ export function NewStyle() {
                 marginBottom: 8,
               }}
             >
-              The placeholder slug below ends in <code>-clone</code> — change
-              it to your real slug (kebab-case). Slug must be unique among
-              active styles. Server-side Zod validation will catch shape
-              issues before insert.
+              The placeholder slug below ends in <code>-clone</code> — change it to your real slug
+              (kebab-case). Slug must be unique among active styles. Server-side Zod validation will
+              catch shape issues before insert.
             </div>
           )}
 
@@ -216,9 +215,7 @@ export function NewStyle() {
               width: "100%",
               minHeight: "70vh",
               background: "var(--bg-1)",
-              border: `1px solid ${
-                parseError ? "var(--red, #f55)" : "var(--border)"
-              }`,
+              border: `1px solid ${parseError ? "var(--red, #f55)" : "var(--border)"}`,
               color: "var(--text)",
               padding: 12,
               borderRadius: "var(--radius)",

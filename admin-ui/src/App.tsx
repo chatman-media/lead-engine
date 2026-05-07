@@ -1,20 +1,14 @@
 import { useEffect, useState } from "react";
-import {
-  BrowserRouter,
-  Navigate,
-  Route,
-  Routes,
-  useNavigate,
-} from "react-router-dom";
-import { api, type Admin } from "./api.ts";
+import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { type Admin, api } from "./api.ts";
 import { Layout } from "./components/Layout.tsx";
 import { Chat } from "./pages/Chat.tsx";
 import { Chats } from "./pages/Chats.tsx";
 import { Experiments } from "./pages/Experiments.tsx";
 import { Kb } from "./pages/Kb.tsx";
+import { Leads } from "./pages/Leads.tsx";
 import { Login } from "./pages/Login.tsx";
 import { NewStyle } from "./pages/NewStyle.tsx";
-import { Leads } from "./pages/Leads.tsx";
 import { Status } from "./pages/Status.tsx";
 import { StyleDetail } from "./pages/StyleDetail.tsx";
 import { Styles } from "./pages/Styles.tsx";
