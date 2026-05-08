@@ -53,6 +53,9 @@ export function Chat() {
   const [summary, setSummary] = useState<ConversationSummary | null>(null);
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
+  // After a successful reply, prompt operator to add Q&A to KB.
+  const [addToKb, setAddToKb] = useState<{ question: string; answer: string } | null>(null);
+  const [kbFlash, setKbFlash] = useState<string | null>(null);
   // Debug toggle: when on, each assistant/human message gets a small
   // telemetry strip beneath it (path, latencies, distances, reflect verdict).
   // Off by default — most operators only want the conversation view.
@@ -127,10 +130,31 @@ export function Chat() {
     setSending(true);
     try {
       await api.sendMessage(convId, text);
+      // Find last user message to pre-fill the KB suggestion question.
+      const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+      if (lastUserMsg) {
+        setAddToKb({ question: lastUserMsg.text, answer: text });
+      }
       setReplyText("");
       reload();
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleAddToKb() {
+    if (!addToKb) return;
+    try {
+      await api.createKbSuggestion({
+        question_text: addToKb.question,
+        answer_draft: addToKb.answer,
+        source_conversation_id: convId,
+      });
+      setAddToKb(null);
+      setKbFlash("✓ Добавлено в очередь KB");
+      setTimeout(() => setKbFlash(null), 3000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -275,6 +299,49 @@ export function Chat() {
           >
             Send
           </button>
+        </div>
+      )}
+
+      {/* "Add to KB" prompt — shown after operator sends a reply */}
+      {kbFlash && (
+        <div
+          style={{
+            padding: "8px 16px",
+            background: "rgba(34,197,94,0.1)",
+            color: "var(--green)",
+            fontSize: 13,
+            borderTop: "1px solid var(--border)",
+          }}
+        >
+          {kbFlash}
+        </div>
+      )}
+      {addToKb && !kbFlash && (
+        <div
+          style={{
+            padding: "12px 16px",
+            background: "var(--bg-2)",
+            borderTop: "1px solid var(--border)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, color: "var(--text-3)" }}>
+            Добавить этот ответ в базу знаний?
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text-2)", fontFamily: "var(--mono)" }}>
+            Q: {addToKb.question.slice(0, 120)}
+            {addToKb.question.length > 120 ? "…" : ""}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-sm btn-primary" onClick={handleAddToKb}>
+              Add to KB
+            </button>
+            <button className="btn btn-sm btn-ghost" onClick={() => setAddToKb(null)}>
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -166,6 +166,7 @@ describe("webhook escalation trigger", () => {
     );
     expect(chatCalls).toBe(0); // KB is empty -> NO_CONTEXT without calling chat
     const conv = new ConversationsRepo(db).byUserId(new UsersRepo(db).byTgId(43)!.id)!;
-    expect(conv.mode).toBe("ai");
+    // NO_CONTEXT now queues conversation for operator reply
+    expect(conv.mode).toBe("queued");
   });
 });

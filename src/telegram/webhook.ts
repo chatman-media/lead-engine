@@ -3,6 +3,7 @@ import { config, telegramOpenAccess } from "../config.ts";
 import { type ConversationRow, ConversationsRepo } from "../db/repos/conversations.ts";
 import { ExperimentsRepo, parseAllocationToExperiment } from "../db/repos/experiments.ts";
 import { KbRepo } from "../db/repos/kb.ts";
+import { KbSuggestionsRepo } from "../db/repos/kb-suggestions.ts";
 import { LeadsRepo } from "../db/repos/leads.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
 import { SkillsRepo } from "../db/repos/skills.ts";
@@ -92,7 +93,8 @@ export interface RagDeps {
 export type WebhookEvent =
   | { type: "user-message-persisted"; conversationId: number; tgUserId: number }
   | { type: "assistant-replied"; conversationId: number; tgUserId: number }
-  | { type: "conversation-mode-changed"; conversationId: number };
+  | { type: "conversation-mode-changed"; conversationId: number }
+  | { type: "kb-suggestion:created"; suggestionId: number; conversationId: number };
 
 export interface WebhookDeps {
   db: Database;
@@ -186,6 +188,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.db);
   const messages = new MessagesRepo(deps.db);
   const kb = new KbRepo(deps.db);
+  const kbSuggestions = new KbSuggestionsRepo(deps.db);
   const styles = new StylesRepo(deps.db);
   const skills = new SkillsRepo(deps.db);
   const experiments = new ExperimentsRepo(deps.db);
@@ -349,6 +352,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       messages,
       conversations,
       kb,
+      kbSuggestions,
       styles,
       skills,
       experiments,
@@ -400,6 +404,7 @@ interface ProcessInboundDeps {
   messages: MessagesRepo;
   conversations: ConversationsRepo;
   kb: KbRepo;
+  kbSuggestions: KbSuggestionsRepo;
   styles: StylesRepo;
   skills: SkillsRepo;
   experiments: ExperimentsRepo;
@@ -1018,6 +1023,12 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
       );
       return;
     }
+    // Still no answer — stay queued. Run background tasks so intake/memory
+    // continue to update even while the conversation awaits a manual reply.
+    await runMemoryExtraction(d);
+    await runConversationSummaryRefresh(d);
+    await runIntakeUpdate(d);
+    await runVisaDocsUpdate(d);
     return;
   }
 
@@ -1034,6 +1045,32 @@ async function processInbound(d: ProcessInboundDeps): Promise<void> {
   const { result, stage, skillSlugs } = await runRagForInbound(d);
 
   if (result.text === NO_CONTEXT_MARKER) {
+    // Queue the conversation so the operator sees it needs a manual reply.
+    if (d.conv.mode === "ai") {
+      d.conversations.setMode(d.conv.id, "queued");
+      d.conv.mode = "queued";
+      d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
+    }
+
+    // Record the unanswered question for the KB approval pipeline.
+    // Dedup: if there is already a pending suggestion for this conversation
+    // (same question lingering) a new row is NOT inserted — see KbSuggestionsRepo.create.
+    try {
+      const userMsg = d.messages.recentForContext(d.conv.id, 1).find((m) => m.role === "user");
+      const suggestion = d.kbSuggestions.create({
+        questionText: d.text,
+        sourceConversationId: d.conv.id,
+        sourceMessageId: userMsg?.id,
+      });
+      d.onEvent?.({
+        type: "kb-suggestion:created",
+        suggestionId: suggestion.id,
+        conversationId: d.conv.id,
+      });
+    } catch (err) {
+      console.error("[webhook] kb_suggestion create failed (non-fatal):", err);
+    }
+
     // Run memory extraction even on silent turns — the user message itself
     // may carry persistent facts ("I'm Anya, 25, from Moscow") that we want
     // remembered regardless of whether RAG could answer.

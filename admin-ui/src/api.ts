@@ -500,6 +500,7 @@ export const api = {
       ungrounded_count: number;
       hybrid_count: number;
       rewrite_count: number;
+      unanswered_rate: number;
     }>(`/admin/api/analytics?window=${window}`),
 
   // Skill catalogue
@@ -725,6 +726,48 @@ export const api = {
       success_metric: SuccessMetric;
       funnel: FunnelRow[];
     }>(`/admin/api/experiments/${id}/funnel`),
+
+  // ─── KB Suggestions ───────────────────────────────────────────────────
+  kbSuggestionCounts: () =>
+    req<SuggestionCounts>("/admin/api/kb/suggestions/counts"),
+
+  kbSuggestions: (status?: SuggestionStatus) =>
+    req<{ suggestions: KbSuggestion[]; counts: SuggestionCounts }>(
+      `/admin/api/kb/suggestions${status ? `?status=${status}` : ""}`,
+    ),
+
+  kbSuggestion: (id: number) =>
+    req<{ suggestion: KbSuggestion; context_messages: Message[] }>(
+      `/admin/api/kb/suggestions/${id}`,
+    ),
+
+  updateKbSuggestionDraft: (id: number, answerDraft: string) =>
+    req<{ suggestion: KbSuggestion }>(`/admin/api/kb/suggestions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ answer_draft: answerDraft }),
+    }),
+
+  approveKbSuggestion: (id: number) =>
+    req<{ suggestion: KbSuggestion; kb_document_id: number }>(
+      `/admin/api/kb/suggestions/${id}/approve`,
+      { method: "POST" },
+    ),
+
+  rejectKbSuggestion: (id: number, reason?: string) =>
+    req<{ suggestion: KbSuggestion }>(`/admin/api/kb/suggestions/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
+    }),
+
+  createKbSuggestion: (input: {
+    question_text: string;
+    answer_draft?: string;
+    source_conversation_id?: number;
+  }) =>
+    req<{ suggestion: KbSuggestion }>("/admin/api/kb/suggestions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 };
 
 export type ExperimentStatus = "draft" | "running" | "paused" | "done";
@@ -788,3 +831,28 @@ export interface FunnelRow {
 }
 
 export { ApiError };
+
+// ─── KB Suggestions ───────────────────────────────────────────────────────
+
+export type SuggestionStatus = "pending" | "ingested" | "rejected";
+
+export interface KbSuggestion {
+  id: number;
+  question_text: string;
+  answer_draft: string | null;
+  status: SuggestionStatus;
+  source_conversation_id: number | null;
+  source_message_id: number | null;
+  decided_by_admin_id: number | null;
+  decided_at: number | null;
+  kb_document_id: number | null;
+  rejected_reason: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface SuggestionCounts {
+  pending: number;
+  ingested: number;
+  rejected: number;
+}

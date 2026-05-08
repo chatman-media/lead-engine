@@ -2,10 +2,12 @@ import type { Database } from "bun:sqlite";
 
 import {
   createAnalyticsHandler,
+  createApproveKbSuggestionHandler,
   createApproveLeadHandler,
   createBulkExportConversationsHandler,
   createConversationDetailHandler,
   createCreateExperimentHandler,
+  createCreateKbSuggestionHandler,
   createCreateLeadNoteHandler,
   createCreateStyleHandler,
   createCreateVacancyHandler,
@@ -20,15 +22,18 @@ import {
   createExperimentFunnelHandler,
   createExportConversationHandler,
   createGetKbDocumentHandler,
+  createGetKbSuggestionHandler,
   createGetSelfPlayMatchHandler,
   createGetStyleHandler,
   createGetStyleSkillsHandler,
   createIngestKbDocumentHandler,
+  createKbSuggestionCountsHandler,
   createLeadCallbackHandler,
   createLeadDetailHandler,
   createListConversationsHandler,
   createListExperimentsHandler,
   createListKbDocumentsHandler,
+  createListKbSuggestionsHandler,
   createListLeadsHandler,
   createListSelfPlayMatchesHandler,
   createListSkillsHandler,
@@ -38,6 +43,7 @@ import {
   createListVacanciesHandler,
   createPromoteLeadHandler,
   createRecommendSkillsHandler,
+  createRejectKbSuggestionHandler,
   createRejectLeadHandler,
   createReleaseHandler,
   createReplyHandler,
@@ -49,6 +55,7 @@ import {
   createSubmitToVisaHandler,
   createTakeHandler,
   createUpdateKbDocumentHandler,
+  createUpdateKbSuggestionHandler,
   createUpdateSkillHandler,
   createUpdateUserMemoryHandler,
   createUpdateVacancyHandler,
@@ -57,6 +64,7 @@ import {
 } from "./admin/api.ts";
 import { createLoginHandler, createLogoutHandler, createMeHandler } from "./admin/auth.ts";
 import type { AdminBus } from "./admin/bus.ts";
+import { config } from "./config.ts";
 import { createQuestionnaireGet, createQuestionnairePost } from "./questionnaire/routes.ts";
 import { html, Router } from "./router.ts";
 import type { TelegramClient } from "./telegram/client.ts";
@@ -125,22 +133,40 @@ export function createRouter(deps: AppDeps): Router {
         visaChatId: deps.visaChatId ?? null,
       }),
       onEvent: (event) => {
-        if (!deps.bus) return;
         switch (event.type) {
           case "user-message-persisted":
           case "assistant-replied":
-            deps.bus.publish({
+            deps.bus?.publish({
               type: "message:new",
               conversationId: event.conversationId,
               tgUserId: event.tgUserId,
             });
             return;
           case "conversation-mode-changed":
-            deps.bus.publish({
+            deps.bus?.publish({
               type: "conversation:updated",
               conversationId: event.conversationId,
             });
             return;
+          case "kb-suggestion:created": {
+            deps.bus?.publish({
+              type: "kb-suggestion:created",
+              suggestionId: event.suggestionId,
+              conversationId: event.conversationId,
+            });
+            // DM the admin in Telegram so they can jump to the chat immediately.
+            const adminTgId = config.admin.tgUserId;
+            if (adminTgId) {
+              const adminUrl = `${config.publicBaseUrl}/admin/kb-suggestions`;
+              deps.telegram
+                .sendMessage({
+                  chatId: adminTgId,
+                  text: `❓ Новый вопрос без ответа (conversation #${event.conversationId})\n\nОткрыть: ${adminUrl}`,
+                })
+                .catch(() => undefined);
+            }
+            return;
+          }
         }
       },
     }),
@@ -248,6 +274,17 @@ export function createRouter(deps: AppDeps): Router {
   router.get("/admin/api/kb/documents/:id", createGetKbDocumentHandler(apiDeps));
   router.patch("/admin/api/kb/documents/:id", createUpdateKbDocumentHandler(apiDeps));
   router.delete("/admin/api/kb/documents/:id", createDeleteKbDocumentHandler(apiDeps));
+
+  // KB suggestions — unanswered questions queue with approval pipeline.
+  // "counts" and the POST (create) must come before "/:id" so they're not
+  // captured by the ":id" pattern.
+  router.get("/admin/api/kb/suggestions/counts", createKbSuggestionCountsHandler(apiDeps));
+  router.get("/admin/api/kb/suggestions", createListKbSuggestionsHandler(apiDeps));
+  router.post("/admin/api/kb/suggestions", createCreateKbSuggestionHandler(apiDeps));
+  router.post("/admin/api/kb/suggestions/:id/approve", createApproveKbSuggestionHandler(apiDeps));
+  router.post("/admin/api/kb/suggestions/:id/reject", createRejectKbSuggestionHandler(apiDeps));
+  router.patch("/admin/api/kb/suggestions/:id", createUpdateKbSuggestionHandler(apiDeps));
+  router.get("/admin/api/kb/suggestions/:id", createGetKbSuggestionHandler(apiDeps));
 
   // Leads — pipeline state machine: intake → approve/reject → docs → submitted.
   router.get("/admin/api/leads", createListLeadsHandler(apiDeps));

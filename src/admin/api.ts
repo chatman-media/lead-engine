@@ -9,6 +9,7 @@ import {
   type SuccessMetric,
 } from "../db/repos/experiments.ts";
 import { KbRepo } from "../db/repos/kb.ts";
+import { KbSuggestionsRepo, type SuggestionStatus } from "../db/repos/kb-suggestions.ts";
 import { type LeadRow, type LeadState, LeadsRepo } from "../db/repos/leads.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
 import { SelfPlayMatchesRepo } from "../db/repos/self-play-matches.ts";
@@ -2586,6 +2587,10 @@ export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
       )
       .get(since)!.n;
 
+    const noContextCount =
+      (byPath.find((p) => p.path === "no_context")?.count ?? 0) + ungrounded;
+    const unansweredRate = total > 0 ? noContextCount / total : 0;
+
     return json({
       window: windowKey,
       window_seconds: windowSec,
@@ -2597,6 +2602,7 @@ export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
       ungrounded_count: ungrounded,
       hybrid_count: hybrid,
       rewrite_count: rewrites,
+      unanswered_rate: unansweredRate,
     });
   };
 }
@@ -2614,7 +2620,6 @@ interface SkillDto {
   intent: string;
   is_enabled: boolean;
   attached_to_styles: number;
-  /** Phase 2 outcome aggregates. NaN win_rate is sent as null. */
   outcomes: {
     count: number;
     wins: number;
@@ -2660,8 +2665,6 @@ function rowToSkillDto(
 
 const EMPTY_OUTCOME = { count: 0, wins: 0, losses: 0, draws: 0, win_rate: Number.NaN };
 
-/** GET /admin/api/skills — full catalogue with attachment counts +
- *  outcome aggregates (Phase 2 win-rates). */
 export function createListSkillsHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.db);
   const outcomesRepo = new SkillOutcomesRepo(deps.db);
@@ -2680,7 +2683,6 @@ export function createListSkillsHandler(deps: AdminApiDeps): RouteHandler {
   };
 }
 
-/** GET /admin/api/style-ratings — per-style ELO leaderboard. */
 export function createListStyleRatingsHandler(deps: AdminApiDeps): RouteHandler {
   const repo = new StyleRatingsRepo(deps.db);
   return ({ req }) => {
@@ -2690,9 +2692,6 @@ export function createListStyleRatingsHandler(deps: AdminApiDeps): RouteHandler 
   };
 }
 
-/** PATCH /admin/api/skills/:slug — toggle is_enabled (operator can globally
- *  silence a noisy skill). Other fields are read-only — they come from the
- *  source-controlled catalogue. */
 export function createUpdateSkillHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.db);
   const outcomesRepo = new SkillOutcomesRepo(deps.db);
@@ -2720,7 +2719,6 @@ export function createUpdateSkillHandler(deps: AdminApiDeps): RouteHandler {
   };
 }
 
-/** GET /admin/api/styles/:id/skills — slugs attached to this style. */
 export function createGetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.db);
   const styles = new StylesRepo(deps.db);
@@ -2735,7 +2733,6 @@ export function createGetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
   };
 }
 
-/** PUT /admin/api/styles/:id/skills — replace the attached set. Body: {slugs: string[]}. */
 export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.db);
   const styles = new StylesRepo(deps.db);
@@ -2755,8 +2752,6 @@ export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
     if (!Array.isArray(body.slugs)) {
       return json({ error: "slugs (array) required" }, { status: 400 });
     }
-    // Reject any unknown slugs upfront so the operator gets an explicit
-    // error rather than silent drop. Catalogue is the source of truth.
     const slugs = body.slugs.filter((s): s is string => typeof s === "string");
     const unknown = slugs.filter((s) => !SKILL_BY_SLUG.has(s));
     if (unknown.length > 0) {
@@ -2764,6 +2759,144 @@ export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
     }
     const r = skills.setSkillsForStyle(id, slugs);
     return json({ ok: true, attached: r.attached });
+  };
+}
+
+// ---------------------------------------------------------------------------
+// KB Suggestions — unanswered questions → approval pipeline
+// ---------------------------------------------------------------------------
+
+export function createKbSuggestionCountsHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    return json(suggestions.countByStatus());
+  };
+}
+
+export function createListKbSuggestionsHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const url = new URL(req.url);
+    const status = url.searchParams.get("status") as SuggestionStatus | null;
+    const limit = Number(url.searchParams.get("limit") ?? "200");
+    const rows = suggestions.list({ status: status ?? undefined, limit });
+    return json({ suggestions: rows, counts: suggestions.countByStatus() });
+  };
+}
+
+export function createGetKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  const messages = new MessagesRepo(deps.db);
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const suggestion = suggestions.byId(id);
+    if (!suggestion) return json({ error: "not found" }, { status: 404 });
+    const contextMessages = suggestion.source_conversation_id
+      ? messages.recentForContext(suggestion.source_conversation_id, 20)
+      : [];
+    return json({ suggestion, context_messages: contextMessages });
+  };
+}
+
+export function createUpdateKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const body = (await req.json()) as { answer_draft?: unknown };
+    if (typeof body.answer_draft !== "string") {
+      return json({ error: "answer_draft must be a string" }, { status: 400 });
+    }
+    const updated = suggestions.setDraft(id, body.answer_draft);
+    if (!updated) return json({ error: "not found" }, { status: 404 });
+    return json({ suggestion: updated });
+  };
+}
+
+export function createApproveKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  const kb = new KbRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    if (!deps.rag) {
+      return json(
+        { error: "LLM not configured — cannot ingest without embedder" },
+        { status: 503 },
+      );
+    }
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const suggestion = suggestions.byId(id);
+    if (!suggestion) return json({ error: "not found" }, { status: 404 });
+    if (suggestion.status !== "pending") {
+      return json({ error: "suggestion is not pending" }, { status: 409 });
+    }
+    if (!suggestion.answer_draft?.trim()) {
+      return json({ error: "answer_draft is empty — add an answer before approving" }, { status: 400 });
+    }
+
+    const docBody = `Q: ${suggestion.question_text}\n\nA: ${suggestion.answer_draft.trim()}`;
+    const doc = await ingestText(
+      {
+        title: suggestion.question_text.slice(0, 120),
+        body: docBody,
+      },
+      { kb, embedder: deps.rag.embedder },
+    );
+
+    const updated = suggestions.markIngested(id, ctx.adminId, doc.documentId);
+    return json({ suggestion: updated, kb_document_id: doc.documentId });
+  };
+}
+
+export function createRejectKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const body = (await req.json().catch(() => ({}))) as { reason?: unknown };
+    const reason = typeof body.reason === "string" ? body.reason : undefined;
+    const updated = suggestions.reject(id, ctx.adminId, reason);
+    if (!updated) return json({ error: "not found or already decided" }, { status: 404 });
+    return json({ suggestion: updated });
+  };
+}
+
+export function createCreateKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  return async ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const body = (await req.json()) as {
+      question_text?: unknown;
+      answer_draft?: unknown;
+      source_conversation_id?: unknown;
+    };
+    if (typeof body.question_text !== "string" || !body.question_text.trim()) {
+      return json({ error: "question_text is required" }, { status: 400 });
+    }
+    const sourceConvId =
+      typeof body.source_conversation_id === "number" ? body.source_conversation_id : null;
+    const suggestion = suggestions.create({
+      questionText: body.question_text.trim(),
+      sourceConversationId: sourceConvId,
+    });
+    if (typeof body.answer_draft === "string" && body.answer_draft.trim()) {
+      return json({ suggestion: suggestions.setDraft(suggestion.id, body.answer_draft.trim()) });
+    }
+    return json({ suggestion });
   };
 }
 

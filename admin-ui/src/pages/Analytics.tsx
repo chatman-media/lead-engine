@@ -114,6 +114,21 @@ export function Analytics() {
               <BigNumber value={`${pct(data.ungrounded_count, data.total_assistant_messages)}%`} />
               <Hint>reflect dropped as ungrounded</Hint>
             </Card>
+            <Card
+              title="Unanswered rate"
+              tone={
+                (data.unanswered_rate ?? 0) > 0.3
+                  ? "warn"
+                  : (data.unanswered_rate ?? 0) > 0
+                    ? "warn"
+                    : "ok"
+              }
+            >
+              <BigNumber
+                value={`${Math.round((data.unanswered_rate ?? 0) * 100)}%`}
+              />
+              <Hint>вопросы без ответа (no_context + ungrounded)</Hint>
+            </Card>
           </SectionRow>
 
           <SectionRow>

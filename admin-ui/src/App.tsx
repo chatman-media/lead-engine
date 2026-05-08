@@ -7,6 +7,7 @@ import { Chat } from "./pages/Chat.tsx";
 import { Chats } from "./pages/Chats.tsx";
 import { Experiments } from "./pages/Experiments.tsx";
 import { Kb } from "./pages/Kb.tsx";
+import { KbSuggestions } from "./pages/KbSuggestions.tsx";
 import { Leads } from "./pages/Leads.tsx";
 import { Login } from "./pages/Login.tsx";
 import { NewStyle } from "./pages/NewStyle.tsx";
@@ -88,6 +89,7 @@ export function App() {
                 <Route path="leads" element={<Leads />} />
                 <Route path="vacancies" element={<Vacancies />} />
                 <Route path="kb" element={<Kb />} />
+                <Route path="kb-suggestions" element={<KbSuggestions />} />
                 <Route path="styles" element={<Styles />} />
                 <Route path="styles/new" element={<NewStyle />} />
                 <Route path="styles/:id" element={<StyleDetail />} />
