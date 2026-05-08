@@ -2848,3 +2848,56 @@ export function createDeleteSelfPlayMatchHandler(deps: AdminApiDeps): RouteHandl
     return json({ ok: true, deleted: id });
   };
 }
+
+// ─── Skill recommendations (data-driven picker) ──────────────────────
+
+import { rankSkillRecommendations } from "../sales/skill-recommendations.ts";
+
+/**
+ * GET /admin/api/skills/recommend?minSamples=5&accept=0.4
+ *
+ * Returns skills ranked by Wilson lower-bound confidence on win-rate.
+ * The /admin/styles/:id picker uses this to auto-select a "best
+ * performers" subset based on real outcome data — operators can then
+ * tweak before saving.
+ *
+ * Query params:
+ *   minSamples (int, default 5)  — below this `confidence_lower` is 0
+ *   accept     (float, default 0.4) — Wilson lb above this → recommended=true
+ */
+export function createRecommendSkillsHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, url }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const minSamples = clampInt(url.searchParams.get("minSamples"), 1, 1000, 5);
+    const accept = clampFloat(url.searchParams.get("accept"), 0, 1, 0.4);
+    const catalogue = new SkillsRepo(deps.db).list();
+    const aggregates = new SkillOutcomesRepo(deps.db).aggregate();
+    const ranked = rankSkillRecommendations(catalogue, aggregates, {
+      minSamples,
+      acceptThreshold: accept,
+    });
+    return json({
+      params: { minSamples, accept },
+      total_outcomes: aggregates.reduce((s, a) => s + a.count, 0),
+      recommendations: ranked.map((r) => ({
+        ...r,
+        observed_rate: Number.isFinite(r.observed_rate) ? r.observed_rate : null,
+      })),
+    });
+  };
+}
+
+function clampInt(raw: string | null, lo: number, hi: number, fallback: number): number {
+  if (raw === null) return fallback;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function clampFloat(raw: string | null, lo: number, hi: number, fallback: number): number {
+  if (raw === null) return fallback;
+  const n = Number.parseFloat(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(hi, Math.max(lo, n));
+}

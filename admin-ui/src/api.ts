@@ -535,6 +535,28 @@ export const api = {
     req<{ ok: true; deleted: number }>(`/admin/api/self-play/${id}`, {
       method: "DELETE",
     }),
+  recommendSkills: (opts?: { minSamples?: number; accept?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.minSamples !== undefined) params.set("minSamples", String(opts.minSamples));
+    if (opts?.accept !== undefined) params.set("accept", String(opts.accept));
+    const q = params.toString();
+    return req<{
+      params: { minSamples: number; accept: number };
+      total_outcomes: number;
+      recommendations: Array<{
+        slug: string;
+        display_name: string;
+        family: string;
+        observed_rate: number | null;
+        confidence_lower: number;
+        count: number;
+        wins: number;
+        losses: number;
+        draws: number;
+        recommended: boolean;
+      }>;
+    }>(`/admin/api/skills/recommend${q ? `?${q}` : ""}`);
+  },
   setStyleSkills: (styleId: number, slugs: string[]) =>
     req<{ ok: true; attached: number }>(`/admin/api/styles/${styleId}/skills`, {
       method: "PUT",

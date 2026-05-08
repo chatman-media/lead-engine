@@ -37,6 +37,7 @@ import {
   createListUsersHandler,
   createListVacanciesHandler,
   createPromoteLeadHandler,
+  createRecommendSkillsHandler,
   createRejectLeadHandler,
   createReleaseHandler,
   createReplyHandler,
@@ -215,6 +216,8 @@ export function createRouter(deps: AppDeps): Router {
 
   // Skill catalogue (read-only list + global enable/disable toggle).
   router.get("/admin/api/skills", createListSkillsHandler(apiDeps));
+  // Specific path before :slug catch-all so "recommend" isn't captured as a slug.
+  router.get("/admin/api/skills/recommend", createRecommendSkillsHandler(apiDeps));
   router.patch("/admin/api/skills/:slug", createUpdateSkillHandler(apiDeps));
 
   // Style ELO leaderboard (Phase 2 outcome attribution).
