@@ -54,6 +54,8 @@ export function Layout({ admin, children }: LayoutProps) {
       badge: pendingKbCount > 0 ? pendingKbCount : undefined,
     },
     { to: "/admin/styles", label: "Sales styles" },
+    { to: "/admin/skills", label: "Skills" },
+    { to: "/admin/self-play", label: "Self-play" },
     { to: "/admin/experiments", label: "Experiments" },
   ];
 
@@ -66,25 +68,7 @@ export function Layout({ admin, children }: LayoutProps) {
         </div>
 
         <nav className="sidebar-nav">
-<<<<<<< Updated upstream
-          {[
-            { to: "/admin/status", label: "Status" },
-            { to: "/admin/analytics", label: "Analytics" },
-            { to: "/admin/chats", label: "Chats" },
-            { to: "/admin/leads", label: "Leads" },
-            { to: "/admin/users", label: "Users" },
-            { to: "/admin/vacancies", label: "Vacancies" },
-            { to: "/admin/kb", label: "Knowledge base" },
-            { to: "/admin/styles", label: "Sales styles" },
-            { to: "/admin/skills", label: "Skills" },
-            { to: "/admin/self-play", label: "Self-play" },
-            // Experiments hidden from nav for the single-persona setup.
-            // Route + backend still work — visit /admin/experiments directly.
-            // See docs/SALES_STYLES.md "When to bring back experiments" for criteria.
-          ].map(({ to, label }) => (
-=======
           {navItems.map(({ to, label, badge }) => (
->>>>>>> Stashed changes
             <NavLink key={to} to={to} className="nav-item">
               <span>{label}</span>
               {badge !== undefined && (
