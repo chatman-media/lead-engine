@@ -18,6 +18,7 @@ import type { SkillsRepo } from "../../db/repos/skills.ts";
 import { answerWithRag } from "../../rag/answer.ts";
 import type { ChatClient, ChatMessage } from "../../rag/chat.ts";
 import type { EmbeddingClient } from "../../rag/embed.ts";
+import { gradeSkills } from "../../rag/grade-skills.ts";
 import type { EloOutcome } from "../elo.ts";
 import type { SkillForPrompt } from "../prompt.ts";
 import { nextStage } from "../stage-router.ts";
@@ -147,6 +148,11 @@ export async function runSelfPlayMatch(
 
   let stage: FunnelStage | null = null;
   let userMessageCount = 1;
+  // Slugs the LLM actually demonstrated across the match, accumulated
+  // via per-turn grade-skills calls. Used at finalize for fine-grained
+  // attribution — only the skills the bot really performed get the
+  // outcome, not the full attached bundle.
+  const usedSkills = new Set<string>();
 
   for (let turn = 0; turn < maxTurns; turn++) {
     // Salesperson's response — full RAG pipeline. We don't pass a
@@ -179,6 +185,26 @@ export async function runSelfPlayMatch(
     });
     transcript.push({ role: "salesperson", text: salesResult.text });
 
+    // Per-turn self-grading: ask the judge-class LLM which of the configured
+    // skills the bot ACTUALLY used in this reply. Without this, attribution
+    // bundles the whole skill set onto every outcome and per-skill win-rate
+    // can't differentiate. We use the SAME chat client as the judge (already
+    // running at temperature 0) — adds one short LLM call per turn but only
+    // when skills are attached.
+    if (skills.length > 0) {
+      try {
+        const used = await gradeSkills({
+          question: lastCandidate.text,
+          reply: salesResult.text,
+          availableSlugs: skills.map((s) => s.slug),
+          chat: deps.judgeChat,
+        });
+        for (const slug of used) usedSkills.add(slug);
+      } catch (err) {
+        console.warn("[self-play] per-turn skill grading failed:", err);
+      }
+    }
+
     // Candidate's reply — separate LLM, persona-driven.
     const candidateMessages = buildCandidateHistory(transcript, input.persona.systemPrompt);
     let candidateText: string;
@@ -194,7 +220,7 @@ export async function runSelfPlayMatch(
         outcome: "draw",
         reason: `candidate LLM failed: ${err instanceof Error ? err.message : String(err)}`,
       };
-      return finalize(deps, input, transcript, skills, verdict);
+      return finalize(deps, input, transcript, skills, verdict, usedSkills);
     }
     candidateText = candidateText.trim();
     if (!candidateText) {
@@ -203,7 +229,7 @@ export async function runSelfPlayMatch(
         outcome: "lost",
         reason: "candidate produced empty reply (ghosted)",
       };
-      return finalize(deps, input, transcript, skills, verdict);
+      return finalize(deps, input, transcript, skills, verdict, usedSkills);
     }
     transcript.push({ role: "candidate", text: candidateText });
     userMessageCount++;
@@ -220,7 +246,7 @@ export async function runSelfPlayMatch(
     transcript,
     chat: deps.judgeChat,
   });
-  return finalize(deps, input, transcript, skills, verdict);
+  return finalize(deps, input, transcript, skills, verdict, usedSkills);
 }
 
 function finalize(
@@ -229,21 +255,25 @@ function finalize(
   transcript: SelfPlayMatchResult["transcript"],
   skills: SkillForPrompt[],
   verdict: JudgeVerdict,
+  usedSkills: Set<string>,
 ): SelfPlayMatchResult {
-  // Persist outcomes when there are skills attached. With zero skills
-  // there's nothing meaningful to attribute — we still want the
-  // transcript saved though, so we insert a synthetic conversation
-  // anyway (see persistSelfPlayMatch below).
+  // Attribute outcomes to skills that the LLM actually USED (per-turn
+  // self-grading union). Falls back to the full attached set when the
+  // grader produced zero matches — typically because the grader LLM
+  // failed or the bot didn't visibly demonstrate any skill, in which
+  // case bundle-level attribution is the conservative default.
+  const attributedSkills =
+    usedSkills.size > 0 ? skills.filter((s) => usedSkills.has(s.slug)) : skills;
   let leadId = -1;
-  if (input.style && skills.length > 0) {
-    leadId = persistSelfPlayOutcome(deps, input, skills, verdict);
+  if (input.style && attributedSkills.length > 0) {
+    leadId = persistSelfPlayOutcome(deps, input, attributedSkills, verdict);
   }
   const result: SelfPlayMatchResult = {
     styleSlug: input.style.slug,
     personaSlug: input.persona.slug,
     turns: Math.ceil(transcript.length / 2),
     transcript,
-    skillsAttributed: skills.map((s) => s.slug),
+    skillsAttributed: attributedSkills.map((s) => s.slug),
     verdict,
     outcome: verdict.outcome,
     leadId,
