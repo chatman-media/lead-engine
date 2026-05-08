@@ -108,13 +108,19 @@ function buildSalesHistory(
  * turn loop early, saves judge LLM tokens. Pattern matches Russian
  * yes/no-style commitments.
  */
+/** Exposed for tests so the regex can be exercised without spinning up a full match. */
+export const _testCandidateConcluded = (text: string): boolean => candidateConcluded(text);
+
 function candidateConcluded(text: string): boolean {
   const t = text.toLowerCase();
-  // Strong commit signals
-  if (/(давай[те]*\s+(оформ|анкет|поех|созв|попроб))/i.test(t)) return true;
-  if (/^ок|^окей.*(давай|оформ|поех|анкет)/i.test(t)) return true;
-  if (/(я\s+согласн[аы])/i.test(t)) return true;
-  // Strong refusal signals
+  // Strong commit signals — explicit ask-to-proceed.
+  if (/(давай[те]*\s+(оформ|анкет|поех|созв|попроб|начн|сдела))/i.test(t)) return true;
+  if (/(я\s+согласн[аы]|я\s+готов[а]?\s+(оформ|поех|начать|подать))/i.test(t)) return true;
+  // "ок" followed by an action verb. Plain "ок, а сколько…?" is just an
+  // engaged follow-up question, not a conclusion — the bare `^ок` regex
+  // used to incorrectly close those matches.
+  if (/^ок\s*[!,.\s]*(давай|оформ|поех|анкет|готов|подаём|подаем|начн)/i.test(t)) return true;
+  // Strong refusal signals.
   if (/(не\s+интересно|мне\s+(не\s+)?подход|передумал)/i.test(t)) return true;
   if (/(не\s+пишите|отстань|это\s+развод)/i.test(t)) return true;
   return false;

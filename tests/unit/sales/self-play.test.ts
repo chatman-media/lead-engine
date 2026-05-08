@@ -49,6 +49,37 @@ function scriptedChat(
   };
 }
 
+describe("candidateConcluded regression — bare 'ок' prefix shouldn't close", () => {
+  // The conclusion detector used to include `^ок` as a standalone alternative,
+  // which made any candidate reply starting with "ок" (e.g. "ок, а сколько
+  // платят?") prematurely end the match — every real run capped at 2-3 turns
+  // and judges had nothing to call but draw.
+  test("'ок, а сколько платят?' → not concluded (it's a follow-up question)", async () => {
+    const { _testCandidateConcluded } = await import("@/sales/self-play/orchestrator.ts");
+    expect(_testCandidateConcluded("ок, а сколько платят?")).toBe(false);
+  });
+
+  test("'ок, и где жить?' → not concluded", async () => {
+    const { _testCandidateConcluded } = await import("@/sales/self-play/orchestrator.ts");
+    expect(_testCandidateConcluded("ок, и где жить?")).toBe(false);
+  });
+
+  test("'ок, давай анкету' → concluded (explicit action verb)", async () => {
+    const { _testCandidateConcluded } = await import("@/sales/self-play/orchestrator.ts");
+    expect(_testCandidateConcluded("ок, давай анкету")).toBe(true);
+  });
+
+  test("'я согласна, давай оформляться' → concluded", async () => {
+    const { _testCandidateConcluded } = await import("@/sales/self-play/orchestrator.ts");
+    expect(_testCandidateConcluded("я согласна, давай оформляться")).toBe(true);
+  });
+
+  test("'это развод' → concluded (refusal)", async () => {
+    const { _testCandidateConcluded } = await import("@/sales/self-play/orchestrator.ts");
+    expect(_testCandidateConcluded("это развод")).toBe(true);
+  });
+});
+
 describe("personas catalogue", () => {
   test("at least 5 personas with unique slugs + non-empty fields", () => {
     expect(CANDIDATE_PERSONAS.length).toBeGreaterThanOrEqual(5);
