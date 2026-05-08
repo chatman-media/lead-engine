@@ -12,6 +12,7 @@
 import type { Database } from "bun:sqlite";
 
 import type { KbRepo } from "../../db/repos/kb.ts";
+import { SelfPlayMatchesRepo } from "../../db/repos/self-play-matches.ts";
 import type { SkillOutcomesRepo, StyleRatingsRepo } from "../../db/repos/skill-outcomes.ts";
 import type { SkillsRepo } from "../../db/repos/skills.ts";
 import { answerWithRag } from "../../rag/answer.ts";
@@ -223,18 +224,15 @@ function finalize(
   skills: SkillForPrompt[],
   verdict: JudgeVerdict,
 ): SelfPlayMatchResult {
-  // Persist outcomes. Self-play doesn't have a real lead row — to satisfy
-  // the FK we synthesise a synthetic lead via INSERT; the row lives only
-  // for the FK target. NEGATIVE id would be cleaner but SQLite autoincr
-  // doesn't allow it directly, so we insert a regular row tied to a
-  // throwaway "self-play" user. Cheapest is to skip persistence entirely
-  // when self-play is run as a smoke test, so we do it conditionally:
-  // callers pass `db` only when they want persistence.
+  // Persist outcomes when there are skills attached. With zero skills
+  // there's nothing meaningful to attribute — we still want the
+  // transcript saved though, so we insert a synthetic conversation
+  // anyway (see persistSelfPlayMatch below).
   let leadId = -1;
   if (input.style && skills.length > 0) {
     leadId = persistSelfPlayOutcome(deps, input, skills, verdict);
   }
-  return {
+  const result: SelfPlayMatchResult = {
     styleSlug: input.style.slug,
     personaSlug: input.persona.slug,
     turns: Math.ceil(transcript.length / 2),
@@ -244,6 +242,9 @@ function finalize(
     outcome: verdict.outcome,
     leadId,
   };
+  // Save the full transcript for operator review on /admin/self-play.
+  persistSelfPlayMatch(deps, result, verdict.reason);
+  return result;
 }
 
 /**
@@ -288,6 +289,31 @@ function persistSelfPlayOutcome(
   }
   deps.ratings.applyOutcome(input.style.slug, verdict.outcome);
   return lead.id;
+}
+
+/** Persist the full match transcript so operators can review it on
+ *  /admin/self-play. Called from `finalize` AFTER skill-outcome rows
+ *  exist so `lead_id` is real. Failure-soft: any error logs and skips
+ *  — losing a transcript is annoying but shouldn't kill the batch. */
+export function persistSelfPlayMatch(
+  deps: SelfPlayDeps,
+  result: SelfPlayMatchResult,
+  judgeReason: string,
+): void {
+  try {
+    new SelfPlayMatchesRepo(deps.db).insert({
+      styleSlug: result.styleSlug,
+      personaSlug: result.personaSlug,
+      outcome: result.outcome,
+      judgeReason,
+      transcript: result.transcript,
+      turns: result.turns,
+      skills: result.skillsAttributed,
+      leadId: result.leadId > 0 ? result.leadId : null,
+    });
+  } catch (err) {
+    console.warn("[self-play] failed to persist match transcript:", err);
+  }
 }
 
 function parseStages(raw: string): readonly FunnelStage[] {

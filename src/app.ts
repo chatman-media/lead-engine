@@ -13,12 +13,14 @@ import {
   createDeleteKbDocumentHandler,
   createDeleteLeadHandler,
   createDeleteLeadNoteHandler,
+  createDeleteSelfPlayMatchHandler,
   createDeleteVacancyHandler,
   createDownloadFileHandler,
   createEditStyleHandler,
   createExperimentFunnelHandler,
   createExportConversationHandler,
   createGetKbDocumentHandler,
+  createGetSelfPlayMatchHandler,
   createGetStyleHandler,
   createGetStyleSkillsHandler,
   createIngestKbDocumentHandler,
@@ -28,6 +30,7 @@ import {
   createListExperimentsHandler,
   createListKbDocumentsHandler,
   createListLeadsHandler,
+  createListSelfPlayMatchesHandler,
   createListSkillsHandler,
   createListStyleRatingsHandler,
   createListStylesHandler,
@@ -216,6 +219,11 @@ export function createRouter(deps: AppDeps): Router {
 
   // Style ELO leaderboard (Phase 2 outcome attribution).
   router.get("/admin/api/style-ratings", createListStyleRatingsHandler(apiDeps));
+
+  // Self-play match transcripts (Phase 3).
+  router.get("/admin/api/self-play", createListSelfPlayMatchesHandler(apiDeps));
+  router.get("/admin/api/self-play/:id", createGetSelfPlayMatchHandler(apiDeps));
+  router.delete("/admin/api/self-play/:id", createDeleteSelfPlayMatchHandler(apiDeps));
   router.get("/admin/api/experiments", createListExperimentsHandler(apiDeps));
   router.post("/admin/api/experiments", createCreateExperimentHandler(apiDeps));
   router.patch("/admin/api/experiments/:id", createSetExperimentStatusHandler(apiDeps));

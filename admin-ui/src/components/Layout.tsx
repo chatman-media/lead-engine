@@ -34,6 +34,7 @@ export function Layout({ admin, children }: LayoutProps) {
             { to: "/admin/kb", label: "Knowledge base" },
             { to: "/admin/styles", label: "Sales styles" },
             { to: "/admin/skills", label: "Skills" },
+            { to: "/admin/self-play", label: "Self-play" },
             // Experiments hidden from nav for the single-persona setup.
             // Route + backend still work — visit /admin/experiments directly.
             // See docs/SALES_STYLES.md "When to bring back experiments" for criteria.

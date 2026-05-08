@@ -96,6 +96,47 @@ export interface SkillDto {
   };
 }
 
+export interface SelfPlayMatchSummary {
+  id: number;
+  style_slug: string;
+  persona_slug: string;
+  outcome: "won" | "lost" | "draw";
+  judge_reason: string | null;
+  turns: number;
+  skills_count: number;
+  lead_id: number | null;
+  created_at: number;
+}
+
+export interface SelfPlayMatchDetail {
+  id: number;
+  style_slug: string;
+  persona_slug: string;
+  persona_display_name: string;
+  outcome: "won" | "lost" | "draw";
+  judge_reason: string | null;
+  turns: number;
+  skills: string[];
+  lead_id: number | null;
+  created_at: number;
+  transcript: Array<{ role: "candidate" | "salesperson"; text: string }>;
+}
+
+export interface SelfPlayMatrixRow {
+  style_slug: string;
+  persona_slug: string;
+  won: number;
+  lost: number;
+  draw: number;
+  total: number;
+}
+
+export interface SelfPlayPersona {
+  slug: string;
+  display_name: string;
+  summary: string;
+}
+
 export interface StyleRatingDto {
   style_slug: string;
   elo: number;
@@ -470,6 +511,30 @@ export const api = {
     }),
   styleSkills: (styleId: number) => req<{ slugs: string[] }>(`/admin/api/styles/${styleId}/skills`),
   styleRatings: () => req<{ ratings: StyleRatingDto[] }>("/admin/api/style-ratings"),
+  selfPlayMatches: (opts?: {
+    style?: string;
+    persona?: string;
+    outcome?: "won" | "lost" | "draw";
+    limit?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (opts?.style) params.set("style", opts.style);
+    if (opts?.persona) params.set("persona", opts.persona);
+    if (opts?.outcome) params.set("outcome", opts.outcome);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    const q = params.toString();
+    return req<{
+      total: number;
+      matches: SelfPlayMatchSummary[];
+      matrix: SelfPlayMatrixRow[];
+      personas: SelfPlayPersona[];
+    }>(`/admin/api/self-play${q ? `?${q}` : ""}`);
+  },
+  selfPlayMatch: (id: number) => req<{ match: SelfPlayMatchDetail }>(`/admin/api/self-play/${id}`),
+  deleteSelfPlayMatch: (id: number) =>
+    req<{ ok: true; deleted: number }>(`/admin/api/self-play/${id}`, {
+      method: "DELETE",
+    }),
   setStyleSkills: (styleId: number, slugs: string[]) =>
     req<{ ok: true; attached: number }>(`/admin/api/styles/${styleId}/skills`, {
       method: "PUT",

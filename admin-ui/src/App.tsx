@@ -10,6 +10,7 @@ import { Kb } from "./pages/Kb.tsx";
 import { Leads } from "./pages/Leads.tsx";
 import { Login } from "./pages/Login.tsx";
 import { NewStyle } from "./pages/NewStyle.tsx";
+import { SelfPlay } from "./pages/SelfPlay.tsx";
 import { Skills } from "./pages/Skills.tsx";
 import { Status } from "./pages/Status.tsx";
 import { StyleDetail } from "./pages/StyleDetail.tsx";
@@ -79,6 +80,7 @@ export function App() {
                 <Route path="status" element={<Status />} />
                 <Route path="analytics" element={<Analytics />} />
                 <Route path="skills" element={<Skills />} />
+                <Route path="self-play" element={<SelfPlay />} />
                 <Route path="chats" element={<Chats />} />
                 <Route path="chats/:id" element={<Chat />} />
                 <Route path="users" element={<Users />} />
