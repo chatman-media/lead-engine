@@ -197,8 +197,16 @@ if (config.userbot.enabled) {
         "Get them at https://my.telegram.org and run `bun scripts/userbot-auth.ts` once.",
     );
   } else {
-    const { startUserbot } = await import("./telegram/userbot.ts");
-    await startUserbot({ db, apiId: config.userbot.apiId, apiHash: config.userbot.apiHash, rag });
+    // Fire-and-forget: server is already listening at this point.
+    // gramjs client.connect() can block for several seconds on slow DCs —
+    // we must not await it in the main startup path.
+    import("./telegram/userbot.ts")
+      .then(({ startUserbot }) =>
+        startUserbot({ db, apiId: config.userbot.apiId, apiHash: config.userbot.apiHash, rag }),
+      )
+      .catch((err) => {
+        console.error("[userbot] startup failed:", err?.message ?? err);
+      });
   }
 }
 
