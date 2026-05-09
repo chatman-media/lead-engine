@@ -189,6 +189,18 @@ if (config.telegram.visaChatId) {
 
 console.log(`[server] listening on http://localhost:${server.port}`);
 
+if (config.userbot.enabled) {
+  if (!config.userbot.apiId || !config.userbot.apiHash) {
+    console.error(
+      "[userbot] ERROR: TELEGRAM_USERBOT=1 but TELEGRAM_API_ID / TELEGRAM_API_HASH are not set. " +
+        "Get them at https://my.telegram.org and run `bun scripts/userbot-auth.ts` once.",
+    );
+  } else {
+    const { startUserbot } = await import("./telegram/userbot.ts");
+    await startUserbot({ db, apiId: config.userbot.apiId, apiHash: config.userbot.apiHash, rag });
+  }
+}
+
 // Stale-lead sweep: every 6h, auto-close non-terminal leads that haven't
 // transitioned in 14d → records `lost` outcomes for skills the bot used.
 // This populates the loss side of the leaderboard; otherwise the win-rate

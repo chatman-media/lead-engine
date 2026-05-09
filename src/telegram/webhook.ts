@@ -402,7 +402,7 @@ function decideIntent(
   return { mode: "ai" };
 }
 
-interface ProcessInboundDeps {
+export interface ProcessInboundDeps {
   messages: MessagesRepo;
   conversations: ConversationsRepo;
   kb: KbRepo;
@@ -969,7 +969,7 @@ async function runConversationSummaryRefresh(d: ProcessInboundDeps): Promise<voi
   }
 }
 
-async function processInbound(d: ProcessInboundDeps): Promise<void> {
+export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   const reply = async (
     text: string,
     meta?: unknown,
