@@ -28,10 +28,11 @@ const telegram = new TelegramClient({
   if (seedResult.inserted.length > 0) {
     console.log(`[server] seeded built-in sales styles: ${seedResult.inserted.join(", ")}`);
   }
+  if (seedResult.updated.length > 0) {
+    console.log(`[server] refreshed built-in sales styles: ${seedResult.updated.join(", ")}`);
+  }
   if (seedResult.skipped.length > 0) {
-    console.log(
-      `[server] sales styles already present (kept DB version): ${seedResult.skipped.join(", ")}`,
-    );
+    console.log(`[server] sales styles unchanged: ${seedResult.skipped.join(", ")}`);
   }
 }
 

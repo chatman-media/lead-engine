@@ -141,8 +141,8 @@ describe("renderVacanciesBlock", () => {
     repo.create({ title: "Шаохинг", body: "10k юаней" }); // no url
     const block = renderVacanciesBlock(repo.listActive());
     expect(block).toContain("Ссылка: https://t.me/infinity_agency_world");
-    // The instruction telling the bot when to drop the link.
-    expect(block).toContain("ТОЛЬКО когда кандидат сам спрашивает");
+    // The instruction telling the bot to always include the link.
+    expect(block).toContain("ВСЕГДА включай её когда называешь эту вакансию");
     // Vacancy without URL → no "Ссылка:" line on its block
     const vacanciesText = block.split("[В")[2] ?? ""; // chunk for the 2nd vacancy
     expect(vacanciesText).not.toContain("Ссылка:");

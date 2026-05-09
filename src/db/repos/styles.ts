@@ -97,16 +97,24 @@ export class StylesRepo {
   /**
    * Idempotent boot-time seeder. If a row with `slug` already exists, do
    * nothing — admin's edits in the DB always win over hard-coded source.
-   * Returns true if a new row was inserted, false if it was already present.
+   * Returns "inserted" | "updated" | "skipped".
+   * Always refreshes config_json from source so code edits take effect on
+   * next boot. The row's `display_name` is also kept in sync with source.
    */
-  upsertBuiltin(style: Style): boolean {
-    if (this.bySlug(style.slug)) return false;
-    this.insert({
-      slug: style.slug,
-      displayName: style.displayName,
-      config: style,
-    });
-    return true;
+  upsertBuiltin(style: Style): "inserted" | "updated" | "skipped" {
+    const existing = this.bySlug(style.slug);
+    if (!existing) {
+      this.insert({ slug: style.slug, displayName: style.displayName, config: style });
+      return "inserted";
+    }
+    const newJson = JSON.stringify(style);
+    if (existing.config_json === newJson) return "skipped";
+    // Update only config_json — display_name may have been edited by an admin.
+    this.db.run("UPDATE styles SET config_json = ? WHERE slug = ? AND is_active = 1", [
+      newJson,
+      style.slug,
+    ]);
+    return "updated";
   }
 
   /** Soft-delete: mark inactive instead of removing. Conversations that
@@ -190,13 +198,17 @@ export function seedBuiltinStyles(
   builtins: readonly Style[],
 ): {
   inserted: string[];
+  updated: string[];
   skipped: string[];
 } {
   const inserted: string[] = [];
+  const updated: string[] = [];
   const skipped: string[] = [];
   for (const s of builtins) {
-    if (repo.upsertBuiltin(s)) inserted.push(s.slug);
+    const r = repo.upsertBuiltin(s);
+    if (r === "inserted") inserted.push(s.slug);
+    else if (r === "updated") updated.push(s.slug);
     else skipped.push(s.slug);
   }
-  return { inserted, skipped };
+  return { inserted, updated, skipped };
 }
