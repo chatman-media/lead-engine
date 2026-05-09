@@ -193,6 +193,89 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
     expect(rating.elo).toBeGreaterThan(1500);
   });
 
+  test("reflect catches a fabrication and replaces with a stall reply", async () => {
+    const styleRow = styles.bySlug(alinaInfinity.slug)!;
+    // Sales LLM is hit twice per turn when reflect=on:
+    //   1) generation
+    //   2) reflect verifier
+    // Need vacanciesBlock so answerWithRag has CONTEXT and proceeds to
+    // generation; otherwise it short-circuits to NO_CONTEXT (path=no_context).
+    const salesChat = scriptedChat([
+      "Ближайший вылет в январь-февраль 2025 года", // fabrication
+      '{"grounded":false,"reason":"date not in CONTEXT"}', // reflect verdict → ungrounded
+      "Ок, удобно тебе анкету сейчас?", // turn 1 grounded reply
+      '{"grounded":true}', // reflect verdict turn 1
+    ]);
+    const candidateChat = scriptedChat(["ну ладно", "ок, давай оформляться"]);
+    const judgeChat = scriptedChat([
+      '["specific-next-step"]',
+      '{"outcome":"won","reason":"agreed at turn 1"}',
+    ]);
+
+    const result = await runSelfPlayMatch(
+      {
+        db,
+        kb,
+        skills,
+        outcomes,
+        ratings,
+        salesChat,
+        candidateChat,
+        judgeChat,
+        embedder: fakeEmbedder(),
+        reflect: true,
+        stallReply: "Секунду, уточню",
+        vacanciesBlock: "АКТУАЛЬНЫЕ ВАКАНСИИ:\n- Корея, караоке хостес",
+      },
+      {
+        style: alinaInfinity,
+        styleId: styleRow.id,
+        persona: CANDIDATE_BY_SLUG.get("time-pressed-zhanna")!,
+        maxTurns: 3,
+      },
+    );
+
+    expect(result.fabricationsCaught).toBe(1);
+    const transcriptText = result.transcript.map((m) => m.text).join("\n");
+    expect(transcriptText).not.toContain("январь-февраль");
+    expect(transcriptText).toContain("Секунду, уточню");
+  });
+
+  test("reflect=false: fabrication leaks through (legacy behaviour)", async () => {
+    const styleRow = styles.bySlug(alinaInfinity.slug)!;
+    const salesChat = scriptedChat(["Ближайший вылет январь 2025"]);
+    const candidateChat = scriptedChat(["ок, давай оформляться"]);
+    const judgeChat = scriptedChat([
+      '["social-proof-stat"]',
+      '{"outcome":"won","reason":"agreed"}',
+    ]);
+
+    const result = await runSelfPlayMatch(
+      {
+        db,
+        kb,
+        skills,
+        outcomes,
+        ratings,
+        salesChat,
+        candidateChat,
+        judgeChat,
+        embedder: fakeEmbedder(),
+        reflect: false,
+        vacanciesBlock: "АКТУАЛЬНЫЕ ВАКАНСИИ:\n- Корея",
+      },
+      {
+        style: alinaInfinity,
+        styleId: styleRow.id,
+        persona: CANDIDATE_BY_SLUG.get("eager-kate")!,
+        maxTurns: 3,
+      },
+    );
+
+    expect(result.fabricationsCaught).toBe(0);
+    expect(result.transcript.map((m) => m.text).join("\n")).toContain("январь 2025");
+  });
+
   test("lost match records losses", async () => {
     const styleRow = styles.bySlug(alinaInfinity.slug)!;
     const salesChat = scriptedChat(["рассказывай про себя?"]);

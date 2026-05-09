@@ -18,6 +18,7 @@ export interface SelfPlayMatchRow {
   turns: number;
   skills_json: string;
   lead_id: number | null;
+  fabrications_caught: number;
   created_at: number;
 }
 
@@ -32,6 +33,7 @@ export interface SelfPlayMatchSummary {
   turns: number;
   skills_count: number;
   lead_id: number | null;
+  fabrications_caught: number;
   created_at: number;
 }
 
@@ -52,15 +54,16 @@ export class SelfPlayMatchesRepo {
     turns: number;
     skills: string[];
     leadId: number | null;
+    fabricationsCaught?: number;
   }): SelfPlayMatchRow {
     const row = this.db
       .query<
         SelfPlayMatchRow,
-        [string, string, string, string | null, string, number, string, number | null]
+        [string, string, string, string | null, string, number, string, number | null, number]
       >(
         `INSERT INTO self_play_matches
-           (style_slug, persona_slug, outcome, judge_reason, transcript_json, turns, skills_json, lead_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           (style_slug, persona_slug, outcome, judge_reason, transcript_json, turns, skills_json, lead_id, fabrications_caught)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING *`,
       )
       .get(
@@ -72,6 +75,7 @@ export class SelfPlayMatchesRepo {
         input.turns,
         JSON.stringify(input.skills),
         input.leadId,
+        input.fabricationsCaught ?? 0,
       );
     if (!row) throw new Error("failed to insert self_play_match");
     return row;
@@ -115,6 +119,7 @@ export class SelfPlayMatchesRepo {
       turns: r.turns,
       skills_count: parseSkills(r.skills_json).length,
       lead_id: r.lead_id,
+      fabrications_caught: r.fabrications_caught ?? 0,
       created_at: r.created_at,
     }));
   }
