@@ -32,6 +32,7 @@ export function Layout({ admin, children }: LayoutProps) {
             { to: "/admin/users", label: "Users" },
             { to: "/admin/vacancies", label: "Vacancies" },
             { to: "/admin/kb", label: "Knowledge base" },
+            { to: "/admin/library", label: "Library (books)" },
             { to: "/admin/styles", label: "Sales styles" },
             { to: "/admin/skills", label: "Skills" },
             // Experiments hidden from nav for the single-persona setup.

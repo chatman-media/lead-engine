@@ -467,6 +467,27 @@ export const api = {
       },
     ),
 
+  uploadBook: async (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/admin/api/kb/books/upload", {
+      method: "POST",
+      body: fd,
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, (body as { error?: string }).error ?? res.statusText);
+    }
+    return res.json() as Promise<{
+      ok: true;
+      document_id: number;
+      chunks: number;
+      created: boolean;
+      filename: string;
+    }>;
+  },
+
   // Lead pipeline
   leads: (state?: LeadState) =>
     req<{ leads: Lead[]; counts: LeadCounts }>(`/admin/api/leads${state ? `?state=${state}` : ""}`),

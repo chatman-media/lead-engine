@@ -8,6 +8,7 @@ import { Chats } from "./pages/Chats.tsx";
 import { Experiments } from "./pages/Experiments.tsx";
 import { Kb } from "./pages/Kb.tsx";
 import { Leads } from "./pages/Leads.tsx";
+import { Library } from "./pages/Library.tsx";
 import { Login } from "./pages/Login.tsx";
 import { NewStyle } from "./pages/NewStyle.tsx";
 import { Skills } from "./pages/Skills.tsx";
@@ -86,6 +87,7 @@ export function App() {
                 <Route path="leads" element={<Leads />} />
                 <Route path="vacancies" element={<Vacancies />} />
                 <Route path="kb" element={<Kb />} />
+                <Route path="library" element={<Library />} />
                 <Route path="styles" element={<Styles />} />
                 <Route path="styles/new" element={<NewStyle />} />
                 <Route path="styles/:id" element={<StyleDetail />} />

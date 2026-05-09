@@ -48,6 +48,7 @@ import {
   createUpdateUserMemoryHandler,
   createUpdateVacancyHandler,
   createUpdateVisaDocsHandler,
+  createUploadBookHandler,
   createUserDetailHandler,
 } from "./admin/api.ts";
 import { createLoginHandler, createLogoutHandler, createMeHandler } from "./admin/auth.ts";
@@ -230,6 +231,8 @@ export function createRouter(deps: AppDeps): Router {
   // linear first-match scan on a `[^/]+` pattern, so without this order the
   // literal "ingest" segment would be captured as `:id="ingest"`.
   router.post("/admin/api/kb/ingest", createIngestKbDocumentHandler(apiDeps));
+  // Book upload: multipart PDF/TXT/MD → ingest with topic="books".
+  router.post("/admin/api/kb/books/upload", createUploadBookHandler(apiDeps));
   router.get("/admin/api/kb/documents/:id", createGetKbDocumentHandler(apiDeps));
   router.patch("/admin/api/kb/documents/:id", createUpdateKbDocumentHandler(apiDeps));
   router.delete("/admin/api/kb/documents/:id", createDeleteKbDocumentHandler(apiDeps));
