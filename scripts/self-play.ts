@@ -24,7 +24,7 @@ import { config } from "../src/config.ts";
 import { KbRepo } from "../src/db/repos/kb.ts";
 import { SkillOutcomesRepo, StyleRatingsRepo } from "../src/db/repos/skill-outcomes.ts";
 import { SkillsRepo, seedSkillCatalogue } from "../src/db/repos/skills.ts";
-import { StylesRepo } from "../src/db/repos/styles.ts";
+import { StylesRepo, seedBuiltinStyles } from "../src/db/repos/styles.ts";
 import { renderVacanciesBlock, VacanciesRepo } from "../src/db/repos/vacancies.ts";
 import { getDb } from "../src/db/sqlite.ts";
 import { OpenAIChatClient } from "../src/rag/chat.ts";
@@ -34,6 +34,7 @@ import { OllamaEmbeddingClient } from "../src/rag/providers/ollama-embed.ts";
 import { OpenRouterChatClient } from "../src/rag/providers/openrouter-chat.ts";
 import { runSelfPlayMatch } from "../src/sales/self-play/orchestrator.ts";
 import { CANDIDATE_BY_SLUG, CANDIDATE_PERSONAS } from "../src/sales/self-play/personas.ts";
+import { STYLES as BUILTIN_STYLES } from "../src/sales/styles/index.ts";
 import type { Style } from "../src/sales/types.ts";
 
 interface Args {
@@ -126,6 +127,7 @@ async function main() {
   const skillsRepo = new SkillsRepo(db);
   // Seed catalogue + ensure styles loaded on first run from a fresh DB.
   seedSkillCatalogue(skillsRepo);
+  seedBuiltinStyles(stylesRepo, BUILTIN_STYLES);
 
   const styleRow = stylesRepo.bySlug(args.style);
   if (!styleRow) {
