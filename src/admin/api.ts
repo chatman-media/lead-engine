@@ -2681,8 +2681,7 @@ export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
       )
       .get(since)!.n;
 
-    const noContextCount =
-      (byPath.find((p) => p.path === "no_context")?.count ?? 0) + ungrounded;
+    const noContextCount = (byPath.find((p) => p.path === "no_context")?.count ?? 0) + ungrounded;
     const unansweredRate = total > 0 ? noContextCount / total : 0;
 
     return json({
@@ -2936,7 +2935,10 @@ export function createApproveKbSuggestionHandler(deps: AdminApiDeps): RouteHandl
       return json({ error: "suggestion is not pending" }, { status: 409 });
     }
     if (!suggestion.answer_draft?.trim()) {
-      return json({ error: "answer_draft is empty — add an answer before approving" }, { status: 400 });
+      return json(
+        { error: "answer_draft is empty — add an answer before approving" },
+        { status: 400 },
+      );
     }
 
     const docBody = `Q: ${suggestion.question_text}\n\nA: ${suggestion.answer_draft.trim()}`;

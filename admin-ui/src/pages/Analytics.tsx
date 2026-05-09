@@ -124,9 +124,7 @@ export function Analytics() {
                     : "ok"
               }
             >
-              <BigNumber
-                value={`${Math.round((data.unanswered_rate ?? 0) * 100)}%`}
-              />
+              <BigNumber value={`${Math.round((data.unanswered_rate ?? 0) * 100)}%`} />
               <Hint>вопросы без ответа (no_context + ungrounded)</Hint>
             </Card>
           </SectionRow>

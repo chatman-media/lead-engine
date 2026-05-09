@@ -122,6 +122,85 @@ export const capitalizeFirstLetter: TextStyleRule = {
   },
 };
 
+/**
+ * Strip Markdown bold (`**text**` and `__text__`). Telegram doesn't
+ * render Markdown unless `parse_mode` is set — and the bot uses plain
+ * text — so the asterisks/underscores leak through to the candidate
+ * verbatim ("Зарплата от **₩110 000**" → user sees the stars).
+ *
+ * We strip the markers and keep the inner text. Conservative: requires
+ * non-whitespace content inside, so a literal `**` separator wrapping
+ * spaces stays intact (rare but happens).
+ */
+export const stripMarkdownBold: TextStyleRule = {
+  name: "strip-markdown-bold",
+  description: "**foo** / __foo__ → foo",
+  apply: (s) =>
+    s
+      .replace(/\*\*([^\s*](?:[^*]*[^\s*])?)\*\*/g, "$1")
+      .replace(/__([^\s_](?:[^_]*[^\s_])?)__/g, "$1"),
+};
+
+/**
+ * Strip Markdown italics (`*text*` and `_text_`). Same reason as bold.
+ *
+ * Tricky: bare `*` and `_` appear naturally in URLs, file names, math
+ * expressions, etc. We require:
+ *   - the OPENING marker to be at start-of-string OR preceded by a
+ *     non-letter/non-digit (so `foo_bar` and `https://example_com` stay);
+ *   - the CLOSING marker to be at end-of-string OR followed by the same;
+ *   - inner content to be non-empty + not start/end with whitespace.
+ *
+ * Run AFTER `stripMarkdownBold` so `**bold**` is unwrapped before the
+ * italic regex sees the standalone `*` pair.
+ */
+export const stripMarkdownItalic: TextStyleRule = {
+  name: "strip-markdown-italic",
+  description: "*foo* / _foo_ → foo",
+  apply: (s) =>
+    s
+      .replace(/(^|[^\p{L}\p{N}*])\*([^\s*][^*]*?[^\s*]|[^\s*])\*(?=$|[^\p{L}\p{N}*])/gu, "$1$2")
+      .replace(/(^|[^\p{L}\p{N}_])_([^\s_][^_]*?[^\s_]|[^\s_])_(?=$|[^\p{L}\p{N}_])/gu, "$1$2"),
+};
+
+/**
+ * Strip Markdown inline / fenced code (`` `code` ``, ``` ```block``` ```).
+ * In a candidate-facing sales chat these are never helpful; the bot
+ * sometimes wraps numbers like `` `₩110 000` `` for emphasis and the
+ * candidate sees the backticks.
+ *
+ * Fenced (triple-backtick) blocks come first so their contents aren't
+ * partially eaten by the inline rule.
+ */
+export const stripMarkdownCode: TextStyleRule = {
+  name: "strip-markdown-code",
+  description: "`x` → x; ```x``` → x",
+  apply: (s) =>
+    s.replace(/```(?:[a-z0-9_-]*\n)?([\s\S]*?)```/gi, "$1").replace(/`([^`\n]+)`/g, "$1"),
+};
+
+/**
+ * Strip Markdown headers (`# Heading` at the start of a line). LLMs
+ * sometimes emit `## Условия:` when listing facts; in chat that just
+ * dumps the hashes. We keep the trailing text.
+ */
+export const stripMarkdownHeaders: TextStyleRule = {
+  name: "strip-markdown-headers",
+  description: "^#+ text → text",
+  apply: (s) => s.replace(/^[ \t]*#{1,6}[ \t]+/gm, ""),
+};
+
+/**
+ * Strip Markdown links (`[text](url)`) into `text (url)` — keeps the
+ * URL visible, drops the bracket syntax. Telegram autolinks plain
+ * URLs, so the candidate still gets a clickable link.
+ */
+export const stripMarkdownLinks: TextStyleRule = {
+  name: "strip-markdown-links",
+  description: "[text](url) → text (url)",
+  apply: (s) => s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, "$1 ($2)"),
+};
+
 // ─── Default bundle ────────────────────────────────────────────────────
 
 /**
@@ -132,10 +211,22 @@ export const capitalizeFirstLetter: TextStyleRule = {
  * just re-uppercase the «К» in «Конечно!» and the lead-in stays.
  */
 export const DEFAULT_STYLE_RULES: readonly TextStyleRule[] = [
+  // Markdown stripping FIRST — Telegram doesn't render markdown for
+  // plain-text bot replies, so leftover **/`/[]() reach the candidate.
+  // Order: links → fenced code → bold → italic → headers (each one's
+  // output becomes input for the next; bold before italic so `**foo**`
+  // is unwrapped before the italic regex sees a `*` pair).
+  stripMarkdownLinks,
+  stripMarkdownCode,
+  stripMarkdownBold,
+  stripMarkdownItalic,
+  stripMarkdownHeaders,
+  // Typography normalisation.
   replaceEmDash,
   replaceEnDash,
   replaceOtherDashes,
   replaceEllipsis,
+  // Conversational tone fixes.
   stripAILeadIns, // strip first
   capitalizeFirstLetter, // then ensure remaining first char is capital
 ];
