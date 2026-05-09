@@ -1,174 +1,288 @@
 # Architecture
 
-Высокоуровневая карта проекта. Один Telegram-бот с RAG, sales-style engine, операторской админкой и пайплайном RAG-надстроек. Всё на чистом Bun + SQLite (с расширением `sqlite-vec`).
+Высокоуровневая карта проекта. Один Telegram-бот с RAG, sales-style engine, операторской админкой, самообучением через self-play и опциональным userbot-режимом. Всё на Bun + SQLite (+ расширение `sqlite-vec`).
 
-## Запрос end-to-end
+## Request lifecycle (webhook)
 
 ```
 Telegram update
    │
    ▼
-POST /telegram/<secret>      ─┬─► users.byTgId / whitelist (TELEGRAM_OPEN_ACCESS)
-                              │
-                              ├─► messages.addUserMessageIfNew (idempotent)
-                              │
-                              ├─► escalation triggers? → mode=queued, return
-                              │
-                              └─► ack 200 + detached processInbound() ───────┐
-                                                                              │
-                                                                              ▼
-                                                            ┌─────────────────────────────────┐
-                                                            │ resolveStyle (env ▸ DB ▸ A/B)              │
-                                                            │ classifyStage (regex / LLM)                │
-                                                            │ users.getMemory       (RAG_USER_MEMORY)    │
-                                                            │ conversations.getSummary (RAG_CONVERSATION_SUMMARY) │
-                                                            │ rewriteQuery          (RAG_QUERY_REWRITE)  │
-                                                            │ classifyTopic         (RAG_TOPIC_ROUTING)  │
-                                                            │ kb.hybridSearch       (RAG_HYBRID_SEARCH)  │
-                                                            │ composeSystemPrompt                        │
-                                                            │ chat.complete                              │
-                                                            │ verifyAnswer          (RAG_REFLECT)        │
-                                                            └────────────────────────────────────────────┘
-                                                                              │
-                                                       ┌──────────────────────┼─────────────────────┐
-                                                       ▼                      ▼                     ▼
-                                                send to TG          NO_CONTEXT_MARKER       ungrounded → silent
-                                                       │
-                                                       └─► fire-and-forget:
-                                                              extractUserFacts → mergeMemoryFacts
-                                                              summarizeConversation → setSummary
+POST /telegram/<secret>   ─┬─► whitelist (UsersRepo.byTgId / TELEGRAM_OPEN_ACCESS)
+                           │
+                           ├─► messages.addUserMessageIfNew  (idempotent по tg_message_id)
+                           │
+                           ├─► escalation trigger? → mode=queued, return
+                           │
+                           └─► ack 200 + detached processInbound() ───────────────┐
+                                                                                   │
+                                                                                   ▼
+                                                           ┌──────────────────────────────────────────┐
+                                                           │  resolveStyle  env ▸ DB slug ▸ A/B       │
+                                                           │  classifyStage  regex / LLM              │
+                                                           │  users.getMemory      (USER_MEMORY)      │
+                                                           │  conversations.getSummary  (CONV_SUMMARY) │
+                                                           │  rewriteQuery         (QUERY_REWRITE)    │
+                                                           │  classifyTopic        (TOPIC_ROUTING)    │
+                                                           │  kb.hybridSearch      (HYBRID_SEARCH)    │
+                                                           │  composeSystemPrompt                     │
+                                                           │  chat.complete  →  sanitize              │
+                                                           │  verifyAnswer         (REFLECT)          │
+                                                           └──────────────────────────────────────────┘
+                                                                                   │
+                                                         ┌─────────────────────────┼──────────────────┐
+                                                         ▼                         ▼                  ▼
+                                                   send to TG            NO_CONTEXT_MARKER       ungrounded
+                                                         │                      (silent)           (silent)
+                                                         └─► fire-and-forget:
+                                                                extractUserFacts → mergeMemoryFacts
+                                                                gradeSkills → recordSkillOutcome
+                                                                summarizeConversation
+                                                                intakeCheck → leadStateTransition
+                                                                kb-suggestion if NO_CONTEXT
 ```
 
-Все шесть RAG-надстроек **опциональны** и независимы. Подробности в [RAG_LAYERS.md](RAG_LAYERS.md).
+Все RAG-надстройки **опциональны** и независимы. Подробности — [RAG_LAYERS.md](RAG_LAYERS.md).
 
 ## Слои
 
 ```
 ┌──────────────────────────── HTTP / WebSocket ─────────────────────────────┐
-│ src/server.ts          createServer(): Bun.serve + WS upgrade             │
-│ src/router.ts          мини-роутер с :params                              │
-│ src/app.ts             регистрация всех routes (admin, telegram, ws, ui)  │
+│  src/server.ts    createServer(): Bun.serve + WS upgrade + security headers│
+│  src/router.ts    мини-роутер с :params extraction                        │
+│  src/app.ts       регистрация всех routes (admin, telegram, ws, UI)       │
 └────────────────────────────────────────────────────────────────────────────┘
-        │                          │                          │
-        ▼                          ▼                          ▼
-┌──────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
-│ telegram/        │   │ admin/               │   │ questionnaire/       │
-│   webhook.ts     │   │   api.ts (REST)      │   │   routes.ts          │
-│   client.ts      │   │   auth.ts (sessions) │   │   /q/:token          │
-│   escalation.ts  │   │   bus.ts (WS pub/sub)│   └──────────────────────┘
-└──────────────────┘   └──────────────────────┘
-        │                          │
-        └──────────┬───────────────┘
-                   ▼
-┌──────────────────────────────── domain layer ─────────────────────────────┐
-│ rag/                                  sales/                              │
-│   answer.ts (entry point)              types.ts (Style schema, Zod)        │
-│   chat.ts / embed.ts (interfaces)      prompt.ts (composeSystemPrompt)     │
-│   text-style-rules.ts (postproc)       stage-router.ts (regex)             │
-│   extract-user-facts.ts                stage-classifier.ts (LLM)           │
-│   rewrite-query.ts                     ab-router.ts (deterministic)        │
-│   reflect.ts                           styles/ (built-in styles)           │
-│   providers/ (ollama, openai, openrouter)                                  │
-└────────────────────────────────────────────────────────────────────────────┘
-                   │
-                   ▼
-┌──────────────────────────────── data layer ───────────────────────────────┐
-│ db/                                                                       │
-│   sqlite.ts (Bun.Database + sqlite-vec extension)                         │
-│   migrate.ts (file-based migrations runner)                               │
-│   ensure-kb-vec.ts (auto re-create kb_vec on dim change)                  │
-│   repos/                                                                  │
-│     users.ts         conversations.ts    messages.ts                      │
-│     kb.ts            styles.ts           experiments.ts                   │
-│     leads.ts         vacancies.ts                                         │
-│     admins.ts        sessions.ts         questionnaire_tokens.ts          │
-└────────────────────────────────────────────────────────────────────────────┘
-                   │
-                   ▼
-┌────────────────────────────── persistence ────────────────────────────────┐
-│ data/bot.db (SQLite, WAL)                                                 │
-│   users / conversations / messages                                        │
-│   kb_documents / kb_chunks / kb_vec / kb_chunks_fts                       │
-│   styles / experiments / leads / vacancies                                │
-│   admins / sessions / questionnaire_tokens                                │
-└────────────────────────────────────────────────────────────────────────────┘
+         │                         │                         │
+         ▼                         ▼                         ▼
+┌──────────────────┐  ┌────────────────────────┐  ┌──────────────────────┐
+│  telegram/       │  │  admin/                │  │  questionnaire/      │
+│    webhook.ts    │  │    api.ts  (50+ REST)  │  │    routes.ts         │
+│    client.ts     │  │    auth.ts (sessions)  │  │    /q/:token         │
+│    userbot.ts    │  │    bus.ts  (WS pub/sub)│  └──────────────────────┘
+│    escalation.ts │  └────────────────────────┘
+└──────────────────┘
+         │                         │
+         └──────────┬──────────────┘
+                    ▼
+┌──────────────────────────────── domain layer ──────────────────────────────┐
+│                                                                             │
+│  rag/                                 sales/                               │
+│    answer.ts    (entry point)           types.ts   (Style schema, Zod)     │
+│    chat.ts      (ChatClient iface)      prompt.ts  (composeSystemPrompt)   │
+│    embed.ts     (EmbeddingClient)       stage-router.ts  (regex)           │
+│    reflect.ts   (grounding check)       stage-classifier.ts  (LLM)        │
+│    rewrite-query.ts                     ab-router.ts  (deterministic)      │
+│    extract-user-facts.ts                elo.ts  (ELO ratings)              │
+│    summarize-conversation.ts            skills/catalogue.ts                │
+│    topic-classifier.ts                  styles/  (4 built-in styles)       │
+│    text-style-rules.ts                  coach.ts  (coach-LLM proposals)    │
+│    chunk.ts / ingest.ts / parse-pdf.ts  shadow-eval.ts                     │
+│    providers/  (ollama, openai, openrouter)                                │
+│                                       self-play/                           │
+│                                         orchestrator.ts                    │
+│                                         judge.ts                           │
+│                                         pairwise.ts                        │
+│                                         personas.ts                        │
+│                                                                             │
+│  leads/                                                                     │
+│    service.ts   (state machine)                                             │
+│    intake.ts    (auto-extraction)                                           │
+│    visa-docs.ts (27-field parser)                                           │
+│    stale-sweep.ts  (background job)                                         │
+│    outcome-attribution.ts                                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌──────────────────────────────── data layer ─────────────────────────────────┐
+│  db/                                                                         │
+│    sqlite.ts          (Bun.Database + sqlite-vec extension)                  │
+│    migrate.ts         (file-based migration runner, sequential)              │
+│    ensure-kb-vec.ts   (auto-recreate kb_vec on embedding dim change)         │
+│    repos/ (21 DAOs):                                                         │
+│      users.ts            conversations.ts        messages.ts                 │
+│      kb.ts               admins.ts               sessions.ts                 │
+│      styles.ts           experiments.ts          skills.ts                   │
+│      vacancies.ts        leads.ts                lead-notes.ts               │
+│      questionnaire-tokens.ts  kb-suggestions.ts  skill-outcomes.ts          │
+│      self-play-matches.ts     pairwise-matches.ts style-ratings.ts           │
+│      coach-proposals.ts       shadow-evaluations.ts  userbot-session.ts     │
+└──────────────────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────── persistence ─────────────────────────────────────┐
+│  data/bot.db (SQLite, WAL)                                                   │
+│                                                                               │
+│  Users & conversations                                                        │
+│    users / conversations / messages                                           │
+│  Knowledge base                                                               │
+│    kb_documents / kb_chunks / kb_vec / kb_chunks_fts                         │
+│  Sales engine                                                                 │
+│    styles / experiments / skills / style_skills                               │
+│    skill_outcomes / self_play_matches / pairwise_matches                      │
+│    coach_proposals / shadow_evaluations                                       │
+│  Leads                                                                        │
+│    leads / lead_events / lead_notes                                           │
+│  Operations                                                                   │
+│    vacancies / admins / sessions / questionnaire_tokens / kb_suggestions      │
+│    userbot_session                                                            │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
+
+## Data layer
+
+### Таблицы
+
+| Таблица | Назначение |
+|---------|-----------|
+| `users` | Telegram-юзеры. `status` для воронки; `profile_json.memory.facts` — cross-session память кандидата |
+| `conversations` | Одна на юзера. `mode` ∈ ai/queued/human; `current_stage` (funnel); `style_id` + `experiment_id` (A/B sticky); `summary_json` (сжатая история) |
+| `messages` | `role` ∈ user/assistant/human/system. Idempotent по `(conversation_id, tg_message_id)`. `meta_json` хранит `used_chunk_ids`. `stage` для funnel-аналитики |
+| `kb_documents` | KB-документы: source path, `content_hash` (SHA-256 dedup), optional `topic` тег |
+| `kb_chunks` | Чанки ≈1500 символов, overlap 150 |
+| `kb_vec` | sqlite-vec virtual table (L2, dim из конфига) |
+| `kb_chunks_fts` | FTS5 BM25 index; синхронизирован тремя INSERT/UPDATE/DELETE триггерами |
+| `kb_suggestions` | Очередь вопросов без ответа (когда RAG вернул NO_CONTEXT) — оператор решает что добавить в KB |
+| `styles` | Sales-style configs в JSON. `(slug, version)` composite key — цепочка версий; одна активная на slug |
+| `experiments` | A/B эксперименты: slug, allocation JSON, status, success metric |
+| `skills` | Каталог техник убеждения. `prompt_fragment` инжектируется в system prompt |
+| `style_skills` | Пересечение: какие skills включены для какого style |
+| `skill_outcomes` | Post-attribution: skill → outcome (win/loss), source (real_conversation/self_play) |
+| `self_play_matches` | Транскрипты self-play матчей + judge verdict + fabrication count |
+| `pairwise_matches` | Head-to-head A/B матчи (два solo_match_id → winner) |
+| `coach_proposals` | Предложения coach-LLM: `proposal_json`, status (pending/approved/rejected/applied) |
+| `shadow_evaluations` | Post-coach A/B валидация: base vs variant, статус, pairwise match IDs |
+| `leads` | Воронка кандидата: `state` machine, `intake_json` (7 полей), `visa_docs_json` (27 полей), `application_id` |
+| `lead_events` | Аудит-трейл переходов состояний |
+| `lead_notes` | Операторские аннотации к лиду |
+| `vacancies` | Быстро-меняющиеся вакансии. Prepended к RAG context на каждом turn. `url` — ссылка для кандидата |
+| `admins` | Операторские аккаунты (argon2id, Bun.password) |
+| `sessions` | Admin session cookies (HttpOnly, TTL 14d) |
+| `questionnaire_tokens` | One-shot токены для `/q/:token` |
+| `userbot_session` | MTProto session string (gramjs StringSession). Одна строка (id=1) |
+
+### Миграции (21 файл, `migrations/`)
+
+```
+001_init.sql                  — базовые таблицы
+002_idempotent_user_messages  — unique(conversation_id, tg_message_id)
+003_sales_styles_and_experiments
+004_style_versioning          — (slug, version) UNIQUE + partial UNIQUE(slug) WHERE is_active=1
+005_kb_fts                    — FTS5 virtual table + 3 sync triggers
+006_conversation_summary
+007_kb_topic                  — kb_chunks.topic
+008_vacancies
+009_leads                     — state machine
+010_lead_events
+011_lead_notes
+012_vacancies_url
+013_kb_suggestions
+013_skills                    — skills + style_skills
+014_skill_outcomes
+015_skill_outcomes_self_play  — allow source='self_play'
+016_self_play_matches
+017_self_play_fabrications    — matches.fabrication_count
+018_pairwise_matches
+018_userbot_session
+019_coach_proposals
+020_shadow_evaluations
+```
+
+## Self-play training loop
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         SELF-PLAY LOOP                                   │
+│                                                                          │
+│  Candidate persona (LLM)  ◄──────────────────────────────────────────┐  │
+│          │ user message                                                │  │
+│          ▼                                                             │  │
+│  Salesperson (salesperson-LLM + RAG + style)                          │  │
+│          │ assistant reply                                             │  │
+│          └───────────────────────────────────────────────────────────►│  │
+│                                                                          │
+│  Max N turns → Judge-LLM → verdict {outcome, reason}                    │
+│                    │                                                     │
+│                    ├── win   → skill_outcomes (win) + ELO ↑             │
+│                    └── loss  → skill_outcomes (loss) + ELO ↓            │
+│                                                                          │
+│  Pairwise mode: same persona × 2 styles → head-to-head winner           │
+│                                                                          │
+│  Coach: reads recent losses → proposes style edits → operator approves  │
+│       → new style version → shadow A/B (Wilson 95% LB) → accept/reject  │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+Подробности — [SELF_PLAY.md](SELF_PLAY.md).
 
 ## Ключевые design decisions
 
 ### Stateless webhook, sticky DB state
 
-Webhook ackает Telegram в <100ms (Bot API таймаут — 60s, retries дублируют сообщения). Тяжёлая обработка (RAG → LLM → sendMessage) detached в `processInbound()`. State (mode, current_stage, style_id, memory, summary) хранится в БД — рестарты сервера ничего не теряют.
+Webhook ackает Telegram в <100ms (Bot API таймаут 60s, retries дублируют сообщения). Тяжёлая обработка (RAG → LLM → sendMessage) detached в `processInbound()`. State (mode, current_stage, style_id, memory, summary) хранится в БД — рестарты сервера ничего не теряют.
 
 ### Один conversation на user
 
-`conversations.ensureForUser(userId)` идемпотентна — у одного Telegram-юзера только один conversation. Если оператор удалил его — следующее сообщение создаст новый, **но** `users.profile_json.memory` сохраняется (привязан к `users.id`, не к `conversations.id`). Это и нужно.
+`conversations.ensureForUser(userId)` идемпотентна. Если оператор удалил conversation — следующее сообщение создаст новый, но `users.profile_json.memory` сохраняется (привязана к `users.id`, не к `conversations.id`).
 
 ### Two-tier system prompt
 
-- **Legacy persona** (`buildSystemPrompt`) — простой, через `BOT_PERSONA_*` env vars. Достаточно для одного бота с одной воронкой.
-- **Sales-style engine** (`composeSystemPrompt`) — богатый: persona + voice + framework + Cialdini hooks + per-stage guidance + few-shot. Управляется в админке (`/admin/styles`), поддерживает A/B через `experiments`.
-
-Style побеждает persona когда оба заданы (`answerWithRag` смотрит сначала на `input.style`).
+- **Legacy persona** (`buildSystemPrompt`) — простой промпт из `BOT_PERSONA_*` env vars. Достаточно для одного бота с одной воронкой.
+- **Sales-style engine** (`composeSystemPrompt`) — богатый: persona + voice + framework + Cialdini hooks + per-stage guidance + skills + few-shot + KB context. Style побеждает persona когда оба заданы.
 
 ### NO_CONTEXT — silent, не stall
 
-Когда RAG не находит контекст ИЛИ reflection детектит галлюцинацию, бот **молчит**. Conversation остаётся в `mode=ai`, следующее сообщение снова попробует RAG. Альтернатива (отправлять "сейчас уточню") создавала бы false expectations и вешала бы дискуссию на оператора без явного триггера.
-
-Эскалация на оператора — отдельный путь: только по явным ключевым словам кандидата (`escalation.ts`).
+Когда RAG не находит контекст ИЛИ reflection детектит галлюцинацию, бот **молчит**. Conversation остаётся в `mode=ai`, следующее сообщение снова пробует RAG. Эскалация на оператора — только по явным ключевым словам кандидата (`escalation.ts`). Незнакомые вопросы попадают в `kb_suggestions` — оператор видит их в `/admin/kb/suggestions` и решает что добавить в KB.
 
 ### Pluggable LLM providers, decoupled chat ↔ embeddings
 
-`LLM_PROVIDER` управляет чатом, `EMBEDDING_PROVIDER` — embeddings. Их разделяет реальность — у OpenRouter нет endpoint'а для embeddings. Поддерживаемые сочетания:
+`LLM_PROVIDER` управляет чатом, `EMBEDDING_PROVIDER` — embeddings. OpenRouter не имеет `/embeddings` endpoint'а, поэтому в смешанных конфигурациях (OpenRouter chat + Ollama embed) оба провайдера конфигурируются независимо.
 
 | Chat | Embed | Use case |
 |------|-------|----------|
 | OpenAI | OpenAI | стандарт |
 | OpenRouter | Ollama | Claude/GPT в облаке + локальные дешёвые embeddings |
-| OpenRouter | OpenAI | всё в облаке, но через OpenRouter аналитику |
+| OpenRouter | OpenAI | всё в облаке через OpenRouter |
 | Ollama | Ollama | full-local, без расхода токенов |
+
+### Style versioning — immutable history
+
+Редактирование style создаёт новую row (version+1, parent_id=текущий), старая маркируется is_active=0. Conversations, пинненные к старой версии, продолжают видеть тот же промпт. Новые conversations получают новую. Atomic: транзакция в `StylesRepo.editAsNewVersion()`.
 
 ### Operator-first UI
 
-Админка — не CRUD над БД, а инструмент для **перехвата** диалога. Ключевые операции:
+Ключевые операции:
 - `Take over` → `mode=human`, бот замолкает, оператор пишет в TG
 - `Release` → `mode=ai`, бот возобновляет
-- `MEMORY` pane — править то, что бот «знает» о кандидате
-- `Delete` → стереть переписку (например, тестовый чат), persona-память сохраняется
+- MEMORY pane — правка того, что бот «знает» о кандидате
+- WS `/admin/api/ws` — real-time события без polling
 
-WS `/admin/api/ws` стримит события в реальном времени — список чатов сам перестраивается без рефреша.
+### Userbot mode
 
-## Слои данных
-
-| Таблица | Назначение |
-|---------|-----------|
-| `users` | whitelisted Telegram-юзеры, `status` для воронки, `profile_json.memory.facts` для cross-session памяти |
-| `conversations` | одна на юзера, `mode` ∈ ai/queued/human, `current_stage`, `style_id`+`experiment_id` (A/B-сtiky), `summary_json` (long-conversation summary) |
-| `leads` | воронка кандидата, `state` ∈ intake_pending → intake_complete → approved/rejected → docs_pending → docs_complete → submitted/closed; `intake_json`, `visa_docs_json`, `application_id` (VS-YYYY-NNNN), `ops_chat_id`+`ops_message_id` для редактирования карточки в TG |
-| `vacancies` | админ-управляемый список открытых офферов, prepended к RAG context |
-| `messages` | `role` ∈ user/assistant/human/system, idempotent по `tg_message_id`, `meta_json` для `used_chunk_ids`, `stage` для funnel-аналитики |
-| `kb_documents` | source файлы для RAG, dedup по `content_hash`, optional `topic` тег для topic-routed retrieval |
-| `kb_chunks` | чанки ≈1500 символов с overlap 150 |
-| `kb_vec` | vector index (sqlite-vec, dim из конфига) |
-| `kb_chunks_fts` | BM25 keyword index (FTS5, unicode61 tokenizer) — синхронизирован триггерами |
-| `styles` | sales-style configs, версионируется (parent_id) |
-| `experiments` | A/B definitions (slug + allocation JSON + status) |
-| `admins` / `sessions` | argon2id auth, HttpOnly cookies |
-| `questionnaire_tokens` | one-shot tokens для формы `/q/:token` |
-
-## Documentation map
-
-- [README.md](../README.md) — настройка, env, провайдеры, CLI, KB pipeline, full setup guide
-- [docs/ARCHITECTURE.md](ARCHITECTURE.md) — этот файл, общая навигация
-- [docs/RAG_LAYERS.md](RAG_LAYERS.md) — шесть опциональных надстроек (hybrid, memory, rewrite, reflect, summary, topic routing): зачем, как, цена, тесты
-- [docs/SALES_STYLES.md](SALES_STYLES.md) — sales-style engine: схема Style, A/B testing, integration с RAG
-- [docs/LEADS.md](LEADS.md) — lead pipeline: state machine, intake/visa-docs auto-extract, operator workflow, шаблоны
-- [docs/DEPLOY.md](DEPLOY.md) — Docker / docker-compose / nginx / Cloudflare Tunnel / backups
-- [docs/ROADMAP.md](ROADMAP.md) — что сделано, что в очереди (Tier 1/2/3 по ROI)
+Когда `TELEGRAM_USERBOT=1`, gramjs-клиент подключается как личный аккаунт. Каждое входящее `NewMessage` создаёт per-message sender с замыканием на `msg.reply()` — это обходит "could not find input entity" ошибку gramjs (numeric userId без access_hash). Сессия хранится в `userbot_session` таблице.
 
 ## Тестовая стратегия
 
-- **Unit tests** (`bun run test`, ≥478): TDD, каждый модуль изолирован, `:memory:` SQLite. Тесты на каждый repo, prompt builder, RAG layer, parsing helper, admin handler.
-- **E2E tests** (`bun run test:e2e`, 14): Playwright прогоняет happy-path через всю стек (Telegram update → admin UI → ответ обратно в TG). Отдельная test DB, `TEST_HOOKS=1` для seed эндпоинтов.
-- **Build check**: `bun run build:ui` — Vite сборка React-админки. Должна быть зелёной перед PR.
-- **Type check**: `bunx tsc --noEmit --ignoreDeprecations 6.0` — TypeScript strict, известные warnings в test-файлах из-за Bun 1.3 fetch types (не блокирующие).
+| Уровень | Инструмент | Объём |
+|---------|-----------|-------|
+| Unit | `bun test` | 807+ тестов, `tests/unit/` (58 файлов) |
+| E2E | Playwright | 14+ тестов, `tests/e2e/` |
+| Build | `bun run build:ui` | Vite сборка React-админки |
+| Type check | `bunx tsc --noEmit` | TypeScript strict |
+
+Unit-тесты изолированы: `:memory:` SQLite, мок-LLM клиенты, никакой сети. Каждый модуль с нетривиальной логикой — отдельный test-файл в `tests/unit/`, зеркалирующий структуру `src/`.
+
+E2E-тесты поднимают сервер на отдельном порту (`E2E_PORT`, default 3100) с тестовой БД и `TEST_HOOKS=1`. `/__test/*` seed-эндпоинты доступны только при этом флаге.
+
+## Documentation map
+
+| Файл | Что |
+|---|---|
+| [../README.md](../README.md) | Setup guide: env, CLI, KB pipeline, провайдеры |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Этот файл |
+| [RAG_LAYERS.md](RAG_LAYERS.md) | 6 opt-in RAG надстроек |
+| [SALES_STYLES.md](SALES_STYLES.md) | Style schema, skills, A/B, промпт |
+| [SELF_PLAY.md](SELF_PLAY.md) | Self-play, pairwise, coaching, shadow eval |
+| [LEADS.md](LEADS.md) | Lead state machine, intake/visa-docs, relay |
+| [USERBOT.md](USERBOT.md) | MTProto userbot setup |
+| [DEPLOY.md](DEPLOY.md) | Docker, nginx, backups |
+| [ROADMAP.md](ROADMAP.md) | Что сделано, что в очереди |

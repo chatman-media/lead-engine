@@ -2,75 +2,46 @@
 
 [![CI](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml/badge.svg)](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml)
 
-Telegram-бот с RAG по базе знаний, анкетой по токену и админкой с ручным
-перехватом диалога. Всё на чистом Bun без HTTP-фреймворка, БД — встроенный
-`bun:sqlite` + расширение `sqlite-vec`. Поддерживаются OpenAI-совместимые
-API и локальная Ollama (без расхода токенов).
+Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тестами, самообучением через self-play и полноценной операторской админкой. Всё на чистом Bun без HTTP-фреймворка — SQLite + `sqlite-vec` для векторного поиска, gramjs для MTProto userbot-режима.
 
-Разрабатывается через TDD: на каждый юнит сначала падающий тест, потом
-минимальная реализация. Текущее состояние: **640+ unit + 14 e2e зелёных.**
+## Возможности
 
-**RAG layers** (опциональные надстройки over vanilla retrieval):
-hybrid retrieval (BM25 + vector + RRF), cross-session memory кандидата,
-query rewriting, reflection-проверка ответа на галлюцинации, conversation
-summarization для длинных диалогов, topic-routed retrieval (фильтр по
-теме документа). Все включаются флагами в `.env`, по умолчанию off.
-Подробности — [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md). Текущее состояние
-и план — [docs/ROADMAP.md](docs/ROADMAP.md).
+**RAG pipeline** — ответы из базы знаний: hybrid retrieval (BM25 + vector + RRF), cross-session memory кандидата, query rewriting, reflection-проверка на галлюцинации, conversation summarization, topic-routed retrieval. Все слои opt-in через `.env`. Подробности — [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
+
+**Sales-style engine** — pluggable персоны с фреймворками продаж (AIDA / PAS / SPIN / NEPQ / Straight Line), хуками Чалдини и per-stage guidance. Управляется из `/admin/styles`, поддерживает A/B через `/admin/experiments`. Подробности — [docs/SALES_STYLES.md](docs/SALES_STYLES.md).
+
+**Skills catalogue** — каталог техник убеждения (`social_proof_with_numbers`, `reciprocity_gift_offer` и т.д.), включаемых по-стильно. Инжектируются в system prompt, граются post-generation LLM-вызовом. Результаты на лидерборде в `/admin/skills`.
+
+**Self-play + coaching** — автоматизированный тренировочный цикл: бот (salesperson-LLM) против LLM-кандидата → LLM-судья → ELO-рейтинг стилей → coach-LLM предлагает правки → shadow A/B validation. Без ручного труда. Подробности — [docs/SELF_PLAY.md](docs/SELF_PLAY.md).
+
+**Lead pipeline** — воронка кандидата от диалога до подачи на визу: авто-сбор intake (рост / вес / город / фото / загран), карточка в TG-чат с кнопками одобрить/отклонить, авто-парсинг 27 полей визовой анкеты, финальный пакет с `VS-YYYY-NNNN` в визовый чат. Подробности — [docs/LEADS.md](docs/LEADS.md).
+
+**Vacancies** — быстро-меняющийся слой: оператор добавляет вакансию в `/admin/vacancies` → следующий ответ бота уже её видит, без re-embedding.
+
+**Userbot (MTProto)** — бот может работать с личного аккаунта Telegram через gramjs. Отвечает на входящие личные сообщения. Подробности — [docs/USERBOT.md](docs/USERBOT.md).
+
+**Operator admin** — React SPA: список диалогов, ручной перехват (`Take over` / `Release`), reply из браузера, MEMORY pane для редактирования памяти о кандидате, lead pipeline UI, KB browser с approval queue для незнакомых вопросов, styles + experiments + self-play + coach + analytics — всё в реальном времени через WebSocket.
+
+**Conversation export** — диалоги как JSONL (OpenAI fine-tune compatible): `GET /admin/api/conversations/export.jsonl` с фильтрами по style/experiment/status. Готово для дообучения модели.
 
 ### Documentation map
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — общая навигация: слои, request lifecycle, design decisions
-- [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md) — шесть опциональных надстроек RAG (hybrid, memory, rewrite, reflect, summary, topic routing): зачем, как работает, цена, тесты
-- [docs/SALES_STYLES.md](docs/SALES_STYLES.md) — sales-style engine: схема Style, A/B testing
-- [docs/LEADS.md](docs/LEADS.md) — lead pipeline: state machine, intake/visa-docs schemas, operator workflow, templates, tests
-- [docs/DEPLOY.md](docs/DEPLOY.md) — Docker / docker-compose / nginx / Cloudflare Tunnel / backups / KB ingest в проде
-- [docs/ROADMAP.md](docs/ROADMAP.md) — что сделано, что в очереди (Tier 1/2/3 по ROI)
+| Файл | Что |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Слои, request lifecycle, data layer, design decisions |
+| [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md) | 6 opt-in RAG надстроек: hybrid / memory / rewrite / reflect / summary / topic-routing |
+| [docs/SALES_STYLES.md](docs/SALES_STYLES.md) | Sales-style engine: схема Style, skills, A/B testing, промпт |
+| [docs/SELF_PLAY.md](docs/SELF_PLAY.md) | Self-play / pairwise / coaching / shadow evaluation |
+| [docs/LEADS.md](docs/LEADS.md) | Lead pipeline: state machine, intake/visa-docs, operator workflow |
+| [docs/USERBOT.md](docs/USERBOT.md) | Userbot (MTProto): setup, auth, конфигурация |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | Docker / nginx / Cloudflare Tunnel / backups / KB ingest |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Что сделано, что в очереди |
 
-**Conversation export**: операторы могут скачать диалог (или пачку
-с фильтрами по style/experiment/status/mode) как JSONL — `↓ JSONL`
-кнопка на странице чата, или `GET /admin/api/conversations/export.jsonl`
-для скрипт-доступа. Формат — OpenAI fine-tune compatible (`{"messages":[...]}`
-один диалог на строку), готов для дообучения своей модели на лучших
-переписках или передачи команде.
-
-**Sales-style engine**: pluggable стили общения (флирт-рекрутер,
-эмпатичный консультант, прямой PAS) с фреймворками продаж (AIDA/PAS/SPIN/
-NEPQ/Belfort), хуками Чалдини, посменными промптами и few-shot примерами.
-Управляется из админки (`/admin/styles`, `/admin/experiments`) — создаёшь
-эксперимент с весами вариантов, кнопка `start` запускает A/B на новых
-диалогах, на странице эксперимента видна per-style funnel-конверсия.
-
-Активируется одним из:
-- **Один стиль для всех** — `BOT_SALES_STYLE=flirty-belfort-v1` в `.env`.
-- **A/B-тест из админки** — раздел "Experiments" → создать → start.
-
-Подробности, схема БД, API и тесты — [docs/SALES_STYLES.md](docs/SALES_STYLES.md).
-
-**Lead pipeline**: воронка кандидатов от знакомства до подачи на визу,
-управляемая из админки (`/admin/leads`) и через TG-чат «Лиды». Бот
-авто-собирает intake (рост / вес / город / дата выезда / 6+ фото / 2+
-видео / загранпаспорт / танец-видео), постит карточку с inline-кнопками
-**[Одобрить]** / **[Отклонить]** в `LEADS_CHAT_ID`. Оператор жмёт →
-бот шлёт девушке шаблон визовой анкеты на английском, авто-парсит
-заполненные поля в `leads.visa_docs_json`, и по кнопке `→ visa submit`
-постит финальный пакет с автогенерируемым `application_id` в
-`VISA_CHAT_ID`. Оператор может ответить на лид-карточку текстом /
-фото / видео / документом — бот пересылает в DM кандидату (relay).
-
-5 фаз пайплайна: state machine + approval gate · auto-intake +
-submit-to-visa · structured visa-docs editor · operator relay ·
-Docker deploy. Подробности — [docs/LEADS.md](docs/LEADS.md).
-
-**Vacancies**: админ-управляемый список открытых офферов
-(`/admin/vacancies`). В отличие от KB (медленные факты) — это
-быстро-меняющийся слой: edit в админке → следующий ответ бота уже
-видит изменение, без re-embedding pipeline. Активные вакансии
-prepended к RAG context на каждом turn'е.
+---
 
 ## Быстрый старт
 
-### Bun (dev)
+### Dev (Bun)
 
 ```bash
 bun install
@@ -78,31 +49,27 @@ cp .env.example .env        # отредактируйте под себя
 bun run dev
 ```
 
-### Docker (production)
+### Production (Docker)
 
 ```bash
-cp .env.example .env        # заполните токены, RAG_*, LEADS_CHAT_ID, VISA_CHAT_ID
+cp .env.example .env        # TELEGRAM_BOT_TOKEN, LLM-провайдер, LEADS_CHAT_ID, VISA_CHAT_ID
 docker compose up -d
 docker compose logs -f app
-# опционально полностью локальный стек с Ollama:
+# Полностью локальный стек с Ollama:
 # docker compose --profile ollama up -d
 ```
 
-Полная инструкция (reverse proxy / HTTPS / бэкапы / sizing) —
-[docs/DEPLOY.md](docs/DEPLOY.md).
+Полная инструкция (reverse proxy / HTTPS / бэкапы) — [docs/DEPLOY.md](docs/DEPLOY.md).
 
-Сервер слушает `PORT` (по умолчанию 3000). Health-чек:
-[http://localhost:3000/health](http://localhost:3000/health).
+Сервер слушает `PORT` (по умолчанию `3000`). Health-чек: `GET /health`.
+
+---
 
 ## Выбор LLM-провайдера
 
-`LLM_PROVIDER` управляет **чатом**, `EMBEDDING_PROVIDER` — **эмбеддингами**.
-Они разделены потому что у OpenRouter нет endpoint'а для embeddings — даже
-с `LLM_PROVIDER=openrouter` нужен второй провайдер для векторного поиска
-(обычно локальная Ollama, она и без GPU быстро считает 100M-параметровые
-embedder'ы).
+`LLM_PROVIDER` управляет **чатом**, `EMBEDDING_PROVIDER` — **эмбеддингами**. Разделены, потому что у OpenRouter нет endpoint'а для embeddings — даже с `LLM_PROVIDER=openrouter` нужен отдельный провайдер для векторного поиска.
 
-### OpenAI / любой OpenAI-совместимый API
+### OpenAI / OpenAI-совместимый
 
 ```bash
 LLM_PROVIDER=openai
@@ -115,80 +82,53 @@ OPENAI_EMBEDDING_DIM=1536
 
 ### OpenRouter (Claude / GPT / Gemini одним ключом)
 
-Когда локальная Ollama слишком медленная, а платить OpenAI напрямую не
-хочется — OpenRouter даёт ~сотни моделей за один ключ. Особенно полезен
-для Claude (лучше всех держит стиль и few-shot) и для A/B-тестирования
-одной и той же персоны на разных backbone'ах.
-
 ```bash
 LLM_PROVIDER=openrouter
 OPENROUTER_API_KEY=sk-or-v1-...
 OPENROUTER_CHAT_MODEL=anthropic/claude-haiku-4.5
 
-# OpenRouter не делает embeddings — embedder отдельный.
-EMBEDDING_PROVIDER=ollama         # default когда chat=openrouter
+# OpenRouter не делает embeddings — embedder отдельно.
+EMBEDDING_PROVIDER=ollama
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_EMBEDDING_MODEL=bge-m3:latest
 OLLAMA_EMBEDDING_DIM=1024
 
-# Или если хотите всё через облако:
-# EMBEDDING_PROVIDER=openai
-# OPENAI_API_KEY=sk-...
-```
-
-Опционально — атрибуция в OpenRouter dashboard (видна в их UI с подсчётом
-запросов/токенов на ваш проект):
-```bash
+# Опционально — атрибуция в OpenRouter dashboard:
 OPENROUTER_SITE_URL=https://your-site.com
 OPENROUTER_APP_NAME=tg-chatbot
 ```
 
-Рекомендуемые модели для sales-бота:
+Рекомендуемые модели:
 
-| Модель | Цена ↓ | Русский | Стиль |
+| Модель | Цена | Русский | Стиль |
 |---|---|---|---|
-| `anthropic/claude-haiku-4.5` | $$ | excellent | холодный/тёплый держит ровно |
-| `anthropic/claude-sonnet-4.6` | $$$$ | excellent | лучшее follow для few-shot |
+| `anthropic/claude-haiku-4.5` | $$ | excellent | тёплый/холодный держит ровно |
+| `anthropic/claude-sonnet-4.6` | $$$$ | excellent | лучший few-shot |
 | `openai/gpt-4o-mini` | $ | good | быстро, но стилистически блёкло |
 | `google/gemini-2.5-flash` | $ | good | дешевле всех frontier-class |
-| `qwen/qwen3-8b` | $ | good | то же что у тебя локально, но в облаке |
+| `qwen/qwen3-8b` | $ | good | то же что локальный, но в облаке |
 
 ### Локальная Ollama (без токенов)
 
 ```bash
 LLM_PROVIDER=ollama
 OLLAMA_HOST=http://localhost:11434
-OLLAMA_CHAT_MODEL=qwen3:latest      # послушный к system-prompt, без «переспрашиваний»
-OLLAMA_EMBEDDING_MODEL=bge-m3:latest  # мультиязычный (ru/zh/ko), 1024-dim
+OLLAMA_CHAT_MODEL=qwen3:latest
+OLLAMA_EMBEDDING_MODEL=bge-m3:latest
 OLLAMA_EMBEDDING_DIM=1024
-RAG_MAX_DISTANCE=1.00                # bge-m3 даёт ~0.75–0.95 для on-topic, 1.05+ для шума
+RAG_MAX_DISTANCE=1.00
 RAG_TOP_K=5
 ```
 
-Перед стартом:
-
 ```bash
-ollama serve                       # или Ollama Desktop
-ollama pull qwen3                  # 8B, q4_K_M, ~5 GB VRAM, 30K context
-ollama pull bge-m3                 # 567M, FP16, мультиязычный embedder
+ollama serve
+ollama pull qwen3      # 8B, q4_K_M, ~5 GB VRAM, 30K context
+ollama pull bge-m3     # 567M, мультиязычный (ru/zh/ko), 1024-dim
 ```
 
-Замечания по чат-моделям:
+`qwen3` хорошо выдерживает строгие правила system-prompt и поддерживает `think:false` (bot подмешивает `/no_think` чтобы подавить CoT-блок). `gemma3` и `rnj-1` **не рекомендуются** — склонны переспрашивать вместо ответа.
 
-- `qwen3` хорошо слушается system-prompt, по-русски естественен и
-  поддерживает «выключенный thinking»: бот шлёт `think:false` и подмешивает
-  `/no_think` в system-сообщение, иначе модель тратит токены на CoT-блок.
-- `llama3.1` / `llama3.2` — быстрее, но хуже выдерживают строгие негативные
-  правила («не переспрашивай», «не упоминай оператора»).
-- Модели семейства `gemma3` (включая фай-тюны вроде `rnj-1`) **не**
-  рекомендуются как чат-модель: они склонны переспрашивать «что именно
-  интересует?» вместо ответа.
-
-Размерность векторного индекса синхронизируется автоматически: если
-`OLLAMA_EMBEDDING_DIM` отличается от текущей, таблица `kb_vec` пересоздаётся
-при старте (с предупреждением — KB нужно переиндексировать).
-
-| Эмбеддинг-модель | dim |
+| Embedder | dim |
 |---|---|
 | `text-embedding-3-small` | 1536 |
 | `text-embedding-3-large` | 3072 |
@@ -196,24 +136,42 @@ ollama pull bge-m3                 # 567M, FP16, мультиязычный embe
 | `mxbai-embed-large` | 1024 |
 | `bge-m3` | 1024 |
 
+Размерность `kb_vec` синхронизируется автоматически — при смене `OLLAMA_EMBEDDING_DIM` таблица пересоздаётся (KB нужно переиндексировать).
+
+---
+
 ## CLI
 
 ```bash
-bun run build:ui                               # собрать React SPA (admin-ui/dist/)
-bun run dev:ui                                 # Vite dev-server с HMR на :5173 (proxy → :3000)
-bun scripts/extract-tg.ts <result.json> <out>  # извлечь корпус из Telegram-экспорта
-bun scripts/transcribe.ts <result.json> [out]  # расшифровать голосовые через Whisper
-bun scripts/ingest.ts ./docs                   # индексация .md/.txt в KB
-bun scripts/create-admin.ts <email> <password> # создать аккаунт админа
-bun scripts/set-webhook.ts set <publicUrl>     # привязать webhook к Telegram
-bun scripts/set-webhook.ts info                # проверить статус
-bun scripts/set-webhook.ts delete              # отвязать
+bun run build:ui                                 # собрать React SPA
+bun run dev:ui                                   # Vite dev-сервер с HMR → :5173
+
+bun scripts/create-admin.ts <email> <password>   # создать аккаунт оператора
+bun scripts/set-webhook.ts set <publicUrl>        # привязать webhook к Telegram
+bun scripts/set-webhook.ts info                  # проверить статус
+bun scripts/set-webhook.ts delete                # отвязать
+
+bun scripts/ingest.ts ./kb/curated               # индексировать .md/.txt в KB
+bun scripts/ingest-books.ts ./kb/books           # книги с topic=books
+bun scripts/tag-kb-by-keyword.ts                 # прокатить keyword-теги по существующей KB
+bun scripts/kb-wipe.ts                           # очистить KB
+
+bun scripts/extract-tg.ts kb/result.json kb/extracted  # парсить Telegram-экспорт
+bun scripts/transcribe.ts kb/result.json kb/extracted  # расшифровать голосовые (Whisper)
+
+bun scripts/userbot-auth.ts                      # одноразовый MTProto-логин
+
+bun scripts/self-play.ts                         # один self-play матч
+bun scripts/pairwise.ts                          # pairwise A/B матч
+bun scripts/coach.ts                             # сгенерировать coach-предложения
+
+bun scripts/get-chat-ids.ts                      # найти ID групп для LEADS_CHAT_ID / VISA_CHAT_ID
+bun scripts/seed-vacancies-infinity.ts           # задать демо-вакансии
 ```
 
-## База знаний: пайплайн данных
+---
 
-Бот отвечает на вопросы по корпусу `.md`/`.txt`-документов из вашего KB.
-Полный путь от сырых данных до проиндексированной базы — пять этапов:
+## База знаний: пайплайн данных
 
 ```
 Telegram-экспорт (result.json + медиа)
@@ -221,373 +179,210 @@ Telegram-экспорт (result.json + медиа)
         ▼  scripts/extract-tg.ts
 kb/extracted/  posts/  dialogs/  voice/INDEX.md
         │
-        ▼  scripts/transcribe.ts          (опционально: голосовые → текст)
-kb/extracted/  + транскрипты, встроенные в диалоги
+        ▼  scripts/transcribe.ts   (опционально: голосовые → текст через Whisper)
         │
-        ▼  курация (вручную)
-kb/curated/   тематические .md без дублей и шума
+        ▼  курация вручную → kb/curated/
         │
         ▼  scripts/ingest.ts
-SQLite + sqlite-vec   (kb_documents / kb_chunks / kb_vec)
+SQLite + sqlite-vec  (kb_documents / kb_chunks / kb_vec / kb_chunks_fts)
 ```
 
-### 1. Экспорт из Telegram
+Бот видит обновлённую базу сразу — перезапуск сервера не нужен, вектора в той же `data/bot.db`.
 
-В Telegram Desktop: `Settings → Advanced → Export Telegram data`. В формате
-**JSON**, выбрать только нужные чаты (или всё), включить медиа: голосовые,
-видео, стикеры опционально. Получится папка с `result.json` (главный
-индекс) и подпапками `chats/chat_NNN/voice_messages/*.ogg`. Положить всё
-в `kb/`:
+Подробно о каждом шаге — в README секции "База знаний: пайплайн данных" ниже, или сразу в [docs/DEPLOY.md](docs/DEPLOY.md#ingesting-the-kb-inside-the-container) для продакшн-индексации.
 
-```
-kb/
-  result.json
-  chats/
-    chat_001/voice_messages/...
-    chat_002/voice_messages/...
-    ...
-```
+### Экстракция (`extract-tg.ts`)
 
-### 2. Экстракция корпуса (`extract-tg.ts`)
-
-Скрипт парсит `result.json` и формирует первичный корпус:
+Парсит `result.json` из Telegram Desktop export:
+- **Посты** — уникальные длинные (≥250 символов) реплики агента, дедуплицированные по содержимому.
+- **Диалоги** — Q&A-пары из чатов с реальной активностью.
+- **Голосовые** — индекс `voice/INDEX.md` для последующей транскрипции.
 
 ```bash
 bun scripts/extract-tg.ts kb/result.json kb/extracted
-# опционально другой отправитель:
-# bun scripts/extract-tg.ts kb/result.json kb/extracted --agent user1234567890
+# Другой отправитель:
+bun scripts/extract-tg.ts kb/result.json kb/extracted --agent user1234567890
 ```
 
-Что он делает:
-
-- Идентифицирует **сообщения агента** по `from_id` (по умолчанию
-  `user8201160309`). Через флаг `--agent` можно указать другой ID.
-- Из всех длинных (≥250 символов) сообщений агента собирает **уникальные
-  посты с дедупликацией по содержимому** — один и тот же шаблон
-  вакансии, разосланный в 20 чатов, сохранится один раз с пометкой
-  `<!-- occurrences: 20 -->`. Кладёт в `kb/extracted/posts/`.
-- Из чатов с реальной активностью (≥2 сообщения агента и ≥2 совпадения
-  по словарю «работа/вакансия/агентство/...») собирает **диалоги в
-  формате Q&A**, склеивает соседние реплики одной стороны, обрезает
-  «висящие» вопросы без ответа. Кладёт в `kb/extracted/dialogs/`.
-- Все **голосовые от агента** индексирует в `kb/extracted/voice/INDEX.md`
-  с путём к файлу, длительностью и привязкой к чату — для последующей
-  расшифровки.
-- Пишет `kb/extracted/README.md` со статистикой: сколько чатов
-  обработано, сколько уникальных постов, диалогов, голосовых.
-
-Скрипт идемпотентен — можно перезапускать после нового экспорта.
-
-### 3. Транскрипция голосовых (`transcribe.ts`) — опционально
-
-Голосовые от агента часто содержат то, что текстом не написано
-(детали условий, ответы на нестандартные вопросы). Скрипт идёт по
-`result.json`, находит `voice_message`-сообщения, гонит каждый `.ogg`
-через Whisper-совместимый endpoint и кэширует результат:
-
-```
-kb/extracted/voice/transcripts/<chat_dir>__<file_stem>.txt
-```
-
-Кэш — один файл на одну запись, скрипт **резюмируемый**: повторный
-запуск пропустит уже расшифрованные. Падение в середине не страшно.
+### Транскрипция (`transcribe.ts`)
 
 ```bash
-# по умолчанию — только голосовые от агента (32 файла, ~7 минут)
 bun scripts/transcribe.ts kb/result.json kb/extracted
+bun scripts/transcribe.ts kb/result.json kb/extracted --all     # включая голосовые кандидатов
+bun scripts/transcribe.ts kb/result.json kb/extracted --dry-run # что будет расшифровано
 
-# вместе с голосовыми кандидатов (всего 82 файла, ~30 минут)
-bun scripts/transcribe.ts kb/result.json kb/extracted --all
-
-# показать что будет расшифровано, без вызова API
-bun scripts/transcribe.ts kb/result.json kb/extracted --dry-run
-```
-
-Конфигурация через `.env` (или переменные среды):
-
-```
-WHISPER_BASE_URL=https://api.openai.com/v1   # или ваш локальный whisper-сервер
-WHISPER_API_KEY=sk-...                       # либо OPENAI_API_KEY как fallback
+# .env:
+WHISPER_BASE_URL=https://api.openai.com/v1
+WHISPER_API_KEY=sk-...
 WHISPER_MODEL=whisper-1
 WHISPER_LANGUAGE=ru
 ```
 
-Для **полностью локального** варианта (без облачных API) можно поднять
-`faster-whisper-server` (или любой другой OpenAI-совместимый прокси к
-whisper) и указать `WHISPER_BASE_URL=http://localhost:8000/v1`.
+Резюмируемый — повторный запуск пропускает уже расшифрованные. После транскрипции повторно запустите `extract-tg.ts` — встроит транскрипты в диалоги.
 
-После транскрипции **повторно запустите `extract-tg.ts`** — он подхватит
-кэшированные транскрипты и встроит их в `dialogs/*.md` в правильной
-хронологии с пометкой `[голосовое, Xс] <текст>`. Длинные монологи
-агента (≥250 символов) дополнительно попадут в `posts/` как отдельные
-дедуплицированные документы.
-
-### 4. Курация (вручную)
-
-`kb/extracted/` — это **сырьё**, а не продакшн-база. На этом этапе
-человек открывает выгрузку и принимает решения, которые машина
-принять не может:
-
-- В `posts/` — удалить мусор (черновики, переводы, дубли близкие, но
-  не идентичные), объединить родственные посты в тематические файлы
-  (`china-ktv.md`, `korea-karaoke.md`, `application-form.md`).
-- В `dialogs/` — оставить только содержательные Q&A, выбросить чаты,
-  где кандидат отвалился после первой реплики. Хорошие пары
-  «вопрос → ответ» вынести в общий `faq.md`.
-- Привести стиль к единому: убрать имена, личное, эмодзи-шум, если
-  мешают. В KB должно быть то, что бот может говорить любому клиенту.
-
-Результат складывать в `kb/curated/` — это и есть финальная база
-знаний, готовая к индексации.
-
-### 5. Индексация в векторную БД (`ingest.ts`)
+### Индексация (`ingest.ts`)
 
 ```bash
 bun scripts/ingest.ts kb/curated
+# Размер чанка можно переопределить (default: 1500 символов, overlap 150):
+bun scripts/ingest.ts kb/curated --max-chars 1200 --overlap 100
 ```
 
-Скрипт:
+Идемпотентен — SHA-256 каждого файла, неизменённые пропускаются. PDF-поддержка через `unpdf` без нативных зависимостей.
 
-1. Читает все `.md`/`.txt` рекурсивно (другие расширения пропускает).
-2. Считает SHA-256 содержимого; неизменённые файлы **пропускает**
-   (идемпотентность — можно запускать после каждой правки).
-3. Изменённые — режет на чанки ≈1500 символов с overlap 150 по
-   границам абзацев, батчем гонит через эмбеддер, пишет в
-   `kb_chunks` + `kb_vec` одной транзакцией.
-4. Старые чанки документа удаляются перед переиндексацией.
+---
 
-Бот видит обновлённую базу сразу — рестарт сервера не нужен,
-вектора лежат в той же `data/bot.db`.
+## RAG-надстройки
 
-### Как ответ доходит до пользователя
+Все выключены по умолчанию. Включай по одному, проверяй на своём трафике.
+Подробное описание каждого — в [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
 
-При входящем сообщении в Telegram: webhook эмбеддит вопрос
-тем же провайдером, что и индексация → `kb_vec` возвращает top-K
-ближайших чанков (L2-distance) → они склеиваются в системный
-промпт `«отвечай только по CONTEXT, иначе верни __NO_CONTEXT__»` →
-LLM генерирует ответ → если получили `__NO_CONTEXT__`, в Telegram
-**ничего не отправляется**, диалог остаётся в `mode=ai` (следующее
-сообщение снова пробует RAG). В очередь `queued` попадают только явные
-запросы оператора (ключевые слова). Иначе ответ уходит в чат,
-а `used_chunk_ids` сохраняются в `meta_json` сообщения для аудита.
+```bash
+RAG_HYBRID_SEARCH=true       # BM25 + vector + RRF. Без LLM-цены, чистый upgrade.
+RAG_USER_MEMORY=true         # Cross-session memory. Видно и редактируется в админке.
+RAG_QUERY_REWRITE=true       # "а в Стамбуле?" → полный вопрос перед retrieval.
+RAG_REFLECT=true             # Reflection: ответ проверяется на галлюцинации.
+RAG_CONVERSATION_SUMMARY=true # Сжатие старых turn'ов (>30) в параграф.
+RAG_TOPIC_ROUTING=true       # Фильтр KB по теме (visa/payment/locations/...).
+RAG_BOOKS_PRIORITY=true      # Книги (topic=books) отвечают первыми, общая KB — fallback.
+```
 
-### Персона бота и режим очереди
+### Библиотека книг
 
-Бот говорит от лица живого менеджера — имя, роль и компания
-задаются в `.env`:
+```bash
+bun scripts/ingest-books.ts ./kb/books   # PDF/TXT/MD → topic=books
+
+# или через Admin UI → /admin/library (drag-and-drop)
+
+# .env:
+RAG_BOOKS_PRIORITY=true
+```
+
+---
+
+## Sales-style engine
+
+Управление через `.env` или `/admin/styles` + `/admin/experiments`.
+
+```bash
+# Один стиль для всех:
+BOT_SALES_STYLE=alina-infinity-v1
+
+# Или A/B через админку: Experiments → New → Start
+```
+
+Built-in стили:
+
+| slug | Персона | Фреймворк | Тон |
+|---|---|---|---|
+| `alina-infinity-v1` | Алина, INFINITY AGENCY | NEPQ | тёплый, менеджер в личке |
+| `flirty-belfort-v1` | Алина — флирт-рекрутер | Straight Line | тёплый, дерзкий |
+| `empathetic-nepq-v1` | Маша — эмпатичный консультант | NEPQ | спокойный, low-pressure |
+| `cold-direct-pas-v1` | Игорь — прямой | PAS | сухой, без воды |
+
+Подробности, схема Style, skills catalogue, authoring guide — [docs/SALES_STYLES.md](docs/SALES_STYLES.md).
+
+---
+
+## Self-play и coaching
+
+Автоматизированный тренировочный цикл:
+
+```
+self-play матч  →  судья  →  ELO рейтинг  →  coach предложения  →  shadow A/B  →  новый стиль
+```
+
+```bash
+# Запустить матч вручную:
+bun scripts/self-play.ts --style alina-infinity-v1
+
+# Pairwise A/B:
+bun scripts/pairwise.ts --style-a flirty-belfort-v1 --style-b alina-infinity-v1
+
+# Coach-предложения из недавних поражений:
+bun scripts/coach.ts
+```
+
+Через админку: `/admin/self-play`, `/admin/pairwise`, `/admin/coach`.
+Подробности — [docs/SELF_PLAY.md](docs/SELF_PLAY.md).
+
+---
+
+## Userbot (MTProto)
+
+Бот работает с личного аккаунта Telegram. Одноразовая авторизация:
+
+```bash
+# .env:
+TELEGRAM_USERBOT=1
+TELEGRAM_API_ID=12345678
+TELEGRAM_API_HASH=abc123...
+
+# Первый запуск (телефон → OTP → 2FA):
+bun scripts/userbot-auth.ts
+
+# Потом просто:
+bun run dev
+```
+
+Подробности — [docs/USERBOT.md](docs/USERBOT.md).
+
+---
+
+## Персона (legacy)
+
+Когда `BOT_SALES_STYLE` не задан, используется простой legacy-режим:
 
 ```bash
 BOT_PERSONA_NAME=Алина
-BOT_PERSONA_ROLE=human       # human → притворяется человеком; assistant → честный AI
+BOT_PERSONA_ROLE=human       # human / assistant
 BOT_PERSONA_COMPANY=INFINITY AGENCY
 ```
 
-В режиме `human` системный промпт явно запрещает упоминать слова
-«бот», «ИИ», «ассистент», «оператор», «коллега», «свяжитесь с
-менеджером» — модель должна вести диалог сама. Когда в KB не
-нашлось ответа, бот не сочиняет: возвращает маркер `__NO_CONTEXT__`,
-webhook **молчит** в Telegram и оставляет режим `ai`. Оператора можно
-позвать текстом триггеров («оператор», `/human`, …). При падении
-фонового пайплайна — только запись в логах.
+В режиме `human` промпт запрещает упоминать «бот», «ИИ», «ассистент». Когда KB не нашлась — бот молчит (не сочиняет), conversation остаётся в `mode=ai`.
 
-Чувствительность к «нет ответа» крутится через `RAG_MAX_DISTANCE`
-в `.env` (sqlite-vec L2): чем меньше — тем строже отсекаются
-слабые попадания, тем чаще бот промолчит и не отправит сообщение без
-гарантированных фактов. Пустое значение = без порога (отдаём всё, что
-вернул top-K).
-
-Подбор порога зависит от эмбеддера и **корпуса**:
-
-- `bge-m3` (рекомендуется для ru/zh/ko корпусов): on-topic ~0.75–0.95,
-  off-topic ≥1.05 → разумный порог `RAG_MAX_DISTANCE=1.00`.
-- `nomic-embed-text` (английский, слабее на CJK): on-topic ~0.55–0.65,
-  off-topic 0.62+ — порог здесь почти не разделяет темы, поэтому RAG
-  может «галлюцинировать через соседнюю страну». Для нашего сценария
-  (Корея/Китай) недостаточно избирателен.
-
-Чтобы перейти на другой эмбеддер: поменять `OLLAMA_EMBEDDING_MODEL` +
-`OLLAMA_EMBEDDING_DIM`, очистить `kb_chunks` / `kb_documents` и
-прогнать `bun scripts/ingest.ts <корпус>` — таблица `kb_vec` пересоздаётся
-автоматически при изменении `dim`.
-
-### Скорость / латентность ответа
-
-`OllamaChatClient` явно ограничивает `num_ctx=4096` и `num_predict=256`
-и шлёт `keep_alive: "30m"`. Это:
-
-- держит KV-cache `qwen3` в районе 5–6 GB VRAM (а не 11 GB при
-  дефолтных 40K context) — модель помещается и быстрее обрабатывает
-  prompt;
-- кладёт верхнюю границу на длину ответа (бот не выдаёт «эссе»);
-- не даёт Ollama выгружать модель между сообщениями, чтобы не было
-  10-секундных холодных стартов.
-
-Ускорить дальше можно либо переходом на меньшую чат-модель
-(`llama3.2:3b` ≈ в 2–3× быстрее, ценой более слабого следования
-системным правилам), либо на облачную (`*:cloud` в Ollama).
-
-## RAG-надстройки (опциональные флаги в `.env`)
-
-Все шесть улучшений retrieval/answering пайплайна выключены по умолчанию.
-Включай по одному, проверяй качество на своём трафике, потом следующий.
-Подробное описание каждого слоя, цены и trade-off'ы — в
-[docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
-
-```bash
-# Hybrid retrieval (BM25 + vector + RRF). Без LLM-цены, чистый upgrade.
-RAG_HYBRID_SEARCH=true
-
-# Cross-session memory: бот запоминает факты о кандидате, не переспрашивает.
-# Видно и редактируется в админке: chat → MEMORY pane.
-RAG_USER_MEMORY=true
-
-# Query rewriting: "а в Стамбуле?" → "какие условия в Стамбуле" перед retrieval.
-RAG_QUERY_REWRITE=true
-
-# Reflection: ответ проверяется на галлюцинации перед отправкой.
-# Невалидные ответы → бот молчит (mode остаётся ai).
-RAG_REFLECT=true
-
-# Conversation summarization: на длинных чатах (>30 turn) старая часть
-# сжимается в paragraph и подмешивается в системный промпт. Ленивый refresh
-# раз в ~8 сообщений, не на каждом turn.
-RAG_CONVERSATION_SUMMARY=true
-
-# Topic-routed retrieval: regex классификатор маппит вопрос на тему
-# (visa / payment / schedule / housing / locations / application / vacancy /
-# requirements), KB ищется только среди тегированных этой темой документов.
-# Сначала тегируй ingest:
-#   bun scripts/ingest.ts ./kb/curated --topic visa
-# или сложи документы по поддиректориям (kb/curated/visa/*.md → topic=visa).
-# Уже проиндексированную базу можно прокатить через keyword-классификатор
-# одним проходом: `bun run scripts/tag-kb-by-keyword.ts` (idempotent, тегает
-# только untagged-доки). Управление и просмотр документов — `/admin/kb`.
-RAG_TOPIC_ROUTING=true
-
-# Books-priority retrieval: бот сначала ищет в библиотеке книг (topic=books),
-# если нашёл ≥1 чанк — отвечает из книг; только при нулевом результате
-# уходит в общую KB. Книги (PDF/TXT/MD) загружаются через:
-#   bun scripts/ingest-books.ts ./kb/books
-# или через Admin UI → Library (books) (drag-and-drop загрузка PDF прямо из браузера).
-RAG_BOOKS_PRIORITY=true
-```
-
-### Библиотека книг (управление и манипуляции)
-
-Бот умеет отвечать на основе 10–20 книг (управление, влияние, переговоры и т.д.).
-Все файлы тегируются `topic=books` и при `RAG_BOOKS_PRIORITY=true` имеют приоритет над
-остальной KB.
-
-**Инжест через CLI:**
-```bash
-# Положи PDF/TXT/MD в папку
-mkdir -p kb/books
-cp ~/Downloads/influence.pdf kb/books/
-
-# Проиндексируй (идемпотентно — повторный запуск пропустит неизменённые файлы)
-bun scripts/ingest-books.ts ./kb/books
-
-# Опционально: размер чанка для длинных книг
-bun scripts/ingest-books.ts ./kb/books --max-chars 1200 --overlap 150
-```
-
-**Инжест через Admin UI:**
-Откройте `/admin/library` → перетащите PDF/TXT/MD файлы в зону загрузки или нажмите для выбора.
-
-**Активация:**
-```bash
-# .env
-RAG_BOOKS_PRIORITY=true
-```
-
-Поддерживаемые форматы: `.pdf`, `.txt`, `.md` (PDF через `unpdf`, без нативных зависимостей).
+---
 
 ## Тесты
 
-- Бэкенд (юниты): `bun run test`
-- E2E (Playwright): `bun run test:e2e:install` (один раз) и `bun run test:e2e`
-
-Playwright поднимает сервер автоматически на отдельном порту (`E2E_PORT`,
-по умолчанию 3100) с тестовой БД `data/test.db` и `TEST_HOOKS=1`, чтобы тесты
-могли сидать данные через `/__test/*` (эти роуты доступны только при этом
-флаге и не должны включаться в проде).
-
-## Архитектура
-
-```
-Telegram → /telegram/<secret> ─┬─► whitelist (UsersRepo)
-                                ├─► message persisted (MessagesRepo)
-                                ├─► escalation triggers? ─► mode=queued
-                                └─► RAG: embed → kb.search → LLM
-                                    └─► NO_CONTEXT? ─► silent (stay ai)
+```bash
+bun run test              # unit tests (807+)
+bun run test:e2e:install  # установить Playwright (один раз)
+bun run test:e2e          # E2E (Playwright, 14+ тестов)
 ```
 
-- `src/router.ts` — мини-роутер поверх `Bun.serve`.
-- `src/server.ts` — `createServer()`: объединяет router + WebSocket upgrade.
-- `src/db/` — `bun:sqlite` + `sqlite-vec`, миграции, репозитории.
-- `src/rag/` — чанкинг, эмбеддинги (OpenAI/Ollama), retrieval, ответы.
-- `src/telegram/` — клиент Bot API, webhook, эскалация.
-- `src/questionnaire/` — токены и форма `/q/:token`.
-- `src/admin/auth.ts` — логин/логаут/сессии (`Bun.password` argon2id, HttpOnly cookie).
-- `src/admin/api.ts` — REST: пользователи, диалоги, take/release.
-- `src/admin/bus.ts` — `AdminBus`: pub/sub для WS-клиентов.
+Playwright поднимает сервер на `E2E_PORT` (по умолчанию `3100`) с тестовой БД и `TEST_HOOKS=1` (seed-эндпоинты `/__test/*`, только с этим флагом).
 
-### Admin API (все за исключением `login` требуют авторизацию через cookie)
+---
 
-| Метод | Путь | Описание |
-|---|---|---|
-| `POST` | `/admin/api/login` | Вход, возвращает `Set-Cookie` |
-| `POST` | `/admin/api/logout` | Выход, сбрасывает cookie |
-| `GET` | `/admin/api/me` | Текущий администратор |
-| `GET` | `/admin/api/users` | Список пользователей |
-| `GET` | `/admin/api/conversations` | Список диалогов (queued первые) |
-| `GET` | `/admin/api/conversations/:id` | Диалог + сообщения |
-| `POST` | `/admin/api/conversations/:id/take` | Переключить в `human` |
-| `POST` | `/admin/api/conversations/:id/release` | Вернуть в `ai` |
-| `POST` | `/admin/api/conversations/:id/reply` | Отправить ответ из админки в TG |
-| `DELETE` | `/admin/api/conversations/:id` | Снести диалог + историю (статус `mode` сбросится при следующем сообщении) |
-| `PATCH` | `/admin/api/users/:id/memory` | Перезаписать `users.profile_json.memory.facts` (оператор корректирует извлечённые ботом факты) |
-| `GET` | `/admin/api/status` | Дашборд: RAG-флаги, провайдеры, KB-статистика по темам, счётчики |
-| `GET` | `/admin/api/leads` | Список лидов + counts по state |
-| `GET` | `/admin/api/leads/:id` | Detail лида + parsed intake / visa_docs |
-| `POST` | `/admin/api/leads/from-conversation/:id` | Promote чат в лид (постит карточку в LEADS_CHAT_ID) |
-| `POST` | `/admin/api/leads/:id/approve` | Одобрить → бот шлёт визовую анкету |
-| `POST` | `/admin/api/leads/:id/reject` | Отклонить (опционально reason) |
-| `POST` | `/admin/api/leads/:id/send-intake` | Отправить шаблон с 7 пунктами intake |
-| `POST` | `/admin/api/leads/:id/submit-to-visa` | Allocate `application_id`, post в VISA_CHAT_ID |
-| `PATCH` | `/admin/api/leads/:id/visa-docs` | Manual edit извлечённых полей анкеты |
-| `DELETE` | `/admin/api/leads/:id` | Hard delete лида |
-| `GET` | `/admin/api/vacancies` | Список вакансий (active + closed) |
-| `POST` | `/admin/api/vacancies` | Создать вакансию |
-| `PATCH` | `/admin/api/vacancies/:id` | Edit / toggle is_active |
-| `DELETE` | `/admin/api/vacancies/:id` | Hard delete |
-| `WS` | `/admin/api/ws` | Realtime-события (`message:new`, `conversation:updated`) |
+## Архитектура (кратко)
 
-В ответ `GET /admin/api/conversations/:id` включается поле `memory: { facts, updatedAt? }` и `summary: { ... } | null` — это и есть то, что админка показывает в раскрывающихся панелях MEMORY и SUMMARY на странице чата.
+```
+Telegram update (Bot API webhook)
+   │
+   ▼
+POST /telegram/<secret>
+   ├─ whitelist (UsersRepo)
+   ├─ message saved (idempotent by tg_message_id)
+   ├─ escalation trigger? → mode=queued
+   └─ ack 200 + detached processInbound()
+          │
+          ▼
+   resolveStyle (env ▸ DB ▸ A/B experiment)
+   classifyStage (regex / LLM)
+   rewriteQuery (RAG_QUERY_REWRITE)
+   kb.hybridSearch (RAG_HYBRID_SEARCH)
+   composeSystemPrompt (persona + voice + framework + hooks + stage + few-shot + KB)
+   chat.complete → sanitize → sendMessage
+   verifyAnswer (RAG_REFLECT)
+          │
+          └─ fire-and-forget:
+               extractUserFacts → mergeMemoryFacts
+               gradeSkills → recordSkillOutcome
+               intakeCheck → leadStateTransition
 
-## Прогресс
+Telegram personal account (Userbot MTProto, optional)
+   msg.reply() per message → same processInbound()
+```
 
-| # | Задача | Статус |
-|---|---|---|
-| 1 | `bootstrap` — Bun.serve, мини-роутер, `/health`, Playwright smoke | ✅ |
-| 2 | `db-layer` — `bun:sqlite` + `sqlite-vec`, миграции, репозитории | ✅ |
-| 3 | `tg-client` — клиент Bot API + `setWebhook` CLI | ✅ |
-| 4 | `webhook` — `/telegram/<secret>` с whitelist и плейсхолдером | ✅ |
-| 5 | `kb-ingest` — CLI: txt/md → чанки → эмбеддинги | ✅ |
-| 6 | `rag` — retrieval top-k + LLM + ответ в TG | ✅ |
-| 7 | `questionnaire` — токен + GET/POST `/q/:token` + Playwright | ✅ |
-| 8 | `ollama` — нативный провайдер + динамический `kb_vec` | ✅ |
-| 9 | `escalation` — триггеры (ключевые слова) → `queued`; `NO_CONTEXT` → молча | ✅ |
-| 10 | `admin-auth` — `Bun.password` + сессии + middleware `/admin/*` | ✅ |
-| 11 | `admin-api-ws` — REST + WebSocket-бродкаст для админки | ✅ |
-| 12 | `admin-ui` — React + Vite: Login / Users / Chats / Chat | ✅ |
-| 13 | `admin-reply` — ответ из админки → TG + WS + возврат `mode=ai` | ✅ |
-| 14 | `smoke` — финальный happy-path E2E + чеклист релиза | ✅ |
-| 15 | `sales-styles` — A/B-движок: stage router, Cialdini hooks, A/B-experiments | ✅ |
-| 16 | `rag-layers` — 6 opt-in надстроек: hybrid / memory / rewrite / reflect / summary / topic-routing | ✅ |
-| 17 | `vacancies` — админ CRUD активных офферов, prepended к RAG context | ✅ |
-| 18 | `leads-1` — lead state machine + approval gate (TG inline buttons) + visa-anketa templates | ✅ |
-| 19 | `leads-2` — auto-intake detection (text + media), submit-to-visa с `application_id` | ✅ |
-| 20 | `leads-3` — visa-docs auto-extraction (27 fields) + admin inline editor | ✅ |
-| 21 | `leads-4` — operator relay через reply-to-card (text/photo/video/document → DM) | ✅ |
-| 22 | `deploy` — Dockerfile, docker-compose (+ optional Ollama profile), DEPLOY.md | ✅ |
+Полная карта слоёв — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

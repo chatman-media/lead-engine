@@ -176,6 +176,37 @@ Topic-routed retrieval picks up the immediate sub-directory name as
 the topic (`/app/kb/curated/visa/*.md` → topic=visa). See
 [docs/RAG_LAYERS.md](RAG_LAYERS.md#6-topic-routed-retrieval--rag_topic_routingtrue).
 
+## Userbot (MTProto) in production
+
+If you're running the bot from a personal Telegram account, the session
+must be authorised before starting the server.
+
+**One-time auth (run on the server, not inside Docker):**
+
+```bash
+# .env must have TELEGRAM_USERBOT=1, TELEGRAM_API_ID, TELEGRAM_API_HASH
+bun scripts/userbot-auth.ts
+# Follow prompts: phone → OTP → 2FA password
+# Session is saved to data/bot.db → persists across restarts
+```
+
+The session string lives in the `userbot_session` table inside
+`data/bot.db`. Back up the volume before touching the DB.
+
+**In docker-compose**, the auth script needs the same volume:
+
+```bash
+docker compose run --rm app bun scripts/userbot-auth.ts
+```
+
+After auth the server picks up the session automatically on next start:
+
+```bash
+docker compose up -d
+```
+
+Full userbot docs: [USERBOT.md](USERBOT.md).
+
 ## Operations checklist
 
 - [ ] **Rotate `TELEGRAM_WEBHOOK_SECRET`** if it ever leaks — call

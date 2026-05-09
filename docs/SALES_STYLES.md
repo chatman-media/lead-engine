@@ -1,315 +1,366 @@
 # Sales-style engine
 
-Pluggable conversational personas with sales frameworks, Cialdini hooks, per-stage guidance, and few-shot anchoring. Composed into a system prompt at runtime, with KB-grounded RAG for facts.
+Pluggable conversational personas с sales frameworks, Cialdini hooks, per-stage guidance, skills catalogue и few-shot anchoring. Промпт собирается at runtime, факты — из KB-grounded RAG.
 
-Originally prototyped in the sister `sales-guru` repo, ported into this codebase under `src/sales/`. Two activation modes:
+## Activation
 
-| Mode | What | When |
+| Mode | Как | Когда |
 |---|---|---|
-| **Single forced style** | `BOT_SALES_STYLE=<slug>` env → all conversations use that style | demo, QA, single-persona deploy |
-| **Per-conversation A/B** | running row in `experiments` table → each conversation gets a deterministic variant | actually testing which persona converts best |
-| **Off (legacy)** | neither set → bot uses the env-based `BOT_PERSONA_*` persona prompt | default for back-compat |
-
-## TL;DR — turn it on
-
-**Quick (single style for everyone):**
+| **Single forced style** | `BOT_SALES_STYLE=<slug>` в `.env` | демо, QA, single-persona prod |
+| **Per-conversation A/B** | running row в `experiments` → детерминированный variant | реально тестируешь что конвертит лучше |
+| **Off (legacy)** | ни то ни другое → `BOT_PERSONA_*` env | back-compat |
 
 ```bash
-# .env
-BOT_SALES_STYLE=flirty-belfort-v1
+# .env — один стиль для всех:
+BOT_SALES_STYLE=alina-infinity-v1
 ```
 
-**Real A/B (different users get different styles):**
-
-```sql
--- one row, one query, restart not needed
+```bash
+# A/B через Admin UI: /admin/experiments → New → Start
+# Или напрямую в DB:
 INSERT INTO experiments (slug, status, allocation_json, started_at)
 VALUES (
-  'april-2026-recruit',
+  'may-2026-ab',
   'running',
-  '{"flirty-belfort-v1": 50, "empathetic-nepq-v1": 25, "cold-direct-pas-v1": 25}',
+  '{"alina-infinity-v1": 50, "empathetic-nepq-v1": 50}',
   unixepoch()
 );
 ```
 
-In both modes you can revert by unsetting the env var or `UPDATE experiments SET status='paused'`. Existing conversations keep their assigned style — no mid-flight reshuffles.
+Откат: убрать env var или `UPDATE experiments SET status='paused'`. Существующие conversations сохраняют назначенный стиль.
+
+---
 
 ## Built-in styles
 
-| slug | persona | framework | tone |
+| slug | Персона | Фреймворк | Тон |
 |---|---|---|---|
-| `flirty-belfort-v1` | Алина — флирт-рекрутер | Belfort Straight Line | тёплый, дерзкий, короткие реплики, комплименты |
-| `empathetic-nepq-v1` | Маша — эмпатичный консультант | NEPQ | спокойный, low-pressure, neuro-emotional questions |
-| `cold-direct-pas-v1` | Игорь — прямой PAS | PAS (Problem-Agitate-Solve) | сухой, без воды, без эмодзи |
+| `alina-infinity-v1` | Алина, INFINITY AGENCY | NEPQ | тёплый, менеджер в личке, по-человечески |
+| `flirty-belfort-v1` | Алина — флирт-рекрутер | Straight Line | тёплый, дерзкий, комплименты |
+| `empathetic-nepq-v1` | Маша — эмпатичный консультант | NEPQ | спокойный, low-pressure |
+| `cold-direct-pas-v1` | Игорь | PAS | сухой, без воды, без эмодзи |
 
-Source: [`src/sales/styles/`](../src/sales/styles/). Each file is a Zod-validated TypeScript object — type-safe by construction, easy to read, easy to copy when authoring new styles.
+Исходники: [`src/sales/styles/`](../src/sales/styles/). Каждый файл — Zod-валидированный TypeScript-объект.
 
-## Mental model
+---
 
-A `Style` is the unit of A/B testing. Four orthogonal concerns get bundled together:
+## Style schema
 
-1. **Persona** — who speaks (name, role, company, voice).
-2. **Sales framework** — what conversation structure (AIDA / PAS / SPIN / NEPQ / Belfort Straight Line).
-3. **Hooks** — which Cialdini levers are deployed (social proof, scarcity, authority, liking, reciprocity, commitment).
-4. **Stage** — where in the funnel we are (opener → qualify → pitch → objection → close).
+```typescript
+type Style = {
+  slug: string           // kebab-case, immutable — ID всей version chain
+  displayName: string
 
-Holding three constant and rotating one is what makes the A/B comparable.
+  persona: {
+    name: string
+    role: "human" | "assistant"   // human → не раскрывать что бот
+    company?: string
+    facts?: Record<string, string> // дополнительные факты для промпта
+  }
 
-## How a turn flows
+  voice: {
+    tone: string         // описание тона для LLM
+    language: "ru" | "en"
+    forbid: string[]     // список запрещённых слов/конструкций
+  }
 
-1. Telegram POST → [`src/telegram/webhook.ts`](../src/telegram/webhook.ts) `createWebhookHandler`.
-2. Persist user message, dedupe by `tg_message_id`, load conversation row.
-3. **Resolve style** via `resolveStyle()` — priority:
-   - `BOT_SALES_STYLE` env override (forces a single style)
-   - existing `conversations.style_id` (sticky per-conversation assignment)
-   - running experiment + `pickVariant()` → assigns and persists `style_id`
-   - none → legacy `BOT_PERSONA_*` path
-4. **Compute stage** via [`src/sales/stage-router.ts`](../src/sales/stage-router.ts) — Cyrillic-aware regex on user message + turn count + previous stage from `conversations.current_stage`. Persist new stage on conversation.
-5. Call `answerWithRag({ question, ..., style, stage, includeFewShot })`.
-6. [`src/rag/answer.ts`](../src/rag/answer.ts) embeds the question, runs vector search, formats `KB CONTEXT`.
-7. **Branch:** if `style` was passed → [`composeSystemPrompt(style, stage, kbContext)`](../src/sales/prompt.ts). Else legacy `buildSystemPrompt(persona, context)`.
-8. LLM call via existing `ChatClient` (Ollama or OpenAI) at the style's pinned `temperature`.
-9. Reply sanitized (`<think>` blocks stripped, prefixes trimmed) and sent. Assistant message persisted with `stage` tag for funnel analytics.
+  framework: "AIDA" | "PAS" | "SPIN" | "NEPQ" | "straight_line"
 
-## What gets composed into the system prompt
+  hooks: Array<{
+    kind: "social_proof" | "scarcity" | "authority" | "liking" | "reciprocity" | "commitment"
+    text: string
+  }>
 
-Up to 9 sections, separated by blank lines. Sections marked **conditional** are omitted when their input is empty:
+  stages: {
+    opener?:   { goal, guidance?, groundingRequired?, maxTurns? }
+    qualify?:  { goal, guidance?, groundingRequired? }
+    pitch?:    { goal, guidance?, groundingRequired? }
+    objection?: { goal, guidance? }
+    close?:    { goal, guidance? }
+  }
 
-| section | always | content |
+  fewShot: Array<{
+    stage?: FunnelStage
+    user: string
+    assistant: string
+  }>
+
+  guardrails: {
+    noMinors: boolean
+    botDisclosureOnDirectQuestion: boolean
+    forbiddenTopics: string[]
+  }
+
+  model: {
+    id: string           // e.g., "qwen3:latest"
+    temperature: number  // 0..2
+    maxTokens: number
+  }
+}
+```
+
+### Mental model
+
+Style — единица A/B теста. Четыре ортогональных измерения:
+
+1. **Persona** — кто говорит (имя, роль, компания, факты).
+2. **Sales framework** — структура разговора (AIDA / PAS / SPIN / NEPQ / Straight Line).
+3. **Hooks** — рычаги Чалдини (social proof, scarcity, authority, liking, reciprocity, commitment).
+4. **Stage** — где в воронке (opener → qualify → pitch → objection → close).
+
+Держи три константой — варьируй одно.
+
+---
+
+## System prompt (что туда входит)
+
+До 9 секций, разделённых пустой строкой:
+
+| Секция | Всегда | Содержимое |
 |---|---|---|
-| persona | ✓ | name, human/assistant role, bot-disclosure rule |
-| voice | ✓ | tone, language, banned phrases |
-| framework | ✓ | one-line blurb for AIDA / PAS / SPIN / NEPQ / Belfort |
-| hooks | conditional | Cialdini modifiers as ammunition (social_proof, scarcity, …) |
-| stage | ✓ | current stage uppercase, goal, guidance, grounding requirement |
-| KB grounding reminder | conditional | only when `groundingRequired: true` AND no KB hits found |
-| guardrails | ✓ | no minors, forbidden topics, length limit |
-| few-shot examples | conditional | first turn only — drops on follow-ups to save 200-500 tokens |
-| KB context | conditional | top vector hits formatted as `[#1] Title\nText` blocks |
+| persona | ✓ | имя + human/assistant role + правило бот-раскрытия |
+| voice | ✓ | tone + language + список запрещённого |
+| framework | ✓ | одна строка описания AIDA/PAS/SPIN/NEPQ/Belfort |
+| hooks | conditional | Cialdini-усилители как «ammunition» |
+| stage | ✓ | текущий stage заглавными, goal, guidance, требование grounding |
+| skills | conditional | prompt_fragment активных skills для этого stage |
+| guardrails | ✓ | noMinors + forbidden topics + limit длины |
+| few-shot | conditional | только первый turn — сбрасывается дальше (экономит 200-500 токенов) |
+| KB context | conditional | top vector hits в формате `[#1] Title\nText` |
+
+Реализация: [`src/sales/prompt.ts`](../src/sales/prompt.ts) → `composeSystemPrompt()`.
+
+---
 
 ## Stage routing
 
-Two strategies, picked at boot via `SALES_STAGE_CLASSIFIER` env:
+### Два режима
 
-| Strategy | When | Cost | Accuracy |
+| Стратегия | Env | Стоимость | Точность |
 |---|---|---|---|
-| `regex` (default) | Always | Sub-ms, free | Good on clear-cut signals |
-| `llm` (opt-in) | Per turn | One extra LLM call (5-30s on Ollama+CPU, ~$0.0001 on OpenRouter haiku) | Picks up nuance regex misses |
+| `regex` (default) | — | Sub-ms, free | Чёткие сигналы ловит хорошо |
+| `llm` | `SALES_STAGE_CLASSIFIER=llm` | +1 LLM вызов (~$0.0001 на haiku) | Нюансы, которые regex пропускает |
 
-The `llm` strategy is **self-healing**: every inbound goes through `classifyStage()` ([src/sales/stage-classifier.ts](../src/sales/stage-classifier.ts)) which calls the main `ChatClient` with a JSON-output prompt. Falls back silently to regex when:
-- LLM throws → reason `llm-error`
-- Output not parseable as JSON → reason `parse-error`
-- Returns a stage outside the 5-funnel set → reason `unknown-stage`
-- Confidence < `SALES_STAGE_CLASSIFIER_THRESHOLD` (default 0.6) → reason `low-confidence`
+```bash
+# .env:
+SALES_STAGE_CLASSIFIER=llm
+SALES_STAGE_CLASSIFIER_THRESHOLD=0.6   # fallback к regex если confidence < threshold
+```
 
-Operators see source + reason in the per-turn log:
+### LLM classifier (`stage-classifier.ts`)
 
+Вызывает основной `ChatClient` с JSON-output промптом. Graceful fallbacks:
+- LLM throws → `llm-error`, regex fallback
+- Output not parseable → `parse-error`, regex fallback
+- Unknown stage → `unknown-stage`, regex fallback
+- Confidence < threshold → `low-confidence`, regex fallback
+
+Промпт classifier'а зафиксирован на `temperature: 0` — детерминирован при одном и том же вводе.
+
+Лог каждого turn'а:
 ```
 [sales] stage=objection source=llm confidence=0.92
-[sales] stage=pitch source=regex-fallback confidence=0.40 reason=low-confidence
-[sales] stage=opener source=regex-fallback confidence=0.00 reason=llm-error
+[sales] stage=pitch source=regex-fallback reason=low-confidence
 ```
 
-The classifier prompt is locked to `temperature: 0` — same input → same output, deterministic for replay.
+### Regex fallback (`stage-router.ts`)
 
-### Regex fallback (always available)
+Правила по приоритету:
 
-Rule-based, zero LLM calls, predictable. Decision priority:
+1. `objection` regex → `objection`
+2. `pricing` regex → `pitch`
+3. `agreement` AND мы в qualify/pitch/objection → `close`
+4. Turn 1 → `opener`. opener → `qualify`. Иначе → `currentStage`
 
-1. Message matches `objection` regex (`но`, `сомнев`, `боюсь`, `развод`, …) → `objection`.
-2. Else matches `pricing` regex (`сколько`, `гонорар`, `виза`, `комисси`, …) → `pitch`.
-3. Else matches `agreement` regex AND we're in `qualify`/`pitch`/`objection` → `close`.
-4. Else turn 1 → `opener`. Else opener → `qualify`. Else stay in `currentStage`.
+⚠️ Кириллица: JS `\b` — ASCII-only. Используются явные Unicode-делимитеры `[^\p{L}\p{N}]` с флагом `u`. Регрессионный тест в [`tests/unit/sales/stage-router.test.ts`](../tests/unit/sales/stage-router.test.ts).
 
-⚠️ Cyrillic regex caveat: JS `\b` is ASCII-only, so the routes use explicit Unicode delimiters `[^\p{L}\p{N}]` with the `u` flag. Reverting to `\b` silently breaks every Russian regex. There's a regression test in [`tests/unit/sales/stage-router.test.ts`](../tests/unit/sales/stage-router.test.ts) for this.
+---
 
-## A/B routing (Phase 2a — shipped)
+## Skills catalogue
 
-[`src/sales/ab-router.ts`](../src/sales/ab-router.ts) ships a deterministic `pickVariant(experiment, userId)`:
+Каталог техник убеждения, инжектируемых в систем промпт сверх базового stage guidance.
 
-- Same `(experiment.slug, userId)` always returns the same `styleSlug` — sticky across restarts, sticky if the prospect comes back tomorrow.
-- Distribution proportional to integer weights.
+### Как работает
 
-Wired into the webhook: when an experiment is in `status='running'`, every NEW conversation gets allocated on its first inbound message. The `style_id` and `experiment_id` are persisted on the conversation row, so subsequent turns are deterministic — no chance of a prospect seeing a different persona because of a process restart or load-balancer hop.
+1. Каждый skill имеет `prompt_fragment` — инструкцию для LLM.
+2. Для каждого style в `style_skills` помечается набор enabled skills.
+3. `composeSystemPrompt()` включает только skills, enabled для текущего style.
+4. Post-generation: `gradeSkills()` отдельным LLM-вызовом оценивает, какие skills реально применил бот в ответе.
+5. Результат записывается в `skill_outcomes` → лидерборд в `/admin/skills`.
 
-### DB schema (migration `003_sales_styles_and_experiments.sql`)
+### Управление
 
-```sql
-CREATE TABLE styles (
-  id INTEGER PRIMARY KEY,
-  slug TEXT UNIQUE NOT NULL,
-  display_name TEXT NOT NULL,
-  config_json TEXT NOT NULL,        -- full Style as JSON, validated by Zod
-  is_active INTEGER NOT NULL DEFAULT 1,
-  version INTEGER NOT NULL DEFAULT 1,
-  parent_id INTEGER REFERENCES styles(id),  -- version chain
-  created_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
+В `/admin/skills`:
+- просмотр каталога с win-rate каждого skill
+- включение/выключение для конкретного style
+- редактирование `prompt_fragment`
 
-CREATE TABLE experiments (
-  id INTEGER PRIMARY KEY,
-  slug TEXT UNIQUE NOT NULL,
-  status TEXT NOT NULL,              -- 'draft'|'running'|'paused'|'done'
-  allocation_json TEXT NOT NULL,     -- {"flirty-v1": 50, "empathetic-v1": 50}
-  success_metric TEXT NOT NULL,      -- 'qualified'|'won'|'replied_3+'
-  started_at INTEGER, ended_at INTEGER,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
+### Примеры skills
 
-ALTER TABLE conversations ADD COLUMN style_id INTEGER REFERENCES styles(id);
-ALTER TABLE conversations ADD COLUMN experiment_id INTEGER REFERENCES experiments(id);
-ALTER TABLE conversations ADD COLUMN current_stage TEXT;
-ALTER TABLE messages ADD COLUMN stage TEXT;
+| slug | Описание |
+|---|---|
+| `social_proof_with_numbers` | «за год 200+ девушек» |
+| `scarcity_limited_slots` | «осталось 3 места» |
+| `reciprocity_gift_offer` | «пришлю пример договора» |
+| `authority_legal_contract` | «легальный контракт, виза от агентства» |
+
+---
+
+## A/B routing
+
+[`src/sales/ab-router.ts`](../src/sales/ab-router.ts) — `pickVariant(experiment, userId)`:
+
+- Детерминированный: `hash(experiment.slug + userId) mod totalWeight` → всегда одно и то же распределение.
+- Sticky: `style_id` и `experiment_id` сохраняются на conversation row. Рестарт сервера / другой процесс — тот же вариант.
+- Proportional: integer веса в `allocation_json`.
+
+Когда experiment `running` — каждый NEW conversation автоматически получает variant при первом сообщении.
+
+### Funnel аналитика
+
+`GET /admin/api/experiments/:id/funnel` — per-style агрегаты: conversations · qualified · won · lost · human-handoff rate.
+
+---
+
+## Style versioning
+
+Редактирование style создаёт **новую row** (version+1, parent_id=currentId), старая маркируется is_active=0.
+
 ```
+┌─────────────────────────────────────────────────────────┐
+│  slug="alina-infinity-v1"                               │
+│                                                         │
+│  v1 (id=1)  is_active=0  parent_id=null   ← historical │
+│    └─► v2 (id=7)  is_active=0  parent_id=1             │
+│           └─► v3 (id=15) is_active=1  parent_id=7 ← current │
+└─────────────────────────────────────────────────────────┘
+```
+
+- Conversations пинненные к старой версии продолжают видеть тот же промпт.
+- `bySlug()` возвращает только `is_active=1` → новые conversations получают v3.
+- `byId()` возвращает любую версию → audit / history view.
+- `editAsNewVersion()` атомарный: транзакция, оба op либо commit либо rollback.
 
 ### Boot-time seed
 
-[`seedBuiltinStyles`](../src/db/repos/styles.ts) inserts each source-defined style into the DB on every server start, **idempotent on slug** — admin's edits in the table always win. Newly added builtins (added in source code after a deploy) get inserted on next boot.
+`seedBuiltinStyles()` вызывается при каждом старте сервера:
+- Новый slug → INSERT.
+- Существующий + `config_json` изменился → UPDATE `config_json` (admin's `display_name` edits сохраняются).
+- Без изменений → skip.
 
-### Style versioning
+Это значит: редактирование стиля в коде и рестарт сервера → изменение применяется. Редактирование через Admin UI → сохраняется в DB и побеждает после следующего edit через Admin UI (code refresh пересинхронизирует только если файл поменялся).
 
-The `version` + `parent_id` chain lets the admin UI edit a live style by inserting a new row (version+1, parent_id = old.id) and marking the old one inactive. Conversations already running keep their `style_id` pointer to the old row, so the prompt they were assigned remains pinned for the lifetime of that chat. (UI for this is Phase 2b.)
-
-### Failure modes — graceful degradation
-
-- Malformed `experiments.allocation_json` → bot logs warning, falls back to legacy persona.
-- Experiment references unknown style slug → same.
-- `styles.config_json` fails Zod schema → throws with field-level error pointing at the offending row.
-
-All three covered by [`tests/unit/sales/webhook-ab.test.ts`](../tests/unit/sales/webhook-ab.test.ts).
+---
 
 ## Authoring a new style
 
-Drop a new file into [`src/sales/styles/`](../src/sales/styles/):
+```typescript
+// src/sales/styles/my-style-v1.ts
+import { type Style, StyleSchema } from "../types.ts";
 
-```ts
-// src/sales/styles/cold-empathy-v1.ts
-import { StyleSchema, type Style } from "../types.ts";
-
-export const coldEmpathy: Style = StyleSchema.parse({
-  slug: "cold-empathy-v1",
-  displayName: "Sasha — холодный эмпат",
-  persona: { name: "Саша", role: "human", company: "ALINA Models" },
-  voice: { tone: "...", language: "ru", forbid: [...] },
-  framework: "SPIN",
-  hooks: [{ kind: "authority", text: "..." }],
-  stages: { opener: { goal: "..." }, /* ... */ },
-  fewShot: [{ stage: "opener", user: "—", assistant: "..." }],
-  guardrails: { noMinors: true, botDisclosureOnDirectQuestion: true, forbiddenTopics: [] },
-  model: { id: "qwen3:latest", temperature: 0.6, maxTokens: 200 },
+export const myStyle: Style = StyleSchema.parse({
+  slug: "my-style-v1",          // kebab-case, уникальный
+  displayName: "Саша — пример",
+  persona: {
+    name: "Саша",
+    role: "human",
+    company: "EXAMPLE AGENCY",
+    facts: { phone: "+7 999 000 0000" },
+  },
+  voice: {
+    tone: "дружелюбный, коротко, без формализма",
+    language: "ru",
+    forbid: ["Здравствуйте", "Добрый день", "оператор", "ИИ"],
+  },
+  framework: "NEPQ",
+  hooks: [
+    { kind: "social_proof", text: "работаем с 500+ кандидатами" },
+    { kind: "scarcity", text: "набираем только 5 человек в потоке" },
+  ],
+  stages: {
+    opener: {
+      goal: "представиться и узнать что интересует",
+      guidance: "Одна реплика, без продажи.",
+      maxTurns: 1,
+    },
+    qualify: {
+      goal: "узнать возраст, город, готовность",
+      guidance:
+        "ПРАВИЛО 1: Один вопрос в конце реплики.\n" +
+        "ПРАВИЛО 2: Не повторяй то, что уже сказали.\n" +
+        "ПРАВИЛО 3: Как только есть возраст + город — переходи к pitch.",
+      groundingRequired: false,
+    },
+    pitch: {
+      goal: "рассказать вакансию по АКТУАЛЬНЫЕ ВАКАНСИИ",
+      guidance:
+        "Цифры только из АКТУАЛЬНЫЕ ВАКАНСИИ или KB. " +
+        "Если кандидат соглашается («Да», «ок») — продолжай питч. " +
+        "ВСЕГДА прикладывай ссылку из поля «Ссылка:».",
+      groundingRequired: false,
+    },
+    objection: {
+      goal: "снять страх",
+      guidance: "Признай по-человечески, дай конкретный proof, мягкий мост к close.",
+    },
+    close: {
+      goal: "договориться на следующий шаг",
+      guidance: "Один мягкий CTA. Не уговаривай.",
+    },
+  },
+  fewShot: [
+    {
+      stage: "opener",
+      user: "привет",
+      assistant: "Привет! Я Саша из EXAMPLE. Что интересует?",
+    },
+  ],
+  guardrails: {
+    noMinors: true,
+    botDisclosureOnDirectQuestion: false,
+    forbiddenTopics: ["sexual_explicit", "minors", "fake_documents"],
+  },
+  model: {
+    id: "qwen3:latest",
+    temperature: 0.65,
+    maxTokens: 280,
+  },
 });
 ```
 
-Then register in [`src/sales/styles/index.ts`](../src/sales/styles/index.ts):
+Зарегистрировать в [`src/sales/styles/index.ts`](../src/sales/styles/index.ts):
 
-```ts
-import { coldEmpathy } from "./cold-empathy-v1.ts";
-export const STYLES = [flirtyBelfort, empatheticNepq, coldDirectPas, coldEmpathy];
+```typescript
+import { myStyle } from "./my-style-v1.ts";
+export const STYLES = [...EXISTING_STYLES, myStyle];
 ```
 
-The Zod schema validates at module load — malformed styles fail fast with a helpful error rather than blowing up at request time.
+Zod-схема валидируется при загрузке модуля — ошибка в структуре → краш с field-level сообщением, не при первом сообщении пользователя.
 
-## Models
+---
 
-[`src/sales/models.ts`](../src/sales/models.ts) is a registry of known-good models with metadata (provider, size, Russian quality, ~tok/s, recommendation). It's NOT a constraint on what you can run (the runtime accepts any string) — it's source data for a future admin UI dropdown.
+## Guardrails
 
-Three provider categories represented:
+- `noMinors: true` — запрещает любое взаимодействие с несовершеннолетними. Проверяется в `guardrails.ts`.
+- `botDisclosureOnDirectQuestion: false` — прямой вопрос «ты бот?» обрабатывается детерминистически через `botPresenceReply` shortcut **до** LLM (см. `webhook.ts`), независимо от этого флага. Флаг контролирует поведение при косвенных намёках в промпте.
+- `forbiddenTopics` — список тем, по которым LLM не должна отвечать.
 
-- **Local Ollama** — `qwen3:latest`, `qwen3:14b`, `qwen2.5:7b`, `llama3.2:latest`, `gemma2:9b`, `moondream:v2`.
-- **Ollama Cloud** — `qwen3.5:cloud`, `glm-4.6:cloud`. Same `OllamaChatClient` (HTTP API is identical), runs on Ollama's hosted GPUs. Solves CPU bottlenecks. Needs a paid Ollama subscription.
-- **OpenRouter** — `anthropic/claude-haiku-4.5`, `anthropic/claude-sonnet-4.6`, `openai/gpt-4o-mini`, `google/gemini-2.5-flash`. **Provider not yet wired into tg-chatbot** — would need a new `OpenRouterChatClient` implementing `ChatClient` (~80 LOC). Tracked in `sales-guru` repo as a reference implementation.
+---
 
 ## Testing
 
-`tests/unit/sales/` mirrors the source structure:
+`tests/unit/sales/` зеркалирует `src/sales/`:
 
-| file | what's tested | tests |
-|---|---|---|
-| `ab-router.test.ts` | Determinism, distribution, edge cases | 11 |
-| `stage-router.test.ts` | Cyrillic regex regression, all transitions, precedence | 19 |
-| `prompt.test.ts` | All sections, persona-role branching, few-shot toggle, KB block, grounding | 20 |
-| `styles.test.ts` | All 3 sample styles + invariants + Zod rejection of bad input | 25 |
-| `styles-repo.test.ts` | StylesRepo CRUD, parseRow with Zod validation, soft-delete, idempotent seed | 14 |
-| `experiments-repo.test.ts` | ExperimentsRepo CRUD, getRunning, status transitions, allocation parsing | 17 |
-| `webhook-ab.test.ts` | End-to-end A/B: assignment, stickiness, two users, malformed experiment graceful fallback + classifier integration | 8 |
-| `stage-classifier.test.ts` | LLM-output parser (10 cases: code fences, prose, clamping, malformed) + classify happy path + 4 fallback paths + threshold respected | 22 |
-| `admin-sales-api.test.ts` | 9 admin endpoints (auth, list/get/edit/create/playground styles, list/create/patch experiments, funnel SQL) + version-pin invariant | 47 |
-| `styles-repo.test.ts` (extended) | + `editAsNewVersion` (creates new version, deactivates old, refuses inactive/slug-change, transactional rollback) + `versionHistory` | 23 |
+| Файл теста | Что тестируется |
+|---|---|
+| `ab-router.test.ts` | детерминизм, distribution, edge cases |
+| `stage-router.test.ts` | кириллица regression, все переходы, приоритет правил |
+| `stage-classifier.test.ts` | 4 fallback пути, threshold, парсинг LLM output |
+| `prompt.test.ts` | все секции, persona-role branching, few-shot toggle, KB block |
+| `styles.test.ts` | все 4 built-in styles + Zod rejection bad input |
+| `styles-repo.test.ts` | CRUD, parseRow, soft-delete, idempotent seed, editAsNewVersion |
+| `experiments-repo.test.ts` | CRUD, getRunning, allocation parsing |
+| `webhook-ab.test.ts` | E2E A/B: assignment, stickiness, graceful fallback |
+| `admin-sales-api.test.ts` | 47 тестов, все 9 sales endpoints + version-pin invariant |
 
-Plus four integration tests in [`tests/unit/answer.test.ts`](../tests/unit/answer.test.ts) verifying that `answerWithRag` correctly branches between the legacy persona prompt and the sales-engine composed prompt.
-
-Run: `bun test tests/unit`. The full unit suite is hermetic — no network, no live Ollama, no real DB beyond `:memory:`.
-
-## Phase 2b — Admin UI (shipped)
-
-Two new pages in the admin panel under [`admin-ui/src/pages/`](../admin-ui/src/pages/):
-
-- **`/admin/styles`** — list of active sales styles + **"+ new style"**
-  flow (clone-from-existing). Click any row to view + edit the full
-  Zod-validated config (JSON editor with live parse-error feedback). Saving
-  creates a new version; the previous one stays in the DB so any conversation
-  pinned to it keeps the prompt it started with. Each style detail page also
-  has a **Playground** — collapsible section that runs a sample prospect
-  message through the live LLM with the current style config, returning the
-  auto-detected funnel stage, the KB hits that would be injected, the full
-  composed system prompt, and the model's reply. No DB writes, no Telegram
-  traffic — pure dry-run for iterating on prompts.
-
-  New styles are created by **cloning** an existing template — pick one in
-  the dropdown on the list page, click "+ new style", the JSON editor opens
-  pre-filled with that style (slug suffixed `-clone`, displayName prefixed
-  `[clone]`). Operator changes slug + persona + voice + whatever else, hits
-  Create. The result is a fresh root of a new version chain (v1, parent_id=null).
-- **`/admin/experiments`** — list of all A/B experiments with their
-  status badge (draft / running / paused / done), allocation, **per-style
-  funnel** (conversations · success · rate · escalated), and start / pause /
-  finish buttons. New experiments via the "+ new experiment" form: pick a
-  slug, set integer weights against any of the seeded styles, save as draft.
-  Activate by clicking *start*.
-
-Backend endpoints in [`src/admin/api.ts`](../src/admin/api.ts):
-
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/admin/api/styles` | list active styles (slug, name, version, created) |
-| POST | `/admin/api/styles` | create a fresh style (root of new version chain). 409 on slug collision with an active row. 422 on Zod failure. |
-| GET | `/admin/api/styles/:id` | full row + parsed Zod config (or `parse_error` when malformed) |
-| PATCH | `/admin/api/styles/:id` | save edit as new version (deactivates old, inserts new with `parent_id` chain) |
-| POST | `/admin/api/styles/:id/playground` | dry-run a prospect message against the style — no persistence. Body: `{userMessage, stage?, useKb?, dropFewShot?}`. Returns: stage (auto or override), kb_hits, composed system_prompt, reply, duration_ms, model. Returns 503 if LLM not configured. |
-| GET | `/admin/api/experiments` | list all experiments with allocation pre-parsed |
-| POST | `/admin/api/experiments` | create draft. Validates slug shape, every variant slug exists, weights non-negative, total weight > 0 |
-| PATCH | `/admin/api/experiments/:id` | set status. Refuses to start a second running experiment, refuses to start one with malformed allocation |
-| GET | `/admin/api/experiments/:id/funnel` | per-style aggregates (conversations + qualified/won/lost counts + human-handoff rate) |
-
-Full coverage in [`tests/unit/sales/admin-sales-api.test.ts`](../tests/unit/sales/admin-sales-api.test.ts) — 19 tests across the 6 endpoints.
-
-**Operational guard rails baked into the API:**
-- Cannot create/start a second `running` experiment when one is already live (409).
-- Cannot start an experiment whose `allocation_json` is malformed (422 — fix the JSON first).
-- Cannot reference a style slug that's missing or `is_active=0` (400 with the offending slug).
-- Cannot edit a historical (already-inactive) style version (409 — fork from the current active version instead).
-- Cannot change `slug` across the version chain — slug is the identity (409).
-- Style edits that fail Zod validation surface field-level issues (422 with `{path, message}` array).
-
-These match the runtime's graceful-fallback rules — together they make it hard to ship a misconfigured experiment that would silently degrade to legacy persona.
-
-### Why version chain instead of in-place edit
-
-A sales conversation in flight is pinned to its `style_id` for stickiness — restarting the bot mid-funnel can't change which persona is talking. If "edit" mutated the row in-place, the prompt every running conversation sees would shift mid-conversation: a prospect who started with the flirty opener could end up qualified by an empathetic bot.
-
-Solution (migration `004_style_versioning.sql`):
-
-- Drop `UNIQUE(slug)`. Multiple historical versions share the slug.
-- Add partial `UNIQUE(slug) WHERE is_active=1`. Exactly one current version.
-- Add `UNIQUE(slug, version)`. Each tuple is unique.
-- `parent_id` links to the row this one was forked from. The chain is auditable.
-
-`StylesRepo.editAsNewVersion(currentId, newConfig)` is atomic: deactivate old + insert new with `version+1`, `parent_id=currentId`. Wrapped in a transaction; if either op fails, both roll back and the old row stays active.
-
-Conversations with `conversations.style_id = old.id` keep reading the old row via `byId()` (which intentionally returns inactive rows too). New conversations resolve via `bySlug()` → only active rows → the new version. Both groups stay coherent forever.
-
-## Future work
-- **Phase 2c — OpenRouter provider** — add `OpenRouterChatClient` implementing the existing `ChatClient` interface. The model registry in `src/sales/models.ts` already lists Claude/GPT/Gemini entries; provider just needs wiring (~80 LOC). Enables per-style backbone choice.
-- **Stage classifier upgrade** — replace regex `nextStage` with a haiku-class LLM classifier returning `{stage, confidence}`. Keep regex as fallback at confidence < 0.6.
-- **Streaming replies** — switch the Ollama `/api/chat` call to SSE so partial replies show up as they're generated (helps UX on slow CPU inference).
-- **Per-style memory** — `conversations.style_memory_json` for persona-specific facts (e.g. "this prospect's name is Anya, lives in Yekaterinburg") that survive across turns.
+Суммарно 150+ тестов. `bun test tests/unit/sales/` — изолировано, `:memory:` SQLite.
