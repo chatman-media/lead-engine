@@ -33,7 +33,13 @@ export interface UserbotDeps {
  * when leads are disabled (leadsChatId = null), which is always the case for
  * the userbot path — all other methods are intentionally left as stubs.
  */
-function makeUserbotSender(gramjs: GramjsClient): TelegramClient {
+// replyFn is a closure over the inbound `msg` so gramjs doesn't need to
+// look up an entity by bare numeric ID (which fails for first-time users
+// who aren't yet in the session's entity cache).
+function makeUserbotSender(
+  replyFn: (text: string) => Promise<{ id: number }>,
+  chatId: number,
+): TelegramClient {
   return {
     async sendMessage(input: {
       chatId: number | string;
@@ -43,10 +49,10 @@ function makeUserbotSender(gramjs: GramjsClient): TelegramClient {
       disableWebPagePreview?: boolean;
       replyToMessageId?: number;
     }) {
-      const msg = await gramjs.sendMessage(input.chatId as number, { message: input.text });
+      const sent = await replyFn(input.text);
       return {
-        message_id: msg.id,
-        chat: { id: Number(input.chatId), type: "private" },
+        message_id: sent.id,
+        chat: { id: chatId, type: "private" },
       } as TgSendMessageResult;
     },
     getMe: () => {
@@ -100,7 +106,6 @@ interface ProcessUnreadDeps {
   experiments: ExperimentsRepo;
   vacancies: VacanciesRepo;
   leads: LeadsRepo;
-  telegramSender: TelegramClient;
   rag?: RagDeps;
   onEvent?: Parameters<typeof processInbound>[0]["onEvent"];
 }
@@ -172,6 +177,14 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
         `[userbot] sweep: processing missed msg id=${msg.id} from tg_user_id=${tgUserId}`,
       );
 
+      // Use dialog.entity (full User object) so gramjs doesn't need to
+      // resolve access_hash from a bare numeric ID.
+      const entity = dialog.entity;
+      const telegramSender = makeUserbotSender(
+        (text) => d.client.sendMessage(entity, { message: text }),
+        tgUserId,
+      );
+
       processInbound({
         messages: d.messages,
         conversations: d.conversations,
@@ -183,7 +196,7 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
         users: d.users,
         vacancies: d.vacancies,
         leads: d.leads,
-        telegram: d.telegramSender,
+        telegram: telegramSender,
         leadsChatId: null,
         visaChatId: null,
         rag: d.rag,
@@ -246,7 +259,6 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   const experiments = new ExperimentsRepo(db);
   const vacancies = new VacanciesRepo(db);
   const leads = new LeadsRepo(db);
-  const telegramSender = makeUserbotSender(client);
   // Per-user last-processed timestamp for rate limiting.
   const lastProcessedAt = new Map<number, number>();
 
@@ -298,6 +310,11 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
       conversations.touch(conv.id);
       onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
 
+      // Create sender bound to this specific inbound message so that
+      // msg.reply() is used instead of sendMessage(numericId) — the
+      // latter fails for users not yet in gramjs's entity cache.
+      const telegramSender = makeUserbotSender((text) => msg.reply({ message: text }), tgUserId);
+
       processInbound({
         messages,
         conversations,
@@ -340,7 +357,6 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     experiments,
     vacancies,
     leads,
-    telegramSender,
     ...(rag ? { rag } : {}),
     ...(onEvent ? { onEvent } : {}),
   };
