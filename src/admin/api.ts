@@ -3057,6 +3057,7 @@ export function createGetSelfPlayMatchHandler(deps: AdminApiDeps): RouteHandler 
         turns: match.turns,
         skills: match.skills,
         lead_id: match.lead_id,
+        fabrications_caught: match.fabrications_caught ?? 0,
         created_at: match.created_at,
         transcript: match.transcript,
       },

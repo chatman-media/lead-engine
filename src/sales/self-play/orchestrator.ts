@@ -204,13 +204,18 @@ export async function runSelfPlayMatch(
       ...(reflect ? { reflect: true } : {}),
     });
 
-    // Reflection caught a fabrication — answerWithRag returns the
-    // NO_CONTEXT marker. Replace with a polite stall so the candidate
-    // hears something honest instead of "__NO_CONTEXT__", and keep the
-    // match going. Track the count for diagnostic.
+    // answerWithRag returns NO_CONTEXT in two cases — distinguish via
+    // the telemetry path so we count "fabrications" only when reflect
+    // was the cause:
+    //   - "ungrounded" → reflect rejected the answer as fabricated
+    //   - "no_context" → retrieval found nothing (no KB hit, no vacancies)
+    // Both paths get the same stall fallback so the match keeps going,
+    // but only the first bumps the fabrication counter.
     let salesText = salesResult.text;
     if (salesText === NO_CONTEXT_MARKER) {
-      fabricationsCaught++;
+      if (salesResult.telemetry.path === "ungrounded") {
+        fabricationsCaught++;
+      }
       salesText = deps.stallReply ?? "Секунду, уточню детали и напишу — пара минут.";
     }
     transcript.push({ role: "salesperson", text: salesText });
@@ -384,6 +389,7 @@ export function persistSelfPlayMatch(
       turns: result.turns,
       skills: result.skillsAttributed,
       leadId: result.leadId > 0 ? result.leadId : null,
+      fabricationsCaught: result.fabricationsCaught,
     });
   } catch (err) {
     console.warn("[self-play] failed to persist match transcript:", err);
