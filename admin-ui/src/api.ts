@@ -180,6 +180,29 @@ export interface CoachProposalRow {
   decided_by_admin_id: number | null;
 }
 
+export type ShadowEvalStatus = "running" | "complete" | "failed";
+export type ShadowEvalDecision = "keep" | "rollback" | "inconclusive";
+
+export interface ShadowEvalRow {
+  id: number;
+  proposal_id: number;
+  parent_style_slug: string;
+  parent_style_id: number;
+  new_style_slug: string;
+  new_style_id: number;
+  pairs_planned: number;
+  pairs_done: number;
+  a_wins: number;
+  b_wins: number;
+  draws: number;
+  win_rate_lb: number | null;
+  status: ShadowEvalStatus;
+  decision: ShadowEvalDecision | null;
+  error_message: string | null;
+  started_at: number;
+  completed_at: number | null;
+}
+
 export interface CoachProposalDetail extends CoachProposalRow {
   edits: {
     voice_tone?: string;
@@ -653,6 +676,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify(opts ?? {}),
     }),
+  startShadowEval: (
+    id: number,
+    body?: { runs?: number; personas?: string[]; max_turns?: number },
+  ) =>
+    req<{ shadow_eval: ShadowEvalRow }>(`/admin/api/coach/${id}/shadow-eval`, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    }),
+  getShadowEval: (id: number) =>
+    req<{ shadow_eval: ShadowEvalRow | null }>(`/admin/api/coach/${id}/shadow-eval`),
+  rollbackCoachProposal: (id: number) =>
+    req<{
+      ok: true;
+      deactivated: { id: number; slug: string; version: number };
+      reactivated: { id: number; slug: string; version: number };
+    }>(`/admin/api/coach/${id}/rollback`, { method: "POST" }),
   deleteCoachProposal: (id: number) =>
     req<{ ok: true; deleted: number }>(`/admin/api/coach/${id}`, { method: "DELETE" }),
   recommendSkills: (opts?: { minSamples?: number; accept?: number }) => {

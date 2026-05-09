@@ -3407,6 +3407,177 @@ export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandle
   };
 }
 
+// ─── Shadow A/B evaluations ────────────────────────────────────────────
+
+import { ShadowEvaluationsRepo } from "../db/repos/shadow-evaluations.ts";
+import {
+  renderVacanciesBlock as _renderVacanciesForShadow,
+  VacanciesRepo as _VacanciesRepoForShadow,
+} from "../db/repos/vacancies.ts";
+import {
+  CANDIDATE_PERSONAS as _CANDIDATE_PERSONAS_FOR_SHADOW,
+  CANDIDATE_BY_SLUG,
+} from "../sales/self-play/personas.ts";
+import { runShadowEval } from "../sales/shadow-eval.ts";
+
+/**
+ * POST /admin/api/coach/:id/shadow-eval — kicks off pairwise A/B between
+ * the parent style version (A) and the freshly-forked new version (B).
+ * Body: { runs?, personas?, max_turns? }. Returns the row immediately;
+ * the runner writes incremental progress in the background. Caller polls
+ * GET /admin/api/coach/:id/shadow-eval until status changes.
+ */
+export function createStartShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    if (!deps.rag?.chat || !deps.rag?.embedder) {
+      return json({ error: "LLM not configured" }, { status: 503 });
+    }
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    let body: { runs?: number; personas?: string[]; max_turns?: number } = {};
+    try {
+      const text = await req.text();
+      if (text.trim()) body = JSON.parse(text);
+    } catch {
+      // Empty body OK.
+    }
+
+    const proposalsRepo = new CoachProposalsRepo(deps.db);
+    const proposal = proposalsRepo.byId(id);
+    if (!proposal) return json({ error: "proposal not found" }, { status: 404 });
+    if (proposal.status !== "applied") {
+      return json(
+        { error: `proposal must be applied first (current: ${proposal.status})` },
+        { status: 409 },
+      );
+    }
+
+    const stylesRepo = new StylesRepo(deps.db);
+    const newRow = stylesRepo.bySlug(proposal.style_slug);
+    if (!newRow) return json({ error: "new style not found" }, { status: 404 });
+    if (newRow.parent_id === null) {
+      return json({ error: "applied proposal's style row has no parent" }, { status: 409 });
+    }
+    const parentRow = stylesRepo.byId(newRow.parent_id);
+    if (!parentRow) return json({ error: "parent missing" }, { status: 404 });
+
+    const newStyle = stylesRepo.parseRow(newRow) as Style;
+    const parentStyle = stylesRepo.parseRow(parentRow) as Style;
+
+    const personaSlugs =
+      Array.isArray(body.personas) && body.personas.length > 0
+        ? body.personas
+        : _CANDIDATE_PERSONAS_FOR_SHADOW.slice(0, 4).map((p) => p.slug);
+    const personas = personaSlugs
+      .map((s) => CANDIDATE_BY_SLUG.get(s))
+      .filter((p): p is NonNullable<typeof p> => p !== undefined);
+    if (personas.length === 0) return json({ error: "no valid personas" }, { status: 400 });
+
+    const runs = Math.max(1, Math.min(5, Math.floor(body.runs ?? 1)));
+    const maxTurns = Math.max(4, Math.min(40, Math.floor(body.max_turns ?? 16)));
+    const pairsPlanned = personas.length * runs;
+
+    const shadowRepo = new ShadowEvaluationsRepo(deps.db);
+    const evalRow = shadowRepo.insert({
+      proposalId: id,
+      parentStyleSlug: parentRow.slug,
+      parentStyleId: parentRow.id,
+      newStyleSlug: newRow.slug,
+      newStyleId: newRow.id,
+      pairsPlanned,
+    });
+
+    void runShadowEval(
+      {
+        db: deps.db,
+        shadowRepo,
+        kb: new KbRepo(deps.db),
+        skills: new _SkillsRepoForCoach(deps.db),
+        outcomes: new SkillOutcomesRepo(deps.db),
+        ratings: new StyleRatingsRepo(deps.db),
+        salesChat: deps.rag.chat,
+        candidateChat: deps.rag.chat,
+        judgeChat: deps.rag.chat,
+        embedder: deps.rag.embedder,
+        ...(() => {
+          const block = _renderVacanciesForShadow(
+            new _VacanciesRepoForShadow(deps.db).listActive(),
+          );
+          return block ? { vacanciesBlock: block } : {};
+        })(),
+      },
+      {
+        evalId: evalRow.id,
+        parentStyle,
+        parentStyleId: parentRow.id,
+        newStyle,
+        newStyleId: newRow.id,
+        personas,
+        runs,
+        maxTurns,
+      },
+    ).catch((err) => {
+      console.warn(`[shadow-eval] runner crashed for eval #${evalRow.id}: ${err}`);
+    });
+
+    return json({ shadow_eval: evalRow });
+  };
+}
+
+/** GET /admin/api/coach/:id/shadow-eval — latest eval status (polled). */
+export function createGetShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const row = new ShadowEvaluationsRepo(deps.db).latestForProposal(id);
+    return json({ shadow_eval: row });
+  };
+}
+
+/** POST /admin/api/coach/:id/rollback — deactivate the new version,
+ *  reactivate the parent. Conversations pinned to the new version keep
+ *  working (FK is to row id, not slug — version chain semantics). */
+export function createRollbackCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const proposalsRepo = new CoachProposalsRepo(deps.db);
+    const proposal = proposalsRepo.byId(id);
+    if (!proposal) return json({ error: "proposal not found" }, { status: 404 });
+    if (proposal.status !== "applied") {
+      return json(
+        { error: `only applied proposals can be rolled back (current: ${proposal.status})` },
+        { status: 409 },
+      );
+    }
+    const stylesRepo = new StylesRepo(deps.db);
+    const newRow = stylesRepo.bySlug(proposal.style_slug);
+    if (!newRow || newRow.parent_id === null) {
+      return json({ error: "no parent version" }, { status: 409 });
+    }
+    const parentRow = stylesRepo.byId(newRow.parent_id);
+    if (!parentRow) return json({ error: "parent missing" }, { status: 404 });
+
+    deps.db.transaction(() => {
+      deps.db.run("UPDATE styles SET is_active = 0 WHERE id = ?", [newRow.id]);
+      deps.db.run("UPDATE styles SET is_active = 1 WHERE id = ?", [parentRow.id]);
+    })();
+
+    return json({
+      ok: true,
+      deactivated: { id: newRow.id, slug: newRow.slug, version: newRow.version },
+      reactivated: { id: parentRow.id, slug: parentRow.slug, version: parentRow.version },
+    });
+  };
+}
+
 /** DELETE /admin/api/coach/:id — clear noisy proposals. */
 export function createDeleteCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
   return ({ req, params }) => {

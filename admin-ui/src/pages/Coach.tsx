@@ -5,6 +5,7 @@ import {
   type CoachProposalRow,
   type CoachProposalStatus,
   type SelfPlayPersona,
+  type ShadowEvalRow,
 } from "../api.ts";
 
 const STATUS_COLOR: Record<CoachProposalStatus, string> = {
@@ -43,6 +44,19 @@ export function Coach() {
   const [detail, setDetail] = useState<CoachProposalDetail | null>(null);
   const [deciding, setDeciding] = useState<"applied" | "dismissed" | null>(null);
 
+  // Apply / shadow-eval state — declared up here so the useEffect below
+  // (polling shadowEval) can reference these in its deps without a TDZ.
+  const [applying, setApplying] = useState(false);
+  const [applyResult, setApplyResult] = useState<{
+    slug: string;
+    version: number;
+    id: number;
+  } | null>(null);
+  const [shadowEval, setShadowEval] = useState<ShadowEvalRow | null>(null);
+  const [shadowStarting, setShadowStarting] = useState(false);
+  const [shadowRuns, setShadowRuns] = useState(1);
+  const [rollingBack, setRollingBack] = useState(false);
+
   async function refresh() {
     try {
       setError(null);
@@ -78,13 +92,36 @@ export function Coach() {
   useEffect(() => {
     if (openId === null) {
       setDetail(null);
+      setShadowEval(null);
       return;
     }
     api
       .coachProposal(openId)
       .then((r) => setDetail(r.proposal))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    api
+      .getShadowEval(openId)
+      .then((r) => setShadowEval(r.shadow_eval))
+      .catch(() => undefined);
   }, [openId]);
+
+  // Poll shadow-eval status when running.
+  useEffect(() => {
+    if (!shadowEval || shadowEval.status !== "running") return;
+    const id = shadowEval.proposal_id;
+    const handle = setInterval(() => {
+      api
+        .getShadowEval(id)
+        .then((r) => {
+          if (r.shadow_eval) setShadowEval(r.shadow_eval);
+          if (r.shadow_eval && r.shadow_eval.status !== "running") {
+            clearInterval(handle);
+          }
+        })
+        .catch(() => undefined);
+    }, 5000);
+    return () => clearInterval(handle);
+  }, [shadowEval]);
 
   async function runCoach() {
     if (running) return;
@@ -119,13 +156,6 @@ export function Coach() {
     }
   }
 
-  const [applying, setApplying] = useState(false);
-  const [applyResult, setApplyResult] = useState<{
-    slug: string;
-    version: number;
-    id: number;
-  } | null>(null);
-
   async function applyAsNewVersion(id: number) {
     if (
       !window.confirm(
@@ -148,6 +178,43 @@ export function Coach() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setApplying(false);
+    }
+  }
+
+  async function startShadow(id: number) {
+    if (shadowStarting) return;
+    setShadowStarting(true);
+    try {
+      const res = await api.startShadowEval(id, { runs: shadowRuns });
+      setShadowEval(res.shadow_eval);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setShadowStarting(false);
+    }
+  }
+
+  async function rollback(id: number) {
+    if (
+      !window.confirm(
+        "Roll back this proposal?\n\n" +
+          "The new style version will be deactivated and the parent will be reactivated. " +
+          "Conversations already pinned to the new version keep working — this only affects " +
+          "which version becomes the default for new chats.",
+      )
+    )
+      return;
+    setRollingBack(true);
+    try {
+      await api.rollbackCoachProposal(id);
+      await refresh();
+      // Reload the proposal so the badge shows the new state.
+      const r = await api.coachProposal(id);
+      setDetail(r.proposal);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRollingBack(false);
     }
   }
 
@@ -496,6 +563,130 @@ export function Coach() {
             >
               ✓ Forked <strong>{applyResult.slug}</strong> v{applyResult.version} (style id #
               {applyResult.id}). Skills attachments copied + edited.
+            </div>
+          )}
+
+          {detail.status === "applied" && (
+            <div
+              style={{
+                marginTop: 16,
+                padding: 12,
+                background: "var(--bg-2, #1a1a1a)",
+                border: "1px solid var(--border, #2a2a2a)",
+                borderRadius: 6,
+              }}
+            >
+              <h3 style={{ margin: "0 0 8px 0", fontSize: 14 }}>Shadow A/B</h3>
+              {shadowEval === null && (
+                <div>
+                  <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 0 }}>
+                    Pit the new fork (B) against the parent (A) head-to-head. Wilson 95% lower bound
+                    on B's win rate decides keep / rollback.
+                  </p>
+                  <label style={{ marginRight: 8 }}>
+                    Runs/persona:&nbsp;
+                    <input
+                      type="number"
+                      min={1}
+                      max={5}
+                      value={shadowRuns}
+                      onChange={(e) => setShadowRuns(Number(e.target.value) || 1)}
+                      style={{ width: 50 }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => startShadow(detail.id)}
+                    disabled={shadowStarting}
+                    style={{
+                      background: "var(--accent, #3b82f6)",
+                      color: "white",
+                      border: "none",
+                      padding: "6px 12px",
+                      borderRadius: 4,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {shadowStarting ? "Starting…" : "Run shadow A/B"}
+                  </button>
+                  <p style={{ fontSize: 11, color: "var(--text-3)", marginTop: 6 }}>
+                    Default: 4 personas × {shadowRuns} run = {4 * shadowRuns} pairs. Each pair ~2-3
+                    min on Ollama, so plan accordingly.
+                  </p>
+                </div>
+              )}
+              {shadowEval && (
+                <div style={{ fontSize: 13 }}>
+                  <div style={{ marginBottom: 6 }}>
+                    Status:&nbsp;
+                    <strong
+                      style={{
+                        color:
+                          shadowEval.status === "running"
+                            ? "var(--amber, #d97706)"
+                            : shadowEval.status === "complete"
+                              ? "var(--green, #2ea043)"
+                              : "var(--red, #ef4444)",
+                      }}
+                    >
+                      {shadowEval.status.toUpperCase()}
+                    </strong>
+                    &nbsp;· {shadowEval.pairs_done}/{shadowEval.pairs_planned} pairs
+                  </div>
+                  <div style={{ color: "var(--text-3)" }}>
+                    A (parent={shadowEval.parent_style_slug}) wins:{" "}
+                    <strong>{shadowEval.a_wins}</strong>, B (new) wins:{" "}
+                    <strong>{shadowEval.b_wins}</strong>, draws: <strong>{shadowEval.draws}</strong>
+                  </div>
+                  {shadowEval.win_rate_lb !== null && (
+                    <div style={{ marginTop: 4 }}>
+                      B Wilson LB: <strong>{shadowEval.win_rate_lb.toFixed(3)}</strong>
+                      {shadowEval.decision && (
+                        <>
+                          &nbsp;· decision:&nbsp;
+                          <strong
+                            style={{
+                              color:
+                                shadowEval.decision === "keep"
+                                  ? "var(--green)"
+                                  : shadowEval.decision === "rollback"
+                                    ? "var(--red)"
+                                    : "var(--amber)",
+                            }}
+                          >
+                            {shadowEval.decision}
+                          </strong>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {shadowEval.error_message && (
+                    <div style={{ color: "var(--red)", fontSize: 12, marginTop: 4 }}>
+                      Error: {shadowEval.error_message}
+                    </div>
+                  )}
+                  {(shadowEval.decision === "rollback" ||
+                    shadowEval.decision === "inconclusive") && (
+                    <button
+                      type="button"
+                      onClick={() => rollback(detail.id)}
+                      disabled={rollingBack}
+                      style={{
+                        marginTop: 8,
+                        background: "var(--red, #ef4444)",
+                        color: "white",
+                        border: "none",
+                        padding: "6px 12px",
+                        borderRadius: 4,
+                        cursor: "pointer",
+                        fontSize: 13,
+                      }}
+                    >
+                      {rollingBack ? "Rolling back…" : "Rollback to parent"}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {detail.status !== "pending" && detail.decided_at && (

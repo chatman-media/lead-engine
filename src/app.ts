@@ -30,6 +30,7 @@ import {
   createGetKbSuggestionHandler,
   createGetPairwiseMatchHandler,
   createGetSelfPlayMatchHandler,
+  createGetShadowEvalHandler,
   createGetStyleHandler,
   createGetStyleSkillsHandler,
   createIngestKbDocumentHandler,
@@ -55,10 +56,12 @@ import {
   createRejectLeadHandler,
   createReleaseHandler,
   createReplyHandler,
+  createRollbackCoachProposalHandler,
   createRunCoachHandler,
   createSendIntakeHandler,
   createSetExperimentStatusHandler,
   createSetStyleSkillsHandler,
+  createStartShadowEvalHandler,
   createStatusHandler,
   createStylePlaygroundHandler,
   createSubmitToVisaHandler,
@@ -271,6 +274,9 @@ export function createRouter(deps: AppDeps): Router {
   router.get("/admin/api/coach/:id", createGetCoachProposalHandler(apiDeps));
   router.post("/admin/api/coach/:id/decide", createDecideCoachProposalHandler(apiDeps));
   router.post("/admin/api/coach/:id/apply", createApplyCoachProposalHandler(apiDeps));
+  router.post("/admin/api/coach/:id/shadow-eval", createStartShadowEvalHandler(apiDeps));
+  router.get("/admin/api/coach/:id/shadow-eval", createGetShadowEvalHandler(apiDeps));
+  router.post("/admin/api/coach/:id/rollback", createRollbackCoachProposalHandler(apiDeps));
   router.delete("/admin/api/coach/:id", createDeleteCoachProposalHandler(apiDeps));
   router.get("/admin/api/experiments", createListExperimentsHandler(apiDeps));
   router.post("/admin/api/experiments", createCreateExperimentHandler(apiDeps));
