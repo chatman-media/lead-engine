@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 
 import {
   createAnalyticsHandler,
+  createApplyCoachProposalHandler,
   createApproveKbSuggestionHandler,
   createApproveLeadHandler,
   createBulkExportConversationsHandler,
@@ -269,6 +270,7 @@ export function createRouter(deps: AppDeps): Router {
   router.post("/admin/api/coach/run", createRunCoachHandler(apiDeps));
   router.get("/admin/api/coach/:id", createGetCoachProposalHandler(apiDeps));
   router.post("/admin/api/coach/:id/decide", createDecideCoachProposalHandler(apiDeps));
+  router.post("/admin/api/coach/:id/apply", createApplyCoachProposalHandler(apiDeps));
   router.delete("/admin/api/coach/:id", createDeleteCoachProposalHandler(apiDeps));
   router.get("/admin/api/experiments", createListExperimentsHandler(apiDeps));
   router.post("/admin/api/experiments", createCreateExperimentHandler(apiDeps));

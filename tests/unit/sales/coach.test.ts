@@ -9,7 +9,23 @@
  */
 import { describe, expect, test } from "bun:test";
 
-import { parseProposal } from "@/sales/coach.ts";
+import { applyEditsToStyle, parseProposal } from "@/sales/coach.ts";
+import type { Style } from "@/sales/types.ts";
+
+const BASE_STYLE: Style = {
+  slug: "test-style-v1",
+  displayName: "Test",
+  persona: { name: "Алина", role: "human", company: "INFINITY" },
+  voice: { tone: "warm and direct", language: "ru", forbid: ["официально"] },
+  framework: "AIDA",
+  hooks: [{ kind: "social_proof", text: "наши девочки..." }],
+  stages: {
+    opener: { goal: "engage", guidance: "lead with curiosity", groundingRequired: false },
+  },
+  fewShot: [],
+  guardrails: { noMinors: true, botDisclosureOnDirectQuestion: true, forbiddenTopics: [] },
+  model: { id: "qwen3:latest", temperature: 0.8, maxTokens: 256 },
+};
 
 describe("parseProposal", () => {
   test("parses fully-populated proposal", () => {
@@ -99,5 +115,81 @@ describe("parseProposal", () => {
     expect(p.edits.voice_tone).toBe("warm");
     expect(p.edits.skills_attach).toBeUndefined();
     expect(p.edits.hooks_add).toBeUndefined();
+  });
+});
+
+describe("applyEditsToStyle", () => {
+  test("does not mutate the original", () => {
+    const original = JSON.parse(JSON.stringify(BASE_STYLE));
+    applyEditsToStyle(BASE_STYLE, { voice_tone: "icy" });
+    expect(BASE_STYLE).toEqual(original);
+  });
+
+  test("voice_tone replaces", () => {
+    const out = applyEditsToStyle(BASE_STYLE, { voice_tone: "playful, less corporate" });
+    expect(out.voice.tone).toBe("playful, less corporate");
+  });
+
+  test("voice_forbid_add appends and dedupes", () => {
+    const out = applyEditsToStyle(BASE_STYLE, {
+      voice_forbid_add: ["согласно регламенту", "официально", "красавица"],
+    });
+    expect(out.voice.forbid).toContain("согласно регламенту");
+    expect(out.voice.forbid).toContain("красавица");
+    expect(out.voice.forbid.filter((s) => s === "официально")).toHaveLength(1); // not duplicated
+  });
+
+  test("hooks_add filters invalid kinds", () => {
+    const out = applyEditsToStyle(BASE_STYLE, {
+      hooks_add: [
+        { kind: "scarcity", text: "3 места" },
+        { kind: "made_up_kind", text: "x" },
+        { kind: "authority", text: "контракт ДО вылета" },
+      ],
+    });
+    expect(out.hooks).toHaveLength(3); // 1 base + 2 valid added
+    expect(out.hooks.find((h) => h.kind === "scarcity")?.text).toBe("3 места");
+    expect(out.hooks.find((h) => h.kind === "authority")).toBeDefined();
+  });
+
+  test("stage_guidance replaces existing + creates missing", () => {
+    const out = applyEditsToStyle(BASE_STYLE, {
+      stage_guidance: { opener: "lead with sincere observation", close: "ask for anketa directly" },
+    });
+    expect(out.stages.opener?.guidance).toBe("lead with sincere observation");
+    expect(out.stages.close).toBeDefined();
+    expect(out.stages.close?.guidance).toBe("ask for anketa directly");
+  });
+
+  test("fewshot_add appends with valid stages", () => {
+    const out = applyEditsToStyle(BASE_STYLE, {
+      fewshot_add: [
+        { user: "сколько платят", assistant: "от $3k", stage: "qualify" },
+        { user: "x", assistant: "y", stage: "made-up-stage" },
+        { user: "только пользовательский", assistant: "ответ" },
+      ],
+    });
+    expect(out.fewShot).toHaveLength(3);
+    expect(out.fewShot[0]?.stage).toBe("qualify");
+    expect(out.fewShot[1]?.stage).toBeUndefined(); // invalid stage stripped
+    expect(out.fewShot[2]?.stage).toBeUndefined();
+  });
+
+  test("empty edits object → identical (deep-equal) style", () => {
+    const out = applyEditsToStyle(BASE_STYLE, {});
+    expect(out).toEqual(BASE_STYLE);
+  });
+
+  test("ignores empty/whitespace edit values", () => {
+    const out = applyEditsToStyle(BASE_STYLE, {
+      voice_tone: "   ",
+      voice_forbid_add: ["", "  "],
+      hooks_add: [{ kind: "scarcity", text: "  " }],
+      fewshot_add: [{ user: "", assistant: "" }],
+    });
+    expect(out.voice.tone).toBe(BASE_STYLE.voice.tone);
+    expect(out.voice.forbid).toEqual(BASE_STYLE.voice.forbid);
+    expect(out.hooks).toEqual(BASE_STYLE.hooks);
+    expect(out.fewShot).toEqual([]);
   });
 });

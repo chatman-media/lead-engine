@@ -119,6 +119,38 @@ export function Coach() {
     }
   }
 
+  const [applying, setApplying] = useState(false);
+  const [applyResult, setApplyResult] = useState<{
+    slug: string;
+    version: number;
+    id: number;
+  } | null>(null);
+
+  async function applyAsNewVersion(id: number) {
+    if (
+      !window.confirm(
+        "Fork a new version of this style with the proposal's edits applied?\n\n" +
+          "The current version will be marked is_active=0 (historical) but stays " +
+          "available for already-pinned conversations. The new version becomes the " +
+          "active default for new chats.",
+      )
+    ) {
+      return;
+    }
+    setApplying(true);
+    setApplyResult(null);
+    try {
+      const res = await api.applyCoachProposal(id);
+      setDetail(res.proposal);
+      setApplyResult(res.new_style);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApplying(false);
+    }
+  }
+
   async function deleteProposal(id: number) {
     if (!window.confirm(`Delete proposal #${id}?`)) return;
     try {
@@ -400,11 +432,29 @@ export function Coach() {
           )}
 
           {detail.status === "pending" && (
-            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => applyAsNewVersion(detail.id)}
+                disabled={applying || deciding !== null}
+                title="Forks a new style version with these edits applied (current version becomes historical)"
+                style={{
+                  background: "var(--accent, #3b82f6)",
+                  color: "white",
+                  border: "none",
+                  padding: "8px 16px",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                {applying ? "Forking…" : "Apply as new version"}
+              </button>
               <button
                 type="button"
                 onClick={() => decide(detail.id, "applied")}
-                disabled={deciding !== null}
+                disabled={deciding !== null || applying}
+                title="Mark applied without forking (e.g. you already edited style.json by hand)"
                 style={{
                   background: "var(--green, #2ea043)",
                   color: "white",
@@ -414,12 +464,12 @@ export function Coach() {
                   cursor: "pointer",
                 }}
               >
-                {deciding === "applied" ? "Marking…" : "Mark as applied"}
+                {deciding === "applied" ? "Marking…" : "Mark applied (manual)"}
               </button>
               <button
                 type="button"
                 onClick={() => decide(detail.id, "dismissed")}
-                disabled={deciding !== null}
+                disabled={deciding !== null || applying}
                 style={{
                   background: "var(--bg-2)",
                   color: "var(--text)",
@@ -431,6 +481,21 @@ export function Coach() {
               >
                 Dismiss
               </button>
+            </div>
+          )}
+          {applyResult && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: 8,
+                background: "var(--bg-2)",
+                borderLeft: "3px solid var(--green, #2ea043)",
+                borderRadius: 4,
+                fontSize: 13,
+              }}
+            >
+              ✓ Forked <strong>{applyResult.slug}</strong> v{applyResult.version} (style id #
+              {applyResult.id}). Skills attachments copied + edited.
             </div>
           )}
           {detail.status !== "pending" && detail.decided_at && (

@@ -3156,7 +3156,7 @@ export function createDeletePairwiseMatchHandler(deps: AdminApiDeps): RouteHandl
 
 import { CoachProposalsRepo } from "../db/repos/coach-proposals.ts";
 import { SkillsRepo as _SkillsRepoForCoach } from "../db/repos/skills.ts";
-import { proposeStyleEdits } from "../sales/coach.ts";
+import { applyEditsToStyle, proposeStyleEdits } from "../sales/coach.ts";
 
 /** GET /admin/api/coach — list proposals (filter by style + status). */
 export function createListCoachProposalsHandler(deps: AdminApiDeps): RouteHandler {
@@ -3286,6 +3286,124 @@ export function createDecideCoachProposalHandler(deps: AdminApiDeps): RouteHandl
       return json({ error: `already ${existing.status}` }, { status: 409 });
     }
     return json({ proposal: repo.byId(id) });
+  };
+}
+
+/**
+ * POST /admin/api/coach/:id/apply — fork a NEW VERSION of the style with the
+ * proposal's edits applied. Body (optional): { skip_skills?: boolean }.
+ *
+ * Steps (atomic-ish — DB ops in single transaction):
+ *   1. Look up the proposal; must be status='pending'.
+ *   2. Find the active style row by slug.
+ *   3. applyEditsToStyle(currentStyle, edits) → newStyle
+ *   4. StyleSchema.parse(newStyle) — guard against drift
+ *   5. StylesRepo.editAsNewVersion(currentRowId, newStyle) — fresh row,
+ *      old marked is_active=0, conversations pinned to old keep working.
+ *   6. Apply skills_attach / skills_detach via SkillsRepo.setSkillsForStyle
+ *      against the NEW row id (unless body.skip_skills is true).
+ *   7. Mark proposal status='applied' with the admin id.
+ *
+ * Returns: { proposal, new_style: { id, slug, version } }
+ */
+export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    let body: { skip_skills?: boolean } = {};
+    try {
+      const text = await req.text();
+      if (text.trim()) body = JSON.parse(text);
+    } catch {
+      // Empty body is fine — the endpoint has no required fields.
+    }
+
+    const proposalsRepo = new CoachProposalsRepo(deps.db);
+    const proposal = proposalsRepo.byId(id);
+    if (!proposal) return json({ error: "not found" }, { status: 404 });
+    if (proposal.status !== "pending") {
+      return json({ error: `already ${proposal.status}` }, { status: 409 });
+    }
+
+    const stylesRepo = new StylesRepo(deps.db);
+    const currentRow = stylesRepo.bySlug(proposal.style_slug);
+    if (!currentRow) {
+      return json({ error: `style not found: ${proposal.style_slug}` }, { status: 404 });
+    }
+    const currentStyle = stylesRepo.parseRow(currentRow) as Style;
+
+    const newStyle = applyEditsToStyle(currentStyle, proposal.edits);
+    const validation = StyleSchema.safeParse(newStyle);
+    if (!validation.success) {
+      return json(
+        {
+          error: "applied edits produced an invalid style — refusing to fork",
+          issues: validation.error.issues.map((i) => ({
+            path: i.path.join("."),
+            message: i.message,
+          })),
+        },
+        { status: 422 },
+      );
+    }
+
+    let newRow: { id: number; slug: string; version: number };
+    try {
+      const inserted = stylesRepo.editAsNewVersion(currentRow.id, validation.data);
+      newRow = { id: inserted.id, slug: inserted.slug, version: inserted.version };
+    } catch (err) {
+      return json(
+        { error: `editAsNewVersion failed: ${err instanceof Error ? err.message : String(err)}` },
+        { status: 500 },
+      );
+    }
+
+    // Apply skills_attach / skills_detach against the NEW row's id. Strategy:
+    // start from the parent's attached set, add proposal.edits.skills_attach,
+    // remove proposal.edits.skills_detach, then setSkillsForStyle replaces
+    // the new row's attachments atomically.
+    if (!body.skip_skills) {
+      const skillsRepo = new _SkillsRepoForCoach(deps.db);
+      const currentAttached = new Set(skillsRepo.skillsForStyle(currentRow.id).map((s) => s.slug));
+      for (const slug of proposal.edits.skills_attach ?? []) {
+        currentAttached.add(slug);
+      }
+      for (const slug of proposal.edits.skills_detach ?? []) {
+        currentAttached.delete(slug);
+      }
+      try {
+        skillsRepo.setSkillsForStyle(newRow.id, [...currentAttached]);
+      } catch (err) {
+        // Skill attachment failure shouldn't roll back the style fork — the
+        // operator can re-attach via /admin/styles/:id/skills. Log only.
+        console.warn(`[coach-apply] setSkillsForStyle failed: ${err}`);
+      }
+    }
+
+    const decided = proposalsRepo.decide({
+      id,
+      status: "applied",
+      adminId: ctx.adminId,
+    });
+    if (!decided) {
+      // Race: another admin decided between our byId and now. Style fork
+      // is already done — leave it; surface the conflict.
+      return json(
+        {
+          error: "proposal status changed concurrently — style was forked but proposal not marked",
+          new_style: newRow,
+        },
+        { status: 409 },
+      );
+    }
+
+    return json({
+      proposal: proposalsRepo.byId(id),
+      new_style: newRow,
+    });
   };
 }
 

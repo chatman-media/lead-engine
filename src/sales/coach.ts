@@ -237,6 +237,110 @@ export function parseProposal(raw: string): CoachProposal {
   };
 }
 
+/**
+ * Pure function: apply a coach proposal's edits to a style spec, returning
+ * a NEW style object. Original is untouched. Caller is responsible for
+ * persisting via `StylesRepo.editAsNewVersion`.
+ *
+ * Merge rules:
+ *   - voice_tone: replaces the existing voice.tone string verbatim.
+ *   - voice_forbid_add: appended to voice.forbid (deduped).
+ *   - hooks_add: appended to hooks. Invalid kinds (not in HOOK_KINDS) are
+ *     silently dropped — coach-LLM occasionally hallucinates new categories.
+ *   - stage_guidance: per-stage `guidance` field replaced. If the stage
+ *     didn't exist, a minimal config is created (goal=stage name).
+ *   - fewshot_add: appended to fewShot. Invalid stage values dropped.
+ *   - skills_attach / skills_detach: NOT applied here — those are managed
+ *     via the styles_skills join table, not the style.json itself. Caller
+ *     handles via SkillsRepo.setStyleSkills().
+ *
+ * Returned style is NOT validated against StyleSchema — caller should run
+ * `StyleSchema.parse(applied)` to catch any drift before persisting.
+ */
+export function applyEditsToStyle(style: Style, edits: CoachProposal["edits"]): Style {
+  const out: Style = {
+    ...style,
+    voice: { ...style.voice, forbid: [...style.voice.forbid] },
+    hooks: [...style.hooks],
+    stages: { ...style.stages },
+    fewShot: [...style.fewShot],
+  };
+
+  if (typeof edits.voice_tone === "string" && edits.voice_tone.trim()) {
+    out.voice.tone = edits.voice_tone.trim();
+  }
+
+  if (Array.isArray(edits.voice_forbid_add)) {
+    const existing = new Set(out.voice.forbid);
+    for (const phrase of edits.voice_forbid_add) {
+      const t = phrase.trim();
+      if (t && !existing.has(t)) {
+        out.voice.forbid.push(t);
+        existing.add(t);
+      }
+    }
+  }
+
+  if (Array.isArray(edits.hooks_add)) {
+    const validKinds = new Set([
+      "social_proof",
+      "scarcity",
+      "authority",
+      "liking",
+      "reciprocity",
+      "commitment",
+    ]);
+    for (const h of edits.hooks_add) {
+      if (validKinds.has(h.kind) && h.text.trim()) {
+        out.hooks.push({
+          kind: h.kind as Style["hooks"][number]["kind"],
+          text: h.text.trim(),
+        });
+      }
+    }
+  }
+
+  if (edits.stage_guidance) {
+    for (const [k, guidance] of Object.entries(edits.stage_guidance)) {
+      if (typeof guidance !== "string" || !guidance.trim()) continue;
+      const stageKey = k as keyof Style["stages"];
+      const existing = out.stages[stageKey];
+      if (existing) {
+        out.stages = {
+          ...out.stages,
+          [stageKey]: { ...existing, guidance: guidance.trim() },
+        };
+      } else {
+        out.stages = {
+          ...out.stages,
+          [stageKey]: {
+            goal: stageKey,
+            guidance: guidance.trim(),
+            groundingRequired: false,
+          },
+        };
+      }
+    }
+  }
+
+  if (Array.isArray(edits.fewshot_add)) {
+    const validStages = new Set(["opener", "qualify", "pitch", "objection", "close"]);
+    for (const fs of edits.fewshot_add) {
+      if (!fs.user.trim() || !fs.assistant.trim()) continue;
+      const entry: Style["fewShot"][number] = {
+        user: fs.user.trim(),
+        assistant: fs.assistant.trim(),
+      };
+      if (fs.stage && validStages.has(fs.stage)) {
+        entry.stage = fs.stage as Style["fewShot"][number]["stage"];
+      }
+      out.fewShot.push(entry);
+    }
+  }
+
+  return out;
+}
+
 function normalizeProposal(p: unknown, raw: string): CoachProposal {
   if (!p || typeof p !== "object") {
     return { summary: "(empty proposal)", edits: {}, rationale: [], raw };

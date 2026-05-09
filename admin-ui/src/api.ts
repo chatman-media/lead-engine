@@ -645,6 +645,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ status }),
     }),
+  applyCoachProposal: (id: number, opts?: { skip_skills?: boolean }) =>
+    req<{
+      proposal: CoachProposalDetail;
+      new_style: { id: number; slug: string; version: number };
+    }>(`/admin/api/coach/${id}/apply`, {
+      method: "POST",
+      body: JSON.stringify(opts ?? {}),
+    }),
   deleteCoachProposal: (id: number) =>
     req<{ ok: true; deleted: number }>(`/admin/api/coach/${id}`, { method: "DELETE" }),
   recommendSkills: (opts?: { minSamples?: number; accept?: number }) => {
