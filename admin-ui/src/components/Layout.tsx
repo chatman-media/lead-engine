@@ -12,12 +12,17 @@ export function Layout({ admin, children }: LayoutProps) {
   const navigate = useNavigate();
   const [queuedCount, setQueuedCount] = useState(0);
   const [pendingKbCount, setPendingKbCount] = useState(0);
+  const [pendingCoachCount, setPendingCoachCount] = useState(0);
 
   useEffect(() => {
     // Initial fetch of both counts.
     api
       .kbSuggestionCounts()
       .then((c) => setPendingKbCount(c.pending))
+      .catch(() => {});
+    api
+      .coachProposals({ status: "pending", limit: 1 })
+      .then((c) => setPendingCoachCount(c.pending_count))
       .catch(() => {});
     api
       .conversations()
@@ -61,6 +66,11 @@ export function Layout({ admin, children }: LayoutProps) {
     { to: "/admin/skills", label: "Skills" },
     { to: "/admin/self-play", label: "Self-play" },
     { to: "/admin/pairwise", label: "Pairwise" },
+    {
+      to: "/admin/coach",
+      label: "Coach",
+      badge: pendingCoachCount > 0 ? pendingCoachCount : undefined,
+    },
     { to: "/admin/experiments", label: "Experiments" },
   ];
 

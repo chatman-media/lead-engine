@@ -5,6 +5,7 @@ import { Layout } from "./components/Layout.tsx";
 import { Analytics } from "./pages/Analytics.tsx";
 import { Chat } from "./pages/Chat.tsx";
 import { Chats } from "./pages/Chats.tsx";
+import { Coach } from "./pages/Coach.tsx";
 import { Experiments } from "./pages/Experiments.tsx";
 import { Kb } from "./pages/Kb.tsx";
 import { KbSuggestions } from "./pages/KbSuggestions.tsx";
@@ -85,6 +86,7 @@ export function App() {
                 <Route path="skills" element={<Skills />} />
                 <Route path="self-play" element={<SelfPlay />} />
                 <Route path="pairwise" element={<Pairwise />} />
+                <Route path="coach" element={<Coach />} />
                 <Route path="chats" element={<Chats />} />
                 <Route path="chats/:id" element={<Chat />} />
                 <Route path="users" element={<Users />} />

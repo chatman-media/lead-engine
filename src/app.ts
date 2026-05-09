@@ -11,6 +11,8 @@ import {
   createCreateLeadNoteHandler,
   createCreateStyleHandler,
   createCreateVacancyHandler,
+  createDecideCoachProposalHandler,
+  createDeleteCoachProposalHandler,
   createDeleteConversationHandler,
   createDeleteKbDocumentHandler,
   createDeleteLeadHandler,
@@ -22,6 +24,7 @@ import {
   createEditStyleHandler,
   createExperimentFunnelHandler,
   createExportConversationHandler,
+  createGetCoachProposalHandler,
   createGetKbDocumentHandler,
   createGetKbSuggestionHandler,
   createGetPairwiseMatchHandler,
@@ -32,6 +35,7 @@ import {
   createKbSuggestionCountsHandler,
   createLeadCallbackHandler,
   createLeadDetailHandler,
+  createListCoachProposalsHandler,
   createListConversationsHandler,
   createListExperimentsHandler,
   createListKbDocumentsHandler,
@@ -50,6 +54,7 @@ import {
   createRejectLeadHandler,
   createReleaseHandler,
   createReplyHandler,
+  createRunCoachHandler,
   createSendIntakeHandler,
   createSetExperimentStatusHandler,
   createSetStyleSkillsHandler,
@@ -260,6 +265,11 @@ export function createRouter(deps: AppDeps): Router {
   router.get("/admin/api/pairwise", createListPairwiseMatchesHandler(apiDeps));
   router.get("/admin/api/pairwise/:id", createGetPairwiseMatchHandler(apiDeps));
   router.delete("/admin/api/pairwise/:id", createDeletePairwiseMatchHandler(apiDeps));
+  router.get("/admin/api/coach", createListCoachProposalsHandler(apiDeps));
+  router.post("/admin/api/coach/run", createRunCoachHandler(apiDeps));
+  router.get("/admin/api/coach/:id", createGetCoachProposalHandler(apiDeps));
+  router.post("/admin/api/coach/:id/decide", createDecideCoachProposalHandler(apiDeps));
+  router.delete("/admin/api/coach/:id", createDeleteCoachProposalHandler(apiDeps));
   router.get("/admin/api/experiments", createListExperimentsHandler(apiDeps));
   router.post("/admin/api/experiments", createCreateExperimentHandler(apiDeps));
   router.patch("/admin/api/experiments/:id", createSetExperimentStatusHandler(apiDeps));

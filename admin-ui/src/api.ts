@@ -163,6 +163,42 @@ export interface PairwiseMatrixRow {
   total: number;
 }
 
+export type CoachProposalStatus = "pending" | "applied" | "dismissed";
+
+export interface CoachProposalRow {
+  id: number;
+  style_slug: string;
+  sample_size: number;
+  persona_filter: string | null;
+  summary: string;
+  edits_json: string;
+  rationale_json: string;
+  raw_output: string | null;
+  status: CoachProposalStatus;
+  created_at: number;
+  decided_at: number | null;
+  decided_by_admin_id: number | null;
+}
+
+export interface CoachProposalDetail extends CoachProposalRow {
+  edits: {
+    voice_tone?: string;
+    voice_forbid_add?: string[];
+    hooks_add?: Array<{ kind: string; text: string }>;
+    stage_guidance?: Partial<{
+      opener: string;
+      qualify: string;
+      pitch: string;
+      objection: string;
+      close: string;
+    }>;
+    fewshot_add?: Array<{ user: string; assistant: string; stage?: string }>;
+    skills_attach?: string[];
+    skills_detach?: string[];
+  };
+  rationale: string[];
+}
+
 export interface StyleRatingDto {
   style_slug: string;
   elo: number;
@@ -588,6 +624,29 @@ export const api = {
     req<{ ok: true; deleted: number }>(`/admin/api/pairwise/${id}`, {
       method: "DELETE",
     }),
+  coachProposals: (opts?: { style?: string; status?: CoachProposalStatus; limit?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.style) params.set("style", opts.style);
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    const q = params.toString();
+    return req<{ proposals: CoachProposalRow[]; pending_count: number }>(
+      `/admin/api/coach${q ? `?${q}` : ""}`,
+    );
+  },
+  coachProposal: (id: number) => req<{ proposal: CoachProposalDetail }>(`/admin/api/coach/${id}`),
+  runCoach: (body: { style_slug: string; sample?: number; persona?: string; model?: string }) =>
+    req<{ proposal: CoachProposalDetail }>("/admin/api/coach/run", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  decideCoachProposal: (id: number, status: "applied" | "dismissed") =>
+    req<{ proposal: CoachProposalDetail }>(`/admin/api/coach/${id}/decide`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    }),
+  deleteCoachProposal: (id: number) =>
+    req<{ ok: true; deleted: number }>(`/admin/api/coach/${id}`, { method: "DELETE" }),
   recommendSkills: (opts?: { minSamples?: number; accept?: number }) => {
     const params = new URLSearchParams();
     if (opts?.minSamples !== undefined) params.set("minSamples", String(opts.minSamples));

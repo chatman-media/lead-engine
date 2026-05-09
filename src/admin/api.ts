@@ -31,7 +31,7 @@ import { json, type RouteHandler } from "../router.ts";
 import { composeSystemPrompt } from "../sales/prompt.ts";
 import { SKILL_BY_SLUG } from "../sales/skills/catalogue.ts";
 import { nextStage } from "../sales/stage-router.ts";
-import { FUNNEL_STAGES, type FunnelStage, StyleSchema } from "../sales/types.ts";
+import { FUNNEL_STAGES, type FunnelStage, type Style, StyleSchema } from "../sales/types.ts";
 import type { TelegramClient } from "../telegram/client.ts";
 import { requireAdmin } from "./auth.ts";
 
@@ -3147,6 +3147,156 @@ export function createDeletePairwiseMatchHandler(deps: AdminApiDeps): RouteHandl
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
     const ok = new PairwiseMatchesRepo(deps.db).delete(id);
+    if (!ok) return json({ error: "not found" }, { status: 404 });
+    return json({ ok: true, deleted: id });
+  };
+}
+
+// ─── Coach-LLM proposals ──────────────────────────────────────────────
+
+import { CoachProposalsRepo } from "../db/repos/coach-proposals.ts";
+import { SkillsRepo as _SkillsRepoForCoach } from "../db/repos/skills.ts";
+import { proposeStyleEdits } from "../sales/coach.ts";
+
+/** GET /admin/api/coach — list proposals (filter by style + status). */
+export function createListCoachProposalsHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, url }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const repo = new CoachProposalsRepo(deps.db);
+    const styleSlug = url.searchParams.get("style") ?? undefined;
+    const status = url.searchParams.get("status");
+    const limit = Number(url.searchParams.get("limit") ?? "100");
+    const opts: Parameters<typeof repo.list>[0] = {
+      limit: Number.isFinite(limit) && limit > 0 && limit <= 500 ? limit : 100,
+      ...(styleSlug ? { styleSlug } : {}),
+      ...(status === "pending" || status === "applied" || status === "dismissed" ? { status } : {}),
+    };
+    return json({
+      proposals: repo.list(opts),
+      pending_count: repo.countPending(),
+    });
+  };
+}
+
+/** GET /admin/api/coach/:id — full proposal with parsed edits + rationale. */
+export function createGetCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const proposal = new CoachProposalsRepo(deps.db).byId(id);
+    if (!proposal) return json({ error: "not found" }, { status: 404 });
+    return json({ proposal });
+  };
+}
+
+/**
+ * POST /admin/api/coach/run — runs proposeStyleEdits live and persists.
+ * Body: { style_slug: string, sample?: number, persona?: string, model?: string }
+ * Returns the freshly-created proposal row.
+ *
+ * Requires `deps.rag.chat` (LLM client). Returns 503 when unset, mirroring
+ * the playground endpoint's contract.
+ */
+export function createRunCoachHandler(deps: AdminApiDeps): RouteHandler {
+  return async ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    if (!deps.rag?.chat) {
+      return json(
+        { error: "LLM not configured — set LLM_PROVIDER + provider creds" },
+        { status: 503 },
+      );
+    }
+    let body: {
+      style_slug?: string;
+      sample?: number;
+      persona?: string;
+      model?: string;
+    };
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "bad json" }, { status: 400 });
+    }
+    const styleSlug = body.style_slug?.trim();
+    if (!styleSlug) return json({ error: "style_slug required" }, { status: 400 });
+
+    const stylesRepo = new StylesRepo(deps.db);
+    const styleRow = stylesRepo.bySlug(styleSlug);
+    if (!styleRow) return json({ error: `style not found: ${styleSlug}` }, { status: 404 });
+    const style = stylesRepo.parseRow(styleRow) as Style;
+
+    const sampleSize =
+      typeof body.sample === "number" && body.sample > 0 && body.sample <= 50
+        ? Math.floor(body.sample)
+        : 8;
+    const personaFilter = body.persona?.trim() || null;
+
+    const skillsRepo = new _SkillsRepoForCoach(deps.db);
+    const currentSkills = skillsRepo.skillsForStyle(styleRow.id).map((r) => r.slug);
+
+    const matchesRepo = new SelfPlayMatchesRepo(deps.db);
+    const proposal = await proposeStyleEdits({
+      style,
+      matchesRepo,
+      chat: deps.rag.chat,
+      sampleSize,
+      ...(personaFilter ? { personaSlug: personaFilter } : {}),
+      ...(body.model?.trim() ? { model: body.model.trim() } : {}),
+      currentSkills,
+    });
+
+    const repo = new CoachProposalsRepo(deps.db);
+    const row = repo.insert({
+      styleSlug,
+      sampleSize,
+      personaFilter,
+      proposal,
+    });
+    return json({ proposal: { ...row, edits: proposal.edits, rationale: proposal.rationale } });
+  };
+}
+
+/** POST /admin/api/coach/:id/decide — operator marks proposal applied/dismissed.
+ *  Body: { status: 'applied' | 'dismissed' }. Idempotent: 409 if already decided. */
+export function createDecideCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    let body: { status?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "bad json" }, { status: 400 });
+    }
+    if (body.status !== "applied" && body.status !== "dismissed") {
+      return json({ error: "status must be 'applied' or 'dismissed'" }, { status: 400 });
+    }
+    const repo = new CoachProposalsRepo(deps.db);
+    const ok = repo.decide({ id, status: body.status, adminId: ctx.adminId });
+    if (!ok) {
+      // Either not found OR already decided — distinguish for better UX.
+      const existing = repo.byId(id);
+      if (!existing) return json({ error: "not found" }, { status: 404 });
+      return json({ error: `already ${existing.status}` }, { status: 409 });
+    }
+    return json({ proposal: repo.byId(id) });
+  };
+}
+
+/** DELETE /admin/api/coach/:id — clear noisy proposals. */
+export function createDeleteCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const ok = new CoachProposalsRepo(deps.db).delete(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
   };
