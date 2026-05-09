@@ -119,19 +119,30 @@ describe("composeSystemPrompt — KB context block", () => {
 });
 
 describe("composeSystemPrompt — grounding reminder", () => {
+  // Use a minimal inline style with groundingRequired:true on pitch to test the
+  // reminder feature independently of built-in styles (all built-ins now use false).
+  const groundedStyle: Style = StyleSchema.parse({
+    ...flirtyBelfort,
+    slug: "grounded-test-v1",
+    stages: {
+      ...flirtyBelfort.stages,
+      pitch: { goal: "test pitch", guidance: "test", groundingRequired: true },
+    },
+  });
+
   test("appears when stage requires grounding AND no KB context", () => {
-    const out = composeSystemPrompt(flirtyBelfort, "pitch", null);
+    const out = composeSystemPrompt(groundedStyle, "pitch", null);
     expect(out).toContain("Никогда не выдумывай цифры");
   });
 
   test("absent when KB context is provided (model has facts to use)", () => {
-    const out = composeSystemPrompt(flirtyBelfort, "pitch", "[#1] T\ndata");
+    const out = composeSystemPrompt(groundedStyle, "pitch", "[#1] T\ndata");
     expect(out).not.toContain("Никогда не выдумывай цифры");
   });
 
   test("absent on stages that don't require grounding", () => {
     // opener doesn't require grounding
-    const out = composeSystemPrompt(flirtyBelfort, "opener", null);
+    const out = composeSystemPrompt(groundedStyle, "opener", null);
     expect(out).not.toContain("Никогда не выдумывай цифры");
   });
 });

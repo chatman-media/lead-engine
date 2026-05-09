@@ -31,8 +31,11 @@ export const coldDirectPas: Style = StyleSchema.parse({
     },
     pitch: {
       goal: "сухие факты: что, где, сколько",
-      guidance: "Опирайся на KB CONTEXT. Никакой воды и эмоций.",
-      groundingRequired: true,
+      guidance:
+        "Только факты из АКТУАЛЬНЫЕ ВАКАНСИИ и KB CONTEXT. Никакой воды и эмоций. " +
+        "Если кандидат соглашается («Да», «ок», «давай») — продолжай питч из АКТУАЛЬНЫЕ ВАКАНСИИ. " +
+        "Прикладывай ссылку из «Ссылка:» когда называешь вакансию.",
+      groundingRequired: false,
     },
     objection: {
       goal: "коротко закрой, не уговаривай",

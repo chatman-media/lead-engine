@@ -208,6 +208,11 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
 }
 
 const UNREAD_SWEEP_INTERVAL_MS = 60_000;
+/** Minimum ms between processing consecutive messages from the same user.
+ *  Prevents a burst of rapid messages (accidental spam / double-send) from
+ *  firing multiple back-to-back LLM calls. The second message in a burst is
+ *  silently dropped; the user sees only the reply to the first. */
+const USER_RATE_LIMIT_MS = 5_000;
 
 export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   const { db, apiId, apiHash, rag, onEvent } = deps;
@@ -238,6 +243,8 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   const vacancies = new VacanciesRepo(db);
   const leads = new LeadsRepo(db);
   const telegramSender = makeUserbotSender(client);
+  // Per-user last-processed timestamp for rate limiting.
+  const lastProcessedAt = new Map<number, number>();
 
   client.addEventHandler(
     async (event) => {
@@ -252,6 +259,17 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
 
       const text = msg.text ?? "";
       if (!text.trim()) return;
+
+      // Rate limit: drop messages arriving faster than USER_RATE_LIMIT_MS per user.
+      const now = Date.now();
+      const last = lastProcessedAt.get(tgUserId) ?? 0;
+      if (now - last < USER_RATE_LIMIT_MS) {
+        console.log(
+          `[userbot] rate-limited tg_user_id=${tgUserId} (${now - last}ms since last msg)`,
+        );
+        return;
+      }
+      lastProcessedAt.set(tgUserId, now);
 
       const userExisting = users.byTgId(tgUserId);
       let user = userExisting;
