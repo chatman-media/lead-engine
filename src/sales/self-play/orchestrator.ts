@@ -15,7 +15,7 @@ import type { KbRepo } from "../../db/repos/kb.ts";
 import { SelfPlayMatchesRepo } from "../../db/repos/self-play-matches.ts";
 import type { SkillOutcomesRepo, StyleRatingsRepo } from "../../db/repos/skill-outcomes.ts";
 import type { SkillsRepo } from "../../db/repos/skills.ts";
-import { answerWithRag } from "../../rag/answer.ts";
+import { answerWithRag, NO_CONTEXT_MARKER } from "../../rag/answer.ts";
 import type { ChatClient, ChatMessage } from "../../rag/chat.ts";
 import type { EmbeddingClient } from "../../rag/embed.ts";
 import { gradeSkills } from "../../rag/grade-skills.ts";
@@ -42,6 +42,20 @@ export interface SelfPlayDeps {
   embedder: EmbeddingClient;
   /** Active vacancies block (caller renders, we just inject). Empty = none. */
   vacanciesBlock?: string;
+  /**
+   * Run reflection on every salesperson reply (extra LLM call per turn).
+   * Catches fabrications — the bot inventing dates / numbers / cities
+   * not present in CONTEXT. Without this, a confident-sounding lie
+   * counts as a "won" outcome in self-play. With it, the lie is replaced
+   * with a stall and the candidate hears something honest.
+   *
+   * Default: ON for self-play (research mode — accuracy matters more
+   * than throughput). Pass `false` for fast smoke runs.
+   */
+  reflect?: boolean;
+  /** Polite stall used to replace ungrounded answers — keeps the match
+   *  going so the judge can still call the outcome on a fair transcript. */
+  stallReply?: string;
 }
 
 export interface SelfPlayMatchInput {
@@ -67,6 +81,10 @@ export interface SelfPlayMatchResult {
   /** Synthetic lead id we generated for skill_outcomes FK. Negative so it
    *  doesn't collide with real leads — see comment on the insert. */
   leadId: number;
+  /** Number of salesperson replies that reflect rejected as ungrounded
+   *  (i.e. fabrications). High count means the bot is making things up —
+   *  prompt grounding needs tightening. */
+  fabricationsCaught: number;
 }
 
 const DEFAULT_MAX_TURNS = 20;
@@ -153,6 +171,7 @@ export async function runSelfPlayMatch(
   // attribution — only the skills the bot really performed get the
   // outcome, not the full attached bundle.
   const usedSkills = new Set<string>();
+  let fabricationsCaught = 0;
 
   for (let turn = 0; turn < maxTurns; turn++) {
     // Salesperson's response — full RAG pipeline. We don't pass a
@@ -170,6 +189,7 @@ export async function runSelfPlayMatch(
     // takes that as its `question`.
     const history = buildSalesHistory(transcript.slice(0, -1));
 
+    const reflect = deps.reflect !== false; // default ON for self-play
     const salesResult = await answerWithRag({
       question: lastCandidate.text,
       kb: deps.kb,
@@ -181,9 +201,19 @@ export async function runSelfPlayMatch(
       includeFewShot: turn === 0,
       ...(deps.vacanciesBlock ? { vacanciesBlock: deps.vacanciesBlock } : {}),
       ...(skills.length > 0 ? { skills } : {}),
-      // Self-play doesn't run reflection / rewriting — keep matches fast.
+      ...(reflect ? { reflect: true } : {}),
     });
-    transcript.push({ role: "salesperson", text: salesResult.text });
+
+    // Reflection caught a fabrication — answerWithRag returns the
+    // NO_CONTEXT marker. Replace with a polite stall so the candidate
+    // hears something honest instead of "__NO_CONTEXT__", and keep the
+    // match going. Track the count for diagnostic.
+    let salesText = salesResult.text;
+    if (salesText === NO_CONTEXT_MARKER) {
+      fabricationsCaught++;
+      salesText = deps.stallReply ?? "Секунду, уточню детали и напишу — пара минут.";
+    }
+    transcript.push({ role: "salesperson", text: salesText });
 
     // Per-turn self-grading: ask the judge-class LLM which of the configured
     // skills the bot ACTUALLY used in this reply. Without this, attribution
@@ -191,11 +221,17 @@ export async function runSelfPlayMatch(
     // can't differentiate. We use the SAME chat client as the judge (already
     // running at temperature 0) — adds one short LLM call per turn but only
     // when skills are attached.
-    if (skills.length > 0) {
+    // Don't grade skills on a stall reply — there's nothing meaningful
+    // for the LLM to extract from "секунду, уточню". Skip when reflect
+    // dropped the original.
+    if (
+      skills.length > 0 &&
+      salesText !== (deps.stallReply ?? "Секунду, уточню детали и напишу — пара минут.")
+    ) {
       try {
         const used = await gradeSkills({
           question: lastCandidate.text,
-          reply: salesResult.text,
+          reply: salesText,
           availableSlugs: skills.map((s) => s.slug),
           chat: deps.judgeChat,
         });
@@ -220,7 +256,7 @@ export async function runSelfPlayMatch(
         outcome: "draw",
         reason: `candidate LLM failed: ${err instanceof Error ? err.message : String(err)}`,
       };
-      return finalize(deps, input, transcript, skills, verdict, usedSkills);
+      return finalize(deps, input, transcript, skills, verdict, usedSkills, fabricationsCaught);
     }
     candidateText = candidateText.trim();
     if (!candidateText) {
@@ -229,7 +265,7 @@ export async function runSelfPlayMatch(
         outcome: "lost",
         reason: "candidate produced empty reply (ghosted)",
       };
-      return finalize(deps, input, transcript, skills, verdict, usedSkills);
+      return finalize(deps, input, transcript, skills, verdict, usedSkills, fabricationsCaught);
     }
     transcript.push({ role: "candidate", text: candidateText });
     userMessageCount++;
@@ -246,7 +282,7 @@ export async function runSelfPlayMatch(
     transcript,
     chat: deps.judgeChat,
   });
-  return finalize(deps, input, transcript, skills, verdict, usedSkills);
+  return finalize(deps, input, transcript, skills, verdict, usedSkills, fabricationsCaught);
 }
 
 function finalize(
@@ -256,6 +292,7 @@ function finalize(
   skills: SkillForPrompt[],
   verdict: JudgeVerdict,
   usedSkills: Set<string>,
+  fabricationsCaught: number,
 ): SelfPlayMatchResult {
   // Attribute outcomes to skills that the LLM actually USED (per-turn
   // self-grading union). Falls back to the full attached set when the
@@ -277,6 +314,7 @@ function finalize(
     verdict,
     outcome: verdict.outcome,
     leadId,
+    fabricationsCaught,
   };
   // Save the full transcript for operator review on /admin/self-play.
   persistSelfPlayMatch(deps, result, verdict.reason);
