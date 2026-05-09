@@ -221,7 +221,11 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   const session = new StringSession(sessionString);
 
   const client = new GramjsClient(session, apiId, apiHash, {
-    connectionRetries: 5,
+    // -1 = unlimited retries; gramjs will keep reconnecting after network
+    // drops without dying. Individual reconnect attempts are logged by
+    // gramjs itself at WARN level ("Started reconnecting").
+    connectionRetries: -1,
+    retryDelay: 3000,
   });
 
   await client.connect();
