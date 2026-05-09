@@ -6,8 +6,9 @@ import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import type { KbRepo } from "../db/repos/kb.ts";
 import { type ChunkOptions, chunkText } from "./chunk.ts";
 import type { EmbeddingClient } from "./embed.ts";
+import { parsePdf } from "./parse-pdf.ts";
 
-const SUPPORTED_EXTS = new Set([".md", ".txt"]);
+const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf"]);
 
 export interface IngestDeps {
   kb: KbRepo;
@@ -34,7 +35,9 @@ interface ExistingDoc {
 
 export async function ingestFile(path: string, deps: IngestDeps): Promise<IngestFileResult> {
   const abs = resolve(path);
-  const raw = readFileSync(abs, "utf8");
+  const ext = extname(abs).toLowerCase();
+  // PDF files are parsed async; text files read synchronously.
+  const raw = ext === ".pdf" ? await parsePdf(abs) : readFileSync(abs, "utf8");
   const hash = createHash("sha256").update(raw).digest("hex");
   const source = `file://${abs}`;
   const title = basename(abs);
@@ -70,7 +73,8 @@ export async function ingestFile(path: string, deps: IngestDeps): Promise<Ingest
     ...(deps.topic !== undefined ? { topic: deps.topic } : {}),
   });
 
-  const chunks = chunkText(stripNonContent(raw), deps.chunk);
+  const preparedText = ext === ".pdf" ? raw : stripNonContent(raw);
+  const chunks = chunkText(preparedText, deps.chunk);
   if (chunks.length === 0) {
     return { source, documentId: doc.id, chunks: 0, created: true };
   }
@@ -185,6 +189,7 @@ export async function ingestDirectory(
       summary.skipped++;
       continue;
     }
+
     const fileDeps: IngestDeps =
       deps.topic !== undefined ? deps : { ...deps, topic: deriveTopicFromPath(file, root) };
     const r = await ingestFile(file, fileDeps);

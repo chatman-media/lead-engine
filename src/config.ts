@@ -179,6 +179,13 @@ export const config = {
      * the candidate. Default off; flip on during research windows.
      */
     skillGrading: envTruthy("RAG_SKILL_GRADING", false),
+    /**
+     * Books-priority retrieval: when enabled, the bot first searches only
+     * documents tagged with topic="books" (management / manipulation library).
+     * If those return ≥1 hit the bot answers from books; only falls back to
+     * the general KB when the books slice is empty. Default: off.
+     */
+    booksPriority: envTruthy("RAG_BOOKS_PRIORITY", false),
   },
   openai: {
     apiKey: envOptional("OPENAI_API_KEY"),

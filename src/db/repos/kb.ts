@@ -327,6 +327,61 @@ export class KbRepo {
     return res.changes > 0;
   }
 
+  /**
+   * Strict vector-only search restricted to documents with exactly
+   * `topic = 'books'`. Unlike `search()` with a topic arg, this does NOT
+   * include NULL-tagged documents — the caller wants books only.
+   */
+  private searchBooksStrict(embedding: number[], k: number): KbSearchHit[] {
+    const overFetched = this.db
+      .query<KbSearchHit & { topic: string | null }, [Uint8Array, number]>(
+        `SELECT v.chunk_id AS chunk_id,
+                v.distance AS distance,
+                c.text AS text,
+                c.document_id AS document_id,
+                d.source AS source,
+                d.title AS title,
+                d.topic AS topic
+         FROM kb_vec v
+         JOIN kb_chunks c ON c.id = v.chunk_id
+         JOIN kb_documents d ON d.id = c.document_id
+         WHERE v.embedding MATCH ? AND k = ?
+         ORDER BY v.distance ASC`,
+      )
+      .all(encodeVector(embedding), k * 3);
+    return overFetched
+      .filter((h) => h.topic === "books")
+      .slice(0, k)
+      .map(({ topic: _t, ...rest }) => rest);
+  }
+
+  /**
+   * Books-priority retrieval: search the "books" topic first (strict — no
+   * NULL-topic fallback within the books pass). When at least one hit is
+   * returned, use it — the operator has curated books as the authoritative
+   * source. Falls back to a global hybrid/vector search when the books
+   * slice is empty.
+   *
+   * `vectorOnly` skips BM25 on the global fallback pass — useful for callers
+   * that have not enabled hybrid search globally.
+   */
+  prioritySearch(input: {
+    embedding: number[];
+    query: string;
+    k?: number;
+    vectorOnly?: boolean;
+  }): KbSearchHit[] {
+    const k = input.k ?? 5;
+
+    const bookHits = this.searchBooksStrict(input.embedding, k);
+    if (bookHits.length > 0) return bookHits;
+
+    // Fall back to global retrieval (all topics + untagged).
+    return input.vectorOnly
+      ? this.search(input.embedding, k)
+      : this.hybridSearch({ embedding: input.embedding, query: input.query, k });
+  }
+
   countDocuments(): number {
     const r = this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM kb_documents").get();
     return r?.n ?? 0;
