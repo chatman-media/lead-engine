@@ -60,6 +60,7 @@ export function Layout({ admin, children }: LayoutProps) {
     { to: "/admin/styles", label: "Sales styles" },
     { to: "/admin/skills", label: "Skills" },
     { to: "/admin/self-play", label: "Self-play" },
+    { to: "/admin/pairwise", label: "Pairwise" },
     { to: "/admin/experiments", label: "Experiments" },
   ];
 

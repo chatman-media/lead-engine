@@ -15,6 +15,7 @@ import {
   createDeleteKbDocumentHandler,
   createDeleteLeadHandler,
   createDeleteLeadNoteHandler,
+  createDeletePairwiseMatchHandler,
   createDeleteSelfPlayMatchHandler,
   createDeleteVacancyHandler,
   createDownloadFileHandler,
@@ -23,6 +24,7 @@ import {
   createExportConversationHandler,
   createGetKbDocumentHandler,
   createGetKbSuggestionHandler,
+  createGetPairwiseMatchHandler,
   createGetSelfPlayMatchHandler,
   createGetStyleHandler,
   createGetStyleSkillsHandler,
@@ -35,6 +37,7 @@ import {
   createListKbDocumentsHandler,
   createListKbSuggestionsHandler,
   createListLeadsHandler,
+  createListPairwiseMatchesHandler,
   createListSelfPlayMatchesHandler,
   createListSkillsHandler,
   createListStyleRatingsHandler,
@@ -254,6 +257,9 @@ export function createRouter(deps: AppDeps): Router {
   router.get("/admin/api/self-play", createListSelfPlayMatchesHandler(apiDeps));
   router.get("/admin/api/self-play/:id", createGetSelfPlayMatchHandler(apiDeps));
   router.delete("/admin/api/self-play/:id", createDeleteSelfPlayMatchHandler(apiDeps));
+  router.get("/admin/api/pairwise", createListPairwiseMatchesHandler(apiDeps));
+  router.get("/admin/api/pairwise/:id", createGetPairwiseMatchHandler(apiDeps));
+  router.delete("/admin/api/pairwise/:id", createDeletePairwiseMatchHandler(apiDeps));
   router.get("/admin/api/experiments", createListExperimentsHandler(apiDeps));
   router.post("/admin/api/experiments", createCreateExperimentHandler(apiDeps));
   router.patch("/admin/api/experiments/:id", createSetExperimentStatusHandler(apiDeps));

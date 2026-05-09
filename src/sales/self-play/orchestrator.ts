@@ -85,6 +85,10 @@ export interface SelfPlayMatchResult {
    *  (i.e. fabrications). High count means the bot is making things up —
    *  prompt grounding needs tightening. */
   fabricationsCaught: number;
+  /** Row id in `self_play_matches` after persistence, or null when the
+   *  insert failed (logged but non-fatal). Pairwise mode reads this to
+   *  link both solo runs into a `pairwise_matches` row. */
+  matchId: number | null;
 }
 
 const DEFAULT_MAX_TURNS = 20;
@@ -320,9 +324,10 @@ function finalize(
     outcome: verdict.outcome,
     leadId,
     fabricationsCaught,
+    matchId: null,
   };
   // Save the full transcript for operator review on /admin/self-play.
-  persistSelfPlayMatch(deps, result, verdict.reason);
+  result.matchId = persistSelfPlayMatch(deps, result, verdict.reason);
   return result;
 }
 
@@ -378,9 +383,9 @@ export function persistSelfPlayMatch(
   deps: SelfPlayDeps,
   result: SelfPlayMatchResult,
   judgeReason: string,
-): void {
+): number | null {
   try {
-    new SelfPlayMatchesRepo(deps.db).insert({
+    const row = new SelfPlayMatchesRepo(deps.db).insert({
       styleSlug: result.styleSlug,
       personaSlug: result.personaSlug,
       outcome: result.outcome,
@@ -391,8 +396,10 @@ export function persistSelfPlayMatch(
       leadId: result.leadId > 0 ? result.leadId : null,
       fabricationsCaught: result.fabricationsCaught,
     });
+    return row.id;
   } catch (err) {
     console.warn("[self-play] failed to persist match transcript:", err);
+    return null;
   }
 }
 

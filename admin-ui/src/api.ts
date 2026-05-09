@@ -139,6 +139,30 @@ export interface SelfPlayPersona {
   summary: string;
 }
 
+export interface PairwiseMatchRow {
+  id: number;
+  style_a_slug: string;
+  style_b_slug: string;
+  persona_slug: string;
+  persona_display_name: string;
+  winner: "a" | "b" | "draw";
+  judge_reason: string | null;
+  match_a_id: number | null;
+  match_b_id: number | null;
+  elo_a_after: number;
+  elo_b_after: number;
+  created_at: number;
+}
+
+export interface PairwiseMatrixRow {
+  style_a_slug: string;
+  style_b_slug: string;
+  a_wins: number;
+  b_wins: number;
+  draws: number;
+  total: number;
+}
+
 export interface StyleRatingDto {
   style_slug: string;
   elo: number;
@@ -536,6 +560,32 @@ export const api = {
   selfPlayMatch: (id: number) => req<{ match: SelfPlayMatchDetail }>(`/admin/api/self-play/${id}`),
   deleteSelfPlayMatch: (id: number) =>
     req<{ ok: true; deleted: number }>(`/admin/api/self-play/${id}`, {
+      method: "DELETE",
+    }),
+  pairwiseMatches: (opts?: {
+    a?: string;
+    b?: string;
+    persona?: string;
+    winner?: "a" | "b" | "draw";
+    limit?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (opts?.a) params.set("a", opts.a);
+    if (opts?.b) params.set("b", opts.b);
+    if (opts?.persona) params.set("persona", opts.persona);
+    if (opts?.winner) params.set("winner", opts.winner);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    const q = params.toString();
+    return req<{
+      total: number;
+      matches: PairwiseMatchRow[];
+      matrix: PairwiseMatrixRow[];
+      personas: SelfPlayPersona[];
+    }>(`/admin/api/pairwise${q ? `?${q}` : ""}`);
+  },
+  pairwiseMatch: (id: number) => req<{ match: PairwiseMatchRow }>(`/admin/api/pairwise/${id}`),
+  deletePairwiseMatch: (id: number) =>
+    req<{ ok: true; deleted: number }>(`/admin/api/pairwise/${id}`, {
       method: "DELETE",
     }),
   recommendSkills: (opts?: { minSamples?: number; accept?: number }) => {

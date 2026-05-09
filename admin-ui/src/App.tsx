@@ -12,6 +12,7 @@ import { Leads } from "./pages/Leads.tsx";
 import { Library } from "./pages/Library.tsx";
 import { Login } from "./pages/Login.tsx";
 import { NewStyle } from "./pages/NewStyle.tsx";
+import { Pairwise } from "./pages/Pairwise.tsx";
 import { SelfPlay } from "./pages/SelfPlay.tsx";
 import { Skills } from "./pages/Skills.tsx";
 import { Status } from "./pages/Status.tsx";
@@ -83,6 +84,7 @@ export function App() {
                 <Route path="analytics" element={<Analytics />} />
                 <Route path="skills" element={<Skills />} />
                 <Route path="self-play" element={<SelfPlay />} />
+                <Route path="pairwise" element={<Pairwise />} />
                 <Route path="chats" element={<Chats />} />
                 <Route path="chats/:id" element={<Chat />} />
                 <Route path="users" element={<Users />} />

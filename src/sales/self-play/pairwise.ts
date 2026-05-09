@@ -13,6 +13,7 @@
  * ELO updates use `eloUpdatePair` so both styles' ratings move
  * symmetrically — A's gain is B's loss, no baseline drift.
  */
+import { PairwiseMatchesRepo } from "../../db/repos/pairwise-matches.ts";
 import type { ChatClient, ChatMessage } from "../../rag/chat.ts";
 import type { EloOutcome } from "../elo.ts";
 import { eloUpdatePair } from "../elo.ts";
@@ -52,6 +53,9 @@ export interface PairwiseMatchResult {
    *  effects compound; this field reports the pairwise delta only. */
   eloAAfter: number;
   eloBAfter: number;
+  /** Row id in `pairwise_matches` after persistence, or null when the
+   *  insert failed (logged but non-fatal). */
+  pairwiseId: number | null;
 }
 
 /**
@@ -240,6 +244,27 @@ export async function runPairwiseMatch(
     );
   }
 
+  // Persist the pairwise row, linking to the two solo matches by id
+  // (already inserted by runSelfPlayMatch). Failure-soft: a transcript
+  // already exists on each side; losing the pairwise row is recoverable.
+  let pairwiseId: number | null = null;
+  try {
+    const row = new PairwiseMatchesRepo(deps.db).insert({
+      styleASlug: input.styleA.slug,
+      styleBSlug: input.styleB.slug,
+      personaSlug: input.persona.slug,
+      winner: verdict.winner,
+      judgeReason: verdict.reason,
+      matchAId: matchA.matchId,
+      matchBId: matchB.matchId,
+      eloAAfter: newA,
+      eloBAfter: newB,
+    });
+    pairwiseId = row.id;
+  } catch (err) {
+    console.warn("[pairwise] failed to persist pairwise match:", err);
+  }
+
   return {
     styleASlug: input.styleA.slug,
     styleBSlug: input.styleB.slug,
@@ -249,5 +274,6 @@ export async function runPairwiseMatch(
     verdict,
     eloAAfter: newA,
     eloBAfter: newB,
+    pairwiseId,
   };
 }
