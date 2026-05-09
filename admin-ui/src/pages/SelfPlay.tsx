@@ -368,6 +368,14 @@ function MatchRow({
           </span>
           <span style={{ fontSize: 11, color: "var(--text-3)", fontFamily: "var(--mono)" }}>
             {match.turns} turns · {match.skills_count} skills
+            {match.fabrications_caught > 0 && (
+              <span
+                style={{ color: "var(--amber, #d97706)", marginLeft: 8 }}
+                title="Reflect rejected this many ungrounded replies"
+              >
+                ⚠ {match.fabrications_caught} fabrication{match.fabrications_caught > 1 ? "s" : ""}
+              </span>
+            )}
           </span>
           {match.judge_reason && (
             <span

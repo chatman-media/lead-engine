@@ -105,6 +105,7 @@ export interface SelfPlayMatchSummary {
   turns: number;
   skills_count: number;
   lead_id: number | null;
+  fabrications_caught: number;
   created_at: number;
 }
 
@@ -118,6 +119,7 @@ export interface SelfPlayMatchDetail {
   turns: number;
   skills: string[];
   lead_id: number | null;
+  fabrications_caught: number;
   created_at: number;
   transcript: Array<{ role: "candidate" | "salesperson"; text: string }>;
 }
