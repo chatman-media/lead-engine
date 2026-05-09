@@ -248,6 +248,13 @@ export const config = {
       }
     })(),
   },
+  userbot: {
+    /** When true, connect to Telegram as a personal account via MTProto. */
+    enabled: envTruthy("TELEGRAM_USERBOT", false),
+    /** From https://my.telegram.org — required when TELEGRAM_USERBOT=1. */
+    apiId: envInt("TELEGRAM_API_ID", 0),
+    apiHash: envOptional("TELEGRAM_API_HASH", ""),
+  },
   sales: {
     /**
      * When set, the bot uses the sales-style engine instead of the env-based
