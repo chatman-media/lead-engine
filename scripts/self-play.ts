@@ -42,6 +42,7 @@ interface Args {
   runs: number;
   maxTurns: number;
   dryRun: boolean;
+  reflect: boolean;
 }
 
 function parseArgs(): Args {
@@ -51,6 +52,7 @@ function parseArgs(): Args {
   let runs = 1;
   let maxTurns = 20;
   let dryRun = false;
+  let reflect = true; // default ON — research mode prefers honesty over speed
   for (let i = 0; i < a.length; i++) {
     const v = a[i]!;
     if (v === "--style") style = a[++i] ?? style;
@@ -62,14 +64,18 @@ function parseArgs(): Args {
     else if (v === "--runs") runs = parseInt(a[++i] ?? "1", 10) || 1;
     else if (v === "--max-turns") maxTurns = parseInt(a[++i] ?? "20", 10) || 20;
     else if (v === "--dry-run") dryRun = true;
+    else if (v === "--no-reflect") reflect = false;
     else if (v === "--help" || v === "-h") {
       console.log(
-        "Usage: bun scripts/self-play.ts --style <slug> [--personas a,b] [--runs N] [--max-turns N] [--dry-run]",
+        "Usage: bun scripts/self-play.ts --style <slug> [--personas a,b] " +
+          "[--runs N] [--max-turns N] [--dry-run] [--no-reflect]\n" +
+          "  --no-reflect  disable hallucination check (faster but counts " +
+          "fabricated wins)",
       );
       process.exit(0);
     }
   }
-  return { style, personas, runs, maxTurns, dryRun };
+  return { style, personas, runs, maxTurns, dryRun, reflect };
 }
 
 function buildChat() {
@@ -183,6 +189,7 @@ async function main() {
           candidateChat,
           judgeChat,
           embedder,
+          reflect: args.reflect,
           ...(vacanciesBlock ? { vacanciesBlock } : {}),
         },
         {
@@ -198,8 +205,12 @@ async function main() {
         result.outcome === "won" ? "won" : result.outcome === "lost" ? "lost" : "draw"
       ]++;
 
+      const fab =
+        result.fabricationsCaught > 0
+          ? ` · ⚠ ${result.fabricationsCaught} fabrication${result.fabricationsCaught > 1 ? "s" : ""} caught`
+          : "";
       console.log(
-        `verdict: ${result.outcome.toUpperCase()} (${elapsed}s, ${result.turns} turns) — ${result.verdict.reason}`,
+        `verdict: ${result.outcome.toUpperCase()} (${elapsed}s, ${result.turns} turns${fab}) — ${result.verdict.reason}`,
       );
       // Always print the transcript on dry-run; on real runs only when
       // verdict is interesting (lost / draw — wins are usually predictable).
