@@ -49,18 +49,11 @@ export class KbSuggestionsRepo {
       if (existing) return existing;
     }
     const row = this.db
-      .query<
-        KbSuggestionRow,
-        [string, number | null, number | null]
-      >(
+      .query<KbSuggestionRow, [string, number | null, number | null]>(
         `INSERT INTO kb_suggestions (question_text, source_conversation_id, source_message_id)
          VALUES (?, ?, ?) RETURNING *`,
       )
-      .get(
-        input.questionText,
-        input.sourceConversationId ?? null,
-        input.sourceMessageId ?? null,
-      );
+      .get(input.questionText, input.sourceConversationId ?? null, input.sourceMessageId ?? null);
     if (!row) throw new Error("Failed to insert kb_suggestion");
     return row;
   }
@@ -113,9 +106,7 @@ export class KbSuggestionsRepo {
 
   pendingCount(): number {
     const row = this.db
-      .query<{ n: number }, []>(
-        `SELECT COUNT(*) AS n FROM kb_suggestions WHERE status = 'pending'`,
-      )
+      .query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM kb_suggestions WHERE status = 'pending'`)
       .get();
     return row?.n ?? 0;
   }

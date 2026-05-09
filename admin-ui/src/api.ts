@@ -728,8 +728,7 @@ export const api = {
     }>(`/admin/api/experiments/${id}/funnel`),
 
   // ─── KB Suggestions ───────────────────────────────────────────────────
-  kbSuggestionCounts: () =>
-    req<SuggestionCounts>("/admin/api/kb/suggestions/counts"),
+  kbSuggestionCounts: () => req<SuggestionCounts>("/admin/api/kb/suggestions/counts"),
 
   kbSuggestions: (status?: SuggestionStatus) =>
     req<{ suggestions: KbSuggestion[]; counts: SuggestionCounts }>(

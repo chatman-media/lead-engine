@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type KbSuggestion, type SuggestionCounts, type SuggestionStatus } from "../api.ts";
 import { ws } from "../App.tsx";
+import { api, type KbSuggestion, type SuggestionCounts, type SuggestionStatus } from "../api.ts";
 
 const TABS: { key: SuggestionStatus | "all"; label: string }[] = [
   { key: "pending", label: "Pending" },
@@ -211,7 +211,15 @@ function SuggestionCard({
       }}
     >
       {/* Question + meta */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
+          marginBottom: 12,
+        }}
+      >
         <div style={{ flex: 1 }}>
           <div
             style={{
@@ -229,7 +237,10 @@ function SuggestionCard({
             {s.source_conversation_id && (
               <>
                 {" · "}
-                <Link to={`/admin/chats/${s.source_conversation_id}`} style={{ color: "var(--blue)" }}>
+                <Link
+                  to={`/admin/chats/${s.source_conversation_id}`}
+                  style={{ color: "var(--blue)" }}
+                >
                   View chat →
                 </Link>
               </>
@@ -272,18 +283,10 @@ function SuggestionCard({
             onBlur={onDraftBlur}
           />
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <button
-              className="btn btn-sm btn-primary"
-              disabled={isBusy}
-              onClick={onApprove}
-            >
+            <button className="btn btn-sm btn-primary" disabled={isBusy} onClick={onApprove}>
               {isBusy ? "…" : "Approve & Ingest"}
             </button>
-            <button
-              className="btn btn-sm btn-ghost"
-              disabled={isBusy}
-              onClick={onReject}
-            >
+            <button className="btn btn-sm btn-ghost" disabled={isBusy} onClick={onReject}>
               Reject
             </button>
           </div>

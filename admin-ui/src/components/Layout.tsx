@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { type Admin, api } from "../api.ts";
 import { ws } from "../App.tsx";
+import { type Admin, api } from "../api.ts";
 
 interface LayoutProps {
   admin: Admin;
@@ -15,7 +15,10 @@ export function Layout({ admin, children }: LayoutProps) {
 
   useEffect(() => {
     // Initial fetch of both counts.
-    api.kbSuggestionCounts().then((c) => setPendingKbCount(c.pending)).catch(() => {});
+    api
+      .kbSuggestionCounts()
+      .then((c) => setPendingKbCount(c.pending))
+      .catch(() => {});
     api
       .conversations()
       .then(({ conversations }) => {
