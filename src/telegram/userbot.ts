@@ -28,12 +28,15 @@ export interface UserbotDeps {
 }
 
 /**
- * Build a minimal TelegramClient-shaped sender that routes `sendMessage`
- * through the already-connected gramjs client. Only `sendMessage` is called
- * when leads are disabled (leadsChatId = null), which is always the case for
- * the userbot path — all other methods are intentionally left as stubs.
+ * Build a minimal TelegramClient-shaped sender per incoming message.
+ * `replyFn` uses `msg.reply()` so gramjs already has the peer entity —
+ * sending by raw numeric userId fails because gramjs doesn't cache
+ * access_hash for users it hasn't "seen" yet.
  */
-function makeUserbotSender(gramjs: GramjsClient): TelegramClient {
+function makeUserbotSender(
+  replyFn: (text: string) => Promise<{ id: number }>,
+  chatId: number,
+): TelegramClient {
   return {
     async sendMessage(input: {
       chatId: number | string;
@@ -43,10 +46,10 @@ function makeUserbotSender(gramjs: GramjsClient): TelegramClient {
       disableWebPagePreview?: boolean;
       replyToMessageId?: number;
     }) {
-      const msg = await gramjs.sendMessage(input.chatId as number, { message: input.text });
+      const sent = await replyFn(input.text);
       return {
-        message_id: msg.id,
-        chat: { id: Number(input.chatId), type: "private" },
+        message_id: sent.id,
+        chat: { id: chatId, type: "private" },
       } as TgSendMessageResult;
     },
     getMe: () => {
@@ -106,6 +109,9 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     saveUserbotSession(db, newSession);
   }
 
+  // Register handlers BEFORE catchUp so missed messages flow through them.
+  // catchUp() replays all updates accumulated since the last disconnect.
+
   const users = new UsersRepo(db);
   const conversations = new ConversationsRepo(db);
   const messages = new MessagesRepo(db);
@@ -116,7 +122,6 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   const experiments = new ExperimentsRepo(db);
   const vacancies = new VacanciesRepo(db);
   const leads = new LeadsRepo(db);
-  const telegramSender = makeUserbotSender(client);
 
   client.addEventHandler(
     async (event) => {
@@ -131,6 +136,15 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
 
       const text = msg.text ?? "";
       if (!text.trim()) return;
+
+      console.log(`[userbot] incoming message from tg_user_id=${tgUserId}: "${text.slice(0, 60)}"`);
+
+      // Sender per-message: msg.reply() uses the known peer entity from the
+      // incoming update — avoids the "could not find input entity" error.
+      const telegramSender = makeUserbotSender(
+        (t) => msg.reply({ message: t }) as Promise<{ id: number }>,
+        tgUserId,
+      );
 
       const userExisting = users.byTgId(tgUserId);
       let user = userExisting;
@@ -182,6 +196,10 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     },
     new NewMessage({ incoming: true }),
   );
+
+  // Process updates that arrived while the server was offline.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (client as unknown as { catchUp(): Promise<void> }).catchUp();
 
   console.log("[userbot] connected and listening for private messages");
   return client;
