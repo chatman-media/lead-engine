@@ -12,12 +12,16 @@ import {
   type SuccessMetric,
 } from "../db/repos/experiments.ts";
 import { KbRepo } from "../db/repos/kb.ts";
-import { type LeadState, LeadsRepo } from "../db/repos/leads.ts";
+import { KbSuggestionsRepo, type SuggestionStatus } from "../db/repos/kb-suggestions.ts";
+import { type LeadRow, type LeadState, LeadsRepo } from "../db/repos/leads.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
+import { SelfPlayMatchesRepo } from "../db/repos/self-play-matches.ts";
+import { SkillOutcomesRepo, StyleRatingsRepo } from "../db/repos/skill-outcomes.ts";
 import { SkillsRepo } from "../db/repos/skills.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
 import { UsersRepo } from "../db/repos/users.ts";
 import { VacanciesRepo } from "../db/repos/vacancies.ts";
+import { attributeLeadOutcome } from "../leads/outcome-attribution.ts";
 import { LeadsService } from "../leads/service.ts";
 import { sanitizeLlmOutput } from "../rag/answer.ts";
 import type { ChatClient, ChatMessage } from "../rag/chat.ts";
@@ -1534,6 +1538,32 @@ function recentMessagesForCard(
     .map((m) => ({ role: m.role, text: m.text }));
 }
 
+/**
+ * Run skill-outcome attribution + ELO update for a lead that just hit
+ * a terminal state. Idempotent (UNIQUE constraint on (lead, skill, source)
+ * + applyOutcome conditional on fresh inserts) — safe to call after every
+ * setState even when the new state isn't terminal. Errors are logged and
+ * swallowed: attribution is analytics, not critical path.
+ */
+function runAttribution(deps: AdminApiDeps, leadRow: LeadRow | null): void {
+  if (!leadRow) return;
+  try {
+    attributeLeadOutcome(
+      {
+        db: deps.db,
+        outcomes: new SkillOutcomesRepo(deps.db),
+        ratings: new StyleRatingsRepo(deps.db),
+        messages: new MessagesRepo(deps.db),
+        conversations: new ConversationsRepo(deps.db),
+        styles: new StylesRepo(deps.db),
+      },
+      leadRow,
+    );
+  } catch (err) {
+    console.warn("[attribution] failed for lead", leadRow.id, err);
+  }
+}
+
 const LEAD_STATES: LeadState[] = [
   "intake_pending",
   "intake_complete",
@@ -1685,6 +1715,7 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
       ...rejectedReasonOpt,
     });
     if (!updated) return json({ error: "transition failed" }, { status: 500 });
+    runAttribution(deps, updated);
 
     const service = buildLeadsService(deps);
     if (service) {
@@ -1770,6 +1801,7 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
 
     const applicationId = leadsRepo.allocateApplicationId(id);
     const transitioned = leadsRepo.setState(id, "docs_complete") ?? lead;
+    runAttribution(deps, transitioned);
 
     const service = buildLeadsService(deps);
     if (service) {
@@ -2053,6 +2085,7 @@ export function createLeadCallbackHandler(deps: AdminApiDeps) {
       });
     } else {
       const rejected = leadsRepo.setState(leadId, "rejected") ?? lead;
+      runAttribution(deps, rejected);
       await service.sendRejection({ user });
       const conv = conversations.byUserId(user.id);
       if (conv) {
@@ -2648,6 +2681,9 @@ export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
       )
       .get(since)!.n;
 
+    const noContextCount = (byPath.find((p) => p.path === "no_context")?.count ?? 0) + ungrounded;
+    const unansweredRate = total > 0 ? noContextCount / total : 0;
+
     return json({
       window: windowKey,
       window_seconds: windowSec,
@@ -2659,6 +2695,7 @@ export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
       ungrounded_count: ungrounded,
       hybrid_count: hybrid,
       rewrite_count: rewrites,
+      unanswered_rate: unansweredRate,
     });
   };
 }
@@ -2676,11 +2713,19 @@ interface SkillDto {
   intent: string;
   is_enabled: boolean;
   attached_to_styles: number;
+  outcomes: {
+    count: number;
+    wins: number;
+    losses: number;
+    draws: number;
+    win_rate: number | null;
+  };
 }
 
 function rowToSkillDto(
   row: ReturnType<SkillsRepo["bySlug"]>,
   attachmentCount: number,
+  outcomes: { count: number; wins: number; losses: number; draws: number; win_rate: number },
 ): SkillDto | null {
   if (!row) return null;
   let stages: string[] = [];
@@ -2701,29 +2746,48 @@ function rowToSkillDto(
     intent: row.intent,
     is_enabled: row.is_enabled === 1,
     attached_to_styles: attachmentCount,
+    outcomes: {
+      count: outcomes.count,
+      wins: outcomes.wins,
+      losses: outcomes.losses,
+      draws: outcomes.draws,
+      win_rate: Number.isFinite(outcomes.win_rate) ? outcomes.win_rate : null,
+    },
   };
 }
 
-/** GET /admin/api/skills — full catalogue with attachment counts. */
+const EMPTY_OUTCOME = { count: 0, wins: 0, losses: 0, draws: 0, win_rate: Number.NaN };
+
 export function createListSkillsHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.db);
+  const outcomesRepo = new SkillOutcomesRepo(deps.db);
   return ({ req }) => {
     const ctx = requireAdmin(deps.db, req);
     if (ctx instanceof Response) return ctx;
     const counts = skills.attachmentCounts();
+    const aggregates = new Map(outcomesRepo.aggregate().map((a) => [a.skill_slug, a]));
     const rows = skills.list();
     const dtos = rows
-      .map((r) => rowToSkillDto(r, counts.get(r.slug) ?? 0))
+      .map((r) =>
+        rowToSkillDto(r, counts.get(r.slug) ?? 0, aggregates.get(r.slug) ?? EMPTY_OUTCOME),
+      )
       .filter((d): d is SkillDto => d !== null);
     return json({ skills: dtos });
   };
 }
 
-/** PATCH /admin/api/skills/:slug — toggle is_enabled (operator can globally
- *  silence a noisy skill). Other fields are read-only — they come from the
- *  source-controlled catalogue. */
+export function createListStyleRatingsHandler(deps: AdminApiDeps): RouteHandler {
+  const repo = new StyleRatingsRepo(deps.db);
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    return json({ ratings: repo.list() });
+  };
+}
+
 export function createUpdateSkillHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.db);
+  const outcomesRepo = new SkillOutcomesRepo(deps.db);
   return async ({ req, params }) => {
     const ctx = requireAdmin(deps.db, req);
     if (ctx instanceof Response) return ctx;
@@ -2743,11 +2807,11 @@ export function createUpdateSkillHandler(deps: AdminApiDeps): RouteHandler {
     skills.setEnabled(row.id, body.is_enabled);
     const updated = skills.bySlug(slug);
     const counts = skills.attachmentCounts();
-    return json({ skill: rowToSkillDto(updated, counts.get(slug) ?? 0) });
+    const outcomes = outcomesRepo.aggregate().find((a) => a.skill_slug === slug) ?? EMPTY_OUTCOME;
+    return json({ skill: rowToSkillDto(updated, counts.get(slug) ?? 0, outcomes) });
   };
 }
 
-/** GET /admin/api/styles/:id/skills — slugs attached to this style. */
 export function createGetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.db);
   const styles = new StylesRepo(deps.db);
@@ -2762,7 +2826,6 @@ export function createGetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
   };
 }
 
-/** PUT /admin/api/styles/:id/skills — replace the attached set. Body: {slugs: string[]}. */
 export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.db);
   const styles = new StylesRepo(deps.db);
@@ -2782,8 +2845,6 @@ export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
     if (!Array.isArray(body.slugs)) {
       return json({ error: "slugs (array) required" }, { status: 400 });
     }
-    // Reject any unknown slugs upfront so the operator gets an explicit
-    // error rather than silent drop. Catalogue is the source of truth.
     const slugs = body.slugs.filter((s): s is string => typeof s === "string");
     const unknown = slugs.filter((s) => !SKILL_BY_SLUG.has(s));
     if (unknown.length > 0) {
@@ -2792,4 +2853,280 @@ export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
     const r = skills.setSkillsForStyle(id, slugs);
     return json({ ok: true, attached: r.attached });
   };
+}
+
+// ---------------------------------------------------------------------------
+// KB Suggestions — unanswered questions → approval pipeline
+// ---------------------------------------------------------------------------
+
+export function createKbSuggestionCountsHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    return json(suggestions.countByStatus());
+  };
+}
+
+export function createListKbSuggestionsHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  return ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const url = new URL(req.url);
+    const status = url.searchParams.get("status") as SuggestionStatus | null;
+    const limit = Number(url.searchParams.get("limit") ?? "200");
+    const rows = suggestions.list({ status: status ?? undefined, limit });
+    return json({ suggestions: rows, counts: suggestions.countByStatus() });
+  };
+}
+
+export function createGetKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  const messages = new MessagesRepo(deps.db);
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const suggestion = suggestions.byId(id);
+    if (!suggestion) return json({ error: "not found" }, { status: 404 });
+    const contextMessages = suggestion.source_conversation_id
+      ? messages.recentForContext(suggestion.source_conversation_id, 20)
+      : [];
+    return json({ suggestion, context_messages: contextMessages });
+  };
+}
+
+export function createUpdateKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const body = (await req.json()) as { answer_draft?: unknown };
+    if (typeof body.answer_draft !== "string") {
+      return json({ error: "answer_draft must be a string" }, { status: 400 });
+    }
+    const updated = suggestions.setDraft(id, body.answer_draft);
+    if (!updated) return json({ error: "not found" }, { status: 404 });
+    return json({ suggestion: updated });
+  };
+}
+
+export function createApproveKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  const kb = new KbRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    if (!deps.rag) {
+      return json(
+        { error: "LLM not configured — cannot ingest without embedder" },
+        { status: 503 },
+      );
+    }
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const suggestion = suggestions.byId(id);
+    if (!suggestion) return json({ error: "not found" }, { status: 404 });
+    if (suggestion.status !== "pending") {
+      return json({ error: "suggestion is not pending" }, { status: 409 });
+    }
+    if (!suggestion.answer_draft?.trim()) {
+      return json(
+        { error: "answer_draft is empty — add an answer before approving" },
+        { status: 400 },
+      );
+    }
+
+    const docBody = `Q: ${suggestion.question_text}\n\nA: ${suggestion.answer_draft.trim()}`;
+    const doc = await ingestText(
+      {
+        title: suggestion.question_text.slice(0, 120),
+        body: docBody,
+      },
+      { kb, embedder: deps.rag.embedder },
+    );
+
+    const updated = suggestions.markIngested(id, ctx.adminId, doc.documentId);
+    return json({ suggestion: updated, kb_document_id: doc.documentId });
+  };
+}
+
+export function createRejectKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  return async ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const body = (await req.json().catch(() => ({}))) as { reason?: unknown };
+    const reason = typeof body.reason === "string" ? body.reason : undefined;
+    const updated = suggestions.reject(id, ctx.adminId, reason);
+    if (!updated) return json({ error: "not found or already decided" }, { status: 404 });
+    return json({ suggestion: updated });
+  };
+}
+
+export function createCreateKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
+  const suggestions = new KbSuggestionsRepo(deps.db);
+  return async ({ req }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const body = (await req.json()) as {
+      question_text?: unknown;
+      answer_draft?: unknown;
+      source_conversation_id?: unknown;
+    };
+    if (typeof body.question_text !== "string" || !body.question_text.trim()) {
+      return json({ error: "question_text is required" }, { status: 400 });
+    }
+    const sourceConvId =
+      typeof body.source_conversation_id === "number" ? body.source_conversation_id : null;
+    const suggestion = suggestions.create({
+      questionText: body.question_text.trim(),
+      sourceConversationId: sourceConvId,
+    });
+    if (typeof body.answer_draft === "string" && body.answer_draft.trim()) {
+      return json({ suggestion: suggestions.setDraft(suggestion.id, body.answer_draft.trim()) });
+    }
+    return json({ suggestion });
+  };
+}
+
+// ─── Self-play match transcripts ──────────────────────────────────────
+
+import type { CandidatePersona } from "../sales/self-play/personas.ts";
+import { CANDIDATE_PERSONAS } from "../sales/self-play/personas.ts";
+
+const PERSONA_LOOKUP = new Map<string, CandidatePersona>(
+  CANDIDATE_PERSONAS.map((p) => [p.slug, p]),
+);
+
+/** GET /admin/api/self-play — recent matches list + matrix per (style, persona). */
+export function createListSelfPlayMatchesHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, url }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const repo = new SelfPlayMatchesRepo(deps.db);
+    const limit = Number(url.searchParams.get("limit") ?? "100");
+    const styleSlug = url.searchParams.get("style") ?? undefined;
+    const personaSlug = url.searchParams.get("persona") ?? undefined;
+    const outcome = url.searchParams.get("outcome");
+    const opts: Parameters<typeof repo.list>[0] = {
+      limit: Number.isFinite(limit) && limit > 0 && limit <= 500 ? limit : 100,
+      ...(styleSlug ? { styleSlug } : {}),
+      ...(personaSlug ? { personaSlug } : {}),
+      ...(outcome === "won" || outcome === "lost" || outcome === "draw" ? { outcome } : {}),
+    };
+    const matches = repo.list(opts);
+    const matrix = repo.matrix();
+    return json({
+      total: repo.count(),
+      matches,
+      matrix,
+      personas: CANDIDATE_PERSONAS.map((p) => ({
+        slug: p.slug,
+        display_name: p.displayName,
+        summary: p.summary,
+      })),
+    });
+  };
+}
+
+/** GET /admin/api/self-play/:id — full transcript of one match. */
+export function createGetSelfPlayMatchHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const match = new SelfPlayMatchesRepo(deps.db).byId(id);
+    if (!match) return json({ error: "not found" }, { status: 404 });
+    const persona = PERSONA_LOOKUP.get(match.persona_slug);
+    return json({
+      match: {
+        id: match.id,
+        style_slug: match.style_slug,
+        persona_slug: match.persona_slug,
+        persona_display_name: persona?.displayName ?? match.persona_slug,
+        outcome: match.outcome,
+        judge_reason: match.judge_reason,
+        turns: match.turns,
+        skills: match.skills,
+        lead_id: match.lead_id,
+        created_at: match.created_at,
+        transcript: match.transcript,
+      },
+    });
+  };
+}
+
+/** DELETE /admin/api/self-play/:id — operator clears bad data points
+ *  (e.g. judge mis-classified). Idempotent — 404 on missing. */
+export function createDeleteSelfPlayMatchHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, params }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const ok = new SelfPlayMatchesRepo(deps.db).delete(id);
+    if (!ok) return json({ error: "not found" }, { status: 404 });
+    return json({ ok: true, deleted: id });
+  };
+}
+
+// ─── Skill recommendations (data-driven picker) ──────────────────────
+
+import { rankSkillRecommendations } from "../sales/skill-recommendations.ts";
+
+/**
+ * GET /admin/api/skills/recommend?minSamples=5&accept=0.4
+ *
+ * Returns skills ranked by Wilson lower-bound confidence on win-rate.
+ * The /admin/styles/:id picker uses this to auto-select a "best
+ * performers" subset based on real outcome data — operators can then
+ * tweak before saving.
+ *
+ * Query params:
+ *   minSamples (int, default 5)  — below this `confidence_lower` is 0
+ *   accept     (float, default 0.4) — Wilson lb above this → recommended=true
+ */
+export function createRecommendSkillsHandler(deps: AdminApiDeps): RouteHandler {
+  return ({ req, url }) => {
+    const ctx = requireAdmin(deps.db, req);
+    if (ctx instanceof Response) return ctx;
+    const minSamples = clampInt(url.searchParams.get("minSamples"), 1, 1000, 5);
+    const accept = clampFloat(url.searchParams.get("accept"), 0, 1, 0.4);
+    const catalogue = new SkillsRepo(deps.db).list();
+    const aggregates = new SkillOutcomesRepo(deps.db).aggregate();
+    const ranked = rankSkillRecommendations(catalogue, aggregates, {
+      minSamples,
+      acceptThreshold: accept,
+    });
+    return json({
+      params: { minSamples, accept },
+      total_outcomes: aggregates.reduce((s, a) => s + a.count, 0),
+      recommendations: ranked.map((r) => ({
+        ...r,
+        observed_rate: Number.isFinite(r.observed_rate) ? r.observed_rate : null,
+      })),
+    });
+  };
+}
+
+function clampInt(raw: string | null, lo: number, hi: number, fallback: number): number {
+  if (raw === null) return fallback;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function clampFloat(raw: string | null, lo: number, hi: number, fallback: number): number {
+  if (raw === null) return fallback;
+  const n = Number.parseFloat(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(hi, Math.max(lo, n));
 }

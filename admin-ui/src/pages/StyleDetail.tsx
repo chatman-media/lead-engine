@@ -735,7 +735,7 @@ function SkillsPicker({ styleId }: { styleId: number }) {
             </div>
           ))}
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button
               onClick={save}
               disabled={!dirty || saving}
@@ -753,9 +753,81 @@ function SkillsPicker({ styleId }: { styleId: number }) {
                 revert
               </button>
             )}
+            <AutoSuggestButton onPick={(slugs) => setAttached(new Set(slugs))} />
           </div>
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Data-driven shortcut: pick the skill set the recommender suggests
+ * (Wilson lower-bound on win-rate). When no outcomes have been
+ * collected yet, the button explains the empty state instead of
+ * silently producing a random pick.
+ *
+ * On click it calls /admin/api/skills/recommend, replaces the picker's
+ * `attached` set with the recommended slugs, and bumps the dirty flag
+ * so the operator can review and `save` to persist.
+ */
+function AutoSuggestButton({ onPick }: { onPick: (slugs: string[]) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function suggest() {
+    setBusy(true);
+    setInfo(null);
+    setError(null);
+    try {
+      const res = await api.recommendSkills();
+      const recommended = res.recommendations.filter((r) => r.recommended);
+      if (res.total_outcomes === 0) {
+        setError(
+          "Нет данных для рекомендаций — запусти self-play или собери реальные исходы. Без статистики я просто угадаю.",
+        );
+        return;
+      }
+      if (recommended.length === 0) {
+        setError(
+          `Из ${res.total_outcomes} исходов ни один скилл не превысил порог уверенности (Wilson lb ≥ ${res.params.accept}, ≥${res.params.minSamples} samples). Попробуй больше матчей или снизь требования.`,
+        );
+        return;
+      }
+      onPick(recommended.map((r) => r.slug));
+      const families = new Set(recommended.map((r) => r.family));
+      setInfo(
+        `Подобрано ${recommended.length} скилов из ${[...families].join(", ")} (Wilson lb ≥ ${res.params.accept}, на ${res.total_outcomes} исходах).`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={suggest}
+        disabled={busy}
+        className="btn btn-ghost btn-sm"
+        title="Автовыбор по win-rate (Wilson lower bound)"
+        data-testid="skills-picker-suggest"
+      >
+        {busy ? "thinking…" : "✨ auto-select from data"}
+      </button>
+      {info && (
+        <span style={{ fontSize: 11, color: "var(--green, #2ea043)", fontFamily: "var(--mono)" }}>
+          {info}
+        </span>
+      )}
+      {error && (
+        <span style={{ fontSize: 11, color: "var(--amber, #d97706)", fontFamily: "var(--mono)" }}>
+          {error}
+        </span>
+      )}
+    </>
   );
 }

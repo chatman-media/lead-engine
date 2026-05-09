@@ -7,10 +7,12 @@ import { Chat } from "./pages/Chat.tsx";
 import { Chats } from "./pages/Chats.tsx";
 import { Experiments } from "./pages/Experiments.tsx";
 import { Kb } from "./pages/Kb.tsx";
+import { KbSuggestions } from "./pages/KbSuggestions.tsx";
 import { Leads } from "./pages/Leads.tsx";
 import { Library } from "./pages/Library.tsx";
 import { Login } from "./pages/Login.tsx";
 import { NewStyle } from "./pages/NewStyle.tsx";
+import { SelfPlay } from "./pages/SelfPlay.tsx";
 import { Skills } from "./pages/Skills.tsx";
 import { Status } from "./pages/Status.tsx";
 import { StyleDetail } from "./pages/StyleDetail.tsx";
@@ -80,6 +82,7 @@ export function App() {
                 <Route path="status" element={<Status />} />
                 <Route path="analytics" element={<Analytics />} />
                 <Route path="skills" element={<Skills />} />
+                <Route path="self-play" element={<SelfPlay />} />
                 <Route path="chats" element={<Chats />} />
                 <Route path="chats/:id" element={<Chat />} />
                 <Route path="users" element={<Users />} />
@@ -87,6 +90,7 @@ export function App() {
                 <Route path="leads" element={<Leads />} />
                 <Route path="vacancies" element={<Vacancies />} />
                 <Route path="kb" element={<Kb />} />
+                <Route path="kb-suggestions" element={<KbSuggestions />} />
                 <Route path="library" element={<Library />} />
                 <Route path="styles" element={<Styles />} />
                 <Route path="styles/new" element={<NewStyle />} />

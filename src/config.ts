@@ -213,6 +213,17 @@ export const config = {
   admin: {
     sessionCookie: envOptional("ADMIN_SESSION_COOKIE", "tg_admin_sid"),
     sessionTtlDays: envInt("ADMIN_SESSION_TTL_DAYS", 14),
+    /**
+     * When set, the bot sends a Telegram DM to this user ID whenever a new
+     * unanswered question is queued (kb_suggestion created). Set to your own
+     * Telegram user ID so you get notified without having to watch the admin UI.
+     */
+    tgUserId: (() => {
+      const raw = envOptional("ADMIN_TG_USER_ID", "");
+      if (!raw) return null;
+      const n = parseInt(raw, 10);
+      return Number.isFinite(n) ? n : null;
+    })(),
   },
   persona: {
     /** What the bot calls itself in chat. */

@@ -9,6 +9,11 @@ import {
   replaceEnDash,
   replaceOtherDashes,
   stripAILeadIns,
+  stripMarkdownBold,
+  stripMarkdownCode,
+  stripMarkdownHeaders,
+  stripMarkdownItalic,
+  stripMarkdownLinks,
   type TextStyleRule,
 } from "@/rag/text-style-rules.ts";
 
@@ -136,6 +141,106 @@ describe("capitalizeFirstLetter", () => {
   });
 });
 
+describe("stripMarkdownBold", () => {
+  test("strips ** wrappers, keeps inner text", () => {
+    expect(stripMarkdownBold.apply("Зарплата от **₩110 000** в смену")).toBe(
+      "Зарплата от ₩110 000 в смену",
+    );
+  });
+
+  test("strips __ wrappers", () => {
+    expect(stripMarkdownBold.apply("Это __очень__ важно")).toBe("Это очень важно");
+  });
+
+  test("idempotent", () => {
+    const once = stripMarkdownBold.apply("**факт**: ставка от 10k");
+    expect(stripMarkdownBold.apply(once)).toBe(once);
+  });
+
+  test("leaves text with no markdown intact", () => {
+    expect(stripMarkdownBold.apply("обычный текст без звёздочек")).toBe(
+      "обычный текст без звёздочек",
+    );
+  });
+
+  test("does not eat lone '**' between non-content", () => {
+    // Bare `** **` (whitespace-only inside) is not bold — leave it.
+    const input = "перевод средств ** ** оформляется автоматом";
+    expect(stripMarkdownBold.apply(input)).toBe(input);
+  });
+});
+
+describe("stripMarkdownItalic", () => {
+  test("strips * wrappers around words", () => {
+    expect(stripMarkdownItalic.apply("это *важно* для тебя")).toBe("это важно для тебя");
+  });
+
+  test("strips _ wrappers around words", () => {
+    expect(stripMarkdownItalic.apply("это _курсив_")).toBe("это курсив");
+  });
+
+  test("preserves underscores INSIDE identifiers (URLs, filenames)", () => {
+    expect(stripMarkdownItalic.apply("https://example_site.com/file_name.md")).toBe(
+      "https://example_site.com/file_name.md",
+    );
+    expect(stripMarkdownItalic.apply("обнови my_var и yet_another")).toBe(
+      "обнови my_var и yet_another",
+    );
+  });
+
+  test("preserves asterisks NOT acting as paired emphasis", () => {
+    expect(stripMarkdownItalic.apply("ставка 5*5 = 25")).toBe("ставка 5*5 = 25");
+  });
+
+  test("strips italic at the start and end of string", () => {
+    expect(stripMarkdownItalic.apply("*важно* — тут")).toBe("важно — тут");
+    expect(stripMarkdownItalic.apply("в конце _важно_")).toBe("в конце важно");
+  });
+});
+
+describe("stripMarkdownCode", () => {
+  test("strips inline backticks", () => {
+    expect(stripMarkdownCode.apply("оплата `₩110 000` за смену")).toBe("оплата ₩110 000 за смену");
+  });
+
+  test("strips fenced code blocks", () => {
+    // The regex consumes the optional language line (incl. newline) after
+    // the opening fence, so the content's leading newline collapses. Net
+    // effect: fence delimiters drop, content keeps its own line breaks.
+    expect(stripMarkdownCode.apply("вот:\n```\nстрока\n```\nконец")).toBe("вот:\nстрока\n\nконец");
+  });
+
+  test("strips fenced block with language hint", () => {
+    expect(stripMarkdownCode.apply("```ts\nlet x = 1\n```")).toBe("let x = 1\n");
+  });
+});
+
+describe("stripMarkdownHeaders", () => {
+  test("strips leading # at line start", () => {
+    expect(stripMarkdownHeaders.apply("# Условия\nставка")).toBe("Условия\nставка");
+  });
+
+  test("handles multiple levels", () => {
+    expect(stripMarkdownHeaders.apply("## Корея\n### Шаохинг")).toBe("Корея\nШаохинг");
+  });
+
+  test("preserves # in the middle of a line", () => {
+    expect(stripMarkdownHeaders.apply("звони +1 #1234")).toBe("звони +1 #1234");
+  });
+});
+
+describe("stripMarkdownLinks", () => {
+  test("converts [text](url) into 'text (url)'", () => {
+    expect(stripMarkdownLinks.apply("читай [тут](https://t.me/x)")).toBe(
+      "читай тут (https://t.me/x)",
+    );
+  });
+
+  test("preserves plain URLs", () => {
+    expect(stripMarkdownLinks.apply("ссылка https://t.me/x")).toBe("ссылка https://t.me/x");
+  });
+});
+
 describe("applyStyleRules — DEFAULT_STYLE_RULES bundle", () => {
   test("compounds across rules (em-dash + ellipsis + lead-in + capital)", () => {
     expect(applyStyleRules("Конечно! сейчас расскажу — там много нюансов…")).toBe(
@@ -177,6 +282,21 @@ describe("applyStyleRules — DEFAULT_STYLE_RULES bundle", () => {
     expect(cleaned).toContain("$3000 - $8000");
     expect(cleaned).toContain("...");
     expect(cleaned[0]).toBe("У"); // capital после strip
+  });
+
+  test("strips markdown that qwen3 actually emits (real reply from self-play)", () => {
+    // Verbatim from a self-play match — qwen3 ignored the "no markdown"
+    // instruction and emitted bold + italic emphasis. Telegram doesn't
+    // render markdown by default, so the candidate sees raw asterisks.
+    const aiOutput =
+      "Корея — оплата **₩110 000** за смену + румки `₩1 500/час`. " +
+      "Хочешь подробнее по [этой странице](https://t.me/infinity_agency_world/389)?";
+    const cleaned = applyStyleRules(aiOutput);
+    expect(cleaned).not.toContain("**");
+    expect(cleaned).not.toContain("`");
+    expect(cleaned).not.toContain("](");
+    expect(cleaned).toContain("₩110 000");
+    expect(cleaned).toContain("https://t.me/infinity_agency_world/389");
   });
 
   test("custom rule list — caller can override default bundle", () => {

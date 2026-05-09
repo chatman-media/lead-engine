@@ -154,7 +154,7 @@ describe("webhook RAG integration", () => {
     expect(msgs[1]!.text).toBe("From RAG");
   });
 
-  test("ai mode + LLM returns NO_CONTEXT_MARKER: stays ai, no Telegram message", async () => {
+  test("ai mode + LLM returns NO_CONTEXT_MARKER: switches to queued, no Telegram message", async () => {
     teardown(ctx);
     ctx = setup({
       embedder: fakeEmbedder(),
@@ -187,10 +187,10 @@ describe("webhook RAG integration", () => {
     expect(ctx.sent).toHaveLength(0);
 
     const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
-    expect(conv.mode).toBe("ai");
+    expect(conv.mode).toBe("queued");
   });
 
-  test("two NO_CONTEXT in ai: no Telegram traffic, mode stays ai", async () => {
+  test("two NO_CONTEXT in ai: no Telegram traffic, mode queued after first", async () => {
     teardown(ctx);
     ctx = setup({
       embedder: fakeEmbedder(),
@@ -226,7 +226,7 @@ describe("webhook RAG integration", () => {
       headers: { "content-type": "application/json" },
     });
     expect(ctx.sent).toHaveLength(0);
-    expect(new ConversationsRepo(ctx.db).byUserId(u.id)!.mode).toBe("ai");
+    expect(new ConversationsRepo(ctx.db).byUserId(u.id)!.mode).toBe("queued");
   });
 
   test("ai mode: NO_CONTEXT then on-topic question gets RAG reply", async () => {
@@ -275,7 +275,7 @@ describe("webhook RAG integration", () => {
     expect(conv.mode).toBe("ai");
   });
 
-  test("kb empty: silent, stays ai", async () => {
+  test("kb empty: silent, queued for operator", async () => {
     const users = new UsersRepo(ctx.db);
     users.create({ tgUserId: 300 });
 
@@ -287,7 +287,7 @@ describe("webhook RAG integration", () => {
     });
     expect(res.status).toBe(200);
     const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(300)!.id)!;
-    expect(conv.mode).toBe("ai");
+    expect(conv.mode).toBe("queued");
     expect(ctx.sent).toHaveLength(0);
   });
   test("ai mode + smalltalk question: replies with persona name, LLM not called", async () => {

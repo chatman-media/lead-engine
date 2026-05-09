@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import type { Admin } from "../api.ts";
-import { api } from "../api.ts";
+import { ws } from "../App.tsx";
+import { type Admin, api } from "../api.ts";
 
 interface LayoutProps {
   admin: Admin;
@@ -9,11 +10,58 @@ interface LayoutProps {
 
 export function Layout({ admin, children }: LayoutProps) {
   const navigate = useNavigate();
+  const [queuedCount, setQueuedCount] = useState(0);
+  const [pendingKbCount, setPendingKbCount] = useState(0);
+
+  useEffect(() => {
+    // Initial fetch of both counts.
+    api
+      .kbSuggestionCounts()
+      .then((c) => setPendingKbCount(c.pending))
+      .catch(() => {});
+    api
+      .conversations()
+      .then(({ conversations }) => {
+        setQueuedCount(conversations.filter((c) => c.mode === "queued").length);
+      })
+      .catch(() => {});
+
+    // Subscribe to real-time updates.
+    const unsub = ws.on((evt) => {
+      if (evt.type === "queued:count") {
+        setQueuedCount(evt.count);
+      }
+      if (evt.type === "kb-suggestion:created") {
+        setPendingKbCount((n) => n + 1);
+      }
+    });
+    return unsub;
+  }, []);
 
   async function handleLogout() {
     await api.logout().catch(() => {});
     navigate("/admin/login", { replace: true });
   }
+
+  const navItems = [
+    { to: "/admin/status", label: "Status" },
+    { to: "/admin/analytics", label: "Analytics" },
+    { to: "/admin/chats", label: "Chats", badge: queuedCount > 0 ? queuedCount : undefined },
+    { to: "/admin/leads", label: "Leads" },
+    { to: "/admin/users", label: "Users" },
+    { to: "/admin/vacancies", label: "Vacancies" },
+    { to: "/admin/kb", label: "Knowledge base" },
+    {
+      to: "/admin/kb-suggestions",
+      label: "KB Suggestions",
+      badge: pendingKbCount > 0 ? pendingKbCount : undefined,
+    },
+    { to: "/admin/library", label: "Library (books)" },
+    { to: "/admin/styles", label: "Sales styles" },
+    { to: "/admin/skills", label: "Skills" },
+    { to: "/admin/self-play", label: "Self-play" },
+    { to: "/admin/experiments", label: "Experiments" },
+  ];
 
   return (
     <div className="layout">
@@ -24,23 +72,27 @@ export function Layout({ admin, children }: LayoutProps) {
         </div>
 
         <nav className="sidebar-nav">
-          {[
-            { to: "/admin/status", label: "Status" },
-            { to: "/admin/analytics", label: "Analytics" },
-            { to: "/admin/chats", label: "Chats" },
-            { to: "/admin/leads", label: "Leads" },
-            { to: "/admin/users", label: "Users" },
-            { to: "/admin/vacancies", label: "Vacancies" },
-            { to: "/admin/kb", label: "Knowledge base" },
-            { to: "/admin/library", label: "Library (books)" },
-            { to: "/admin/styles", label: "Sales styles" },
-            { to: "/admin/skills", label: "Skills" },
-            // Experiments hidden from nav for the single-persona setup.
-            // Route + backend still work — visit /admin/experiments directly.
-            // See docs/SALES_STYLES.md "When to bring back experiments" for criteria.
-          ].map(({ to, label }) => (
+          {navItems.map(({ to, label, badge }) => (
             <NavLink key={to} to={to} className="nav-item">
-              {label}
+              <span>{label}</span>
+              {badge !== undefined && (
+                <span
+                  style={{
+                    marginLeft: "auto",
+                    background: "var(--red, #ef4444)",
+                    color: "#fff",
+                    borderRadius: "10px",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    padding: "1px 6px",
+                    lineHeight: "16px",
+                    minWidth: "18px",
+                    textAlign: "center",
+                  }}
+                >
+                  {badge}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

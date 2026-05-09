@@ -9,6 +9,15 @@ export type AdminEvent =
   | {
       type: "conversation:updated";
       conversationId: number;
+    }
+  | {
+      type: "kb-suggestion:created";
+      suggestionId: number;
+      conversationId: number;
+    }
+  | {
+      type: "queued:count";
+      count: number;
     };
 
 export interface AdminWsData {
