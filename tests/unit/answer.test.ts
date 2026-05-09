@@ -562,10 +562,10 @@ describe("answerWithRag", () => {
 
   test("hybridSearch=true uses BM25+vector fusion for retrieval", async () => {
     const doc = kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
-    // Two chunks with disjoint topics. The query mentions "Стамбул" which is
-    // an exact-match keyword only in chunk #2 — pure vector search seeded
-    // with vec(1) would return chunk #1 first, but BM25 lifts chunk #2 via
-    // the keyword. RRF fusion should land chunk #2 in top-1.
+    // Two chunks with disjoint topics. The query keyword "Стамбул" appears only
+    // in chunk #2 — pure vector search (vec(1) vs vec(2) distance ≈ √2) would
+    // return chunk #1 first, but BM25 lifts chunk #2 via the keyword match.
+    // RRF fusion should include chunk #2 in the results.
     kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
@@ -576,16 +576,20 @@ describe("answerWithRag", () => {
     const istanbul = kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 1,
+      // Use "Стамбул" (not "Стамбуле") so that the FTS prefix query generated
+      // from "Стамбул контракт" → `"Стамбул"*` matches this exact token.
       text: "Стамбул контракт 60 дней оплата в долларах",
       tokenCount: 10,
       embedding: vec(2),
     });
 
-    const embedder = fakeEmbedder({ "что в Стамбуле?": vec(1) });
+    // Query uses "Стамбул" (base form) so sanitizeFtsQuery produces "Стамбул"*
+    // which prefix-matches the chunk text above.
+    const embedder = fakeEmbedder({ "Стамбул контракт": vec(1) });
     const chat = fakeChat("ok");
 
     const result = await answerWithRag({
-      question: "что в Стамбуле?",
+      question: "Стамбул контракт",
       kb,
       embedder,
       chat,
