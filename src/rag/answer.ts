@@ -631,9 +631,16 @@ async function answerFromHits(opts: {
   ];
 
   const generationStart = Date.now();
+  // Resolve numPredict (output token cap) in priority order:
+  //   1. Explicit input.numPredict (tests / playground override)
+  //   2. style.model.maxTokens (per-style author cap — was previously dead;
+  //      bot's reply was truncated mid-sentence on multi-vacancy listings
+  //      because Ollama's default 256 kicked in instead of the schema value)
+  //   3. Ollama provider default (256)
+  const numPredict = input.numPredict ?? input.style?.model.maxTokens;
   const raw = await input.chat.complete(messages, {
     temperature,
-    ...(input.numPredict !== undefined ? { numPredict: input.numPredict } : {}),
+    ...(numPredict !== undefined ? { numPredict } : {}),
   });
   const text = sanitizeLlmOutput(raw);
   const generationMs = Date.now() - generationStart;

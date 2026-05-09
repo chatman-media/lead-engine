@@ -205,6 +205,9 @@ export const alinaInfinity: Style = StyleSchema.parse({
     // not "флирт-рекрутер".
     id: "qwen3:latest",
     temperature: 0.65,
-    maxTokens: 280,
+    // 280 was too tight for multi-vacancy listings — replies got truncated
+    // mid-sentence ("Южная Кор..."). 700 fits 4-5 vacancies in one message
+    // while still capping rambling.
+    maxTokens: 700,
   },
 });
