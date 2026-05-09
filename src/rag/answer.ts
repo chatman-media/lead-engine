@@ -525,6 +525,13 @@ export interface AnswerInput {
    * `composeSystemPrompt`. Filtered by current stage at compose time.
    */
   skills?: readonly SkillForPrompt[];
+  /**
+   * Books-priority retrieval: when true, searches the "books" topic first
+   * (management / manipulation library). Falls back to global KB when the
+   * books slice is empty. Pairs with `hybridSearch` — uses hybrid when both
+   * flags are set, vector-only otherwise.
+   */
+  booksPriority?: boolean;
 }
 
 /**
@@ -564,6 +571,108 @@ export interface AnswerResult {
   usedChunkIds: number[];
   hits: KbSearchHit[];
   telemetry: AnswerTelemetry;
+}
+
+/** Shared: build a reply from pre-fetched hits. Called by both the
+ *  books-priority path and the normal retrieval path to avoid duplication. */
+async function answerFromHits(opts: {
+  hits: KbSearchHit[];
+  baseTelemetry: AnswerTelemetry;
+  startedAt: number;
+  input: AnswerInput;
+  activePersona: Persona;
+}): Promise<AnswerResult> {
+  const { hits, baseTelemetry, startedAt, input, activePersona } = opts;
+  const vacBlock = (input.vacanciesBlock ?? "").trim();
+
+  if (hits.length === 0 && !vacBlock) {
+    return {
+      text: NO_CONTEXT_MARKER,
+      usedChunkIds: [],
+      hits: [],
+      telemetry: { ...baseTelemetry, path: "no_context", total_ms: Date.now() - startedAt },
+    };
+  }
+
+  const kbContextStr = hits
+    .map((h, i) => `[#${i + 1}] (source: ${h.title})\n${h.text}`)
+    .join("\n\n");
+
+  const context = vacBlock
+    ? kbContextStr
+      ? `${vacBlock}\n\n${kbContextStr}`
+      : vacBlock
+    : kbContextStr;
+
+  let systemPrompt: string;
+  let temperature = legacyRagSamplingTemperature(activePersona);
+  if (input.style) {
+    const stage: FunnelStage = input.stage ?? "qualify";
+    systemPrompt = composeSystemPrompt(input.style, stage, context, {
+      includeFewShot: input.includeFewShot ?? true,
+      ...(input.userFacts ? { userFacts: input.userFacts } : {}),
+      ...(input.conversationSummary ? { conversationSummary: input.conversationSummary } : {}),
+      ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
+    });
+    temperature = input.style.model.temperature;
+  } else {
+    systemPrompt = buildSystemPrompt(
+      input.persona ?? DEFAULT_PERSONA,
+      context,
+      input.userFacts,
+      input.conversationSummary,
+    );
+  }
+
+  const messages: ChatMessage[] = [
+    { role: "system", content: systemPrompt },
+    ...(input.history ?? []),
+    { role: "user", content: input.question },
+  ];
+
+  const generationStart = Date.now();
+  const raw = await input.chat.complete(messages, {
+    temperature,
+    ...(input.numPredict !== undefined ? { numPredict: input.numPredict } : {}),
+  });
+  const text = sanitizeLlmOutput(raw);
+  const generationMs = Date.now() - generationStart;
+
+  const telemetry: AnswerTelemetry = { ...baseTelemetry, generation_ms: generationMs };
+
+  if (input.reflect && text !== NO_CONTEXT_MARKER && text.trim().length > 0) {
+    const verdict = await verifyAnswer({
+      question: input.question,
+      answer: text,
+      context,
+      chat: input.chat,
+    });
+    telemetry.reflect = verdict.grounded
+      ? { grounded: true }
+      : { grounded: false, ...(verdict.reason ? { reason: verdict.reason } : {}) };
+    if (!verdict.grounded) {
+      console.warn(
+        `[reflect] dropping ungrounded answer: ${verdict.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
+      );
+      return {
+        text: NO_CONTEXT_MARKER,
+        usedChunkIds: hits.map((h) => h.chunk_id),
+        hits,
+        telemetry: { ...telemetry, path: "ungrounded", total_ms: Date.now() - startedAt },
+      };
+    }
+  }
+
+  if (text === NO_CONTEXT_MARKER) {
+    telemetry.path = "no_context";
+  }
+
+  return {
+    text,
+    usedChunkIds: hits.map((h) => h.chunk_id),
+    hits,
+    telemetry: { ...telemetry, total_ms: Date.now() - startedAt },
+  };
 }
 
 export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
@@ -636,6 +745,33 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   const [questionVec] = await input.embedder.embed([searchQuery]);
   if (!questionVec) throw new Error("Embedder returned no vector for question");
 
+  // Books-priority mode: search the "books" topic first, fall back to
+  // global KB when the books slice is empty. When both booksPriority and
+  // hybridSearch are set, the priority search uses hybrid on each pass.
+  if (input.booksPriority) {
+    const allHits = input.kb.prioritySearch({
+      embedding: questionVec,
+      query: searchQuery,
+      k: topK,
+      vectorOnly: !input.hybridSearch,
+    });
+    const hits =
+      input.hybridSearch || input.maxDistance === undefined
+        ? allHits
+        : allHits.filter((h) => h.distance <= input.maxDistance!);
+    const retrievalMs = Date.now() - retrievalStart;
+    const baseTelemetry: AnswerTelemetry = {
+      path: "ok",
+      retrieval_ms: retrievalMs,
+      top_distances: hits.map((h) => Math.round(h.distance * 10000) / 10000),
+      ...(input.hybridSearch ? { hybrid: true } : {}),
+      ...(searchQuery !== input.question
+        ? { original_query: input.question, rewritten_query: searchQuery }
+        : {}),
+    };
+    return answerFromHits({ hits, baseTelemetry, startedAt, input, activePersona });
+  }
+
   // Topic routing: classify the QUESTION (not the rewritten query — it
   // matches the cleaner regex anchors better). When the classifier is
   // confident AND the topic-filtered search yields hits, use those;
@@ -684,107 +820,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       : {}),
   };
 
-  // Active vacancies (from admin) are prepended as the freshest grounding;
-  // KB hits follow as background. When BOTH are empty, fall through to
-  // NO_CONTEXT — vacancies alone are enough to answer "что у вас сейчас?"
-  // even on cold KB.
-  const vacBlock = (input.vacanciesBlock ?? "").trim();
-
-  if (hits.length === 0 && !vacBlock) {
-    return {
-      text: NO_CONTEXT_MARKER,
-      usedChunkIds: [],
-      hits: [],
-      telemetry: { ...baseTelemetry, path: "no_context", total_ms: Date.now() - startedAt },
-    };
-  }
-
-  const kbContextStr = hits
-    .map((h, i) => `[#${i + 1}] (source: ${h.title})\n${h.text}`)
-    .join("\n\n");
-
-  const context = vacBlock
-    ? kbContextStr
-      ? `${vacBlock}\n\n${kbContextStr}`
-      : vacBlock
-    : kbContextStr;
-
-  // Branch: sales-style engine vs legacy persona prompt.
-  // `style` wins over `persona` when both are passed.
-  let systemPrompt: string;
-  let temperature = legacyRagSamplingTemperature(activePersona);
-  if (input.style) {
-    const stage: FunnelStage = input.stage ?? "qualify";
-    systemPrompt = composeSystemPrompt(input.style, stage, context, {
-      includeFewShot: input.includeFewShot ?? true,
-      ...(input.userFacts ? { userFacts: input.userFacts } : {}),
-      ...(input.conversationSummary ? { conversationSummary: input.conversationSummary } : {}),
-      ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
-    });
-    temperature = input.style.model.temperature;
-  } else {
-    systemPrompt = buildSystemPrompt(
-      input.persona ?? DEFAULT_PERSONA,
-      context,
-      input.userFacts,
-      input.conversationSummary,
-    );
-  }
-
-  const messages: ChatMessage[] = [
-    { role: "system", content: systemPrompt },
-    ...(input.history ?? []),
-    { role: "user", content: input.question },
-  ];
-
-  const generationStart = Date.now();
-  const raw = await input.chat.complete(messages, {
-    temperature,
-    ...(input.numPredict !== undefined ? { numPredict: input.numPredict } : {}),
-  });
-  const text = sanitizeLlmOutput(raw);
-  const generationMs = Date.now() - generationStart;
-
-  const telemetry: AnswerTelemetry = {
-    ...baseTelemetry,
-    generation_ms: generationMs,
-  };
-
-  // If the generator returned the NO_CONTEXT marker, don't waste an LLM call
-  // verifying it — pass through unchanged.
-  if (input.reflect && text !== NO_CONTEXT_MARKER && text.trim().length > 0) {
-    const verdict = await verifyAnswer({
-      question: input.question,
-      answer: text,
-      context,
-      chat: input.chat,
-    });
-    telemetry.reflect = verdict.grounded
-      ? { grounded: true }
-      : { grounded: false, ...(verdict.reason ? { reason: verdict.reason } : {}) };
-    if (!verdict.grounded) {
-      console.warn(
-        `[reflect] dropping ungrounded answer: ${verdict.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
-      );
-      return {
-        text: NO_CONTEXT_MARKER,
-        usedChunkIds: hits.map((h) => h.chunk_id),
-        hits,
-        telemetry: { ...telemetry, path: "ungrounded", total_ms: Date.now() - startedAt },
-      };
-    }
-  }
-
-  if (text === NO_CONTEXT_MARKER) {
-    telemetry.path = "no_context";
-  }
-
-  return {
-    text,
-    usedChunkIds: hits.map((h) => h.chunk_id),
-    hits,
-    telemetry: { ...telemetry, total_ms: Date.now() - startedAt },
-  };
+  return answerFromHits({ hits, baseTelemetry, startedAt, input, activePersona });
 }
 
 /**

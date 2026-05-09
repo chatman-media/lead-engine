@@ -463,7 +463,44 @@ RAG_CONVERSATION_SUMMARY=true
 # одним проходом: `bun run scripts/tag-kb-by-keyword.ts` (idempotent, тегает
 # только untagged-доки). Управление и просмотр документов — `/admin/kb`.
 RAG_TOPIC_ROUTING=true
+
+# Books-priority retrieval: бот сначала ищет в библиотеке книг (topic=books),
+# если нашёл ≥1 чанк — отвечает из книг; только при нулевом результате
+# уходит в общую KB. Книги (PDF/TXT/MD) загружаются через:
+#   bun scripts/ingest-books.ts ./kb/books
+# или через Admin UI → Library (books) (drag-and-drop загрузка PDF прямо из браузера).
+RAG_BOOKS_PRIORITY=true
 ```
+
+### Библиотека книг (управление и манипуляции)
+
+Бот умеет отвечать на основе 10–20 книг (управление, влияние, переговоры и т.д.).
+Все файлы тегируются `topic=books` и при `RAG_BOOKS_PRIORITY=true` имеют приоритет над
+остальной KB.
+
+**Инжест через CLI:**
+```bash
+# Положи PDF/TXT/MD в папку
+mkdir -p kb/books
+cp ~/Downloads/influence.pdf kb/books/
+
+# Проиндексируй (идемпотентно — повторный запуск пропустит неизменённые файлы)
+bun scripts/ingest-books.ts ./kb/books
+
+# Опционально: размер чанка для длинных книг
+bun scripts/ingest-books.ts ./kb/books --max-chars 1200 --overlap 150
+```
+
+**Инжест через Admin UI:**
+Откройте `/admin/library` → перетащите PDF/TXT/MD файлы в зону загрузки или нажмите для выбора.
+
+**Активация:**
+```bash
+# .env
+RAG_BOOKS_PRIORITY=true
+```
+
+Поддерживаемые форматы: `.pdf`, `.txt`, `.md` (PDF через `unpdf`, без нативных зависимостей).
 
 ## Тесты
 

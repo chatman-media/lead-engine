@@ -54,6 +54,8 @@ export interface RagDeps {
   hybridSearch?: boolean;
   /** Topic-routed retrieval — see `answerWithRag.topicRouting`. */
   topicRouting?: boolean;
+  /** Books-priority retrieval — see `answerWithRag.booksPriority`. */
+  booksPriority?: boolean;
   /**
    * Conversation summarization for long chats: when total messages exceeds
    * `summaryStartThreshold` (default 30), older turns get compressed into a
@@ -638,6 +640,7 @@ async function runRagForInbound(
     ...(d.rag.reflect ? { reflect: true } : {}),
     ...(d.rag.hybridSearch ? { hybridSearch: true } : {}),
     ...(d.rag.topicRouting ? { topicRouting: true } : {}),
+    ...(d.rag.booksPriority ? { booksPriority: true } : {}),
     ...(vacanciesBlock ? { vacanciesBlock } : {}),
     ...(resolvedSkills && resolvedSkills.length > 0 ? { skills: resolvedSkills } : {}),
   });
