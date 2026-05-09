@@ -91,6 +91,111 @@ function makeUserbotSender(
   } as unknown as TelegramClient;
 }
 
+interface ProcessUnreadDeps {
+  client: GramjsClient;
+  users: UsersRepo;
+  conversations: ConversationsRepo;
+  messages: MessagesRepo;
+  kb: KbRepo;
+  kbSuggestions: KbSuggestionsRepo;
+  styles: StylesRepo;
+  skills: SkillsRepo;
+  experiments: ExperimentsRepo;
+  vacancies: VacanciesRepo;
+  leads: LeadsRepo;
+  rag?: RagDeps;
+  onEvent?: Parameters<typeof processInbound>[0]["onEvent"];
+}
+
+async function processUnread(d: ProcessUnreadDeps): Promise<void> {
+  let dialogs: Awaited<ReturnType<GramjsClient["getDialogs"]>>;
+  try {
+    dialogs = await d.client.getDialogs({ limit: 100 });
+  } catch (err) {
+    console.warn("[userbot] could not fetch dialogs for unread sweep:", err);
+    return;
+  }
+
+  for (const dialog of dialogs) {
+    if (!dialog.unreadCount || dialog.unreadCount === 0) continue;
+    // Only private chats (not groups/channels).
+    if (!(dialog.entity && "className" in dialog.entity && dialog.entity.className === "User"))
+      continue;
+
+    const tgUserId = Number("id" in dialog.entity ? (dialog.entity.id?.toString() ?? "0") : "0");
+    if (!tgUserId) continue;
+
+    let msgs: Awaited<ReturnType<GramjsClient["getMessages"]>>;
+    try {
+      msgs = await d.client.getMessages(dialog.entity, {
+        limit: Math.min(dialog.unreadCount, 20),
+      });
+    } catch {
+      continue;
+    }
+
+    for (const msg of [...msgs].reverse()) {
+      if (!msg || (msg as { out?: boolean }).out) continue;
+      const text = (msg as { text?: string }).text ?? "";
+      if (!text.trim()) continue;
+
+      const userExisting = d.users.byTgId(tgUserId);
+      let user = userExisting;
+      if (!user && telegramOpenAccess()) {
+        user = d.users.create({ tgUserId, tgUsername: null });
+      }
+      if (!user) continue;
+
+      const conv = d.conversations.ensureForUser(user.id);
+      const msgId = (msg as { id: number }).id;
+
+      const persisted = d.messages.addUserMessageIfNew({
+        conversationId: conv.id,
+        tgMessageId: msgId,
+        text,
+      });
+      if (!persisted.isNew) continue;
+
+      console.log(`[userbot] unread from tg_user_id=${tgUserId}: "${text.slice(0, 60)}"`);
+      d.conversations.touch(conv.id);
+      d.onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
+
+      const telegramSender = makeUserbotSender(
+        (t) =>
+          (msg as { reply(opts: { message: string }): Promise<{ id: number }> }).reply({
+            message: t,
+          }),
+        tgUserId,
+      );
+
+      await processInbound({
+        messages: d.messages,
+        conversations: d.conversations,
+        kb: d.kb,
+        kbSuggestions: d.kbSuggestions,
+        styles: d.styles,
+        skills: d.skills,
+        experiments: d.experiments,
+        users: d.users,
+        vacancies: d.vacancies,
+        leads: d.leads,
+        telegram: telegramSender,
+        leadsChatId: null,
+        visaChatId: null,
+        rag: d.rag,
+        conv,
+        user,
+        chatId: tgUserId,
+        text,
+        tgUserId,
+        onEvent: d.onEvent,
+      }).catch((err) => {
+        console.error("[userbot] processInbound (unread) failed:", err);
+      });
+    }
+  }
+}
+
 export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   const { db, apiId, apiHash, rag, onEvent } = deps;
 
@@ -197,9 +302,22 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     new NewMessage({ incoming: true }),
   );
 
-  // Process updates that arrived while the server was offline.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (client as unknown as { catchUp(): Promise<void> }).catchUp();
+  // Process messages that arrived while the server was offline.
+  await processUnread({
+    client,
+    users,
+    conversations,
+    messages,
+    kb,
+    kbSuggestions,
+    styles,
+    skills,
+    experiments,
+    vacancies,
+    leads,
+    rag,
+    onEvent,
+  });
 
   console.log("[userbot] connected and listening for private messages");
   return client;
