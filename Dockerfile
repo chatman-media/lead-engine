@@ -36,7 +36,10 @@ COPY package.json bun.lock ./
 # postinstall runs scripts/install-hooks.ts — copy it so the script
 # resolves even in the isolated deps stage (no git, but || true exits ok).
 COPY scripts/install-hooks.ts ./scripts/
-RUN bun install --frozen-lockfile --production
+# --production omits devDeps; no --frozen-lockfile so bun can re-resolve
+# platform-specific optional deps (e.g. sqlite-vec-linux-x64) on the
+# build host without a lockfile mismatch.
+RUN bun install --production
 
 # ─── Stage 3: runtime ─────────────────────────────────────────────────
 FROM oven/bun:${BUN_VERSION}-slim AS runtime
