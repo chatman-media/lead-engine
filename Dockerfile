@@ -33,6 +33,9 @@ WORKDIR /app
 
 # Lockfile-first → install layer reuses on source-only edits.
 COPY package.json bun.lock ./
+# postinstall runs scripts/install-hooks.ts — copy it so the script
+# resolves even in the isolated deps stage (no git, but || true exits ok).
+COPY scripts/install-hooks.ts ./scripts/
 RUN bun install --frozen-lockfile --production
 
 # ─── Stage 3: runtime ─────────────────────────────────────────────────
