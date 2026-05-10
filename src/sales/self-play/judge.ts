@@ -116,6 +116,7 @@ export function parseVerdict(raw: string): JudgeVerdict {
       reason: reasonMatch?.[1] ?? "(no reason)",
     };
   }
+  console.warn("[judge] unparseable output (first 300 chars):", stripped.slice(0, 300));
   return { outcome: "draw", reason: "judge output unparseable", raw };
 }
 
