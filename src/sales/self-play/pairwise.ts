@@ -134,6 +134,7 @@ export async function judgePairwise(args: {
  */
 export function parsePairwiseVerdict(raw: string): PairwiseVerdict {
   const stripped = raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/i, "")
     .trim();

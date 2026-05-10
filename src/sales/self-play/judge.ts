@@ -91,6 +91,7 @@ export async function judgeMatch(input: JudgeInput): Promise<JudgeVerdict> {
  */
 export function parseVerdict(raw: string): JudgeVerdict {
   const stripped = raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/i, "")
     .trim();
