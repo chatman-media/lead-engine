@@ -56,10 +56,9 @@ COPY scripts ./scripts
 # Prebuilt admin UI (served at /admin/* when SERVE_UI=1).
 COPY --from=ui-build /app/admin-ui/dist ./admin-ui/dist
 
-# The DB lives in /app/data — mount this as a named volume so it
-# survives image rebuilds. Initially empty; migrations run on first boot.
+# The DB lives in /app/data — on Railway attach a Volume to /app/data
+# so it survives deploys. VOLUME instruction not supported on Railway.
 RUN mkdir -p /app/data
-VOLUME ["/app/data"]
 
 ENV NODE_ENV=production
 ENV PORT=3000
