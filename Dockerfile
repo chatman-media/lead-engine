@@ -39,7 +39,7 @@ COPY scripts/install-hooks.ts ./scripts/
 # --production omits devDeps; no --frozen-lockfile so bun can re-resolve
 # platform-specific optional deps (e.g. sqlite-vec-linux-x64) on the
 # build host without a lockfile mismatch.
-RUN bun install --production --ignore-scripts
+RUN bun install --ignore-scripts
 
 # ─── Stage 3: runtime ─────────────────────────────────────────────────
 FROM oven/bun:${BUN_VERSION}-slim AS runtime
