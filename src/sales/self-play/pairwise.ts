@@ -109,7 +109,7 @@ export async function judgePairwise(args: {
         transcriptToString(args.transcriptA) +
         `\n\nTranscript B (style: ${args.styleBSlug}):\n` +
         transcriptToString(args.transcriptB) +
-        `\n\nReturn the JSON verdict now.`,
+        `\n\n/no_think\nReturn the JSON verdict now.`,
     },
   ];
   let raw: string;
@@ -117,7 +117,7 @@ export async function judgePairwise(args: {
     raw = await args.chat.complete(messages, {
       temperature: 0,
       ...(args.model ? { model: args.model } : {}),
-      numPredict: 200,
+      numPredict: 600,
     });
   } catch (err) {
     return {

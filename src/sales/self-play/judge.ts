@@ -64,7 +64,7 @@ export async function judgeMatch(input: JudgeInput): Promise<JudgeVerdict> {
     { role: "system", content: JUDGE_SYSTEM(input.judgingHint) },
     {
       role: "user",
-      content: `Transcript (style under test: ${input.styleSlug}, candidate persona: ${input.personaSlug}):\n\n${transcriptToString(
+      content: `/no_think\nTranscript (style under test: ${input.styleSlug}, candidate persona: ${input.personaSlug}):\n\n${transcriptToString(
         input.transcript,
       )}\n\nReturn the JSON verdict now.`,
     },
@@ -74,7 +74,7 @@ export async function judgeMatch(input: JudgeInput): Promise<JudgeVerdict> {
     raw = await input.chat.complete(messages, {
       temperature: 0,
       ...(input.model ? { model: input.model } : {}),
-      numPredict: 200,
+      numPredict: 600,
     });
   } catch (err) {
     return {
