@@ -194,6 +194,15 @@ export const config = {
     embeddingModel: envOptional("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
     embeddingDim: envInt("OPENAI_EMBEDDING_DIM", envInt("EMBEDDING_DIM", 1536)),
   },
+  /** Optional separate embedding endpoint (e.g. Voyage AI, separate OpenAI key).
+   *  When set, overrides the openai.* embedding fields for the embedder only.
+   *  The chat LLM still uses OPENAI_API_KEY / OPENAI_BASE_URL. */
+  embed: {
+    apiKey: envOptional("EMBED_API_KEY"),
+    baseUrl: envOptional("EMBED_BASE_URL"),
+    model: envOptional("EMBED_MODEL"),
+    dim: envInt("EMBED_DIM", 0) || undefined,
+  },
   ollama: {
     host: envOptional("OLLAMA_HOST", "http://localhost:11434"),
     chatModel: envOptional("OLLAMA_CHAT_MODEL", ollamaDefaults.chatModel),

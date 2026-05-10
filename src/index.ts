@@ -83,10 +83,10 @@ if (llmIsConfigured()) {
     });
   } else {
     embedder = new OpenAIEmbeddingClient({
-      apiKey: config.openai.apiKey,
-      baseUrl: config.openai.baseUrl,
-      model: config.openai.embeddingModel,
-      dim: config.openai.embeddingDim,
+      apiKey: config.embed.apiKey ?? config.openai.apiKey,
+      baseUrl: config.embed.baseUrl ?? config.openai.baseUrl,
+      model: config.embed.model ?? config.openai.embeddingModel,
+      dim: config.embed.dim ?? config.openai.embeddingDim,
     });
   }
 

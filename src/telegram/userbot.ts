@@ -313,7 +313,10 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
       // Create sender bound to this specific inbound message so that
       // msg.reply() is used instead of sendMessage(numericId) — the
       // latter fails for users not yet in gramjs's entity cache.
-      const telegramSender = makeUserbotSender((text) => msg.reply({ message: text }), tgUserId);
+      const telegramSender = makeUserbotSender(async (text) => {
+        const sent = await msg.reply({ message: text });
+        return { id: sent?.id ?? 0 };
+      }, tgUserId);
 
       processInbound({
         messages,
