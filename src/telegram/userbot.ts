@@ -241,7 +241,26 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     retryDelay: 3000,
   });
 
-  await client.connect();
+  // connect() can throw TIMEOUT on the first attempt when Telegram is slow.
+  // Retry up to 5 times with a 5s pause before giving up and letting the
+  // parent process (index.ts) restart the subprocess in 10s.
+  let connected = false;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await client.connect();
+      connected = true;
+      break;
+    } catch (err) {
+      console.warn(
+        `[userbot] connect attempt ${attempt}/5 failed:`,
+        (err as Error)?.message ?? err,
+      );
+      if (attempt < 5) await new Promise((r) => setTimeout(r, 5_000));
+    }
+  }
+  if (!connected) {
+    throw new Error("[userbot] could not connect after 5 attempts — subprocess will restart");
+  }
 
   // Persist refreshed session after connect so it survives restarts.
   const newSession = client.session.save() as unknown as string;

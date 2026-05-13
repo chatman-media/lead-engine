@@ -1,6 +1,16 @@
 #!/usr/bin/env bun
 // Standalone entry point for the userbot subprocess.
 // Spawned by index.ts via Bun.spawn so that gramJS crashes don't kill the main server.
+
+// gramJS emits TIMEOUT and network errors as unhandled promise rejections.
+// Log them and keep running — the connect/reconnect loop in userbot.ts handles recovery.
+process.on("unhandledRejection", (reason) => {
+  console.error("[userbot-process] unhandledRejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[userbot-process] uncaughtException:", err?.message ?? err);
+});
+
 import { config } from "../config.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
 import { getDb } from "../db/sqlite.ts";
