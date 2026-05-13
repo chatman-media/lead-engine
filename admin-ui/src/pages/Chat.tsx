@@ -137,6 +137,8 @@ export function Chat() {
       }
       setReplyText("");
       reload();
+    } catch (err) {
+      alert(`Ошибка отправки: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setSending(false);
     }

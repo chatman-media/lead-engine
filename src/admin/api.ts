@@ -523,6 +523,7 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
     if (!user) return json({ error: "user not found" }, { status: 404 });
 
     let tgMessageId: number | undefined;
+    let tgError: string | undefined;
     if (deps.telegram) {
       try {
         const sent = await deps.telegram.sendMessage({
@@ -531,6 +532,7 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
         });
         tgMessageId = sent.message_id;
       } catch (err) {
+        tgError = err instanceof Error ? err.message : String(err);
         console.error("[admin reply] Telegram send failed:", err);
       }
     }
@@ -545,6 +547,12 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
 
     deps.onMessageSent?.({ conversationId: id, tgUserId: user.tg_user_id });
 
+    if (tgError) {
+      return json(
+        { ok: false, error: `Telegram: ${tgError}`, conversationId: id, tgUserId: user.tg_user_id },
+        { status: 502 },
+      );
+    }
     return json({ ok: true, conversationId: id, tgUserId: user.tg_user_id });
   };
 }
