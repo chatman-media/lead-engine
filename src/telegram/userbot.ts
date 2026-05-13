@@ -230,7 +230,7 @@ const USER_RATE_LIMIT_MS = 5_000;
 export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   const { db, apiId, apiHash, rag, onEvent } = deps;
 
-  const sessionString = loadUserbotSession(db);
+  const sessionString = process.env.USERBOT_SESSION || loadUserbotSession(db);
   const session = new StringSession(sessionString);
 
   const client = new GramjsClient(session, apiId, apiHash, {
