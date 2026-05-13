@@ -614,11 +614,20 @@ async function answerFromHits(opts: {
       : vacBlock
     : kbContextStr;
 
+  // When a style is set but there's no KB content and no vacancies, the LLM
+  // sees no grounding section at all and may hallucinate vacancy details from
+  // few-shot examples. Pass an explicit "no data" block so the forbid rules
+  // in the style fire correctly.
+  const contextForPrompt =
+    input.style && !context
+      ? "АКТУАЛЬНЫЕ ВАКАНСИИ: нет данных. Конкретных вакансий, зарплат и городов сейчас нет в базе — не называй никаких цифр и мест."
+      : context;
+
   let systemPrompt: string;
   let temperature = legacyRagSamplingTemperature(activePersona);
   if (input.style) {
     const stage: FunnelStage = input.stage ?? "qualify";
-    systemPrompt = composeSystemPrompt(input.style, stage, context, {
+    systemPrompt = composeSystemPrompt(input.style, stage, contextForPrompt, {
       includeFewShot: input.includeFewShot ?? true,
       ...(input.userFacts ? { userFacts: input.userFacts } : {}),
       ...(input.conversationSummary ? { conversationSummary: input.conversationSummary } : {}),
