@@ -8,6 +8,7 @@ import { verifyAnswer } from "./reflect.ts";
 import { rewriteQuery } from "./rewrite-query.ts";
 import { applyStyleRules } from "./text-style-rules.ts";
 import { classifyTopic } from "./topic-classifier.ts";
+import { checkVacancyFacts } from "./vacancy-guard.ts";
 
 /** Sentinel returned when retrieval is empty (or LLM cannot answer from
  * CONTEXT alone). The webhook layer turns this into a polite stall
@@ -564,6 +565,8 @@ export interface AnswerTelemetry {
   rewritten_query?: string;
   /** Reflection verdict (`grounded`) and reason, when reflection ran. */
   reflect?: { grounded: boolean; reason?: string };
+  /** Vacancy guard verdict (`ok`) and reason, when guard ran. */
+  vacancyGuard?: { ok: boolean; reason?: string };
 }
 
 export interface AnswerResult {
@@ -660,6 +663,31 @@ async function answerFromHits(opts: {
     if (!verdict.grounded) {
       console.warn(
         `[reflect] dropping ungrounded answer: ${verdict.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
+      );
+      return {
+        text: NO_CONTEXT_MARKER,
+        usedChunkIds: hits.map((h) => h.chunk_id),
+        hits,
+        telemetry: { ...telemetry, path: "ungrounded", total_ms: Date.now() - startedAt },
+      };
+    }
+  }
+
+  // Vacancy guard: runs after reflect, checks that any salary/location/condition
+  // facts in the answer match the authoritative vacanciesBlock (DB table), not
+  // just some KB chunk that may contain outdated data from old conversations.
+  if (vacBlock && text !== NO_CONTEXT_MARKER && text.trim().length > 0) {
+    const guardResult = await checkVacancyFacts({
+      answer: text,
+      vacanciesBlock: vacBlock,
+      chat: input.chat,
+    });
+    telemetry.vacancyGuard = guardResult.ok
+      ? { ok: true }
+      : { ok: false, ...(guardResult.reason ? { reason: guardResult.reason } : {}) };
+    if (!guardResult.ok) {
+      console.warn(
+        `[vacancy-guard] dropping answer with mismatched vacancy data: ${guardResult.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
       );
       return {
         text: NO_CONTEXT_MARKER,

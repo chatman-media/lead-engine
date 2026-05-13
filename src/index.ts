@@ -17,6 +17,9 @@ import type { RagDeps } from "./telegram/webhook.ts";
 process.on("unhandledRejection", (reason) => {
   console.error("[unhandledRejection]", reason);
 });
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err?.message ?? err);
+});
 
 const db = getDb();
 const telegram = new TelegramClient({
