@@ -48,13 +48,20 @@ export function KbSuggestions() {
   }
 
   async function handleApprove(s: KbSuggestion) {
-    if (!s.answer_draft?.trim()) {
+    // Use locally typed draft first, fall back to server-side value.
+    const localDraft = draftRefs.current[s.id];
+    const draft = localDraft !== undefined ? localDraft : (s.answer_draft ?? "");
+    if (!draft.trim()) {
       alert("Сначала добавьте ответ в поле ниже.");
       return;
     }
     if (!confirm(`Добавить в KB?\nВопрос: "${s.question_text}"`)) return;
     setBusy(s.id);
     try {
+      // Save draft to server first if it differs from what's persisted.
+      if (draft !== (s.answer_draft ?? "")) {
+        await api.updateKbSuggestionDraft(s.id, draft);
+      }
       await api.approveKbSuggestion(s.id);
       showFlash(`✓ Добавлено в KB`);
       await load(tab);
