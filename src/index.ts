@@ -74,6 +74,9 @@ if (llmIsConfigured()) {
     });
   }
 
+  console.log(
+    `[debug] embeddingProvider=${config.llm.embeddingProvider} OPENAI_API_KEY=${process.env.OPENAI_API_KEY ? "set(" + process.env.OPENAI_API_KEY.slice(0, 8) + "…)" : "MISSING"} EMBED_API_KEY=${process.env.EMBED_API_KEY ? "set" : "MISSING"}`,
+  );
   let embedder: EmbeddingClient;
   if (config.llm.embeddingProvider === "ollama") {
     embedder = new OllamaEmbeddingClient({
