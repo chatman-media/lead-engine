@@ -119,6 +119,7 @@ const BUILTIN_VACANCIES: Array<{ title: string; body: string; url: string }> = [
     body: `Локация: Южная Корея
 Роль: караоке хостес
 Оплата: ₩110,000 за смену база + ₩1,500/час чаевых
+Заработок в месяц: от $3,500+
 Контракт: от 2 месяцев
 Смена: 19:00–04:00 (иногда до 05:00)
 Возраст: 19–30
@@ -178,8 +179,13 @@ export function seedInfinityVacancies(repo: VacanciesRepo): SeedVacanciesResult 
   for (const v of BUILTIN_VACANCIES) {
     const existing = existingByTitle.get(v.title);
     if (existing) {
-      if (!existing.url && v.url) {
-        repo.update(existing.id, { url: v.url });
+      const needsUrl = !existing.url && v.url;
+      const needsBody = existing.body.trim() !== v.body.trim();
+      if (needsUrl || needsBody) {
+        repo.update(existing.id, {
+          ...(needsBody ? { body: v.body } : {}),
+          ...(needsUrl ? { url: v.url } : {}),
+        });
         urlPatched++;
       } else {
         skipped++;
