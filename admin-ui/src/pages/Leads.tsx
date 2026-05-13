@@ -268,6 +268,7 @@ export function Leads() {
 }
 
 interface IntakeFields {
+  age?: string;
   height?: string;
   weight?: string;
   city?: string;
@@ -1008,6 +1009,7 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
 
 function IntakeProgress({ intake }: { intake: IntakeFields }) {
   const items: Array<[string, string | undefined, boolean]> = [
+    ["возраст", intake.age, !!intake.age],
     ["рост", intake.height, !!intake.height],
     ["вес", intake.weight, !!intake.weight],
     ["город", intake.city, !!intake.city],

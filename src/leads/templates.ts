@@ -138,6 +138,7 @@ export const AWAITING_APPROVAL_REPLY = `Спасибо, всё получили!
  * is one source of truth.
  */
 export interface IntakeFields {
+  age?: string;
   height?: string;
   weight?: string;
   city?: string;
@@ -149,6 +150,7 @@ export interface IntakeFields {
 }
 
 export const INTAKE_FIELD_LABELS: Record<keyof IntakeFields, string> = {
+  age: "возраст",
   height: "рост",
   weight: "вес",
   city: "город сейчас",

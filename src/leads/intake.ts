@@ -35,11 +35,12 @@ export interface IntakeExtractInput {
   chat: ChatClient;
 }
 
-const SYSTEM_PROMPT = `Ты извлекаешь 4 поля анкеты из переписки рекрутингового агентства.
+const SYSTEM_PROMPT = `Ты извлекаешь 5 полей анкеты из переписки рекрутингового агентства.
 
 Извлекай ТОЛЬКО то, что девушка явно сообщила. Никаких догадок.
 
 Поля (все опциональные):
+- age: возраст (например "22", "22 года")
 - height: рост (например "165 см", "165")
 - weight: вес (например "52 кг", "52")
 - city: где сейчас живёт (например "Москва", "Новосибирск")
@@ -51,11 +52,11 @@ const SYSTEM_PROMPT = `Ты извлекаешь 4 поля анкеты из п
 
 Пример:
 Сообщения:
-user: 165 рост, 52 вес
+user: мне 22, рост 165, вес 52
 user: я в Москве
 Существующие: {}
 Ответ:
-{"height":"165","weight":"52","city":"Москва"}`;
+{"age":"22","height":"165","weight":"52","city":"Москва"}`;
 
 /**
  * Calls the LLM extractor for the four text-shaped intake fields. Media
@@ -88,6 +89,7 @@ export async function extractIntake(input: IntakeExtractInput): Promise<IntakeFi
 
   const conversation = input.messages.map((m) => `${m.role}: ${m.content}`).join("\n");
   const existingJson = JSON.stringify({
+    age: merged.age,
     height: merged.height,
     weight: merged.weight,
     city: merged.city,
@@ -112,6 +114,7 @@ export async function extractIntake(input: IntakeExtractInput): Promise<IntakeFi
   }
 
   const extracted = parseIntakeJson(raw);
+  if (extracted.age) merged.age = extracted.age;
   if (extracted.height) merged.height = extracted.height;
   if (extracted.weight) merged.weight = extracted.weight;
   if (extracted.city) merged.city = extracted.city;
@@ -139,7 +142,7 @@ export function parseIntakeJson(raw: string): Partial<IntakeFields> {
   }
   const obj = parsed as Record<string, unknown>;
   const out: Partial<IntakeFields> = {};
-  for (const key of ["height", "weight", "city", "departure_readiness"] as const) {
+  for (const key of ["age", "height", "weight", "city", "departure_readiness"] as const) {
     const val = obj[key];
     if (typeof val === "string" && val.trim() && val.trim().length <= 100) {
       out[key] = val.trim();

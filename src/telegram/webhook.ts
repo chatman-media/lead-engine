@@ -785,17 +785,22 @@ const SUMMARY_STALENESS = 8; // refresh once we drift this many msgs past last s
  */
 async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
   if (!d.rag) return;
-  // Auto-intake only when an ops chat is configured — otherwise the
-  // promotion has no place to surface and the LLM call would be wasted.
-  // Operators without LEADS_CHAT_ID can still promote manually via
-  // /admin/api/leads/from-conversation/:id.
-  if (d.leadsChatId == null) return;
 
-  const lead = d.leads.ensureForUser(d.user.id);
-  // Once decided one way or the other, intake auto-update is dormant —
-  // operator owns the lead from there. Same for any state past
-  // intake_complete — re-running extraction would erase manual edits.
-  if (lead.state !== "intake_pending") return;
+  // When an ops chat is configured, auto-create a lead for every candidate
+  // so intake tracking kicks in from the first message. Without an ops chat,
+  // only extract intake for leads that were manually promoted by the operator
+  // (so the admin UI fields stay up-to-date even without LEADS_CHAT_ID).
+  let lead = d.leads.byUserId(d.user.id);
+  if (!lead) {
+    if (d.leadsChatId == null) return;
+    lead = d.leads.ensureForUser(d.user.id);
+  }
+
+  // Stop updating once the operator has made a final decision — approved,
+  // rejected, submitted, or lost leads are operator-owned and extraction
+  // could overwrite manual edits. intake_pending and intake_complete are
+  // still "in progress" so we keep extracting.
+  if (lead.state !== "intake_pending" && lead.state !== "intake_complete") return;
 
   const recent = d.messages.recentForContext(d.conv.id, 30);
   const messagesForLlm = recent
@@ -820,10 +825,11 @@ async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
 
   d.leads.setIntake(lead.id, JSON.stringify(intake));
 
-  if (!isIntakeComplete(intake)) return;
+  // Auto-promote + post ops card only when all conditions met:
+  // 1. intake is complete, 2. lead was in intake_pending (not already promoted),
+  // 3. an ops chat is configured to post the card to.
+  if (!isIntakeComplete(intake) || lead.state !== "intake_pending" || d.leadsChatId == null) return;
 
-  // Transition + post the operator-facing card. The auto-promote path
-  // mirrors the manual /admin/api/leads/from-conversation/:id flow.
   const promoted = d.leads.setState(lead.id, "intake_complete");
   if (!promoted) return;
 
