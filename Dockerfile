@@ -60,6 +60,7 @@ COPY package.json bun.lock ./
 COPY migrations ./migrations
 COPY src ./src
 COPY scripts ./scripts
+COPY kb ./kb
 
 # Prebuilt admin UI (served at /admin/* when SERVE_UI=1).
 COPY --from=ui-build /app/admin-ui/dist ./admin-ui/dist
