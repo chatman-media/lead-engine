@@ -1048,6 +1048,33 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   const { result, stage, skillSlugs } = await runRagForInbound(d);
 
   if (result.text === NO_CONTEXT_MARKER) {
+    // Consecutive-stall anti-deadloop: after STALL_LIMIT silent turns in a row,
+    // send a CTA-fallback instead of staying silent. This keeps the candidate
+    // engaged rather than watching "Секунду, уточню…" repeat endlessly.
+    const STALL_LIMIT = 3;
+    const stallCount = d.conversations.getStallCount(d.conv) + 1;
+    d.conversations.setStallCount(d.conv.id, stallCount);
+
+    if (stallCount >= STALL_LIMIT) {
+      // Reset counter so next stall cycle restarts from 0.
+      d.conversations.setStallCount(d.conv.id, 0);
+      // Send CTA-fallback: pivot to call — moves toward conversion instead
+      // of silently queuing. Keep the conversation in AI mode so the bot can
+      // still reply to follow-ups.
+      const ctaReply =
+        d.rag?.style?.voice?.stallCtaReply ??
+        "Давай созвонимся — так быстрее всё объясню. В какое время удобно? 😊";
+      console.log(
+        `[webhook] stall limit (${STALL_LIMIT}) reached for conv=${d.conv.id} — sending CTA`,
+      );
+      await reply(ctaReply, { used_chunk_ids: [], telemetry: result.telemetry }, stage);
+      await runMemoryExtraction(d);
+      await runConversationSummaryRefresh(d);
+      await runIntakeUpdate(d);
+      await runVisaDocsUpdate(d);
+      return;
+    }
+
     // Queue the conversation so the operator sees it needs a manual reply.
     if (d.conv.mode === "ai") {
       d.conversations.setMode(d.conv.id, "queued");
@@ -1083,6 +1110,9 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     await runVisaDocsUpdate(d);
     return;
   }
+
+  // Successful answer — reset the stall counter.
+  d.conversations.setStallCount(d.conv.id, 0);
 
   const { messageId } = await reply(
     result.text,

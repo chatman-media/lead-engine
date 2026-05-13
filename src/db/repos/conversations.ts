@@ -18,6 +18,8 @@ export interface ConversationRow {
   // Long-conversation summary (migration 006). Null until the chat crosses
   // the length threshold and the summarizer first runs. See ConversationSummary.
   summary_json: string | null;
+  // Extensible metadata (migration 021). NULL = {} semantics.
+  meta_json: string | null;
 }
 
 /**
@@ -147,6 +149,40 @@ export class ConversationsRepo {
       JSON.stringify(payload),
       id,
     ]);
+  }
+
+  // ── Stall counter (anti-deadloop) ──────────────────────────────────────
+  // Tracks consecutive NO_CONTEXT stalls. Resets to 0 on any real answer.
+  // When count reaches the threshold, webhook sends a CTA-fallback instead
+  // of another "Секунду, уточню…" to break the loop.
+
+  getStallCount(conv: ConversationRow): number {
+    if (!conv.meta_json) return 0;
+    try {
+      const meta = JSON.parse(conv.meta_json) as Record<string, unknown>;
+      return typeof meta.stall_count === "number" ? meta.stall_count : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  setStallCount(id: number, count: number): void {
+    // Read current meta to preserve other fields, then write back.
+    const row = this.db
+      .query<{ meta_json: string | null }, [number]>(
+        "SELECT meta_json FROM conversations WHERE id = ?",
+      )
+      .get(id);
+    let meta: Record<string, unknown> = {};
+    if (row?.meta_json) {
+      try {
+        meta = JSON.parse(row.meta_json) as Record<string, unknown>;
+      } catch {
+        /* ignore corrupt JSON */
+      }
+    }
+    meta.stall_count = count;
+    this.db.run(`UPDATE conversations SET meta_json = ? WHERE id = ?`, [JSON.stringify(meta), id]);
   }
 
   /**

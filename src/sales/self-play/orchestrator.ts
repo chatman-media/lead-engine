@@ -176,6 +176,9 @@ export async function runSelfPlayMatch(
   // outcome, not the full attached bundle.
   const usedSkills = new Set<string>();
   let fabricationsCaught = 0;
+  // Consecutive stall counter — same anti-deadloop logic as webhook.ts.
+  const STALL_LIMIT = 3;
+  let consecutiveStalls = 0;
 
   for (let turn = 0; turn < maxTurns; turn++) {
     // Salesperson's response — full RAG pipeline. We don't pass a
@@ -220,7 +223,18 @@ export async function runSelfPlayMatch(
       if (salesResult.telemetry.path === "ungrounded") {
         fabricationsCaught++;
       }
-      salesText = deps.stallReply ?? "Секунду, уточню детали и напишу — пара минут.";
+      consecutiveStalls++;
+      if (consecutiveStalls >= STALL_LIMIT) {
+        // CTA-fallback instead of yet another stall — mirrors webhook.ts logic.
+        consecutiveStalls = 0;
+        salesText =
+          input.style.voice.stallCtaReply ??
+          "Давай созвонимся — так быстрее всё объясню. В какое время удобно? 😊";
+      } else {
+        salesText = deps.stallReply ?? "Секунду, уточню детали и напишу — пара минут.";
+      }
+    } else {
+      consecutiveStalls = 0;
     }
     transcript.push({ role: "salesperson", text: salesText });
 
@@ -233,10 +247,8 @@ export async function runSelfPlayMatch(
     // Don't grade skills on a stall reply — there's nothing meaningful
     // for the LLM to extract from "секунду, уточню". Skip when reflect
     // dropped the original.
-    if (
-      skills.length > 0 &&
-      salesText !== (deps.stallReply ?? "Секунду, уточню детали и напишу — пара минут.")
-    ) {
+    const defaultStall = deps.stallReply ?? "Секунду, уточню детали и напишу — пара минут.";
+    if (skills.length > 0 && salesText !== defaultStall) {
       try {
         const used = await gradeSkills({
           question: lastCandidate.text,

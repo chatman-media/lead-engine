@@ -4,11 +4,10 @@ import { composeSystemPrompt, type SkillForPrompt } from "../sales/prompt.ts";
 import type { FunnelStage, Style } from "../sales/types.ts";
 import type { ChatClient, ChatMessage } from "./chat.ts";
 import type { EmbeddingClient } from "./embed.ts";
-import { verifyAnswer } from "./reflect.ts";
+import { checkFacts } from "./fact-checker.ts";
 import { rewriteQuery } from "./rewrite-query.ts";
 import { applyStyleRules } from "./text-style-rules.ts";
 import { classifyTopic } from "./topic-classifier.ts";
-import { checkVacancyFacts } from "./vacancy-guard.ts";
 
 /** Sentinel returned when retrieval is empty (or LLM cannot answer from
  * CONTEXT alone). The webhook layer turns this into a polite stall
@@ -521,6 +520,13 @@ export interface AnswerInput {
    */
   vacanciesBlock?: string;
   /**
+   * When false, disables vacancy-accuracy checking inside fact-checker even
+   * when vacanciesBlock is set. Useful for self-play dry-run where you want
+   * to see what the bot *would* say without the guard blocking it.
+   * Default: true (guard runs whenever vacanciesBlock is non-empty).
+   */
+  vacancyGuard?: boolean;
+  /**
    * Persuasion skills attached to the active style. Loaded from the DB
    * (SkillsRepo.skillsForStyle) by the webhook and threaded through to
    * `composeSystemPrompt`. Filtered by current stage at compose time.
@@ -563,10 +569,8 @@ export interface AnswerTelemetry {
   original_query?: string;
   /** Rewritten search query, when different from `original_query`. */
   rewritten_query?: string;
-  /** Reflection verdict (`grounded`) and reason, when reflection ran. */
-  reflect?: { grounded: boolean; reason?: string };
-  /** Vacancy guard verdict (`ok`) and reason, when guard ran. */
-  vacancyGuard?: { ok: boolean; reason?: string };
+  /** Fact-checker verdict (KB grounding + vacancy accuracy), when ran. */
+  factCheck?: { grounded: boolean; vacancyOk: boolean; reason?: string };
 }
 
 export interface AnswerResult {
@@ -650,19 +654,31 @@ async function answerFromHits(opts: {
 
   const telemetry: AnswerTelemetry = { ...baseTelemetry, generation_ms: generationMs };
 
-  if (input.reflect && text !== NO_CONTEXT_MARKER && text.trim().length > 0) {
-    const verdict = await verifyAnswer({
+  // Unified fact-checker: single LLM call replaces the old reflect + vacancy-guard
+  // two-call pipeline. Checks KB grounding AND vacancy accuracy together.
+  // Only runs when reflect=true OR vacanciesBlock is set (same trigger conditions
+  // as the old separate layers).
+  const runVacancyCheck = vacBlock.length > 0 && input.vacancyGuard !== false;
+  const runFactCheck =
+    (input.reflect || runVacancyCheck) && text !== NO_CONTEXT_MARKER && text.trim().length > 0;
+
+  if (runFactCheck) {
+    const verdict = await checkFacts({
       question: input.question,
       answer: text,
       context,
       chat: input.chat,
+      ...(runVacancyCheck ? { vacanciesBlock: vacBlock } : {}),
     });
-    telemetry.reflect = verdict.grounded
-      ? { grounded: true }
-      : { grounded: false, ...(verdict.reason ? { reason: verdict.reason } : {}) };
+    telemetry.factCheck = {
+      grounded: verdict.grounded,
+      vacancyOk: verdict.vacancyOk,
+      ...(verdict.reason ? { reason: verdict.reason } : {}),
+    };
+
     if (!verdict.grounded) {
       console.warn(
-        `[reflect] dropping ungrounded answer: ${verdict.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
+        `[fact-checker] dropping ungrounded answer: ${verdict.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
       );
       return {
         text: NO_CONTEXT_MARKER,
@@ -671,23 +687,10 @@ async function answerFromHits(opts: {
         telemetry: { ...telemetry, path: "ungrounded", total_ms: Date.now() - startedAt },
       };
     }
-  }
 
-  // Vacancy guard: runs after reflect, checks that any salary/location/condition
-  // facts in the answer match the authoritative vacanciesBlock (DB table), not
-  // just some KB chunk that may contain outdated data from old conversations.
-  if (vacBlock && text !== NO_CONTEXT_MARKER && text.trim().length > 0) {
-    const guardResult = await checkVacancyFacts({
-      answer: text,
-      vacanciesBlock: vacBlock,
-      chat: input.chat,
-    });
-    telemetry.vacancyGuard = guardResult.ok
-      ? { ok: true }
-      : { ok: false, ...(guardResult.reason ? { reason: guardResult.reason } : {}) };
-    if (!guardResult.ok) {
+    if (!verdict.vacancyOk) {
       console.warn(
-        `[vacancy-guard] dropping answer with mismatched vacancy data: ${guardResult.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
+        `[fact-checker] dropping answer with mismatched vacancy data: ${verdict.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
       );
       return {
         text: NO_CONTEXT_MARKER,

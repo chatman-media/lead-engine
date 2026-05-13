@@ -60,6 +60,9 @@ export const StyleSchema = z.object({
     tone: z.string().min(1),
     language: z.enum(["ru", "en"]).default("ru"),
     forbid: z.array(z.string()).default([]),
+    /** Custom CTA reply sent after STALL_LIMIT consecutive NO_CONTEXT turns.
+     *  Defaults to a generic "let's call" message when not set. */
+    stallCtaReply: z.string().optional(),
   }),
   framework: z.enum(SALES_FRAMEWORKS),
   hooks: z.array(HookSchema).default([]),
