@@ -47,6 +47,18 @@ export class OpenAIEmbeddingClient implements EmbeddingClient {
 
   async embed(inputs: string[]): Promise<number[][]> {
     if (inputs.length === 0) return [];
+    // OpenAI limits: 2048 inputs per request and ~300k tokens per request.
+    // Split into batches of 96 strings to stay well under both limits.
+    const BATCH_SIZE = 96;
+    if (inputs.length > BATCH_SIZE) {
+      const results: number[][] = [];
+      for (let i = 0; i < inputs.length; i += BATCH_SIZE) {
+        const batch = inputs.slice(i, i + BATCH_SIZE);
+        const batchResult = await this.embed(batch);
+        results.push(...batchResult);
+      }
+      return results;
+    }
     const res = await this.fetchImpl(`${this.baseUrl}/embeddings`, {
       method: "POST",
       headers: {

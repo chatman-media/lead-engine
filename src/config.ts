@@ -198,9 +198,9 @@ export const config = {
    *  When set, overrides the openai.* embedding fields for the embedder only.
    *  The chat LLM still uses OPENAI_API_KEY / OPENAI_BASE_URL. */
   embed: {
-    apiKey: envOptional("EMBED_API_KEY"),
-    baseUrl: envOptional("EMBED_BASE_URL"),
-    model: envOptional("EMBED_MODEL"),
+    apiKey: envOptional("EMBED_API_KEY") || undefined,
+    baseUrl: envOptional("EMBED_BASE_URL") || undefined,
+    model: envOptional("EMBED_MODEL") || undefined,
     dim: envInt("EMBED_DIM", 0) || undefined,
   },
   ollama: {
