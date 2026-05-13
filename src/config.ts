@@ -305,17 +305,14 @@ export function activeEmbeddingDim(c: typeof config = config): number {
   return c.llm.embeddingProvider === "ollama" ? c.ollama.embeddingDim : c.openai.embeddingDim;
 }
 
-/** True when there is enough config for the bot to actually answer via LLM.
- *  Both chat AND embeddings must be configured (RAG without embeddings = useless). */
+/** True when there is enough config for the bot to answer via LLM chat.
+ *  Embedder is optional — missing key falls back to NullEmbeddingClient (KB search disabled). */
 export function llmIsConfigured(c: typeof config = config): boolean {
-  const chatOk =
-    c.llm.provider === "ollama"
-      ? !!c.ollama.host
-      : c.llm.provider === "openrouter"
-        ? !!c.openrouter.apiKey
-        : !!c.openai.apiKey;
-  const embedOk = c.llm.embeddingProvider === "ollama" ? !!c.ollama.host : !!c.openai.apiKey;
-  return chatOk && embedOk;
+  return c.llm.provider === "ollama"
+    ? !!c.ollama.host
+    : c.llm.provider === "openrouter"
+      ? !!c.openrouter.apiKey
+      : !!c.openai.apiKey;
 }
 
 export { env };

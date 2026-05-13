@@ -5,7 +5,7 @@ import { getDb } from "./db/sqlite.ts";
 import type { ChatClient } from "./rag/chat.ts";
 import { OpenAIChatClient } from "./rag/chat.ts";
 import type { EmbeddingClient } from "./rag/embed.ts";
-import { OpenAIEmbeddingClient } from "./rag/embed.ts";
+import { NullEmbeddingClient, OpenAIEmbeddingClient } from "./rag/embed.ts";
 import { OllamaChatClient } from "./rag/providers/ollama-chat.ts";
 import { OllamaEmbeddingClient } from "./rag/providers/ollama-embed.ts";
 import { OpenRouterChatClient } from "./rag/providers/openrouter-chat.ts";
@@ -74,12 +74,6 @@ if (llmIsConfigured()) {
     });
   }
 
-  console.log(
-    `[debug] embeddingProvider=${config.llm.embeddingProvider}` +
-      ` env.OPENAI_API_KEY=${process.env.OPENAI_API_KEY ? `set(${process.env.OPENAI_API_KEY.slice(0, 8)}…)` : "MISSING"}` +
-      ` config.openai.apiKey=${config.openai.apiKey ? `set(${config.openai.apiKey.slice(0, 8)}…)` : "EMPTY"}` +
-      ` config.embed.apiKey=${config.embed.apiKey === undefined ? "undefined" : config.embed.apiKey === "" ? "empty-string" : "set"}`,
-  );
   let embedder: EmbeddingClient;
   if (config.llm.embeddingProvider === "ollama") {
     embedder = new OllamaEmbeddingClient({
@@ -88,12 +82,18 @@ if (llmIsConfigured()) {
       dim: config.ollama.embeddingDim,
     });
   } else {
-    embedder = new OpenAIEmbeddingClient({
-      apiKey: config.embed.apiKey ?? config.openai.apiKey,
-      baseUrl: config.embed.baseUrl ?? config.openai.baseUrl,
-      model: config.embed.model ?? config.openai.embeddingModel,
-      dim: config.embed.dim ?? config.openai.embeddingDim,
-    });
+    const embedApiKey = config.embed.apiKey ?? config.openai.apiKey;
+    if (embedApiKey) {
+      embedder = new OpenAIEmbeddingClient({
+        apiKey: embedApiKey,
+        baseUrl: config.embed.baseUrl ?? config.openai.baseUrl,
+        model: config.embed.model ?? config.openai.embeddingModel,
+        dim: config.embed.dim ?? config.openai.embeddingDim,
+      });
+    } else {
+      console.warn("[server] OPENAI_API_KEY not set — KB vector search disabled");
+      embedder = new NullEmbeddingClient(config.embed.dim ?? config.openai.embeddingDim);
+    }
   }
 
   // Provider-specific summary line so operators see exactly what's wired.

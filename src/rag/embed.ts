@@ -93,3 +93,13 @@ export class OpenAIEmbeddingClient implements EmbeddingClient {
     return sorted.map((d) => d.embedding);
   }
 }
+
+export class NullEmbeddingClient implements EmbeddingClient {
+  readonly dim: number;
+  constructor(dim: number) {
+    this.dim = dim;
+  }
+  async embed(inputs: string[]): Promise<number[][]> {
+    return inputs.map(() => new Array<number>(this.dim).fill(0));
+  }
+}
