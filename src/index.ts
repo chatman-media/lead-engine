@@ -75,7 +75,10 @@ if (llmIsConfigured()) {
   }
 
   console.log(
-    `[debug] embeddingProvider=${config.llm.embeddingProvider} OPENAI_API_KEY=${process.env.OPENAI_API_KEY ? "set(" + process.env.OPENAI_API_KEY.slice(0, 8) + "…)" : "MISSING"} EMBED_API_KEY=${process.env.EMBED_API_KEY ? "set" : "MISSING"}`,
+    `[debug] embeddingProvider=${config.llm.embeddingProvider}` +
+      ` env.OPENAI_API_KEY=${process.env.OPENAI_API_KEY ? `set(${process.env.OPENAI_API_KEY.slice(0, 8)}…)` : "MISSING"}` +
+      ` config.openai.apiKey=${config.openai.apiKey ? `set(${config.openai.apiKey.slice(0, 8)}…)` : "EMPTY"}` +
+      ` config.embed.apiKey=${config.embed.apiKey === undefined ? "undefined" : config.embed.apiKey === "" ? "empty-string" : "set"}`,
   );
   let embedder: EmbeddingClient;
   if (config.llm.embeddingProvider === "ollama") {
