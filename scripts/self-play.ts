@@ -44,6 +44,10 @@ interface Args {
   maxTurns: number;
   dryRun: boolean;
   reflect: boolean;
+  /** Override chat model (works for openai/openrouter/ollama providers). */
+  model?: string;
+  /** Override judge model separately (defaults to same as --model). */
+  judgeModel?: string;
 }
 
 function parseArgs(): Args {
@@ -54,6 +58,8 @@ function parseArgs(): Args {
   let maxTurns = 20;
   let dryRun = false;
   let reflect = true; // default ON — research mode prefers honesty over speed
+  let model: string | undefined;
+  let judgeModel: string | undefined;
   for (let i = 0; i < a.length; i++) {
     const v = a[i]!;
     if (v === "--style") style = a[++i] ?? style;
@@ -66,24 +72,27 @@ function parseArgs(): Args {
     else if (v === "--max-turns") maxTurns = parseInt(a[++i] ?? "20", 10) || 20;
     else if (v === "--dry-run") dryRun = true;
     else if (v === "--no-reflect") reflect = false;
+    else if (v === "--model") model = a[++i];
+    else if (v === "--judge-model") judgeModel = a[++i];
     else if (v === "--help" || v === "-h") {
       console.log(
         "Usage: bun scripts/self-play.ts --style <slug> [--personas a,b] " +
           "[--runs N] [--max-turns N] [--dry-run] [--no-reflect]\n" +
-          "  --no-reflect  disable hallucination check (faster but counts " +
-          "fabricated wins)",
+          "  --model <id>        override chat model (e.g. anthropic/claude-haiku-4.5)\n" +
+          "  --judge-model <id>  use different model for judge (defaults to --model)\n" +
+          "  --no-reflect        disable hallucination check (faster but counts fabricated wins)",
       );
       process.exit(0);
     }
   }
-  return { style, personas, runs, maxTurns, dryRun, reflect };
+  return { style, personas, runs, maxTurns, dryRun, reflect, model, judgeModel };
 }
 
-function buildChat() {
+function buildChat(modelOverride?: string) {
   if (config.llm.provider === "ollama") {
     return new OllamaChatClient({
       host: config.ollama.host,
-      model: config.ollama.chatModel,
+      model: modelOverride ?? config.ollama.chatModel,
       timeoutMs: 60 * 60_000,
     });
   }
@@ -91,7 +100,7 @@ function buildChat() {
     return new OpenRouterChatClient({
       apiKey: config.openrouter.apiKey,
       baseUrl: config.openrouter.baseUrl,
-      model: config.openrouter.chatModel,
+      model: modelOverride ?? config.openrouter.chatModel,
       ...(config.openrouter.siteUrl ? { siteUrl: config.openrouter.siteUrl } : {}),
       ...(config.openrouter.appName ? { appName: config.openrouter.appName } : {}),
     });
@@ -99,7 +108,7 @@ function buildChat() {
   return new OpenAIChatClient({
     apiKey: config.openai.apiKey,
     baseUrl: config.openai.baseUrl,
-    model: config.openai.chatModel,
+    model: modelOverride ?? config.openai.chatModel,
   });
 }
 
@@ -112,11 +121,12 @@ function buildEmbedder() {
       timeoutMs: 30 * 60_000,
     });
   }
+  // Support separate EMBED_* overrides (e.g. Voyage AI key + URL)
   return new OpenAIEmbeddingClient({
-    apiKey: config.openai.apiKey,
-    baseUrl: config.openai.baseUrl,
-    model: config.openai.embeddingModel,
-    dim: config.openai.embeddingDim,
+    apiKey: config.embed.apiKey ?? config.openai.apiKey,
+    baseUrl: config.embed.baseUrl ?? config.openai.baseUrl,
+    model: config.embed.model ?? config.openai.embeddingModel,
+    dim: config.embed.dim ?? config.openai.embeddingDim,
   });
 }
 
@@ -158,15 +168,19 @@ async function main() {
   // Both sales + candidate use the same provider/model for now. Splitting
   // into two providers (e.g. Anthropic for candidate, Ollama for sales)
   // is a future tweak.
-  const salesChat = buildChat();
-  const candidateChat = buildChat();
-  const judgeChat = buildChat();
+  const salesChat = buildChat(args.model);
+  const candidateChat = buildChat(args.model);
+  const judgeChat = buildChat(args.judgeModel ?? args.model);
   const embedder = buildEmbedder();
+
+  const modelLabel = args.model ?? "config default";
+  const judgeLabel = args.judgeModel ?? modelLabel;
 
   console.log("=".repeat(60));
   console.log(`[self-play] style="${args.style}" runs=${args.runs} maxTurns=${args.maxTurns}`);
   console.log(`[self-play] personas: ${args.personas.join(", ")}`);
   console.log(`[self-play] dry-run=${args.dryRun} provider=${config.llm.provider}`);
+  console.log(`[self-play] model=${modelLabel}  judge=${judgeLabel}`);
   console.log(`[self-play] vacancies in context: ${vacancies.listActive().length}`);
   console.log("=".repeat(60));
 
