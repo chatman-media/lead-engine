@@ -1002,7 +1002,12 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return { messageId: inserted.id };
   };
 
+  console.log(
+    `[processInbound] conv=${d.conv.id} mode=${d.conv.mode} rag=${d.rag ? "yes" : "no"} tgUserId=${d.tgUserId}`,
+  );
+
   if (d.conv.mode === "human") {
+    console.log(`[processInbound] conv=${d.conv.id} → skipped (human mode)`);
     return;
   }
 
@@ -1042,10 +1047,15 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   }
 
   if (!d.rag) {
+    console.log(`[processInbound] conv=${d.conv.id} → skipped (no rag)`);
     return;
   }
 
   const { result, stage, skillSlugs } = await runRagForInbound(d);
+
+  console.log(
+    `[processInbound] conv=${d.conv.id} rag result=${result.text === NO_CONTEXT_MARKER ? "NO_CONTEXT" : `reply(${result.text.length}chars)`} stage=${stage ?? "none"}`,
+  );
 
   if (result.text === NO_CONTEXT_MARKER) {
     // Consecutive-stall anti-deadloop: after STALL_LIMIT silent turns in a row,
@@ -1055,6 +1065,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     const stallCount = d.conversations.getStallCount(d.conv) + 1;
     d.conversations.setStallCount(d.conv.id, stallCount);
 
+    console.log(`[processInbound] conv=${d.conv.id} stall=${stallCount}/${STALL_LIMIT}`);
     if (stallCount >= STALL_LIMIT) {
       // Reset counter so next stall cycle restarts from 0.
       d.conversations.setStallCount(d.conv.id, 0);
