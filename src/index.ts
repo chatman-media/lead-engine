@@ -1,5 +1,8 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { activeEmbeddingDim, config, llmIsConfigured } from "./config.ts";
 import { AdminsRepo } from "./db/repos/admins.ts";
+import { KbRepo } from "./db/repos/kb.ts";
 import { SkillsRepo, seedSkillCatalogue } from "./db/repos/skills.ts";
 import { StylesRepo, seedBuiltinStyles } from "./db/repos/styles.ts";
 import { seedInfinityVacancies, VacanciesRepo } from "./db/repos/vacancies.ts";
@@ -301,4 +304,29 @@ if (rag) {
       `[server] LLM warm-up done in ${Math.round((Date.now() - startedAt) / 1000)}s (${ok || "all failed"})`,
     );
   });
+}
+
+// Auto-ingest KB on first boot when the knowledge base is empty and the
+// kb/ directory is present (committed to git). Fire-and-forget — server
+// is already serving, ingest runs in the background. Idempotent by
+// content hash: re-running on a non-empty KB is a no-op for unchanged files.
+if (rag) {
+  const kbDir = resolve(import.meta.dir, "../kb");
+  const kb = new KbRepo(db);
+  const chunkCount = kb.countChunks();
+  if (chunkCount === 0 && existsSync(kbDir)) {
+    console.log(`[server] KB is empty — starting background ingest of ${kbDir}`);
+    import("./rag/ingest.ts")
+      .then(({ ingestDirectory }) => ingestDirectory(kbDir, { kb, embedder: rag.embedder }))
+      .then((summary) => {
+        console.log(
+          `[server] KB ingest done: ${summary.documents} docs, ${summary.chunks} chunks (${summary.skipped} skipped)`,
+        );
+      })
+      .catch((err) => {
+        console.error("[server] KB auto-ingest failed:", err?.message ?? err);
+      });
+  } else if (chunkCount > 0) {
+    console.log(`[server] KB ready: ${chunkCount} chunks`);
+  }
 }
