@@ -14,6 +14,10 @@ import { createServer } from "./server.ts";
 import { TelegramClient } from "./telegram/client.ts";
 import type { RagDeps } from "./telegram/webhook.ts";
 
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+});
+
 const db = getDb();
 const telegram = new TelegramClient({
   token: config.telegram.botToken || "missing-token",
