@@ -15,4 +15,3 @@ test-results/
 *.db-shm
 kb/
 .claude/
-sec/
