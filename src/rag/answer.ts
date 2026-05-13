@@ -592,7 +592,10 @@ async function answerFromHits(opts: {
   const { hits, baseTelemetry, startedAt, input, activePersona } = opts;
   const vacBlock = (input.vacanciesBlock ?? "").trim();
 
-  if (hits.length === 0 && !vacBlock) {
+  // With a sales style, proceed even with no KB hits — the style's system
+  // prompt (opener scripts, NEPQ scripting) is enough for conversational
+  // turns. Only return NO_CONTEXT when there's truly no style and no KB.
+  if (hits.length === 0 && !vacBlock && !input.style) {
     return {
       text: NO_CONTEXT_MARKER,
       usedChunkIds: [],
@@ -637,6 +640,7 @@ async function answerFromHits(opts: {
     { role: "user", content: input.question },
   ];
 
+  console.log(`[rag] calling LLM (hits=${hits.length} vacBlock=${vacBlock.length > 0})`);
   const generationStart = Date.now();
   // Resolve numPredict (output token cap) in priority order:
   //   1. Explicit input.numPredict (tests / playground override)
@@ -725,6 +729,10 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
             : {}),
         }
       : (input.persona ?? DEFAULT_PERSONA);
+
+  console.log(
+    `[rag] answerWithRag style=${input.style?.slug ?? "none"} stage=${input.stage ?? "none"} q="${input.question.slice(0, 60)}"`,
+  );
 
   if (isPersonaSmalltalkQuestion(input.question)) {
     // Apply text-style rules (em-dash → hyphen, ellipsis → ..., etc) even
@@ -858,6 +866,9 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       : {}),
   };
 
+  console.log(
+    `[rag] retrieval hits=${hits.length} topic=${usedTopic ?? "global"} ms=${Date.now() - retrievalStart}`,
+  );
   return answerFromHits({ hits, baseTelemetry, startedAt, input, activePersona });
 }
 
