@@ -40,8 +40,16 @@ playwright-report/
 test-results/
 coverage/
 
-# Source artifacts of the KB pipeline (large, transient)
-kb/
+# Source artifacts of the KB pipeline — keep text files, skip binaries
+kb/**/*.webp
+kb/**/*.tgs
+kb/**/*.mp4
+kb/**/*.mp3
+kb/**/*.ogg
+kb/**/*.jpg
+kb/**/*.jpeg
+kb/**/*.png
+kb/**/*.gif
 
 # OS junk
 .DS_Store
