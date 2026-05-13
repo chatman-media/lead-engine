@@ -1,6 +1,8 @@
 import { activeEmbeddingDim, config, llmIsConfigured } from "./config.ts";
+import { AdminsRepo } from "./db/repos/admins.ts";
 import { SkillsRepo, seedSkillCatalogue } from "./db/repos/skills.ts";
 import { StylesRepo, seedBuiltinStyles } from "./db/repos/styles.ts";
+import { seedInfinityVacancies, VacanciesRepo } from "./db/repos/vacancies.ts";
 import { getDb } from "./db/sqlite.ts";
 import type { ChatClient } from "./rag/chat.ts";
 import { OpenAIChatClient } from "./rag/chat.ts";
@@ -50,6 +52,33 @@ const telegram = new TelegramClient({
   const r = seedSkillCatalogue(skillsRepo);
   if (r.inserted > 0 || r.updated > 0) {
     console.log(`[server] skill catalogue: ${r.inserted} inserted, ${r.updated} refreshed`);
+  }
+}
+
+// Auto-create admin from ADMIN_EMAIL + ADMIN_PASSWORD env vars (idempotent).
+// Lets operators bootstrap the first admin without running a shell command.
+{
+  const adminEmail = process.env.ADMIN_EMAIL?.trim();
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (adminEmail && adminPassword) {
+    const adminsRepo = new AdminsRepo(db);
+    if (!adminsRepo.byEmail(adminEmail)) {
+      await adminsRepo.create({ email: adminEmail, password: adminPassword });
+      console.log(`[server] admin created: ${adminEmail}`);
+    }
+  }
+}
+
+// Seed built-in INFINITY AGENCY vacancies. Idempotent — skips existing titles.
+// Operators can edit/close in /admin/vacancies; new built-ins added in code
+// will be inserted on next boot.
+{
+  const vacanciesRepo = new VacanciesRepo(db);
+  const r = seedInfinityVacancies(vacanciesRepo);
+  if (r.inserted > 0 || r.urlPatched > 0) {
+    console.log(
+      `[server] vacancies seeded: ${r.inserted} inserted, ${r.urlPatched} url-patched, ${r.skipped} skipped`,
+    );
   }
 }
 

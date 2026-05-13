@@ -111,6 +111,87 @@ export class VacanciesRepo {
   }
 }
 
+const FALLBACK_CHANNEL = "https://t.me/infinity_agency_world";
+
+const BUILTIN_VACANCIES: Array<{ title: string; body: string; url: string }> = [
+  {
+    title: "Корея — Караоке хостес (₩110k + tips)",
+    body: `Локация: Южная Корея
+Роль: караоке хостес
+Оплата: ₩110,000 за смену база + ₩1,500/час чаевых
+Контракт: от 2 месяцев
+Смена: 19:00–04:00 (иногда до 05:00)
+Возраст: 19–30
+Без интима. Жильё бесплатно (2–3 комн.), встреча в аэропорту, перелёт в счёт работы. 2 выходных в месяц.`,
+    url: FALLBACK_CHANNEL,
+  },
+  {
+    title: "Шаохинг / Иу — Premium хостес (9k–10k юаней + %)",
+    body: `Локация: Шаохинг, Иу (Китай)
+Роль: хостес, flower consumption
+Оплата: 9 000–10 000 юаней база + 40% с цветов + % с напитков и столов
+Заработок: $2 500–$4 000+ в месяц
+Возраст: 18–30
+Смена: ночная, 8–10 часов
+Без интима. Жильё бесплатно (2 чел.), легальный контракт, виза и перелёт в счёт работы.`,
+    url: FALLBACK_CHANNEL,
+  },
+  {
+    title: "Санья / Чжэцзян / Шанхай — KTV хостес ($5000+)",
+    body: `Локация: Санья, Чжэцзян, Шанхай
+Роль: KTV хостес
+Оплата: 700–800 юаней room fee + чай полностью ваш
+Заработок: $5 000+ в месяц
+Возраст: 18+
+Смена: 21:00–02:00
+Жильё бесплатно. Поддерживающая команда.`,
+    url: FALLBACK_CHANNEL,
+  },
+  {
+    title: "Менеджер агентства (Шаохинг / Иу / Корея)",
+    body: `Роль: менеджер / рекрутёр агентства
+Локации и оплата:
+- Шаохинг: $1 300–$1 800
+- Иу: $700–$900
+- Корея: $700
+Возраст: 18+, ответственность, пунктуальность.
+Обучение есть, заработок включает комиссии.`,
+    url: FALLBACK_CHANNEL,
+  },
+];
+
+export interface SeedVacanciesResult {
+  inserted: number;
+  urlPatched: number;
+  skipped: number;
+}
+
+/**
+ * Idempotent seeder for INFINITY AGENCY built-in vacancies. Safe to call on
+ * every boot — skips rows whose `title` already exists, patches missing URLs.
+ */
+export function seedInfinityVacancies(repo: VacanciesRepo): SeedVacanciesResult {
+  const existingByTitle = new Map(repo.listAll().map((v) => [v.title, v]));
+  let inserted = 0;
+  let urlPatched = 0;
+  let skipped = 0;
+  for (const v of BUILTIN_VACANCIES) {
+    const existing = existingByTitle.get(v.title);
+    if (existing) {
+      if (!existing.url && v.url) {
+        repo.update(existing.id, { url: v.url });
+        urlPatched++;
+      } else {
+        skipped++;
+      }
+      continue;
+    }
+    repo.create({ title: v.title, body: v.body, url: v.url, isActive: true });
+    inserted++;
+  }
+  return { inserted, urlPatched, skipped };
+}
+
 /**
  * Render active vacancies into the prompt-friendly block prepended to
  * the RAG CONTEXT. Returns "" when no active vacancies — caller skips
