@@ -210,16 +210,18 @@ if (config.userbot.enabled) {
         "Get them at https://my.telegram.org and run `bun scripts/userbot-auth.ts` once.",
     );
   } else {
-    // Fire-and-forget: server is already listening at this point.
-    // gramjs client.connect() can block for several seconds on slow DCs —
-    // we must not await it in the main startup path.
-    import("./telegram/userbot.ts")
-      .then(({ startUserbot }) =>
-        startUserbot({ db, apiId: config.userbot.apiId, apiHash: config.userbot.apiHash, rag }),
-      )
-      .catch((err) => {
-        console.error("[userbot] startup failed:", err?.message ?? err);
+    // Run userbot as an isolated subprocess so gramJS crashes don't kill the server.
+    const spawnUserbot = () => {
+      const proc = Bun.spawn(["bun", "run", "src/telegram/userbot-process.ts"], {
+        env: process.env as Record<string, string>,
+        stdio: ["ignore", "inherit", "inherit"],
       });
+      proc.exited.then((code) => {
+        console.warn(`[userbot] process exited (code=${code}), restarting in 10s…`);
+        setTimeout(spawnUserbot, 10_000);
+      });
+    };
+    spawnUserbot();
   }
 }
 
