@@ -61,17 +61,14 @@ export function Layout({ admin, children }: LayoutProps) {
       label: "KB Suggestions",
       badge: pendingKbCount > 0 ? pendingKbCount : undefined,
     },
-    { to: "/admin/library", label: "Library (books)" },
     { to: "/admin/styles", label: "Sales styles" },
     { to: "/admin/skills", label: "Skills" },
     { to: "/admin/self-play", label: "Self-play" },
-    { to: "/admin/pairwise", label: "Pairwise" },
     {
       to: "/admin/coach",
       label: "Coach",
       badge: pendingCoachCount > 0 ? pendingCoachCount : undefined,
     },
-    { to: "/admin/experiments", label: "Experiments" },
   ];
 
   return (
