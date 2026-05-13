@@ -13,4 +13,14 @@ test-results/
 *.db-journal
 *.db-wal
 *.db-shm
+# KB binary files — only .md/.txt/.pdf are ingested
+*.webp
+*.tgs
+*.mp4
+*.mp3
+*.ogg
+*.jpg
+*.jpeg
+*.png
+*.gif
 .claude/
