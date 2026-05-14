@@ -18,7 +18,7 @@ import type { TgUpdate } from "@/telegram/types.ts";
 import { cleanTestDb, getTestSql, setupTestDb } from "../../helpers/test-db.ts";
 
 const SECRET = "test-secret";
-const DIM = 1536;
+const DIM = 8;
 
 function vec(seed: number): number[] {
   const arr = new Array<number>(DIM).fill(0);

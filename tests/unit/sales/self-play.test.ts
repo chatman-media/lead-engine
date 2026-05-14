@@ -1,9 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
+import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { KbRepo } from "@/db/repos/kb.ts";
+import { LeadsRepo } from "@/db/repos/leads.ts";
 import { SkillOutcomesRepo, StyleRatingsRepo } from "@/db/repos/skill-outcomes.ts";
 import { SkillsRepo, seedSkillCatalogue } from "@/db/repos/skills.ts";
 import { StylesRepo, seedBuiltinStyles } from "@/db/repos/styles.ts";
+import { UsersRepo } from "@/db/repos/users.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { parseVerdict } from "@/sales/self-play/judge.ts";
@@ -12,7 +15,7 @@ import { CANDIDATE_BY_SLUG, CANDIDATE_PERSONAS } from "@/sales/self-play/persona
 import { alinaInfinity } from "@/sales/styles/alina-infinity.ts";
 import { cleanTestDb, getTestSql, setupTestDb } from "../../helpers/test-db.ts";
 
-const DIM = 1536;
+const DIM = 8;
 
 function vec(seed: number): number[] {
   const arr = new Array<number>(DIM).fill(0);
@@ -140,6 +143,9 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
   let outcomes: SkillOutcomesRepo;
   let ratings: StyleRatingsRepo;
   let styles: StylesRepo;
+  let users: UsersRepo;
+  let conversations: ConversationsRepo;
+  let leads: LeadsRepo;
 
   beforeEach(async () => {
     kb = new KbRepo(sql);
@@ -147,6 +153,9 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
     outcomes = new SkillOutcomesRepo(sql);
     ratings = new StyleRatingsRepo(sql);
     styles = new StylesRepo(sql);
+    users = new UsersRepo(sql);
+    conversations = new ConversationsRepo(sql);
+    leads = new LeadsRepo(sql);
     await seedSkillCatalogue(skills);
     await seedBuiltinStyles(styles, [alinaInfinity]);
     // Attach a couple of skills so attribution has slugs to record.
@@ -169,6 +178,9 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
         skills,
         outcomes,
         ratings,
+        users,
+        conversations,
+        leads,
         salesChat,
         candidateChat,
         judgeChat,
@@ -221,6 +233,9 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
         skills,
         outcomes,
         ratings,
+        users,
+        conversations,
+        leads,
         salesChat,
         candidateChat,
         judgeChat,
@@ -259,6 +274,9 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
         skills,
         outcomes,
         ratings,
+        users,
+        conversations,
+        leads,
         salesChat,
         candidateChat,
         judgeChat,
@@ -290,6 +308,9 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
         skills,
         outcomes,
         ratings,
+        users,
+        conversations,
+        leads,
         salesChat,
         candidateChat,
         judgeChat,
@@ -321,6 +342,9 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
         skills,
         outcomes,
         ratings,
+        users,
+        conversations,
+        leads,
         salesChat,
         candidateChat,
         judgeChat,
@@ -350,6 +374,9 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
         skills,
         outcomes,
         ratings,
+        users,
+        conversations,
+        leads,
         salesChat,
         candidateChat,
         judgeChat,
@@ -377,6 +404,9 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
         skills,
         outcomes,
         ratings,
+        users,
+        conversations,
+        leads,
         salesChat,
         candidateChat,
         judgeChat,

@@ -36,7 +36,7 @@ import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
  */
 
 const SECRET = "test-secret";
-const DIM = 1536;
+const DIM = 8;
 const LEADS_CHAT_ID = -1_007_770;
 const VISA_CHAT_ID = -1_009_990;
 const CANDIDATE_TG_ID = 4_242_424;
@@ -73,9 +73,10 @@ function scriptedChat(): ChatClient {
       const system = messages.find((m) => m.role === "system")?.content ?? "";
       const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
 
-      // Intake extractor — pulls 4 text fields.
-      if (system.includes("извлекаешь 4 поля анкеты")) {
+      // Intake extractor — pulls 5 text fields.
+      if (system.includes("полей анкеты")) {
         const out: Record<string, string> = {};
+        if (/22/.test(lastUser)) out.age = "22";
         if (/165/.test(lastUser)) out.height = "165";
         if (/52/.test(lastUser)) out.weight = "52";
         if (/Москв|москв/i.test(lastUser)) out.city = "Москва";

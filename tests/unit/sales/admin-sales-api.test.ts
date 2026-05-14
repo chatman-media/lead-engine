@@ -17,7 +17,7 @@ import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import { cleanTestDb, getTestSql, setupTestDb } from "../../helpers/test-db.ts";
 
 const SECRET = "s";
-const DIM = 1536;
+const DIM = 8;
 
 const sql = getTestSql();
 beforeAll(() => setupTestDb(sql));

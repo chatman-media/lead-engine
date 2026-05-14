@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import { KbRepo, type KbSearchHit, reciprocalRankFusion, sanitizeFtsQuery } from "@/db/repos/kb.ts";
 import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
-const DIM = 1536;
+const DIM = 8;
 
 function vec(seed: number): number[] {
   const arr = new Array<number>(DIM).fill(0);

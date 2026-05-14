@@ -55,9 +55,9 @@ function fakeChat(reply: string): ChatClient {
 
 function fakeEmbedder(): EmbeddingClient {
   return {
-    dim: 1536,
+    dim: 8,
     async embed(inputs) {
-      return inputs.map(() => new Array<number>(1536).fill(0));
+      return inputs.map(() => new Array<number>(8).fill(0));
     },
   };
 }

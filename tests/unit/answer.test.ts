@@ -15,7 +15,7 @@ import type { EmbeddingClient } from "@/rag/embed.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
 import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
-const DIM = 1536;
+const DIM = 8;
 
 function vec(seed: number): number[] {
   const arr = new Array<number>(DIM).fill(0);
