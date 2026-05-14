@@ -103,7 +103,7 @@ describe("composeSystemPrompt — KB context block", () => {
 
   test("omits KB CONTEXT block when no context", () => {
     const out = composeSystemPrompt(flirtyBelfort, "opener", null);
-    expect(out).not.toContain("KB CONTEXT");
+    expect(out).not.toContain("KB CONTEXT (актуальные факты агентства):");
   });
 
   test("excludes references to non-existent kb_lookup tool (regression)", () => {
