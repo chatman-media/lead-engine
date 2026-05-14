@@ -1,10 +1,13 @@
 # tg-chatbot production stack.
 #
-# Default profile:  app + persistent SQLite volume.
+# Default profile:  app + PostgreSQL.
 # Optional profile: ollama for fully-local inference (chat + embeddings).
 #
+# Database connection is configured via DATABASE_URL in .env
+# (external PostgreSQL / Supabase — not bundled in this compose file).
+#
 # Quick start:
-#   cp .env.example .env && edit .env
+#   cp .env.example .env && edit .env  # set DATABASE_URL and other vars
 #   docker compose up -d        # backend only — uses OpenAI / OpenRouter
 #   docker compose --profile ollama up -d
 #                              # full local stack: bot + ollama at :11434
@@ -25,18 +28,12 @@ services:
     env_file:
       - .env
     environment:
-      # Container-internal paths. Compose v2 lets env_file values
-      # override `environment:` keys, so when running with the ollama
-      # profile, set `OLLAMA_HOST=http://ollama:11434` in your .env —
-      # the .env.example default of `http://localhost:11434` won't
-      # reach the sibling container.
-      DB_PATH: /app/data/bot.db
+      # When running with the ollama profile, set OLLAMA_HOST=http://ollama:11434
+      # in your .env — the .env.example default of http://localhost:11434 won't
+      # reach the sibling container. DATABASE_URL comes from the .env file.
       PORT: 3000
       SERVE_UI: "1"
     volumes:
-      # Single named volume holds the SQLite DB + future media uploads
-      # so a `docker compose down && up` doesn't wipe state.
-      - bot-data:/app/data
       # Optional: bring in a host-side KB tree if you want to ingest
       # without exec'ing into the container. Comment-out if not used.
       # - ./kb:/app/kb:ro
@@ -83,7 +80,5 @@ services:
     #           capabilities: [gpu]
 
 volumes:
-  bot-data:
-    name: tg-chatbot-data
   ollama-models:
     name: tg-chatbot-ollama-models

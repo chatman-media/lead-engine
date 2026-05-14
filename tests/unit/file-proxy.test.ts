@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { createRouter } from "@/app.ts";
@@ -6,8 +6,8 @@ import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const SECRET = "s";
 const KNOWN_FILE_ID = "AgADseen1234";
@@ -59,19 +59,22 @@ function buildTelegramStub(): { client: TelegramClient; tracker: ScriptedFetchCa
   };
 }
 
-let db: ReturnType<typeof openDb>;
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 let server: Server;
 let cookie: string;
 let tracker: ScriptedFetchCalls;
 
 beforeEach(async () => {
-  db = openDb({ path: ":memory:" });
   const tg = buildTelegramStub();
   tracker = tg.tracker;
-  const router = createRouter({ db, telegram: tg.client, webhookSecret: SECRET });
+  const router = createRouter({ sql, telegram: tg.client, webhookSecret: SECRET });
   server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
 
-  const admins = new AdminsRepo(db);
+  const admins = new AdminsRepo(sql);
   await admins.create({ email: "op@x.test", password: "longenough" });
   const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
     method: "POST",
@@ -82,9 +85,9 @@ beforeEach(async () => {
 
   // Seed one message that references KNOWN_FILE_ID via meta_json so
   // the endpoint's "have we seen this file?" gate passes.
-  const u = new UsersRepo(db).create({ tgUserId: 7777 });
-  const c = new ConversationsRepo(db).ensureForUser(u.id);
-  new MessagesRepo(db).add({
+  const u = await new UsersRepo(sql).create({ tgUserId: 7777 });
+  const c = await new ConversationsRepo(sql).ensureForUser(u.id);
+  await new MessagesRepo(sql).add({
     conversationId: c.id,
     role: "user",
     text: "[photo]",
@@ -94,7 +97,6 @@ beforeEach(async () => {
 
 afterEach(() => {
   server.stop(true);
-  db.close();
 });
 
 function url(p: string) {
@@ -143,10 +145,8 @@ describe("GET /admin/api/tg-files/:fileId", () => {
   });
 
   test("502 when Telegram getFile errors out", async () => {
-    // Re-create with a fetch impl that rejects getFile.
+    // Re-create server with a fetch impl that rejects getFile.
     server.stop(true);
-    db.close();
-    db = openDb({ path: ":memory:" });
     const fetchImpl: FetchLike = async (input) => {
       const u = typeof input === "string" ? input : (input as Request).url;
       if (u.includes("/getFile")) {
@@ -158,19 +158,19 @@ describe("GET /admin/api/tg-files/:fileId", () => {
       return new Response("nope", { status: 404 });
     };
     const telegram = new TelegramClient({ token: "tok", fetch: fetchImpl });
-    const router = createRouter({ db, telegram, webhookSecret: SECRET });
+    const router = createRouter({ sql, telegram, webhookSecret: SECRET });
     server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
-    const admins = new AdminsRepo(db);
-    await admins.create({ email: "op@x.test", password: "longenough" });
+    const admins = new AdminsRepo(sql);
+    await admins.create({ email: "op2@x.test", password: "longenough" });
     const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+      body: JSON.stringify({ email: "op2@x.test", password: "longenough" }),
     });
     cookie = login.headers.get("set-cookie")!.split(";")[0]!;
-    const u = new UsersRepo(db).create({ tgUserId: 8888 });
-    const c = new ConversationsRepo(db).ensureForUser(u.id);
-    new MessagesRepo(db).add({
+    const u = await new UsersRepo(sql).create({ tgUserId: 8888 });
+    const c = await new ConversationsRepo(sql).ensureForUser(u.id);
+    await new MessagesRepo(sql).add({
       conversationId: c.id,
       role: "user",
       text: "[photo]",

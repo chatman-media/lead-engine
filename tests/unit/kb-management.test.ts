@@ -1,9 +1,13 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { activeEmbeddingDim } from "@/config.ts";
 import { KbRepo } from "@/db/repos/kb.ts";
-import { openDb } from "@/db/sqlite.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
-let db: ReturnType<typeof openDb>;
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 let kb: KbRepo;
 
 const dim = activeEmbeddingDim();
@@ -15,26 +19,24 @@ const zeroVec = (seed = 0): number[] => {
 };
 
 beforeEach(() => {
-  db = openDb({ path: ":memory:" });
-  kb = new KbRepo(db);
+  kb = new KbRepo(sql);
 });
-afterEach(() => db.close());
 
-function seed(source: string, title: string, topic: string | null = null) {
-  const doc = kb.upsertDocument({
+async function seed(source: string, title: string, topic: string | null = null) {
+  const doc = await kb.upsertDocument({
     source,
     title,
     contentHash: `${source}:${title}:${topic ?? ""}`,
     topic,
   });
-  kb.insertChunkWithEmbedding({
+  await kb.insertChunkWithEmbedding({
     documentId: doc.id,
     chunkIndex: 0,
     text: `body of ${title}`,
     tokenCount: 4,
     embedding: zeroVec(doc.id),
   });
-  kb.insertChunkWithEmbedding({
+  await kb.insertChunkWithEmbedding({
     documentId: doc.id,
     chunkIndex: 1,
     text: `more body of ${title}`,
@@ -46,80 +48,80 @@ function seed(source: string, title: string, topic: string | null = null) {
 
 describe("KbRepo management methods", () => {
   test("listDocuments returns chunk_count + sorts freshest first", async () => {
-    const a = seed("a.md", "Alpha");
+    const a = await seed("a.md", "Alpha");
     await new Promise((r) => setTimeout(r, 1100)); // unixepoch is integer-second
-    const b = seed("b.md", "Beta");
-    const list = kb.listDocuments();
+    const b = await seed("b.md", "Beta");
+    const list = await kb.listDocuments();
     expect(list[0]!.id).toBe(b.id);
     expect(list[1]!.id).toBe(a.id);
     expect(list[0]!.chunk_count).toBe(2);
   });
 
-  test("listDocuments filters by topic + __untagged__ sentinel", () => {
-    const visa = seed("visa.md", "Visa rules", "visa");
-    const pay = seed("pay.md", "Payment", "payment");
-    const free = seed("misc.md", "Misc");
+  test("listDocuments filters by topic + __untagged__ sentinel", async () => {
+    const visa = await seed("visa.md", "Visa rules", "visa");
+    const pay = await seed("pay.md", "Payment", "payment");
+    const free = await seed("misc.md", "Misc");
 
-    expect(kb.listDocuments({ topic: "visa" }).map((d) => d.id)).toEqual([visa.id]);
-    expect(kb.listDocuments({ topic: "payment" }).map((d) => d.id)).toEqual([pay.id]);
-    expect(kb.listDocuments({ topic: "__untagged__" }).map((d) => d.id)).toEqual([free.id]);
+    expect((await kb.listDocuments({ topic: "visa" })).map((d) => d.id)).toEqual([visa.id]);
+    expect((await kb.listDocuments({ topic: "payment" })).map((d) => d.id)).toEqual([pay.id]);
+    expect((await kb.listDocuments({ topic: "__untagged__" })).map((d) => d.id)).toEqual([free.id]);
   });
 
-  test("listDocuments q-filter matches title + source case-insensitively", () => {
-    seed("notes/visa.md", "Visa entry rules");
-    seed("notes/jobs.md", "Job offers");
-    const matches = kb.listDocuments({ q: "VISA" });
+  test("listDocuments q-filter matches title + source case-insensitively", async () => {
+    await seed("notes/visa.md", "Visa entry rules");
+    await seed("notes/jobs.md", "Job offers");
+    const matches = await kb.listDocuments({ q: "VISA" });
     expect(matches.length).toBe(1);
     expect(matches[0]!.title).toBe("Visa entry rules");
   });
 
-  test("listTopics returns distinct non-null tags, sorted", () => {
-    seed("a.md", "A", "visa");
-    seed("b.md", "B", "payment");
-    seed("c.md", "C", "visa");
-    seed("d.md", "D", null);
-    expect(kb.listTopics()).toEqual(["payment", "visa"]);
+  test("listTopics returns distinct non-null tags, sorted", async () => {
+    await seed("a.md", "A", "visa");
+    await seed("b.md", "B", "payment");
+    await seed("c.md", "C", "visa");
+    await seed("d.md", "D", null);
+    expect(await kb.listTopics()).toEqual(["payment", "visa"]);
   });
 
-  test("setTopic updates the row + clears with null", () => {
-    const d = seed("a.md", "A", "visa");
-    expect(kb.setTopic(d.id, "payment")?.topic).toBe("payment");
-    expect(kb.setTopic(d.id, null)?.topic).toBeNull();
-    expect(kb.setTopic(99999, "visa")).toBeNull();
+  test("setTopic updates the row + clears with null", async () => {
+    const d = await seed("a.md", "A", "visa");
+    expect((await kb.setTopic(d.id, "payment"))?.topic).toBe("payment");
+    expect((await kb.setTopic(d.id, null))?.topic).toBeNull();
+    expect(await kb.setTopic(99999, "visa")).toBeNull();
   });
 
-  test("listChunks returns chunks ordered by chunk_index", () => {
-    const d = seed("a.md", "A");
-    const chunks = kb.listChunks(d.id);
+  test("listChunks returns chunks ordered by chunk_index", async () => {
+    const d = await seed("a.md", "A");
+    const chunks = await kb.listChunks(d.id);
     expect(chunks.length).toBe(2);
     expect(chunks[0]!.chunk_index).toBe(0);
     expect(chunks[1]!.chunk_index).toBe(1);
   });
 
-  test("deleteDocument removes doc + chunks + vec rows", () => {
-    const d = seed("a.md", "A");
-    expect(kb.countChunks()).toBe(2);
-    expect(kb.deleteDocument(d.id)).toBe(true);
-    expect(kb.getDocument(d.id)).toBeNull();
-    expect(kb.listChunks(d.id).length).toBe(0);
+  test("deleteDocument removes doc + chunks + vec rows", async () => {
+    const d = await seed("a.md", "A");
+    expect(await kb.countChunks()).toBe(2);
+    expect(await kb.deleteDocument(d.id)).toBe(true);
+    expect(await kb.getDocument(d.id)).toBeNull();
+    expect((await kb.listChunks(d.id)).length).toBe(0);
     // Vector rows gone — search returns no hits for the doc's chunks
-    const hits = kb.search(zeroVec(d.id), 5);
+    const hits = await kb.search(zeroVec(d.id), 5);
     expect(hits.find((h) => h.document_id === d.id)).toBeUndefined();
   });
 
-  test("deleteDocument returns false on missing id", () => {
-    expect(kb.deleteDocument(99999)).toBe(false);
+  test("deleteDocument returns false on missing id", async () => {
+    expect(await kb.deleteDocument(99999)).toBe(false);
   });
 });
 
 describe("KbRepo.prioritySearch", () => {
-  test("returns books-tagged hits when available", () => {
+  test("returns books-tagged hits when available", async () => {
     // Seed a general doc and a books doc with different embedding directions
-    seed("general.md", "General KB", null);
-    const booksDoc = seed("influence.md", "Influence", "books");
+    await seed("general.md", "General KB", null);
+    const booksDoc = await seed("influence.md", "Influence", "books");
 
     // Query vector closest to the books doc's first chunk (seed = booksDoc.id)
-    const hits = kb.prioritySearch({
+    const hits = await kb.prioritySearch({
       embedding: zeroVec(booksDoc.id),
       query: "influence",
       k: 5,
@@ -131,10 +133,10 @@ describe("KbRepo.prioritySearch", () => {
     expect(hits.every((h) => h.document_id === booksDoc.id)).toBe(true);
   });
 
-  test("falls back to global KB when no books are indexed", () => {
-    const general = seed("general.md", "General KB", "visa");
+  test("falls back to global KB when no books are indexed", async () => {
+    const general = await seed("general.md", "General KB", "visa");
 
-    const hits = kb.prioritySearch({
+    const hits = await kb.prioritySearch({
       embedding: zeroVec(general.id),
       query: "visa",
       k: 5,
@@ -145,18 +147,18 @@ describe("KbRepo.prioritySearch", () => {
     expect(hits.every((h) => h.document_id === general.id)).toBe(true);
   });
 
-  test("returns books hits even when general KB has better vector match", () => {
+  test("returns books hits even when general KB has better vector match", async () => {
     // General doc has perfect match vector (seed = 0 = zeroVec(0) = [1, 0, ...])
-    seed("general.md", "General KB", null);
+    await seed("general.md", "General KB", null);
     // Books doc has a slightly different vector
-    const booksDoc = seed("power.md", "48 Laws", "books");
+    const booksDoc = await seed("power.md", "48 Laws", "books");
 
     // Even if we query with zeroVec(0) (perfect match for general), books doc
     // should be returned from the books-priority search.
-    const bookHits = kb.search(zeroVec(0), 5, "books");
+    const bookHits = await kb.search(zeroVec(0), 5, "books");
     // Only verify that when books exist, prioritySearch uses the books layer
     if (bookHits.length > 0) {
-      const hits = kb.prioritySearch({
+      const hits = await kb.prioritySearch({
         embedding: zeroVec(booksDoc.id),
         query: "power",
         k: 5,

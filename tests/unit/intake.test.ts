@@ -1,19 +1,17 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
-import { countMediaForConversation, extractIntake, parseIntakeJson } from "@/leads/intake.ts";
+import { extractIntake, parseIntakeJson } from "@/leads/intake.ts";
 import { isIntakeComplete } from "@/leads/templates.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
-let db: ReturnType<typeof openDb>;
-
-beforeEach(() => {
-  db = openDb({ path: ":memory:" });
-});
-afterEach(() => db.close());
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
 
 function fakeChat(reply: string): ChatClient & { calls: number } {
   const wrapper = {
@@ -59,60 +57,60 @@ describe("parseIntakeJson", () => {
 });
 
 describe("countMediaForConversation", () => {
-  test("counts photos and videos by media.type, ignores other rows", () => {
-    const users = new UsersRepo(db);
-    const convs = new ConversationsRepo(db);
-    const msgs = new MessagesRepo(db);
-    const u = users.create({ tgUserId: 1 });
-    const c = convs.ensureForUser(u.id);
+  test("counts photos and videos by media.type, ignores other rows", async () => {
+    const users = new UsersRepo(sql);
+    const convs = new ConversationsRepo(sql);
+    const msgs = new MessagesRepo(sql);
+    const u = await users.create({ tgUserId: 1 });
+    const c = await convs.ensureForUser(u.id);
 
-    msgs.add({ conversationId: c.id, role: "user", text: "hello" });
-    msgs.add({
+    await msgs.add({ conversationId: c.id, role: "user", text: "hello" });
+    await msgs.add({
       conversationId: c.id,
       role: "user",
       text: "[photo]",
       meta: { media: { type: "photo", file_id: "a" } },
     });
-    msgs.add({
+    await msgs.add({
       conversationId: c.id,
       role: "user",
       text: "[photo]",
       meta: { media: { type: "photo", file_id: "b" } },
     });
-    msgs.add({
+    await msgs.add({
       conversationId: c.id,
       role: "user",
       text: "[video]",
       meta: { media: { type: "video", file_id: "c" } },
     });
-    msgs.add({
+    await msgs.add({
       conversationId: c.id,
       role: "user",
       text: "[document]",
       meta: { media: { type: "document", file_id: "d" } },
     });
 
-    const counts = countMediaForConversation(db, c.id);
+    const counts = await msgs.countMediaForConversation(c.id);
     expect(counts.photos).toBe(2);
     expect(counts.videos).toBe(1);
   });
 
-  test("scoped per conversation (does not leak across)", () => {
-    const users = new UsersRepo(db);
-    const convs = new ConversationsRepo(db);
-    const msgs = new MessagesRepo(db);
-    const ua = users.create({ tgUserId: 10 });
-    const ub = users.create({ tgUserId: 11 });
-    const ca = convs.ensureForUser(ua.id);
-    const cb = convs.ensureForUser(ub.id);
-    msgs.add({
+  test("scoped per conversation (does not leak across)", async () => {
+    const users = new UsersRepo(sql);
+    const convs = new ConversationsRepo(sql);
+    const msgs = new MessagesRepo(sql);
+    const ua = await users.create({ tgUserId: 10 });
+    const ub = await users.create({ tgUserId: 11 });
+    const ca = await convs.ensureForUser(ua.id);
+    const cb = await convs.ensureForUser(ub.id);
+    await msgs.add({
       conversationId: ca.id,
       role: "user",
       text: "[photo]",
       meta: { media: { type: "photo", file_id: "x" } },
     });
-    expect(countMediaForConversation(db, ca.id).photos).toBe(1);
-    expect(countMediaForConversation(db, cb.id).photos).toBe(0);
+    expect((await msgs.countMediaForConversation(ca.id)).photos).toBe(1);
+    expect((await msgs.countMediaForConversation(cb.id)).photos).toBe(0);
   });
 });
 

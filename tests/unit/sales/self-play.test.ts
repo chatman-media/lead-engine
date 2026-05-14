@@ -1,16 +1,16 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
 import { KbRepo } from "@/db/repos/kb.ts";
 import { SkillOutcomesRepo, StyleRatingsRepo } from "@/db/repos/skill-outcomes.ts";
 import { SkillsRepo, seedSkillCatalogue } from "@/db/repos/skills.ts";
 import { StylesRepo, seedBuiltinStyles } from "@/db/repos/styles.ts";
-import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { parseVerdict } from "@/sales/self-play/judge.ts";
 import { runSelfPlayMatch } from "@/sales/self-play/orchestrator.ts";
 import { CANDIDATE_BY_SLUG, CANDIDATE_PERSONAS } from "@/sales/self-play/personas.ts";
 import { alinaInfinity } from "@/sales/styles/alina-infinity.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../../helpers/test-db.ts";
 
 const DIM = 1536;
 
@@ -130,30 +130,32 @@ describe("parseVerdict", () => {
 });
 
 describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
-  let db: ReturnType<typeof openDb>;
+  const sql = getTestSql();
+  beforeAll(() => setupTestDb(sql));
+  afterEach(() => cleanTestDb(sql));
+  afterAll(() => sql.end());
+
   let kb: KbRepo;
   let skills: SkillsRepo;
   let outcomes: SkillOutcomesRepo;
   let ratings: StyleRatingsRepo;
   let styles: StylesRepo;
 
-  beforeEach(() => {
-    db = openDb({ path: ":memory:", embeddingDim: DIM });
-    kb = new KbRepo(db);
-    skills = new SkillsRepo(db);
-    outcomes = new SkillOutcomesRepo(db);
-    ratings = new StyleRatingsRepo(db);
-    styles = new StylesRepo(db);
-    seedSkillCatalogue(skills);
-    seedBuiltinStyles(styles, [alinaInfinity]);
+  beforeEach(async () => {
+    kb = new KbRepo(sql);
+    skills = new SkillsRepo(sql);
+    outcomes = new SkillOutcomesRepo(sql);
+    ratings = new StyleRatingsRepo(sql);
+    styles = new StylesRepo(sql);
+    await seedSkillCatalogue(skills);
+    await seedBuiltinStyles(styles, [alinaInfinity]);
     // Attach a couple of skills so attribution has slugs to record.
-    const styleRow = styles.bySlug(alinaInfinity.slug)!;
-    skills.setSkillsForStyle(styleRow.id, ["social-proof-stat", "tactical-empathy"]);
+    const styleRow = (await styles.bySlug(alinaInfinity.slug))!;
+    await skills.setSkillsForStyle(styleRow.id, ["social-proof-stat", "tactical-empathy"]);
   });
-  afterEach(() => db.close());
 
   test("won match records outcomes + bumps style ELO", async () => {
-    const styleRow = styles.bySlug(alinaInfinity.slug)!;
+    const styleRow = (await styles.bySlug(alinaInfinity.slug))!;
     // Sales replies once; candidate concludes immediately with a strong commit;
     // judge returns "won".
     const salesChat = scriptedChat(["хочешь анкету заполним?"]);
@@ -162,7 +164,7 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
 
     const result = await runSelfPlayMatch(
       {
-        db,
+        db: sql,
         kb,
         skills,
         outcomes,
@@ -184,17 +186,17 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
     expect(result.transcript[0]!.role).toBe("candidate"); // opener from persona
     expect(result.skillsAttributed.sort()).toEqual(["social-proof-stat", "tactical-empathy"]);
 
-    const aggs = outcomes.aggregate();
+    const aggs = await outcomes.aggregate();
     expect(aggs.length).toBe(2);
     for (const a of aggs) expect(a.wins).toBe(1);
 
-    const rating = ratings.bySlug(alinaInfinity.slug)!;
+    const rating = (await ratings.bySlug(alinaInfinity.slug))!;
     expect(rating.wins).toBe(1);
     expect(rating.elo).toBeGreaterThan(1500);
   });
 
   test("reflect catches a fabrication and replaces with a stall reply", async () => {
-    const styleRow = styles.bySlug(alinaInfinity.slug)!;
+    const styleRow = (await styles.bySlug(alinaInfinity.slug))!;
     // Sales LLM is hit twice per turn when reflect=on:
     //   1) generation
     //   2) reflect verifier
@@ -214,7 +216,7 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
 
     const result = await runSelfPlayMatch(
       {
-        db,
+        db: sql,
         kb,
         skills,
         outcomes,
@@ -242,7 +244,7 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
   });
 
   test("reflect=false: fabrication leaks through (legacy behaviour)", async () => {
-    const styleRow = styles.bySlug(alinaInfinity.slug)!;
+    const styleRow = (await styles.bySlug(alinaInfinity.slug))!;
     const salesChat = scriptedChat(["Ближайший вылет январь 2025"]);
     const candidateChat = scriptedChat(["ок, давай оформляться"]);
     const judgeChat = scriptedChat([
@@ -252,7 +254,7 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
 
     const result = await runSelfPlayMatch(
       {
-        db,
+        db: sql,
         kb,
         skills,
         outcomes,
@@ -277,13 +279,13 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
   });
 
   test("lost match records losses", async () => {
-    const styleRow = styles.bySlug(alinaInfinity.slug)!;
+    const styleRow = (await styles.bySlug(alinaInfinity.slug))!;
     const salesChat = scriptedChat(["рассказывай про себя?"]);
     const candidateChat = scriptedChat(["не интересно, передумала"]);
     const judgeChat = scriptedChat(['{"outcome":"lost","reason":"candidate refused"}']);
     const result = await runSelfPlayMatch(
       {
-        db,
+        db: sql,
         kb,
         skills,
         outcomes,
@@ -301,20 +303,20 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
       },
     );
     expect(result.outcome).toBe("lost");
-    const aggs = outcomes.aggregate();
+    const aggs = await outcomes.aggregate();
     for (const a of aggs) expect(a.losses).toBe(1);
-    expect(ratings.bySlug(alinaInfinity.slug)!.losses).toBe(1);
+    expect((await ratings.bySlug(alinaInfinity.slug))!.losses).toBe(1);
   });
 
   test("respects maxTurns and falls through to judge when no early conclusion", async () => {
-    const styleRow = styles.bySlug(alinaInfinity.slug)!;
+    const styleRow = (await styles.bySlug(alinaInfinity.slug))!;
     // Sales says something; candidate replies vaguely; loop exhausts; judge → draw.
     const salesChat = scriptedChat(["скажи возраст?", "понятно", "ок"]);
     const candidateChat = scriptedChat(["хм", "может", "не знаю"]);
     const judgeChat = scriptedChat(['{"outcome":"draw","reason":"timeout"}']);
     const result = await runSelfPlayMatch(
       {
-        db,
+        db: sql,
         kb,
         skills,
         outcomes,
@@ -337,13 +339,13 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
   });
 
   test("empty candidate reply ends as 'lost' without calling judge", async () => {
-    const styleRow = styles.bySlug(alinaInfinity.slug)!;
+    const styleRow = (await styles.bySlug(alinaInfinity.slug))!;
     const salesChat = scriptedChat(["привет!"]);
     const candidateChat = scriptedChat([""]);
     const judgeChat = scriptedChat(['{"outcome":"won","reason":"should NOT be called"}']);
     const result = await runSelfPlayMatch(
       {
-        db,
+        db: sql,
         kb,
         skills,
         outcomes,
@@ -364,13 +366,13 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
   });
 
   test("self-play outcomes use source='self_play' (queryable, distinct from real leads)", async () => {
-    const styleRow = styles.bySlug(alinaInfinity.slug)!;
+    const styleRow = (await styles.bySlug(alinaInfinity.slug))!;
     const salesChat = scriptedChat(["анкету заполним?"]);
     const candidateChat = scriptedChat(["я согласна"]);
     const judgeChat = scriptedChat(['{"outcome":"won","reason":"yes"}']);
     await runSelfPlayMatch(
       {
-        db,
+        db: sql,
         kb,
         skills,
         outcomes,
@@ -387,7 +389,7 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
         maxTurns: 5,
       },
     );
-    const recent = outcomes.recent(10);
+    const recent = await outcomes.recent(10);
     expect(recent.length).toBe(2);
     for (const r of recent) expect(r.source).toBe("self_play");
   });

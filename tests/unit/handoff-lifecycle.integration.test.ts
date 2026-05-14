@@ -12,18 +12,19 @@
  *  - release() failing to flip mode back to "ai" so the next user message
  *    is silently dropped.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
 import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
+import { KbRepo } from "@/db/repos/kb.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { createServer } from "@/server.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const SECRET = "lifecycle-secret";
 const DIM = 8;
@@ -57,8 +58,12 @@ interface OutgoingCall {
   body: Record<string, unknown>;
 }
 
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 function setup() {
-  const db = openDb({ path: ":memory:", embeddingDim: DIM });
   const sent: OutgoingCall[] = [];
   let nextTgMsgId = 1000;
   const fetchImpl: FetchLike = async (input, init) => {
@@ -85,7 +90,7 @@ function setup() {
     fetch: fetchImpl,
   });
   const server = createServer({
-    db,
+    sql,
     telegram,
     webhookSecret: SECRET,
     rag: {
@@ -99,12 +104,11 @@ function setup() {
     // production fires-and-forgets to keep the Telegram ack under 60s.
     awaitWebhookProcessing: true,
   });
-  return { db, server, sent };
+  return { server, sent };
 }
 
 function teardown(ctx: ReturnType<typeof setup>) {
   ctx.server.stop(true);
-  ctx.db.close();
 }
 
 let ctx: ReturnType<typeof setup>;
@@ -144,7 +148,7 @@ async function postWebhook(text: string): Promise<Response> {
 }
 
 async function loginAsAdmin(): Promise<string> {
-  const admins = new AdminsRepo(ctx.db);
+  const admins = new AdminsRepo(sql);
   await admins.create({ email: "ops@x.test", password: "longenough" });
   const res = await fetch(`${origin()}/admin/api/login`, {
     method: "POST",
@@ -193,21 +197,21 @@ async function waitFor<T>(cond: () => T | undefined, timeoutMs = 1500): Promise<
 
 describe("AI ↔ human handoff lifecycle (integration)", () => {
   test("ai → escalation → human takeover → admin reply → release → ai", async () => {
-    const users = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const messages = new MessagesRepo(ctx.db);
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const messages = new MessagesRepo(sql);
 
-    const u = users.create({ tgUserId: TG_USER_ID, tgUsername: "tester" });
+    const u = await users.create({ tgUserId: TG_USER_ID, tgUsername: "tester" });
 
     // Without a KB hit the first message would get NO_CONTEXT silently; seed
     // a chunk so step 1 receives a normal AI reply before user-triggered queue.
-    const kb = new (await import("@/db/repos/kb.ts")).KbRepo(ctx.db);
-    const doc = kb.upsertDocument({
+    const kb = new KbRepo(sql);
+    const doc = await kb.upsertDocument({
       source: "mem://t",
       title: "doc",
       contentHash: "h",
     });
-    kb.insertChunkWithEmbedding({
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "Some company info.",
@@ -226,7 +230,7 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     expect(ctx.sent[0]!.method).toBe("sendMessage");
     expect(ctx.sent[0]!.body.text).toBe("AI говорит привет");
 
-    const conv = conversations.byUserId(u.id)!;
+    const conv = (await conversations.byUserId(u.id))!;
     expect(conv.mode).toBe("ai");
 
     const escalateUserText = "позови оператора пожалуйста";
@@ -240,8 +244,8 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
       expect(body.reason).toBe("user-trigger");
     }
     expect(ctx.sent).toHaveLength(1); // only step-1 AI reply
-    expect(conversations.byId(conv.id)!.mode).toBe("queued");
-    expect(conversations.byId(conv.id)!.escalated_at).not.toBeNull();
+    expect((await conversations.byId(conv.id))!.mode).toBe("queued");
+    expect((await conversations.byId(conv.id))!.escalated_at).not.toBeNull();
 
     // --- Step 3: Admin logs in, opens a WS, sees the queued conversation ---
     const cookie = await loginAsAdmin();
@@ -266,8 +270,8 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
       headers: { cookie },
     });
     expect(takeRes.status).toBe(200);
-    expect(conversations.byId(conv.id)!.mode).toBe("human");
-    expect(conversations.byId(conv.id)!.assigned_admin_id).not.toBeNull();
+    expect((await conversations.byId(conv.id))!.mode).toBe("human");
+    expect((await conversations.byId(conv.id))!.assigned_admin_id).not.toBeNull();
     // No outbound Telegram traffic on take.
     expect(ctx.sent).toHaveLength(sendCountBeforeTake);
 
@@ -319,7 +323,7 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     expect(lastSend.body.chat_id).toBe(TG_USER_ID);
     expect(lastSend.body.text).toBe("Привет, я Алина. Сейчас помогу!");
 
-    const allMessages = messages.listByConversation(conv.id);
+    const allMessages = await messages.listByConversation(conv.id);
     const lastPersisted = allMessages.at(-1)!;
     expect(lastPersisted.role).toBe("human");
     expect(lastPersisted.text).toBe("Привет, я Алина. Сейчас помогу!");
@@ -337,7 +341,7 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     expect(adminMsgEvt).toBeDefined();
 
     // Conversation should still be in human mode after the reply.
-    expect(conversations.byId(conv.id)!.mode).toBe("human");
+    expect((await conversations.byId(conv.id))!.mode).toBe("human");
 
     // --- Step 7: Admin releases → mode flips back to ai, assignment cleared ---
     const releaseRes = await fetch(`${origin()}/admin/api/conversations/${conv.id}/release`, {
@@ -345,7 +349,7 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
       headers: { cookie },
     });
     expect(releaseRes.status).toBe(200);
-    const released = conversations.byId(conv.id)!;
+    const released = (await conversations.byId(conv.id))!;
     expect(released.mode).toBe("ai");
     expect(released.assigned_admin_id).toBeNull();
     expect(released.escalated_at).toBeNull();
@@ -362,7 +366,7 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     expect(ctx.sent.at(-1)!.body.text).toBe("AI говорит привет");
 
     // --- Final transcript sanity check ---
-    const finalMsgs = messages.listByConversation(conv.id).map((m) => ({
+    const finalMsgs = (await messages.listByConversation(conv.id)).map((m) => ({
       role: m.role,
       text: m.text,
     }));
@@ -383,10 +387,10 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     // Guards against an admin UI bug where the operator could reply to a chat
     // that hasn't been taken yet — would cause inconsistent state and an
     // unsolicited "human" message to the user.
-    const users = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = users.create({ tgUserId: TG_USER_ID });
-    const c = conversations.ensureForUser(u.id);
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await users.create({ tgUserId: TG_USER_ID });
+    const c = await conversations.ensureForUser(u.id);
     expect(c.mode).toBe("ai");
 
     const cookie = await loginAsAdmin();
@@ -397,7 +401,7 @@ describe("AI ↔ human handoff lifecycle (integration)", () => {
     });
     expect(res.status).toBe(409);
     expect(ctx.sent).toHaveLength(0);
-    const msgs = new MessagesRepo(ctx.db).listByConversation(c.id);
+    const msgs = await new MessagesRepo(sql).listByConversation(c.id);
     expect(msgs).toHaveLength(0);
   });
 });

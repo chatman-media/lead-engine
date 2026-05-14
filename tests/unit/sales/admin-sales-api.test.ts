@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { createRouter } from "@/app.ts";
@@ -8,16 +8,21 @@ import { ExperimentsRepo } from "@/db/repos/experiments.ts";
 import { KbRepo } from "@/db/repos/kb.ts";
 import { StylesRepo, seedBuiltinStyles } from "@/db/repos/styles.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { coldDirectPas } from "@/sales/styles/cold-direct-pas.ts";
 import { empatheticNepq } from "@/sales/styles/empathetic-nepq.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../../helpers/test-db.ts";
 
 const SECRET = "s";
 const DIM = 1536;
+
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
 
 function vec(seed: number): number[] {
   const arr = new Array<number>(DIM).fill(0);
@@ -25,31 +30,12 @@ function vec(seed: number): number[] {
   return arr;
 }
 
-function setup() {
-  // Pass embeddingDim so kb_vec is created. Required for the playground
-  // tests that pre-seed a KB chunk; harmless for the others.
-  const db = openDb({ path: ":memory:", embeddingDim: DIM });
-  const fetchImpl: FetchLike = async () =>
-    new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
-  const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
-  const router = createRouter({ db, telegram, webhookSecret: SECRET });
-  const server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
-  return { db, server };
+/** Seed the 3 builtin styles into the DB. */
+async function seedStyles() {
+  await seedBuiltinStyles(new StylesRepo(sql), [flirtyBelfort, empatheticNepq, coldDirectPas]);
 }
 
-/** Seed the 3 builtin styles into a freshly-opened DB. Keep this OUT of
- *  beforeEach to mirror admin-api.test.ts setup (which apparently has the
- *  exact CPU budget for the bcrypt hash + login fetch and nothing else). */
-function seedStyles(db: ReturnType<typeof openDb>) {
-  seedBuiltinStyles(new StylesRepo(db), [flirtyBelfort, empatheticNepq, coldDirectPas]);
-}
-
-function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
-  s.server.stop(true);
-  s.db.close();
-}
-
-let ctx: ReturnType<typeof setup>;
+let server: Server;
 let cookie: string;
 
 // 30s ceiling on hooks — bcrypt cost-12 hash + login fetch + Bun.serve port
@@ -57,10 +43,15 @@ let cookie: string;
 // any concurrent load (other test files, IDE indexing, build processes).
 // Real work in here is sub-200ms; this is just an honest slack budget.
 beforeEach(async () => {
-  ctx = setup();
-  const admins = new AdminsRepo(ctx.db);
+  const fetchImpl: FetchLike = async () =>
+    new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
+  const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
+  const router = createRouter({ sql, telegram, webhookSecret: SECRET });
+  server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
+
+  const admins = new AdminsRepo(sql);
   await admins.create({ email: "op@x.test", password: "longenough" });
-  const login = await fetch(`http://127.0.0.1:${ctx.server.port}/admin/api/login`, {
+  const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
@@ -68,10 +59,13 @@ beforeEach(async () => {
   const set = login.headers.get("set-cookie")!;
   cookie = set.split(";")[0]!;
 }, 30_000);
-afterEach(() => teardown(ctx));
+
+afterEach(() => {
+  server.stop(true);
+});
 
 function url(path: string) {
-  return `http://127.0.0.1:${ctx.server.port}${path}`;
+  return `http://127.0.0.1:${server.port}${path}`;
 }
 function authed(extra: RequestInit = {}): RequestInit {
   return { ...extra, headers: { ...(extra.headers ?? {}), cookie } };
@@ -84,7 +78,7 @@ describe("GET /admin/api/styles", () => {
   });
 
   test("returns the 3 seeded styles", async () => {
-    seedStyles(ctx.db);
+    await seedStyles();
     const res = await fetch(url("/admin/api/styles"), authed());
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -97,9 +91,9 @@ describe("GET /admin/api/styles", () => {
   });
 
   test("excludes soft-deleted styles", async () => {
-    seedStyles(ctx.db);
-    const repo = new StylesRepo(ctx.db);
-    repo.deactivate(repo.bySlug("cold-direct-pas-v1")!.id);
+    await seedStyles();
+    const repo = new StylesRepo(sql);
+    await repo.deactivate((await repo.bySlug("cold-direct-pas-v1"))!.id);
     const res = await fetch(url("/admin/api/styles"), authed());
     const body = (await res.json()) as { styles: Array<{ slug: string }> };
     expect(body.styles.map((s) => s.slug)).not.toContain("cold-direct-pas-v1");
@@ -108,9 +102,9 @@ describe("GET /admin/api/styles", () => {
 
 describe("GET /admin/api/styles/:id", () => {
   test("returns the parsed config", async () => {
-    seedStyles(ctx.db);
-    const repo = new StylesRepo(ctx.db);
-    const row = repo.bySlug("flirty-belfort-v1")!;
+    await seedStyles();
+    const repo = new StylesRepo(sql);
+    const row = (await repo.bySlug("flirty-belfort-v1"))!;
     const res = await fetch(url(`/admin/api/styles/${row.id}`), authed());
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -126,14 +120,9 @@ describe("GET /admin/api/styles/:id", () => {
   });
 
   test("malformed config_json surfaces parse_error but doesn't crash", async () => {
-    ctx.db.run(`INSERT INTO styles (slug, display_name, config_json) VALUES (?, ?, ?)`, [
-      "broken",
-      "Broken",
-      "{not json",
-    ]);
-    const id = ctx.db
-      .query<{ id: number }, [string]>("SELECT id FROM styles WHERE slug = ?")
-      .get("broken")!.id;
+    await sql`INSERT INTO styles (slug, display_name, config_json) VALUES ('broken', 'Broken', '{not json')`;
+    const [row] = await sql<[{ id: number }]>`SELECT id FROM styles WHERE slug = 'broken'`;
+    const id = row!.id;
     const res = await fetch(url(`/admin/api/styles/${id}`), authed());
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -150,12 +139,12 @@ describe("GET /admin/api/styles/:id", () => {
 });
 
 describe("POST /admin/api/styles/:id/playground", () => {
-  beforeEach(() => seedStyles(ctx.db));
+  beforeEach(() => seedStyles());
 
   test("503 when rag is not configured (LLM clients absent)", async () => {
-    // ctx is the default setup() which doesn't pass rag.
-    const repo = new StylesRepo(ctx.db);
-    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    // server is the default one which doesn't pass rag.
+    const repo = new StylesRepo(sql);
+    const id = (await repo.bySlug("flirty-belfort-v1"))!.id;
     const res = await fetch(
       url(`/admin/api/styles/${id}/playground`),
       authed({
@@ -172,23 +161,23 @@ describe("POST /admin/api/styles/:id/playground", () => {
 
 describe("POST /admin/api/styles/:id/playground (with rag)", () => {
   // Spin up a parallel server on the same DB but WITH a stub LLM. We can't
-  // mutate the existing ctx.server (already booted without rag), so we use
+  // mutate the existing server (already booted without rag), so we use
   // a separate Bun.serve and tear it down explicitly.
   let ragServer: Server;
   let chatCalls: Array<{ messages: Array<{ role: string; content: string }> }>;
 
   beforeEach(async () => {
-    seedStyles(ctx.db);
+    await seedStyles();
     chatCalls = [];
 
     // Pre-seed a KB chunk so kb.search returns something for grounded stages.
-    const kb = new KbRepo(ctx.db);
-    const doc = kb.upsertDocument({
+    const kb = new KbRepo(sql);
+    const doc = await kb.upsertDocument({
       source: "test",
       title: "Дубай контракты",
       contentHash: "h1",
     });
-    kb.insertChunkWithEmbedding({
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "В Дубае гонорар $3000-8000/мес.",
@@ -213,7 +202,7 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
       new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
     const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
     const ragRouter = createRouter({
-      db: ctx.db,
+      sql,
       telegram,
       webhookSecret: SECRET,
       rag: { chat: stubChat, embedder: stubEmbedder },
@@ -236,8 +225,8 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
   }
 
   test("happy path: stage auto-detected, KB pre-search runs, LLM called, prompt returned", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const repo = new StylesRepo(sql);
+    const id = (await repo.bySlug("flirty-belfort-v1"))!.id;
     const res = await fetch(
       ragUrl(`/admin/api/styles/${id}/playground`),
       authed({
@@ -271,8 +260,8 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
   });
 
   test("stage override forces a specific stage", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const repo = new StylesRepo(sql);
+    const id = (await repo.bySlug("flirty-belfort-v1"))!.id;
     const res = await fetch(
       ragUrl(`/admin/api/styles/${id}/playground`),
       authed({
@@ -291,8 +280,8 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
   });
 
   test("invalid stage override is ignored, falls back to auto", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const repo = new StylesRepo(sql);
+    const id = (await repo.bySlug("flirty-belfort-v1"))!.id;
     const res = await fetch(
       ragUrl(`/admin/api/styles/${id}/playground`),
       authed({
@@ -310,8 +299,8 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
   });
 
   test("useKb=false skips embedder + kb, no injected KB block in prompt", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const repo = new StylesRepo(sql);
+    const id = (await repo.bySlug("flirty-belfort-v1"))!.id;
     const res = await fetch(
       ragUrl(`/admin/api/styles/${id}/playground`),
       authed({
@@ -336,8 +325,8 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
   });
 
   test("dropFewShot=true removes few-shot block from system prompt", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const repo = new StylesRepo(sql);
+    const id = (await repo.bySlug("flirty-belfort-v1"))!.id;
     const withFewShot = await fetch(
       ragUrl(`/admin/api/styles/${id}/playground`),
       authed({
@@ -368,8 +357,8 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
   });
 
   test("400 on missing userMessage", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const repo = new StylesRepo(sql);
+    const id = (await repo.bySlug("flirty-belfort-v1"))!.id;
     const res = await fetch(
       ragUrl(`/admin/api/styles/${id}/playground`),
       authed({
@@ -382,8 +371,8 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
   });
 
   test("400 on whitespace-only userMessage", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const repo = new StylesRepo(sql);
+    const id = (await repo.bySlug("flirty-belfort-v1"))!.id;
     const res = await fetch(
       ragUrl(`/admin/api/styles/${id}/playground`),
       authed({
@@ -425,15 +414,15 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
       new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
     const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
     const failRouter = createRouter({
-      db: ctx.db,
+      sql,
       telegram,
       webhookSecret: SECRET,
       rag: { chat: failChat, embedder: stubEmbedder },
     });
     ragServer = Bun.serve({ port: 0, fetch: (req) => failRouter.handle(req) });
 
-    const repo = new StylesRepo(ctx.db);
-    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const repo = new StylesRepo(sql);
+    const id = (await repo.bySlug("flirty-belfort-v1"))!.id;
     const res = await fetch(
       ragUrl(`/admin/api/styles/${id}/playground`),
       authed({
@@ -450,7 +439,7 @@ describe("POST /admin/api/styles/:id/playground (with rag)", () => {
 });
 
 describe("POST /admin/api/styles (create from clone)", () => {
-  beforeEach(() => seedStyles(ctx.db));
+  beforeEach(() => seedStyles());
 
   test("requires auth", async () => {
     const res = await fetch(url("/admin/api/styles"), {
@@ -495,8 +484,8 @@ describe("POST /admin/api/styles (create from clone)", () => {
     expect(body.style.is_active).toBe(true);
 
     // The new row is readable by bySlug.
-    const repo = new StylesRepo(ctx.db);
-    expect(repo.bySlug("alina-v2-flirty")?.id).toBe(body.style.id);
+    const repo = new StylesRepo(sql);
+    expect((await repo.bySlug("alina-v2-flirty"))?.id).toBe(body.style.id);
   });
 
   test("does NOT collide with the original style — both coexist", async () => {
@@ -513,9 +502,9 @@ describe("POST /admin/api/styles (create from clone)", () => {
         body: JSON.stringify({ config: newConfig }),
       }),
     );
-    const repo = new StylesRepo(ctx.db);
-    expect(repo.bySlug("flirty-belfort-v1")).not.toBeNull(); // original still active
-    expect(repo.bySlug("alina-fork")).not.toBeNull(); // new one too
+    const repo = new StylesRepo(sql);
+    expect(await repo.bySlug("flirty-belfort-v1")).not.toBeNull(); // original still active
+    expect(await repo.bySlug("alina-fork")).not.toBeNull(); // new one too
   });
 
   test("409 on slug collision with an active style", async () => {
@@ -643,11 +632,11 @@ describe("POST /admin/api/styles (create from clone)", () => {
 });
 
 describe("PATCH /admin/api/styles/:id (inline editor)", () => {
-  beforeEach(() => seedStyles(ctx.db));
+  beforeEach(() => seedStyles());
 
   test("requires auth", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const id = repo.bySlug("flirty-belfort-v1")!.id;
+    const repo = new StylesRepo(sql);
+    const id = (await repo.bySlug("flirty-belfort-v1"))!.id;
     const res = await fetch(url(`/admin/api/styles/${id}`), {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -657,8 +646,8 @@ describe("PATCH /admin/api/styles/:id (inline editor)", () => {
   });
 
   test("creates a new version on save", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const v1 = repo.bySlug("flirty-belfort-v1")!;
+    const repo = new StylesRepo(sql);
+    const v1 = (await repo.bySlug("flirty-belfort-v1"))!;
     const newConfig = { ...flirtyBelfort, displayName: "Алина — edited" };
 
     const res = await fetch(
@@ -679,19 +668,19 @@ describe("PATCH /admin/api/styles/:id (inline editor)", () => {
     expect(body.style.display_name).toBe("Алина — edited");
 
     // Old row deactivated, new is active.
-    expect(repo.byId(v1.id)?.is_active).toBe(0);
-    expect(repo.bySlug("flirty-belfort-v1")?.id).toBe(body.style.id);
+    expect((await repo.byId(v1.id))?.is_active).toBe(false);
+    expect((await repo.bySlug("flirty-belfort-v1"))?.id).toBe(body.style.id);
   });
 
   test("conversations pinned to old version keep reading the original prompt", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const users = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
+    const repo = new StylesRepo(sql);
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
 
-    const v1 = repo.bySlug("flirty-belfort-v1")!;
-    const u = users.create({ tgUserId: 999 });
-    const c = conversations.ensureForUser(u.id);
-    conversations.assignStyle(c.id, v1.id, null);
+    const v1 = (await repo.bySlug("flirty-belfort-v1"))!;
+    const u = await users.create({ tgUserId: 999 });
+    const c = await conversations.ensureForUser(u.id);
+    await conversations.assignStyle(c.id, v1.id, null);
 
     // Edit the style.
     const newConfig = { ...flirtyBelfort, displayName: "post-edit" };
@@ -706,17 +695,17 @@ describe("PATCH /admin/api/styles/:id (inline editor)", () => {
 
     // The conversation's pinned style_id still points at v1; reading it via
     // byId returns the original config.
-    const stillPinnedTo = conversations.byUserId(u.id)?.style_id;
+    const stillPinnedTo = (await conversations.byUserId(u.id))?.style_id;
     expect(stillPinnedTo).toBe(v1.id);
-    const oldRow = repo.byId(v1.id)!;
+    const oldRow = (await repo.byId(v1.id))!;
     const oldStyle = repo.parseRow(oldRow);
     expect(oldStyle.displayName).toBe(flirtyBelfort.displayName);
     expect(oldStyle.displayName).not.toBe("post-edit");
   });
 
   test("422 on Zod schema validation failure", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const v1 = repo.bySlug("flirty-belfort-v1")!;
+    const repo = new StylesRepo(sql);
+    const v1 = (await repo.bySlug("flirty-belfort-v1"))!;
     const broken = { ...flirtyBelfort, framework: "MADE_UP_FRAMEWORK" };
 
     const res = await fetch(
@@ -737,8 +726,8 @@ describe("PATCH /admin/api/styles/:id (inline editor)", () => {
   });
 
   test("400 on missing config in body", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const v1 = repo.bySlug("flirty-belfort-v1")!;
+    const repo = new StylesRepo(sql);
+    const v1 = (await repo.bySlug("flirty-belfort-v1"))!;
     const res = await fetch(
       url(`/admin/api/styles/${v1.id}`),
       authed({
@@ -763,10 +752,10 @@ describe("PATCH /admin/api/styles/:id (inline editor)", () => {
   });
 
   test("409 when editing a historical (already-inactive) version", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const v1 = repo.bySlug("flirty-belfort-v1")!;
+    const repo = new StylesRepo(sql);
+    const v1 = (await repo.bySlug("flirty-belfort-v1"))!;
     // Edit once to make v1 historical.
-    repo.editAsNewVersion(v1.id, { ...flirtyBelfort, displayName: "v2" });
+    await repo.editAsNewVersion(v1.id, { ...flirtyBelfort, displayName: "v2" });
 
     const res = await fetch(
       url(`/admin/api/styles/${v1.id}`),
@@ -780,8 +769,8 @@ describe("PATCH /admin/api/styles/:id (inline editor)", () => {
   });
 
   test("409 when slug in config differs from row slug", async () => {
-    const repo = new StylesRepo(ctx.db);
-    const v1 = repo.bySlug("flirty-belfort-v1")!;
+    const repo = new StylesRepo(sql);
+    const v1 = (await repo.bySlug("flirty-belfort-v1"))!;
     const wrongSlug = { ...flirtyBelfort, slug: "different-slug" };
 
     const res = await fetch(
@@ -798,7 +787,7 @@ describe("PATCH /admin/api/styles/:id (inline editor)", () => {
 
 describe("POST /admin/api/experiments", () => {
   test("creates a draft and returns 201", async () => {
-    seedStyles(ctx.db);
+    await seedStyles();
     const res = await fetch(
       url("/admin/api/experiments"),
       authed({
@@ -852,7 +841,7 @@ describe("POST /admin/api/experiments", () => {
   });
 
   test("rejects negative weight", async () => {
-    seedStyles(ctx.db);
+    await seedStyles();
     const res = await fetch(
       url("/admin/api/experiments"),
       authed({
@@ -868,7 +857,7 @@ describe("POST /admin/api/experiments", () => {
   });
 
   test("rejects non-kebab-case slug", async () => {
-    seedStyles(ctx.db);
+    await seedStyles();
     const res = await fetch(
       url("/admin/api/experiments"),
       authed({
@@ -884,7 +873,7 @@ describe("POST /admin/api/experiments", () => {
   });
 
   test("conflict on duplicate slug", async () => {
-    seedStyles(ctx.db);
+    await seedStyles();
     const create = () =>
       fetch(
         url("/admin/api/experiments"),
@@ -902,8 +891,8 @@ describe("POST /admin/api/experiments", () => {
   });
 
   test("refuses to create another running experiment when one is already live", async () => {
-    seedStyles(ctx.db);
-    new ExperimentsRepo(ctx.db).insert({
+    await seedStyles();
+    await new ExperimentsRepo(sql).insert({
       slug: "live",
       status: "running",
       allocation: { "flirty-belfort-v1": 100 },
@@ -927,7 +916,7 @@ describe("POST /admin/api/experiments", () => {
 
 describe("PATCH /admin/api/experiments/:id", () => {
   // All tests here need a baseline style for the allocation references.
-  beforeEach(() => seedStyles(ctx.db));
+  beforeEach(() => seedStyles());
 
   async function createDraft(slug = "x") {
     const res = await fetch(
@@ -998,13 +987,12 @@ describe("PATCH /admin/api/experiments/:id", () => {
   });
 
   test("422 when trying to start an experiment with malformed allocation_json", async () => {
-    ctx.db.run(
-      `INSERT INTO experiments (slug, status, allocation_json, success_metric)
-       VALUES ('broken', 'draft', '{not json', 'qualified')`,
-    );
-    const id = ctx.db
-      .query<{ id: number }, [string]>("SELECT id FROM experiments WHERE slug = ?")
-      .get("broken")!.id;
+    await sql`
+      INSERT INTO experiments (slug, status, allocation_json, success_metric)
+      VALUES ('broken', 'draft', '{not json', 'qualified')
+    `;
+    const [row] = await sql<[{ id: number }]>`SELECT id FROM experiments WHERE slug = 'broken'`;
+    const id = row!.id;
     const res = await fetch(
       url(`/admin/api/experiments/${id}`),
       authed({
@@ -1018,10 +1006,10 @@ describe("PATCH /admin/api/experiments/:id", () => {
 });
 
 describe("GET /admin/api/experiments/:id/funnel", () => {
-  beforeEach(() => seedStyles(ctx.db));
+  beforeEach(() => seedStyles());
 
   test("returns per-style funnel rows", async () => {
-    const exp = new ExperimentsRepo(ctx.db).insert({
+    const exp = await new ExperimentsRepo(sql).insert({
       slug: "f",
       status: "running",
       allocation: {
@@ -1032,16 +1020,16 @@ describe("GET /admin/api/experiments/:id/funnel", () => {
     });
 
     // Add a couple of conversations bound to one style.
-    const styles = new StylesRepo(ctx.db);
-    const flirtyId = styles.bySlug("flirty-belfort-v1")!.id;
-    const users = new UsersRepo(ctx.db);
-    const u1 = users.create({ tgUserId: 1, status: "qualified" });
-    const u2 = users.create({ tgUserId: 2, status: "new" });
-    const conversations = new ConversationsRepo(ctx.db);
-    const c1 = conversations.ensureForUser(u1.id);
-    const c2 = conversations.ensureForUser(u2.id);
-    conversations.assignStyle(c1.id, flirtyId, exp.id);
-    conversations.assignStyle(c2.id, flirtyId, exp.id);
+    const styles = new StylesRepo(sql);
+    const flirtyId = (await styles.bySlug("flirty-belfort-v1"))!.id;
+    const users = new UsersRepo(sql);
+    const u1 = await users.create({ tgUserId: 1, status: "qualified" });
+    const u2 = await users.create({ tgUserId: 2, status: "new" });
+    const conversations = new ConversationsRepo(sql);
+    const c1 = await conversations.ensureForUser(u1.id);
+    const c2 = await conversations.ensureForUser(u2.id);
+    await conversations.assignStyle(c1.id, flirtyId, exp.id);
+    await conversations.assignStyle(c2.id, flirtyId, exp.id);
 
     const res = await fetch(url(`/admin/api/experiments/${exp.id}/funnel`), authed());
     expect(res.status).toBe(200);

@@ -1,31 +1,34 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { createRouter } from "@/app.ts";
 import { AdminsRepo } from "@/db/repos/admins.ts";
-import { openDb } from "@/db/sqlite.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const SECRET = "s";
 const COOKIE_NAME = "tg_admin_sid";
 
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 function setup() {
-  const db = openDb({ path: ":memory:" });
   const fetchImpl: FetchLike = async () =>
     new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
   const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
   const router = createRouter({
-    db,
+    sql,
     telegram,
     webhookSecret: SECRET,
   });
   const server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
-  return { db, server };
+  return { server };
 }
 
-function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
+function teardown(s: { server: Server }) {
   s.server.stop(true);
-  s.db.close();
 }
 
 let ctx: ReturnType<typeof setup>;
@@ -57,7 +60,7 @@ function parseCookie(setCookie: string | null): {
 
 describe("POST /admin/api/login", () => {
   test("valid creds → 200, sets HttpOnly session cookie, returns admin email", async () => {
-    const admins = new AdminsRepo(ctx.db);
+    const admins = new AdminsRepo(sql);
     await admins.create({ email: "op@x.test", password: "longenough" });
 
     const res = await fetch(url("/admin/api/login"), {
@@ -78,7 +81,7 @@ describe("POST /admin/api/login", () => {
   });
 
   test("wrong password → 401, no cookie", async () => {
-    const admins = new AdminsRepo(ctx.db);
+    const admins = new AdminsRepo(sql);
     await admins.create({ email: "x@y.test", password: "longenough" });
 
     const res = await fetch(url("/admin/api/login"), {
@@ -116,7 +119,7 @@ describe("/admin/api/* requires session", () => {
   });
 
   test("GET /admin/api/me with valid cookie → 200 + admin email", async () => {
-    const admins = new AdminsRepo(ctx.db);
+    const admins = new AdminsRepo(sql);
     await admins.create({ email: "me@x.test", password: "longenough" });
     const login = await fetch(url("/admin/api/login"), {
       method: "POST",
@@ -141,7 +144,7 @@ describe("/admin/api/* requires session", () => {
 
 describe("POST /admin/api/logout", () => {
   test("clears the session and subsequent /admin/api/me returns 401", async () => {
-    const admins = new AdminsRepo(ctx.db);
+    const admins = new AdminsRepo(sql);
     await admins.create({ email: "lo@x.test", password: "longenough" });
     const login = await fetch(url("/admin/api/login"), {
       method: "POST",

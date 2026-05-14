@@ -2,7 +2,7 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/chatman-media/sales-guru/ci.yml?style=flat-square&label=ci)](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml)
 
-Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тестами, самообучением через self-play и полноценной операторской админкой. Всё на чистом Bun без HTTP-фреймворка — SQLite + `sqlite-vec` для векторного поиска, gramjs для MTProto userbot-режима.
+Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тестами, самообучением через self-play и полноценной операторской админкой. Всё на чистом Bun без HTTP-фреймворка — PostgreSQL + pgvector для векторного поиска, gramjs для MTProto userbot-режима.
 
 ## Возможности
 
@@ -46,6 +46,7 @@ Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тест�
 ```bash
 bun install
 cp .env.example .env        # отредактируйте под себя
+# Обязательно задайте DATABASE_URL=postgres://... в .env
 bun run dev
 ```
 
@@ -184,10 +185,10 @@ kb/extracted/  posts/  dialogs/  voice/INDEX.md
         ▼  курация вручную → kb/curated/
         │
         ▼  scripts/ingest.ts
-SQLite + sqlite-vec  (kb_documents / kb_chunks / kb_vec / kb_chunks_fts)
+PostgreSQL + pgvector  (kb_documents / kb_chunks / kb_vec FTS)
 ```
 
-Бот видит обновлённую базу сразу — перезапуск сервера не нужен, вектора в той же `data/bot.db`.
+Бот видит обновлённую базу сразу — перезапуск сервера не нужен.
 
 Подробно о каждом шаге — в README секции "База знаний: пайплайн данных" ниже, или сразу в [docs/DEPLOY.md](docs/DEPLOY.md#ingesting-the-kb-inside-the-container) для продакшн-индексации.
 
@@ -346,7 +347,8 @@ BOT_PERSONA_COMPANY=INFINITY AGENCY
 ## Тесты
 
 ```bash
-bun run test              # unit tests (807+)
+bun run test              # unit tests (860+)
+bun run test:coverage     # unit tests с отчётом покрытия
 bun run test:e2e:install  # установить Playwright (один раз)
 bun run test:e2e          # E2E (Playwright, 14+ тестов)
 ```

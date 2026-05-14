@@ -1,22 +1,24 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
 import { SkillsRepo, seedSkillCatalogue } from "@/db/repos/skills.ts";
 import { StylesRepo } from "@/db/repos/styles.ts";
-import { openDb } from "@/db/sqlite.ts";
 import { composeSystemPrompt } from "@/sales/prompt.ts";
 import { SKILL_BY_SLUG, SKILL_CATALOGUE, SkillSchema } from "@/sales/skills/catalogue.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../../helpers/test-db.ts";
 
-let db: ReturnType<typeof openDb>;
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 let skills: SkillsRepo;
 let styles: StylesRepo;
 
 beforeEach(() => {
-  db = openDb({ path: ":memory:" });
-  skills = new SkillsRepo(db);
-  styles = new StylesRepo(db);
+  skills = new SkillsRepo(sql);
+  styles = new StylesRepo(sql);
 });
-afterEach(() => db.close());
 
 describe("skill catalogue (source of truth)", () => {
   test("every entry passes SkillSchema", () => {
@@ -39,83 +41,78 @@ describe("skill catalogue (source of truth)", () => {
 });
 
 describe("seedSkillCatalogue", () => {
-  test("first call inserts all entries; second is idempotent", () => {
-    const r1 = seedSkillCatalogue(skills);
+  test("first call inserts all entries; second is idempotent", async () => {
+    const r1 = await seedSkillCatalogue(skills);
     expect(r1.inserted).toBe(SKILL_CATALOGUE.length);
     expect(r1.updated).toBe(0);
-    expect(skills.list().length).toBe(SKILL_CATALOGUE.length);
+    expect((await skills.list()).length).toBe(SKILL_CATALOGUE.length);
 
-    const r2 = seedSkillCatalogue(skills);
+    const r2 = await seedSkillCatalogue(skills);
     expect(r2.inserted).toBe(0);
     expect(r2.updated).toBe(SKILL_CATALOGUE.length);
-    expect(skills.list().length).toBe(SKILL_CATALOGUE.length);
+    expect((await skills.list()).length).toBe(SKILL_CATALOGUE.length);
   });
 
-  test("upsert refreshes display_name + prompt fragment but preserves is_enabled", () => {
+  test("upsert refreshes display_name + prompt fragment but preserves is_enabled", async () => {
     const initial = SKILL_CATALOGUE[0]!;
-    skills.upsert(initial);
-    const row = skills.bySlug(initial.slug)!;
-    skills.setEnabled(row.id, false);
-    expect(skills.bySlug(initial.slug)!.is_enabled).toBe(0);
+    await skills.upsert(initial);
+    const row = (await skills.bySlug(initial.slug))!;
+    await skills.setEnabled(row.id, false);
+    expect((await skills.bySlug(initial.slug))!.is_enabled).toBe(false);
 
     // Re-upsert with mutated copy (simulates an edit in catalogue.ts).
-    skills.upsert({ ...initial, displayName: "Renamed thing" });
-    const after = skills.bySlug(initial.slug)!;
+    await skills.upsert({ ...initial, displayName: "Renamed thing" });
+    const after = (await skills.bySlug(initial.slug))!;
     expect(after.display_name).toBe("Renamed thing");
     // Operator's disable choice survives the seeder pass.
-    expect(after.is_enabled).toBe(0);
+    expect(after.is_enabled).toBe(false);
   });
 });
 
 describe("style ↔ skill membership", () => {
-  test("setSkillsForStyle attaches subset; skillsForStyle returns them", () => {
-    seedSkillCatalogue(skills);
-    const style = styles.upsertBuiltin(flirtyBelfort)
-      ? styles.bySlug(flirtyBelfort.slug)!
-      : styles.bySlug(flirtyBelfort.slug)!;
+  test("setSkillsForStyle attaches subset; skillsForStyle returns them", async () => {
+    await seedSkillCatalogue(skills);
+    await styles.upsertBuiltin(flirtyBelfort);
+    const style = (await styles.bySlug(flirtyBelfort.slug))!;
     expect(style.id).toBeGreaterThan(0);
 
     const slugs = ["social-proof-stat", "scarcity-deadline", "tactical-empathy"];
-    const r = skills.setSkillsForStyle(style.id, slugs);
+    const r = await skills.setSkillsForStyle(style.id, slugs);
     expect(r.attached).toBe(3);
 
-    const back = skills
-      .skillsForStyle(style.id)
-      .map((s) => s.slug)
-      .sort();
+    const back = (await skills.skillsForStyle(style.id)).map((s) => s.slug).sort();
     expect(back).toEqual(slugs.sort());
   });
 
-  test("setSkillsForStyle replaces (not appends)", () => {
-    seedSkillCatalogue(skills);
-    const style = styles.upsertBuiltin(flirtyBelfort)
-      ? styles.bySlug(flirtyBelfort.slug)!
-      : styles.bySlug(flirtyBelfort.slug)!;
+  test("setSkillsForStyle replaces (not appends)", async () => {
+    await seedSkillCatalogue(skills);
+    await styles.upsertBuiltin(flirtyBelfort);
+    const style = (await styles.bySlug(flirtyBelfort.slug))!;
 
-    skills.setSkillsForStyle(style.id, ["social-proof-stat", "scarcity-deadline"]);
-    skills.setSkillsForStyle(style.id, ["tactical-empathy"]);
-    const back = skills.skillsForStyle(style.id).map((s) => s.slug);
+    await skills.setSkillsForStyle(style.id, ["social-proof-stat", "scarcity-deadline"]);
+    await skills.setSkillsForStyle(style.id, ["tactical-empathy"]);
+    const back = (await skills.skillsForStyle(style.id)).map((s) => s.slug);
     expect(back).toEqual(["tactical-empathy"]);
   });
 
-  test("unknown slugs in setSkillsForStyle are silently dropped (repo stays forgiving)", () => {
-    seedSkillCatalogue(skills);
-    const style = styles.upsertBuiltin(flirtyBelfort)
-      ? styles.bySlug(flirtyBelfort.slug)!
-      : styles.bySlug(flirtyBelfort.slug)!;
-    const r = skills.setSkillsForStyle(style.id, ["social-proof-stat", "does-not-exist"]);
+  test("unknown slugs in setSkillsForStyle are silently dropped (repo stays forgiving)", async () => {
+    await seedSkillCatalogue(skills);
+    await styles.upsertBuiltin(flirtyBelfort);
+    const style = (await styles.bySlug(flirtyBelfort.slug))!;
+    const r = await skills.setSkillsForStyle(style.id, ["social-proof-stat", "does-not-exist"]);
     expect(r.attached).toBe(1);
-    expect(skills.skillsForStyle(style.id).map((s) => s.slug)).toEqual(["social-proof-stat"]);
+    expect((await skills.skillsForStyle(style.id)).map((s) => s.slug)).toEqual([
+      "social-proof-stat",
+    ]);
   });
 
-  test("attachmentCounts reflects the join", () => {
-    seedSkillCatalogue(skills);
-    const style = styles.upsertBuiltin(flirtyBelfort)
-      ? styles.bySlug(flirtyBelfort.slug)!
-      : styles.bySlug(flirtyBelfort.slug)!;
-    skills.setSkillsForStyle(style.id, ["social-proof-stat", "tactical-empathy"]);
+  test("attachmentCounts reflects the join", async () => {
+    await seedSkillCatalogue(skills);
+    await styles.upsertBuiltin(flirtyBelfort);
+    const style = (await styles.bySlug(flirtyBelfort.slug))!;
+    await skills.setSkillsForStyle(style.id, ["social-proof-stat", "tactical-empathy"]);
 
-    const counts = skills.attachmentCounts();
+    const counts = await skills.attachmentCounts();
     expect(counts.get("social-proof-stat")).toBe(1);
     expect(counts.get("tactical-empathy")).toBe(1);
     expect(counts.get("scarcity-deadline")).toBe(0);

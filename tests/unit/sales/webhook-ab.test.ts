@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { createRouter } from "@/app.ts";
@@ -8,7 +8,6 @@ import { KbRepo } from "@/db/repos/kb.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { StylesRepo, seedBuiltinStyles } from "@/db/repos/styles.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { coldDirectPas } from "@/sales/styles/cold-direct-pas.ts";
@@ -16,6 +15,7 @@ import { empatheticNepq } from "@/sales/styles/empathetic-nepq.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../../helpers/test-db.ts";
 
 const SECRET = "test-secret";
 const DIM = 1536;
@@ -57,14 +57,12 @@ interface OutgoingCall {
   body: Record<string, unknown>;
 }
 
-function setup(): {
-  db: ReturnType<typeof openDb>;
-  server: Server;
-  sent: OutgoingCall[];
-  chatCalls: CapturedChatCall[];
-  port: number;
-} {
-  const db = openDb({ path: ":memory:", embeddingDim: DIM });
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
+function buildFetchImpl(): { fetchImpl: FetchLike; sent: OutgoingCall[] } {
   const sent: OutgoingCall[] = [];
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
@@ -85,39 +83,7 @@ function setup(): {
       headers: { "content-type": "application/json" },
     });
   };
-  const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
-
-  const chatCapture = captureChat("LLM-REPLY");
-  // Seed a KB chunk so RAG returns SOME context (otherwise NO_CONTEXT_MARKER
-  // path fires and we never reach the sales-engine prompt).
-  const kb = new KbRepo(db);
-  const doc = kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
-  kb.insertChunkWithEmbedding({
-    documentId: doc.id,
-    chunkIndex: 0,
-    text: "kb chunk",
-    tokenCount: 5,
-    embedding: vec(1),
-  });
-
-  // Seed the 3 builtin styles into the DB.
-  const styles = new StylesRepo(db);
-  seedBuiltinStyles(styles, [flirtyBelfort, empatheticNepq, coldDirectPas]);
-
-  const router = createRouter({
-    db,
-    telegram,
-    webhookSecret: SECRET,
-    rag: { embedder: fakeEmbedder(), chat: chatCapture.client },
-    awaitWebhookProcessing: true,
-  });
-  const server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
-  return { db, server, sent, chatCalls: chatCapture.calls, port: server.port };
-}
-
-function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
-  s.server.stop(true);
-  s.db.close();
+  return { fetchImpl, sent };
 }
 
 function update(fromId: number, text: string): TgUpdate {
@@ -141,28 +107,64 @@ async function send(port: number, fromId: number, text: string): Promise<void> {
   });
 }
 
-let ctx: ReturnType<typeof setup>;
+let server: Server;
+let chatCalls: CapturedChatCall[];
+let port: number;
 
-beforeEach(() => {
-  ctx = setup();
+beforeEach(async () => {
+  const { fetchImpl, sent: _ } = buildFetchImpl();
+  const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
+
+  const chatCapture = captureChat("LLM-REPLY");
+  chatCalls = chatCapture.calls;
+
+  // Seed a KB chunk so RAG returns SOME context (otherwise NO_CONTEXT_MARKER
+  // path fires and we never reach the sales-engine prompt).
+  const kb = new KbRepo(sql);
+  const doc = await kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
+  await kb.insertChunkWithEmbedding({
+    documentId: doc.id,
+    chunkIndex: 0,
+    text: "kb chunk",
+    tokenCount: 5,
+    embedding: vec(1),
+  });
+
+  // Seed the 3 builtin styles into the DB.
+  const styles = new StylesRepo(sql);
+  await seedBuiltinStyles(styles, [flirtyBelfort, empatheticNepq, coldDirectPas]);
+
+  const router = createRouter({
+    sql,
+    telegram,
+    webhookSecret: SECRET,
+    rag: { embedder: fakeEmbedder(), chat: chatCapture.client },
+    awaitWebhookProcessing: true,
+  });
+  server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
+  port = server.port;
+
   // Whitelist users — webhook rejects unknown tg_user_ids.
-  const users = new UsersRepo(ctx.db);
-  users.create({ tgUserId: 100 });
-  users.create({ tgUserId: 200 });
+  const users = new UsersRepo(sql);
+  await users.create({ tgUserId: 100 });
+  await users.create({ tgUserId: 200 });
 });
 
-afterEach(() => teardown(ctx));
+afterEach(() => {
+  server.stop(true);
+});
 
 describe("webhook A/B — no experiment running", () => {
   test("legacy persona path: conversation has no style_id, no stage", async () => {
-    await send(ctx.port, 100, "hello");
+    await send(port, 100, "hello");
 
-    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
+    const user = await new UsersRepo(sql).byTgId(100);
+    const conv = (await new ConversationsRepo(sql).byUserId(user!.id))!;
     expect(conv.style_id).toBeNull();
     expect(conv.experiment_id).toBeNull();
     expect(conv.current_stage).toBeNull();
 
-    const sys = ctx.chatCalls[0]?.messages[0];
+    const sys = chatCalls[0]?.messages[0];
     expect(sys?.role).toBe("system");
     // Legacy persona prompt has the "СТРОГИЕ ПРАВИЛА" header,
     // sales-engine prompt does not.
@@ -181,9 +183,10 @@ describe("webhook with LLM stage classifier enabled", () => {
   let classifierCalls: ChatMessage[][];
   let answerCalls: ChatMessage[][];
 
-  beforeEach(() => {
-    seedStylesIntoDb(ctx.db);
-    new ExperimentsRepo(ctx.db).insert({
+  beforeEach(async () => {
+    // Ensure flirty-belfort is in DB (already seeded in outer beforeEach,
+    // but add experiment to run against it).
+    await new ExperimentsRepo(sql).insert({
       slug: "classifier-test",
       status: "running",
       allocation: { "flirty-belfort-v1": 100 },
@@ -205,28 +208,11 @@ describe("webhook with LLM stage classifier enabled", () => {
       },
     };
 
-    const fetchImpl: FetchLike = async (input, init) => {
-      const url = typeof input === "string" ? input : (input as Request).url;
-      const apiMethod = url.split("/").pop() ?? "";
-      const body = JSON.parse((init?.body as string) ?? "{}");
-      const result =
-        apiMethod === "sendMessage"
-          ? {
-              message_id: Math.floor(Math.random() * 1_000_000),
-              chat: { id: body.chat_id, type: "private" },
-              date: Math.floor(Date.now() / 1000),
-              text: body.text,
-            }
-          : true;
-      return new Response(JSON.stringify({ ok: true, result }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    };
+    const { fetchImpl } = buildFetchImpl();
     const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
 
     const router = createRouter({
-      db: ctx.db,
+      sql,
       telegram,
       webhookSecret: SECRET,
       rag: {
@@ -256,7 +242,8 @@ describe("webhook with LLM stage classifier enabled", () => {
     expect(classifierCalls.length).toBe(1);
     expect(answerCalls.length).toBe(1);
 
-    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
+    const user = await new UsersRepo(sql).byTgId(100);
+    const conv = (await new ConversationsRepo(sql).byUserId(user!.id))!;
     expect(conv.current_stage).toBe("objection"); // LLM, not regex's "pitch"
 
     // The actual answer prompt was built for the LLM-classified stage.
@@ -285,20 +272,9 @@ describe("webhook with LLM stage classifier enabled", () => {
   });
 });
 
-function seedStylesIntoDb(db: ReturnType<typeof openDb>) {
-  const styles = new StylesRepo(db);
-  if (!styles.bySlug("flirty-belfort-v1")) {
-    styles.insert({
-      slug: flirtyBelfort.slug,
-      displayName: flirtyBelfort.displayName,
-      config: flirtyBelfort,
-    });
-  }
-}
-
 describe("webhook A/B — running experiment assigns variant", () => {
-  beforeEach(() => {
-    new ExperimentsRepo(ctx.db).insert({
+  beforeEach(async () => {
+    await new ExperimentsRepo(sql).insert({
       slug: "test-exp",
       status: "running",
       allocation: { "flirty-belfort-v1": 50, "empathetic-nepq-v1": 50 },
@@ -307,80 +283,86 @@ describe("webhook A/B — running experiment assigns variant", () => {
   });
 
   test("first message → assigns style_id + experiment_id, persists current_stage", async () => {
-    await send(ctx.port, 100, "привет");
+    await send(port, 100, "привет");
 
-    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
+    const user = await new UsersRepo(sql).byTgId(100);
+    const conv = (await new ConversationsRepo(sql).byUserId(user!.id))!;
     expect(conv.style_id).not.toBeNull();
     expect(conv.experiment_id).not.toBeNull();
     expect(conv.current_stage).toBe("opener");
 
     // The system prompt is the sales-engine composed prompt.
-    const sys = ctx.chatCalls[0]?.messages[0];
+    const sys = chatCalls[0]?.messages[0];
     expect(sys?.content).toContain("ТЕКУЩИЙ ЭТАП: OPENER");
     expect(sys?.content).toContain("ФРЕЙМВОРК");
     expect(sys?.content).not.toContain("СТРОГИЕ ПРАВИЛА:"); // legacy marker absent
 
     // Assistant message persisted with stage tag.
-    const msgs = new MessagesRepo(ctx.db).listByConversation(conv.id);
+    const msgs = await new MessagesRepo(sql).listByConversation(conv.id);
     const assistant = msgs.find((m) => m.role === "assistant");
     expect(assistant?.stage).toBe("opener");
   });
 
   test("same user on second message → style is sticky (same style_id)", async () => {
-    await send(ctx.port, 100, "привет");
-    const conv1 = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
+    await send(port, 100, "привет");
+    const user = await new UsersRepo(sql).byTgId(100);
+    const conv1 = (await new ConversationsRepo(sql).byUserId(user!.id))!;
     const firstStyleId = conv1.style_id;
 
-    await send(ctx.port, 100, "сколько в Дубае платят?");
-    const conv2 = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
+    await send(port, 100, "сколько в Дубае платят?");
+    const conv2 = (await new ConversationsRepo(sql).byUserId(user!.id))!;
     expect(conv2.style_id).toBe(firstStyleId);
     // Stage advanced because of pricing keyword.
     expect(conv2.current_stage).toBe("pitch");
   });
 
   test("different users → assignment is deterministic per-user (same as pickVariant)", async () => {
-    await send(ctx.port, 100, "hi");
-    await send(ctx.port, 200, "hi");
+    await send(port, 100, "hi");
+    await send(port, 200, "hi");
 
-    const users = new UsersRepo(ctx.db);
-    const conv100 = new ConversationsRepo(ctx.db).byUserId(users.byTgId(100)!.id)!;
-    const conv200 = new ConversationsRepo(ctx.db).byUserId(users.byTgId(200)!.id)!;
+    const users = new UsersRepo(sql);
+    const u100 = await users.byTgId(100);
+    const u200 = await users.byTgId(200);
+    const conv100 = (await new ConversationsRepo(sql).byUserId(u100!.id))!;
+    const conv200 = (await new ConversationsRepo(sql).byUserId(u200!.id))!;
 
     expect(conv100.style_id).not.toBeNull();
     expect(conv200.style_id).not.toBeNull();
     // They MAY be the same or different — that depends on hash output. The
     // important thing is each is a known-valid style id.
-    const styles = new StylesRepo(ctx.db);
-    expect(styles.byId(conv100.style_id!)).not.toBeNull();
-    expect(styles.byId(conv200.style_id!)).not.toBeNull();
+    const styles = new StylesRepo(sql);
+    expect(await styles.byId(conv100.style_id!)).not.toBeNull();
+    expect(await styles.byId(conv200.style_id!)).not.toBeNull();
   });
 
   test("malformed allocation in DB → graceful fallback to legacy persona", async () => {
     // Replace the running experiment with one that has bad allocation_json.
-    ctx.db.run("DELETE FROM experiments");
-    ctx.db.run(
-      `INSERT INTO experiments (slug, status, allocation_json, success_metric, started_at)
-       VALUES ('bad', 'running', '{not valid json', 'qualified', 1)`,
-    );
+    await sql`DELETE FROM experiments`;
+    await sql`
+      INSERT INTO experiments (slug, status, allocation_json, success_metric, started_at)
+      VALUES ('bad', 'running', '{not valid json', 'qualified', 1)
+    `;
 
-    await send(ctx.port, 100, "hi");
-    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
+    await send(port, 100, "hi");
+    const user = await new UsersRepo(sql).byTgId(100);
+    const conv = (await new ConversationsRepo(sql).byUserId(user!.id))!;
     // No assignment happened — sales-engine fell back gracefully.
     expect(conv.style_id).toBeNull();
     // Legacy persona prompt was used.
-    const sys = ctx.chatCalls[0]?.messages[0];
+    const sys = chatCalls[0]?.messages[0];
     expect(sys?.content).toContain("СТРОГИЕ ПРАВИЛА");
   });
 
   test("experiment references non-existent style slug → graceful fallback", async () => {
-    ctx.db.run("DELETE FROM experiments");
-    ctx.db.run(
-      `INSERT INTO experiments (slug, status, allocation_json, success_metric, started_at)
-       VALUES ('ghost', 'running', '{"does-not-exist": 100}', 'qualified', 1)`,
-    );
+    await sql`DELETE FROM experiments`;
+    await sql`
+      INSERT INTO experiments (slug, status, allocation_json, success_metric, started_at)
+      VALUES ('ghost', 'running', '{"does-not-exist": 100}', 'qualified', 1)
+    `;
 
-    await send(ctx.port, 100, "hi");
-    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(100)!.id)!;
+    await send(port, 100, "hi");
+    const user = await new UsersRepo(sql).byTgId(100);
+    const conv = (await new ConversationsRepo(sql).byUserId(user!.id))!;
     expect(conv.style_id).toBeNull();
   });
 });

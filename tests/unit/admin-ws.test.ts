@@ -1,33 +1,37 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import { createServer } from "@/server.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
+
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
 
 function makeServer() {
-  const db = openDb({ path: ":memory:" });
   const fetchImpl: FetchLike = async () =>
     new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
   const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
   const server = createServer({
-    db,
+    sql,
     telegram,
     webhookSecret: "s",
     port: 0,
   });
-  return { db, server };
+  return { server };
 }
 
-let ctx: { db: ReturnType<typeof openDb>; server: Server };
+let ctx: { server: Server };
 let cookie: string;
 
 beforeEach(async () => {
   ctx = makeServer();
-  const admins = new AdminsRepo(ctx.db);
+  const admins = new AdminsRepo(sql);
   await admins.create({ email: "ws@x.test", password: "longenough" });
   const login = await fetch(`http://127.0.0.1:${ctx.server.port}/admin/api/login`, {
     method: "POST",
@@ -39,7 +43,6 @@ beforeEach(async () => {
 
 afterEach(() => {
   ctx.server.stop(true);
-  ctx.db.close();
 });
 
 function connect(headers: Record<string, string> = {}): Promise<{
@@ -84,10 +87,10 @@ describe("/admin/api/ws", () => {
   });
 
   test("authenticated client receives conversation:updated when /take is called", async () => {
-    const users = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = users.create({ tgUserId: 200 });
-    const c = conversations.ensureForUser(u.id);
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await users.create({ tgUserId: 200 });
+    const c = await conversations.ensureForUser(u.id);
 
     const { ws, events } = await connect({ cookie });
 
@@ -111,8 +114,8 @@ describe("/admin/api/ws", () => {
   });
 
   test("receives message:new when a Telegram update is processed", async () => {
-    const users = new UsersRepo(ctx.db);
-    users.create({ tgUserId: 333 });
+    const users = new UsersRepo(sql);
+    await users.create({ tgUserId: 333 });
 
     const { ws, events } = await connect({ cookie });
 

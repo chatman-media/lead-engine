@@ -1,15 +1,20 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { createRouter } from "@/app.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const SECRET = "test-secret";
+
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
 
 interface OutgoingCall {
   method: string;
@@ -17,7 +22,6 @@ interface OutgoingCall {
 }
 
 function setup() {
-  const db = openDb({ path: ":memory:" });
   const sent: OutgoingCall[] = [];
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
@@ -43,7 +47,7 @@ function setup() {
     fetch: fetchImpl,
   });
   const router = createRouter({
-    db,
+    sql,
     telegram,
     webhookSecret: SECRET,
   });
@@ -51,12 +55,11 @@ function setup() {
     port: 0,
     fetch: (req) => router.handle(req),
   });
-  return { db, router, server, sent };
+  return { router, server, sent };
 }
 
-function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
+function teardown(s: { server: Server }) {
   s.server.stop(true);
-  s.db.close();
 }
 
 function update(fromId: number, text: string, chatId = fromId): TgUpdate {
@@ -118,8 +121,8 @@ describe("/telegram/<secret> webhook", () => {
     expect(res.status).toBe(200);
     expect(ctx.sent).toHaveLength(0);
 
-    const usersRepo = new UsersRepo(ctx.db);
-    expect(usersRepo.byTgId(999)).toBeNull();
+    const usersRepo = new UsersRepo(sql);
+    expect(await usersRepo.byTgId(999)).toBeNull();
   });
 
   test("TELEGRAM_OPEN_ACCESS=1: registers unknown tg user on first message", async () => {
@@ -135,7 +138,7 @@ describe("/telegram/<secret> webhook", () => {
         headers: { "content-type": "application/json" },
       });
       expect(res.status).toBe(200);
-      expect(new UsersRepo(ctx.db).byTgId(888)).not.toBeNull();
+      expect(await new UsersRepo(sql).byTgId(888)).not.toBeNull();
       // No RAG configured — no placeholder stub is sent to Telegram.
       expect(ctx.sent).toHaveLength(0);
     } finally {
@@ -145,10 +148,10 @@ describe("/telegram/<secret> webhook", () => {
   });
 
   test("whitelisted user without RAG: persists user message only, no sendMessage", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const convsRepo = new ConversationsRepo(ctx.db);
-    const msgsRepo = new MessagesRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 555, tgUsername: "bob" });
+    const usersRepo = new UsersRepo(sql);
+    const convsRepo = new ConversationsRepo(sql);
+    const msgsRepo = new MessagesRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 555, tgUsername: "bob" });
 
     const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
     const res = await fetch(url, {
@@ -160,20 +163,20 @@ describe("/telegram/<secret> webhook", () => {
 
     expect(ctx.sent).toHaveLength(0);
 
-    const conv = convsRepo.byUserId(u.id);
+    const conv = await convsRepo.byUserId(u.id);
     expect(conv).not.toBeNull();
-    const msgs = msgsRepo.listByConversation(conv!.id);
+    const msgs = await msgsRepo.listByConversation(conv!.id);
     expect(msgs.map((m) => m.role)).toEqual(["user"]);
     expect(msgs[0]!.text).toBe("hello world");
   });
 
   test("mode=human: persists user message but does NOT call sendMessage", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const convsRepo = new ConversationsRepo(ctx.db);
-    const msgsRepo = new MessagesRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 777 });
-    const c = convsRepo.ensureForUser(u.id);
-    convsRepo.setMode(c.id, "human", 1);
+    const usersRepo = new UsersRepo(sql);
+    const convsRepo = new ConversationsRepo(sql);
+    const msgsRepo = new MessagesRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 777 });
+    const c = await convsRepo.ensureForUser(u.id);
+    await convsRepo.setMode(c.id, "human", 1);
 
     const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
     const res = await fetch(url, {
@@ -184,7 +187,7 @@ describe("/telegram/<secret> webhook", () => {
     expect(res.status).toBe(200);
     expect(ctx.sent).toHaveLength(0);
 
-    const msgs = msgsRepo.listByConversation(c.id);
+    const msgs = await msgsRepo.listByConversation(c.id);
     expect(msgs).toHaveLength(1);
     expect(msgs[0]!.role).toBe("user");
   });

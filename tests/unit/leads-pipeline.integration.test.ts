@@ -1,15 +1,16 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { createRouter } from "@/app.ts";
+import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { LeadsRepo } from "@/db/repos/leads.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 /**
  * End-to-end pipeline integration test.
@@ -148,11 +149,15 @@ function buildTelegramStub(): {
   };
 }
 
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 function setup() {
-  const db = openDb({ path: ":memory:", embeddingDim: DIM });
   const tg = buildTelegramStub();
   const router = createRouter({
-    db,
+    sql,
     telegram: tg.client,
     webhookSecret: SECRET,
     rag: {
@@ -175,23 +180,22 @@ function setup() {
     port: 0,
     fetch: (req) => router.handle(req),
   });
-  return { db, server, tg };
+  return { server, tg };
 }
 
-function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
+function teardown(s: { server: Server }) {
   s.server.stop(true);
-  s.db.close();
 }
 
 let ctx: ReturnType<typeof setup>;
 
-beforeEach(() => {
+beforeEach(async () => {
   ctx = setup();
   // The webhook drops messages from unknown TG users when
   // TELEGRAM_OPEN_ACCESS isn't set. Pre-create the candidate as
   // whitelisted so all the test does is exercise the lead pipeline,
   // not the access-control gate.
-  new UsersRepo(ctx.db).create({
+  await new UsersRepo(sql).create({
     tgUserId: CANDIDATE_TG_ID,
     tgUsername: "anya",
   });
@@ -275,17 +279,14 @@ describe("lead pipeline e2e", () => {
     const res = await postUpdate(photoUpdate());
     expect(res.status).toBe(200);
 
-    const messagesRepo = new MessagesRepo(ctx.db);
-    const usersRepo = new UsersRepo(ctx.db);
-    const u = usersRepo.byTgId(CANDIDATE_TG_ID);
+    const usersRepo = new UsersRepo(sql);
+    const conversationsRepo = new ConversationsRepo(sql);
+    const messagesRepo = new MessagesRepo(sql);
+    const u = await usersRepo.byTgId(CANDIDATE_TG_ID);
     expect(u).not.toBeNull();
-    const list = messagesRepo.listByConversation(
-      // The conversation was just created by ensureForUser; any of its rows
-      // will do for the meta inspection.
-      ctx.db
-        .query<{ id: number }, [number]>("SELECT id FROM conversations WHERE user_id = ? LIMIT 1")
-        .get(u!.id)!.id,
-    );
+    const conv = await conversationsRepo.byUserId(u!.id);
+    expect(conv).not.toBeNull();
+    const list = await messagesRepo.listByConversation(conv!.id);
     expect(list.length).toBeGreaterThan(0);
     const photoRow = list.find((m) => m.text === "[photo]");
     expect(photoRow).toBeDefined();
@@ -308,10 +309,10 @@ describe("lead pipeline e2e", () => {
     // 3. 3 videos (so dance-video flag flips at >=3).
     for (let i = 0; i < 3; i++) await postUpdate(videoUpdate());
 
-    const leads = new LeadsRepo(ctx.db);
-    const usersRepo = new UsersRepo(ctx.db);
-    const u = usersRepo.byTgId(CANDIDATE_TG_ID)!;
-    const lead = leads.byUserId(u.id);
+    const leads = new LeadsRepo(sql);
+    const usersRepo = new UsersRepo(sql);
+    const u = (await usersRepo.byTgId(CANDIDATE_TG_ID))!;
+    const lead = await leads.byUserId(u.id);
     expect(lead).not.toBeNull();
     expect(lead!.state).toBe("intake_complete");
 
@@ -358,10 +359,10 @@ describe("lead pipeline e2e", () => {
     for (let i = 0; i < 7; i++) await postUpdate(photoUpdate());
     for (let i = 0; i < 3; i++) await postUpdate(videoUpdate());
 
-    const leads = new LeadsRepo(ctx.db);
-    const usersRepo = new UsersRepo(ctx.db);
-    const u = usersRepo.byTgId(CANDIDATE_TG_ID)!;
-    const lead = leads.byUserId(u.id)!;
+    const leads = new LeadsRepo(sql);
+    const usersRepo = new UsersRepo(sql);
+    const u = (await usersRepo.byTgId(CANDIDATE_TG_ID))!;
+    const lead = (await leads.byUserId(u.id))!;
     expect(lead.state).toBe("intake_complete");
 
     // Reset the recorded calls so we can isolate post-approve outbounds.
@@ -385,7 +386,7 @@ describe("lead pipeline e2e", () => {
     const res = await postUpdate(callbackUpdate);
     expect(res.status).toBe(200);
 
-    const reread = leads.byId(lead.id)!;
+    const reread = (await leads.byId(lead.id))!;
     // approve → docs_pending in one go (Phase 1 wires both transitions
     // so the next candidate turn lands in docs_pending immediately).
     expect(reread.state).toBe("docs_pending");
@@ -433,10 +434,11 @@ describe("lead pipeline e2e", () => {
     for (let i = 0; i < 7; i++) await postUpdate(photoUpdate());
     for (let i = 0; i < 3; i++) await postUpdate(videoUpdate());
 
-    const leads = new LeadsRepo(ctx.db);
-    const usersRepo = new UsersRepo(ctx.db);
-    const u = usersRepo.byTgId(CANDIDATE_TG_ID)!;
-    const lead = leads.byUserId(u.id)!;
+    const leads = new LeadsRepo(sql);
+    const usersRepo = new UsersRepo(sql);
+    const conversationsRepo = new ConversationsRepo(sql);
+    const u = (await usersRepo.byTgId(CANDIDATE_TG_ID))!;
+    const lead = (await leads.byUserId(u.id))!;
     expect(lead.ops_message_id).not.toBeNull();
 
     const sentBefore = ctx.tg.sent.length;
@@ -498,11 +500,9 @@ describe("lead pipeline e2e", () => {
 
     // The relay was recorded as role='human' so the admin chat view
     // distinguishes it from the bot's auto replies.
-    const messagesRepo = new MessagesRepo(ctx.db);
-    const conv = ctx.db
-      .query<{ id: number }, [number]>("SELECT id FROM conversations WHERE user_id = ? LIMIT 1")
-      .get(u.id)!;
-    const list = messagesRepo.listByConversation(conv.id);
+    const messagesRepo = new MessagesRepo(sql);
+    const conv = await conversationsRepo.byUserId(u.id);
+    const list = await messagesRepo.listByConversation(conv!.id);
     const human = list.filter((m) => m.role === "human");
     expect(human.length).toBe(1);
     expect(human[0]!.text).toBe("вот образец визы как заполнять");
@@ -521,10 +521,10 @@ describe("lead pipeline e2e", () => {
     for (let i = 0; i < 5; i++) await postUpdate(photoUpdate());
     await postUpdate(videoUpdate());
 
-    const leads = new LeadsRepo(ctx.db);
-    const usersRepo = new UsersRepo(ctx.db);
-    const u = usersRepo.byTgId(CANDIDATE_TG_ID)!;
-    const lead = leads.byUserId(u.id);
+    const leads = new LeadsRepo(sql);
+    const usersRepo = new UsersRepo(sql);
+    const u = (await usersRepo.byTgId(CANDIDATE_TG_ID))!;
+    const lead = await leads.byUserId(u.id);
     // Lead ROW exists (we always ensureForUser on every intake update),
     // but state stays at intake_pending until thresholds clear.
     expect(lead).not.toBeNull();
