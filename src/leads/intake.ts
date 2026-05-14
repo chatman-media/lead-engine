@@ -1,3 +1,4 @@
+import { log } from "../log.ts";
 import type { ChatClient, ChatMessage } from "../rag/chat.ts";
 import type { IntakeFields } from "./templates.ts";
 
@@ -120,7 +121,7 @@ export async function extractIntake(input: IntakeExtractInput): Promise<IntakeFi
       { temperature: 0.1 },
     );
   } catch (err) {
-    console.error("[intake] LLM extract failed:", err);
+    log.error("intake LLM extract failed", { scope: "intake", err });
     return merged;
   }
 

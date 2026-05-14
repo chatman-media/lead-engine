@@ -4,6 +4,7 @@ import { type ExperimentsRepo, parseAllocationToExperiment } from "../db/repos/e
 import type { StylesRepo } from "../db/repos/styles.ts";
 import type { UserRow } from "../db/repos/users.ts";
 import { renderVacanciesBlock } from "../db/repos/vacancies.ts";
+import { log } from "../log.ts";
 import { inc } from "../metrics.ts";
 import { type AnswerResult, answerWithRag, NO_CONTEXT_MARKER } from "../rag/answer.ts";
 import { gradeSkills } from "../rag/grade-skills.ts";
@@ -66,15 +67,17 @@ async function resolveStyle(d: {
   if (d.conv.style_id != null) {
     const row = await d.styles.byId(d.conv.style_id);
     if (!row) {
-      console.warn(
-        `[sales] conv ${d.conv.id} references style_id=${d.conv.style_id} that no longer exists; falling back`,
-      );
+      log.warn("style row missing; falling back", {
+        scope: "sales",
+        conv_id: d.conv.id,
+        style_id: d.conv.style_id,
+      });
       return null;
     }
     try {
       return d.styles.parseRow(row);
     } catch (err) {
-      console.error(`[sales] failed to parse style row id=${row.id}:`, err);
+      log.error("failed to parse style row", { scope: "sales", style_id: row.id, err });
       return null;
     }
   }
@@ -85,16 +88,21 @@ async function resolveStyle(d: {
 
   const experiment = parseAllocationToExperiment(running);
   if (!experiment) {
-    console.warn(`[sales] experiment ${running.slug} has malformed allocation_json; skipping`);
+    log.warn("experiment has malformed allocation_json; skipping", {
+      scope: "sales",
+      experiment_slug: running.slug,
+    });
     return null;
   }
 
   const variantSlug = pickVariant(experiment, d.user.tg_user_id);
   const variantRow = await d.styles.bySlug(variantSlug);
   if (!variantRow) {
-    console.warn(
-      `[sales] experiment ${running.slug} allocates to slug "${variantSlug}" that's missing/inactive in styles table`,
-    );
+    log.warn("experiment variant missing/inactive in styles table", {
+      scope: "sales",
+      experiment_slug: running.slug,
+      variant_slug: variantSlug,
+    });
     return null;
   }
 
@@ -106,7 +114,7 @@ async function resolveStyle(d: {
     d.conv.experiment_id = running.id;
     return style;
   } catch (err) {
-    console.error(`[sales] failed to parse style row id=${variantRow.id}:`, err);
+    log.error("failed to parse style row", { scope: "sales", style_id: variantRow.id, err });
     return null;
   }
 }
@@ -179,10 +187,14 @@ async function runRagForInbound(
           : {}),
       });
       stage = result.stage;
-      console.log(
-        `[sales] stage=${stage} source=${result.source} confidence=${result.confidence.toFixed(2)}` +
-          (result.fallbackReason ? ` reason=${result.fallbackReason}` : ""),
-      );
+      log.debug("stage classified", {
+        scope: "sales",
+        conv_id: d.conv.id,
+        stage,
+        source: result.source,
+        confidence: result.confidence,
+        ...(result.fallbackReason ? { fallback_reason: result.fallbackReason } : {}),
+      });
     } else {
       stage = nextStage({
         turnNumber: userMessageCount,
@@ -317,7 +329,7 @@ async function runSkillGrading(
       telemetry: mergedTelemetry,
     });
   } catch (err) {
-    console.warn("[skill-grading] failed:", err);
+    log.warn("skill-grading failed", { err });
   }
 }
 
@@ -337,7 +349,11 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
       inc("tg_replies_total", 1, { source: "webhook" });
     } catch (err) {
       inc("llm_errors_total", 1, { stage: "sendMessage" });
-      console.error("[webhook] sendMessage failed (non-fatal):", err);
+      log.error("sendMessage failed (non-fatal)", {
+        scope: "webhook",
+        conv_id: d.conv.id,
+        err,
+      });
     }
     const inserted = await d.messages.add({
       conversationId: d.conv.id,
@@ -356,12 +372,16 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return { messageId: inserted.id };
   };
 
-  console.log(
-    `[processInbound] conv=${d.conv.id} mode=${d.conv.mode} rag=${d.rag ? "yes" : "no"} tgUserId=${d.tgUserId}`,
-  );
+  log.info("processInbound start", {
+    scope: "webhook",
+    conv_id: d.conv.id,
+    mode: d.conv.mode,
+    rag: !!d.rag,
+    tg_user_id: d.tgUserId,
+  });
 
   if (d.conv.mode === "human") {
-    console.log(`[processInbound] conv=${d.conv.id} → skipped (human mode)`);
+    log.debug("skipped (human mode)", { scope: "webhook", conv_id: d.conv.id });
     return;
   }
 
@@ -398,15 +418,19 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   }
 
   if (!d.rag) {
-    console.log(`[processInbound] conv=${d.conv.id} → skipped (no rag)`);
+    log.debug("skipped (no rag)", { scope: "webhook", conv_id: d.conv.id });
     return;
   }
 
   const { result, stage, skillSlugs } = await runRagForInbound(d);
 
-  console.log(
-    `[processInbound] conv=${d.conv.id} rag result=${result.text === NO_CONTEXT_MARKER ? "NO_CONTEXT" : `reply(${result.text.length}chars)`} stage=${stage ?? "none"}`,
-  );
+  log.info("rag finished", {
+    scope: "webhook",
+    conv_id: d.conv.id,
+    no_context: result.text === NO_CONTEXT_MARKER,
+    reply_chars: result.text === NO_CONTEXT_MARKER ? 0 : result.text.length,
+    stage: stage ?? null,
+  });
 
   if (result.text === NO_CONTEXT_MARKER) {
     // Consecutive-stall anti-deadloop: after STALL_LIMIT silent turns in a row,
@@ -416,7 +440,12 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     const stallCount = (await d.conversations.getStallCount(d.conv)) + 1;
     await d.conversations.setStallCount(d.conv.id, stallCount);
 
-    console.log(`[processInbound] conv=${d.conv.id} stall=${stallCount}/${STALL_LIMIT}`);
+    log.debug("stall step", {
+      scope: "webhook",
+      conv_id: d.conv.id,
+      stall: stallCount,
+      stall_limit: STALL_LIMIT,
+    });
     if (stallCount >= STALL_LIMIT) {
       // Reset counter so next stall cycle restarts from 0.
       await d.conversations.setStallCount(d.conv.id, 0);
@@ -426,9 +455,11 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
       const ctaReply =
         d.rag?.style?.voice?.stallCtaReply ??
         "Давай созвонимся — так быстрее всё объясню. В какое время удобно? 😊";
-      console.log(
-        `[webhook] stall limit (${STALL_LIMIT}) reached for conv=${d.conv.id} — sending CTA`,
-      );
+      log.info("stall limit reached — sending CTA", {
+        scope: "webhook",
+        conv_id: d.conv.id,
+        stall_limit: STALL_LIMIT,
+      });
       await reply(ctaReply, { used_chunk_ids: [], telemetry: result.telemetry }, stage);
       await runPostReplyHooks(d);
       return;
@@ -459,7 +490,11 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
         conversationId: d.conv.id,
       });
     } catch (err) {
-      console.error("[webhook] kb_suggestion create failed (non-fatal):", err);
+      log.error("kb_suggestion create failed (non-fatal)", {
+        scope: "webhook",
+        conv_id: d.conv.id,
+        err,
+      });
     }
 
     // Run memory extraction even on silent turns — the user message itself

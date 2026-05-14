@@ -201,6 +201,10 @@ function scanFile(absPath: string, root: string): Hit[] {
   if (content.includes("\0")) return [];
 
   const isPlaceholder = PLACEHOLDER_FILES.has(rel) || PLACEHOLDER_FILES.has(rel.split("/").pop()!);
+  // Test files routinely embed placeholder-shaped secrets to exercise
+  // detection / redaction logic. Allow shapes that obviously aren't real
+  // (long runs of the same letter, or contain the literal `XXXX`/`YYYY`/`ZZZZ`).
+  const isTestFile = rel.startsWith("tests/") || /\.test\.[cm]?[tj]s$/.test(rel);
   const hits: Hit[] = [];
   for (const p of PATTERNS) {
     p.re.lastIndex = 0;
@@ -210,6 +214,7 @@ function scanFile(absPath: string, root: string): Hit[] {
       const full = match[0];
       const ignored =
         (isPlaceholder && /example|placeholder|your[_-]token|XXXX|YYYY|ZZZZ/i.test(full)) ||
+        (isTestFile && /XXXX|YYYY|ZZZZ|FAKE|PLACEHOLDER/.test(full)) ||
         p.ignoreSubstrings?.some((s) => full.includes(s));
       if (ignored) continue;
       const lineNum = content.slice(0, match.index).split("\n").length;

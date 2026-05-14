@@ -2,6 +2,7 @@ import type { ConversationsRepo } from "../db/repos/conversations.ts";
 import type { LeadRow, LeadsRepo } from "../db/repos/leads.ts";
 import type { MessagesRepo } from "../db/repos/messages.ts";
 import type { UserRow, UsersRepo } from "../db/repos/users.ts";
+import { log } from "../log.ts";
 import type { TelegramClient } from "../telegram/client.ts";
 import type { TgInlineKeyboardButton } from "../telegram/types.ts";
 import {
@@ -160,7 +161,11 @@ export class LeadsService {
       );
       return (await this.deps.leads.byId(input.lead.id)) ?? input.lead;
     } catch (err) {
-      console.error(`[leads] failed to post card to LEADS_CHAT_ID=${this.deps.leadsChatId}:`, err);
+      log.error("failed to post lead card", {
+        scope: "leads",
+        leads_chat_id: this.deps.leadsChatId,
+        err,
+      });
       return input.lead;
     }
   }
@@ -174,7 +179,10 @@ export class LeadsService {
   async sendApprovalMessages(input: { lead: LeadRow; user: UserRow }): Promise<void> {
     const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) {
-      console.warn(`[leads] no conversation for user ${input.user.id}`);
+      log.warn("no conversation for user (approval flow)", {
+        scope: "leads",
+        user_id: input.user.id,
+      });
       return;
     }
     const messages = [
@@ -289,10 +297,11 @@ export class LeadsService {
         text: lines.join("\n"),
       });
     } catch (err) {
-      console.error(
-        `[leads] failed to post visa package to VISA_CHAT_ID=${this.deps.visaChatId}:`,
+      log.error("failed to post visa package", {
+        scope: "leads",
+        visa_chat_id: this.deps.visaChatId,
         err,
-      );
+      });
     }
   }
 
@@ -329,7 +338,7 @@ export class LeadsService {
           : { inline_keyboard: this.approvalKeyboard(input.lead.id) },
       });
     } catch (err) {
-      console.error(`[leads] failed to refresh ops card for lead ${input.lead.id}:`, err);
+      log.error("failed to refresh ops card", { scope: "leads", lead_id: input.lead.id, err });
     }
   }
 
@@ -355,7 +364,7 @@ export class LeadsService {
   }): Promise<boolean> {
     const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) {
-      console.warn(`[leads] relay: no conversation for user ${input.user.id}`);
+      log.warn("relay: no conversation for user", { scope: "leads", user_id: input.user.id });
       return false;
     }
     const text = input.text?.trim() ?? "";
@@ -406,7 +415,7 @@ export class LeadsService {
         tgMessageId = sent.message_id;
       }
     } catch (err) {
-      console.error("[leads] relay sendMessage failed:", err);
+      log.error("relay sendMessage failed", { scope: "leads", err });
       return false;
     }
 
@@ -446,7 +455,7 @@ export class LeadsService {
       });
       tgMessageId = sent.message_id;
     } catch (err) {
-      console.error("[leads] sendMessage to candidate failed:", err);
+      log.error("sendMessage to candidate failed", { scope: "leads", err });
     }
     await this.deps.messages.add({
       conversationId: input.conversationId,
