@@ -2,7 +2,7 @@
 // Standalone entry point for the userbot subprocess.
 // Spawned by index.ts via Bun.spawn so that gramJS crashes don't kill the main server.
 
-import { config } from "../config.ts";
+import { config, llmIsConfigured } from "../config.ts";
 import { sql } from "../db/postgres.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
 import { OpenAIChatClient } from "../rag/chat.ts";
@@ -15,7 +15,7 @@ import { startUserbot } from "./userbot.ts";
 
 let rag: Parameters<typeof startUserbot>[0]["rag"];
 
-if (config.llm.provider === "openrouter" ? !!config.openrouter.apiKey : !!config.openai.apiKey) {
+if (llmIsConfigured()) {
   const chat =
     config.llm.provider === "ollama"
       ? new OllamaChatClient({ host: config.ollama.host, model: config.ollama.chatModel })
