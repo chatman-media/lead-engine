@@ -425,8 +425,31 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
         `[userbot] send-queue: sending id=${row.id} tg_user_id=${row.tg_user_id} text_len=${row.text.length}`,
       );
       try {
-        // Resolve access_hash from entity cache; bare numeric IDs fail without it.
-        const peer = await client.getInputEntity(row.tg_user_id);
+        // Try resolving by numeric ID first (works if user has ever messaged
+        // this account and their entity is in the gramJS session cache).
+        // Fall back to @username lookup if the ID resolution fails — this
+        // handles admins replying to users who only ever chatted with the bot,
+        // not with Alina's personal account directly.
+        let peer: Awaited<ReturnType<typeof client.getInputEntity>>;
+        try {
+          peer = await client.getInputEntity(row.tg_user_id);
+        } catch (entityErr) {
+          console.warn(
+            `[userbot] send-queue: getInputEntity(${row.tg_user_id}) failed (${(entityErr as Error)?.message}), trying username lookup...`,
+          );
+          const [userRow] = await db<{ tg_username: string | null }[]>`
+            SELECT tg_username FROM users WHERE tg_user_id = ${row.tg_user_id} LIMIT 1
+          `;
+          if (!userRow?.tg_username) {
+            throw new Error(
+              `Cannot resolve entity for tg_user_id=${row.tg_user_id}: not in session cache and no tg_username in DB`,
+            );
+          }
+          peer = await client.getInputEntity(`@${userRow.tg_username}`);
+          console.log(
+            `[userbot] send-queue: resolved via @${userRow.tg_username} for tg_user_id=${row.tg_user_id}`,
+          );
+        }
         await client.sendMessage(peer, { message: row.text });
         await markSent(db, row.id);
         console.log(`[userbot] send-queue: sent ok id=${row.id}`);
