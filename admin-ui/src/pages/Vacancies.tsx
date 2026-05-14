@@ -87,7 +87,7 @@ export function Vacancies() {
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div>
-          <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Vacancies</h2>
+          <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Вакансии</h2>
           <div
             style={{
               fontSize: 12,
@@ -96,11 +96,11 @@ export function Vacancies() {
               fontFamily: "var(--mono)",
             }}
           >
-            {activeCount} active · prepended to RAG context as АКТУАЛЬНЫЕ ВАКАНСИИ
+            {activeCount} активных · вставляются в RAG как АКТУАЛЬНЫЕ ВАКАНСИИ
           </div>
         </div>
         <button onClick={() => setShowAdd((s) => !s)} className="btn btn-primary btn-sm">
-          {showAdd ? "cancel" : "+ ADD"}
+          {showAdd ? "отмена" : "+ ДОБАВИТЬ"}
         </button>
       </div>
 
@@ -211,8 +211,8 @@ function VacancyCard({
             }}
           >
             <span>id={v.id}</span>
-            <span>{isActive ? "active" : "closed"}</span>
-            <span>updated {new Date(v.updated_at * 1000).toLocaleString("ru-RU")}</span>
+            <span>{isActive ? "активна" : "закрыта"}</span>
+            <span>обновлена {new Date(v.updated_at * 1000).toLocaleString("ru-RU")}</span>
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -221,13 +221,13 @@ function VacancyCard({
             className={`btn btn-sm ${isActive ? "btn-ghost" : "btn-warn"}`}
             data-testid="vacancy-toggle"
           >
-            {isActive ? "close" : "reopen"}
+            {isActive ? "закрыть" : "открыть"}
           </button>
           <button onClick={onEdit} className="btn btn-ghost btn-sm" data-testid="vacancy-edit">
-            edit
+            изменить
           </button>
           <button onClick={onDelete} className="btn btn-danger btn-sm" data-testid="vacancy-delete">
-            delete
+            удалить
           </button>
         </div>
       </div>
@@ -273,7 +273,7 @@ function AddForm({
 }) {
   return (
     <FormShell
-      submitLabel="create"
+      submitLabel="создать"
       initial={{ title: "", body: "", url: "" }}
       onSubmit={(values) =>
         onSubmit({
@@ -297,7 +297,7 @@ function EditForm({
 }) {
   return (
     <FormShell
-      submitLabel="save"
+      submitLabel="сохранить"
       initial={{
         title: vacancy.title,
         body: vacancy.body,
@@ -392,7 +392,7 @@ function FormShell({
             className="btn btn-ghost btn-sm"
             data-testid="vacancy-cancel"
           >
-            cancel
+            отмена
           </button>
         )}
       </div>
@@ -418,7 +418,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
       }}
     >
       <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-3)" }}>
-        no vacancies yet
+        нет вакансий
       </div>
       <div>
         Добавь актуальные вакансии — заголовок (страна / город / ставка) + тело (условия,
@@ -426,7 +426,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         чатов.
       </div>
       <button onClick={onAdd} className="btn btn-primary btn-sm">
-        + add the first vacancy
+        + добавить первую вакансию
       </button>
     </div>
   );

@@ -178,7 +178,7 @@ export function Chat() {
         <button
           onClick={() => navigate("/admin/chats")}
           className="btn btn-ghost btn-icon"
-          title="Back"
+          title="Назад"
           style={{ fontSize: 18 }}
         >
           ←
@@ -284,7 +284,7 @@ export function Chat() {
           <textarea
             value={replyText}
             onChange={(e) => setReplyText(e.target.value)}
-            placeholder="Type a reply and press Ctrl+Enter…"
+            placeholder="Ответ оператора (Ctrl+Enter для отправки)…"
             data-testid="reply-input"
             rows={2}
             onKeyDown={(e) => {
@@ -299,7 +299,7 @@ export function Chat() {
             data-testid="send-btn"
             className="btn btn-primary"
           >
-            Send
+            Отправить
           </button>
         </div>
       )}
@@ -338,10 +338,10 @@ export function Chat() {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn btn-sm btn-primary" onClick={handleAddToKb}>
-              Add to KB
+              В базу знаний
             </button>
             <button className="btn btn-sm btn-ghost" onClick={() => setAddToKb(null)}>
-              Dismiss
+              Пропустить
             </button>
           </div>
         </div>

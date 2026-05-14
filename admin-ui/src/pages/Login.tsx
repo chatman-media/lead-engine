@@ -13,7 +13,7 @@ export function Login() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!email || !password) {
-      setError("Fill in both fields.");
+      setError("Заполните оба поля.");
       return;
     }
     setLoading(true);
@@ -23,7 +23,7 @@ export function Login() {
       ws.connect();
       navigate("/admin/chats", { replace: true });
     } catch {
-      setError("Invalid credentials.");
+      setError("Неверный логин или пароль.");
     } finally {
       setLoading(false);
     }
@@ -34,7 +34,7 @@ export function Login() {
       <div className="login-card fade-in">
         <div className="login-logo">
           <div className="login-logo-name">tg-chatbot</div>
-          <div className="login-logo-sub">Admin access only</div>
+          <div className="login-logo-sub">Только для администраторов</div>
         </div>
 
         <form onSubmit={handleSubmit} noValidate data-testid="login-form">
@@ -83,7 +83,7 @@ export function Login() {
             className="btn btn-primary btn-block"
             style={{ padding: "10px 0" }}
           >
-            {loading ? "signing in…" : "Sign in"}
+            {loading ? "вход…" : "Войти"}
           </button>
         </form>
       </div>

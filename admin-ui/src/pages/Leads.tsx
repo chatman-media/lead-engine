@@ -112,14 +112,14 @@ const VISA_LONG_FIELDS: ReadonlySet<keyof VisaDocs> = new Set([
  * needs to act) and docs_complete next (ready to submit on consulate).
  */
 const STATE_LABEL: Record<LeadState, string> = {
-  intake_pending: "intake",
-  intake_complete: "ready for review",
-  approved: "approved",
-  rejected: "rejected",
-  docs_pending: "docs",
-  docs_complete: "ready for visa submit",
-  submitted: "submitted",
-  closed: "closed",
+  intake_pending: "анкета",
+  intake_complete: "ожидает решения",
+  approved: "одобрен",
+  rejected: "отклонён",
+  docs_pending: "документы",
+  docs_complete: "готов к подаче",
+  submitted: "подан",
+  closed: "закрыт",
 };
 
 const STATE_ACCENT: Record<LeadState, string> = {
@@ -172,20 +172,13 @@ export function Leads() {
   return (
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Leads</h2>
+        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Лиды</h2>
         <div style={{ fontSize: 12, color: "var(--text-3)", fontFamily: "var(--mono)" }}>
           {counts
-            ? `${counts.intake_complete} ready · ${counts.docs_complete} for visa submit`
+            ? `${counts.intake_complete} ожидают решения · ${counts.docs_complete} готовы к подаче`
             : "—"}
         </div>
       </div>
-
-      <p style={{ color: "var(--text-3)", fontSize: 12, margin: 0, lineHeight: 1.6 }}>
-        Воронка лидов: бот собирает анкету → ты одобряешь/отклоняешь → бот автоматически шлёт
-        девочке шаблоны → собирает визовую анкету → отдаёт тебе на подачу. Карточка с
-        inline-кнопками постится в группу <code>LEADS_CHAT_ID</code> (если задана), оттуда можно
-        жать одобрить/отклонить прямо из Telegram.
-      </p>
 
       {error && (
         <div
@@ -204,7 +197,7 @@ export function Leads() {
 
       {/* Filter pills */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <FilterPill label="all" active={filter === null} onClick={() => setFilter(null)} />
+        <FilterPill label="все" active={filter === null} onClick={() => setFilter(null)} />
         {(Object.keys(STATE_LABEL) as LeadState[]).map((s) => {
           const count = counts?.[s] ?? 0;
           if (count === 0 && filter !== s) return null;
@@ -365,8 +358,8 @@ function LeadCard({
             }}
           >
             <span style={{ color: accent, fontWeight: 600 }}>{STATE_LABEL[lead.state]}</span>
-            <span>updated {new Date(lead.updated_at * 1000).toLocaleString("ru-RU")}</span>
-            {lead.ops_message_id && <span>card in ops chat</span>}
+            <span>обновлён {new Date(lead.updated_at * 1000).toLocaleString("ru-RU")}</span>
+            {lead.ops_message_id && <span>карточка в чате</span>}
           </div>
           {lead.rejected_reason && (
             <div
@@ -377,14 +370,14 @@ function LeadCard({
                 marginTop: 4,
               }}
             >
-              reason: {lead.rejected_reason}
+              причина: {lead.rejected_reason}
             </div>
           )}
         </div>
 
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
           <button onClick={onOpen} className="btn btn-ghost btn-sm" disabled={busy}>
-            open chat
+            чат
           </button>
           {!decided && !inFlight && (
             <button
@@ -393,7 +386,7 @@ function LeadCard({
               disabled={busy}
               title="Отправить девочке шаблон с 7 пунктами анкеты"
             >
-              send intake
+              анкета
             </button>
           )}
           {ready && (
@@ -404,7 +397,7 @@ function LeadCard({
                 disabled={busy}
                 data-testid="lead-approve"
               >
-                ✅ approve
+                ✅ одобрить
               </button>
               <button
                 onClick={onReject}
@@ -412,7 +405,7 @@ function LeadCard({
                 disabled={busy}
                 data-testid="lead-reject"
               >
-                ❌ reject
+                ❌ отклонить
               </button>
             </>
           )}
@@ -428,7 +421,7 @@ function LeadCard({
                   : "Сгенерировать номер заявки и опубликовать в VISA_CHAT_ID"
               }
             >
-              {lead.application_id ? "↻ resend visa" : "→ visa submit"}
+              {lead.application_id ? "↻ на визу" : "→ на визу"}
             </button>
           )}
           <button
@@ -533,7 +526,7 @@ function NotesPane({ leadId }: { leadId: number }) {
         data-testid="notes-toggle"
       >
         <span style={{ width: 10, display: "inline-block" }}>{open ? "▾" : "▸"}</span>
-        <span>NOTES</span>
+        <span>ЗАМЕТКИ</span>
         {notes !== null && <span style={{ color: "var(--text-2)" }}>{notes.length}</span>}
       </button>
 
@@ -573,7 +566,7 @@ function NotesPane({ leadId }: { leadId: number }) {
               data-testid="notes-add"
               style={{ alignSelf: "flex-start", fontSize: 11 }}
             >
-              {saving ? "saving…" : "add"}
+              {saving ? "сохранение…" : "добавить"}
             </button>
           </div>
 
@@ -709,8 +702,8 @@ function TimelinePane({ leadId }: { leadId: number }) {
         data-testid="timeline-toggle"
       >
         <span style={{ width: 10, display: "inline-block" }}>{open ? "▾" : "▸"}</span>
-        <span>TIMELINE</span>
-        {events !== null && <span style={{ color: "var(--text-2)" }}>{events.length} events</span>}
+        <span>ИСТОРИЯ</span>
+        {events !== null && <span style={{ color: "var(--text-2)" }}>{events.length} событий</span>}
       </button>
 
       {open && (
@@ -725,9 +718,9 @@ function TimelinePane({ leadId }: { leadId: number }) {
           }}
         >
           {events === null ? (
-            <div style={{ color: "var(--text-3)" }}>loading…</div>
+            <div style={{ color: "var(--text-3)" }}>загрузка…</div>
           ) : events.length === 0 ? (
-            <div style={{ color: "var(--text-3)" }}>no events yet</div>
+            <div style={{ color: "var(--text-3)" }}>нет событий</div>
           ) : (
             events.map((ev) => <TimelineRow key={ev.id} event={ev} />)
           )}
@@ -864,7 +857,7 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
         data-testid="visa-docs-toggle"
       >
         <span style={{ width: 10, display: "inline-block" }}>{open ? "▾" : "▸"}</span>
-        <span>VISA DOCS</span>
+        <span>ВИЗОВАЯ АНКЕТА</span>
         <span
           style={{
             color: pct >= 100 ? "var(--green, #2ea043)" : "var(--amber)",
@@ -972,7 +965,7 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
                           className="btn btn-primary btn-sm"
                           style={{ fontSize: 11, padding: "4px 8px" }}
                         >
-                          save
+                          сохранить
                         </button>
                         <button
                           onClick={() => {
@@ -993,7 +986,7 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
                         style={{ fontSize: 11, padding: "4px 8px" }}
                         data-testid={`visa-docs-edit-${key}`}
                       >
-                        edit
+                        изменить
                       </button>
                     )}
                   </div>
@@ -1103,25 +1096,12 @@ function EmptyState({ filter }: { filter: LeadState | null }) {
         borderRadius: "var(--radius)",
         padding: 24,
         background: "var(--bg-1)",
-        color: "var(--text-2)",
+        color: "var(--text-3)",
         fontSize: 13,
-        lineHeight: 1.6,
+        fontFamily: "var(--mono)",
       }}
     >
-      <div
-        style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-3)", marginBottom: 8 }}
-      >
-        no leads {filter ? `in state "${filter}"` : "yet"}
-      </div>
-      <div>
-        Лиды появляются здесь когда оператор нажимает <strong>Promote to lead</strong> на странице
-        чата (TODO в этой фазе) или когда бот автоматически детектит, что анкета заполнена (Phase
-        2).
-      </div>
-      <div style={{ marginTop: 8, color: "var(--text-3)" }}>
-        Для теста: создай лид через <code>POST /admin/api/leads/from-conversation/:convId</code> —
-        бот запостит карточку в LEADS_CHAT_ID (если настроен) с inline-кнопками одобрить/отклонить.
-      </div>
+      {filter ? `нет лидов в статусе «${STATE_LABEL[filter]}»` : "нет лидов"}
     </div>
   );
 }

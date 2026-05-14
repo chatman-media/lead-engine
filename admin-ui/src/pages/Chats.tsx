@@ -68,11 +68,11 @@ export function Chats() {
   return (
     <div className="page fade-in">
       <div className="page-header">
-        <span className="page-title">Chats</span>
+        <span className="page-title">Чаты</span>
         <span className="page-count">— {convs.length}</span>
         {queued.length > 0 && (
           <span className="queued-alert" data-testid="queued-count">
-            ▲ {queued.length} needs attention
+            ▲ {queued.length} требует внимания
           </span>
         )}
       </div>
@@ -111,7 +111,7 @@ export function Chats() {
             </div>
           ))}
 
-          {convs.length === 0 && <div className="empty">No conversations yet.</div>}
+          {convs.length === 0 && <div className="empty">Нет чатов.</div>}
         </div>
       )}
     </div>

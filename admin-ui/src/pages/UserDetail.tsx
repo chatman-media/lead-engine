@@ -61,7 +61,7 @@ export function UserDetail() {
           to="/admin/users"
           style={{ fontSize: 12, color: "var(--text-3)", fontFamily: "var(--mono)" }}
         >
-          ← all users
+          ← все пользователи
         </Link>
         <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: "8px 0 0" }}>
           {user.tg_username ? `@${user.tg_username}` : `tg:${user.tg_user_id}`}
@@ -82,12 +82,12 @@ export function UserDetail() {
           <span>
             status: <span className={`status-${user.status}`}>{user.status}</span>
           </span>
-          <span>registered {ts(user.created_at)}</span>
-          <span>updated {ts(user.updated_at)}</span>
+          <span>зарегистрирован {ts(user.created_at)}</span>
+          <span>обновлён {ts(user.updated_at)}</span>
         </div>
       </div>
 
-      <Section title="Conversation">
+      <Section title="Переписка">
         {conversation ? (
           <div
             style={{
@@ -101,19 +101,19 @@ export function UserDetail() {
               <div>id: {conversation.id}</div>
               <div>mode: {conversation.mode}</div>
               {conversation.last_message_at && (
-                <div>last message: {ts(conversation.last_message_at)}</div>
+                <div>последнее сообщение: {ts(conversation.last_message_at)}</div>
               )}
             </div>
             <Link to={`/admin/chats/${conversation.id}`} className="btn btn-primary btn-sm">
-              open chat →
+              открыть чат →
             </Link>
           </div>
         ) : (
-          <Empty>No conversation yet.</Empty>
+          <Empty>Нет чата.</Empty>
         )}
       </Section>
 
-      <Section title="Lead">
+      <Section title="Лид">
         {lead ? (
           <div
             style={{
@@ -131,26 +131,26 @@ export function UserDetail() {
             </div>
             {lead.application_id && <div>application_id: {lead.application_id}</div>}
             {lead.rejected_reason && (
-              <div style={{ color: "var(--red, #ef4444)" }}>rejected: {lead.rejected_reason}</div>
+              <div style={{ color: "var(--red, #ef4444)" }}>
+                причина отказа: {lead.rejected_reason}
+              </div>
             )}
             <Link
               to="/admin/leads"
               style={{ marginTop: 6, fontSize: 12 }}
               className="btn btn-ghost btn-sm"
             >
-              open leads board →
+              воронка →
             </Link>
           </div>
         ) : (
-          <Empty>No lead yet — promote from chat to start the pipeline.</Empty>
+          <Empty>Нет лида.</Empty>
         )}
       </Section>
 
-      <Section title={`Memory (${factsEntries.length})`}>
+      <Section title={`Память (${factsEntries.length})`}>
         {factsEntries.length === 0 ? (
-          <Empty>
-            No facts learned. Memory is auto-extracted from past chats; edits live in the chat view.
-          </Empty>
+          <Empty>Фактов нет. Память извлекается автоматически из переписки.</Empty>
         ) : (
           <table className="data-table" style={{ marginTop: 0 }}>
             <thead>

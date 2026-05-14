@@ -49,7 +49,7 @@ export function Analytics() {
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div>
-          <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Analytics</h2>
+          <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Аналитика</h2>
           <div
             style={{
               fontSize: 12,
@@ -58,7 +58,7 @@ export function Analytics() {
               fontFamily: "var(--mono)",
             }}
           >
-            per-turn telemetry from messages.meta_json
+            телеметрия по сообщениям из messages.meta_json
           </div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
@@ -102,20 +102,20 @@ export function Analytics() {
       {data && data.total_assistant_messages > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <SectionRow>
-            <Card title="Total replies">
+            <Card title="Всего ответов">
               <BigNumber value={data.total_assistant_messages} />
-              <Hint>assistant turns with telemetry</Hint>
+              <Hint>ходов бота с телеметрией</Hint>
             </Card>
-            <Card title="No-context rate" tone={noCtxTone(data)}>
+            <Card title="Без контекста" tone={noCtxTone(data)}>
               <BigNumber value={`${pct(noCtxCount(data), data.total_assistant_messages)}%`} />
-              <Hint>turns that returned NO_CONTEXT (silent escalation)</Hint>
+              <Hint>ходы с NO_CONTEXT (тихая эскалация)</Hint>
             </Card>
-            <Card title="Ungrounded rate" tone={data.ungrounded_count > 0 ? "warn" : "ok"}>
+            <Card title="Неподкреплённых" tone={data.ungrounded_count > 0 ? "warn" : "ok"}>
               <BigNumber value={`${pct(data.ungrounded_count, data.total_assistant_messages)}%`} />
-              <Hint>reflect dropped as ungrounded</Hint>
+              <Hint>reflect отброшен как ungrounded</Hint>
             </Card>
             <Card
-              title="Unanswered rate"
+              title="Без ответа"
               tone={
                 (data.unanswered_rate ?? 0) > 0.3
                   ? "warn"
@@ -130,13 +130,13 @@ export function Analytics() {
           </SectionRow>
 
           <SectionRow>
-            <Card title="Total latency (ms)">
+            <Card title="Общая задержка (мс)">
               <Latency stats={data.latency.total_ms} />
             </Card>
-            <Card title="Retrieval (ms)">
+            <Card title="Поиск (мс)">
               <Latency stats={data.latency.retrieval_ms} />
             </Card>
-            <Card title="Generation (ms)">
+            <Card title="Генерация (мс)">
               <Latency stats={data.latency.generation_ms} />
             </Card>
           </SectionRow>
@@ -275,7 +275,7 @@ function Hint({ children }: { children: React.ReactNode }) {
 
 function Latency({ stats }: { stats: Data["latency"]["total_ms"] }) {
   if (stats.count === 0) {
-    return <Hint>no samples</Hint>;
+    return <Hint>нет данных</Hint>;
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, fontFamily: "var(--mono)" }}>
