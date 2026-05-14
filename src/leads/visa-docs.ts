@@ -1,3 +1,4 @@
+import { log } from "../log.ts";
 import type { ChatClient, ChatMessage } from "../rag/chat.ts";
 
 /**
@@ -184,7 +185,7 @@ export async function extractVisaDocs(input: ExtractVisaInput): Promise<VisaFiel
       { temperature: 0.1 },
     );
   } catch (err) {
-    console.error("[visa-docs] LLM extract failed:", err);
+    log.error("visa-docs LLM extract failed", { scope: "visa-docs", err });
     return merged;
   }
 
