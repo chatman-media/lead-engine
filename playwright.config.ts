@@ -27,7 +27,6 @@ export default defineConfig({
     timeout: 30_000,
     env: {
       PORT: String(PORT),
-      DB_PATH: "./data/test.db",
       TELEGRAM_WEBHOOK_SECRET: "test-secret",
       TEST_HOOKS: "1",
       SERVE_UI: "1",
