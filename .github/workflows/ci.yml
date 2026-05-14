@@ -21,6 +21,22 @@ jobs:
     name: typecheck + lint + secret-scan + unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tgchatbot_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,6 +73,8 @@ jobs:
         run: bun run secret-scan
 
       - name: unit tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/tgchatbot_test
         run: bun test tests/unit
 
       - name: build admin UI
@@ -71,6 +89,22 @@ jobs:
     # Don't block merges on flaky e2e for now — they run in parallel and
     # the result is informational. Flip to required once stable.
     continue-on-error: true
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tgchatbot_e2e
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
       - uses: actions/checkout@v4
 
@@ -107,9 +141,8 @@ jobs:
 
       - name: Run e2e
         env:
-          # Tests bring up the server themselves via playwright.config webServer.
-          # Use a separate DB file so we don't need any seed.
           CI: "1"
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/tgchatbot_e2e
         run: bun run test:e2e
 
       - name: Upload Playwright report on failure
