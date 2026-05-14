@@ -12,10 +12,12 @@ export async function enqueue(sql: Sql, tgUserId: number, text: string): Promise
 export async function dequeuePending(
   sql: Sql,
 ): Promise<{ id: number; tg_user_id: number; text: string }[]> {
+  // Retry all unsent messages regardless of previous errors — transient
+  // gramJS failures (entity cache miss, TIMEOUT) should resolve on next poll.
   return sql<{ id: number; tg_user_id: number; text: string }[]>`
     SELECT id, tg_user_id, text
     FROM userbot_send_queue
-    WHERE sent_at IS NULL AND error IS NULL
+    WHERE sent_at IS NULL
     ORDER BY id
     LIMIT 50
   `;
