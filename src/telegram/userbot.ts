@@ -414,7 +414,9 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     }
     for (const row of pending) {
       try {
-        await client.sendMessage(row.tg_user_id, { message: row.text });
+        // Resolve access_hash from entity cache; bare numeric IDs fail without it.
+        const peer = await client.getInputEntity(row.tg_user_id);
+        await client.sendMessage(peer, { message: row.text });
         await markSent(db, row.id);
       } catch (err) {
         console.error(`[userbot] send-queue failed tg_user_id=${row.tg_user_id}:`, err);
