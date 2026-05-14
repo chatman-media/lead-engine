@@ -1,0 +1,15 @@
+FROM oven/bun:1 AS base
+WORKDIR /app
+
+# Install deps first (cached layer)
+# admin-ui/package.json is needed because root package.json declares it as a workspace
+COPY package.json bun.lock* ./
+COPY admin-ui/package.json ./admin-ui/package.json
+RUN bun install --frozen-lockfile
+
+# Copy source
+COPY tsconfig.json ./
+COPY src/ ./src/
+COPY scripts/userbot-local.ts ./scripts/userbot-local.ts
+
+CMD ["bun", "scripts/userbot-local.ts"]

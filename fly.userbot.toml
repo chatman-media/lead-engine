@@ -1,0 +1,14 @@
+# fly.io config for the userbot worker (Alina's gramJS account)
+# Deploy: fly deploy --config fly.userbot.toml
+app = "svoi-userbot"
+primary_region = "ams"  # Amsterdam — Telegram MTProto servers are in EU/NL
+
+[build]
+  dockerfile = "Dockerfile.userbot"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+# No [[services]] — this is a pure background worker, no HTTP
