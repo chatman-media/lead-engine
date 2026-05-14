@@ -133,15 +133,12 @@ export function Chat() {
     setReplyText("");
     setSending(true);
     try {
-      await api.sendMessage(convId, text);
+      const res = await api.sendMessage(convId, text);
+      if (res.tgError) {
+        console.warn("[admin reply] Telegram delivery failed:", res.tgError);
+      }
     } catch (err) {
-      // Backend persists the message to the DB BEFORE attempting the
-      // Telegram send, so a 502 here means "saved but delivery failed"
-      // (typically a stale chat session / 404 from Telegram). The row
-      // shows up in the conversation list on reload either way; don't
-      // restore the input or the operator would think nothing happened.
-      // The alert is the only signal that delivery itself didn't land.
-      alert(`Ошибка отправки в Telegram: ${err instanceof Error ? err.message : String(err)}`);
+      alert(`Ошибка отправки: ${err instanceof Error ? err.message : String(err)}`);
     }
     // Find last user message to pre-fill the KB suggestion question —
     // outside the try so the prompt opens even when the Telegram leg

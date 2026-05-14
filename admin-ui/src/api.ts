@@ -815,7 +815,7 @@ export const api = {
     }),
 
   sendMessage: (id: number, text: string) =>
-    req<{ ok: boolean }>(`/admin/api/conversations/${id}/reply`, {
+    req<{ ok: boolean; tgError?: string }>(`/admin/api/conversations/${id}/reply`, {
       method: "POST",
       body: JSON.stringify({ text }),
     }),

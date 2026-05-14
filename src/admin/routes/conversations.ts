@@ -227,12 +227,9 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
 
     deps.onMessageSent?.({ conversationId: id, tgUserId: user.tg_user_id });
 
-    if (tgError) {
-      return json(
-        { ok: false, error: `Telegram: ${tgError}`, conversationId: id, tgUserId: user.tg_user_id },
-        { status: 502 },
-      );
-    }
-    return json({ ok: true, conversationId: id, tgUserId: user.tg_user_id });
+    // Message is saved to DB regardless of Telegram delivery. Return 200 so
+    // the client clears the input and reloads; surface tgError as a warning
+    // field so the admin UI can optionally toast about it without blocking.
+    return json({ ok: true, conversationId: id, tgUserId: user.tg_user_id, tgError });
   };
 }
