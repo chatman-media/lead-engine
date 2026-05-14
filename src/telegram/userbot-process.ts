@@ -5,6 +5,7 @@
 import { config, llmIsConfigured } from "../config.ts";
 import { sql } from "../db/postgres.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
+import { log } from "../log.ts";
 import { OpenAIChatClient } from "../rag/chat.ts";
 import { NullEmbeddingClient, OpenAIEmbeddingClient } from "../rag/embed.ts";
 import { OllamaChatClient } from "../rag/providers/ollama-chat.ts";
@@ -86,7 +87,7 @@ async function runUserbot() {
   restarting = true;
 
   if (activeClient) {
-    console.warn("[userbot-process] disconnecting previous client...");
+    log.warn("disconnecting previous client", { scope: "userbot-process" });
     await activeClient.disconnect().catch(() => {});
     activeClient = null;
   }
@@ -101,8 +102,7 @@ async function runUserbot() {
       rag,
     });
   } catch (err) {
-    console.error("[userbot-process] startUserbot failed:", (err as Error)?.message ?? err);
-    console.warn("[userbot-process] restarting in 10s...");
+    log.error("startUserbot failed; restarting in 10s", { scope: "userbot-process", err });
     setTimeout(runUserbot, 10_000);
   }
 }
@@ -110,17 +110,15 @@ async function runUserbot() {
 // gramJS emits TIMEOUT and network errors as unhandled promise rejections.
 // Catch them here and restart the client instead of letting the process die.
 process.on("unhandledRejection", (reason) => {
-  const msg = reason instanceof Error ? reason.message : String(reason);
-  console.warn("[userbot-process] unhandledRejection:", msg, "— restarting gramJS in 5s");
+  log.warn("unhandledRejection; restarting gramJS in 5s", {
+    scope: "userbot-process",
+    err: reason,
+  });
   setTimeout(runUserbot, 5_000);
 });
 
 process.on("uncaughtException", (err) => {
-  console.error(
-    "[userbot-process] uncaughtException:",
-    err?.message ?? err,
-    "— restarting gramJS in 5s",
-  );
+  log.error("uncaughtException; restarting gramJS in 5s", { scope: "userbot-process", err });
   setTimeout(runUserbot, 5_000);
 });
 
