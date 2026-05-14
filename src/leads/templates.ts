@@ -17,13 +17,21 @@
 export const INTAKE_TEMPLATE = `Замечательно, а теперь приступим к заполнению анкеты!
 
 Заполните анкету:
-1. Ваш рост
-2. Ваш вес
-3. Фотографии 6-8 обычных (в полный рост 2-3)
-4. В каком городе вы сейчас и когда готовы выезжать
-5. 2 любых видео
-6. Фото загран паспорта
-7. Видео танца на 1 минуту (главное весёлая музыка и активные импровизированные движения)
+1. Имя и фамилия (как в паспорте)
+2. Возраст
+3. Рост
+4. Вес
+5. Гражданство
+6. Семейное положение (не замужем / замужем)
+7. Дети (нет / есть, укажите сколько)
+8. Языки и уровень (например: английский B2, базовый китайский)
+9. Опыт работы за последние 2 года (кратко)
+10. Дата окончания загранпаспорта (дд.мм.гггг)
+11. В каком городе вы сейчас и когда готовы выезжать
+12. Фотографии 6-8 обычных (в полный рост 2-3)
+13. 2 любых видео
+14. Фото загран паспорта
+15. Видео танца на 1 минуту (главное весёлая музыка и активные импровизированные движения)
 
 Просьба заполнить и отправить одним сообщением, спасибо 🙌🌞`;
 
@@ -147,6 +155,13 @@ export interface IntakeFields {
   videos_count?: number;
   passport_photo_received?: boolean;
   dance_video_received?: boolean;
+  name?: string;
+  nationality?: string;
+  marital_status?: string;
+  children?: string;
+  languages?: string;
+  passport_expiry?: string;
+  work_experience?: string;
 }
 
 export const INTAKE_FIELD_LABELS: Record<keyof IntakeFields, string> = {
@@ -159,6 +174,13 @@ export const INTAKE_FIELD_LABELS: Record<keyof IntakeFields, string> = {
   videos_count: "2 видео",
   passport_photo_received: "фото загранпаспорта",
   dance_video_received: "видео танца",
+  name: "имя",
+  nationality: "гражданство",
+  marital_status: "семейное положение",
+  children: "дети",
+  languages: "языки",
+  passport_expiry: "загранпаспорт до",
+  work_experience: "опыт работы",
 };
 
 export function isIntakeComplete(fields: IntakeFields | undefined): boolean {

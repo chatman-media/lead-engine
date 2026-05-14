@@ -33,7 +33,7 @@ export interface IntakeExtractInput {
   chat: ChatClient;
 }
 
-const SYSTEM_PROMPT = `Ты извлекаешь 5 полей анкеты из переписки рекрутингового агентства.
+const SYSTEM_PROMPT = `Ты извлекаешь поля анкеты из переписки рекрутингового агентства.
 
 Извлекай ТОЛЬКО то, что девушка явно сообщила. Никаких догадок.
 
@@ -43,6 +43,13 @@ const SYSTEM_PROMPT = `Ты извлекаешь 5 полей анкеты из 
 - weight: вес (например "52 кг", "52")
 - city: где сейчас живёт (например "Москва", "Новосибирск")
 - departure_readiness: когда готова выезжать (например "с 1 апреля", "в любое время", "через 2 недели")
+- name: имя и фамилия (например "Sofia Ivanova", "Иванова София")
+- nationality: гражданство (например "Russian", "Россия", "казахстанское")
+- marital_status: семейное положение (например "не замужем", "замужем", "single")
+- children: информация о детях (например "нет", "есть, 1 ребёнок", "none")
+- languages: языки и уровень (например "английский B2, базовый китайский")
+- passport_expiry: дата окончания загранпаспорта (например "18.04.2029", "April 18, 2029")
+- work_experience: опыт работы за последние 2 года (например "модель", "хостес, официантка")
 
 ВЕРНИ СТРОГО JSON-ОБЪЕКТ, без markdown, без \`\`\`, без комментариев.
 Если поле не упомянуто — НЕ включай его в JSON.
@@ -50,11 +57,10 @@ const SYSTEM_PROMPT = `Ты извлекаешь 5 полей анкеты из 
 
 Пример:
 Сообщения:
-user: мне 22, рост 165, вес 52
-user: я в Москве
+user: мне 22, рост 165, вес 52, я в Москве, Sofia Ivanova, гражданство Россия
 Существующие: {}
 Ответ:
-{"age":"22","height":"165","weight":"52","city":"Москва"}`;
+{"age":"22","height":"165","weight":"52","city":"Москва","name":"Sofia Ivanova","nationality":"Россия"}`;
 
 /**
  * Calls the LLM extractor for the four text-shaped intake fields. Media
@@ -92,6 +98,13 @@ export async function extractIntake(input: IntakeExtractInput): Promise<IntakeFi
     weight: merged.weight,
     city: merged.city,
     departure_readiness: merged.departure_readiness,
+    name: merged.name,
+    nationality: merged.nationality,
+    marital_status: merged.marital_status,
+    children: merged.children,
+    languages: merged.languages,
+    passport_expiry: merged.passport_expiry,
+    work_experience: merged.work_experience,
   });
 
   let raw: string;
@@ -117,6 +130,13 @@ export async function extractIntake(input: IntakeExtractInput): Promise<IntakeFi
   if (extracted.weight) merged.weight = extracted.weight;
   if (extracted.city) merged.city = extracted.city;
   if (extracted.departure_readiness) merged.departure_readiness = extracted.departure_readiness;
+  if (extracted.name) merged.name = extracted.name;
+  if (extracted.nationality) merged.nationality = extracted.nationality;
+  if (extracted.marital_status) merged.marital_status = extracted.marital_status;
+  if (extracted.children) merged.children = extracted.children;
+  if (extracted.languages) merged.languages = extracted.languages;
+  if (extracted.passport_expiry) merged.passport_expiry = extracted.passport_expiry;
+  if (extracted.work_experience) merged.work_experience = extracted.work_experience;
 
   return merged;
 }
@@ -140,7 +160,20 @@ export function parseIntakeJson(raw: string): Partial<IntakeFields> {
   }
   const obj = parsed as Record<string, unknown>;
   const out: Partial<IntakeFields> = {};
-  for (const key of ["age", "height", "weight", "city", "departure_readiness"] as const) {
+  for (const key of [
+    "age",
+    "height",
+    "weight",
+    "city",
+    "departure_readiness",
+    "name",
+    "nationality",
+    "marital_status",
+    "children",
+    "languages",
+    "passport_expiry",
+    "work_experience",
+  ] as const) {
     const val = obj[key];
     if (typeof val === "string" && val.trim() && val.trim().length <= 100) {
       out[key] = val.trim();
