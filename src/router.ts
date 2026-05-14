@@ -1,3 +1,5 @@
+import { inc } from "./metrics.ts";
+
 export type RouteContext = {
   req: Request;
   url: URL;
@@ -61,6 +63,13 @@ export class Router {
       route.paramNames.forEach((name, i) => {
         params[name] = decodeURIComponent(m[i + 1] ?? "");
       });
+      // Count admin API hits — cheap signal for "is the operator UI alive"
+      // and for spotting routes that suddenly stop being called. Excludes
+      // /admin/api/me (polled on every page load) so the counter stays
+      // useful. Body / sensitive path segments are not labelled.
+      if (url.pathname.startsWith("/admin/api/") && url.pathname !== "/admin/api/me") {
+        inc("admin_requests_total", 1, { method });
+      }
       try {
         return await route.handler({ req, url, params });
       } catch (err) {

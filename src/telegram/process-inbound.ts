@@ -237,6 +237,13 @@ async function runRagForInbound(
     ...(vacanciesBlock ? { vacanciesBlock } : {}),
     ...(resolvedSkills && resolvedSkills.length > 0 ? { skills: resolvedSkills } : {}),
   });
+  // path is the categorical outcome of the RAG turn — ok / no_context /
+  // ungrounded / smalltalk / persona_fact. Bucketed here so the /metrics
+  // dashboard can see retrieval health without scraping per-message
+  // telemetry JSON.
+  if (result.telemetry?.path) {
+    inc("rag_kb_hits_total", 1, { path: result.telemetry.path });
+  }
   return {
     result,
     stage,
