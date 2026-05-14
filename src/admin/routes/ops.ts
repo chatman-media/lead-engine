@@ -11,6 +11,7 @@ import { resolve } from "node:path";
 import { activeEmbeddingDim, config, llmIsConfigured } from "../../config.ts";
 import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { KbRepo } from "../../db/repos/kb.ts";
+import { MAX_SEND_ATTEMPTS } from "../../db/repos/userbot-send-queue.ts";
 import { seedInfinityVacancies, VacanciesRepo } from "../../db/repos/vacancies.ts";
 import { ingestDirectory } from "../../rag/ingest.ts";
 import { json, type RouteHandler } from "../../router.ts";
@@ -267,9 +268,9 @@ export function createPurgeOutcomesHandler(deps: AdminApiDeps): RouteHandler {
       FROM self_play_matches m
       WHERE m.created_at < ${cutoff}
         AND m.id NOT IN (
-          SELECT solo_match_a_id FROM pairwise_matches WHERE solo_match_a_id IS NOT NULL
+          SELECT match_a_id FROM pairwise_matches WHERE match_a_id IS NOT NULL
           UNION
-          SELECT solo_match_b_id FROM pairwise_matches WHERE solo_match_b_id IS NOT NULL
+          SELECT match_b_id FROM pairwise_matches WHERE match_b_id IS NOT NULL
         )
     `;
 
@@ -295,9 +296,9 @@ export function createPurgeOutcomesHandler(deps: AdminApiDeps): RouteHandler {
         DELETE FROM self_play_matches
         WHERE created_at < ${cutoff}
           AND id NOT IN (
-            SELECT solo_match_a_id FROM pairwise_matches WHERE solo_match_a_id IS NOT NULL
+            SELECT match_a_id FROM pairwise_matches WHERE match_a_id IS NOT NULL
             UNION
-            SELECT solo_match_b_id FROM pairwise_matches WHERE solo_match_b_id IS NOT NULL
+            SELECT match_b_id FROM pairwise_matches WHERE match_b_id IS NOT NULL
           )
       `;
     }
@@ -316,13 +317,24 @@ export function createPurgeOutcomesHandler(deps: AdminApiDeps): RouteHandler {
  * POST /admin/api/ops/userbot/queue-stats — non-destructive snapshot of
  * the userbot send queue so operators can see how many manual replies
  * are still waiting for the userbot worker to pick up.
+ *
+ * `userbot_send_queue` has no `status` column; we derive one from
+ * `sent_at` / `error` / `attempts` so the operator dashboard can show
+ * the right buckets without a schema migration.
  */
 export function createUserbotQueueStatsHandler(deps: AdminApiDeps): RouteHandler {
   return withAdmin(deps.sql, async () => {
     const rows = await deps.sql<{ status: string; count: number }[]>`
-      SELECT status, COUNT(*)::INTEGER AS count
+      SELECT
+        CASE
+          WHEN sent_at IS NOT NULL          THEN 'sent'
+          WHEN attempts >= ${MAX_SEND_ATTEMPTS} THEN 'parked'
+          WHEN error IS NOT NULL            THEN 'errored'
+          ELSE                                   'pending'
+        END AS status,
+        COUNT(*)::INTEGER AS count
       FROM userbot_send_queue
-      GROUP BY status
+      GROUP BY 1
     `;
     return json({
       by_status: Object.fromEntries(rows.map((r) => [r.status, r.count])),
