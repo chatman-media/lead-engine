@@ -2,15 +2,6 @@
 // Standalone entry point for the userbot subprocess.
 // Spawned by index.ts via Bun.spawn so that gramJS crashes don't kill the main server.
 
-// gramJS emits TIMEOUT and network errors as unhandled promise rejections.
-// Log them and keep running — the connect/reconnect loop in userbot.ts handles recovery.
-process.on("unhandledRejection", (reason) => {
-  console.error("[userbot-process] unhandledRejection:", reason);
-});
-process.on("uncaughtException", (err) => {
-  console.error("[userbot-process] uncaughtException:", err?.message ?? err);
-});
-
 import { config } from "../config.ts";
 import { sql } from "../db/postgres.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
@@ -81,4 +72,51 @@ if (config.llm.provider === "openrouter" ? !!config.openrouter.apiKey : !!config
   };
 }
 
-await startUserbot({ db: sql, apiId: config.userbot.apiId, apiHash: config.userbot.apiHash, rag });
+// Track the active gramJS client so we can disconnect it before restarting.
+let activeClient: Awaited<ReturnType<typeof startUserbot>> | null = null;
+let restarting = false;
+
+async function runUserbot() {
+  if (restarting) return;
+  restarting = true;
+
+  if (activeClient) {
+    console.warn("[userbot-process] disconnecting previous client...");
+    await activeClient.disconnect().catch(() => {});
+    activeClient = null;
+  }
+
+  restarting = false;
+
+  try {
+    activeClient = await startUserbot({
+      db: sql,
+      apiId: config.userbot.apiId,
+      apiHash: config.userbot.apiHash,
+      rag,
+    });
+  } catch (err) {
+    console.error("[userbot-process] startUserbot failed:", (err as Error)?.message ?? err);
+    console.warn("[userbot-process] restarting in 10s...");
+    setTimeout(runUserbot, 10_000);
+  }
+}
+
+// gramJS emits TIMEOUT and network errors as unhandled promise rejections.
+// Catch them here and restart the client instead of letting the process die.
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.warn("[userbot-process] unhandledRejection:", msg, "— restarting gramJS in 5s");
+  setTimeout(runUserbot, 5_000);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error(
+    "[userbot-process] uncaughtException:",
+    err?.message ?? err,
+    "— restarting gramJS in 5s",
+  );
+  setTimeout(runUserbot, 5_000);
+});
+
+await runUserbot();
