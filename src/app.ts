@@ -18,6 +18,7 @@ import {
   createDeleteLeadNoteHandler,
   createDeletePairwiseMatchHandler,
   createDeleteSelfPlayMatchHandler,
+  createDeleteTelegramWebhookHandler,
   createDeleteVacancyHandler,
   createDownloadFileHandler,
   createEditStyleHandler,
@@ -31,8 +32,11 @@ import {
   createGetShadowEvalHandler,
   createGetStyleHandler,
   createGetStyleSkillsHandler,
+  createGetTelegramWebhookHandler,
   createIngestKbDocumentHandler,
+  createKbIngestHandler,
   createKbSuggestionCountsHandler,
+  createKbWipeHandler,
   createLeadCallbackHandler,
   createLeadDetailHandler,
   createListCoachProposalsHandler,
@@ -49,16 +53,19 @@ import {
   createListUsersHandler,
   createListVacanciesHandler,
   createPromoteLeadHandler,
+  createPurgeOutcomesHandler,
   createRecommendSkillsHandler,
   createRejectKbSuggestionHandler,
   createRejectLeadHandler,
   createReleaseHandler,
   createReplyHandler,
+  createReseedVacanciesHandler,
   createRollbackCoachProposalHandler,
   createRunCoachHandler,
   createSendIntakeHandler,
   createSetExperimentStatusHandler,
   createSetStyleSkillsHandler,
+  createSetTelegramWebhookHandler,
   createStartShadowEvalHandler,
   createStatusHandler,
   createStylePlaygroundHandler,
@@ -71,6 +78,7 @@ import {
   createUpdateVacancyHandler,
   createUpdateVisaDocsHandler,
   createUploadBookHandler,
+  createUserbotQueueStatsHandler,
   createUserDetailHandler,
 } from "./admin/api.ts";
 import { createLoginHandler, createLogoutHandler, createMeHandler } from "./admin/auth.ts";
@@ -381,6 +389,18 @@ export function createRouter(deps: AppDeps): Router {
   router.get("/admin/api/leads/:id", createLeadDetailHandler(apiDeps));
   router.patch("/admin/api/leads/:id/visa-docs", createUpdateVisaDocsHandler(apiDeps));
   router.delete("/admin/api/leads/:id", createDeleteLeadHandler(apiDeps));
+
+  // Operations / maintenance endpoints — CLI-equivalents exposed to the
+  // admin UI so common upkeep tasks (re-ingest KB, set Telegram webhook,
+  // purge analytics) don't require shell access.
+  router.post("/admin/api/ops/kb/ingest", createKbIngestHandler(apiDeps));
+  router.post("/admin/api/ops/kb/wipe", createKbWipeHandler(apiDeps));
+  router.get("/admin/api/ops/telegram/webhook", createGetTelegramWebhookHandler(apiDeps));
+  router.put("/admin/api/ops/telegram/webhook", createSetTelegramWebhookHandler(apiDeps));
+  router.delete("/admin/api/ops/telegram/webhook", createDeleteTelegramWebhookHandler(apiDeps));
+  router.post("/admin/api/ops/vacancies/reseed", createReseedVacanciesHandler(apiDeps));
+  router.post("/admin/api/ops/skill-outcomes/purge", createPurgeOutcomesHandler(apiDeps));
+  router.get("/admin/api/ops/userbot/queue-stats", createUserbotQueueStatsHandler(apiDeps));
 
   if (deps.enableTestHooks) {
     mountTestHooks(router, deps.sql);

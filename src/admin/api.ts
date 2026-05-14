@@ -67,6 +67,16 @@ export {
 } from "./routes/leads.ts";
 export { createUploadBookHandler } from "./routes/library.ts";
 export {
+  createDeleteTelegramWebhookHandler,
+  createGetTelegramWebhookHandler,
+  createKbIngestHandler,
+  createKbWipeHandler,
+  createPurgeOutcomesHandler,
+  createReseedVacanciesHandler,
+  createSetTelegramWebhookHandler,
+  createUserbotQueueStatsHandler,
+} from "./routes/ops.ts";
+export {
   createDeletePairwiseMatchHandler,
   createGetPairwiseMatchHandler,
   createListPairwiseMatchesHandler,

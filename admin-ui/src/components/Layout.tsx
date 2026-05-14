@@ -79,6 +79,7 @@ export function Layout({ admin, children }: LayoutProps) {
       key: "coach",
       badge: pendingCoachCount > 0 ? pendingCoachCount : undefined,
     },
+    { to: "/admin/ops", label: "Операции", key: null },
   ];
 
   const navItems = allNavItems.filter(({ key }) => key === null || visible(key));
