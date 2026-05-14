@@ -14,9 +14,12 @@ import type { ChatClient, ChatMessage } from "./chat.ts";
  *
  * Cost: 1 LLM call per turn (was 2 with separate reflect + vacancy-guard).
  *
- * Fail-open: on any LLM or parse error returns { grounded: true, vacancyOk: true }
- * — false negatives (one wasted reply) are cheaper than false positives
- * (silently dropping a legitimate answer).
+ * **Fail-closed by default**: on any LLM or parse error returns
+ * `{ grounded: false, vacancyOk: false, reason: "checker_error: …" }` so the
+ * caller treats the reply as ungrounded and escalates to silence/operator
+ * instead of shipping a potentially-hallucinated answer. The legacy
+ * fail-open behaviour can be restored with `RAG_FACT_CHECKER_FAIL_OPEN=1`
+ * (kept for test fixtures that drive the checker with mock failures).
  */
 
 export interface FactCheckInput {
@@ -85,6 +88,18 @@ const SYSTEM_PROMPT_WITH_VACANCIES = `Ты проверяешь ответ бо�
 
 // ── Main function ───────────────────────────────────────────────────────────
 
+/** Reply when the checker itself cannot run (LLM error / network).
+ *  Default: treat the answer as ungrounded so it gets silenced. The
+ *  RAG_FACT_CHECKER_FAIL_OPEN=1 env override restores the legacy
+ *  "let it through" behaviour for test environments that intentionally
+ *  inject failing LLM mocks. */
+function checkerErrorResult(reason: string): FactCheckResult {
+  if (process.env.RAG_FACT_CHECKER_FAIL_OPEN === "1") {
+    return { grounded: true, vacancyOk: true };
+  }
+  return { grounded: false, vacancyOk: false, reason: `checker_error: ${reason}` };
+}
+
 export async function checkFacts(input: FactCheckInput): Promise<FactCheckResult> {
   const OK: FactCheckResult = { grounded: true, vacancyOk: true };
 
@@ -120,8 +135,9 @@ export async function checkFacts(input: FactCheckInput): Promise<FactCheckResult
   try {
     raw = await input.chat.complete(messages, { temperature: 0.0 });
   } catch (err) {
-    console.error("[fact-checker] LLM call failed; treating as ok:", err);
-    return OK;
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[fact-checker] LLM call failed:", err);
+    return checkerErrorResult(`llm_call: ${msg}`);
   }
 
   return parseFactCheckResult(raw);
