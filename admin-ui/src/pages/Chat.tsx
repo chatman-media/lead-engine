@@ -169,7 +169,6 @@ export function Chat() {
   }
 
   const isHuman = conv.mode === "human";
-  const isQueued = conv.mode === "queued";
 
   return (
     <div className="chat-view fade-in">
