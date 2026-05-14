@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { ws } from "../App.tsx";
 import { type Admin, api } from "../api.ts";
+import { useTabVisibility } from "../useTabVisibility.ts";
 
 interface LayoutProps {
   admin: Admin;
@@ -48,28 +49,39 @@ export function Layout({ admin, children }: LayoutProps) {
     navigate("/admin/login", { replace: true });
   }
 
-  const navItems = [
-    { to: "/admin/status", label: "Status" },
-    { to: "/admin/analytics", label: "Analytics" },
-    { to: "/admin/chats", label: "Chats", badge: queuedCount > 0 ? queuedCount : undefined },
-    { to: "/admin/leads", label: "Leads" },
-    { to: "/admin/users", label: "Users" },
-    { to: "/admin/vacancies", label: "Vacancies" },
-    { to: "/admin/kb", label: "Knowledge base" },
+  const { visible } = useTabVisibility();
+
+  const allNavItems = [
+    { to: "/admin/status", label: "Status", key: null },
+    { to: "/admin/analytics", label: "Analytics", key: "analytics" },
+    {
+      to: "/admin/chats",
+      label: "Chats",
+      key: null,
+      badge: queuedCount > 0 ? queuedCount : undefined,
+    },
+    { to: "/admin/leads", label: "Leads", key: null },
+    { to: "/admin/users", label: "Users", key: null },
+    { to: "/admin/vacancies", label: "Vacancies", key: "vacancies" },
+    { to: "/admin/kb", label: "Knowledge base", key: null },
     {
       to: "/admin/kb-suggestions",
       label: "KB Suggestions",
+      key: "kb-suggestions",
       badge: pendingKbCount > 0 ? pendingKbCount : undefined,
     },
-    { to: "/admin/styles", label: "Sales styles" },
-    { to: "/admin/skills", label: "Skills" },
-    { to: "/admin/self-play", label: "Self-play" },
+    { to: "/admin/styles", label: "Sales styles", key: "styles" },
+    { to: "/admin/skills", label: "Skills", key: "skills" },
+    { to: "/admin/self-play", label: "Self-play", key: "self-play" },
     {
       to: "/admin/coach",
       label: "Coach",
+      key: "coach",
       badge: pendingCoachCount > 0 ? pendingCoachCount : undefined,
     },
   ];
+
+  const navItems = allNavItems.filter(({ key }) => key === null || visible(key));
 
   return (
     <div className="layout">
@@ -106,6 +118,9 @@ export function Layout({ admin, children }: LayoutProps) {
         </nav>
 
         <div className="sidebar-footer">
+          <NavLink to="/admin/settings" className="nav-item" style={{ marginBottom: 8 }}>
+            <span>Settings</span>
+          </NavLink>
           <div className="sidebar-email">{admin.email}</div>
           <button className="btn btn-ghost btn-sm btn-block" onClick={handleLogout}>
             Sign out
