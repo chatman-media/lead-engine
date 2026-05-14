@@ -128,6 +128,10 @@ Telegram. The `secret` lives in the path; Telegram also sends it in
 the `X-Telegram-Bot-Api-Secret-Token` header — both must match what
 the bot expects (see `src/telegram/webhook.ts`).
 
+**Alternative: from the admin UI.** Once an admin account exists,
+`/admin/ops` exposes the same three actions (info / set / delete) as
+buttons — no shell access required.
+
 ## Persistent data
 
 All state is stored in PostgreSQL (configured via `DATABASE_URL` in `.env`).
@@ -151,16 +155,22 @@ available in the dashboard.
 
 ## Ingesting the KB inside the container
 
-Two ways:
+Three ways, pick whichever fits the situation:
 
-**A. Copy the corpus into the volume and ingest:**
+**A. From the admin UI (simplest).** Open `/admin/ops` → "База знаний" →
+choose `kb/curated/` or `kb/books/` → "Запустить ingest". The page
+shows the per-run summary (documents / chunks / skipped). Requires
+`kb/` to be mounted into the container (the volume is uncommented in
+`docker-compose.yml`).
+
+**B. Copy the corpus into the volume and ingest from the container:**
 
 ```bash
 # Mount the kb dir read-only; uncomment the volume in docker-compose.yml
 docker compose exec app bun scripts/ingest.ts /app/kb/curated
 ```
 
-**B. From the host, into a one-shot run:**
+**C. From the host, into a one-shot run:**
 
 ```bash
 docker compose run --rm -v $PWD/kb:/app/kb:ro app \
@@ -170,6 +180,43 @@ docker compose run --rm -v $PWD/kb:/app/kb:ro app \
 Topic-routed retrieval picks up the immediate sub-directory name as
 the topic (`/app/kb/curated/visa/*.md` → topic=visa). See
 [docs/RAG_LAYERS.md](RAG_LAYERS.md#6-topic-routed-retrieval--rag_topic_routingtrue).
+
+## Recovering after a database wipe
+
+If the DB volume gets lost (developer ran `dropdb`, cloud snapshot
+restore went wrong, ...), boot the app once with a fresh DB and the
+following auto-restore happens via `runMigrations()` in
+[src/index.ts](../src/index.ts):
+
+- schema + indexes + pgvector extension (idempotent, via
+  `pg_schema.sql`)
+- built-in sales styles (`seedBuiltinStyles`)
+- skills catalogue (`seedSkillCatalogue`)
+- default Infinity vacancies (`seedInfinityVacancies`)
+
+These three things need a manual step (no source of truth in the
+schema):
+
+1. **Admin account** — `bun scripts/create-admin.ts <email> <password>`
+   (CLI by design — UI is gated behind admins).
+2. **Telegram webhook** — set via `/admin/ops` ("Telegram" panel) or
+   `bun scripts/set-webhook.ts set https://...`.
+3. **Knowledge base** — re-ingest from `kb/curated` (and `kb/books` if
+   you used books) via `/admin/ops` ("База знаний" panel) or
+   `bun scripts/ingest.ts kb/curated`. The source files in `kb/` are
+   git-tracked, so the corpus is recoverable as long as the working
+   tree is intact.
+
+Manually-curated rows that have no source-of-truth on disk are NOT
+recoverable without a database backup:
+
+- `kb_suggestions` (operator decisions on unanswered questions)
+- `vacancies` rows added through the admin UI (the seed only restores
+  the defaults; per-instance edits are lost)
+- `lead_notes`, `leads`, `conversations`, `messages` history
+- `coach_proposals`, `shadow_evaluations`, ELO ratings
+
+Run `pg_dump` on a cron — see [Persistent data](#persistent-data) above.
 
 ## Userbot (MTProto) in production
 
