@@ -320,5 +320,10 @@ CREATE TABLE IF NOT EXISTS userbot_send_queue (
   text        TEXT    NOT NULL,
   created_at  INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER,
   sent_at     INTEGER,
-  error       TEXT
+  error       TEXT,
+  attempts    INTEGER NOT NULL DEFAULT 0
 );
+-- Existing deployments predate the attempts column; add it idempotently.
+ALTER TABLE userbot_send_queue ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_userbot_queue_pending
+  ON userbot_send_queue(id) WHERE sent_at IS NULL;
