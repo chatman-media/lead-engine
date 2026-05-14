@@ -194,27 +194,34 @@ export function Chat() {
         </div>
 
         <div className="chat-header-actions">
-          {(isQueued || isHuman) && (
-            <span className={`mode-chip ${conv.mode}`} data-testid="mode-badge">
-              {conv.mode}
-            </span>
-          )}
-
-          {!isHuman && (
-            <button onClick={handleTake} data-testid="take-btn" className="btn btn-warn btn-sm">
-              Take over
-            </button>
-          )}
-
-          {isHuman && (
+          {/* Mode selector — segmented control */}
+          <div className="mode-selector" data-testid="mode-selector">
             <button
-              onClick={handleRelease}
+              className={`mode-btn ${conv.mode === "ai" ? "mode-btn-active" : ""}`}
+              onClick={conv.mode !== "ai" ? handleRelease : undefined}
+              disabled={conv.mode === "ai"}
               data-testid="release-btn"
-              className="btn btn-ghost btn-sm"
+              title="Бот отвечает автоматически"
             >
-              Release
+              🤖 Авто
             </button>
-          )}
+            <button
+              className={`mode-btn ${conv.mode === "queued" ? "mode-btn-active mode-btn-queued" : ""}`}
+              disabled
+              title="Ждёт оператора"
+            >
+              ⏳ Очередь
+            </button>
+            <button
+              className={`mode-btn ${conv.mode === "human" ? "mode-btn-active mode-btn-human" : ""}`}
+              onClick={conv.mode !== "human" ? handleTake : undefined}
+              disabled={conv.mode === "human"}
+              data-testid="take-btn"
+              title="Оператор отвечает вручную"
+            >
+              👤 Я
+            </button>
+          </div>
 
           <button
             onClick={handlePromoteLead}

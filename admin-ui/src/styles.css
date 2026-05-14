@@ -335,6 +335,49 @@ input, textarea {
 .mode-chip.queued { color: var(--amber); border-color: var(--amber); }
 .mode-chip.human  { color: var(--green); border-color: var(--green); }
 
+/* ─── Mode selector (segmented control) ──────────────── */
+
+.mode-selector {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.mode-btn {
+  padding: 4px 11px;
+  font-size: 12px;
+  font-family: var(--mono);
+  background: var(--bg-2);
+  color: var(--text-3);
+  border: none;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.mode-btn:last-child { border-right: none; }
+
+.mode-btn:not(:disabled):hover {
+  background: var(--bg-3, var(--border));
+  color: var(--text);
+}
+
+.mode-btn-active {
+  background: var(--bg-3, var(--border)) !important;
+  color: var(--text) !important;
+  font-weight: 600;
+  cursor: default;
+}
+
+.mode-btn-active.mode-btn-queued {
+  color: var(--amber) !important;
+}
+
+.mode-btn-active.mode-btn-human {
+  color: var(--green) !important;
+}
+
 /* ─── Empty / Loading ─────────────────────────────────── */
 
 .empty {
