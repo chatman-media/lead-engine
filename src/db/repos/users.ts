@@ -47,9 +47,15 @@ export class UsersRepo {
     status?: UserStatus;
   }): Promise<UserRow> {
     const status: UserStatus = input.status ?? "new";
+    // ON CONFLICT against the UNIQUE index on `tg_user_id` makes this safe
+    // under concurrent first-message + first-callback (two webhook calls
+    // arriving back-to-back used to race here and produce two user rows).
+    // DO UPDATE on a sentinel column lets RETURNING fire for the existing
+    // row as well; DO NOTHING would skip RETURNING on conflict.
     const [row] = await this.sql<UserRow[]>`
       INSERT INTO users (tg_user_id, tg_username, status)
       VALUES (${input.tgUserId}, ${input.tgUsername ?? null}, ${status})
+      ON CONFLICT (tg_user_id) DO UPDATE SET tg_user_id = EXCLUDED.tg_user_id
       RETURNING *
     `;
     if (!row) throw new Error("Failed to create user");

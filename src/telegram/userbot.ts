@@ -11,7 +11,12 @@ import { LeadsRepo } from "../db/repos/leads.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
 import { SkillsRepo } from "../db/repos/skills.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
-import { dequeuePending, markFailed, markSent } from "../db/repos/userbot-send-queue.ts";
+import {
+  dequeuePending,
+  MAX_SEND_ATTEMPTS,
+  markFailed,
+  markSent,
+} from "../db/repos/userbot-send-queue.ts";
 import { loadUserbotSession, saveUserbotSession } from "../db/repos/userbot-session.ts";
 import { UsersRepo } from "../db/repos/users.ts";
 import { VacanciesRepo } from "../db/repos/vacancies.ts";
@@ -283,8 +288,23 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   const experiments = new ExperimentsRepo(db);
   const vacancies = new VacanciesRepo(db);
   const leads = new LeadsRepo(db);
-  // Per-user last-processed timestamp for rate limiting.
+  // Per-user last-processed timestamp for rate limiting. Bounded so a
+  // long-running process doesn't accumulate one entry per ever-seen user
+  // forever — when over the cap, drop the half that hasn't been seen in
+  // the longest time (Map preserves insertion order; entries get
+  // rewritten on every hit so iteration order tracks recency).
   const lastProcessedAt = new Map<number, number>();
+  const LAST_PROCESSED_CAP = 10_000;
+  function pruneLastProcessed(): void {
+    if (lastProcessedAt.size <= LAST_PROCESSED_CAP) return;
+    const drop = Math.floor(LAST_PROCESSED_CAP / 2);
+    const it = lastProcessedAt.keys();
+    for (let i = 0; i < drop; i++) {
+      const k = it.next();
+      if (k.done) break;
+      lastProcessedAt.delete(k.value);
+    }
+  }
 
   client.addEventHandler(
     async (event) => {
@@ -309,7 +329,9 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
         );
         return;
       }
+      lastProcessedAt.delete(tgUserId);
       lastProcessedAt.set(tgUserId, now);
+      pruneLastProcessed();
 
       const userExisting = await users.byTgId(tgUserId);
       let user = userExisting;
@@ -409,7 +431,22 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   // Drain admin-reply send queue — picks up messages enqueued by the main process
   // so they are sent from Alina's personal account instead of the bot.
   const SEND_QUEUE_POLL_MS = 2_000;
+  // In-flight guard: if a previous tick is still running (slow Telegram
+  // send / network blip), skip this tick. dequeuePending already uses
+  // FOR UPDATE SKIP LOCKED so multi-instance is safe, but a single
+  // instance shouldn't waste CPU on overlapping drains either.
+  let draining = false;
   const sendQueueHandle = setInterval(async () => {
+    if (draining) return;
+    draining = true;
+    try {
+      await drainSendQueue();
+    } finally {
+      draining = false;
+    }
+  }, SEND_QUEUE_POLL_MS);
+
+  async function drainSendQueue(): Promise<void> {
     let pending: Awaited<ReturnType<typeof dequeuePending>>;
     try {
       pending = await dequeuePending(db);
@@ -461,9 +498,16 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
         await markFailed(db, row.id, err instanceof Error ? err.message : String(err)).catch(
           () => undefined,
         );
+        // Surface the moment a row hits the attempts cap so an operator
+        // can see in logs why a message stopped retrying.
+        if (row.attempts >= MAX_SEND_ATTEMPTS - 1) {
+          console.warn(
+            `[userbot] send-queue: row id=${row.id} hit attempt cap (${MAX_SEND_ATTEMPTS}), giving up`,
+          );
+        }
       }
     }
-  }, SEND_QUEUE_POLL_MS);
+  }
   if (typeof (sendQueueHandle as { unref?: () => void }).unref === "function") {
     (sendQueueHandle as { unref: () => void }).unref();
   }

@@ -19,6 +19,7 @@ import {
   createDeletePairwiseMatchHandler,
   createDeleteSelfPlayMatchHandler,
   createDeleteTelegramWebhookHandler,
+  createDeleteUserDataHandler,
   createDeleteVacancyHandler,
   createDownloadFileHandler,
   createEditStyleHandler,
@@ -146,11 +147,23 @@ function rateLimited(
 export function createRouter(deps: AppDeps): Router {
   const router = new Router();
 
-  router.get("/health", () =>
-    html(
+  // Liveness + readiness combined: pings the DB so that an orchestrator
+  // (fly, k8s) gets a red dot during a Postgres outage instead of a false
+  // green. Cheap enough at SELECT-1 frequency to call on every probe.
+  router.get("/health", async () => {
+    try {
+      await deps.sql`SELECT 1`;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return new Response(
+        `<!doctype html><html><body><main id="health">db-unreachable</main><pre>${msg}</pre></body></html>`,
+        { status: 503, headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    }
+    return html(
       `<!doctype html><html><head><meta charset="utf-8"><title>tg-chatbot health</title></head><body><main id="health">ok</main></body></html>`,
-    ),
-  );
+    );
+  });
 
   // Prometheus text-format scrape endpoint. Unauthenticated by design —
   // counters are non-sensitive, and the reverse proxy typically restricts
@@ -283,6 +296,9 @@ export function createRouter(deps: AppDeps): Router {
   // in the admin chat view; admin session cookie is the auth.
   router.get("/admin/api/tg-files/:fileId", createDownloadFileHandler(apiDeps));
   router.patch("/admin/api/users/:id/memory", createUpdateUserMemoryHandler(apiDeps));
+  // GDPR right-to-erasure: drops every PII row for one candidate and
+  // tombstones the users row itself. Single endpoint, transactional.
+  router.delete("/admin/api/users/:id/data", createDeleteUserDataHandler(apiDeps));
   // Detail view — register AFTER the more-specific :id/memory sub-path so
   // the literal sub-path matches first (router does linear scan).
   router.get("/admin/api/users/:id", createUserDetailHandler(apiDeps));

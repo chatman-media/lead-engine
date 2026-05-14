@@ -138,20 +138,55 @@ All state is stored in PostgreSQL (configured via `DATABASE_URL` in `.env`).
 The bot has no local data volume — a container restart or replacement
 leaves all data intact in the database.
 
-Back up the database using `pg_dump`:
+### One-off backup
 
 ```bash
-pg_dump $DATABASE_URL -Fc -f tg-chatbot-$(date +%Y%m%d).dump
+scripts/backup.sh
+# writes to ./backups/tgchatbot-<utc-timestamp>.pgc
 ```
 
-Restore:
+`scripts/backup.sh` wraps `pg_dump --format=c --no-owner --no-privileges`
+and prunes archives older than `$BACKUP_KEEP` days (default 14). It
+also verifies the archive contains ≥10 tables before exiting 0 — a
+defensive check against a partial dump.
+
+### Restore
 
 ```bash
-pg_restore -d $DATABASE_URL tg-chatbot-XXXX.dump
+pg_restore -d $DATABASE_URL --clean --if-exists path/to/dump.pgc
+```
+
+`--clean --if-exists` drops the existing schema before importing — use
+when restoring into the active production DB. For a side-by-side
+restore (e.g. into a `tgchatbot_check` DB to validate the dump), drop
+both flags.
+
+### Scheduled daily backup (docker-compose sidecar)
+
+```yaml
+# docker-compose.yml — add alongside the `app` service
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    depends_on: { app: { condition: service_healthy } }
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      BACKUP_DIR: /backups
+      BACKUP_KEEP: "14"
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
+    entrypoint: ["sh", "-c", "while true; do /usr/local/bin/backup.sh; sleep 86400; done"]
+```
+
+For a single-host cron alternative without docker:
+
+```cron
+15 3 * * *  DATABASE_URL=postgres://... /opt/tg-chatbot/scripts/backup.sh >> /var/log/tg-backup.log 2>&1
 ```
 
 When using Supabase, point-in-time recovery and daily backups are
-available in the dashboard.
+available in the dashboard — the cron above is redundant in that case.
 
 ## Ingesting the KB inside the container
 

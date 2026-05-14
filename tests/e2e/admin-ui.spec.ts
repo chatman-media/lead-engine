@@ -76,7 +76,10 @@ test.describe("Admin Users page", () => {
     await loginPage(page);
     await page.goto("/admin/users");
     await expect(page.getByTestId("users-table")).toBeVisible();
-    await expect(page.getByTestId("user-count")).toHaveText("2");
+    // user-count is decorated as "— N" in the header; assert it contains
+    // the number rather than an exact match so a cosmetic prefix tweak
+    // doesn't break this spec.
+    await expect(page.getByTestId("user-count")).toContainText("2");
     await expect(page.getByText("@alice")).toBeVisible();
     await expect(page.getByText("@bob")).toBeVisible();
   });
@@ -177,7 +180,12 @@ test.describe("Admin Chat detail", () => {
     await page.getByTestId("take-btn").click();
     await expect(page.getByTestId("reply-input")).toBeVisible();
     await expect(page.getByTestId("release-btn")).toBeVisible();
-    await expect(page.getByTestId("mode-badge")).toHaveText("HUMAN");
+    // The segmented mode selector replaced the old `mode-badge` element:
+    // after take-over the take-btn becomes the active segment AND is
+    // disabled (no point clicking what you just turned on). Asserting the
+    // disabled state proves take-over actually flipped the conversation
+    // mode to "human" — the same invariant the old badge encoded.
+    await expect(page.getByTestId("take-btn")).toBeDisabled();
   });
 
   test("operator sends reply → appears in message list", async ({ page }) => {

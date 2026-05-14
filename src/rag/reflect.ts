@@ -1,4 +1,5 @@
 import type { ChatClient, ChatMessage } from "./chat.ts";
+import { stripCodeFences, stripThinkBlocks } from "./sanitize.ts";
 
 /**
  * Verifies that all factual claims in `answer` are grounded in `context`
@@ -76,8 +77,7 @@ export async function verifyAnswer(input: ReflectInput): Promise<ReflectResult> 
  *  failure — false negatives are cheap (one wasted reply), but false positives
  *  here would silently drop legitimate answers. Exported for unit tests. */
 export function parseReflection(raw: string): ReflectResult {
-  let s = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
-  s = s.replace(/```(?:json)?/gi, "").trim();
+  const s = stripCodeFences(stripThinkBlocks(raw)).trim();
   const start = s.indexOf("{");
   const end = s.lastIndexOf("}");
   if (start === -1 || end === -1 || end < start) return { grounded: true };

@@ -11,6 +11,30 @@ export type LeadState =
   | "submitted"
   | "closed";
 
+/**
+ * Lead-state transition guard. Permissive on purpose — operators
+ * routinely skip funnel steps (approve straight from intake_pending,
+ * jump directly to docs_complete after an offline submission, etc.).
+ * The guard only rejects writes out of terminal states (a bug that
+ * teleports a `closed` or `rejected` lead back into intake would be
+ * silent without it). "Same state" writes go through an idempotency
+ * branch in setState() and don't pass through this check.
+ */
+const TERMINAL_LEAD_TRANSITIONS: Readonly<Partial<Record<LeadState, ReadonlySet<LeadState>>>> = {
+  // From submitted you can only close out (e.g. mark archived).
+  submitted: new Set<LeadState>(["closed"]),
+  // Rejected leads also flow only into closed.
+  rejected: new Set<LeadState>(["closed"]),
+  // Closed is a sink. Resurrection would erase the audit trail.
+  closed: new Set<LeadState>(),
+};
+
+function isLegalLeadTransition(from: LeadState, to: LeadState): boolean {
+  const allowed = TERMINAL_LEAD_TRANSITIONS[from];
+  if (allowed === undefined) return true; // non-terminal: any transition OK
+  return allowed.has(to);
+}
+
 export interface LeadRow {
   id: number;
   user_id: number;
@@ -149,34 +173,51 @@ export class LeadsRepo {
     state: LeadState,
     opts: { adminId?: number; rejectedReason?: string } = {},
   ): Promise<LeadRow | null> {
-    const before = await this.byId(id);
-    if (!before) return null;
-    const sameState = before.state === state;
+    // Run the read + UPDATE + event-append inside a single transaction with
+    // SELECT … FOR UPDATE so a concurrent auto-promote (from webhook) and
+    // operator approve (from admin) can't both observe the same `before`
+    // state and produce a torn transition / duplicate lead_event row.
+    return this.sql.begin(async (tx) => {
+      const [before] = await tx<LeadRow[]>`
+        SELECT * FROM leads WHERE id = ${id} FOR UPDATE
+      `;
+      if (!before) return null;
+      const sameState = before.state === state;
 
-    const isDecision = state === "approved" || state === "rejected";
-    if (isDecision) {
-      await this.sql`
-        UPDATE leads
-        SET state = ${state}, decided_by_admin_id = ${opts.adminId ?? null},
-            decided_at = EXTRACT(EPOCH FROM NOW())::INTEGER,
-            rejected_reason = ${state === "rejected" ? (opts.rejectedReason ?? null) : null},
-            updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER
-        WHERE id = ${id}
-      `;
-    } else {
-      await this.sql`
-        UPDATE leads SET state = ${state}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
-      `;
-    }
-    if (!sameState) {
-      await this.appendEvent(id, {
-        fromState: before.state,
-        toState: state,
-        byAdminId: opts.adminId ?? null,
-        notes: state === "rejected" ? (opts.rejectedReason ?? null) : null,
-      });
-    }
-    return this.byId(id);
+      // Reject obviously-invalid transitions so a bug elsewhere can't
+      // teleport a closed/submitted lead back into intake. Same-state
+      // writes are tolerated (idempotent re-calls).
+      if (!sameState && !isLegalLeadTransition(before.state, state)) {
+        throw new Error(`illegal lead transition: ${before.state} → ${state}`);
+      }
+
+      const isDecision = state === "approved" || state === "rejected";
+      if (isDecision) {
+        await tx`
+          UPDATE leads
+          SET state = ${state}, decided_by_admin_id = ${opts.adminId ?? null},
+              decided_at = EXTRACT(EPOCH FROM NOW())::INTEGER,
+              rejected_reason = ${state === "rejected" ? (opts.rejectedReason ?? null) : null},
+              updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER
+          WHERE id = ${id}
+        `;
+      } else {
+        await tx`
+          UPDATE leads SET state = ${state}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+        `;
+      }
+      if (!sameState) {
+        await tx`
+          INSERT INTO lead_events (lead_id, from_state, to_state, by_admin_id, notes)
+          VALUES (${id}, ${before.state}, ${state}, ${opts.adminId ?? null}, ${
+            state === "rejected" ? (opts.rejectedReason ?? null) : null
+          })
+        `;
+        inc("lead_transitions_total", 1, { to_state: state });
+      }
+      const [after] = await tx<LeadRow[]>`SELECT * FROM leads WHERE id = ${id}`;
+      return after ?? null;
+    });
   }
 
   async setIntake(id: number, intakeJson: string): Promise<void> {

@@ -96,9 +96,9 @@ jobs:
     name: playwright e2e
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Don't block merges on flaky e2e for now — they run in parallel and
-    # the result is informational. Flip to required once stable.
-    continue-on-error: true
+    # E2E now blocks the merge. Playwright config sets retries=1 in CI
+    # to absorb a one-off network/scheduler hiccup without masking real
+    # regressions (retried runs are still reported separately).
 
     services:
       postgres:
