@@ -313,3 +313,12 @@ CREATE TABLE IF NOT EXISTS shadow_evaluations (
   completed_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_shadow_evaluations_proposal ON shadow_evaluations(proposal_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS userbot_send_queue (
+  id          SERIAL  PRIMARY KEY,
+  tg_user_id  BIGINT  NOT NULL,
+  text        TEXT    NOT NULL,
+  created_at  INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER,
+  sent_at     INTEGER,
+  error       TEXT
+);

@@ -194,6 +194,7 @@ export function createRouter(deps: AppDeps): Router {
   const apiDeps = {
     sql: deps.sql,
     telegram: deps.telegram,
+    userbotEnabled: config.userbot.enabled,
     // Thread the LLM clients through so the style playground endpoint can
     // run dry-run completions. Other admin endpoints don't need this; the
     // playground returns 503 when rag is undefined.
