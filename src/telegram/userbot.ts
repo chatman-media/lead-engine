@@ -11,6 +11,7 @@ import { LeadsRepo } from "../db/repos/leads.ts";
 import { MessagesRepo } from "../db/repos/messages.ts";
 import { SkillsRepo } from "../db/repos/skills.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
+import { dequeuePending, markFailed, markSent } from "../db/repos/userbot-send-queue.ts";
 import { loadUserbotSession, saveUserbotSession } from "../db/repos/userbot-session.ts";
 import { UsersRepo } from "../db/repos/users.ts";
 import { VacanciesRepo } from "../db/repos/vacancies.ts";
@@ -399,6 +400,32 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   // API; falls back to no-op on Node.
   if (typeof (sweepHandle as { unref?: () => void }).unref === "function") {
     (sweepHandle as { unref: () => void }).unref();
+  }
+
+  // Drain admin-reply send queue — picks up messages enqueued by the main process
+  // so they are sent from Alina's personal account instead of the bot.
+  const SEND_QUEUE_POLL_MS = 2_000;
+  const sendQueueHandle = setInterval(async () => {
+    let pending: Awaited<ReturnType<typeof dequeuePending>>;
+    try {
+      pending = await dequeuePending(db);
+    } catch {
+      return;
+    }
+    for (const row of pending) {
+      try {
+        await client.sendMessage(row.tg_user_id, { message: row.text });
+        await markSent(db, row.id);
+      } catch (err) {
+        console.error(`[userbot] send-queue failed tg_user_id=${row.tg_user_id}:`, err);
+        await markFailed(db, row.id, err instanceof Error ? err.message : String(err)).catch(
+          () => undefined,
+        );
+      }
+    }
+  }, SEND_QUEUE_POLL_MS);
+  if (typeof (sendQueueHandle as { unref?: () => void }).unref === "function") {
+    (sendQueueHandle as { unref: () => void }).unref();
   }
 
   console.log(

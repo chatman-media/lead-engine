@@ -18,6 +18,7 @@ import { SelfPlayMatchesRepo } from "../db/repos/self-play-matches.ts";
 import { SkillOutcomesRepo, StyleRatingsRepo } from "../db/repos/skill-outcomes.ts";
 import { SkillsRepo } from "../db/repos/skills.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
+import { enqueue } from "../db/repos/userbot-send-queue.ts";
 import { UsersRepo } from "../db/repos/users.ts";
 import { VacanciesRepo } from "../db/repos/vacancies.ts";
 import { attributeLeadOutcome } from "../leads/outcome-attribution.ts";
@@ -37,6 +38,9 @@ import { requireAdmin } from "./auth.ts";
 export interface AdminApiDeps {
   sql: Sql;
   telegram?: TelegramClient;
+  /** When true, manual admin replies are routed through the userbot send queue
+   *  so messages appear from Alina's personal account instead of the bot. */
+  userbotEnabled?: boolean;
   /** Optional event hooks for the websocket layer (or other listeners). */
   onConversationChanged?: (conversationId: number) => void;
   onMessageSent?: (input: { conversationId: number; tgUserId: number }) => void;
@@ -512,7 +516,13 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
 
     let tgMessageId: number | undefined;
     let tgError: string | undefined;
-    if (deps.telegram) {
+    if (deps.userbotEnabled) {
+      // Route through the userbot send queue — message will appear from Alina's account.
+      await enqueue(deps.sql, user.tg_user_id, text).catch((err) => {
+        tgError = err instanceof Error ? err.message : String(err);
+        console.error("[admin reply] userbot enqueue failed:", err);
+      });
+    } else if (deps.telegram) {
       try {
         const sent = await deps.telegram.sendMessage({
           chatId: user.tg_user_id,
