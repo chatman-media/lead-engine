@@ -1,3 +1,4 @@
+import { inc } from "../../metrics.ts";
 import type { Sql } from "../postgres.ts";
 
 export type LeadState =
@@ -100,6 +101,7 @@ export class LeadsRepo {
       INSERT INTO lead_events (lead_id, from_state, to_state, by_admin_id, notes)
       VALUES (${leadId}, ${input.fromState}, ${input.toState}, ${input.byAdminId}, ${input.notes})
     `;
+    inc("lead_transitions_total", 1, { to_state: input.toState });
   }
 
   async events(leadId: number): Promise<LeadEventRow[]> {
@@ -207,7 +209,7 @@ export class LeadsRepo {
         0
       ) + 1 AS next_seq
       FROM leads
-      WHERE application_id LIKE ${prefix + "%"}
+      WHERE application_id LIKE ${`${prefix}%`}
     `;
     const seq = row?.next_seq ?? 1;
     const applicationId = `${prefix}${String(seq).padStart(4, "0")}`;

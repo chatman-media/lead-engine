@@ -77,8 +77,10 @@ import { createLoginHandler, createLogoutHandler, createMeHandler } from "./admi
 import type { AdminBus } from "./admin/bus.ts";
 import { config } from "./config.ts";
 import type { Sql } from "./db/postgres.ts";
+import { renderPrometheus } from "./metrics.ts";
 import { createQuestionnaireGet, createQuestionnairePost } from "./questionnaire/routes.ts";
-import { html, Router } from "./router.ts";
+import { clientIp, RateLimiter } from "./rate-limit.ts";
+import { html, json, type RouteHandler, Router } from "./router.ts";
 import type { TelegramClient } from "./telegram/client.ts";
 import { createWebhookHandler, type RagDeps } from "./telegram/webhook.ts";
 import { mountTestHooks } from "./test-hooks.ts";
@@ -105,6 +107,34 @@ export interface AppDeps {
   visaChatId?: number | null;
 }
 
+// Rate limiters shared across the request lifetime. Telegram webhook is
+// generously sized (a busy chat can burst dozens of updates in a second),
+// admin login is tight to thwart credential stuffing. Disabled during
+// tests — fake "unknown" client IP would share one bucket and break
+// suites that hit the login endpoint repeatedly.
+const RATE_LIMIT_DISABLED =
+  process.env.TEST_HOOKS === "1" ||
+  process.env.NODE_ENV === "test" ||
+  process.env.BUN_ENV === "test" ||
+  process.env.RATE_LIMIT_DISABLED === "1";
+const webhookLimiter = new RateLimiter({ capacity: 60, refillPerSec: 30 });
+const adminLoginLimiter = new RateLimiter({ capacity: 10, refillPerSec: 0.5 });
+
+function rateLimited(
+  limiter: RateLimiter,
+  keyFn: (req: Request) => string,
+  inner: RouteHandler,
+): RouteHandler {
+  if (RATE_LIMIT_DISABLED) return inner;
+  return async (ctx) => {
+    const key = keyFn(ctx.req);
+    if (!limiter.check(key)) {
+      return json({ error: "rate limited" }, { status: 429, headers: { "retry-after": "1" } });
+    }
+    return inner(ctx);
+  };
+}
+
 export function createRouter(deps: AppDeps): Router {
   const router = new Router();
 
@@ -113,6 +143,18 @@ export function createRouter(deps: AppDeps): Router {
       `<!doctype html><html><head><meta charset="utf-8"><title>tg-chatbot health</title></head><body><main id="health">ok</main></body></html>`,
     ),
   );
+
+  // Prometheus text-format scrape endpoint. Unauthenticated by design —
+  // counters are non-sensitive, and the reverse proxy typically restricts
+  // /metrics to the monitoring VPC. If exposed publicly, place behind
+  // basic auth at the proxy layer.
+  router.get("/metrics", () => {
+    const body = renderPrometheus();
+    return new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/plain; version=0.0.4; charset=utf-8" },
+    });
+  });
 
   router.get("/", () =>
     html(
@@ -123,71 +165,80 @@ export function createRouter(deps: AppDeps): Router {
   // Eagerly build the leads-callback handler so the webhook can dispatch
   // inline-keyboard clicks. Built outside the route closure so apiDeps
   // is captured by reference once.
+  // Wrap the webhook in a per-IP token bucket — protection in case the
+  // secret URL leaks (a third party could otherwise flood the bot).
   router.post(
     "/telegram/:secret",
-    createWebhookHandler({
-      db: deps.sql,
-      telegram: deps.telegram,
-      webhookSecret: deps.webhookSecret,
-      rag: deps.rag,
-      awaitProcessing: deps.awaitWebhookProcessing,
-      // leadsChatId / visaChatId need to flow into the webhook itself
-      // (auto-intake gate, reply-to-card relay detection), not just
-      // the callback-query handler. Without this, runIntakeUpdate
-      // early-returns on `leadsChatId == null` and no auto-promotion
-      // ever happens — silently.
-      leadsChatId: deps.leadsChatId ?? null,
-      visaChatId: deps.visaChatId ?? null,
-      onCallbackQuery: createLeadCallbackHandler({
-        sql: deps.sql,
+    rateLimited(
+      webhookLimiter,
+      clientIp,
+      createWebhookHandler({
+        db: deps.sql,
         telegram: deps.telegram,
+        webhookSecret: deps.webhookSecret,
+        rag: deps.rag,
+        awaitProcessing: deps.awaitWebhookProcessing,
+        // leadsChatId / visaChatId need to flow into the webhook itself
+        // (auto-intake gate, reply-to-card relay detection), not just
+        // the callback-query handler. Without this, runIntakeUpdate
+        // early-returns on `leadsChatId == null` and no auto-promotion
+        // ever happens — silently.
         leadsChatId: deps.leadsChatId ?? null,
         visaChatId: deps.visaChatId ?? null,
-      }),
-      onEvent: (event) => {
-        switch (event.type) {
-          case "user-message-persisted":
-          case "assistant-replied":
-            deps.bus?.publish({
-              type: "message:new",
-              conversationId: event.conversationId,
-              tgUserId: event.tgUserId,
-            });
-            return;
-          case "conversation-mode-changed":
-            deps.bus?.publish({
-              type: "conversation:updated",
-              conversationId: event.conversationId,
-            });
-            return;
-          case "kb-suggestion:created": {
-            deps.bus?.publish({
-              type: "kb-suggestion:created",
-              suggestionId: event.suggestionId,
-              conversationId: event.conversationId,
-            });
-            // DM the admin in Telegram so they can jump to the chat immediately.
-            const adminTgId = config.admin.tgUserId;
-            if (adminTgId) {
-              const adminUrl = `${config.publicBaseUrl}/admin/kb-suggestions`;
-              deps.telegram
-                .sendMessage({
-                  chatId: adminTgId,
-                  text: `❓ Новый вопрос без ответа (conversation #${event.conversationId})\n\nОткрыть: ${adminUrl}`,
-                })
-                .catch(() => undefined);
+        onCallbackQuery: createLeadCallbackHandler({
+          sql: deps.sql,
+          telegram: deps.telegram,
+          leadsChatId: deps.leadsChatId ?? null,
+          visaChatId: deps.visaChatId ?? null,
+        }),
+        onEvent: (event) => {
+          switch (event.type) {
+            case "user-message-persisted":
+            case "assistant-replied":
+              deps.bus?.publish({
+                type: "message:new",
+                conversationId: event.conversationId,
+                tgUserId: event.tgUserId,
+              });
+              return;
+            case "conversation-mode-changed":
+              deps.bus?.publish({
+                type: "conversation:updated",
+                conversationId: event.conversationId,
+              });
+              return;
+            case "kb-suggestion:created": {
+              deps.bus?.publish({
+                type: "kb-suggestion:created",
+                suggestionId: event.suggestionId,
+                conversationId: event.conversationId,
+              });
+              // DM the admin in Telegram so they can jump to the chat immediately.
+              const adminTgId = config.admin.tgUserId;
+              if (adminTgId) {
+                const adminUrl = `${config.publicBaseUrl}/admin/kb-suggestions`;
+                deps.telegram
+                  .sendMessage({
+                    chatId: adminTgId,
+                    text: `❓ Новый вопрос без ответа (conversation #${event.conversationId})\n\nОткрыть: ${adminUrl}`,
+                  })
+                  .catch(() => undefined);
+              }
+              return;
             }
-            return;
           }
-        }
-      },
-    }),
+        },
+      }),
+    ),
   );
 
   router.get("/q/:token", createQuestionnaireGet(deps.sql));
   router.post("/q/:token", createQuestionnairePost(deps.sql));
 
-  router.post("/admin/api/login", createLoginHandler(deps.sql));
+  router.post(
+    "/admin/api/login",
+    rateLimited(adminLoginLimiter, clientIp, createLoginHandler(deps.sql)),
+  );
   router.post("/admin/api/logout", createLogoutHandler(deps.sql));
   router.get("/admin/api/me", createMeHandler(deps.sql));
 
