@@ -127,6 +127,10 @@ export function Chat() {
   async function handleSend() {
     const text = replyText.trim();
     if (!text) return;
+    // Clear the input optimistically before the API roundtrip so the
+    // operator can immediately start typing the next reply (and so the
+    // e2e test doesn't race the await on api.sendMessage).
+    setReplyText("");
     setSending(true);
     try {
       await api.sendMessage(convId, text);
@@ -135,10 +139,11 @@ export function Chat() {
       if (lastUserMsg) {
         setAddToKb({ question: lastUserMsg.text, answer: text });
       }
-      setReplyText("");
       reload();
     } catch (err) {
       alert(`Ошибка отправки: ${err instanceof Error ? err.message : String(err)}`);
+      // Restore the text so the operator doesn't have to retype it.
+      setReplyText(text);
     } finally {
       setSending(false);
     }
