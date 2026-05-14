@@ -5,16 +5,14 @@ import { StylesRepo } from "../../db/repos/styles.ts";
 import { json, type RouteHandler } from "../../router.ts";
 import { applyEditsToStyle, proposeStyleEdits } from "../../sales/coach.ts";
 import { type Style, StyleSchema } from "../../sales/types.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // ─── Coach-LLM proposals ──────────────────────────────────────────────
 
 /** GET /admin/api/coach — list proposals (filter by style + status). */
 export function createListCoachProposalsHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, url }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ url }) => {
     const repo = new CoachProposalsRepo(deps.sql);
     const styleSlug = url.searchParams.get("style") ?? undefined;
     const status = url.searchParams.get("status");
@@ -28,21 +26,19 @@ export function createListCoachProposalsHandler(deps: AdminApiDeps): RouteHandle
       proposals: await repo.list(opts),
       pending_count: await repo.countPending(),
     });
-  };
+  });
 }
 
 /** GET /admin/api/coach/:id — full proposal with parsed edits + rationale. */
 export function createGetCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const repo = new CoachProposalsRepo(deps.sql);
     const proposal = await repo.byId(id);
     if (!proposal) return json({ error: "not found" }, { status: 404 });
     return json({ proposal });
-  };
+  });
 }
 
 /**
@@ -54,9 +50,7 @@ export function createGetCoachProposalHandler(deps: AdminApiDeps): RouteHandler 
  * the playground endpoint's contract.
  */
 export function createRunCoachHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ req }) => {
     if (!deps.rag?.chat) {
       return json(
         { error: "LLM not configured — set LLM_PROVIDER + provider creds" },
@@ -110,17 +104,15 @@ export function createRunCoachHandler(deps: AdminApiDeps): RouteHandler {
       proposal,
     });
     return json({ proposal: { ...row, edits: proposal.edits, rationale: proposal.rationale } });
-  };
+  });
 }
 
 /** POST /admin/api/coach/:id/decide — operator marks proposal applied/dismissed.
  *  Body: { status: 'applied' | 'dismissed' }. Idempotent: 409 if already decided. */
 export function createDecideCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     let body: { status?: string };
     try {
       body = await req.json();
@@ -131,7 +123,7 @@ export function createDecideCoachProposalHandler(deps: AdminApiDeps): RouteHandl
       return json({ error: "status must be 'applied' or 'dismissed'" }, { status: 400 });
     }
     const repo = new CoachProposalsRepo(deps.sql);
-    const ok = await repo.decide({ id, status: body.status, adminId: ctx.adminId });
+    const ok = await repo.decide({ id, status: body.status, adminId: admin.adminId });
     if (!ok) {
       // Either not found OR already decided — distinguish for better UX.
       const existing = await repo.byId(id);
@@ -139,7 +131,7 @@ export function createDecideCoachProposalHandler(deps: AdminApiDeps): RouteHandl
       return json({ error: `already ${existing.status}` }, { status: 409 });
     }
     return json({ proposal: await repo.byId(id) });
-  };
+  });
 }
 
 /**
@@ -160,11 +152,9 @@ export function createDecideCoachProposalHandler(deps: AdminApiDeps): RouteHandl
  * Returns: { proposal, new_style: { id, slug, version } }
  */
 export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     let body: { skip_skills?: boolean } = {};
     try {
@@ -241,7 +231,7 @@ export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandle
     const decided = await proposalsRepo.decide({
       id,
       status: "applied",
-      adminId: ctx.adminId,
+      adminId: admin.adminId,
     });
     if (!decided) {
       // Race: another admin decided between our byId and now. Style fork
@@ -259,18 +249,16 @@ export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandle
       proposal: await proposalsRepo.byId(id),
       new_style: newRow,
     });
-  };
+  });
 }
 
 /** POST /admin/api/coach/:id/rollback — deactivate the new version,
  *  reactivate the parent. Conversations pinned to the new version keep
  *  working (FK is to row id, not slug — version chain semantics). */
 export function createRollbackCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const proposalsRepo = new CoachProposalsRepo(deps.sql);
     const proposal = await proposalsRepo.byId(id);
     if (!proposal) return json({ error: "proposal not found" }, { status: 404 });
@@ -298,19 +286,17 @@ export function createRollbackCoachProposalHandler(deps: AdminApiDeps): RouteHan
       deactivated: { id: newRow.id, slug: newRow.slug, version: newRow.version },
       reactivated: { id: parentRow.id, slug: parentRow.slug, version: parentRow.version },
     });
-  };
+  });
 }
 
 /** DELETE /admin/api/coach/:id — clear noisy proposals. */
 export function createDeleteCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const proposalsRepo = new CoachProposalsRepo(deps.sql);
     const ok = await proposalsRepo.delete(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
-  };
+  });
 }

@@ -13,7 +13,7 @@ import { KbRepo } from "../../db/repos/kb.ts";
 import { seedInfinityVacancies, VacanciesRepo } from "../../db/repos/vacancies.ts";
 import { ingestDirectory } from "../../rag/ingest.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // Whitelisted ingest sources — accept only known KB roots so a request
@@ -37,10 +37,7 @@ interface IngestBody {
  * Idempotent: ingestFile dedupes by SHA-256.
  */
 export function createKbIngestHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
+  return withAdmin(deps.sql, async ({ req }) => {
     if (!deps.rag?.embedder) {
       return json(
         { error: "embedder not configured — set OLLAMA_HOST or LLM_PROVIDER" },
@@ -51,12 +48,8 @@ export function createKbIngestHandler(deps: AdminApiDeps): RouteHandler {
       return json({ error: "LLM provider not configured" }, { status: 503 });
     }
 
-    let body: IngestBody;
-    try {
-      body = (await req.json()) as IngestBody;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<IngestBody>(req);
+    if (body instanceof Response) return body;
     const source = typeof body.source === "string" ? body.source : "curated";
     const root = KB_INGEST_ROOTS[source];
     if (!root) {
@@ -117,7 +110,7 @@ export function createKbIngestHandler(deps: AdminApiDeps): RouteHandler {
       provider: config.llm.embeddingProvider,
       dim: activeEmbeddingDim(),
     });
-  };
+  });
 }
 
 /**
@@ -126,9 +119,7 @@ export function createKbIngestHandler(deps: AdminApiDeps): RouteHandler {
  * `confirm: "yes"` in the body to dodge accidental clicks.
  */
 export function createKbWipeHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ req }) => {
     let body: { confirm?: unknown };
     try {
       body = (await req.json()) as typeof body;
@@ -151,16 +142,14 @@ export function createKbWipeHandler(deps: AdminApiDeps): RouteHandler {
       deleted_chunks: chunksRow?.n ?? 0,
       deleted_documents: docsRow?.n ?? 0,
     });
-  };
+  });
 }
 
 // ─── Telegram webhook ──────────────────────────────────────────────────
 
 /** GET /admin/api/ops/telegram/webhook → { url, pending_update_count } */
 export function createGetTelegramWebhookHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async () => {
     if (!deps.telegram) return json({ error: "telegram client not configured" }, { status: 503 });
     try {
       const info = await deps.telegram.getWebhookInfo();
@@ -168,21 +157,15 @@ export function createGetTelegramWebhookHandler(deps: AdminApiDeps): RouteHandle
     } catch (err) {
       return json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
     }
-  };
+  });
 }
 
 /** PUT /admin/api/ops/telegram/webhook  body: { url, dropPending? } */
 export function createSetTelegramWebhookHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ req }) => {
     if (!deps.telegram) return json({ error: "telegram client not configured" }, { status: 503 });
-    let body: { url?: unknown; dropPending?: unknown };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<{ url?: unknown; dropPending?: unknown }>(req);
+    if (body instanceof Response) return body;
     const url = typeof body.url === "string" ? body.url.trim() : "";
     if (!url || !/^https:\/\//.test(url)) {
       return json({ error: "url must start with https://" }, { status: 400 });
@@ -198,14 +181,12 @@ export function createSetTelegramWebhookHandler(deps: AdminApiDeps): RouteHandle
     } catch (err) {
       return json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
     }
-  };
+  });
 }
 
 /** DELETE /admin/api/ops/telegram/webhook  body: { dropPending? } */
 export function createDeleteTelegramWebhookHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ req }) => {
     if (!deps.telegram) return json({ error: "telegram client not configured" }, { status: 503 });
     let body: { dropPending?: unknown };
     try {
@@ -219,20 +200,18 @@ export function createDeleteTelegramWebhookHandler(deps: AdminApiDeps): RouteHan
     } catch (err) {
       return json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
     }
-  };
+  });
 }
 
 // ─── Maintenance ───────────────────────────────────────────────────────
 
 /** POST /admin/api/ops/vacancies/reseed — re-runs seedInfinityVacancies. */
 export function createReseedVacanciesHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async () => {
     const repo = new VacanciesRepo(deps.sql);
     const result = await seedInfinityVacancies(repo);
     return json({ ok: true, ...result });
-  };
+  });
 }
 
 interface PurgeBody {
@@ -246,9 +225,7 @@ interface PurgeBody {
  * Pairwise / shadow / coach rows are intentionally preserved (audit trail).
  */
 export function createPurgeOutcomesHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ req }) => {
     let body: PurgeBody;
     try {
       body = (await req.json()) as PurgeBody;
@@ -305,7 +282,7 @@ export function createPurgeOutcomesHandler(deps: AdminApiDeps): RouteHandler {
       `;
     }
     return json({ ok: true, days, deleted: willDelete });
-  };
+  });
 }
 
 /**
@@ -314,9 +291,7 @@ export function createPurgeOutcomesHandler(deps: AdminApiDeps): RouteHandler {
  * are still waiting for the userbot worker to pick up.
  */
 export function createUserbotQueueStatsHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async () => {
     const rows = await deps.sql<{ status: string; count: number }[]>`
       SELECT status, COUNT(*)::INTEGER AS count
       FROM userbot_send_queue
@@ -326,5 +301,5 @@ export function createUserbotQueueStatsHandler(deps: AdminApiDeps): RouteHandler
       by_status: Object.fromEntries(rows.map((r) => [r.status, r.count])),
       userbot_enabled: !!deps.userbotEnabled,
     });
-  };
+  });
 }

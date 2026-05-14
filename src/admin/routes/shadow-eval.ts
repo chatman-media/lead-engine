@@ -12,7 +12,7 @@ import { json, type RouteHandler } from "../../router.ts";
 import { CANDIDATE_BY_SLUG, CANDIDATE_PERSONAS } from "../../sales/self-play/personas.ts";
 import { runShadowEval } from "../../sales/shadow-eval.ts";
 import type { Style } from "../../sales/types.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // ─── Shadow A/B evaluations ────────────────────────────────────────────
@@ -25,14 +25,12 @@ import type { AdminApiDeps } from "../shared.ts";
  * GET /admin/api/coach/:id/shadow-eval until status changes.
  */
 export function createStartShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ req, params }) => {
     if (!deps.rag?.chat || !deps.rag?.embedder) {
       return json({ error: "LLM not configured" }, { status: 503 });
     }
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     let body: { runs?: number; personas?: string[]; max_turns?: number } = {};
     try {
@@ -122,18 +120,16 @@ export function createStartShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
     });
 
     return json({ shadow_eval: evalRow });
-  };
+  });
 }
 
 /** GET /admin/api/coach/:id/shadow-eval — latest eval status (polled). */
 export function createGetShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const shadowRepo = new ShadowEvaluationsRepo(deps.sql);
     const row = await shadowRepo.latestForProposal(id);
     return json({ shadow_eval: row });
-  };
+  });
 }

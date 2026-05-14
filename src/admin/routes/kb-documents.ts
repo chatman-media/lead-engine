@@ -1,16 +1,14 @@
 import { KbRepo } from "../../db/repos/kb.ts";
 import { ingestText } from "../../rag/ingest.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 const KB_TOPIC_MAX = 64;
 
 export function createListKbDocumentsHandler(deps: AdminApiDeps): RouteHandler {
   const kb = new KbRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ req }) => {
     const url = new URL(req.url);
     // Sentinel "__untagged__" lets the UI request NULL-topic docs without
     // overloading the empty string. Other values pass through verbatim.
@@ -25,16 +23,14 @@ export function createListKbDocumentsHandler(deps: AdminApiDeps): RouteHandler {
       topics: await kb.listTopics(),
       totals: { documents: await kb.countDocuments(), chunks: await kb.countChunks() },
     });
-  };
+  });
 }
 
 export function createGetKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
   const kb = new KbRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const doc = await kb.getDocument(id);
     if (!doc) return json({ error: "not found" }, { status: 404 });
     // Truncate chunk text in the listing — full text is rarely useful at the
@@ -46,23 +42,17 @@ export function createGetKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
       text: c.text,
     }));
     return json({ document: doc, chunks });
-  };
+  });
 }
 
 export function createUpdateKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
   const kb = new KbRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
-    let body: { topic?: unknown };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<{ topic?: unknown }>(req);
+    if (body instanceof Response) return body;
     // `null` (or empty string) clears the tag; any string trims + length-checks.
     let nextTopic: string | null;
     if (body.topic === null || body.topic === "") {
@@ -82,20 +72,18 @@ export function createUpdateKbDocumentHandler(deps: AdminApiDeps): RouteHandler 
     const updated = await kb.setTopic(id, nextTopic);
     if (!updated) return json({ error: "not found" }, { status: 404 });
     return json({ document: updated });
-  };
+  });
 }
 
 export function createDeleteKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
   const kb = new KbRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const ok = await kb.deleteDocument(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
-  };
+  });
 }
 
 const KB_TITLE_MAX = 200;
@@ -115,10 +103,7 @@ const KB_BODY_MAX = 200_000; // 200KB upper bound — enough for any single doc
  * change deletes + re-creates with the new topic.
  */
 export function createIngestKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
+  return withAdmin(deps.sql, async ({ req }) => {
     if (!deps.rag?.embedder) {
       return json(
         { error: "embedder not configured — set OLLAMA_HOST or LLM_PROVIDER" },
@@ -126,12 +111,8 @@ export function createIngestKbDocumentHandler(deps: AdminApiDeps): RouteHandler 
       );
     }
 
-    let body: { title?: unknown; body?: unknown; topic?: unknown };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<{ title?: unknown; body?: unknown; topic?: unknown }>(req);
+    if (body instanceof Response) return body;
 
     const title = typeof body.title === "string" ? body.title.trim() : "";
     const text = typeof body.body === "string" ? body.body : "";
@@ -182,5 +163,5 @@ export function createIngestKbDocumentHandler(deps: AdminApiDeps): RouteHandler 
         { status: 500 },
       );
     }
-  };
+  });
 }

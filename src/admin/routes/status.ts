@@ -4,7 +4,7 @@ import { LeadsRepo } from "../../db/repos/leads.ts";
 import { StylesRepo } from "../../db/repos/styles.ts";
 import { VacanciesRepo } from "../../db/repos/vacancies.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { withAdmin } from "../handler-helpers.ts";
 import { type AdminApiDeps, readBotHealth } from "../shared.ts";
 
 /**
@@ -16,10 +16,7 @@ import { type AdminApiDeps, readBotHealth } from "../shared.ts";
  * counts. Safe to render to any authenticated admin.
  */
 export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
+  return withAdmin(deps.sql, async () => {
     // Provider config — names and dims only, no API keys.
     const chatProvider = config.llm.provider;
     const embedProvider = config.llm.embeddingProvider;
@@ -164,5 +161,5 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
       },
       bot_health: await readBotHealth(deps),
     });
-  };
+  });
 }

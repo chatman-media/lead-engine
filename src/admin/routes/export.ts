@@ -1,5 +1,5 @@
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, withAdmin } from "../handler-helpers.ts";
 import {
   type AdminApiDeps,
   buildExportHeaders,
@@ -12,11 +12,9 @@ import {
 } from "../shared.ts";
 
 export function createExportConversationHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     const headers = await buildExportHeaders(deps.sql, [id]);
     if (headers.size === 0) return json({ error: "not found" }, { status: 404 });
@@ -24,14 +22,11 @@ export function createExportConversationHandler(deps: AdminApiDeps): RouteHandle
 
     const conv = [...headers.values()][0]!;
     return jsonlResponse([conv], `conversation-${id}.jsonl`);
-  };
+  });
 }
 
 export function createBulkExportConversationsHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
+  return withAdmin(deps.sql, async ({ req }) => {
     const url = new URL(req.url);
     const styleId = parseIntParam(url.searchParams.get("style_id"));
     const experimentId = parseIntParam(url.searchParams.get("experiment_id"));
@@ -74,5 +69,5 @@ export function createBulkExportConversationsHandler(deps: AdminApiDeps): RouteH
 
     const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     return jsonlResponse(out, `conversations-${stamp}.jsonl`);
-  };
+  });
 }

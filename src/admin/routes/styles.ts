@@ -6,14 +6,12 @@ import { json, type RouteHandler } from "../../router.ts";
 import { composeSystemPrompt } from "../../sales/prompt.ts";
 import { nextStage } from "../../sales/stage-router.ts";
 import { FUNNEL_STAGES, type FunnelStage, StyleSchema } from "../../sales/types.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 export function createListStylesHandler(deps: AdminApiDeps): RouteHandler {
   const styles = new StylesRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async () => {
     const rows = (await styles.listActive()).map((row) => ({
       id: row.id,
       slug: row.slug,
@@ -24,16 +22,14 @@ export function createListStylesHandler(deps: AdminApiDeps): RouteHandler {
       created_at: row.created_at,
     }));
     return json({ styles: rows });
-  };
+  });
 }
 
 export function createGetStyleHandler(deps: AdminApiDeps): RouteHandler {
   const styles = new StylesRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const row = await styles.byId(id);
     if (!row) return json({ error: "not found" }, { status: 404 });
     let parsedConfig: unknown = null;
@@ -57,7 +53,7 @@ export function createGetStyleHandler(deps: AdminApiDeps): RouteHandler {
         parse_error: parseError,
       },
     });
-  };
+  });
 }
 
 interface PlaygroundBody {
@@ -91,10 +87,7 @@ const FUNNEL_STAGE_SET: ReadonlySet<string> = new Set(FUNNEL_STAGES);
 export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
   const styles = new StylesRepo(deps.sql);
   const kb = new KbRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
+  return withAdmin(deps.sql, async ({ req, params }) => {
     if (!deps.rag) {
       return json(
         {
@@ -109,8 +102,8 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
     // to either non-null-assert or re-narrow.
     const rag = deps.rag;
 
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const row = await styles.byId(id);
     if (!row) return json({ error: "not found" }, { status: 404 });
 
@@ -126,12 +119,8 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
       );
     }
 
-    let body: PlaygroundBody;
-    try {
-      body = (await req.json()) as PlaygroundBody;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<PlaygroundBody>(req);
+    if (body instanceof Response) return body;
     const userMessage = typeof body.userMessage === "string" ? body.userMessage.trim() : "";
     if (!userMessage) {
       return json({ error: "userMessage is required" }, { status: 400 });
@@ -235,7 +224,7 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
       duration_ms: durationMs,
       model: { id: style.model.id, temperature: style.model.temperature },
     });
-  };
+  });
 }
 
 /**
@@ -254,16 +243,9 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
  */
 export function createCreateStyleHandler(deps: AdminApiDeps): RouteHandler {
   const styles = new StylesRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
-    let body: { config?: unknown };
-    try {
-      body = (await req.json()) as { config?: unknown };
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+  return withAdmin(deps.sql, async ({ req }) => {
+    const body = await parseJsonBody<{ config?: unknown }>(req);
+    if (body instanceof Response) return body;
     if (typeof body.config !== "object" || body.config === null) {
       return json({ error: "body.config must be a Style object" }, { status: 400 });
     }
@@ -319,7 +301,7 @@ export function createCreateStyleHandler(deps: AdminApiDeps): RouteHandler {
       },
       { status: 201 },
     );
-  };
+  });
 }
 
 /**
@@ -331,18 +313,12 @@ export function createCreateStyleHandler(deps: AdminApiDeps): RouteHandler {
  */
 export function createEditStyleHandler(deps: AdminApiDeps): RouteHandler {
   const styles = new StylesRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
-    let body: { config?: unknown };
-    try {
-      body = (await req.json()) as { config?: unknown };
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<{ config?: unknown }>(req);
+    if (body instanceof Response) return body;
     if (typeof body.config !== "object" || body.config === null) {
       return json({ error: "body.config must be a Style object" }, { status: 400 });
     }
@@ -389,5 +365,5 @@ export function createEditStyleHandler(deps: AdminApiDeps): RouteHandler {
         parse_error: null,
       },
     });
-  };
+  });
 }

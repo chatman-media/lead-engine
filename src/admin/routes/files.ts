@@ -1,5 +1,5 @@
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // ─── Telegram file proxy (photos / videos / documents in admin chat) ──
@@ -22,10 +22,7 @@ import type { AdminApiDeps } from "../shared.ts";
  * on each `getFile`, but the underlying bytes don't change.
  */
 export function createDownloadFileHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
+  return withAdmin(deps.sql, async ({ params }) => {
     if (!deps.telegram) {
       return json({ error: "telegram client not configured" }, { status: 503 });
     }
@@ -70,5 +67,5 @@ export function createDownloadFileHandler(deps: AdminApiDeps): RouteHandler {
     const len = upstream.headers.get("content-length");
     if (len) headers["content-length"] = len;
     return new Response(upstream.body, { status: 200, headers });
-  };
+  });
 }

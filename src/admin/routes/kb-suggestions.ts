@@ -3,7 +3,7 @@ import { KbSuggestionsRepo, type SuggestionStatus } from "../../db/repos/kb-sugg
 import { MessagesRepo } from "../../db/repos/messages.ts";
 import { ingestText } from "../../rag/ingest.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // ---------------------------------------------------------------------------
@@ -12,50 +12,41 @@ import type { AdminApiDeps } from "../shared.ts";
 
 export function createKbSuggestionCountsHandler(deps: AdminApiDeps): RouteHandler {
   const suggestions = new KbSuggestionsRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async () => {
     return json(await suggestions.countByStatus());
-  };
+  });
 }
 
 export function createListKbSuggestionsHandler(deps: AdminApiDeps): RouteHandler {
   const suggestions = new KbSuggestionsRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const url = new URL(req.url);
+  return withAdmin(deps.sql, async ({ url }) => {
     const status = url.searchParams.get("status") as SuggestionStatus | null;
     const limit = Number(url.searchParams.get("limit") ?? "200");
     const rows = await suggestions.list({ status: status ?? undefined, limit });
     return json({ suggestions: rows, counts: await suggestions.countByStatus() });
-  };
+  });
 }
 
 export function createGetKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
   const suggestions = new KbSuggestionsRepo(deps.sql);
   const messages = new MessagesRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const suggestion = await suggestions.byId(id);
     if (!suggestion) return json({ error: "not found" }, { status: 404 });
     const contextMessages = suggestion.source_conversation_id
       ? await messages.recentForContext(suggestion.source_conversation_id, 20)
       : [];
     return json({ suggestion, context_messages: contextMessages });
-  };
+  });
 }
 
 export function createUpdateKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
   const suggestions = new KbSuggestionsRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const body = (await req.json()) as { answer_draft?: unknown };
     if (typeof body.answer_draft !== "string") {
       return json({ error: "answer_draft must be a string" }, { status: 400 });
@@ -63,23 +54,21 @@ export function createUpdateKbSuggestionHandler(deps: AdminApiDeps): RouteHandle
     const updated = await suggestions.setDraft(id, body.answer_draft);
     if (!updated) return json({ error: "not found" }, { status: 404 });
     return json({ suggestion: updated });
-  };
+  });
 }
 
 export function createApproveKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
   const suggestions = new KbSuggestionsRepo(deps.sql);
   const kb = new KbRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ params, admin }) => {
     if (!deps.rag) {
       return json(
         { error: "LLM not configured — cannot ingest without embedder" },
         { status: 503 },
       );
     }
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const suggestion = await suggestions.byId(id);
     if (!suggestion) return json({ error: "not found" }, { status: 404 });
     if (suggestion.status !== "pending") {
@@ -101,31 +90,27 @@ export function createApproveKbSuggestionHandler(deps: AdminApiDeps): RouteHandl
       { kb, embedder: deps.rag.embedder },
     );
 
-    const updated = await suggestions.markIngested(id, ctx.adminId, doc.documentId);
+    const updated = await suggestions.markIngested(id, admin.adminId, doc.documentId);
     return json({ suggestion: updated, kb_document_id: doc.documentId });
-  };
+  });
 }
 
 export function createRejectKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
   const suggestions = new KbSuggestionsRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const body = (await req.json().catch(() => ({}))) as { reason?: unknown };
     const reason = typeof body.reason === "string" ? body.reason : undefined;
-    const updated = await suggestions.reject(id, ctx.adminId, reason);
+    const updated = await suggestions.reject(id, admin.adminId, reason);
     if (!updated) return json({ error: "not found or already decided" }, { status: 404 });
     return json({ suggestion: updated });
-  };
+  });
 }
 
 export function createCreateKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
   const suggestions = new KbSuggestionsRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ req }) => {
     const body = (await req.json()) as {
       question_text?: unknown;
       answer_draft?: unknown;
@@ -146,5 +131,5 @@ export function createCreateKbSuggestionHandler(deps: AdminApiDeps): RouteHandle
       });
     }
     return json({ suggestion });
-  };
+  });
 }

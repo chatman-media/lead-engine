@@ -1,5 +1,5 @@
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // ─── Analytics (per-turn telemetry aggregates) ─────────────────────────
@@ -38,10 +38,7 @@ interface LatencyRow {
  * row's full meta blob. Indexes already exist on `created_at`.
  */
 export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, url }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
+  return withAdmin(deps.sql, async ({ url }) => {
     const windowKey = url.searchParams.get("window") ?? "24h";
     const windowSec = WINDOW_SECONDS[windowKey];
     if (windowSec === undefined) {
@@ -174,5 +171,5 @@ export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
       rewrite_count: rewrites,
       unanswered_rate: unansweredRate,
     });
-  };
+  });
 }

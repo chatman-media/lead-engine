@@ -3,16 +3,14 @@ import { LeadsRepo } from "../../db/repos/leads.ts";
 import { MessagesRepo } from "../../db/repos/messages.ts";
 import { UsersRepo } from "../../db/repos/users.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 export function createListUsersHandler(deps: AdminApiDeps): RouteHandler {
   const users = new UsersRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async () => {
     return json({ users: await users.list(500) });
-  };
+  });
 }
 
 /**
@@ -41,11 +39,9 @@ export function createListUsersHandler(deps: AdminApiDeps): RouteHandler {
  */
 export function createDeleteUserDataHandler(deps: AdminApiDeps): RouteHandler {
   const users = new UsersRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const user = await users.byId(id);
     if (!user) return json({ error: "not found" }, { status: 404 });
 
@@ -75,7 +71,7 @@ export function createDeleteUserDataHandler(deps: AdminApiDeps): RouteHandler {
     });
 
     return json({ ok: true, user_id: id, ...summary });
-  };
+  });
 }
 
 export function createUserDetailHandler(deps: AdminApiDeps): RouteHandler {
@@ -83,11 +79,9 @@ export function createUserDetailHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.sql);
   const leads = new LeadsRepo(deps.sql);
   const messages = new MessagesRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const user = await users.byId(id);
     if (!user) return json({ error: "not found" }, { status: 404 });
     const conversation = await conversations.byUserId(id);
@@ -109,5 +103,5 @@ export function createUserDetailHandler(deps: AdminApiDeps): RouteHandler {
       memory,
       recent_messages: recentMessages,
     });
-  };
+  });
 }

@@ -5,7 +5,7 @@ import { extname, join } from "node:path";
 import { KbRepo } from "../../db/repos/kb.ts";
 import { ingestFile } from "../../rag/ingest.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // ─── Library: book file upload ───────────────────────────────────────────
@@ -22,10 +22,7 @@ const BOOK_ALLOWED_EXTS = new Set([".pdf", ".txt", ".md"]);
  * Returns { ok, document_id, chunks, created, filename }.
  */
 export function createUploadBookHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
+  return withAdmin(deps.sql, async ({ req }) => {
     if (!deps.rag?.embedder) {
       return json(
         { error: "embedder not configured — set OLLAMA_HOST or LLM_PROVIDER" },
@@ -101,5 +98,5 @@ export function createUploadBookHandler(deps: AdminApiDeps): RouteHandler {
         // Ignore cleanup errors — temp dir is cleaned by OS anyway.
       }
     }
-  };
+  });
 }

@@ -1,6 +1,6 @@
 import { VacanciesRepo } from "../../db/repos/vacancies.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // ─── Vacancies (admin-managed list of currently-open offers) ───────────
@@ -11,9 +11,7 @@ const VACANCY_URL_MAX = 500;
 
 export function createListVacanciesHandler(deps: AdminApiDeps): RouteHandler {
   const vacancies = new VacanciesRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ req }) => {
     const url = new URL(req.url);
     // Default = all (operators want to see closed too, to re-enable);
     // ?active=1 narrows for any internal callers that need the same
@@ -21,26 +19,19 @@ export function createListVacanciesHandler(deps: AdminApiDeps): RouteHandler {
     const onlyActive = url.searchParams.get("active") === "1";
     const list = onlyActive ? await vacancies.listActive() : await vacancies.listAll();
     return json({ vacancies: list });
-  };
+  });
 }
 
 export function createCreateVacancyHandler(deps: AdminApiDeps): RouteHandler {
   const vacancies = new VacanciesRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
-    let body: {
+  return withAdmin(deps.sql, async ({ req }) => {
+    const body = await parseJsonBody<{
       title?: unknown;
       body?: unknown;
       url?: unknown;
       is_active?: unknown;
-    };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    }>(req);
+    if (body instanceof Response) return body;
     const title = typeof body.title === "string" ? body.title.trim() : "";
     const text = typeof body.body === "string" ? body.body.trim() : "";
     if (!title) return json({ error: "title is required" }, { status: 400 });
@@ -67,28 +58,22 @@ export function createCreateVacancyHandler(deps: AdminApiDeps): RouteHandler {
       isActive: body.is_active !== false,
     });
     return json({ vacancy: created });
-  };
+  });
 }
 
 export function createUpdateVacancyHandler(deps: AdminApiDeps): RouteHandler {
   const vacancies = new VacanciesRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
-    let body: {
+    const body = await parseJsonBody<{
       title?: unknown;
       body?: unknown;
       url?: unknown;
       is_active?: unknown;
-    };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    }>(req);
+    if (body instanceof Response) return body;
     const patch: {
       title?: string;
       body?: string;
@@ -126,18 +111,16 @@ export function createUpdateVacancyHandler(deps: AdminApiDeps): RouteHandler {
     const updated = await vacancies.update(id, patch);
     if (!updated) return json({ error: "not found" }, { status: 404 });
     return json({ vacancy: updated });
-  };
+  });
 }
 
 export function createDeleteVacancyHandler(deps: AdminApiDeps): RouteHandler {
   const vacancies = new VacanciesRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const ok = await vacancies.delete(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
-  };
+  });
 }
