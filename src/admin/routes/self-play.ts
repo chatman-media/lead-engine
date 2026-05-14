@@ -2,7 +2,7 @@ import { SelfPlayMatchesRepo } from "../../db/repos/self-play-matches.ts";
 import { json, type RouteHandler } from "../../router.ts";
 import type { CandidatePersona } from "../../sales/self-play/personas.ts";
 import { CANDIDATE_PERSONAS } from "../../sales/self-play/personas.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // ─── Self-play match transcripts ──────────────────────────────────────
@@ -13,9 +13,7 @@ const PERSONA_LOOKUP = new Map<string, CandidatePersona>(
 
 /** GET /admin/api/self-play — recent matches list + matrix per (style, persona). */
 export function createListSelfPlayMatchesHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, url }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ url }) => {
     const repo = new SelfPlayMatchesRepo(deps.sql);
     const limit = Number(url.searchParams.get("limit") ?? "100");
     const styleSlug = url.searchParams.get("style") ?? undefined;
@@ -39,16 +37,14 @@ export function createListSelfPlayMatchesHandler(deps: AdminApiDeps): RouteHandl
         summary: p.summary,
       })),
     });
-  };
+  });
 }
 
 /** GET /admin/api/self-play/:id — full transcript of one match. */
 export function createGetSelfPlayMatchHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const repo = new SelfPlayMatchesRepo(deps.sql);
     const match = await repo.byId(id);
     if (!match) return json({ error: "not found" }, { status: 404 });
@@ -69,20 +65,18 @@ export function createGetSelfPlayMatchHandler(deps: AdminApiDeps): RouteHandler 
         transcript: match.transcript,
       },
     });
-  };
+  });
 }
 
 /** DELETE /admin/api/self-play/:id — operator clears bad data points
  *  (e.g. judge mis-classified). Idempotent — 404 on missing. */
 export function createDeleteSelfPlayMatchHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const repo = new SelfPlayMatchesRepo(deps.sql);
     const ok = await repo.delete(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
-  };
+  });
 }

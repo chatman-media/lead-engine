@@ -1,18 +1,16 @@
+import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { ConversationsRepo } from "../../db/repos/conversations.ts";
 import { MessagesRepo } from "../../db/repos/messages.ts";
 import { enqueue } from "../../db/repos/userbot-send-queue.ts";
 import { UsersRepo } from "../../db/repos/users.ts";
 import { inc } from "../../metrics.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 export function createListConversationsHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const url = new URL(req.url);
+  return withAdmin(deps.sql, async ({ url }) => {
     const onlyEscalated = url.searchParams.get("escalated") === "1";
     return json({
       conversations: (await conversations.list({ onlyEscalated, limit: 200 })).map((row) => ({
@@ -28,18 +26,16 @@ export function createListConversationsHandler(deps: AdminApiDeps): RouteHandler
         },
       })),
     });
-  };
+  });
 }
 
 export function createConversationDetailHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.sql);
   const users = new UsersRepo(deps.sql);
   const messages = new MessagesRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const conv = await conversations.byId(id);
     if (!conv) return json({ error: "not found" }, { status: 404 });
     const user = await users.byId(conv.user_id);
@@ -60,7 +56,7 @@ export function createConversationDetailHandler(deps: AdminApiDeps): RouteHandle
       memory,
       summary,
     });
-  };
+  });
 }
 
 /**
@@ -71,22 +67,15 @@ export function createConversationDetailHandler(deps: AdminApiDeps): RouteHandle
  */
 export function createUpdateUserMemoryHandler(deps: AdminApiDeps): RouteHandler {
   const users = new UsersRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     const user = await users.byId(id);
     if (!user) return json({ error: "not found" }, { status: 404 });
 
-    let body: { facts?: unknown };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<{ facts?: unknown }>(req);
+    if (body instanceof Response) return body;
     if (typeof body.facts !== "object" || body.facts === null || Array.isArray(body.facts)) {
       return json({ error: "facts must be an object" }, { status: 400 });
     }
@@ -109,55 +98,57 @@ export function createUpdateUserMemoryHandler(deps: AdminApiDeps): RouteHandler 
 
     await users.setMemoryFacts(id, cleaned);
     return json({ memory: await users.getMemory(id) });
-  };
+  });
 }
 
 export function createTakeHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const conv = await conversations.byId(id);
     if (!conv) return json({ error: "not found" }, { status: 404 });
-    await conversations.setMode(id, "human", ctx.adminId);
+    await conversations.setMode(id, "human", admin.adminId);
     deps.onConversationChanged?.(id);
     const updated = await conversations.byId(id);
     return json({ conversation: updated });
-  };
+  });
 }
 
 export function createReleaseHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const conv = await conversations.byId(id);
     if (!conv) return json({ error: "not found" }, { status: 404 });
     await conversations.setMode(id, "ai");
     deps.onConversationChanged?.(id);
     const updated = await conversations.byId(id);
     return json({ conversation: updated });
-  };
+  });
 }
 
 export function createDeleteConversationHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const conv = await conversations.byId(id);
     if (!conv) return json({ error: "not found" }, { status: 404 });
     const ok = await conversations.deleteById(id);
     if (!ok) return json({ error: "delete failed" }, { status: 500 });
     deps.onConversationChanged?.(id);
+    await new AuditLogRepo(deps.sql)
+      .write({
+        action: "conversation.delete",
+        adminId: admin.adminId,
+        targetKind: "conversation",
+        targetId: id,
+      })
+      .catch((err) => console.error("[audit] conversation.delete write failed:", err));
     return json({ ok: true, deleted: id });
-  };
+  });
 }
 
 export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
@@ -165,12 +156,9 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
   const messages = new MessagesRepo(deps.sql);
   const users = new UsersRepo(deps.sql);
 
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     const conv = await conversations.byId(id);
     if (!conv) return json({ error: "not found" }, { status: 404 });
@@ -178,12 +166,8 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
       return json({ error: "conversation is not in human mode" }, { status: 409 });
     }
 
-    let body: { text?: unknown };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<{ text?: unknown }>(req);
+    if (body instanceof Response) return body;
     const text = typeof body.text === "string" ? body.text.trim() : "";
     if (!text) return json({ error: "text is required" }, { status: 400 });
 
@@ -231,5 +215,5 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
     // the client clears the input and reloads; surface tgError as a warning
     // field so the admin UI can optionally toast about it without blocking.
     return json({ ok: true, conversationId: id, tgUserId: user.tg_user_id, tgError });
-  };
+  });
 }

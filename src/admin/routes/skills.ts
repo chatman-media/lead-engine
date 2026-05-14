@@ -4,7 +4,7 @@ import { StylesRepo } from "../../db/repos/styles.ts";
 import { json, type RouteHandler } from "../../router.ts";
 import { rankSkillRecommendations } from "../../sales/skill-recommendations.ts";
 import { SKILL_BY_SLUG } from "../../sales/skills/catalogue.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // ─── Skills (catalogue + per-style attachments) ──────────────────────
@@ -68,9 +68,7 @@ const EMPTY_OUTCOME = { count: 0, wins: 0, losses: 0, draws: 0, win_rate: Number
 export function createListSkillsHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.sql);
   const outcomesRepo = new SkillOutcomesRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async () => {
     const counts = await skills.attachmentCounts();
     const aggregates = new Map((await outcomesRepo.aggregate()).map((a) => [a.skill_slug, a]));
     const rows = await skills.list();
@@ -80,34 +78,26 @@ export function createListSkillsHandler(deps: AdminApiDeps): RouteHandler {
       )
       .filter((d): d is SkillDto => d !== null);
     return json({ skills: dtos });
-  };
+  });
 }
 
 export function createListStyleRatingsHandler(deps: AdminApiDeps): RouteHandler {
   const repo = new StyleRatingsRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async () => {
     return json({ ratings: await repo.list() });
-  };
+  });
 }
 
 export function createUpdateSkillHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.sql);
   const outcomesRepo = new SkillOutcomesRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ req, params }) => {
     const slug = params.slug;
     const row = await skills.bySlug(slug);
     if (!row) return json({ error: "skill not found" }, { status: 404 });
 
-    let body: { is_enabled?: unknown };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<{ is_enabled?: unknown }>(req);
+    if (body instanceof Response) return body;
     if (typeof body.is_enabled !== "boolean") {
       return json({ error: "is_enabled (boolean) required" }, { status: 400 });
     }
@@ -117,39 +107,31 @@ export function createUpdateSkillHandler(deps: AdminApiDeps): RouteHandler {
     const outcomes =
       (await outcomesRepo.aggregate()).find((a) => a.skill_slug === slug) ?? EMPTY_OUTCOME;
     return json({ skill: rowToSkillDto(updated, counts.get(slug) ?? 0, outcomes) });
-  };
+  });
 }
 
 export function createGetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.sql);
   const styles = new StylesRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     if (!(await styles.byId(id))) return json({ error: "style not found" }, { status: 404 });
     const rows = await skills.skillsForStyle(id);
     return json({ slugs: rows.map((r) => r.slug) });
-  };
+  });
 }
 
 export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
   const skills = new SkillsRepo(deps.sql);
   const styles = new StylesRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     if (!(await styles.byId(id))) return json({ error: "style not found" }, { status: 404 });
 
-    let body: { slugs?: unknown };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<{ slugs?: unknown }>(req);
+    if (body instanceof Response) return body;
     if (!Array.isArray(body.slugs)) {
       return json({ error: "slugs (array) required" }, { status: 400 });
     }
@@ -160,7 +142,7 @@ export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
     }
     const r = await skills.setSkillsForStyle(id, slugs);
     return json({ ok: true, attached: r.attached });
-  };
+  });
 }
 
 // ─── Skill recommendations (data-driven picker) ──────────────────────
@@ -178,9 +160,7 @@ export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
  *   accept     (float, default 0.4) — Wilson lb above this → recommended=true
  */
 export function createRecommendSkillsHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, url }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async ({ url }) => {
     const minSamples = clampInt(url.searchParams.get("minSamples"), 1, 1000, 5);
     const accept = clampFloat(url.searchParams.get("accept"), 0, 1, 0.4);
     const skillsRepoLocal = new SkillsRepo(deps.sql);
@@ -199,7 +179,7 @@ export function createRecommendSkillsHandler(deps: AdminApiDeps): RouteHandler {
         observed_rate: Number.isFinite(r.observed_rate) ? r.observed_rate : null,
       })),
     });
-  };
+  });
 }
 
 function clampInt(raw: string | null, lo: number, hi: number, fallback: number): number {

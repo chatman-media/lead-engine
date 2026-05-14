@@ -6,7 +6,7 @@ import {
 } from "../../db/repos/experiments.ts";
 import { StylesRepo } from "../../db/repos/styles.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import { type AdminApiDeps, safeJson } from "../shared.ts";
 
 const VALID_EXPERIMENT_STATUSES: readonly ExperimentStatus[] = [
@@ -19,9 +19,7 @@ const VALID_SUCCESS_METRICS: readonly SuccessMetric[] = ["qualified", "won", "re
 
 export function createListExperimentsHandler(deps: AdminApiDeps): RouteHandler {
   const experiments = new ExperimentsRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
+  return withAdmin(deps.sql, async () => {
     const rows = (await experiments.list()).map((row) => ({
       id: row.id,
       slug: row.slug,
@@ -34,7 +32,7 @@ export function createListExperimentsHandler(deps: AdminApiDeps): RouteHandler {
       created_at: row.created_at,
     }));
     return json({ experiments: rows });
-  };
+  });
 }
 
 interface CreateExperimentBody {
@@ -47,15 +45,9 @@ interface CreateExperimentBody {
 export function createCreateExperimentHandler(deps: AdminApiDeps): RouteHandler {
   const experiments = new ExperimentsRepo(deps.sql);
   const styles = new StylesRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    let body: CreateExperimentBody;
-    try {
-      body = (await req.json()) as CreateExperimentBody;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+  return withAdmin(deps.sql, async ({ req }) => {
+    const body = await parseJsonBody<CreateExperimentBody>(req);
+    if (body instanceof Response) return body;
 
     const slug = typeof body.slug === "string" ? body.slug.trim() : "";
     if (!slug) return json({ error: "slug is required" }, { status: 400 });
@@ -135,7 +127,7 @@ export function createCreateExperimentHandler(deps: AdminApiDeps): RouteHandler 
       },
       { status: 201 },
     );
-  };
+  });
 }
 
 interface PatchExperimentBody {
@@ -144,20 +136,14 @@ interface PatchExperimentBody {
 
 export function createSetExperimentStatusHandler(deps: AdminApiDeps): RouteHandler {
   const experiments = new ExperimentsRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const row = await experiments.byId(id);
     if (!row) return json({ error: "not found" }, { status: 404 });
 
-    let body: PatchExperimentBody;
-    try {
-      body = (await req.json()) as PatchExperimentBody;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<PatchExperimentBody>(req);
+    if (body instanceof Response) return body;
     const status = typeof body.status === "string" ? body.status : "";
     if (!(VALID_EXPERIMENT_STATUSES as readonly string[]).includes(status)) {
       return json(
@@ -199,7 +185,7 @@ export function createSetExperimentStatusHandler(deps: AdminApiDeps): RouteHandl
         created_at: updated.created_at,
       },
     });
-  };
+  });
 }
 
 interface FunnelRow {
@@ -216,11 +202,9 @@ interface FunnelRow {
 
 export function createExperimentFunnelHandler(deps: AdminApiDeps): RouteHandler {
   const experiments = new ExperimentsRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const row = await experiments.byId(id);
     if (!row) return json({ error: "not found" }, { status: 404 });
 
@@ -260,5 +244,5 @@ export function createExperimentFunnelHandler(deps: AdminApiDeps): RouteHandler 
       // experiment, so no extra filtering is needed here.
       funnel,
     });
-  };
+  });
 }

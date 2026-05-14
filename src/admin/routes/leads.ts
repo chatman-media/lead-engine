@@ -1,9 +1,10 @@
+import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { ConversationsRepo } from "../../db/repos/conversations.ts";
 import { type LeadState, LeadsRepo } from "../../db/repos/leads.ts";
 import { MessagesRepo } from "../../db/repos/messages.ts";
 import { UsersRepo } from "../../db/repos/users.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { requireAdmin } from "../auth.ts";
+import { parseIdParam, parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import {
   type AdminApiDeps,
   buildLeadsService,
@@ -27,10 +28,7 @@ const LEAD_STATES: LeadState[] = [
 
 export function createListLeadsHandler(deps: AdminApiDeps): RouteHandler {
   const leads = new LeadsRepo(deps.sql);
-  return async ({ req }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const url = new URL(req.url);
+  return withAdmin(deps.sql, async ({ url }) => {
     const stateParam = url.searchParams.get("state");
     const state =
       stateParam && (LEAD_STATES as string[]).includes(stateParam)
@@ -40,7 +38,7 @@ export function createListLeadsHandler(deps: AdminApiDeps): RouteHandler {
       leads: await leads.list({ ...(state ? { state } : {}) }),
       counts: await leads.countByState(),
     });
-  };
+  });
 }
 
 /**
@@ -50,11 +48,9 @@ export function createListLeadsHandler(deps: AdminApiDeps): RouteHandler {
  * with approve/reject buttons.
  */
 export function createPromoteLeadHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const convId = Number(params.id);
-    if (!Number.isFinite(convId)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const convId = parseIdParam(params);
+    if (convId instanceof Response) return convId;
 
     const conversations = new ConversationsRepo(deps.sql);
     const users = new UsersRepo(deps.sql);
@@ -85,15 +81,13 @@ export function createPromoteLeadHandler(deps: AdminApiDeps): RouteHandler {
     }
     deps.onConversationChanged?.(conv.id);
     return json({ lead });
-  };
+  });
 }
 
 export function createApproveLeadHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     const leadsRepo = new LeadsRepo(deps.sql);
     const usersRepo = new UsersRepo(deps.sql);
@@ -108,7 +102,7 @@ export function createApproveLeadHandler(deps: AdminApiDeps): RouteHandler {
     const user = await usersRepo.byId(lead.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
 
-    const updated = await leadsRepo.setState(id, "approved", { adminId: ctx.adminId });
+    const updated = await leadsRepo.setState(id, "approved", { adminId: admin.adminId });
     if (!updated) return json({ error: "transition failed" }, { status: 500 });
     // Move into docs_pending — bot will start collecting visa form.
     const inDocs = (await leadsRepo.setState(id, "docs_pending")) ?? updated;
@@ -127,15 +121,13 @@ export function createApproveLeadHandler(deps: AdminApiDeps): RouteHandler {
       }
     }
     return json({ lead: inDocs });
-  };
+  });
 }
 
 export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     let body: { reason?: unknown } = {};
     try {
@@ -161,7 +153,7 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
 
     const rejectedReasonOpt: { rejectedReason?: string } = reason ? { rejectedReason: reason } : {};
     const updated = await leadsRepo.setState(id, "rejected", {
-      adminId: ctx.adminId,
+      adminId: admin.adminId,
       ...rejectedReasonOpt,
     });
     if (!updated) return json({ error: "transition failed" }, { status: 500 });
@@ -184,18 +176,16 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
       }
     }
     return json({ lead: updated });
-  };
+  });
 }
 
 /** Operator clicks "send intake template" — bot DMs the candidate the
  *  7-item checklist. Useful when the bot's natural greeting hasn't yet
  *  prompted the candidate to start submitting intake. */
 export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     const leadsRepo = new LeadsRepo(deps.sql);
     const usersRepo = new UsersRepo(deps.sql);
@@ -210,7 +200,7 @@ export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
     }
     await service.sendIntakeTemplate({ user });
     return json({ ok: true });
-  };
+  });
 }
 
 /**
@@ -223,11 +213,9 @@ export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
  * same id. State guard: must be in approved / docs_pending / docs_complete.
  */
 export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     const leadsRepo = new LeadsRepo(deps.sql);
     const usersRepo = new UsersRepo(deps.sql);
@@ -268,7 +256,7 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
       await service.sendDocsCompleteAck({ user });
     }
     return json({ lead: transitioned, application_id: applicationId });
-  };
+  });
 }
 
 /**
@@ -277,11 +265,9 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
  * re-parse JSON in the browser, plus the most recent ~30 messages.
  */
 export function createLeadDetailHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     const leadsRepo = new LeadsRepo(deps.sql);
     const usersRepo = new UsersRepo(deps.sql);
@@ -303,7 +289,7 @@ export function createLeadDetailHandler(deps: AdminApiDeps): RouteHandler {
       events: await leadsRepo.events(id),
       notes: await leadsRepo.notes(id),
     });
-  };
+  });
 }
 
 const NOTE_BODY_MAX = 2000;
@@ -311,24 +297,17 @@ const NOTE_BODY_MAX = 2000;
 /** Append a note to a lead. Body required; admin id is taken from the
  *  authenticated session so the note carries an attribution row. */
 export function createCreateLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     const leadsRepo = new LeadsRepo(deps.sql);
     if (!(await leadsRepo.byId(id))) {
       return json({ error: "lead not found" }, { status: 404 });
     }
 
-    let body: { body?: unknown };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<{ body?: unknown }>(req);
+    if (body instanceof Response) return body;
     const text = typeof body.body === "string" ? body.body.trim() : "";
     if (!text) return json({ error: "body is required" }, { status: 400 });
     if (text.length > NOTE_BODY_MAX) {
@@ -338,20 +317,17 @@ export function createCreateLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
     const note = await leadsRepo.addNote({
       leadId: id,
       body: text,
-      byAdminId: ctx.adminId,
+      byAdminId: admin.adminId,
     });
     return json({ note });
-  };
+  });
 }
 
 /** Hard-delete a note. Operator can clean up typos / mistaken entries.
  *  Belongs-to check: the note must reference the lead in the URL, not
  *  some other lead — prevents cross-lead deletion via guessed note ids. */
 export function createDeleteLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-
+  return withAdmin(deps.sql, async ({ params }) => {
     const leadId = Number(params.id);
     const noteId = Number(params.noteId);
     if (!Number.isFinite(leadId) || !Number.isFinite(noteId)) {
@@ -369,7 +345,7 @@ export function createDeleteLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
     const leadsRepo = new LeadsRepo(deps.sql);
     await leadsRepo.deleteNote(noteId);
     return json({ ok: true, deleted: noteId });
-  };
+  });
 }
 
 const VISA_DOCS_FIELD_KEYS = [
@@ -413,21 +389,15 @@ const VISA_DOCS_VALUE_MAX = 1500;
  */
 export function createUpdateVisaDocsHandler(deps: AdminApiDeps): RouteHandler {
   const leadsRepo = new LeadsRepo(deps.sql);
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ req, params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
 
     const lead = await leadsRepo.byId(id);
     if (!lead) return json({ error: "not found" }, { status: 404 });
 
-    let body: { docs?: unknown };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return json({ error: "invalid JSON" }, { status: 400 });
-    }
+    const body = await parseJsonBody<{ docs?: unknown }>(req);
+    if (body instanceof Response) return body;
     if (typeof body.docs !== "object" || body.docs === null || Array.isArray(body.docs)) {
       return json({ error: "docs must be an object" }, { status: 400 });
     }
@@ -456,20 +426,21 @@ export function createUpdateVisaDocsHandler(deps: AdminApiDeps): RouteHandler {
 
     await leadsRepo.setVisaDocs(id, JSON.stringify(merged));
     return json({ visa_docs: merged });
-  };
+  });
 }
 
 export function createDeleteLeadHandler(deps: AdminApiDeps): RouteHandler {
-  return async ({ req, params }) => {
-    const ctx = await requireAdmin(deps.sql, req);
-    if (ctx instanceof Response) return ctx;
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+  return withAdmin(deps.sql, async ({ params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
     const leadsRepo = new LeadsRepo(deps.sql);
     const ok = await leadsRepo.delete(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
+    await new AuditLogRepo(deps.sql)
+      .write({ action: "lead.delete", adminId: admin.adminId, targetKind: "lead", targetId: id })
+      .catch((err) => console.error("[audit] lead.delete write failed:", err));
     return json({ ok: true, deleted: id });
-  };
+  });
 }
 
 /**
