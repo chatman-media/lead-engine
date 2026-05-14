@@ -130,13 +130,13 @@ export function Analytics() {
           </SectionRow>
 
           <SectionRow>
-            <Card title="Общая задержка (мс)">
+            <Card title="Общая задержка (с)">
               <Latency stats={data.latency.total_ms} />
             </Card>
-            <Card title="Поиск (мс)">
+            <Card title="Поиск (с)">
               <Latency stats={data.latency.retrieval_ms} />
             </Card>
-            <Card title="Генерация (мс)">
+            <Card title="Генерация (с)">
               <Latency stats={data.latency.generation_ms} />
             </Card>
           </SectionRow>
@@ -300,7 +300,7 @@ function Row({ label, value, mono }: { label: string; value: number | null; mono
     >
       <span style={{ color: "var(--text-3)" }}>{label}</span>
       <span style={{ fontFamily: mono ? "var(--mono)" : "var(--mono)" }}>
-        {value === null ? "—" : value}
+        {value === null ? "—" : mono ? value : `${(value / 1000).toFixed(2)}с`}
       </span>
     </div>
   );
