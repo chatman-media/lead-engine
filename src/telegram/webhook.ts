@@ -746,7 +746,7 @@ async function runMemoryExtraction(d: ProcessInboundDeps): Promise<void> {
       await d.users.mergeMemoryFacts(d.user.id, newFacts, lastId);
     }
     if (Object.keys(newFacts).length > 0) {
-      const lead = d.leads.byUserId(d.user.id);
+      const lead = await d.leads.byUserId(d.user.id);
       if (lead) {
         const allFacts = { ...stored.facts, ...newFacts };
         const lines = Object.entries(allFacts)
