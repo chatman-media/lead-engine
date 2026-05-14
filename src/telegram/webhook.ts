@@ -745,6 +745,18 @@ async function runMemoryExtraction(d: ProcessInboundDeps): Promise<void> {
     if (Object.keys(newFacts).length > 0 || lastId !== sinceId) {
       d.users.mergeMemoryFacts(d.user.id, newFacts, lastId);
     }
+    if (Object.keys(newFacts).length > 0) {
+      const lead = d.leads.byUserId(d.user.id);
+      if (lead) {
+        const allFacts = { ...stored.facts, ...newFacts };
+        const lines = Object.entries(allFacts)
+          .filter(([, v]) => v?.trim())
+          .map(([k, v]) => `• ${k}: ${v}`);
+        if (lines.length > 0) {
+          d.leads.upsertAutoFactsNote(lead.id, `Факты из разговора:\n${lines.join("\n")}`);
+        }
+      }
+    }
   } catch (err) {
     console.error("[memory] extraction failed:", err);
   }

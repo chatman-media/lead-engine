@@ -56,6 +56,7 @@ export interface LeadNoteRow {
   lead_id: number;
   by_admin_id: number | null;
   body: string;
+  source: string | null;
   created_at: number;
 }
 
@@ -184,6 +185,14 @@ export class LeadsRepo {
   deleteNote(noteId: number): boolean {
     const res = this.db.run("DELETE FROM lead_notes WHERE id = ?", [noteId]);
     return res.changes > 0;
+  }
+
+  upsertAutoFactsNote(leadId: number, body: string): void {
+    this.db.run("DELETE FROM lead_notes WHERE lead_id = ? AND source = 'auto_facts'", [leadId]);
+    this.db.run(
+      "INSERT INTO lead_notes (lead_id, body, source, created_at) VALUES (?, ?, 'auto_facts', unixepoch())",
+      [leadId, body],
+    );
   }
 
   /**
