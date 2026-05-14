@@ -1,12 +1,5 @@
-import type { Database } from "bun:sqlite";
-
 import type { EloOutcome } from "../../sales/elo.ts";
-
-/**
- * Persist + query self-play match transcripts. See migration 016 for
- * schema rationale. The repo is read-mostly: writes happen once per
- * match in the orchestrator's finalize step.
- */
+import type { Sql } from "../postgres.ts";
 
 export interface SelfPlayMatchRow {
   id: number;
@@ -22,8 +15,6 @@ export interface SelfPlayMatchRow {
   created_at: number;
 }
 
-/** A summary row for the listing page — same shape as the table row but
- *  without the heavy transcript blob (saves bandwidth on the listing). */
 export interface SelfPlayMatchSummary {
   id: number;
   style_slug: string;
@@ -43,9 +34,9 @@ export interface SelfPlayMatchDetail extends SelfPlayMatchRow {
 }
 
 export class SelfPlayMatchesRepo {
-  constructor(private db: Database) {}
+  constructor(private sql: Sql) {}
 
-  insert(input: {
+  async insert(input: {
     styleSlug: string;
     personaSlug: string;
     outcome: EloOutcome;
@@ -55,61 +46,67 @@ export class SelfPlayMatchesRepo {
     skills: string[];
     leadId: number | null;
     fabricationsCaught?: number;
-  }): SelfPlayMatchRow {
-    const row = this.db
-      .query<
-        SelfPlayMatchRow,
-        [string, string, string, string | null, string, number, string, number | null, number]
-      >(
-        `INSERT INTO self_play_matches
-           (style_slug, persona_slug, outcome, judge_reason, transcript_json, turns, skills_json, lead_id, fabrications_caught)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         RETURNING *`,
-      )
-      .get(
-        input.styleSlug,
-        input.personaSlug,
-        input.outcome,
-        input.judgeReason,
-        JSON.stringify(input.transcript),
-        input.turns,
-        JSON.stringify(input.skills),
-        input.leadId,
-        input.fabricationsCaught ?? 0,
-      );
+  }): Promise<SelfPlayMatchRow> {
+    const [row] = await this.sql<SelfPlayMatchRow[]>`
+      INSERT INTO self_play_matches
+        (style_slug, persona_slug, outcome, judge_reason, transcript_json, turns, skills_json, lead_id, fabrications_caught)
+      VALUES (${input.styleSlug}, ${input.personaSlug}, ${input.outcome}, ${input.judgeReason},
+              ${JSON.stringify(input.transcript)}, ${input.turns}, ${JSON.stringify(input.skills)},
+              ${input.leadId}, ${input.fabricationsCaught ?? 0})
+      RETURNING *
+    `;
     if (!row) throw new Error("failed to insert self_play_match");
     return row;
   }
 
-  /** Recent matches — listing page. Filters optional. */
-  list(
+  async list(
     opts: { limit?: number; styleSlug?: string; personaSlug?: string; outcome?: EloOutcome } = {},
-  ): SelfPlayMatchSummary[] {
-    const wheres: string[] = [];
-    const params: (string | number)[] = [];
-    if (opts.styleSlug) {
-      wheres.push("style_slug = ?");
-      params.push(opts.styleSlug);
-    }
-    if (opts.personaSlug) {
-      wheres.push("persona_slug = ?");
-      params.push(opts.personaSlug);
-    }
-    if (opts.outcome) {
-      wheres.push("outcome = ?");
-      params.push(opts.outcome);
-    }
-    const whereClause = wheres.length > 0 ? `WHERE ${wheres.join(" AND ")}` : "";
+  ): Promise<SelfPlayMatchSummary[]> {
+    let rows: SelfPlayMatchRow[];
     const limit = opts.limit ?? 100;
-    params.push(limit);
-    const rows = this.db
-      .query<SelfPlayMatchRow, (string | number)[]>(
-        `SELECT * FROM self_play_matches
-         ${whereClause}
-         ORDER BY id DESC
-         LIMIT ?`,
-      )
-      .all(...params);
+
+    if (opts.styleSlug && opts.personaSlug && opts.outcome) {
+      rows = await this.sql<SelfPlayMatchRow[]>`
+        SELECT * FROM self_play_matches
+        WHERE style_slug = ${opts.styleSlug} AND persona_slug = ${opts.personaSlug} AND outcome = ${opts.outcome}
+        ORDER BY id DESC LIMIT ${limit}
+      `;
+    } else if (opts.styleSlug && opts.personaSlug) {
+      rows = await this.sql<SelfPlayMatchRow[]>`
+        SELECT * FROM self_play_matches
+        WHERE style_slug = ${opts.styleSlug} AND persona_slug = ${opts.personaSlug}
+        ORDER BY id DESC LIMIT ${limit}
+      `;
+    } else if (opts.styleSlug && opts.outcome) {
+      rows = await this.sql<SelfPlayMatchRow[]>`
+        SELECT * FROM self_play_matches
+        WHERE style_slug = ${opts.styleSlug} AND outcome = ${opts.outcome}
+        ORDER BY id DESC LIMIT ${limit}
+      `;
+    } else if (opts.personaSlug && opts.outcome) {
+      rows = await this.sql<SelfPlayMatchRow[]>`
+        SELECT * FROM self_play_matches
+        WHERE persona_slug = ${opts.personaSlug} AND outcome = ${opts.outcome}
+        ORDER BY id DESC LIMIT ${limit}
+      `;
+    } else if (opts.styleSlug) {
+      rows = await this.sql<SelfPlayMatchRow[]>`
+        SELECT * FROM self_play_matches WHERE style_slug = ${opts.styleSlug} ORDER BY id DESC LIMIT ${limit}
+      `;
+    } else if (opts.personaSlug) {
+      rows = await this.sql<SelfPlayMatchRow[]>`
+        SELECT * FROM self_play_matches WHERE persona_slug = ${opts.personaSlug} ORDER BY id DESC LIMIT ${limit}
+      `;
+    } else if (opts.outcome) {
+      rows = await this.sql<SelfPlayMatchRow[]>`
+        SELECT * FROM self_play_matches WHERE outcome = ${opts.outcome} ORDER BY id DESC LIMIT ${limit}
+      `;
+    } else {
+      rows = await this.sql<SelfPlayMatchRow[]>`
+        SELECT * FROM self_play_matches ORDER BY id DESC LIMIT ${limit}
+      `;
+    }
+
     return rows.map((r) => ({
       id: r.id,
       style_slug: r.style_slug,
@@ -124,12 +121,10 @@ export class SelfPlayMatchesRepo {
     }));
   }
 
-  /** Full match detail with parsed transcript + skills. Returns null when
-   *  the row doesn't exist. */
-  byId(id: number): SelfPlayMatchDetail | null {
-    const row = this.db
-      .query<SelfPlayMatchRow, [number]>(`SELECT * FROM self_play_matches WHERE id = ? LIMIT 1`)
-      .get(id);
+  async byId(id: number): Promise<SelfPlayMatchDetail | null> {
+    const [row] = await this.sql<SelfPlayMatchRow[]>`
+      SELECT * FROM self_play_matches WHERE id = ${id} LIMIT 1
+    `;
     if (!row) return null;
     return {
       ...row,
@@ -138,49 +133,47 @@ export class SelfPlayMatchesRepo {
     };
   }
 
-  /** Aggregate win-rate per (style, persona). Used by the dashboard so
-   *  operators can see which personas the style struggles with. */
-  matrix(): Array<{
-    style_slug: string;
-    persona_slug: string;
-    won: number;
-    lost: number;
-    draw: number;
-    total: number;
-  }> {
-    return this.db
-      .query<
-        {
-          style_slug: string;
-          persona_slug: string;
-          won: number;
-          lost: number;
-          draw: number;
-          total: number;
-        },
-        []
-      >(
-        `SELECT style_slug, persona_slug,
-                SUM(CASE WHEN outcome = 'won'  THEN 1 ELSE 0 END) AS won,
-                SUM(CASE WHEN outcome = 'lost' THEN 1 ELSE 0 END) AS lost,
-                SUM(CASE WHEN outcome = 'draw' THEN 1 ELSE 0 END) AS draw,
-                COUNT(*) AS total
-         FROM self_play_matches
-         GROUP BY style_slug, persona_slug
-         ORDER BY style_slug, persona_slug`,
-      )
-      .all();
+  async matrix(): Promise<
+    Array<{
+      style_slug: string;
+      persona_slug: string;
+      won: number;
+      lost: number;
+      draw: number;
+      total: number;
+    }>
+  > {
+    return this.sql<
+      {
+        style_slug: string;
+        persona_slug: string;
+        won: number;
+        lost: number;
+        draw: number;
+        total: number;
+      }[]
+    >`
+      SELECT style_slug, persona_slug,
+             SUM(CASE WHEN outcome = 'won'  THEN 1 ELSE 0 END)::INTEGER AS won,
+             SUM(CASE WHEN outcome = 'lost' THEN 1 ELSE 0 END)::INTEGER AS lost,
+             SUM(CASE WHEN outcome = 'draw' THEN 1 ELSE 0 END)::INTEGER AS draw,
+             COUNT(*)::INTEGER AS total
+      FROM self_play_matches
+      GROUP BY style_slug, persona_slug
+      ORDER BY style_slug, persona_slug
+    `;
   }
 
-  /** Total matches count — for empty-state messaging. */
-  count(): number {
-    const r = this.db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM self_play_matches`).get();
+  async count(): Promise<number> {
+    const [r] = await this.sql<
+      { n: number }[]
+    >`SELECT COUNT(*)::INTEGER AS n FROM self_play_matches`;
     return r?.n ?? 0;
   }
 
-  delete(id: number): boolean {
-    const r = this.db.run(`DELETE FROM self_play_matches WHERE id = ?`, [id]);
-    return r.changes > 0;
+  async delete(id: number): Promise<boolean> {
+    const result = await this.sql`DELETE FROM self_play_matches WHERE id = ${id}`;
+    return result.count > 0;
   }
 }
 

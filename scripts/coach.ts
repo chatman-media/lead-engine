@@ -12,10 +12,10 @@
  * Defaults: --sample 8, all personas, current chat provider/model.
  */
 import { config } from "../src/config.ts";
+import { sql } from "../src/db/postgres.ts";
 import { SelfPlayMatchesRepo } from "../src/db/repos/self-play-matches.ts";
 import { SkillsRepo } from "../src/db/repos/skills.ts";
 import { StylesRepo, seedBuiltinStyles } from "../src/db/repos/styles.ts";
-import { getDb } from "../src/db/sqlite.ts";
 import { OpenAIChatClient } from "../src/rag/chat.ts";
 import { OllamaChatClient } from "../src/rag/providers/ollama-chat.ts";
 import { OpenRouterChatClient } from "../src/rag/providers/openrouter-chat.ts";
@@ -82,18 +82,14 @@ function buildChat() {
 
 async function main() {
   const args = parseArgs();
-  const db = getDb();
-  const stylesRepo = new StylesRepo(db);
-  seedBuiltinStyles(stylesRepo, BUILTIN_STYLES);
+  const stylesRepo = new StylesRepo(sql);
+  await seedBuiltinStyles(stylesRepo, BUILTIN_STYLES);
 
-  const styleRow = stylesRepo.bySlug(args.style);
+  const styleRow = await stylesRepo.bySlug(args.style);
   if (!styleRow) {
     console.error(`[coach] style not found: ${args.style}`);
     console.error(
-      `[coach] available: ${stylesRepo
-        .listActive()
-        .map((s) => s.slug)
-        .join(", ")}`,
+      `[coach] available: ${(await stylesRepo.listActive()).map((s) => s.slug).join(", ")}`,
     );
     process.exit(1);
   }
@@ -105,9 +101,9 @@ async function main() {
     process.exit(1);
   }
 
-  const matchesRepo = new SelfPlayMatchesRepo(db);
-  const skillsRepo = new SkillsRepo(db);
-  const currentSkills = skillsRepo.skillsForStyle(styleRow.id).map((r) => r.slug);
+  const matchesRepo = new SelfPlayMatchesRepo(sql);
+  const skillsRepo = new SkillsRepo(sql);
+  const currentSkills = (await skillsRepo.skillsForStyle(styleRow.id)).map((r) => r.slug);
 
   const chat = buildChat();
 
@@ -130,7 +126,7 @@ async function main() {
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`[coach] done in ${elapsed}s\n`);
   console.log(JSON.stringify(proposal, null, 2));
-  db.close();
+  await sql.end();
 }
 
 await main();

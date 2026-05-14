@@ -84,7 +84,7 @@ export function rankSkillRecommendations(
 
   const out: SkillRecommendation[] = [];
   for (const skill of catalogue) {
-    if (skill.is_enabled !== 1) continue;
+    if (!skill.is_enabled) continue;
     if (skill.family === "noise") continue;
     const agg = aggBySlug.get(skill.slug);
     const wins = agg?.wins ?? 0;

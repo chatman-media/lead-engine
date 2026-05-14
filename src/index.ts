@@ -1,12 +1,13 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { activeEmbeddingDim, config, llmIsConfigured } from "./config.ts";
+import { runMigrations } from "./db/migrate.ts";
+import { sql } from "./db/postgres.ts";
 import { AdminsRepo } from "./db/repos/admins.ts";
 import { KbRepo } from "./db/repos/kb.ts";
 import { SkillsRepo, seedSkillCatalogue } from "./db/repos/skills.ts";
 import { StylesRepo, seedBuiltinStyles } from "./db/repos/styles.ts";
 import { seedInfinityVacancies, VacanciesRepo } from "./db/repos/vacancies.ts";
-import { getDb } from "./db/sqlite.ts";
 import type { ChatClient } from "./rag/chat.ts";
 import { OpenAIChatClient } from "./rag/chat.ts";
 import type { EmbeddingClient } from "./rag/embed.ts";
@@ -26,7 +27,8 @@ process.on("uncaughtException", (err) => {
   console.error("[uncaughtException]", err?.message ?? err);
 });
 
-const db = getDb();
+await runMigrations();
+
 const telegram = new TelegramClient({
   token: config.telegram.botToken || "missing-token",
 });
@@ -35,8 +37,8 @@ const telegram = new TelegramClient({
 // Idempotent — admin's edits in the table win over the source-code styles.
 // Newly added builtins (added in source after a deploy) get inserted on next boot.
 {
-  const stylesRepo = new StylesRepo(db);
-  const seedResult = seedBuiltinStyles(stylesRepo, BUILTIN_STYLES);
+  const stylesRepo = new StylesRepo(sql);
+  const seedResult = await seedBuiltinStyles(stylesRepo, BUILTIN_STYLES);
   if (seedResult.inserted.length > 0) {
     console.log(`[server] seeded built-in sales styles: ${seedResult.inserted.join(", ")}`);
   }
@@ -51,8 +53,8 @@ const telegram = new TelegramClient({
 // Seed the skill catalogue — refreshes copy/prompt-fragments on every boot
 // (operator-toggleable `is_enabled` is preserved across upserts).
 {
-  const skillsRepo = new SkillsRepo(db);
-  const r = seedSkillCatalogue(skillsRepo);
+  const skillsRepo = new SkillsRepo(sql);
+  const r = await seedSkillCatalogue(skillsRepo);
   if (r.inserted > 0 || r.updated > 0) {
     console.log(`[server] skill catalogue: ${r.inserted} inserted, ${r.updated} refreshed`);
   }
@@ -64,8 +66,8 @@ const telegram = new TelegramClient({
   const adminEmail = process.env.ADMIN_EMAIL?.trim();
   const adminPassword = process.env.ADMIN_PASSWORD;
   if (adminEmail && adminPassword) {
-    const adminsRepo = new AdminsRepo(db);
-    if (!adminsRepo.byEmail(adminEmail)) {
+    const adminsRepo = new AdminsRepo(sql);
+    if (!(await adminsRepo.byEmail(adminEmail))) {
       await adminsRepo.create({ email: adminEmail, password: adminPassword });
       console.log(`[server] admin created: ${adminEmail}`);
     }
@@ -76,8 +78,8 @@ const telegram = new TelegramClient({
 // Operators can edit/close in /admin/vacancies; new built-ins added in code
 // will be inserted on next boot.
 {
-  const vacanciesRepo = new VacanciesRepo(db);
-  const r = seedInfinityVacancies(vacanciesRepo);
+  const vacanciesRepo = new VacanciesRepo(sql);
+  const r = await seedInfinityVacancies(vacanciesRepo);
   if (r.inserted > 0 || r.urlPatched > 0) {
     console.log(
       `[server] vacancies seeded: ${r.inserted} inserted, ${r.urlPatched} url-patched, ${r.skipped} skipped`,
@@ -216,7 +218,7 @@ if (llmIsConfigured()) {
 console.log(`[server] embedding dim in use: ${activeEmbeddingDim()}`);
 
 const server = createServer({
-  db,
+  sql,
   telegram,
   webhookSecret: config.telegram.webhookSecret,
   rag,
@@ -267,12 +269,12 @@ if (config.userbot.enabled) {
   const { MessagesRepo } = await import("./db/repos/messages.ts");
   const { SkillOutcomesRepo, StyleRatingsRepo } = await import("./db/repos/skill-outcomes.ts");
   scheduleStaleLeadSweep({
-    db,
-    outcomes: new SkillOutcomesRepo(db),
-    ratings: new StyleRatingsRepo(db),
-    messages: new MessagesRepo(db),
-    conversations: new ConversationsRepo(db),
-    styles: new StylesRepo(db),
+    db: sql,
+    outcomes: new SkillOutcomesRepo(sql),
+    ratings: new StyleRatingsRepo(sql),
+    messages: new MessagesRepo(sql),
+    conversations: new ConversationsRepo(sql),
+    styles: new StylesRepo(sql),
   });
 }
 
@@ -312,8 +314,8 @@ if (rag) {
 // content hash: re-running on a non-empty KB is a no-op for unchanged files.
 if (rag) {
   const kbDir = resolve(import.meta.dir, "../kb");
-  const kb = new KbRepo(db);
-  const chunkCount = kb.countChunks();
+  const kb = new KbRepo(sql);
+  const chunkCount = await kb.countChunks();
   if (chunkCount === 0 && existsSync(kbDir)) {
     console.log(`[server] KB is empty — starting background ingest of ${kbDir}`);
     import("./rag/ingest.ts")

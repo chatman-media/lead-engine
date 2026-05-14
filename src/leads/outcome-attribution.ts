@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Sql } from "../db/postgres.ts";
 
 import type { ConversationsRepo } from "../db/repos/conversations.ts";
 import type { LeadRow } from "../db/repos/leads.ts";
@@ -56,9 +56,11 @@ interface MessageWithMeta {
  * Returns a Map slug → most-recent-message-id so the outcome row can
  * link back to the specific reply that demonstrated the skill.
  */
-function collectRecentSkills(messages: MessagesRepo, conversationId: number): Map<string, number> {
-  const recent = messages
-    .listByConversation(conversationId, 200)
+async function collectRecentSkills(
+  messages: MessagesRepo,
+  conversationId: number,
+): Promise<Map<string, number>> {
+  const recent = (await messages.listByConversation(conversationId, 200))
     .filter((m) => m.role === "assistant")
     .slice(-ATTRIBUTION_WINDOW);
   const seen = new Map<string, number>();
@@ -87,18 +89,18 @@ function parseSkillsUsed(metaJson: string | null): string[] {
 
 /** Find the active style slug for a conversation: prefer pinned style_id,
  *  fall back to latest assistant message's stage/style metadata if any. */
-function resolveStyleSlug(
+async function resolveStyleSlug(
   styles: StylesRepo,
   conversations: ConversationsRepo,
   conversationId: number,
-): string | null {
-  const conv = conversations.byId(conversationId);
+): Promise<string | null> {
+  const conv = await conversations.byId(conversationId);
   if (!conv?.style_id) return null;
-  return styles.byId(conv.style_id)?.slug ?? null;
+  return (await styles.byId(conv.style_id))?.slug ?? null;
 }
 
 export interface AttributionDeps {
-  db: Database;
+  db: Sql;
   outcomes: SkillOutcomesRepo;
   ratings: StyleRatingsRepo;
   messages: MessagesRepo;
@@ -121,21 +123,24 @@ export interface AttributionResult {
  *    N assistant messages of the lead's conversation.
  *  - Updates style_ratings (ELO + W/L/D) for the active style.
  */
-export function attributeLeadOutcome(d: AttributionDeps, lead: LeadRow): AttributionResult {
+export async function attributeLeadOutcome(
+  d: AttributionDeps,
+  lead: LeadRow,
+): Promise<AttributionResult> {
   const out = leadOutcome(lead);
   if (!out) return { outcomesRecorded: 0, styleRatingUpdated: false };
 
   // Find the conversation associated with this lead. Lead.user_id → any
   // conversation by user is a 1:1 in our schema.
-  const conv = d.conversations.byUserId(lead.user_id);
+  const conv = await d.conversations.byUserId(lead.user_id);
   if (!conv) return { outcomesRecorded: 0, styleRatingUpdated: false };
 
-  const styleSlug = resolveStyleSlug(d.styles, d.conversations, conv.id);
-  const skillToMsgId = collectRecentSkills(d.messages, conv.id);
+  const styleSlug = await resolveStyleSlug(d.styles, d.conversations, conv.id);
+  const skillToMsgId = await collectRecentSkills(d.messages, conv.id);
 
   let recorded = 0;
   for (const [slug, msgId] of skillToMsgId) {
-    const inserted = d.outcomes.record({
+    const inserted = await d.outcomes.record({
       leadId: lead.id,
       conversationId: conv.id,
       messageId: msgId,
@@ -153,7 +158,7 @@ export function attributeLeadOutcome(d: AttributionDeps, lead: LeadRow): Attribu
   // attempt drives the ELO move.
   let styleUpdated = false;
   if (styleSlug && recorded > 0) {
-    d.ratings.applyOutcome(styleSlug, out.outcome);
+    await d.ratings.applyOutcome(styleSlug, out.outcome);
     styleUpdated = true;
   }
 
@@ -165,4 +170,4 @@ export const _testHelpers = {
   collectRecentSkills,
   resolveStyleSlug,
   ATTRIBUTION_WINDOW,
-};
+} as const;

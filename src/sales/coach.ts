@@ -118,11 +118,11 @@ export async function proposeStyleEdits(input: CoachInput): Promise<CoachProposa
     limit: sampleSize,
     ...(input.personaSlug ? { personaSlug: input.personaSlug } : {}),
   };
-  const losses = input.matchesRepo.list(lossOpts);
+  const losses = await input.matchesRepo.list(lossOpts);
   const remaining = sampleSize - losses.length;
   const draws =
     remaining > 0
-      ? input.matchesRepo.list({
+      ? await input.matchesRepo.list({
           styleSlug: input.style.slug,
           outcome: "draw",
           limit: remaining,
@@ -140,9 +140,9 @@ export async function proposeStyleEdits(input: CoachInput): Promise<CoachProposa
   }
 
   // Hydrate transcripts (list returns summaries without text).
-  const fullMatches = sample
-    .map((s) => input.matchesRepo.byId(s.id))
-    .filter((m): m is NonNullable<typeof m> => m !== null);
+  const fullMatches = (await Promise.all(sample.map((s) => input.matchesRepo.byId(s.id)))).filter(
+    (m): m is NonNullable<typeof m> => m !== null,
+  );
 
   const transcriptsBlock = fullMatches
     .map((m) => {

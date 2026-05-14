@@ -97,7 +97,7 @@ export function createServer(opts: CreateServerOptions): Server<AdminWsData> {
   const shouldServeUi = opts.serveUi ?? process.env.SERVE_UI === "1";
   const bus = new AdminBus();
   const router = createRouter({ ...opts, bus });
-  const db = opts.db;
+  const sql = opts.sql;
 
   return Bun.serve<AdminWsData>({
     port: opts.port,
@@ -105,7 +105,7 @@ export function createServer(opts: CreateServerOptions): Server<AdminWsData> {
       const url = new URL(req.url);
 
       if (url.pathname === wsPath) {
-        const ctx = currentAdmin(db, req);
+        const ctx = await currentAdmin(sql, req);
         if (!ctx) return new Response("Unauthorized", { status: 401 });
         const ok = server.upgrade(req, { data: { adminId: ctx.adminId } });
         return ok ? undefined : new Response("Upgrade failed", { status: 500 });

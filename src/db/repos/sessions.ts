@@ -1,5 +1,5 @@
-import type { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
+import type { Sql } from "../postgres.ts";
 
 export interface SessionRow {
   id: string;
@@ -15,45 +15,39 @@ function generateId(): string {
 }
 
 export class SessionsRepo {
-  constructor(private db: Database) {}
+  constructor(private sql: Sql) {}
 
-  issue(adminId: number, opts: { ttlSeconds?: number } = {}): string {
+  async issue(adminId: number, opts: { ttlSeconds?: number } = {}): Promise<string> {
     const id = generateId();
     const ttl = opts.ttlSeconds ?? DEFAULT_TTL_SECONDS;
     const expiresAt = Math.floor(Date.now() / 1000) + ttl;
-    this.db.run(`INSERT INTO sessions (id, admin_id, expires_at) VALUES (?, ?, ?)`, [
-      id,
-      adminId,
-      expiresAt,
-    ]);
+    await this.sql`
+      INSERT INTO sessions (id, admin_id, expires_at) VALUES (${id}, ${adminId}, ${expiresAt})
+    `;
     return id;
   }
 
-  /** Returns admin_id or null. Garbage-collects the row if expired. */
-  adminIdFor(id: string): number | null {
-    const row = this.db
-      .query<SessionRow, [string]>(`SELECT * FROM sessions WHERE id = ? LIMIT 1`)
-      .get(id);
+  async adminIdFor(id: string): Promise<number | null> {
+    const [row] = await this.sql<SessionRow[]>`
+      SELECT * FROM sessions WHERE id = ${id} LIMIT 1
+    `;
     if (!row) return null;
     const now = Math.floor(Date.now() / 1000);
     if (row.expires_at <= now) {
-      this.db.run(`DELETE FROM sessions WHERE id = ?`, [id]);
+      await this.sql`DELETE FROM sessions WHERE id = ${id}`;
       return null;
     }
     return row.admin_id;
   }
 
-  revoke(id: string): void {
-    this.db.run(`DELETE FROM sessions WHERE id = ?`, [id]);
+  async revoke(id: string): Promise<void> {
+    await this.sql`DELETE FROM sessions WHERE id = ${id}`;
   }
 
-  /** Bulk delete expired sessions; useful for startup or cron. */
-  purgeExpired(): number {
-    const before =
-      this.db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM sessions`).get()?.n ?? 0;
-    this.db.run(`DELETE FROM sessions WHERE expires_at <= unixepoch()`);
-    const after =
-      this.db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM sessions`).get()?.n ?? 0;
-    return before - after;
+  async purgeExpired(): Promise<number> {
+    const [before] = await this.sql<{ n: number }[]>`SELECT COUNT(*)::INTEGER AS n FROM sessions`;
+    await this.sql`DELETE FROM sessions WHERE expires_at <= EXTRACT(EPOCH FROM NOW())::INTEGER`;
+    const [after] = await this.sql<{ n: number }[]>`SELECT COUNT(*)::INTEGER AS n FROM sessions`;
+    return (before?.n ?? 0) - (after?.n ?? 0);
   }
 }

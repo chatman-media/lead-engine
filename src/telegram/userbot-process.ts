@@ -12,8 +12,8 @@ process.on("uncaughtException", (err) => {
 });
 
 import { config } from "../config.ts";
+import { sql } from "../db/postgres.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
-import { getDb } from "../db/sqlite.ts";
 import { OpenAIChatClient } from "../rag/chat.ts";
 import { NullEmbeddingClient, OpenAIEmbeddingClient } from "../rag/embed.ts";
 import { OllamaChatClient } from "../rag/providers/ollama-chat.ts";
@@ -21,8 +21,6 @@ import { OllamaEmbeddingClient } from "../rag/providers/ollama-embed.ts";
 import { OpenRouterChatClient } from "../rag/providers/openrouter-chat.ts";
 import type { Style } from "../sales/types.ts";
 import { startUserbot } from "./userbot.ts";
-
-const db = getDb();
 
 let rag: Parameters<typeof startUserbot>[0]["rag"];
 
@@ -59,9 +57,9 @@ if (config.llm.provider === "openrouter" ? !!config.openrouter.apiKey : !!config
           })
         : new NullEmbeddingClient(config.embed.dim ?? config.openai.embeddingDim);
 
-  const stylesRepo = new StylesRepo(db);
+  const stylesRepo = new StylesRepo(sql);
   const styleRow = config.sales.forcedStyleSlug
-    ? stylesRepo.bySlug(config.sales.forcedStyleSlug)
+    ? await stylesRepo.bySlug(config.sales.forcedStyleSlug)
     : undefined;
   const style = styleRow ? (stylesRepo.parseRow(styleRow) as Style) : undefined;
 
@@ -83,4 +81,4 @@ if (config.llm.provider === "openrouter" ? !!config.openrouter.apiKey : !!config
   };
 }
 
-await startUserbot({ db, apiId: config.userbot.apiId, apiHash: config.userbot.apiHash, rag });
+await startUserbot({ db: sql, apiId: config.userbot.apiId, apiHash: config.userbot.apiHash, rag });

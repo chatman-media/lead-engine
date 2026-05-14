@@ -1,13 +1,12 @@
 import { config } from "../src/config.ts";
+import { sql } from "../src/db/postgres.ts";
 import { KbRepo } from "../src/db/repos/kb.ts";
-import { getDb } from "../src/db/sqlite.ts";
 import { buildSystemPrompt } from "../src/rag/answer.ts";
 import { OllamaEmbeddingClient } from "../src/rag/providers/ollama-embed.ts";
 
 const question = process.argv.slice(2).join(" ") || "расскажи про работу в Корее";
 
-const db = getDb();
-const kb = new KbRepo(db);
+const kb = new KbRepo(sql);
 const embedder = new OllamaEmbeddingClient({
   host: config.ollama.host,
   model: config.ollama.embeddingModel,
@@ -16,7 +15,7 @@ const embedder = new OllamaEmbeddingClient({
 
 const [vec] = await embedder.embed([question]);
 if (!vec) throw new Error("no vec");
-const allHits = kb.search(vec, config.rag.topK);
+const allHits = await kb.search(vec, config.rag.topK);
 const hits = allHits.filter((h) =>
   config.rag.maxDistance === undefined ? true : h.distance <= config.rag.maxDistance,
 );
@@ -51,3 +50,5 @@ console.log(
 );
 console.log(`[raw] CONTAINS <think>: ${msg.includes("<think>")}`);
 console.log(`\n--- raw content (first 600 chars): ---\n${msg.slice(0, 600)}\n---`);
+
+await sql.end();

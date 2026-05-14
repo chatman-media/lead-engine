@@ -1,5 +1,3 @@
-import type { Database } from "bun:sqlite";
-
 import {
   createAnalyticsHandler,
   createApplyCoachProposalHandler,
@@ -78,6 +76,7 @@ import {
 import { createLoginHandler, createLogoutHandler, createMeHandler } from "./admin/auth.ts";
 import type { AdminBus } from "./admin/bus.ts";
 import { config } from "./config.ts";
+import type { Sql } from "./db/postgres.ts";
 import { createQuestionnaireGet, createQuestionnairePost } from "./questionnaire/routes.ts";
 import { html, Router } from "./router.ts";
 import type { TelegramClient } from "./telegram/client.ts";
@@ -85,7 +84,7 @@ import { createWebhookHandler, type RagDeps } from "./telegram/webhook.ts";
 import { mountTestHooks } from "./test-hooks.ts";
 
 export interface AppDeps {
-  db: Database;
+  sql: Sql;
   telegram: TelegramClient;
   webhookSecret: string;
   rag?: RagDeps;
@@ -127,7 +126,7 @@ export function createRouter(deps: AppDeps): Router {
   router.post(
     "/telegram/:secret",
     createWebhookHandler({
-      db: deps.db,
+      db: deps.sql,
       telegram: deps.telegram,
       webhookSecret: deps.webhookSecret,
       rag: deps.rag,
@@ -140,7 +139,7 @@ export function createRouter(deps: AppDeps): Router {
       leadsChatId: deps.leadsChatId ?? null,
       visaChatId: deps.visaChatId ?? null,
       onCallbackQuery: createLeadCallbackHandler({
-        db: deps.db,
+        sql: deps.sql,
         telegram: deps.telegram,
         leadsChatId: deps.leadsChatId ?? null,
         visaChatId: deps.visaChatId ?? null,
@@ -185,15 +184,15 @@ export function createRouter(deps: AppDeps): Router {
     }),
   );
 
-  router.get("/q/:token", createQuestionnaireGet(deps.db));
-  router.post("/q/:token", createQuestionnairePost(deps.db));
+  router.get("/q/:token", createQuestionnaireGet(deps.sql));
+  router.post("/q/:token", createQuestionnairePost(deps.sql));
 
-  router.post("/admin/api/login", createLoginHandler(deps.db));
-  router.post("/admin/api/logout", createLogoutHandler(deps.db));
-  router.get("/admin/api/me", createMeHandler(deps.db));
+  router.post("/admin/api/login", createLoginHandler(deps.sql));
+  router.post("/admin/api/logout", createLogoutHandler(deps.sql));
+  router.get("/admin/api/me", createMeHandler(deps.sql));
 
   const apiDeps = {
-    db: deps.db,
+    sql: deps.sql,
     telegram: deps.telegram,
     // Thread the LLM clients through so the style playground endpoint can
     // run dry-run completions. Other admin endpoints don't need this; the
@@ -332,7 +331,7 @@ export function createRouter(deps: AppDeps): Router {
   router.delete("/admin/api/leads/:id", createDeleteLeadHandler(apiDeps));
 
   if (deps.enableTestHooks) {
-    mountTestHooks(router, deps.db);
+    mountTestHooks(router, deps.sql);
   }
 
   return router;

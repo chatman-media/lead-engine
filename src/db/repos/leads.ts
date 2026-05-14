@@ -1,14 +1,5 @@
-import type { Database } from "bun:sqlite";
+import type { Sql } from "../postgres.ts";
 
-/**
- * Lead pipeline state machine (see migration 009 for state semantics).
- *
- * Keep transitions linear and operator-driven for now: the bot doesn't
- * auto-promote across states, the admin UI does (or callback_query
- * handlers when an inline button is clicked). Auto-promotion (e.g. from
- * intake_pending → intake_complete based on extracted intake fields) is
- * Phase 2 and lives in the webhook, not here.
- */
 export type LeadState =
   | "intake_pending"
   | "intake_complete"
@@ -35,11 +26,6 @@ export interface LeadRow {
   updated_at: number;
 }
 
-/**
- * Append-only audit-trail row. See migration 010 for the rationale —
- * `leads.state` is the current cursor, `lead_events` is the history
- * the admin timeline panel renders.
- */
 export interface LeadEventRow {
   id: number;
   lead_id: number;
@@ -50,7 +36,6 @@ export interface LeadEventRow {
   created_at: number;
 }
 
-/** Operator-facing free-form notes on a lead. Migration 011. */
 export interface LeadNoteRow {
   id: number;
   lead_id: number;
@@ -61,56 +46,39 @@ export interface LeadNoteRow {
 }
 
 export class LeadsRepo {
-  constructor(private db: Database) {}
+  constructor(private sql: Sql) {}
 
-  byId(id: number): LeadRow | null {
-    return (
-      this.db.query<LeadRow, [number]>("SELECT * FROM leads WHERE id = ? LIMIT 1").get(id) ?? null
-    );
+  async byId(id: number): Promise<LeadRow | null> {
+    const [row] = await this.sql<LeadRow[]>`
+      SELECT * FROM leads WHERE id = ${id} LIMIT 1
+    `;
+    return row ?? null;
   }
 
-  byUserId(userId: number): LeadRow | null {
-    return (
-      this.db
-        .query<LeadRow, [number]>("SELECT * FROM leads WHERE user_id = ? LIMIT 1")
-        .get(userId) ?? null
-    );
+  async byUserId(userId: number): Promise<LeadRow | null> {
+    const [row] = await this.sql<LeadRow[]>`
+      SELECT * FROM leads WHERE user_id = ${userId} LIMIT 1
+    `;
+    return row ?? null;
   }
 
-  /**
-   * Look up a lead by its ops-chat card message. Used by the relay
-   * handler in webhook: when the operator replies to a lead card in
-   * the ops chat, Telegram delivers `reply_to_message.message_id` and
-   * we need to find which lead that card belongs to.
-   */
-  byOpsMessage(chatId: number, messageId: number): LeadRow | null {
-    return (
-      this.db
-        .query<LeadRow, [number, number]>(
-          `SELECT * FROM leads
-           WHERE ops_chat_id = ? AND ops_message_id = ?
-           LIMIT 1`,
-        )
-        .get(chatId, messageId) ?? null
-    );
+  async byOpsMessage(chatId: number, messageId: number): Promise<LeadRow | null> {
+    const [row] = await this.sql<LeadRow[]>`
+      SELECT * FROM leads
+      WHERE ops_chat_id = ${chatId} AND ops_message_id = ${messageId}
+      LIMIT 1
+    `;
+    return row ?? null;
   }
 
-  /**
-   * Idempotent — returns existing lead for the user when one exists, else
-   * creates a fresh `intake_pending` lead. The `user_id` UNIQUE constraint
-   * means at most one lead row per candidate; closed/rejected leads must
-   * be hard-deleted before a new lead can begin (operator decision).
-   */
-  ensureForUser(userId: number): LeadRow {
-    const existing = this.byUserId(userId);
+  async ensureForUser(userId: number): Promise<LeadRow> {
+    const existing = await this.byUserId(userId);
     if (existing) return existing;
-    const row = this.db
-      .query<LeadRow, [number]>(`INSERT INTO leads (user_id) VALUES (?) RETURNING *`)
-      .get(userId);
+    const [row] = await this.sql<LeadRow[]>`
+      INSERT INTO leads (user_id) VALUES (${userId}) RETURNING *
+    `;
     if (!row) throw new Error("Failed to insert lead");
-    // Synthetic "created" event — `from_state` NULL, to_state matches
-    // the lead's default. Marks the start of the timeline.
-    this.appendEvent(row.id, {
+    await this.appendEvent(row.id, {
       fromState: null,
       toState: row.state,
       byAdminId: null,
@@ -119,13 +87,7 @@ export class LeadsRepo {
     return row;
   }
 
-  /**
-   * Append a row to `lead_events`. Internal helper — prefer the
-   * higher-level mutation methods (`setState`, `allocateApplicationId`,
-   * `ensureForUser`) which call this automatically. Made public so
-   * tests can inject events without going through a transition.
-   */
-  appendEvent(
+  async appendEvent(
     leadId: number,
     input: {
       fromState: LeadState | null;
@@ -133,179 +95,128 @@ export class LeadsRepo {
       byAdminId: number | null;
       notes: string | null;
     },
-  ): void {
-    this.db.run(
-      `INSERT INTO lead_events (lead_id, from_state, to_state, by_admin_id, notes)
-       VALUES (?, ?, ?, ?, ?)`,
-      [leadId, input.fromState, input.toState, input.byAdminId, input.notes],
-    );
+  ): Promise<void> {
+    await this.sql`
+      INSERT INTO lead_events (lead_id, from_state, to_state, by_admin_id, notes)
+      VALUES (${leadId}, ${input.fromState}, ${input.toState}, ${input.byAdminId}, ${input.notes})
+    `;
   }
 
-  /** Timeline for one lead, oldest first. */
-  events(leadId: number): LeadEventRow[] {
-    return this.db
-      .query<LeadEventRow, [number]>(
-        `SELECT * FROM lead_events
-         WHERE lead_id = ?
-         ORDER BY created_at ASC, id ASC`,
-      )
-      .all(leadId);
+  async events(leadId: number): Promise<LeadEventRow[]> {
+    return this.sql<LeadEventRow[]>`
+      SELECT * FROM lead_events
+      WHERE lead_id = ${leadId}
+      ORDER BY created_at ASC, id ASC
+    `;
   }
 
-  /**
-   * Operator-typed note on a lead. Body is required; whitespace-only
-   * input is rejected to keep the notes panel clean. Returns the
-   * inserted row so the caller can echo it back to the UI without
-   * a re-fetch.
-   */
-  addNote(input: { leadId: number; body: string; byAdminId?: number }): LeadNoteRow {
+  async addNote(input: { leadId: number; body: string; byAdminId?: number }): Promise<LeadNoteRow> {
     const trimmed = input.body.trim();
     if (!trimmed) throw new Error("note body is empty");
-    const row = this.db
-      .query<LeadNoteRow, [number, number | null, string]>(
-        `INSERT INTO lead_notes (lead_id, by_admin_id, body)
-         VALUES (?, ?, ?) RETURNING *`,
-      )
-      .get(input.leadId, input.byAdminId ?? null, trimmed);
+    const [row] = await this.sql<LeadNoteRow[]>`
+      INSERT INTO lead_notes (lead_id, by_admin_id, body)
+      VALUES (${input.leadId}, ${input.byAdminId ?? null}, ${trimmed}) RETURNING *
+    `;
     if (!row) throw new Error("failed to insert lead note");
     return row;
   }
 
-  /** All notes for a lead, freshest first. */
-  notes(leadId: number): LeadNoteRow[] {
-    return this.db
-      .query<LeadNoteRow, [number]>(
-        `SELECT * FROM lead_notes
-         WHERE lead_id = ?
-         ORDER BY created_at DESC, id DESC`,
-      )
-      .all(leadId);
+  async notes(leadId: number): Promise<LeadNoteRow[]> {
+    return this.sql<LeadNoteRow[]>`
+      SELECT * FROM lead_notes
+      WHERE lead_id = ${leadId}
+      ORDER BY created_at DESC, id DESC
+    `;
   }
 
-  deleteNote(noteId: number): boolean {
-    const res = this.db.run("DELETE FROM lead_notes WHERE id = ?", [noteId]);
-    return res.changes > 0;
+  async deleteNote(noteId: number): Promise<boolean> {
+    const result = await this.sql`DELETE FROM lead_notes WHERE id = ${noteId}`;
+    return result.count > 0;
   }
 
-  upsertAutoFactsNote(leadId: number, body: string): void {
-    this.db.run("DELETE FROM lead_notes WHERE lead_id = ? AND source = 'auto_facts'", [leadId]);
-    this.db.run(
-      "INSERT INTO lead_notes (lead_id, body, source, created_at) VALUES (?, ?, 'auto_facts', unixepoch())",
-      [leadId, body],
-    );
+  async upsertAutoFactsNote(leadId: number, body: string): Promise<void> {
+    await this.sql`DELETE FROM lead_notes WHERE lead_id = ${leadId} AND source = 'auto_facts'`;
+    await this.sql`
+      INSERT INTO lead_notes (lead_id, body, source)
+      VALUES (${leadId}, ${body}, 'auto_facts')
+    `;
   }
 
-  /**
-   * Atomic state transition. Updates `updated_at` and (when the new state
-   * is a terminal operator decision) `decided_by_admin_id` + `decided_at`.
-   * The caller is responsible for sending any side-effect messages.
-   */
-  setState(
+  async setState(
     id: number,
     state: LeadState,
     opts: { adminId?: number; rejectedReason?: string } = {},
-  ): LeadRow | null {
-    // Capture the prior state for the audit-trail row. When the lead
-    // doesn't exist, return null without writing anything.
-    const before = this.byId(id);
+  ): Promise<LeadRow | null> {
+    const before = await this.byId(id);
     if (!before) return null;
-    // No-op transitions (re-emitting the same state) skip the event
-    // log to keep the timeline meaningful — operators don't want to
-    // see "intake_pending → intake_pending" rows.
     const sameState = before.state === state;
 
     const isDecision = state === "approved" || state === "rejected";
     if (isDecision) {
-      this.db.run(
-        `UPDATE leads
-         SET state = ?, decided_by_admin_id = ?, decided_at = unixepoch(),
-             rejected_reason = ?, updated_at = unixepoch()
-         WHERE id = ?`,
-        [
-          state,
-          opts.adminId ?? null,
-          state === "rejected" ? (opts.rejectedReason ?? null) : null,
-          id,
-        ],
-      );
+      await this.sql`
+        UPDATE leads
+        SET state = ${state}, decided_by_admin_id = ${opts.adminId ?? null},
+            decided_at = EXTRACT(EPOCH FROM NOW())::INTEGER,
+            rejected_reason = ${state === "rejected" ? (opts.rejectedReason ?? null) : null},
+            updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER
+        WHERE id = ${id}
+      `;
     } else {
-      this.db.run(`UPDATE leads SET state = ?, updated_at = unixepoch() WHERE id = ?`, [state, id]);
+      await this.sql`
+        UPDATE leads SET state = ${state}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+      `;
     }
     if (!sameState) {
-      this.appendEvent(id, {
+      await this.appendEvent(id, {
         fromState: before.state,
         toState: state,
         byAdminId: opts.adminId ?? null,
-        // Only carry the rejection reason on the rejected event;
-        // approved leads have no operator-typed note.
         notes: state === "rejected" ? (opts.rejectedReason ?? null) : null,
       });
     }
     return this.byId(id);
   }
 
-  /** Stores the parsed intake fields. Caller serializes to JSON. */
-  setIntake(id: number, intakeJson: string): void {
-    this.db.run(`UPDATE leads SET intake_json = ?, updated_at = unixepoch() WHERE id = ?`, [
-      intakeJson,
-      id,
-    ]);
+  async setIntake(id: number, intakeJson: string): Promise<void> {
+    await this.sql`
+      UPDATE leads SET intake_json = ${intakeJson}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+    `;
   }
 
-  setVisaDocs(id: number, visaDocsJson: string): void {
-    this.db.run(`UPDATE leads SET visa_docs_json = ?, updated_at = unixepoch() WHERE id = ?`, [
-      visaDocsJson,
-      id,
-    ]);
+  async setVisaDocs(id: number, visaDocsJson: string): Promise<void> {
+    await this.sql`
+      UPDATE leads SET visa_docs_json = ${visaDocsJson}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+    `;
   }
 
-  /**
-   * Records the Telegram message id of the lead card we posted to the ops
-   * chat, so callback_query handlers (and approve/reject UI actions) can
-   * edit the card in place to show the new state.
-   */
-  setOpsCardMessage(id: number, chatId: number, messageId: number): void {
-    this.db.run(
-      `UPDATE leads SET ops_chat_id = ?, ops_message_id = ?, updated_at = unixepoch() WHERE id = ?`,
-      [chatId, messageId, id],
-    );
+  async setOpsCardMessage(id: number, chatId: number, messageId: number): Promise<void> {
+    await this.sql`
+      UPDATE leads SET ops_chat_id = ${chatId}, ops_message_id = ${messageId}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+    `;
   }
 
-  /**
-   * Allocates the next sequential application id in the form
-   * "VS-YYYY-NNNN" and assigns it to the lead. Idempotent on the lead's
-   * existing application_id (returns it if already set).
-   */
-  allocateApplicationId(id: number): string {
-    const existing = this.byId(id);
+  async allocateApplicationId(id: number): Promise<string> {
+    const existing = await this.byId(id);
     if (existing?.application_id) return existing.application_id;
     const year = new Date().getFullYear();
     const prefix = `VS-${year}-`;
-    const row = this.db
-      .query<{ next_seq: number }, [number, string]>(
-        `SELECT COALESCE(
-           MAX(CAST(SUBSTR(application_id, ?) AS INTEGER)),
-           0
-         ) + 1 AS next_seq
-         FROM leads
-         WHERE application_id LIKE ? || '%'`,
-      )
-      .get(prefix.length + 1, prefix);
+    // Get max sequence number
+    const [row] = await this.sql<{ next_seq: number }[]>`
+      SELECT COALESCE(
+        MAX(CAST(SUBSTR(application_id, ${prefix.length + 1}) AS INTEGER)),
+        0
+      ) + 1 AS next_seq
+      FROM leads
+      WHERE application_id LIKE ${prefix + "%"}
+    `;
     const seq = row?.next_seq ?? 1;
     const applicationId = `${prefix}${String(seq).padStart(4, "0")}`;
-    this.db.run(`UPDATE leads SET application_id = ?, updated_at = unixepoch() WHERE id = ?`, [
-      applicationId,
-      id,
-    ]);
-    // Surface the allocation in the timeline. The lead's state
-    // doesn't change (the caller transitions to `docs_complete`
-    // separately and that emits its own event), so we use a self-
-    // loop pseudo-event with the current state on both sides and
-    // the application id in `notes` — distinct from a state-change
-    // event because from===to.
-    const current = this.byId(id);
+    await this.sql`
+      UPDATE leads SET application_id = ${applicationId}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+    `;
+    const current = await this.byId(id);
     if (current) {
-      this.appendEvent(id, {
+      await this.appendEvent(id, {
         fromState: current.state,
         toState: current.state,
         byAdminId: null,
@@ -315,48 +226,42 @@ export class LeadsRepo {
     return applicationId;
   }
 
-  list(
+  async list(
     opts: { state?: LeadState | null; limit?: number } = {},
-  ): Array<LeadRow & { tg_user_id: number; tg_username: string | null }> {
+  ): Promise<Array<LeadRow & { tg_user_id: number; tg_username: string | null }>> {
     const limit = opts.limit ?? 200;
     if (opts.state) {
-      return this.db
-        .query<LeadRow & { tg_user_id: number; tg_username: string | null }, [LeadState, number]>(
-          `SELECT l.*, u.tg_user_id, u.tg_username
-           FROM leads l
-           JOIN users u ON u.id = l.user_id
-           WHERE l.state = ?
-           ORDER BY l.updated_at DESC
-           LIMIT ?`,
-        )
-        .all(opts.state, limit);
+      return this.sql<Array<LeadRow & { tg_user_id: number; tg_username: string | null }>>`
+        SELECT l.*, u.tg_user_id, u.tg_username
+        FROM leads l
+        JOIN users u ON u.id = l.user_id
+        WHERE l.state = ${opts.state}
+        ORDER BY l.updated_at DESC
+        LIMIT ${limit}
+      `;
     }
-    return this.db
-      .query<LeadRow & { tg_user_id: number; tg_username: string | null }, [number]>(
-        `SELECT l.*, u.tg_user_id, u.tg_username
-         FROM leads l
-         JOIN users u ON u.id = l.user_id
-         ORDER BY
-           CASE l.state
-             WHEN 'intake_complete' THEN 0
-             WHEN 'docs_complete' THEN 1
-             WHEN 'approved' THEN 2
-             WHEN 'docs_pending' THEN 3
-             WHEN 'intake_pending' THEN 4
-             ELSE 5
-           END,
-           l.updated_at DESC
-         LIMIT ?`,
-      )
-      .all(limit);
+    return this.sql<Array<LeadRow & { tg_user_id: number; tg_username: string | null }>>`
+      SELECT l.*, u.tg_user_id, u.tg_username
+      FROM leads l
+      JOIN users u ON u.id = l.user_id
+      ORDER BY
+        CASE l.state
+          WHEN 'intake_complete' THEN 0
+          WHEN 'docs_complete' THEN 1
+          WHEN 'approved' THEN 2
+          WHEN 'docs_pending' THEN 3
+          WHEN 'intake_pending' THEN 4
+          ELSE 5
+        END,
+        l.updated_at DESC
+      LIMIT ${limit}
+    `;
   }
 
-  countByState(): Record<LeadState, number> {
-    const rows = this.db
-      .query<{ state: LeadState; count: number }, []>(
-        `SELECT state, COUNT(*) AS count FROM leads GROUP BY state`,
-      )
-      .all();
+  async countByState(): Promise<Record<LeadState, number>> {
+    const rows = await this.sql<{ state: LeadState; count: number }[]>`
+      SELECT state, COUNT(*)::INTEGER AS count FROM leads GROUP BY state
+    `;
     const result: Record<LeadState, number> = {
       intake_pending: 0,
       intake_complete: 0,
@@ -371,8 +276,25 @@ export class LeadsRepo {
     return result;
   }
 
-  delete(id: number): boolean {
-    const res = this.db.run("DELETE FROM leads WHERE id = ?", [id]);
-    return res.changes > 0;
+  /**
+   * Return leads in non-terminal states whose `updated_at` is older than
+   * `cutoffEpoch` (seconds since Unix epoch). Used by the stale-sweep job.
+   */
+  async listStale(
+    states: LeadState[],
+    cutoffEpoch: number,
+  ): Promise<Array<{ id: number; state: LeadState; updated_at: number }>> {
+    if (states.length === 0) return [];
+    return this.sql<Array<{ id: number; state: LeadState; updated_at: number }>>`
+      SELECT id, state, updated_at
+      FROM leads
+      WHERE state = ANY(${states}::text[])
+        AND updated_at < ${cutoffEpoch}
+    `;
+  }
+
+  async delete(id: number): Promise<boolean> {
+    const result = await this.sql`DELETE FROM leads WHERE id = ${id}`;
+    return result.count > 0;
   }
 }

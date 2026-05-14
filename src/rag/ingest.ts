@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
@@ -28,11 +27,6 @@ export interface IngestFileResult {
   created: boolean;
 }
 
-interface ExistingDoc {
-  id: number;
-  content_hash: string;
-}
-
 export async function ingestFile(path: string, deps: IngestDeps): Promise<IngestFileResult> {
   const abs = resolve(path);
   const ext = extname(abs).toLowerCase();
@@ -41,16 +35,11 @@ export async function ingestFile(path: string, deps: IngestDeps): Promise<Ingest
   const hash = createHash("sha256").update(raw).digest("hex");
   const source = `file://${abs}`;
   const title = basename(abs);
-  const db = getDb(deps.kb);
 
-  const existing = db
-    .query<ExistingDoc, [string]>(
-      "SELECT id, content_hash FROM kb_documents WHERE source = ? LIMIT 1",
-    )
-    .get(source);
+  const existing = await deps.kb.getDocumentBySource(source);
 
   if (existing && existing.content_hash === hash) {
-    const chunks = countChunksForDoc(db, existing.id);
+    const chunks = await deps.kb.countChunksForDocument(existing.id);
     if (chunks > 0) {
       return {
         source,
@@ -62,11 +51,10 @@ export async function ingestFile(path: string, deps: IngestDeps): Promise<Ingest
   }
 
   if (existing) {
-    deps.kb.deleteChunksByDocument(existing.id);
-    db.run("DELETE FROM kb_documents WHERE id = ?", [existing.id]);
+    await deps.kb.deleteDocument(existing.id);
   }
 
-  const doc = deps.kb.upsertDocument({
+  const doc = await deps.kb.upsertDocument({
     source,
     title,
     contentHash: hash,
@@ -81,7 +69,7 @@ export async function ingestFile(path: string, deps: IngestDeps): Promise<Ingest
 
   const vectors = await deps.embedder.embed(chunks.map((c) => c.text));
   for (let i = 0; i < chunks.length; i++) {
-    deps.kb.insertChunkWithEmbedding({
+    await deps.kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: chunks[i]!.index,
       text: chunks[i]!.text,
@@ -113,27 +101,21 @@ export async function ingestText(
   const hash = createHash("sha256").update(raw).digest("hex");
   const source = `inline:${hash.slice(0, 12)}`;
   const title = input.title.trim() || "untitled";
-  const db = getDb(deps.kb);
 
-  const existing = db
-    .query<ExistingDoc, [string]>(
-      "SELECT id, content_hash FROM kb_documents WHERE source = ? LIMIT 1",
-    )
-    .get(source);
+  const existing = await deps.kb.getDocumentBySource(source);
 
   if (existing && existing.content_hash === hash) {
-    const chunks = countChunksForDoc(db, existing.id);
+    const chunks = await deps.kb.countChunksForDocument(existing.id);
     if (chunks > 0) {
       return { source, documentId: existing.id, chunks, created: false };
     }
   }
 
   if (existing) {
-    deps.kb.deleteChunksByDocument(existing.id);
-    db.run("DELETE FROM kb_documents WHERE id = ?", [existing.id]);
+    await deps.kb.deleteDocument(existing.id);
   }
 
-  const doc = deps.kb.upsertDocument({
+  const doc = await deps.kb.upsertDocument({
     source,
     title,
     contentHash: hash,
@@ -147,7 +129,7 @@ export async function ingestText(
 
   const vectors = await deps.embedder.embed(chunks.map((c) => c.text));
   for (let i = 0; i < chunks.length; i++) {
-    deps.kb.insertChunkWithEmbedding({
+    await deps.kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: chunks[i]!.index,
       text: chunks[i]!.text,
@@ -226,17 +208,6 @@ function* walk(dir: string): Generator<string> {
       yield full;
     }
   }
-}
-
-function getDb(kb: KbRepo): Database {
-  return (kb as unknown as { db: Database }).db;
-}
-
-function countChunksForDoc(db: Database, docId: number): number {
-  const r = db
-    .query<{ n: number }, [number]>("SELECT COUNT(*) AS n FROM kb_chunks WHERE document_id = ?")
-    .get(docId);
-  return r?.n ?? 0;
 }
 
 /**

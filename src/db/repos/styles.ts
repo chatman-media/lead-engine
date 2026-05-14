@@ -1,30 +1,20 @@
-import type { Database } from "bun:sqlite";
-
 import { type Style, StyleSchema } from "../../sales/types.ts";
+import type { Sql } from "../postgres.ts";
 
 export interface StyleRow {
   id: number;
   slug: string;
   display_name: string;
   config_json: string;
-  is_active: number; // SQLite has no boolean — 1/0
+  is_active: boolean;
   version: number;
   parent_id: number | null;
   created_at: number;
 }
 
-/**
- * Repository for the `styles` table — the DB-backed registry for the sales
- * engine. Each row stores a full `Style` as JSON in `config_json`; we parse
- * it through the Zod schema on every read so a malformed row from a partial
- * admin-UI write fails loudly instead of poisoning the prompt downstream.
- */
 export class StylesRepo {
-  constructor(private db: Database) {}
+  constructor(private sql: Sql) {}
 
-  /** Decode a row's config_json through StyleSchema. Throws on malformed JSON
-   *  or schema mismatch — callers should prefer `tryParse` when graceful
-   *  degradation is desired (e.g. boot-time seed checks). */
   parseRow(row: StyleRow): Style {
     let raw: unknown;
     try {
@@ -45,110 +35,67 @@ export class StylesRepo {
     return result.data;
   }
 
-  byId(id: number): StyleRow | null {
-    return (
-      this.db.query<StyleRow, [number]>("SELECT * FROM styles WHERE id = ? LIMIT 1").get(id) ?? null
-    );
+  async byId(id: number): Promise<StyleRow | null> {
+    const [row] = await this.sql<StyleRow[]>`
+      SELECT * FROM styles WHERE id = ${id} LIMIT 1
+    `;
+    return row ?? null;
   }
 
-  bySlug(slug: string): StyleRow | null {
-    return (
-      this.db
-        .query<StyleRow, [string]>("SELECT * FROM styles WHERE slug = ? AND is_active = 1 LIMIT 1")
-        .get(slug) ?? null
-    );
+  async bySlug(slug: string): Promise<StyleRow | null> {
+    const [row] = await this.sql<StyleRow[]>`
+      SELECT * FROM styles WHERE slug = ${slug} AND is_active = TRUE LIMIT 1
+    `;
+    return row ?? null;
   }
 
-  /** All active styles, ordered by display name — useful for admin UI lists. */
-  listActive(): StyleRow[] {
-    return this.db
-      .query<StyleRow, []>("SELECT * FROM styles WHERE is_active = 1 ORDER BY display_name")
-      .all();
+  async listActive(): Promise<StyleRow[]> {
+    return this.sql<StyleRow[]>`
+      SELECT * FROM styles WHERE is_active = TRUE ORDER BY display_name
+    `;
   }
 
-  /**
-   * Insert a new style. Throws on slug conflict (UNIQUE constraint) — caller
-   * should either dedupe upstream or use `upsertBuiltin` for boot-time seeding.
-   */
-  insert(input: {
+  async insert(input: {
     slug: string;
     displayName: string;
     config: Style;
     version?: number;
     parentId?: number | null;
-  }): StyleRow {
-    const row = this.db
-      .query<StyleRow, [string, string, string, number, number | null]>(
-        `INSERT INTO styles (slug, display_name, config_json, version, parent_id)
-         VALUES (?, ?, ?, ?, ?)
-         RETURNING *`,
-      )
-      .get(
-        input.slug,
-        input.displayName,
-        JSON.stringify(input.config),
-        input.version ?? 1,
-        input.parentId ?? null,
-      );
+  }): Promise<StyleRow> {
+    const [row] = await this.sql<StyleRow[]>`
+      INSERT INTO styles (slug, display_name, config_json, version, parent_id)
+      VALUES (${input.slug}, ${input.displayName}, ${JSON.stringify(input.config)}, ${input.version ?? 1}, ${input.parentId ?? null})
+      RETURNING *
+    `;
     if (!row) throw new Error(`Failed to insert style ${input.slug}`);
     return row;
   }
 
-  /**
-   * Idempotent boot-time seeder. If a row with `slug` already exists, do
-   * nothing — admin's edits in the DB always win over hard-coded source.
-   * Returns "inserted" | "updated" | "skipped".
-   * Always refreshes config_json from source so code edits take effect on
-   * next boot. The row's `display_name` is also kept in sync with source.
-   */
-  upsertBuiltin(style: Style): "inserted" | "updated" | "skipped" {
-    const existing = this.bySlug(style.slug);
+  async upsertBuiltin(style: Style): Promise<"inserted" | "updated" | "skipped"> {
+    const existing = await this.bySlug(style.slug);
     if (!existing) {
-      this.insert({ slug: style.slug, displayName: style.displayName, config: style });
+      await this.insert({ slug: style.slug, displayName: style.displayName, config: style });
       return "inserted";
     }
     const newJson = JSON.stringify(style);
     if (existing.config_json === newJson) return "skipped";
-    // Update only config_json — display_name may have been edited by an admin.
-    this.db.run("UPDATE styles SET config_json = ? WHERE slug = ? AND is_active = 1", [
-      newJson,
-      style.slug,
-    ]);
+    await this.sql`
+      UPDATE styles SET config_json = ${newJson} WHERE slug = ${style.slug} AND is_active = TRUE
+    `;
     return "updated";
   }
 
-  /** Soft-delete: mark inactive instead of removing. Conversations that
-   *  reference this style_id continue working — the row is still readable. */
-  deactivate(id: number): boolean {
-    const res = this.db.run("UPDATE styles SET is_active = 0 WHERE id = ?", [id]);
-    return res.changes > 0;
+  async deactivate(id: number): Promise<boolean> {
+    const result = await this.sql`UPDATE styles SET is_active = FALSE WHERE id = ${id}`;
+    return result.count > 0;
   }
 
-  /**
-   * Save an edit as a new version of an existing style.
-   *
-   * - Old row (`currentId`) is marked is_active=0 — historical, but still
-   *   readable by `byId()` so conversations already pinned to it (via
-   *   `conversations.style_id = currentId`) keep seeing the same prompt
-   *   they were assigned. This is the whole point of the version chain.
-   * - New row is inserted with version+1, parent_id=currentId, same slug.
-   * - `display_name` is sourced from `newConfig.displayName` so it never
-   *   diverges from the schema.
-   *
-   * Atomic — wrapped in a transaction. If the new row's UNIQUE(slug, version)
-   * collides with another version, both ops roll back.
-   *
-   * Throws if the target is already inactive (refuses to fork from history)
-   * or doesn't exist.
-   *
-   * Returns the new row.
-   */
-  editAsNewVersion(currentId: number, newConfig: Style): StyleRow {
-    const current = this.byId(currentId);
+  async editAsNewVersion(currentId: number, newConfig: Style): Promise<StyleRow> {
+    const current = await this.byId(currentId);
     if (!current) {
       throw new Error(`styles.id=${currentId} not found`);
     }
-    if (current.is_active !== 1) {
+    if (!current.is_active) {
       throw new Error(
         `styles.id=${currentId} (slug=${current.slug}) is not active — refusing to fork from a historical version. Edit the current active version instead.`,
       );
@@ -159,53 +106,38 @@ export class StylesRepo {
       );
     }
 
-    const txn = this.db.transaction(() => {
-      this.db.run("UPDATE styles SET is_active = 0 WHERE id = ?", [currentId]);
-      const inserted = this.db
-        .query<StyleRow, [string, string, string, number, number]>(
-          `INSERT INTO styles (slug, display_name, config_json, version, parent_id)
-           VALUES (?, ?, ?, ?, ?)
-           RETURNING *`,
-        )
-        .get(
-          current.slug,
-          newConfig.displayName,
-          JSON.stringify(newConfig),
-          current.version + 1,
-          currentId,
-        );
-      if (!inserted) throw new Error("editAsNewVersion: INSERT returned no row");
-      return inserted;
+    const [inserted] = await this.sql.begin(async (sql) => {
+      await sql`UPDATE styles SET is_active = FALSE WHERE id = ${currentId}`;
+      return sql<StyleRow[]>`
+        INSERT INTO styles (slug, display_name, config_json, version, parent_id)
+        VALUES (${current.slug}, ${newConfig.displayName}, ${JSON.stringify(newConfig)}, ${current.version + 1}, ${currentId})
+        RETURNING *
+      `;
     });
-    return txn();
+    if (!inserted) throw new Error("editAsNewVersion: INSERT returned no row");
+    return inserted;
   }
 
-  /** All versions of a slug, oldest → newest. Useful for an audit / history view. */
-  versionHistory(slug: string): StyleRow[] {
-    return this.db
-      .query<StyleRow, [string]>("SELECT * FROM styles WHERE slug = ? ORDER BY version ASC")
-      .all(slug);
+  async versionHistory(slug: string): Promise<StyleRow[]> {
+    return this.sql<StyleRow[]>`
+      SELECT * FROM styles WHERE slug = ${slug} ORDER BY version ASC
+    `;
   }
 }
 
-/**
- * Boot-time seeder — call once after migrations. Inserts each built-in style
- * into the DB if its slug is missing. Edits in the DB persist; the seed is
- * a safety net for fresh installs / new deployments only.
- */
-export function seedBuiltinStyles(
+export async function seedBuiltinStyles(
   repo: StylesRepo,
   builtins: readonly Style[],
-): {
+): Promise<{
   inserted: string[];
   updated: string[];
   skipped: string[];
-} {
+}> {
   const inserted: string[] = [];
   const updated: string[] = [];
   const skipped: string[] = [];
   for (const s of builtins) {
-    const r = repo.upsertBuiltin(s);
+    const r = await repo.upsertBuiltin(s);
     if (r === "inserted") inserted.push(s.slug);
     else if (r === "updated") updated.push(s.slug);
     else skipped.push(s.slug);

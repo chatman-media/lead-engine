@@ -12,8 +12,8 @@ import { readdirSync, statSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 
 import { activeEmbeddingDim, config, llmIsConfigured } from "../src/config.ts";
+import { sql } from "../src/db/postgres.ts";
 import { KbRepo } from "../src/db/repos/kb.ts";
-import { openDb } from "../src/db/sqlite.ts";
 import type { EmbeddingClient } from "../src/rag/embed.ts";
 import { OpenAIEmbeddingClient } from "../src/rag/embed.ts";
 import { ingestFile } from "../src/rag/ingest.ts";
@@ -93,8 +93,7 @@ async function main() {
     process.exit(1);
   }
 
-  const db = openDb();
-  const kb = new KbRepo(db);
+  const kb = new KbRepo(sql);
 
   let embedder: EmbeddingClient;
   if (config.llm.embeddingProvider === "ollama") {
@@ -134,7 +133,7 @@ async function main() {
   const files = collectBooks(opts.dir);
   if (files.length === 0) {
     console.log("[ingest-books] no PDF/TXT/MD files found — nothing to do.");
-    db.close();
+    await sql.end();
     return;
   }
 
@@ -172,7 +171,7 @@ async function main() {
   );
   console.log(`[ingest-books] activate: set RAG_BOOKS_PRIORITY=true in .env`);
 
-  db.close();
+  await sql.end();
 }
 
 main().catch((err) => {

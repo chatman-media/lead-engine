@@ -7,9 +7,8 @@
  * Idempotent: skips a row whose `title` already exists, so you can
  * re-run without duplicating. Edit/close in /admin/vacancies once seeded.
  */
-import { config } from "../src/config.ts";
+import { sql } from "../src/db/postgres.ts";
 import { VacanciesRepo } from "../src/db/repos/vacancies.ts";
-import { openDb } from "../src/db/sqlite.ts";
 
 // Public TG channel where all vacancy posts live. Used as a safe fallback
 // link on every vacancy so the bot never has to invent a URL — even when
@@ -63,10 +62,10 @@ const VACANCIES = [
   },
 ];
 
-const db = openDb({ path: config.dbPath });
-const repo = new VacanciesRepo(db);
+const repo = new VacanciesRepo(sql);
 
-const existingByTitle = new Map(repo.listAll().map((v) => [v.title, v]));
+const allVacancies = await repo.listAll();
+const existingByTitle = new Map(allVacancies.map((v) => [v.title, v]));
 let inserted = 0;
 let urlPatched = 0;
 let skipped = 0;
@@ -76,7 +75,7 @@ for (const v of VACANCIES) {
     // Backfill url on previously-seeded rows that were inserted before the
     // url field was added — bot was hallucinating links because url was null.
     if (!existing.url && v.url) {
-      repo.update(existing.id, { url: v.url });
+      await repo.update(existing.id, { url: v.url });
       console.log(`  ~ url patched: ${v.title}`);
       urlPatched++;
     } else {
@@ -85,11 +84,12 @@ for (const v of VACANCIES) {
     }
     continue;
   }
-  const row = repo.create({ title: v.title, body: v.body, url: v.url, isActive: true });
+  const row = await repo.create({ title: v.title, body: v.body, url: v.url, isActive: true });
   console.log(`  + id=${row.id}: ${row.title}`);
   inserted++;
 }
+const activeCount = (await repo.listActive()).length;
 console.log(
-  `\nDone. inserted=${inserted}, url-patched=${urlPatched}, skipped=${skipped}, total active=${repo.listActive().length}`,
+  `\nDone. inserted=${inserted}, url-patched=${urlPatched}, skipped=${skipped}, total active=${activeCount}`,
 );
-db.close();
+await sql.end();

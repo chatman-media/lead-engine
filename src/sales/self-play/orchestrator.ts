@@ -9,12 +9,14 @@
  * actual prompt — not a stub. The candidate side runs a lighter
  * persona-prompt loop (no KB, no skills).
  */
-import type { Database } from "bun:sqlite";
-
+import type { Sql } from "../../db/postgres.ts";
+import type { ConversationsRepo } from "../../db/repos/conversations.ts";
 import type { KbRepo } from "../../db/repos/kb.ts";
+import type { LeadsRepo } from "../../db/repos/leads.ts";
 import { SelfPlayMatchesRepo } from "../../db/repos/self-play-matches.ts";
 import type { SkillOutcomesRepo, StyleRatingsRepo } from "../../db/repos/skill-outcomes.ts";
 import type { SkillsRepo } from "../../db/repos/skills.ts";
+import type { UsersRepo } from "../../db/repos/users.ts";
 import { answerWithRag, NO_CONTEXT_MARKER } from "../../rag/answer.ts";
 import type { ChatClient, ChatMessage } from "../../rag/chat.ts";
 import type { EmbeddingClient } from "../../rag/embed.ts";
@@ -27,7 +29,10 @@ import { type JudgeVerdict, judgeMatch } from "./judge.ts";
 import type { CandidatePersona } from "./personas.ts";
 
 export interface SelfPlayDeps {
-  db: Database;
+  db: Sql;
+  users: UsersRepo;
+  conversations: ConversationsRepo;
+  leads: LeadsRepo;
   kb: KbRepo;
   skills: SkillsRepo;
   outcomes: SkillOutcomesRepo;
@@ -157,7 +162,7 @@ export async function runSelfPlayMatch(
   const transcript: SelfPlayMatchResult["transcript"] = [];
 
   // Resolve skills attached to this style (filtered to enabled ones).
-  const skillRows = deps.skills.skillsForStyle(input.styleId).filter((r) => r.is_enabled === 1);
+  const skillRows = (await deps.skills.skillsForStyle(input.styleId)).filter((r) => r.is_enabled);
   const skills: SkillForPrompt[] = skillRows.map((r) => ({
     slug: r.slug,
     displayName: r.display_name,
@@ -277,7 +282,15 @@ export async function runSelfPlayMatch(
         outcome: "draw",
         reason: `candidate LLM failed: ${err instanceof Error ? err.message : String(err)}`,
       };
-      return finalize(deps, input, transcript, skills, verdict, usedSkills, fabricationsCaught);
+      return await finalize(
+        deps,
+        input,
+        transcript,
+        skills,
+        verdict,
+        usedSkills,
+        fabricationsCaught,
+      );
     }
     candidateText = candidateText.trim();
     if (!candidateText) {
@@ -286,7 +299,15 @@ export async function runSelfPlayMatch(
         outcome: "lost",
         reason: "candidate produced empty reply (ghosted)",
       };
-      return finalize(deps, input, transcript, skills, verdict, usedSkills, fabricationsCaught);
+      return await finalize(
+        deps,
+        input,
+        transcript,
+        skills,
+        verdict,
+        usedSkills,
+        fabricationsCaught,
+      );
     }
     transcript.push({ role: "candidate", text: candidateText });
     userMessageCount++;
@@ -303,10 +324,10 @@ export async function runSelfPlayMatch(
     transcript,
     chat: deps.judgeChat,
   });
-  return finalize(deps, input, transcript, skills, verdict, usedSkills, fabricationsCaught);
+  return await finalize(deps, input, transcript, skills, verdict, usedSkills, fabricationsCaught);
 }
 
-function finalize(
+async function finalize(
   deps: SelfPlayDeps,
   input: SelfPlayMatchInput,
   transcript: SelfPlayMatchResult["transcript"],
@@ -314,7 +335,7 @@ function finalize(
   verdict: JudgeVerdict,
   usedSkills: Set<string>,
   fabricationsCaught: number,
-): SelfPlayMatchResult {
+): Promise<SelfPlayMatchResult> {
   // Attribute outcomes to skills that the LLM actually USED (per-turn
   // self-grading union). Falls back to the full attached set when the
   // grader produced zero matches — typically because the grader LLM
@@ -324,7 +345,7 @@ function finalize(
     usedSkills.size > 0 ? skills.filter((s) => usedSkills.has(s.slug)) : skills;
   let leadId = -1;
   if (input.style && attributedSkills.length > 0) {
-    leadId = persistSelfPlayOutcome(deps, input, attributedSkills, verdict);
+    leadId = await persistSelfPlayOutcome(deps, input, attributedSkills, verdict);
   }
   const result: SelfPlayMatchResult = {
     styleSlug: input.style.slug,
@@ -339,7 +360,7 @@ function finalize(
     matchId: null,
   };
   // Save the full transcript for operator review on /admin/self-play.
-  result.matchId = persistSelfPlayMatch(deps, result, verdict.reason);
+  result.matchId = await persistSelfPlayMatch(deps, result, verdict.reason);
   return result;
 }
 
@@ -349,31 +370,25 @@ function finalize(
  * Rows are clearly tagged by the persona slug encoded in conversation
  * style_id metadata so they can be filtered out of business reports.
  */
-function persistSelfPlayOutcome(
+async function persistSelfPlayOutcome(
   deps: SelfPlayDeps,
   input: SelfPlayMatchInput,
   skills: SkillForPrompt[],
   verdict: JudgeVerdict,
-): number {
+): Promise<number> {
   // Make a throwaway user + conversation + lead so FKs hold. Negative
   // tg_user_id keeps these rows distinguishable from real candidates.
   const tgUserId = -Math.floor(1e9 + Math.random() * 9e9);
-  const u = deps.db
-    .query<{ id: number }, [number]>(
-      `INSERT INTO users (tg_user_id, status) VALUES (?, 'lost') RETURNING id`,
-    )
-    .get(tgUserId)!;
-  const c = deps.db
-    .query<{ id: number }, [number, number]>(
-      `INSERT INTO conversations (user_id, style_id) VALUES (?, ?) RETURNING id`,
-    )
-    .get(u.id, input.styleId)!;
-  const lead = deps.db
-    .query<{ id: number }, [number]>(`INSERT INTO leads (user_id) VALUES (?) RETURNING id`)
-    .get(u.id)!;
+  const u = await deps.users.create({ tgUserId, tgUsername: null, status: "lost" });
+  const c = await deps.conversations.ensureForUser(u.id);
+  // Set style_id on the conversation so attribution can resolve the style.
+  if (input.styleId) {
+    await deps.db`UPDATE conversations SET style_id = ${input.styleId} WHERE id = ${c.id}`;
+  }
+  const lead = await deps.leads.ensureForUser(u.id);
 
   for (const s of skills) {
-    deps.outcomes.record({
+    await deps.outcomes.record({
       leadId: lead.id,
       conversationId: c.id,
       messageId: null,
@@ -383,7 +398,7 @@ function persistSelfPlayOutcome(
       source: "self_play",
     });
   }
-  deps.ratings.applyOutcome(input.style.slug, verdict.outcome);
+  await deps.ratings.applyOutcome(input.style.slug, verdict.outcome);
   return lead.id;
 }
 
@@ -391,13 +406,13 @@ function persistSelfPlayOutcome(
  *  /admin/self-play. Called from `finalize` AFTER skill-outcome rows
  *  exist so `lead_id` is real. Failure-soft: any error logs and skips
  *  — losing a transcript is annoying but shouldn't kill the batch. */
-export function persistSelfPlayMatch(
+export async function persistSelfPlayMatch(
   deps: SelfPlayDeps,
   result: SelfPlayMatchResult,
   judgeReason: string,
-): number | null {
+): Promise<number | null> {
   try {
-    const row = new SelfPlayMatchesRepo(deps.db).insert({
+    const row = await new SelfPlayMatchesRepo(deps.db).insert({
       styleSlug: result.styleSlug,
       personaSlug: result.personaSlug,
       outcome: result.outcome,

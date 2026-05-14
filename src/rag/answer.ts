@@ -430,7 +430,7 @@ export interface AnswerInput {
   /** Recent dialog messages (oldest first), excluding the current question. */
   history?: ChatMessage[];
   topK?: number;
-  /** Used to drop noisy hits; sqlite-vec returns L2 distance (lower=closer). */
+  /** Used to drop noisy hits; pgvector returns cosine distance (lower=closer). */
   maxDistance?: number;
   /** Persona settings (see buildSystemPrompt). Optional — defaults to a
    *  generic AI-assistant persona for backward compatibility with tests.
@@ -804,7 +804,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   // global KB when the books slice is empty. When both booksPriority and
   // hybridSearch are set, the priority search uses hybrid on each pass.
   if (input.booksPriority) {
-    const allHits = input.kb.prioritySearch({
+    const allHits = await input.kb.prioritySearch({
       embedding: questionVec,
       query: searchQuery,
       k: topK,
@@ -846,13 +846,13 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
         })
       : input.kb.search(questionVec, topK, filterTopic);
 
-  let allHits = runSearch(topic);
+  let allHits = await runSearch(topic);
   let usedTopic: string | null = topic;
   if (topic !== null && allHits.length === 0) {
     // Topic filter starved retrieval — fall back to global. The miss is
     // either: classifier wrongly identified topic, OR no docs are tagged
     // with that topic yet. Either way, we'd rather return SOMETHING.
-    allHits = runSearch(null);
+    allHits = await runSearch(null);
     usedTopic = null;
   }
   const hits =

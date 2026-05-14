@@ -1,5 +1,3 @@
-import type { Database } from "bun:sqlite";
-
 import type { ChatClient, ChatMessage } from "../rag/chat.ts";
 import type { IntakeFields } from "./templates.ts";
 
@@ -149,35 +147,4 @@ export function parseIntakeJson(raw: string): Partial<IntakeFields> {
     }
   }
   return out;
-}
-
-/**
- * SQL aggregate over messages.meta_json — counts photos and videos
- * sent by the candidate (role='user') in this conversation. SQLite's
- * json_extract goes through the meta_json blob; we only filter on the
- * media.type so the path is short and indexable.
- */
-export function countMediaForConversation(
-  db: Database,
-  conversationId: number,
-): { photos: number; videos: number } {
-  const rows = db
-    .query<{ kind: string; n: number }, [number]>(
-      `SELECT json_extract(meta_json, '$.media.type') AS kind,
-              COUNT(*) AS n
-       FROM messages
-       WHERE conversation_id = ?
-         AND role = 'user'
-         AND meta_json IS NOT NULL
-         AND json_extract(meta_json, '$.media.type') IS NOT NULL
-       GROUP BY kind`,
-    )
-    .all(conversationId);
-  let photos = 0;
-  let videos = 0;
-  for (const r of rows) {
-    if (r.kind === "photo") photos = r.n;
-    else if (r.kind === "video") videos = r.n;
-  }
-  return { photos, videos };
 }

@@ -153,8 +153,12 @@ export class LeadsService {
         text,
         replyMarkup: { inline_keyboard: this.approvalKeyboard(input.lead.id) },
       });
-      this.deps.leads.setOpsCardMessage(input.lead.id, this.deps.leadsChatId, sent.message_id);
-      return this.deps.leads.byId(input.lead.id) ?? input.lead;
+      await this.deps.leads.setOpsCardMessage(
+        input.lead.id,
+        this.deps.leadsChatId,
+        sent.message_id,
+      );
+      return (await this.deps.leads.byId(input.lead.id)) ?? input.lead;
     } catch (err) {
       console.error(`[leads] failed to post card to LEADS_CHAT_ID=${this.deps.leadsChatId}:`, err);
       return input.lead;
@@ -168,7 +172,7 @@ export class LeadsService {
    * see them and they're not crammed into one wall.
    */
   async sendApprovalMessages(input: { lead: LeadRow; user: UserRow }): Promise<void> {
-    const conv = this.deps.conversations.byUserId(input.user.id);
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) {
       console.warn(`[leads] no conversation for user ${input.user.id}`);
       return;
@@ -189,7 +193,7 @@ export class LeadsService {
   }
 
   async sendIntakeTemplate(input: { user: UserRow }): Promise<void> {
-    const conv = this.deps.conversations.byUserId(input.user.id);
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
     await this.relayToCandidate({
       chatId: input.user.tg_user_id,
@@ -199,7 +203,7 @@ export class LeadsService {
   }
 
   async sendAwaitingApprovalNote(input: { user: UserRow }): Promise<void> {
-    const conv = this.deps.conversations.byUserId(input.user.id);
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
     await this.relayToCandidate({
       chatId: input.user.tg_user_id,
@@ -209,7 +213,7 @@ export class LeadsService {
   }
 
   async sendRejection(input: { user: UserRow; customReason?: string }): Promise<void> {
-    const conv = this.deps.conversations.byUserId(input.user.id);
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
     const text = input.customReason?.trim() || REJECTION_DEFAULT;
     await this.relayToCandidate({
@@ -220,7 +224,7 @@ export class LeadsService {
   }
 
   async sendDocsCompleteAck(input: { user: UserRow }): Promise<void> {
-    const conv = this.deps.conversations.byUserId(input.user.id);
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
     await this.relayToCandidate({
       chatId: input.user.tg_user_id,
@@ -349,7 +353,7 @@ export class LeadsService {
       file_id: string;
     };
   }): Promise<boolean> {
-    const conv = this.deps.conversations.byUserId(input.user.id);
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) {
       console.warn(`[leads] relay: no conversation for user ${input.user.id}`);
       return false;
@@ -409,7 +413,7 @@ export class LeadsService {
     // Persist as `role='human'` (operator origin) with media metadata
     // attached so the admin chat view can render the same way it
     // renders the candidate's media.
-    this.deps.messages.add({
+    await this.deps.messages.add({
       conversationId: conv.id,
       role: "human",
       text: text || `[${media?.type ?? "message"}]`,
@@ -419,7 +423,7 @@ export class LeadsService {
         ...(media ? { media } : {}),
       },
     });
-    this.deps.conversations.touch(conv.id);
+    await this.deps.conversations.touch(conv.id);
     return true;
   }
 
@@ -444,14 +448,14 @@ export class LeadsService {
     } catch (err) {
       console.error("[leads] sendMessage to candidate failed:", err);
     }
-    this.deps.messages.add({
+    await this.deps.messages.add({
       conversationId: input.conversationId,
       role: "assistant",
       text: input.text,
       ...(tgMessageId !== undefined ? { tgMessageId } : {}),
       meta: { source: "lead-template" },
     });
-    this.deps.conversations.touch(input.conversationId);
+    await this.deps.conversations.touch(input.conversationId);
   }
 }
 

@@ -19,10 +19,13 @@
  *   winner='draw' → counted as 0.5 wins for Wilson — same `actualScore`
  *                   convention used in ELO.
  */
+import type { ConversationsRepo } from "../db/repos/conversations.ts";
 import type { KbRepo } from "../db/repos/kb.ts";
+import type { LeadsRepo } from "../db/repos/leads.ts";
 import type { ShadowEvaluationsRepo } from "../db/repos/shadow-evaluations.ts";
 import type { SkillOutcomesRepo, StyleRatingsRepo } from "../db/repos/skill-outcomes.ts";
 import type { SkillsRepo } from "../db/repos/skills.ts";
+import type { UsersRepo } from "../db/repos/users.ts";
 import type { ChatClient } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
 import { runPairwiseMatch } from "./self-play/pairwise.ts";
@@ -36,13 +39,16 @@ export interface ShadowEvalDeps {
   skills: SkillsRepo;
   outcomes: SkillOutcomesRepo;
   ratings: StyleRatingsRepo;
+  users: UsersRepo;
+  conversations: ConversationsRepo;
+  leads: LeadsRepo;
   salesChat: ChatClient;
   candidateChat: ChatClient;
   judgeChat: ChatClient;
   embedder: EmbeddingClient;
   vacanciesBlock?: string;
   /** db is needed by orchestrator — passed through pairwise deps. */
-  db: import("bun:sqlite").Database;
+  db: import("../db/postgres.ts").Sql;
 }
 
 export interface ShadowEvalInput {
@@ -92,7 +98,7 @@ export async function runShadowEval(deps: ShadowEvalDeps, input: ShadowEvalInput
   }
   const total = pairs.length;
   if (total === 0) {
-    deps.shadowRepo.complete(input.evalId, 0, "inconclusive");
+    await deps.shadowRepo.complete(input.evalId, 0, "inconclusive");
     return;
   }
 
@@ -107,6 +113,9 @@ export async function runShadowEval(deps: ShadowEvalDeps, input: ShadowEvalInput
       const result = await runPairwiseMatch(
         {
           db: deps.db,
+          users: deps.users,
+          conversations: deps.conversations,
+          leads: deps.leads,
           kb: deps.kb,
           skills: deps.skills,
           outcomes: deps.outcomes,
@@ -126,7 +135,7 @@ export async function runShadowEval(deps: ShadowEvalDeps, input: ShadowEvalInput
           maxTurns: input.maxTurns,
         },
       );
-      deps.shadowRepo.bumpPairResult(input.evalId, result.verdict.winner);
+      await deps.shadowRepo.bumpPairResult(input.evalId, result.verdict.winner);
       if (result.verdict.winner === "a") aWins++;
       else if (result.verdict.winner === "b") bWins++;
       else draws++;
@@ -137,10 +146,10 @@ export async function runShadowEval(deps: ShadowEvalDeps, input: ShadowEvalInput
     const bAdjusted = bWins + 0.5 * draws;
     const lb = wilsonLowerBound(bAdjusted, total);
     const decision = shadowDecide(bAdjusted, total);
-    deps.shadowRepo.complete(input.evalId, lb, decision);
+    await deps.shadowRepo.complete(input.evalId, lb, decision);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    deps.shadowRepo.fail(input.evalId, msg);
+    await deps.shadowRepo.fail(input.evalId, msg);
     console.warn(
       `[shadow-eval] eval #${input.evalId} failed after ${aWins + bWins + draws}/${total} pairs: ${msg}`,
     );

@@ -6,9 +6,9 @@
  * Запуск: bun run scripts/test-conversation.ts
  */
 import { activeEmbeddingDim, config } from "../src/config.ts";
+import { sql } from "../src/db/postgres.ts";
 import { KbRepo } from "../src/db/repos/kb.ts";
 import { renderVacanciesBlock, VacanciesRepo } from "../src/db/repos/vacancies.ts";
-import { getDb } from "../src/db/sqlite.ts";
 import {
   answerWithRag,
   isPersonalFactQuestion,
@@ -62,10 +62,10 @@ const QUESTIONS = [
   "Какая погода в Москве?",
 ];
 
-const db = getDb();
-const kb = new KbRepo(db);
-const vacancies = new VacanciesRepo(db);
-const vacanciesBlock = renderVacanciesBlock(vacancies.listActive());
+const kb = new KbRepo(sql);
+const vacancies = new VacanciesRepo(sql);
+const activeVacanciesForBlock = await vacancies.listActive();
+const vacanciesBlock = renderVacanciesBlock(activeVacanciesForBlock);
 const chat = new OllamaChatClient({
   host: config.ollama.host,
   model: config.ollama.chatModel,
@@ -111,7 +111,7 @@ console.log(
 );
 console.log(`stage classifier: ${config.sales.stageClassifier}`);
 console.log(`forced style:  ${config.sales.forcedStyleSlug || "(none — legacy persona path)"}`);
-const activeVacancies = vacancies.listActive().length;
+const activeVacancies = activeVacanciesForBlock.length;
 const ragLayers =
   [
     config.rag.hybridSearch && "hybrid",
@@ -237,4 +237,4 @@ for (const r of reports) {
   );
 }
 
-db.close();
+await sql.end();

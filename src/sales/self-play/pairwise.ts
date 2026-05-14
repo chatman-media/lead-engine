@@ -211,8 +211,8 @@ export async function runPairwiseMatch(
   });
 
   // Apply symmetric pairwise ELO on top of the solo updates already done.
-  const ratingA = deps.ratings.bySlug(input.styleA.slug);
-  const ratingB = deps.ratings.bySlug(input.styleB.slug);
+  const ratingA = await deps.ratings.bySlug(input.styleA.slug);
+  const ratingB = await deps.ratings.bySlug(input.styleB.slug);
   const a = ratingA?.elo ?? 1500;
   const b = ratingB?.elo ?? 1500;
   const outcomeForA = pairwiseToSoloOutcome(verdict.winner);
@@ -221,28 +221,10 @@ export async function runPairwiseMatch(
   // exact post-pair ELO. Skip the writes when both ratings are unchanged
   // (draw at equal ELO → no-op).
   if (newA !== a) {
-    // We can't directly set the ELO via applyOutcome (which recomputes from
-    // K * (actual - expected)). Bump via raw SQL to the precomputed value.
-    deps.db.run(
-      `INSERT INTO style_ratings (style_slug, elo, wins, losses, draws, last_outcome_at)
-       VALUES (?, ?, 0, 0, 0, unixepoch())
-       ON CONFLICT(style_slug) DO UPDATE SET
-         elo = excluded.elo,
-         last_outcome_at = unixepoch(),
-         updated_at = unixepoch()`,
-      [input.styleA.slug, newA],
-    );
+    await deps.ratings.setElo(input.styleA.slug, newA);
   }
   if (newB !== b) {
-    deps.db.run(
-      `INSERT INTO style_ratings (style_slug, elo, wins, losses, draws, last_outcome_at)
-       VALUES (?, ?, 0, 0, 0, unixepoch())
-       ON CONFLICT(style_slug) DO UPDATE SET
-         elo = excluded.elo,
-         last_outcome_at = unixepoch(),
-         updated_at = unixepoch()`,
-      [input.styleB.slug, newB],
-    );
+    await deps.ratings.setElo(input.styleB.slug, newB);
   }
 
   // Persist the pairwise row, linking to the two solo matches by id
@@ -250,7 +232,7 @@ export async function runPairwiseMatch(
   // already exists on each side; losing the pairwise row is recoverable.
   let pairwiseId: number | null = null;
   try {
-    const row = new PairwiseMatchesRepo(deps.db).insert({
+    const row = await new PairwiseMatchesRepo(deps.db).insert({
       styleASlug: input.styleA.slug,
       styleBSlug: input.styleB.slug,
       personaSlug: input.persona.slug,

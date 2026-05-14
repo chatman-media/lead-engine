@@ -9,8 +9,8 @@ import * as readline from "node:readline";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { config } from "../src/config.ts";
+import { sql } from "../src/db/postgres.ts";
 import { saveUserbotSession } from "../src/db/repos/userbot-session.ts";
-import { getDb } from "../src/db/sqlite.ts";
 
 function ask(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -32,7 +32,6 @@ async function main() {
     process.exit(1);
   }
 
-  const db = getDb();
   const session = new StringSession("");
   const client = new TelegramClient(session, apiId, apiHash, {
     connectionRetries: 5,
@@ -50,7 +49,7 @@ async function main() {
   });
 
   const sessionString = client.session.save() as unknown as string;
-  saveUserbotSession(db, sessionString);
+  await saveUserbotSession(sql, sessionString);
 
   const me = await client.getMe();
   const username = (me as { username?: string }).username;

@@ -1,14 +1,13 @@
 import { activeEmbeddingDim, config } from "../src/config.ts";
+import { sql } from "../src/db/postgres.ts";
 import { KbRepo } from "../src/db/repos/kb.ts";
-import { getDb } from "../src/db/sqlite.ts";
 import { answerWithRag, NO_CONTEXT_MARKER } from "../src/rag/answer.ts";
 import { OllamaChatClient } from "../src/rag/providers/ollama-chat.ts";
 import { OllamaEmbeddingClient } from "../src/rag/providers/ollama-embed.ts";
 
 const question = process.argv.slice(2).join(" ") || "расскажи про работу в Корее";
 
-const db = getDb();
-const kb = new KbRepo(db);
+const kb = new KbRepo(sql);
 const chat = new OllamaChatClient({
   host: config.ollama.host,
   model: config.ollama.chatModel,
@@ -72,3 +71,5 @@ console.log(
   "\n[test] banned-word check:",
   found.length === 0 ? "OK" : `LEAKED: ${found.join(", ")}`,
 );
+
+await sql.end();

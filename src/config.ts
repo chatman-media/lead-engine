@@ -75,7 +75,7 @@ const ollamaDefaults = {
 export const config = {
   port: envInt("PORT", 3000),
   publicBaseUrl: envOptional("PUBLIC_BASE_URL", "http://localhost:3000"),
-  dbPath: envOptional("DB_PATH", "./data/bot.db"),
+  databaseUrl: envOptional("DATABASE_URL", ""),
   telegram: {
     botToken: envOptional("TELEGRAM_BOT_TOKEN"),
     webhookSecret: envOptional("TELEGRAM_WEBHOOK_SECRET", "dev-secret"),
@@ -108,7 +108,7 @@ export const config = {
     embeddingProvider,
   },
   rag: {
-    /** sqlite-vec L2 distance threshold; hits above are dropped before LLM. */
+    /** pgvector cosine distance threshold; hits above are dropped before LLM. */
     maxDistance: envFloat("RAG_MAX_DISTANCE"),
     /** Top-K vector hits per query. */
     topK: envInt("RAG_TOP_K", 5),
@@ -146,8 +146,8 @@ export const config = {
      * Hybrid retrieval: combine vector search with BM25 keyword search and
      * fuse via Reciprocal Rank Fusion. Catches exact-match queries (numbers,
      * proper nouns, technical terms) that pure embedding search misranks.
-     * No extra LLM calls — only one extra SQLite FTS5 query per turn.
-     * Default: off (opt-in until you've migrated the FTS5 backfill).
+     * No extra LLM calls — only one extra PostgreSQL FTS query per turn.
+     * Default: off.
      */
     hybridSearch: envTruthy("RAG_HYBRID_SEARCH", false),
     /**

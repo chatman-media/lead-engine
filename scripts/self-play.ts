@@ -21,12 +21,15 @@
  * a typical match is ~2-3 minutes.
  */
 import { config } from "../src/config.ts";
+import { sql } from "../src/db/postgres.ts";
+import { ConversationsRepo } from "../src/db/repos/conversations.ts";
 import { KbRepo } from "../src/db/repos/kb.ts";
+import { LeadsRepo } from "../src/db/repos/leads.ts";
 import { SkillOutcomesRepo, StyleRatingsRepo } from "../src/db/repos/skill-outcomes.ts";
 import { SkillsRepo, seedSkillCatalogue } from "../src/db/repos/skills.ts";
 import { StylesRepo, seedBuiltinStyles } from "../src/db/repos/styles.ts";
+import { UsersRepo } from "../src/db/repos/users.ts";
 import { renderVacanciesBlock, VacanciesRepo } from "../src/db/repos/vacancies.ts";
-import { getDb } from "../src/db/sqlite.ts";
 import { OpenAIChatClient } from "../src/rag/chat.ts";
 import { OpenAIEmbeddingClient } from "../src/rag/embed.ts";
 import { OllamaChatClient } from "../src/rag/providers/ollama-chat.ts";
@@ -132,22 +135,17 @@ function buildEmbedder() {
 
 async function main() {
   const args = parseArgs();
-  const db = getDb();
-  const stylesRepo = new StylesRepo(db);
-  const skillsRepo = new SkillsRepo(db);
+  const stylesRepo = new StylesRepo(sql);
+  const skillsRepo = new SkillsRepo(sql);
   // Seed catalogue + ensure styles loaded on first run from a fresh DB.
-  seedSkillCatalogue(skillsRepo);
-  seedBuiltinStyles(stylesRepo, BUILTIN_STYLES);
+  await seedSkillCatalogue(skillsRepo);
+  await seedBuiltinStyles(stylesRepo, BUILTIN_STYLES);
 
-  const styleRow = stylesRepo.bySlug(args.style);
+  const styleRow = await stylesRepo.bySlug(args.style);
   if (!styleRow) {
+    const activeStyles = await stylesRepo.listActive();
     console.error(`[self-play] style not found: ${args.style}`);
-    console.error(
-      `[self-play] available: ${stylesRepo
-        .listActive()
-        .map((s) => s.slug)
-        .join(", ")}`,
-    );
+    console.error(`[self-play] available: ${activeStyles.map((s) => s.slug).join(", ")}`);
     process.exit(1);
   }
   const style = stylesRepo.parseRow(styleRow) as Style;
@@ -159,15 +157,17 @@ async function main() {
     process.exit(1);
   }
 
-  const kb = new KbRepo(db);
-  const vacancies = new VacanciesRepo(db);
-  const vacanciesBlock = renderVacanciesBlock(vacancies.listActive());
-  const outcomesRepo = new SkillOutcomesRepo(db);
-  const ratingsRepo = new StyleRatingsRepo(db);
+  const kb = new KbRepo(sql);
+  const vacanciesRepo = new VacanciesRepo(sql);
+  const activeVacancies = await vacanciesRepo.listActive();
+  const vacanciesBlock = renderVacanciesBlock(activeVacancies);
+  const outcomesRepo = new SkillOutcomesRepo(sql);
+  const ratingsRepo = new StyleRatingsRepo(sql);
+  const usersRepo = new UsersRepo(sql);
+  const conversationsRepo = new ConversationsRepo(sql);
+  const leadsRepo = new LeadsRepo(sql);
 
-  // Both sales + candidate use the same provider/model for now. Splitting
-  // into two providers (e.g. Anthropic for candidate, Ollama for sales)
-  // is a future tweak.
+  // Both sales + candidate use the same provider/model for now.
   const salesChat = buildChat(args.model);
   const candidateChat = buildChat(args.model);
   const judgeChat = buildChat(args.judgeModel ?? args.model);
@@ -181,7 +181,7 @@ async function main() {
   console.log(`[self-play] personas: ${args.personas.join(", ")}`);
   console.log(`[self-play] dry-run=${args.dryRun} provider=${config.llm.provider}`);
   console.log(`[self-play] model=${modelLabel}  judge=${judgeLabel}`);
-  console.log(`[self-play] vacancies in context: ${vacancies.listActive().length}`);
+  console.log(`[self-play] vacancies in context: ${activeVacancies.length}`);
   console.log("=".repeat(60));
 
   const tally: Record<string, { won: number; lost: number; draw: number }> = {};
@@ -196,7 +196,10 @@ async function main() {
       console.log(`\n--- ${persona.displayName} (run ${run + 1}/${args.runs}) ---`);
       const result = await runSelfPlayMatch(
         {
-          db,
+          db: sql,
+          users: usersRepo,
+          conversations: conversationsRepo,
+          leads: leadsRepo,
           kb,
           skills: skillsRepo,
           outcomes: outcomesRepo,
@@ -239,9 +242,8 @@ async function main() {
 
       if (args.dryRun && result.leadId > 0) {
         // Best-effort cleanup of synthetic rows when dry-run was set
-        // AFTER orchestration already inserted them. The orchestrator
-        // doesn't know about dry-run; we clean up here.
-        db.run(`DELETE FROM leads WHERE id = ?`, [result.leadId]);
+        // AFTER orchestration already inserted them.
+        await leadsRepo.delete(result.leadId);
       }
     }
   }
@@ -255,13 +257,13 @@ async function main() {
     const wr = total > 0 ? ((t.won / total) * 100).toFixed(0) : "—";
     console.log(`  ${persona.padEnd(28)} ${t.won}W / ${t.lost}L / ${t.draw}D  (win rate ${wr}%)`);
   }
-  const rating = ratingsRepo.bySlug(args.style);
+  const rating = await ratingsRepo.bySlug(args.style);
   if (rating) {
     console.log(
       `[self-play] style ELO: ${rating.elo}  (record: ${rating.wins}W / ${rating.losses}L / ${rating.draws}D)`,
     );
   }
-  db.close();
+  await sql.end();
 }
 
 await main();

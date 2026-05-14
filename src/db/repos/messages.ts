@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Sql } from "../postgres.ts";
 
 export type MessageRole = "user" | "assistant" | "human" | "system";
 
@@ -10,130 +10,111 @@ export interface MessageRow {
   tg_message_id: number | null;
   meta_json: string | null;
   created_at: number;
-  /** Funnel stage at the time this message was processed (null on legacy
-   *  rows and on conversations that don't use the sales-style engine). */
   stage: string | null;
 }
 
 export class MessagesRepo {
-  constructor(private db: Database) {}
+  constructor(private sql: Sql) {}
 
-  add(input: {
+  async add(input: {
     conversationId: number;
     role: MessageRole;
     text: string;
     tgMessageId?: number | null;
     meta?: unknown;
-    /** Optional funnel stage tag. Set by the sales-style engine for
-     *  per-stage analytics; left null when the engine isn't active. */
     stage?: string | null;
-  }): MessageRow {
-    const row = this.db
-      .query<
-        MessageRow,
-        [number, MessageRole, string, number | null, string | null, string | null]
-      >(
-        `INSERT INTO messages (conversation_id, role, text, tg_message_id, meta_json, stage)
-         VALUES (?, ?, ?, ?, ?, ?)
-         RETURNING *`,
-      )
-      .get(
-        input.conversationId,
-        input.role,
-        input.text,
-        input.tgMessageId ?? null,
-        input.meta === undefined ? null : JSON.stringify(input.meta),
-        input.stage ?? null,
-      );
+  }): Promise<MessageRow> {
+    const metaJson = input.meta === undefined ? null : JSON.stringify(input.meta);
+    const [row] = await this.sql<MessageRow[]>`
+      INSERT INTO messages (conversation_id, role, text, tg_message_id, meta_json, stage)
+      VALUES (${input.conversationId}, ${input.role}, ${input.text}, ${input.tgMessageId ?? null}, ${metaJson}, ${input.stage ?? null})
+      RETURNING *
+    `;
     if (!row) throw new Error("Failed to insert message");
     return row;
   }
 
   /**
-   * Idempotent insert for inbound Telegram messages. Telegram retries
-   * webhook deliveries with the same `tg_message_id` when our handler
-   * doesn't ack within ~60s — without dedup that produces ghost rows
-   * in the admin UI ("the same message every minute"). Pair this with
-   * the partial UNIQUE index from migration 002.
-   *
-   * Returns `{isNew: true, message}` if this is the first time we see
-   * `(conversationId, tgMessageId)`, or `{isNew: false, message}` with
-   * the existing row if it's a retry.
+   * Idempotent insert for inbound Telegram messages.
    */
-  addUserMessageIfNew(input: {
+  async addUserMessageIfNew(input: {
     conversationId: number;
     text: string;
     tgMessageId: number;
-    /** Optional metadata for media messages — `{ media: { type, file_id, ... } }`.
-     *  Stored as JSON in `meta_json`. Lets the intake auto-detector count
-     *  photo / video uploads via `json_extract`. */
     meta?: unknown;
-  }): { isNew: boolean; message: MessageRow } {
+  }): Promise<{ isNew: boolean; message: MessageRow }> {
     const metaJson = input.meta === undefined ? null : JSON.stringify(input.meta);
-    const inserted = this.db
-      .query<MessageRow, [number, string, number, string | null]>(
-        `INSERT INTO messages (conversation_id, role, text, tg_message_id, meta_json)
-         VALUES (?, 'user', ?, ?, ?)
-         ON CONFLICT(conversation_id, tg_message_id)
-           WHERE role = 'user' AND tg_message_id IS NOT NULL
-           DO NOTHING
-         RETURNING *`,
-      )
-      .get(input.conversationId, input.text, input.tgMessageId, metaJson);
+    const [inserted] = await this.sql<MessageRow[]>`
+      INSERT INTO messages (conversation_id, role, text, tg_message_id, meta_json)
+      VALUES (${input.conversationId}, 'user', ${input.text}, ${input.tgMessageId}, ${metaJson})
+      ON CONFLICT (conversation_id, tg_message_id)
+        WHERE role = 'user' AND tg_message_id IS NOT NULL
+      DO NOTHING
+      RETURNING *
+    `;
     if (inserted) return { isNew: true, message: inserted };
 
-    const existing = this.db
-      .query<MessageRow, [number, number]>(
-        `SELECT * FROM messages
-         WHERE conversation_id = ? AND tg_message_id = ? AND role = 'user'
-         LIMIT 1`,
-      )
-      .get(input.conversationId, input.tgMessageId);
+    const [existing] = await this.sql<MessageRow[]>`
+      SELECT * FROM messages
+      WHERE conversation_id = ${input.conversationId} AND tg_message_id = ${input.tgMessageId} AND role = 'user'
+      LIMIT 1
+    `;
     if (!existing) {
       throw new Error("addUserMessageIfNew: insert was no-op but no existing row found");
     }
     return { isNew: false, message: existing };
   }
 
-  listByConversation(conversationId: number, limit = 200): MessageRow[] {
-    return this.db
-      .query<MessageRow, [number, number]>(
-        `SELECT * FROM messages
-         WHERE conversation_id = ?
-         ORDER BY created_at ASC, id ASC
-         LIMIT ?`,
-      )
-      .all(conversationId, limit);
+  async listByConversation(conversationId: number, limit = 200): Promise<MessageRow[]> {
+    return this.sql<MessageRow[]>`
+      SELECT * FROM messages
+      WHERE conversation_id = ${conversationId}
+      ORDER BY created_at ASC, id ASC
+      LIMIT ${limit}
+    `;
   }
 
-  recentForContext(conversationId: number, limit = 10): MessageRow[] {
-    const rows = this.db
-      .query<MessageRow, [number, number]>(
-        `SELECT * FROM messages
-         WHERE conversation_id = ?
-         ORDER BY created_at DESC, id DESC
-         LIMIT ?`,
-      )
-      .all(conversationId, limit);
+  async recentForContext(conversationId: number, limit = 10): Promise<MessageRow[]> {
+    const rows = await this.sql<MessageRow[]>`
+      SELECT * FROM messages
+      WHERE conversation_id = ${conversationId}
+      ORDER BY created_at DESC, id DESC
+      LIMIT ${limit}
+    `;
     return rows.reverse();
   }
 
-  /**
-   * Patch `meta_json` on an existing message — used by post-reply
-   * analytics (skill grading, reflection verdicts that arrive late).
-   * Caller produces the merged JSON object; this is a blind UPDATE.
-   * Returns true when a row was actually updated.
-   */
-  setMeta(id: number, meta: unknown): boolean {
+  async setMeta(id: number, meta: unknown): Promise<boolean> {
     const json = meta === null || meta === undefined ? null : JSON.stringify(meta);
-    const r = this.db.run(`UPDATE messages SET meta_json = ? WHERE id = ?`, [json, id]);
-    return r.changes > 0;
+    const result = await this.sql`UPDATE messages SET meta_json = ${json} WHERE id = ${id}`;
+    return result.count > 0;
   }
 
-  byId(id: number): MessageRow | null {
-    return (
-      this.db.query<MessageRow, [number]>(`SELECT * FROM messages WHERE id = ? LIMIT 1`).get(id) ??
-      null
-    );
+  async byId(id: number): Promise<MessageRow | null> {
+    const [row] = await this.sql<MessageRow[]>`
+      SELECT * FROM messages WHERE id = ${id} LIMIT 1
+    `;
+    return row ?? null;
+  }
+
+  async countMediaForConversation(
+    conversationId: number,
+  ): Promise<{ photos: number; videos: number }> {
+    const rows = await this.sql<{ kind: string; n: number }[]>`
+      SELECT (meta_json::jsonb)->'media'->>'type' AS kind, COUNT(*)::INTEGER AS n
+      FROM messages
+      WHERE conversation_id = ${conversationId}
+        AND role = 'user'
+        AND meta_json IS NOT NULL
+        AND (meta_json::jsonb)->'media'->>'type' IS NOT NULL
+      GROUP BY kind
+    `;
+    let photos = 0;
+    let videos = 0;
+    for (const r of rows) {
+      if (r.kind === "photo") photos = r.n;
+      else if (r.kind === "video") videos = r.n;
+    }
+    return { photos, videos };
   }
 }

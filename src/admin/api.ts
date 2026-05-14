@@ -1,9 +1,8 @@
-import type { Database } from "bun:sqlite";
 import { unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
 import { activeEmbeddingDim, config } from "../config.ts";
+import type { Sql } from "../db/postgres.ts";
 import { ConversationsRepo } from "../db/repos/conversations.ts";
 import {
   type ExperimentStatus,
@@ -36,7 +35,7 @@ import type { TelegramClient } from "../telegram/client.ts";
 import { requireAdmin } from "./auth.ts";
 
 export interface AdminApiDeps {
-  db: Database;
+  sql: Sql;
   telegram?: TelegramClient;
   /** Optional event hooks for the websocket layer (or other listeners). */
   onConversationChanged?: (conversationId: number) => void;
@@ -60,11 +59,11 @@ export interface AdminApiDeps {
 }
 
 export function createListUsersHandler(deps: AdminApiDeps): RouteHandler {
-  const users = new UsersRepo(deps.db);
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const users = new UsersRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
-    return json({ users: users.list(500) });
+    return json({ users: await users.list(500) });
   };
 }
 
@@ -80,22 +79,22 @@ export function createListUsersHandler(deps: AdminApiDeps): RouteHandler {
  * /admin/chats/:id (the conversation view).
  */
 export function createUserDetailHandler(deps: AdminApiDeps): RouteHandler {
-  const users = new UsersRepo(deps.db);
-  const conversations = new ConversationsRepo(deps.db);
-  const leads = new LeadsRepo(deps.db);
-  const messages = new MessagesRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const users = new UsersRepo(deps.sql);
+  const conversations = new ConversationsRepo(deps.sql);
+  const leads = new LeadsRepo(deps.sql);
+  const messages = new MessagesRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const user = users.byId(id);
+    const user = await users.byId(id);
     if (!user) return json({ error: "not found" }, { status: 404 });
-    const conversation = conversations.byUserId(id);
-    const lead = leads.byUserId(id);
-    const memory = users.getMemory(id);
+    const conversation = await conversations.byUserId(id);
+    const lead = await leads.byUserId(id);
+    const memory = await users.getMemory(id);
     const recentMessages = conversation
-      ? messages.listByConversation(conversation.id, 30).map((m) => ({
+      ? (await messages.listByConversation(conversation.id, 30)).map((m) => ({
           id: m.id,
           role: m.role,
           text: m.text,
@@ -178,7 +177,7 @@ async function readBotHealth(deps: AdminApiDeps): Promise<BotHealth> {
  */
 export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     // Provider config — names and dims only, no API keys.
@@ -194,10 +193,10 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
       embedProvider === "ollama" ? config.ollama.embeddingModel : config.openai.embeddingModel;
 
     // Active routing: env override > running experiment > legacy persona > none.
-    const styles = new StylesRepo(deps.db);
-    const experiments = new ExperimentsRepo(deps.db);
-    const vacancies = new VacanciesRepo(deps.db);
-    const leadsRepo = new LeadsRepo(deps.db);
+    const styles = new StylesRepo(deps.sql);
+    const experiments = new ExperimentsRepo(deps.sql);
+    const vacancies = new VacanciesRepo(deps.sql);
+    const leadsRepo = new LeadsRepo(deps.sql);
     let routingMode: "env_override" | "running_experiment" | "legacy_persona" | "none";
     let activeStyleSlug: string | null = null;
     let runningExperimentSlug: string | null = null;
@@ -205,7 +204,7 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
       routingMode = "env_override";
       activeStyleSlug = config.sales.forcedStyleSlug;
     } else {
-      const running = experiments.getRunning();
+      const running = await experiments.getRunning();
       if (running) {
         routingMode = "running_experiment";
         runningExperimentSlug = running.slug;
@@ -218,63 +217,52 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
 
     // KB stats grouped by topic. NULL groups together as "untagged" so the
     // UI can render them distinctly. Single CROSS JOIN for aggregate count.
-    const kbByTopic = deps.db
-      .query<{ topic: string | null; documents: number; chunks: number }, []>(
-        `SELECT d.topic AS topic,
-                COUNT(DISTINCT d.id) AS documents,
-                COUNT(c.id) AS chunks
-         FROM kb_documents d
-         LEFT JOIN kb_chunks c ON c.document_id = d.id
-         GROUP BY d.topic
-         ORDER BY documents DESC, topic ASC`,
-      )
-      .all();
-    const kbTotals = deps.db
-      .query<{ documents: number; chunks: number }, []>(
-        `SELECT (SELECT COUNT(*) FROM kb_documents) AS documents,
-                (SELECT COUNT(*) FROM kb_chunks) AS chunks`,
-      )
-      .get()!;
+    const kbByTopic = await deps.sql<{ topic: string | null; documents: number; chunks: number }[]>`
+      SELECT d.topic AS topic,
+             COUNT(DISTINCT d.id)::INTEGER AS documents,
+             COUNT(c.id)::INTEGER AS chunks
+      FROM kb_documents d
+      LEFT JOIN kb_chunks c ON c.document_id = d.id
+      GROUP BY d.topic
+      ORDER BY documents DESC, topic ASC
+    `;
+    const [kbTotalsRow] = await deps.sql<{ documents: number; chunks: number }[]>`
+      SELECT (SELECT COUNT(*) FROM kb_documents)::INTEGER AS documents,
+             (SELECT COUNT(*) FROM kb_chunks)::INTEGER AS chunks
+    `;
+    const kbTotals = kbTotalsRow ?? { documents: 0, chunks: 0 };
 
-    const convsByMode = deps.db
-      .query<{ mode: string; count: number }, []>(
-        `SELECT mode, COUNT(*) AS count FROM conversations GROUP BY mode`,
-      )
-      .all();
+    const convsByMode = await deps.sql<{ mode: string; count: number }[]>`
+      SELECT mode, COUNT(*)::INTEGER AS count FROM conversations GROUP BY mode
+    `;
     const convTotal = convsByMode.reduce((s, r) => s + r.count, 0);
 
-    const usersByStatus = deps.db
-      .query<{ status: string; count: number }, []>(
-        `SELECT status, COUNT(*) AS count FROM users GROUP BY status`,
-      )
-      .all();
+    const usersByStatus = await deps.sql<{ status: string; count: number }[]>`
+      SELECT status, COUNT(*)::INTEGER AS count FROM users GROUP BY status
+    `;
     const usersTotal = usersByStatus.reduce((s, r) => s + r.count, 0);
 
-    const messagesByRole = deps.db
-      .query<{ role: string; count: number }, []>(
-        `SELECT role, COUNT(*) AS count FROM messages GROUP BY role`,
-      )
-      .all();
+    const messagesByRole = await deps.sql<{ role: string; count: number }[]>`
+      SELECT role, COUNT(*)::INTEGER AS count FROM messages GROUP BY role
+    `;
     const messagesTotal = messagesByRole.reduce((s, r) => s + r.count, 0);
 
     // How many conversations have a long-conversation summary stored?
     // Useful signal for whether RAG_CONVERSATION_SUMMARY is actually doing
     // anything on this corpus.
-    const summarizedConvs = deps.db
-      .query<{ count: number }, []>(
-        `SELECT COUNT(*) AS count FROM conversations WHERE summary_json IS NOT NULL`,
-      )
-      .get()!.count;
+    const [summarizedConvsRow] = await deps.sql<{ count: number }[]>`
+      SELECT COUNT(*)::INTEGER AS count FROM conversations WHERE summary_json IS NOT NULL
+    `;
+    const summarizedConvs = summarizedConvsRow?.count ?? 0;
 
     // How many users have memory facts extracted? Same diagnostic value
     // for RAG_USER_MEMORY.
-    const usersWithMemory = deps.db
-      .query<{ count: number }, []>(
-        `SELECT COUNT(*) AS count FROM users
-         WHERE profile_json IS NOT NULL
-           AND json_extract(profile_json, '$.memory.facts') IS NOT NULL`,
-      )
-      .get()!.count;
+    const [usersWithMemoryRow] = await deps.sql<{ count: number }[]>`
+      SELECT COUNT(*)::INTEGER AS count FROM users
+      WHERE profile_json IS NOT NULL
+        AND (profile_json::jsonb)->'memory'->'facts' IS NOT NULL
+    `;
+    const usersWithMemory = usersWithMemoryRow?.count ?? 0;
 
     return json({
       rag: {
@@ -310,7 +298,7 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
         chunks: kbTotals.chunks,
         by_topic: kbByTopic,
         // Number of active styles seeded in DB (just count for UI hint).
-        styles: styles.listActive().length,
+        styles: (await styles.listActive()).length,
       },
       conversations: {
         total: convTotal,
@@ -327,10 +315,10 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
         by_role: Object.fromEntries(messagesByRole.map((r) => [r.role, r.count])),
       },
       vacancies: {
-        active: vacancies.countActive(),
+        active: await vacancies.countActive(),
       },
       leads: {
-        by_state: leadsRepo.countByState(),
+        by_state: await leadsRepo.countByState(),
         leads_chat_configured: deps.leadsChatId != null,
         visa_chat_configured: deps.visaChatId != null,
       },
@@ -340,14 +328,14 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 export function createListConversationsHandler(deps: AdminApiDeps): RouteHandler {
-  const conversations = new ConversationsRepo(deps.db);
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const conversations = new ConversationsRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const url = new URL(req.url);
     const onlyEscalated = url.searchParams.get("escalated") === "1";
     return json({
-      conversations: conversations.list({ onlyEscalated, limit: 200 }).map((row) => ({
+      conversations: (await conversations.list({ onlyEscalated, limit: 200 })).map((row) => ({
         id: row.id,
         mode: row.mode,
         escalated_at: row.escalated_at,
@@ -364,31 +352,31 @@ export function createListConversationsHandler(deps: AdminApiDeps): RouteHandler
 }
 
 export function createConversationDetailHandler(deps: AdminApiDeps): RouteHandler {
-  const conversations = new ConversationsRepo(deps.db);
-  const users = new UsersRepo(deps.db);
-  const messages = new MessagesRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const conversations = new ConversationsRepo(deps.sql);
+  const users = new UsersRepo(deps.sql);
+  const messages = new MessagesRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const conv = conversations.byId(id);
+    const conv = await conversations.byId(id);
     if (!conv) return json({ error: "not found" }, { status: 404 });
-    const user = users.byId(conv.user_id);
+    const user = await users.byId(conv.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
     // Cross-session memory pulled from `users.profile_json.memory`. Always
     // included — when memory extraction is off (RAG_USER_MEMORY=false) this
     // is `{ facts: {} }` and the UI just shows an empty pane. Keeping the
     // shape stable on/off avoids a frontend feature flag.
-    const memory = users.getMemory(user.id);
+    const memory = await users.getMemory(user.id);
     // Long-conversation summary (RAG_CONVERSATION_SUMMARY). Null when the
     // chat is too short to have triggered summarization yet, which the UI
     // handles by hiding the summary pane.
-    const summary = conversations.getSummary(id);
+    const summary = await conversations.getSummary(id);
     return json({
       conversation: conv,
       user,
-      messages: messages.listByConversation(id, 200),
+      messages: await messages.listByConversation(id, 200),
       memory,
       summary,
     });
@@ -402,15 +390,15 @@ export function createConversationDetailHandler(deps: AdminApiDeps): RouteHandle
  * next bot turn picks them up via the standard `getMemory` read path.
  */
 export function createUpdateUserMemoryHandler(deps: AdminApiDeps): RouteHandler {
-  const users = new UsersRepo(deps.db);
+  const users = new UsersRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
 
-    const user = users.byId(id);
+    const user = await users.byId(id);
     if (!user) return json({ error: "not found" }, { status: 404 });
 
     let body: { facts?: unknown };
@@ -439,53 +427,53 @@ export function createUpdateUserMemoryHandler(deps: AdminApiDeps): RouteHandler 
       cleaned[trimmedKey] = trimmed;
     }
 
-    users.setMemoryFacts(id, cleaned);
-    return json({ memory: users.getMemory(id) });
+    await users.setMemoryFacts(id, cleaned);
+    return json({ memory: await users.getMemory(id) });
   };
 }
 
 export function createTakeHandler(deps: AdminApiDeps): RouteHandler {
-  const conversations = new ConversationsRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const conversations = new ConversationsRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const conv = conversations.byId(id);
+    const conv = await conversations.byId(id);
     if (!conv) return json({ error: "not found" }, { status: 404 });
-    conversations.setMode(id, "human", ctx.adminId);
+    await conversations.setMode(id, "human", ctx.adminId);
     deps.onConversationChanged?.(id);
-    const updated = conversations.byId(id);
+    const updated = await conversations.byId(id);
     return json({ conversation: updated });
   };
 }
 
 export function createReleaseHandler(deps: AdminApiDeps): RouteHandler {
-  const conversations = new ConversationsRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const conversations = new ConversationsRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const conv = conversations.byId(id);
+    const conv = await conversations.byId(id);
     if (!conv) return json({ error: "not found" }, { status: 404 });
-    conversations.setMode(id, "ai");
+    await conversations.setMode(id, "ai");
     deps.onConversationChanged?.(id);
-    const updated = conversations.byId(id);
+    const updated = await conversations.byId(id);
     return json({ conversation: updated });
   };
 }
 
 export function createDeleteConversationHandler(deps: AdminApiDeps): RouteHandler {
-  const conversations = new ConversationsRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const conversations = new ConversationsRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const conv = conversations.byId(id);
+    const conv = await conversations.byId(id);
     if (!conv) return json({ error: "not found" }, { status: 404 });
-    const ok = conversations.deleteById(id);
+    const ok = await conversations.deleteById(id);
     if (!ok) return json({ error: "delete failed" }, { status: 500 });
     deps.onConversationChanged?.(id);
     return json({ ok: true, deleted: id });
@@ -493,18 +481,18 @@ export function createDeleteConversationHandler(deps: AdminApiDeps): RouteHandle
 }
 
 export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
-  const conversations = new ConversationsRepo(deps.db);
-  const messages = new MessagesRepo(deps.db);
-  const users = new UsersRepo(deps.db);
+  const conversations = new ConversationsRepo(deps.sql);
+  const messages = new MessagesRepo(deps.sql);
+  const users = new UsersRepo(deps.sql);
 
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
 
-    const conv = conversations.byId(id);
+    const conv = await conversations.byId(id);
     if (!conv) return json({ error: "not found" }, { status: 404 });
     if (conv.mode !== "human") {
       return json({ error: "conversation is not in human mode" }, { status: 409 });
@@ -519,7 +507,7 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
     const text = typeof body.text === "string" ? body.text.trim() : "";
     if (!text) return json({ error: "text is required" }, { status: 400 });
 
-    const user = users.byId(conv.user_id);
+    const user = await users.byId(conv.user_id);
     if (!user) return json({ error: "user not found" }, { status: 404 });
 
     let tgMessageId: number | undefined;
@@ -537,13 +525,13 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
       }
     }
 
-    messages.add({
+    await messages.add({
       conversationId: id,
       role: "human",
       text,
       tgMessageId,
     });
-    conversations.touch(id);
+    await conversations.touch(id);
 
     deps.onMessageSent?.({ conversationId: id, tgUserId: user.tg_user_id });
 
@@ -624,34 +612,31 @@ const EXPORT_BULK_LIMIT_DEFAULT = 100;
  * single and bulk export. Joins users + styles + experiments so a downstream
  * data scientist can filter by slug without re-joining themselves.
  */
-function buildExportHeaders(
-  db: Database,
+async function buildExportHeaders(
+  sql: Sql,
   ids: readonly number[],
-): Map<number, ExportedConversation> {
+): Promise<Map<number, ExportedConversation>> {
   if (ids.length === 0) return new Map();
-  const placeholders = ids.map(() => "?").join(",");
-  const rows = db
-    .query<ExportRow, number[]>(
-      `SELECT
-         c.id              AS conv_id,
-         c.mode            AS conv_mode,
-         c.created_at      AS conv_created_at,
-         c.current_stage   AS conv_current_stage,
-         u.id              AS user_id,
-         u.tg_user_id      AS tg_user_id,
-         u.tg_username     AS tg_username,
-         u.status          AS user_status,
-         c.style_id        AS style_id,
-         s.slug            AS style_slug,
-         c.experiment_id   AS experiment_id,
-         e.slug            AS experiment_slug
-       FROM conversations c
-       JOIN users u ON u.id = c.user_id
-       LEFT JOIN styles s ON s.id = c.style_id
-       LEFT JOIN experiments e ON e.id = c.experiment_id
-       WHERE c.id IN (${placeholders})`,
-    )
-    .all(...ids);
+  const rows = await sql<ExportRow[]>`
+    SELECT
+      c.id              AS conv_id,
+      c.mode            AS conv_mode,
+      c.created_at      AS conv_created_at,
+      c.current_stage   AS conv_current_stage,
+      u.id              AS user_id,
+      u.tg_user_id      AS tg_user_id,
+      u.tg_username     AS tg_username,
+      u.status          AS user_status,
+      c.style_id        AS style_id,
+      s.slug            AS style_slug,
+      c.experiment_id   AS experiment_id,
+      e.slug            AS experiment_slug
+    FROM conversations c
+    JOIN users u ON u.id = c.user_id
+    LEFT JOIN styles s ON s.id = c.style_id
+    LEFT JOIN experiments e ON e.id = c.experiment_id
+    WHERE c.id = ANY(${ids as number[]})
+  `;
 
   const out = new Map<number, ExportedConversation>();
   for (const r of rows) {
@@ -672,18 +657,18 @@ function buildExportHeaders(
 }
 
 /** Hydrate the message lists in-place. Single SELECT for all conversations. */
-function fillExportMessages(db: Database, conversations: Map<number, ExportedConversation>): void {
+async function fillExportMessages(
+  sql: Sql,
+  conversations: Map<number, ExportedConversation>,
+): Promise<void> {
   if (conversations.size === 0) return;
   const ids = [...conversations.keys()];
-  const placeholders = ids.map(() => "?").join(",");
-  const rows = db
-    .query<ExportMessageRow, number[]>(
-      `SELECT conversation_id, role, text, stage, created_at
-       FROM messages
-       WHERE conversation_id IN (${placeholders})
-       ORDER BY conversation_id, created_at ASC, id ASC`,
-    )
-    .all(...ids);
+  const rows = await sql<ExportMessageRow[]>`
+    SELECT conversation_id, role, text, stage, created_at
+    FROM messages
+    WHERE conversation_id = ANY(${ids as number[]})
+    ORDER BY conversation_id, created_at ASC, id ASC
+  `;
   for (const r of rows) {
     const conv = conversations.get(r.conversation_id);
     if (!conv) continue;
@@ -706,15 +691,15 @@ function jsonlResponse(lines: ExportedConversation[], filename: string): Respons
 }
 
 export function createExportConversationHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
 
-    const headers = buildExportHeaders(deps.db, [id]);
+    const headers = await buildExportHeaders(deps.sql, [id]);
     if (headers.size === 0) return json({ error: "not found" }, { status: 404 });
-    fillExportMessages(deps.db, headers);
+    await fillExportMessages(deps.sql, headers);
 
     const conv = [...headers.values()][0]!;
     return jsonlResponse([conv], `conversation-${id}.jsonl`);
@@ -722,8 +707,8 @@ export function createExportConversationHandler(deps: AdminApiDeps): RouteHandle
 }
 
 export function createBulkExportConversationsHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     const url = new URL(req.url);
@@ -737,41 +722,29 @@ export function createBulkExportConversationsHandler(deps: AdminApiDeps): RouteH
       EXPORT_BULK_LIMIT_MAX,
     );
 
-    // Build a parameterized WHERE so we never interpolate user input.
-    const wheres: string[] = [];
-    const args: Array<number | string> = [];
-    if (styleId !== null) {
-      wheres.push("c.style_id = ?");
-      args.push(styleId);
-    }
-    if (experimentId !== null) {
-      wheres.push("c.experiment_id = ?");
-      args.push(experimentId);
-    }
-    if (userStatus) {
-      wheres.push("u.status = ?");
-      args.push(userStatus);
-    }
-    if (mode) {
-      wheres.push("c.mode = ?");
-      args.push(mode);
-    }
-    const whereClause = wheres.length ? `WHERE ${wheres.join(" AND ")}` : "";
+    // Build the query using postgres tagged templates with conditional clauses.
+    const styleFilter = styleId !== null ? deps.sql`AND c.style_id = ${styleId}` : deps.sql``;
+    const expFilter =
+      experimentId !== null ? deps.sql`AND c.experiment_id = ${experimentId}` : deps.sql``;
+    const statusFilter = userStatus ? deps.sql`AND u.status = ${userStatus}` : deps.sql``;
+    const modeFilter = mode ? deps.sql`AND c.mode = ${mode}` : deps.sql``;
 
-    const ids = deps.db
-      .query<{ id: number }, Array<number | string>>(
-        `SELECT c.id
-         FROM conversations c
-         JOIN users u ON u.id = c.user_id
-         ${whereClause}
-         ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
-         LIMIT ${limit}`,
-      )
-      .all(...args)
-      .map((r) => r.id);
+    const idRows = await deps.sql<{ id: number }[]>`
+      SELECT c.id
+      FROM conversations c
+      JOIN users u ON u.id = c.user_id
+      WHERE 1=1
+        ${styleFilter}
+        ${expFilter}
+        ${statusFilter}
+        ${modeFilter}
+      ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
+      LIMIT ${limit}
+    `;
+    const ids = idRows.map((r) => r.id);
 
-    const headers = buildExportHeaders(deps.db, ids);
-    fillExportMessages(deps.db, headers);
+    const headers = await buildExportHeaders(deps.sql, ids);
+    await fillExportMessages(deps.sql, headers);
 
     // Preserve the order from the SELECT (most recent first).
     const out = ids
@@ -812,17 +785,17 @@ const VALID_EXPERIMENT_STATUSES: readonly ExperimentStatus[] = [
 const VALID_SUCCESS_METRICS: readonly SuccessMetric[] = ["qualified", "won", "replied_3+"];
 
 export function createListStylesHandler(deps: AdminApiDeps): RouteHandler {
-  const styles = new StylesRepo(deps.db);
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const styles = new StylesRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
-    const rows = styles.listActive().map((row) => ({
+    const rows = (await styles.listActive()).map((row) => ({
       id: row.id,
       slug: row.slug,
       display_name: row.display_name,
       version: row.version,
       parent_id: row.parent_id,
-      is_active: row.is_active === 1,
+      is_active: row.is_active,
       created_at: row.created_at,
     }));
     return json({ styles: rows });
@@ -830,13 +803,13 @@ export function createListStylesHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 export function createGetStyleHandler(deps: AdminApiDeps): RouteHandler {
-  const styles = new StylesRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const styles = new StylesRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const row = styles.byId(id);
+    const row = await styles.byId(id);
     if (!row) return json({ error: "not found" }, { status: 404 });
     let parsedConfig: unknown = null;
     let parseError: string | null = null;
@@ -852,7 +825,7 @@ export function createGetStyleHandler(deps: AdminApiDeps): RouteHandler {
         display_name: row.display_name,
         version: row.version,
         parent_id: row.parent_id,
-        is_active: row.is_active === 1,
+        is_active: row.is_active,
         created_at: row.created_at,
         config: parsedConfig,
         config_raw: row.config_json,
@@ -891,10 +864,10 @@ const FUNNEL_STAGE_SET: ReadonlySet<string> = new Set(FUNNEL_STAGES);
  * sample prospect message, see what comes back BEFORE versioning the row.
  */
 export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
-  const styles = new StylesRepo(deps.db);
-  const kb = new KbRepo(deps.db);
+  const styles = new StylesRepo(deps.sql);
+  const kb = new KbRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     if (!deps.rag) {
@@ -913,7 +886,7 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
 
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const row = styles.byId(id);
+    const row = await styles.byId(id);
     if (!row) return json({ error: "not found" }, { status: 404 });
 
     let style: ReturnType<typeof styles.parseRow>;
@@ -977,7 +950,7 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
         const [vec] = await rag.embedder.embed([userMessage]);
         if (vec) {
           const topK = rag.topK ?? 5;
-          const all = kb.search(vec, topK);
+          const all = await kb.search(vec, topK);
           const filtered =
             rag.maxDistance === undefined ? all : all.filter((h) => h.distance <= rag.maxDistance!);
           kbHits = filtered.map((h) => ({
@@ -1055,9 +1028,9 @@ export function createStylePlaygroundHandler(deps: AdminApiDeps): RouteHandler {
  * recover from accidental deactivation without DB surgery.
  */
 export function createCreateStyleHandler(deps: AdminApiDeps): RouteHandler {
-  const styles = new StylesRepo(deps.db);
+  const styles = new StylesRepo(deps.sql);
   return async ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     let body: { config?: unknown };
@@ -1087,7 +1060,7 @@ export function createCreateStyleHandler(deps: AdminApiDeps): RouteHandler {
 
     // Refuse if there's already an ACTIVE style with this slug. Deactivated
     // rows with the same slug are tolerated (see comment block above).
-    if (styles.bySlug(config.slug)) {
+    if (await styles.bySlug(config.slug)) {
       return json(
         {
           error: `style with slug "${config.slug}" already exists. Edit the existing one or pick a different slug.`,
@@ -1096,7 +1069,7 @@ export function createCreateStyleHandler(deps: AdminApiDeps): RouteHandler {
       );
     }
 
-    const inserted = styles.insert({
+    const inserted = await styles.insert({
       slug: config.slug,
       displayName: config.displayName,
       config,
@@ -1112,7 +1085,7 @@ export function createCreateStyleHandler(deps: AdminApiDeps): RouteHandler {
           display_name: inserted.display_name,
           version: inserted.version,
           parent_id: inserted.parent_id,
-          is_active: inserted.is_active === 1,
+          is_active: inserted.is_active,
           created_at: inserted.created_at,
           config,
           config_raw: inserted.config_json,
@@ -1132,9 +1105,9 @@ export function createCreateStyleHandler(deps: AdminApiDeps): RouteHandler {
  * pinned to the old version keep seeing the prompt they started with.
  */
 export function createEditStyleHandler(deps: AdminApiDeps): RouteHandler {
-  const styles = new StylesRepo(deps.db);
+  const styles = new StylesRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
@@ -1163,9 +1136,9 @@ export function createEditStyleHandler(deps: AdminApiDeps): RouteHandler {
       );
     }
 
-    let newRow: ReturnType<typeof styles.editAsNewVersion>;
+    let newRow: Awaited<ReturnType<typeof styles.editAsNewVersion>>;
     try {
-      newRow = styles.editAsNewVersion(id, parseResult.data);
+      newRow = await styles.editAsNewVersion(id, parseResult.data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("not found")) {
@@ -1184,7 +1157,7 @@ export function createEditStyleHandler(deps: AdminApiDeps): RouteHandler {
         display_name: newRow.display_name,
         version: newRow.version,
         parent_id: newRow.parent_id,
-        is_active: newRow.is_active === 1,
+        is_active: newRow.is_active,
         created_at: newRow.created_at,
         config: parseResult.data,
         config_raw: newRow.config_json,
@@ -1195,11 +1168,11 @@ export function createEditStyleHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 export function createListExperimentsHandler(deps: AdminApiDeps): RouteHandler {
-  const experiments = new ExperimentsRepo(deps.db);
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const experiments = new ExperimentsRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
-    const rows = experiments.list().map((row) => ({
+    const rows = (await experiments.list()).map((row) => ({
       id: row.id,
       slug: row.slug,
       status: row.status,
@@ -1222,10 +1195,10 @@ interface CreateExperimentBody {
 }
 
 export function createCreateExperimentHandler(deps: AdminApiDeps): RouteHandler {
-  const experiments = new ExperimentsRepo(deps.db);
-  const styles = new StylesRepo(deps.db);
+  const experiments = new ExperimentsRepo(deps.sql);
+  const styles = new StylesRepo(deps.sql);
   return async ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     let body: CreateExperimentBody;
     try {
@@ -1266,7 +1239,7 @@ export function createCreateExperimentHandler(deps: AdminApiDeps): RouteHandler 
       // Verify the referenced style exists & is active. Otherwise the
       // experiment will silently allocate to a missing slug and graceful-
       // fallback to the legacy persona — nasty surprise during a real test.
-      if (!styles.bySlug(k)) {
+      if (!(await styles.bySlug(k))) {
         return json(
           { error: `referenced style slug "${k}" not found or inactive` },
           { status: 400 },
@@ -1282,21 +1255,21 @@ export function createCreateExperimentHandler(deps: AdminApiDeps): RouteHandler 
       return json({ error: "total allocation weight must be > 0" }, { status: 400 });
     }
 
-    if (experiments.bySlug(slug)) {
+    if (await experiments.bySlug(slug)) {
       return json({ error: "experiment with this slug already exists" }, { status: 409 });
     }
 
     // Only one experiment may run at a time. If we're creating a 'running'
     // one and another is live, refuse — admin must pause/done the existing
     // one first.
-    if (status === "running" && experiments.getRunning()) {
+    if (status === "running" && (await experiments.getRunning())) {
       return json(
         { error: "another experiment is already running; pause it first" },
         { status: 409 },
       );
     }
 
-    const row = experiments.insert({ slug, status, allocation, successMetric });
+    const row = await experiments.insert({ slug, status, allocation, successMetric });
     return json(
       {
         experiment: {
@@ -1320,13 +1293,13 @@ interface PatchExperimentBody {
 }
 
 export function createSetExperimentStatusHandler(deps: AdminApiDeps): RouteHandler {
-  const experiments = new ExperimentsRepo(deps.db);
+  const experiments = new ExperimentsRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const row = experiments.byId(id);
+    const row = await experiments.byId(id);
     if (!row) return json({ error: "not found" }, { status: 404 });
 
     let body: PatchExperimentBody;
@@ -1344,7 +1317,7 @@ export function createSetExperimentStatusHandler(deps: AdminApiDeps): RouteHandl
     }
     const newStatus = status as ExperimentStatus;
     if (newStatus === "running" && row.status !== "running") {
-      const conflicting = experiments.getRunning();
+      const conflicting = await experiments.getRunning();
       if (conflicting && conflicting.id !== id) {
         return json(
           {
@@ -1362,8 +1335,8 @@ export function createSetExperimentStatusHandler(deps: AdminApiDeps): RouteHandl
       }
     }
 
-    experiments.setStatus(id, newStatus);
-    const updated = experiments.byId(id)!;
+    await experiments.setStatus(id, newStatus);
+    const updated = (await experiments.byId(id))!;
     return json({
       experiment: {
         id: updated.id,
@@ -1392,43 +1365,41 @@ interface FunnelRow {
 }
 
 export function createExperimentFunnelHandler(deps: AdminApiDeps): RouteHandler {
-  const experiments = new ExperimentsRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const experiments = new ExperimentsRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const row = experiments.byId(id);
+    const row = await experiments.byId(id);
     if (!row) return json({ error: "not found" }, { status: 404 });
 
     // Per-style aggregate. LEFT JOIN on conversations so styles that haven't
     // received any traffic yet still appear with zero counts (helps the UI
     // distinguish "nobody assigned" from "assigned, didn't qualify").
-    const funnel = deps.db
-      .query<FunnelRow, [number, number]>(
-        `SELECT
-           s.id AS style_id,
-           s.slug AS slug,
-           s.display_name AS display_name,
-           COUNT(c.id) AS conversations,
-           COALESCE(SUM(CASE WHEN u.status = 'qualified' THEN 1 ELSE 0 END), 0) AS qualified,
-           COALESCE(SUM(CASE WHEN u.status = 'won' THEN 1 ELSE 0 END), 0) AS won,
-           COALESCE(SUM(CASE WHEN u.status = 'lost' THEN 1 ELSE 0 END), 0) AS lost,
-           COALESCE(SUM(CASE WHEN u.status IN ('new','questionnaire_pending') THEN 1 ELSE 0 END), 0) AS pending,
-           COALESCE(SUM(CASE WHEN c.mode = 'human' THEN 1 ELSE 0 END), 0) AS escalated_to_human
-         FROM styles s
-         LEFT JOIN conversations c
-           ON c.style_id = s.id AND c.experiment_id = ?
-         LEFT JOIN users u ON u.id = c.user_id
-         WHERE s.id IN (
-           SELECT DISTINCT style_id FROM conversations WHERE experiment_id = ?
-           UNION
-           SELECT s2.id FROM styles s2 WHERE s2.is_active = 1
-         )
-         GROUP BY s.id, s.slug, s.display_name
-         ORDER BY conversations DESC, s.display_name`,
+    const funnel = await deps.sql<FunnelRow[]>`
+      SELECT
+        s.id AS style_id,
+        s.slug AS slug,
+        s.display_name AS display_name,
+        COUNT(c.id)::INTEGER AS conversations,
+        COALESCE(SUM(CASE WHEN u.status = 'qualified' THEN 1 ELSE 0 END), 0)::INTEGER AS qualified,
+        COALESCE(SUM(CASE WHEN u.status = 'won' THEN 1 ELSE 0 END), 0)::INTEGER AS won,
+        COALESCE(SUM(CASE WHEN u.status = 'lost' THEN 1 ELSE 0 END), 0)::INTEGER AS lost,
+        COALESCE(SUM(CASE WHEN u.status IN ('new','questionnaire_pending') THEN 1 ELSE 0 END), 0)::INTEGER AS pending,
+        COALESCE(SUM(CASE WHEN c.mode = 'human' THEN 1 ELSE 0 END), 0)::INTEGER AS escalated_to_human
+      FROM styles s
+      LEFT JOIN conversations c
+        ON c.style_id = s.id AND c.experiment_id = ${id}
+      LEFT JOIN users u ON u.id = c.user_id
+      WHERE s.id IN (
+        SELECT DISTINCT style_id FROM conversations WHERE experiment_id = ${id}
+        UNION
+        SELECT s2.id FROM styles s2 WHERE s2.is_active = TRUE
       )
-      .all(id, id);
+      GROUP BY s.id, s.slug, s.display_name
+      ORDER BY conversations DESC, s.display_name
+    `;
 
     return json({
       experiment_id: id,
@@ -1467,7 +1438,7 @@ function safeJson(text: string): unknown {
  */
 export function createDownloadFileHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     if (!deps.telegram) {
@@ -1480,17 +1451,13 @@ export function createDownloadFileHandler(deps: AdminApiDeps): RouteHandler {
     }
 
     // Constraint 1: file_id must already be referenced by some message
-    // we processed. SQLite json_extract is too opinionated here — we
-    // do a simple LIKE scan over meta_json. The set of seen file_ids
-    // is small enough (one per inbound media message) that this is fine.
-    const seen = deps.db
-      .query<{ count: number }, [string]>(
-        `SELECT COUNT(*) AS count FROM messages
-         WHERE meta_json IS NOT NULL
-           AND json_extract(meta_json, '$.media.file_id') = ?`,
-      )
-      .get(fileId);
-    if (!seen || seen.count === 0) {
+    // we processed. We query via jsonb to find the file_id in meta_json.
+    const [seenRow] = await deps.sql<{ count: number }[]>`
+      SELECT COUNT(*)::INTEGER AS count FROM messages
+      WHERE meta_json IS NOT NULL
+        AND (meta_json::jsonb)->'media'->>'file_id' = ${fileId}
+    `;
+    if (!seenRow || seenRow.count === 0) {
       return json({ error: "unknown file" }, { status: 404 });
     }
 
@@ -1526,22 +1493,21 @@ export function createDownloadFileHandler(deps: AdminApiDeps): RouteHandler {
 function buildLeadsService(deps: AdminApiDeps): LeadsService | null {
   if (!deps.telegram) return null;
   return new LeadsService({
-    leads: new LeadsRepo(deps.db),
-    users: new UsersRepo(deps.db),
-    conversations: new ConversationsRepo(deps.db),
-    messages: new MessagesRepo(deps.db),
+    leads: new LeadsRepo(deps.sql),
+    users: new UsersRepo(deps.sql),
+    conversations: new ConversationsRepo(deps.sql),
+    messages: new MessagesRepo(deps.sql),
     telegram: deps.telegram,
     leadsChatId: deps.leadsChatId ?? null,
     visaChatId: deps.visaChatId ?? null,
   });
 }
 
-function recentMessagesForCard(
+async function recentMessagesForCard(
   messages: MessagesRepo,
   conversationId: number,
-): Array<{ role: string; text: string }> {
-  return messages
-    .recentForContext(conversationId, 8)
+): Promise<Array<{ role: string; text: string }>> {
+  return (await messages.recentForContext(conversationId, 8))
     .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "human")
     .map((m) => ({ role: m.role, text: m.text }));
 }
@@ -1555,21 +1521,19 @@ function recentMessagesForCard(
  */
 function runAttribution(deps: AdminApiDeps, leadRow: LeadRow | null): void {
   if (!leadRow) return;
-  try {
-    attributeLeadOutcome(
-      {
-        db: deps.db,
-        outcomes: new SkillOutcomesRepo(deps.db),
-        ratings: new StyleRatingsRepo(deps.db),
-        messages: new MessagesRepo(deps.db),
-        conversations: new ConversationsRepo(deps.db),
-        styles: new StylesRepo(deps.db),
-      },
-      leadRow,
-    );
-  } catch (err) {
+  attributeLeadOutcome(
+    {
+      db: deps.sql,
+      outcomes: new SkillOutcomesRepo(deps.sql),
+      ratings: new StyleRatingsRepo(deps.sql),
+      messages: new MessagesRepo(deps.sql),
+      conversations: new ConversationsRepo(deps.sql),
+      styles: new StylesRepo(deps.sql),
+    },
+    leadRow,
+  ).catch((err) => {
     console.warn("[attribution] failed for lead", leadRow.id, err);
-  }
+  });
 }
 
 const LEAD_STATES: LeadState[] = [
@@ -1584,9 +1548,9 @@ const LEAD_STATES: LeadState[] = [
 ];
 
 export function createListLeadsHandler(deps: AdminApiDeps): RouteHandler {
-  const leads = new LeadsRepo(deps.db);
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const leads = new LeadsRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const url = new URL(req.url);
     const stateParam = url.searchParams.get("state");
@@ -1595,8 +1559,8 @@ export function createListLeadsHandler(deps: AdminApiDeps): RouteHandler {
         ? (stateParam as LeadState)
         : null;
     return json({
-      leads: leads.list({ ...(state ? { state } : {}) }),
-      counts: leads.countByState(),
+      leads: await leads.list({ ...(state ? { state } : {}) }),
+      counts: await leads.countByState(),
     });
   };
 }
@@ -1609,25 +1573,25 @@ export function createListLeadsHandler(deps: AdminApiDeps): RouteHandler {
  */
 export function createPromoteLeadHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const convId = Number(params.id);
     if (!Number.isFinite(convId)) return json({ error: "bad id" }, { status: 400 });
 
-    const conversations = new ConversationsRepo(deps.db);
-    const users = new UsersRepo(deps.db);
-    const leadsRepo = new LeadsRepo(deps.db);
-    const messagesRepo = new MessagesRepo(deps.db);
+    const conversations = new ConversationsRepo(deps.sql);
+    const users = new UsersRepo(deps.sql);
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const messagesRepo = new MessagesRepo(deps.sql);
 
-    const conv = conversations.byId(convId);
+    const conv = await conversations.byId(convId);
     if (!conv) return json({ error: "conversation not found" }, { status: 404 });
-    const user = users.byId(conv.user_id);
+    const user = await users.byId(conv.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
 
-    let lead = leadsRepo.ensureForUser(user.id);
+    let lead = await leadsRepo.ensureForUser(user.id);
     // Promotion implies "ready for operator decision" — bump intake state.
     if (lead.state === "intake_pending") {
-      lead = leadsRepo.setState(lead.id, "intake_complete") ?? lead;
+      lead = (await leadsRepo.setState(lead.id, "intake_complete")) ?? lead;
     }
 
     const service = buildLeadsService(deps);
@@ -1635,7 +1599,7 @@ export function createPromoteLeadHandler(deps: AdminApiDeps): RouteHandler {
       lead = await service.postCardToOpsChat({
         lead,
         user,
-        recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+        recentMessages: await recentMessagesForCard(messagesRepo, conv.id),
       });
       // Notify the candidate that the request is being reviewed — this
       // matches the operator's stock "отправила запрос в клуб" message.
@@ -1648,38 +1612,38 @@ export function createPromoteLeadHandler(deps: AdminApiDeps): RouteHandler {
 
 export function createApproveLeadHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
 
-    const leadsRepo = new LeadsRepo(deps.db);
-    const usersRepo = new UsersRepo(deps.db);
-    const messagesRepo = new MessagesRepo(deps.db);
-    const conversations = new ConversationsRepo(deps.db);
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const usersRepo = new UsersRepo(deps.sql);
+    const messagesRepo = new MessagesRepo(deps.sql);
+    const conversations = new ConversationsRepo(deps.sql);
 
-    const lead = leadsRepo.byId(id);
+    const lead = await leadsRepo.byId(id);
     if (!lead) return json({ error: "not found" }, { status: 404 });
     if (lead.state === "approved" || lead.state === "rejected") {
       return json({ error: `lead already ${lead.state}` }, { status: 409 });
     }
-    const user = usersRepo.byId(lead.user_id);
+    const user = await usersRepo.byId(lead.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
 
-    const updated = leadsRepo.setState(id, "approved", { adminId: ctx.adminId });
+    const updated = await leadsRepo.setState(id, "approved", { adminId: ctx.adminId });
     if (!updated) return json({ error: "transition failed" }, { status: 500 });
     // Move into docs_pending — bot will start collecting visa form.
-    const inDocs = leadsRepo.setState(id, "docs_pending") ?? updated;
+    const inDocs = (await leadsRepo.setState(id, "docs_pending")) ?? updated;
 
     const service = buildLeadsService(deps);
     if (service) {
       await service.sendApprovalMessages({ lead: inDocs, user });
-      const conv = conversations.byUserId(user.id);
+      const conv = await conversations.byUserId(user.id);
       if (conv) {
         await service.refreshOpsCard({
           lead: inDocs,
           user,
-          recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+          recentMessages: await recentMessagesForCard(messagesRepo, conv.id),
           decision: { state: "approved" },
         });
       }
@@ -1690,7 +1654,7 @@ export function createApproveLeadHandler(deps: AdminApiDeps): RouteHandler {
 
 export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
@@ -1704,21 +1668,21 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
     const reason =
       typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : undefined;
 
-    const leadsRepo = new LeadsRepo(deps.db);
-    const usersRepo = new UsersRepo(deps.db);
-    const messagesRepo = new MessagesRepo(deps.db);
-    const conversations = new ConversationsRepo(deps.db);
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const usersRepo = new UsersRepo(deps.sql);
+    const messagesRepo = new MessagesRepo(deps.sql);
+    const conversations = new ConversationsRepo(deps.sql);
 
-    const lead = leadsRepo.byId(id);
+    const lead = await leadsRepo.byId(id);
     if (!lead) return json({ error: "not found" }, { status: 404 });
     if (lead.state === "approved" || lead.state === "rejected") {
       return json({ error: `lead already ${lead.state}` }, { status: 409 });
     }
-    const user = usersRepo.byId(lead.user_id);
+    const user = await usersRepo.byId(lead.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
 
     const rejectedReasonOpt: { rejectedReason?: string } = reason ? { rejectedReason: reason } : {};
-    const updated = leadsRepo.setState(id, "rejected", {
+    const updated = await leadsRepo.setState(id, "rejected", {
       adminId: ctx.adminId,
       ...rejectedReasonOpt,
     });
@@ -1731,12 +1695,12 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
         user,
         ...(reason ? { customReason: reason } : {}),
       });
-      const conv = conversations.byUserId(user.id);
+      const conv = await conversations.byUserId(user.id);
       if (conv) {
         await service.refreshOpsCard({
           lead: updated,
           user,
-          recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+          recentMessages: await recentMessagesForCard(messagesRepo, conv.id),
           decision: { state: "rejected" },
         });
       }
@@ -1750,16 +1714,16 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
  *  prompted the candidate to start submitting intake. */
 export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
 
-    const leadsRepo = new LeadsRepo(deps.db);
-    const usersRepo = new UsersRepo(deps.db);
-    const lead = leadsRepo.byId(id);
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const usersRepo = new UsersRepo(deps.sql);
+    const lead = await leadsRepo.byId(id);
     if (!lead) return json({ error: "not found" }, { status: 404 });
-    const user = usersRepo.byId(lead.user_id);
+    const user = await usersRepo.byId(lead.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
 
     const service = buildLeadsService(deps);
@@ -1782,17 +1746,17 @@ export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
  */
 export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
 
-    const leadsRepo = new LeadsRepo(deps.db);
-    const usersRepo = new UsersRepo(deps.db);
-    const messagesRepo = new MessagesRepo(deps.db);
-    const conversations = new ConversationsRepo(deps.db);
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const usersRepo = new UsersRepo(deps.sql);
+    const messagesRepo = new MessagesRepo(deps.sql);
+    const conversations = new ConversationsRepo(deps.sql);
 
-    const lead = leadsRepo.byId(id);
+    const lead = await leadsRepo.byId(id);
     if (!lead) return json({ error: "not found" }, { status: 404 });
     if (
       lead.state !== "approved" &&
@@ -1804,21 +1768,21 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
         { status: 409 },
       );
     }
-    const user = usersRepo.byId(lead.user_id);
+    const user = await usersRepo.byId(lead.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
 
-    const applicationId = leadsRepo.allocateApplicationId(id);
-    const transitioned = leadsRepo.setState(id, "docs_complete") ?? lead;
+    const applicationId = await leadsRepo.allocateApplicationId(id);
+    const transitioned = (await leadsRepo.setState(id, "docs_complete")) ?? lead;
     runAttribution(deps, transitioned);
 
     const service = buildLeadsService(deps);
     if (service) {
-      const conv = conversations.byUserId(user.id);
+      const conv = await conversations.byUserId(user.id);
       if (conv) {
         await service.postVisaSubmissionPackage({
           lead: transitioned,
           user,
-          recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+          recentMessages: await recentMessagesForCard(messagesRepo, conv.id),
           applicationId,
         });
       }
@@ -1835,31 +1799,31 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
  * re-parse JSON in the browser, plus the most recent ~30 messages.
  */
 export function createLeadDetailHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
 
-    const leadsRepo = new LeadsRepo(deps.db);
-    const usersRepo = new UsersRepo(deps.db);
-    const conversations = new ConversationsRepo(deps.db);
-    const messagesRepo = new MessagesRepo(deps.db);
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const usersRepo = new UsersRepo(deps.sql);
+    const conversations = new ConversationsRepo(deps.sql);
+    const messagesRepo = new MessagesRepo(deps.sql);
 
-    const lead = leadsRepo.byId(id);
+    const lead = await leadsRepo.byId(id);
     if (!lead) return json({ error: "not found" }, { status: 404 });
-    const user = usersRepo.byId(lead.user_id);
+    const user = await usersRepo.byId(lead.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
-    const conv = conversations.byUserId(user.id);
+    const conv = await conversations.byUserId(user.id);
     return json({
       lead,
       user,
       intake: lead.intake_json ? safeJson(lead.intake_json) : null,
       visa_docs: lead.visa_docs_json ? safeJson(lead.visa_docs_json) : null,
       conversation_id: conv?.id ?? null,
-      recent_messages: conv ? recentMessagesForCard(messagesRepo, conv.id) : [],
-      events: leadsRepo.events(id),
-      notes: leadsRepo.notes(id),
+      recent_messages: conv ? await recentMessagesForCard(messagesRepo, conv.id) : [],
+      events: await leadsRepo.events(id),
+      notes: await leadsRepo.notes(id),
     });
   };
 }
@@ -1870,14 +1834,14 @@ const NOTE_BODY_MAX = 2000;
  *  authenticated session so the note carries an attribution row. */
 export function createCreateLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
 
-    const leadsRepo = new LeadsRepo(deps.db);
-    if (!leadsRepo.byId(id)) {
+    const leadsRepo = new LeadsRepo(deps.sql);
+    if (!(await leadsRepo.byId(id))) {
       return json({ error: "lead not found" }, { status: 404 });
     }
 
@@ -1893,7 +1857,7 @@ export function createCreateLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
       return json({ error: `body > ${NOTE_BODY_MAX} chars` }, { status: 400 });
     }
 
-    const note = leadsRepo.addNote({
+    const note = await leadsRepo.addNote({
       leadId: id,
       body: text,
       byAdminId: ctx.adminId,
@@ -1906,8 +1870,8 @@ export function createCreateLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
  *  Belongs-to check: the note must reference the lead in the URL, not
  *  some other lead — prevents cross-lead deletion via guessed note ids. */
 export function createDeleteLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     const leadId = Number(params.id);
@@ -1916,16 +1880,16 @@ export function createDeleteLeadNoteHandler(deps: AdminApiDeps): RouteHandler {
       return json({ error: "bad id" }, { status: 400 });
     }
 
-    const owner = deps.db
-      .query<{ lead_id: number }, [number]>("SELECT lead_id FROM lead_notes WHERE id = ?")
-      .get(noteId);
-    if (!owner) return json({ error: "note not found" }, { status: 404 });
-    if (owner.lead_id !== leadId) {
+    const [ownerRow] = await deps.sql<{ lead_id: number }[]>`
+      SELECT lead_id FROM lead_notes WHERE id = ${noteId}
+    `;
+    if (!ownerRow) return json({ error: "note not found" }, { status: 404 });
+    if (ownerRow.lead_id !== leadId) {
       return json({ error: "note does not belong to this lead" }, { status: 404 });
     }
 
-    const leadsRepo = new LeadsRepo(deps.db);
-    leadsRepo.deleteNote(noteId);
+    const leadsRepo = new LeadsRepo(deps.sql);
+    await leadsRepo.deleteNote(noteId);
     return json({ ok: true, deleted: noteId });
   };
 }
@@ -1970,14 +1934,14 @@ const VISA_DOCS_VALUE_MAX = 1500;
  * stored docs so the operator can fix one field without retyping all.
  */
 export function createUpdateVisaDocsHandler(deps: AdminApiDeps): RouteHandler {
-  const leadsRepo = new LeadsRepo(deps.db);
+  const leadsRepo = new LeadsRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
 
-    const lead = leadsRepo.byId(id);
+    const lead = await leadsRepo.byId(id);
     if (!lead) return json({ error: "not found" }, { status: 404 });
 
     let body: { docs?: unknown };
@@ -2012,19 +1976,19 @@ export function createUpdateVisaDocsHandler(deps: AdminApiDeps): RouteHandler {
       merged[k] = trimmed;
     }
 
-    leadsRepo.setVisaDocs(id, JSON.stringify(merged));
+    await leadsRepo.setVisaDocs(id, JSON.stringify(merged));
     return json({ visa_docs: merged });
   };
 }
 
 export function createDeleteLeadHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const leadsRepo = new LeadsRepo(deps.db);
-    const ok = leadsRepo.delete(id);
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const ok = await leadsRepo.delete(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
   };
@@ -2047,12 +2011,12 @@ export function createLeadCallbackHandler(deps: AdminApiDeps) {
     const action = match[1] as "approve" | "reject";
     const leadId = Number(match[2]);
 
-    const leadsRepo = new LeadsRepo(deps.db);
-    const usersRepo = new UsersRepo(deps.db);
-    const messagesRepo = new MessagesRepo(deps.db);
-    const conversations = new ConversationsRepo(deps.db);
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const usersRepo = new UsersRepo(deps.sql);
+    const messagesRepo = new MessagesRepo(deps.sql);
+    const conversations = new ConversationsRepo(deps.sql);
 
-    const lead = leadsRepo.byId(leadId);
+    const lead = await leadsRepo.byId(leadId);
     if (!lead) {
       await deps.telegram.answerCallbackQuery({
         callbackQueryId: query.id,
@@ -2068,22 +2032,22 @@ export function createLeadCallbackHandler(deps: AdminApiDeps) {
       });
       return;
     }
-    const user = usersRepo.byId(lead.user_id);
+    const user = await usersRepo.byId(lead.user_id);
     if (!user) return;
 
     const service = buildLeadsService(deps);
     if (!service) return;
 
     if (action === "approve") {
-      const approved = leadsRepo.setState(leadId, "approved") ?? lead;
-      const inDocs = leadsRepo.setState(leadId, "docs_pending") ?? approved;
+      const approved = (await leadsRepo.setState(leadId, "approved")) ?? lead;
+      const inDocs = (await leadsRepo.setState(leadId, "docs_pending")) ?? approved;
       await service.sendApprovalMessages({ lead: inDocs, user });
-      const conv = conversations.byUserId(user.id);
+      const conv = await conversations.byUserId(user.id);
       if (conv) {
         await service.refreshOpsCard({
           lead: inDocs,
           user,
-          recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+          recentMessages: await recentMessagesForCard(messagesRepo, conv.id),
           decision: { state: "approved" },
         });
       }
@@ -2092,15 +2056,15 @@ export function createLeadCallbackHandler(deps: AdminApiDeps) {
         text: "Одобрено ✅",
       });
     } else {
-      const rejected = leadsRepo.setState(leadId, "rejected") ?? lead;
+      const rejected = (await leadsRepo.setState(leadId, "rejected")) ?? lead;
       runAttribution(deps, rejected);
       await service.sendRejection({ user });
-      const conv = conversations.byUserId(user.id);
+      const conv = await conversations.byUserId(user.id);
       if (conv) {
         await service.refreshOpsCard({
           lead: rejected,
           user,
-          recentMessages: recentMessagesForCard(messagesRepo, conv.id),
+          recentMessages: await recentMessagesForCard(messagesRepo, conv.id),
           decision: { state: "rejected" },
         });
       }
@@ -2119,24 +2083,24 @@ const VACANCY_BODY_MAX = 4000;
 const VACANCY_URL_MAX = 500;
 
 export function createListVacanciesHandler(deps: AdminApiDeps): RouteHandler {
-  const vacancies = new VacanciesRepo(deps.db);
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const vacancies = new VacanciesRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const url = new URL(req.url);
     // Default = all (operators want to see closed too, to re-enable);
     // ?active=1 narrows for any internal callers that need the same
     // shape the bot uses.
     const onlyActive = url.searchParams.get("active") === "1";
-    const list = onlyActive ? vacancies.listActive() : vacancies.listAll();
+    const list = onlyActive ? await vacancies.listActive() : await vacancies.listAll();
     return json({ vacancies: list });
   };
 }
 
 export function createCreateVacancyHandler(deps: AdminApiDeps): RouteHandler {
-  const vacancies = new VacanciesRepo(deps.db);
+  const vacancies = new VacanciesRepo(deps.sql);
   return async ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     let body: {
@@ -2169,7 +2133,7 @@ export function createCreateVacancyHandler(deps: AdminApiDeps): RouteHandler {
       url = trimmed || null;
     }
 
-    const created = vacancies.create({
+    const created = await vacancies.create({
       title,
       body: text,
       url,
@@ -2180,9 +2144,9 @@ export function createCreateVacancyHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 export function createUpdateVacancyHandler(deps: AdminApiDeps): RouteHandler {
-  const vacancies = new VacanciesRepo(deps.db);
+  const vacancies = new VacanciesRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
@@ -2232,20 +2196,20 @@ export function createUpdateVacancyHandler(deps: AdminApiDeps): RouteHandler {
     if (typeof body.is_active === "boolean") {
       patch.isActive = body.is_active;
     }
-    const updated = vacancies.update(id, patch);
+    const updated = await vacancies.update(id, patch);
     if (!updated) return json({ error: "not found" }, { status: 404 });
     return json({ vacancy: updated });
   };
 }
 
 export function createDeleteVacancyHandler(deps: AdminApiDeps): RouteHandler {
-  const vacancies = new VacanciesRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const vacancies = new VacanciesRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const ok = vacancies.delete(id);
+    const ok = await vacancies.delete(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
   };
@@ -2256,9 +2220,9 @@ export function createDeleteVacancyHandler(deps: AdminApiDeps): RouteHandler {
 const KB_TOPIC_MAX = 64;
 
 export function createListKbDocumentsHandler(deps: AdminApiDeps): RouteHandler {
-  const kb = new KbRepo(deps.db);
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const kb = new KbRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const url = new URL(req.url);
     // Sentinel "__untagged__" lets the UI request NULL-topic docs without
@@ -2268,27 +2232,27 @@ export function createListKbDocumentsHandler(deps: AdminApiDeps): RouteHandler {
     const opts: { topic?: string | null; q?: string; limit?: number } = {};
     if (topicParam !== null) opts.topic = topicParam;
     if (q) opts.q = q;
-    const documents = kb.listDocuments(opts);
+    const documents = await kb.listDocuments(opts);
     return json({
       documents,
-      topics: kb.listTopics(),
-      totals: { documents: kb.countDocuments(), chunks: kb.countChunks() },
+      topics: await kb.listTopics(),
+      totals: { documents: await kb.countDocuments(), chunks: await kb.countChunks() },
     });
   };
 }
 
 export function createGetKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
-  const kb = new KbRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const kb = new KbRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const doc = kb.getDocument(id);
+    const doc = await kb.getDocument(id);
     if (!doc) return json({ error: "not found" }, { status: 404 });
     // Truncate chunk text in the listing — full text is rarely useful at the
     // overview level and balloons the JSON response on long docs.
-    const chunks = kb.listChunks(id).map((c) => ({
+    const chunks = (await kb.listChunks(id)).map((c) => ({
       id: c.id,
       chunk_index: c.chunk_index,
       token_count: c.token_count,
@@ -2299,9 +2263,9 @@ export function createGetKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 export function createUpdateKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
-  const kb = new KbRepo(deps.db);
+  const kb = new KbRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
@@ -2328,20 +2292,20 @@ export function createUpdateKbDocumentHandler(deps: AdminApiDeps): RouteHandler 
     } else {
       return json({ error: "topic must be string or null" }, { status: 400 });
     }
-    const updated = kb.setTopic(id, nextTopic);
+    const updated = await kb.setTopic(id, nextTopic);
     if (!updated) return json({ error: "not found" }, { status: 404 });
     return json({ document: updated });
   };
 }
 
 export function createDeleteKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
-  const kb = new KbRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const kb = new KbRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const ok = kb.deleteDocument(id);
+    const ok = await kb.deleteDocument(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
   };
@@ -2365,7 +2329,7 @@ const KB_BODY_MAX = 200_000; // 200KB upper bound — enough for any single doc
  */
 export function createIngestKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     if (!deps.rag?.embedder) {
@@ -2408,7 +2372,7 @@ export function createIngestKbDocumentHandler(deps: AdminApiDeps): RouteHandler 
       topic = trimmed.toLowerCase() || null;
     }
 
-    const kb = new KbRepo(deps.db);
+    const kb = new KbRepo(deps.sql);
     try {
       const result = await ingestText(
         { title, body: text },
@@ -2449,7 +2413,7 @@ const BOOK_ALLOWED_EXTS = new Set([".pdf", ".txt", ".md"]);
  */
 export function createUploadBookHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     if (!deps.rag?.embedder) {
@@ -2495,7 +2459,7 @@ export function createUploadBookHandler(deps: AdminApiDeps): RouteHandler {
       return json({ error: "failed to write temp file" }, { status: 500 });
     }
 
-    const kb = new KbRepo(deps.db);
+    const kb = new KbRepo(deps.sql);
     try {
       const result = await ingestFile(tmpPath, {
         kb,
@@ -2561,8 +2525,8 @@ interface LatencyRow {
  * row's full meta blob. Indexes already exist on `created_at`.
  */
 export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, url }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, url }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
 
     const windowKey = url.searchParams.get("window") ?? "24h";
@@ -2579,46 +2543,43 @@ export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
 
     // Total assistant messages with telemetry in window. We scope to
     // role='assistant' because user messages don't carry telemetry.
-    const total = deps.db
-      .query<{ n: number }, [number]>(
-        `SELECT COUNT(*) AS n
-         FROM messages
-         WHERE role = 'assistant'
-           AND created_at >= ?
-           AND meta_json IS NOT NULL`,
-      )
-      .get(since)!.n;
+    const [totalRow] = await deps.sql<{ n: number }[]>`
+      SELECT COUNT(*)::INTEGER AS n
+      FROM messages
+      WHERE role = 'assistant'
+        AND created_at >= ${since}
+        AND meta_json IS NOT NULL
+    `;
+    const total = totalRow?.n ?? 0;
 
     // Per-path breakdown (smalltalk / persona_fact / no_context / ungrounded / ok).
-    const byPath = deps.db
-      .query<PathRow, [number]>(
-        `SELECT json_extract(meta_json, '$.telemetry.path') AS path,
-                COUNT(*) AS count
-         FROM messages
-         WHERE role = 'assistant'
-           AND created_at >= ?
-           AND meta_json IS NOT NULL
-           AND json_extract(meta_json, '$.telemetry.path') IS NOT NULL
-         GROUP BY path
-         ORDER BY count DESC`,
-      )
-      .all(since);
+    const byPath = await deps.sql<PathRow[]>`
+      SELECT (meta_json::jsonb)->'telemetry'->>'path' AS path,
+             COUNT(*)::INTEGER AS count
+      FROM messages
+      WHERE role = 'assistant'
+        AND created_at >= ${since}
+        AND meta_json IS NOT NULL
+        AND (meta_json::jsonb)->'telemetry'->>'path' IS NOT NULL
+      GROUP BY path
+      ORDER BY count DESC
+    `;
 
     // Latency aggregates — total / retrieval / generation. We compute
     // approximate percentiles by ranking. Cheap on the message-count
     // scale we'd ever see (<1M turns over any reasonable window).
-    function latencyFor(field: string): LatencyRow {
-      const rows = deps.db
-        .query<{ v: number }, [number]>(
-          `SELECT json_extract(meta_json, '$.telemetry.${field}') AS v
-           FROM messages
-           WHERE role = 'assistant'
-             AND created_at >= ?
-             AND json_extract(meta_json, '$.telemetry.${field}') IS NOT NULL
-           ORDER BY v ASC`,
-        )
-        .all(since)
-        .map((r) => r.v)
+    async function latencyFor(field: string): Promise<LatencyRow> {
+      const rows = (
+        await deps.sql<{ v: number }[]>`
+        SELECT ((meta_json::jsonb)->'telemetry'->>${field})::NUMERIC AS v
+        FROM messages
+        WHERE role = 'assistant'
+          AND created_at >= ${since}
+          AND (meta_json::jsonb)->'telemetry'->>${field} IS NOT NULL
+        ORDER BY v ASC
+      `
+      )
+        .map((r) => Number(r.v))
         .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
       if (rows.length === 0) {
         return { p50: null, p95: null, p99: null, avg: null, count: 0 };
@@ -2635,59 +2596,54 @@ export function createAnalyticsHandler(deps: AdminApiDeps): RouteHandler {
     }
 
     const latency = {
-      total_ms: latencyFor("total_ms"),
-      retrieval_ms: latencyFor("retrieval_ms"),
-      generation_ms: latencyFor("generation_ms"),
+      total_ms: await latencyFor("total_ms"),
+      retrieval_ms: await latencyFor("retrieval_ms"),
+      generation_ms: await latencyFor("generation_ms"),
     };
 
     // Topic distribution — which topics the classifier hit (only when
     // RAG_TOPIC_ROUTING was on for that turn).
-    const byTopic = deps.db
-      .query<TopicRow, [number]>(
-        `SELECT json_extract(meta_json, '$.telemetry.topic') AS topic,
-                COUNT(*) AS count
-         FROM messages
-         WHERE role = 'assistant'
-           AND created_at >= ?
-           AND json_extract(meta_json, '$.telemetry.topic') IS NOT NULL
-         GROUP BY topic
-         ORDER BY count DESC
-         LIMIT 20`,
-      )
-      .all(since);
+    const byTopic = await deps.sql<TopicRow[]>`
+      SELECT (meta_json::jsonb)->'telemetry'->>'topic' AS topic,
+             COUNT(*)::INTEGER AS count
+      FROM messages
+      WHERE role = 'assistant'
+        AND created_at >= ${since}
+        AND (meta_json::jsonb)->'telemetry'->>'topic' IS NOT NULL
+      GROUP BY topic
+      ORDER BY count DESC
+      LIMIT 20
+    `;
 
     // Reflection ungrounded count (when reflect was on and dropped the answer).
-    const ungrounded = deps.db
-      .query<{ n: number }, [number]>(
-        `SELECT COUNT(*) AS n
-         FROM messages
-         WHERE role = 'assistant'
-           AND created_at >= ?
-           AND json_extract(meta_json, '$.telemetry.reflect.grounded') = 0`,
-      )
-      .get(since)!.n;
+    const [ungroundedRow] = await deps.sql<{ n: number }[]>`
+      SELECT COUNT(*)::INTEGER AS n
+      FROM messages
+      WHERE role = 'assistant'
+        AND created_at >= ${since}
+        AND (meta_json::jsonb)->'telemetry'->'reflect'->>'grounded' = 'false'
+    `;
+    const ungrounded = ungroundedRow?.n ?? 0;
 
     // Hybrid retrieval usage rate.
-    const hybrid = deps.db
-      .query<{ n: number }, [number]>(
-        `SELECT COUNT(*) AS n
-         FROM messages
-         WHERE role = 'assistant'
-           AND created_at >= ?
-           AND json_extract(meta_json, '$.telemetry.hybrid') = 1`,
-      )
-      .get(since)!.n;
+    const [hybridRow] = await deps.sql<{ n: number }[]>`
+      SELECT COUNT(*)::INTEGER AS n
+      FROM messages
+      WHERE role = 'assistant'
+        AND created_at >= ${since}
+        AND (meta_json::jsonb)->'telemetry'->>'hybrid' = 'true'
+    `;
+    const hybrid = hybridRow?.n ?? 0;
 
     // Query rewrites (when query_rewrite was on AND the heuristic flagged the turn).
-    const rewrites = deps.db
-      .query<{ n: number }, [number]>(
-        `SELECT COUNT(*) AS n
-         FROM messages
-         WHERE role = 'assistant'
-           AND created_at >= ?
-           AND json_extract(meta_json, '$.telemetry.rewritten_query') IS NOT NULL`,
-      )
-      .get(since)!.n;
+    const [rewritesRow] = await deps.sql<{ n: number }[]>`
+      SELECT COUNT(*)::INTEGER AS n
+      FROM messages
+      WHERE role = 'assistant'
+        AND created_at >= ${since}
+        AND (meta_json::jsonb)->'telemetry'->>'rewritten_query' IS NOT NULL
+    `;
+    const rewrites = rewritesRow?.n ?? 0;
 
     const noContextCount = (byPath.find((p) => p.path === "no_context")?.count ?? 0) + ungrounded;
     const unansweredRate = total > 0 ? noContextCount / total : 0;
@@ -2731,7 +2687,7 @@ interface SkillDto {
 }
 
 function rowToSkillDto(
-  row: ReturnType<SkillsRepo["bySlug"]>,
+  row: Awaited<ReturnType<SkillsRepo["bySlug"]>>,
   attachmentCount: number,
   outcomes: { count: number; wins: number; losses: number; draws: number; win_rate: number },
 ): SkillDto | null {
@@ -2752,7 +2708,7 @@ function rowToSkillDto(
     prompt_fragment: row.prompt_fragment,
     applicable_stages: stages,
     intent: row.intent,
-    is_enabled: row.is_enabled === 1,
+    is_enabled: row.is_enabled,
     attached_to_styles: attachmentCount,
     outcomes: {
       count: outcomes.count,
@@ -2767,14 +2723,14 @@ function rowToSkillDto(
 const EMPTY_OUTCOME = { count: 0, wins: 0, losses: 0, draws: 0, win_rate: Number.NaN };
 
 export function createListSkillsHandler(deps: AdminApiDeps): RouteHandler {
-  const skills = new SkillsRepo(deps.db);
-  const outcomesRepo = new SkillOutcomesRepo(deps.db);
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const skills = new SkillsRepo(deps.sql);
+  const outcomesRepo = new SkillOutcomesRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
-    const counts = skills.attachmentCounts();
-    const aggregates = new Map(outcomesRepo.aggregate().map((a) => [a.skill_slug, a]));
-    const rows = skills.list();
+    const counts = await skills.attachmentCounts();
+    const aggregates = new Map((await outcomesRepo.aggregate()).map((a) => [a.skill_slug, a]));
+    const rows = await skills.list();
     const dtos = rows
       .map((r) =>
         rowToSkillDto(r, counts.get(r.slug) ?? 0, aggregates.get(r.slug) ?? EMPTY_OUTCOME),
@@ -2785,22 +2741,22 @@ export function createListSkillsHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 export function createListStyleRatingsHandler(deps: AdminApiDeps): RouteHandler {
-  const repo = new StyleRatingsRepo(deps.db);
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const repo = new StyleRatingsRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
-    return json({ ratings: repo.list() });
+    return json({ ratings: await repo.list() });
   };
 }
 
 export function createUpdateSkillHandler(deps: AdminApiDeps): RouteHandler {
-  const skills = new SkillsRepo(deps.db);
-  const outcomesRepo = new SkillOutcomesRepo(deps.db);
+  const skills = new SkillsRepo(deps.sql);
+  const outcomesRepo = new SkillOutcomesRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const slug = params.slug;
-    const row = skills.bySlug(slug);
+    const row = await skills.bySlug(slug);
     if (!row) return json({ error: "skill not found" }, { status: 404 });
 
     let body: { is_enabled?: unknown };
@@ -2812,37 +2768,38 @@ export function createUpdateSkillHandler(deps: AdminApiDeps): RouteHandler {
     if (typeof body.is_enabled !== "boolean") {
       return json({ error: "is_enabled (boolean) required" }, { status: 400 });
     }
-    skills.setEnabled(row.id, body.is_enabled);
-    const updated = skills.bySlug(slug);
-    const counts = skills.attachmentCounts();
-    const outcomes = outcomesRepo.aggregate().find((a) => a.skill_slug === slug) ?? EMPTY_OUTCOME;
+    await skills.setEnabled(row.id, body.is_enabled);
+    const updated = await skills.bySlug(slug);
+    const counts = await skills.attachmentCounts();
+    const outcomes =
+      (await outcomesRepo.aggregate()).find((a) => a.skill_slug === slug) ?? EMPTY_OUTCOME;
     return json({ skill: rowToSkillDto(updated, counts.get(slug) ?? 0, outcomes) });
   };
 }
 
 export function createGetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
-  const skills = new SkillsRepo(deps.db);
-  const styles = new StylesRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const skills = new SkillsRepo(deps.sql);
+  const styles = new StylesRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    if (!styles.byId(id)) return json({ error: "style not found" }, { status: 404 });
-    const rows = skills.skillsForStyle(id);
+    if (!(await styles.byId(id))) return json({ error: "style not found" }, { status: 404 });
+    const rows = await skills.skillsForStyle(id);
     return json({ slugs: rows.map((r) => r.slug) });
   };
 }
 
 export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
-  const skills = new SkillsRepo(deps.db);
-  const styles = new StylesRepo(deps.db);
+  const skills = new SkillsRepo(deps.sql);
+  const styles = new StylesRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    if (!styles.byId(id)) return json({ error: "style not found" }, { status: 404 });
+    if (!(await styles.byId(id))) return json({ error: "style not found" }, { status: 404 });
 
     let body: { slugs?: unknown };
     try {
@@ -2858,7 +2815,7 @@ export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
     if (unknown.length > 0) {
       return json({ error: `unknown skill slugs: ${unknown.join(", ")}` }, { status: 400 });
     }
-    const r = skills.setSkillsForStyle(id, slugs);
+    const r = await skills.setSkillsForStyle(id, slugs);
     return json({ ok: true, attached: r.attached });
   };
 }
@@ -2868,48 +2825,48 @@ export function createSetStyleSkillsHandler(deps: AdminApiDeps): RouteHandler {
 // ---------------------------------------------------------------------------
 
 export function createKbSuggestionCountsHandler(deps: AdminApiDeps): RouteHandler {
-  const suggestions = new KbSuggestionsRepo(deps.db);
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const suggestions = new KbSuggestionsRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
-    return json(suggestions.countByStatus());
+    return json(await suggestions.countByStatus());
   };
 }
 
 export function createListKbSuggestionsHandler(deps: AdminApiDeps): RouteHandler {
-  const suggestions = new KbSuggestionsRepo(deps.db);
-  return ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const suggestions = new KbSuggestionsRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const url = new URL(req.url);
     const status = url.searchParams.get("status") as SuggestionStatus | null;
     const limit = Number(url.searchParams.get("limit") ?? "200");
-    const rows = suggestions.list({ status: status ?? undefined, limit });
-    return json({ suggestions: rows, counts: suggestions.countByStatus() });
+    const rows = await suggestions.list({ status: status ?? undefined, limit });
+    return json({ suggestions: rows, counts: await suggestions.countByStatus() });
   };
 }
 
 export function createGetKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
-  const suggestions = new KbSuggestionsRepo(deps.db);
-  const messages = new MessagesRepo(deps.db);
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  const suggestions = new KbSuggestionsRepo(deps.sql);
+  const messages = new MessagesRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const suggestion = suggestions.byId(id);
+    const suggestion = await suggestions.byId(id);
     if (!suggestion) return json({ error: "not found" }, { status: 404 });
     const contextMessages = suggestion.source_conversation_id
-      ? messages.recentForContext(suggestion.source_conversation_id, 20)
+      ? await messages.recentForContext(suggestion.source_conversation_id, 20)
       : [];
     return json({ suggestion, context_messages: contextMessages });
   };
 }
 
 export function createUpdateKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
-  const suggestions = new KbSuggestionsRepo(deps.db);
+  const suggestions = new KbSuggestionsRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
@@ -2917,17 +2874,17 @@ export function createUpdateKbSuggestionHandler(deps: AdminApiDeps): RouteHandle
     if (typeof body.answer_draft !== "string") {
       return json({ error: "answer_draft must be a string" }, { status: 400 });
     }
-    const updated = suggestions.setDraft(id, body.answer_draft);
+    const updated = await suggestions.setDraft(id, body.answer_draft);
     if (!updated) return json({ error: "not found" }, { status: 404 });
     return json({ suggestion: updated });
   };
 }
 
 export function createApproveKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
-  const suggestions = new KbSuggestionsRepo(deps.db);
-  const kb = new KbRepo(deps.db);
+  const suggestions = new KbSuggestionsRepo(deps.sql);
+  const kb = new KbRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     if (!deps.rag) {
       return json(
@@ -2937,7 +2894,7 @@ export function createApproveKbSuggestionHandler(deps: AdminApiDeps): RouteHandl
     }
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const suggestion = suggestions.byId(id);
+    const suggestion = await suggestions.byId(id);
     if (!suggestion) return json({ error: "not found" }, { status: 404 });
     if (suggestion.status !== "pending") {
       return json({ error: "suggestion is not pending" }, { status: 409 });
@@ -2958,30 +2915,30 @@ export function createApproveKbSuggestionHandler(deps: AdminApiDeps): RouteHandl
       { kb, embedder: deps.rag.embedder },
     );
 
-    const updated = suggestions.markIngested(id, ctx.adminId, doc.documentId);
+    const updated = await suggestions.markIngested(id, ctx.adminId, doc.documentId);
     return json({ suggestion: updated, kb_document_id: doc.documentId });
   };
 }
 
 export function createRejectKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
-  const suggestions = new KbSuggestionsRepo(deps.db);
+  const suggestions = new KbSuggestionsRepo(deps.sql);
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
     const body = (await req.json().catch(() => ({}))) as { reason?: unknown };
     const reason = typeof body.reason === "string" ? body.reason : undefined;
-    const updated = suggestions.reject(id, ctx.adminId, reason);
+    const updated = await suggestions.reject(id, ctx.adminId, reason);
     if (!updated) return json({ error: "not found or already decided" }, { status: 404 });
     return json({ suggestion: updated });
   };
 }
 
 export function createCreateKbSuggestionHandler(deps: AdminApiDeps): RouteHandler {
-  const suggestions = new KbSuggestionsRepo(deps.db);
+  const suggestions = new KbSuggestionsRepo(deps.sql);
   return async ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const body = (await req.json()) as {
       question_text?: unknown;
@@ -2993,12 +2950,14 @@ export function createCreateKbSuggestionHandler(deps: AdminApiDeps): RouteHandle
     }
     const sourceConvId =
       typeof body.source_conversation_id === "number" ? body.source_conversation_id : null;
-    const suggestion = suggestions.create({
+    const suggestion = await suggestions.create({
       questionText: body.question_text.trim(),
       sourceConversationId: sourceConvId,
     });
     if (typeof body.answer_draft === "string" && body.answer_draft.trim()) {
-      return json({ suggestion: suggestions.setDraft(suggestion.id, body.answer_draft.trim()) });
+      return json({
+        suggestion: await suggestions.setDraft(suggestion.id, body.answer_draft.trim()),
+      });
     }
     return json({ suggestion });
   };
@@ -3015,10 +2974,10 @@ const PERSONA_LOOKUP = new Map<string, CandidatePersona>(
 
 /** GET /admin/api/self-play — recent matches list + matrix per (style, persona). */
 export function createListSelfPlayMatchesHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, url }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, url }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
-    const repo = new SelfPlayMatchesRepo(deps.db);
+    const repo = new SelfPlayMatchesRepo(deps.sql);
     const limit = Number(url.searchParams.get("limit") ?? "100");
     const styleSlug = url.searchParams.get("style") ?? undefined;
     const personaSlug = url.searchParams.get("persona") ?? undefined;
@@ -3029,10 +2988,10 @@ export function createListSelfPlayMatchesHandler(deps: AdminApiDeps): RouteHandl
       ...(personaSlug ? { personaSlug } : {}),
       ...(outcome === "won" || outcome === "lost" || outcome === "draw" ? { outcome } : {}),
     };
-    const matches = repo.list(opts);
-    const matrix = repo.matrix();
+    const matches = await repo.list(opts);
+    const matrix = await repo.matrix();
     return json({
-      total: repo.count(),
+      total: await repo.count(),
       matches,
       matrix,
       personas: CANDIDATE_PERSONAS.map((p) => ({
@@ -3046,12 +3005,13 @@ export function createListSelfPlayMatchesHandler(deps: AdminApiDeps): RouteHandl
 
 /** GET /admin/api/self-play/:id — full transcript of one match. */
 export function createGetSelfPlayMatchHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const match = new SelfPlayMatchesRepo(deps.db).byId(id);
+    const repo = new SelfPlayMatchesRepo(deps.sql);
+    const match = await repo.byId(id);
     if (!match) return json({ error: "not found" }, { status: 404 });
     const persona = PERSONA_LOOKUP.get(match.persona_slug);
     return json({
@@ -3076,12 +3036,13 @@ export function createGetSelfPlayMatchHandler(deps: AdminApiDeps): RouteHandler 
 /** DELETE /admin/api/self-play/:id — operator clears bad data points
  *  (e.g. judge mis-classified). Idempotent — 404 on missing. */
 export function createDeleteSelfPlayMatchHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const ok = new SelfPlayMatchesRepo(deps.db).delete(id);
+    const repo = new SelfPlayMatchesRepo(deps.sql);
+    const ok = await repo.delete(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
   };
@@ -3093,10 +3054,10 @@ import { PairwiseMatchesRepo } from "../db/repos/pairwise-matches.ts";
 
 /** GET /admin/api/pairwise — recent pairwise pairs + head-to-head matrix. */
 export function createListPairwiseMatchesHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, url }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, url }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
-    const repo = new PairwiseMatchesRepo(deps.db);
+    const repo = new PairwiseMatchesRepo(deps.sql);
     const limit = Number(url.searchParams.get("limit") ?? "100");
     const a = url.searchParams.get("a") ?? undefined;
     const b = url.searchParams.get("b") ?? undefined;
@@ -3109,10 +3070,10 @@ export function createListPairwiseMatchesHandler(deps: AdminApiDeps): RouteHandl
       ...(personaSlug ? { personaSlug } : {}),
       ...(winner === "a" || winner === "b" || winner === "draw" ? { winner } : {}),
     };
-    const matches = repo.list(opts);
-    const matrix = repo.matrix();
+    const matches = await repo.list(opts);
+    const matrix = await repo.matrix();
     return json({
-      total: repo.count(),
+      total: await repo.count(),
       matches: matches.map((m) => ({
         ...m,
         persona_display_name: PERSONA_LOOKUP.get(m.persona_slug)?.displayName ?? m.persona_slug,
@@ -3130,12 +3091,13 @@ export function createListPairwiseMatchesHandler(deps: AdminApiDeps): RouteHandl
 /** GET /admin/api/pairwise/:id — pairwise verdict + linked solo match ids
  *  (operator can drill into either transcript via /admin/self-play/:id). */
 export function createGetPairwiseMatchHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const match = new PairwiseMatchesRepo(deps.db).byId(id);
+    const repo = new PairwiseMatchesRepo(deps.sql);
+    const match = await repo.byId(id);
     if (!match) return json({ error: "not found" }, { status: 404 });
     const persona = PERSONA_LOOKUP.get(match.persona_slug);
     return json({
@@ -3149,12 +3111,13 @@ export function createGetPairwiseMatchHandler(deps: AdminApiDeps): RouteHandler 
 
 /** DELETE /admin/api/pairwise/:id — clear bad pairwise verdicts. */
 export function createDeletePairwiseMatchHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const ok = new PairwiseMatchesRepo(deps.db).delete(id);
+    const repo = new PairwiseMatchesRepo(deps.sql);
+    const ok = await repo.delete(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
   };
@@ -3168,10 +3131,10 @@ import { applyEditsToStyle, proposeStyleEdits } from "../sales/coach.ts";
 
 /** GET /admin/api/coach — list proposals (filter by style + status). */
 export function createListCoachProposalsHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, url }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, url }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
-    const repo = new CoachProposalsRepo(deps.db);
+    const repo = new CoachProposalsRepo(deps.sql);
     const styleSlug = url.searchParams.get("style") ?? undefined;
     const status = url.searchParams.get("status");
     const limit = Number(url.searchParams.get("limit") ?? "100");
@@ -3181,20 +3144,21 @@ export function createListCoachProposalsHandler(deps: AdminApiDeps): RouteHandle
       ...(status === "pending" || status === "applied" || status === "dismissed" ? { status } : {}),
     };
     return json({
-      proposals: repo.list(opts),
-      pending_count: repo.countPending(),
+      proposals: await repo.list(opts),
+      pending_count: await repo.countPending(),
     });
   };
 }
 
 /** GET /admin/api/coach/:id — full proposal with parsed edits + rationale. */
 export function createGetCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const proposal = new CoachProposalsRepo(deps.db).byId(id);
+    const repo = new CoachProposalsRepo(deps.sql);
+    const proposal = await repo.byId(id);
     if (!proposal) return json({ error: "not found" }, { status: 404 });
     return json({ proposal });
   };
@@ -3210,7 +3174,7 @@ export function createGetCoachProposalHandler(deps: AdminApiDeps): RouteHandler 
  */
 export function createRunCoachHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     if (!deps.rag?.chat) {
       return json(
@@ -3232,8 +3196,8 @@ export function createRunCoachHandler(deps: AdminApiDeps): RouteHandler {
     const styleSlug = body.style_slug?.trim();
     if (!styleSlug) return json({ error: "style_slug required" }, { status: 400 });
 
-    const stylesRepo = new StylesRepo(deps.db);
-    const styleRow = stylesRepo.bySlug(styleSlug);
+    const stylesRepo = new StylesRepo(deps.sql);
+    const styleRow = await stylesRepo.bySlug(styleSlug);
     if (!styleRow) return json({ error: `style not found: ${styleSlug}` }, { status: 404 });
     const style = stylesRepo.parseRow(styleRow) as Style;
 
@@ -3243,10 +3207,10 @@ export function createRunCoachHandler(deps: AdminApiDeps): RouteHandler {
         : 8;
     const personaFilter = body.persona?.trim() || null;
 
-    const skillsRepo = new _SkillsRepoForCoach(deps.db);
-    const currentSkills = skillsRepo.skillsForStyle(styleRow.id).map((r) => r.slug);
+    const skillsRepo = new _SkillsRepoForCoach(deps.sql);
+    const currentSkills = (await skillsRepo.skillsForStyle(styleRow.id)).map((r) => r.slug);
 
-    const matchesRepo = new SelfPlayMatchesRepo(deps.db);
+    const matchesRepo = new SelfPlayMatchesRepo(deps.sql);
     const proposal = await proposeStyleEdits({
       style,
       matchesRepo,
@@ -3257,8 +3221,8 @@ export function createRunCoachHandler(deps: AdminApiDeps): RouteHandler {
       currentSkills,
     });
 
-    const repo = new CoachProposalsRepo(deps.db);
-    const row = repo.insert({
+    const repo = new CoachProposalsRepo(deps.sql);
+    const row = await repo.insert({
       styleSlug,
       sampleSize,
       personaFilter,
@@ -3272,7 +3236,7 @@ export function createRunCoachHandler(deps: AdminApiDeps): RouteHandler {
  *  Body: { status: 'applied' | 'dismissed' }. Idempotent: 409 if already decided. */
 export function createDecideCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
@@ -3285,15 +3249,15 @@ export function createDecideCoachProposalHandler(deps: AdminApiDeps): RouteHandl
     if (body.status !== "applied" && body.status !== "dismissed") {
       return json({ error: "status must be 'applied' or 'dismissed'" }, { status: 400 });
     }
-    const repo = new CoachProposalsRepo(deps.db);
-    const ok = repo.decide({ id, status: body.status, adminId: ctx.adminId });
+    const repo = new CoachProposalsRepo(deps.sql);
+    const ok = await repo.decide({ id, status: body.status, adminId: ctx.adminId });
     if (!ok) {
       // Either not found OR already decided — distinguish for better UX.
-      const existing = repo.byId(id);
+      const existing = await repo.byId(id);
       if (!existing) return json({ error: "not found" }, { status: 404 });
       return json({ error: `already ${existing.status}` }, { status: 409 });
     }
-    return json({ proposal: repo.byId(id) });
+    return json({ proposal: await repo.byId(id) });
   };
 }
 
@@ -3316,7 +3280,7 @@ export function createDecideCoachProposalHandler(deps: AdminApiDeps): RouteHandl
  */
 export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
@@ -3329,15 +3293,15 @@ export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandle
       // Empty body is fine — the endpoint has no required fields.
     }
 
-    const proposalsRepo = new CoachProposalsRepo(deps.db);
-    const proposal = proposalsRepo.byId(id);
+    const proposalsRepo = new CoachProposalsRepo(deps.sql);
+    const proposal = await proposalsRepo.byId(id);
     if (!proposal) return json({ error: "not found" }, { status: 404 });
     if (proposal.status !== "pending") {
       return json({ error: `already ${proposal.status}` }, { status: 409 });
     }
 
-    const stylesRepo = new StylesRepo(deps.db);
-    const currentRow = stylesRepo.bySlug(proposal.style_slug);
+    const stylesRepo = new StylesRepo(deps.sql);
+    const currentRow = await stylesRepo.bySlug(proposal.style_slug);
     if (!currentRow) {
       return json({ error: `style not found: ${proposal.style_slug}` }, { status: 404 });
     }
@@ -3360,7 +3324,7 @@ export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandle
 
     let newRow: { id: number; slug: string; version: number };
     try {
-      const inserted = stylesRepo.editAsNewVersion(currentRow.id, validation.data);
+      const inserted = await stylesRepo.editAsNewVersion(currentRow.id, validation.data);
       newRow = { id: inserted.id, slug: inserted.slug, version: inserted.version };
     } catch (err) {
       return json(
@@ -3374,8 +3338,10 @@ export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandle
     // remove proposal.edits.skills_detach, then setSkillsForStyle replaces
     // the new row's attachments atomically.
     if (!body.skip_skills) {
-      const skillsRepo = new _SkillsRepoForCoach(deps.db);
-      const currentAttached = new Set(skillsRepo.skillsForStyle(currentRow.id).map((s) => s.slug));
+      const skillsRepo = new _SkillsRepoForCoach(deps.sql);
+      const currentAttached = new Set(
+        (await skillsRepo.skillsForStyle(currentRow.id)).map((s) => s.slug),
+      );
       for (const slug of proposal.edits.skills_attach ?? []) {
         currentAttached.add(slug);
       }
@@ -3383,7 +3349,7 @@ export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandle
         currentAttached.delete(slug);
       }
       try {
-        skillsRepo.setSkillsForStyle(newRow.id, [...currentAttached]);
+        await skillsRepo.setSkillsForStyle(newRow.id, [...currentAttached]);
       } catch (err) {
         // Skill attachment failure shouldn't roll back the style fork — the
         // operator can re-attach via /admin/styles/:id/skills. Log only.
@@ -3391,7 +3357,7 @@ export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandle
       }
     }
 
-    const decided = proposalsRepo.decide({
+    const decided = await proposalsRepo.decide({
       id,
       status: "applied",
       adminId: ctx.adminId,
@@ -3409,7 +3375,7 @@ export function createApplyCoachProposalHandler(deps: AdminApiDeps): RouteHandle
     }
 
     return json({
-      proposal: proposalsRepo.byId(id),
+      proposal: await proposalsRepo.byId(id),
       new_style: newRow,
     });
   };
@@ -3437,7 +3403,7 @@ import { runShadowEval } from "../sales/shadow-eval.ts";
  */
 export function createStartShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
   return async ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     if (!deps.rag?.chat || !deps.rag?.embedder) {
       return json({ error: "LLM not configured" }, { status: 503 });
@@ -3453,8 +3419,8 @@ export function createStartShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
       // Empty body OK.
     }
 
-    const proposalsRepo = new CoachProposalsRepo(deps.db);
-    const proposal = proposalsRepo.byId(id);
+    const proposalsRepo = new CoachProposalsRepo(deps.sql);
+    const proposal = await proposalsRepo.byId(id);
     if (!proposal) return json({ error: "proposal not found" }, { status: 404 });
     if (proposal.status !== "applied") {
       return json(
@@ -3463,13 +3429,13 @@ export function createStartShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
       );
     }
 
-    const stylesRepo = new StylesRepo(deps.db);
-    const newRow = stylesRepo.bySlug(proposal.style_slug);
+    const stylesRepo = new StylesRepo(deps.sql);
+    const newRow = await stylesRepo.bySlug(proposal.style_slug);
     if (!newRow) return json({ error: "new style not found" }, { status: 404 });
     if (newRow.parent_id === null) {
       return json({ error: "applied proposal's style row has no parent" }, { status: 409 });
     }
-    const parentRow = stylesRepo.byId(newRow.parent_id);
+    const parentRow = await stylesRepo.byId(newRow.parent_id);
     if (!parentRow) return json({ error: "parent missing" }, { status: 404 });
 
     const newStyle = stylesRepo.parseRow(newRow) as Style;
@@ -3488,8 +3454,8 @@ export function createStartShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
     const maxTurns = Math.max(4, Math.min(40, Math.floor(body.max_turns ?? 16)));
     const pairsPlanned = personas.length * runs;
 
-    const shadowRepo = new ShadowEvaluationsRepo(deps.db);
-    const evalRow = shadowRepo.insert({
+    const shadowRepo = new ShadowEvaluationsRepo(deps.sql);
+    const evalRow = await shadowRepo.insert({
       proposalId: id,
       parentStyleSlug: parentRow.slug,
       parentStyleId: parentRow.id,
@@ -3500,22 +3466,25 @@ export function createStartShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
 
     void runShadowEval(
       {
-        db: deps.db,
+        db: deps.sql,
         shadowRepo,
-        kb: new KbRepo(deps.db),
-        skills: new _SkillsRepoForCoach(deps.db),
-        outcomes: new SkillOutcomesRepo(deps.db),
-        ratings: new StyleRatingsRepo(deps.db),
+        kb: new KbRepo(deps.sql),
+        skills: new _SkillsRepoForCoach(deps.sql),
+        outcomes: new SkillOutcomesRepo(deps.sql),
+        ratings: new StyleRatingsRepo(deps.sql),
+        users: new UsersRepo(deps.sql),
+        conversations: new ConversationsRepo(deps.sql),
+        leads: new LeadsRepo(deps.sql),
         salesChat: deps.rag.chat,
         candidateChat: deps.rag.chat,
         judgeChat: deps.rag.chat,
         embedder: deps.rag.embedder,
-        ...(() => {
+        ...(await (async () => {
           const block = _renderVacanciesForShadow(
-            new _VacanciesRepoForShadow(deps.db).listActive(),
+            await new _VacanciesRepoForShadow(deps.sql).listActive(),
           );
           return block ? { vacanciesBlock: block } : {};
-        })(),
+        })()),
       },
       {
         evalId: evalRow.id,
@@ -3537,12 +3506,13 @@ export function createStartShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
 
 /** GET /admin/api/coach/:id/shadow-eval — latest eval status (polled). */
 export function createGetShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const row = new ShadowEvaluationsRepo(deps.db).latestForProposal(id);
+    const shadowRepo = new ShadowEvaluationsRepo(deps.sql);
+    const row = await shadowRepo.latestForProposal(id);
     return json({ shadow_eval: row });
   };
 }
@@ -3551,13 +3521,13 @@ export function createGetShadowEvalHandler(deps: AdminApiDeps): RouteHandler {
  *  reactivate the parent. Conversations pinned to the new version keep
  *  working (FK is to row id, not slug — version chain semantics). */
 export function createRollbackCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const proposalsRepo = new CoachProposalsRepo(deps.db);
-    const proposal = proposalsRepo.byId(id);
+    const proposalsRepo = new CoachProposalsRepo(deps.sql);
+    const proposal = await proposalsRepo.byId(id);
     if (!proposal) return json({ error: "proposal not found" }, { status: 404 });
     if (proposal.status !== "applied") {
       return json(
@@ -3565,18 +3535,18 @@ export function createRollbackCoachProposalHandler(deps: AdminApiDeps): RouteHan
         { status: 409 },
       );
     }
-    const stylesRepo = new StylesRepo(deps.db);
-    const newRow = stylesRepo.bySlug(proposal.style_slug);
+    const stylesRepo = new StylesRepo(deps.sql);
+    const newRow = await stylesRepo.bySlug(proposal.style_slug);
     if (!newRow || newRow.parent_id === null) {
       return json({ error: "no parent version" }, { status: 409 });
     }
-    const parentRow = stylesRepo.byId(newRow.parent_id);
+    const parentRow = await stylesRepo.byId(newRow.parent_id);
     if (!parentRow) return json({ error: "parent missing" }, { status: 404 });
 
-    deps.db.transaction(() => {
-      deps.db.run("UPDATE styles SET is_active = 0 WHERE id = ?", [newRow.id]);
-      deps.db.run("UPDATE styles SET is_active = 1 WHERE id = ?", [parentRow.id]);
-    })();
+    await deps.sql.begin(async (sql) => {
+      await sql`UPDATE styles SET is_active = FALSE WHERE id = ${newRow.id}`;
+      await sql`UPDATE styles SET is_active = TRUE WHERE id = ${parentRow.id}`;
+    });
 
     return json({
       ok: true,
@@ -3588,12 +3558,13 @@ export function createRollbackCoachProposalHandler(deps: AdminApiDeps): RouteHan
 
 /** DELETE /admin/api/coach/:id — clear noisy proposals. */
 export function createDeleteCoachProposalHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, params }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const id = Number(params.id);
     if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
-    const ok = new CoachProposalsRepo(deps.db).delete(id);
+    const proposalsRepo = new CoachProposalsRepo(deps.sql);
+    const ok = await proposalsRepo.delete(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
     return json({ ok: true, deleted: id });
   };
@@ -3616,13 +3587,15 @@ import { rankSkillRecommendations } from "../sales/skill-recommendations.ts";
  *   accept     (float, default 0.4) — Wilson lb above this → recommended=true
  */
 export function createRecommendSkillsHandler(deps: AdminApiDeps): RouteHandler {
-  return ({ req, url }) => {
-    const ctx = requireAdmin(deps.db, req);
+  return async ({ req, url }) => {
+    const ctx = await requireAdmin(deps.sql, req);
     if (ctx instanceof Response) return ctx;
     const minSamples = clampInt(url.searchParams.get("minSamples"), 1, 1000, 5);
     const accept = clampFloat(url.searchParams.get("accept"), 0, 1, 0.4);
-    const catalogue = new SkillsRepo(deps.db).list();
-    const aggregates = new SkillOutcomesRepo(deps.db).aggregate();
+    const skillsRepoLocal = new SkillsRepo(deps.sql);
+    const outcomesRepoLocal = new SkillOutcomesRepo(deps.sql);
+    const catalogue = await skillsRepoLocal.list();
+    const aggregates = await outcomesRepoLocal.aggregate();
     const ranked = rankSkillRecommendations(catalogue, aggregates, {
       minSamples,
       acceptThreshold: accept,

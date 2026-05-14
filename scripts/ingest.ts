@@ -2,8 +2,8 @@
 import { statSync } from "node:fs";
 
 import { activeEmbeddingDim, config, llmIsConfigured } from "../src/config.ts";
+import { sql } from "../src/db/postgres.ts";
 import { KbRepo } from "../src/db/repos/kb.ts";
-import { openDb } from "../src/db/sqlite.ts";
 import type { EmbeddingClient } from "../src/rag/embed.ts";
 import { OpenAIEmbeddingClient } from "../src/rag/embed.ts";
 import { ingestDirectory, ingestFile } from "../src/rag/ingest.ts";
@@ -71,8 +71,7 @@ async function main() {
     process.exit(1);
   }
 
-  const db = openDb();
-  const kb = new KbRepo(db);
+  const kb = new KbRepo(sql);
   let embedder: EmbeddingClient;
   if (config.llm.provider === "ollama") {
     embedder = new OllamaEmbeddingClient({
@@ -124,7 +123,7 @@ async function main() {
     const r = await ingestFile(target, deps);
     console.log(JSON.stringify(r, null, 2));
   }
-  db.close();
+  await sql.end();
 }
 
 main().catch((err) => {

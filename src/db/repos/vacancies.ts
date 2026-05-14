@@ -1,78 +1,54 @@
-import type { Database } from "bun:sqlite";
+import type { Sql } from "../postgres.ts";
 
-/**
- * Operationally-mutable list of currently-open job offers, managed from
- * the admin UI. See migration 008 for the design rationale (fast-changing
- * data that should NOT live in the embedded KB).
- *
- * `is_active = 0` rows are kept (not deleted) so operators can re-enable
- * a previously-closed vacancy without re-typing it. Hard delete is also
- * supported for actual cleanup.
- */
 export interface VacancyRow {
   id: number;
   title: string;
   body: string;
-  /** Optional canonical link — Telegram channel post, group invite,
-   *  external page. Surfaced to the bot so it can drop a "подробнее: …"
-   *  line when the candidate asks for a link. Empty string normalised
-   *  to NULL by the repo. */
   url: string | null;
-  is_active: 0 | 1;
+  is_active: boolean;
   created_at: number;
   updated_at: number;
 }
 
 export class VacanciesRepo {
-  constructor(private db: Database) {}
+  constructor(private sql: Sql) {}
 
-  /** All active vacancies, freshest first. Used by the webhook on every
-   *  inbound message to build the prompt block — keep it cheap. */
-  listActive(): VacancyRow[] {
-    return this.db
-      .query<VacancyRow, []>(`SELECT * FROM vacancies WHERE is_active = 1 ORDER BY updated_at DESC`)
-      .all();
+  async listActive(): Promise<VacancyRow[]> {
+    return this.sql<VacancyRow[]>`
+      SELECT * FROM vacancies WHERE is_active = TRUE ORDER BY updated_at DESC
+    `;
   }
 
-  /** All vacancies, regardless of active state. Used by the admin list
-   *  view — operators want to see closed ones too (to re-enable). */
-  listAll(): VacancyRow[] {
-    return this.db
-      .query<VacancyRow, []>(`SELECT * FROM vacancies ORDER BY is_active DESC, updated_at DESC`)
-      .all();
+  async listAll(): Promise<VacancyRow[]> {
+    return this.sql<VacancyRow[]>`
+      SELECT * FROM vacancies ORDER BY is_active DESC, updated_at DESC
+    `;
   }
 
-  byId(id: number): VacancyRow | null {
-    return (
-      this.db.query<VacancyRow, [number]>("SELECT * FROM vacancies WHERE id = ? LIMIT 1").get(id) ??
-      null
-    );
+  async byId(id: number): Promise<VacancyRow | null> {
+    const [row] = await this.sql<VacancyRow[]>`
+      SELECT * FROM vacancies WHERE id = ${id} LIMIT 1
+    `;
+    return row ?? null;
   }
 
-  create(input: {
+  async create(input: {
     title: string;
     body: string;
     url?: string | null;
     isActive?: boolean;
-  }): VacancyRow {
-    const isActive = input.isActive === false ? 0 : 1;
+  }): Promise<VacancyRow> {
+    const isActive = input.isActive !== false;
     const url = normaliseUrl(input.url);
-    const row = this.db
-      .query<VacancyRow, [string, string, string | null, number]>(
-        `INSERT INTO vacancies (title, body, url, is_active)
-         VALUES (?, ?, ?, ?) RETURNING *`,
-      )
-      .get(input.title.trim(), input.body.trim(), url, isActive);
+    const [row] = await this.sql<VacancyRow[]>`
+      INSERT INTO vacancies (title, body, url, is_active)
+      VALUES (${input.title.trim()}, ${input.body.trim()}, ${url}, ${isActive}) RETURNING *
+    `;
     if (!row) throw new Error("Failed to insert vacancy");
     return row;
   }
 
-  /**
-   * Patches any subset of mutable fields. Always bumps `updated_at` so the
-   * webhook's freshest-first ordering reflects the operator's edit.
-   * Returns null when the row doesn't exist (UI handles 404).
-   */
-  update(
+  async update(
     id: number,
     patch: {
       title?: string;
@@ -80,33 +56,30 @@ export class VacanciesRepo {
       url?: string | null;
       isActive?: boolean;
     },
-  ): VacancyRow | null {
-    const existing = this.byId(id);
+  ): Promise<VacancyRow | null> {
+    const existing = await this.byId(id);
     if (!existing) return null;
     const title = patch.title !== undefined ? patch.title.trim() : existing.title;
     const body = patch.body !== undefined ? patch.body.trim() : existing.body;
     const url = patch.url !== undefined ? normaliseUrl(patch.url) : existing.url;
-    const isActive = patch.isActive === undefined ? existing.is_active : patch.isActive ? 1 : 0;
-    this.db.run(
-      `UPDATE vacancies
-       SET title = ?, body = ?, url = ?, is_active = ?, updated_at = unixepoch()
-       WHERE id = ?`,
-      [title, body, url, isActive, id],
-    );
+    const isActive = patch.isActive === undefined ? existing.is_active : patch.isActive;
+    await this.sql`
+      UPDATE vacancies
+      SET title = ${title}, body = ${body}, url = ${url}, is_active = ${isActive}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER
+      WHERE id = ${id}
+    `;
     return this.byId(id);
   }
 
-  /** Hard delete. Closed-but-archived vacancies are kept via is_active=0;
-   *  this is for actual cleanup of mistaken entries. */
-  delete(id: number): boolean {
-    const res = this.db.run("DELETE FROM vacancies WHERE id = ?", [id]);
-    return res.changes > 0;
+  async delete(id: number): Promise<boolean> {
+    const result = await this.sql`DELETE FROM vacancies WHERE id = ${id}`;
+    return result.count > 0;
   }
 
-  countActive(): number {
-    const r = this.db
-      .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM vacancies WHERE is_active = 1")
-      .get();
+  async countActive(): Promise<number> {
+    const [r] = await this.sql<{ n: number }[]>`
+      SELECT COUNT(*)::INTEGER AS n FROM vacancies WHERE is_active = TRUE
+    `;
     return r?.n ?? 0;
   }
 }
@@ -167,12 +140,8 @@ export interface SeedVacanciesResult {
   skipped: number;
 }
 
-/**
- * Idempotent seeder for INFINITY AGENCY built-in vacancies. Safe to call on
- * every boot — skips rows whose `title` already exists, patches missing URLs.
- */
-export function seedInfinityVacancies(repo: VacanciesRepo): SeedVacanciesResult {
-  const existingByTitle = new Map(repo.listAll().map((v) => [v.title, v]));
+export async function seedInfinityVacancies(repo: VacanciesRepo): Promise<SeedVacanciesResult> {
+  const existingByTitle = new Map((await repo.listAll()).map((v) => [v.title, v]));
   let inserted = 0;
   let urlPatched = 0;
   let skipped = 0;
@@ -182,7 +151,7 @@ export function seedInfinityVacancies(repo: VacanciesRepo): SeedVacanciesResult 
       const needsUrl = !existing.url && v.url;
       const needsBody = existing.body.trim() !== v.body.trim();
       if (needsUrl || needsBody) {
-        repo.update(existing.id, {
+        await repo.update(existing.id, {
           ...(needsBody ? { body: v.body } : {}),
           ...(needsUrl ? { url: v.url } : {}),
         });
@@ -192,20 +161,14 @@ export function seedInfinityVacancies(repo: VacanciesRepo): SeedVacanciesResult 
       }
       continue;
     }
-    repo.create({ title: v.title, body: v.body, url: v.url, isActive: true });
+    await repo.create({ title: v.title, body: v.body, url: v.url, isActive: true });
     inserted++;
   }
   return { inserted, urlPatched, skipped };
 }
 
-/**
- * Render active vacancies into the prompt-friendly block prepended to
- * the RAG CONTEXT. Returns "" when no active vacancies — caller skips
- * adding the heading entirely. Exported separately so unit tests can
- * verify formatting without touching the DB.
- */
 export function renderVacanciesBlock(vacancies: VacancyRow[]): string {
-  const active = vacancies.filter((v) => v.is_active === 1);
+  const active = vacancies.filter((v) => v.is_active);
   if (active.length === 0) return "";
   const items = active
     .map((v, i) => {
@@ -232,16 +195,6 @@ export function renderVacanciesBlock(vacancies: VacancyRow[]): string {
   );
 }
 
-/**
- * Pull the headline location(s) from each active vacancy. Operators title
- * vacancies as "Город / Город — Роль (детали)" or "Страна — Роль (детали)";
- * we split on " — " and take the part before it. The result feeds into the
- * "ОТКРЫТЫЕ ЛОКАЦИИ:" line so the LLM has a concise allow-list it can echo
- * when redirecting "сколько в Дубае?" → "в Дубае не работаем".
- *
- * Falls back to the full title when there's no " — " separator. Deduplicated
- * preserving first occurrence so the order matches operator priority.
- */
 function extractOpenLocations(active: VacancyRow[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -255,9 +208,6 @@ function extractOpenLocations(active: VacancyRow[]): string[] {
   return out;
 }
 
-/** Empty / whitespace → NULL. URLs without a scheme get an `https://` prefix
- *  so the bot copies a clickable form into Telegram. Anything that already
- *  has a scheme (https / http / tg / tonsite) passes through. */
 function normaliseUrl(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined) return null;
   const trimmed = raw.trim();

@@ -22,7 +22,7 @@
  *   - style_ratings (aggregated ELO — not time-series, always small)
  */
 
-import { getDb } from "../src/db/sqlite.ts";
+import { sql } from "../src/db/postgres.ts";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -34,59 +34,52 @@ if (Number.isNaN(days) || days < 1) {
   process.exit(1);
 }
 
-const db = getDb();
 const cutoffEpoch = Math.floor(Date.now() / 1000) - days * 86400;
 const cutoffIso = new Date(cutoffEpoch * 1000).toISOString();
 
 console.log(`Purge cutoff: ${cutoffIso} (${days} days ago)${dryRun ? " [DRY RUN]" : ""}`);
 
 // --- skill_outcomes ---
-const outcomesCount = db
-  .query<{ n: number }, [number]>("SELECT COUNT(*) AS n FROM skill_outcomes WHERE created_at < ?")
-  .get(cutoffEpoch);
-console.log(`skill_outcomes to delete: ${outcomesCount?.n ?? 0}`);
+const [outcomesRow] = await sql<{ n: number }[]>`
+  SELECT COUNT(*)::INTEGER AS n FROM skill_outcomes WHERE created_at < ${cutoffEpoch}
+`;
+console.log(`skill_outcomes to delete: ${outcomesRow?.n ?? 0}`);
 
-if (!dryRun && (outcomesCount?.n ?? 0) > 0) {
-  const res = db.run("DELETE FROM skill_outcomes WHERE created_at < ?", [cutoffEpoch]);
-  console.log(`  deleted ${res.changes} skill_outcomes rows`);
+if (!dryRun && (outcomesRow?.n ?? 0) > 0) {
+  const res = await sql`DELETE FROM skill_outcomes WHERE created_at < ${cutoffEpoch}`;
+  console.log(`  deleted ${res.count} skill_outcomes rows`);
 }
 
 // --- self_play_matches (only those NOT referenced by pairwise_matches) ---
-const matchesCount = db
-  .query<{ n: number }, [number]>(
-    `SELECT COUNT(*) AS n
-     FROM self_play_matches m
-     WHERE m.created_at < ?
-       AND m.id NOT IN (
-         SELECT solo_match_a_id FROM pairwise_matches WHERE solo_match_a_id IS NOT NULL
-         UNION
-         SELECT solo_match_b_id FROM pairwise_matches WHERE solo_match_b_id IS NOT NULL
-       )`,
-  )
-  .get(cutoffEpoch);
-console.log(`self_play_matches to delete (unreferenced): ${matchesCount?.n ?? 0}`);
+const [matchesRow] = await sql<{ n: number }[]>`
+  SELECT COUNT(*)::INTEGER AS n
+  FROM self_play_matches m
+  WHERE m.created_at < ${cutoffEpoch}
+    AND m.id NOT IN (
+      SELECT solo_match_a_id FROM pairwise_matches WHERE solo_match_a_id IS NOT NULL
+      UNION
+      SELECT solo_match_b_id FROM pairwise_matches WHERE solo_match_b_id IS NOT NULL
+    )
+`;
+console.log(`self_play_matches to delete (unreferenced): ${matchesRow?.n ?? 0}`);
 
-if (!dryRun && (matchesCount?.n ?? 0) > 0) {
-  const res = db.run(
-    `DELETE FROM self_play_matches
-     WHERE created_at < ?
-       AND id NOT IN (
-         SELECT solo_match_a_id FROM pairwise_matches WHERE solo_match_a_id IS NOT NULL
-         UNION
-         SELECT solo_match_b_id FROM pairwise_matches WHERE solo_match_b_id IS NOT NULL
-       )`,
-    [cutoffEpoch],
-  );
-  console.log(`  deleted ${res.changes} self_play_matches rows`);
+if (!dryRun && (matchesRow?.n ?? 0) > 0) {
+  const res = await sql`
+    DELETE FROM self_play_matches
+    WHERE created_at < ${cutoffEpoch}
+      AND id NOT IN (
+        SELECT solo_match_a_id FROM pairwise_matches WHERE solo_match_a_id IS NOT NULL
+        UNION
+        SELECT solo_match_b_id FROM pairwise_matches WHERE solo_match_b_id IS NOT NULL
+      )
+  `;
+  console.log(`  deleted ${res.count} self_play_matches rows`);
 }
 
-// --- VACUUM to reclaim disk space ---
-if (!dryRun) {
-  console.log("Running VACUUM...");
-  db.run("VACUUM");
-  console.log("Done.");
-} else {
+if (dryRun) {
   console.log("[DRY RUN] no changes made");
+} else {
+  console.log("Done.");
 }
 
-db.close();
+await sql.end();

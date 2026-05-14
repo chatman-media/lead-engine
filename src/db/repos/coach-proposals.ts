@@ -1,12 +1,5 @@
-/**
- * Coach proposal persistence. See migration 019. Operator workflow:
- *   1. POST /admin/api/coach/run → proposeStyleEdits + insert (status=pending)
- *   2. Admin reviews on /admin/coach
- *   3. POST /admin/api/coach/:id/decide {status:'applied'|'dismissed'} → audit
- */
-import type { Database } from "bun:sqlite";
-
 import type { CoachProposal } from "../../sales/coach.ts";
+import type { Sql } from "../postgres.ts";
 
 export type CoachProposalStatus = "pending" | "applied" | "dismissed";
 
@@ -31,64 +24,55 @@ export interface CoachProposalDetail extends CoachProposalRow {
 }
 
 export class CoachProposalsRepo {
-  constructor(private db: Database) {}
+  constructor(private sql: Sql) {}
 
-  insert(input: {
+  async insert(input: {
     styleSlug: string;
     sampleSize: number;
     personaFilter: string | null;
     proposal: CoachProposal;
-  }): CoachProposalRow {
-    const row = this.db
-      .query<
-        CoachProposalRow,
-        [string, number, string | null, string, string, string, string | null]
-      >(
-        `INSERT INTO coach_proposals
-           (style_slug, sample_size, persona_filter, summary, edits_json, rationale_json, raw_output)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         RETURNING *`,
-      )
-      .get(
-        input.styleSlug,
-        input.sampleSize,
-        input.personaFilter,
-        input.proposal.summary,
-        JSON.stringify(input.proposal.edits),
-        JSON.stringify(input.proposal.rationale),
-        input.proposal.raw ?? null,
-      );
+  }): Promise<CoachProposalRow> {
+    const [row] = await this.sql<CoachProposalRow[]>`
+      INSERT INTO coach_proposals
+        (style_slug, sample_size, persona_filter, summary, edits_json, rationale_json, raw_output)
+      VALUES (${input.styleSlug}, ${input.sampleSize}, ${input.personaFilter},
+              ${input.proposal.summary}, ${JSON.stringify(input.proposal.edits)},
+              ${JSON.stringify(input.proposal.rationale)}, ${input.proposal.raw ?? null})
+      RETURNING *
+    `;
     if (!row) throw new Error("failed to insert coach_proposal");
     return row;
   }
 
-  list(
+  async list(
     opts: { limit?: number; styleSlug?: string; status?: CoachProposalStatus } = {},
-  ): CoachProposalRow[] {
-    const wheres: string[] = [];
-    const params: (string | number)[] = [];
+  ): Promise<CoachProposalRow[]> {
+    const limit = opts.limit ?? 100;
+    if (opts.styleSlug && opts.status) {
+      return this.sql<CoachProposalRow[]>`
+        SELECT * FROM coach_proposals WHERE style_slug = ${opts.styleSlug} AND status = ${opts.status}
+        ORDER BY id DESC LIMIT ${limit}
+      `;
+    }
     if (opts.styleSlug) {
-      wheres.push("style_slug = ?");
-      params.push(opts.styleSlug);
+      return this.sql<CoachProposalRow[]>`
+        SELECT * FROM coach_proposals WHERE style_slug = ${opts.styleSlug} ORDER BY id DESC LIMIT ${limit}
+      `;
     }
     if (opts.status) {
-      wheres.push("status = ?");
-      params.push(opts.status);
+      return this.sql<CoachProposalRow[]>`
+        SELECT * FROM coach_proposals WHERE status = ${opts.status} ORDER BY id DESC LIMIT ${limit}
+      `;
     }
-    const whereClause = wheres.length > 0 ? `WHERE ${wheres.join(" AND ")}` : "";
-    const limit = opts.limit ?? 100;
-    params.push(limit);
-    return this.db
-      .query<CoachProposalRow, (string | number)[]>(
-        `SELECT * FROM coach_proposals ${whereClause} ORDER BY id DESC LIMIT ?`,
-      )
-      .all(...params);
+    return this.sql<CoachProposalRow[]>`
+      SELECT * FROM coach_proposals ORDER BY id DESC LIMIT ${limit}
+    `;
   }
 
-  byId(id: number): CoachProposalDetail | null {
-    const row = this.db
-      .query<CoachProposalRow, [number]>(`SELECT * FROM coach_proposals WHERE id = ? LIMIT 1`)
-      .get(id);
+  async byId(id: number): Promise<CoachProposalDetail | null> {
+    const [row] = await this.sql<CoachProposalRow[]>`
+      SELECT * FROM coach_proposals WHERE id = ${id} LIMIT 1
+    `;
     if (!row) return null;
     return {
       ...row,
@@ -97,27 +81,28 @@ export class CoachProposalsRepo {
     };
   }
 
-  decide(input: { id: number; status: "applied" | "dismissed"; adminId: number }): boolean {
-    const r = this.db.run(
-      `UPDATE coach_proposals
-       SET status = ?, decided_at = unixepoch(), decided_by_admin_id = ?
-       WHERE id = ? AND status = 'pending'`,
-      [input.status, input.adminId, input.id],
-    );
-    return r.changes > 0;
+  async decide(input: {
+    id: number;
+    status: "applied" | "dismissed";
+    adminId: number;
+  }): Promise<boolean> {
+    const result = await this.sql`
+      UPDATE coach_proposals
+      SET status = ${input.status}, decided_at = EXTRACT(EPOCH FROM NOW())::INTEGER, decided_by_admin_id = ${input.adminId}
+      WHERE id = ${input.id} AND status = 'pending'
+    `;
+    return result.count > 0;
   }
 
-  delete(id: number): boolean {
-    const r = this.db.run(`DELETE FROM coach_proposals WHERE id = ?`, [id]);
-    return r.changes > 0;
+  async delete(id: number): Promise<boolean> {
+    const result = await this.sql`DELETE FROM coach_proposals WHERE id = ${id}`;
+    return result.count > 0;
   }
 
-  countPending(): number {
-    const r = this.db
-      .query<{ n: number }, []>(
-        `SELECT COUNT(*) AS n FROM coach_proposals WHERE status = 'pending'`,
-      )
-      .get();
+  async countPending(): Promise<number> {
+    const [r] = await this.sql<{ n: number }[]>`
+      SELECT COUNT(*)::INTEGER AS n FROM coach_proposals WHERE status = 'pending'
+    `;
     return r?.n ?? 0;
   }
 }

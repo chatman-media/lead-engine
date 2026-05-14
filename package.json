@@ -26,7 +26,7 @@
     "ci": "bun run typecheck && bun run check && bun run secret-scan && bun test tests/unit"
   },
   "dependencies": {
-    "sqlite-vec": "^0.1.9",
+    "postgres": "^3.4.4",
     "telegram": "^2.26.22",
     "unpdf": "^1.6.2",
     "zod": "^4.4.1"

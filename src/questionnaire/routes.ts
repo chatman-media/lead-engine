@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Sql } from "../db/postgres.ts";
 
 import { QuestionnaireTokensRepo } from "../db/repos/questionnaire_tokens.ts";
 import { UsersRepo } from "../db/repos/users.ts";
@@ -31,24 +31,24 @@ function validate(form: URLSearchParams): ValidationResult {
   return { values, errors };
 }
 
-export function createQuestionnaireGet(db: Database): RouteHandler {
+export function createQuestionnaireGet(db: Sql): RouteHandler {
   const tokens = new QuestionnaireTokensRepo(db);
-  return ({ params }) => {
+  return async ({ params }) => {
     const token = params.token;
     if (!token) return html(renderNotFound(), { status: 404 });
-    const valid = tokens.getValid(token);
+    const valid = await tokens.getValid(token);
     if (!valid) return html(renderNotFound(), { status: 404 });
     return html(renderForm({ token }));
   };
 }
 
-export function createQuestionnairePost(db: Database): RouteHandler {
+export function createQuestionnairePost(db: Sql): RouteHandler {
   const tokens = new QuestionnaireTokensRepo(db);
   const users = new UsersRepo(db);
   return async ({ req, params }) => {
     const token = params.token;
     if (!token) return html(renderNotFound(), { status: 404 });
-    if (!tokens.getValid(token)) return html(renderNotFound(), { status: 404 });
+    if (!(await tokens.getValid(token))) return html(renderNotFound(), { status: 404 });
 
     const text = await req.text();
     const form = new URLSearchParams(text);
@@ -57,10 +57,10 @@ export function createQuestionnairePost(db: Database): RouteHandler {
       return html(renderForm({ token, values, errors }), { status: 400 });
     }
 
-    const userId = tokens.consume(token);
+    const userId = await tokens.consume(token);
     if (!userId) return html(renderNotFound(), { status: 404 });
-    users.setProfile(userId, values);
-    users.setStatus(userId, "qualified");
+    await users.setProfile(userId, values);
+    await users.setStatus(userId, "qualified");
 
     return html(renderSuccess());
   };

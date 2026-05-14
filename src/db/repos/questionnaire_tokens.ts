@@ -1,5 +1,5 @@
-import type { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
+import type { Sql } from "../postgres.ts";
 
 export interface QuestionnaireTokenRow {
   token: string;
@@ -16,36 +16,33 @@ function generateToken(): string {
 }
 
 export class QuestionnaireTokensRepo {
-  constructor(private db: Database) {}
+  constructor(private sql: Sql) {}
 
-  issue(userId: number, opts: { ttlSeconds?: number } = {}): string {
+  async issue(userId: number, opts: { ttlSeconds?: number } = {}): Promise<string> {
     const token = generateToken();
     const ttl = opts.ttlSeconds ?? DEFAULT_TTL_SECONDS;
     const expiresAt = Math.floor(Date.now() / 1000) + ttl;
-    this.db.run(`INSERT INTO questionnaire_tokens (token, user_id, expires_at) VALUES (?, ?, ?)`, [
-      token,
-      userId,
-      expiresAt,
-    ]);
+    await this.sql`
+      INSERT INTO questionnaire_tokens (token, user_id, expires_at) VALUES (${token}, ${userId}, ${expiresAt})
+    `;
     return token;
   }
 
-  getValid(token: string): QuestionnaireTokenRow | null {
-    const row = this.db
-      .query<QuestionnaireTokenRow, [string]>(
-        `SELECT * FROM questionnaire_tokens
-         WHERE token = ? AND used_at IS NULL AND expires_at > unixepoch()
-         LIMIT 1`,
-      )
-      .get(token);
+  async getValid(token: string): Promise<QuestionnaireTokenRow | null> {
+    const [row] = await this.sql<QuestionnaireTokenRow[]>`
+      SELECT * FROM questionnaire_tokens
+      WHERE token = ${token} AND used_at IS NULL AND expires_at > EXTRACT(EPOCH FROM NOW())::INTEGER
+      LIMIT 1
+    `;
     return row ?? null;
   }
 
-  /** Marks the token used and returns the user_id, or null if invalid/used. */
-  consume(token: string): number | null {
-    const row = this.getValid(token);
+  async consume(token: string): Promise<number | null> {
+    const row = await this.getValid(token);
     if (!row) return null;
-    this.db.run(`UPDATE questionnaire_tokens SET used_at = unixepoch() WHERE token = ?`, [token]);
+    await this.sql`
+      UPDATE questionnaire_tokens SET used_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE token = ${token}
+    `;
     return row.user_id;
   }
 }

@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Sql } from "../db/postgres.ts";
 
 import { type LeadState, LeadsRepo } from "../db/repos/leads.ts";
 import { type AttributionDeps, attributeLeadOutcome } from "./outcome-attribution.ts";
@@ -29,26 +29,18 @@ export interface StaleSweepResult {
  * Cost is tiny — single SELECT + N updates where N is "leads going
  * stale this hour", typically 0-2.
  */
-export function runStaleLeadSweep(deps: AttributionDeps): StaleSweepResult {
+export async function runStaleLeadSweep(deps: AttributionDeps): Promise<StaleSweepResult> {
   const leads = new LeadsRepo(deps.db);
   const cutoff = Math.floor(Date.now() / 1000) - STALE_DAYS * 24 * 60 * 60;
-  const placeholders = NON_TERMINAL.map(() => "?").join(",");
-  const stale = deps.db
-    .query<{ id: number; state: LeadState; updated_at: number }, [...string[], number]>(
-      `SELECT id, state, updated_at
-       FROM leads
-       WHERE state IN (${placeholders})
-         AND updated_at < ?`,
-    )
-    .all(...NON_TERMINAL, cutoff);
+  const stale = await leads.listStale(NON_TERMINAL, cutoff);
 
   let closed = 0;
   let attributed = 0;
   for (const row of stale) {
-    const updated = leads.setState(row.id, "closed");
+    const updated = await leads.setState(row.id, "closed");
     if (!updated) continue;
     closed++;
-    const r = attributeLeadOutcome(deps, updated);
+    const r = await attributeLeadOutcome(deps, updated);
     if (r.outcomesRecorded > 0) attributed += r.outcomesRecorded;
   }
   return { scanned: stale.length, closed, attributed };
@@ -69,17 +61,20 @@ export function scheduleStaleLeadSweep(
   const intervalMs = opts.intervalMs ?? 6 * 60 * 60 * 1000;
   const firstRunAfterMs = opts.firstRunAfterMs ?? 60 * 1000;
   let timer: ReturnType<typeof setTimeout> | null = setTimeout(function tick() {
-    try {
-      const r = runStaleLeadSweep(deps);
-      if (r.closed > 0) {
-        console.log(
-          `[stale-sweep] closed ${r.closed} stale lead(s); attributed ${r.attributed} skill outcome(s)`,
-        );
-      }
-    } catch (err) {
-      console.warn("[stale-sweep] failed:", err);
-    }
-    timer = setTimeout(tick, intervalMs);
+    runStaleLeadSweep(deps)
+      .then((r) => {
+        if (r.closed > 0) {
+          console.log(
+            `[stale-sweep] closed ${r.closed} stale lead(s); attributed ${r.attributed} skill outcome(s)`,
+          );
+        }
+      })
+      .catch((err) => {
+        console.warn("[stale-sweep] failed:", err);
+      })
+      .finally(() => {
+        timer = setTimeout(tick, intervalMs);
+      });
   }, firstRunAfterMs);
   return {
     stop() {

@@ -15,12 +15,15 @@
  * runs × personas × 2 LLM-roundtrips accordingly.
  */
 import { config } from "../src/config.ts";
+import { sql } from "../src/db/postgres.ts";
+import { ConversationsRepo } from "../src/db/repos/conversations.ts";
 import { KbRepo } from "../src/db/repos/kb.ts";
+import { LeadsRepo } from "../src/db/repos/leads.ts";
 import { SkillOutcomesRepo, StyleRatingsRepo } from "../src/db/repos/skill-outcomes.ts";
 import { SkillsRepo, seedSkillCatalogue } from "../src/db/repos/skills.ts";
 import { StylesRepo, seedBuiltinStyles } from "../src/db/repos/styles.ts";
+import { UsersRepo } from "../src/db/repos/users.ts";
 import { renderVacanciesBlock, VacanciesRepo } from "../src/db/repos/vacancies.ts";
-import { getDb } from "../src/db/sqlite.ts";
 import { OpenAIChatClient } from "../src/rag/chat.ts";
 import { OpenAIEmbeddingClient } from "../src/rag/embed.ts";
 import { OllamaChatClient } from "../src/rag/providers/ollama-chat.ts";
@@ -114,23 +117,19 @@ function buildEmbedder() {
 
 async function main() {
   const args = parseArgs();
-  const db = getDb();
-  const stylesRepo = new StylesRepo(db);
-  const skillsRepo = new SkillsRepo(db);
-  seedSkillCatalogue(skillsRepo);
-  seedBuiltinStyles(stylesRepo, BUILTIN_STYLES);
+  const stylesRepo = new StylesRepo(sql);
+  const skillsRepo = new SkillsRepo(sql);
+  await seedSkillCatalogue(skillsRepo);
+  await seedBuiltinStyles(stylesRepo, BUILTIN_STYLES);
 
-  const rowA = stylesRepo.bySlug(args.styleA);
-  const rowB = stylesRepo.bySlug(args.styleB);
+  const rowA = await stylesRepo.bySlug(args.styleA);
+  const rowB = await stylesRepo.bySlug(args.styleB);
   if (!rowA || !rowB) {
     console.error(
       `[pairwise] missing style: a=${args.styleA} (${rowA ? "ok" : "missing"}) b=${args.styleB} (${rowB ? "ok" : "missing"})`,
     );
     console.error(
-      `[pairwise] available: ${stylesRepo
-        .listActive()
-        .map((s) => s.slug)
-        .join(", ")}`,
+      `[pairwise] available: ${(await stylesRepo.listActive()).map((s) => s.slug).join(", ")}`,
     );
     process.exit(1);
   }
@@ -144,11 +143,15 @@ async function main() {
     process.exit(1);
   }
 
-  const kb = new KbRepo(db);
-  const vacancies = new VacanciesRepo(db);
-  const vacanciesBlock = renderVacanciesBlock(vacancies.listActive());
-  const outcomesRepo = new SkillOutcomesRepo(db);
-  const ratingsRepo = new StyleRatingsRepo(db);
+  const kb = new KbRepo(sql);
+  const vacanciesRepo = new VacanciesRepo(sql);
+  const activeVacancies = await vacanciesRepo.listActive();
+  const vacanciesBlock = renderVacanciesBlock(activeVacancies);
+  const outcomesRepo = new SkillOutcomesRepo(sql);
+  const ratingsRepo = new StyleRatingsRepo(sql);
+  const usersRepo = new UsersRepo(sql);
+  const conversationsRepo = new ConversationsRepo(sql);
+  const leadsRepo = new LeadsRepo(sql);
 
   const salesChat = buildChat();
   const candidateChat = buildChat();
@@ -172,11 +175,14 @@ async function main() {
       console.log(`\n--- ${persona.displayName} (run ${run + 1}/${args.runs}) ---`);
       const result = await runPairwiseMatch(
         {
-          db,
+          db: sql,
           kb,
           skills: skillsRepo,
           outcomes: outcomesRepo,
           ratings: ratingsRepo,
+          users: usersRepo,
+          conversations: conversationsRepo,
+          leads: leadsRepo,
           salesChat,
           candidateChat,
           judgeChat,
@@ -217,12 +223,12 @@ async function main() {
   console.log(
     `[pairwise] tally: A=${tally.a} (${pct(tally.a, total)}%)  B=${tally.b} (${pct(tally.b, total)}%)  draw=${tally.draw} (${pct(tally.draw, total)}%)`,
   );
-  const ratA = ratingsRepo.bySlug(args.styleA);
-  const ratB = ratingsRepo.bySlug(args.styleB);
+  const ratA = await ratingsRepo.bySlug(args.styleA);
+  const ratB = await ratingsRepo.bySlug(args.styleB);
   console.log(
     `[pairwise] final ELO: ${args.styleA}=${ratA?.elo ?? "—"}  ${args.styleB}=${ratB?.elo ?? "—"}`,
   );
-  db.close();
+  await sql.end();
 }
 
 function pct(n: number, total: number): string {

@@ -6,11 +6,10 @@
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { config } from "../src/config.ts";
+import { sql } from "../src/db/postgres.ts";
 import { loadUserbotSession } from "../src/db/repos/userbot-session.ts";
-import { getDb } from "../src/db/sqlite.ts";
 
-const db = getDb();
-const sessionString = loadUserbotSession(db);
+const sessionString = await loadUserbotSession(sql);
 
 if (!sessionString) {
   console.error("No saved session. Run `bun scripts/userbot-auth.ts` first.");

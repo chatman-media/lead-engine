@@ -1,6 +1,5 @@
-import type { Database } from "bun:sqlite";
-
 import { config } from "../config.ts";
+import type { Sql } from "../db/postgres.ts";
 import { AdminsRepo } from "../db/repos/admins.ts";
 import { SessionsRepo } from "../db/repos/sessions.ts";
 import { json, type RouteHandler } from "../router.ts";
@@ -35,26 +34,26 @@ function buildCookie(value: string, maxAgeSeconds: number): string {
 }
 
 /** Look up the current admin from the request's session cookie, if any. */
-export function currentAdmin(db: Database, req: Request): AuthContext | null {
+export async function currentAdmin(sql: Sql, req: Request): Promise<AuthContext | null> {
   const sid = readSessionCookie(req);
   if (!sid) return null;
-  const sessions = new SessionsRepo(db);
-  const adminId = sessions.adminIdFor(sid);
+  const sessions = new SessionsRepo(sql);
+  const adminId = await sessions.adminIdFor(sid);
   if (adminId === null) return null;
-  const admin = new AdminsRepo(db).byId(adminId);
+  const admin = await new AdminsRepo(sql).byId(adminId);
   if (!admin) return null;
   return { adminId: admin.id, email: admin.email };
 }
 
-export function requireAdmin(db: Database, req: Request): AuthContext | Response {
-  const ctx = currentAdmin(db, req);
+export async function requireAdmin(sql: Sql, req: Request): Promise<AuthContext | Response> {
+  const ctx = await currentAdmin(sql, req);
   if (!ctx) return json({ error: "unauthorized" }, { status: 401 });
   return ctx;
 }
 
-export function createLoginHandler(db: Database): RouteHandler {
-  const admins = new AdminsRepo(db);
-  const sessions = new SessionsRepo(db);
+export function createLoginHandler(sql: Sql): RouteHandler {
+  const admins = new AdminsRepo(sql);
+  const sessions = new SessionsRepo(sql);
   return async ({ req }) => {
     let body: { email?: unknown; password?: unknown };
     try {
@@ -71,7 +70,7 @@ export function createLoginHandler(db: Database): RouteHandler {
     if (!admin) return json({ error: "invalid credentials" }, { status: 401 });
 
     const ttl = config.admin.sessionTtlDays * 24 * 60 * 60;
-    const sid = sessions.issue(admin.id, { ttlSeconds: ttl });
+    const sid = await sessions.issue(admin.id, { ttlSeconds: ttl });
     return json(
       { admin: { id: admin.id, email: admin.email } },
       { headers: { "set-cookie": buildCookie(sid, ttl) } },
@@ -79,18 +78,18 @@ export function createLoginHandler(db: Database): RouteHandler {
   };
 }
 
-export function createLogoutHandler(db: Database): RouteHandler {
-  const sessions = new SessionsRepo(db);
-  return ({ req }) => {
+export function createLogoutHandler(sql: Sql): RouteHandler {
+  const sessions = new SessionsRepo(sql);
+  return async ({ req }) => {
     const sid = readSessionCookie(req);
-    if (sid) sessions.revoke(sid);
+    if (sid) await sessions.revoke(sid);
     return json({ ok: true }, { headers: { "set-cookie": buildCookie("", 0) } });
   };
 }
 
-export function createMeHandler(db: Database): RouteHandler {
-  return ({ req }) => {
-    const ctx = requireAdmin(db, req);
+export function createMeHandler(sql: Sql): RouteHandler {
+  return async ({ req }) => {
+    const ctx = await requireAdmin(sql, req);
     if (ctx instanceof Response) return ctx;
     return json({ admin: { id: ctx.adminId, email: ctx.email } });
   };

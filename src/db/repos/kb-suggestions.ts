@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Sql } from "../postgres.ts";
 
 export type SuggestionStatus = "pending" | "ingested" | "rejected";
 
@@ -18,105 +18,90 @@ export interface KbSuggestionRow {
 }
 
 export class KbSuggestionsRepo {
-  constructor(private db: Database) {}
+  constructor(private sql: Sql) {}
 
-  byId(id: number): KbSuggestionRow | null {
-    return (
-      this.db
-        .query<KbSuggestionRow, [number]>("SELECT * FROM kb_suggestions WHERE id = ? LIMIT 1")
-        .get(id) ?? null
-    );
+  async byId(id: number): Promise<KbSuggestionRow | null> {
+    const [row] = await this.sql<KbSuggestionRow[]>`
+      SELECT * FROM kb_suggestions WHERE id = ${id} LIMIT 1
+    `;
+    return row ?? null;
   }
 
-  /**
-   * Create a suggestion. Deduplicates per conversation: if a pending suggestion
-   * already exists for the same conversation, returns the existing row without
-   * inserting a duplicate.
-   */
-  create(input: {
+  async create(input: {
     questionText: string;
     sourceConversationId?: number | null;
     sourceMessageId?: number | null;
-  }): KbSuggestionRow {
+  }): Promise<KbSuggestionRow> {
     if (input.sourceConversationId) {
-      const existing = this.db
-        .query<KbSuggestionRow, [number]>(
-          `SELECT * FROM kb_suggestions
-           WHERE source_conversation_id = ? AND status = 'pending'
-           ORDER BY created_at DESC LIMIT 1`,
-        )
-        .get(input.sourceConversationId);
+      const [existing] = await this.sql<KbSuggestionRow[]>`
+        SELECT * FROM kb_suggestions
+        WHERE source_conversation_id = ${input.sourceConversationId} AND status = 'pending'
+        ORDER BY created_at DESC LIMIT 1
+      `;
       if (existing) return existing;
     }
-    const row = this.db
-      .query<KbSuggestionRow, [string, number | null, number | null]>(
-        `INSERT INTO kb_suggestions (question_text, source_conversation_id, source_message_id)
-         VALUES (?, ?, ?) RETURNING *`,
-      )
-      .get(input.questionText, input.sourceConversationId ?? null, input.sourceMessageId ?? null);
+    const [row] = await this.sql<KbSuggestionRow[]>`
+      INSERT INTO kb_suggestions (question_text, source_conversation_id, source_message_id)
+      VALUES (${input.questionText}, ${input.sourceConversationId ?? null}, ${input.sourceMessageId ?? null}) RETURNING *
+    `;
     if (!row) throw new Error("Failed to insert kb_suggestion");
     return row;
   }
 
-  list(opts: { status?: SuggestionStatus; limit?: number } = {}): KbSuggestionRow[] {
+  async list(opts: { status?: SuggestionStatus; limit?: number } = {}): Promise<KbSuggestionRow[]> {
     const limit = opts.limit ?? 200;
     if (opts.status) {
-      return this.db
-        .query<KbSuggestionRow, [SuggestionStatus, number]>(
-          `SELECT * FROM kb_suggestions WHERE status = ? ORDER BY created_at DESC LIMIT ?`,
-        )
-        .all(opts.status, limit);
+      return this.sql<KbSuggestionRow[]>`
+        SELECT * FROM kb_suggestions WHERE status = ${opts.status} ORDER BY created_at DESC LIMIT ${limit}
+      `;
     }
-    return this.db
-      .query<KbSuggestionRow, [number]>(
-        `SELECT * FROM kb_suggestions ORDER BY created_at DESC LIMIT ?`,
-      )
-      .all(limit);
+    return this.sql<KbSuggestionRow[]>`
+      SELECT * FROM kb_suggestions ORDER BY created_at DESC LIMIT ${limit}
+    `;
   }
 
-  setDraft(id: number, answerDraft: string): KbSuggestionRow | null {
-    this.db.run(
-      `UPDATE kb_suggestions SET answer_draft = ?, updated_at = unixepoch() WHERE id = ?`,
-      [answerDraft, id],
-    );
+  async setDraft(id: number, answerDraft: string): Promise<KbSuggestionRow | null> {
+    await this.sql`
+      UPDATE kb_suggestions SET answer_draft = ${answerDraft}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+    `;
     return this.byId(id);
   }
 
-  reject(id: number, adminId: number, reason?: string): KbSuggestionRow | null {
-    this.db.run(
-      `UPDATE kb_suggestions
-       SET status = 'rejected', decided_by_admin_id = ?, decided_at = unixepoch(),
-           rejected_reason = ?, updated_at = unixepoch()
-       WHERE id = ? AND status = 'pending'`,
-      [adminId, reason ?? null, id],
-    );
+  async reject(id: number, adminId: number, reason?: string): Promise<KbSuggestionRow | null> {
+    await this.sql`
+      UPDATE kb_suggestions
+      SET status = 'rejected', decided_by_admin_id = ${adminId}, decided_at = EXTRACT(EPOCH FROM NOW())::INTEGER,
+          rejected_reason = ${reason ?? null}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER
+      WHERE id = ${id} AND status = 'pending'
+    `;
     return this.byId(id);
   }
 
-  markIngested(id: number, adminId: number, kbDocumentId: number): KbSuggestionRow | null {
-    this.db.run(
-      `UPDATE kb_suggestions
-       SET status = 'ingested', decided_by_admin_id = ?, decided_at = unixepoch(),
-           kb_document_id = ?, updated_at = unixepoch()
-       WHERE id = ?`,
-      [adminId, kbDocumentId, id],
-    );
+  async markIngested(
+    id: number,
+    adminId: number,
+    kbDocumentId: number,
+  ): Promise<KbSuggestionRow | null> {
+    await this.sql`
+      UPDATE kb_suggestions
+      SET status = 'ingested', decided_by_admin_id = ${adminId}, decided_at = EXTRACT(EPOCH FROM NOW())::INTEGER,
+          kb_document_id = ${kbDocumentId}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER
+      WHERE id = ${id}
+    `;
     return this.byId(id);
   }
 
-  pendingCount(): number {
-    const row = this.db
-      .query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM kb_suggestions WHERE status = 'pending'`)
-      .get();
+  async pendingCount(): Promise<number> {
+    const [row] = await this.sql<{ n: number }[]>`
+      SELECT COUNT(*)::INTEGER AS n FROM kb_suggestions WHERE status = 'pending'
+    `;
     return row?.n ?? 0;
   }
 
-  countByStatus(): Record<SuggestionStatus, number> {
-    const rows = this.db
-      .query<{ status: SuggestionStatus; count: number }, []>(
-        `SELECT status, COUNT(*) AS count FROM kb_suggestions GROUP BY status`,
-      )
-      .all();
+  async countByStatus(): Promise<Record<SuggestionStatus, number>> {
+    const rows = await this.sql<{ status: SuggestionStatus; count: number }[]>`
+      SELECT status, COUNT(*)::INTEGER AS count FROM kb_suggestions GROUP BY status
+    `;
     const result: Record<SuggestionStatus, number> = { pending: 0, ingested: 0, rejected: 0 };
     for (const r of rows) result[r.status] = r.count;
     return result;

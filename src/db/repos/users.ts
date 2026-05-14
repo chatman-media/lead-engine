@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Sql } from "../postgres.ts";
 
 export type UserStatus = "new" | "questionnaire_pending" | "qualified" | "won" | "lost";
 
@@ -25,53 +25,54 @@ export interface UserMemory {
 }
 
 export class UsersRepo {
-  constructor(private db: Database) {}
+  constructor(private sql: Sql) {}
 
-  byTgId(tgUserId: number): UserRow | null {
-    return (
-      this.db
-        .query<UserRow, [number]>("SELECT * FROM users WHERE tg_user_id = ? LIMIT 1")
-        .get(tgUserId) ?? null
-    );
+  async byTgId(tgUserId: number): Promise<UserRow | null> {
+    const [row] = await this.sql<UserRow[]>`
+      SELECT * FROM users WHERE tg_user_id = ${tgUserId} LIMIT 1
+    `;
+    return row ?? null;
   }
 
-  byId(id: number): UserRow | null {
-    return (
-      this.db.query<UserRow, [number]>("SELECT * FROM users WHERE id = ? LIMIT 1").get(id) ?? null
-    );
+  async byId(id: number): Promise<UserRow | null> {
+    const [row] = await this.sql<UserRow[]>`
+      SELECT * FROM users WHERE id = ${id} LIMIT 1
+    `;
+    return row ?? null;
   }
 
-  create(input: { tgUserId: number; tgUsername?: string | null; status?: UserStatus }): UserRow {
+  async create(input: {
+    tgUserId: number;
+    tgUsername?: string | null;
+    status?: UserStatus;
+  }): Promise<UserRow> {
     const status: UserStatus = input.status ?? "new";
-    const row = this.db
-      .query<UserRow, [number, string | null, UserStatus]>(
-        `INSERT INTO users (tg_user_id, tg_username, status)
-         VALUES (?, ?, ?)
-         RETURNING *`,
-      )
-      .get(input.tgUserId, input.tgUsername ?? null, status);
+    const [row] = await this.sql<UserRow[]>`
+      INSERT INTO users (tg_user_id, tg_username, status)
+      VALUES (${input.tgUserId}, ${input.tgUsername ?? null}, ${status})
+      RETURNING *
+    `;
     if (!row) throw new Error("Failed to create user");
     return row;
   }
 
-  setStatus(id: number, status: UserStatus): void {
-    this.db.run("UPDATE users SET status = ?, updated_at = unixepoch() WHERE id = ?", [status, id]);
+  async setStatus(id: number, status: UserStatus): Promise<void> {
+    await this.sql`
+      UPDATE users SET status = ${status}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+    `;
   }
 
-  setProfile(id: number, profile: unknown): void {
-    this.db.run("UPDATE users SET profile_json = ?, updated_at = unixepoch() WHERE id = ?", [
-      JSON.stringify(profile),
-      id,
-    ]);
+  async setProfile(id: number, profile: unknown): Promise<void> {
+    await this.sql`
+      UPDATE users SET profile_json = ${JSON.stringify(profile)}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+    `;
   }
 
   /**
    * Cross-session memory about the candidate (not the bot persona).
-   * Persisted under `profile_json.memory.facts` so it survives conversation
-   * resets. Keys are LLM-extracted attributes ("city", "age", "intent", etc).
    */
-  getMemory(id: number): UserMemory {
-    const row = this.byId(id);
+  async getMemory(id: number): Promise<UserMemory> {
+    const row = await this.byId(id);
     if (!row?.profile_json) return { facts: {} };
     try {
       const parsed = JSON.parse(row.profile_json) as { memory?: UserMemory };
@@ -82,13 +83,10 @@ export class UsersRepo {
   }
 
   /**
-   * Replace stored memory facts wholesale. Used by the admin UI when an
-   * operator manually edits the memory pane — operator edits are
-   * authoritative (they often correct extractor mistakes), so we don't
-   * merge, we replace. Empty/whitespace values are dropped.
+   * Replace stored memory facts wholesale.
    */
-  setMemoryFacts(id: number, facts: Record<string, string>): void {
-    const row = this.byId(id);
+  async setMemoryFacts(id: number, facts: Record<string, string>): Promise<void> {
+    const row = await this.byId(id);
     if (!row) return;
 
     let parsed: { memory?: UserMemory } & Record<string, unknown> = {};
@@ -114,22 +112,20 @@ export class UsersRepo {
         : {}),
       updatedAt: Math.floor(Date.now() / 1000),
     };
-    this.db.run("UPDATE users SET profile_json = ?, updated_at = unixepoch() WHERE id = ?", [
-      JSON.stringify(parsed),
-      id,
-    ]);
+    await this.sql`
+      UPDATE users SET profile_json = ${JSON.stringify(parsed)}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+    `;
   }
 
   /**
-   * Merge new facts into stored memory. New keys overwrite old ones (latest
-   * wins). Empty / whitespace values clear the key. Atomic via single UPDATE.
+   * Merge new facts into stored memory.
    */
-  mergeMemoryFacts(
+  async mergeMemoryFacts(
     id: number,
     newFacts: Record<string, string>,
     lastExtractedFromMsgId?: number,
-  ): void {
-    const row = this.byId(id);
+  ): Promise<void> {
+    const row = await this.byId(id);
     if (!row) return;
 
     let parsed: { memory?: UserMemory } & Record<string, unknown> = {};
@@ -153,17 +149,14 @@ export class UsersRepo {
       updatedAt: Math.floor(Date.now() / 1000),
     };
     parsed.memory = memory;
-    this.db.run("UPDATE users SET profile_json = ?, updated_at = unixepoch() WHERE id = ?", [
-      JSON.stringify(parsed),
-      id,
-    ]);
+    await this.sql`
+      UPDATE users SET profile_json = ${JSON.stringify(parsed)}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+    `;
   }
 
-  list(limit = 100, offset = 0): UserRow[] {
-    return this.db
-      .query<UserRow, [number, number]>(
-        "SELECT * FROM users ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-      )
-      .all(limit, offset);
+  async list(limit = 100, offset = 0): Promise<UserRow[]> {
+    return this.sql<UserRow[]>`
+      SELECT * FROM users ORDER BY updated_at DESC LIMIT ${limit} OFFSET ${offset}
+    `;
   }
 }

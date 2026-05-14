@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Sql } from "../postgres.ts";
 
 export type ConversationMode = "ai" | "queued" | "human";
 
@@ -10,26 +10,13 @@ export interface ConversationRow {
   assigned_admin_id: number | null;
   last_message_at: number | null;
   created_at: number;
-  // Sales-engine columns (added in migration 003). Null on legacy rows and
-  // on conversations created when no experiment is running.
   style_id: number | null;
   experiment_id: number | null;
   current_stage: string | null;
-  // Long-conversation summary (migration 006). Null until the chat crosses
-  // the length threshold and the summarizer first runs. See ConversationSummary.
   summary_json: string | null;
-  // Extensible metadata (migration 021). NULL = {} semantics.
   meta_json: string | null;
 }
 
-/**
- * Periodically-refreshed compressed summary of older turns in a long
- * conversation. Stored in `conversations.summary_json` as JSON.
- *
- * `summarizedThroughMsgId` is the highest message id covered by the
- * summary — refresh logic checks `currentLatestMsgId - summarizedThroughMsgId`
- * against a staleness threshold to decide if regeneration is needed.
- */
 export interface ConversationSummary {
   summary: string;
   summarizedThroughMsgId: number;
@@ -37,93 +24,84 @@ export interface ConversationSummary {
 }
 
 export class ConversationsRepo {
-  constructor(private db: Database) {}
+  constructor(private sql: Sql) {}
 
-  byUserId(userId: number): ConversationRow | null {
-    return (
-      this.db
-        .query<ConversationRow, [number]>("SELECT * FROM conversations WHERE user_id = ? LIMIT 1")
-        .get(userId) ?? null
-    );
+  async byUserId(userId: number): Promise<ConversationRow | null> {
+    const [row] = await this.sql<ConversationRow[]>`
+      SELECT * FROM conversations WHERE user_id = ${userId} LIMIT 1
+    `;
+    return row ?? null;
   }
 
-  byId(id: number): ConversationRow | null {
-    return (
-      this.db
-        .query<ConversationRow, [number]>("SELECT * FROM conversations WHERE id = ? LIMIT 1")
-        .get(id) ?? null
-    );
+  async byId(id: number): Promise<ConversationRow | null> {
+    const [row] = await this.sql<ConversationRow[]>`
+      SELECT * FROM conversations WHERE id = ${id} LIMIT 1
+    `;
+    return row ?? null;
   }
 
-  ensureForUser(userId: number): ConversationRow {
-    const existing = this.byUserId(userId);
+  async ensureForUser(userId: number): Promise<ConversationRow> {
+    const existing = await this.byUserId(userId);
     if (existing) return existing;
-    const row = this.db
-      .query<ConversationRow, [number]>(
-        `INSERT INTO conversations (user_id) VALUES (?) RETURNING *`,
-      )
-      .get(userId);
+    const [row] = await this.sql<ConversationRow[]>`
+      INSERT INTO conversations (user_id) VALUES (${userId}) RETURNING *
+    `;
     if (!row) throw new Error("Failed to create conversation");
     return row;
   }
 
-  setMode(id: number, mode: ConversationMode, assignedAdminId: number | null = null) {
+  async setMode(
+    id: number,
+    mode: ConversationMode,
+    assignedAdminId: number | null = null,
+  ): Promise<void> {
     if (mode === "ai") {
-      this.db.run(
-        `UPDATE conversations
-         SET mode = 'ai', escalated_at = NULL, assigned_admin_id = NULL
-         WHERE id = ?`,
-        [id],
-      );
+      await this.sql`
+        UPDATE conversations
+        SET mode = 'ai', escalated_at = NULL, assigned_admin_id = NULL
+        WHERE id = ${id}
+      `;
       return;
     }
     if (mode === "queued") {
-      this.db.run(
-        `UPDATE conversations
-         SET mode = 'queued', escalated_at = unixepoch()
-         WHERE id = ?`,
-        [id],
-      );
+      await this.sql`
+        UPDATE conversations
+        SET mode = 'queued', escalated_at = EXTRACT(EPOCH FROM NOW())::INTEGER
+        WHERE id = ${id}
+      `;
       return;
     }
-    this.db.run(
-      `UPDATE conversations
-       SET mode = 'human', assigned_admin_id = ?
-       WHERE id = ?`,
-      [assignedAdminId, id],
-    );
+    await this.sql`
+      UPDATE conversations
+      SET mode = 'human', assigned_admin_id = ${assignedAdminId}
+      WHERE id = ${id}
+    `;
   }
 
-  touch(id: number) {
-    this.db.run("UPDATE conversations SET last_message_at = unixepoch() WHERE id = ?", [id]);
+  async touch(id: number): Promise<void> {
+    await this.sql`
+      UPDATE conversations SET last_message_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+    `;
   }
 
-  /**
-   * Pin a sales-engine style + experiment to this conversation. Idempotent —
-   * setting again with the same ids is a no-op. Once assigned, A/B routing
-   * MUST stick (else a prospect on retry could see a different persona).
-   */
-  assignStyle(id: number, styleId: number, experimentId: number | null = null): void {
-    this.db.run(`UPDATE conversations SET style_id = ?, experiment_id = ? WHERE id = ?`, [
-      styleId,
-      experimentId,
-      id,
-    ]);
+  async assignStyle(
+    id: number,
+    styleId: number,
+    experimentId: number | null = null,
+  ): Promise<void> {
+    await this.sql`
+      UPDATE conversations SET style_id = ${styleId}, experiment_id = ${experimentId} WHERE id = ${id}
+    `;
   }
 
-  /** Persist the latest funnel stage so it survives process restarts. */
-  setCurrentStage(id: number, stage: string): void {
-    this.db.run(`UPDATE conversations SET current_stage = ? WHERE id = ?`, [stage, id]);
+  async setCurrentStage(id: number, stage: string): Promise<void> {
+    await this.sql`
+      UPDATE conversations SET current_stage = ${stage} WHERE id = ${id}
+    `;
   }
 
-  /**
-   * Read the long-conversation summary if one exists. Returns null when the
-   * column is empty (chat hasn't crossed the summarization threshold yet)
-   * or contains malformed JSON (treated as "no summary" — caller falls
-   * back to the recent-history window only).
-   */
-  getSummary(id: number): ConversationSummary | null {
-    const row = this.byId(id);
+  async getSummary(id: number): Promise<ConversationSummary | null> {
+    const row = await this.byId(id);
     if (!row?.summary_json) return null;
     try {
       const parsed = JSON.parse(row.summary_json) as ConversationSummary;
@@ -136,25 +114,16 @@ export class ConversationsRepo {
     }
   }
 
-  /**
-   * Replace the stored summary. Always sets `updatedAt` to current unix time.
-   */
-  setSummary(id: number, summary: string, summarizedThroughMsgId: number): void {
+  async setSummary(id: number, summary: string, summarizedThroughMsgId: number): Promise<void> {
     const payload: ConversationSummary = {
       summary,
       summarizedThroughMsgId,
       updatedAt: Math.floor(Date.now() / 1000),
     };
-    this.db.run(`UPDATE conversations SET summary_json = ? WHERE id = ?`, [
-      JSON.stringify(payload),
-      id,
-    ]);
+    await this.sql`
+      UPDATE conversations SET summary_json = ${JSON.stringify(payload)} WHERE id = ${id}
+    `;
   }
-
-  // ── Stall counter (anti-deadloop) ──────────────────────────────────────
-  // Tracks consecutive NO_CONTEXT stalls. Resets to 0 on any real answer.
-  // When count reaches the threshold, webhook sends a CTA-fallback instead
-  // of another "Секунду, уточню…" to break the loop.
 
   getStallCount(conv: ConversationRow): number {
     if (!conv.meta_json) return 0;
@@ -166,13 +135,10 @@ export class ConversationsRepo {
     }
   }
 
-  setStallCount(id: number, count: number): void {
-    // Read current meta to preserve other fields, then write back.
-    const row = this.db
-      .query<{ meta_json: string | null }, [number]>(
-        "SELECT meta_json FROM conversations WHERE id = ?",
-      )
-      .get(id);
+  async setStallCount(id: number, count: number): Promise<void> {
+    const [row] = await this.sql<{ meta_json: string | null }[]>`
+      SELECT meta_json FROM conversations WHERE id = ${id}
+    `;
     let meta: Record<string, unknown> = {};
     if (row?.meta_json) {
       try {
@@ -182,33 +148,36 @@ export class ConversationsRepo {
       }
     }
     meta.stall_count = count;
-    this.db.run(`UPDATE conversations SET meta_json = ? WHERE id = ?`, [JSON.stringify(meta), id]);
+    await this.sql`
+      UPDATE conversations SET meta_json = ${JSON.stringify(meta)} WHERE id = ${id}
+    `;
   }
 
-  /**
-   * Hard-deletes a conversation and (via FK CASCADE) all its messages.
-   * The next inbound Telegram message from the same user will recreate
-   * a fresh conversation in default mode='ai', escalated_at=NULL.
-   */
-  deleteById(id: number): boolean {
-    const res = this.db.run(`DELETE FROM conversations WHERE id = ?`, [id]);
-    return res.changes > 0;
+  async deleteById(id: number): Promise<boolean> {
+    const result = await this.sql`DELETE FROM conversations WHERE id = ${id}`;
+    return result.count > 0;
   }
 
-  list(
+  async list(
     opts: { onlyEscalated?: boolean; limit?: number } = {},
-  ): Array<ConversationRow & { tg_user_id: number; tg_username: string | null }> {
+  ): Promise<Array<ConversationRow & { tg_user_id: number; tg_username: string | null }>> {
     const limit = opts.limit ?? 100;
-    const where = opts.onlyEscalated ? "WHERE c.mode IN ('queued','human')" : "";
-    return this.db
-      .query<ConversationRow & { tg_user_id: number; tg_username: string | null }, [number]>(
-        `SELECT c.*, u.tg_user_id, u.tg_username
-         FROM conversations c
-         JOIN users u ON u.id = c.user_id
-         ${where}
-         ORDER BY (c.mode = 'queued') DESC, c.last_message_at DESC NULLS LAST
-         LIMIT ?`,
-      )
-      .all(limit);
+    if (opts.onlyEscalated) {
+      return this.sql<Array<ConversationRow & { tg_user_id: number; tg_username: string | null }>>`
+        SELECT c.*, u.tg_user_id, u.tg_username
+        FROM conversations c
+        JOIN users u ON u.id = c.user_id
+        WHERE c.mode IN ('queued','human')
+        ORDER BY (c.mode = 'queued') DESC, c.last_message_at DESC NULLS LAST
+        LIMIT ${limit}
+      `;
+    }
+    return this.sql<Array<ConversationRow & { tg_user_id: number; tg_username: string | null }>>`
+      SELECT c.*, u.tg_user_id, u.tg_username
+      FROM conversations c
+      JOIN users u ON u.id = c.user_id
+      ORDER BY (c.mode = 'queued') DESC, c.last_message_at DESC NULLS LAST
+      LIMIT ${limit}
+    `;
   }
 }

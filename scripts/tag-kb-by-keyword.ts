@@ -12,8 +12,7 @@
  * Rules below are applied in priority order; first match wins. Update the
  * lists when the corpus shifts — the script is meant to be edited.
  */
-import { config } from "../src/config.ts";
-import { openDb } from "../src/db/sqlite.ts";
+import { sql } from "../src/db/postgres.ts";
 
 interface DocRow {
   id: number;
@@ -102,47 +101,39 @@ function classify(text: string): string {
   return FALLBACK_TOPIC;
 }
 
-const db = openDb({ path: config.dbPath });
-
-const docs = db
-  .query<DocRow, []>(
-    `SELECT d.id AS id,
-            d.title AS title,
-            COALESCE(GROUP_CONCAT(c.text, '\n'), '') AS text
-     FROM kb_documents d
-     LEFT JOIN kb_chunks c ON c.document_id = d.id
-     WHERE d.topic IS NULL
-     GROUP BY d.id`,
-  )
-  .all();
+const docs = await sql<DocRow[]>`
+  SELECT d.id AS id,
+         d.title AS title,
+         COALESCE(STRING_AGG(c.text, E'\n'), '') AS text
+  FROM kb_documents d
+  LEFT JOIN kb_chunks c ON c.document_id = d.id
+  WHERE d.topic IS NULL
+  GROUP BY d.id
+`;
 
 console.log(`Found ${docs.length} untagged documents to classify.`);
 
 const counts: Record<string, number> = {};
-const update = db.prepare(`UPDATE kb_documents SET topic = ? WHERE id = ?`);
 
-const tx = db.transaction((rows: DocRow[]) => {
-  for (const row of rows) {
-    // Title contributes to classification too — channel-dump titles often
-    // carry the topical hint (e.g. "159-китаи-г-шаосин.md" → vacancy).
-    const topic = classify(`${row.title}\n${row.text}`);
-    update.run(topic, row.id);
-    counts[topic] = (counts[topic] ?? 0) + 1;
-  }
-});
-tx(docs);
+for (const row of docs) {
+  // Title contributes to classification too — channel-dump titles often
+  // carry the topical hint (e.g. "159-китаи-г-шаосин.md" → vacancy).
+  const topic = classify(`${row.title}\n${row.text}`);
+  await sql`UPDATE kb_documents SET topic = ${topic} WHERE id = ${row.id}`;
+  counts[topic] = (counts[topic] ?? 0) + 1;
+}
 
 console.log("\nResulting distribution:");
 for (const [topic, n] of Object.entries(counts).sort((a, b) => b[1] - a[1])) {
   console.log(`  ${topic.padEnd(14)} ${n}`);
 }
 
-const totalAll = db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM kb_documents`).get()!.n;
-const stillUntagged = db
-  .query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM kb_documents WHERE topic IS NULL`)
-  .get()!.n;
+const [totalRow] = await sql<{ n: number }[]>`SELECT COUNT(*)::INTEGER AS n FROM kb_documents`;
+const [untaggedRow] = await sql<{ n: number }[]>`
+  SELECT COUNT(*)::INTEGER AS n FROM kb_documents WHERE topic IS NULL
+`;
 console.log(
-  `\nTotal docs: ${totalAll}, still untagged: ${stillUntagged} (acts as neutral in topic-filtered search).`,
+  `\nTotal docs: ${totalRow?.n ?? 0}, still untagged: ${untaggedRow?.n ?? 0} (acts as neutral in topic-filtered search).`,
 );
 
-db.close();
+await sql.end();

@@ -1,8 +1,8 @@
-import type { Database } from "bun:sqlite";
 import { TelegramClient as GramjsClient } from "telegram";
 import { NewMessage } from "telegram/events";
 import { StringSession } from "telegram/sessions";
 import { telegramOpenAccess } from "../config.ts";
+import type { Sql } from "../db/postgres.ts";
 import { ConversationsRepo } from "../db/repos/conversations.ts";
 import { ExperimentsRepo } from "../db/repos/experiments.ts";
 import { KbRepo } from "../db/repos/kb.ts";
@@ -20,7 +20,7 @@ import type { RagDeps } from "./webhook.ts";
 import { processInbound } from "./webhook.ts";
 
 export interface UserbotDeps {
-  db: Database;
+  db: Sql;
   apiId: number;
   apiHash: string;
   rag?: RagDeps;
@@ -155,22 +155,22 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
       const text = msg.text ?? "";
       if (!text.trim()) continue;
 
-      const userExisting = d.users.byTgId(tgUserId);
+      const userExisting = await d.users.byTgId(tgUserId);
       let user = userExisting;
       if (!user && telegramOpenAccess()) {
-        user = d.users.create({ tgUserId, tgUsername: null });
+        user = await d.users.create({ tgUserId, tgUsername: null });
       }
       if (!user) continue;
 
-      const conv = d.conversations.ensureForUser(user.id);
-      const persisted = d.messages.addUserMessageIfNew({
+      const conv = await d.conversations.ensureForUser(user.id);
+      const persisted = await d.messages.addUserMessageIfNew({
         conversationId: conv.id,
         tgMessageId: msg.id,
         text,
       });
       if (!persisted.isNew) continue;
 
-      d.conversations.touch(conv.id);
+      await d.conversations.touch(conv.id);
       d.onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
 
       console.log(
@@ -230,7 +230,7 @@ const USER_RATE_LIMIT_MS = 5_000;
 export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   const { db, apiId, apiHash, rag, onEvent } = deps;
 
-  const sessionString = process.env.USERBOT_SESSION || loadUserbotSession(db);
+  const sessionString = process.env.USERBOT_SESSION || (await loadUserbotSession(db));
   const session = new StringSession(sessionString);
 
   const client = new GramjsClient(session, apiId, apiHash, {
@@ -265,7 +265,7 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   // Persist refreshed session after connect so it survives restarts.
   const newSession = client.session.save() as unknown as string;
   if (newSession !== sessionString) {
-    saveUserbotSession(db, newSession);
+    await saveUserbotSession(db, newSession);
   }
 
   const users = new UsersRepo(db);
@@ -306,10 +306,10 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
       }
       lastProcessedAt.set(tgUserId, now);
 
-      const userExisting = users.byTgId(tgUserId);
+      const userExisting = await users.byTgId(tgUserId);
       let user = userExisting;
       if (!user && telegramOpenAccess()) {
-        user = users.create({ tgUserId, tgUsername: null });
+        user = await users.create({ tgUserId, tgUsername: null });
         console.log(`[userbot] TELEGRAM_OPEN_ACCESS: created user tg_user_id=${tgUserId}`);
       }
       if (!user) {
@@ -317,16 +317,16 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
         return;
       }
 
-      const conv = conversations.ensureForUser(user.id);
+      const conv = await conversations.ensureForUser(user.id);
 
-      const persisted = messages.addUserMessageIfNew({
+      const persisted = await messages.addUserMessageIfNew({
         conversationId: conv.id,
         tgMessageId: msg.id,
         text,
       });
       if (!persisted.isNew) return;
 
-      conversations.touch(conv.id);
+      await conversations.touch(conv.id);
       onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
 
       // Create sender bound to this specific inbound message so that

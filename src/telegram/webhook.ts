@@ -1,5 +1,5 @@
-import type { Database } from "bun:sqlite";
 import { config, telegramOpenAccess } from "../config.ts";
+import type { Sql } from "../db/postgres.ts";
 import { type ConversationRow, ConversationsRepo } from "../db/repos/conversations.ts";
 import { ExperimentsRepo, parseAllocationToExperiment } from "../db/repos/experiments.ts";
 import { KbRepo } from "../db/repos/kb.ts";
@@ -10,7 +10,7 @@ import { SkillsRepo } from "../db/repos/skills.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
 import { type UserRow, UsersRepo } from "../db/repos/users.ts";
 import { renderVacanciesBlock, VacanciesRepo } from "../db/repos/vacancies.ts";
-import { countMediaForConversation, extractIntake } from "../leads/intake.ts";
+import { extractIntake } from "../leads/intake.ts";
 import { LeadsService } from "../leads/service.ts";
 import { type IntakeFields, isIntakeComplete } from "../leads/templates.ts";
 import { extractVisaDocs, type VisaFields } from "../leads/visa-docs.ts";
@@ -67,7 +67,7 @@ export interface RagDeps {
    */
   conversationSummary?: boolean;
   topK?: number;
-  /** sqlite-vec L2 distance threshold; hits above are dropped before LLM. */
+  /** pgvector cosine distance threshold; hits above are dropped before LLM. */
   maxDistance?: number;
   /** How the bot identifies itself in answers (name, role, company).
    *  Used only when `style` is not provided. */
@@ -99,7 +99,7 @@ export type WebhookEvent =
   | { type: "kb-suggestion:created"; suggestionId: number; conversationId: number };
 
 export interface WebhookDeps {
-  db: Database;
+  db: Sql;
   telegram: TelegramClient;
   webhookSecret: string;
   /** Optional: when present, bot answers via RAG. Otherwise it sends a stub
@@ -247,9 +247,9 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       message.reply_to_message?.message_id !== undefined
     ) {
       const parentMessageId = message.reply_to_message.message_id;
-      const lead = leadsRepo.byOpsMessage(deps.leadsChatId, parentMessageId);
+      const lead = await leadsRepo.byOpsMessage(deps.leadsChatId, parentMessageId);
       if (lead) {
-        const opUser = users.byId(lead.user_id);
+        const opUser = await users.byId(lead.user_id);
         if (opUser) {
           const service = new LeadsService({
             leads: leadsRepo,
@@ -297,10 +297,10 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
     const tgUserId = message.from.id;
     const userMessageText = message.text ?? message.caption ?? `[${mediaInfo!.type}]`;
 
-    const userExisting = users.byTgId(tgUserId);
+    const userExisting = await users.byTgId(tgUserId);
     let user = userExisting;
     if (!user && telegramOpenAccess()) {
-      user = users.create({
+      user = await users.create({
         tgUserId,
         tgUsername: message.from.username ?? null,
       });
@@ -311,12 +311,12 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       return json({ ok: true, ignored: "not-whitelisted" });
     }
 
-    const conv = conversations.ensureForUser(user.id);
+    const conv = await conversations.ensureForUser(user.id);
 
     // Idempotency boundary. Telegram retries webhook deliveries with the
     // same message_id when we don't ack in ~60s; we collapse retries to a
     // single row and skip all downstream work for the duplicate.
-    const persisted = messages.addUserMessageIfNew({
+    const persisted = await messages.addUserMessageIfNew({
       conversationId: conv.id,
       tgMessageId: message.message_id,
       text: userMessageText,
@@ -332,7 +332,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       });
     }
 
-    conversations.touch(conv.id);
+    await conversations.touch(conv.id);
     deps.onEvent?.({
       type: "user-message-persisted",
       conversationId: conv.id,
@@ -440,20 +440,20 @@ export interface ProcessInboundDeps {
  *
  * Returns `null` when no style applies — caller uses `rag.persona` instead.
  */
-function resolveStyle(d: {
+async function resolveStyle(d: {
   rag?: RagDeps;
   conv: ConversationRow;
   user: UserRow;
   styles: StylesRepo;
   experiments: ExperimentsRepo;
   conversations: ConversationsRepo;
-}): Style | null {
+}): Promise<Style | null> {
   // Priority 1: env force-override.
   if (d.rag?.style) return d.rag.style;
 
   // Priority 2: existing assignment.
   if (d.conv.style_id != null) {
-    const row = d.styles.byId(d.conv.style_id);
+    const row = await d.styles.byId(d.conv.style_id);
     if (!row) {
       console.warn(
         `[sales] conv ${d.conv.id} references style_id=${d.conv.style_id} that no longer exists; falling back`,
@@ -469,7 +469,7 @@ function resolveStyle(d: {
   }
 
   // Priority 3: running experiment → pickVariant + persist assignment.
-  const running = d.experiments.getRunning();
+  const running = await d.experiments.getRunning();
   if (!running) return null;
 
   const experiment = parseAllocationToExperiment(running);
@@ -479,7 +479,7 @@ function resolveStyle(d: {
   }
 
   const variantSlug = pickVariant(experiment, d.user.tg_user_id);
-  const variantRow = d.styles.bySlug(variantSlug);
+  const variantRow = await d.styles.bySlug(variantSlug);
   if (!variantRow) {
     console.warn(
       `[sales] experiment ${running.slug} allocates to slug "${variantSlug}" that's missing/inactive in styles table`,
@@ -489,7 +489,7 @@ function resolveStyle(d: {
 
   try {
     const style = d.styles.parseRow(variantRow);
-    d.conversations.assignStyle(d.conv.id, variantRow.id, running.id);
+    await d.conversations.assignStyle(d.conv.id, variantRow.id, running.id);
     // Reflect on the in-memory row so downstream code sees the assignment.
     d.conv.style_id = variantRow.id;
     d.conv.experiment_id = running.id;
@@ -514,7 +514,7 @@ async function runRagForInbound(
 ): Promise<{ result: AnswerResult; stage?: FunnelStage; skillSlugs: string[] }> {
   if (!d.rag) throw new Error("runRagForInbound: rag deps required");
 
-  const style = resolveStyle({
+  const style = await resolveStyle({
     rag: d.rag,
     conv: d.conv,
     user: d.user,
@@ -531,11 +531,11 @@ async function runRagForInbound(
   if (style) {
     let styleId: number | null = d.conv.style_id;
     if (styleId == null) {
-      const row = d.styles.bySlug(style.slug);
+      const row = await d.styles.bySlug(style.slug);
       styleId = row?.id ?? null;
     }
     if (styleId != null) {
-      const rows = d.skills.skillsForStyle(styleId).filter((r) => r.is_enabled === 1);
+      const rows = (await d.skills.skillsForStyle(styleId)).filter((r) => r.is_enabled);
       resolvedSkills = rows.map((r) => ({
         slug: r.slug,
         displayName: r.display_name,
@@ -552,9 +552,9 @@ async function runRagForInbound(
   let stage: FunnelStage | undefined;
   let includeFewShot: boolean | undefined;
   if (style) {
-    const userMessageCount = d.messages
-      .listByConversation(d.conv.id)
-      .filter((m) => m.role === "user").length;
+    const userMessageCount = (await d.messages.listByConversation(d.conv.id)).filter(
+      (m) => m.role === "user",
+    ).length;
     const previousStage = toFunnelStage(d.conv.current_stage);
 
     if (d.rag.stageClassifier === "llm") {
@@ -580,7 +580,7 @@ async function runRagForInbound(
       });
     }
 
-    d.conversations.setCurrentStage(d.conv.id, stage);
+    await d.conversations.setCurrentStage(d.conv.id, stage);
     includeFewShot = userMessageCount <= 1;
   }
 
@@ -589,7 +589,7 @@ async function runRagForInbound(
   // прошлая реплика). Берём 12 последних сообщений и КИДАЕМ только тот
   // user-row, который мы только что вставили (он же в d.text), чтобы не
   // дублировать его в финальном prompt.
-  const recent = d.messages.recentForContext(d.conv.id, 12);
+  const recent = await d.messages.recentForContext(d.conv.id, 12);
   const justInsertedIdx = recent
     .map((m, i) => ({ m, i }))
     .filter(({ m }) => m.role === "user" && m.text === d.text)
@@ -608,19 +608,19 @@ async function runRagForInbound(
   // conversations) so the bot doesn't re-ask the candidate's city/age/etc.
   // Read is cheap (single DB row); facts from current message land on the
   // NEXT turn (extraction runs after the reply, see processInbound).
-  const userFacts = d.rag.userMemory ? d.users.getMemory(d.user.id).facts : undefined;
+  const userFacts = d.rag.userMemory ? (await d.users.getMemory(d.user.id)).facts : undefined;
 
   // Long-conversation summary (when feature is on AND a summary exists).
   // Refresh decision happens AFTER reply (see runConversationSummaryRefresh)
   // so the hot path stays fast — current turn uses whatever is currently
   // stored, next turn benefits from the refresh.
   const conversationSummary = d.rag.conversationSummary
-    ? (d.conversations.getSummary(d.conv.id)?.summary ?? undefined)
+    ? ((await d.conversations.getSummary(d.conv.id))?.summary ?? undefined)
     : undefined;
 
   // Active vacancies (admin-managed). Fast SQL read on every turn.
   // Empty when none configured — answerWithRag treats "" as "no block".
-  const vacanciesBlock = renderVacanciesBlock(d.vacancies.listActive());
+  const vacanciesBlock = renderVacanciesBlock(await d.vacancies.listActive());
 
   const result = await answerWithRag({
     question: d.text,
@@ -700,7 +700,7 @@ async function runSkillGrading(
     // the other fields the webhook persisted on the message.
     const existing = (args.telemetry ?? {}) as Record<string, unknown>;
     const mergedTelemetry = { ...existing, skills_used: used };
-    d.messages.setMeta(args.messageId, {
+    await d.messages.setMeta(args.messageId, {
       used_chunk_ids: args.usedChunkIds,
       telemetry: mergedTelemetry,
     });
@@ -712,9 +712,9 @@ async function runSkillGrading(
 async function runMemoryExtraction(d: ProcessInboundDeps): Promise<void> {
   if (!d.rag?.userMemory) return;
 
-  const stored = d.users.getMemory(d.user.id);
+  const stored = await d.users.getMemory(d.user.id);
   const sinceId = stored.lastExtractedFromMsgId ?? 0;
-  const all = d.messages.listByConversation(d.conv.id, 200);
+  const all = await d.messages.listByConversation(d.conv.id, 200);
   const fresh = all.filter((m) => m.id > sinceId && (m.role === "user" || m.role === "assistant"));
   if (fresh.length === 0) return;
 
@@ -743,7 +743,7 @@ async function runMemoryExtraction(d: ProcessInboundDeps): Promise<void> {
       existingFacts: stored.facts,
     });
     if (Object.keys(newFacts).length > 0 || lastId !== sinceId) {
-      d.users.mergeMemoryFacts(d.user.id, newFacts, lastId);
+      await d.users.mergeMemoryFacts(d.user.id, newFacts, lastId);
     }
     if (Object.keys(newFacts).length > 0) {
       const lead = d.leads.byUserId(d.user.id);
@@ -753,7 +753,7 @@ async function runMemoryExtraction(d: ProcessInboundDeps): Promise<void> {
           .filter(([, v]) => v?.trim())
           .map(([k, v]) => `• ${k}: ${v}`);
         if (lines.length > 0) {
-          d.leads.upsertAutoFactsNote(lead.id, `Факты из разговора:\n${lines.join("\n")}`);
+          await d.leads.upsertAutoFactsNote(lead.id, `Факты из разговора:\n${lines.join("\n")}`);
         }
       }
     }
@@ -802,10 +802,10 @@ async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
   // so intake tracking kicks in from the first message. Without an ops chat,
   // only extract intake for leads that were manually promoted by the operator
   // (so the admin UI fields stay up-to-date even without LEADS_CHAT_ID).
-  let lead = d.leads.byUserId(d.user.id);
+  let lead = await d.leads.byUserId(d.user.id);
   if (!lead) {
     if (d.leadsChatId == null) return;
-    lead = d.leads.ensureForUser(d.user.id);
+    lead = await d.leads.ensureForUser(d.user.id);
   }
 
   // Stop updating once the operator has made a final decision — approved,
@@ -814,7 +814,7 @@ async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
   // still "in progress" so we keep extracting.
   if (lead.state !== "intake_pending" && lead.state !== "intake_complete") return;
 
-  const recent = d.messages.recentForContext(d.conv.id, 30);
+  const recent = await d.messages.recentForContext(d.conv.id, 30);
   const messagesForLlm = recent
     .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => ({
@@ -822,10 +822,7 @@ async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
       content: m.text,
     }));
 
-  const mediaCounts = countMediaForConversation(
-    (d.messages as unknown as { db: import("bun:sqlite").Database }).db,
-    d.conv.id,
-  );
+  const mediaCounts = await d.messages.countMediaForConversation(d.conv.id);
 
   const existing = parseIntakeJson(lead.intake_json);
   const intake = await extractIntake({
@@ -835,14 +832,14 @@ async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
     ...(existing ? { existingIntake: existing } : {}),
   });
 
-  d.leads.setIntake(lead.id, JSON.stringify(intake));
+  await d.leads.setIntake(lead.id, JSON.stringify(intake));
 
   // Auto-promote + post ops card only when all conditions met:
   // 1. intake is complete, 2. lead was in intake_pending (not already promoted),
   // 3. an ops chat is configured to post the card to.
   if (!isIntakeComplete(intake) || lead.state !== "intake_pending" || d.leadsChatId == null) return;
 
-  const promoted = d.leads.setState(lead.id, "intake_complete");
+  const promoted = await d.leads.setState(lead.id, "intake_complete");
   if (!promoted) return;
 
   const service = new LeadsService({
@@ -895,14 +892,14 @@ async function runVisaDocsUpdate(d: ProcessInboundDeps): Promise<void> {
   if (!d.rag) return;
   if (d.leadsChatId == null) return;
 
-  const lead = d.leads.byUserId(d.user.id);
+  const lead = await d.leads.byUserId(d.user.id);
   if (!lead) return;
   if (lead.state !== "docs_pending") return;
 
   // Read recent messages from the conversation. The visa form is
   // typically sent by the candidate as one or two long messages, so
   // 30 turns of context is plenty (and a hard upper bound on cost).
-  const recent = d.messages.recentForContext(d.conv.id, 30);
+  const recent = await d.messages.recentForContext(d.conv.id, 30);
   const messagesForLlm = recent
     .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => ({
@@ -922,7 +919,7 @@ async function runVisaDocsUpdate(d: ProcessInboundDeps): Promise<void> {
   const before = JSON.stringify(existing ?? {});
   const after = JSON.stringify(merged);
   if (before !== after) {
-    d.leads.setVisaDocs(lead.id, after);
+    await d.leads.setVisaDocs(lead.id, after);
   }
 }
 
@@ -938,10 +935,10 @@ function parseVisaDocsJson(raw: string | null): VisaFields | undefined {
 async function runConversationSummaryRefresh(d: ProcessInboundDeps): Promise<void> {
   if (!d.rag?.conversationSummary) return;
 
-  const all = d.messages.listByConversation(d.conv.id, 500);
+  const all = await d.messages.listByConversation(d.conv.id, 500);
   if (all.length < SUMMARY_START_THRESHOLD) return;
 
-  const stored = d.conversations.getSummary(d.conv.id);
+  const stored = await d.conversations.getSummary(d.conv.id);
   const _latestId = all[all.length - 1]!.id;
   const lastSummarizedId = stored?.summarizedThroughMsgId ?? 0;
 
@@ -977,7 +974,7 @@ async function runConversationSummaryRefresh(d: ProcessInboundDeps): Promise<voi
       ...(stored?.summary ? { previousSummary: stored.summary } : {}),
     });
     if (summary.trim().length > 0) {
-      d.conversations.setSummary(d.conv.id, summary, lastSummarizable.id);
+      await d.conversations.setSummary(d.conv.id, summary, lastSummarizable.id);
     }
     console.log(
       `[summary] conv=${d.conv.id} refreshed through msg=${lastSummarizable.id} (gap=${gap}, refined=${stored !== null})`,
@@ -1003,7 +1000,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     } catch (err) {
       console.error("[webhook] sendMessage failed (non-fatal):", err);
     }
-    const inserted = d.messages.add({
+    const inserted = await d.messages.add({
       conversationId: d.conv.id,
       role: "assistant",
       text,
@@ -1011,7 +1008,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
       meta,
       ...(stage !== undefined ? { stage } : {}),
     });
-    d.conversations.touch(d.conv.id);
+    await d.conversations.touch(d.conv.id);
     d.onEvent?.({
       type: "assistant-replied",
       conversationId: d.conv.id,
@@ -1040,7 +1037,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     // inbound — a contextual hit returns mode to ai.
     const { result, stage } = await runRagForInbound(d);
     if (result.text !== NO_CONTEXT_MARKER) {
-      d.conversations.setMode(d.conv.id, "ai");
+      await d.conversations.setMode(d.conv.id, "ai");
       d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
       await reply(
         result.text,
@@ -1059,7 +1056,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   }
 
   if (containsEscalationTrigger(d.text)) {
-    d.conversations.setMode(d.conv.id, "queued");
+    await d.conversations.setMode(d.conv.id, "queued");
     d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
     return;
   }
@@ -1080,13 +1077,13 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     // send a CTA-fallback instead of staying silent. This keeps the candidate
     // engaged rather than watching "Секунду, уточню…" repeat endlessly.
     const STALL_LIMIT = 3;
-    const stallCount = d.conversations.getStallCount(d.conv) + 1;
-    d.conversations.setStallCount(d.conv.id, stallCount);
+    const stallCount = (await d.conversations.getStallCount(d.conv)) + 1;
+    await d.conversations.setStallCount(d.conv.id, stallCount);
 
     console.log(`[processInbound] conv=${d.conv.id} stall=${stallCount}/${STALL_LIMIT}`);
     if (stallCount >= STALL_LIMIT) {
       // Reset counter so next stall cycle restarts from 0.
-      d.conversations.setStallCount(d.conv.id, 0);
+      await d.conversations.setStallCount(d.conv.id, 0);
       // Send CTA-fallback: pivot to call — moves toward conversion instead
       // of silently queuing. Keep the conversation in AI mode so the bot can
       // still reply to follow-ups.
@@ -1106,7 +1103,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
 
     // Queue the conversation so the operator sees it needs a manual reply.
     if (d.conv.mode === "ai") {
-      d.conversations.setMode(d.conv.id, "queued");
+      await d.conversations.setMode(d.conv.id, "queued");
       d.conv.mode = "queued";
       d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
     }
@@ -1115,8 +1112,10 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     // Dedup: if there is already a pending suggestion for this conversation
     // (same question lingering) a new row is NOT inserted — see KbSuggestionsRepo.create.
     try {
-      const userMsg = d.messages.recentForContext(d.conv.id, 1).find((m) => m.role === "user");
-      const suggestion = d.kbSuggestions.create({
+      const userMsg = (await d.messages.recentForContext(d.conv.id, 1)).find(
+        (m) => m.role === "user",
+      );
+      const suggestion = await d.kbSuggestions.create({
         questionText: d.text,
         sourceConversationId: d.conv.id,
         sourceMessageId: userMsg?.id,
@@ -1141,7 +1140,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   }
 
   // Successful answer — reset the stall counter.
-  d.conversations.setStallCount(d.conv.id, 0);
+  await d.conversations.setStallCount(d.conv.id, 0);
 
   const { messageId } = await reply(
     result.text,
