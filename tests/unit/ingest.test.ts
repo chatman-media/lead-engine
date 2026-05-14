@@ -8,7 +8,7 @@ import type { EmbeddingClient } from "@/rag/embed.ts";
 import { deriveTopicFromPath, ingestDirectory, ingestFile, ingestText } from "@/rag/ingest.ts";
 import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
-const DIM = 1536;
+const DIM = 8;
 
 function fakeEmbedder(): EmbeddingClient & { calls: string[][] } {
   const calls: string[][] = [];

@@ -26,13 +26,17 @@ const t0 = Date.now();
 try {
   await client.connect();
   console.log(`Connected in ${Date.now() - t0}ms`);
-  const me = await client.getMe();
+  const me = (await client.getMe()) as {
+    id?: { toString(): string };
+    username?: string;
+    firstName?: string;
+  };
   console.log(
     "Authenticated as:",
     JSON.stringify({
-      id: (me as any).id?.toString(),
-      username: (me as any).username,
-      firstName: (me as any).firstName,
+      id: me.id?.toString(),
+      username: me.username,
+      firstName: me.firstName,
     }),
   );
   await client.disconnect();

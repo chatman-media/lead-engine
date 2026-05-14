@@ -44,15 +44,27 @@ describe("ExperimentsRepo — insert/read", () => {
   });
 
   test("invalid status is rejected by CHECK constraint", async () => {
-    await expect(
-      sql`INSERT INTO experiments (slug, status, allocation_json, success_metric)
-          VALUES ('bad', 'made-up', '{}', 'qualified')`,
-    ).rejects.toThrow();
+    // Avoid expect().rejects.toThrow() on raw postgres.js tagged templates —
+    // the pending-query lifecycle hangs on constraint-violation cancels.
+    let threw = false;
+    try {
+      await sql`INSERT INTO experiments (slug, status, allocation_json, success_metric)
+                VALUES ('bad', 'made-up', '{}', 'qualified')`;
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
   });
 
   test("duplicate slug throws", async () => {
     await repo.insert({ slug: "dup", allocation: { x: 1 } });
-    await expect(repo.insert({ slug: "dup", allocation: { y: 1 } })).rejects.toThrow();
+    let threw = false;
+    try {
+      await repo.insert({ slug: "dup", allocation: { y: 1 } });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
   });
 });
 

@@ -1,5 +1,3 @@
-import type { Sql } from "../db/postgres.ts";
-
 import { type LeadState, LeadsRepo } from "../db/repos/leads.ts";
 import { type AttributionDeps, attributeLeadOutcome } from "./outcome-attribution.ts";
 

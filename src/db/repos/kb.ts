@@ -36,17 +36,17 @@ export class KbRepo {
     contentHash: string;
     topic?: string | null;
   }): Promise<KbDocumentRow> {
-    const [existing] = await this.sql<KbDocumentRow[]>`
-      SELECT * FROM kb_documents
-      WHERE source = ${input.source} AND content_hash = ${input.contentHash} LIMIT 1
-    `;
-    if (existing) return existing;
     const topic = input.topic ?? null;
+    // Atomic upsert against uniq_kb_source_hash index. DO UPDATE on a sentinel
+    // column lets RETURNING * fire for both new and existing rows (a plain
+    // DO NOTHING would silently skip RETURNING on conflict).
     const [row] = await this.sql<KbDocumentRow[]>`
       INSERT INTO kb_documents (source, title, content_hash, topic)
-      VALUES (${input.source}, ${input.title}, ${input.contentHash}, ${topic}) RETURNING *
+      VALUES (${input.source}, ${input.title}, ${input.contentHash}, ${topic})
+      ON CONFLICT (source, content_hash) DO UPDATE SET source = EXCLUDED.source
+      RETURNING *
     `;
-    if (!row) throw new Error("Failed to insert kb_document");
+    if (!row) throw new Error("Failed to upsert kb_document");
     return row;
   }
 
@@ -103,30 +103,36 @@ export class KbRepo {
   }
 
   async searchBm25(query: string, k = 5, topic?: string | null): Promise<KbSearchHit[]> {
+    // sanitizeFtsQuery turns "оформляется общ" into `"оформляется"* OR "общ"*` —
+    // prefix-OR semantics so any single term keyword (and its prefix) can
+    // match a chunk, bridging Russian morphology gaps the FTS dict can't
+    // bridge. Previously this sanitized form was computed but unused — the
+    // queries below fell back to plainto_tsquery on the raw query, which
+    // ANDs terms and skips prefix matching.
     const ftsQuery = sanitizeFtsQuery(query);
     if (!ftsQuery) return [];
     try {
       if (topic == null) {
         return this.sql<KbSearchHit[]>`
           SELECT c.id AS chunk_id,
-                 -ts_rank(c.fts, plainto_tsquery('russian', ${query})) AS distance,
+                 -ts_rank(c.fts, to_tsquery('russian', ${ftsQuery})) AS distance,
                  c.text, c.document_id, d.source, d.title
           FROM kb_chunks c
           JOIN kb_documents d ON d.id = c.document_id
-          WHERE c.fts @@ plainto_tsquery('russian', ${query})
-          ORDER BY ts_rank(c.fts, plainto_tsquery('russian', ${query})) DESC
+          WHERE c.fts @@ to_tsquery('russian', ${ftsQuery})
+          ORDER BY ts_rank(c.fts, to_tsquery('russian', ${ftsQuery})) DESC
           LIMIT ${k}
         `;
       }
       return this.sql<KbSearchHit[]>`
         SELECT c.id AS chunk_id,
-               -ts_rank(c.fts, plainto_tsquery('russian', ${query})) AS distance,
+               -ts_rank(c.fts, to_tsquery('russian', ${ftsQuery})) AS distance,
                c.text, c.document_id, d.source, d.title
         FROM kb_chunks c
         JOIN kb_documents d ON d.id = c.document_id
-        WHERE c.fts @@ plainto_tsquery('russian', ${query})
+        WHERE c.fts @@ to_tsquery('russian', ${ftsQuery})
           AND (d.topic = ${topic} OR d.topic IS NULL)
-        ORDER BY ts_rank(c.fts, plainto_tsquery('russian', ${query})) DESC
+        ORDER BY ts_rank(c.fts, to_tsquery('russian', ${ftsQuery})) DESC
         LIMIT ${k}
       `;
     } catch (err) {
@@ -319,14 +325,20 @@ export class KbRepo {
 }
 
 export function sanitizeFtsQuery(raw: string): string {
+  // Build a Postgres-FTS-compatible tsquery: prefix-OR over every term so
+  // each keyword matches independently (bridging Russian morphology gaps
+  // the FTS dictionary cannot fully cover, e.g. "оформ" → "оформляется").
+  // Strip operator characters and bare boolean keywords so user input
+  // cannot inject tsquery operators.
   if (!raw) return "";
-  const stripped = raw.replace(/["'()*:.\\^]/g, " ").replace(/\s+(AND|OR|NOT|NEAR)\s+/gi, " ");
+  const stripped = raw.replace(/["'()*:.\\^&|!]/g, " ").replace(/\s+(AND|OR|NOT|NEAR)\s+/gi, " ");
   const tokens = stripped
     .split(/\s+/)
     .map((t) => t.trim())
     .filter((t) => t.length >= 2);
   if (tokens.length === 0) return "";
-  return tokens.map((t) => `"${t}"*`).join(" OR ");
+  // `term:*` is Postgres tsquery prefix syntax; `|` is OR.
+  return tokens.map((t) => `${t}:*`).join(" | ");
 }
 
 export function reciprocalRankFusion(

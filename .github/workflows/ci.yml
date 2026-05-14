@@ -23,6 +23,9 @@ jobs:
     timeout-minutes: 10
 
     services:
+      # pgvector image bundles PostgreSQL + the pgvector extension that
+      # KbRepo needs for vector search. tests/helpers/test-db.ts applies
+      # pg_schema.sql which calls CREATE EXTENSION vector.
       postgres:
         image: pgvector/pgvector:pg16
         env:
@@ -36,6 +39,13 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+
+    env:
+      # Tests use fake embedders with an 8-d shape; setupTestDb patches the
+      # schema accordingly. activeEmbeddingDim() in src/config.ts must agree
+      # so tests that call into it (e.g. kb-management.test.ts) match.
+      OPENAI_EMBEDDING_DIM: "8"
+      OLLAMA_EMBEDDING_DIM: "8"
 
     steps:
       - uses: actions/checkout@v4

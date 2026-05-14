@@ -21,6 +21,8 @@ export interface OpenAIEmbeddingOptions {
   baseUrl: string;
   model: string;
   dim: number;
+  /** Per-request timeout in ms. Default 60_000 (1 min). */
+  timeoutMs?: number;
   fetch?: FetchLike;
 }
 
@@ -34,6 +36,7 @@ export class OpenAIEmbeddingClient implements EmbeddingClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly model: string;
+  private readonly timeoutMs: number;
   private readonly fetchImpl: FetchLike;
 
   constructor(opts: OpenAIEmbeddingOptions) {
@@ -42,6 +45,7 @@ export class OpenAIEmbeddingClient implements EmbeddingClient {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.model = opts.model;
     this.dim = opts.dim;
+    this.timeoutMs = opts.timeoutMs ?? 60_000;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
@@ -66,6 +70,7 @@ export class OpenAIEmbeddingClient implements EmbeddingClient {
         authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({ model: this.model, input: inputs }),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     let body: EmbeddingResponse;
     try {

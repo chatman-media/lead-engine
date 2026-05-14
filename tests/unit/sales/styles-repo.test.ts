@@ -55,13 +55,19 @@ describe("StylesRepo — insert/read", () => {
       displayName: flirtyBelfort.displayName,
       config: flirtyBelfort,
     });
-    await expect(
-      repo.insert({
+    // Avoid expect().rejects.toThrow() on a PG UNIQUE-violation path — the
+    // postgres.js pending-query lifecycle hangs on constraint cancel.
+    let threw = false;
+    try {
+      await repo.insert({
         slug: flirtyBelfort.slug,
         displayName: "duplicate",
         config: flirtyBelfort,
-      }),
-    ).rejects.toThrow();
+      });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
   });
 });
 

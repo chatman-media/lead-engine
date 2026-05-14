@@ -164,6 +164,7 @@ function RoutingCard({ status }: { status: SystemStatus }) {
       <Row label="active" value={summary} mono />
       <Row label="stage classifier" value={routing.stage_classifier} />
       {detailLines.map((line, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: detail lines are derived deterministically from routing config — index is stable
         <div key={i} style={{ fontSize: 11, color: "var(--text-3)", marginTop: i === 0 ? 8 : 4 }}>
           {line}
         </div>

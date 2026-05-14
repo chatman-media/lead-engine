@@ -140,6 +140,7 @@ export function MemoryPane({
 
           {rows.map((r, i) => (
             <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: rows are an editable form buffer; index is the stable identity here, not the contents
               key={i}
               data-testid="memory-row"
               style={{ display: "flex", gap: 6, alignItems: "center" }}

@@ -39,11 +39,13 @@ describe("VacanciesRepo", () => {
 
   test("listActive ordering: freshest update first", async () => {
     const a = await repo.create({ title: "A", body: "a" });
-    // Wait a beat so updated_at differs
+    // updated_at has integer-second resolution — wait past the boundary
+    // so b is strictly newer than a, and again before patching a so the
+    // patch is strictly newer than b.
     await new Promise((r) => setTimeout(r, 1100));
     const b = await repo.create({ title: "B", body: "b" });
     expect((await repo.listActive())[0]!.id).toBe(b.id);
-    // Editing A bumps it to the top
+    await new Promise((r) => setTimeout(r, 1100));
     await repo.update(a.id, { body: "a updated" });
     expect((await repo.listActive())[0]!.id).toBe(a.id);
   });
