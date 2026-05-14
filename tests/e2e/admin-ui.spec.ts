@@ -189,6 +189,11 @@ test.describe("Admin Chat detail", () => {
   });
 
   test("operator sends reply → appears in message list", async ({ page }) => {
+    // Telegram delivery fails in the test env (no real bot token), and
+    // handleSend surfaces that as `window.alert(...)`. Without a handler
+    // Playwright would hang on the modal until its default timeout —
+    // auto-dismiss makes the click handler complete naturally.
+    page.on("dialog", (d) => d.dismiss());
     await loginPage(page);
     await page.goto(`/admin/chats/${convId}`);
     // Take over the conversation
