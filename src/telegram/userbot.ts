@@ -409,17 +409,28 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     let pending: Awaited<ReturnType<typeof dequeuePending>>;
     try {
       pending = await dequeuePending(db);
-    } catch {
+    } catch (err) {
+      console.error("[userbot] send-queue dequeuePending failed:", err);
       return;
     }
+    if (pending.length > 0) {
+      console.log(`[userbot] send-queue: ${pending.length} pending message(s)`);
+    }
     for (const row of pending) {
+      console.log(
+        `[userbot] send-queue: sending id=${row.id} tg_user_id=${row.tg_user_id} text_len=${row.text.length}`,
+      );
       try {
         // Resolve access_hash from entity cache; bare numeric IDs fail without it.
         const peer = await client.getInputEntity(row.tg_user_id);
         await client.sendMessage(peer, { message: row.text });
         await markSent(db, row.id);
+        console.log(`[userbot] send-queue: sent ok id=${row.id}`);
       } catch (err) {
-        console.error(`[userbot] send-queue failed tg_user_id=${row.tg_user_id}:`, err);
+        console.error(
+          `[userbot] send-queue failed id=${row.id} tg_user_id=${row.tg_user_id}:`,
+          err,
+        );
         await markFailed(db, row.id, err instanceof Error ? err.message : String(err)).catch(
           () => undefined,
         );

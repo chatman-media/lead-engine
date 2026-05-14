@@ -514,25 +514,37 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
     const user = await users.byId(conv.user_id);
     if (!user) return json({ error: "user not found" }, { status: 404 });
 
+    console.log(
+      `[admin reply] conv=${id} user=${user.id} tg_user_id=${user.tg_user_id} text_len=${text.length} userbotEnabled=${!!deps.userbotEnabled} hasTelegram=${!!deps.telegram}`,
+    );
+
     let tgMessageId: number | undefined;
     let tgError: string | undefined;
     if (deps.userbotEnabled) {
       // Route through the userbot send queue — message will appear from Alina's account.
+      console.log(`[admin reply] routing via userbot enqueue → tg_user_id=${user.tg_user_id}`);
       await enqueue(deps.sql, user.tg_user_id, text).catch((err) => {
         tgError = err instanceof Error ? err.message : String(err);
         console.error("[admin reply] userbot enqueue failed:", err);
       });
+      if (!tgError) console.log(`[admin reply] userbot enqueue ok`);
     } else if (deps.telegram) {
+      console.log(`[admin reply] routing via bot API → chatId=${user.tg_user_id}`);
       try {
         const sent = await deps.telegram.sendMessage({
           chatId: user.tg_user_id,
           text,
         });
         tgMessageId = sent.message_id;
+        console.log(`[admin reply] bot API ok → message_id=${tgMessageId}`);
       } catch (err) {
         tgError = err instanceof Error ? err.message : String(err);
         console.error("[admin reply] Telegram send failed:", err);
       }
+    } else {
+      console.warn(
+        "[admin reply] no send path: userbotEnabled=false and telegram=undefined — message saved to DB only",
+      );
     }
 
     await messages.add({
