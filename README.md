@@ -35,7 +35,8 @@ Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тест�
 | [docs/LEADS.md](docs/LEADS.md) | Lead pipeline: state machine, intake/visa-docs, operator workflow |
 | [docs/USERBOT.md](docs/USERBOT.md) | Userbot (MTProto): setup, auth, конфигурация |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Docker / nginx / Cloudflare Tunnel / backups / KB ingest / recovery |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Что сделано, что в очереди |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Что в очереди (Tier 3 + recommended turn-on order) |
+| [CHANGELOG.md](CHANGELOG.md) | Что сделано |
 
 ---
 

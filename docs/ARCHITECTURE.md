@@ -264,4 +264,5 @@ E2E-тесты поднимают сервер на отдельном порт�
 | [LEADS.md](LEADS.md) | Lead state machine, intake/visa-docs, relay |
 | [USERBOT.md](USERBOT.md) | MTProto userbot setup |
 | [DEPLOY.md](DEPLOY.md) | Docker, nginx, backups |
-| [ROADMAP.md](ROADMAP.md) | Что сделано, что в очереди |
+| [ROADMAP.md](ROADMAP.md) | Что в очереди |
+| [../CHANGELOG.md](../CHANGELOG.md) | Что сделано |
