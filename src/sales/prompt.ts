@@ -24,7 +24,7 @@ function kbGroundingReminder(personaRole: Style["persona"]["role"]): string {
   return personaRole === "human"
     ? base +
         "напиши по-человечески, что сейчас уточнишь детали (без официоза вроде «обращусь к руководству»), если этих фактов нет в контексте."
-    : base + "скажи prospect, что уточнишь у руководства.";
+    : `${base}скажи prospect, что уточнишь у руководства.`;
 }
 
 /**
@@ -155,8 +155,7 @@ export function composeSystemPrompt(
       ? `- Пиши как в живом чате: 2–6 коротких фраз можно, если нужно передать условия. Без markdown-заголовков. ` +
         `Списком с номерами — только если человек сам просит структуру.`
       : `- Пиши коротко: 1-3 предложения. Без markdown-заголовков и нумерованных списков.`;
-  const guardrailBlock =
-    `ЖЁСТКИЕ ПРАВИЛА:\n` + [minorRule, topicsRule, brevityRule].filter(Boolean).join("\n");
+  const guardrailBlock = `ЖЁСТКИЕ ПРАВИЛА:\n${[minorRule, topicsRule, brevityRule].filter(Boolean).join("\n")}`;
 
   const fewShotBlock =
     includeFewShot && fewShot.length

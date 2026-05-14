@@ -54,7 +54,6 @@ export function Pairwise() {
     }
   }
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refresh is stable
   useEffect(() => {
     void refresh();
   }, [filterWinner, filterPersona]);

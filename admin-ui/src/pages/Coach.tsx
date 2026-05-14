@@ -71,7 +71,6 @@ export function Coach() {
     }
   }
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refresh is stable
   useEffect(() => {
     void refresh();
   }, [filterStatus, filterStyle]);
@@ -451,6 +450,7 @@ export function Coach() {
               <h3>Rationale</h3>
               <ul style={{ paddingLeft: 20 }}>
                 {detail.rationale.map((r, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: rationale list is read-only and append-only — index is stable
                   <li key={i} style={{ marginBottom: 4 }}>
                     {r}
                   </li>
