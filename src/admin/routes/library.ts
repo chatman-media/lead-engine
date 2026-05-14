@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { KbRepo } from "../../db/repos/kb.ts";
 import { ingestFile } from "../../rag/ingest.ts";
 import { json, type RouteHandler } from "../../router.ts";
@@ -45,10 +46,13 @@ export function createUploadBookHandler(deps: AdminApiDeps): RouteHandler {
     }
 
     const originalName = fileEntry.name;
-    const ext = originalName.slice(originalName.lastIndexOf(".")).toLowerCase();
-    if (!BOOK_ALLOWED_EXTS.has(ext)) {
+    // path.extname returns "" when the dot is missing — explicit handling
+    // beats the slice() fallback (which would otherwise pull the whole
+    // filename and fail the allowlist obscurely).
+    const ext = extname(originalName).toLowerCase();
+    if (!ext || !BOOK_ALLOWED_EXTS.has(ext)) {
       return json(
-        { error: `unsupported file type: ${ext} (allowed: pdf, txt, md)` },
+        { error: `unsupported file type: ${ext || "(none)"} (allowed: pdf, txt, md)` },
         { status: 400 },
       );
     }
@@ -61,7 +65,9 @@ export function createUploadBookHandler(deps: AdminApiDeps): RouteHandler {
       );
     }
 
-    const tmpPath = join(tmpdir(), `book-upload-${Date.now()}${ext}`);
+    // Random suffix avoids the collision two simultaneous uploads in the
+    // same millisecond would otherwise hit with a Date.now()-only name.
+    const tmpPath = join(tmpdir(), `book-upload-${randomUUID()}${ext}`);
     try {
       writeFileSync(tmpPath, new Uint8Array(bytes));
     } catch {

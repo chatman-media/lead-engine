@@ -254,7 +254,11 @@ export function createExperimentFunnelHandler(deps: AdminApiDeps): RouteHandler 
     return json({
       experiment_id: id,
       success_metric: row.success_metric,
-      funnel: funnel.filter((r) => r.conversations > 0 || true), // include all rows for now
+      // Surface every active style in the funnel (even zero-traffic ones) so
+      // the UI can show "this branch never got a chance" rather than hiding
+      // it. The repo query already restricts to styles relevant to the
+      // experiment, so no extra filtering is needed here.
+      funnel,
     });
   };
 }
