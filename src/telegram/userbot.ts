@@ -288,8 +288,23 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   const experiments = new ExperimentsRepo(db);
   const vacancies = new VacanciesRepo(db);
   const leads = new LeadsRepo(db);
-  // Per-user last-processed timestamp for rate limiting.
+  // Per-user last-processed timestamp for rate limiting. Bounded so a
+  // long-running process doesn't accumulate one entry per ever-seen user
+  // forever — when over the cap, drop the half that hasn't been seen in
+  // the longest time (Map preserves insertion order; entries get
+  // rewritten on every hit so iteration order tracks recency).
   const lastProcessedAt = new Map<number, number>();
+  const LAST_PROCESSED_CAP = 10_000;
+  function pruneLastProcessed(): void {
+    if (lastProcessedAt.size <= LAST_PROCESSED_CAP) return;
+    const drop = Math.floor(LAST_PROCESSED_CAP / 2);
+    const it = lastProcessedAt.keys();
+    for (let i = 0; i < drop; i++) {
+      const k = it.next();
+      if (k.done) break;
+      lastProcessedAt.delete(k.value);
+    }
+  }
 
   client.addEventHandler(
     async (event) => {
@@ -314,7 +329,9 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
         );
         return;
       }
+      lastProcessedAt.delete(tgUserId);
       lastProcessedAt.set(tgUserId, now);
+      pruneLastProcessed();
 
       const userExisting = await users.byTgId(tgUserId);
       let user = userExisting;

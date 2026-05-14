@@ -1,4 +1,5 @@
 import type { ChatClient, ChatMessage } from "./chat.ts";
+import { stripCodeFences, stripThinkBlocks } from "./sanitize.ts";
 
 /**
  * Unified fact-checker — replaces the separate reflect.ts + vacancy-guard.ts
@@ -147,8 +148,7 @@ export async function checkFacts(input: FactCheckInput): Promise<FactCheckResult
 export function parseFactCheckResult(raw: string): FactCheckResult {
   const OK: FactCheckResult = { grounded: true, vacancyOk: true };
 
-  let s = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
-  s = s.replace(/```(?:json)?/gi, "").trim();
+  const s = stripCodeFences(stripThinkBlocks(raw)).trim();
   const start = s.indexOf("{");
   const end = s.lastIndexOf("}");
   if (start === -1 || end === -1 || end < start) return OK;

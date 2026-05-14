@@ -1,4 +1,5 @@
 import type { ChatClient, ChatMessage } from "./chat.ts";
+import { stripCodeFences, stripThinkBlocks } from "./sanitize.ts";
 
 /**
  * Extracts persistent facts ABOUT THE CANDIDATE (not the bot persona) from
@@ -84,8 +85,7 @@ export async function extractUserFacts(input: ExtractFactsInput): Promise<Record
  * Exported for unit tests.
  */
 export function parseFactsFromLlmOutput(raw: string): Record<string, string> {
-  let s = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
-  s = s.replace(/```(?:json)?/gi, "").trim();
+  const s = stripCodeFences(stripThinkBlocks(raw)).trim();
 
   // Find the first {...} block. The model sometimes prefixes "Ответ:" or similar.
   const start = s.indexOf("{");

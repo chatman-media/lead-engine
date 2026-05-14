@@ -1,4 +1,5 @@
 import type { ChatClient, ChatMessage } from "./chat.ts";
+import { stripCodeFences, stripThinkBlocks } from "./sanitize.ts";
 
 /**
  * Vacancy Guard — второй слой валидации после reflect.ts.
@@ -80,8 +81,7 @@ export async function checkVacancyFacts(input: VacancyGuardInput): Promise<Vacan
 
 /** Exported for unit tests. */
 export function parseGuardResult(raw: string): VacancyGuardResult {
-  let s = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
-  s = s.replace(/```(?:json)?/gi, "").trim();
+  const s = stripCodeFences(stripThinkBlocks(raw)).trim();
   const start = s.indexOf("{");
   const end = s.lastIndexOf("}");
   if (start === -1 || end === -1 || end < start) return { ok: true };

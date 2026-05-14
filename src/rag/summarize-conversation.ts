@@ -1,4 +1,5 @@
 import type { ChatClient, ChatMessage } from "./chat.ts";
+import { stripThinkBlocks } from "./sanitize.ts";
 
 /**
  * Compresses old turns of a long conversation into one short paragraph that
@@ -70,7 +71,7 @@ export async function summarizeConversation(input: SummarizeInput): Promise<stri
 /** Strip think-tags / markdown / leading prefixes; cap length at the last
  *  sentence boundary inside the cap. Exported for unit tests. */
 export function cleanSummary(raw: string, maxLength: number): string {
-  let s = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
+  let s = stripThinkBlocks(raw);
   // Strip ONLY the fence delimiters, not the wrapped content — the model
   // sometimes wraps a clean summary in ``` for emphasis, we want the body.
   s = s.replace(/```[a-zA-Z]*\n?/g, "");
