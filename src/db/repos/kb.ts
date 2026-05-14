@@ -36,17 +36,17 @@ export class KbRepo {
     contentHash: string;
     topic?: string | null;
   }): Promise<KbDocumentRow> {
-    const [existing] = await this.sql<KbDocumentRow[]>`
-      SELECT * FROM kb_documents
-      WHERE source = ${input.source} AND content_hash = ${input.contentHash} LIMIT 1
-    `;
-    if (existing) return existing;
     const topic = input.topic ?? null;
+    // Atomic upsert against uniq_kb_source_hash index. DO UPDATE on a sentinel
+    // column lets RETURNING * fire for both new and existing rows (a plain
+    // DO NOTHING would silently skip RETURNING on conflict).
     const [row] = await this.sql<KbDocumentRow[]>`
       INSERT INTO kb_documents (source, title, content_hash, topic)
-      VALUES (${input.source}, ${input.title}, ${input.contentHash}, ${topic}) RETURNING *
+      VALUES (${input.source}, ${input.title}, ${input.contentHash}, ${topic})
+      ON CONFLICT (source, content_hash) DO UPDATE SET source = EXCLUDED.source
+      RETURNING *
     `;
-    if (!row) throw new Error("Failed to insert kb_document");
+    if (!row) throw new Error("Failed to upsert kb_document");
     return row;
   }
 
