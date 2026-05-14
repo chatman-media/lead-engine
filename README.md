@@ -1,10 +1,6 @@
 # tg-chatbot
 
 [![CI](https://img.shields.io/github/actions/workflow/status/chatman-media/sales-guru/ci.yml?style=flat-square&label=ci)](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml)
-[![Lint](https://img.shields.io/github/actions/workflow/status/chatman-media/sales-guru/ci.yml?style=flat-square&label=lint&logo=biome&logoColor=white)](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/github/actions/workflow/status/chatman-media/sales-guru/ci.yml?style=flat-square&label=tests)](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml)
-[![Last Commit](https://img.shields.io/github/last-commit/chatman-media/sales-guru?style=flat-square&label=last%20commit)](https://github.com/chatman-media/sales-guru/commits/main)
-[![GitHub commits](https://img.shields.io/github/commit-activity/m/chatman-media/sales-guru?style=flat-square&label=commits)](https://github.com/chatman-media/sales-guru/graphs/commit-activity)
 
 Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тестами, самообучением через self-play и полноценной операторской админкой. Всё на чистом Bun без HTTP-фреймворка — SQLite + `sqlite-vec` для векторного поиска, gramjs для MTProto userbot-режима.
 
