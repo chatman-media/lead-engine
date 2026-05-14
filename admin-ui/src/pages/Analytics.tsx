@@ -170,19 +170,19 @@ export function Analytics() {
                 />
               )}
             </Card>
-            <Card title="RAG layers usage">
+            <Card title="Использование RAG">
               <KV
-                label="hybrid retrieval"
+                label="гибридный поиск"
                 value={data.hybrid_count}
                 total={data.total_assistant_messages}
               />
               <KV
-                label="query rewrites"
+                label="перефразирование запроса"
                 value={data.rewrite_count}
                 total={data.total_assistant_messages}
               />
               <KV
-                label="ungrounded (reflect)"
+                label="без подтверждения (reflect)"
                 value={data.ungrounded_count}
                 total={data.total_assistant_messages}
               />
