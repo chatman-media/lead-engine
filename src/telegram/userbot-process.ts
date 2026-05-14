@@ -72,6 +72,11 @@ if (config.llm.provider === "openrouter" ? !!config.openrouter.apiKey : !!config
   };
 }
 
+// Keep-alive: gramJS tears down all sockets on TIMEOUT, which empties the
+// event loop. Without this interval Bun exits before our 5s restart timer
+// fires, making the unhandledRejection handler useless.
+const _keepAlive = setInterval(() => {}, 30_000);
+
 // Track the active gramJS client so we can disconnect it before restarting.
 let activeClient: Awaited<ReturnType<typeof startUserbot>> | null = null;
 let restarting = false;

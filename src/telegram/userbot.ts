@@ -240,6 +240,10 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     // gramjs itself at WARN level ("Started reconnecting").
     connectionRetries: -1,
     retryDelay: 3000,
+    // Default timeout is 10s; Koyeb→Telegram latency can exceed that on
+    // first connect. 30s gives the update-state fetch enough headroom so
+    // the internal TIMEOUT rejection doesn't fire on healthy connections.
+    timeout: 30,
   });
 
   // connect() can throw TIMEOUT on the first attempt when Telegram is slow.
