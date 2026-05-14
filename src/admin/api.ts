@@ -107,6 +107,7 @@ export {
   createStylePlaygroundHandler,
 } from "./routes/styles.ts";
 export {
+  createDeleteUserDataHandler,
   createListUsersHandler,
   createUserDetailHandler,
 } from "./routes/users.ts";

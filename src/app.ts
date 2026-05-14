@@ -19,6 +19,7 @@ import {
   createDeletePairwiseMatchHandler,
   createDeleteSelfPlayMatchHandler,
   createDeleteTelegramWebhookHandler,
+  createDeleteUserDataHandler,
   createDeleteVacancyHandler,
   createDownloadFileHandler,
   createEditStyleHandler,
@@ -295,6 +296,9 @@ export function createRouter(deps: AppDeps): Router {
   // in the admin chat view; admin session cookie is the auth.
   router.get("/admin/api/tg-files/:fileId", createDownloadFileHandler(apiDeps));
   router.patch("/admin/api/users/:id/memory", createUpdateUserMemoryHandler(apiDeps));
+  // GDPR right-to-erasure: drops every PII row for one candidate and
+  // tombstones the users row itself. Single endpoint, transactional.
+  router.delete("/admin/api/users/:id/data", createDeleteUserDataHandler(apiDeps));
   // Detail view — register AFTER the more-specific :id/memory sub-path so
   // the literal sub-path matches first (router does linear scan).
   router.get("/admin/api/users/:id", createUserDetailHandler(apiDeps));
