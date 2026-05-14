@@ -164,6 +164,8 @@ POST /telegram/<secret>   ─┬─► whitelist (UsersRepo.byTgId / TELEGRAM_OP
 
 Single `pg_schema.sql` applied idempotently via `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`. Applied on every boot by `runMigrations()` in `src/db/migrate.ts`.
 
+Нумерованные файлы `migrations/001_*.sql` … `022_*.sql` — исторический trail миграций до их объединения в `pg_schema.sql`; **они не выполняются** runtime'ом и оставлены только для аудита. При изменении схемы правьте `pg_schema.sql` напрямую (через `CREATE ... IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`).
+
 ## Self-play training loop
 
 ```
@@ -241,8 +243,8 @@ Webhook ackает Telegram в <100ms (Bot API таймаут 60s, retries дуб
 
 | Уровень | Инструмент | Объём |
 |---------|-----------|-------|
-| Unit | `bun test` | 860+ тестов, `tests/unit/` (60 файлов) |
-| E2E | Playwright | 14+ тестов, `tests/e2e/` |
+| Unit | `bun test` | `tests/unit/` (~40 файлов с реальной PostgreSQL через `tests/helpers/test-db.ts`) |
+| E2E | Playwright | `tests/e2e/` |
 | Build | `bun run build:ui` | Vite сборка React-админки |
 | Type check | `bunx tsc --noEmit` | TypeScript strict |
 

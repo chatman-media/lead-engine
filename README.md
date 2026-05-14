@@ -347,10 +347,10 @@ BOT_PERSONA_COMPANY=INFINITY AGENCY
 ## Тесты
 
 ```bash
-bun run test              # unit tests (860+)
+bun run test              # unit tests
 bun run test:coverage     # unit tests с отчётом покрытия
 bun run test:e2e:install  # установить Playwright (один раз)
-bun run test:e2e          # E2E (Playwright, 14+ тестов)
+bun run test:e2e          # E2E (Playwright)
 ```
 
 Playwright поднимает сервер на `E2E_PORT` (по умолчанию `3100`) с тестовой БД и `TEST_HOOKS=1` (seed-эндпоинты `/__test/*`, только с этим флагом).
