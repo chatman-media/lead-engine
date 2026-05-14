@@ -20,6 +20,7 @@ import {
 import { loadUserbotSession, saveUserbotSession } from "../db/repos/userbot-session.ts";
 import { UsersRepo } from "../db/repos/users.ts";
 import { VacanciesRepo } from "../db/repos/vacancies.ts";
+import { log } from "../log.ts";
 import type { TelegramClient } from "./client.ts";
 import type { TgReplyMarkup, TgSendMessageResult } from "./types.ts";
 import type { RagDeps } from "./webhook.ts";
@@ -133,7 +134,7 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
   try {
     dialogs = await d.client.getDialogs({ limit: 100 });
   } catch (err) {
-    console.warn("[userbot] could not fetch dialogs for unread sweep:", err);
+    log.warn("could not fetch dialogs for unread sweep", { scope: "userbot", err });
     return;
   }
 
@@ -151,7 +152,7 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
         limit: Math.min(dialog.unreadCount, 20),
       });
     } catch (err) {
-      console.warn(`[userbot] getMessages failed for tgUserId=${tgUserId}:`, err);
+      log.warn("getMessages failed", { scope: "userbot", tg_user_id: tgUserId, err });
       continue;
     }
 
@@ -179,9 +180,11 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
       await d.conversations.touch(conv.id);
       d.onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
 
-      console.log(
-        `[userbot] sweep: processing missed msg id=${msg.id} from tg_user_id=${tgUserId}`,
-      );
+      log.info("sweep: processing missed msg", {
+        scope: "userbot",
+        tg_message_id: msg.id,
+        tg_user_id: tgUserId,
+      });
 
       // Use dialog.entity (full User object) so gramjs doesn't need to
       // resolve access_hash from a bare numeric ID.
@@ -213,7 +216,7 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
         tgUserId,
         onEvent: d.onEvent,
       }).catch((err) => {
-        console.error("[userbot] sweep processInbound failed:", err);
+        log.error("sweep processInbound failed", { scope: "userbot", err });
       });
     }
 
@@ -261,10 +264,12 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
       connected = true;
       break;
     } catch (err) {
-      console.warn(
-        `[userbot] connect attempt ${attempt}/5 failed:`,
-        (err as Error)?.message ?? err,
-      );
+      log.warn("connect attempt failed", {
+        scope: "userbot",
+        attempt,
+        max_attempts: 5,
+        err,
+      });
       if (attempt < 5) await new Promise((r) => setTimeout(r, 5_000));
     }
   }
@@ -324,9 +329,11 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
       const now = Date.now();
       const last = lastProcessedAt.get(tgUserId) ?? 0;
       if (now - last < USER_RATE_LIMIT_MS) {
-        console.log(
-          `[userbot] rate-limited tg_user_id=${tgUserId} (${now - last}ms since last msg)`,
-        );
+        log.debug("rate-limited inbound", {
+          scope: "userbot",
+          tg_user_id: tgUserId,
+          since_last_ms: now - last,
+        });
         return;
       }
       lastProcessedAt.delete(tgUserId);
@@ -337,10 +344,16 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
       let user = userExisting;
       if (!user && telegramOpenAccess()) {
         user = await users.create({ tgUserId, tgUsername: null });
-        console.log(`[userbot] TELEGRAM_OPEN_ACCESS: created user tg_user_id=${tgUserId}`);
+        log.info("TELEGRAM_OPEN_ACCESS: created user", {
+          scope: "userbot",
+          tg_user_id: tgUserId,
+        });
       }
       if (!user) {
-        console.log(`[userbot] ignoring message from non-whitelisted tg_user_id=${tgUserId}`);
+        log.debug("ignoring message from non-whitelisted user", {
+          scope: "userbot",
+          tg_user_id: tgUserId,
+        });
         return;
       }
 
@@ -386,7 +399,7 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
         tgUserId,
         onEvent,
       }).catch((err) => {
-        console.error("[userbot] processInbound failed:", err);
+        log.error("processInbound failed", { scope: "userbot", err });
       });
     },
     new NewMessage({ incoming: true }),
@@ -410,7 +423,7 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     ...(onEvent ? { onEvent } : {}),
   };
   await processUnread(sweepDeps).catch((err) => {
-    console.warn("[userbot] initial unread sweep failed:", err);
+    log.warn("initial unread sweep failed", { scope: "userbot", err });
   });
 
   // Periodic sweep — recovers messages received between a disconnect and
@@ -419,7 +432,7 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   // by way of `messages.addUserMessageIfNew` so re-runs are safe.
   const sweepHandle = setInterval(() => {
     processUnread(sweepDeps).catch((err) => {
-      console.warn("[userbot] periodic sweep failed:", err);
+      log.warn("periodic sweep failed", { scope: "userbot", err });
     });
   }, UNREAD_SWEEP_INTERVAL_MS);
   // Don't keep the process alive just because of this timer. Bun-specific
@@ -451,16 +464,19 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     try {
       pending = await dequeuePending(db);
     } catch (err) {
-      console.error("[userbot] send-queue dequeuePending failed:", err);
+      log.error("send-queue dequeuePending failed", { scope: "userbot", err });
       return;
     }
     if (pending.length > 0) {
-      console.log(`[userbot] send-queue: ${pending.length} pending message(s)`);
+      log.info("send-queue draining", { scope: "userbot", pending: pending.length });
     }
     for (const row of pending) {
-      console.log(
-        `[userbot] send-queue: sending id=${row.id} tg_user_id=${row.tg_user_id} text_len=${row.text.length}`,
-      );
+      log.info("send-queue sending", {
+        scope: "userbot",
+        queue_id: row.id,
+        tg_user_id: row.tg_user_id,
+        text_len: row.text.length,
+      });
       try {
         // Try resolving by numeric ID first (works if user has ever messaged
         // this account and their entity is in the gramJS session cache).
@@ -471,9 +487,11 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
         try {
           peer = await client.getInputEntity(row.tg_user_id);
         } catch (entityErr) {
-          console.warn(
-            `[userbot] send-queue: getInputEntity(${row.tg_user_id}) failed (${(entityErr as Error)?.message}), trying username lookup...`,
-          );
+          log.warn("send-queue: getInputEntity failed, trying username lookup", {
+            scope: "userbot",
+            tg_user_id: row.tg_user_id,
+            err: entityErr,
+          });
           const [userRow] = await db<{ tg_username: string | null }[]>`
             SELECT tg_username FROM users WHERE tg_user_id = ${row.tg_user_id} LIMIT 1
           `;
@@ -483,27 +501,33 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
             );
           }
           peer = await client.getInputEntity(`@${userRow.tg_username}`);
-          console.log(
-            `[userbot] send-queue: resolved via @${userRow.tg_username} for tg_user_id=${row.tg_user_id}`,
-          );
+          log.info("send-queue: resolved via @username", {
+            scope: "userbot",
+            tg_username: userRow.tg_username,
+            tg_user_id: row.tg_user_id,
+          });
         }
         await client.sendMessage(peer, { message: row.text });
         await markSent(db, row.id);
-        console.log(`[userbot] send-queue: sent ok id=${row.id}`);
+        log.info("send-queue: sent ok", { scope: "userbot", queue_id: row.id });
       } catch (err) {
-        console.error(
-          `[userbot] send-queue failed id=${row.id} tg_user_id=${row.tg_user_id}:`,
+        log.error("send-queue failed", {
+          scope: "userbot",
+          queue_id: row.id,
+          tg_user_id: row.tg_user_id,
           err,
-        );
+        });
         await markFailed(db, row.id, err instanceof Error ? err.message : String(err)).catch(
           () => undefined,
         );
         // Surface the moment a row hits the attempts cap so an operator
         // can see in logs why a message stopped retrying.
         if (row.attempts >= MAX_SEND_ATTEMPTS - 1) {
-          console.warn(
-            `[userbot] send-queue: row id=${row.id} hit attempt cap (${MAX_SEND_ATTEMPTS}), giving up`,
-          );
+          log.warn("send-queue: row hit attempt cap, giving up", {
+            scope: "userbot",
+            queue_id: row.id,
+            max_attempts: MAX_SEND_ATTEMPTS,
+          });
         }
       }
     }
@@ -512,8 +536,9 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     (sendQueueHandle as { unref: () => void }).unref();
   }
 
-  console.log(
-    `[userbot] connected and listening for private messages (sweep every ${UNREAD_SWEEP_INTERVAL_MS / 1000}s)`,
-  );
+  log.info("connected and listening for private messages", {
+    scope: "userbot",
+    sweep_interval_s: UNREAD_SWEEP_INTERVAL_MS / 1000,
+  });
   return client;
 }

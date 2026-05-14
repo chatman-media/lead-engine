@@ -1,5 +1,10 @@
 [test]
-coverage = false
-coverageThreshold = 0.0    # no enforced minimum — informational only
+# Coverage is opt-in via `--coverage` (or the `test:coverage` script).
+# Bun 1.3.x quirks:
+#   - `coverage = false` here silently overrides the CLI `--coverage` flag,
+#     so we omit it entirely.
+#   - `coverageThreshold` is read but never enforced (the gate is a no-op
+#     as of Bun 1.3.14). Threshold enforcement runs through the
+#     `scripts/check-coverage.ts` wrapper in CI instead.
 coverageReporter = ["text", "lcov"]
 coverageDir = "coverage"
