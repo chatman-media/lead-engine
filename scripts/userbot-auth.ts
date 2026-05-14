@@ -9,8 +9,6 @@ import * as readline from "node:readline";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { config } from "../src/config.ts";
-import { sql } from "../src/db/postgres.ts";
-import { saveUserbotSession } from "../src/db/repos/userbot-session.ts";
 
 function ask(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -49,13 +47,29 @@ async function main() {
   });
 
   const sessionString = client.session.save() as unknown as string;
-  await saveUserbotSession(sql, sessionString);
+
+  // Print before DB save so the string is never lost even if the DB is unreachable.
+  console.log("\n=== SESSION STRING (copy as USERBOT_SESSION env var if needed) ===");
+  console.log(sessionString);
+  console.log("===================================================================\n");
+
+  try {
+    const { sql } = await import("../src/db/postgres.ts");
+    const { saveUserbotSession } = await import("../src/db/repos/userbot-session.ts");
+    await saveUserbotSession(sql, sessionString);
+    console.log("Session saved to database.");
+  } catch (err) {
+    console.error(
+      "Could not save to DB (set USERBOT_SESSION env var manually):",
+      (err as Error).message,
+    );
+  }
 
   const me = await client.getMe();
   const username = (me as { username?: string }).username;
   const firstName = (me as { firstName?: string }).firstName;
-  console.log(`\nAuthenticated as: ${firstName ?? ""}${username ? ` (@${username})` : ""}`);
-  console.log("Session saved to database. You can now start the server with TELEGRAM_USERBOT=1.");
+  console.log(`Authenticated as: ${firstName ?? ""}${username ? ` (@${username})` : ""}`);
+  console.log("You can now start the server with TELEGRAM_USERBOT=1.");
 
   await client.disconnect();
   process.exit(0);
