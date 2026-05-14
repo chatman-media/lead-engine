@@ -4,9 +4,9 @@ import { ws } from "../App.tsx";
 import { api, type KbSuggestion, type SuggestionCounts, type SuggestionStatus } from "../api.ts";
 
 const TABS: { key: SuggestionStatus | "all"; label: string }[] = [
-  { key: "pending", label: "Pending" },
-  { key: "ingested", label: "Ingested" },
-  { key: "rejected", label: "Rejected" },
+  { key: "pending", label: "Ожидает" },
+  { key: "ingested", label: "Добавлено" },
+  { key: "rejected", label: "Отклонено" },
 ];
 
 export function KbSuggestions() {
@@ -100,7 +100,7 @@ export function KbSuggestions() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">KB Suggestions</h1>
+          <h1 className="page-title">Предложения в KB</h1>
           <p className="page-subtitle">
             Вопросы без ответа — просмотрите, добавьте ответ и одобрите в KB.
           </p>
@@ -161,9 +161,7 @@ export function KbSuggestions() {
       {suggestions === null ? (
         <div className="loading-text">Loading…</div>
       ) : suggestions.length === 0 ? (
-        <div className="empty">
-          {tab === "pending" ? "Нет неотвеченных вопросов" : "Нет записей"}
-        </div>
+        <div className="empty">{tab === "pending" ? "Нет вопросов без ответа" : "Нет записей"}</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {suggestions.map((s) => (
@@ -248,7 +246,7 @@ function SuggestionCard({
                   to={`/admin/chats/${s.source_conversation_id}`}
                   style={{ color: "var(--blue)" }}
                 >
-                  View chat →
+                  Чат →
                 </Link>
               </>
             )}
@@ -291,10 +289,10 @@ function SuggestionCard({
           />
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <button className="btn btn-sm btn-primary" disabled={isBusy} onClick={onApprove}>
-              {isBusy ? "…" : "Approve & Ingest"}
+              {isBusy ? "…" : "Добавить в KB"}
             </button>
             <button className="btn btn-sm btn-ghost" disabled={isBusy} onClick={onReject}>
-              Reject
+              Отклонить
             </button>
           </div>
         </>

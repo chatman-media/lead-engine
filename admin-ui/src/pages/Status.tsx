@@ -53,15 +53,15 @@ export function Status() {
   return (
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Status</h2>
+        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Статус</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {loadedAt && (
             <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-3)" }}>
-              loaded {new Date(loadedAt).toLocaleTimeString()}
+              обновлено {new Date(loadedAt).toLocaleTimeString("ru-RU")}
             </span>
           )}
           <button onClick={refresh} className="btn btn-ghost btn-sm">
-            refresh
+            обновить
           </button>
         </div>
       </div>
@@ -358,7 +358,7 @@ function LeadsCard({ status }: { status: SystemStatus }) {
       <Row label="closed/rejected" value={String(closed)} mono />
       <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-3)" }}>
         <a href="/admin/leads" style={{ color: "var(--amber)" }}>
-          open pipeline →
+          воронка →
         </a>
       </div>
       {!status.leads.leads_chat_configured && (
@@ -375,9 +375,9 @@ function VacanciesCard({ status }: { status: SystemStatus }) {
     <Card title="Vacancies">
       <Row label="active" value={String(status.vacancies.active)} mono />
       <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 8 }}>
-        Prepended to RAG context as АКТУАЛЬНЫЕ ВАКАНСИИ on every turn.{" "}
+        Вставляются в RAG-контекст как АКТУАЛЬНЫЕ ВАКАНСИИ на каждом ходу.{" "}
         <a href="/admin/vacancies" style={{ color: "var(--amber)" }}>
-          manage →
+          управление →
         </a>
       </div>
       {status.vacancies.active === 0 && (
@@ -388,7 +388,7 @@ function VacanciesCard({ status }: { status: SystemStatus }) {
             color: "var(--text-3)",
           }}
         >
-          No active vacancies — bot answers from KB only.
+          Нет активных вакансий — бот отвечает только из KB.
         </div>
       )}
     </Card>

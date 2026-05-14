@@ -7,11 +7,11 @@ export interface TabKey {
 }
 
 export const CONFIGURABLE_TABS: TabKey[] = [
-  { key: "analytics", label: "Analytics", defaultOn: true },
-  { key: "vacancies", label: "Vacancies", defaultOn: true },
-  { key: "kb-suggestions", label: "KB Suggestions", defaultOn: true },
-  { key: "styles", label: "Sales styles", defaultOn: true },
-  { key: "skills", label: "Skills", defaultOn: true },
+  { key: "analytics", label: "Аналитика", defaultOn: true },
+  { key: "vacancies", label: "Вакансии", defaultOn: true },
+  { key: "kb-suggestions", label: "Предложения в KB", defaultOn: true },
+  { key: "styles", label: "Стили продаж", defaultOn: true },
+  { key: "skills", label: "Навыки", defaultOn: true },
   { key: "self-play", label: "Self-play", defaultOn: false },
   { key: "coach", label: "Coach", defaultOn: false },
 ];

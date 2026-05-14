@@ -52,26 +52,26 @@ export function Layout({ admin, children }: LayoutProps) {
   const { visible } = useTabVisibility();
 
   const allNavItems = [
-    { to: "/admin/status", label: "Status", key: null },
-    { to: "/admin/analytics", label: "Analytics", key: "analytics" },
+    { to: "/admin/status", label: "Статус", key: null },
+    { to: "/admin/analytics", label: "Аналитика", key: "analytics" },
     {
       to: "/admin/chats",
-      label: "Chats",
+      label: "Чаты",
       key: null,
       badge: queuedCount > 0 ? queuedCount : undefined,
     },
-    { to: "/admin/leads", label: "Leads", key: null },
-    { to: "/admin/users", label: "Users", key: null },
-    { to: "/admin/vacancies", label: "Vacancies", key: "vacancies" },
-    { to: "/admin/kb", label: "Knowledge base", key: null },
+    { to: "/admin/leads", label: "Лиды", key: null },
+    { to: "/admin/users", label: "Пользователи", key: null },
+    { to: "/admin/vacancies", label: "Вакансии", key: "vacancies" },
+    { to: "/admin/kb", label: "База знаний", key: null },
     {
       to: "/admin/kb-suggestions",
-      label: "KB Suggestions",
+      label: "Предложения в KB",
       key: "kb-suggestions",
       badge: pendingKbCount > 0 ? pendingKbCount : undefined,
     },
-    { to: "/admin/styles", label: "Sales styles", key: "styles" },
-    { to: "/admin/skills", label: "Skills", key: "skills" },
+    { to: "/admin/styles", label: "Стили продаж", key: "styles" },
+    { to: "/admin/skills", label: "Навыки", key: "skills" },
     { to: "/admin/self-play", label: "Self-play", key: "self-play" },
     {
       to: "/admin/coach",
@@ -119,11 +119,11 @@ export function Layout({ admin, children }: LayoutProps) {
 
         <div className="sidebar-footer">
           <NavLink to="/admin/settings" className="nav-item" style={{ marginBottom: 8 }}>
-            <span>Settings</span>
+            <span>Настройки</span>
           </NavLink>
           <div className="sidebar-email">{admin.email}</div>
           <button className="btn btn-ghost btn-sm btn-block" onClick={handleLogout}>
-            Sign out
+            Выйти
           </button>
         </div>
       </aside>

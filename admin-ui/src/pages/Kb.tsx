@@ -124,7 +124,7 @@ export function Kb() {
           data-testid="kb-search-input"
         />
         <button onClick={refresh} className="btn btn-ghost btn-sm">
-          search
+          найти
         </button>
         <div style={{ flex: 1 }} />
         <TopicFilter topics={topics} value={topicFilter} onChange={setTopicFilter} />
@@ -136,7 +136,7 @@ export function Kb() {
           className="btn btn-primary btn-sm"
           data-testid="kb-ingest-toggle"
         >
-          {showIngest ? "cancel" : "+ ADD"}
+          {showIngest ? "отмена" : "+ ДОБАВИТЬ"}
         </button>
       </div>
 
@@ -247,7 +247,7 @@ function IngestForm({
           letterSpacing: 1,
         }}
       >
-        Add a document
+        Добавить документ
       </div>
       <input
         type="text"
@@ -289,7 +289,7 @@ function IngestForm({
           className="btn btn-primary btn-sm"
           data-testid="kb-ingest-submit"
         >
-          {submitting ? "ingesting…" : "ingest"}
+          {submitting ? "загрузка…" : "загрузить"}
         </button>
       </div>
       <div style={{ fontSize: 11, color: "var(--text-3)", lineHeight: 1.4 }}>
@@ -325,8 +325,8 @@ function TopicFilter({
       style={{ minWidth: 160 }}
       data-testid="kb-topic-filter"
     >
-      <option value="all">all topics</option>
-      <option value="__untagged__">(untagged only)</option>
+      <option value="all">все темы</option>
+      <option value="__untagged__">(без темы)</option>
       {topics.map((t) => (
         <option key={t} value={t}>
           {t}
@@ -448,7 +448,7 @@ function KbDocCard({
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
           <RetagControl current={doc.topic} knownTopics={knownTopics} onSet={onRetag} />
           <button onClick={onDelete} className="btn btn-danger btn-sm" data-testid="kb-doc-delete">
-            delete
+            удалить
           </button>
         </div>
       </div>
@@ -479,7 +479,7 @@ function RetagControl({
         className="btn btn-ghost btn-sm"
         data-testid="kb-doc-retag"
       >
-        retag
+        тег
       </button>
     );
   }
@@ -506,10 +506,10 @@ function RetagControl({
         }}
         className="btn btn-primary btn-sm"
       >
-        save
+        сохранить
       </button>
       <button onClick={() => setEditing(false)} className="btn btn-ghost btn-sm">
-        cancel
+        отмена
       </button>
     </div>
   );

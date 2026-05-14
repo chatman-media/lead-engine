@@ -6,7 +6,7 @@ export function Settings() {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="page-title">Settings</div>
+        <div className="page-title">Настройки</div>
       </div>
 
       <div style={{ maxWidth: 480 }}>
@@ -21,7 +21,7 @@ export function Settings() {
             marginBottom: 10,
           }}
         >
-          Sidebar tabs
+          Вкладки в меню
         </div>
 
         <div

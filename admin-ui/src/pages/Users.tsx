@@ -26,7 +26,7 @@ export function Users() {
   return (
     <div className="page fade-in">
       <div className="page-header">
-        <span className="page-title">Users</span>
+        <span className="page-title">Пользователи</span>
         <span className="page-count" data-testid="user-count">
           — {users.length}
         </span>
@@ -68,7 +68,7 @@ export function Users() {
             {users.length === 0 && (
               <tr>
                 <td colSpan={4} className="empty" style={{ padding: 32 }}>
-                  No users yet.
+                  Нет пользователей.
                 </td>
               </tr>
             )}
