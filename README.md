@@ -346,6 +346,23 @@ BOT_PERSONA_COMPANY=INFINITY AGENCY
 
 ## Тесты
 
+### Локальный setup (один раз)
+
+Тестам нужен **отдельный** PostgreSQL с pgvector. `cleanTestDb` между тестами делает `TRUNCATE CASCADE` по всем доменным таблицам — против прод-базы это снесёт данные, поэтому `getTestSql()` отказывается работать если host не `localhost` И имя БД не содержит `test`.
+
+```bash
+# 1. Создать локальную тестовую БД (один раз)
+createdb tgchatbot_test
+psql tgchatbot_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+# 2. Добавить в .env:
+TEST_DATABASE_URL=postgres://localhost/tgchatbot_test
+```
+
+`TEST_DATABASE_URL` имеет приоритет над `DATABASE_URL`, продовая connection-string остаётся нетронутой. Скрипт `test` сам выставляет `OPENAI_EMBEDDING_DIM=8 / OLLAMA_EMBEDDING_DIM=8` (фейковые embedders в тестах 8-мерные, `activeEmbeddingDim()` должна совпадать со схемой).
+
+### Запуск
+
 ```bash
 bun run test              # unit tests
 bun run test:coverage     # unit tests с отчётом покрытия

@@ -4,9 +4,38 @@ import postgres from "postgres";
 
 export type TestSql = ReturnType<typeof postgres>;
 
+/** Reject anything that doesn't *clearly* look like a throwaway test DB.
+ *  cleanTestDb runs TRUNCATE ... CASCADE on every domain table, so a misrouted
+ *  pool against a prod URL would wipe production data. Allow-list approach:
+ *  the URL must point at localhost / 127.0.0.1 OR the database name itself
+ *  must contain "test". */
+function assertLooksLikeTestDb(url: string): void {
+  let host: string;
+  let dbname: string;
+  try {
+    const parsed = new URL(url);
+    host = parsed.hostname;
+    dbname = parsed.pathname.replace(/^\//, "");
+  } catch {
+    throw new Error(`TEST_DATABASE_URL is not a valid URL: ${url.replace(/\/\/[^@]+@/, "//***@")}`);
+  }
+  const isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  const nameLooksTest = /test/i.test(dbname);
+  if (!isLocalHost && !nameLooksTest) {
+    const redacted = url.replace(/\/\/[^@]+@/, "//***@");
+    throw new Error(
+      `Refusing to run tests against ${redacted} — host is not localhost and ` +
+        `database name "${dbname}" doesn't contain "test". cleanTestDb runs ` +
+        `TRUNCATE CASCADE on every domain table. Set TEST_DATABASE_URL to a ` +
+        `disposable database (e.g. postgres://localhost/tgchatbot_test).`,
+    );
+  }
+}
+
 export function getTestSql(): TestSql {
   const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
   if (!url) throw new Error("TEST_DATABASE_URL or DATABASE_URL must be set for DB tests");
+  assertLooksLikeTestDb(url);
   // Each call creates a new isolated connection pool. Callers call sql.end()
   // in afterAll, which only closes their own pool — no cross-file interference.
   // BIGINT → number cast mirrors src/db/postgres.ts so tests see the same types
