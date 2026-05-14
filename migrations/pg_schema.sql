@@ -28,11 +28,17 @@ CREATE TABLE IF NOT EXISTS styles (
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   version INTEGER NOT NULL DEFAULT 1,
   parent_id INTEGER REFERENCES styles(id),
-  created_at INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
+  created_at INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER,
+  -- Soft-delete marker. NULL = live; NOT NULL = operator-retired chain
+  -- (distinguishes "removed by operator" from "is_active=FALSE because a
+  -- newer version supersedes it"). Set together with is_active=FALSE.
+  deleted_at INTEGER
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_styles_slug_version ON styles(slug, version);
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_styles_active_slug ON styles(slug) WHERE is_active = TRUE;
 CREATE INDEX IF NOT EXISTS idx_styles_active ON styles(is_active);
+-- Existing deployments predate the deleted_at column.
+ALTER TABLE styles ADD COLUMN IF NOT EXISTS deleted_at INTEGER;
 
 CREATE TABLE IF NOT EXISTS experiments (
   id SERIAL PRIMARY KEY,

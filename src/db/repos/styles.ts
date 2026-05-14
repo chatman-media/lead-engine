@@ -10,6 +10,7 @@ export interface StyleRow {
   version: number;
   parent_id: number | null;
   created_at: number;
+  deleted_at: number | null;
 }
 
 export class StylesRepo {
@@ -85,8 +86,22 @@ export class StylesRepo {
     return "updated";
   }
 
-  async deactivate(id: number): Promise<boolean> {
-    const result = await this.sql`UPDATE styles SET is_active = FALSE WHERE id = ${id}`;
+  /**
+   * Operator-initiated removal. Sets `deleted_at` AND `is_active = FALSE` so
+   * the row stops appearing in `listActive` / `bySlug` and the slug becomes
+   * reusable. Distinguished from version-chain succession (which only flips
+   * `is_active = FALSE`) by the populated timestamp. Historical versions in
+   * the same chain are left alone — `byId` still returns them so pinned
+   * conversations keep working, and `versionHistory` still surfaces the
+   * whole audit trail.
+   */
+  async softDelete(id: number): Promise<boolean> {
+    const result = await this.sql`
+      UPDATE styles
+      SET is_active = FALSE,
+          deleted_at = EXTRACT(EPOCH FROM NOW())::INTEGER
+      WHERE id = ${id}
+    `;
     return result.count > 0;
   }
 

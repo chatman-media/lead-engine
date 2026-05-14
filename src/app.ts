@@ -18,6 +18,7 @@ import {
   createDeleteLeadNoteHandler,
   createDeletePairwiseMatchHandler,
   createDeleteSelfPlayMatchHandler,
+  createDeleteStyleHandler,
   createDeleteTelegramWebhookHandler,
   createDeleteUserDataHandler,
   createDeleteVacancyHandler,
@@ -324,6 +325,7 @@ export function createRouter(deps: AppDeps): Router {
   router.post("/admin/api/styles", createCreateStyleHandler(apiDeps));
   router.get("/admin/api/styles/:id", createGetStyleHandler(apiDeps));
   router.patch("/admin/api/styles/:id", createEditStyleHandler(apiDeps));
+  router.delete("/admin/api/styles/:id", createDeleteStyleHandler(apiDeps));
   router.post("/admin/api/styles/:id/playground", createStylePlaygroundHandler(apiDeps));
   router.get("/admin/api/styles/:id/skills", createGetStyleSkillsHandler(apiDeps));
   router.put("/admin/api/styles/:id/skills", createSetStyleSkillsHandler(apiDeps));

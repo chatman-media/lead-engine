@@ -98,13 +98,13 @@ describe("StylesRepo — parseRow", () => {
   });
 });
 
-describe("StylesRepo — listActive + deactivate", () => {
+describe("StylesRepo — listActive + softDelete", () => {
   test("listActive omits soft-deleted rows", async () => {
     const a = await repo.insert({ slug: "a-style", displayName: "A", config: flirtyBelfort });
     await repo.insert({ slug: "b-style", displayName: "B", config: empatheticNepq });
     expect((await repo.listActive()).length).toBe(2);
 
-    expect(await repo.deactivate(a.id)).toBe(true);
+    expect(await repo.softDelete(a.id)).toBe(true);
     const active = await repo.listActive();
     expect(active.length).toBe(1);
     expect(active.map((r) => r.slug)).not.toContain("a-style");
@@ -116,7 +116,7 @@ describe("StylesRepo — listActive + deactivate", () => {
       displayName: "X",
       config: flirtyBelfort,
     });
-    await repo.deactivate(row.id);
+    await repo.softDelete(row.id);
     expect(await repo.bySlug("deactivated")).toBeNull();
   });
 
@@ -126,8 +126,40 @@ describe("StylesRepo — listActive + deactivate", () => {
       displayName: "X",
       config: flirtyBelfort,
     });
-    await repo.deactivate(row.id);
-    expect((await repo.byId(row.id))?.is_active).toBe(false);
+    await repo.softDelete(row.id);
+    const reloaded = await repo.byId(row.id);
+    expect(reloaded?.is_active).toBe(false);
+    expect(reloaded?.deleted_at).toBeGreaterThan(0);
+  });
+
+  test("softDelete frees the slug from the bySlug active lookup", async () => {
+    const v1 = await repo.insert({ slug: "reusable", displayName: "v1", config: flirtyBelfort });
+    expect((await repo.bySlug("reusable"))?.id).toBe(v1.id);
+    await repo.softDelete(v1.id);
+    // bySlug filters by is_active=TRUE, so the slug now resolves to null —
+    // letting createCreateStyleHandler's uniqueness check accept reuse.
+    expect(await repo.bySlug("reusable")).toBeNull();
+  });
+
+  test("softDelete distinguishes operator-retired from version-superseded", async () => {
+    const slugged = { ...flirtyBelfort, slug: "audit-trail" };
+    const v1 = await repo.insert({
+      slug: slugged.slug,
+      displayName: "v1",
+      config: slugged,
+    });
+    // editAsNewVersion flips is_active=FALSE but leaves deleted_at NULL.
+    await repo.editAsNewVersion(v1.id, { ...slugged, displayName: "v2" });
+    const supersededV1 = (await repo.byId(v1.id))!;
+    expect(supersededV1.is_active).toBe(false);
+    expect(supersededV1.deleted_at).toBeNull();
+
+    // Now retire the chain — softDelete on the active v2 head.
+    const v2 = (await repo.bySlug(slugged.slug))!;
+    await repo.softDelete(v2.id);
+    const retiredV2 = (await repo.byId(v2.id))!;
+    expect(retiredV2.is_active).toBe(false);
+    expect(retiredV2.deleted_at).toBeGreaterThan(0);
   });
 });
 

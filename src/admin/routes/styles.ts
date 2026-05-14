@@ -1,3 +1,4 @@
+import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { KbRepo } from "../../db/repos/kb.ts";
 import { StylesRepo } from "../../db/repos/styles.ts";
 import { sanitizeLlmOutput } from "../../rag/answer.ts";
@@ -365,5 +366,58 @@ export function createEditStyleHandler(deps: AdminApiDeps): RouteHandler {
         parse_error: null,
       },
     });
+  });
+}
+
+/**
+ * DELETE /admin/api/styles/:id — soft-delete a style chain.
+ *
+ * Operator-initiated retirement: sets `deleted_at` and flips `is_active=FALSE`
+ * on the targeted row. Distinguished from version-chain succession (where
+ * `is_active=FALSE` is set but `deleted_at` stays NULL) so the audit trail
+ * can tell "operator removed this" from "a newer version superseded this".
+ *
+ * Refuses to touch a non-active row — if the row is already the parent of a
+ * newer version, the caller likely meant to retire the chain head, not a
+ * historical version. 404 on unknown id keeps the path idempotent enough.
+ *
+ * Conversations pinned to historical versions in the same chain keep
+ * working: `byId` still returns inactive rows. The slug becomes free for a
+ * future fresh insert (partial unique index ignores rows where
+ * is_active=FALSE).
+ */
+export function createDeleteStyleHandler(deps: AdminApiDeps): RouteHandler {
+  const styles = new StylesRepo(deps.sql);
+  return withAdmin(deps.sql, async ({ params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
+
+    const row = await styles.byId(id);
+    if (!row) return json({ error: "not found" }, { status: 404 });
+    if (!row.is_active) {
+      return json(
+        {
+          error: row.deleted_at
+            ? "style is already soft-deleted"
+            : "style is a historical version (already inactive) — retire the active head of the chain instead",
+        },
+        { status: 409 },
+      );
+    }
+
+    const ok = await styles.softDelete(id);
+    if (!ok) return json({ error: "delete failed" }, { status: 500 });
+
+    await new AuditLogRepo(deps.sql)
+      .write({
+        action: "style.delete",
+        adminId: admin.adminId,
+        targetKind: "style",
+        targetId: id,
+        details: { slug: row.slug, version: row.version },
+      })
+      .catch((err) => console.error("[audit] style.delete write failed:", err));
+
+    return json({ ok: true, deleted: id });
   });
 }
