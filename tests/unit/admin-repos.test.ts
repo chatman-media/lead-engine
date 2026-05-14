@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 
 import { AdminsRepo } from "@/db/repos/admins.ts";
 import { SessionsRepo } from "@/db/repos/sessions.ts";
@@ -45,7 +45,15 @@ describe("AdminsRepo", () => {
   test("creating with duplicate email throws", async () => {
     const admins = new AdminsRepo(sql);
     await admins.create({ email: "dup@x.test", password: "longenough1" });
-    await expect(admins.create({ email: "DUP@x.test", password: "longenough2" })).rejects.toThrow();
+    // Avoid expect().rejects.toThrow() on a PG UNIQUE-violation path — the
+    // postgres.js pending-query lifecycle hangs on constraint cancel.
+    let threw = false;
+    try {
+      await admins.create({ email: "DUP@x.test", password: "longenough2" });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
   });
 
   test("rejects too-short password", async () => {

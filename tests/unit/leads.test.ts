@@ -140,7 +140,17 @@ describe("LeadsRepo", () => {
   test("user_id UNIQUE: only one open lead per user", async () => {
     const u = await users.create({ tgUserId: 600 });
     await leads.ensureForUser(u.id);
-    await expect(sql`INSERT INTO leads (user_id) VALUES (${u.id})`).rejects.toThrow();
+    // postgres.js tagged templates are lazy thenables — drive them explicitly
+    // through try/catch instead of expect().rejects.toThrow(), which has a
+    // known hang interaction with the pending-query lifecycle on constraint
+    // violations.
+    let threw = false;
+    try {
+      await sql`INSERT INTO leads (user_id) VALUES (${u.id})`;
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
   });
 
   test("delete removes the row", async () => {
