@@ -67,7 +67,7 @@ export function Vacancies() {
   }
 
   async function handleToggleActive(v: Vacancy) {
-    await handleUpdate(v.id, { is_active: v.is_active !== 1 });
+    await handleUpdate(v.id, { is_active: !v.is_active });
   }
 
   async function handleDelete(v: Vacancy) {
@@ -81,7 +81,7 @@ export function Vacancies() {
     }
   }
 
-  const activeCount = list?.filter((v) => v.is_active === 1).length ?? 0;
+  const activeCount = list?.filter((v) => v.is_active).length ?? 0;
 
   return (
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
@@ -167,7 +167,7 @@ function VacancyCard({
   onToggleActive: () => void;
   onDelete: () => void;
 }) {
-  const isActive = v.is_active === 1;
+  const isActive = !!v.is_active;
   return (
     <div
       data-testid="vacancy-card"
