@@ -946,6 +946,63 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+
+  // ─── Operations / maintenance ─────────────────────────────────────────
+
+  opsKbIngest: (body: { source: "curated" | "books"; topic?: string }) =>
+    req<{
+      ok: boolean;
+      source: string;
+      dir: string;
+      duration_ms: number;
+      summary: { documents: number; chunks: number; skipped: number };
+      provider: string;
+      dim: number;
+    }>("/admin/api/ops/kb/ingest", { method: "POST", body: JSON.stringify(body) }),
+
+  opsKbWipe: () =>
+    req<{ ok: boolean; deleted_chunks: number; deleted_documents: number }>(
+      "/admin/api/ops/kb/wipe",
+      { method: "POST", body: JSON.stringify({ confirm: "yes" }) },
+    ),
+
+  opsGetTelegramWebhook: () =>
+    req<{ info: { url: string; pending_update_count: number } }>("/admin/api/ops/telegram/webhook"),
+
+  opsSetTelegramWebhook: (input: { url: string; dropPending?: boolean }) =>
+    req<{ ok: boolean; info: { url: string; pending_update_count: number } }>(
+      "/admin/api/ops/telegram/webhook",
+      { method: "PUT", body: JSON.stringify(input) },
+    ),
+
+  opsDeleteTelegramWebhook: (dropPending = false) =>
+    req<{ ok: boolean }>("/admin/api/ops/telegram/webhook", {
+      method: "DELETE",
+      body: JSON.stringify({ dropPending }),
+    }),
+
+  opsReseedVacancies: () =>
+    req<{ ok: boolean; inserted: number; urlPatched: number; skipped: number }>(
+      "/admin/api/ops/vacancies/reseed",
+      { method: "POST" },
+    ),
+
+  opsPurgeOutcomes: (input: { days?: number; dryRun?: boolean }) =>
+    req<{
+      ok: boolean;
+      days: number;
+      dry_run?: boolean;
+      deleted?: { skill_outcomes: number; self_play_matches: number };
+      would_delete?: { skill_outcomes: number; self_play_matches: number };
+    }>("/admin/api/ops/skill-outcomes/purge", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  opsUserbotQueueStats: () =>
+    req<{ by_status: Record<string, number>; userbot_enabled: boolean }>(
+      "/admin/api/ops/userbot/queue-stats",
+    ),
 };
 
 export type ExperimentStatus = "draft" | "running" | "paused" | "done";

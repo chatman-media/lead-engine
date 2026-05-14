@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "bun run --hot src/index.ts",
     "start": "bun run src/index.ts",
-    "test": "bun test tests/unit",
-    "test:coverage": "bun test tests/unit --coverage",
+    "test": "OPENAI_EMBEDDING_DIM=8 OLLAMA_EMBEDDING_DIM=8 bun test tests/unit",
+    "test:coverage": "OPENAI_EMBEDDING_DIM=8 OLLAMA_EMBEDDING_DIM=8 bun test tests/unit --coverage",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install --with-deps chromium",
     "build:ui": "bun run --cwd admin-ui build",
@@ -24,7 +24,7 @@
     "secret-scan": "bun run scripts/scan-secrets.ts",
     "hooks:install": "bun run scripts/install-hooks.ts",
     "postinstall": "bun run scripts/install-hooks.ts || true",
-    "ci": "bun run typecheck && bun run check && bun run secret-scan && bun test tests/unit"
+    "ci": "bun run typecheck && bun run check && bun run secret-scan && bun run test"
   },
   "dependencies": {
     "postgres": "^3.4.4",

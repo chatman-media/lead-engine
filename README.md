@@ -20,7 +20,7 @@ Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тест�
 
 **Userbot (MTProto)** — бот может работать с личного аккаунта Telegram через gramjs. Отвечает на входящие личные сообщения. Подробности — [docs/USERBOT.md](docs/USERBOT.md).
 
-**Operator admin** — React SPA: список диалогов, ручной перехват (`Take over` / `Release`), reply из браузера, MEMORY pane для редактирования памяти о кандидате, lead pipeline UI, KB browser с approval queue для незнакомых вопросов, styles + experiments + self-play + coach + analytics — всё в реальном времени через WebSocket.
+**Operator admin** — React SPA: список диалогов, ручной перехват (`Take over` / `Release`), reply из браузера, MEMORY pane для редактирования памяти о кандидате, lead pipeline UI, KB browser с approval queue для незнакомых вопросов, styles + experiments + self-play + coach + analytics — всё в реальном времени через WebSocket. Раздел **Операции** (`/admin/ops`) даёт UI-эквиваленты частых CLI-задач: re-ingest KB с диска, привязать/сменить Telegram webhook, очистить старые self-play результаты, ре-засеять дефолтные вакансии, посмотреть очередь userbot.
 
 **Conversation export** — диалоги как JSONL (OpenAI fine-tune compatible): `GET /admin/api/conversations/export.jsonl` с фильтрами по style/experiment/status. Готово для дообучения модели.
 
@@ -34,7 +34,7 @@ Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тест�
 | [docs/SELF_PLAY.md](docs/SELF_PLAY.md) | Self-play / pairwise / coaching / shadow evaluation |
 | [docs/LEADS.md](docs/LEADS.md) | Lead pipeline: state machine, intake/visa-docs, operator workflow |
 | [docs/USERBOT.md](docs/USERBOT.md) | Userbot (MTProto): setup, auth, конфигурация |
-| [docs/DEPLOY.md](docs/DEPLOY.md) | Docker / nginx / Cloudflare Tunnel / backups / KB ingest |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | Docker / nginx / Cloudflare Tunnel / backups / KB ingest / recovery |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Что сделано, что в очереди |
 
 ---
@@ -143,31 +143,33 @@ ollama pull bge-m3     # 567M, мультиязычный (ru/zh/ko), 1024-dim
 
 ## CLI
 
+Большинство частых операций есть и в админке — раздел **`/admin/ops`** (Операции). CLI ниже остаётся для bootstrap (первый admin, userbot auth) и для тяжёлых пайплайнов (Telegram-экспорт, Whisper).
+
 ```bash
 bun run build:ui                                 # собрать React SPA
 bun run dev:ui                                   # Vite dev-сервер с HMR → :5173
 
-bun scripts/create-admin.ts <email> <password>   # создать аккаунт оператора
+bun scripts/create-admin.ts <email> <password>   # bootstrap: первый аккаунт оператора (UI gated)
+bun scripts/userbot-auth.ts                      # одноразовый MTProto-логин (интерактивный)
+
+# Эти доступны и из /admin/ops:
 bun scripts/set-webhook.ts set <publicUrl>        # привязать webhook к Telegram
 bun scripts/set-webhook.ts info                  # проверить статус
 bun scripts/set-webhook.ts delete                # отвязать
-
 bun scripts/ingest.ts ./kb/curated               # индексировать .md/.txt в KB
 bun scripts/ingest-books.ts ./kb/books           # книги с topic=books
-bun scripts/tag-kb-by-keyword.ts                 # прокатить keyword-теги по существующей KB
 bun scripts/kb-wipe.ts                           # очистить KB
+bun scripts/seed-vacancies-infinity.ts           # задать демо-вакансии
+bun scripts/purge-old-outcomes.ts                # очистить старые skill_outcomes
 
+# CLI-only (большие/интерактивные/одноразовые):
+bun scripts/tag-kb-by-keyword.ts                 # прокатить keyword-теги по существующей KB
 bun scripts/extract-tg.ts kb/result.json kb/extracted  # парсить Telegram-экспорт
 bun scripts/transcribe.ts kb/result.json kb/extracted  # расшифровать голосовые (Whisper)
-
-bun scripts/userbot-auth.ts                      # одноразовый MTProto-логин
-
-bun scripts/self-play.ts                         # один self-play матч
-bun scripts/pairwise.ts                          # pairwise A/B матч
-bun scripts/coach.ts                             # сгенерировать coach-предложения
-
+bun scripts/self-play.ts                         # один self-play матч (UI: /admin/self-play)
+bun scripts/pairwise.ts                          # pairwise A/B матч (UI: /admin/pairwise)
+bun scripts/coach.ts                             # coach-предложения (UI: /admin/coach)
 bun scripts/get-chat-ids.ts                      # найти ID групп для LEADS_CHAT_ID / VISA_CHAT_ID
-bun scripts/seed-vacancies-infinity.ts           # задать демо-вакансии
 ```
 
 ---
@@ -345,6 +347,23 @@ BOT_PERSONA_COMPANY=INFINITY AGENCY
 ---
 
 ## Тесты
+
+### Локальный setup (один раз)
+
+Тестам нужен **отдельный** PostgreSQL с pgvector. `cleanTestDb` между тестами делает `TRUNCATE CASCADE` по всем доменным таблицам — против прод-базы это снесёт данные, поэтому `getTestSql()` отказывается работать если host не `localhost` И имя БД не содержит `test`.
+
+```bash
+# 1. Создать локальную тестовую БД (один раз)
+createdb tgchatbot_test
+psql tgchatbot_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+# 2. Добавить в .env:
+TEST_DATABASE_URL=postgres://localhost/tgchatbot_test
+```
+
+`TEST_DATABASE_URL` имеет приоритет над `DATABASE_URL`, продовая connection-string остаётся нетронутой. Скрипт `test` сам выставляет `OPENAI_EMBEDDING_DIM=8 / OLLAMA_EMBEDDING_DIM=8` (фейковые embedders в тестах 8-мерные, `activeEmbeddingDim()` должна совпадать со схемой).
+
+### Запуск
 
 ```bash
 bun run test              # unit tests
