@@ -1,3 +1,4 @@
+import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { ConversationsRepo } from "../../db/repos/conversations.ts";
 import { LeadsRepo } from "../../db/repos/leads.ts";
 import { MessagesRepo } from "../../db/repos/messages.ts";
@@ -39,7 +40,7 @@ export function createListUsersHandler(deps: AdminApiDeps): RouteHandler {
  */
 export function createDeleteUserDataHandler(deps: AdminApiDeps): RouteHandler {
   const users = new UsersRepo(deps.sql);
-  return withAdmin(deps.sql, async ({ params }) => {
+  return withAdmin(deps.sql, async ({ params, admin }) => {
     const id = parseIdParam(params);
     if (id instanceof Response) return id;
     const user = await users.byId(id);
@@ -69,6 +70,18 @@ export function createDeleteUserDataHandler(deps: AdminApiDeps): RouteHandler {
         leads_deleted: leadRes.count,
       };
     });
+
+    // GDPR audit trail — who erased which user. Best-effort, don't fail
+    // the operation if the audit write itself blows up.
+    await new AuditLogRepo(deps.sql)
+      .write({
+        action: "user.gdpr_erase",
+        adminId: admin.adminId,
+        targetKind: "user",
+        targetId: id,
+        details: summary,
+      })
+      .catch((err) => console.error("[audit] user.gdpr_erase write failed:", err));
 
     return json({ ok: true, user_id: id, ...summary });
   });

@@ -1,3 +1,4 @@
+import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { ConversationsRepo } from "../../db/repos/conversations.ts";
 import { MessagesRepo } from "../../db/repos/messages.ts";
 import { enqueue } from "../../db/repos/userbot-send-queue.ts";
@@ -130,7 +131,7 @@ export function createReleaseHandler(deps: AdminApiDeps): RouteHandler {
 
 export function createDeleteConversationHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.sql);
-  return withAdmin(deps.sql, async ({ params }) => {
+  return withAdmin(deps.sql, async ({ params, admin }) => {
     const id = parseIdParam(params);
     if (id instanceof Response) return id;
     const conv = await conversations.byId(id);
@@ -138,6 +139,14 @@ export function createDeleteConversationHandler(deps: AdminApiDeps): RouteHandle
     const ok = await conversations.deleteById(id);
     if (!ok) return json({ error: "delete failed" }, { status: 500 });
     deps.onConversationChanged?.(id);
+    await new AuditLogRepo(deps.sql)
+      .write({
+        action: "conversation.delete",
+        adminId: admin.adminId,
+        targetKind: "conversation",
+        targetId: id,
+      })
+      .catch((err) => console.error("[audit] conversation.delete write failed:", err));
     return json({ ok: true, deleted: id });
   });
 }

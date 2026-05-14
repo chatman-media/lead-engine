@@ -9,6 +9,7 @@
 
 import { resolve } from "node:path";
 import { activeEmbeddingDim, config, llmIsConfigured } from "../../config.ts";
+import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { KbRepo } from "../../db/repos/kb.ts";
 import { seedInfinityVacancies, VacanciesRepo } from "../../db/repos/vacancies.ts";
 import { ingestDirectory } from "../../rag/ingest.ts";
@@ -119,7 +120,7 @@ export function createKbIngestHandler(deps: AdminApiDeps): RouteHandler {
  * `confirm: "yes"` in the body to dodge accidental clicks.
  */
 export function createKbWipeHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ req }) => {
+  return withAdmin(deps.sql, async ({ req, admin }) => {
     let body: { confirm?: unknown };
     try {
       body = (await req.json()) as typeof body;
@@ -137,10 +138,22 @@ export function createKbWipeHandler(deps: AdminApiDeps): RouteHandler {
     `;
     await deps.sql`DELETE FROM kb_chunks`;
     await deps.sql`DELETE FROM kb_documents`;
+    const deletedChunks = chunksRow?.n ?? 0;
+    const deletedDocs = docsRow?.n ?? 0;
+    // Audit-trail write is best-effort — if it fails the destructive
+    // action still went through, so the response must be the success
+    // body, not the audit error.
+    await new AuditLogRepo(deps.sql)
+      .write({
+        action: "kb.wipe",
+        adminId: admin.adminId,
+        details: { deleted_chunks: deletedChunks, deleted_documents: deletedDocs },
+      })
+      .catch((err) => console.error("[audit] kb.wipe write failed:", err));
     return json({
       ok: true,
-      deleted_chunks: chunksRow?.n ?? 0,
-      deleted_documents: docsRow?.n ?? 0,
+      deleted_chunks: deletedChunks,
+      deleted_documents: deletedDocs,
     });
   });
 }
@@ -186,7 +199,7 @@ export function createSetTelegramWebhookHandler(deps: AdminApiDeps): RouteHandle
 
 /** DELETE /admin/api/ops/telegram/webhook  body: { dropPending? } */
 export function createDeleteTelegramWebhookHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ req }) => {
+  return withAdmin(deps.sql, async ({ req, admin }) => {
     if (!deps.telegram) return json({ error: "telegram client not configured" }, { status: 503 });
     let body: { dropPending?: unknown };
     try {
@@ -196,6 +209,13 @@ export function createDeleteTelegramWebhookHandler(deps: AdminApiDeps): RouteHan
     }
     try {
       await deps.telegram.deleteWebhook(body.dropPending === true);
+      await new AuditLogRepo(deps.sql)
+        .write({
+          action: "telegram.webhook.delete",
+          adminId: admin.adminId,
+          details: { drop_pending: body.dropPending === true },
+        })
+        .catch((err) => console.error("[audit] telegram.webhook.delete write failed:", err));
       return json({ ok: true });
     } catch (err) {
       return json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
@@ -225,7 +245,7 @@ interface PurgeBody {
  * Pairwise / shadow / coach rows are intentionally preserved (audit trail).
  */
 export function createPurgeOutcomesHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ req }) => {
+  return withAdmin(deps.sql, async ({ req, admin }) => {
     let body: PurgeBody;
     try {
       body = (await req.json()) as PurgeBody;
@@ -281,6 +301,13 @@ export function createPurgeOutcomesHandler(deps: AdminApiDeps): RouteHandler {
           )
       `;
     }
+    await new AuditLogRepo(deps.sql)
+      .write({
+        action: "skill_outcomes.purge",
+        adminId: admin.adminId,
+        details: { days, deleted: willDelete },
+      })
+      .catch((err) => console.error("[audit] skill_outcomes.purge write failed:", err));
     return json({ ok: true, days, deleted: willDelete });
   });
 }

@@ -1,3 +1,4 @@
+import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { ConversationsRepo } from "../../db/repos/conversations.ts";
 import { type LeadState, LeadsRepo } from "../../db/repos/leads.ts";
 import { MessagesRepo } from "../../db/repos/messages.ts";
@@ -429,12 +430,15 @@ export function createUpdateVisaDocsHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 export function createDeleteLeadHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ params }) => {
+  return withAdmin(deps.sql, async ({ params, admin }) => {
     const id = parseIdParam(params);
     if (id instanceof Response) return id;
     const leadsRepo = new LeadsRepo(deps.sql);
     const ok = await leadsRepo.delete(id);
     if (!ok) return json({ error: "not found" }, { status: 404 });
+    await new AuditLogRepo(deps.sql)
+      .write({ action: "lead.delete", adminId: admin.adminId, targetKind: "lead", targetId: id })
+      .catch((err) => console.error("[audit] lead.delete write failed:", err));
     return json({ ok: true, deleted: id });
   });
 }
