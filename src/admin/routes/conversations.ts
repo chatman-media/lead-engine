@@ -1,0 +1,248 @@
+import { ConversationsRepo } from "../../db/repos/conversations.ts";
+import { MessagesRepo } from "../../db/repos/messages.ts";
+import { enqueue } from "../../db/repos/userbot-send-queue.ts";
+import { UsersRepo } from "../../db/repos/users.ts";
+import { inc } from "../../metrics.ts";
+import { json, type RouteHandler } from "../../router.ts";
+import { requireAdmin } from "../auth.ts";
+import type { AdminApiDeps } from "../shared.ts";
+
+export function createListConversationsHandler(deps: AdminApiDeps): RouteHandler {
+  const conversations = new ConversationsRepo(deps.sql);
+  return async ({ req }) => {
+    const ctx = await requireAdmin(deps.sql, req);
+    if (ctx instanceof Response) return ctx;
+    const url = new URL(req.url);
+    const onlyEscalated = url.searchParams.get("escalated") === "1";
+    return json({
+      conversations: (await conversations.list({ onlyEscalated, limit: 200 })).map((row) => ({
+        id: row.id,
+        mode: row.mode,
+        escalated_at: row.escalated_at,
+        last_message_at: row.last_message_at,
+        assigned_admin_id: row.assigned_admin_id,
+        user: {
+          id: row.user_id,
+          tg_user_id: row.tg_user_id,
+          tg_username: row.tg_username,
+        },
+      })),
+    });
+  };
+}
+
+export function createConversationDetailHandler(deps: AdminApiDeps): RouteHandler {
+  const conversations = new ConversationsRepo(deps.sql);
+  const users = new UsersRepo(deps.sql);
+  const messages = new MessagesRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const conv = await conversations.byId(id);
+    if (!conv) return json({ error: "not found" }, { status: 404 });
+    const user = await users.byId(conv.user_id);
+    if (!user) return json({ error: "user gone" }, { status: 404 });
+    // Cross-session memory pulled from `users.profile_json.memory`. Always
+    // included — when memory extraction is off (RAG_USER_MEMORY=false) this
+    // is `{ facts: {} }` and the UI just shows an empty pane. Keeping the
+    // shape stable on/off avoids a frontend feature flag.
+    const memory = await users.getMemory(user.id);
+    // Long-conversation summary (RAG_CONVERSATION_SUMMARY). Null when the
+    // chat is too short to have triggered summarization yet, which the UI
+    // handles by hiding the summary pane.
+    const summary = await conversations.getSummary(id);
+    return json({
+      conversation: conv,
+      user,
+      messages: await messages.listByConversation(id, 200),
+      memory,
+      summary,
+    });
+  };
+}
+
+/**
+ * Operator override of extracted candidate facts. Used when the LLM
+ * extractor mis-attributes ("intent: путешествие" instead of "работа") —
+ * operator edits replace stored memory wholesale (no merge), then the
+ * next bot turn picks them up via the standard `getMemory` read path.
+ */
+export function createUpdateUserMemoryHandler(deps: AdminApiDeps): RouteHandler {
+  const users = new UsersRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
+    if (ctx instanceof Response) return ctx;
+
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    const user = await users.byId(id);
+    if (!user) return json({ error: "not found" }, { status: 404 });
+
+    let body: { facts?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    if (typeof body.facts !== "object" || body.facts === null || Array.isArray(body.facts)) {
+      return json({ error: "facts must be an object" }, { status: 400 });
+    }
+
+    // Coerce: accept any-typed values from JSON (string|number|bool) and
+    // normalize to string. Reject keys/values longer than reasonable —
+    // memory is for facts, not pasted essays.
+    const incoming = body.facts as Record<string, unknown>;
+    const cleaned: Record<string, string> = {};
+    for (const [k, v] of Object.entries(incoming)) {
+      if (typeof k !== "string") continue;
+      const trimmedKey = k.trim();
+      if (!trimmedKey || trimmedKey.length > 40) continue;
+      if (v === null || v === undefined) continue;
+      const str = typeof v === "string" ? v : String(v);
+      const trimmed = str.trim();
+      if (!trimmed || trimmed.length > 200) continue;
+      cleaned[trimmedKey] = trimmed;
+    }
+
+    await users.setMemoryFacts(id, cleaned);
+    return json({ memory: await users.getMemory(id) });
+  };
+}
+
+export function createTakeHandler(deps: AdminApiDeps): RouteHandler {
+  const conversations = new ConversationsRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const conv = await conversations.byId(id);
+    if (!conv) return json({ error: "not found" }, { status: 404 });
+    await conversations.setMode(id, "human", ctx.adminId);
+    deps.onConversationChanged?.(id);
+    const updated = await conversations.byId(id);
+    return json({ conversation: updated });
+  };
+}
+
+export function createReleaseHandler(deps: AdminApiDeps): RouteHandler {
+  const conversations = new ConversationsRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const conv = await conversations.byId(id);
+    if (!conv) return json({ error: "not found" }, { status: 404 });
+    await conversations.setMode(id, "ai");
+    deps.onConversationChanged?.(id);
+    const updated = await conversations.byId(id);
+    return json({ conversation: updated });
+  };
+}
+
+export function createDeleteConversationHandler(deps: AdminApiDeps): RouteHandler {
+  const conversations = new ConversationsRepo(deps.sql);
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
+    if (ctx instanceof Response) return ctx;
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+    const conv = await conversations.byId(id);
+    if (!conv) return json({ error: "not found" }, { status: 404 });
+    const ok = await conversations.deleteById(id);
+    if (!ok) return json({ error: "delete failed" }, { status: 500 });
+    deps.onConversationChanged?.(id);
+    return json({ ok: true, deleted: id });
+  };
+}
+
+export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
+  const conversations = new ConversationsRepo(deps.sql);
+  const messages = new MessagesRepo(deps.sql);
+  const users = new UsersRepo(deps.sql);
+
+  return async ({ req, params }) => {
+    const ctx = await requireAdmin(deps.sql, req);
+    if (ctx instanceof Response) return ctx;
+
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) return json({ error: "bad id" }, { status: 400 });
+
+    const conv = await conversations.byId(id);
+    if (!conv) return json({ error: "not found" }, { status: 404 });
+    if (conv.mode !== "human") {
+      return json({ error: "conversation is not in human mode" }, { status: 409 });
+    }
+
+    let body: { text?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "invalid JSON" }, { status: 400 });
+    }
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text) return json({ error: "text is required" }, { status: 400 });
+
+    const user = await users.byId(conv.user_id);
+    if (!user) return json({ error: "user not found" }, { status: 404 });
+
+    console.log(
+      `[admin reply] conv=${id} user=${user.id} tg_user_id=${user.tg_user_id} text_len=${text.length} userbotEnabled=${!!deps.userbotEnabled} hasTelegram=${!!deps.telegram}`,
+    );
+
+    let tgMessageId: number | undefined;
+    let tgError: string | undefined;
+    if (deps.userbotEnabled) {
+      // Route through the userbot send queue — message will appear from Alina's account.
+      console.log(`[admin reply] routing via userbot enqueue → tg_user_id=${user.tg_user_id}`);
+      await enqueue(deps.sql, user.tg_user_id, text).catch((err) => {
+        tgError = err instanceof Error ? err.message : String(err);
+        console.error("[admin reply] userbot enqueue failed:", err);
+      });
+      if (!tgError) {
+        inc("tg_replies_total", 1, { source: "admin_userbot" });
+        console.log(`[admin reply] userbot enqueue ok`);
+      }
+    } else if (deps.telegram) {
+      console.log(`[admin reply] routing via bot API → chatId=${user.tg_user_id}`);
+      try {
+        const sent = await deps.telegram.sendMessage({
+          chatId: user.tg_user_id,
+          text,
+        });
+        tgMessageId = sent.message_id;
+        inc("tg_replies_total", 1, { source: "admin_bot" });
+        console.log(`[admin reply] bot API ok → message_id=${tgMessageId}`);
+      } catch (err) {
+        tgError = err instanceof Error ? err.message : String(err);
+        console.error("[admin reply] Telegram send failed:", err);
+      }
+    } else {
+      console.warn(
+        "[admin reply] no send path: userbotEnabled=false and telegram=undefined — message saved to DB only",
+      );
+    }
+
+    await messages.add({
+      conversationId: id,
+      role: "human",
+      text,
+      tgMessageId,
+    });
+    await conversations.touch(id);
+
+    deps.onMessageSent?.({ conversationId: id, tgUserId: user.tg_user_id });
+
+    if (tgError) {
+      return json(
+        { ok: false, error: `Telegram: ${tgError}`, conversationId: id, tgUserId: user.tg_user_id },
+        { status: 502 },
+      );
+    }
+    return json({ ok: true, conversationId: id, tgUserId: user.tg_user_id });
+  };
+}
