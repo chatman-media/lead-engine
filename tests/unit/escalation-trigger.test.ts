@@ -1,14 +1,19 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import { containsEscalationTrigger } from "@/telegram/escalation.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
 import { createWebhookHandler } from "@/telegram/webhook.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
+
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
 
 describe("containsEscalationTrigger", () => {
   test("matches Russian and English variants regardless of case/punctuation", () => {
@@ -62,13 +67,11 @@ interface OutgoingCall {
   body: Record<string, unknown>;
 }
 
-let db: ReturnType<typeof openDb>;
 let sent: OutgoingCall[];
 let handler: ReturnType<typeof createWebhookHandler>;
 let chatCalls: number;
 
 beforeEach(() => {
-  db = openDb({ path: ":memory:" });
   sent = [];
   chatCalls = 0;
   const fetchImpl: FetchLike = async (input, init) => {
@@ -100,7 +103,7 @@ beforeEach(() => {
     },
   };
   handler = createWebhookHandler({
-    db,
+    db: sql,
     telegram,
     webhookSecret: SECRET,
     rag: { embedder: fakeEmbedder(), chat: trackingChat },
@@ -108,7 +111,6 @@ beforeEach(() => {
     awaitProcessing: true,
   });
 });
-afterEach(() => db.close());
 
 function update(fromId: number, text: string): TgUpdate {
   return {
@@ -131,8 +133,8 @@ async function call(req: Request): Promise<Response> {
 
 describe("webhook escalation trigger", () => {
   test("trigger word in user message switches mode to queued and skips RAG", async () => {
-    const users = new UsersRepo(db);
-    const u = users.create({ tgUserId: 42 });
+    const users = new UsersRepo(sql);
+    const u = await users.create({ tgUserId: 42 });
 
     const res = await call(
       new Request(`http://x/telegram/${SECRET}`, {
@@ -146,16 +148,17 @@ describe("webhook escalation trigger", () => {
     expect(chatCalls).toBe(0);
     expect(sent).toHaveLength(0);
 
-    const conv = new ConversationsRepo(db).byUserId(u.id)!;
-    expect(conv.mode).toBe("queued");
+    const conv = await new ConversationsRepo(sql).byUserId(u.id);
+    expect(conv).not.toBeNull();
+    expect(conv!.mode).toBe("queued");
 
-    const msgs = new MessagesRepo(db).listByConversation(conv.id);
+    const msgs = await new MessagesRepo(sql).listByConversation(conv!.id);
     expect(msgs.map((m) => m.role)).toEqual(["user"]);
   });
 
   test("non-trigger message in ai mode still goes through RAG", async () => {
-    const users = new UsersRepo(db);
-    users.create({ tgUserId: 43 });
+    const users = new UsersRepo(sql);
+    await users.create({ tgUserId: 43 });
 
     await call(
       new Request(`http://x/telegram/${SECRET}`, {
@@ -165,8 +168,9 @@ describe("webhook escalation trigger", () => {
       }),
     );
     expect(chatCalls).toBe(0); // KB is empty -> NO_CONTEXT without calling chat
-    const conv = new ConversationsRepo(db).byUserId(new UsersRepo(db).byTgId(43)!.id)!;
+    const user = await new UsersRepo(sql).byTgId(43);
+    const conv = await new ConversationsRepo(sql).byUserId(user!.id);
     // NO_CONTEXT now queues conversation for operator reply
-    expect(conv.mode).toBe("queued");
+    expect(conv!.mode).toBe("queued");
   });
 });

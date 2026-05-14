@@ -130,29 +130,24 @@ the bot expects (see `src/telegram/webhook.ts`).
 
 ## Persistent data
 
-The named volume `tg-chatbot-data` mounts at `/app/data` inside the
-container. It holds:
+All state is stored in PostgreSQL (configured via `DATABASE_URL` in `.env`).
+The bot has no local data volume — a container restart or replacement
+leaves all data intact in the database.
 
-- `bot.db` — SQLite database (users, conversations, messages, leads,
-  KB embeddings, sales styles, vacancies, sessions, …)
-- `bot.db-journal` / `-shm` / `-wal` — SQLite journal files (don't
-  touch; deleting them mid-run corrupts the DB)
-
-Back up by snapshotting the volume:
+Back up the database using `pg_dump`:
 
 ```bash
-docker run --rm -v tg-chatbot-data:/data -v $PWD:/backup alpine \
-  tar czf /backup/tg-chatbot-data-$(date +%Y%m%d).tar.gz -C /data .
+pg_dump $DATABASE_URL -Fc -f tg-chatbot-$(date +%Y%m%d).dump
 ```
 
 Restore:
 
 ```bash
-docker compose down
-docker run --rm -v tg-chatbot-data:/data -v $PWD:/backup alpine \
-  sh -c "rm -rf /data/* && tar xzf /backup/tg-chatbot-data-XXXX.tar.gz -C /data"
-docker compose up -d
+pg_restore -d $DATABASE_URL tg-chatbot-XXXX.dump
 ```
+
+When using Supabase, point-in-time recovery and daily backups are
+available in the dashboard.
 
 ## Ingesting the KB inside the container
 
@@ -187,11 +182,10 @@ must be authorised before starting the server.
 # .env must have TELEGRAM_USERBOT=1, TELEGRAM_API_ID, TELEGRAM_API_HASH
 bun scripts/userbot-auth.ts
 # Follow prompts: phone → OTP → 2FA password
-# Session is saved to data/bot.db → persists across restarts
+# Session is saved to PostgreSQL → persists across restarts
 ```
 
-The session string lives in the `userbot_session` table inside
-`data/bot.db`. Back up the volume before touching the DB.
+The session string lives in the `userbot_session` table in PostgreSQL.
 
 **In docker-compose**, the auth script needs the same volume:
 
@@ -228,9 +222,8 @@ docker compose build app          # rebuild image with the new code
 docker compose up -d app          # restart with zero data loss
 ```
 
-The `data/` volume is independent of the image, so even
-`docker compose down && rm -rf` of containers is safe; only
-`docker volume rm tg-chatbot-data` would lose state.
+All state lives in PostgreSQL, independent of the container image, so
+`docker compose down && up` is safe — no local volume to worry about.
 
 ## Resource sizing
 
@@ -251,10 +244,9 @@ Tested baselines:
 - **`Webhook info shows pending_update_count growing`**: the bot is
   not ack'ing fast enough. Check container logs for slow LLM calls;
   raise `proxy_read_timeout` in nginx.
-- **`SQLITE_CANTOPEN` on first boot**: the `data/` volume isn't
-  writable. Ensure the named volume is owned by uid 1000 (`bun`):
-  `docker compose exec app id` should show `uid=1000(bun)`.
-- **`unable to load extension 'sqlite-vec'` only on macOS dev**:
-  not a problem in Docker — the bundled Bun SQLite on Linux supports
-  extensions natively. `src/db/sqlite.ts` explicitly returns early
-  on non-Darwin.
+- **`connect ECONNREFUSED` on first boot**: `DATABASE_URL` is not
+  reachable from inside the container. Verify the connection string
+  in `.env` and that your PostgreSQL / Supabase instance is accessible.
+- **`relation "users" does not exist`**: migrations haven't run yet or
+  `DATABASE_URL` points to the wrong database. Check the boot logs for
+  `runMigrations()` output.

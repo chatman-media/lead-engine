@@ -1,35 +1,35 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
+import { LeadsRepo } from "@/db/repos/leads.ts";
 import { SelfPlayMatchesRepo } from "@/db/repos/self-play-matches.ts";
-import { openDb } from "@/db/sqlite.ts";
+import { UsersRepo } from "@/db/repos/users.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../../helpers/test-db.ts";
 
-function createLead(db: ReturnType<typeof openDb>): number {
-  const u = db
-    .query<{ id: number }, [number]>(
-      `INSERT INTO users (tg_user_id, status) VALUES (?, 'new') RETURNING id`,
-    )
-    .get(-Math.floor(Math.random() * 1e9))!;
-  const lead = db
-    .query<{ id: number }, [number]>(`INSERT INTO leads (user_id) VALUES (?) RETURNING id`)
-    .get(u.id)!;
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
+async function createLead(): Promise<number> {
+  const users = new UsersRepo(sql);
+  const leads = new LeadsRepo(sql);
+  const u = await users.create({ tgUserId: -Math.floor(Math.random() * 1e9) });
+  const lead = await leads.ensureForUser(u.id);
   return lead.id;
 }
 
-let db: ReturnType<typeof openDb>;
 let repo: SelfPlayMatchesRepo;
 
 beforeEach(() => {
-  db = openDb({ path: ":memory:" });
-  repo = new SelfPlayMatchesRepo(db);
+  repo = new SelfPlayMatchesRepo(sql);
 });
-afterEach(() => db.close());
 
 describe("SelfPlayMatchesRepo", () => {
-  test("insert + byId roundtrip preserves transcript and skills", () => {
+  test("insert + byId roundtrip preserves transcript and skills", async () => {
     // Synthesise a real lead row first so the lead_id FK holds. The
     // orchestrator always does this; the test mirrors that.
-    const leadId = createLead(db);
-    const inserted = repo.insert({
+    const leadId = await createLead();
+    const inserted = await repo.insert({
       styleSlug: "alina-infinity-v1",
       personaSlug: "eager-kate",
       outcome: "won",
@@ -46,7 +46,7 @@ describe("SelfPlayMatchesRepo", () => {
     expect(inserted.id).toBeGreaterThan(0);
     expect(inserted.outcome).toBe("won");
 
-    const detail = repo.byId(inserted.id);
+    const detail = await repo.byId(inserted.id);
     expect(detail).not.toBeNull();
     expect(detail?.transcript.length).toBe(3);
     expect(detail?.transcript[0]?.role).toBe("candidate");
@@ -54,13 +54,13 @@ describe("SelfPlayMatchesRepo", () => {
     expect(detail?.lead_id).toBe(leadId);
   });
 
-  test("byId returns null for missing", () => {
-    expect(repo.byId(99999)).toBeNull();
+  test("byId returns null for missing", async () => {
+    expect(await repo.byId(99999)).toBeNull();
   });
 
-  test("list orders by id DESC and respects limit", () => {
+  test("list orders by id DESC and respects limit", async () => {
     for (let i = 0; i < 5; i++) {
-      repo.insert({
+      await repo.insert({
         styleSlug: "a",
         personaSlug: "p",
         outcome: i % 2 === 0 ? "won" : "lost",
@@ -71,14 +71,14 @@ describe("SelfPlayMatchesRepo", () => {
         leadId: null,
       });
     }
-    const list = repo.list({ limit: 3 });
+    const list = await repo.list({ limit: 3 });
     expect(list.length).toBe(3);
     expect(list[0]!.id).toBeGreaterThan(list[1]!.id);
     expect(list[1]!.id).toBeGreaterThan(list[2]!.id);
   });
 
-  test("filters by style/persona/outcome compose with AND", () => {
-    repo.insert({
+  test("filters by style/persona/outcome compose with AND", async () => {
+    await repo.insert({
       styleSlug: "alpha",
       personaSlug: "kate",
       outcome: "won",
@@ -88,7 +88,7 @@ describe("SelfPlayMatchesRepo", () => {
       skills: [],
       leadId: null,
     });
-    repo.insert({
+    await repo.insert({
       styleSlug: "alpha",
       personaSlug: "anya",
       outcome: "lost",
@@ -98,7 +98,7 @@ describe("SelfPlayMatchesRepo", () => {
       skills: [],
       leadId: null,
     });
-    repo.insert({
+    await repo.insert({
       styleSlug: "beta",
       personaSlug: "kate",
       outcome: "lost",
@@ -109,16 +109,18 @@ describe("SelfPlayMatchesRepo", () => {
       leadId: null,
     });
 
-    expect(repo.list({ styleSlug: "alpha" }).length).toBe(2);
-    expect(repo.list({ personaSlug: "kate" }).length).toBe(2);
-    expect(repo.list({ outcome: "won" }).length).toBe(1);
-    expect(repo.list({ styleSlug: "alpha", outcome: "lost" }).length).toBe(1);
-    expect(repo.list({ styleSlug: "beta", personaSlug: "kate", outcome: "lost" }).length).toBe(1);
+    expect((await repo.list({ styleSlug: "alpha" })).length).toBe(2);
+    expect((await repo.list({ personaSlug: "kate" })).length).toBe(2);
+    expect((await repo.list({ outcome: "won" })).length).toBe(1);
+    expect((await repo.list({ styleSlug: "alpha", outcome: "lost" })).length).toBe(1);
+    expect(
+      (await repo.list({ styleSlug: "beta", personaSlug: "kate", outcome: "lost" })).length,
+    ).toBe(1);
   });
 
-  test("matrix aggregates W/L/D by (style, persona)", () => {
+  test("matrix aggregates W/L/D by (style, persona)", async () => {
     for (const o of ["won", "won", "lost", "draw"] as const) {
-      repo.insert({
+      await repo.insert({
         styleSlug: "alpha",
         personaSlug: "kate",
         outcome: o,
@@ -129,7 +131,7 @@ describe("SelfPlayMatchesRepo", () => {
         leadId: null,
       });
     }
-    repo.insert({
+    await repo.insert({
       styleSlug: "beta",
       personaSlug: "kate",
       outcome: "lost",
@@ -139,7 +141,7 @@ describe("SelfPlayMatchesRepo", () => {
       skills: [],
       leadId: null,
     });
-    const m = repo.matrix();
+    const m = await repo.matrix();
     const alphaKate = m.find((r) => r.style_slug === "alpha" && r.persona_slug === "kate")!;
     expect(alphaKate.won).toBe(2);
     expect(alphaKate.lost).toBe(1);
@@ -147,8 +149,8 @@ describe("SelfPlayMatchesRepo", () => {
     expect(alphaKate.total).toBe(4);
   });
 
-  test("delete removes the row", () => {
-    const r = repo.insert({
+  test("delete removes the row", async () => {
+    const r = await repo.insert({
       styleSlug: "a",
       personaSlug: "p",
       outcome: "won",
@@ -158,13 +160,13 @@ describe("SelfPlayMatchesRepo", () => {
       skills: [],
       leadId: null,
     });
-    expect(repo.delete(r.id)).toBe(true);
-    expect(repo.byId(r.id)).toBeNull();
-    expect(repo.delete(r.id)).toBe(false);
+    expect(await repo.delete(r.id)).toBe(true);
+    expect(await repo.byId(r.id)).toBeNull();
+    expect(await repo.delete(r.id)).toBe(false);
   });
 
-  test("malformed transcript_json falls back to empty array (defensive)", () => {
-    const r = repo.insert({
+  test("malformed transcript_json falls back to empty array (defensive)", async () => {
+    const r = await repo.insert({
       styleSlug: "a",
       personaSlug: "p",
       outcome: "won",
@@ -174,7 +176,7 @@ describe("SelfPlayMatchesRepo", () => {
       skills: [],
       leadId: null,
     });
-    db.run(`UPDATE self_play_matches SET transcript_json = ? WHERE id = ?`, ["{not json", r.id]);
-    expect(repo.byId(r.id)?.transcript).toEqual([]);
+    await sql`UPDATE self_play_matches SET transcript_json = '{not json}' WHERE id = ${r.id}`;
+    expect((await repo.byId(r.id))?.transcript).toEqual([]);
   });
 });

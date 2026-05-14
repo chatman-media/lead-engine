@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { KbRepo } from "@/db/repos/kb.ts";
-import { openDb } from "@/db/sqlite.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { deriveTopicFromPath, ingestDirectory, ingestFile, ingestText } from "@/rag/ingest.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const DIM = 1536;
 
@@ -33,18 +33,20 @@ function deterministicVec(text: string, dim: number): number[] {
   return arr;
 }
 
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 let tmp: string;
-let db: ReturnType<typeof openDb>;
 let kb: KbRepo;
 
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "tg-ingest-"));
-  db = openDb({ path: ":memory:", embeddingDim: DIM });
-  kb = new KbRepo(db);
+  kb = new KbRepo(sql);
 });
 
 afterEach(() => {
-  db.close();
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -62,8 +64,8 @@ describe("ingestFile", () => {
 
     expect(result.created).toBe(true);
     expect(result.chunks).toBeGreaterThanOrEqual(2);
-    expect(kb.countDocuments()).toBe(1);
-    expect(kb.countChunks()).toBe(result.chunks);
+    expect(await kb.countDocuments()).toBe(1);
+    expect(await kb.countChunks()).toBe(result.chunks);
     expect(embedder.calls).toHaveLength(1);
     expect(embedder.calls[0]!.length).toBe(result.chunks);
   });
@@ -78,8 +80,8 @@ describe("ingestFile", () => {
 
     expect(r1.created).toBe(true);
     expect(r2.created).toBe(false);
-    expect(kb.countDocuments()).toBe(1);
-    expect(kb.countChunks()).toBe(r1.chunks);
+    expect(await kb.countDocuments()).toBe(1);
+    expect(await kb.countChunks()).toBe(r1.chunks);
     expect(embedder.calls).toHaveLength(1);
   });
 
@@ -94,10 +96,10 @@ describe("ingestFile", () => {
     const r2 = await ingestFile(file, { kb, embedder });
     expect(r2.created).toBe(true);
 
-    expect(kb.countDocuments()).toBe(1);
-    expect(kb.countChunks()).toBe(r2.chunks);
+    expect(await kb.countDocuments()).toBe(1);
+    expect(await kb.countChunks()).toBe(r2.chunks);
 
-    const hits = kb.search(deterministicVec("version two with more text", DIM), 5);
+    const hits = await kb.search(deterministicVec("version two with more text", DIM), 5);
     expect(hits[0]!.text).toContain("version two");
   });
 
@@ -109,7 +111,7 @@ describe("ingestFile", () => {
 
     const summary = await ingestDirectory(tmp, { kb, embedder });
     expect(summary.documents).toBe(2);
-    expect(kb.countDocuments()).toBe(2);
+    expect(await kb.countDocuments()).toBe(2);
   });
 
   test("ingestFile applies deps.topic to the inserted document", async () => {
@@ -117,15 +119,15 @@ describe("ingestFile", () => {
     writeFileSync(file, "content", "utf8");
     const embedder = fakeEmbedder();
     await ingestFile(file, { kb, embedder, topic: "visa" });
-    const row = db.query<{ topic: string | null }, []>("SELECT topic FROM kb_documents").get();
+    const [row] = await sql<[{ topic: string | null }]>`SELECT topic FROM kb_documents LIMIT 1`;
     expect(row?.topic).toBe("visa");
   });
 
   test("ingestDirectory derives topic from immediate sub-directory", async () => {
     const visaDir = join(tmp, "visa");
     const paymentDir = join(tmp, "payment");
-    require("node:fs").mkdirSync(visaDir, { recursive: true });
-    require("node:fs").mkdirSync(paymentDir, { recursive: true });
+    mkdirSync(visaDir, { recursive: true });
+    mkdirSync(paymentDir, { recursive: true });
     writeFileSync(join(visaDir, "v1.md"), "visa doc 1", "utf8");
     writeFileSync(join(paymentDir, "p1.md"), "payment doc 1", "utf8");
     // File directly under tmp gets no topic
@@ -133,11 +135,9 @@ describe("ingestFile", () => {
 
     const embedder = fakeEmbedder();
     await ingestDirectory(tmp, { kb, embedder });
-    const rows = db
-      .query<{ title: string; topic: string | null }, []>(
-        "SELECT title, topic FROM kb_documents ORDER BY title",
-      )
-      .all();
+    const rows = await sql<{ title: string; topic: string | null }[]>`
+      SELECT title, topic FROM kb_documents ORDER BY title
+    `;
     const byTitle = new Map(rows.map((r) => [r.title, r.topic]));
     expect(byTitle.get("v1.md")).toBe("visa");
     expect(byTitle.get("p1.md")).toBe("payment");
@@ -146,12 +146,12 @@ describe("ingestFile", () => {
 
   test("ingestDirectory: explicit deps.topic overrides directory layout", async () => {
     const visaDir = join(tmp, "visa");
-    require("node:fs").mkdirSync(visaDir, { recursive: true });
+    mkdirSync(visaDir, { recursive: true });
     writeFileSync(join(visaDir, "v.md"), "doc", "utf8");
 
     const embedder = fakeEmbedder();
     await ingestDirectory(tmp, { kb, embedder, topic: "manual-override" });
-    const row = db.query<{ topic: string | null }, []>("SELECT topic FROM kb_documents").get();
+    const [row] = await sql<[{ topic: string | null }]>`SELECT topic FROM kb_documents LIMIT 1`;
     expect(row?.topic).toBe("manual-override");
   });
 });
@@ -180,8 +180,8 @@ describe("ingestText", () => {
     );
     expect(result.created).toBe(true);
     expect(result.chunks).toBeGreaterThanOrEqual(2);
-    expect(kb.countDocuments()).toBe(1);
-    expect(kb.countChunks()).toBe(result.chunks);
+    expect(await kb.countDocuments()).toBe(1);
+    expect(await kb.countChunks()).toBe(result.chunks);
     expect(embedder.calls.length).toBe(1);
     expect(result.source.startsWith("inline:")).toBe(true);
   });
@@ -193,15 +193,13 @@ describe("ingestText", () => {
     expect(r1.created).toBe(true);
     expect(r2.created).toBe(false);
     expect(r1.documentId).toBe(r2.documentId);
-    expect(kb.countDocuments()).toBe(1);
+    expect(await kb.countDocuments()).toBe(1);
   });
 
   test("topic is applied to the inserted document when set", async () => {
     const embedder = fakeEmbedder();
     await ingestText({ title: "v.md", body: "visa info" }, { kb, embedder, topic: "visa" });
-    const row = db
-      .query<{ topic: string | null }, []>(`SELECT topic FROM kb_documents LIMIT 1`)
-      .get();
+    const [row] = await sql<[{ topic: string | null }]>`SELECT topic FROM kb_documents LIMIT 1`;
     expect(row?.topic).toBe("visa");
   });
 
@@ -209,7 +207,7 @@ describe("ingestText", () => {
     const embedder = fakeEmbedder();
     const r = await ingestText({ title: "  ", body: "some body" }, { kb, embedder });
     expect(r.created).toBe(true);
-    const row = db.query<{ title: string }, []>(`SELECT title FROM kb_documents LIMIT 1`).get();
+    const [row] = await sql<[{ title: string }]>`SELECT title FROM kb_documents LIMIT 1`;
     expect(row?.title).toBe("untitled");
   });
 });

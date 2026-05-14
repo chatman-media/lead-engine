@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { LeadsRepo } from "@/db/repos/leads.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import { LeadsService } from "@/leads/service.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 interface SentCall {
   method: string;
@@ -36,27 +36,25 @@ function fakeTelegram(): {
   };
 }
 
-let db: ReturnType<typeof openDb>;
-
-beforeEach(() => {
-  db = openDb({ path: ":memory:" });
-});
-afterEach(() => db.close());
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
 
 describe("LeadsService.relayFromOperator", () => {
-  function build() {
-    const users = new UsersRepo(db);
-    const conversations = new ConversationsRepo(db);
-    const messages = new MessagesRepo(db);
-    const leads = new LeadsRepo(db);
-    const u = users.create({ tgUserId: 555_000 });
-    const conv = conversations.ensureForUser(u.id);
-    const lead = leads.ensureForUser(u.id);
+  async function build() {
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const messages = new MessagesRepo(sql);
+    const leads = new LeadsRepo(sql);
+    const u = await users.create({ tgUserId: 555_000 });
+    const conv = await conversations.ensureForUser(u.id);
+    const lead = await leads.ensureForUser(u.id);
     return { users, conversations, messages, leads, u, conv, lead };
   }
 
   test("text-only relay sends sendMessage and records role=human", async () => {
-    const { users, conversations, messages, leads, u, conv, lead } = build();
+    const { users, conversations, messages, leads, u, conv, lead } = await build();
     const tg = fakeTelegram();
     const service = new LeadsService({
       leads,
@@ -76,7 +74,7 @@ describe("LeadsService.relayFromOperator", () => {
 
     expect(ok).toBe(true);
     expect(tg.calls.map((c) => c.method)).toEqual(["sendMessage"]);
-    const list = messages.listByConversation(conv.id);
+    const list = await messages.listByConversation(conv.id);
     expect(list).toHaveLength(1);
     expect(list[0]!.role).toBe("human");
     expect(list[0]!.text).toBe("привет, отправь паспорт пжл");
@@ -85,7 +83,7 @@ describe("LeadsService.relayFromOperator", () => {
   });
 
   test("photo relay calls sendPhoto with caption when text present", async () => {
-    const { users, conversations, messages, leads, u, lead } = build();
+    const { users, conversations, messages, leads, u, lead } = await build();
     const tg = fakeTelegram();
     const service = new LeadsService({
       leads,
@@ -107,7 +105,7 @@ describe("LeadsService.relayFromOperator", () => {
   });
 
   test("video / document use respective send methods", async () => {
-    const { users, conversations, messages, leads, u, lead } = build();
+    const { users, conversations, messages, leads, u, lead } = await build();
     const tg = fakeTelegram();
     const service = new LeadsService({
       leads,
@@ -132,7 +130,7 @@ describe("LeadsService.relayFromOperator", () => {
   });
 
   test("returns false when neither text nor media supplied", async () => {
-    const { users, conversations, messages, leads, u, lead } = build();
+    const { users, conversations, messages, leads, u, lead } = await build();
     const tg = fakeTelegram();
     const service = new LeadsService({
       leads,
@@ -149,7 +147,7 @@ describe("LeadsService.relayFromOperator", () => {
   });
 
   test("relay records media metadata for admin chat view", async () => {
-    const { users, conversations, messages, leads, u, conv, lead } = build();
+    const { users, conversations, messages, leads, u, conv, lead } = await build();
     const tg = fakeTelegram();
     const service = new LeadsService({
       leads,
@@ -165,7 +163,7 @@ describe("LeadsService.relayFromOperator", () => {
       user: u,
       media: { type: "photo", file_id: "AgADxxx" },
     });
-    const list = messages.listByConversation(conv.id);
+    const list = await messages.listByConversation(conv.id);
     const meta = JSON.parse(list[0]!.meta_json ?? "{}") as {
       media: { type: string; file_id: string };
     };

@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
 import { KbRepo, type KbSearchHit, reciprocalRankFusion, sanitizeFtsQuery } from "@/db/repos/kb.ts";
-import { openDb } from "@/db/sqlite.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const DIM = 1536;
 
@@ -11,32 +11,38 @@ function vec(seed: number): number[] {
   return arr;
 }
 
-let db: ReturnType<typeof openDb>;
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 let kb: KbRepo;
 
 beforeEach(() => {
-  db = openDb({ path: ":memory:", embeddingDim: DIM });
-  kb = new KbRepo(db);
+  kb = new KbRepo(sql);
 });
-afterEach(() => db.close());
 
-function seedDocs(): { visaChunkId: number; dubaiChunkId: number; istanbulChunkId: number } {
-  const doc = kb.upsertDocument({ source: "kb://t", title: "t", contentHash: "h1" });
-  const visa = kb.insertChunkWithEmbedding({
+async function seedDocs(): Promise<{
+  visaChunkId: number;
+  dubaiChunkId: number;
+  istanbulChunkId: number;
+}> {
+  const doc = await kb.upsertDocument({ source: "kb://t", title: "t", contentHash: "h1" });
+  const visa = await kb.insertChunkWithEmbedding({
     documentId: doc.id,
     chunkIndex: 0,
     text: "Виза оформляется на 30 дней бесплатно через агентство.",
     tokenCount: 10,
     embedding: vec(1),
   });
-  const dubai = kb.insertChunkWithEmbedding({
+  const dubai = await kb.insertChunkWithEmbedding({
     documentId: doc.id,
     chunkIndex: 1,
     text: "В Дубае платят 1500 в день, контракт 30 дней с релокацией.",
     tokenCount: 12,
     embedding: vec(2),
   });
-  const istanbul = kb.insertChunkWithEmbedding({
+  const istanbul = await kb.insertChunkWithEmbedding({
     documentId: doc.id,
     chunkIndex: 2,
     text: "Стамбул: контракты от 60 дней, оплата в долларах.",
@@ -88,74 +94,74 @@ describe("sanitizeFtsQuery", () => {
 });
 
 describe("KbRepo.searchBm25", () => {
-  test("returns hits for exact-match keywords (Cyrillic)", () => {
-    const ids = seedDocs();
-    const hits = kb.searchBm25("виза", 5);
+  test("returns hits for exact-match keywords (Cyrillic)", async () => {
+    const ids = await seedDocs();
+    const hits = await kb.searchBm25("виза", 5);
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0]!.chunk_id).toBe(ids.visaChunkId);
   });
 
-  test("matches via forward prefix matching (query 'виз' hits 'виза')", () => {
-    const ids = seedDocs();
+  test("matches via forward prefix matching (query 'виз' hits 'виза')", async () => {
+    const ids = await seedDocs();
     // FTS5 prefix-match is forward-only: query "виз*" matches "виза",
     // "визу", "визой" etc. The reverse direction (query "визой" matching
     // a chunk containing "виза") needs a stemmer — out of scope for now.
-    const hits = kb.searchBm25("виз", 5);
+    const hits = await kb.searchBm25("виз", 5);
     expect(hits.map((h) => h.chunk_id)).toContain(ids.visaChunkId);
   });
 
-  test("returns multiple hits ordered by BM25 score (lower = better)", () => {
-    seedDocs();
-    const hits = kb.searchBm25("контракт дней", 5);
+  test("returns multiple hits ordered by BM25 score (lower = better)", async () => {
+    await seedDocs();
+    const hits = await kb.searchBm25("контракт дней", 5);
     expect(hits.length).toBeGreaterThanOrEqual(2);
     for (let i = 1; i < hits.length; i++) {
       expect(hits[i]!.distance).toBeGreaterThanOrEqual(hits[i - 1]!.distance);
     }
   });
 
-  test("returns [] when query has no matchable tokens", () => {
-    seedDocs();
-    expect(kb.searchBm25("", 5)).toEqual([]);
-    expect(kb.searchBm25("я", 5)).toEqual([]); // single char dropped
+  test("returns [] when query has no matchable tokens", async () => {
+    await seedDocs();
+    expect(await kb.searchBm25("", 5)).toEqual([]);
+    expect(await kb.searchBm25("я", 5)).toEqual([]); // single char dropped
   });
 
-  test("returns [] when no chunk matches", () => {
-    seedDocs();
-    expect(kb.searchBm25("xylophone", 5)).toEqual([]);
+  test("returns [] when no chunk matches", async () => {
+    await seedDocs();
+    expect(await kb.searchBm25("xylophone", 5)).toEqual([]);
   });
 
-  test("returns [] gracefully on malformed FTS queries (does not throw)", () => {
-    seedDocs();
+  test("returns [] gracefully on malformed FTS queries (does not throw)", async () => {
+    await seedDocs();
     // Even with operator chars, sanitize should handle it — but if user
     // somehow passes operators through, we shouldn't crash.
-    expect(() => kb.searchBm25("(((", 5)).not.toThrow();
+    await expect(kb.searchBm25("(((", 5)).resolves.not.toThrow;
   });
 
-  test("trigger keeps FTS in sync after insert", () => {
-    const doc = kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
-    expect(kb.searchBm25("уникальное", 5).length).toBe(0);
-    kb.insertChunkWithEmbedding({
+  test("trigger keeps FTS in sync after insert", async () => {
+    const doc = await kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
+    expect(await kb.searchBm25("уникальное", 5)).toHaveLength(0);
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "это уникальное слово в контенте",
       tokenCount: 5,
       embedding: vec(7),
     });
-    expect(kb.searchBm25("уникальное", 5).length).toBe(1);
+    expect(await kb.searchBm25("уникальное", 5)).toHaveLength(1);
   });
 
-  test("trigger keeps FTS in sync after delete", () => {
-    const doc = kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
-    kb.insertChunkWithEmbedding({
+  test("trigger keeps FTS in sync after delete", async () => {
+    const doc = await kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "удаляемое слово",
       tokenCount: 3,
       embedding: vec(8),
     });
-    expect(kb.searchBm25("удаляемое", 5).length).toBe(1);
-    kb.deleteChunksByDocument(doc.id);
-    expect(kb.searchBm25("удаляемое", 5).length).toBe(0);
+    expect(await kb.searchBm25("удаляемое", 5)).toHaveLength(1);
+    await kb.deleteChunksByDocument(doc.id);
+    expect(await kb.searchBm25("удаляемое", 5)).toHaveLength(0);
   });
 });
 
@@ -204,39 +210,39 @@ describe("reciprocalRankFusion", () => {
 });
 
 describe("topic-filtered search", () => {
-  function seedTopical() {
-    const doc1 = kb.upsertDocument({
+  async function seedTopical() {
+    const doc1 = await kb.upsertDocument({
       source: "kb://visa/v1",
       title: "v1",
       contentHash: "hv1",
       topic: "visa",
     });
-    const doc2 = kb.upsertDocument({
+    const doc2 = await kb.upsertDocument({
       source: "kb://payment/p1",
       title: "p1",
       contentHash: "hp1",
       topic: "payment",
     });
-    const doc3 = kb.upsertDocument({
+    const doc3 = await kb.upsertDocument({
       source: "kb://untagged/u1",
       title: "u1",
       contentHash: "hu1",
     });
-    const visaChunk = kb.insertChunkWithEmbedding({
+    const visaChunk = await kb.insertChunkWithEmbedding({
       documentId: doc1.id,
       chunkIndex: 0,
       text: "Виза оформляется на 30 дней",
       tokenCount: 5,
       embedding: vec(1),
     });
-    const paymentChunk = kb.insertChunkWithEmbedding({
+    const paymentChunk = await kb.insertChunkWithEmbedding({
       documentId: doc2.id,
       chunkIndex: 0,
       text: "Платят 1500 в день",
       tokenCount: 4,
       embedding: vec(2),
     });
-    const untaggedChunk = kb.insertChunkWithEmbedding({
+    const untaggedChunk = await kb.insertChunkWithEmbedding({
       documentId: doc3.id,
       chunkIndex: 0,
       text: "Общая информация про работу",
@@ -250,37 +256,37 @@ describe("topic-filtered search", () => {
     };
   }
 
-  test("vector search filters out docs from other topics", () => {
-    const ids = seedTopical();
-    const hits = kb.search(vec(2), 10, "visa");
+  test("vector search filters out docs from other topics", async () => {
+    const ids = await seedTopical();
+    const hits = await kb.search(vec(2), 10, "visa");
     const found = hits.map((h) => h.chunk_id);
     expect(found).toContain(ids.visaChunkId);
     expect(found).toContain(ids.untaggedChunkId); // NULL topic always passes
     expect(found).not.toContain(ids.paymentChunkId);
   });
 
-  test("BM25 search filters out docs from other topics", () => {
-    const ids = seedTopical();
+  test("BM25 search filters out docs from other topics", async () => {
+    const ids = await seedTopical();
     // Query "общ" matches the untagged chunk ("Общая ..."). "Платят" /
     // "оформ" cover payment / visa chunks respectively for the prefix
     // matcher.
-    const hits = kb.searchBm25("оформляется общ", 10, "visa");
+    const hits = await kb.searchBm25("оформляется общ", 10, "visa");
     const found = hits.map((h) => h.chunk_id);
     expect(found).toContain(ids.visaChunkId);
     expect(found).toContain(ids.untaggedChunkId);
     expect(found).not.toContain(ids.paymentChunkId);
   });
 
-  test("topic=null behaves as no filter (back-compat)", () => {
-    seedTopical();
-    const all = kb.search(vec(1), 10);
-    const filtered = kb.search(vec(1), 10, null);
+  test("topic=null behaves as no filter (back-compat)", async () => {
+    await seedTopical();
+    const all = await kb.search(vec(1), 10);
+    const filtered = await kb.search(vec(1), 10, null);
     expect(filtered.length).toBe(all.length);
   });
 
-  test("hybridSearch passes topic to both sides", () => {
-    const ids = seedTopical();
-    const hits = kb.hybridSearch({
+  test("hybridSearch passes topic to both sides", async () => {
+    const ids = await seedTopical();
+    const hits = await kb.hybridSearch({
       embedding: vec(2),
       query: "работа",
       k: 10,
@@ -290,43 +296,43 @@ describe("topic-filtered search", () => {
     expect(found).not.toContain(ids.paymentChunkId);
   });
 
-  test("upsertDocument persists the topic and search returns it correctly", () => {
-    const ids = seedTopical();
-    const hits = kb.searchBm25("Виза", 5, "visa");
+  test("upsertDocument persists the topic and search returns it correctly", async () => {
+    const ids = await seedTopical();
+    const hits = await kb.searchBm25("Виза", 5, "visa");
     expect(hits[0]!.chunk_id).toBe(ids.visaChunkId);
   });
 });
 
 describe("KbRepo.hybridSearch", () => {
-  test("falls back to vector-only when BM25 has no hits", () => {
-    const ids = seedDocs();
-    const result = kb.hybridSearch({ embedding: vec(1), query: "xylophone", k: 3 });
+  test("falls back to vector-only when BM25 has no hits", async () => {
+    const ids = await seedDocs();
+    const result = await kb.hybridSearch({ embedding: vec(1), query: "xylophone", k: 3 });
     expect(result.length).toBeGreaterThan(0);
     expect(result[0]!.chunk_id).toBe(ids.visaChunkId);
   });
 
-  test("falls back to BM25-only when vector index has no hits (unmatched embedding)", () => {
-    seedDocs();
+  test("falls back to BM25-only when vector index has no hits (unmatched embedding)", async () => {
+    await seedDocs();
     // Vector with no chunk near it → vector returns empty due to k=0 candidates,
     // but here vec(99) IS in the index seed range — test more directly via
     // empty-embedding edge case below.
-    const result = kb.hybridSearch({ embedding: vec(1), query: "виза", k: 3 });
+    const result = await kb.hybridSearch({ embedding: vec(1), query: "виза", k: 3 });
     expect(result.length).toBeGreaterThan(0);
   });
 
-  test("merged results include hits from both sides", () => {
-    const ids = seedDocs();
+  test("merged results include hits from both sides", async () => {
+    const ids = await seedDocs();
     // Vector seed favors visa (vec(1)); BM25 query "Стамбул" favors istanbul.
     // Hybrid should return BOTH in top-3.
-    const result = kb.hybridSearch({ embedding: vec(1), query: "Стамбул", k: 3 });
+    const result = await kb.hybridSearch({ embedding: vec(1), query: "Стамбул", k: 3 });
     const chunkIds = result.map((h) => h.chunk_id);
     expect(chunkIds).toContain(ids.visaChunkId); // from vector
     expect(chunkIds).toContain(ids.istanbulChunkId); // from BM25
   });
 
-  test("respects k", () => {
-    seedDocs();
-    const result = kb.hybridSearch({ embedding: vec(1), query: "контракт", k: 1 });
+  test("respects k", async () => {
+    await seedDocs();
+    const result = await kb.hybridSearch({ embedding: vec(1), query: "контракт", k: 1 });
     expect(result.length).toBe(1);
   });
 });

@@ -1,15 +1,16 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { createRouter } from "@/app.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
+import { KbRepo } from "@/db/repos/kb.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const SECRET = "test-secret";
 const DIM = 1536;
@@ -42,8 +43,12 @@ interface OutgoingCall {
   body: Record<string, unknown>;
 }
 
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 function setup() {
-  const db = openDb({ path: ":memory:", embeddingDim: DIM });
   const sent: OutgoingCall[] = [];
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
@@ -66,7 +71,7 @@ function setup() {
   };
   const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
   const router = createRouter({
-    db,
+    sql,
     telegram,
     webhookSecret: SECRET,
     rag: { embedder: fakeEmbedder(), chat: fakeChat("Привет от бота") },
@@ -76,12 +81,11 @@ function setup() {
     port: 0,
     fetch: (req) => router.handle(req),
   });
-  return { db, server, sent };
+  return { server, sent };
 }
 
-function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
+function teardown(s: { server: Server }) {
   s.server.stop(true);
-  s.db.close();
 }
 
 /** Same update_id + same message_id, replayed verbatim — exactly what
@@ -109,16 +113,15 @@ afterEach(() => teardown(ctx));
 
 describe("webhook idempotency (Telegram retry hardening)", () => {
   test("replaying the same update twice persists one user-msg and triggers one assistant reply", async () => {
-    const users = new UsersRepo(ctx.db);
-    const u = users.create({ tgUserId: 555 });
+    const users = new UsersRepo(sql);
+    const u = await users.create({ tgUserId: 555 });
 
     // KB seed so RAG actually has a context to answer from (otherwise
     // the second branch would escalate and we'd be measuring the wrong
     // thing).
-    const { KbRepo } = await import("@/db/repos/kb.ts");
-    const kb = new KbRepo(ctx.db);
-    const doc = kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
-    kb.insertChunkWithEmbedding({
+    const kb = new KbRepo(sql);
+    const doc = await kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "anything",
@@ -142,9 +145,9 @@ describe("webhook idempotency (Telegram retry hardening)", () => {
     const body2 = (await r2.json()) as { ok: boolean; deduped?: boolean };
     expect(body2.deduped).toBe(true);
 
-    const conv = new ConversationsRepo(ctx.db).byUserId(u.id);
+    const conv = await new ConversationsRepo(sql).byUserId(u.id);
     expect(conv).not.toBeNull();
-    const msgs = new MessagesRepo(ctx.db).listByConversation(conv!.id);
+    const msgs = await new MessagesRepo(sql).listByConversation(conv!.id);
 
     const userRows = msgs.filter((m) => m.role === "user");
     expect(userRows).toHaveLength(1);
@@ -159,13 +162,12 @@ describe("webhook idempotency (Telegram retry hardening)", () => {
   });
 
   test("a different message_id from the same user is NOT deduped", async () => {
-    const users = new UsersRepo(ctx.db);
-    const u = users.create({ tgUserId: 556 });
+    const users = new UsersRepo(sql);
+    const u = await users.create({ tgUserId: 556 });
 
-    const { KbRepo } = await import("@/db/repos/kb.ts");
-    const kb = new KbRepo(ctx.db);
-    const doc = kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
-    kb.insertChunkWithEmbedding({
+    const kb = new KbRepo(sql);
+    const doc = await kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "anything",
@@ -184,10 +186,10 @@ describe("webhook idempotency (Telegram retry hardening)", () => {
     await post(1, "первое");
     await post(2, "второе");
 
-    const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
-    const userRows = new MessagesRepo(ctx.db)
-      .listByConversation(conv.id)
-      .filter((m) => m.role === "user");
+    const conv = (await new ConversationsRepo(sql).byUserId(u.id))!;
+    const userRows = (await new MessagesRepo(sql).listByConversation(conv.id)).filter(
+      (m) => m.role === "user",
+    );
     expect(userRows).toHaveLength(2);
     expect(userRows.map((r) => r.tg_message_id).sort()).toEqual([1, 2]);
   });

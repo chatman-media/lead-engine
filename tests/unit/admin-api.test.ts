@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { __resetBotHealthCacheForTesting } from "@/admin/api.ts";
@@ -7,49 +7,55 @@ import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const SECRET = "s";
 
-function setup() {
-  const db = openDb({ path: ":memory:" });
-  const fetchImpl: FetchLike = async () =>
-    new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
-  const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
-  const router = createRouter({ db, telegram, webhookSecret: SECRET });
-  const server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
-  return { db, server };
-}
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
 
-function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
-  s.server.stop(true);
-  s.db.close();
-}
-
-let ctx: ReturnType<typeof setup>;
+let server: Server;
 let cookie: string;
+
+function makeFetchImpl(): FetchLike {
+  return async () => new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
+}
+
+async function startServer(fetchImpl: FetchLike = makeFetchImpl()): Promise<Server> {
+  const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
+  const router = createRouter({ sql, telegram, webhookSecret: SECRET });
+  return Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
+}
+
+async function loginCookie(s: Server): Promise<string> {
+  const login = await fetch(`http://127.0.0.1:${s.port}/admin/api/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+  });
+  return login.headers.get("set-cookie")!.split(";")[0]!;
+}
 
 beforeEach(async () => {
   // Bot-health cache is module-level — without this reset the first
   // /status probe in test N persists into test N+1, hiding stub
   // behaviour from later cases.
   __resetBotHealthCacheForTesting();
-  ctx = setup();
-  const admins = new AdminsRepo(ctx.db);
+  server = await startServer();
+  const admins = new AdminsRepo(sql);
   await admins.create({ email: "op@x.test", password: "longenough" });
-  const login = await fetch(`http://127.0.0.1:${ctx.server.port}/admin/api/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
-  });
-  const set = login.headers.get("set-cookie")!;
-  cookie = set.split(";")[0]!;
+  cookie = await loginCookie(server);
 });
-afterEach(() => teardown(ctx));
+
+afterEach(() => {
+  server.stop(true);
+});
 
 function url(path: string) {
-  return `http://127.0.0.1:${ctx.server.port}${path}`;
+  return `http://127.0.0.1:${server.port}${path}`;
 }
 function authed(extra: RequestInit = {}): RequestInit {
   return {
@@ -74,10 +80,10 @@ describe("leads endpoints", () => {
   });
 
   test("POST /admin/api/leads/from-conversation/:id promotes idempotently", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9001 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9001 });
+    const c = await conversations.ensureForUser(u.id);
 
     const first = await fetch(
       url(`/admin/api/leads/from-conversation/${c.id}`),
@@ -100,10 +106,10 @@ describe("leads endpoints", () => {
   });
 
   test("POST /admin/api/leads/:id/approve transitions through docs_pending", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9002 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9002 });
+    const c = await conversations.ensureForUser(u.id);
     const promoted = await fetch(
       url(`/admin/api/leads/from-conversation/${c.id}`),
       authed({ method: "POST" }),
@@ -121,10 +127,10 @@ describe("leads endpoints", () => {
   });
 
   test("POST /admin/api/leads/:id/reject records reason and locks state", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9003 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9003 });
+    const c = await conversations.ensureForUser(u.id);
     const promoted = await fetch(
       url(`/admin/api/leads/from-conversation/${c.id}`),
       authed({ method: "POST" }),
@@ -162,10 +168,10 @@ describe("leads endpoints", () => {
   });
 
   test("POST /admin/api/leads/:id/submit-to-visa allocates application_id and transitions to docs_complete", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9210 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9210 });
+    const c = await conversations.ensureForUser(u.id);
     const promoted = await fetch(
       url(`/admin/api/leads/from-conversation/${c.id}`),
       authed({ method: "POST" }),
@@ -190,10 +196,10 @@ describe("leads endpoints", () => {
   });
 
   test("submit-to-visa is idempotent on application_id (re-submit returns same id)", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9211 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9211 });
+    const c = await conversations.ensureForUser(u.id);
     const { lead } = (await (
       await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
@@ -209,10 +215,10 @@ describe("leads endpoints", () => {
   });
 
   test("notes: POST creates, lead detail returns the list, DELETE removes", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9_400 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9_400 });
+    const c = await conversations.ensureForUser(u.id);
     const promoted = await fetch(
       url(`/admin/api/leads/from-conversation/${c.id}`),
       authed({ method: "POST" }),
@@ -253,10 +259,10 @@ describe("leads endpoints", () => {
   });
 
   test("notes: empty body rejected with 400", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9_401 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9_401 });
+    const c = await conversations.ensureForUser(u.id);
     const { lead } = (await (
       await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
@@ -273,12 +279,12 @@ describe("leads endpoints", () => {
   });
 
   test("notes: cross-lead delete is rejected (note belongs to another lead)", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const ua = usersRepo.create({ tgUserId: 9_410 });
-    const ub = usersRepo.create({ tgUserId: 9_411 });
-    const ca = conversations.ensureForUser(ua.id);
-    const cb = conversations.ensureForUser(ub.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const ua = await usersRepo.create({ tgUserId: 9_410 });
+    const ub = await usersRepo.create({ tgUserId: 9_411 });
+    const ca = await conversations.ensureForUser(ua.id);
+    const cb = await conversations.ensureForUser(ub.id);
     const leadA = (await (
       await fetch(url(`/admin/api/leads/from-conversation/${ca.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
@@ -307,10 +313,10 @@ describe("leads endpoints", () => {
   });
 
   test("GET /admin/api/leads/:id includes the timeline events array", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9_350 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9_350 });
+    const c = await conversations.ensureForUser(u.id);
     const promoted = await fetch(
       url(`/admin/api/leads/from-conversation/${c.id}`),
       authed({ method: "POST" }),
@@ -337,10 +343,10 @@ describe("leads endpoints", () => {
   });
 
   test("GET /admin/api/leads/:id returns lead detail with parsed intake/visa_docs", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9300 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9300 });
+    const c = await conversations.ensureForUser(u.id);
     const { lead } = (await (
       await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
@@ -356,15 +362,15 @@ describe("leads endpoints", () => {
       recent_messages: unknown[];
     };
     expect(body.lead.id).toBe(lead.id);
-    expect(body.user.tg_user_id).toBe(9300);
+    expect(Number(body.user.tg_user_id)).toBe(9300);
     expect(body.conversation_id).toBe(c.id);
   });
 
   test("PATCH /admin/api/leads/:id/visa-docs merges patch with existing", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9301 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9301 });
+    const c = await conversations.ensureForUser(u.id);
     const { lead } = (await (
       await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
@@ -405,10 +411,10 @@ describe("leads endpoints", () => {
   });
 
   test("PATCH /admin/api/leads/:id/visa-docs drops unknown keys", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9302 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9302 });
+    const c = await conversations.ensureForUser(u.id);
     const { lead } = (await (
       await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
@@ -429,10 +435,10 @@ describe("leads endpoints", () => {
   });
 
   test("submit-to-visa rejects leads in wrong state with 409", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9212 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9212 });
+    const c = await conversations.ensureForUser(u.id);
     const { lead } = (await (
       await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
     ).json()) as { lead: { id: number } };
@@ -445,10 +451,10 @@ describe("leads endpoints", () => {
   });
 
   test("status endpoint reports leads.by_state counts", async () => {
-    const usersRepo = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = usersRepo.create({ tgUserId: 9100 });
-    const c = conversations.ensureForUser(u.id);
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9100 });
+    const c = await conversations.ensureForUser(u.id);
     await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }));
     const r = await fetch(url("/admin/api/status"), authed());
     const body = (await r.json()) as {
@@ -479,10 +485,10 @@ describe("vacancies endpoints", () => {
     );
     expect(create.status).toBe(200);
     const created = (await create.json()) as {
-      vacancy: { id: number; title: string; is_active: number };
+      vacancy: { id: number; title: string; is_active: boolean };
     };
     expect(created.vacancy.title).toBe("Шаохинг");
-    expect(created.vacancy.is_active).toBe(1);
+    expect(created.vacancy.is_active).toBe(true);
 
     const patch = await fetch(
       url(`/admin/api/vacancies/${created.vacancy.id}`),
@@ -493,8 +499,8 @@ describe("vacancies endpoints", () => {
       }),
     );
     expect(patch.status).toBe(200);
-    const patched = (await patch.json()) as { vacancy: { is_active: number } };
-    expect(patched.vacancy.is_active).toBe(0);
+    const patched = (await patch.json()) as { vacancy: { is_active: boolean } };
+    expect(patched.vacancy.is_active).toBe(false);
 
     const del = await fetch(
       url(`/admin/api/vacancies/${created.vacancy.id}`),
@@ -584,7 +590,7 @@ describe("GET /admin/api/status", () => {
     // getMe shape, and counts upstream calls. The default setup() stub
     // returns `result: true` which doesn't match TgUser — fine for the
     // smoke check, not for asserting bot_health fields.
-    teardown(ctx);
+    server.stop(true);
     __resetBotHealthCacheForTesting();
     const calls: string[] = [];
     const fetchImpl: FetchLike = async (input) => {
@@ -608,19 +614,9 @@ describe("GET /admin/api/status", () => {
         status: 200,
       });
     };
-    const db = openDb({ path: ":memory:" });
-    const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
-    const router = createRouter({ db, telegram, webhookSecret: SECRET });
-    const server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
-    const admins = new AdminsRepo(db);
-    await admins.create({ email: "op@x.test", password: "longenough" });
-    const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
-    });
-    const localCookie = login.headers.get("set-cookie")!.split(";")[0]!;
-    const localUrl = (p: string) => `http://127.0.0.1:${server.port}${p}`;
+    const localServer = await startServer(fetchImpl);
+    const localCookie = await loginCookie(localServer);
+    const localUrl = (p: string) => `http://127.0.0.1:${localServer.port}${p}`;
 
     const r1 = await fetch(localUrl("/admin/api/status"), {
       headers: { cookie: localCookie },
@@ -641,42 +637,31 @@ describe("GET /admin/api/status", () => {
     const getMeCallsAfterSecond = calls.filter((u) => u.includes("/getMe")).length;
     expect(getMeCallsAfterSecond).toBe(1);
 
-    server.stop(true);
-    db.close();
-    // Re-set ctx so afterEach's teardown(ctx) doesn't double-stop.
-    ctx = setup();
+    localServer.stop(true);
+    // Re-start the main server so afterEach's server.stop(true) doesn't error.
+    server = await startServer();
   });
 
   test("bot_health.ok is false when telegram getMe rejects", async () => {
-    teardown(ctx);
+    server.stop(true);
     __resetBotHealthCacheForTesting();
     const fetchImpl: FetchLike = async () =>
       new Response(JSON.stringify({ ok: false, description: "unauthorized" }), {
         status: 401,
       });
-    const db = openDb({ path: ":memory:" });
-    const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
-    const router = createRouter({ db, telegram, webhookSecret: SECRET });
-    const server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
-    const admins = new AdminsRepo(db);
-    await admins.create({ email: "op@x.test", password: "longenough" });
-    const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
-    });
-    const localCookie = login.headers.get("set-cookie")!.split(";")[0]!;
+    const localServer = await startServer(fetchImpl);
+    const localCookie = await loginCookie(localServer);
 
-    const r = await fetch(`http://127.0.0.1:${server.port}/admin/api/status`, {
+    const r = await fetch(`http://127.0.0.1:${localServer.port}/admin/api/status`, {
       headers: { cookie: localCookie },
     });
     const body = (await r.json()) as { bot_health: { ok: boolean; error?: string } };
     expect(body.bot_health.ok).toBe(false);
     expect(typeof body.bot_health.error).toBe("string");
 
-    server.stop(true);
-    db.close();
-    ctx = setup();
+    localServer.stop(true);
+    // Re-start the main server so afterEach's server.stop(true) doesn't error.
+    server = await startServer();
   });
 
   test("rag block reflects all six layer flags", async () => {
@@ -697,19 +682,11 @@ describe("GET /admin/api/status", () => {
   });
 
   test("kb counts by topic include untagged docs as null group", async () => {
-    const users = new UsersRepo(ctx.db);
-    users.create({ tgUserId: 800 }); // unrelated noise
     // Insert docs with mixed topics directly via SQL (KbRepo would do
     // the same thing).
-    ctx.db.run(
-      "INSERT INTO kb_documents (source, title, content_hash, topic) VALUES ('s1','t1','h1','visa')",
-    );
-    ctx.db.run(
-      "INSERT INTO kb_documents (source, title, content_hash, topic) VALUES ('s2','t2','h2','payment')",
-    );
-    ctx.db.run(
-      "INSERT INTO kb_documents (source, title, content_hash, topic) VALUES ('s3','t3','h3',NULL)",
-    );
+    await sql`INSERT INTO kb_documents (source, title, content_hash, topic) VALUES ('s1','t1','h1','visa')`;
+    await sql`INSERT INTO kb_documents (source, title, content_hash, topic) VALUES ('s2','t2','h2','payment')`;
+    await sql`INSERT INTO kb_documents (source, title, content_hash, topic) VALUES ('s3','t3','h3',NULL)`;
 
     const res = await fetch(url("/admin/api/status"), authed());
     const body = (await res.json()) as {
@@ -723,11 +700,11 @@ describe("GET /admin/api/status", () => {
   });
 
   test("conversations.with_summary counts non-null summary_json rows", async () => {
-    const users = new UsersRepo(ctx.db);
-    const convs = new ConversationsRepo(ctx.db);
-    const u = users.create({ tgUserId: 801 });
-    const c = convs.ensureForUser(u.id);
-    convs.setSummary(c.id, "обсуждали Дубай и сроки", 10);
+    const users = new UsersRepo(sql);
+    const convs = new ConversationsRepo(sql);
+    const u = await users.create({ tgUserId: 801 });
+    const c = await convs.ensureForUser(u.id);
+    await convs.setSummary(c.id, "обсуждали Дубай и сроки", 10);
 
     const res = await fetch(url("/admin/api/status"), authed());
     const body = (await res.json()) as {
@@ -738,9 +715,9 @@ describe("GET /admin/api/status", () => {
   });
 
   test("users.with_memory counts users with extracted facts", async () => {
-    const users = new UsersRepo(ctx.db);
-    const u = users.create({ tgUserId: 802 });
-    users.mergeMemoryFacts(u.id, { city: "Москва" });
+    const users = new UsersRepo(sql);
+    const u = await users.create({ tgUserId: 802 });
+    await users.mergeMemoryFacts(u.id, { city: "Москва" });
 
     const res = await fetch(url("/admin/api/status"), authed());
     const body = (await res.json()) as { users: { with_memory: number; total: number } };
@@ -756,40 +733,40 @@ describe("GET /admin/api/users", () => {
   });
 
   test("returns whitelist with status and counts", async () => {
-    const users = new UsersRepo(ctx.db);
-    users.create({ tgUserId: 11, tgUsername: "a", status: "qualified" });
-    users.create({ tgUserId: 22, tgUsername: "b", status: "new" });
+    const users = new UsersRepo(sql);
+    await users.create({ tgUserId: 11, tgUsername: "a", status: "qualified" });
+    await users.create({ tgUserId: 22, tgUsername: "b", status: "new" });
 
     const res = await fetch(url("/admin/api/users"), authed());
     expect(res.status).toBe(200);
     const body = (await res.json()) as { users: Array<{ tg_user_id: number; status: string }> };
     expect(body.users).toHaveLength(2);
-    const ids = body.users.map((u) => u.tg_user_id).sort();
+    const ids = body.users.map((u) => Number(u.tg_user_id)).sort();
     expect(ids).toEqual([11, 22]);
   });
 });
 
 describe("GET /admin/api/conversations", () => {
   test("queued conversations come first, then by recency", async () => {
-    const users = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const messages = new MessagesRepo(ctx.db);
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const messages = new MessagesRepo(sql);
 
-    const u1 = users.create({ tgUserId: 1 });
-    const u2 = users.create({ tgUserId: 2 });
-    const u3 = users.create({ tgUserId: 3 });
+    const u1 = await users.create({ tgUserId: 1 });
+    const u2 = await users.create({ tgUserId: 2 });
+    const u3 = await users.create({ tgUserId: 3 });
 
-    const c1 = conversations.ensureForUser(u1.id);
-    const c2 = conversations.ensureForUser(u2.id);
-    const c3 = conversations.ensureForUser(u3.id);
+    const c1 = await conversations.ensureForUser(u1.id);
+    const c2 = await conversations.ensureForUser(u2.id);
+    const c3 = await conversations.ensureForUser(u3.id);
 
-    messages.add({ conversationId: c1.id, role: "user", text: "old" });
-    conversations.touch(c1.id);
-    messages.add({ conversationId: c2.id, role: "user", text: "newer" });
-    conversations.touch(c2.id);
-    conversations.setMode(c3.id, "queued");
-    messages.add({ conversationId: c3.id, role: "user", text: "queued one" });
-    conversations.touch(c3.id);
+    await messages.add({ conversationId: c1.id, role: "user", text: "old" });
+    await conversations.touch(c1.id);
+    await messages.add({ conversationId: c2.id, role: "user", text: "newer" });
+    await conversations.touch(c2.id);
+    await conversations.setMode(c3.id, "queued");
+    await messages.add({ conversationId: c3.id, role: "user", text: "queued one" });
+    await conversations.touch(c3.id);
 
     const res = await fetch(url("/admin/api/conversations"), authed());
     expect(res.status).toBe(200);
@@ -797,19 +774,19 @@ describe("GET /admin/api/conversations", () => {
       conversations: Array<{ id: number; mode: string; user: { tg_user_id: number } }>;
     };
     expect(body.conversations[0]!.mode).toBe("queued");
-    expect(body.conversations[0]!.user.tg_user_id).toBe(3);
+    expect(Number(body.conversations[0]!.user.tg_user_id)).toBe(3);
   });
 });
 
 describe("GET /admin/api/conversations/:id", () => {
   test("returns conversation, user, and messages", async () => {
-    const users = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const messages = new MessagesRepo(ctx.db);
-    const u = users.create({ tgUserId: 99 });
-    const c = conversations.ensureForUser(u.id);
-    messages.add({ conversationId: c.id, role: "user", text: "hi" });
-    messages.add({ conversationId: c.id, role: "assistant", text: "hello" });
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const messages = new MessagesRepo(sql);
+    const u = await users.create({ tgUserId: 99 });
+    const c = await conversations.ensureForUser(u.id);
+    await messages.add({ conversationId: c.id, role: "user", text: "hi" });
+    await messages.add({ conversationId: c.id, role: "assistant", text: "hello" });
 
     const res = await fetch(url(`/admin/api/conversations/${c.id}`), authed());
     expect(res.status).toBe(200);
@@ -819,7 +796,7 @@ describe("GET /admin/api/conversations/:id", () => {
       messages: Array<{ role: string; text: string }>;
     };
     expect(body.conversation.id).toBe(c.id);
-    expect(body.user.tg_user_id).toBe(99);
+    expect(Number(body.user.tg_user_id)).toBe(99);
     expect(body.messages).toHaveLength(2);
     expect(body.messages.map((m) => m.text)).toEqual(["hi", "hello"]);
   });
@@ -830,10 +807,10 @@ describe("GET /admin/api/conversations/:id", () => {
   });
 
   test("includes empty memory object when no facts stored", async () => {
-    const users = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = users.create({ tgUserId: 510 });
-    const c = conversations.ensureForUser(u.id);
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await users.create({ tgUserId: 510 });
+    const c = await conversations.ensureForUser(u.id);
 
     const res = await fetch(url(`/admin/api/conversations/${c.id}`), authed());
     expect(res.status).toBe(200);
@@ -843,11 +820,11 @@ describe("GET /admin/api/conversations/:id", () => {
   });
 
   test("includes stored memory facts", async () => {
-    const users = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = users.create({ tgUserId: 511 });
-    const c = conversations.ensureForUser(u.id);
-    users.mergeMemoryFacts(u.id, { city: "Москва", age: "25" });
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await users.create({ tgUserId: 511 });
+    const c = await conversations.ensureForUser(u.id);
+    await users.mergeMemoryFacts(u.id, { city: "Москва", age: "25" });
 
     const res = await fetch(url(`/admin/api/conversations/${c.id}`), authed());
     const body = (await res.json()) as {
@@ -860,8 +837,8 @@ describe("GET /admin/api/conversations/:id", () => {
 
 describe("PATCH /admin/api/users/:id/memory", () => {
   test("requires auth", async () => {
-    const users = new UsersRepo(ctx.db);
-    const u = users.create({ tgUserId: 600 });
+    const users = new UsersRepo(sql);
+    const u = await users.create({ tgUserId: 600 });
     const res = await fetch(url(`/admin/api/users/${u.id}/memory`), {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -871,9 +848,9 @@ describe("PATCH /admin/api/users/:id/memory", () => {
   });
 
   test("replaces facts wholesale (operator edit is authoritative)", async () => {
-    const users = new UsersRepo(ctx.db);
-    const u = users.create({ tgUserId: 601 });
-    users.mergeMemoryFacts(u.id, { city: "Москва", age: "25", intent: "Дубай" });
+    const users = new UsersRepo(sql);
+    const u = await users.create({ tgUserId: 601 });
+    await users.mergeMemoryFacts(u.id, { city: "Москва", age: "25", intent: "Дубай" });
 
     const res = await fetch(
       url(`/admin/api/users/${u.id}/memory`),
@@ -889,13 +866,13 @@ describe("PATCH /admin/api/users/:id/memory", () => {
     expect(body.memory.facts).toEqual({ city: "Сочи", language: "ru" });
 
     // Persists across re-reads.
-    const reread = users.getMemory(u.id);
+    const reread = await users.getMemory(u.id);
     expect(reread.facts).toEqual({ city: "Сочи", language: "ru" });
   });
 
   test("trims whitespace and drops empty values", async () => {
-    const users = new UsersRepo(ctx.db);
-    const u = users.create({ tgUserId: 602 });
+    const users = new UsersRepo(sql);
+    const u = await users.create({ tgUserId: 602 });
 
     const res = await fetch(
       url(`/admin/api/users/${u.id}/memory`),
@@ -913,8 +890,8 @@ describe("PATCH /admin/api/users/:id/memory", () => {
   });
 
   test("rejects 400 when facts is not an object", async () => {
-    const users = new UsersRepo(ctx.db);
-    const u = users.create({ tgUserId: 603 });
+    const users = new UsersRepo(sql);
+    const u = await users.create({ tgUserId: 603 });
     const res = await fetch(
       url(`/admin/api/users/${u.id}/memory`),
       authed({
@@ -939,9 +916,9 @@ describe("PATCH /admin/api/users/:id/memory", () => {
   });
 
   test("clears memory when facts is empty object", async () => {
-    const users = new UsersRepo(ctx.db);
-    const u = users.create({ tgUserId: 604 });
-    users.mergeMemoryFacts(u.id, { city: "x" });
+    const users = new UsersRepo(sql);
+    const u = await users.create({ tgUserId: 604 });
+    await users.mergeMemoryFacts(u.id, { city: "x" });
 
     const res = await fetch(
       url(`/admin/api/users/${u.id}/memory`),
@@ -952,12 +929,12 @@ describe("PATCH /admin/api/users/:id/memory", () => {
       }),
     );
     expect(res.status).toBe(200);
-    expect(users.getMemory(u.id).facts).toEqual({});
+    expect((await users.getMemory(u.id)).facts).toEqual({});
   });
 
   test("caps oversized values to keep memory factual not essay-length", async () => {
-    const users = new UsersRepo(ctx.db);
-    const u = users.create({ tgUserId: 605 });
+    const users = new UsersRepo(sql);
+    const u = await users.create({ tgUserId: 605 });
     const huge = "x".repeat(500);
     const res = await fetch(
       url(`/admin/api/users/${u.id}/memory`),
@@ -976,34 +953,34 @@ describe("PATCH /admin/api/users/:id/memory", () => {
 
 describe("POST /admin/api/conversations/:id/take and /release", () => {
   test("take switches mode to human and records assigned admin", async () => {
-    const users = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = users.create({ tgUserId: 55 });
-    const c = conversations.ensureForUser(u.id);
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await users.create({ tgUserId: 55 });
+    const c = await conversations.ensureForUser(u.id);
 
     const take = await fetch(
       url(`/admin/api/conversations/${c.id}/take`),
       authed({ method: "POST" }),
     );
     expect(take.status).toBe(200);
-    const after = conversations.byId(c.id)!;
+    const after = (await conversations.byId(c.id))!;
     expect(after.mode).toBe("human");
     expect(after.assigned_admin_id).not.toBeNull();
   });
 
   test("release switches mode back to ai and clears assignment", async () => {
-    const users = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const u = users.create({ tgUserId: 56 });
-    const c = conversations.ensureForUser(u.id);
-    conversations.setMode(c.id, "human", 1);
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await users.create({ tgUserId: 56 });
+    const c = await conversations.ensureForUser(u.id);
+    await conversations.setMode(c.id, "human", 1);
 
     const rel = await fetch(
       url(`/admin/api/conversations/${c.id}/release`),
       authed({ method: "POST" }),
     );
     expect(rel.status).toBe(200);
-    const after = conversations.byId(c.id)!;
+    const after = (await conversations.byId(c.id))!;
     expect(after.mode).toBe("ai");
     expect(after.assigned_admin_id).toBeNull();
   });
@@ -1011,18 +988,18 @@ describe("POST /admin/api/conversations/:id/take and /release", () => {
 
 describe("user detail endpoint", () => {
   test("GET /admin/api/users/:id returns dossier with conversation + memory", async () => {
-    const users = new UsersRepo(ctx.db);
-    const conversations = new ConversationsRepo(ctx.db);
-    const messages = new MessagesRepo(ctx.db);
-    const u = users.create({ tgUserId: 9001, tgUsername: "vasya" });
-    const c = conversations.ensureForUser(u.id);
-    messages.add({
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const messages = new MessagesRepo(sql);
+    const u = await users.create({ tgUserId: 9001, tgUsername: "vasya" });
+    const c = await conversations.ensureForUser(u.id);
+    await messages.add({
       conversationId: c.id,
       role: "user",
       text: "hello",
       tgMessageId: 1,
     });
-    users.mergeMemoryFacts(u.id, { city: "Moscow", age: "25" });
+    await users.mergeMemoryFacts(u.id, { city: "Moscow", age: "25" });
 
     const r = await fetch(url(`/admin/api/users/${u.id}`), authed());
     expect(r.status).toBe(200);
@@ -1033,7 +1010,7 @@ describe("user detail endpoint", () => {
       memory: { facts: Record<string, string> };
       recent_messages: Array<{ text: string }>;
     };
-    expect(body.user.tg_user_id).toBe(9001);
+    expect(Number(body.user.tg_user_id)).toBe(9001);
     expect(body.user.tg_username).toBe("vasya");
     expect(body.conversation?.id).toBe(c.id);
     expect(body.lead).toBeNull();
@@ -1071,30 +1048,23 @@ describe("analytics endpoint", () => {
 
   test("aggregates real telemetry per path + latency percentiles", async () => {
     // Seed user → conversation → assistant messages with telemetry blobs.
-    const u = ctx.db
-      .query<{ id: number }, [number]>("INSERT INTO users (tg_user_id) VALUES (?) RETURNING id")
-      .get(99001)!;
-    const c = ctx.db
-      .query<{ id: number }, [number]>(
-        "INSERT INTO conversations (user_id) VALUES (?) RETURNING id",
-      )
-      .get(u.id)!;
-    const inject = (path: string, totalMs: number) => {
-      ctx.db.run(
-        `INSERT INTO messages (conversation_id, role, text, meta_json)
-         VALUES (?, 'assistant', ?, ?)`,
-        [
-          c.id,
-          `reply ${path}`,
-          JSON.stringify({ telemetry: { path, total_ms: totalMs, retrieval_ms: 50 } }),
-        ],
-      );
+    const [uRow] = await sql<
+      [{ id: number }]
+    >`INSERT INTO users (tg_user_id) VALUES (99001) RETURNING id`;
+    const [cRow] = await sql<
+      [{ id: number }]
+    >`INSERT INTO conversations (user_id) VALUES (${uRow!.id}) RETURNING id`;
+    const inject = async (path: string, totalMs: number) => {
+      await sql`
+        INSERT INTO messages (conversation_id, role, text, meta_json)
+        VALUES (${cRow!.id}, 'assistant', ${`reply ${path}`}, ${JSON.stringify({ telemetry: { path, total_ms: totalMs, retrieval_ms: 50 } })})
+      `;
     };
-    inject("ok", 100);
-    inject("ok", 200);
-    inject("ok", 300);
-    inject("no_context", 50);
-    inject("smalltalk", 5);
+    await inject("ok", 100);
+    await inject("ok", 200);
+    await inject("ok", 300);
+    await inject("no_context", 50);
+    await inject("smalltalk", 5);
 
     const r = await fetch(url("/admin/api/analytics?window=24h"), authed());
     expect(r.status).toBe(200);
@@ -1141,11 +1111,9 @@ describe("kb management endpoints", () => {
 
   test("PATCH /admin/api/kb/documents/:id retags + DELETE removes", async () => {
     // Seed one doc directly (no need to embed — we just want a row).
-    ctx.db.run(
-      `INSERT INTO kb_documents (source, title, content_hash, topic) VALUES (?, ?, ?, ?)`,
-      ["x.md", "X", "hash-x", null],
-    );
-    const id = ctx.db.query<{ id: number }, []>(`SELECT id FROM kb_documents`).get()!.id;
+    await sql`INSERT INTO kb_documents (source, title, content_hash, topic) VALUES ('x.md', 'X', 'hash-x', NULL)`;
+    const [docRow] = await sql<[{ id: number }]>`SELECT id FROM kb_documents`;
+    const id = docRow!.id;
 
     const patch = await fetch(
       url(`/admin/api/kb/documents/${id}`),
@@ -1178,7 +1146,7 @@ describe("kb management endpoints", () => {
   });
 
   test("POST /admin/api/kb/ingest returns 503 when embedder is not configured", async () => {
-    // The default `setup()` fixture above doesn't pass `rag` deps, so the
+    // The default server fixture doesn't pass `rag` deps, so the
     // ingest endpoint must fail loud with 503 rather than silently storing
     // a document with no retrievable chunks.
     const r = await fetch(

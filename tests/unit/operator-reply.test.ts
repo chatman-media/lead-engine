@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { createRouter } from "@/app.ts";
@@ -6,8 +6,13 @@ import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
+
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
 
 interface SentMessage {
   chatId: number;
@@ -15,7 +20,6 @@ interface SentMessage {
 }
 
 function setup() {
-  const db = openDb({ path: ":memory:" });
   const sent: SentMessage[] = [];
 
   const fetchImpl: FetchLike = async (input, init) => {
@@ -45,14 +49,13 @@ function setup() {
   };
 
   const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
-  const router = createRouter({ db, telegram, webhookSecret: "s" });
+  const router = createRouter({ sql, telegram, webhookSecret: "s" });
   const server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
-  return { db, server, sent };
+  return { server, sent };
 }
 
-function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
+function teardown(s: { server: Server }) {
   s.server.stop(true);
-  s.db.close();
 }
 
 let ctx: ReturnType<typeof setup>;
@@ -62,10 +65,9 @@ let tgUserId: number;
 
 beforeEach(async () => {
   ctx = setup();
-  const { db } = ctx;
 
   // Create admin + get session cookie
-  const admins = new AdminsRepo(db);
+  const admins = new AdminsRepo(sql);
   await admins.create({ email: "op@x.test", password: "longenough" });
   const login = await fetch(`http://127.0.0.1:${ctx.server.port}/admin/api/login`, {
     method: "POST",
@@ -76,11 +78,11 @@ beforeEach(async () => {
 
   // Create user + conversation in human mode
   tgUserId = 555;
-  const users = new UsersRepo(db);
-  const u = users.create({ tgUserId });
-  const conversations = new ConversationsRepo(db);
-  const c = conversations.ensureForUser(u.id);
-  conversations.setMode(c.id, "human", 1);
+  const users = new UsersRepo(sql);
+  const u = await users.create({ tgUserId });
+  const conversations = new ConversationsRepo(sql);
+  const c = await conversations.ensureForUser(u.id);
+  await conversations.setMode(c.id, "human", 1);
   convId = c.id;
 });
 
@@ -123,8 +125,8 @@ describe("POST /admin/api/conversations/:id/reply", () => {
   });
 
   test("returns 409 when conversation is not in human mode", async () => {
-    const conversations = new ConversationsRepo(ctx.db);
-    conversations.setMode(convId, "ai");
+    const conversations = new ConversationsRepo(sql);
+    await conversations.setMode(convId, "ai");
 
     const res = await fetch(url(`/admin/api/conversations/${convId}/reply`), {
       method: "POST",
@@ -149,8 +151,8 @@ describe("POST /admin/api/conversations/:id/reply", () => {
     expect(ctx.sent[0]!.text).toBe("Добрый день! Сейчас помогу.");
 
     // Message persisted with role=human
-    const msgs = new MessagesRepo(ctx.db);
-    const all = msgs.listByConversation(convId, 50);
+    const msgs = new MessagesRepo(sql);
+    const all = await msgs.listByConversation(convId, 50);
     const humanMsg = all.find((m) => m.role === "human");
     expect(humanMsg?.text).toBe("Добрый день! Сейчас помогу.");
     expect(humanMsg?.tg_message_id).toBe(99);
@@ -162,8 +164,8 @@ describe("POST /admin/api/conversations/:id/reply", () => {
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ text: "ok" }),
     });
-    const conversations = new ConversationsRepo(ctx.db);
-    expect(conversations.byId(convId)!.mode).toBe("human");
+    const conversations = new ConversationsRepo(sql);
+    expect((await conversations.byId(convId))!.mode).toBe("human");
   });
 
   test("publishes message:new WS event", async () => {

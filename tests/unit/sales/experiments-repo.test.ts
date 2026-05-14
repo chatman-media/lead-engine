@@ -1,24 +1,26 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
 import {
   type ExperimentRow,
   ExperimentsRepo,
   parseAllocationToExperiment,
 } from "@/db/repos/experiments.ts";
-import { openDb } from "@/db/sqlite.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../../helpers/test-db.ts";
 
-let db: ReturnType<typeof openDb>;
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 let repo: ExperimentsRepo;
 
 beforeEach(() => {
-  db = openDb({ path: ":memory:", embeddingDim: 1536 });
-  repo = new ExperimentsRepo(db);
+  repo = new ExperimentsRepo(sql);
 });
-afterEach(() => db.close());
 
 describe("ExperimentsRepo — insert/read", () => {
-  test("insert creates a draft by default", () => {
-    const row = repo.insert({
+  test("insert creates a draft by default", async () => {
+    const row = await repo.insert({
       slug: "my-exp",
       allocation: { "flirty-belfort-v1": 50, "empathetic-nepq-v1": 50 },
     });
@@ -30,8 +32,8 @@ describe("ExperimentsRepo — insert/read", () => {
     expect(allocation).toEqual({ "flirty-belfort-v1": 50, "empathetic-nepq-v1": 50 });
   });
 
-  test("custom status + success_metric are persisted", () => {
-    const row = repo.insert({
+  test("custom status + success_metric are persisted", async () => {
+    const row = await repo.insert({
       slug: "running-exp",
       status: "running",
       successMetric: "won",
@@ -41,86 +43,84 @@ describe("ExperimentsRepo — insert/read", () => {
     expect(row.success_metric).toBe("won");
   });
 
-  test("invalid status is rejected by CHECK constraint", () => {
-    expect(() =>
-      db.run(
-        `INSERT INTO experiments (slug, status, allocation_json, success_metric)
-         VALUES ('bad', 'made-up', '{}', 'qualified')`,
-      ),
-    ).toThrow();
+  test("invalid status is rejected by CHECK constraint", async () => {
+    await expect(
+      sql`INSERT INTO experiments (slug, status, allocation_json, success_metric)
+          VALUES ('bad', 'made-up', '{}', 'qualified')`,
+    ).rejects.toThrow();
   });
 
-  test("duplicate slug throws", () => {
-    repo.insert({ slug: "dup", allocation: { x: 1 } });
-    expect(() => repo.insert({ slug: "dup", allocation: { y: 1 } })).toThrow();
+  test("duplicate slug throws", async () => {
+    await repo.insert({ slug: "dup", allocation: { x: 1 } });
+    await expect(repo.insert({ slug: "dup", allocation: { y: 1 } })).rejects.toThrow();
   });
 });
 
 describe("ExperimentsRepo — getRunning", () => {
-  test("returns null when no experiments exist", () => {
-    expect(repo.getRunning()).toBeNull();
+  test("returns null when no experiments exist", async () => {
+    expect(await repo.getRunning()).toBeNull();
   });
 
-  test("returns null when all experiments are draft/paused/done", () => {
-    repo.insert({ slug: "draft", allocation: { x: 1 } });
-    repo.insert({ slug: "paused", status: "paused", allocation: { x: 1 } });
-    repo.insert({ slug: "done", status: "done", allocation: { x: 1 } });
-    expect(repo.getRunning()).toBeNull();
+  test("returns null when all experiments are draft/paused/done", async () => {
+    await repo.insert({ slug: "draft", allocation: { x: 1 } });
+    await repo.insert({ slug: "paused", status: "paused", allocation: { x: 1 } });
+    await repo.insert({ slug: "done", status: "done", allocation: { x: 1 } });
+    expect(await repo.getRunning()).toBeNull();
   });
 
-  test("returns the running experiment", () => {
-    repo.insert({ slug: "draft", allocation: { x: 1 } });
-    const running = repo.insert({
+  test("returns the running experiment", async () => {
+    await repo.insert({ slug: "draft", allocation: { x: 1 } });
+    const running = await repo.insert({
       slug: "live",
       status: "running",
       allocation: { x: 1 },
       startedAt: 1_000_000,
     });
-    expect(repo.getRunning()?.id).toBe(running.id);
+    expect((await repo.getRunning())?.id).toBe(running.id);
   });
 
-  test("when multiple are running (shouldn't happen but…), returns most recently started", () => {
-    repo.insert({
+  test("when multiple are running (shouldn't happen but…), returns most recently started", async () => {
+    await repo.insert({
       slug: "older",
       status: "running",
       allocation: { x: 1 },
       startedAt: 1000,
     });
-    const newer = repo.insert({
+    const newer = await repo.insert({
       slug: "newer",
       status: "running",
       allocation: { x: 1 },
       startedAt: 2000,
     });
-    expect(repo.getRunning()?.id).toBe(newer.id);
+    expect((await repo.getRunning())?.id).toBe(newer.id);
   });
 });
 
 describe("ExperimentsRepo — setStatus", () => {
-  test("setting status='running' stamps started_at on first transition", () => {
-    const row = repo.insert({ slug: "x", allocation: { a: 1 } });
-    repo.setStatus(row.id, "running");
-    const after = repo.byId(row.id)!;
+  test("setting status='running' stamps started_at on first transition", async () => {
+    const row = await repo.insert({ slug: "x", allocation: { a: 1 } });
+    await repo.setStatus(row.id, "running");
+    const after = (await repo.byId(row.id))!;
     expect(after.status).toBe("running");
     expect(after.started_at).not.toBeNull();
   });
 
-  test("re-starting preserves the original started_at (COALESCE)", () => {
-    const row = repo.insert({
+  test("re-starting preserves the original started_at (COALESCE)", async () => {
+    const row = await repo.insert({
       slug: "x",
       status: "running",
       allocation: { a: 1 },
       startedAt: 12345,
     });
-    repo.setStatus(row.id, "paused");
-    repo.setStatus(row.id, "running");
-    expect(repo.byId(row.id)?.started_at).toBe(12345);
+    await repo.setStatus(row.id, "paused");
+    await repo.setStatus(row.id, "running");
+    expect((await repo.byId(row.id))?.started_at).toBe(12345);
   });
 
-  test("setting status='done' stamps ended_at", () => {
-    const row = repo.insert({ slug: "x", status: "running", allocation: { a: 1 } });
-    repo.setStatus(row.id, "done");
-    expect(repo.byId(row.id)?.ended_at).not.toBeNull();
+  test("setting status='done' stamps ended_at", async () => {
+    const row = await repo.insert({ slug: "x", status: "running", allocation: { a: 1 } });
+    await repo.setStatus(row.id, "done");
+    expect((await repo.byId(row.id))?.ended_at).not.toBeNull();
   });
 });
 

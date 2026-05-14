@@ -1,0 +1,5 @@
+[test]
+coverage = false
+coverageThreshold = 0.0    # no enforced minimum — informational only
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage"

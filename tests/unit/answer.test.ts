@@ -1,7 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
 import { KbRepo } from "@/db/repos/kb.ts";
-import { openDb } from "@/db/sqlite.ts";
 import {
   answerWithRag,
   botPresenceReply,
@@ -14,6 +13,7 @@ import {
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const DIM = 1536;
 
@@ -50,29 +50,31 @@ function fakeChat(reply: string): ChatClient & {
   return wrapper as ChatClient & { lastMessages: ChatMessage[] | null };
 }
 
-let db: ReturnType<typeof openDb>;
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 let kb: KbRepo;
 
 beforeEach(() => {
-  db = openDb({ path: ":memory:", embeddingDim: DIM });
-  kb = new KbRepo(db);
+  kb = new KbRepo(sql);
 });
-afterEach(() => db.close());
 
-function seed(): { qVec: number[] } {
-  const doc = kb.upsertDocument({
+async function seed(): Promise<{ qVec: number[] }> {
+  const doc = await kb.upsertDocument({
     source: "s://t",
     title: "t",
     contentHash: "h1",
   });
-  kb.insertChunkWithEmbedding({
+  await kb.insertChunkWithEmbedding({
     documentId: doc.id,
     chunkIndex: 0,
     text: "Refunds are processed within 5 business days.",
     tokenCount: 10,
     embedding: vec(1),
   });
-  kb.insertChunkWithEmbedding({
+  await kb.insertChunkWithEmbedding({
     documentId: doc.id,
     chunkIndex: 1,
     text: "Office hours: Mon-Fri 9-18 UTC.",
@@ -230,7 +232,7 @@ describe("personaFactReply", () => {
 
 describe("answerWithRag", () => {
   test("retrieves chunks, builds prompt with their text, returns LLM answer", async () => {
-    const { qVec } = seed();
+    const { qVec } = await seed();
     const embedder = fakeEmbedder({ "How do refunds work?": qVec });
     const chat = fakeChat("Refunds take 5 business days.");
 
@@ -271,7 +273,7 @@ describe("answerWithRag", () => {
   });
 
   test("personal fact question without facts configured: falls through to RAG", async () => {
-    seed();
+    await seed();
     const embedder = fakeEmbedder({ "где живешь?": vec(1) });
     const chat = fakeChat("RAG answer");
     const result = await answerWithRag({
@@ -367,7 +369,7 @@ describe("answerWithRag", () => {
   });
 
   test("when style is provided, the system prompt comes from composeSystemPrompt (sales engine)", async () => {
-    seed();
+    await seed();
     const embedder = fakeEmbedder({});
     const chat = fakeChat("ok");
     await answerWithRag({
@@ -392,7 +394,7 @@ describe("answerWithRag", () => {
   });
 
   test("style takes precedence over persona when both are provided", async () => {
-    seed();
+    await seed();
     const embedder = fakeEmbedder({});
     const chat = fakeChat("ok");
     await answerWithRag({
@@ -413,7 +415,7 @@ describe("answerWithRag", () => {
   });
 
   test("includeFewShot=false skips few-shot block (used on follow-up turns)", async () => {
-    seed();
+    await seed();
     const embedder = fakeEmbedder({});
     const chat = fakeChat("ok");
     await answerWithRag({
@@ -430,7 +432,7 @@ describe("answerWithRag", () => {
   });
 
   test("legacy persona path still works when no style is provided (back-compat)", async () => {
-    seed();
+    await seed();
     const embedder = fakeEmbedder({});
     const chat = fakeChat("ok");
     await answerWithRag({
@@ -449,7 +451,7 @@ describe("answerWithRag", () => {
   });
 
   test("conversationSummary is injected into legacy persona prompt", async () => {
-    seed();
+    await seed();
     const embedder = fakeEmbedder({});
     const chat = fakeChat("ok");
     await answerWithRag({
@@ -466,7 +468,7 @@ describe("answerWithRag", () => {
   });
 
   test("conversationSummary is injected into sales-style prompt", async () => {
-    seed();
+    await seed();
     const embedder = fakeEmbedder({});
     const chat = fakeChat("ok");
     await answerWithRag({
@@ -484,7 +486,7 @@ describe("answerWithRag", () => {
   });
 
   test("empty conversationSummary does NOT inject the heading", async () => {
-    seed();
+    await seed();
     const embedder = fakeEmbedder({});
     const chat = fakeChat("ok");
     await answerWithRag({
@@ -500,26 +502,26 @@ describe("answerWithRag", () => {
   });
 
   test("topicRouting=true filters retrieval to classified topic, falls back when no match", async () => {
-    const visaDoc = kb.upsertDocument({
+    const visaDoc = await kb.upsertDocument({
       source: "kb://v",
       title: "v",
       contentHash: "v",
       topic: "visa",
     });
-    const paymentDoc = kb.upsertDocument({
+    const paymentDoc = await kb.upsertDocument({
       source: "kb://p",
       title: "p",
       contentHash: "p",
       topic: "payment",
     });
-    const visaChunk = kb.insertChunkWithEmbedding({
+    const visaChunk = await kb.insertChunkWithEmbedding({
       documentId: visaDoc.id,
       chunkIndex: 0,
       text: "Виза 30 дней",
       tokenCount: 3,
       embedding: vec(1),
     });
-    kb.insertChunkWithEmbedding({
+    await kb.insertChunkWithEmbedding({
       documentId: paymentDoc.id,
       chunkIndex: 0,
       text: "1500 в день",
@@ -546,7 +548,7 @@ describe("answerWithRag", () => {
   });
 
   test("topicRouting falls back to global when classifier returns null", async () => {
-    seed();
+    await seed();
     const embedder = fakeEmbedder({ привет: vec(1) });
     const chat = fakeChat("Reply text");
     const result = await answerWithRag({
@@ -561,19 +563,19 @@ describe("answerWithRag", () => {
   });
 
   test("hybridSearch=true uses BM25+vector fusion for retrieval", async () => {
-    const doc = kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
+    const doc = await kb.upsertDocument({ source: "s", title: "t", contentHash: "h" });
     // Two chunks with disjoint topics. The query keyword "Стамбул" appears only
     // in chunk #2 — pure vector search (vec(1) vs vec(2) distance ≈ √2) would
     // return chunk #1 first, but BM25 lifts chunk #2 via the keyword match.
     // RRF fusion should include chunk #2 in the results.
-    kb.insertChunkWithEmbedding({
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "Refunds in 5 business days",
       tokenCount: 10,
       embedding: vec(1),
     });
-    const istanbul = kb.insertChunkWithEmbedding({
+    const istanbul = await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 1,
       // Use "Стамбул" (not "Стамбуле") so that the FTS prefix query generated
@@ -644,7 +646,7 @@ describe("answerWithRag", () => {
   });
 
   test("telemetry: ok path with top_distances + generation_ms", async () => {
-    const { qVec } = seed();
+    const { qVec } = await seed();
     const embedder = fakeEmbedder({ "How do refunds work?": qVec });
     const chat = fakeChat("Refunds take 5 business days.");
 
@@ -667,7 +669,7 @@ describe("answerWithRag", () => {
   });
 
   test("telemetry: hybrid=true marker when hybrid retrieval is used", async () => {
-    const { qVec } = seed();
+    const { qVec } = await seed();
     const embedder = fakeEmbedder({ test: qVec });
     const chat = fakeChat("ok");
     const result = await answerWithRag({
@@ -682,7 +684,7 @@ describe("answerWithRag", () => {
   });
 
   test("includes prior conversation messages between system and current user", async () => {
-    seed();
+    await seed();
     const embedder = fakeEmbedder({});
     const chat = fakeChat("ok");
     await answerWithRag({
@@ -772,7 +774,7 @@ describe("botPresenceReply", () => {
 
 describe("answerWithRag bot-presence shortcut", () => {
   test("bypasses retrieval and LLM for 'ты бот?' / 'ты человек?'", async () => {
-    const kb = new KbRepo(openDb({ path: ":memory:" }));
+    const kb = new KbRepo(sql);
     const embedder = fakeEmbedder({});
     const chat: ChatClient & { calls: number } = {
       calls: 0,

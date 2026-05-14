@@ -1,6 +1,6 @@
 # Architecture
 
-Высокоуровневая карта проекта. Один Telegram-бот с RAG, sales-style engine, операторской админкой, самообучением через self-play и опциональным userbot-режимом. Всё на Bun + SQLite (+ расширение `sqlite-vec`).
+Высокоуровневая карта проекта. Один Telegram-бот с RAG, sales-style engine, операторской админкой, самообучением через self-play и опциональным userbot-режимом. Всё на Bun + PostgreSQL + pgvector.
 
 ## Request lifecycle (webhook)
 
@@ -95,10 +95,9 @@ POST /telegram/<secret>   ─┬─► whitelist (UsersRepo.byTgId / TELEGRAM_OP
                     ▼
 ┌──────────────────────────────── data layer ─────────────────────────────────┐
 │  db/                                                                         │
-│    sqlite.ts          (Bun.Database + sqlite-vec extension)                  │
-│    migrate.ts         (file-based migration runner, sequential)              │
-│    ensure-kb-vec.ts   (auto-recreate kb_vec on embedding dim change)         │
-│    repos/ (21 DAOs):                                                         │
+│    postgres.ts        (postgres.js client + pgvector)                        │
+│    migrate.ts         (pg_schema.sql applied idempotently on every boot)     │
+│    repos/ (22 DAOs):                                                         │
 │      users.ts            conversations.ts        messages.ts                 │
 │      kb.ts               admins.ts               sessions.ts                 │
 │      styles.ts           experiments.ts          skills.ts                   │
@@ -106,16 +105,17 @@ POST /telegram/<secret>   ─┬─► whitelist (UsersRepo.byTgId / TELEGRAM_OP
 │      questionnaire-tokens.ts  kb-suggestions.ts  skill-outcomes.ts          │
 │      self-play-matches.ts     pairwise-matches.ts style-ratings.ts           │
 │      coach-proposals.ts       shadow-evaluations.ts  userbot-session.ts     │
+│      userbot-send-queue.ts                                                   │
 └──────────────────────────────────────────────────────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────── persistence ─────────────────────────────────────┐
-│  data/bot.db (SQLite, WAL)                                                   │
+│  PostgreSQL (pgvector extension)                                              │
 │                                                                               │
 │  Users & conversations                                                        │
 │    users / conversations / messages                                           │
 │  Knowledge base                                                               │
-│    kb_documents / kb_chunks / kb_vec / kb_chunks_fts                         │
+│    kb_documents / kb_chunks / kb_vec FTS                                     │
 │  Sales engine                                                                 │
 │    styles / experiments / skills / style_skills                               │
 │    skill_outcomes / self_play_matches / pairwise_matches                      │
@@ -124,7 +124,7 @@ POST /telegram/<secret>   ─┬─► whitelist (UsersRepo.byTgId / TELEGRAM_OP
 │    leads / lead_events / lead_notes                                           │
 │  Operations                                                                   │
 │    vacancies / admins / sessions / questionnaire_tokens / kb_suggestions      │
-│    userbot_session                                                            │
+│    userbot_session / userbot_send_queue                                       │
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -139,8 +139,8 @@ POST /telegram/<secret>   ─┬─► whitelist (UsersRepo.byTgId / TELEGRAM_OP
 | `messages` | `role` ∈ user/assistant/human/system. Idempotent по `(conversation_id, tg_message_id)`. `meta_json` хранит `used_chunk_ids`. `stage` для funnel-аналитики |
 | `kb_documents` | KB-документы: source path, `content_hash` (SHA-256 dedup), optional `topic` тег |
 | `kb_chunks` | Чанки ≈1500 символов, overlap 150 |
-| `kb_vec` | sqlite-vec virtual table (L2, dim из конфига) |
-| `kb_chunks_fts` | FTS5 BM25 index; синхронизирован тремя INSERT/UPDATE/DELETE триггерами |
+| `kb_vec` | pgvector embedded column on kb_chunks (cosine distance, 1536-dim) |
+| `kb_chunks_fts` | PostgreSQL FTS (tsvector/tsquery, GIN index) |
 | `kb_suggestions` | Очередь вопросов без ответа (когда RAG вернул NO_CONTEXT) — оператор решает что добавить в KB |
 | `styles` | Sales-style configs в JSON. `(slug, version)` composite key — цепочка версий; одна активная на slug |
 | `experiments` | A/B эксперименты: slug, allocation JSON, status, success metric |
@@ -160,32 +160,9 @@ POST /telegram/<secret>   ─┬─► whitelist (UsersRepo.byTgId / TELEGRAM_OP
 | `questionnaire_tokens` | One-shot токены для `/q/:token` |
 | `userbot_session` | MTProto session string (gramjs StringSession). Одна строка (id=1) |
 
-### Миграции (21 файл, `migrations/`)
+### Миграции
 
-```
-001_init.sql                  — базовые таблицы
-002_idempotent_user_messages  — unique(conversation_id, tg_message_id)
-003_sales_styles_and_experiments
-004_style_versioning          — (slug, version) UNIQUE + partial UNIQUE(slug) WHERE is_active=1
-005_kb_fts                    — FTS5 virtual table + 3 sync triggers
-006_conversation_summary
-007_kb_topic                  — kb_chunks.topic
-008_vacancies
-009_leads                     — state machine
-010_lead_events
-011_lead_notes
-012_vacancies_url
-013_kb_suggestions
-013_skills                    — skills + style_skills
-014_skill_outcomes
-015_skill_outcomes_self_play  — allow source='self_play'
-016_self_play_matches
-017_self_play_fabrications    — matches.fabrication_count
-018_pairwise_matches
-018_userbot_session
-019_coach_proposals
-020_shadow_evaluations
-```
+Single `pg_schema.sql` applied idempotently via `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`. Applied on every boot by `runMigrations()` in `src/db/migrate.ts`.
 
 ## Self-play training loop
 
@@ -264,12 +241,12 @@ Webhook ackает Telegram в <100ms (Bot API таймаут 60s, retries дуб
 
 | Уровень | Инструмент | Объём |
 |---------|-----------|-------|
-| Unit | `bun test` | 807+ тестов, `tests/unit/` (58 файлов) |
+| Unit | `bun test` | 860+ тестов, `tests/unit/` (60 файлов) |
 | E2E | Playwright | 14+ тестов, `tests/e2e/` |
 | Build | `bun run build:ui` | Vite сборка React-админки |
 | Type check | `bunx tsc --noEmit` | TypeScript strict |
 
-Unit-тесты изолированы: `:memory:` SQLite, мок-LLM клиенты, никакой сети. Каждый модуль с нетривиальной логикой — отдельный test-файл в `tests/unit/`, зеркалирующий структуру `src/`.
+Unit-тесты изолированы: мок-LLM клиенты, никакой сети. Каждый модуль с нетривиальной логикой — отдельный test-файл в `tests/unit/`, зеркалирующий структуру `src/`.
 
 E2E-тесты поднимают сервер на отдельном порту (`E2E_PORT`, default 3100) с тестовой БД и `TEST_HOOKS=1`. `/__test/*` seed-эндпоинты доступны только при этом флаге.
 

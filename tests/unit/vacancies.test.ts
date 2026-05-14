@@ -1,81 +1,78 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
 import { renderVacanciesBlock, VacanciesRepo } from "@/db/repos/vacancies.ts";
-import { openDb } from "@/db/sqlite.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
-let db: ReturnType<typeof openDb>;
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 let repo: VacanciesRepo;
 
 beforeEach(() => {
-  db = openDb({ path: ":memory:" });
-  repo = new VacanciesRepo(db);
+  repo = new VacanciesRepo(sql);
 });
-afterEach(() => db.close());
 
 describe("VacanciesRepo", () => {
-  test("create + listActive round-trip", () => {
-    const v = repo.create({ title: "Шаохинг", body: "3000 юаней/смена" });
+  test("create + listActive round-trip", async () => {
+    const v = await repo.create({ title: "Шаохинг", body: "3000 юаней/смена" });
     expect(v.title).toBe("Шаохинг");
     expect(v.body).toBe("3000 юаней/смена");
-    expect(v.is_active).toBe(1);
-    expect(repo.listActive()).toHaveLength(1);
+    expect(v.is_active).toBe(true);
+    expect(await repo.listActive()).toHaveLength(1);
   });
 
-  test("create trims whitespace from title and body", () => {
-    const v = repo.create({ title: "  Стамбул  ", body: "  условия  " });
+  test("create trims whitespace from title and body", async () => {
+    const v = await repo.create({ title: "  Стамбул  ", body: "  условия  " });
     expect(v.title).toBe("Стамбул");
     expect(v.body).toBe("условия");
   });
 
-  test("listActive excludes inactive rows; listAll includes them", () => {
-    const a = repo.create({ title: "A", body: "a body" });
-    const b = repo.create({ title: "B", body: "b body" });
-    repo.update(b.id, { isActive: false });
-    expect(repo.listActive().map((v) => v.id)).toEqual([a.id]);
-    expect(
-      repo
-        .listAll()
-        .map((v) => v.id)
-        .sort(),
-    ).toEqual([a.id, b.id].sort());
+  test("listActive excludes inactive rows; listAll includes them", async () => {
+    const a = await repo.create({ title: "A", body: "a body" });
+    const b = await repo.create({ title: "B", body: "b body" });
+    await repo.update(b.id, { isActive: false });
+    expect((await repo.listActive()).map((v) => v.id)).toEqual([a.id]);
+    expect((await repo.listAll()).map((v) => v.id).sort()).toEqual([a.id, b.id].sort());
   });
 
   test("listActive ordering: freshest update first", async () => {
-    const a = repo.create({ title: "A", body: "a" });
+    const a = await repo.create({ title: "A", body: "a" });
     // Wait a beat so updated_at differs
     await new Promise((r) => setTimeout(r, 1100));
-    const b = repo.create({ title: "B", body: "b" });
-    expect(repo.listActive()[0]!.id).toBe(b.id);
+    const b = await repo.create({ title: "B", body: "b" });
+    expect((await repo.listActive())[0]!.id).toBe(b.id);
     // Editing A bumps it to the top
-    repo.update(a.id, { body: "a updated" });
-    expect(repo.listActive()[0]!.id).toBe(a.id);
+    await repo.update(a.id, { body: "a updated" });
+    expect((await repo.listActive())[0]!.id).toBe(a.id);
   });
 
-  test("update patches partial fields without touching others", () => {
-    const v = repo.create({ title: "T1", body: "B1" });
-    repo.update(v.id, { title: "T2" });
-    const after = repo.byId(v.id);
+  test("update patches partial fields without touching others", async () => {
+    const v = await repo.create({ title: "T1", body: "B1" });
+    await repo.update(v.id, { title: "T2" });
+    const after = await repo.byId(v.id);
     expect(after?.title).toBe("T2");
     expect(after?.body).toBe("B1");
   });
 
-  test("update returns null for missing id (no row)", () => {
-    expect(repo.update(99999, { title: "x" })).toBeNull();
+  test("update returns null for missing id (no row)", async () => {
+    expect(await repo.update(99999, { title: "x" })).toBeNull();
   });
 
-  test("delete removes the row, returns false on missing id", () => {
-    const v = repo.create({ title: "T", body: "B" });
-    expect(repo.delete(v.id)).toBe(true);
-    expect(repo.byId(v.id)).toBeNull();
-    expect(repo.delete(v.id)).toBe(false);
+  test("delete removes the row, returns false on missing id", async () => {
+    const v = await repo.create({ title: "T", body: "B" });
+    expect(await repo.delete(v.id)).toBe(true);
+    expect(await repo.byId(v.id)).toBeNull();
+    expect(await repo.delete(v.id)).toBe(false);
   });
 
-  test("countActive ignores inactive rows", () => {
-    const a = repo.create({ title: "A", body: "a" });
-    repo.create({ title: "B", body: "b" });
-    expect(repo.countActive()).toBe(2);
-    repo.update(a.id, { isActive: false });
-    expect(repo.countActive()).toBe(1);
+  test("countActive ignores inactive rows", async () => {
+    const a = await repo.create({ title: "A", body: "a" });
+    await repo.create({ title: "B", body: "b" });
+    expect(await repo.countActive()).toBe(2);
+    await repo.update(a.id, { isActive: false });
+    expect(await repo.countActive()).toBe(1);
   });
 });
 
@@ -84,16 +81,16 @@ describe("renderVacanciesBlock", () => {
     expect(renderVacanciesBlock([])).toBe("");
   });
 
-  test("returns empty string when no rows are active", () => {
-    const closed = repo.create({ title: "T", body: "B" });
-    repo.update(closed.id, { isActive: false });
-    expect(renderVacanciesBlock(repo.listAll())).toBe("");
+  test("returns empty string when no rows are active", async () => {
+    const closed = await repo.create({ title: "T", body: "B" });
+    await repo.update(closed.id, { isActive: false });
+    expect(renderVacanciesBlock(await repo.listAll())).toBe("");
   });
 
-  test("renders a heading + numbered active items", () => {
-    repo.create({ title: "Шаохинг", body: "3000 ю/смена" });
-    repo.create({ title: "Стамбул", body: "USD 500/нед" });
-    const block = renderVacanciesBlock(repo.listActive());
+  test("renders a heading + numbered active items", async () => {
+    await repo.create({ title: "Шаохинг", body: "3000 ю/смена" });
+    await repo.create({ title: "Стамбул", body: "USD 500/нед" });
+    const block = renderVacanciesBlock(await repo.listActive());
     expect(block).toContain("АКТУАЛЬНЫЕ ВАКАНСИИ");
     expect(block).toContain("Шаохинг");
     expect(block).toContain("Стамбул");
@@ -103,21 +100,21 @@ describe("renderVacanciesBlock", () => {
     expect(block).toContain("[В2]");
   });
 
-  test("filters out inactive entries even if listAll() is passed", () => {
-    const a = repo.create({ title: "Active", body: "ab" });
-    const b = repo.create({ title: "Closed", body: "cb" });
-    repo.update(b.id, { isActive: false });
-    const block = renderVacanciesBlock(repo.listAll());
+  test("filters out inactive entries even if listAll() is passed", async () => {
+    const a = await repo.create({ title: "Active", body: "ab" });
+    const b = await repo.create({ title: "Closed", body: "cb" });
+    await repo.update(b.id, { isActive: false });
+    const block = renderVacanciesBlock(await repo.listAll());
     expect(block).toContain("Active");
     expect(block).not.toContain("Closed");
     expect(a.id).toBeGreaterThan(0);
   });
 
-  test("renders ОТКРЫТЫЕ ЛОКАЦИИ from titles + hard redirect rule", () => {
-    repo.create({ title: "Корея — Караоке хостес", body: "₩110k" });
-    repo.create({ title: "Шаохинг / Иу — Premium хостес", body: "10k юаней" });
-    repo.create({ title: "Менеджер — Шаохинг / Иу / Корея", body: "..." });
-    const block = renderVacanciesBlock(repo.listActive());
+  test("renders ОТКРЫТЫЕ ЛОКАЦИИ from titles + hard redirect rule", async () => {
+    await repo.create({ title: "Корея — Караоке хостес", body: "₩110k" });
+    await repo.create({ title: "Шаохинг / Иу — Premium хостес", body: "10k юаней" });
+    await repo.create({ title: "Менеджер — Шаохинг / Иу / Корея", body: "..." });
+    const block = renderVacanciesBlock(await repo.listActive());
 
     // Headline is auto-extracted before " — " separator; deduped preserving order.
     expect(block).toContain("ОТКРЫТЫЕ ЛОКАЦИИ:");
@@ -132,14 +129,14 @@ describe("renderVacanciesBlock", () => {
     expect(block).toContain("НЕ переноси цифры");
   });
 
-  test("renders the URL line + link-handling instruction when set", () => {
-    repo.create({
+  test("renders the URL line + link-handling instruction when set", async () => {
+    await repo.create({
       title: "Корея",
       body: "оклад ₩110k",
       url: "https://t.me/infinity_agency_world",
     });
-    repo.create({ title: "Шаохинг", body: "10k юаней" }); // no url
-    const block = renderVacanciesBlock(repo.listActive());
+    await repo.create({ title: "Шаохинг", body: "10k юаней" }); // no url
+    const block = renderVacanciesBlock(await repo.listActive());
     expect(block).toContain("Ссылка: https://t.me/infinity_agency_world");
     // The instruction telling the bot to always include the link.
     expect(block).toContain("ВСЕГДА включай её когда называешь эту вакансию");
@@ -150,36 +147,36 @@ describe("renderVacanciesBlock", () => {
 });
 
 describe("VacanciesRepo URL handling", () => {
-  test("create stores trimmed url + auto-prefixes scheme", () => {
-    const a = repo.create({ title: "T", body: "B", url: "  t.me/foo  " });
+  test("create stores trimmed url + auto-prefixes scheme", async () => {
+    const a = await repo.create({ title: "T", body: "B", url: "  t.me/foo  " });
     expect(a.url).toBe("https://t.me/foo");
-    const b = repo.create({ title: "T2", body: "B2", url: "https://x.com" });
+    const b = await repo.create({ title: "T2", body: "B2", url: "https://x.com" });
     expect(b.url).toBe("https://x.com");
-    const c = repo.create({ title: "T3", body: "B3", url: "tg://resolve?domain=foo" });
+    const c = await repo.create({ title: "T3", body: "B3", url: "tg://resolve?domain=foo" });
     expect(c.url).toBe("tg://resolve?domain=foo");
   });
 
-  test("create normalises empty/whitespace url to null", () => {
-    const a = repo.create({ title: "T", body: "B", url: "" });
+  test("create normalises empty/whitespace url to null", async () => {
+    const a = await repo.create({ title: "T", body: "B", url: "" });
     expect(a.url).toBeNull();
-    const b = repo.create({ title: "T2", body: "B2", url: "   " });
+    const b = await repo.create({ title: "T2", body: "B2", url: "   " });
     expect(b.url).toBeNull();
-    const c = repo.create({ title: "T3", body: "B3" });
+    const c = await repo.create({ title: "T3", body: "B3" });
     expect(c.url).toBeNull();
   });
 
-  test("update can clear url with null and replace with a new value", () => {
-    const v = repo.create({ title: "T", body: "B", url: "t.me/a" });
+  test("update can clear url with null and replace with a new value", async () => {
+    const v = await repo.create({ title: "T", body: "B", url: "t.me/a" });
     expect(v.url).toBe("https://t.me/a");
-    const cleared = repo.update(v.id, { url: null });
+    const cleared = await repo.update(v.id, { url: null });
     expect(cleared?.url).toBeNull();
-    const set = repo.update(v.id, { url: "t.me/b" });
+    const set = await repo.update(v.id, { url: "t.me/b" });
     expect(set?.url).toBe("https://t.me/b");
   });
 
-  test("update keeps existing url when patch omits it", () => {
-    const v = repo.create({ title: "T", body: "B", url: "t.me/a" });
-    const patched = repo.update(v.id, { title: "T2" });
+  test("update keeps existing url when patch omits it", async () => {
+    const v = await repo.create({ title: "T", body: "B", url: "t.me/a" });
+    const patched = await repo.update(v.id, { title: "T2" });
     expect(patched?.url).toBe("https://t.me/a");
   });
 });

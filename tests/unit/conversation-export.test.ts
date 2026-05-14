@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { createRouter } from "@/app.ts";
@@ -8,27 +8,30 @@ import { ExperimentsRepo } from "@/db/repos/experiments.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { StylesRepo, seedBuiltinStyles } from "@/db/repos/styles.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import { coldDirectPas } from "@/sales/styles/cold-direct-pas.ts";
 import { empatheticNepq } from "@/sales/styles/empathetic-nepq.ts";
 import { flirtyBelfort } from "@/sales/styles/flirty-belfort.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const SECRET = "s";
 
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 function setup() {
-  const db = openDb({ path: ":memory:" });
   const fetchImpl: FetchLike = async () =>
     new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
   const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
-  const router = createRouter({ db, telegram, webhookSecret: SECRET });
+  const router = createRouter({ sql, telegram, webhookSecret: SECRET });
   const server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
-  return { db, server };
+  return { server };
 }
 
-function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
+function teardown(s: { server: Server }) {
   s.server.stop(true);
-  s.db.close();
 }
 
 let ctx: ReturnType<typeof setup>;
@@ -36,7 +39,7 @@ let cookie: string;
 
 beforeEach(async () => {
   ctx = setup();
-  const admins = new AdminsRepo(ctx.db);
+  const admins = new AdminsRepo(sql);
   await admins.create({ email: "op@x.test", password: "longenough" });
   const login = await fetch(`http://127.0.0.1:${ctx.server.port}/admin/api/login`, {
     method: "POST",
@@ -56,7 +59,7 @@ function authed(extra: RequestInit = {}): RequestInit {
 }
 
 /** Seed a single conversation with a few exchanges. */
-function seedConversation(opts: {
+async function seedConversation(opts: {
   tgUserId: number;
   status?: string;
   styleSlug?: string;
@@ -64,36 +67,36 @@ function seedConversation(opts: {
   stage?: string;
   mode?: "ai" | "queued" | "human";
   exchanges: Array<{ user: string; assistant: string; stage?: string }>;
-}): number {
-  const users = new UsersRepo(ctx.db);
-  const conversations = new ConversationsRepo(ctx.db);
-  const messages = new MessagesRepo(ctx.db);
-  const styles = new StylesRepo(ctx.db);
+}): Promise<number> {
+  const users = new UsersRepo(sql);
+  const conversations = new ConversationsRepo(sql);
+  const messages = new MessagesRepo(sql);
+  const styles = new StylesRepo(sql);
 
-  const u = users.create({
+  const u = await users.create({
     tgUserId: opts.tgUserId,
     tgUsername: `u${opts.tgUserId}`,
     status: opts.status ?? "new",
   });
-  const conv = conversations.ensureForUser(u.id);
+  const conv = await conversations.ensureForUser(u.id);
 
   if (opts.styleSlug) {
-    const style = styles.bySlug(opts.styleSlug);
+    const style = await styles.bySlug(opts.styleSlug);
     if (style) {
-      conversations.assignStyle(conv.id, style.id, opts.experimentId ?? null);
+      await conversations.assignStyle(conv.id, style.id, opts.experimentId ?? null);
     }
   }
-  if (opts.stage) conversations.setCurrentStage(conv.id, opts.stage);
-  if (opts.mode && opts.mode !== "ai") conversations.setMode(conv.id, opts.mode);
+  if (opts.stage) await conversations.setCurrentStage(conv.id, opts.stage);
+  if (opts.mode && opts.mode !== "ai") await conversations.setMode(conv.id, opts.mode);
 
   for (const ex of opts.exchanges) {
-    messages.add({
+    await messages.add({
       conversationId: conv.id,
       role: "user",
       text: ex.user,
       ...(ex.stage ? { stage: ex.stage } : {}),
     });
-    messages.add({
+    await messages.add({
       conversationId: conv.id,
       role: "assistant",
       text: ex.assistant,
@@ -131,7 +134,7 @@ function parseJsonl(text: string): ExportedConv[] {
 
 describe("GET /admin/api/conversations/:id/export.jsonl", () => {
   test("requires auth", async () => {
-    const id = seedConversation({
+    const id = await seedConversation({
       tgUserId: 100,
       exchanges: [{ user: "hi", assistant: "yo" }],
     });
@@ -140,7 +143,7 @@ describe("GET /admin/api/conversations/:id/export.jsonl", () => {
   });
 
   test("happy path: returns one JSONL line with all messages oldest-first", async () => {
-    const id = seedConversation({
+    const id = await seedConversation({
       tgUserId: 100,
       status: "qualified",
       exchanges: [
@@ -175,13 +178,13 @@ describe("GET /admin/api/conversations/:id/export.jsonl", () => {
   });
 
   test("includes style_slug and experiment_slug when conversation is assigned", async () => {
-    seedBuiltinStyles(new StylesRepo(ctx.db), [flirtyBelfort]);
-    const exp = new ExperimentsRepo(ctx.db).insert({
+    await seedBuiltinStyles(new StylesRepo(sql), [flirtyBelfort]);
+    const exp = await new ExperimentsRepo(sql).insert({
       slug: "april-test",
       status: "running",
       allocation: { "flirty-belfort-v1": 100 },
     });
-    const id = seedConversation({
+    const id = await seedConversation({
       tgUserId: 200,
       styleSlug: "flirty-belfort-v1",
       experimentId: exp.id,
@@ -207,7 +210,7 @@ describe("GET /admin/api/conversations/:id/export.jsonl", () => {
   });
 
   test("conversation with no messages is exported with empty messages[]", async () => {
-    const id = seedConversation({ tgUserId: 300, exchanges: [] });
+    const id = await seedConversation({ tgUserId: 300, exchanges: [] });
     const res = await fetch(url(`/admin/api/conversations/${id}/export.jsonl`), authed());
     const conv = parseJsonl(await res.text())[0]!;
     expect(conv.messages).toEqual([]);
@@ -215,8 +218,8 @@ describe("GET /admin/api/conversations/:id/export.jsonl", () => {
 });
 
 describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
-  beforeEach(() => {
-    seedBuiltinStyles(new StylesRepo(ctx.db), [flirtyBelfort, empatheticNepq, coldDirectPas]);
+  beforeEach(async () => {
+    await seedBuiltinStyles(new StylesRepo(sql), [flirtyBelfort, empatheticNepq, coldDirectPas]);
   });
 
   test("requires auth", async () => {
@@ -225,11 +228,11 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
   });
 
   test("returns ALL conversations when no filters set", async () => {
-    seedConversation({
+    await seedConversation({
       tgUserId: 1,
       exchanges: [{ user: "hi", assistant: "yo" }],
     });
-    seedConversation({
+    await seedConversation({
       tgUserId: 2,
       exchanges: [{ user: "ku", assistant: "ka" }],
     });
@@ -241,21 +244,21 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
   });
 
   test("filter by style_id", async () => {
-    const flirty = new StylesRepo(ctx.db).bySlug("flirty-belfort-v1")!;
-    const empath = new StylesRepo(ctx.db).bySlug("empathetic-nepq-v1")!;
-    seedConversation({
+    const flirty = await new StylesRepo(sql).bySlug("flirty-belfort-v1");
+    const empath = await new StylesRepo(sql).bySlug("empathetic-nepq-v1");
+    await seedConversation({
       tgUserId: 10,
       styleSlug: "flirty-belfort-v1",
       exchanges: [{ user: "a", assistant: "b" }],
     });
-    seedConversation({
+    await seedConversation({
       tgUserId: 20,
       styleSlug: "empathetic-nepq-v1",
       exchanges: [{ user: "a", assistant: "b" }],
     });
 
     const res = await fetch(
-      url(`/admin/api/conversations/export.jsonl?style_id=${flirty.id}`),
+      url(`/admin/api/conversations/export.jsonl?style_id=${flirty!.id}`),
       authed(),
     );
     const lines = parseJsonl(await res.text());
@@ -267,18 +270,18 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
   });
 
   test("filter by experiment_id", async () => {
-    const exp = new ExperimentsRepo(ctx.db).insert({
+    const exp = await new ExperimentsRepo(sql).insert({
       slug: "exp-1",
       status: "running",
       allocation: { "flirty-belfort-v1": 100 },
     });
-    seedConversation({
+    await seedConversation({
       tgUserId: 50,
       styleSlug: "flirty-belfort-v1",
       experimentId: exp.id,
       exchanges: [{ user: "a", assistant: "b" }],
     });
-    seedConversation({
+    await seedConversation({
       tgUserId: 51,
       exchanges: [{ user: "a", assistant: "b" }],
     });
@@ -293,12 +296,12 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
   });
 
   test("filter by user_status", async () => {
-    seedConversation({
+    await seedConversation({
       tgUserId: 70,
       status: "qualified",
       exchanges: [{ user: "a", assistant: "b" }],
     });
-    seedConversation({
+    await seedConversation({
       tgUserId: 71,
       status: "lost",
       exchanges: [{ user: "a", assistant: "b" }],
@@ -314,12 +317,12 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
   });
 
   test("filter by mode", async () => {
-    seedConversation({
+    await seedConversation({
       tgUserId: 80,
       mode: "human",
       exchanges: [{ user: "a", assistant: "b" }],
     });
-    seedConversation({
+    await seedConversation({
       tgUserId: 81,
       mode: "ai",
       exchanges: [{ user: "a", assistant: "b" }],
@@ -333,7 +336,7 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
 
   test("limit param caps the number of rows", async () => {
     for (let i = 0; i < 5; i++) {
-      seedConversation({
+      await seedConversation({
         tgUserId: 1000 + i,
         exchanges: [{ user: "a", assistant: "b" }],
       });
@@ -346,7 +349,7 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
   test("limit is clamped to the hard maximum", async () => {
     // Just verify the request doesn't error with a giant limit; we don't
     // actually create thousands of conversations in the test.
-    seedConversation({
+    await seedConversation({
       tgUserId: 9999,
       exchanges: [{ user: "a", assistant: "b" }],
     });
@@ -355,7 +358,7 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
   });
 
   test("non-numeric limit is ignored (falls back to default)", async () => {
-    seedConversation({
+    await seedConversation({
       tgUserId: 5000,
       exchanges: [{ user: "a", assistant: "b" }],
     });
@@ -373,28 +376,28 @@ describe("GET /admin/api/conversations/export.jsonl (bulk)", () => {
   });
 
   test("multiple filters combine (AND semantics)", async () => {
-    seedConversation({
+    await seedConversation({
       tgUserId: 200,
       status: "qualified",
       styleSlug: "flirty-belfort-v1",
       exchanges: [{ user: "a", assistant: "b" }],
     });
-    seedConversation({
+    await seedConversation({
       tgUserId: 201,
       status: "lost",
       styleSlug: "flirty-belfort-v1",
       exchanges: [{ user: "a", assistant: "b" }],
     });
-    seedConversation({
+    await seedConversation({
       tgUserId: 202,
       status: "qualified",
       styleSlug: "empathetic-nepq-v1",
       exchanges: [{ user: "a", assistant: "b" }],
     });
 
-    const flirty = new StylesRepo(ctx.db).bySlug("flirty-belfort-v1")!;
+    const flirty = await new StylesRepo(sql).bySlug("flirty-belfort-v1");
     const res = await fetch(
-      url(`/admin/api/conversations/export.jsonl?style_id=${flirty.id}&user_status=qualified`),
+      url(`/admin/api/conversations/export.jsonl?style_id=${flirty!.id}&user_status=qualified`),
       authed(),
     );
     const lines = parseJsonl(await res.text());

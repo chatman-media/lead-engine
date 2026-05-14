@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
 import { createRouter } from "@/app.ts";
@@ -6,11 +6,11 @@ import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { KbRepo } from "@/db/repos/kb.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { openDb } from "@/db/sqlite.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import type { EmbeddingClient } from "@/rag/embed.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import type { TgUpdate } from "@/telegram/types.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const SECRET = "test-secret";
 const DIM = 1536;
@@ -43,14 +43,16 @@ interface OutgoingCall {
   body: Record<string, unknown>;
 }
 
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 function setup(opts: {
   embedder: EmbeddingClient;
   chat: ChatClient;
   persona?: { name: string; role: "human" | "assistant"; company?: string };
-  /** When provided, lets a test count how many times the LLM was called. */
-  chatCallCounter?: { count: number };
 }) {
-  const db = openDb({ path: ":memory:", embeddingDim: DIM });
   const sent: OutgoingCall[] = [];
   const fetchImpl: FetchLike = async (input, init) => {
     const url = typeof input === "string" ? input : (input as Request).url;
@@ -73,7 +75,7 @@ function setup(opts: {
   };
   const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
   const router = createRouter({
-    db,
+    sql,
     telegram,
     webhookSecret: SECRET,
     rag: {
@@ -89,12 +91,11 @@ function setup(opts: {
     port: 0,
     fetch: (req) => router.handle(req),
   });
-  return { db, router, server, sent };
+  return { router, server, sent };
 }
 
-function teardown(s: { db: ReturnType<typeof openDb>; server: Server }) {
+function teardownServer(s: { server: Server }) {
   s.server.stop(true);
-  s.db.close();
 }
 
 function update(fromId: number, text: string): TgUpdate {
@@ -116,19 +117,19 @@ beforeEach(() => {
   ctx = setup({ embedder: fakeEmbedder(), chat: fakeChat("From RAG") });
 });
 
-afterEach(() => teardown(ctx));
+afterEach(() => teardownServer(ctx));
 
 describe("webhook RAG integration", () => {
   test("ai mode + KB has context: replies with RAG answer (not placeholder)", async () => {
-    const users = new UsersRepo(ctx.db);
-    const kb = new KbRepo(ctx.db);
-    const u = users.create({ tgUserId: 100 });
-    const doc = kb.upsertDocument({
+    const users = new UsersRepo(sql);
+    const kb = new KbRepo(sql);
+    const u = await users.create({ tgUserId: 100 });
+    const doc = await kb.upsertDocument({
       source: "s://t",
       title: "doc",
       contentHash: "h",
     });
-    kb.insertChunkWithEmbedding({
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "Some KB text",
@@ -147,28 +148,27 @@ describe("webhook RAG integration", () => {
     expect(ctx.sent).toHaveLength(1);
     expect(ctx.sent[0]!.body.text).toBe("From RAG");
 
-    const msgs = new MessagesRepo(ctx.db).listByConversation(
-      new ConversationsRepo(ctx.db).byUserId(u.id)!.id,
-    );
+    const conv = await new ConversationsRepo(sql).byUserId(u.id);
+    const msgs = await new MessagesRepo(sql).listByConversation(conv!.id);
     expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(msgs[1]!.text).toBe("From RAG");
   });
 
   test("ai mode + LLM returns NO_CONTEXT_MARKER: switches to queued, no Telegram message", async () => {
-    teardown(ctx);
+    teardownServer(ctx);
     ctx = setup({
       embedder: fakeEmbedder(),
       chat: fakeChat("__NO_CONTEXT__"),
     });
-    const users = new UsersRepo(ctx.db);
-    const kb = new KbRepo(ctx.db);
-    const u = users.create({ tgUserId: 200 });
-    const doc = kb.upsertDocument({
+    const users = new UsersRepo(sql);
+    const kb = new KbRepo(sql);
+    const u = await users.create({ tgUserId: 200 });
+    const doc = await kb.upsertDocument({
       source: "s://t",
       title: "doc",
       contentHash: "h",
     });
-    kb.insertChunkWithEmbedding({
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "irrelevant",
@@ -186,25 +186,25 @@ describe("webhook RAG integration", () => {
 
     expect(ctx.sent).toHaveLength(0);
 
-    const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
+    const conv = (await new ConversationsRepo(sql).byUserId(u.id))!;
     expect(conv.mode).toBe("queued");
   });
 
   test("two NO_CONTEXT in ai: no Telegram traffic, mode queued after first", async () => {
-    teardown(ctx);
+    teardownServer(ctx);
     ctx = setup({
       embedder: fakeEmbedder(),
       chat: fakeChat("__NO_CONTEXT__"),
     });
-    const users = new UsersRepo(ctx.db);
-    const kb = new KbRepo(ctx.db);
-    const u = users.create({ tgUserId: 420 });
-    const doc = kb.upsertDocument({
+    const users = new UsersRepo(sql);
+    const kb = new KbRepo(sql);
+    const u = await users.create({ tgUserId: 420 });
+    const doc = await kb.upsertDocument({
       source: "s://t",
       title: "doc",
       contentHash: "h",
     });
-    kb.insertChunkWithEmbedding({
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "irrelevant",
@@ -226,11 +226,11 @@ describe("webhook RAG integration", () => {
       headers: { "content-type": "application/json" },
     });
     expect(ctx.sent).toHaveLength(0);
-    expect(new ConversationsRepo(ctx.db).byUserId(u.id)!.mode).toBe("queued");
+    expect((await new ConversationsRepo(sql).byUserId(u.id))!.mode).toBe("queued");
   });
 
   test("ai mode: NO_CONTEXT then on-topic question gets RAG reply", async () => {
-    teardown(ctx);
+    teardownServer(ctx);
     let turn = 0;
     ctx = setup({
       embedder: fakeEmbedder(),
@@ -241,15 +241,15 @@ describe("webhook RAG integration", () => {
         },
       },
     });
-    const users = new UsersRepo(ctx.db);
-    const kb = new KbRepo(ctx.db);
-    const u = users.create({ tgUserId: 500 });
-    const doc = kb.upsertDocument({
+    const users = new UsersRepo(sql);
+    const kb = new KbRepo(sql);
+    const u = await users.create({ tgUserId: 500 });
+    const doc = await kb.upsertDocument({
       source: "s://t",
       title: "vacancy-china",
       contentHash: "h2",
     });
-    kb.insertChunkWithEmbedding({
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "Вакансии в Китае: подробности в контексте.",
@@ -271,13 +271,13 @@ describe("webhook RAG integration", () => {
 
     expect(ctx.sent).toHaveLength(1);
     expect(String(ctx.sent[0]!.body.text)).toBe("Ответ из базы после очереди");
-    const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
+    const conv = (await new ConversationsRepo(sql).byUserId(u.id))!;
     expect(conv.mode).toBe("ai");
   });
 
   test("kb empty: silent, queued for operator", async () => {
-    const users = new UsersRepo(ctx.db);
-    users.create({ tgUserId: 300 });
+    const users = new UsersRepo(sql);
+    await users.create({ tgUserId: 300 });
 
     const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
     const res = await fetch(url, {
@@ -286,12 +286,14 @@ describe("webhook RAG integration", () => {
       headers: { "content-type": "application/json" },
     });
     expect(res.status).toBe(200);
-    const conv = new ConversationsRepo(ctx.db).byUserId(new UsersRepo(ctx.db).byTgId(300)!.id)!;
+    const user = await new UsersRepo(sql).byTgId(300);
+    const conv = (await new ConversationsRepo(sql).byUserId(user!.id))!;
     expect(conv.mode).toBe("queued");
     expect(ctx.sent).toHaveLength(0);
   });
+
   test("ai mode + smalltalk question: replies with persona name, LLM not called", async () => {
-    teardown(ctx);
+    teardownServer(ctx);
     let chatCalls = 0;
     ctx = setup({
       embedder: fakeEmbedder(),
@@ -307,13 +309,13 @@ describe("webhook RAG integration", () => {
         company: "INFINITY AGENCY",
       },
     });
-    const users = new UsersRepo(ctx.db);
-    const kb = new KbRepo(ctx.db);
-    const u = users.create({ tgUserId: 700 });
+    const users = new UsersRepo(sql);
+    const kb = new KbRepo(sql);
+    const u = await users.create({ tgUserId: 700 });
     // Seed a KB chunk so the search step has something — proves the
     // shortcut runs BEFORE retrieval and bypasses both.
-    const doc = kb.upsertDocument({ source: "s", title: "doc", contentHash: "h" });
-    kb.insertChunkWithEmbedding({
+    const doc = await kb.upsertDocument({ source: "s", title: "doc", contentHash: "h" });
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "irrelevant filler",
@@ -340,7 +342,7 @@ describe("webhook RAG integration", () => {
       expect(text).toContain("INFINITY AGENCY");
       // Conversation must NOT be queued — smalltalk replies don't escalate.
     }
-    const conv = new ConversationsRepo(ctx.db).byUserId(u.id)!;
+    const conv = (await new ConversationsRepo(sql).byUserId(u.id))!;
     expect(conv.mode).toBe("ai");
   });
 
@@ -349,7 +351,7 @@ describe("webhook RAG integration", () => {
   // because model didn't see prior turns. Now we read recentForContext()
   // and pass last 12 messages — assistant answers stay coherent across turns.
   test("multi-turn: history is passed to LLM (chat receives prior messages)", async () => {
-    teardown(ctx);
+    teardownServer(ctx);
     const captured: ChatMessage[][] = [];
     const captureChat: ChatClient = {
       async complete(messages) {
@@ -361,15 +363,15 @@ describe("webhook RAG integration", () => {
       embedder: fakeEmbedder(),
       chat: captureChat,
     });
-    const users = new UsersRepo(ctx.db);
-    const kb = new KbRepo(ctx.db);
-    const _u = users.create({ tgUserId: 800 });
-    const doc = kb.upsertDocument({
+    const users = new UsersRepo(sql);
+    const kb = new KbRepo(sql);
+    await users.create({ tgUserId: 800 });
+    const doc = await kb.upsertDocument({
       source: "s://t",
       title: "doc",
       contentHash: "h",
     });
-    kb.insertChunkWithEmbedding({
+    await kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: 0,
       text: "Some KB text about jobs",

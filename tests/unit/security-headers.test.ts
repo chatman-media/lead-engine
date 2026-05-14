@@ -1,21 +1,24 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 import type { AdminWsData } from "@/admin/bus.ts";
-import { openDb } from "@/db/sqlite.ts";
 import { createServer } from "@/server.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
+import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
-let db: ReturnType<typeof openDb>;
+const sql = getTestSql();
+beforeAll(() => setupTestDb(sql));
+afterEach(() => cleanTestDb(sql));
+afterAll(() => sql.end());
+
 let server: Server<AdminWsData>;
 let baseUrl: string;
 
 beforeEach(() => {
-  db = openDb({ path: ":memory:" });
   const fetchImpl: FetchLike = async () =>
     new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
   const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
   server = createServer({
-    db,
+    sql,
     telegram,
     webhookSecret: "s",
     port: 0,
@@ -25,7 +28,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   server.stop(true);
-  db.close();
 });
 
 describe("security headers", () => {

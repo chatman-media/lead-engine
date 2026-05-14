@@ -1,6 +1,6 @@
 # Userbot (MTProto)
 
-Режим работы с личного аккаунта Telegram вместо бот-аккаунта. Используется gramjs (TDLib MTProto). Сессия хранится в SQLite — рестарты не требуют повторного логина.
+Режим работы с личного аккаунта Telegram вместо бот-аккаунта. Используется gramjs (TDLib MTProto). Сессия хранится в PostgreSQL — рестарты не требуют повторного логина.
 
 ## Зачем
 
@@ -101,7 +101,7 @@ Userbot и Bot API могут работать одновременно:
 **Делает:**
 - Отвечает на входящие DM через RAG (тот же пайплайн, тот же style).
 - Обрабатывает непрочитанные при старте.
-- Персистирует сессию в SQLite (одна строка в `userbot_session`).
+- Персистирует сессию в PostgreSQL (одна строка в `userbot_session`).
 
 **Не делает:**
 - Не пишет первым (нет метода initiate-conversation в текущей реализации).
@@ -112,7 +112,7 @@ Userbot и Bot API могут работать одновременно:
 ## Безопасность
 
 - `api_id` / `api_hash` — не секреты в строгом смысле (не аналог bot token), но не нужно их публиковать.
-- Сессионная строка в `userbot_session` — эквивалент токена: кто угодно с этой строкой может работать от имени аккаунта. **Бэкапьте `data/bot.db` только в безопасное место.**
+- Сессионная строка в `userbot_session` — эквивалент токена: кто угодно с этой строкой может работать от имени аккаунта. **Ограничьте доступ к базе данных PostgreSQL.**
 - Если сессия скомпрометирована: завершить все сессии в Telegram Settings → Devices → Terminate All Other Sessions.
 
 ## Troubleshooting
@@ -141,7 +141,7 @@ bun scripts/userbot-auth.ts
 ### Сессия устарела / невалидна
 
 ```bash
-# Удалить сессию из DB и перелогиниться:
-bun -e "const db = require('./src/db/sqlite.ts').getDb(); db.run(\"UPDATE userbot_session SET session_string = '' WHERE id = 1\");"
+# Сбросить сессию в PostgreSQL и перелогиниться:
+psql $DATABASE_URL -c "UPDATE userbot_session SET session_string = '' WHERE id = 1;"
 bun scripts/userbot-auth.ts
 ```
