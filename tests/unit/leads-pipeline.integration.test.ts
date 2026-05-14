@@ -73,8 +73,11 @@ function scriptedChat(): ChatClient {
       const system = messages.find((m) => m.role === "system")?.content ?? "";
       const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
 
-      // Intake extractor — pulls 5 text fields.
-      if (system.includes("полей анкеты")) {
+      // Intake extractor — pulls the questionnaire fields. The system prompt
+      // text has drifted between revisions ("4 поля" → "5 полей" → "поля
+      // анкеты"); match the stable substring "анкеты" (recruiting form) so
+      // future field additions don't break this regex.
+      if (system.includes("Ты извлекаешь поля анкеты")) {
         const out: Record<string, string> = {};
         if (/22/.test(lastUser)) out.age = "22";
         if (/165/.test(lastUser)) out.height = "165";
