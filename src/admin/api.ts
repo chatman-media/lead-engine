@@ -101,6 +101,7 @@ export {
 export { createStatusHandler } from "./routes/status.ts";
 export {
   createCreateStyleHandler,
+  createDeleteStyleHandler,
   createEditStyleHandler,
   createGetStyleHandler,
   createListStylesHandler,

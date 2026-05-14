@@ -93,7 +93,7 @@ describe("GET /admin/api/styles", () => {
   test("excludes soft-deleted styles", async () => {
     await seedStyles();
     const repo = new StylesRepo(sql);
-    await repo.deactivate((await repo.bySlug("cold-direct-pas-v1"))!.id);
+    await repo.softDelete((await repo.bySlug("cold-direct-pas-v1"))!.id);
     const res = await fetch(url("/admin/api/styles"), authed());
     const body = (await res.json()) as { styles: Array<{ slug: string }> };
     expect(body.styles.map((s) => s.slug)).not.toContain("cold-direct-pas-v1");
@@ -782,6 +782,70 @@ describe("PATCH /admin/api/styles/:id (inline editor)", () => {
       }),
     );
     expect(res.status).toBe(409);
+  });
+});
+
+describe("DELETE /admin/api/styles/:id (soft-delete)", () => {
+  beforeEach(() => seedStyles());
+
+  test("requires auth", async () => {
+    const repo = new StylesRepo(sql);
+    const v1 = (await repo.bySlug("flirty-belfort-v1"))!;
+    const res = await fetch(url(`/admin/api/styles/${v1.id}`), { method: "DELETE" });
+    expect(res.status).toBe(401);
+  });
+
+  test("soft-deletes the active head, writes an audit row, frees the slug", async () => {
+    const repo = new StylesRepo(sql);
+    const v1 = (await repo.bySlug("flirty-belfort-v1"))!;
+
+    const res = await fetch(url(`/admin/api/styles/${v1.id}`), authed({ method: "DELETE" }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; deleted: number };
+    expect(body).toEqual({ ok: true, deleted: v1.id });
+
+    const reloaded = (await repo.byId(v1.id))!;
+    expect(reloaded.is_active).toBe(false);
+    expect(reloaded.deleted_at).toBeGreaterThan(0);
+
+    // listActive omits the retired style.
+    expect((await repo.listActive()).map((r) => r.slug)).not.toContain(v1.slug);
+
+    // Audit trail written.
+    const [audit] = await sql<
+      [{ action: string; target_kind: string | null; target_id: string | null }]
+    >`SELECT action, target_kind, target_id FROM audit_log WHERE action = 'style.delete'`;
+    expect(audit?.action).toBe("style.delete");
+    expect(audit?.target_kind).toBe("style");
+    expect(audit?.target_id).toBe(String(v1.id));
+  });
+
+  test("404 for unknown id", async () => {
+    const res = await fetch(url("/admin/api/styles/99999"), authed({ method: "DELETE" }));
+    expect(res.status).toBe(404);
+  });
+
+  test("409 when row is already soft-deleted", async () => {
+    const repo = new StylesRepo(sql);
+    const v1 = (await repo.bySlug("flirty-belfort-v1"))!;
+    await repo.softDelete(v1.id);
+
+    const res = await fetch(url(`/admin/api/styles/${v1.id}`), authed({ method: "DELETE" }));
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/already soft-deleted/);
+  });
+
+  test("409 when row is a historical (superseded) version, not the active head", async () => {
+    const repo = new StylesRepo(sql);
+    const v1 = (await repo.bySlug("flirty-belfort-v1"))!;
+    // Bump to v2 — v1 becomes is_active=false but deleted_at=null.
+    await repo.editAsNewVersion(v1.id, { ...flirtyBelfort, displayName: "v2" });
+
+    const res = await fetch(url(`/admin/api/styles/${v1.id}`), authed({ method: "DELETE" }));
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/historical version/);
   });
 });
 
