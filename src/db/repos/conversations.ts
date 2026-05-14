@@ -41,10 +41,14 @@ export class ConversationsRepo {
   }
 
   async ensureForUser(userId: number): Promise<ConversationRow> {
-    const existing = await this.byUserId(userId);
-    if (existing) return existing;
+    // ON CONFLICT against the UNIQUE index on `user_id` collapses the
+    // SELECT-then-INSERT race two simultaneous inbound webhooks used to
+    // trigger (both saw "no row", both inserted). DO UPDATE on a sentinel
+    // column lets RETURNING fire for the existing row too.
     const [row] = await this.sql<ConversationRow[]>`
-      INSERT INTO conversations (user_id) VALUES (${userId}) RETURNING *
+      INSERT INTO conversations (user_id) VALUES (${userId})
+      ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+      RETURNING *
     `;
     if (!row) throw new Error("Failed to create conversation");
     return row;
