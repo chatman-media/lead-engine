@@ -33,6 +33,8 @@ export interface OpenAIChatOptions {
   apiKey: string;
   baseUrl: string;
   model: string;
+  /** Per-request timeout in ms. Default 60_000 (1 min). */
+  timeoutMs?: number;
   fetch?: FetchLike;
 }
 
@@ -48,6 +50,7 @@ export class OpenAIChatClient implements ChatClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly model: string;
+  private readonly timeoutMs: number;
   private readonly fetchImpl: FetchLike;
 
   constructor(opts: OpenAIChatOptions) {
@@ -55,6 +58,7 @@ export class OpenAIChatClient implements ChatClient {
     this.apiKey = opts.apiKey;
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.model = opts.model;
+    this.timeoutMs = opts.timeoutMs ?? 60_000;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
@@ -72,6 +76,7 @@ export class OpenAIChatClient implements ChatClient {
         authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     let payload: ChatResponse;
