@@ -58,38 +58,39 @@ describe("sanitizeFtsQuery", () => {
     expect(sanitizeFtsQuery("   ")).toBe("");
   });
 
-  test("strips FTS5 operators that would break the query", () => {
-    expect(sanitizeFtsQuery("виза AND контракт")).toContain('"виза"*');
-    expect(sanitizeFtsQuery("виза AND контракт")).toContain('"контракт"*');
+  test("strips tsquery operators that would break the query", () => {
+    expect(sanitizeFtsQuery("виза AND контракт")).toContain("виза:*");
+    expect(sanitizeFtsQuery("виза AND контракт")).toContain("контракт:*");
     expect(sanitizeFtsQuery("виза AND контракт")).not.toMatch(/\bAND\b/);
   });
 
-  test("strips operator characters from raw text (parens, asterisks, colons)", () => {
-    // Tokens themselves get re-wrapped in quotes ("hack"*), but the test
-    // here is that user-supplied operator chars from the original text
-    // don't leak into the FTS5 query in a way that changes its semantics.
-    const result = sanitizeFtsQuery("foo (bar) baz");
+  test("strips operator characters from raw text (parens, asterisks, colons, pipes, ampersands)", () => {
+    // User-supplied tsquery operator chars must not leak into the rendered
+    // query — they could otherwise inject AND/OR/prefix semantics.
+    const result = sanitizeFtsQuery("foo (bar) baz | qux & quux");
     expect(result).not.toContain("(");
     expect(result).not.toContain(")");
-    expect(result).toContain('"foo"*');
-    expect(result).toContain('"bar"*');
-    expect(result).toContain('"baz"*');
+    // Tokens themselves get `:*` (prefix); the inter-token `|` we DO emit
+    // is the separator only — operator chars from input were stripped.
+    expect(result).toContain("foo:*");
+    expect(result).toContain("bar:*");
+    expect(result).toContain("baz:*");
   });
 
   test("drops short tokens (< 2 chars)", () => {
     const result = sanitizeFtsQuery("я в дубае");
-    expect(result).toContain('"дубае"*');
+    expect(result).toContain("дубае:*");
     // single-char "я" / "в" dropped
-    expect(result).not.toContain('"я"');
-    expect(result).not.toContain('"в"');
+    expect(result).not.toMatch(/\bя\b/);
+    expect(result).not.toMatch(/\bв\b/);
   });
 
   test("uses OR fusion with prefix-match for word-form variation", () => {
     const result = sanitizeFtsQuery("визу 30 дней");
-    expect(result).toContain('"визу"*');
-    expect(result).toContain('"30"*');
-    expect(result).toContain('"дней"*');
-    expect(result.split(" OR ").length).toBe(3);
+    expect(result).toContain("визу:*");
+    expect(result).toContain("30:*");
+    expect(result).toContain("дней:*");
+    expect(result.split(" | ").length).toBe(3);
   });
 });
 
