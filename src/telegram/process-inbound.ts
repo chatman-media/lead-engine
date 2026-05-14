@@ -19,6 +19,24 @@ import { runConversationSummaryRefresh } from "./summary-refresh.ts";
 import type { ProcessInboundDeps, RagDeps } from "./webhook-types.ts";
 
 /**
+ * The four "after every turn" maintenance tasks that have to run regardless
+ * of which branch processInbound took (successful reply, NO_CONTEXT stall,
+ * CTA fallback, still-queued retry). Extracted so adding a fifth post-turn
+ * hook is a one-line edit instead of a four-call diff in four places.
+ *
+ * Each hook is fire-and-forget on errors (each implementation catches its
+ * own exceptions and logs); they're awaited sequentially because they all
+ * read/write `users.profile_json.memory` and `leads.intake_json` and would
+ * otherwise race against each other.
+ */
+async function runPostReplyHooks(d: ProcessInboundDeps): Promise<void> {
+  await runMemoryExtraction(d);
+  await runConversationSummaryRefresh(d);
+  await runIntakeUpdate(d);
+  await runVisaDocsUpdate(d);
+}
+
+/**
  * Resolves which sales-engine `Style` (if any) to use for a given conversation.
  *
  * Priority chain (highest wins):
@@ -369,10 +387,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     }
     // Still no answer — stay queued. Run background tasks so intake/memory
     // continue to update even while the conversation awaits a manual reply.
-    await runMemoryExtraction(d);
-    await runConversationSummaryRefresh(d);
-    await runIntakeUpdate(d);
-    await runVisaDocsUpdate(d);
+    await runPostReplyHooks(d);
     return;
   }
 
@@ -415,10 +430,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
         `[webhook] stall limit (${STALL_LIMIT}) reached for conv=${d.conv.id} — sending CTA`,
       );
       await reply(ctaReply, { used_chunk_ids: [], telemetry: result.telemetry }, stage);
-      await runMemoryExtraction(d);
-      await runConversationSummaryRefresh(d);
-      await runIntakeUpdate(d);
-      await runVisaDocsUpdate(d);
+      await runPostReplyHooks(d);
       return;
     }
 
@@ -453,10 +465,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     // Run memory extraction even on silent turns — the user message itself
     // may carry persistent facts ("I'm Anya, 25, from Moscow") that we want
     // remembered regardless of whether RAG could answer.
-    await runMemoryExtraction(d);
-    await runConversationSummaryRefresh(d);
-    await runIntakeUpdate(d);
-    await runVisaDocsUpdate(d);
+    await runPostReplyHooks(d);
     return;
   }
 
@@ -468,10 +477,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     { used_chunk_ids: result.usedChunkIds, telemetry: result.telemetry },
     stage,
   );
-  await runMemoryExtraction(d);
-  await runConversationSummaryRefresh(d);
-  await runIntakeUpdate(d);
-  await runVisaDocsUpdate(d);
+  await runPostReplyHooks(d);
 
   // Fire-and-forget: self-grade which skills the reply demonstrated, write
   // the result back into meta_json. Gated by RAG_SKILL_GRADING because
