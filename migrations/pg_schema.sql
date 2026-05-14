@@ -327,3 +327,22 @@ CREATE TABLE IF NOT EXISTS userbot_send_queue (
 ALTER TABLE userbot_send_queue ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_userbot_queue_pending
   ON userbot_send_queue(id) WHERE sent_at IS NULL;
+
+-- Operator-action audit trail. Wrote per destructive admin endpoint
+-- (KB wipe, outcomes purge, webhook delete, lead delete, GDPR erase).
+-- `details_json` is free-form so a future endpoint can record the row
+-- counts it actually deleted, the rejection reason, etc., without a
+-- schema migration. ON DELETE SET NULL on admin_id so we keep the
+-- history when an operator account is later removed.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id           SERIAL  PRIMARY KEY,
+  action       TEXT    NOT NULL,
+  admin_id     INTEGER REFERENCES admins(id) ON DELETE SET NULL,
+  target_kind  TEXT,
+  target_id    TEXT,
+  details_json TEXT,
+  created_at   INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_admin_id ON audit_log(admin_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action, created_at DESC);
