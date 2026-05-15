@@ -67,11 +67,14 @@ export {
 } from "./routes/leads.ts";
 export { createUploadBookHandler } from "./routes/library.ts";
 export {
+  createClearUserbotProxyStatusesHandler,
   createDeleteTelegramWebhookHandler,
   createGetTelegramWebhookHandler,
   createKbIngestHandler,
   createKbWipeHandler,
+  createListUserbotProxiesHandler,
   createPurgeOutcomesHandler,
+  createReplaceUserbotProxiesHandler,
   createReseedVacanciesHandler,
   createSetTelegramWebhookHandler,
   createUserbotQueueStatsHandler,

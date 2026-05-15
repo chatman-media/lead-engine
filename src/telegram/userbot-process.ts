@@ -5,6 +5,7 @@
 import { config, llmIsConfigured } from "../config.ts";
 import { sql } from "../db/postgres.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
+import { UserbotProxiesRepo } from "../db/repos/userbot-proxies.ts";
 import { log } from "../log.ts";
 import { OpenAIChatClient } from "../rag/chat.ts";
 import { NullEmbeddingClient, OpenAIEmbeddingClient } from "../rag/embed.ts";
@@ -14,6 +15,13 @@ import { OpenRouterChatClient } from "../rag/providers/openrouter-chat.ts";
 import type { Style } from "../sales/types.ts";
 import { type ParsedMTProxy, parseMTProxy, parseMTProxyList } from "./mtproxy.ts";
 import { startUserbot } from "./userbot.ts";
+
+/** A proxy ready to dial, optionally tagged with the DB id so per-attempt
+ *  status writes can land on the right row. `id` absent = came from env. */
+interface ProxyCandidate {
+  parsed: ParsedMTProxy;
+  id: number | null;
+}
 
 let rag: Parameters<typeof startUserbot>[0]["rag"];
 
@@ -95,13 +103,15 @@ async function runUserbot() {
 
   restarting = false;
 
-  // Build the ordered list of proxies to try. USERBOT_MTPROXY_LIST wins over
-  // the legacy single-value USERBOT_MTPROXY when both are set (operators
-  // migrating from #21 keep their old value as a comment).
-  const proxies = collectProxies();
+  // Build the ordered list of proxies to try. Precedence:
+  //   1. `userbot_proxies` DB table (admin-UI managed)
+  //   2. USERBOT_MTPROXY_LIST env (newline-separated)
+  //   3. USERBOT_MTPROXY env (legacy single value)
+  const proxiesRepo = new UserbotProxiesRepo(sql);
+  const candidates = await collectProxies(proxiesRepo);
 
   // No proxy configured → direct connection.
-  if (proxies.length === 0) {
+  if (candidates.length === 0) {
     try {
       activeClient = await startUserbot({
         db: sql,
@@ -121,17 +131,18 @@ async function runUserbot() {
 
   // Try each proxy in order, capped by USERBOT_PROXY_CONNECT_TIMEOUT_SEC per
   // attempt. First success wins; if all fail, log a summary and let the parent
-  // restart the whole loop (env may have been updated meanwhile).
+  // restart the whole loop (env / DB may have been updated meanwhile).
   const timeoutMs = config.userbot.proxyConnectTimeoutSec * 1000;
-  for (let i = 0; i < proxies.length; i++) {
-    const proxy = proxies[i]!;
+  for (let i = 0; i < candidates.length; i++) {
+    const { parsed: proxy, id } = candidates[i]!;
     log.info("trying proxy", {
       scope: "userbot-process",
       attempt: i + 1,
-      total: proxies.length,
+      total: candidates.length,
       proxy_host: proxy.ip,
       proxy_port: proxy.port,
     });
+    const startedAt = Date.now();
     try {
       activeClient = await withTimeout(
         startUserbot({
@@ -143,39 +154,79 @@ async function runUserbot() {
         }),
         timeoutMs,
       );
+      const connectMs = Date.now() - startedAt;
       log.info("proxy connect succeeded", {
         scope: "userbot-process",
         attempt: i + 1,
         proxy_host: proxy.ip,
+        connect_ms: connectMs,
       });
+      if (id !== null) {
+        await proxiesRepo
+          .markStatus(id, "ok", { connectMs })
+          .catch((err) => log.warn("markStatus(ok) failed", { scope: "userbot-process", err }));
+      }
       return; // first working proxy wins
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const status = msg.startsWith("TIMEOUT") ? "timeout" : "failed";
       log.warn("proxy connect failed, moving to next", {
         scope: "userbot-process",
         attempt: i + 1,
-        total: proxies.length,
+        total: candidates.length,
         proxy_host: proxy.ip,
         reason: msg,
       });
+      if (id !== null) {
+        await proxiesRepo
+          .markStatus(id, status, { error: msg, connectMs: Date.now() - startedAt })
+          .catch((err) => log.warn("markStatus(fail) failed", { scope: "userbot-process", err }));
+      }
     }
   }
 
-  log.error("all proxies in the list failed; restarting loop in 10s", {
+  log.error("all proxies in the list failed; exiting so parent re-reads sources", {
     scope: "userbot-process",
-    total: proxies.length,
+    total: candidates.length,
   });
-  setTimeout(runUserbot, 10_000);
+  // Exit instead of an in-process retry so the parent's spawn loop picks up
+  // a fresh DB list / env value on the next start (operator may have edited
+  // the list in the admin UI mid-iteration).
+  process.exit(1);
 }
 
 /**
- * Resolve the operator's proxy configuration into an ordered list. Reads
- * both USERBOT_MTPROXY_LIST (newline-separated, takes precedence) and
- * USERBOT_MTPROXY (single legacy value). Exits with status 1 when env is
- * set but unparseable — silent fallback to direct would defeat the point
- * on a geoblocked server.
+ * Resolve the operator's proxy configuration into an ordered list. Sources,
+ * in precedence order:
+ *   1. `userbot_proxies` DB table (admin-UI managed; preferred because the
+ *      operator can swap entries without redeploying)
+ *   2. USERBOT_MTPROXY_LIST env (newline-separated)
+ *   3. USERBOT_MTPROXY env (legacy single value)
+ *
+ * Exits with status 1 when an env source is set but unparseable — silent
+ * fallback to direct would defeat the point on a geoblocked server.
  */
-function collectProxies(): ParsedMTProxy[] {
+async function collectProxies(repo: UserbotProxiesRepo): Promise<ProxyCandidate[]> {
+  const dbRows = await repo.list().catch((err) => {
+    // If the table doesn't exist yet (first deploy with this PR), treat
+    // as empty and fall through to env. Any other DB error is surfaced.
+    log.warn("userbot_proxies read failed; falling back to env", {
+      scope: "userbot-process",
+      err,
+    });
+    return [];
+  });
+  if (dbRows.length > 0) {
+    log.info("loaded proxy list from db", {
+      scope: "userbot-process",
+      count: dbRows.length,
+    });
+    return dbRows.map((r) => ({
+      id: r.id,
+      parsed: { ip: r.parsed_host, port: r.parsed_port, secret: r.parsed_secret, MTProxy: true },
+    }));
+  }
+
   if (config.userbot.mtproxyList) {
     const { proxies, invalid_lines } = parseMTProxyList(config.userbot.mtproxyList);
     if (invalid_lines.length > 0) {
@@ -190,8 +241,8 @@ function collectProxies(): ParsedMTProxy[] {
       });
       process.exit(1);
     }
-    log.info("loaded proxy list", { scope: "userbot-process", count: proxies.length });
-    return proxies;
+    log.info("loaded proxy list from env", { scope: "userbot-process", count: proxies.length });
+    return proxies.map((parsed) => ({ id: null, parsed }));
   }
   if (config.userbot.mtproxy) {
     const parsed = parseMTProxy(config.userbot.mtproxy);
@@ -201,7 +252,7 @@ function collectProxies(): ParsedMTProxy[] {
       });
       process.exit(1);
     }
-    return [parsed];
+    return [{ id: null, parsed }];
   }
   return [];
 }

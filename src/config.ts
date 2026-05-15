@@ -290,11 +290,15 @@ export const config = {
     mtproxyList: envOptional("USERBOT_MTPROXY_LIST", ""),
     /**
      * Per-attempt connect deadline in seconds when iterating the proxy list.
-     * Default 45s — gramjs's default 10s + buffer for TLS handshake through
-     * an obfuscated proxy. Lower this if your list has many dead entries
-     * (faster fail-through); raise if a slow proxy is the only live option.
+     * Default 60s — empirically the average healthy MTProto handshake over a
+     * geo-restricted route can take 30-50s (TLS + obfuscation negotiation +
+     * the initial update-state fetch). 45s was clipping borderline-healthy
+     * proxies; 60s catches them at the cost of slower fail-through on a
+     * list of dead entries. Lower this if your list has many duds and you'd
+     * rather burn through fast; raise it if a slow proxy is the only live
+     * option on your network.
      */
-    proxyConnectTimeoutSec: envInt("USERBOT_PROXY_CONNECT_TIMEOUT_SEC", 45),
+    proxyConnectTimeoutSec: envInt("USERBOT_PROXY_CONNECT_TIMEOUT_SEC", 60),
   },
   sales: {
     /**
