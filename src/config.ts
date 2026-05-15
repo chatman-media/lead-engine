@@ -275,6 +275,26 @@ export const config = {
      * server).
      */
     mtproxy: envOptional("USERBOT_MTPROXY", ""),
+    /**
+     * Newline-separated list of MTProto proxies (same formats as `mtproxy`).
+     * Takes precedence over `mtproxy` when set. The userbot subprocess tries
+     * them in order, falling back to the next one on connect TIMEOUT, until
+     * one succeeds. Useful for community proxy lists that rotate every ~12h
+     * — paste the full list and the bot picks whatever's alive.
+     *
+     * Empty/comment lines (`# …`) skipped. If all proxies in the list fail,
+     * the subprocess exits and the parent restarts the loop after 10s — the
+     * list is re-read on every restart so an updated env value is picked up
+     * without a code change.
+     */
+    mtproxyList: envOptional("USERBOT_MTPROXY_LIST", ""),
+    /**
+     * Per-attempt connect deadline in seconds when iterating the proxy list.
+     * Default 45s — gramjs's default 10s + buffer for TLS handshake through
+     * an obfuscated proxy. Lower this if your list has many dead entries
+     * (faster fail-through); raise if a slow proxy is the only live option.
+     */
+    proxyConnectTimeoutSec: envInt("USERBOT_PROXY_CONNECT_TIMEOUT_SEC", 45),
   },
   sales: {
     /**

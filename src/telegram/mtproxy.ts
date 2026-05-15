@@ -25,13 +25,17 @@ export interface ParsedMTProxy {
   timeout?: number;
 }
 
-const HEX_RE = /^[0-9a-fA-F]+$/;
+// Real-world MTProto secrets ship in a few shapes:
+//   - 32 hex chars (legacy 16-byte secret)
+//   - 34 hex chars (with `dd` or `ee` flag prefix)
+//   - 70-200+ hex chars (FakeTLS / domain-fronted: flag + 16-byte secret +
+//     ASCII-hex of the SNI host that the proxy fronts as)
+//   - Same secrets re-encoded in base64-url (some clients emit this form)
+// We accept any of these and let gramjs validate the actual handshake.
+const SECRET_CHARSET_RE = /^[0-9a-fA-F]+$|^[A-Za-z0-9_+/=-]+$/;
 
 function isValidSecret(s: string): boolean {
-  // Real MTProto secrets are 32 hex chars (16 bytes raw) or 34 hex chars
-  // (with the `dd`/`ee` flag byte). Allow a slightly wider range so a
-  // not-quite-spec-compliant proxy still parses.
-  return HEX_RE.test(s) && s.length >= 30 && s.length <= 68;
+  return s.length >= 30 && s.length <= 300 && SECRET_CHARSET_RE.test(s);
 }
 
 function isValidPort(n: number): boolean {
@@ -86,4 +90,31 @@ export function parseMTProxy(raw: string): ParsedMTProxy | null {
   const port = Number(portStr);
   if (!isValidHost(host) || !isValidPort(port) || !isValidSecret(secret)) return null;
   return { ip: host, port, secret, MTProxy: true };
+}
+
+/**
+ * Parse a newline-separated list of proxies (each line in any format accepted
+ * by `parseMTProxy`). Empty lines and lines starting with `#` are skipped so
+ * the operator can paste an annotated list. Returns both the parsed entries
+ * and the line numbers that failed to parse — the caller surfaces the failures
+ * (log, admin UI, refuse to boot when ALL lines are bad).
+ */
+export function parseMTProxyList(raw: string): {
+  proxies: ParsedMTProxy[];
+  invalid_lines: number[];
+} {
+  const proxies: ParsedMTProxy[] = [];
+  const invalid_lines: number[] = [];
+  const lines = raw.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim();
+    if (!line || line.startsWith("#")) continue;
+    const parsed = parseMTProxy(line);
+    if (parsed) {
+      proxies.push(parsed);
+    } else {
+      invalid_lines.push(i + 1); // 1-indexed for human-friendly log/UI output
+    }
+  }
+  return { proxies, invalid_lines };
 }
