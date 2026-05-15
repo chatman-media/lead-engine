@@ -52,6 +52,15 @@ describe("redactPII", () => {
     expect(redactPII(line)).toBe(line);
   });
 
+  test("leaves IPv4 addresses alone (regression: proxy_host was redacted as phone)", () => {
+    // Real proxy hosts logged from the userbot — none should match the phone
+    // pattern because dots aren't in the separator class anymore.
+    for (const ip of ["194.120.230.199", "91.107.255.20", "5.75.197.246", "127.0.0.1"]) {
+      const line = JSON.stringify({ proxy_host: ip, proxy_port: 443 });
+      expect(redactPII(line)).toBe(line);
+    }
+  });
+
   test("multiple PII items on one line each get masked", () => {
     const line = JSON.stringify({
       msg: "user +998901234567 had token sk-or-v1-XXXXXXXXXXXXXXXXXXXX",

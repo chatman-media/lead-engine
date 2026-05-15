@@ -28,10 +28,16 @@ const REDACTORS: ReadonlyArray<{ kind: string; pattern: RegExp }> = [
   { kind: "api-key", pattern: /\bsk-(?:or-|ant-|proj-)?[A-Za-z0-9_-]{20,}\b/g },
   // E.164-ish phone number: optional +, 10-15 digits with optional separators.
   // Tight enough not to eat order ids / timestamps, loose enough to catch
-  // "+998 90 123-45-67" / "+7 (495) 555-1234".
+  // "+998 90 123-45-67" / "+7 (495) 555-1234" / "8-800-555-35-35".
+  //
+  // Dots are deliberately NOT in the separator class — they're rare in modern
+  // phone formats but ubiquitous in IPv4 (e.g. `194.120.230.199`) and would
+  // cause every proxy host log line to come out as `[REDACTED:phone]`.
+  // European dotted-decimal phones (`+33.6.12.34.56.78`) are uncommon enough
+  // that we accept missing them.
   {
     kind: "phone",
-    pattern: /(?<!\d)(?:\+|\\u002B)?\d{1,3}[\s\-().]{0,3}(?:\d[\s\-().]{0,2}){8,12}\d(?!\d)/g,
+    pattern: /(?<!\d)(?:\+|\\u002B)?\d{1,3}[\s\-()]{0,3}(?:\d[\s\-()]{0,2}){8,12}\d(?!\d)/g,
   },
   // Passport-shaped uppercase letters + digits: 2 letters + 7 digits is the
   // most common (RU/UA/UZ/KZ), but also covers AB12345 (5-9 digits).

@@ -949,7 +949,7 @@ export const api = {
 
   // ─── Operations / maintenance ─────────────────────────────────────────
 
-  opsKbIngest: (body: { source: "curated" | "books"; topic?: string }) =>
+  opsKbIngest: (body: { source: "curated" | "books" | "extracted" | "chats"; topic?: string }) =>
     req<{
       ok: boolean;
       source: string;

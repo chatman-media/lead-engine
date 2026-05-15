@@ -80,9 +80,14 @@ function Card({
 
 // ─── KB ingest from disk ───────────────────────────────────────────────
 
+// Mirror of the whitelist in src/admin/routes/ops.ts. Kept in sync so the
+// dropdown only offers what the backend actually accepts — typo'd source
+// names get a 400 immediately rather than after submit.
+type KbIngestSource = "curated" | "books" | "extracted" | "chats";
+
 function KbIngestPanel() {
   const [result, setResult] = useState<Result>({ kind: "idle" });
-  const [source, setSource] = useState<"curated" | "books">("curated");
+  const [source, setSource] = useState<KbIngestSource>("curated");
 
   async function run() {
     setResult({ kind: "running" });
@@ -102,10 +107,12 @@ function KbIngestPanel() {
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
         <select
           value={source}
-          onChange={(e) => setSource(e.target.value as "curated" | "books")}
+          onChange={(e) => setSource(e.target.value as KbIngestSource)}
           disabled={result.kind === "running"}
         >
-          <option value="curated">kb/curated/</option>
+          <option value="curated">kb/curated/ (ручной FAQ)</option>
+          <option value="extracted">kb/extracted/ (посты + диалоги)</option>
+          <option value="chats">kb/chats/ (дампы переписок)</option>
           <option value="books">kb/books/ (topic=books)</option>
         </select>
         <button className="btn btn-primary" onClick={run} disabled={result.kind === "running"}>
