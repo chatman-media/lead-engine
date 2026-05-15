@@ -11,10 +11,12 @@ import { resolve } from "node:path";
 import { activeEmbeddingDim, config, llmIsConfigured } from "../../config.ts";
 import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { KbRepo } from "../../db/repos/kb.ts";
+import { UserbotProxiesRepo } from "../../db/repos/userbot-proxies.ts";
 import { MAX_SEND_ATTEMPTS } from "../../db/repos/userbot-send-queue.ts";
 import { seedInfinityVacancies, VacanciesRepo } from "../../db/repos/vacancies.ts";
 import { ingestDirectory } from "../../rag/ingest.ts";
 import { json, type RouteHandler } from "../../router.ts";
+import { parseMTProxyList } from "../../telegram/mtproxy.ts";
 import { parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
@@ -349,5 +351,123 @@ export function createUserbotQueueStatsHandler(deps: AdminApiDeps): RouteHandler
       by_status: Object.fromEntries(rows.map((r) => [r.status, r.count])),
       userbot_enabled: !!deps.userbotEnabled,
     });
+  });
+}
+
+// ─── Userbot MTProto proxy list ────────────────────────────────────────
+
+/**
+ * GET /admin/api/ops/userbot/proxies — list every proxy + its last-attempt
+ * status for the admin UI's status table. Ordered by `position` so the
+ * operator sees them in the same order the userbot iterates.
+ */
+export function createListUserbotProxiesHandler(deps: AdminApiDeps): RouteHandler {
+  return withAdmin(deps.sql, async () => {
+    const rows = await new UserbotProxiesRepo(deps.sql).list();
+    return json({
+      proxies: rows.map((r) => ({
+        id: r.id,
+        position: r.position,
+        host: r.parsed_host,
+        port: r.parsed_port,
+        // Secret intentionally omitted — these are credential-equivalents
+        // and the UI doesn't need them; the raw input string is still
+        // available for round-trip editing.
+        raw: r.raw,
+        last_status: r.last_status,
+        last_tried_at: r.last_tried_at,
+        last_error: r.last_error,
+        last_connect_ms: r.last_connect_ms,
+        created_at: r.created_at,
+      })),
+    });
+  });
+}
+
+interface PutProxyListBody {
+  text?: unknown;
+}
+
+/**
+ * PUT /admin/api/ops/userbot/proxies — bulk-replace the list from a
+ * newline-separated paste. Returns `{ saved, invalid_lines }` so the UI
+ * can show which lines didn't parse without rejecting the whole submit.
+ * An entirely-invalid paste returns 400 instead of wiping the table.
+ */
+export function createReplaceUserbotProxiesHandler(deps: AdminApiDeps): RouteHandler {
+  return withAdmin(deps.sql, async ({ req, admin }) => {
+    const body = await parseJsonBody<PutProxyListBody>(req);
+    if (body instanceof Response) return body;
+    const text = typeof body.text === "string" ? body.text : "";
+
+    // Empty paste = explicit clear. We accept it but log distinctly so an
+    // accidental empty submit is visible in the audit trail.
+    if (!text.trim()) {
+      await new UserbotProxiesRepo(deps.sql).replaceAll([]);
+      await new AuditLogRepo(deps.sql)
+        .write({
+          action: "userbot.proxies.replace",
+          adminId: admin.adminId,
+          details: { saved: 0, invalid_lines: [], cleared: true },
+        })
+        .catch((err) => console.error("[audit] userbot.proxies.replace write failed:", err));
+      return json({ saved: 0, invalid_lines: [], cleared: true });
+    }
+
+    const { proxies, invalid_lines } = parseMTProxyList(text);
+    if (proxies.length === 0) {
+      // Some content, but nothing parsed → refuse rather than wipe the
+      // existing list. UI surfaces invalid_lines so the operator can fix.
+      return json(
+        {
+          error: "no valid proxies in input",
+          invalid_lines,
+        },
+        { status: 400 },
+      );
+    }
+
+    // Re-derive the raw line text per parsed entry so the UI can show
+    // the exact pasted string (including original format). Walk lines
+    // in parallel with the parser's logic.
+    const rawLines = text.split(/\r?\n/);
+    const invalidSet = new Set(invalid_lines);
+    const entries: Array<{ raw: string; parsed: (typeof proxies)[number] }> = [];
+    let parsedIdx = 0;
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i]!.trim();
+      if (!line || line.startsWith("#") || invalidSet.has(i + 1)) continue;
+      entries.push({ raw: line, parsed: proxies[parsedIdx]! });
+      parsedIdx++;
+    }
+
+    await new UserbotProxiesRepo(deps.sql).replaceAll(entries);
+    await new AuditLogRepo(deps.sql)
+      .write({
+        action: "userbot.proxies.replace",
+        adminId: admin.adminId,
+        details: { saved: entries.length, invalid_lines },
+      })
+      .catch((err) => console.error("[audit] userbot.proxies.replace write failed:", err));
+
+    return json({ saved: entries.length, invalid_lines });
+  });
+}
+
+/**
+ * POST /admin/api/ops/userbot/proxies/clear-statuses — reset every row's
+ * `last_status` back to `never_tried`. Useful after a Telegram outage when
+ * every entry got marked timeout and the operator wants a clean canvas.
+ */
+export function createClearUserbotProxyStatusesHandler(deps: AdminApiDeps): RouteHandler {
+  return withAdmin(deps.sql, async ({ admin }) => {
+    await new UserbotProxiesRepo(deps.sql).clearStatuses();
+    await new AuditLogRepo(deps.sql)
+      .write({
+        action: "userbot.proxies.clear_statuses",
+        adminId: admin.adminId,
+      })
+      .catch((err) => console.error("[audit] userbot.proxies.clear_statuses write failed:", err));
+    return json({ ok: true });
   });
 }
