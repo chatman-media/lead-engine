@@ -19,10 +19,19 @@ import { parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // Whitelisted ingest sources — accept only known KB roots so a request
-// can't be coerced into walking the filesystem outside `kb/`.
+// can't be coerced into walking the filesystem outside `kb/`. The repo
+// ships markdown extracts of the operator's existing channel + chat
+// archives alongside the human-curated FAQ; expose all of them so the
+// admin UI can re-ingest each pile without redeploying.
 const KB_INGEST_ROOTS: Record<string, { dir: string; defaultTopic?: string }> = {
   curated: { dir: "kb/curated" },
   books: { dir: "kb/books", defaultTopic: "books" },
+  // Channel posts + dialog extracts pulled out of Telegram history. Mixed
+  // topics — leave defaultTopic unset so each chunk picks one via the
+  // regex classifier when RAG_TOPIC_ROUTING is on.
+  extracted: { dir: "kb/extracted" },
+  // Per-candidate chat dumps. Same mixed-topic rationale.
+  chats: { dir: "kb/chats" },
 };
 
 interface IngestBody {
