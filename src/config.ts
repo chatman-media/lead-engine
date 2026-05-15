@@ -263,6 +263,18 @@ export const config = {
     /** From https://my.telegram.org — required when TELEGRAM_USERBOT=1. */
     apiId: envInt("TELEGRAM_API_ID", 0),
     apiHash: envOptional("TELEGRAM_API_HASH", ""),
+    /**
+     * Optional MTProto proxy. Use when your server's egress IP can't reach
+     * Telegram DCs directly (geoblock, ISP filter). Accepted formats:
+     *   - `host:port:secret`
+     *   - `tg://proxy?server=H&port=P&secret=S`
+     *   - `https://t.me/proxy?server=H&port=P&secret=S`
+     * Empty string = direct connection. Validated by `parseMTProxy()` at
+     * boot — malformed values are rejected loudly rather than silently
+     * falling back to direct (which would defeat the point on a blocked
+     * server).
+     */
+    mtproxy: envOptional("USERBOT_MTPROXY", ""),
   },
   sales: {
     /**

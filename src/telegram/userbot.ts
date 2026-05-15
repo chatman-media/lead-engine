@@ -22,6 +22,7 @@ import { UsersRepo } from "../db/repos/users.ts";
 import { VacanciesRepo } from "../db/repos/vacancies.ts";
 import { log } from "../log.ts";
 import type { TelegramClient } from "./client.ts";
+import type { ParsedMTProxy } from "./mtproxy.ts";
 import type { TgReplyMarkup, TgSendMessageResult } from "./types.ts";
 import type { RagDeps } from "./webhook.ts";
 import { processInbound } from "./webhook.ts";
@@ -30,6 +31,9 @@ export interface UserbotDeps {
   db: Sql;
   apiId: number;
   apiHash: string;
+  /** Optional MTProto proxy. Pre-parsed via `parseMTProxy()` from a config
+   *  string. Used when the server can't reach Telegram DCs directly. */
+  proxy?: ParsedMTProxy;
   rag?: RagDeps;
   onEvent?: Parameters<typeof processInbound>[0]["onEvent"];
 }
@@ -237,10 +241,21 @@ const UNREAD_SWEEP_INTERVAL_MS = 60_000;
 const USER_RATE_LIMIT_MS = 5_000;
 
 export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
-  const { db, apiId, apiHash, rag, onEvent } = deps;
+  const { db, apiId, apiHash, proxy, rag, onEvent } = deps;
 
   const sessionString = process.env.USERBOT_SESSION || (await loadUserbotSession(db));
   const session = new StringSession(sessionString);
+
+  if (proxy) {
+    log.info("starting via MTProto proxy", {
+      scope: "userbot",
+      proxy_host: proxy.ip,
+      proxy_port: proxy.port,
+      // secret intentionally not logged — it'd land in centralized logs
+      // verbatim. Host+port already give an operator enough to pinpoint
+      // which entry from their list is in use.
+    });
+  }
 
   const client = new GramjsClient(session, apiId, apiHash, {
     // -1 = unlimited retries; gramjs will keep reconnecting after network
@@ -252,6 +267,7 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     // first connect. 30s gives the update-state fetch enough headroom so
     // the internal TIMEOUT rejection doesn't fire on healthy connections.
     timeout: 30,
+    ...(proxy ? { proxy } : {}),
   });
 
   // connect() can throw TIMEOUT on the first attempt when Telegram is slow.

@@ -12,6 +12,7 @@ import { OllamaChatClient } from "../rag/providers/ollama-chat.ts";
 import { OllamaEmbeddingClient } from "../rag/providers/ollama-embed.ts";
 import { OpenRouterChatClient } from "../rag/providers/openrouter-chat.ts";
 import type { Style } from "../sales/types.ts";
+import { parseMTProxy } from "./mtproxy.ts";
 import { startUserbot } from "./userbot.ts";
 
 let rag: Parameters<typeof startUserbot>[0]["rag"];
@@ -94,11 +95,30 @@ async function runUserbot() {
 
   restarting = false;
 
+  // Parse the optional MTProto proxy at every restart so an operator can
+  // hot-swap the env value via container restart without redeploying.
+  // Malformed values abort the subprocess loud — silently falling back to
+  // direct on a blocked server would mask the actual failure mode.
+  let proxy: Parameters<typeof startUserbot>[0]["proxy"];
+  if (config.userbot.mtproxy) {
+    const parsed = parseMTProxy(config.userbot.mtproxy);
+    if (!parsed) {
+      log.error("USERBOT_MTPROXY is set but unparseable — refusing to start", {
+        scope: "userbot-process",
+      });
+      // 10s restart loop above would re-trip on the same malformed value;
+      // exit hard so the orchestrator surfaces the bad config.
+      process.exit(1);
+    }
+    proxy = parsed;
+  }
+
   try {
     activeClient = await startUserbot({
       db: sql,
       apiId: config.userbot.apiId,
       apiHash: config.userbot.apiHash,
+      ...(proxy ? { proxy } : {}),
       rag,
     });
   } catch (err) {
