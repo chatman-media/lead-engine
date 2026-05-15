@@ -57,7 +57,10 @@ Thumbs.db
 *.swp
 *~
 
-# Documentation that doesn't ship to runtime
+# Documentation that doesn't ship to runtime. Scoped to root-level so the
+# `kb/**/*.md` content (the entire knowledge base) DOES make it into the
+# image — a bare `*.md` here would silently strip every KB file and the
+# in-container ingest would end up with only voice transcripts.
 docs/
-README.md
-*.md
+/README.md
+/CHANGELOG.md

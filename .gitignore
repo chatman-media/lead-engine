@@ -24,4 +24,8 @@ coverage/
 *.jpeg
 *.png
 *.gif
+*.webm
+# Raw KB export — the curated/extracted markdown is what we ingest, the
+# 5MB+ JSON dump it was generated from doesn't need to live in git.
+kb/result.json
 .claude/
