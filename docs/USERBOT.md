@@ -145,3 +145,31 @@ bun scripts/userbot-auth.ts
 psql $DATABASE_URL -c "UPDATE userbot_session SET session_string = '' WHERE id = 1;"
 bun scripts/userbot-auth.ts
 ```
+
+## MTProto proxy (когда сервер блокирует Telegram)
+
+Если egress-IP сервера не может достучаться до Telegram DC напрямую (госблок, фильтр провайдера), задайте `USERBOT_MTPROXY`. Принимаются три формата:
+
+```bash
+# Простейшая форма — host:port:secret
+USERBOT_MTPROXY=proxy.example.com:443:dd1234567890abcdef1234567890abcd
+
+# Или Telegram deep-link
+USERBOT_MTPROXY=tg://proxy?server=proxy.example.com&port=443&secret=dd1234...
+
+# Или t.me share-link
+USERBOT_MTPROXY=https://t.me/proxy?server=proxy.example.com&port=443&secret=dd1234...
+```
+
+Парсер на старте валидирует формат — **малформед значение убивает userbot-подпроцесс c exit 1** (не падаем тихо к direct connection: на заблокированном сервере это маскировало бы реальную причину).
+
+Где брать прокси:
+- [github.com/SoliSpirit/mtproto](https://github.com/SoliSpirit/mtproto) — обновляется автоматически каждые 12 часов
+- [mtpro.xyz/api](https://mtpro.xyz/api) — JSON-API с публичными прокси
+- Или подними свой: [9seconds/mtg](https://github.com/9seconds/mtg)
+
+**Trust note:** оператор прокси видит метаданные соединения (IP-адреса DC, тайминги). Содержимое сообщений зашифровано Telegram-сессией и недоступно прокси, но выбирайте источник осознанно.
+
+**Ограничения текущей реализации** (одиночный прокси из env):
+- При смерти прокси нужно вручную обновить переменную и перезапустить контейнер
+- Авто-ротация (фолбэк на следующий прокси из списка) — отдельный feature, опциональный апгрейд в следующей итерации

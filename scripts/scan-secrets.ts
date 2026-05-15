@@ -214,7 +214,7 @@ function scanFile(absPath: string, root: string): Hit[] {
       const full = match[0];
       const ignored =
         (isPlaceholder && /example|placeholder|your[_-]token|XXXX|YYYY|ZZZZ/i.test(full)) ||
-        (isTestFile && /XXXX|YYYY|ZZZZ|FAKE|PLACEHOLDER/.test(full)) ||
+        (isTestFile && /XXXX|YYYY|ZZZZ|FAKE|PLACEHOLDER|deadbeef|cafebabe/i.test(full)) ||
         p.ignoreSubstrings?.some((s) => full.includes(s));
       if (ignored) continue;
       const lineNum = content.slice(0, match.index).split("\n").length;
