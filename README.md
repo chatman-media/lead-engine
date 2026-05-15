@@ -138,7 +138,7 @@ ollama pull bge-m3     # 567M, мультиязычный (ru/zh/ko), 1024-dim
 | `mxbai-embed-large` | 1024 |
 | `bge-m3` | 1024 |
 
-Размерность `kb_vec` синхронизируется автоматически — при смене `OLLAMA_EMBEDDING_DIM` таблица пересоздаётся (KB нужно переиндексировать).
+Размерность `kb_chunks.embedding` синхронизируется автоматически: `runMigrations()` сравнивает текущую `vector(N)` колонки с активным `OPENAI_EMBEDDING_DIM` / `OLLAMA_EMBEDDING_DIM` и при расхождении дропает `kb_chunks` + `kb_documents` CASCADE, потом пересоздаёт схему на новой размерности. KB нужно переиндексировать после смены (`bun scripts/ingest.ts` или UI: `/admin/ops` → «Re-ingest KB»). В логах появится `kb_chunks embedding dim changed — dropping for recreate` с прежней и новой размерностями.
 
 ---
 

@@ -139,7 +139,7 @@ POST /telegram/<secret>   ─┬─► whitelist (UsersRepo.byTgId / TELEGRAM_OP
 | `messages` | `role` ∈ user/assistant/human/system. Idempotent по `(conversation_id, tg_message_id)`. `meta_json` хранит `used_chunk_ids`. `stage` для funnel-аналитики |
 | `kb_documents` | KB-документы: source path, `content_hash` (SHA-256 dedup), optional `topic` тег |
 | `kb_chunks` | Чанки ≈1500 символов, overlap 150 |
-| `kb_vec` | pgvector embedded column on kb_chunks (cosine distance, 1536-dim) |
+| `kb_vec` | pgvector embedded column on `kb_chunks` (cosine distance). Размерность подтягивается из активного `*_EMBEDDING_DIM` через `runMigrations()` — при расхождении таблица дропается и пересоздаётся, см. [src/db/migrate.ts](../src/db/migrate.ts) |
 | `kb_chunks_fts` | PostgreSQL FTS (tsvector/tsquery, GIN index) |
 | `kb_suggestions` | Очередь вопросов без ответа (когда RAG вернул NO_CONTEXT) — оператор решает что добавить в KB |
 | `styles` | Sales-style configs в JSON. `(slug, version)` composite key — цепочка версий; одна активная на slug |

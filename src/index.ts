@@ -27,7 +27,7 @@ process.on("uncaughtException", (err) => {
   console.error("[uncaughtException]", err?.message ?? err);
 });
 
-await runMigrations();
+await runMigrations(sql);
 
 const telegram = new TelegramClient({
   token: config.telegram.botToken || "missing-token",
