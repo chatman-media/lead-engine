@@ -170,6 +170,27 @@ USERBOT_MTPROXY=https://t.me/proxy?server=proxy.example.com&port=443&secret=dd12
 
 **Trust note:** оператор прокси видит метаданные соединения (IP-адреса DC, тайминги). Содержимое сообщений зашифровано Telegram-сессией и недоступно прокси, но выбирайте источник осознанно.
 
-**Ограничения текущей реализации** (одиночный прокси из env):
-- При смерти прокси нужно вручную обновить переменную и перезапустить контейнер
-- Авто-ротация (фолбэк на следующий прокси из списка) — отдельный feature, опциональный апгрейд в следующей итерации
+### Список прокси с авто-фолбэком
+
+`USERBOT_MTPROXY_LIST` — newline-separated, **имеет приоритет над `USERBOT_MTPROXY`** когда установлен. Парсер ест те же три формата на каждой строке. Пустые строки и строки `# …` (комментарии) скипаются.
+
+```bash
+USERBOT_MTPROXY_LIST="
+# рабочие на сегодня (замените XXX… на реальные секреты из вашего источника)
+https://t.me/proxy?server=1.2.3.4&port=443&secret=ddXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+https://t.me/proxy?server=proxy.example.com&port=2053&secret=eeXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+# бэкап
+host.example.com:443:ddXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+"
+```
+
+Логика выбора при старте subprocess:
+1. Парсит список — невалидные строки логируются и скипаются (`USERBOT_MTPROXY_LIST has unparseable lines (skipped)` с номерами строк)
+2. Идёт по списку по порядку, на каждый прокси даёт `USERBOT_PROXY_CONNECT_TIMEOUT_SEC` (default 45с) на handshake
+3. Первый успешный коннект → лог `proxy connect succeeded` → дальше userbot живёт на нём до следующего рестарта
+4. Если все мёртвые → лог `all proxies in the list failed; restarting loop in 10s` → parent перезапускает subprocess, который перечитывает env (хот-свап без редеплоя если меняете через runtime-env)
+
+Per-attempt timeout настраивается:
+```bash
+USERBOT_PROXY_CONNECT_TIMEOUT_SEC=30   # быстрее фейлиться через мёртвые, если список длинный
+```

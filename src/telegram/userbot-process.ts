@@ -12,7 +12,7 @@ import { OllamaChatClient } from "../rag/providers/ollama-chat.ts";
 import { OllamaEmbeddingClient } from "../rag/providers/ollama-embed.ts";
 import { OpenRouterChatClient } from "../rag/providers/openrouter-chat.ts";
 import type { Style } from "../sales/types.ts";
-import { parseMTProxy } from "./mtproxy.ts";
+import { type ParsedMTProxy, parseMTProxy, parseMTProxyList } from "./mtproxy.ts";
 import { startUserbot } from "./userbot.ts";
 
 let rag: Parameters<typeof startUserbot>[0]["rag"];
@@ -95,36 +95,133 @@ async function runUserbot() {
 
   restarting = false;
 
-  // Parse the optional MTProto proxy at every restart so an operator can
-  // hot-swap the env value via container restart without redeploying.
-  // Malformed values abort the subprocess loud — silently falling back to
-  // direct on a blocked server would mask the actual failure mode.
-  let proxy: Parameters<typeof startUserbot>[0]["proxy"];
+  // Build the ordered list of proxies to try. USERBOT_MTPROXY_LIST wins over
+  // the legacy single-value USERBOT_MTPROXY when both are set (operators
+  // migrating from #21 keep their old value as a comment).
+  const proxies = collectProxies();
+
+  // No proxy configured → direct connection.
+  if (proxies.length === 0) {
+    try {
+      activeClient = await startUserbot({
+        db: sql,
+        apiId: config.userbot.apiId,
+        apiHash: config.userbot.apiHash,
+        rag,
+      });
+    } catch (err) {
+      log.error("startUserbot (direct) failed; restarting in 10s", {
+        scope: "userbot-process",
+        err,
+      });
+      setTimeout(runUserbot, 10_000);
+    }
+    return;
+  }
+
+  // Try each proxy in order, capped by USERBOT_PROXY_CONNECT_TIMEOUT_SEC per
+  // attempt. First success wins; if all fail, log a summary and let the parent
+  // restart the whole loop (env may have been updated meanwhile).
+  const timeoutMs = config.userbot.proxyConnectTimeoutSec * 1000;
+  for (let i = 0; i < proxies.length; i++) {
+    const proxy = proxies[i]!;
+    log.info("trying proxy", {
+      scope: "userbot-process",
+      attempt: i + 1,
+      total: proxies.length,
+      proxy_host: proxy.ip,
+      proxy_port: proxy.port,
+    });
+    try {
+      activeClient = await withTimeout(
+        startUserbot({
+          db: sql,
+          apiId: config.userbot.apiId,
+          apiHash: config.userbot.apiHash,
+          proxy,
+          rag,
+        }),
+        timeoutMs,
+      );
+      log.info("proxy connect succeeded", {
+        scope: "userbot-process",
+        attempt: i + 1,
+        proxy_host: proxy.ip,
+      });
+      return; // first working proxy wins
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn("proxy connect failed, moving to next", {
+        scope: "userbot-process",
+        attempt: i + 1,
+        total: proxies.length,
+        proxy_host: proxy.ip,
+        reason: msg,
+      });
+    }
+  }
+
+  log.error("all proxies in the list failed; restarting loop in 10s", {
+    scope: "userbot-process",
+    total: proxies.length,
+  });
+  setTimeout(runUserbot, 10_000);
+}
+
+/**
+ * Resolve the operator's proxy configuration into an ordered list. Reads
+ * both USERBOT_MTPROXY_LIST (newline-separated, takes precedence) and
+ * USERBOT_MTPROXY (single legacy value). Exits with status 1 when env is
+ * set but unparseable — silent fallback to direct would defeat the point
+ * on a geoblocked server.
+ */
+function collectProxies(): ParsedMTProxy[] {
+  if (config.userbot.mtproxyList) {
+    const { proxies, invalid_lines } = parseMTProxyList(config.userbot.mtproxyList);
+    if (invalid_lines.length > 0) {
+      log.warn("USERBOT_MTPROXY_LIST has unparseable lines (skipped)", {
+        scope: "userbot-process",
+        invalid_line_numbers: invalid_lines,
+      });
+    }
+    if (proxies.length === 0) {
+      log.error("USERBOT_MTPROXY_LIST yielded zero valid proxies — refusing to start", {
+        scope: "userbot-process",
+      });
+      process.exit(1);
+    }
+    log.info("loaded proxy list", { scope: "userbot-process", count: proxies.length });
+    return proxies;
+  }
   if (config.userbot.mtproxy) {
     const parsed = parseMTProxy(config.userbot.mtproxy);
     if (!parsed) {
       log.error("USERBOT_MTPROXY is set but unparseable — refusing to start", {
         scope: "userbot-process",
       });
-      // 10s restart loop above would re-trip on the same malformed value;
-      // exit hard so the orchestrator surfaces the bad config.
       process.exit(1);
     }
-    proxy = parsed;
+    return [parsed];
   }
+  return [];
+}
 
-  try {
-    activeClient = await startUserbot({
-      db: sql,
-      apiId: config.userbot.apiId,
-      apiHash: config.userbot.apiHash,
-      ...(proxy ? { proxy } : {}),
-      rag,
-    });
-  } catch (err) {
-    log.error("startUserbot failed; restarting in 10s", { scope: "userbot-process", err });
-    setTimeout(runUserbot, 10_000);
-  }
+/** Promise.race-style timeout — rejects with TIMEOUT after `ms` if the inner
+ *  promise hasn't settled. Used to skip slow / dead proxies during iteration. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const handle = setTimeout(() => reject(new Error(`TIMEOUT after ${ms}ms`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(handle);
+        resolve(v);
+      },
+      (err) => {
+        clearTimeout(handle);
+        reject(err);
+      },
+    );
+  });
 }
 
 // gramJS emits TIMEOUT and network errors as unhandled promise rejections.
