@@ -177,7 +177,7 @@ export class LeadsService {
    * see them and they're not crammed into one wall.
    */
   async sendApprovalMessages(input: { lead: LeadRow; user: UserRow }): Promise<void> {
-    const conv = await this.deps.conversations.byUserId(input.user.id, "userbot");
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) {
       log.warn("no conversation for user (approval flow)", {
         scope: "leads",
@@ -201,7 +201,7 @@ export class LeadsService {
   }
 
   async sendIntakeTemplate(input: { user: UserRow }): Promise<void> {
-    const conv = await this.deps.conversations.byUserId(input.user.id, "userbot");
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
     await this.relayToCandidate({
       chatId: input.user.tg_user_id,
@@ -211,7 +211,7 @@ export class LeadsService {
   }
 
   async sendAwaitingApprovalNote(input: { user: UserRow }): Promise<void> {
-    const conv = await this.deps.conversations.byUserId(input.user.id, "userbot");
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
     await this.relayToCandidate({
       chatId: input.user.tg_user_id,
@@ -221,7 +221,7 @@ export class LeadsService {
   }
 
   async sendRejection(input: { user: UserRow; customReason?: string }): Promise<void> {
-    const conv = await this.deps.conversations.byUserId(input.user.id, "userbot");
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
     const text = input.customReason?.trim() || REJECTION_DEFAULT;
     await this.relayToCandidate({
@@ -232,7 +232,7 @@ export class LeadsService {
   }
 
   async sendDocsCompleteAck(input: { user: UserRow }): Promise<void> {
-    const conv = await this.deps.conversations.byUserId(input.user.id, "userbot");
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
     await this.relayToCandidate({
       chatId: input.user.tg_user_id,
@@ -362,7 +362,7 @@ export class LeadsService {
       file_id: string;
     };
   }): Promise<boolean> {
-    const conv = await this.deps.conversations.byUserId(input.user.id, "userbot");
+    const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) {
       log.warn("relay: no conversation for user", { scope: "leads", user_id: input.user.id });
       return false;

@@ -35,18 +35,17 @@ export class ConversationsRepo {
   constructor(private sql: Sql) {}
 
   /**
-   * Look up a candidate's conversation on a specific channel. The same
-   * `user_id` can hold one conversation per channel. Lead-pipeline callers
-   * pass `"userbot"` (real funnel); the bot path passes `"bot"`. Defaults
-   * to `"bot"` so callers that predate the source split keep resolving the
-   * BotAPI conversation.
+   * Look up a candidate's conversation. A user can hold one conversation per
+   * channel (`UNIQUE(user_id, source)`); when more than one exists this
+   * prefers the `userbot` row — the real funnel — over the `bot` test
+   * channel, so lead-pipeline callers resolve the working conversation.
    */
-  async byUserId(
-    userId: number,
-    source: ConversationSource = "bot",
-  ): Promise<ConversationRow | null> {
+  async byUserId(userId: number): Promise<ConversationRow | null> {
     const [row] = await this.sql<ConversationRow[]>`
-      SELECT * FROM conversations WHERE user_id = ${userId} AND source = ${source} LIMIT 1
+      SELECT * FROM conversations
+      WHERE user_id = ${userId}
+      ORDER BY (source = 'userbot') DESC, id ASC
+      LIMIT 1
     `;
     return row ?? null;
   }
@@ -58,7 +57,10 @@ export class ConversationsRepo {
     return row ?? null;
   }
 
-  async ensureForUser(userId: number, source: ConversationSource): Promise<ConversationRow> {
+  async ensureForUser(
+    userId: number,
+    source: ConversationSource = "bot",
+  ): Promise<ConversationRow> {
     // ON CONFLICT against the UNIQUE(user_id, source) index collapses the
     // SELECT-then-INSERT race two simultaneous inbound messages used to
     // trigger (both saw "no row", both inserted). DO UPDATE on a sentinel
