@@ -145,8 +145,24 @@ async function answerFromHits(opts: {
   // Only runs when reflect=true OR vacanciesBlock is set (same trigger conditions
   // as the old separate layers).
   const runVacancyCheck = vacBlock.length > 0 && input.vacancyGuard !== false;
+
+  // The grounding half verifies every claim is backed by KB CONTEXT. At
+  // data-collection stages (opener / qualify / close) the bot ASKS the
+  // candidate for anketa fields — "скинь возраст и фото" reads to the
+  // checker as an unsupported claim, so the whole reply gets dropped and
+  // the candidate sees nothing. Exempt those stages from the grounding
+  // drop; vacancy accuracy is still always enforced. pitch/objection (and
+  // an unknown stage) keep full grounding.
+  const GROUNDING_EXEMPT_STAGES: ReadonlySet<string> = new Set(["opener", "qualify", "close"]);
+  const groundingExempt = input.stage !== undefined && GROUNDING_EXEMPT_STAGES.has(input.stage);
+
   const runFactCheck =
-    (input.reflect || runVacancyCheck) && text !== NO_CONTEXT_MARKER && text.trim().length > 0;
+    (input.reflect || runVacancyCheck) &&
+    text !== NO_CONTEXT_MARKER &&
+    text.trim().length > 0 &&
+    // If grounding is exempt for this stage and there's no vacancy block,
+    // there's nothing left to verify — skip the LLM call entirely.
+    !(groundingExempt && !runVacancyCheck);
 
   if (runFactCheck) {
     const verdict = await checkFacts({
@@ -162,7 +178,7 @@ async function answerFromHits(opts: {
       ...(verdict.reason ? { reason: verdict.reason } : {}),
     };
 
-    if (!verdict.grounded) {
+    if (!verdict.grounded && !groundingExempt) {
       console.warn(
         `[fact-checker] dropping ungrounded answer: ${verdict.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
       );
