@@ -135,6 +135,14 @@ export const REJECTION_DEFAULT = `Спасибо за интерес! К сож�
 export const DOCS_COMPLETE_REPLY = `Спасибо, всё получили! Передаём документы в работу. Как только подадим на визу — напишу с номером заявки.`;
 
 /**
+ * Sent once when the operator marks the lead `submitted` (the visa
+ * application was actually filed with the consulate). Fulfils the
+ * promise made in DOCS_COMPLETE_REPLY ("напишу с номером заявки").
+ * `{applicationId}` is substituted by `sendSubmittedAck`.
+ */
+export const SUBMITTED_REPLY = `Подали вашу заявку на визу ✅ Номер заявки: {applicationId}. Рассмотрение обычно занимает несколько дней — как будет результат, сразу напишу. Если что-то нужно — пишите 🌷`;
+
+/**
  * The waiting-on-approval message — sent right after intake_complete
  * (lead card posted to ops chat, operator hasn't decided yet).
  */

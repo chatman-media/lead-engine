@@ -4,19 +4,21 @@ End-to-end воронка кандидата от знакомства до по
 
 ```
 candidate writes  →  bot RAG-replies + collects intake (height/weight/photos/...)
-                              ↓ (auto when 7-item intake complete)
+                              ↓ (auto when the 8-condition gate passes)
                      intake_complete  →  card posted to LEADS_CHAT_ID
                                           [✅ Одобрить] [❌ Отклонить]
                               ↓ operator clicks
                           approved  →  bot DMs visa anketa template
-                              ↓
+                              ↓ (auto, immediately)
                        docs_pending  →  bot auto-extracts 27 visa fields
                                        admin can manually edit any
-                              ↓ operator clicks "→ visa submit"
+                                       bot answers her questions in support mode
+                              ↓ operator clicks "→ на визу"
                        docs_complete  →  package posted to VISA_CHAT_ID
                                          with VS-YYYY-NNNN
-                              ↓
-                          submitted  →  operator submits to consulate
+                              ↓ operator clicks "✅ подал" after filing
+                          submitted  →  bot keeps answering in support mode
+                                         while the consulate decision is pending
 ```
 
 ## Configuration
@@ -34,29 +36,38 @@ Bot must be a **member** of both (admin role lets it edit cards in place after a
 
 | State | Meaning | How you get here | What bot does |
 |-------|---------|-----------------|---------------|
-| `intake_pending` | Default for any new candidate | Created on first message | Collects 7 items via natural conversation; auto-extracts fields each turn |
-| `intake_complete` | Anketa filled — awaiting operator decision | All 7 items received | Posts card to ops chat; tells candidate "ждите, отправили запрос" |
+| `intake_pending` | Default for any new candidate | Created on first message | Collects intake via natural conversation; auto-extracts fields each turn |
+| `intake_complete` | Anketa filled — awaiting operator decision | 8-condition gate passes | Posts card to ops chat; tells candidate "ждите, отправили запрос" |
 | `approved` | Operator approved | inline button OR `/admin/api/leads/:id/approve` | Sends 4-message visa anketa pack to candidate; transitions to `docs_pending` |
 | `rejected` | Operator rejected (terminal) | inline button OR endpoint | Sends polite rejection (or operator's custom reason) |
-| `docs_pending` | Bot collecting visa form | After approve | Auto-extracts 27 fields from each candidate message; operator can edit any |
-| `docs_complete` | All visa data + package posted | Operator clicks "→ visa submit" | Allocates `VS-YYYY-NNNN`, posts to VISA_CHAT_ID, DMs candidate "передаём в работу" |
-| `submitted` | Operator confirmed consulate submission | Manual transition (or `/admin/api/leads/:id/submit-to-visa` re-call) | — |
-| `closed` | Terminal cleanup state | Manual | — |
+| `docs_pending` | Bot collecting visa form | After approve | Auto-extracts 27 fields from each candidate message; operator can edit any; bot answers questions in **support mode** |
+| `docs_complete` | All visa data + package posted | Operator clicks "→ на визу" (`/admin/api/leads/:id/submit-to-visa`) | Allocates `VS-YYYY-NNNN`, posts to VISA_CHAT_ID, DMs candidate "передаём в работу" |
+| `submitted` | Operator confirmed consulate filing | Operator clicks "✅ подал" (`/admin/api/leads/:id/mark-submitted`) | DMs candidate "заявка подана" + application id; keeps answering in **support mode** while the consulate decision is pending |
+| `closed` | Terminal cleanup state | Manual / stale-sweep auto-close | — |
 
-## Intake schema (7 items)
+## Intake schema
 
-Auto-tracked via [src/leads/intake.ts](../src/leads/intake.ts). Three are LLM-extracted from text, four are SQL-counted from media metadata.
+The candidate is sent `INTAKE_TEMPLATE` — a **15-point checklist** (name, age,
+height, weight, nationality, marital status, children, languages, work
+experience, passport expiry, city + departure readiness, photos, videos,
+passport photo, dance video). The `IntakeFields` interface
+([src/leads/templates.ts](../src/leads/templates.ts)) tracks ~17 fields:
+text fields are LLM-extracted, media counts are SQL-aggregated from
+`messages.meta_json`.
 
-| Field | Source | Threshold |
-|-------|--------|-----------|
+Promotion to `intake_complete` is gated by `isIntakeComplete` — an **8-condition
+gate** (a subset of the tracked fields):
+
+| Condition | Source | Threshold |
+|-----------|--------|-----------|
 | `height` | LLM extracts from text | non-empty |
 | `weight` | LLM extracts from text | non-empty |
 | `city` | LLM extracts from text | non-empty |
 | `departure_readiness` | LLM extracts from text | non-empty |
-| `photos_count` | SQL `json_extract($.media.type='photo')` | ≥ 6 |
-| `videos_count` | SQL `json_extract($.media.type='video')` | ≥ 2 |
-| `passport_photo_received` | Heuristic: photos_count ≥ 7 → assume passport-photo present | true |
-| `dance_video_received` | Heuristic: videos_count ≥ 3 → assume dance-video present | true |
+| `photos_count` | SQL count of `meta.media.type='photo'` | ≥ 6 |
+| `videos_count` | SQL count of `meta.media.type='video'` | ≥ 2 |
+| `passport_photo_received` | Vision classification (`countPhotosByClass`) when `VISION_ENABLED`; fallback heuristic `photos_count ≥ 7` | true |
+| `dance_video_received` | Heuristic: `videos_count ≥ 3` → assume dance-video present | true |
 
 When all 8 conditions hold + state == `intake_pending` → auto-transition to `intake_complete`. Operator confirms by eye in TG before pressing approve.
 
@@ -65,6 +76,30 @@ When all 8 conditions hold + state == `intake_pending` → auto-transition to `i
 Auto-extracted by [src/leads/visa-docs.ts](../src/leads/visa-docs.ts) once per `docs_pending` turn. Subset of the long English visa anketa — 27 fields covering identity, passport, contact, parents, China history, work/education/travel as free-form blocks. Schema in `VisaFields` interface. 17 of them are required (must-haves before consulate submission); the admin UI shows a `N/17 (xx%)` progress strip.
 
 Operator's manual edits via `PATCH /admin/api/leads/:id/visa-docs` are **preserved** across subsequent extractor runs — the LLM prompt explicitly asks not to re-emit unchanged fields, and the merge logic only overwrites fields the LLM newly returns.
+
+## Режим ожидания (support mode)
+
+After approval the candidate spends ~2 weeks waiting: ~10 days while she gathers
+and sends her documents (`docs_pending`), then 3-4 days while the consulate
+processes the filed application (`submitted`). During both stages the bot is
+**not** selling — it answers her questions in **support mode**.
+
+- Detection: `resolveSupportPhase` in [src/telegram/process-inbound.ts](../src/telegram/process-inbound.ts)
+  maps `docs_pending` → `"docs"` and `submitted` → `"submitted"`. The phase is
+  threaded as `AnswerInput.supportPhase` into `answerWithRag`.
+- Prompt: `composeSystemPrompt` ([src/sales/prompt.ts](../src/sales/prompt.ts))
+  drops the sales blocks (framework / hooks / skills / few-shot / funnel-stage
+  guidance) and substitutes a calm FAQ-support block. Persona, voice, guardrails,
+  KB grounding and KB context stay — visa-FAQ retrieval keeps working.
+- No escalation: in support mode a `NO_CONTEXT` turn does **not** queue the chat
+  or send the sales call-to-action. The bot sends a soft reassurance and stays
+  in `ai` mode. The "оператор" keyword still escalates manually.
+- The bot does **not** proactively message the candidate during the wait — it
+  only replies when she writes. Timed check-ins / reminders are a future
+  enhancement (see [ROADMAP.md](ROADMAP.md)).
+- `docs_pending` leads get a longer stale-sweep cutoff (30 days vs the usual 14)
+  so a candidate mid-process isn't auto-closed as lost — see
+  [src/leads/stale-sweep.ts](../src/leads/stale-sweep.ts).
 
 ## Operator interactions
 
@@ -77,34 +112,38 @@ Operator's manual edits via `PATCH /admin/api/leads/:id/visa-docs` are **preserv
 
 - `/admin/leads` — pipeline list with filter pills by state. Each card shows intake progress + buttons appropriate to current state.
 - Button **`→ Lead`** on `/admin/chats/:id` — manual promote when auto-intake hasn't (or when `LEADS_CHAT_ID` is unset).
-- Inline edit of visa fields — click `edit` next to any field; Enter saves, Esc cancels; long fields render as textarea.
-- `→ visa submit` — allocates `application_id`, posts visa package, transitions to `docs_complete`. Idempotent on the id (re-press triggers `↻ resend visa` — re-posts same package, same id).
+- Inline edit of visa fields — click `изменить` next to any field; Enter saves, Esc cancels; long fields render as textarea.
+- `→ на визу` — allocates `application_id`, posts visa package to VISA_CHAT_ID, transitions to `docs_complete`. Idempotent on the id (re-press shows `↻ на визу` — re-posts same package, same id).
+- `✅ подал` — shown on `docs_complete` leads. Records that the operator filed the application with the consulate: transitions to `submitted` and DMs the candidate her application id. The chat stays in `ai` mode (support mode handles the consulate wait).
 
 ## Templates
 
 All operator-curated wording lives as plain string constants in [src/leads/templates.ts](../src/leads/templates.ts) so iteration doesn't require code review:
 
-- `INTAKE_TEMPLATE` — 7-item checklist sent to a new candidate (operator triggers via `POST /admin/api/leads/:id/send-intake` or pastes manually).
+- `INTAKE_TEMPLATE` — 15-point checklist sent to a new candidate (operator triggers via `POST /admin/api/leads/:id/send-intake` or pastes manually).
 - `APPROVAL_PROLOGUE` — sent right after approve.
 - `CONTRACT_TERMS` — verbatim contract terms (1500 ¥ penalty etc.).
 - `VISA_ANKETA_TEMPLATE` — long English visa form.
 - `VISA_PHOTO_REQUIREMENTS` — passport photo size + filled passport pages.
 - `REJECTION_DEFAULT` — fallback rejection text (operator can pass `{reason: "..."}` to override).
 - `AWAITING_APPROVAL_REPLY` — what the candidate sees while operator decides.
-- `DOCS_COMPLETE_REPLY` — sent on `submit-to-visa`.
+- `DOCS_COMPLETE_REPLY` — sent on `submit-to-visa` (promises a message with the application number).
+- `SUBMITTED_REPLY` — sent on `mark-submitted`; substitutes `{applicationId}` and fulfils that promise.
 
 ## Files
 
 | File | Role |
 |------|------|
-| [`migrations/009_leads.sql`](../migrations/009_leads.sql) | `leads` table with state machine + ops-card persistence |
+| [`migrations/pg_schema.sql`](../migrations/pg_schema.sql) | Single idempotent schema — `leads`, `lead_events`, `lead_notes` tables |
 | [`src/db/repos/leads.ts`](../src/db/repos/leads.ts) | LeadsRepo: state transitions, `application_id` allocation, ops-card lookup |
-| [`src/leads/templates.ts`](../src/leads/templates.ts) | All operator-facing message templates |
-| [`src/leads/intake.ts`](../src/leads/intake.ts) | Auto-extract 7-item intake from candidate messages |
+| [`src/leads/templates.ts`](../src/leads/templates.ts) | All operator-facing message templates + `IntakeFields` schema |
+| [`src/leads/intake.ts`](../src/leads/intake.ts) | Auto-extract intake fields from candidate messages |
 | [`src/leads/visa-docs.ts`](../src/leads/visa-docs.ts) | Auto-extract 27 visa-application fields |
 | [`src/leads/service.ts`](../src/leads/service.ts) | LeadsService: card formatting, ops-chat posting, candidate relays, decision side effects |
-| [`src/admin/api.ts`](../src/admin/api.ts) | `createListLeadsHandler` and friends — 9 lead-related endpoints |
-| [`src/telegram/webhook.ts`](../src/telegram/webhook.ts) | Auto-intake update, visa-docs update, operator-relay dispatch on reply-to-card, callback_query approve/reject handler |
+| [`src/leads/stale-sweep.ts`](../src/leads/stale-sweep.ts) | Ghosted-lead auto-close (14d default, 30d for `docs_pending`) |
+| [`src/admin/routes/leads.ts`](../src/admin/routes/leads.ts) | Lead REST handlers + `createLeadCallbackHandler` (TG approve/reject buttons) |
+| [`src/telegram/lead-hooks.ts`](../src/telegram/lead-hooks.ts) | Post-reply hooks: auto-intake update, visa-docs update |
+| [`src/telegram/process-inbound.ts`](../src/telegram/process-inbound.ts) | `resolveSupportPhase` — support mode while waiting on the visa process |
 | [`admin-ui/src/pages/Leads.tsx`](../admin-ui/src/pages/Leads.tsx) | Pipeline view + per-card visa-docs editor |
 
 ## Tests
@@ -115,7 +154,9 @@ All operator-curated wording lives as plain string constants in [src/leads/templ
 | Intake | [`tests/unit/intake.test.ts`](../tests/unit/intake.test.ts) | LLM parse, media SQL counter, threshold flags, isIntakeComplete |
 | Visa docs | [`tests/unit/visa-docs.test.ts`](../tests/unit/visa-docs.test.ts) | parser shape, oversized/unknown-key filtering, completeness counter |
 | Service | [`tests/unit/leads-relay.test.ts`](../tests/unit/leads-relay.test.ts) | relayFromOperator paths (text/photo/video/document), empty-input, meta persistence |
-| Admin | [`tests/unit/admin-api.test.ts`](../tests/unit/admin-api.test.ts) | endpoints — list/promote/approve/reject/submit/visa-docs PATCH/detail |
+| Admin | [`tests/unit/admin-api.test.ts`](../tests/unit/admin-api.test.ts) | endpoints — list/promote/approve/reject/submit/mark-submitted/visa-docs PATCH/detail |
+| Stale-sweep | [`tests/unit/stale-sweep.test.ts`](../tests/unit/stale-sweep.test.ts) | per-state cutoff — `docs_pending` 30d vs 14d default |
+| Support prompt | [`tests/unit/sales/prompt.test.ts`](../tests/unit/sales/prompt.test.ts) | `composeSystemPrompt` support mode — sales blocks dropped, persona/KB kept |
 
 ## Operations checklist
 

@@ -59,6 +59,7 @@ export {
   createLeadCallbackHandler,
   createLeadDetailHandler,
   createListLeadsHandler,
+  createMarkSubmittedHandler,
   createPromoteLeadHandler,
   createRejectLeadHandler,
   createSendIntakeHandler,

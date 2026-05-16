@@ -145,6 +145,15 @@ export interface AnswerInput {
    * flags are set, vector-only otherwise.
    */
   booksPriority?: boolean;
+  /**
+   * Support mode — set when the lead is past approval and waiting on the
+   * visa process (`docs` = collecting her documents, `submitted` = filed
+   * with the consulate). When set AND a `style` is active, the composed
+   * system prompt drops the sales framework / hooks / skills / few-shot /
+   * funnel-stage guidance and uses a calm FAQ-support block instead.
+   * The bot answers her questions without selling or pushing for a call.
+   */
+  supportPhase?: "docs" | "submitted";
 }
 
 /**

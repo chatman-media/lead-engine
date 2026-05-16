@@ -260,6 +260,53 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 /**
+ * Mark a lead as `submitted` — the operator has actually filed the visa
+ * application with the consulate. This is the step after `→ visa submit`
+ * (which only posts the package to VISA_CHAT_ID and lands the lead in
+ * `docs_complete`). Sends the candidate the promised "заявка подана"
+ * message with her application id. The conversation stays in `ai` mode —
+ * the bot keeps answering her questions during the consulate wait.
+ *
+ * State guard: must be in `docs_complete`. A re-call on an already
+ * `submitted` lead is idempotent (200, no duplicate message).
+ */
+export function createMarkSubmittedHandler(deps: AdminApiDeps): RouteHandler {
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
+
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const usersRepo = new UsersRepo(deps.sql);
+
+    const lead = await leadsRepo.byId(id);
+    if (!lead) return json({ error: "not found" }, { status: 404 });
+    if (lead.state === "submitted") {
+      return json({ lead, application_id: lead.application_id });
+    }
+    if (lead.state !== "docs_complete") {
+      return json(
+        { error: `lead state ${lead.state} cannot be marked submitted` },
+        { status: 409 },
+      );
+    }
+    const user = await usersRepo.byId(lead.user_id);
+    if (!user) return json({ error: "user gone" }, { status: 404 });
+
+    // docs_complete always carries an application_id (submit-to-visa
+    // allocates it); allocate defensively just in case.
+    const applicationId = lead.application_id ?? (await leadsRepo.allocateApplicationId(id));
+    const transitioned = (await leadsRepo.setState(id, "submitted")) ?? lead;
+    runAttribution(deps, transitioned);
+
+    const service = buildLeadsService(deps);
+    if (service) {
+      await service.sendSubmittedAck({ user, applicationId });
+    }
+    return json({ lead: transitioned, application_id: applicationId });
+  });
+}
+
+/**
  * Single-lead detail. Returns the lead row joined with the user info,
  * plus parsed `intake` and `visa_docs` so the UI doesn't have to
  * re-parse JSON in the browser, plus the most recent ~30 messages.

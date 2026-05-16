@@ -34,7 +34,7 @@ All six default OFF. Detail in [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
 - Admin UI `TelemetryStrip` per assistant message — color-coded by path.
 - Coach proposals + skill A/B router + pairwise self-play with judge.
 
-## Lead pipeline — 5 phases
+## Lead pipeline — 6 phases
 
 The end-to-end lead workflow (intake → approval → docs collection → consulate handoff). Detail in [docs/LEADS.md](docs/LEADS.md).
 
@@ -45,6 +45,7 @@ The end-to-end lead workflow (intake → approval → docs collection → consul
 | 3 | Visa-docs auto-extraction (27-field schema) + admin inline editor |
 | 4 | Operator relay via reply-to-card (text / photo / video / document → candidate DM) |
 | 5 | Docker / docker-compose / DEPLOY.md |
+| 6 | Reachable `submitted` stage — `mark-submitted` endpoint + "✅ подал" button (DMs the candidate her application id) · **support mode**: while a lead waits on the visa process (`docs_pending` / `submitted`) the bot answers questions calmly without selling and never auto-escalates · `docs_pending` stale-sweep cutoff extended to 30 days |
 
 ## Admin UI
 
