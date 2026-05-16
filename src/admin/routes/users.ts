@@ -97,7 +97,7 @@ export function createUserDetailHandler(deps: AdminApiDeps): RouteHandler {
     if (id instanceof Response) return id;
     const user = await users.byId(id);
     if (!user) return json({ error: "not found" }, { status: 404 });
-    const conversation = await conversations.byUserId(id, "userbot");
+    const conversation = await conversations.byUserId(id);
     const lead = await leads.byUserId(id);
     const memory = await users.getMemory(id);
     const recentMessages = conversation

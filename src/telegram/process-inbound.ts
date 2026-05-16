@@ -29,22 +29,8 @@ import type { ProcessInboundDeps, RagDeps } from "./webhook-types.ts";
  * own exceptions and logs); they're awaited sequentially because they all
  * read/write `users.profile_json.memory` and `leads.intake_json` and would
  * otherwise race against each other.
- *
- * SKIPPED for `source='bot'` conversations. The BotAPI bot is test traffic
- * — running the lead / intake / visa-docs / memory pipeline on it would
- * create real leads and pollute the candidate's cross-session memory (which
- * is keyed per-user and shared with the real `userbot` conversation). The
- * bot still replies (RAG runs) so answer quality can be tested; it just
- * leaves no trace in the working funnel.
  */
 async function runPostReplyHooks(d: ProcessInboundDeps): Promise<void> {
-  if (d.conv.source === "bot") {
-    log.debug("post-reply hooks skipped — bot/test conversation", {
-      scope: "webhook",
-      conv_id: d.conv.id,
-    });
-    return;
-  }
   await runMemoryExtraction(d);
   await runConversationSummaryRefresh(d);
   await runIntakeUpdate(d);
