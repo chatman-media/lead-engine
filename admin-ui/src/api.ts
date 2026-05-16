@@ -1040,7 +1040,28 @@ export const api = {
 
   opsClearUserbotProxyStatuses: () =>
     req<{ ok: true }>("/admin/api/ops/userbot/proxies/clear-statuses", { method: "POST" }),
+
+  getRuntimeSettings: () =>
+    req<{ env_path: string; provider: string; settings: RuntimeSetting[] }>(
+      "/admin/api/settings/runtime",
+    ),
+
+  updateRuntimeSettings: (updates: Record<string, string>) =>
+    req<{ ok: boolean; updated: string[]; restart_required: boolean }>(
+      "/admin/api/settings/runtime",
+      { method: "PUT", body: JSON.stringify({ updates }) },
+    ),
 };
+
+/** One operator-editable runtime setting (see src/admin/routes/settings.ts). */
+export interface RuntimeSetting {
+  key: string;
+  label: string;
+  hint: string;
+  type: "text" | "number" | "boolean";
+  /** Current effective value; "" means the code default is in use. */
+  value: string;
+}
 
 export type ExperimentStatus = "draft" | "running" | "paused" | "done";
 export type SuccessMetric = "qualified" | "won" | "replied_3+";
