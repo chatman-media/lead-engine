@@ -1,7 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import type { Server } from "bun";
 
 import { createRouter } from "@/app.ts";
+import { config } from "@/config.ts";
 import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
@@ -181,5 +184,64 @@ describe("GET /admin/api/tg-files/:fileId", () => {
       headers: { cookie },
     });
     expect(r.status).toBe(502);
+  });
+});
+
+describe("GET /admin/api/media/:messageId", () => {
+  /** Insert a message with the given meta_json and return its id. */
+  async function seedMessage(meta: Record<string, unknown> | undefined): Promise<number> {
+    const u = await new UsersRepo(sql).create({ tgUserId: Math.floor(Math.random() * 1e9) });
+    const c = await new ConversationsRepo(sql).ensureForUser(u.id);
+    const msg = await new MessagesRepo(sql).add({
+      conversationId: c.id,
+      role: "user",
+      text: "[media]",
+      ...(meta ? { meta } : {}),
+    });
+    return msg.id;
+  }
+
+  test("requires auth", async () => {
+    expect((await fetch(url("/admin/api/media/1"))).status).toBe(401);
+  });
+
+  test("400 for a non-numeric / non-positive message id", async () => {
+    expect((await fetch(url("/admin/api/media/abc"), { headers: { cookie } })).status).toBe(400);
+    expect((await fetch(url("/admin/api/media/0"), { headers: { cookie } })).status).toBe(400);
+  });
+
+  test("404 for an unknown message id", async () => {
+    expect((await fetch(url("/admin/api/media/999999"), { headers: { cookie } })).status).toBe(404);
+  });
+
+  test("404 when the message has no media.file in meta_json", async () => {
+    const id = await seedMessage({ media: { type: "photo" } });
+    expect((await fetch(url(`/admin/api/media/${id}`), { headers: { cookie } })).status).toBe(404);
+  });
+
+  test("404 when the filename fails the safe-charset guard", async () => {
+    const id = await seedMessage({ media: { file: "../etc/passwd" } });
+    expect((await fetch(url(`/admin/api/media/${id}`), { headers: { cookie } })).status).toBe(404);
+  });
+
+  test("404 when the file is missing on disk", async () => {
+    const id = await seedMessage({ media: { file: "nope-not-here.jpg" } });
+    expect((await fetch(url(`/admin/api/media/${id}`), { headers: { cookie } })).status).toBe(404);
+  });
+
+  test("streams the bytes when the file exists on disk", async () => {
+    mkdirSync(config.media.dir, { recursive: true });
+    const name = `test-media-${Date.now()}.jpg`;
+    const path = join(config.media.dir, name);
+    await Bun.write(path, PHOTO_BYTES);
+    try {
+      const id = await seedMessage({ media: { file: name } });
+      const r = await fetch(url(`/admin/api/media/${id}`), { headers: { cookie } });
+      expect(r.status).toBe(200);
+      expect(r.headers.get("cache-control")).toContain("private");
+      expect(new Uint8Array(await r.arrayBuffer()).length).toBe(PHOTO_BYTES.byteLength);
+    } finally {
+      rmSync(path, { force: true });
+    }
   });
 });

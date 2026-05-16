@@ -105,7 +105,7 @@ export async function cleanTestDb(sql: TestSql): Promise<void> {
              skill_outcomes, style_ratings, self_play_matches, pairwise_matches,
              coach_proposals, shadow_evaluations, leads, lead_events, lead_notes,
              vacancies, kb_suggestions, questionnaire_tokens, userbot_session,
-             userbot_send_queue, userbot_proxies
+             userbot_send_queue
     RESTART IDENTITY CASCADE
   `;
 }
