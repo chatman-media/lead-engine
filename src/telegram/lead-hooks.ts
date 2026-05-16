@@ -3,6 +3,7 @@ import { extractIntake } from "../leads/intake.ts";
 import { LeadsService } from "../leads/service.ts";
 import { type IntakeFields, isIntakeComplete } from "../leads/templates.ts";
 import { extractVisaDocs, type VisaFields } from "../leads/visa-docs.ts";
+import type { PhotoClass } from "../rag/vision.ts";
 import type { ProcessInboundDeps } from "./webhook-types.ts";
 
 /**
@@ -51,9 +52,18 @@ export async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
   const mediaCounts = await d.messages.countMediaForConversation(d.conv.id);
   // When vision classification is enabled, feed per-category photo counts
   // so passport detection is real instead of the ">=7 photos" heuristic.
-  const photoClasses = config.vision.enabled
-    ? await d.messages.countPhotosByClass(d.conv.id)
-    : undefined;
+  // But only once vision has actually classified something: with vision on
+  // yet no result yet (missing OPENROUTER_API_KEY, a transient API failure,
+  // or an unclassified backlog) countPhotosByClass returns all-zeros, which
+  // would strand passport detection forever. Leaving photoClasses undefined
+  // makes extractIntake fall back to the heuristic until vision catches up.
+  let photoClasses: Record<PhotoClass, number> | undefined;
+  if (config.vision.enabled) {
+    const counts = await d.messages.countPhotosByClass(d.conv.id);
+    if (counts.passport + counts.full_body + counts.portrait + counts.other > 0) {
+      photoClasses = counts;
+    }
+  }
 
   const existing = parseIntakeJson(lead.intake_json);
   const intake = await extractIntake({
