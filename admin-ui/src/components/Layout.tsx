@@ -66,7 +66,7 @@ export function Layout({ admin, children }: LayoutProps) {
     { to: "/admin/kb", label: "База знаний", key: null },
     {
       to: "/admin/kb-suggestions",
-      label: "Предложения в KB",
+      label: "Вопросы без ответа",
       key: "kb-suggestions",
       badge: pendingKbCount > 0 ? pendingKbCount : undefined,
     },
