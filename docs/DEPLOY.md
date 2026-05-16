@@ -10,12 +10,18 @@ VPS / Hetzner / DigitalOcean / etc.
 git clone <repo> && cd tg-chatbot
 cp .env.example .env
 # edit .env — at minimum:
+#   DATABASE_URL              (PostgreSQL WITH the pgvector extension — see Database below)
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
 #   one of: OPENAI_API_KEY / OPENROUTER_API_KEY / (Ollama via compose profile)
 #   LEADS_CHAT_ID, VISA_CHAT_ID  (after adding the bot to those groups)
 docker compose up -d
 docker compose logs -f app
 ```
+
+`docker-compose.yml` runs **only the bot** — PostgreSQL is not bundled.
+You provision it yourself and point `DATABASE_URL` at it, and it must
+have the `pgvector` extension available (see [Database](#database)) or
+the bot crashes on first boot.
 
 The container listens on `${HOST_PORT:-3000}`. Telegram's Bot API
 requires the webhook URL to be HTTPS — point a reverse proxy
@@ -24,6 +30,65 @@ requires the webhook URL to be HTTPS — point a reverse proxy
 ```bash
 docker compose exec app bun scripts/set-webhook.ts set https://your-domain.com
 ```
+
+## Database
+
+All state lives in PostgreSQL, and the KB vector search needs the
+`pgvector` extension. On boot, `runMigrations()` applies
+`migrations/pg_schema.sql`, whose first statement is
+`CREATE EXTENSION IF NOT EXISTS vector;`.
+
+`CREATE EXTENSION` only *loads* an extension into the database — the
+pgvector binaries must already be installed on the PostgreSQL **host**.
+A stock `postgres:16` image and a default `apt install postgresql` do
+NOT ship them, and the bot then fails on first boot with:
+
+```
+extension "vector" is not available
+could not open extension control file ".../vector.control": No such file
+```
+
+Provision Postgres in whichever way fits — pick one:
+
+### PostgreSQL in Docker (recommended)
+
+Use the `pgvector/pgvector` image (the same one CI runs) instead of a
+plain `postgres` image. Add a `db` service to `docker-compose.yml`
+next to `app`:
+
+```yaml
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tgchatbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: tgchatbot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+# add at the bottom of the file:
+volumes:
+  pgdata:
+```
+
+Then in `.env`:
+`DATABASE_URL=postgres://tgchatbot:${POSTGRES_PASSWORD}@db:5432/tgchatbot`.
+
+### Bare-metal PostgreSQL on Ubuntu
+
+```bash
+sudo apt-get install postgresql-16-pgvector   # match your Postgres major version
+```
+
+This installs the extension files cluster-wide; the bot's
+`CREATE EXTENSION` then loads them into its own database.
+
+### Managed PostgreSQL (Supabase, RDS, Cloud SQL, …)
+
+`pgvector` is preinstalled on Supabase and available on most managed
+offerings — the bot's `CREATE EXTENSION` just works. On RDS / Cloud SQL,
+confirm `vector` is in the provider's supported-extensions list first.
 
 ## Choosing an LLM provider
 
@@ -166,7 +231,10 @@ both flags.
 ```yaml
 # docker-compose.yml — add alongside the `app` service
   backup:
-    image: postgres:16
+    # pgvector/pgvector image keeps one Postgres image across the stack;
+    # pg_dump itself doesn't need the extension, but consistency avoids
+    # a version-mismatch foot-gun.
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     depends_on: { app: { condition: service_healthy } }
     environment:
@@ -329,6 +397,11 @@ Tested baselines:
 - **`connect ECONNREFUSED` on first boot**: `DATABASE_URL` is not
   reachable from inside the container. Verify the connection string
   in `.env` and that your PostgreSQL / Supabase instance is accessible.
+- **`extension "vector" is not available`** / **`could not open
+  extension control file ".../vector.control"`**: the PostgreSQL host
+  has no pgvector binaries, so `runMigrations()` can't create the
+  schema. Install pgvector — see [Database](#database) (use the
+  `pgvector/pgvector` image or the `postgresql-NN-pgvector` package).
 - **`relation "users" does not exist`**: migrations haven't run yet or
   `DATABASE_URL` points to the wrong database. Check the boot logs for
   `runMigrations()` output.
