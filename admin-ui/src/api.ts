@@ -1026,31 +1026,6 @@ export const api = {
       "/admin/api/ops/userbot/queue-stats",
     ),
 
-  opsListUserbotProxies: () =>
-    req<{
-      proxies: Array<{
-        id: number;
-        position: number;
-        host: string;
-        port: number;
-        raw: string;
-        last_status: "never_tried" | "ok" | "timeout" | "failed";
-        last_tried_at: number | null;
-        last_error: string | null;
-        last_connect_ms: number | null;
-        created_at: number;
-      }>;
-    }>("/admin/api/ops/userbot/proxies"),
-
-  opsReplaceUserbotProxies: (text: string) =>
-    req<{ saved: number; invalid_lines: number[]; cleared?: boolean }>(
-      "/admin/api/ops/userbot/proxies",
-      { method: "PUT", body: JSON.stringify({ text }) },
-    ),
-
-  opsClearUserbotProxyStatuses: () =>
-    req<{ ok: true }>("/admin/api/ops/userbot/proxies/clear-statuses", { method: "POST" }),
-
   getRuntimeSettings: () =>
     req<{ env_path: string; provider: string; settings: RuntimeSetting[] }>(
       "/admin/api/settings/runtime",

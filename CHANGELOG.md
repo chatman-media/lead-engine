@@ -52,7 +52,6 @@ The end-to-end lead workflow (intake → approval → docs collection → consul
 ## Userbot (MTProto)
 
 - **Photo handling**: incoming candidate photos downloaded via gramjs `downloadMedia`, saved to `config.media.dir`, recorded as `meta_json.media` with `source: "userbot"`. Vision classification fires in parallel — intake counters work identically to Bot API mode. (Fixes the gap where userbot mode silently dropped photos.)
-- **MTProto proxy** (`USERBOT_MTPROXY_LIST`): newline-separated proxy list with auto-rotate on timeout. First working proxy wins; on full-list failure the subprocess restarts and re-reads env (hot-swap without redeploy). Accepted formats: `host:port:secret`, `tg://proxy?...`, `https://t.me/proxy?...`. Single-entry shorthand: `USERBOT_MTPROXY`.
 - **Conversation source tag**: userbot conversations tagged `source=userbot` so funnel analytics distinguish userbot DMs from Bot API traffic.
 
 ## Admin UI
