@@ -1,6 +1,8 @@
+import type { Sql } from "../db/postgres.ts";
 import type { ConversationsRepo } from "../db/repos/conversations.ts";
 import type { LeadRow, LeadsRepo } from "../db/repos/leads.ts";
 import type { MessagesRepo } from "../db/repos/messages.ts";
+import { enqueue } from "../db/repos/userbot-send-queue.ts";
 import type { UserRow, UsersRepo } from "../db/repos/users.ts";
 import { log } from "../log.ts";
 import type { TelegramClient } from "../telegram/client.ts";
@@ -32,6 +34,12 @@ export interface LeadsServiceDeps {
   /** Group chat where the visa-submission package goes after docs are
    *  complete. Optional, same opt-in semantics. */
   visaChatId?: number | null;
+  /** When the candidate funnel runs on the userbot (Alina's personal
+   *  account), template messages to candidates must go through the
+   *  userbot send queue, not the agency Bot API — otherwise they arrive
+   *  from the wrong account. Requires `sql` for the queue insert. */
+  userbotEnabled?: boolean;
+  sql?: Sql;
 }
 
 /**
@@ -470,14 +478,25 @@ export class LeadsService {
     text: string;
   }): Promise<void> {
     let tgMessageId: number | undefined;
-    try {
-      const sent = await this.deps.telegram.sendMessage({
-        chatId: input.chatId,
-        text: input.text,
-      });
-      tgMessageId = sent.message_id;
-    } catch (err) {
-      log.error("sendMessage to candidate failed", { scope: "leads", err });
+    if (this.deps.userbotEnabled && this.deps.sql) {
+      // Real funnel is on the userbot — enqueue so the message appears
+      // from Alina's personal account instead of the agency bot. The
+      // userbot poller assigns the tg message id when it actually sends.
+      try {
+        await enqueue(this.deps.sql, input.chatId, input.text);
+      } catch (err) {
+        log.error("enqueue to userbot send queue failed", { scope: "leads", err });
+      }
+    } else {
+      try {
+        const sent = await this.deps.telegram.sendMessage({
+          chatId: input.chatId,
+          text: input.text,
+        });
+        tgMessageId = sent.message_id;
+      } catch (err) {
+        log.error("sendMessage to candidate failed", { scope: "leads", err });
+      }
     }
     await this.deps.messages.add({
       conversationId: input.conversationId,
