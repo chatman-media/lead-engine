@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
@@ -62,6 +62,11 @@ export function createUploadBookHandler(deps: AdminApiDeps): RouteHandler {
       );
     }
 
+    // Content-addressed source so re-uploading identical bytes dedupes to
+    // the same kb_document instead of stacking duplicates — the temp path
+    // below is random per upload and can't be used as a stable identity.
+    const contentHash = createHash("sha256").update(new Uint8Array(bytes)).digest("hex");
+
     // Random suffix avoids the collision two simultaneous uploads in the
     // same millisecond would otherwise hit with a Date.now()-only name.
     const tmpPath = join(tmpdir(), `book-upload-${randomUUID()}${ext}`);
@@ -77,6 +82,8 @@ export function createUploadBookHandler(deps: AdminApiDeps): RouteHandler {
         kb,
         embedder: deps.rag.embedder,
         topic: BOOK_TOPIC,
+        source: `book:${contentHash.slice(0, 12)}`,
+        title: originalName,
       });
       return json({
         ok: true,
