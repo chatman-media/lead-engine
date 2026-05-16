@@ -100,10 +100,8 @@ export function KbSuggestions() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Предложения в KB</h1>
-          <p className="page-subtitle">
-            Вопросы без ответа — просмотрите, добавьте ответ и одобрите в KB.
-          </p>
+          <h1 className="page-title">Вопросы без ответа</h1>
+          <p className="page-subtitle">Просмотрите, добавьте ответ и одобрите в базу знаний.</p>
         </div>
       </div>
 
