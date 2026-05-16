@@ -258,36 +258,47 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   }
 
   const client = new GramjsClient(session, apiId, apiHash, {
-    // -1 = unlimited retries; gramjs will keep reconnecting after network
-    // drops without dying. Individual reconnect attempts are logged by
-    // gramjs itself at WARN level ("Started reconnecting").
-    connectionRetries: -1,
+    // gramjs uses this in `for (attempt = 0; attempt < retries; attempt++)`
+    // inside MTProtoSender.connect — so it's a COUNT, not a flag. The old
+    // value `-1` made `0 < -1` false → the connect loop ran ZERO times →
+    // the socket was never opened, `_updateLoop` then pinged a dead sender
+    // and threw TIMEOUT forever. gramjs's own "unlimited" sentinel is
+    // `Infinity`; we use a finite 5 so a genuinely unreachable Telegram
+    // lets `connect()` return false (handled below) and the subprocess
+    // restarts cleanly instead of spinning.
+    connectionRetries: 5,
     retryDelay: 3000,
-    // Default timeout is 10s; Koyeb→Telegram latency can exceed that on
-    // first connect. 30s gives the update-state fetch enough headroom so
-    // the internal TIMEOUT rejection doesn't fire on healthy connections.
+    // Default timeout is 10s; first connect over a slow link can exceed
+    // that. 30s gives the update-state fetch headroom.
     timeout: 30,
     ...(proxy ? { proxy } : {}),
   });
 
-  // connect() can throw TIMEOUT on the first attempt when Telegram is slow.
-  // Retry up to 5 times with a 5s pause before giving up and letting the
-  // parent process (index.ts) restart the subprocess in 10s.
+  // `client.connect()` RETURNS a boolean (false = could not connect) — it
+  // doesn't throw on a plain connection failure. The old code ignored the
+  // return value and always set connected=true, so a false return let the
+  // userbot march on with a dead sender: getDialogs would hang forever and
+  // `connected and listening` was never reached. Check the boolean; also
+  // keep the try/catch for the cases where connect DOES throw (TIMEOUT on a
+  // slow link).
   let connected = false;
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
-      await client.connect();
-      connected = true;
-      break;
+      const ok = await client.connect();
+      if (ok) {
+        connected = true;
+        break;
+      }
+      log.warn("connect returned false", { scope: "userbot", attempt, max_attempts: 5 });
     } catch (err) {
-      log.warn("connect attempt failed", {
+      log.warn("connect attempt threw", {
         scope: "userbot",
         attempt,
         max_attempts: 5,
         err,
       });
-      if (attempt < 5) await new Promise((r) => setTimeout(r, 5_000));
     }
+    if (attempt < 5) await new Promise((r) => setTimeout(r, 5_000));
   }
   if (!connected) {
     throw new Error("[userbot] could not connect after 5 attempts — subprocess will restart");
