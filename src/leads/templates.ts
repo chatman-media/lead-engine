@@ -141,6 +141,18 @@ export const DOCS_COMPLETE_REPLY = `Спасибо, всё получили! П�
 export const AWAITING_APPROVAL_REPLY = `Спасибо, всё получили! Сейчас отправила запрос в клуб по вам, ждите ответа. Обычно в течение дня сообщаю.`;
 
 /**
+ * Sent to the candidate once a photo of her international passport is
+ * vision-detected — a small acknowledgement so she knows it landed.
+ */
+export const PASSPORT_PHOTO_ACK = `✅ Фото загранпаспорта получили.`;
+
+/**
+ * Nudge sent once when the candidate has uploaded several photos but
+ * none of them is a full-body shot.
+ */
+export const FULL_BODY_PHOTO_NUDGE = `Не хватает фото в полный рост (2-3 шт). Пришлите, пожалуйста 🙏`;
+
+/**
  * Initial intake field schema. Used by the auto-extractor (Phase 2) and
  * the lead card formatter — kept here so the operator's seven-item list
  * is one source of truth.
@@ -153,8 +165,15 @@ export interface IntakeFields {
   departure_readiness?: string;
   photos_count?: number;
   videos_count?: number;
+  /** Photos vision-classified as full-body shots ("в полный рост").
+   *  Populated only when VISION_ENABLED — see runPhotoClassification. */
+  full_body_count?: number;
   passport_photo_received?: boolean;
   dance_video_received?: boolean;
+  /** One-shot flags so the bot acknowledges photos to the candidate
+   *  exactly once — Telegram albums arrive as many separate messages,
+   *  each triggering the classification hook. Not shown on the card. */
+  media_ack?: { passport?: boolean; full_body_nudged?: boolean };
   name?: string;
   nationality?: string;
   marital_status?: string;
@@ -164,7 +183,7 @@ export interface IntakeFields {
   work_experience?: string;
 }
 
-export const INTAKE_FIELD_LABELS: Record<keyof IntakeFields, string> = {
+export const INTAKE_FIELD_LABELS: Partial<Record<keyof IntakeFields, string>> = {
   age: "возраст",
   height: "рост",
   weight: "вес",
@@ -172,6 +191,7 @@ export const INTAKE_FIELD_LABELS: Record<keyof IntakeFields, string> = {
   departure_readiness: "готовность к выезду",
   photos_count: "фото 6-8 шт",
   videos_count: "2 видео",
+  full_body_count: "фото в полный рост",
   passport_photo_received: "фото загранпаспорта",
   dance_video_received: "видео танца",
   name: "имя",

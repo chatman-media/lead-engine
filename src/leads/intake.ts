@@ -1,5 +1,6 @@
 import { log } from "../log.ts";
 import type { ChatClient, ChatMessage } from "../rag/chat.ts";
+import type { PhotoClass } from "../rag/vision.ts";
 import type { IntakeFields } from "./templates.ts";
 
 /**
@@ -14,13 +15,12 @@ import type { IntakeFields } from "./templates.ts";
  *     every photo / video / voice / document inbound, so we just
  *     count rows.
  *
- * Photos and videos are counted globally for the conversation, not
- * partitioned by "is this the passport photo / dance video?". That
- * heuristic is intentional: distinguishing requires per-photo LLM
- * classification which is expensive and operator-eyes-on-chat is
- * already a sufficient verification step before approval. We just
- * need a reasonable threshold (>=7 photos, >=3 videos) to suggest
- * intake is plausibly complete; the operator confirms by approving.
+ * Videos are counted globally for the conversation. Photos used to be
+ * counted the same way, with a ">=7 photos => passport present"
+ * heuristic. When vision classification is enabled (VISION_ENABLED), the
+ * caller passes `photoClasses` — per-category counts — and we detect the
+ * passport photo for real instead of guessing. The heuristic stays as a
+ * fallback when `photoClasses` is absent.
  */
 export interface IntakeExtractInput {
   /** Recent messages, oldest first, with role and text. Used by the
@@ -31,6 +31,10 @@ export interface IntakeExtractInput {
   existingIntake?: IntakeFields;
   /** Photo / video counts pulled by `countMediaForConversation`. */
   mediaCounts: { photos: number; videos: number };
+  /** Per-category photo counts from `countPhotosByClass`. Present only
+   *  when vision classification is enabled — when given, passport
+   *  detection uses real counts instead of the >=7 heuristic. */
+  photoClasses?: Record<PhotoClass, number>;
   chat: ChatClient;
 }
 
@@ -78,13 +82,20 @@ export async function extractIntake(input: IntakeExtractInput): Promise<IntakeFi
   merged.photos_count = input.mediaCounts.photos;
   merged.videos_count = input.mediaCounts.videos;
 
-  // Heuristic for passport photo / dance video: when total photos >= 7
-  // we assume the passport-photo slot is filled (operator's intake
-  // says 6-8 regular + 1 passport = 7-9 total). Same for videos: 2
-  // regular + 1 dance = 3+. Operator confirms by eye before approving.
-  if (merged.passport_photo_received !== true && input.mediaCounts.photos >= 7) {
+  // Passport photo detection. When vision classification ran
+  // (`photoClasses` present), trust the real count: >=1 photo classified
+  // as a passport means the slot is filled. Otherwise fall back to the
+  // legacy heuristic — total photos >= 7 implies the passport is in there
+  // somewhere (operator's intake: 6-8 regular + 1 passport = 7-9 total).
+  if (input.photoClasses) {
+    merged.full_body_count = input.photoClasses.full_body;
+    if (merged.passport_photo_received !== true && input.photoClasses.passport >= 1) {
+      merged.passport_photo_received = true;
+    }
+  } else if (merged.passport_photo_received !== true && input.mediaCounts.photos >= 7) {
     merged.passport_photo_received = true;
   }
+  // Dance video: 2 regular + 1 dance = 3+. Operator confirms by eye.
   if (merged.dance_video_received !== true && input.mediaCounts.videos >= 3) {
     merged.dance_video_received = true;
   }

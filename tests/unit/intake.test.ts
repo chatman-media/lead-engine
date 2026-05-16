@@ -114,6 +114,50 @@ describe("countMediaForConversation", () => {
   });
 });
 
+describe("photo classification repo methods", () => {
+  test("unclassifiedPhotos / setPhotoClass / countPhotosByClass", async () => {
+    const users = new UsersRepo(sql);
+    const convs = new ConversationsRepo(sql);
+    const msgs = new MessagesRepo(sql);
+    const u = await users.create({ tgUserId: 200 });
+    const c = await convs.ensureForUser(u.id);
+
+    const p1 = await msgs.add({
+      conversationId: c.id,
+      role: "user",
+      text: "[photo]",
+      meta: { media: { type: "photo", file_id: "f1" } },
+    });
+    const p2 = await msgs.add({
+      conversationId: c.id,
+      role: "user",
+      text: "[photo]",
+      meta: { media: { type: "photo", file_id: "f2", mime_type: "image/png" } },
+    });
+    await msgs.add({
+      conversationId: c.id,
+      role: "user",
+      text: "[video]",
+      meta: { media: { type: "video", file_id: "v1" } },
+    });
+    await msgs.add({ conversationId: c.id, role: "user", text: "hi" });
+
+    let pending = await msgs.unclassifiedPhotos(c.id);
+    expect(pending.map((p) => p.file_id).sort()).toEqual(["f1", "f2"]);
+    expect(pending.find((p) => p.file_id === "f2")?.mime_type).toBe("image/png");
+
+    expect(await msgs.setPhotoClass(p1.id, "passport")).toBe(true);
+    pending = await msgs.unclassifiedPhotos(c.id);
+    expect(pending.map((p) => p.file_id)).toEqual(["f2"]);
+
+    await msgs.setPhotoClass(p2.id, "full_body");
+    expect(await msgs.unclassifiedPhotos(c.id)).toEqual([]);
+
+    const counts = await msgs.countPhotosByClass(c.id);
+    expect(counts).toEqual({ passport: 1, full_body: 1, portrait: 0, other: 0 });
+  });
+});
+
 describe("extractIntake + isIntakeComplete", () => {
   test("merges existing facts with extractor output and media counts", async () => {
     const chat = fakeChat('{"height":"165","weight":"52"}');
@@ -158,6 +202,31 @@ describe("extractIntake + isIntakeComplete", () => {
     });
     expect(chat.calls).toBe(0);
     expect(intake.city).toBeUndefined();
+  });
+
+  test("photoClasses: passport detected from real count, not the >=7 heuristic", async () => {
+    const chat = fakeChat("{}");
+    const intake = await extractIntake({
+      messages: [{ role: "user", content: "hi" }],
+      mediaCounts: { photos: 9, videos: 0 },
+      photoClasses: { passport: 0, full_body: 2, portrait: 7, other: 0 },
+      chat,
+    });
+    // 9 photos would trip the legacy heuristic — but vision says no passport.
+    expect(intake.passport_photo_received).toBeUndefined();
+    expect(intake.full_body_count).toBe(2);
+  });
+
+  test("photoClasses: passport flag set when >=1 passport photo classified", async () => {
+    const chat = fakeChat("{}");
+    const intake = await extractIntake({
+      messages: [{ role: "user", content: "hi" }],
+      mediaCounts: { photos: 3, videos: 0 },
+      photoClasses: { passport: 1, full_body: 0, portrait: 2, other: 0 },
+      chat,
+    });
+    expect(intake.passport_photo_received).toBe(true);
+    expect(intake.full_body_count).toBe(0);
   });
 
   test("isIntakeComplete only fires when all 7 items present + thresholds met", () => {
