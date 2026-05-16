@@ -123,7 +123,7 @@ All operator-curated wording lives as plain string constants in [src/leads/templ
 - `INTAKE_TEMPLATE` — 15-point checklist sent to a new candidate (operator triggers via `POST /admin/api/leads/:id/send-intake` or pastes manually).
 - `APPROVAL_PROLOGUE` — sent right after approve.
 - `CONTRACT_TERMS` — verbatim contract terms (1500 ¥ penalty etc.).
-- `VISA_ANKETA_TEMPLATE` — long English visa form.
+- `VISA_ANKETA_TEMPLATE` — bilingual visa form (English field labels — values filled in English as in the passport — with a Russian translation in parentheses for the candidate).
 - `VISA_PHOTO_REQUIREMENTS` — passport photo size + filled passport pages.
 - `REJECTION_DEFAULT` — fallback rejection text (operator can pass `{reason: "..."}` to override).
 - `AWAITING_APPROVAL_REPLY` — what the candidate sees while operator decides.

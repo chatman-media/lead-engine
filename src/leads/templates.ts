@@ -47,68 +47,71 @@ export const APPROVAL_PROLOGUE = `Замечательно! Вас одобри�
 export const CONTRACT_TERMS = `Контракт отправлю в течение суток после подачи на рабочие документы. Также предупреждаем, что документы платные, но агентство уже покрыло за них денежные средства, так как вы едете на контракт минимум от 3 месяцев. Но если вы по своим причинам не сможете поехать, вам придётся возместить нам 1500 юаней.`;
 
 /**
- * The full English-language visa application form. The candidate is
- * expected to fill the fields in-line and send back. Each line is a
- * field with a short Russian hint where useful.
+ * The full visa application form. Bilingual: every field carries an
+ * English label (the candidate fills the VALUE in English, as printed
+ * in the passport) plus a Russian translation in parentheses so a
+ * Russian-speaking candidate understands what each line asks for.
+ * The candidate fills the fields in-line and sends it back.
  */
-export const VISA_ANKETA_TEMPLATE = `АНКЕТА (заполнять на английском, как в паспорте)
+export const VISA_ANKETA_TEMPLATE = `АНКЕТА НА ВИЗУ
 
-Family name -
-Given name -
-Date of birth (yyyy-MM-dd) -
-Country / Region (страна рождения) -
-Province / State -
-City (город рождения) -
-Marital status (single / married) -
-Current nationality -
-National ID number (номер внутреннего паспорта) -
-Do you have any other nationality(ies)? -
-Do you have permanent residence of any other country or region? -
-Have you ever held any other nationality(ies)? -
-Passport / travel document number (номер загранпаспорта) -
-Issuing country or region (страна, где выдали загранпаспорт) -
-Issuing place (место, где выдали загранпаспорт — обычно цифры в паспорте) -
-Expiration date (yyyy-MM-dd) (дата окончания загранпаспорта) -
+Значения заполняйте на английском, как в загранпаспорте. Перевод в скобках — только для понимания.
 
-Ваша работа за последние года (лучше указывать в вашей стране, можно неофициальную)
-Work experience (list in reverse chronological order):
-yyyy-MM-dd Still yyyy-MM-dd:
-Name of employer:
-Address of employer:
-Telephone number:
-Position:
-Name of supervisor:
-Phone number:
+Family name (Фамилия) -
+Given name (Имя) -
+Date of birth (Дата рождения, yyyy-MM-dd) -
+Country / Region (Страна рождения) -
+Province / State (Область / штат рождения) -
+City (Город рождения) -
+Marital status (Семейное положение: single / married) -
+Current nationality (Текущее гражданство) -
+National ID number (Номер внутреннего паспорта) -
+Do you have any other nationality(ies)? (Есть ли у вас другое гражданство?) -
+Do you have permanent residence of any other country or region? (Есть ли у вас ПМЖ в другой стране?) -
+Have you ever held any other nationality(ies)? (Было ли у вас когда-либо другое гражданство?) -
+Passport / travel document number (Номер загранпаспорта) -
+Issuing country or region (Страна, где выдан загранпаспорт) -
+Issuing place (Место выдачи загранпаспорта — обычно цифры в паспорте) -
+Expiration date (Дата окончания загранпаспорта, yyyy-MM-dd) -
 
-Обучение
-Name of institution:
-Diploma:
-Major:
+Work experience (Опыт работы за последние годы — в обратном хронологическом порядке; лучше работу в вашей стране, можно неофициальную):
+yyyy-MM-dd Still yyyy-MM-dd (период работы):
+Name of employer (Название работодателя):
+Address of employer (Адрес работодателя):
+Telephone number (Телефон):
+Position (Должность):
+Name of supervisor (Имя руководителя):
+Phone number (Телефон руководителя):
 
-Current residence address (ваше место жительства) -
-Phone number -
-Mobile phone number -
-Email address -
+Education (Обучение):
+Name of institution (Учебное заведение):
+Diploma (Диплом / степень):
+Major (Специальность):
 
-Family members
-Father:
-  Name -
-  Nationality -
-  Date of birth -
+Current residence address (Адрес проживания) -
+Phone number (Телефон) -
+Mobile phone number (Мобильный телефон) -
+Email address (Электронная почта) -
 
-Mother:
-  Name -
-  Nationality -
-  Date of birth -
+Family members (Члены семьи)
+Father (Отец):
+  Name (Имя) -
+  Nationality (Гражданство) -
+  Date of birth (Дата рождения) -
 
-Have you been to China? Yes / No -
-Have you ever been issued a Chinese visa? -
-  Type of visa -
-  Number of visa -
-  Place of issuance -
-  Date of issuance -
+Mother (Мать):
+  Name (Имя) -
+  Nationality (Гражданство) -
+  Date of birth (Дата рождения) -
 
-Have you travelled to any other countries in the past 12 months -
+Have you been to China? Yes / No (Были ли вы в Китае?) -
+Have you ever been issued a Chinese visa? (Выдавалась ли вам когда-либо китайская виза?) -
+  Type of visa (Тип визы) -
+  Number of visa (Номер визы) -
+  Place of issuance (Место выдачи) -
+  Date of issuance (Дата выдачи) -
+
+Have you travelled to any other countries in the past 12 months (Посещали ли вы другие страны за последние 12 месяцев) -
 
 Если были китайские визы — приложите фото виз.
 Если есть дети или муж — укажите их данные (имя, фамилия, дата рождения, гражданство).
