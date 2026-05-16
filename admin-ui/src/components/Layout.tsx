@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { ws } from "../App.tsx";
 import { type Admin, api } from "../api.ts";
@@ -14,6 +14,10 @@ export function Layout({ admin, children }: LayoutProps) {
   const [queuedCount, setQueuedCount] = useState(0);
   const [pendingKbCount, setPendingKbCount] = useState(0);
   const [pendingCoachCount, setPendingCoachCount] = useState(0);
+  // Conversation ids currently in the queue, as last observed. A new id
+  // appearing here means a chat just escalated and needs an operator.
+  const knownQueuedRef = useRef<Set<number>>(new Set());
+  const seededRef = useRef(false);
 
   useEffect(() => {
     // Initial fetch of both counts.
@@ -25,23 +29,51 @@ export function Layout({ admin, children }: LayoutProps) {
       .coachProposals({ status: "pending", limit: 1 })
       .then((c) => setPendingCoachCount(c.pending_count))
       .catch(() => {});
-    api
-      .conversations()
-      .then(({ conversations }) => {
-        setQueuedCount(conversations.filter((c) => c.mode === "queued").length);
-      })
-      .catch(() => {});
 
-    // Subscribe to real-time updates.
+    // Queued-chat watcher: keeps the sidebar badge fresh and, when a chat
+    // newly escalates into the queue, pulls the operator to the chats list
+    // with the fresh one flagged for a transient highlight (see Chats.tsx).
+    const checkQueued = async () => {
+      let result: Awaited<ReturnType<typeof api.conversations>>;
+      try {
+        result = await api.conversations();
+      } catch {
+        return;
+      }
+      const queuedIds = result.conversations.filter((c) => c.mode === "queued").map((c) => c.id);
+      setQueuedCount(queuedIds.length);
+      if (!seededRef.current) {
+        knownQueuedRef.current = new Set(queuedIds);
+        seededRef.current = true;
+        return;
+      }
+      const fresh = queuedIds.filter((id) => !knownQueuedRef.current.has(id));
+      knownQueuedRef.current = new Set(queuedIds);
+      if (fresh.length > 0) {
+        navigate("/admin/chats", {
+          state: { highlightConvId: fresh[fresh.length - 1], ts: Date.now() },
+        });
+      }
+    };
+    checkQueued();
+
+    // Re-check on escalation events and on a slow poll. The poll is the
+    // fallback for userbot-channel escalations whose WS events may not
+    // reach this client.
+    const poll = setInterval(checkQueued, 20_000);
     const unsub = ws.on((evt) => {
-      if (evt.type === "queued:count") {
-        setQueuedCount(evt.count);
+      if (evt.type === "conversation:updated" || evt.type === "queued:count") {
+        checkQueued();
       }
       if (evt.type === "kb-suggestion:created") {
         setPendingKbCount((n) => n + 1);
       }
     });
-    return unsub;
+    return () => {
+      clearInterval(poll);
+      unsub();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleLogout() {
