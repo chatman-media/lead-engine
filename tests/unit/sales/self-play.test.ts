@@ -216,7 +216,11 @@ describe("runSelfPlayMatch (integration with scripted LLMs)", () => {
     // generation; otherwise it short-circuits to NO_CONTEXT (path=no_context).
     const salesChat = scriptedChat([
       "Ближайший вылет в январь-февраль 2025 года", // fabrication
-      '{"grounded":false,"reason":"date not in CONTEXT"}', // reflect verdict → ungrounded
+      // A made-up departure date is vacancy data, not a free-text claim, so
+      // vacancyOk:false is the accurate verdict. The vacancy guard drops it at
+      // every funnel stage — unlike the grounding check, which is exempt at
+      // data-collection stages (opener/qualify/close) where turn 0 lands.
+      '{"grounded":false,"vacancyOk":false,"reason":"date not in CONTEXT"}',
       "Ок, удобно тебе анкету сейчас?", // turn 1 grounded reply
       '{"grounded":true}', // reflect verdict turn 1
     ]);
