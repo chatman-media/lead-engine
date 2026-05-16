@@ -180,12 +180,15 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 /** Operator clicks "send intake template" — bot DMs the candidate the
- *  7-item checklist. Useful when the bot's natural greeting hasn't yet
- *  prompted the candidate to start submitting intake. */
+ *  15-item checklist. Useful when the bot's natural greeting hasn't yet
+ *  prompted the candidate to start submitting intake. The operator picks
+ *  the checklist language via `?lang=ru|en` (defaults to `ru`). */
 export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ params }) => {
+  return withAdmin(deps.sql, async ({ params, url }) => {
     const id = parseIdParam(params);
     if (id instanceof Response) return id;
+
+    const lang = url.searchParams.get("lang") === "en" ? "en" : "ru";
 
     const leadsRepo = new LeadsRepo(deps.sql);
     const usersRepo = new UsersRepo(deps.sql);
@@ -198,7 +201,7 @@ export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
     if (!service) {
       return json({ error: "telegram client not configured" }, { status: 503 });
     }
-    await service.sendIntakeTemplate({ user });
+    await service.sendIntakeTemplate({ user, lang });
     return json({ ok: true });
   });
 }

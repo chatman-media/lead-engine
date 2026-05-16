@@ -11,8 +11,16 @@
  */
 
 /**
- * Sent to a new candidate to kick off intake. Lists the 7 items the
- * operator wants up front, before deciding whether to approve the lead.
+ * Language of the intake checklist sent to a candidate. The operator
+ * picks it per-lead on the lead card — a Russian-speaking candidate
+ * gets `ru`, an international one (filling in English) gets `en`.
+ */
+export type IntakeLang = "ru" | "en";
+
+/**
+ * Sent to a new candidate to kick off intake — the 15-item checklist
+ * the operator wants up front, before deciding whether to approve the
+ * lead. Russian version (default).
  */
 export const INTAKE_TEMPLATE = `Замечательно, а теперь приступим к заполнению анкеты!
 
@@ -35,6 +43,33 @@ export const INTAKE_TEMPLATE = `Замечательно, а теперь при
 
 Просьба заполнить и отправить одним сообщением, спасибо 🙌🌞`;
 
+/** English version of INTAKE_TEMPLATE — same 15 items. */
+export const INTAKE_TEMPLATE_EN = `Great, now let's fill out the questionnaire!
+
+Please fill in:
+1. First and last name (as in your passport)
+2. Age
+3. Height
+4. Weight
+5. Nationality
+6. Marital status (single / married)
+7. Children (none / yes — state how many)
+8. Languages and level (e.g. English B2, basic Chinese)
+9. Work experience over the last 2 years (briefly)
+10. Passport expiration date (dd.mm.yyyy)
+11. Which city are you in now and when you can depart
+12. 6-8 regular photos (2-3 full-length)
+13. Any 2 videos
+14. Photo of your international passport
+15. A 1-minute dance video (cheerful music and active improvised movements)
+
+Please fill it in and send it as one message, thank you 🙌🌞`;
+
+/** Resolve the intake checklist text for the operator-chosen language. */
+export function intakeTemplate(lang: IntakeLang): string {
+  return lang === "en" ? INTAKE_TEMPLATE_EN : INTAKE_TEMPLATE;
+}
+
 /**
  * Two-message preamble sent right after operator approves the lead.
  * Sent BEFORE the long English visa anketa so the candidate has the
@@ -49,7 +84,8 @@ export const CONTRACT_TERMS = `Контракт отправлю в течени
 /**
  * The full English-language visa application form. The candidate is
  * expected to fill the fields in-line and send back. Each line is a
- * field with a short Russian hint where useful.
+ * field with a short Russian hint where useful. Always English — the
+ * values must match the passport.
  */
 export const VISA_ANKETA_TEMPLATE = `АНКЕТА (заполнять на английском, как в паспорте)
 

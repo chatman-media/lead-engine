@@ -243,7 +243,9 @@ export function Leads() {
                     if (conv) navigate(`/admin/chats/${conv.id}`);
                   })
               }
-              onSendIntake={() => withBusy(lead.id, () => api.sendIntakeTemplate(lead.id))}
+              onSendIntake={(lang) =>
+                withBusy(lead.id, () => api.sendIntakeTemplate(lead.id, lang))
+              }
               onApprove={() => withBusy(lead.id, () => api.approveLead(lead.id))}
               onReject={() => {
                 const reason = prompt("Причина отказа (Enter для шаблонной формулировки):") ?? "";
@@ -316,7 +318,7 @@ function LeadCard({
   lead: Lead;
   busy: boolean;
   onOpen: () => void;
-  onSendIntake: () => void;
+  onSendIntake: (lang: "ru" | "en") => void;
   onApprove: () => void;
   onReject: () => void;
   onSubmitToVisa: () => void | Promise<void>;
@@ -335,6 +337,9 @@ function LeadCard({
     lead.state === "approved" || lead.state === "docs_pending" || lead.state === "docs_complete";
   const canMarkSubmitted = lead.state === "docs_complete";
   const intake = parseIntake(lead.intake_json);
+  // Operator-chosen language for the intake checklist — Russian by
+  // default, English for international candidates (e.g. filling abroad).
+  const [intakeLang, setIntakeLang] = useState<"ru" | "en">("ru");
   return (
     <div
       data-testid="lead-card"
@@ -404,14 +409,47 @@ function LeadCard({
             чат
           </button>
           {!decided && !inFlight && (
-            <button
-              onClick={onSendIntake}
-              className="btn btn-ghost btn-sm"
-              disabled={busy}
-              title="Отправить девочке шаблон с 7 пунктами анкеты"
-            >
-              анкета
-            </button>
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <div
+                style={{
+                  display: "flex",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  overflow: "hidden",
+                }}
+              >
+                {(["ru", "en"] as const).map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => setIntakeLang(l)}
+                    disabled={busy}
+                    title={l === "ru" ? "Анкета на русском" : "Анкета на английском"}
+                    style={{
+                      padding: "3px 7px",
+                      border: "none",
+                      borderRadius: 0,
+                      cursor: "pointer",
+                      background: intakeLang === l ? "var(--bg-3)" : "transparent",
+                      color: intakeLang === l ? "var(--text)" : "var(--text-3)",
+                      fontFamily: "var(--mono)",
+                      fontSize: 10,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {l.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => onSendIntake(intakeLang)}
+                className="btn btn-ghost btn-sm"
+                disabled={busy}
+                title={`Отправить девочке анкету (${intakeLang.toUpperCase()}) — 15 пунктов`}
+              >
+                анкета
+              </button>
+            </div>
           )}
           {ready && (
             <>

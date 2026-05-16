@@ -781,8 +781,8 @@ export const api = {
       body: JSON.stringify(reason ? { reason } : {}),
     }),
 
-  sendIntakeTemplate: (id: number) =>
-    req<{ ok: boolean }>(`/admin/api/leads/${id}/send-intake`, {
+  sendIntakeTemplate: (id: number, lang: "ru" | "en" = "ru") =>
+    req<{ ok: boolean }>(`/admin/api/leads/${id}/send-intake?lang=${lang}`, {
       method: "POST",
     }),
 

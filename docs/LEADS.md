@@ -111,6 +111,7 @@ processes the filed application (`submitted`). During both stages the bot is
 ### Admin UI (any state)
 
 - `/admin/leads` — pipeline list with filter pills by state. Each card shows intake progress + buttons appropriate to current state.
+- `анкета` button (with a RU/EN toggle) — DMs the candidate the 15-point intake checklist in the chosen language. English is for international candidates who fill in English; Russian is the default.
 - Button **`→ Lead`** on `/admin/chats/:id` — manual promote when auto-intake hasn't (or when `LEADS_CHAT_ID` is unset).
 - Inline edit of visa fields — click `изменить` next to any field; Enter saves, Esc cancels; long fields render as textarea.
 - `→ на визу` — allocates `application_id`, posts visa package to VISA_CHAT_ID, transitions to `docs_complete`. Idempotent on the id (re-press shows `↻ на визу` — re-posts same package, same id).
@@ -120,10 +121,10 @@ processes the filed application (`submitted`). During both stages the bot is
 
 All operator-curated wording lives as plain string constants in [src/leads/templates.ts](../src/leads/templates.ts) so iteration doesn't require code review:
 
-- `INTAKE_TEMPLATE` — 15-point checklist sent to a new candidate (operator triggers via `POST /admin/api/leads/:id/send-intake` or pastes manually).
+- `INTAKE_TEMPLATE` / `INTAKE_TEMPLATE_EN` — 15-point intake checklist, Russian and English. The operator picks the language per-lead via the RU/EN toggle next to the `анкета` button (`POST /admin/api/leads/:id/send-intake?lang=ru|en`, defaults to `ru`).
 - `APPROVAL_PROLOGUE` — sent right after approve.
 - `CONTRACT_TERMS` — verbatim contract terms (1500 ¥ penalty etc.).
-- `VISA_ANKETA_TEMPLATE` — long English visa form.
+- `VISA_ANKETA_TEMPLATE` — long English visa form (values filled in English, as in the passport).
 - `VISA_PHOTO_REQUIREMENTS` — passport photo size + filled passport pages.
 - `REJECTION_DEFAULT` — fallback rejection text (operator can pass `{reason: "..."}` to override).
 - `AWAITING_APPROVAL_REPLY` — what the candidate sees while operator decides.
