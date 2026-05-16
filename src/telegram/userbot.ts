@@ -173,7 +173,7 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
       }
       if (!user) continue;
 
-      const conv = await d.conversations.ensureForUser(user.id);
+      const conv = await d.conversations.ensureForUser(user.id, "userbot");
       const persisted = await d.messages.addUserMessageIfNew({
         conversationId: conv.id,
         tgMessageId: msg.id,
@@ -384,7 +384,7 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
         return;
       }
 
-      const conv = await conversations.ensureForUser(user.id);
+      const conv = await conversations.ensureForUser(user.id, "userbot");
 
       const persisted = await messages.addUserMessageIfNew({
         conversationId: conv.id,

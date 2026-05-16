@@ -110,7 +110,7 @@ export function createApproveLeadHandler(deps: AdminApiDeps): RouteHandler {
     const service = buildLeadsService(deps);
     if (service) {
       await service.sendApprovalMessages({ lead: inDocs, user });
-      const conv = await conversations.byUserId(user.id);
+      const conv = await conversations.byUserId(user.id, "userbot");
       if (conv) {
         await service.refreshOpsCard({
           lead: inDocs,
@@ -165,7 +165,7 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
         user,
         ...(reason ? { customReason: reason } : {}),
       });
-      const conv = await conversations.byUserId(user.id);
+      const conv = await conversations.byUserId(user.id, "userbot");
       if (conv) {
         await service.refreshOpsCard({
           lead: updated,
@@ -243,7 +243,7 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
 
     const service = buildLeadsService(deps);
     if (service) {
-      const conv = await conversations.byUserId(user.id);
+      const conv = await conversations.byUserId(user.id, "userbot");
       if (conv) {
         await service.postVisaSubmissionPackage({
           lead: transitioned,
@@ -278,7 +278,7 @@ export function createLeadDetailHandler(deps: AdminApiDeps): RouteHandler {
     if (!lead) return json({ error: "not found" }, { status: 404 });
     const user = await usersRepo.byId(lead.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
-    const conv = await conversations.byUserId(user.id);
+    const conv = await conversations.byUserId(user.id, "userbot");
     return json({
       lead,
       user,
@@ -491,7 +491,7 @@ export function createLeadCallbackHandler(deps: AdminApiDeps) {
       const approved = (await leadsRepo.setState(leadId, "approved")) ?? lead;
       const inDocs = (await leadsRepo.setState(leadId, "docs_pending")) ?? approved;
       await service.sendApprovalMessages({ lead: inDocs, user });
-      const conv = await conversations.byUserId(user.id);
+      const conv = await conversations.byUserId(user.id, "userbot");
       if (conv) {
         await service.refreshOpsCard({
           lead: inDocs,
@@ -508,7 +508,7 @@ export function createLeadCallbackHandler(deps: AdminApiDeps) {
       const rejected = (await leadsRepo.setState(leadId, "rejected")) ?? lead;
       runAttribution(deps, rejected);
       await service.sendRejection({ user });
-      const conv = await conversations.byUserId(user.id);
+      const conv = await conversations.byUserId(user.id, "userbot");
       if (conv) {
         await service.refreshOpsCard({
           lead: rejected,

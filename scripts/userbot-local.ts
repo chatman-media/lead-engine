@@ -223,7 +223,7 @@ async function runCycle(iteration: number): Promise<void> {
           }
           if (!user) continue;
 
-          const conv = await conversations.ensureForUser(user.id);
+          const conv = await conversations.ensureForUser(user.id, "userbot");
           const persisted = await messages.addUserMessageIfNew({
             conversationId: conv.id,
             tgMessageId: msg.id,

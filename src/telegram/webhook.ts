@@ -197,7 +197,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       return json({ ok: true, ignored: "not-whitelisted" });
     }
 
-    const conv = await conversations.ensureForUser(user.id);
+    const conv = await conversations.ensureForUser(user.id, "bot");
 
     // Idempotency boundary. Telegram retries webhook deliveries with the
     // same message_id when we don't ack in ~60s; we collapse retries to a

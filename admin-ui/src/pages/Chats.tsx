@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ws } from "../App.tsx";
-import { api, type Conversation } from "../api.ts";
+import { api, type Conversation, type ConversationSource } from "../api.ts";
 
 function relativeTime(unix: number | null) {
   if (!unix) return "—";
@@ -16,15 +16,56 @@ function modeBadge(mode: Conversation["mode"]) {
   return <span className={`badge badge-${mode}`}>{mode}</span>;
 }
 
+// Channel badge — `userbot` is the real funnel, `bot` is test traffic.
+const SOURCE_LABEL: Record<ConversationSource, string> = {
+  userbot: "личка",
+  bot: "тест",
+  self_play: "self-play",
+};
+const SOURCE_COLOR: Record<ConversationSource, string> = {
+  userbot: "#16a34a",
+  bot: "#9ca3af",
+  self_play: "#a855f7",
+};
+function sourceBadge(source: ConversationSource) {
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        padding: "1px 6px",
+        borderRadius: 4,
+        border: `1px solid ${SOURCE_COLOR[source]}`,
+        color: SOURCE_COLOR[source],
+      }}
+    >
+      {SOURCE_LABEL[source]}
+    </span>
+  );
+}
+
+// Filter options for the channel selector. `userbot` first so the default
+// view is the real funnel — test traffic stays out of sight unless asked for.
+const SOURCE_FILTERS: Array<{ value: ConversationSource | "all"; label: string }> = [
+  { value: "userbot", label: "Личка" },
+  { value: "bot", label: "Тест" },
+  { value: "all", label: "Все" },
+];
+
 export function Chats() {
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sourceFilter, setSourceFilter] = useState<ConversationSource | "all">("userbot");
   const navigate = useNavigate();
   const tickRef = useRef<ReturnType<typeof setInterval>>(null);
+  // Keep the latest filter in a ref so the WS-triggered reload (set up once
+  // in an effect) always reads the current value without re-subscribing.
+  const sourceRef = useRef(sourceFilter);
+  sourceRef.current = sourceFilter;
 
   function reload() {
+    const s = sourceRef.current;
     api
-      .conversations()
+      .conversations(false, s === "all" ? undefined : s)
       .then(({ conversations }) => setConvs(conversations))
       .finally(() => setLoading(false));
   }
@@ -60,7 +101,14 @@ export function Chats() {
       if (tickRef.current) clearInterval(tickRef.current);
       unsub();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-fetch when the operator switches the channel filter.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    reload();
+  }, [sourceFilter]);
 
   const queued = convs.filter((c) => c.mode === "queued");
   const rest = convs.filter((c) => c.mode !== "queued");
@@ -75,6 +123,18 @@ export function Chats() {
             ▲ {queued.length} требует внимания
           </span>
         )}
+        <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+          {SOURCE_FILTERS.map((f) => (
+            <button
+              key={f.value}
+              type="button"
+              onClick={() => setSourceFilter(f.value)}
+              className={`btn btn-sm ${sourceFilter === f.value ? "btn-primary" : "btn-ghost"}`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </span>
       </div>
 
       {loading ? (
@@ -96,6 +156,7 @@ export function Chats() {
                 <div className="chat-time">{relativeTime(c.last_message_at)}</div>
               </div>
 
+              {sourceBadge(c.source)}
               {modeBadge(c.mode)}
 
               <button
