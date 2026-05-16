@@ -430,6 +430,21 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return;
   }
 
+  // A bare photo/media upload (no caption) is not a question — never
+  // generate a chat reply for it. Still run the post-reply hooks so the
+  // photo gets classified and the candidate gets ONE deduped
+  // acknowledgement per album (passport received / full-body nudge),
+  // plus the intake / visa-docs updates. Applies the same in ai and
+  // queued mode — a photo never triggers the queued-retry RAG path.
+  if (d.mediaOnly) {
+    log.debug("media-only turn — hooks only, no chat reply", {
+      scope: "webhook",
+      conv_id: d.conv.id,
+    });
+    if (d.rag) await runPostReplyHooks(d);
+    return;
+  }
+
   if (d.conv.mode === "queued") {
     if (!d.rag) {
       return;
