@@ -373,25 +373,3 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC
 CREATE INDEX IF NOT EXISTS idx_audit_log_admin_id ON audit_log(admin_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action, created_at DESC);
 
--- MTProto proxy list managed via /admin/ops. When non-empty, the userbot
--- subprocess reads from here instead of USERBOT_MTPROXY_LIST so the operator
--- can swap entries without redeploying. Each row preserves the original raw
--- input string (`raw`) for round-trip display in the admin UI alongside the
--- parsed fields. last_status + last_tried_at + last_error are updated by
--- the userbot subprocess after each connect attempt so the admin table can
--- show which entries are alive.
-CREATE TABLE IF NOT EXISTS userbot_proxies (
-  id              SERIAL  PRIMARY KEY,
-  position        INTEGER NOT NULL,
-  raw             TEXT    NOT NULL,
-  parsed_host     TEXT    NOT NULL,
-  parsed_port     INTEGER NOT NULL,
-  parsed_secret   TEXT    NOT NULL,
-  last_status     TEXT    NOT NULL DEFAULT 'never_tried'
-    CHECK (last_status IN ('never_tried', 'ok', 'timeout', 'failed')),
-  last_tried_at   INTEGER,
-  last_error      TEXT,
-  last_connect_ms INTEGER,
-  created_at      INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_userbot_proxies_position ON userbot_proxies(position);

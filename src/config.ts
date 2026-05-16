@@ -287,42 +287,6 @@ export const config = {
     /** From https://my.telegram.org — required when TELEGRAM_USERBOT=1. */
     apiId: envInt("TELEGRAM_API_ID", 0),
     apiHash: envOptional("TELEGRAM_API_HASH", ""),
-    /**
-     * Optional MTProto proxy. Use when your server's egress IP can't reach
-     * Telegram DCs directly (geoblock, ISP filter). Accepted formats:
-     *   - `host:port:secret`
-     *   - `tg://proxy?server=H&port=P&secret=S`
-     *   - `https://t.me/proxy?server=H&port=P&secret=S`
-     * Empty string = direct connection. Validated by `parseMTProxy()` at
-     * boot — malformed values are rejected loudly rather than silently
-     * falling back to direct (which would defeat the point on a blocked
-     * server).
-     */
-    mtproxy: envOptional("USERBOT_MTPROXY", ""),
-    /**
-     * Newline-separated list of MTProto proxies (same formats as `mtproxy`).
-     * Takes precedence over `mtproxy` when set. The userbot subprocess tries
-     * them in order, falling back to the next one on connect TIMEOUT, until
-     * one succeeds. Useful for community proxy lists that rotate every ~12h
-     * — paste the full list and the bot picks whatever's alive.
-     *
-     * Empty/comment lines (`# …`) skipped. If all proxies in the list fail,
-     * the subprocess exits and the parent restarts the loop after 10s — the
-     * list is re-read on every restart so an updated env value is picked up
-     * without a code change.
-     */
-    mtproxyList: envOptional("USERBOT_MTPROXY_LIST", ""),
-    /**
-     * Per-attempt connect deadline in seconds when iterating the proxy list.
-     * Default 60s — empirically the average healthy MTProto handshake over a
-     * geo-restricted route can take 30-50s (TLS + obfuscation negotiation +
-     * the initial update-state fetch). 45s was clipping borderline-healthy
-     * proxies; 60s catches them at the cost of slower fail-through on a
-     * list of dead entries. Lower this if your list has many duds and you'd
-     * rather burn through fast; raise it if a slow proxy is the only live
-     * option on your network.
-     */
-    proxyConnectTimeoutSec: envInt("USERBOT_PROXY_CONNECT_TIMEOUT_SEC", 60),
   },
   sales: {
     /**

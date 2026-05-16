@@ -4,7 +4,6 @@ import {
   createApproveKbSuggestionHandler,
   createApproveLeadHandler,
   createBulkExportConversationsHandler,
-  createClearUserbotProxyStatusesHandler,
   createConversationDetailHandler,
   createCreateExperimentHandler,
   createCreateKbSuggestionHandler,
@@ -54,7 +53,6 @@ import {
   createListSkillsHandler,
   createListStyleRatingsHandler,
   createListStylesHandler,
-  createListUserbotProxiesHandler,
   createListUsersHandler,
   createListVacanciesHandler,
   createMarkSubmittedHandler,
@@ -65,7 +63,6 @@ import {
   createRejectKbSuggestionHandler,
   createRejectLeadHandler,
   createReleaseHandler,
-  createReplaceUserbotProxiesHandler,
   createReplyHandler,
   createReseedVacanciesHandler,
   createRollbackCoachProposalHandler,
@@ -394,12 +391,6 @@ export function createRouter(deps: AppDeps): Router {
   router.post("/admin/api/ops/vacancies/reseed", createReseedVacanciesHandler(apiDeps));
   router.post("/admin/api/ops/skill-outcomes/purge", createPurgeOutcomesHandler(apiDeps));
   router.get("/admin/api/ops/userbot/queue-stats", createUserbotQueueStatsHandler(apiDeps));
-  router.get("/admin/api/ops/userbot/proxies", createListUserbotProxiesHandler(apiDeps));
-  router.put("/admin/api/ops/userbot/proxies", createReplaceUserbotProxiesHandler(apiDeps));
-  router.post(
-    "/admin/api/ops/userbot/proxies/clear-statuses",
-    createClearUserbotProxyStatusesHandler(apiDeps),
-  );
 
   // Operator-editable runtime settings (LLM model, temperature, RAG flags).
   router.get("/admin/api/settings/runtime", createGetRuntimeSettingsHandler(apiDeps));

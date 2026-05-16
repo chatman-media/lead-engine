@@ -25,7 +25,6 @@ import { VacanciesRepo } from "../db/repos/vacancies.ts";
 import { log } from "../log.ts";
 import { classifyPhoto } from "../rag/vision.ts";
 import type { TelegramClient } from "./client.ts";
-import type { ParsedMTProxy } from "./mtproxy.ts";
 import type { TgReplyMarkup, TgSendMessageResult } from "./types.ts";
 import type { RagDeps } from "./webhook.ts";
 import { processInbound } from "./webhook.ts";
@@ -34,9 +33,6 @@ export interface UserbotDeps {
   db: Sql;
   apiId: number;
   apiHash: string;
-  /** Optional MTProto proxy. Pre-parsed via `parseMTProxy()` from a config
-   *  string. Used when the server can't reach Telegram DCs directly. */
-  proxy?: ParsedMTProxy;
   rag?: RagDeps;
   onEvent?: Parameters<typeof processInbound>[0]["onEvent"];
 }
@@ -348,21 +344,10 @@ const UNREAD_SWEEP_INTERVAL_MS = 60_000;
 const USER_RATE_LIMIT_MS = 5_000;
 
 export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
-  const { db, apiId, apiHash, proxy, rag, onEvent } = deps;
+  const { db, apiId, apiHash, rag, onEvent } = deps;
 
   const sessionString = process.env.USERBOT_SESSION || (await loadUserbotSession(db));
   const session = new StringSession(sessionString);
-
-  if (proxy) {
-    log.info("starting via MTProto proxy", {
-      scope: "userbot",
-      proxy_host: proxy.ip,
-      proxy_port: proxy.port,
-      // secret intentionally not logged — it'd land in centralized logs
-      // verbatim. Host+port already give an operator enough to pinpoint
-      // which entry from their list is in use.
-    });
-  }
 
   const client = new GramjsClient(session, apiId, apiHash, {
     // gramjs uses this in `for (attempt = 0; attempt < retries; attempt++)`
@@ -378,7 +363,6 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     // Default timeout is 10s; first connect over a slow link can exceed
     // that. 30s gives the update-state fetch headroom.
     timeout: 30,
-    ...(proxy ? { proxy } : {}),
   });
 
   // `client.connect()` RETURNS a boolean (false = could not connect) — it
