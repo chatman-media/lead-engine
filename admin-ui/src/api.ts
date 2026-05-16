@@ -839,6 +839,10 @@ export const api = {
    *  session cookie. Used directly in <img src> / <video src>. */
   tgFileUrl: (fileId: string) => `/admin/api/tg-files/${encodeURIComponent(fileId)}`,
 
+  /** URL of userbot-channel media (photos sent to the personal account),
+   *  served from disk by message id — MTProto media has no Bot API file_id. */
+  mediaUrl: (messageId: number) => `/admin/api/media/${messageId}`,
+
   /** URL of the bulk JSONL export. Filters are forwarded as query params. */
   bulkConversationExportUrl: (filters: {
     styleId?: number;

@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 function env(name: string, fallback?: string): string {
   const v = process.env[name] ?? fallback;
   if (v === undefined || v === "") {
@@ -230,6 +232,16 @@ export const config = {
     enabled: envTruthy("VISION_ENABLED", false),
     /** OpenRouter slug for a vision-capable model. */
     model: envOptional("VISION_MODEL", "google/gemini-2.5-flash"),
+  },
+  /**
+   * Where userbot-channel media (photos sent to the personal account) is
+   * stored on disk. Bot API media is fetched on demand via the bot token,
+   * but MTProto media has no Bot API file_id — the userbot downloads the
+   * bytes once and saves them here; the admin serves them from this dir.
+   * Relative paths resolve against the app root.
+   */
+  media: {
+    dir: resolve(import.meta.dir, "..", envOptional("MEDIA_DIR", "data/media")),
   },
   admin: {
     sessionCookie: envOptional("ADMIN_SESSION_COOKIE", "tg_admin_sid"),

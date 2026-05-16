@@ -1,9 +1,11 @@
-import { TelegramClient as GramjsClient } from "telegram";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { type Api, TelegramClient as GramjsClient } from "telegram";
 import { NewMessage } from "telegram/events";
 import { StringSession } from "telegram/sessions";
-import { telegramOpenAccess } from "../config.ts";
+import { config, telegramOpenAccess } from "../config.ts";
 import type { Sql } from "../db/postgres.ts";
-import { ConversationsRepo } from "../db/repos/conversations.ts";
+import { type ConversationRow, ConversationsRepo } from "../db/repos/conversations.ts";
 import { ExperimentsRepo } from "../db/repos/experiments.ts";
 import { KbRepo } from "../db/repos/kb.ts";
 import { KbSuggestionsRepo } from "../db/repos/kb-suggestions.ts";
@@ -21,6 +23,7 @@ import { loadUserbotSession, saveUserbotSession } from "../db/repos/userbot-sess
 import { UsersRepo } from "../db/repos/users.ts";
 import { VacanciesRepo } from "../db/repos/vacancies.ts";
 import { log } from "../log.ts";
+import { classifyPhoto } from "../rag/vision.ts";
 import type { TelegramClient } from "./client.ts";
 import type { ParsedMTProxy } from "./mtproxy.ts";
 import type { TgReplyMarkup, TgSendMessageResult } from "./types.ts";
@@ -105,6 +108,95 @@ function makeUserbotSender(
   } as unknown as TelegramClient;
 }
 
+/**
+ * Persist a photo a candidate sent to the userbot (Alina's) account.
+ *
+ * MTProto media has no Bot API `file_id`, so we download the bytes via
+ * gramjs once, save them under `config.media.dir`, and reference the
+ * filename in `meta_json.media`. Without this the userbot dropped photos
+ * entirely (the live handler/sweep skipped non-text messages) — passport
+ * photos in the real funnel were never recorded.
+ *
+ * Vision classification (passport / full_body / ...) runs fire-and-forget
+ * so it never delays persistence; the result is stamped onto
+ * `meta_json.media.photo_class` and an event nudges the admin UI.
+ *
+ * Idempotent: album re-delivery / sweep overlap is collapsed by
+ * `addUserMessageIfNew`'s (conversation_id, tg_message_id) dedupe.
+ */
+async function handleInboundPhoto(d: {
+  client: GramjsClient;
+  msg: Api.Message;
+  conv: ConversationRow;
+  tgUserId: number;
+  messages: MessagesRepo;
+  conversations: ConversationsRepo;
+  onEvent?: UserbotDeps["onEvent"];
+}): Promise<void> {
+  const { client, msg, conv, tgUserId, messages, conversations, onEvent } = d;
+
+  let buf: Buffer;
+  try {
+    const downloaded = await client.downloadMedia(msg, {});
+    if (!downloaded || typeof downloaded === "string") {
+      log.warn("userbot: photo download returned no bytes", {
+        scope: "userbot",
+        tg_message_id: msg.id,
+      });
+      return;
+    }
+    buf = downloaded as Buffer;
+  } catch (err) {
+    log.error("userbot: photo download failed", { scope: "userbot", tg_message_id: msg.id, err });
+    return;
+  }
+
+  const filename = `${conv.id}-${msg.id}.jpg`;
+  try {
+    await mkdir(config.media.dir, { recursive: true });
+    await Bun.write(join(config.media.dir, filename), buf);
+  } catch (err) {
+    log.error("userbot: photo save failed", { scope: "userbot", filename, err });
+    return;
+  }
+
+  const caption = msg.text?.trim();
+  const persisted = await messages.addUserMessageIfNew({
+    conversationId: conv.id,
+    tgMessageId: msg.id,
+    text: caption || "[photo]",
+    meta: { media: { type: "photo", source: "userbot", file: filename } },
+  });
+  if (!persisted.isNew) return;
+
+  await conversations.touch(conv.id);
+  onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
+  log.info("userbot: photo persisted", {
+    scope: "userbot",
+    tg_message_id: msg.id,
+    conv_id: conv.id,
+  });
+
+  if (!config.vision.enabled || !config.openrouter.apiKey) return;
+  const apiKey = config.openrouter.apiKey;
+  const messageId = persisted.message.id;
+  const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+  classifyPhoto({ bytes, model: config.vision.model, apiKey, baseUrl: config.openrouter.baseUrl })
+    .then(async (photoClass) => {
+      await messages.setPhotoClass(messageId, photoClass);
+      log.info("userbot: photo classified", {
+        scope: "userbot",
+        tg_message_id: msg.id,
+        photo_class: photoClass,
+      });
+      // Nudge the admin UI to re-fetch so the passport badge appears.
+      onEvent?.({ type: "conversation-mode-changed", conversationId: conv.id });
+    })
+    .catch((err) => {
+      log.error("userbot: photo classification failed", { scope: "userbot", err });
+    });
+}
+
 interface ProcessUnreadDeps {
   client: GramjsClient;
   users: UsersRepo;
@@ -164,7 +256,8 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
     for (const msg of [...msgs].reverse()) {
       if (msg.out) continue;
       const text = msg.text ?? "";
-      if (!text.trim()) continue;
+      const isPhoto = !!msg.photo;
+      if (!isPhoto && !text.trim()) continue;
 
       const userExisting = await d.users.byTgId(tgUserId);
       let user = userExisting;
@@ -174,6 +267,20 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
       if (!user) continue;
 
       const conv = await d.conversations.ensureForUser(user.id, "userbot");
+
+      if (isPhoto) {
+        await handleInboundPhoto({
+          client: d.client,
+          msg,
+          conv,
+          tgUserId,
+          messages: d.messages,
+          conversations: d.conversations,
+          ...(d.onEvent ? { onEvent: d.onEvent } : {}),
+        });
+        continue;
+      }
+
       const persisted = await d.messages.addUserMessageIfNew({
         conversationId: conv.id,
         tgMessageId: msg.id,
@@ -350,22 +457,28 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
       if (!tgUserId) return;
 
       const text = msg.text ?? "";
-      if (!text.trim()) return;
+      const isPhoto = !!msg.photo;
+      if (!isPhoto && !text.trim()) return;
 
-      // Rate limit: drop messages arriving faster than USER_RATE_LIMIT_MS per user.
-      const now = Date.now();
-      const last = lastProcessedAt.get(tgUserId) ?? 0;
-      if (now - last < USER_RATE_LIMIT_MS) {
-        log.debug("rate-limited inbound", {
-          scope: "userbot",
-          tg_user_id: tgUserId,
-          since_last_ms: now - last,
-        });
-        return;
+      // Rate limit: drop text messages arriving faster than USER_RATE_LIMIT_MS
+      // per user. Photos are exempt — an album arrives as a burst of separate
+      // messages and doesn't trigger an LLM reply, so rate-limiting them would
+      // silently drop uploaded passport / full-body photos.
+      if (!isPhoto) {
+        const now = Date.now();
+        const last = lastProcessedAt.get(tgUserId) ?? 0;
+        if (now - last < USER_RATE_LIMIT_MS) {
+          log.debug("rate-limited inbound", {
+            scope: "userbot",
+            tg_user_id: tgUserId,
+            since_last_ms: now - last,
+          });
+          return;
+        }
+        lastProcessedAt.delete(tgUserId);
+        lastProcessedAt.set(tgUserId, now);
+        pruneLastProcessed();
       }
-      lastProcessedAt.delete(tgUserId);
-      lastProcessedAt.set(tgUserId, now);
-      pruneLastProcessed();
 
       const userExisting = await users.byTgId(tgUserId);
       let user = userExisting;
@@ -385,6 +498,19 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
       }
 
       const conv = await conversations.ensureForUser(user.id, "userbot");
+
+      if (isPhoto) {
+        await handleInboundPhoto({
+          client,
+          msg,
+          conv,
+          tgUserId,
+          messages,
+          conversations,
+          ...(onEvent ? { onEvent } : {}),
+        });
+        return;
+      }
 
       const persisted = await messages.addUserMessageIfNew({
         conversationId: conv.id,

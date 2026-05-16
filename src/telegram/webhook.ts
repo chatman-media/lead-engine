@@ -152,7 +152,9 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
             ...(message.text || message.caption
               ? { text: message.text ?? message.caption ?? "" }
               : {}),
-            ...(mediaInfo ? { media: { type: mediaInfo.type, file_id: mediaInfo.file_id } } : {}),
+            ...(mediaInfo?.file_id
+              ? { media: { type: mediaInfo.type, file_id: mediaInfo.file_id } }
+              : {}),
           };
           const ok = await service.relayFromOperator(relayInput);
           if (ok) {

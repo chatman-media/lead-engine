@@ -140,13 +140,20 @@ export interface ProcessInboundDeps {
  */
 export type MediaInfo = {
   type: "photo" | "video" | "voice" | "document";
-  file_id: string;
+  /** Bot API file reference — present for `bot`-channel media, fetched on
+   *  demand through the bot token. Absent for userbot/MTProto media. */
+  file_id?: string;
+  /** Filename (in `config.media.dir`) for `userbot`-channel media — MTProto
+   *  has no Bot API file_id, so the userbot downloads + saves the bytes. */
+  file?: string;
+  /** Which channel the media came through. Drives how the admin fetches it. */
+  source?: "bot" | "userbot";
   file_size?: number;
   mime_type?: string;
   /**
    * Vision classification of a photo (passport / full_body / portrait /
-   * other). Absent until the `runPhotoClassification` post-reply hook
-   * processes the message — only set for `type: "photo"`.
+   * other). Absent until vision classification processes the message —
+   * only set for `type: "photo"`.
    */
   photo_class?: PhotoClass;
 };
