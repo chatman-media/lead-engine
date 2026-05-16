@@ -130,6 +130,9 @@ test.describe("Admin Chats page", () => {
     await loginPage(page);
     await page.goto("/admin/chats");
     await expect(page.getByTestId("chats-list")).toBeVisible();
+    // Seeded conversations live on the `bot` channel (test traffic); the page
+    // defaults to the `userbot` funnel, so switch to the "Все" (all) filter.
+    await page.getByRole("button", { name: "Все" }).click();
     await expect(page.getByText("@charlie")).toBeVisible();
     await expect(page.getByText("@diana")).toBeVisible();
   });
