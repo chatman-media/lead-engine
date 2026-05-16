@@ -156,7 +156,7 @@ describe("webhook escalation trigger", () => {
     expect(msgs.map((m) => m.role)).toEqual(["user"]);
   });
 
-  test("non-trigger message in ai mode still goes through RAG", async () => {
+  test("non-trigger message with no KB context: bot still answers, stays in ai mode", async () => {
     const users = new UsersRepo(sql);
     await users.create({ tgUserId: 43 });
 
@@ -167,10 +167,13 @@ describe("webhook escalation trigger", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    expect(chatCalls).toBe(0); // KB is empty -> NO_CONTEXT without calling chat
+    // KB is empty → RAG yields NO_CONTEXT → the soft-fallback path makes one
+    // chat call so the bot answers in its own voice instead of going silent.
+    expect(chatCalls).toBe(1);
+    expect(sent.some((c) => c.method === "sendMessage")).toBe(true);
     const user = await new UsersRepo(sql).byTgId(43);
     const conv = await new ConversationsRepo(sql).byUserId(user!.id);
-    // NO_CONTEXT now queues conversation for operator reply
-    expect(conv!.mode).toBe("queued");
+    // NO_CONTEXT no longer queues — the soft fallback keeps it in ai mode.
+    expect(conv!.mode).toBe("ai");
   });
 });
