@@ -33,7 +33,7 @@ export function Login() {
     <div className="login-wrap">
       <div className="login-card fade-in">
         <div className="login-logo">
-          <div className="login-logo-name">Infinity chatbot</div>
+          <div className="login-logo-name">Infinity Agency</div>
           <div className="login-logo-sub">Только для администраторов</div>
         </div>
 
