@@ -15,6 +15,18 @@ import { OpenRouterChatClient } from "../rag/providers/openrouter-chat.ts";
 import type { Style } from "../sales/types.ts";
 import { type ParsedMTProxy, parseMTProxy, parseMTProxyList } from "./mtproxy.ts";
 import { startUserbot } from "./userbot.ts";
+import type { WebhookEvent } from "./webhook-types.ts";
+
+/**
+ * Forward inbound-pipeline events to the parent (main server) process over
+ * Bun IPC. The parent routes them into the AdminBus so userbot-channel chats
+ * update live in the admin UI. `process.send` is only defined when this
+ * process was spawned with an `ipc` handler — guarded so a standalone run
+ * (e.g. manual debugging) just drops the events silently.
+ */
+const onEvent = (event: WebhookEvent): void => {
+  process.send?.(event);
+};
 
 /** A proxy ready to dial, optionally tagged with the DB id so per-attempt
  *  status writes can land on the right row. `id` absent = came from env. */
@@ -118,6 +130,7 @@ async function runUserbot() {
         apiId: config.userbot.apiId,
         apiHash: config.userbot.apiHash,
         rag,
+        onEvent,
       });
     } catch (err) {
       log.error("startUserbot (direct) failed; restarting in 10s", {
@@ -151,6 +164,7 @@ async function runUserbot() {
           apiHash: config.userbot.apiHash,
           proxy,
           rag,
+          onEvent,
         }),
         timeoutMs,
       );

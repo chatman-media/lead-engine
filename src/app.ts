@@ -88,6 +88,7 @@ import {
 } from "./admin/api.ts";
 import { createLoginHandler, createLogoutHandler, createMeHandler } from "./admin/auth.ts";
 import type { AdminBus } from "./admin/bus.ts";
+import { createInboundEventBridge } from "./admin/inbound-events.ts";
 import { config } from "./config.ts";
 import type { Sql } from "./db/postgres.ts";
 import { renderPrometheus } from "./metrics.ts";
@@ -216,43 +217,7 @@ export function createRouter(deps: AppDeps): Router {
           leadsChatId: deps.leadsChatId ?? null,
           visaChatId: deps.visaChatId ?? null,
         }),
-        onEvent: (event) => {
-          switch (event.type) {
-            case "user-message-persisted":
-            case "assistant-replied":
-              deps.bus?.publish({
-                type: "message:new",
-                conversationId: event.conversationId,
-                tgUserId: event.tgUserId,
-              });
-              return;
-            case "conversation-mode-changed":
-              deps.bus?.publish({
-                type: "conversation:updated",
-                conversationId: event.conversationId,
-              });
-              return;
-            case "kb-suggestion:created": {
-              deps.bus?.publish({
-                type: "kb-suggestion:created",
-                suggestionId: event.suggestionId,
-                conversationId: event.conversationId,
-              });
-              // DM the admin in Telegram so they can jump to the chat immediately.
-              const adminTgId = config.admin.tgUserId;
-              if (adminTgId) {
-                const adminUrl = `${config.publicBaseUrl}/admin/kb-suggestions`;
-                deps.telegram
-                  .sendMessage({
-                    chatId: adminTgId,
-                    text: `❓ Новый вопрос без ответа (conversation #${event.conversationId})\n\nОткрыть: ${adminUrl}`,
-                  })
-                  .catch(() => undefined);
-              }
-              return;
-            }
-          }
-        },
+        onEvent: createInboundEventBridge({ bus: deps.bus, telegram: deps.telegram }),
       }),
     ),
   );

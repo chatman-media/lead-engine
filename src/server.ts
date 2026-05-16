@@ -84,7 +84,7 @@ function withSecurityHeaders(res: Response): Response {
   });
 }
 
-export interface CreateServerOptions extends Omit<AppDeps, "bus"> {
+export interface CreateServerOptions extends AppDeps {
   port: number;
   /** Path of the WebSocket endpoint. Defaults to /admin/api/ws. */
   wsPath?: string;
@@ -95,7 +95,9 @@ export interface CreateServerOptions extends Omit<AppDeps, "bus"> {
 export function createServer(opts: CreateServerOptions): Server<AdminWsData> {
   const wsPath = opts.wsPath ?? "/admin/api/ws";
   const shouldServeUi = opts.serveUi ?? process.env.SERVE_UI === "1";
-  const bus = new AdminBus();
+  // Caller may supply a shared bus (so it can also forward events from the
+  // userbot subprocess); otherwise own one.
+  const bus = opts.bus ?? new AdminBus();
   const router = createRouter({ ...opts, bus });
   const sql = opts.sql;
 
