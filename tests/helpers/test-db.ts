@@ -41,10 +41,11 @@ export function getTestSql(): TestSql {
   // BIGINT → number cast mirrors src/db/postgres.ts so tests see the same types
   // as production (Telegram IDs fit in Number.MAX_SAFE_INTEGER).
   //
-  // `max: 1` is intentional: with 50+ test files each owning a pool, even
-  // max:3 risks blowing past Postgres's default `max_connections=100` when
-  // the harness runs files in parallel. Tests inside a single file are
-  // serial, so one connection suffices; the constraint is between-file.
+  // `max: 1` is intentional. Bun runs test files sequentially in one process
+  // (one file fully finishes — hooks included — before the next is imported),
+  // so only one file's pool is ever active at a time and a single connection
+  // is enough. It also keeps the per-file query stream strictly ordered, which
+  // is what setupTestDb's start-of-file TRUNCATE relies on.
   return postgres(url, {
     max: 1,
     idle_timeout: 5,
@@ -86,6 +87,15 @@ export async function setupTestDb(
     CREATE INDEX IF NOT EXISTS idx_kb_chunks_embedding_hnsw
       ON kb_chunks USING hnsw (embedding vector_cosine_ops)
   `;
+  // Every test file shares the one `tgchatbot_test` database. afterEach's
+  // cleanTestDb keeps tests inside a file isolated, but a file still inherits
+  // whatever the *previous* file left behind — and a previous file can leak
+  // rows past its own afterEach (e.g. a postgres.js query that lands after the
+  // final TRUNCATE). That stale state used to collide with this file's fixtures
+  // (`admins_email_key` duplicates, dangling FKs) and made the suite flaky.
+  // Truncating here, in beforeAll, guarantees every file starts from a clean
+  // slate regardless of what ran before it.
+  await cleanTestDb(sql);
 }
 
 export async function cleanTestDb(sql: TestSql): Promise<void> {
