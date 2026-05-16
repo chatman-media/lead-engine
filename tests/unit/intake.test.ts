@@ -4,7 +4,12 @@ import { ConversationsRepo } from "@/db/repos/conversations.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { extractIntake, parseIntakeJson } from "@/leads/intake.ts";
-import { isIntakeComplete } from "@/leads/templates.ts";
+import {
+  INTAKE_TEMPLATE,
+  INTAKE_TEMPLATE_EN,
+  intakeTemplate,
+  isIntakeComplete,
+} from "@/leads/templates.ts";
 import type { ChatClient, ChatMessage } from "@/rag/chat.ts";
 import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
@@ -269,5 +274,25 @@ describe("extractIntake + isIntakeComplete", () => {
         dance_video_received: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe("intakeTemplate — RU/EN switch", () => {
+  test("returns the Russian checklist for 'ru' (default)", () => {
+    expect(intakeTemplate("ru")).toBe(INTAKE_TEMPLATE);
+    expect(intakeTemplate("ru")).toContain("Заполните анкету");
+  });
+
+  test("returns the English checklist for 'en'", () => {
+    expect(intakeTemplate("en")).toBe(INTAKE_TEMPLATE_EN);
+    expect(intakeTemplate("en")).toContain("Please fill in");
+  });
+
+  test("both versions list 15 numbered items", () => {
+    for (const tpl of [INTAKE_TEMPLATE, INTAKE_TEMPLATE_EN]) {
+      for (let i = 1; i <= 15; i++) {
+        expect(tpl).toContain(`${i}.`);
+      }
+    }
   });
 });

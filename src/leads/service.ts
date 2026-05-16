@@ -11,8 +11,9 @@ import {
   CONTRACT_TERMS,
   DOCS_COMPLETE_REPLY,
   INTAKE_FIELD_LABELS,
-  INTAKE_TEMPLATE,
   type IntakeFields,
+  type IntakeLang,
+  intakeTemplate,
   REJECTION_DEFAULT,
   SUBMITTED_REPLY,
   VISA_ANKETA_TEMPLATE,
@@ -204,13 +205,15 @@ export class LeadsService {
     }
   }
 
-  async sendIntakeTemplate(input: { user: UserRow }): Promise<void> {
+  /** Sends the intake checklist in the operator-chosen language
+   *  (defaults to Russian). */
+  async sendIntakeTemplate(input: { user: UserRow; lang?: IntakeLang }): Promise<void> {
     const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
     await this.relayToCandidate({
       chatId: input.user.tg_user_id,
       conversationId: conv.id,
-      text: INTAKE_TEMPLATE,
+      text: intakeTemplate(input.lang ?? "ru"),
     });
   }
 
