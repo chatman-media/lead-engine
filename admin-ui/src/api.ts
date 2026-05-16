@@ -611,6 +611,24 @@ export const api = {
       hybrid_count: number;
       rewrite_count: number;
       unanswered_rate: number;
+      funnel: {
+        by_state: Record<string, number>;
+        new_in_window: number;
+        decided: { approved: number; rejected: number };
+        submitted_in_window: number;
+        rejection_reasons: Array<{ reason: string; count: number }>;
+        avg_decision_seconds: number | null;
+        stage_dwell: Array<{ state: string; avg_seconds: number; n: number }>;
+      };
+      trend: {
+        bucket_seconds: number;
+        buckets: Array<{
+          start_unix: number;
+          conversations: number;
+          leads: number;
+          messages: number;
+        }>;
+      };
     }>(`/admin/api/analytics?window=${window}`),
 
   // Skill catalogue

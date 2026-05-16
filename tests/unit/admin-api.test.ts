@@ -1101,10 +1101,16 @@ describe("analytics endpoint", () => {
       total_assistant_messages: number;
       by_path: unknown[];
       latency: { total_ms: { count: number } };
+      funnel: { by_state: Record<string, number>; new_in_window: number };
+      trend: { bucket_seconds: number; buckets: unknown[] };
     };
     expect(body.window).toBe("24h");
     expect(typeof body.total_assistant_messages).toBe("number");
     expect(Array.isArray(body.by_path)).toBe(true);
+    expect(typeof body.funnel.new_in_window).toBe("number");
+    expect(typeof body.funnel.by_state).toBe("object");
+    expect(Array.isArray(body.trend.buckets)).toBe(true);
+    expect(body.trend.bucket_seconds).toBeGreaterThan(0);
   });
 
   test("aggregates real telemetry per path + latency percentiles", async () => {
@@ -1127,24 +1133,41 @@ describe("analytics endpoint", () => {
     await inject("no_context", 50);
     await inject("smalltalk", 5);
 
+    // An ungrounded turn — fact-checker verdict lives in telemetry.factCheck.
+    await sql`
+      INSERT INTO messages (conversation_id, role, text, meta_json)
+      VALUES (${cRow!.id}, 'assistant', 'dropped reply', ${JSON.stringify({
+        telemetry: {
+          path: "ungrounded",
+          total_ms: 80,
+          factCheck: { grounded: false, vacancyOk: true },
+        },
+      })})
+    `;
+
     const r = await fetch(url("/admin/api/analytics?window=24h"), authed());
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       total_assistant_messages: number;
       by_path: Array<{ path: string; count: number }>;
+      ungrounded_count: number;
       latency: {
         total_ms: { p50: number | null; p95: number | null; count: number };
         retrieval_ms: { count: number };
       };
     };
-    expect(body.total_assistant_messages).toBe(5);
+    expect(body.total_assistant_messages).toBe(6);
 
     const okCount = body.by_path.find((r2) => r2.path === "ok")?.count;
     expect(okCount).toBe(3);
     const noCtx = body.by_path.find((r2) => r2.path === "no_context")?.count;
     expect(noCtx).toBe(1);
 
-    expect(body.latency.total_ms.count).toBe(5);
+    // The ungrounded count must read telemetry.factCheck.grounded (not the
+    // long-removed `reflect` key) — so this turn is counted.
+    expect(body.ungrounded_count).toBe(1);
+
+    expect(body.latency.total_ms.count).toBe(6);
     expect(body.latency.total_ms.p50).toBeGreaterThan(0);
     expect(body.latency.retrieval_ms.count).toBe(5);
   });
