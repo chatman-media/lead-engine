@@ -90,6 +90,10 @@ export {
   createListSelfPlayMatchesHandler,
 } from "./routes/self-play.ts";
 export {
+  createGetRuntimeSettingsHandler,
+  createUpdateRuntimeSettingsHandler,
+} from "./routes/settings.ts";
+export {
   createGetShadowEvalHandler,
   createStartShadowEvalHandler,
 } from "./routes/shadow-eval.ts";

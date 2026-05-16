@@ -31,6 +31,7 @@ import {
   createGetKbDocumentHandler,
   createGetKbSuggestionHandler,
   createGetPairwiseMatchHandler,
+  createGetRuntimeSettingsHandler,
   createGetSelfPlayMatchHandler,
   createGetShadowEvalHandler,
   createGetStyleHandler,
@@ -79,6 +80,7 @@ import {
   createTakeHandler,
   createUpdateKbDocumentHandler,
   createUpdateKbSuggestionHandler,
+  createUpdateRuntimeSettingsHandler,
   createUpdateSkillHandler,
   createUpdateUserMemoryHandler,
   createUpdateVacancyHandler,
@@ -396,6 +398,10 @@ export function createRouter(deps: AppDeps): Router {
     "/admin/api/ops/userbot/proxies/clear-statuses",
     createClearUserbotProxyStatusesHandler(apiDeps),
   );
+
+  // Operator-editable runtime settings (LLM model, temperature, RAG flags).
+  router.get("/admin/api/settings/runtime", createGetRuntimeSettingsHandler(apiDeps));
+  router.put("/admin/api/settings/runtime", createUpdateRuntimeSettingsHandler(apiDeps));
 
   if (deps.enableTestHooks) {
     mountTestHooks(router, deps.sql);
