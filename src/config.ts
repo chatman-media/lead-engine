@@ -127,7 +127,7 @@ export const config = {
      * call per turn AFTER the reply (does not delay the reply itself).
      * Default: off (opt-in until you've seen the extraction quality on your model).
      */
-    userMemory: envTruthy("RAG_USER_MEMORY", false),
+    userMemory: envTruthy("RAG_USER_MEMORY", true),
     /**
      * Query rewriting: rephrase the user question into a search-friendly
      * query before vector retrieval. Resolves pronouns ("это", "там") using
@@ -135,7 +135,7 @@ export const config = {
      * Adds one LLM call per turn BEFORE the reply (small models are <500ms).
      * Default: off.
      */
-    queryRewrite: envTruthy("RAG_QUERY_REWRITE", false),
+    queryRewrite: envTruthy("RAG_QUERY_REWRITE", true),
     /**
      * Reflection: after generating an answer, verify all factual claims are
      * grounded in CONTEXT. If not, return NO_CONTEXT instead of sending a
@@ -143,7 +143,7 @@ export const config = {
      * fires on grounded turns (skipped for smalltalk / fact / NO_CONTEXT).
      * Default: off.
      */
-    reflect: envTruthy("RAG_REFLECT", false),
+    reflect: envTruthy("RAG_REFLECT", true),
     /**
      * Hybrid retrieval: combine vector search with BM25 keyword search and
      * fuse via Reciprocal Rank Fusion. Catches exact-match queries (numbers,
@@ -151,7 +151,7 @@ export const config = {
      * No extra LLM calls — only one extra PostgreSQL FTS query per turn.
      * Default: off.
      */
-    hybridSearch: envTruthy("RAG_HYBRID_SEARCH", false),
+    hybridSearch: envTruthy("RAG_HYBRID_SEARCH", true),
     /**
      * Conversation summarization: when total messages exceed ~30, older
      * turns get compressed into a paragraph stored in
@@ -160,7 +160,7 @@ export const config = {
      * lazily after each reply (1 LLM call per refresh, NOT per turn —
      * staleness threshold is 8 messages). Default: off.
      */
-    conversationSummary: envTruthy("RAG_CONVERSATION_SUMMARY", false),
+    conversationSummary: envTruthy("RAG_CONVERSATION_SUMMARY", true),
     /**
      * Topic-routed retrieval: when the question's topic can be classified
      * deterministically (regex over visa / payment / schedule / housing /
@@ -170,7 +170,7 @@ export const config = {
      * (no LLM); requires KB docs to be tagged at ingest (--topic flag or
      * `<topic>/` directory layout in `bun scripts/ingest.ts`). Default: off.
      */
-    topicRouting: envTruthy("RAG_TOPIC_ROUTING", false),
+    topicRouting: envTruthy("RAG_TOPIC_ROUTING", true),
     /**
      * Self-grade each assistant reply against the configured skill set:
      * after generation, ask the LLM which skills were demonstrably used.
@@ -180,14 +180,14 @@ export const config = {
      * +1 LLM call per turn — fire-and-forget after reply, doesn't block
      * the candidate. Default off; flip on during research windows.
      */
-    skillGrading: envTruthy("RAG_SKILL_GRADING", false),
+    skillGrading: envTruthy("RAG_SKILL_GRADING", true),
     /**
      * Books-priority retrieval: when enabled, the bot first searches only
      * documents tagged with topic="books" (management / manipulation library).
      * If those return ≥1 hit the bot answers from books; only falls back to
      * the general KB when the books slice is empty. Default: off.
      */
-    booksPriority: envTruthy("RAG_BOOKS_PRIORITY", false),
+    booksPriority: envTruthy("RAG_BOOKS_PRIORITY", true),
   },
   openai: {
     apiKey: envOptional("OPENAI_API_KEY"),
@@ -229,7 +229,7 @@ export const config = {
    * `openrouter.apiKey` / `openrouter.baseUrl`. Default: off (opt-in).
    */
   vision: {
-    enabled: envTruthy("VISION_ENABLED", false),
+    enabled: envTruthy("VISION_ENABLED", true),
     /** OpenRouter slug for a vision-capable model. */
     model: envOptional("VISION_MODEL", "google/gemini-2.5-flash"),
   },
@@ -287,42 +287,6 @@ export const config = {
     /** From https://my.telegram.org — required when TELEGRAM_USERBOT=1. */
     apiId: envInt("TELEGRAM_API_ID", 0),
     apiHash: envOptional("TELEGRAM_API_HASH", ""),
-    /**
-     * Optional MTProto proxy. Use when your server's egress IP can't reach
-     * Telegram DCs directly (geoblock, ISP filter). Accepted formats:
-     *   - `host:port:secret`
-     *   - `tg://proxy?server=H&port=P&secret=S`
-     *   - `https://t.me/proxy?server=H&port=P&secret=S`
-     * Empty string = direct connection. Validated by `parseMTProxy()` at
-     * boot — malformed values are rejected loudly rather than silently
-     * falling back to direct (which would defeat the point on a blocked
-     * server).
-     */
-    mtproxy: envOptional("USERBOT_MTPROXY", ""),
-    /**
-     * Newline-separated list of MTProto proxies (same formats as `mtproxy`).
-     * Takes precedence over `mtproxy` when set. The userbot subprocess tries
-     * them in order, falling back to the next one on connect TIMEOUT, until
-     * one succeeds. Useful for community proxy lists that rotate every ~12h
-     * — paste the full list and the bot picks whatever's alive.
-     *
-     * Empty/comment lines (`# …`) skipped. If all proxies in the list fail,
-     * the subprocess exits and the parent restarts the loop after 10s — the
-     * list is re-read on every restart so an updated env value is picked up
-     * without a code change.
-     */
-    mtproxyList: envOptional("USERBOT_MTPROXY_LIST", ""),
-    /**
-     * Per-attempt connect deadline in seconds when iterating the proxy list.
-     * Default 60s — empirically the average healthy MTProto handshake over a
-     * geo-restricted route can take 30-50s (TLS + obfuscation negotiation +
-     * the initial update-state fetch). 45s was clipping borderline-healthy
-     * proxies; 60s catches them at the cost of slower fail-through on a
-     * list of dead entries. Lower this if your list has many duds and you'd
-     * rather burn through fast; raise it if a slow proxy is the only live
-     * option on your network.
-     */
-    proxyConnectTimeoutSec: envInt("USERBOT_PROXY_CONNECT_TIMEOUT_SEC", 60),
   },
   sales: {
     /**

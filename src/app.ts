@@ -4,7 +4,6 @@ import {
   createApproveKbSuggestionHandler,
   createApproveLeadHandler,
   createBulkExportConversationsHandler,
-  createClearUserbotProxyStatusesHandler,
   createConversationDetailHandler,
   createCreateExperimentHandler,
   createCreateKbSuggestionHandler,
@@ -43,6 +42,7 @@ import {
   createKbWipeHandler,
   createLeadCallbackHandler,
   createLeadDetailHandler,
+  createLeadMediaHandler,
   createListCoachProposalsHandler,
   createListConversationsHandler,
   createListExperimentsHandler,
@@ -54,7 +54,6 @@ import {
   createListSkillsHandler,
   createListStyleRatingsHandler,
   createListStylesHandler,
-  createListUserbotProxiesHandler,
   createListUsersHandler,
   createListVacanciesHandler,
   createMarkSubmittedHandler,
@@ -65,7 +64,6 @@ import {
   createRejectKbSuggestionHandler,
   createRejectLeadHandler,
   createReleaseHandler,
-  createReplaceUserbotProxiesHandler,
   createReplyHandler,
   createReseedVacanciesHandler,
   createRollbackCoachProposalHandler,
@@ -123,6 +121,11 @@ export interface AppDeps {
   leadsChatId?: number | null;
   /** Group chat where the visa-submission package is posted. */
   visaChatId?: number | null;
+  /** Whether manual admin replies route through the userbot send queue
+   *  (Alina's personal account) instead of the Bot API. Defaults to
+   *  `config.userbot.enabled`; tests inject it explicitly so they don't
+   *  depend on the developer's local `.env`. */
+  userbotEnabled?: boolean;
 }
 
 // Rate limiters shared across the request lifetime. Telegram webhook is
@@ -239,7 +242,7 @@ export function createRouter(deps: AppDeps): Router {
   const apiDeps = {
     sql: deps.sql,
     telegram: deps.telegram,
-    userbotEnabled: config.userbot.enabled,
+    userbotEnabled: deps.userbotEnabled ?? config.userbot.enabled,
     // Thread the LLM clients through so the style playground endpoint can
     // run dry-run completions. Other admin endpoints don't need this; the
     // playground returns 503 when rag is undefined.
@@ -376,6 +379,7 @@ export function createRouter(deps: AppDeps): Router {
   // `/leads/:id` so /:id/notes doesn't get captured as a literal id.
   router.post("/admin/api/leads/:id/notes", createCreateLeadNoteHandler(apiDeps));
   router.delete("/admin/api/leads/:id/notes/:noteId", createDeleteLeadNoteHandler(apiDeps));
+  router.get("/admin/api/leads/:id/media", createLeadMediaHandler(apiDeps));
   // Detail / patch routes — register AFTER all `/leads/:id/<action>`
   // sub-paths so the literal sub-path matches first (router does
   // linear first-match scanning).
@@ -394,12 +398,6 @@ export function createRouter(deps: AppDeps): Router {
   router.post("/admin/api/ops/vacancies/reseed", createReseedVacanciesHandler(apiDeps));
   router.post("/admin/api/ops/skill-outcomes/purge", createPurgeOutcomesHandler(apiDeps));
   router.get("/admin/api/ops/userbot/queue-stats", createUserbotQueueStatsHandler(apiDeps));
-  router.get("/admin/api/ops/userbot/proxies", createListUserbotProxiesHandler(apiDeps));
-  router.put("/admin/api/ops/userbot/proxies", createReplaceUserbotProxiesHandler(apiDeps));
-  router.post(
-    "/admin/api/ops/userbot/proxies/clear-statuses",
-    createClearUserbotProxyStatusesHandler(apiDeps),
-  );
 
   // Operator-editable runtime settings (LLM model, temperature, RAG flags).
   router.get("/admin/api/settings/runtime", createGetRuntimeSettingsHandler(apiDeps));

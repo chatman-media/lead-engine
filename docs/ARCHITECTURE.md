@@ -38,7 +38,9 @@ POST /telegram/<secret>   ─┬─► whitelist (UsersRepo.byTgId / TELEGRAM_OP
                                                                 extractUserFacts → mergeMemoryFacts
                                                                 gradeSkills → recordSkillOutcome
                                                                 summarizeConversation
+                                                                classifyPhotos → setPhotoClass
                                                                 intakeCheck → leadStateTransition
+                                                                extractVisaDocs → updateVisaDocs (if docs_pending)
                                                                 kb-suggestion if NO_CONTEXT
 ```
 
@@ -87,7 +89,7 @@ POST /telegram/<secret>   ─┬─► whitelist (UsersRepo.byTgId / TELEGRAM_OP
 │  leads/                                                                     │
 │    service.ts   (state machine)                                             │
 │    intake.ts    (auto-extraction)                                           │
-│    visa-docs.ts (27-field parser)                                           │
+│    visa-docs.ts (32-field parser)                                           │
 │    stale-sweep.ts  (background job)                                         │
 │    outcome-attribution.ts                                                   │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -151,7 +153,7 @@ POST /telegram/<secret>   ─┬─► whitelist (UsersRepo.byTgId / TELEGRAM_OP
 | `pairwise_matches` | Head-to-head A/B матчи (два solo_match_id → winner) |
 | `coach_proposals` | Предложения coach-LLM: `proposal_json`, status (pending/approved/rejected/applied) |
 | `shadow_evaluations` | Post-coach A/B валидация: base vs variant, статус, pairwise match IDs |
-| `leads` | Воронка кандидата: `state` machine, `intake_json` (7 полей), `visa_docs_json` (27 полей), `application_id` |
+| `leads` | Воронка кандидата: `state` machine, `intake_json` (7 полей), `visa_docs_json` (32 поля, 18 required), `application_id` |
 | `lead_events` | Аудит-трейл переходов состояний |
 | `lead_notes` | Операторские аннотации к лиду |
 | `vacancies` | Быстро-меняющиеся вакансии. Prepended к RAG context на каждом turn. `url` — ссылка для кандидата |

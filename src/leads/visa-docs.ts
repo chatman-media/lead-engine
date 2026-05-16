@@ -25,10 +25,14 @@ export interface VisaFields {
   given_name?: string;
   date_of_birth?: string;
   country_of_birth?: string;
+  birth_province?: string;
   city_of_birth?: string;
   marital_status?: string;
   current_nationality?: string;
   national_id_number?: string;
+  other_nationalities?: string;
+  other_permanent_residence?: string;
+  held_other_nationalities?: string;
 
   // Passport
   passport_number?: string;
@@ -39,6 +43,7 @@ export interface VisaFields {
   // Contact
   current_address?: string;
   phone?: string;
+  mobile_phone?: string;
   email?: string;
 
   // Family — flat fields keep extraction prompt small. Full structured
@@ -73,16 +78,21 @@ export const VISA_FIELD_LABELS: Record<keyof VisaFields, string> = {
   given_name: "Given name",
   date_of_birth: "Date of birth",
   country_of_birth: "Country of birth",
+  birth_province: "Birth province / state",
   city_of_birth: "City of birth",
   marital_status: "Marital status",
   current_nationality: "Current nationality",
   national_id_number: "National ID number",
+  other_nationalities: "Other nationality(ies)",
+  other_permanent_residence: "Permanent residence elsewhere",
+  held_other_nationalities: "Previously held nationality(ies)",
   passport_number: "Passport number",
   passport_issuing_country: "Passport issuing country",
   passport_issuing_place: "Passport issuing place",
   passport_expiration_date: "Passport expiration",
   current_address: "Current address",
   phone: "Phone",
+  mobile_phone: "Mobile phone",
   email: "Email",
   father_name: "Father name",
   father_nationality: "Father nationality",
@@ -108,6 +118,7 @@ export const VISA_REQUIRED_FIELDS: ReadonlyArray<keyof VisaFields> = [
   "given_name",
   "date_of_birth",
   "country_of_birth",
+  "birth_province",
   "city_of_birth",
   "marital_status",
   "current_nationality",
@@ -125,18 +136,21 @@ export const VISA_REQUIRED_FIELDS: ReadonlyArray<keyof VisaFields> = [
 
 const SYSTEM_PROMPT = `Ты извлекаешь данные визовой анкеты из переписки рекрутингового агентства.
 
-Анкета на английском (Family name, Given name, Date of birth, Country/City of birth, Marital status, Current nationality, National ID, Passport number / issuing country / place / expiration, Address, Phone, Email, Father+Mother (name/nationality/DOB), Have you been to China?, Previous Chinese visa, Work experience, Education, Travel history past 12 months, Family).
+Анкета на английском (Family name, Given name, Date of birth, Country/Province/City of birth, Marital status, Current nationality, National ID, other nationality / permanent residence questions, Passport number / issuing country / place / expiration, Address, Phone, Mobile phone, Email, Father+Mother (name/nationality/DOB), Have you been to China?, Previous Chinese visa, Work experience, Education, Travel history past 12 months, Family).
 
 Извлекай ТОЛЬКО то, что девушка явно написала. Никаких догадок.
 
 Возвращаемые поля (все опциональные):
 - family_name, given_name, date_of_birth (yyyy-mm-dd если возможно)
-- country_of_birth, city_of_birth
+- country_of_birth, birth_province (область/штат рождения), city_of_birth
 - marital_status (single / married / divorced / ...)
 - current_nationality
 - national_id_number
+- other_nationalities (есть ли другое гражданство — yes/no + детали)
+- other_permanent_residence (ПМЖ в другой стране — yes/no + детали)
+- held_other_nationalities (было ли когда-либо другое гражданство — yes/no + детали)
 - passport_number, passport_issuing_country, passport_issuing_place, passport_expiration_date
-- current_address, phone, email
+- current_address, phone (домашний/общий телефон), mobile_phone (мобильный телефон), email
 - father_name, father_nationality, father_dob
 - mother_name, mother_nationality, mother_dob
 - been_to_china (yes / no), previous_chinese_visa (опиши коротко если есть)

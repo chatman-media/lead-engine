@@ -25,7 +25,6 @@ import { VacanciesRepo } from "../db/repos/vacancies.ts";
 import { log } from "../log.ts";
 import { classifyPhoto } from "../rag/vision.ts";
 import type { TelegramClient } from "./client.ts";
-import type { ParsedMTProxy } from "./mtproxy.ts";
 import type { TgReplyMarkup, TgSendMessageResult } from "./types.ts";
 import type { RagDeps } from "./webhook.ts";
 import { processInbound } from "./webhook.ts";
@@ -34,9 +33,6 @@ export interface UserbotDeps {
   db: Sql;
   apiId: number;
   apiHash: string;
-  /** Optional MTProto proxy. Pre-parsed via `parseMTProxy()` from a config
-   *  string. Used when the server can't reach Telegram DCs directly. */
-  proxy?: ParsedMTProxy;
   rag?: RagDeps;
   onEvent?: Parameters<typeof processInbound>[0]["onEvent"];
 }
@@ -132,8 +128,12 @@ async function handleInboundPhoto(d: {
   messages: MessagesRepo;
   conversations: ConversationsRepo;
   onEvent?: UserbotDeps["onEvent"];
-}): Promise<void> {
+}): Promise<{ isNew: boolean; caption: string }> {
   const { client, msg, conv, tgUserId, messages, conversations, onEvent } = d;
+  const caption = msg.text?.trim() ?? "";
+  // Returned when the photo is a duplicate or could not be downloaded/saved
+  // — the caller skips processInbound on `isNew: false`.
+  const NOT_NEW = { isNew: false, caption };
 
   let buf: Buffer;
   try {
@@ -143,12 +143,12 @@ async function handleInboundPhoto(d: {
         scope: "userbot",
         tg_message_id: msg.id,
       });
-      return;
+      return NOT_NEW;
     }
     buf = downloaded as Buffer;
   } catch (err) {
     log.error("userbot: photo download failed", { scope: "userbot", tg_message_id: msg.id, err });
-    return;
+    return NOT_NEW;
   }
 
   const filename = `${conv.id}-${msg.id}.jpg`;
@@ -157,17 +157,16 @@ async function handleInboundPhoto(d: {
     await Bun.write(join(config.media.dir, filename), buf);
   } catch (err) {
     log.error("userbot: photo save failed", { scope: "userbot", filename, err });
-    return;
+    return NOT_NEW;
   }
 
-  const caption = msg.text?.trim();
   const persisted = await messages.addUserMessageIfNew({
     conversationId: conv.id,
     tgMessageId: msg.id,
     text: caption || "[photo]",
     meta: { media: { type: "photo", source: "userbot", file: filename } },
   });
-  if (!persisted.isNew) return;
+  if (!persisted.isNew) return NOT_NEW;
 
   await conversations.touch(conv.id);
   onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
@@ -177,13 +176,24 @@ async function handleInboundPhoto(d: {
     conv_id: conv.id,
   });
 
-  if (!config.vision.enabled || !config.openrouter.apiKey) return;
-  const apiKey = config.openrouter.apiKey;
-  const messageId = persisted.message.id;
-  const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
-  classifyPhoto({ bytes, model: config.vision.model, apiKey, baseUrl: config.openrouter.baseUrl })
-    .then(async (photoClass) => {
-      await messages.setPhotoClass(messageId, photoClass);
+  // Classify synchronously (await) so the photo_class is stamped BEFORE
+  // the caller runs processInbound → runPhotoClassification. That hook
+  // re-downloads pending photos by Bot API file_id, which userbot/MTProto
+  // media doesn't have — classifying here makes the hook's ack step see
+  // the class without needing a re-download.
+  if (config.vision.enabled && config.openrouter.apiKey) {
+    try {
+      const bytes = buf.buffer.slice(
+        buf.byteOffset,
+        buf.byteOffset + buf.byteLength,
+      ) as ArrayBuffer;
+      const photoClass = await classifyPhoto({
+        bytes,
+        model: config.vision.model,
+        apiKey: config.openrouter.apiKey,
+        baseUrl: config.openrouter.baseUrl,
+      });
+      await messages.setPhotoClass(persisted.message.id, photoClass);
       log.info("userbot: photo classified", {
         scope: "userbot",
         tg_message_id: msg.id,
@@ -191,10 +201,12 @@ async function handleInboundPhoto(d: {
       });
       // Nudge the admin UI to re-fetch so the passport badge appears.
       onEvent?.({ type: "conversation-mode-changed", conversationId: conv.id });
-    })
-    .catch((err) => {
+    } catch (err) {
       log.error("userbot: photo classification failed", { scope: "userbot", err });
-    });
+    }
+  }
+
+  return { isNew: true, caption };
 }
 
 interface ProcessUnreadDeps {
@@ -268,8 +280,15 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
 
       const conv = await d.conversations.ensureForUser(user.id, "userbot");
 
+      // Persist the inbound. Photos download + classify in
+      // handleInboundPhoto; text is a plain insert. `isNew` collapses
+      // album re-delivery / sweep overlap. A bare photo (no caption) is a
+      // media-only turn — processInbound acknowledges it without a chat reply.
+      let isNew: boolean;
+      let inboundText: string;
+      let mediaOnly: boolean;
       if (isPhoto) {
-        await handleInboundPhoto({
+        const photo = await handleInboundPhoto({
           client: d.client,
           msg,
           conv,
@@ -278,18 +297,24 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
           conversations: d.conversations,
           ...(d.onEvent ? { onEvent: d.onEvent } : {}),
         });
-        continue;
+        isNew = photo.isNew;
+        inboundText = photo.caption || "[photo]";
+        mediaOnly = photo.caption.length === 0;
+      } else {
+        const persisted = await d.messages.addUserMessageIfNew({
+          conversationId: conv.id,
+          tgMessageId: msg.id,
+          text,
+        });
+        isNew = persisted.isNew;
+        inboundText = text;
+        mediaOnly = false;
+        if (isNew) {
+          await d.conversations.touch(conv.id);
+          d.onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
+        }
       }
-
-      const persisted = await d.messages.addUserMessageIfNew({
-        conversationId: conv.id,
-        tgMessageId: msg.id,
-        text,
-      });
-      if (!persisted.isNew) continue;
-
-      await d.conversations.touch(conv.id);
-      d.onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
+      if (!isNew) continue;
 
       log.info("sweep: processing missed msg", {
         scope: "userbot",
@@ -323,8 +348,9 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
         conv,
         user,
         chatId: tgUserId,
-        text,
+        text: inboundText,
         tgUserId,
+        mediaOnly,
         onEvent: d.onEvent,
       }).catch((err) => {
         log.error("sweep processInbound failed", { scope: "userbot", err });
@@ -348,21 +374,10 @@ const UNREAD_SWEEP_INTERVAL_MS = 60_000;
 const USER_RATE_LIMIT_MS = 5_000;
 
 export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
-  const { db, apiId, apiHash, proxy, rag, onEvent } = deps;
+  const { db, apiId, apiHash, rag, onEvent } = deps;
 
   const sessionString = process.env.USERBOT_SESSION || (await loadUserbotSession(db));
   const session = new StringSession(sessionString);
-
-  if (proxy) {
-    log.info("starting via MTProto proxy", {
-      scope: "userbot",
-      proxy_host: proxy.ip,
-      proxy_port: proxy.port,
-      // secret intentionally not logged — it'd land in centralized logs
-      // verbatim. Host+port already give an operator enough to pinpoint
-      // which entry from their list is in use.
-    });
-  }
 
   const client = new GramjsClient(session, apiId, apiHash, {
     // gramjs uses this in `for (attempt = 0; attempt < retries; attempt++)`
@@ -378,7 +393,6 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
     // Default timeout is 10s; first connect over a slow link can exceed
     // that. 30s gives the update-state fetch headroom.
     timeout: 30,
-    ...(proxy ? { proxy } : {}),
   });
 
   // `client.connect()` RETURNS a boolean (false = could not connect) — it
@@ -499,8 +513,15 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
 
       const conv = await conversations.ensureForUser(user.id, "userbot");
 
+      // Persist the inbound. Photos download + classify in
+      // handleInboundPhoto; text is a plain insert. A bare photo (no
+      // caption) is a media-only turn — processInbound acknowledges it
+      // (one deduped ack per album) without a chat reply.
+      let isNew: boolean;
+      let inboundText: string;
+      let mediaOnly: boolean;
       if (isPhoto) {
-        await handleInboundPhoto({
+        const photo = await handleInboundPhoto({
           client,
           msg,
           conv,
@@ -509,18 +530,24 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
           conversations,
           ...(onEvent ? { onEvent } : {}),
         });
-        return;
+        isNew = photo.isNew;
+        inboundText = photo.caption || "[photo]";
+        mediaOnly = photo.caption.length === 0;
+      } else {
+        const persisted = await messages.addUserMessageIfNew({
+          conversationId: conv.id,
+          tgMessageId: msg.id,
+          text,
+        });
+        isNew = persisted.isNew;
+        inboundText = text;
+        mediaOnly = false;
+        if (isNew) {
+          await conversations.touch(conv.id);
+          onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
+        }
       }
-
-      const persisted = await messages.addUserMessageIfNew({
-        conversationId: conv.id,
-        tgMessageId: msg.id,
-        text,
-      });
-      if (!persisted.isNew) return;
-
-      await conversations.touch(conv.id);
-      onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
+      if (!isNew) return;
 
       // Create sender bound to this specific inbound message so that
       // msg.reply() is used instead of sendMessage(numericId) — the
@@ -548,8 +575,9 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
         conv,
         user,
         chatId: tgUserId,
-        text,
+        text: inboundText,
         tgUserId,
+        mediaOnly,
         onEvent,
       }).catch((err) => {
         log.error("processInbound failed", { scope: "userbot", err });

@@ -15,13 +15,13 @@ Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тест�
 
 **Self-play + coaching** — автоматизированный тренировочный цикл: бот (salesperson-LLM) против LLM-кандидата → LLM-судья → ELO-рейтинг стилей → coach-LLM предлагает правки → shadow A/B validation. Без ручного труда. Подробности — [docs/SELF_PLAY.md](docs/SELF_PLAY.md).
 
-**Lead pipeline** — воронка кандидата от диалога до подачи на визу: авто-сбор intake (рост / вес / город / фото / загран), карточка в TG-чат с кнопками одобрить/отклонить, авто-парсинг 27 полей визовой анкеты, финальный пакет с `VS-YYYY-NNNN` в визовый чат. Подробности — [docs/LEADS.md](docs/LEADS.md).
+**Lead pipeline** — воронка кандидата от диалога до подачи на визу: авто-сбор intake (рост / вес / город / фото / загран), карточка в TG-чат с кнопками одобрить/отклонить, авто-парсинг 32 полей визовой анкеты (18 обязательных), финальный пакет с `VS-YYYY-NNNN` в визовый чат. Подробности — [docs/LEADS.md](docs/LEADS.md).
 
 **Vacancies** — быстро-меняющийся слой: оператор добавляет вакансию в `/admin/vacancies` → следующий ответ бота уже её видит, без re-embedding.
 
 **Userbot (MTProto)** — бот может работать с личного аккаунта Telegram через gramjs. Отвечает на входящие личные сообщения. Подробности — [docs/USERBOT.md](docs/USERBOT.md).
 
-**Operator admin** — React SPA: список диалогов, ручной перехват (`Take over` / `Release`), reply из браузера, MEMORY pane для редактирования памяти о кандидате, lead pipeline UI, KB browser с approval queue для незнакомых вопросов, styles + experiments + self-play + coach + analytics — всё в реальном времени через WebSocket. Раздел **Операции** (`/admin/ops`) даёт UI-эквиваленты частых CLI-задач: re-ingest KB с диска, привязать/сменить Telegram webhook, очистить старые self-play результаты, ре-засеять дефолтные вакансии, посмотреть очередь userbot.
+**Operator admin** — React SPA: список диалогов, ручной перехват (`Take over` / `Release`), reply из браузера, MEMORY pane для редактирования памяти о кандидате, lead pipeline UI, KB browser с approval queue для незнакомых вопросов, styles + experiments + self-play + coach + analytics — всё в реальном времени через WebSocket. Раздел **Операции** (`/admin/ops`) даёт UI-эквиваленты частых CLI-задач: re-ingest KB с диска, привязать/сменить Telegram webhook, очистить старые self-play результаты, ре-засеять дефолтные вакансии, посмотреть очередь userbot. Раздел `/admin/analytics` — агрегаты RAG-телеметрии (path breakdown, latency p50/p95, topic distribution, no_context rate). Раздел `/admin/settings` — real-time переключение LLM-модели, температуры и всех RAG-флагов без редеплоя.
 
 **Conversation export** — диалоги как JSONL (OpenAI fine-tune compatible): `GET /admin/api/conversations/export.jsonl` с фильтрами по style/experiment/status. Готово для дообучения модели.
 
@@ -30,7 +30,7 @@ Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тест�
 | Файл | Что |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Слои, request lifecycle, data layer, design decisions |
-| [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md) | 6 opt-in RAG надстроек: hybrid / memory / rewrite / reflect / summary / topic-routing |
+| [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md) | 8 opt-in RAG надстроек: hybrid / memory / rewrite / reflect / summary / topic-routing / books-priority / skill-grading |
 | [docs/SALES_STYLES.md](docs/SALES_STYLES.md) | Sales-style engine: схема Style, skills, A/B testing, промпт |
 | [docs/SELF_PLAY.md](docs/SELF_PLAY.md) | Self-play / pairwise / coaching / shadow evaluation |
 | [docs/LEADS.md](docs/LEADS.md) | Lead pipeline: state machine, intake/visa-docs, operator workflow |
@@ -243,13 +243,15 @@ bun scripts/ingest.ts kb/curated --max-chars 1200 --overlap 100
 Подробное описание каждого — в [docs/RAG_LAYERS.md](docs/RAG_LAYERS.md).
 
 ```bash
-RAG_HYBRID_SEARCH=true       # BM25 + vector + RRF. Без LLM-цены, чистый upgrade.
-RAG_USER_MEMORY=true         # Cross-session memory. Видно и редактируется в админке.
-RAG_QUERY_REWRITE=true       # "а в Стамбуле?" → полный вопрос перед retrieval.
-RAG_REFLECT=true             # Reflection: ответ проверяется на галлюцинации.
+RAG_HYBRID_SEARCH=true        # BM25 + vector + RRF. Без LLM-цены, чистый upgrade.
+RAG_USER_MEMORY=true          # Cross-session memory. Видно и редактируется в админке.
+RAG_QUERY_REWRITE=true        # "а в Стамбуле?" → полный вопрос перед retrieval.
+RAG_REFLECT=true              # Reflection: ответ проверяется на галлюцинации.
 RAG_CONVERSATION_SUMMARY=true # Сжатие старых turn'ов (>30) в параграф.
-RAG_TOPIC_ROUTING=true       # Фильтр KB по теме (visa/payment/locations/...).
-RAG_BOOKS_PRIORITY=true      # Книги (topic=books) отвечают первыми, общая KB — fallback.
+RAG_TOPIC_ROUTING=true        # Фильтр KB по теме (visa/payment/locations/...).
+RAG_BOOKS_PRIORITY=true       # Книги (topic=books) отвечают первыми, общая KB — fallback.
+RAG_SKILL_GRADING=true        # LLM определяет какие скиллы применил бот (fire-and-forget,
+                              # +1 LLM-вызов после ответа). Кормит ELO-лидерборд скиллов.
 ```
 
 ### Библиотека книг
@@ -334,6 +336,32 @@ bun run dev
 
 ---
 
+## Анкета кандидата (`/q/:token`)
+
+Оператор может отправить кандидату одноразовую ссылку на веб-форму (name / email / goal) до начала Telegram-диалога. После заполнения `users.status` становится `qualified`, профиль сохраняется и бот подхватывает имя при первом сообщении.
+
+```bash
+# Создать токен через Admin API:
+curl -X POST /admin/api/questionnaire-tokens \
+     -H "Cookie: tg_admin_sid=..." \
+     -d '{"userId": 123}'
+# → {"token":"abc123"} → отправьте кандидату: https://your-domain.com/q/abc123
+```
+
+Токен одноразовый — после отправки формы сгорает. Роут `GET /q/:token` рендерит форму, `POST /q/:token` валидирует и коммитит данные.
+
+## Нотификации оператора
+
+Когда бот не может ответить (RAG вернул NO_CONTEXT), вопрос попадает в очередь KB suggestions (`/admin/kb/suggestions`). Если задать `ADMIN_TG_USER_ID`, оператор получает Telegram DM с уведомлением о каждом новом незнакомом вопросе.
+
+```bash
+ADMIN_TG_USER_ID=123456789   # Telegram user id (не username)
+```
+
+Найти свой id: [@userinfobot](https://t.me/userinfobot) или из `getUpdates`.
+
+---
+
 ## Персона (legacy)
 
 Когда `BOT_SALES_STYLE` не задан, используется простой legacy-режим:
@@ -405,7 +433,9 @@ POST /telegram/<secret>
           └─ fire-and-forget:
                extractUserFacts → mergeMemoryFacts
                gradeSkills → recordSkillOutcome
+               classifyPhotos → setPhotoClass
                intakeCheck → leadStateTransition
+               extractVisaDocs → updateVisaDocs (if docs_pending)
 
 Telegram personal account (Userbot MTProto, optional)
    msg.reply() per message → same processInbound()

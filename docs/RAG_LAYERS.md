@@ -1,6 +1,6 @@
 # RAG layers
 
-Шесть опциональных надстроек над базовым `RAG = embed → kb.search → LLM` пайплайном. Каждая решает одну конкретную проблему «vanilla RAG», все включаются независимыми env-флагами, по умолчанию выключены.
+Семь опциональных надстроек над базовым `RAG = embed → kb.search → LLM` пайплайном. Каждая решает одну конкретную проблему «vanilla RAG», все включаются независимыми env-флагами, по умолчанию выключены.
 
 ## Зачем это нужно
 
@@ -14,6 +14,7 @@
 | LLM выдумывает цифры/города, которых нет в KB | **Reflection** |
 | В длинных диалогах теряется контекст из turn'ов 1–N (recent window = 12) | **Conversation summarization** |
 | KB растёт, embeddings смешивают темы (visa/payment/locations/...) — precision падает | **Topic-routed retrieval** |
+| Книги / сценарии нужно приоритизировать над общей KB, не создавая отдельный индекс | **Books priority retrieval** |
 
 Все слои вместе превращают «AI assistant» tier (по таксономии arxiv:2601.12560) в нижний слой «Agentic AI» — без monolithic-→-multi-agent рефакторинга и при том же количестве кода.
 
@@ -329,6 +330,52 @@ Slug должен совпадать с тегом, который ты испо
 
 ---
 
+## 7. Books priority retrieval — `RAG_BOOKS_PRIORITY=true`
+
+### Проблема
+
+Книги и сценарии продаж — высококачественный curated контент, который должен отвечать раньше общей KB. При смешанном индексе (`kb/curated/` + `kb/books/`) vector-поиск не приоритизирует books-чанки — они конкурируют на равных с остальными документами.
+
+### Решение
+
+При включённом флаге `answerWithRag` сначала делает поиск **только по `topic=books`**. Если нашлось хотя бы одно попадание (≥ `RAG_TOP_K` чанков или any non-empty result) — отвечает из books-контекста. Если books-поиск вернул 0 хитов — **fallback на обычный глобальный поиск** без фильтра.
+
+```
+question → hybridSearch({..., topic: "books"})
+              │
+              ├── hits found → use books context → LLM
+              │
+              └── 0 hits → hybridSearch (global, no topic filter) → LLM
+```
+
+Recall гарантирован: если книг нет или они не покрывают тему, бот отвечает из общей KB.
+
+### Как подготовить контент
+
+```bash
+bun scripts/ingest-books.ts ./kb/books   # PDF/TXT/MD → topic=books
+
+# или через Admin UI → /admin/library (drag-and-drop с topic=books)
+```
+
+### Архитектура
+
+- Логика: [src/rag/answer.ts](../src/rag/answer.ts) — ветка `config.booksPriority`
+- Ingest: [scripts/ingest-books.ts](../scripts/ingest-books.ts) — wrapper над `ingest.ts` с `--topic books`
+- Admin UI: `/admin/library` — drag-and-drop загрузка PDF/TXT с авто-тегом `books`
+
+### Цена
+
+- **0 LLM-вызовов** — только дополнительный SQL-запрос к `kb_chunks` с `topic='books'` фильтром
+- При fallback — 2 SQL-запроса (books → miss → global), суб-миллисекундная задержка
+
+### Что важно
+
+- Работает поверх hybrid search: если `RAG_HYBRID_SEARCH=true`, books-поиск тоже будет hybrid (BM25 + vector + RRF с topic-фильтром).
+- Topic routing и books priority **ортогональны**: topic routing фильтрует по теме вопроса (visa / payment / ...), books priority — по типу источника (curated сценарии). Оба флага можно включать одновременно.
+
+---
+
 ## Все вместе
 
 ```
@@ -363,12 +410,13 @@ refresh summary if stale → setSummary
 
 1. **Сначала** `RAG_HYBRID_SEARCH=true` — нет LLM-цены, нет риска извлечения, чистый upgrade retrieval.
 2. **Если KB > 30 документов и темы делятся чисто** — `RAG_TOPIC_ROUTING=true`. Тоже нет LLM-цены. Сначала тегируй документы (`--topic` или директории), потом включай флаг.
-3. **Потом** `RAG_USER_MEMORY=true` — посмотри неделю на extraction quality в админке, поправь явные ошибки.
-4. **Потом** `RAG_QUERY_REWRITE=true` — особенно если у тебя длинные follow-up диалоги.
-5. **Потом** `RAG_REFLECT=true` — это самый дорогой слой (по латентности — удваивает время до ответа).
-6. **Если есть длинные диалоги (>30 turn'ов)** — `RAG_CONVERSATION_SUMMARY=true`. Не нужно если все чаты короткие.
+3. **Если есть curated books/сценарии** — `RAG_BOOKS_PRIORITY=true`. Тоже нет LLM-цены. Сначала загрузи через `ingest-books.ts` или `/admin/library`.
+4. **Потом** `RAG_USER_MEMORY=true` — посмотри неделю на extraction quality в админке, поправь явные ошибки.
+5. **Потом** `RAG_QUERY_REWRITE=true` — особенно если у тебя длинные follow-up диалоги.
+6. **Потом** `RAG_REFLECT=true` — это самый дорогой слой (по латентности — удваивает время до ответа).
+7. **Если есть длинные диалоги (>30 turn'ов)** — `RAG_CONVERSATION_SUMMARY=true`. Не нужно если все чаты короткие.
 
-Если включаешь все шесть сразу: суммарная стоимость ≈ +2.6 LLM-вызова на средний turn (rewrite — на 25% turns, reflect — на 80% grounded turns, memory extraction — на каждом turn но after-reply, summary refresh — раз в ~8 turns на длинных чатах, hybrid + topic routing — без LLM). Только reflect добавляет к latency до отправки — остальные либо after-reply, либо до retrieval (быстрая модель за <500ms).
+Если включаешь все семь сразу: суммарная стоимость ≈ +2.6 LLM-вызова на средний turn (rewrite — на 25% turns, reflect — на 80% grounded turns, memory extraction — на каждом turn но after-reply, summary refresh — раз в ~8 turns на длинных чатах, hybrid + topic routing + books priority — без LLM). Только reflect добавляет к latency до отправки — остальные либо after-reply, либо до retrieval (быстрая модель за <500ms).
 
 ## Telemetry
 

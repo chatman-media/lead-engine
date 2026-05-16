@@ -128,6 +128,13 @@ export interface ProcessInboundDeps {
   chatId: number;
   text: string;
   tgUserId: number;
+  /**
+   * True when this turn is a bare photo/media upload with no text caption.
+   * The bot does NOT generate a chat reply for such turns — a photo isn't a
+   * question — it only runs the post-reply hooks (photo classification +
+   * one deduped acknowledgement per album + intake/visa-docs updates).
+   */
+  mediaOnly?: boolean;
   onEvent?: (event: WebhookEvent) => void;
 }
 

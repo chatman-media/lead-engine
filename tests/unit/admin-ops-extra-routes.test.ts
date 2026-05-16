@@ -1,5 +1,5 @@
-// Coverage for the telegram-webhook, reseed and userbot-proxy ops routes
-// in `src/admin/routes/ops.ts` not exercised by admin-ops-routes.test.ts.
+// Coverage for the telegram-webhook, reseed and kb-ingest ops routes in
+// `src/admin/routes/ops.ts` not exercised by admin-ops-routes.test.ts.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 
@@ -9,7 +9,7 @@ import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
 import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const SECRET = "s";
-const PROXY = "tg://proxy?server=1.2.3.4&port=8888&secret=dddeadbeefdeadbeefdeadbeefdeadbe";
+const ADMIN = "op-opsextra@x.test";
 
 const sql = getTestSql();
 beforeAll(() => setupTestDb(sql));
@@ -34,13 +34,13 @@ async function startServer(withTelegram: boolean) {
   });
   server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
   const admins = new AdminsRepo(sql);
-  if (!(await admins.byEmail("op-opsproxies@x.test"))) {
-    await admins.create({ email: "op-opsproxies@x.test", password: "longenough" });
+  if (!(await admins.byEmail(ADMIN))) {
+    await admins.create({ email: ADMIN, password: "longenough" });
   }
   const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "op-opsproxies@x.test", password: "longenough" }),
+    body: JSON.stringify({ email: ADMIN, password: "longenough" }),
   });
   cookie = login.headers.get("set-cookie")!.split(";")[0]!;
 }
@@ -100,69 +100,6 @@ describe("PUT /admin/api/ops/telegram/webhook", () => {
 describe("POST /admin/api/ops/vacancies/reseed", () => {
   test("re-seeds the built-in Infinity vacancies", async () => {
     const res = await fetch(url("/admin/api/ops/vacancies/reseed"), authed({ method: "POST" }));
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
-  });
-});
-
-describe("userbot proxy routes", () => {
-  test("GET returns an empty list initially", async () => {
-    const res = await fetch(url("/admin/api/ops/userbot/proxies"), authed());
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { proxies: unknown[] }).proxies).toEqual([]);
-  });
-
-  test("PUT replaces the list from a pasted block", async () => {
-    const res = await fetch(
-      url("/admin/api/ops/userbot/proxies"),
-      authed({
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: PROXY }),
-      }),
-    );
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { saved: number }).saved).toBe(1);
-
-    const list = await fetch(url("/admin/api/ops/userbot/proxies"), authed());
-    expect(((await list.json()) as { proxies: unknown[] }).proxies).toHaveLength(1);
-  });
-
-  test("PUT with empty text clears the list", async () => {
-    const put = (text: string) =>
-      fetch(
-        url("/admin/api/ops/userbot/proxies"),
-        authed({
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text }),
-        }),
-      );
-    await put(PROXY);
-    const res = await put("  ");
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { cleared: boolean }).cleared).toBe(true);
-    const list = await fetch(url("/admin/api/ops/userbot/proxies"), authed());
-    expect(((await list.json()) as { proxies: unknown[] }).proxies).toEqual([]);
-  });
-
-  test("PUT with only garbage lines returns 400 without wiping", async () => {
-    const res = await fetch(
-      url("/admin/api/ops/userbot/proxies"),
-      authed({
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: "not-a-proxy\nalso garbage" }),
-      }),
-    );
-    expect(res.status).toBe(400);
-  });
-
-  test("POST clear-statuses resets last_status", async () => {
-    const res = await fetch(
-      url("/admin/api/ops/userbot/proxies/clear-statuses"),
-      authed({ method: "POST" }),
-    );
     expect(res.status).toBe(200);
     expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
   });

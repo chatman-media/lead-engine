@@ -180,12 +180,15 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 /** Operator clicks "send intake template" — bot DMs the candidate the
- *  7-item checklist. Useful when the bot's natural greeting hasn't yet
- *  prompted the candidate to start submitting intake. */
+ *  15-item checklist. Useful when the bot's natural greeting hasn't yet
+ *  prompted the candidate to start submitting intake. The operator picks
+ *  the checklist language via `?lang=ru|en` (defaults to `ru`). */
 export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ params }) => {
+  return withAdmin(deps.sql, async ({ params, url }) => {
     const id = parseIdParam(params);
     if (id instanceof Response) return id;
+
+    const lang = url.searchParams.get("lang") === "en" ? "en" : "ru";
 
     const leadsRepo = new LeadsRepo(deps.sql);
     const usersRepo = new UsersRepo(deps.sql);
@@ -198,7 +201,7 @@ export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
     if (!service) {
       return json({ error: "telegram client not configured" }, { status: 503 });
     }
-    await service.sendIntakeTemplate({ user });
+    await service.sendIntakeTemplate({ user, lang });
     return json({ ok: true });
   });
 }
@@ -339,6 +342,33 @@ export function createLeadDetailHandler(deps: AdminApiDeps): RouteHandler {
   });
 }
 
+/**
+ * All media (photos / videos / documents) a candidate sent, for the
+ * leads page. The operator clicks a media tag on the lead card and gets
+ * the actual files inline. Returns `{ media: [] }` when the lead has no
+ * conversation yet.
+ */
+export function createLeadMediaHandler(deps: AdminApiDeps): RouteHandler {
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
+
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const usersRepo = new UsersRepo(deps.sql);
+    const conversations = new ConversationsRepo(deps.sql);
+    const messagesRepo = new MessagesRepo(deps.sql);
+
+    const lead = await leadsRepo.byId(id);
+    if (!lead) return json({ error: "not found" }, { status: 404 });
+    const user = await usersRepo.byId(lead.user_id);
+    if (!user) return json({ error: "user gone" }, { status: 404 });
+    const conv = await conversations.byUserId(user.id);
+    return json({
+      media: conv ? await messagesRepo.mediaForConversation(conv.id) : [],
+    });
+  });
+}
+
 const NOTE_BODY_MAX = 2000;
 
 /** Append a note to a lead. Body required; admin id is taken from the
@@ -400,16 +430,21 @@ const VISA_DOCS_FIELD_KEYS = [
   "given_name",
   "date_of_birth",
   "country_of_birth",
+  "birth_province",
   "city_of_birth",
   "marital_status",
   "current_nationality",
   "national_id_number",
+  "other_nationalities",
+  "other_permanent_residence",
+  "held_other_nationalities",
   "passport_number",
   "passport_issuing_country",
   "passport_issuing_place",
   "passport_expiration_date",
   "current_address",
   "phone",
+  "mobile_phone",
   "email",
   "father_name",
   "father_nationality",

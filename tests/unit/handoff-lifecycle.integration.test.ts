@@ -103,6 +103,10 @@ function setup() {
     // Integration test asserts post-conditions inline (DB rows, WS frames);
     // production fires-and-forgets to keep the Telegram ack under 60s.
     awaitWebhookProcessing: true,
+    // Assert against the Bot API send path explicitly — don't let the
+    // developer's local `.env` (TELEGRAM_USERBOT=1) reroute admin replies
+    // through the userbot send queue, which would bypass `ctx.sent`.
+    userbotEnabled: false,
   });
   return { server, sent };
 }

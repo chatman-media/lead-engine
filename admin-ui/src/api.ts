@@ -299,16 +299,21 @@ export interface VisaDocs {
   given_name?: string;
   date_of_birth?: string;
   country_of_birth?: string;
+  birth_province?: string;
   city_of_birth?: string;
   marital_status?: string;
   current_nationality?: string;
   national_id_number?: string;
+  other_nationalities?: string;
+  other_permanent_residence?: string;
+  held_other_nationalities?: string;
   passport_number?: string;
   passport_issuing_country?: string;
   passport_issuing_place?: string;
   passport_expiration_date?: string;
   current_address?: string;
   phone?: string;
+  mobile_phone?: string;
   email?: string;
   father_name?: string;
   father_nationality?: string;
@@ -362,6 +367,18 @@ export interface LeadDetail {
   recent_messages: Array<{ role: string; text: string }>;
   events: LeadEvent[];
   notes: LeadNote[];
+}
+
+/** One media file a candidate sent — see GET /admin/api/leads/:id/media.
+ *  `file_id` = Bot API media; `file` = userbot media stored on disk. */
+export interface LeadMediaItem {
+  id: number;
+  type: string;
+  file_id: string | null;
+  file: string | null;
+  photo_class: string | null;
+  caption: string;
+  created_at: number;
 }
 
 /** Mirror of the GET /admin/api/status response — see src/admin/api.ts. */
@@ -594,6 +611,24 @@ export const api = {
       hybrid_count: number;
       rewrite_count: number;
       unanswered_rate: number;
+      funnel: {
+        by_state: Record<string, number>;
+        new_in_window: number;
+        decided: { approved: number; rejected: number };
+        submitted_in_window: number;
+        rejection_reasons: Array<{ reason: string; count: number }>;
+        avg_decision_seconds: number | null;
+        stage_dwell: Array<{ state: string; avg_seconds: number; n: number }>;
+      };
+      trend: {
+        bucket_seconds: number;
+        buckets: Array<{
+          start_unix: number;
+          conversations: number;
+          leads: number;
+          messages: number;
+        }>;
+      };
     }>(`/admin/api/analytics?window=${window}`),
 
   // Skill catalogue
@@ -776,8 +811,8 @@ export const api = {
       body: JSON.stringify(reason ? { reason } : {}),
     }),
 
-  sendIntakeTemplate: (id: number) =>
-    req<{ ok: boolean }>(`/admin/api/leads/${id}/send-intake`, {
+  sendIntakeTemplate: (id: number, lang: "ru" | "en" = "ru") =>
+    req<{ ok: boolean }>(`/admin/api/leads/${id}/send-intake?lang=${lang}`, {
       method: "POST",
     }),
 
@@ -792,6 +827,8 @@ export const api = {
     }),
 
   leadDetail: (id: number) => req<LeadDetail>(`/admin/api/leads/${id}`),
+
+  leadMedia: (id: number) => req<{ media: LeadMediaItem[] }>(`/admin/api/leads/${id}/media`),
 
   updateVisaDocs: (id: number, docs: Partial<VisaDocs>) =>
     req<{ visa_docs: VisaDocs }>(`/admin/api/leads/${id}/visa-docs`, {
@@ -1021,31 +1058,6 @@ export const api = {
       "/admin/api/ops/userbot/queue-stats",
     ),
 
-  opsListUserbotProxies: () =>
-    req<{
-      proxies: Array<{
-        id: number;
-        position: number;
-        host: string;
-        port: number;
-        raw: string;
-        last_status: "never_tried" | "ok" | "timeout" | "failed";
-        last_tried_at: number | null;
-        last_error: string | null;
-        last_connect_ms: number | null;
-        created_at: number;
-      }>;
-    }>("/admin/api/ops/userbot/proxies"),
-
-  opsReplaceUserbotProxies: (text: string) =>
-    req<{ saved: number; invalid_lines: number[]; cleared?: boolean }>(
-      "/admin/api/ops/userbot/proxies",
-      { method: "PUT", body: JSON.stringify({ text }) },
-    ),
-
-  opsClearUserbotProxyStatuses: () =>
-    req<{ ok: true }>("/admin/api/ops/userbot/proxies/clear-statuses", { method: "POST" }),
-
   getRuntimeSettings: () =>
     req<{ env_path: string; provider: string; settings: RuntimeSetting[] }>(
       "/admin/api/settings/runtime",
@@ -1064,8 +1076,9 @@ export interface RuntimeSetting {
   label: string;
   hint: string;
   type: "text" | "number" | "boolean";
-  /** Current effective value; "" means the code default is in use. */
+  /** Current effective value; "" means no override — fall back to defaultValue. */
   value: string;
+  defaultValue?: string;
 }
 
 export type ExperimentStatus = "draft" | "running" | "paused" | "done";

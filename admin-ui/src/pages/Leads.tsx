@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   api,
   type Lead,
   type LeadCounts,
   type LeadEvent,
+  type LeadMediaItem,
   type LeadNote,
   type LeadState,
   type VisaDocs,
@@ -20,6 +21,7 @@ const VISA_REQUIRED: Array<keyof VisaDocs> = [
   "given_name",
   "date_of_birth",
   "country_of_birth",
+  "birth_province",
   "city_of_birth",
   "marital_status",
   "current_nationality",
@@ -42,16 +44,21 @@ const VISA_FIELD_ORDER: Array<keyof VisaDocs> = [
   "given_name",
   "date_of_birth",
   "country_of_birth",
+  "birth_province",
   "city_of_birth",
   "marital_status",
   "current_nationality",
   "national_id_number",
+  "other_nationalities",
+  "other_permanent_residence",
+  "held_other_nationalities",
   "passport_number",
   "passport_issuing_country",
   "passport_issuing_place",
   "passport_expiration_date",
   "current_address",
   "phone",
+  "mobile_phone",
   "email",
   "father_name",
   "father_nationality",
@@ -72,16 +79,21 @@ const VISA_FIELD_LABELS: Record<keyof VisaDocs, string> = {
   given_name: "Given name",
   date_of_birth: "Date of birth",
   country_of_birth: "Country of birth",
+  birth_province: "Birth province / state",
   city_of_birth: "City of birth",
   marital_status: "Marital status",
   current_nationality: "Current nationality",
   national_id_number: "National ID number",
+  other_nationalities: "Other nationality(ies)",
+  other_permanent_residence: "Permanent residence elsewhere",
+  held_other_nationalities: "Previously held nationality(ies)",
   passport_number: "Passport number",
   passport_issuing_country: "Passport issuing country",
   passport_issuing_place: "Passport issuing place",
   passport_expiration_date: "Passport expiration",
   current_address: "Current address",
   phone: "Phone",
+  mobile_phone: "Mobile phone",
   email: "Email",
   father_name: "Father name",
   father_nationality: "Father nationality",
@@ -232,7 +244,9 @@ export function Leads() {
                     if (conv) navigate(`/admin/chats/${conv.id}`);
                   })
               }
-              onSendIntake={() => withBusy(lead.id, () => api.sendIntakeTemplate(lead.id))}
+              onSendIntake={(lang) =>
+                withBusy(lead.id, () => api.sendIntakeTemplate(lead.id, lang))
+              }
               onApprove={() => withBusy(lead.id, () => api.approveLead(lead.id))}
               onReject={() => {
                 const reason = prompt("Причина отказа (Enter для шаблонной формулировки):") ?? "";
@@ -305,7 +319,7 @@ function LeadCard({
   lead: Lead;
   busy: boolean;
   onOpen: () => void;
-  onSendIntake: () => void;
+  onSendIntake: (lang: "ru" | "en") => void;
   onApprove: () => void;
   onReject: () => void;
   onSubmitToVisa: () => void | Promise<void>;
@@ -324,6 +338,9 @@ function LeadCard({
     lead.state === "approved" || lead.state === "docs_pending" || lead.state === "docs_complete";
   const canMarkSubmitted = lead.state === "docs_complete";
   const intake = parseIntake(lead.intake_json);
+  // Operator-chosen language for the intake checklist — Russian by
+  // default, English for international candidates (e.g. filling abroad).
+  const [intakeLang, setIntakeLang] = useState<"ru" | "en">("ru");
   return (
     <div
       data-testid="lead-card"
@@ -393,14 +410,47 @@ function LeadCard({
             чат
           </button>
           {!decided && !inFlight && (
-            <button
-              onClick={onSendIntake}
-              className="btn btn-ghost btn-sm"
-              disabled={busy}
-              title="Отправить девочке шаблон с 7 пунктами анкеты"
-            >
-              анкета
-            </button>
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <div
+                style={{
+                  display: "flex",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  overflow: "hidden",
+                }}
+              >
+                {(["ru", "en"] as const).map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => setIntakeLang(l)}
+                    disabled={busy}
+                    title={l === "ru" ? "Анкета на русском" : "Анкета на английском"}
+                    style={{
+                      padding: "3px 7px",
+                      border: "none",
+                      borderRadius: 0,
+                      cursor: "pointer",
+                      background: intakeLang === l ? "var(--bg-3)" : "transparent",
+                      color: intakeLang === l ? "var(--text)" : "var(--text-3)",
+                      fontFamily: "var(--mono)",
+                      fontSize: 10,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {l.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => onSendIntake(intakeLang)}
+                className="btn btn-ghost btn-sm"
+                disabled={busy}
+                title={`Отправить девочке анкету (${intakeLang.toUpperCase()}) — 15 пунктов`}
+              >
+                анкета
+              </button>
+            </div>
           )}
           {ready && (
             <>
@@ -460,7 +510,7 @@ function LeadCard({
       </div>
 
       {intake && (lead.state === "intake_pending" || lead.state === "intake_complete") && (
-        <IntakeProgress intake={intake} />
+        <IntakeProgress intake={intake} leadId={lead.id} />
       )}
 
       {(lead.state === "docs_pending" ||
@@ -1024,8 +1074,15 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
   );
 }
 
-function IntakeProgress({ intake }: { intake: IntakeFields }) {
-  const items: Array<[string, string | undefined, boolean]> = [
+type MediaTag = "photo" | "passport";
+
+function IntakeProgress({ intake, leadId }: { intake: IntakeFields; leadId: number }) {
+  const [openTag, setOpenTag] = useState<MediaTag | null>(null);
+  const [media, setMedia] = useState<LeadMediaItem[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const items: Array<[string, string | undefined, boolean, MediaTag?]> = [
     ["возраст", intake.age, !!intake.age],
     ["рост", intake.height, !!intake.height],
     ["вес", intake.weight, !!intake.weight],
@@ -1035,6 +1092,7 @@ function IntakeProgress({ intake }: { intake: IntakeFields }) {
       "фото 6+",
       intake.photos_count !== undefined ? String(intake.photos_count) : "0",
       (intake.photos_count ?? 0) >= 6,
+      "photo",
     ],
     [
       "видео 2+",
@@ -1045,6 +1103,7 @@ function IntakeProgress({ intake }: { intake: IntakeFields }) {
       "загранпаспорт",
       intake.passport_photo_received ? "получено" : undefined,
       intake.passport_photo_received === true,
+      "passport",
     ],
     [
       "видео танца",
@@ -1052,32 +1111,127 @@ function IntakeProgress({ intake }: { intake: IntakeFields }) {
       intake.dance_video_received === true,
     ],
   ];
+
+  function toggle(tag: MediaTag) {
+    if (openTag === tag) {
+      setOpenTag(null);
+      return;
+    }
+    setOpenTag(tag);
+    if (media === null && !loading) {
+      setLoading(true);
+      setError(null);
+      api
+        .leadMedia(leadId)
+        .then((res) => setMedia(res.media))
+        .catch((e) => setError(e instanceof Error ? e.message : "ошибка загрузки"))
+        .finally(() => setLoading(false));
+    }
+  }
+
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 6,
-        flexWrap: "wrap",
-        fontFamily: "var(--mono)",
-        fontSize: 10,
-        marginTop: 4,
-      }}
-    >
-      {items.map(([label, value, ok]) => (
-        <span
-          key={label}
-          style={{
+    <div style={{ marginTop: 4 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          flexWrap: "wrap",
+          fontFamily: "var(--mono)",
+          fontSize: 10,
+        }}
+      >
+        {items.map(([label, value, ok, tag]) => {
+          const style: CSSProperties = {
             padding: "2px 8px",
             borderRadius: "var(--radius)",
             background: ok ? "rgba(46,160,67,0.15)" : "var(--bg-3)",
             color: ok ? "var(--green, #2ea043)" : "var(--text-3)",
             border: `1px solid ${ok ? "rgba(46,160,67,0.3)" : "var(--border)"}`,
-          }}
-        >
-          {ok ? "✓" : "·"} {label}
-          {value && ok ? `: ${value}` : ""}
-        </span>
-      ))}
+            font: "inherit",
+          };
+          const text = `${ok ? "✓" : "·"} ${label}${value && ok ? `: ${value}` : ""}`;
+          if (!tag) {
+            return (
+              <span key={label} style={style}>
+                {text}
+              </span>
+            );
+          }
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => toggle(tag)}
+              style={{
+                ...style,
+                cursor: "pointer",
+                outline: openTag === tag ? "1px solid var(--blue)" : "none",
+              }}
+            >
+              {text} {openTag === tag ? "▾" : "▸"}
+            </button>
+          );
+        })}
+      </div>
+      {openTag && <MediaPanel tag={openTag} media={media} loading={loading} error={error} />}
+    </div>
+  );
+}
+
+function MediaPanel({
+  tag,
+  media,
+  loading,
+  error,
+}: {
+  tag: MediaTag;
+  media: LeadMediaItem[] | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  const note: CSSProperties = {
+    marginTop: 6,
+    fontFamily: "var(--mono)",
+    fontSize: 11,
+    color: "var(--text-3)",
+  };
+  if (loading) return <div style={note}>загрузка…</div>;
+  if (error) return <div style={{ ...note, color: "var(--red, #f85149)" }}>{error}</div>;
+
+  const photos = (media ?? []).filter((m) =>
+    tag === "passport" ? m.type === "photo" && m.photo_class === "passport" : m.type === "photo",
+  );
+  if (photos.length === 0) {
+    return <div style={note}>{tag === "passport" ? "нет паспортных фото" : "нет фото"}</div>;
+  }
+  return (
+    <div
+      style={{
+        marginTop: 6,
+        display: "flex",
+        gap: 6,
+        flexWrap: "wrap",
+      }}
+    >
+      {photos.map((m) => {
+        const url = m.file_id ? api.tgFileUrl(m.file_id) : api.mediaUrl(m.id);
+        return (
+          <a key={m.id} href={url} target="_blank" rel="noopener noreferrer">
+            <img
+              src={url}
+              alt="фото"
+              loading="lazy"
+              style={{
+                height: 120,
+                width: "auto",
+                borderRadius: 4,
+                display: "block",
+                border: "1px solid var(--border)",
+              }}
+            />
+          </a>
+        );
+      })}
     </div>
   );
 }

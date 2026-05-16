@@ -10,7 +10,7 @@ candidate writes  →  bot RAG-replies + collects intake (height/weight/photos/.
                               ↓ operator clicks
                           approved  →  bot DMs visa anketa template
                               ↓ (auto, immediately)
-                       docs_pending  →  bot auto-extracts 27 visa fields
+                       docs_pending  →  bot auto-extracts 32 visa fields
                                        admin can manually edit any
                                        bot answers her questions in support mode
                               ↓ operator clicks "→ на визу"
@@ -40,7 +40,7 @@ Bot must be a **member** of both (admin role lets it edit cards in place after a
 | `intake_complete` | Anketa filled — awaiting operator decision | 8-condition gate passes | Posts card to ops chat; tells candidate "ждите, отправили запрос" |
 | `approved` | Operator approved | inline button OR `/admin/api/leads/:id/approve` | Sends 4-message visa anketa pack to candidate; transitions to `docs_pending` |
 | `rejected` | Operator rejected (terminal) | inline button OR endpoint | Sends polite rejection (or operator's custom reason) |
-| `docs_pending` | Bot collecting visa form | After approve | Auto-extracts 27 fields from each candidate message; operator can edit any; bot answers questions in **support mode** |
+| `docs_pending` | Bot collecting visa form | After approve | Auto-extracts 32 fields from each candidate message; operator can edit any; bot answers questions in **support mode** |
 | `docs_complete` | All visa data + package posted | Operator clicks "→ на визу" (`/admin/api/leads/:id/submit-to-visa`) | Allocates `VS-YYYY-NNNN`, posts to VISA_CHAT_ID, DMs candidate "передаём в работу" |
 | `submitted` | Operator confirmed consulate filing | Operator clicks "✅ подал" (`/admin/api/leads/:id/mark-submitted`) | DMs candidate "заявка подана" + application id; keeps answering in **support mode** while the consulate decision is pending |
 | `closed` | Terminal cleanup state | Manual / stale-sweep auto-close | — |
@@ -73,7 +73,7 @@ When all 8 conditions hold + state == `intake_pending` → auto-transition to `i
 
 ## Visa-docs schema
 
-Auto-extracted by [src/leads/visa-docs.ts](../src/leads/visa-docs.ts) once per `docs_pending` turn. Subset of the long English visa anketa — 27 fields covering identity, passport, contact, parents, China history, work/education/travel as free-form blocks. Schema in `VisaFields` interface. 17 of them are required (must-haves before consulate submission); the admin UI shows a `N/17 (xx%)` progress strip.
+Auto-extracted by [src/leads/visa-docs.ts](../src/leads/visa-docs.ts) once per `docs_pending` turn. Mirrors the long English visa anketa — 32 fields covering identity (incl. birth province, other-nationality / permanent-residence questions), passport, contact (incl. mobile phone), parents, China history, work/education/travel as free-form blocks. Schema in `VisaFields` interface. 18 of them are required (must-haves before consulate submission); the admin UI shows a `N/18 (xx%)` progress strip.
 
 Operator's manual edits via `PATCH /admin/api/leads/:id/visa-docs` are **preserved** across subsequent extractor runs — the LLM prompt explicitly asks not to re-emit unchanged fields, and the merge logic only overwrites fields the LLM newly returns.
 
@@ -111,6 +111,7 @@ processes the filed application (`submitted`). During both stages the bot is
 ### Admin UI (any state)
 
 - `/admin/leads` — pipeline list with filter pills by state. Each card shows intake progress + buttons appropriate to current state.
+- `анкета` button (with a RU/EN toggle) — DMs the candidate the 15-point intake checklist in the chosen language. English is for international candidates who fill in English; Russian is the default.
 - Button **`→ Lead`** on `/admin/chats/:id` — manual promote when auto-intake hasn't (or when `LEADS_CHAT_ID` is unset).
 - Inline edit of visa fields — click `изменить` next to any field; Enter saves, Esc cancels; long fields render as textarea.
 - `→ на визу` — allocates `application_id`, posts visa package to VISA_CHAT_ID, transitions to `docs_complete`. Idempotent on the id (re-press shows `↻ на визу` — re-posts same package, same id).
@@ -120,10 +121,10 @@ processes the filed application (`submitted`). During both stages the bot is
 
 All operator-curated wording lives as plain string constants in [src/leads/templates.ts](../src/leads/templates.ts) so iteration doesn't require code review:
 
-- `INTAKE_TEMPLATE` — 15-point checklist sent to a new candidate (operator triggers via `POST /admin/api/leads/:id/send-intake` or pastes manually).
+- `INTAKE_TEMPLATE` / `INTAKE_TEMPLATE_EN` — 15-point intake checklist, Russian and English. The operator picks the language per-lead via the RU/EN toggle next to the `анкета` button (`POST /admin/api/leads/:id/send-intake?lang=ru|en`, defaults to `ru`).
 - `APPROVAL_PROLOGUE` — sent right after approve.
 - `CONTRACT_TERMS` — verbatim contract terms (1500 ¥ penalty etc.).
-- `VISA_ANKETA_TEMPLATE` — long English visa form.
+- `VISA_ANKETA_TEMPLATE` — long English visa form (values filled in English, as in the passport).
 - `VISA_PHOTO_REQUIREMENTS` — passport photo size + filled passport pages.
 - `REJECTION_DEFAULT` — fallback rejection text (operator can pass `{reason: "..."}` to override).
 - `AWAITING_APPROVAL_REPLY` — what the candidate sees while operator decides.
@@ -138,7 +139,7 @@ All operator-curated wording lives as plain string constants in [src/leads/templ
 | [`src/db/repos/leads.ts`](../src/db/repos/leads.ts) | LeadsRepo: state transitions, `application_id` allocation, ops-card lookup |
 | [`src/leads/templates.ts`](../src/leads/templates.ts) | All operator-facing message templates + `IntakeFields` schema |
 | [`src/leads/intake.ts`](../src/leads/intake.ts) | Auto-extract intake fields from candidate messages |
-| [`src/leads/visa-docs.ts`](../src/leads/visa-docs.ts) | Auto-extract 27 visa-application fields |
+| [`src/leads/visa-docs.ts`](../src/leads/visa-docs.ts) | Auto-extract 32 visa-application fields (18 required) |
 | [`src/leads/service.ts`](../src/leads/service.ts) | LeadsService: card formatting, ops-chat posting, candidate relays, decision side effects |
 | [`src/leads/stale-sweep.ts`](../src/leads/stale-sweep.ts) | Ghosted-lead auto-close (14d default, 30d for `docs_pending`) |
 | [`src/admin/routes/leads.ts`](../src/admin/routes/leads.ts) | Lead REST handlers + `createLeadCallbackHandler` (TG approve/reject buttons) |
