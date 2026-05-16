@@ -73,7 +73,7 @@ When all 8 conditions hold + state == `intake_pending` → auto-transition to `i
 
 ## Visa-docs schema
 
-Auto-extracted by [src/leads/visa-docs.ts](../src/leads/visa-docs.ts) once per `docs_pending` turn. Subset of the long English visa anketa — 27 fields covering identity, passport, contact, parents, China history, work/education/travel as free-form blocks. Schema in `VisaFields` interface. 17 of them are required (must-haves before consulate submission); the admin UI shows a `N/17 (xx%)` progress strip.
+Auto-extracted by [src/leads/visa-docs.ts](../src/leads/visa-docs.ts) once per `docs_pending` turn. Mirrors the long English visa anketa — 32 fields covering identity (incl. birth province, other-nationality / permanent-residence questions), passport, contact (incl. mobile phone), parents, China history, work/education/travel as free-form blocks. Schema in `VisaFields` interface. 18 of them are required (must-haves before consulate submission); the admin UI shows a `N/18 (xx%)` progress strip.
 
 Operator's manual edits via `PATCH /admin/api/leads/:id/visa-docs` are **preserved** across subsequent extractor runs — the LLM prompt explicitly asks not to re-emit unchanged fields, and the merge logic only overwrites fields the LLM newly returns.
 
