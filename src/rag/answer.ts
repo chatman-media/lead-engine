@@ -8,7 +8,7 @@ import {
   NO_CONTEXT_MARKER,
   type Persona,
 } from "./answer-types.ts";
-import type { ChatMessage } from "./chat.ts";
+import type { ChatClient, ChatMessage } from "./chat.ts";
 import { checkFacts } from "./fact-checker.ts";
 import {
   botPresenceReply,
@@ -368,4 +368,51 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     `[rag] retrieval hits=${hits.length} topic=${usedTopic ?? "global"} ms=${Date.now() - retrievalStart}`,
   );
   return answerFromHits({ hits, baseTelemetry, startedAt, input, activePersona });
+}
+
+/**
+ * Soft fallback reply for turns where RAG produced nothing groundable — no KB
+ * hit, or the fact-checker dropped the draft as ungrounded. Instead of going
+ * silent, the bot answers in its own persona voice, but is hard-constrained
+ * NOT to invent any specifics (salaries, dates, visa terms, cities, prices).
+ *
+ * Concrete questions get an honest "I'll clarify and come back"; general
+ * questions get a normal conversational answer. The caller is still expected
+ * to log the unanswered question (kb_suggestions) for a later precise reply.
+ */
+export async function generateSoftFallback(input: {
+  question: string;
+  chat: ChatClient;
+  persona: Persona;
+  history?: ChatMessage[];
+}): Promise<string> {
+  const { question, chat, persona, history } = input;
+  const who = persona.company?.trim()
+    ? `${persona.name} из «${persona.company.trim()}»`
+    : persona.name;
+
+  const systemPrompt = [
+    `Ты — ${who}. Ты переписываешься с кандидатом в мессенджере.`,
+    "",
+    "По вопросу кандидата у тебя СЕЙЧАС нет точных данных.",
+    "Ответь живо и по-человечески, своими словами, коротко — 1–3 предложения.",
+    "",
+    "Жёсткие правила:",
+    "- НЕЛЬЗЯ выдумывать конкретику: зарплаты, суммы, проценты, сроки, даты,",
+    "  города, адреса, условия и стоимость визы, названия компаний, требования.",
+    "  Никаких цифр и фактов, которых ты не знаешь наверняка.",
+    "- Если вопрос требует точных данных — честно скажи, что уточнишь этот",
+    "  момент и вернёшься с ответом чуть позже.",
+    "- Если вопрос общий и конкретики не требует — просто ответь по смыслу.",
+    "- Не извиняйся длинно и формально. Тон тёплый и дружелюбный.",
+    "- Не упоминай «базу данных», «систему», не говори, что ты бот или ИИ.",
+  ].join("\n");
+
+  const messages: ChatMessage[] = [
+    { role: "system", content: systemPrompt },
+    ...(history ?? []),
+    { role: "user", content: question },
+  ];
+  const raw = await chat.complete(messages, { temperature: 0.5 });
+  return applyStyleRules(sanitizeLlmOutput(raw));
 }
