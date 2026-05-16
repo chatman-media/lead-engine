@@ -339,6 +339,33 @@ export function createLeadDetailHandler(deps: AdminApiDeps): RouteHandler {
   });
 }
 
+/**
+ * All media (photos / videos / documents) a candidate sent, for the
+ * leads page. The operator clicks a media tag on the lead card and gets
+ * the actual files inline. Returns `{ media: [] }` when the lead has no
+ * conversation yet.
+ */
+export function createLeadMediaHandler(deps: AdminApiDeps): RouteHandler {
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
+
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const usersRepo = new UsersRepo(deps.sql);
+    const conversations = new ConversationsRepo(deps.sql);
+    const messagesRepo = new MessagesRepo(deps.sql);
+
+    const lead = await leadsRepo.byId(id);
+    if (!lead) return json({ error: "not found" }, { status: 404 });
+    const user = await usersRepo.byId(lead.user_id);
+    if (!user) return json({ error: "user gone" }, { status: 404 });
+    const conv = await conversations.byUserId(user.id);
+    return json({
+      media: conv ? await messagesRepo.mediaForConversation(conv.id) : [],
+    });
+  });
+}
+
 const NOTE_BODY_MAX = 2000;
 
 /** Append a note to a lead. Body required; admin id is taken from the

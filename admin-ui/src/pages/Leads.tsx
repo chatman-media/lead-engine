@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   api,
   type Lead,
   type LeadCounts,
   type LeadEvent,
+  type LeadMediaItem,
   type LeadNote,
   type LeadState,
   type VisaDocs,
@@ -471,7 +472,7 @@ function LeadCard({
       </div>
 
       {intake && (lead.state === "intake_pending" || lead.state === "intake_complete") && (
-        <IntakeProgress intake={intake} />
+        <IntakeProgress intake={intake} leadId={lead.id} />
       )}
 
       {(lead.state === "docs_pending" ||
@@ -1035,8 +1036,15 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
   );
 }
 
-function IntakeProgress({ intake }: { intake: IntakeFields }) {
-  const items: Array<[string, string | undefined, boolean]> = [
+type MediaTag = "photo" | "passport";
+
+function IntakeProgress({ intake, leadId }: { intake: IntakeFields; leadId: number }) {
+  const [openTag, setOpenTag] = useState<MediaTag | null>(null);
+  const [media, setMedia] = useState<LeadMediaItem[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const items: Array<[string, string | undefined, boolean, MediaTag?]> = [
     ["возраст", intake.age, !!intake.age],
     ["рост", intake.height, !!intake.height],
     ["вес", intake.weight, !!intake.weight],
@@ -1046,6 +1054,7 @@ function IntakeProgress({ intake }: { intake: IntakeFields }) {
       "фото 6+",
       intake.photos_count !== undefined ? String(intake.photos_count) : "0",
       (intake.photos_count ?? 0) >= 6,
+      "photo",
     ],
     [
       "видео 2+",
@@ -1056,6 +1065,7 @@ function IntakeProgress({ intake }: { intake: IntakeFields }) {
       "загранпаспорт",
       intake.passport_photo_received ? "получено" : undefined,
       intake.passport_photo_received === true,
+      "passport",
     ],
     [
       "видео танца",
@@ -1063,32 +1073,127 @@ function IntakeProgress({ intake }: { intake: IntakeFields }) {
       intake.dance_video_received === true,
     ],
   ];
+
+  function toggle(tag: MediaTag) {
+    if (openTag === tag) {
+      setOpenTag(null);
+      return;
+    }
+    setOpenTag(tag);
+    if (media === null && !loading) {
+      setLoading(true);
+      setError(null);
+      api
+        .leadMedia(leadId)
+        .then((res) => setMedia(res.media))
+        .catch((e) => setError(e instanceof Error ? e.message : "ошибка загрузки"))
+        .finally(() => setLoading(false));
+    }
+  }
+
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 6,
-        flexWrap: "wrap",
-        fontFamily: "var(--mono)",
-        fontSize: 10,
-        marginTop: 4,
-      }}
-    >
-      {items.map(([label, value, ok]) => (
-        <span
-          key={label}
-          style={{
+    <div style={{ marginTop: 4 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          flexWrap: "wrap",
+          fontFamily: "var(--mono)",
+          fontSize: 10,
+        }}
+      >
+        {items.map(([label, value, ok, tag]) => {
+          const style: CSSProperties = {
             padding: "2px 8px",
             borderRadius: "var(--radius)",
             background: ok ? "rgba(46,160,67,0.15)" : "var(--bg-3)",
             color: ok ? "var(--green, #2ea043)" : "var(--text-3)",
             border: `1px solid ${ok ? "rgba(46,160,67,0.3)" : "var(--border)"}`,
-          }}
-        >
-          {ok ? "✓" : "·"} {label}
-          {value && ok ? `: ${value}` : ""}
-        </span>
-      ))}
+            font: "inherit",
+          };
+          const text = `${ok ? "✓" : "·"} ${label}${value && ok ? `: ${value}` : ""}`;
+          if (!tag) {
+            return (
+              <span key={label} style={style}>
+                {text}
+              </span>
+            );
+          }
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => toggle(tag)}
+              style={{
+                ...style,
+                cursor: "pointer",
+                outline: openTag === tag ? "1px solid var(--blue)" : "none",
+              }}
+            >
+              {text} {openTag === tag ? "▾" : "▸"}
+            </button>
+          );
+        })}
+      </div>
+      {openTag && <MediaPanel tag={openTag} media={media} loading={loading} error={error} />}
+    </div>
+  );
+}
+
+function MediaPanel({
+  tag,
+  media,
+  loading,
+  error,
+}: {
+  tag: MediaTag;
+  media: LeadMediaItem[] | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  const note: CSSProperties = {
+    marginTop: 6,
+    fontFamily: "var(--mono)",
+    fontSize: 11,
+    color: "var(--text-3)",
+  };
+  if (loading) return <div style={note}>загрузка…</div>;
+  if (error) return <div style={{ ...note, color: "var(--red, #f85149)" }}>{error}</div>;
+
+  const photos = (media ?? []).filter((m) =>
+    tag === "passport" ? m.type === "photo" && m.photo_class === "passport" : m.type === "photo",
+  );
+  if (photos.length === 0) {
+    return <div style={note}>{tag === "passport" ? "нет паспортных фото" : "нет фото"}</div>;
+  }
+  return (
+    <div
+      style={{
+        marginTop: 6,
+        display: "flex",
+        gap: 6,
+        flexWrap: "wrap",
+      }}
+    >
+      {photos.map((m) => {
+        const url = m.file_id ? api.tgFileUrl(m.file_id) : api.mediaUrl(m.id);
+        return (
+          <a key={m.id} href={url} target="_blank" rel="noopener noreferrer">
+            <img
+              src={url}
+              alt="фото"
+              loading="lazy"
+              style={{
+                height: 120,
+                width: "auto",
+                borderRadius: 4,
+                display: "block",
+                border: "1px solid var(--border)",
+              }}
+            />
+          </a>
+        );
+      })}
     </div>
   );
 }
