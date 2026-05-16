@@ -1044,8 +1044,9 @@ export interface RuntimeSetting {
   label: string;
   hint: string;
   type: "text" | "number" | "boolean";
-  /** Current effective value; "" means the code default is in use. */
+  /** Current effective value; "" means no override — fall back to defaultValue. */
   value: string;
+  defaultValue?: string;
 }
 
 export type ExperimentStatus = "draft" | "running" | "paused" | "done";
