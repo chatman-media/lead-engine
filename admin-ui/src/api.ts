@@ -12,9 +12,14 @@ export interface User {
   updated_at: number;
 }
 
+export type ConversationSource = "bot" | "userbot" | "self_play";
+
 export interface Conversation {
   id: number;
   mode: "ai" | "queued" | "human";
+  /** Which channel the candidate reached us on. `bot` = test traffic via
+   *  the BotAPI bot; `userbot` = real funnel via the personal account. */
+  source: ConversationSource;
   escalated_at: number | null;
   last_message_at: number | null;
   assigned_admin_id: number | null;
@@ -474,10 +479,13 @@ export const api = {
       }>;
     }>(`/admin/api/users/${id}`),
 
-  conversations: (escalated?: boolean) =>
-    req<{ conversations: Conversation[] }>(
-      `/admin/api/conversations${escalated ? "?escalated=1" : ""}`,
-    ),
+  conversations: (escalated?: boolean, source?: ConversationSource) => {
+    const params = new URLSearchParams();
+    if (escalated) params.set("escalated", "1");
+    if (source) params.set("source", source);
+    const qs = params.toString();
+    return req<{ conversations: Conversation[] }>(`/admin/api/conversations${qs ? `?${qs}` : ""}`);
+  },
 
   conversation: (id: number) =>
     req<{

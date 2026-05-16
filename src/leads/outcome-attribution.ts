@@ -132,7 +132,7 @@ export async function attributeLeadOutcome(
 
   // Find the conversation associated with this lead. Lead.user_id → any
   // conversation by user is a 1:1 in our schema.
-  const conv = await d.conversations.byUserId(lead.user_id);
+  const conv = await d.conversations.byUserId(lead.user_id, "userbot");
   if (!conv) return { outcomesRecorded: 0, styleRatingUpdated: false };
 
   const styleSlug = await resolveStyleSlug(d.styles, d.conversations, conv.id);

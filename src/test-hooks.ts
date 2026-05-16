@@ -61,7 +61,7 @@ export function mountTestHooks(router: Router, sql: Sql): void {
     if (existing && body.status) {
       await users.setStatus(existing.id, body.status);
     }
-    await conversations.ensureForUser(u.id);
+    await conversations.ensureForUser(u.id, "bot");
     return json({ id: u.id });
   });
 

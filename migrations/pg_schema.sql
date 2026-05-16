@@ -55,7 +55,14 @@ CREATE INDEX IF NOT EXISTS idx_experiments_status ON experiments(status);
 
 CREATE TABLE IF NOT EXISTS conversations (
   id SERIAL PRIMARY KEY,
-  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  -- Which channel the candidate reached us on:
+  --   'bot'       — the BotAPI bot (@…_bot), used for testing the funnel
+  --   'userbot'   — the operator's personal account via MTProto (real leads)
+  --   'self_play' — synthetic conversations from the self-play harness
+  -- A candidate writing to BOTH the bot and the personal account gets two
+  -- independent conversations so test traffic doesn't pollute real leads.
+  source TEXT NOT NULL DEFAULT 'bot' CHECK (source IN ('bot', 'userbot', 'self_play')),
   mode TEXT NOT NULL DEFAULT 'ai' CHECK (mode IN ('ai', 'queued', 'human')),
   escalated_at INTEGER,
   assigned_admin_id INTEGER,
@@ -67,6 +74,19 @@ CREATE TABLE IF NOT EXISTS conversations (
   summary_json TEXT,
   meta_json TEXT
 );
+-- Existing deployments predate `source` (and had a bare UNIQUE on user_id).
+-- Add the column, drop the single-column uniqueness, and re-establish it
+-- on the (user_id, source) pair so one candidate can hold one conversation
+-- per channel.
+ALTER TABLE conversations
+  ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'bot';
+ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_user_id_key;
+ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_source_check;
+ALTER TABLE conversations
+  ADD CONSTRAINT conversations_source_check
+  CHECK (source IN ('bot', 'userbot', 'self_play'));
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_conversations_user_source
+  ON conversations(user_id, source);
 CREATE INDEX IF NOT EXISTS idx_conv_mode_last ON conversations(mode, last_message_at DESC NULLS LAST);
 CREATE INDEX IF NOT EXISTS idx_conv_style ON conversations(style_id);
 CREATE INDEX IF NOT EXISTS idx_conv_experiment ON conversations(experiment_id);

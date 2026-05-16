@@ -2,9 +2,17 @@ import type { Sql } from "../postgres.ts";
 
 export type ConversationMode = "ai" | "queued" | "human";
 
+/**
+ * Which channel a conversation belongs to. A candidate writing to both the
+ * BotAPI bot and the operator's personal account holds two independent
+ * conversations — test traffic via `bot` never pollutes real `userbot` leads.
+ */
+export type ConversationSource = "bot" | "userbot" | "self_play";
+
 export interface ConversationRow {
   id: number;
   user_id: number;
+  source: ConversationSource;
   mode: ConversationMode;
   escalated_at: number | null;
   assigned_admin_id: number | null;
@@ -26,9 +34,19 @@ export interface ConversationSummary {
 export class ConversationsRepo {
   constructor(private sql: Sql) {}
 
-  async byUserId(userId: number): Promise<ConversationRow | null> {
+  /**
+   * Look up a candidate's conversation on a specific channel. The same
+   * `user_id` can hold one conversation per channel. Lead-pipeline callers
+   * pass `"userbot"` (real funnel); the bot path passes `"bot"`. Defaults
+   * to `"bot"` so callers that predate the source split keep resolving the
+   * BotAPI conversation.
+   */
+  async byUserId(
+    userId: number,
+    source: ConversationSource = "bot",
+  ): Promise<ConversationRow | null> {
     const [row] = await this.sql<ConversationRow[]>`
-      SELECT * FROM conversations WHERE user_id = ${userId} LIMIT 1
+      SELECT * FROM conversations WHERE user_id = ${userId} AND source = ${source} LIMIT 1
     `;
     return row ?? null;
   }
@@ -40,14 +58,14 @@ export class ConversationsRepo {
     return row ?? null;
   }
 
-  async ensureForUser(userId: number): Promise<ConversationRow> {
-    // ON CONFLICT against the UNIQUE index on `user_id` collapses the
-    // SELECT-then-INSERT race two simultaneous inbound webhooks used to
+  async ensureForUser(userId: number, source: ConversationSource): Promise<ConversationRow> {
+    // ON CONFLICT against the UNIQUE(user_id, source) index collapses the
+    // SELECT-then-INSERT race two simultaneous inbound messages used to
     // trigger (both saw "no row", both inserted). DO UPDATE on a sentinel
     // column lets RETURNING fire for the existing row too.
     const [row] = await this.sql<ConversationRow[]>`
-      INSERT INTO conversations (user_id) VALUES (${userId})
-      ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+      INSERT INTO conversations (user_id, source) VALUES (${userId}, ${source})
+      ON CONFLICT (user_id, source) DO UPDATE SET user_id = EXCLUDED.user_id
       RETURNING *
     `;
     if (!row) throw new Error("Failed to create conversation");
@@ -163,15 +181,18 @@ export class ConversationsRepo {
   }
 
   async list(
-    opts: { onlyEscalated?: boolean; limit?: number } = {},
+    opts: { onlyEscalated?: boolean; limit?: number; source?: ConversationSource } = {},
   ): Promise<Array<ConversationRow & { tg_user_id: number; tg_username: string | null }>> {
     const limit = opts.limit ?? 100;
+    // `source` filter is optional and composes with `onlyEscalated`. When
+    // omitted, all channels are returned (admin UI shows a per-row badge).
+    const sourceClause = opts.source ? this.sql`AND c.source = ${opts.source}` : this.sql``;
     if (opts.onlyEscalated) {
       return this.sql<Array<ConversationRow & { tg_user_id: number; tg_username: string | null }>>`
         SELECT c.*, u.tg_user_id, u.tg_username
         FROM conversations c
         JOIN users u ON u.id = c.user_id
-        WHERE c.mode IN ('queued','human')
+        WHERE c.mode IN ('queued','human') ${sourceClause}
         ORDER BY (c.mode = 'queued') DESC, c.last_message_at DESC NULLS LAST
         LIMIT ${limit}
       `;
@@ -180,6 +201,7 @@ export class ConversationsRepo {
       SELECT c.*, u.tg_user_id, u.tg_username
       FROM conversations c
       JOIN users u ON u.id = c.user_id
+      WHERE TRUE ${sourceClause}
       ORDER BY (c.mode = 'queued') DESC, c.last_message_at DESC NULLS LAST
       LIMIT ${limit}
     `;

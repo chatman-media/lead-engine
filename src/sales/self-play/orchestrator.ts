@@ -380,7 +380,7 @@ async function persistSelfPlayOutcome(
   // tg_user_id keeps these rows distinguishable from real candidates.
   const tgUserId = -Math.floor(1e9 + Math.random() * 9e9);
   const u = await deps.users.create({ tgUserId, tgUsername: null, status: "lost" });
-  const c = await deps.conversations.ensureForUser(u.id);
+  const c = await deps.conversations.ensureForUser(u.id, "self_play");
   // Set style_id on the conversation so attribution can resolve the style.
   if (input.styleId) {
     await deps.db`UPDATE conversations SET style_id = ${input.styleId} WHERE id = ${c.id}`;

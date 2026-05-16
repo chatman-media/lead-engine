@@ -12,10 +12,21 @@ export function createListConversationsHandler(deps: AdminApiDeps): RouteHandler
   const conversations = new ConversationsRepo(deps.sql);
   return withAdmin(deps.sql, async ({ url }) => {
     const onlyEscalated = url.searchParams.get("escalated") === "1";
+    // Optional channel filter — `?source=userbot` shows only the real
+    // funnel, `?source=bot` only test traffic. Omitted = all channels
+    // (the UI then renders a per-row badge).
+    const rawSource = url.searchParams.get("source");
+    const source =
+      rawSource === "bot" || rawSource === "userbot" || rawSource === "self_play"
+        ? rawSource
+        : undefined;
     return json({
-      conversations: (await conversations.list({ onlyEscalated, limit: 200 })).map((row) => ({
+      conversations: (
+        await conversations.list({ onlyEscalated, limit: 200, ...(source ? { source } : {}) })
+      ).map((row) => ({
         id: row.id,
         mode: row.mode,
+        source: row.source,
         escalated_at: row.escalated_at,
         last_message_at: row.last_message_at,
         assigned_admin_id: row.assigned_admin_id,
