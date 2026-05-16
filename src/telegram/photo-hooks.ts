@@ -1,9 +1,5 @@
 import { config } from "../config.ts";
-import {
-  FULL_BODY_PHOTO_NUDGE,
-  type IntakeFields,
-  PASSPORT_PHOTO_ACK,
-} from "../leads/templates.ts";
+import { FULL_BODY_PHOTO_NUDGE, PASSPORT_PHOTO_ACK } from "../leads/templates.ts";
 import { log } from "../log.ts";
 import { classifyPhoto } from "../rag/vision.ts";
 import type { ProcessInboundDeps } from "./webhook-types.ts";
@@ -40,7 +36,16 @@ export async function runPhotoClassification(d: ProcessInboundDeps): Promise<voi
     });
     return;
   }
+  // Like every post-reply hook, swallow our own errors so a failure here
+  // never aborts the rest of `runPostReplyHooks` (intake / visa-docs).
+  try {
+    await classifyAndAcknowledge(d, apiKey);
+  } catch (err) {
+    log.error("vision: photo-classification hook failed", { scope: "vision", err });
+  }
+}
 
+async function classifyAndAcknowledge(d: ProcessInboundDeps, apiKey: string): Promise<void> {
   // 1. Classify pending photos.
   const pending = await d.messages.unclassifiedPhotos(d.conv.id);
   for (const photo of pending.slice(0, MAX_PHOTOS_PER_TURN)) {
@@ -79,36 +84,34 @@ export async function runPhotoClassification(d: ProcessInboundDeps): Promise<voi
   }
 
   // 2. Acknowledge milestones to the candidate. Needs a lead to store the
-  //    one-shot dedup flags; skip when the operator already owns the lead.
-  const lead = await d.leads.byUserId(d.user.id);
-  if (!lead) return;
+  //    one-shot dedup flags. Bootstrap one the same way `runIntakeUpdate`
+  //    does (requires an ops chat) so the FIRST photo already gets an
+  //    acknowledgement — otherwise the lead would only be created by the
+  //    intake hook that runs after this one, delaying the reply a turn.
+  let lead = await d.leads.byUserId(d.user.id);
+  if (!lead) {
+    if (d.leadsChatId == null) return;
+    lead = await d.leads.ensureForUser(d.user.id);
+  }
+  // Operator-owned states (approved / rejected / submitted / …) are off-limits.
   if (lead.state !== "intake_pending" && lead.state !== "intake_complete") return;
 
   const counts = await d.messages.countPhotosByClass(d.conv.id);
   const totalClassified = counts.passport + counts.full_body + counts.portrait + counts.other;
 
-  const intake = parseIntake(lead.intake_json);
-  const ack = intake.media_ack ?? {};
-  let changed = false;
-
-  if (counts.passport >= 1 && !ack.passport) {
+  // `claimMediaAck` flips the dedup flag atomically and returns true to
+  // exactly one caller, so an 8-photo album (8 parallel webhooks) yields a
+  // single acknowledgement. Claim BEFORE sending — at-most-once is the
+  // right tradeoff for an ack: a rare lost message beats spamming her.
+  if (counts.passport >= 1 && (await d.leads.claimMediaAck(lead.id, "passport"))) {
     await sendToCandidate(d, PASSPORT_PHOTO_ACK);
-    ack.passport = true;
-    changed = true;
   }
   if (
     totalClassified >= FULL_BODY_NUDGE_MIN_PHOTOS &&
     counts.full_body === 0 &&
-    !ack.full_body_nudged
+    (await d.leads.claimMediaAck(lead.id, "full_body_nudged"))
   ) {
     await sendToCandidate(d, FULL_BODY_PHOTO_NUDGE);
-    ack.full_body_nudged = true;
-    changed = true;
-  }
-
-  if (changed) {
-    intake.media_ack = ack;
-    await d.leads.setIntake(lead.id, JSON.stringify(intake));
   }
 }
 
@@ -117,14 +120,5 @@ async function sendToCandidate(d: ProcessInboundDeps, text: string): Promise<voi
     await d.telegram.sendMessage({ chatId: d.chatId, text });
   } catch (err) {
     log.error("vision: failed to send acknowledgement to candidate", { scope: "vision", err });
-  }
-}
-
-function parseIntake(raw: string | null): IntakeFields {
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw) as IntakeFields;
-  } catch {
-    return {};
   }
 }

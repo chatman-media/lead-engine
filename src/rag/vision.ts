@@ -44,7 +44,7 @@ export interface ClassifyPhotoOptions {
 }
 
 interface VisionResponse {
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
   error?: { message?: string };
 }
 
@@ -76,7 +76,11 @@ export async function classifyPhoto(opts: ClassifyPhotoOptions): Promise<PhotoCl
     model: opts.model,
     stream: false,
     temperature: 0,
-    max_tokens: 8,
+    // Reasoning models (Gemini 2.5 Flash et al.) spend output tokens on
+    // internal thinking — a tiny cap there returns EMPTY content. Disable
+    // reasoning and leave generous headroom; the answer itself is one word.
+    reasoning: { enabled: false },
+    max_tokens: 512,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       {
@@ -110,7 +114,10 @@ export async function classifyPhoto(opts: ClassifyPhotoOptions): Promise<PhotoCl
       `classifyPhoto: OpenRouter error (HTTP ${res.status}): ${payload.error?.message ?? "unknown"}`,
     );
   }
-  const content = payload.choices?.[0]?.message?.content;
-  if (!content) throw new Error("classifyPhoto: no content in response");
+  const choice = payload.choices?.[0];
+  const content = choice?.message?.content;
+  if (!content) {
+    throw new Error(`classifyPhoto: empty content (finish_reason=${choice?.finish_reason ?? "?"})`);
+  }
   return parsePhotoClass(content);
 }

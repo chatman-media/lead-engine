@@ -226,6 +226,35 @@ export class LeadsRepo {
     `;
   }
 
+  /**
+   * Atomically claim a one-shot photo-acknowledgement flag in
+   * `intake_json.media_ack`. Returns true exactly once across concurrent
+   * callers — a Telegram album fans out into many parallel webhook
+   * handlers, so the dedup has to happen in a single conditional UPDATE
+   * (row lock) rather than read-modify-write. The caller sends the
+   * acknowledgement message to the candidate only when this returns true.
+   */
+  async claimMediaAck(id: number, key: "passport" | "full_body_nudged"): Promise<boolean> {
+    // `jsonb_set` with create_missing does NOT create intermediate objects,
+    // so when `media_ack` is absent it would silently no-op. Build the
+    // nested object explicitly via `||` merges instead.
+    const result = await this.sql`
+      UPDATE leads
+      SET intake_json = (
+            COALESCE(intake_json::jsonb, '{}'::jsonb)
+            || jsonb_build_object(
+                 'media_ack',
+                 COALESCE(intake_json::jsonb -> 'media_ack', '{}'::jsonb)
+                   || jsonb_build_object(${key}::text, true)
+               )
+          )::text,
+          updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER
+      WHERE id = ${id}
+        AND COALESCE(intake_json::jsonb #>> ARRAY['media_ack', ${key}]::text[], 'false') <> 'true'
+    `;
+    return result.count > 0;
+  }
+
   async setVisaDocs(id: number, visaDocsJson: string): Promise<void> {
     await this.sql`
       UPDATE leads SET visa_docs_json = ${visaDocsJson}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
