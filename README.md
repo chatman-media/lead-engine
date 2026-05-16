@@ -1,6 +1,7 @@
 # tg-chatbot
 
 [![CI](https://img.shields.io/github/actions/workflow/status/chatman-media/sales-guru/ci.yml?style=flat-square&label=ci)](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml)
+![coverage](.github/badges/coverage.svg)
 
 Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тестами, самообучением через self-play и полноценной операторской админкой. Всё на чистом Bun без HTTP-фреймворка — PostgreSQL + pgvector для векторного поиска, gramjs для MTProto userbot-режима.
 
@@ -54,14 +55,14 @@ bun run dev
 ### Production (Docker)
 
 ```bash
-cp .env.example .env        # TELEGRAM_BOT_TOKEN, LLM-провайдер, LEADS_CHAT_ID, VISA_CHAT_ID
+cp .env.example .env        # DATABASE_URL, TELEGRAM_BOT_TOKEN, LLM-провайдер, LEADS_CHAT_ID, VISA_CHAT_ID
 docker compose up -d
 docker compose logs -f app
 # Полностью локальный стек с Ollama:
 # docker compose --profile ollama up -d
 ```
 
-Полная инструкция (reverse proxy / HTTPS / бэкапы) — [docs/DEPLOY.md](docs/DEPLOY.md).
+`docker compose` поднимает **только бота** — PostgreSQL внешний и должен иметь расширение **pgvector** (Docker-образ `pgvector/pgvector`, пакет `postgresql-NN-pgvector` на bare-metal или Supabase, где оно предустановлено). Без pgvector бот падает на старте. Провижн БД и полная инструкция (reverse proxy / HTTPS / бэкапы) — [docs/DEPLOY.md](docs/DEPLOY.md).
 
 Сервер слушает `PORT` (по умолчанию `3000`). Health-чек: `GET /health`.
 
@@ -367,13 +368,16 @@ TEST_DATABASE_URL=postgres://localhost/tgchatbot_test
 ### Запуск
 
 ```bash
-bun run test              # unit tests
-bun run test:coverage     # unit tests с отчётом покрытия
-bun run test:e2e:install  # установить Playwright (один раз)
-bun run test:e2e          # E2E (Playwright)
+bun run test                # unit tests
+bun run test:coverage       # unit tests с отчётом покрытия (text + lcov)
+bun run test:coverage:badge # coverage + перегенерировать SVG-бейдж
+bun run test:e2e:install    # установить Playwright (один раз)
+bun run test:e2e            # E2E (Playwright)
 ```
 
 Playwright поднимает сервер на `E2E_PORT` (по умолчанию `3100`) с тестовой БД и `TEST_HOOKS=1` (seed-эндпоинты `/__test/*`, только с этим флагом).
+
+Бейдж покрытия (`.github/badges/coverage.svg`) обновляется автоматически в CI на push в `main` — шаг `update coverage badge` коммитит SVG, если процент изменился. Локально — `bun run test:coverage:badge`.
 
 ---
 

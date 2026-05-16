@@ -9,6 +9,7 @@
     "start": "bun run src/index.ts",
     "test": "OPENAI_EMBEDDING_DIM=8 OLLAMA_EMBEDDING_DIM=8 bun test tests/unit",
     "test:coverage": "OPENAI_EMBEDDING_DIM=8 OLLAMA_EMBEDDING_DIM=8 bun test tests/unit --coverage",
+    "test:coverage:badge": "bun run test:coverage && bun scripts/coverage-badge.ts",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install --with-deps chromium",
     "build:ui": "bun run --cwd admin-ui build",

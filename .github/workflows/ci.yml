@@ -22,6 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    # `contents: write` lets the badge step commit .github/badges/coverage.svg
+    # back to main. All other jobs keep the default read-only token.
+    permissions:
+      contents: write
+
     services:
       # pgvector image bundles PostgreSQL + the pgvector extension that
       # KbRepo needs for vector search. tests/helpers/test-db.ts applies
@@ -108,6 +113,25 @@ jobs:
           path: coverage/lcov.info
           retention-days: 14
           if-no-files-found: warn
+
+      - name: update coverage badge
+        # Only on push to main: regenerate the SVG badge from coverage/lcov.info
+        # and commit it if the percentage changed. `[skip ci]` prevents the
+        # bot commit from triggering another CI run.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          bun scripts/coverage-badge.ts
+          if git diff --quiet -- .github/badges/coverage.svg; then
+            echo "coverage badge unchanged"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/badges/coverage.svg
+            git commit -m "chore: update coverage badge [skip ci]"
+            # checkout@v4 leaves a detached HEAD on push events — push the
+            # commit explicitly to main.
+            git push origin HEAD:main
+          fi
 
       - name: build admin UI
         # Catch UI-side TS errors and Vite-time issues that don't show up in
