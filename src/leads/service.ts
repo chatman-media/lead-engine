@@ -87,6 +87,9 @@ export class LeadsService {
       renderField("city", intake.city);
       renderField("departure_readiness", intake.departure_readiness);
       renderField("photos_count", intake.photos_count ?? 0);
+      if (intake.full_body_count !== undefined) {
+        renderField("full_body_count", intake.full_body_count);
+      }
       renderField("videos_count", intake.videos_count ?? 0);
       renderField("passport_photo_received", intake.passport_photo_received ? "получено" : false);
       renderField("dance_video_received", intake.dance_video_received ? "получено" : false);

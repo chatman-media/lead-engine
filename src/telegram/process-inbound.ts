@@ -16,23 +16,26 @@ import { FUNNEL_STAGES, type FunnelStage, type Style } from "../sales/types.ts";
 import { containsEscalationTrigger } from "./escalation.ts";
 import { runIntakeUpdate, runVisaDocsUpdate } from "./lead-hooks.ts";
 import { runMemoryExtraction } from "./memory-extraction.ts";
+import { runPhotoClassification } from "./photo-hooks.ts";
 import { runConversationSummaryRefresh } from "./summary-refresh.ts";
 import type { ProcessInboundDeps, RagDeps } from "./webhook-types.ts";
 
 /**
- * The four "after every turn" maintenance tasks that have to run regardless
+ * The "after every turn" maintenance tasks that have to run regardless
  * of which branch processInbound took (successful reply, NO_CONTEXT stall,
- * CTA fallback, still-queued retry). Extracted so adding a fifth post-turn
- * hook is a one-line edit instead of a four-call diff in four places.
+ * CTA fallback, still-queued retry). Extracted so adding another post-turn
+ * hook is a one-line edit instead of a multi-call diff in several places.
  *
  * Each hook is fire-and-forget on errors (each implementation catches its
  * own exceptions and logs); they're awaited sequentially because they all
  * read/write `users.profile_json.memory` and `leads.intake_json` and would
- * otherwise race against each other.
+ * otherwise race against each other. `runPhotoClassification` runs before
+ * `runIntakeUpdate` so the photo classes it stamps feed the intake counters.
  */
 async function runPostReplyHooks(d: ProcessInboundDeps): Promise<void> {
   await runMemoryExtraction(d);
   await runConversationSummaryRefresh(d);
+  await runPhotoClassification(d);
   await runIntakeUpdate(d);
   await runVisaDocsUpdate(d);
 }

@@ -219,6 +219,18 @@ export const config = {
     /** Optional analytics: sent as `X-Title`. */
     appName: envOptional("OPENROUTER_APP_NAME", "tg-chatbot"),
   },
+  /**
+   * Photo classification: when a candidate sends a photo, classify it as
+   * passport / full-body / portrait / other via a vision model. Feeds the
+   * lead intake counters (accurate passport detection instead of the
+   * "total photos >= 7" heuristic). Runs through OpenRouter — reuses
+   * `openrouter.apiKey` / `openrouter.baseUrl`. Default: off (opt-in).
+   */
+  vision: {
+    enabled: envTruthy("VISION_ENABLED", false),
+    /** OpenRouter slug for a vision-capable model. */
+    model: envOptional("VISION_MODEL", "google/gemini-2.5-flash"),
+  },
   admin: {
     sessionCookie: envOptional("ADMIN_SESSION_COOKIE", "tg_admin_sid"),
     sessionTtlDays: envInt("ADMIN_SESSION_TTL_DAYS", 14),

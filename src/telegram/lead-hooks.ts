@@ -1,3 +1,4 @@
+import { config } from "../config.ts";
 import { extractIntake } from "../leads/intake.ts";
 import { LeadsService } from "../leads/service.ts";
 import { type IntakeFields, isIntakeComplete } from "../leads/templates.ts";
@@ -48,12 +49,18 @@ export async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
     }));
 
   const mediaCounts = await d.messages.countMediaForConversation(d.conv.id);
+  // When vision classification is enabled, feed per-category photo counts
+  // so passport detection is real instead of the ">=7 photos" heuristic.
+  const photoClasses = config.vision.enabled
+    ? await d.messages.countPhotosByClass(d.conv.id)
+    : undefined;
 
   const existing = parseIntakeJson(lead.intake_json);
   const intake = await extractIntake({
     messages: messagesForLlm,
     chat: d.rag.chat,
     mediaCounts,
+    ...(photoClasses ? { photoClasses } : {}),
     ...(existing ? { existingIntake: existing } : {}),
   });
 

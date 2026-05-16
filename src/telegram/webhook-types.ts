@@ -12,6 +12,7 @@ import type { VacanciesRepo } from "../db/repos/vacancies.ts";
 import type { Persona } from "../rag/answer.ts";
 import type { ChatClient } from "../rag/chat.ts";
 import type { EmbeddingClient } from "../rag/embed.ts";
+import type { PhotoClass } from "../rag/vision.ts";
 import type { Style } from "../sales/types.ts";
 import type { TelegramClient } from "./client.ts";
 
@@ -142,4 +143,10 @@ export type MediaInfo = {
   file_id: string;
   file_size?: number;
   mime_type?: string;
+  /**
+   * Vision classification of a photo (passport / full_body / portrait /
+   * other). Absent until the `runPhotoClassification` post-reply hook
+   * processes the message — only set for `type: "photo"`.
+   */
+  photo_class?: PhotoClass;
 };
