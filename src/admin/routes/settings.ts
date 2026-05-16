@@ -69,6 +69,12 @@ const TUNABLE_SPECS: readonly SettingSpec[] = [
     hint: "Сужает поиск по базе знаний до темы вопроса (виза, оплата, жильё…).",
     type: "boolean",
   },
+  {
+    key: "VISION_ENABLED",
+    label: "Распознавание фото (ИИ)",
+    hint: "Бот определяет по фото: загранпаспорт / в полный рост / портрет. Выкл — грубая прикидка по числу фото.",
+    type: "boolean",
+  },
 ];
 
 /** The chat-model env key depends on the active LLM provider. */
