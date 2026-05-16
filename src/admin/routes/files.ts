@@ -1,3 +1,6 @@
+import { basename, join } from "node:path";
+import { config } from "../../config.ts";
+import { MessagesRepo } from "../../db/repos/messages.ts";
 import { json, type RouteHandler } from "../../router.ts";
 import { withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
@@ -67,5 +70,54 @@ export function createDownloadFileHandler(deps: AdminApiDeps): RouteHandler {
     const len = upstream.headers.get("content-length");
     if (len) headers["content-length"] = len;
     return new Response(upstream.body, { status: 200, headers });
+  });
+}
+
+/**
+ * Serves userbot-channel media from disk (`config.media.dir`).
+ *
+ * MTProto media has no Bot API file_id — the userbot downloads the bytes
+ * once and references the filename in `messages.meta_json.media.file`
+ * (see `handleInboundPhoto`). This endpoint resolves that filename for an
+ * authenticated admin. The `<img>` tag in the chat view hits it directly;
+ * admin session cookie authorises.
+ *
+ * Path-traversal guard: the filename is taken only from our own
+ * `meta_json` (which we control), but it is still `basename`-stripped and
+ * matched against `^[\w.-]+$` before being joined to the media dir.
+ */
+export function createMediaFileHandler(deps: AdminApiDeps): RouteHandler {
+  const messages = new MessagesRepo(deps.sql);
+  return withAdmin(deps.sql, async ({ params }) => {
+    const id = Number(params.messageId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return json({ error: "bad message id" }, { status: 400 });
+    }
+
+    const msg = await messages.byId(id);
+    if (!msg?.meta_json) return json({ error: "not found" }, { status: 404 });
+
+    let file: string | undefined;
+    try {
+      const meta = JSON.parse(msg.meta_json) as { media?: { file?: string } };
+      file = meta.media?.file;
+    } catch {
+      return json({ error: "not found" }, { status: 404 });
+    }
+    if (!file || !/^[\w.-]+$/.test(file)) {
+      return json({ error: "not found" }, { status: 404 });
+    }
+
+    const bunFile = Bun.file(join(config.media.dir, basename(file)));
+    if (!(await bunFile.exists())) {
+      return json({ error: "file missing" }, { status: 404 });
+    }
+    return new Response(bunFile, {
+      status: 200,
+      headers: {
+        "content-type": bunFile.type || "image/jpeg",
+        "cache-control": "private, max-age=3600",
+      },
+    });
   });
 }

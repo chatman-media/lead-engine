@@ -34,7 +34,7 @@ export {
   createBulkExportConversationsHandler,
   createExportConversationHandler,
 } from "./routes/export.ts";
-export { createDownloadFileHandler } from "./routes/files.ts";
+export { createDownloadFileHandler, createMediaFileHandler } from "./routes/files.ts";
 export {
   createDeleteKbDocumentHandler,
   createGetKbDocumentHandler,

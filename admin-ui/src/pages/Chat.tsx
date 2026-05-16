@@ -382,13 +382,19 @@ export function Chat() {
  * cookie (auto-sent on same-origin <img>/<video> requests).
  */
 function MessageBody({ message }: { message: Message }) {
-  let media: { type: string; file_id: string } | null = null;
+  let media: {
+    type: string;
+    file_id?: string;
+    file?: string;
+    photo_class?: string;
+  } | null = null;
   if (message.meta_json) {
     try {
       const parsed = JSON.parse(message.meta_json) as {
-        media?: { type: string; file_id: string };
+        media?: { type: string; file_id?: string; file?: string; photo_class?: string };
       };
-      if (parsed.media?.file_id) media = parsed.media;
+      // `file_id` = Bot API media; `file` = userbot media stored on disk.
+      if (parsed.media && (parsed.media.file_id || parsed.media.file)) media = parsed.media;
     } catch {
       // ignore — non-JSON meta or schema drift
     }
@@ -403,7 +409,10 @@ function MessageBody({ message }: { message: Message }) {
   // media itself is the content. Real captions stay visible.
   const isPlaceholder = /^\[(photo|video|document|voice)\]$/.test(message.text);
   const caption = isPlaceholder ? "" : message.text;
-  const url = api.tgFileUrl(media.file_id);
+  // Bot API media goes through the token-backed proxy; userbot media
+  // (no Bot API file_id) is served from disk by message id.
+  const url = media.file_id ? api.tgFileUrl(media.file_id) : api.mediaUrl(message.id);
+  const isPassport = media.photo_class === "passport";
 
   let preview: React.ReactNode = null;
   if (media.type === "photo") {
@@ -456,8 +465,26 @@ function MessageBody({ message }: { message: Message }) {
     <div
       data-testid="message-media"
       data-media-type={media.type}
+      data-photo-class={media.photo_class ?? undefined}
       style={{ display: "flex", flexDirection: "column", gap: 4 }}
     >
+      {isPassport && (
+        <div
+          data-testid="passport-badge"
+          style={{
+            alignSelf: "flex-start",
+            padding: "1px 8px",
+            borderRadius: 4,
+            fontSize: 11,
+            fontWeight: 600,
+            background: "rgba(46,160,67,0.15)",
+            color: "var(--green, #2ea043)",
+            border: "1px solid rgba(46,160,67,0.3)",
+          }}
+        >
+          🛂 загранпаспорт
+        </div>
+      )}
       {preview}
       {caption && <div style={{ marginTop: 4 }}>{caption}</div>}
     </div>

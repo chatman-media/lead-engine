@@ -56,6 +56,7 @@ import {
   createListUserbotProxiesHandler,
   createListUsersHandler,
   createListVacanciesHandler,
+  createMediaFileHandler,
   createPromoteLeadHandler,
   createPurgeOutcomesHandler,
   createRecommendSkillsHandler,
@@ -264,6 +265,8 @@ export function createRouter(deps: AppDeps): Router {
   // Telegram file proxy — browsers hit this URL from <img>/<video> tags
   // in the admin chat view; admin session cookie is the auth.
   router.get("/admin/api/tg-files/:fileId", createDownloadFileHandler(apiDeps));
+  // Userbot-channel media served from disk (MTProto has no Bot API file_id).
+  router.get("/admin/api/media/:messageId", createMediaFileHandler(apiDeps));
   router.patch("/admin/api/users/:id/memory", createUpdateUserMemoryHandler(apiDeps));
   // GDPR right-to-erasure: drops every PII row for one candidate and
   // tombstones the users row itself. Single endpoint, transactional.
