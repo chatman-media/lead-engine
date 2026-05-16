@@ -147,6 +147,46 @@ describe("composeSystemPrompt — grounding reminder", () => {
   });
 });
 
+describe("composeSystemPrompt — support mode (visa waiting)", () => {
+  test("docs phase: support block present, sales blocks dropped", () => {
+    const out = composeSystemPrompt(flirtyBelfort, "pitch", "[#1] T\ndata", {
+      supportPhase: "docs",
+    });
+    expect(out).toContain("РЕЖИМ ПОДДЕРЖКИ");
+    expect(out).toContain("собираем её документы");
+    // Sales blocks must be gone.
+    expect(out).not.toContain("Belfort"); // framework blurb
+    expect(out).not.toContain("ХУКИ");
+    expect(out).not.toContain("ТЕКУЩИЙ ЭТАП");
+    expect(out).not.toContain("ПРИМЕРЫ ДИАЛОГА");
+  });
+
+  test("submitted phase: consulate-wait wording present", () => {
+    const out = composeSystemPrompt(flirtyBelfort, "close", null, {
+      supportPhase: "submitted",
+    });
+    expect(out).toContain("РЕЖИМ ПОДДЕРЖКИ");
+    expect(out).toContain("подана в консульство");
+  });
+
+  test("persona, voice and guardrails survive support mode", () => {
+    const out = composeSystemPrompt(flirtyBelfort, "pitch", null, {
+      supportPhase: "docs",
+    });
+    expect(out).toContain(flirtyBelfort.persona.name);
+    expect(out).toContain(flirtyBelfort.voice.tone);
+    expect(out).toContain("ЖЁСТКИЕ ПРАВИЛА");
+  });
+
+  test("KB context still injected in support mode", () => {
+    const out = composeSystemPrompt(flirtyBelfort, "pitch", "[#1] Visa\nСрок 10 дней.", {
+      supportPhase: "submitted",
+    });
+    expect(out).toContain("KB CONTEXT");
+    expect(out).toContain("Срок 10 дней.");
+  });
+});
+
 describe("composeSystemPrompt — guardrails", () => {
   test("includes minor protection rule when noMinors=true", () => {
     expect(flirtyBelfort.guardrails.noMinors).toBe(true);

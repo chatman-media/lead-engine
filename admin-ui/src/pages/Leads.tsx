@@ -248,6 +248,16 @@ export function Leads() {
                 }
                 return withBusy(lead.id, () => api.submitLeadToVisa(lead.id));
               }}
+              onMarkSubmitted={() => {
+                if (
+                  !confirm(
+                    "Отметить, что заявка подана в консульство? Девушке уйдёт сообщение с номером заявки, чат останется на боте (авто-режим ожидания).",
+                  )
+                ) {
+                  return Promise.resolve();
+                }
+                return withBusy(lead.id, () => api.markLeadSubmitted(lead.id));
+              }}
               onDelete={() => {
                 if (!confirm(`Удалить лид #${lead.id}? Нельзя будет его восстановить.`)) return;
                 return withBusy(lead.id, () => api.deleteLead(lead.id));
@@ -289,6 +299,7 @@ function LeadCard({
   onApprove,
   onReject,
   onSubmitToVisa,
+  onMarkSubmitted,
   onDelete,
 }: {
   lead: Lead;
@@ -298,6 +309,7 @@ function LeadCard({
   onApprove: () => void;
   onReject: () => void;
   onSubmitToVisa: () => void | Promise<void>;
+  onMarkSubmitted: () => void | Promise<void>;
   onDelete: () => void;
 }) {
   const accent = STATE_ACCENT[lead.state];
@@ -310,6 +322,7 @@ function LeadCard({
     lead.state === "submitted";
   const canSubmitToVisa =
     lead.state === "approved" || lead.state === "docs_pending" || lead.state === "docs_complete";
+  const canMarkSubmitted = lead.state === "docs_complete";
   const intake = parseIntake(lead.intake_json);
   return (
     <div
@@ -422,6 +435,17 @@ function LeadCard({
               }
             >
               {lead.application_id ? "↻ на визу" : "→ на визу"}
+            </button>
+          )}
+          {canMarkSubmitted && (
+            <button
+              onClick={() => void onMarkSubmitted()}
+              className="btn btn-primary btn-sm"
+              disabled={busy}
+              data-testid="lead-mark-submitted"
+              title="Отметить, что заявка подана в консульство"
+            >
+              ✅ подал
             </button>
           )}
           <button

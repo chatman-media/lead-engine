@@ -786,6 +786,11 @@ export const api = {
       method: "POST",
     }),
 
+  markLeadSubmitted: (id: number) =>
+    req<{ lead: Lead; application_id: string | null }>(`/admin/api/leads/${id}/mark-submitted`, {
+      method: "POST",
+    }),
+
   leadDetail: (id: number) => req<LeadDetail>(`/admin/api/leads/${id}`),
 
   updateVisaDocs: (id: number, docs: Partial<VisaDocs>) =>

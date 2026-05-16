@@ -224,6 +224,33 @@ describe("LeadsRepo", () => {
     expect(eventsAfterSecond).toBe(eventsAfterFirst);
   });
 
+  test("docs_complete → submitted is a legal transition", async () => {
+    const u = await users.create({ tgUserId: 806 });
+    const l = await leads.ensureForUser(u.id);
+    await leads.setState(l.id, "intake_complete");
+    await leads.setState(l.id, "approved", { adminId });
+    await leads.setState(l.id, "docs_pending");
+    await leads.setState(l.id, "docs_complete");
+    const submitted = await leads.setState(l.id, "submitted");
+    expect(submitted?.state).toBe("submitted");
+    const evs = await leads.events(l.id);
+    expect(evs.at(-1)?.from_state).toBe("docs_complete");
+    expect(evs.at(-1)?.to_state).toBe("submitted");
+  });
+
+  test("submitted is terminal — only closes out, can't return to intake", async () => {
+    const u = await users.create({ tgUserId: 807 });
+    const l = await leads.ensureForUser(u.id);
+    await leads.setState(l.id, "intake_complete");
+    await leads.setState(l.id, "approved", { adminId });
+    await leads.setState(l.id, "docs_pending");
+    await leads.setState(l.id, "docs_complete");
+    await leads.setState(l.id, "submitted");
+    await expect(leads.setState(l.id, "intake_pending")).rejects.toThrow(/illegal lead transition/);
+    const closed = await leads.setState(l.id, "closed");
+    expect(closed?.state).toBe("closed");
+  });
+
   test("delete cascades — events for a deleted lead disappear", async () => {
     const u = await users.create({ tgUserId: 805 });
     const l = await leads.ensureForUser(u.id);

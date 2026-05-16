@@ -14,6 +14,7 @@ import {
   INTAKE_TEMPLATE,
   type IntakeFields,
   REJECTION_DEFAULT,
+  SUBMITTED_REPLY,
   VISA_ANKETA_TEMPLATE,
   VISA_PHOTO_REQUIREMENTS,
 } from "./templates.ts";
@@ -241,6 +242,21 @@ export class LeadsService {
       chatId: input.user.tg_user_id,
       conversationId: conv.id,
       text: DOCS_COMPLETE_REPLY,
+    });
+  }
+
+  /**
+   * Sent once when the operator confirms the visa application was filed
+   * with the consulate (lead → `submitted`). Substitutes the allocated
+   * application id into SUBMITTED_REPLY.
+   */
+  async sendSubmittedAck(input: { user: UserRow; applicationId: string }): Promise<void> {
+    const conv = await this.deps.conversations.byUserId(input.user.id);
+    if (!conv) return;
+    await this.relayToCandidate({
+      chatId: input.user.tg_user_id,
+      conversationId: conv.id,
+      text: SUBMITTED_REPLY.replace("{applicationId}", input.applicationId),
     });
   }
 

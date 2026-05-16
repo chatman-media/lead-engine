@@ -4,6 +4,27 @@ This file lists work that is *not yet started*. For shipped work, see [CHANGELOG
 
 ---
 
+## Tier 2 — medium impact, medium complexity
+
+### Visa waiting-period proactive reminders
+
+**Why:** after approval the candidate waits ~2 weeks (≈10 days collecting her
+documents, then 3-4 days for the consulate decision). Today the bot answers her
+questions in *support mode* but never reaches out first — a silent candidate
+hears nothing until the operator marks `submitted`. A timely "осталось пару дней,
+скоро напишу с результатом" reduces drop-off and support pings.
+
+**How:** add per-lead timestamps (e.g. `docs_started_at`, `submitted_at`) and a
+background scheduler (mirror `scheduleStaleLeadSweep`) that DMs a check-in when a
+lead has been in `docs_pending` / `submitted` past a threshold. Reuse the
+support-mode tone; gate behind an env flag so operators can disable it.
+
+**Estimated lift:** fewer ghosted candidates mid-process; less manual reassurance.
+
+**Status:** support mode (reactive answering) is shipped — see
+[LEADS.md](LEADS.md#режим-ожидания-support-mode). Only the proactive timer half
+is outstanding.
+
 ## Tier 3 — high impact, high complexity
 
 ### Tool calling for live data (rates, schedules, slot availability)

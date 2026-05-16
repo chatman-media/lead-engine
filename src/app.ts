@@ -56,6 +56,7 @@ import {
   createListUserbotProxiesHandler,
   createListUsersHandler,
   createListVacanciesHandler,
+  createMarkSubmittedHandler,
   createMediaFileHandler,
   createPromoteLeadHandler,
   createPurgeOutcomesHandler,
@@ -368,6 +369,7 @@ export function createRouter(deps: AppDeps): Router {
   router.post("/admin/api/leads/:id/reject", createRejectLeadHandler(apiDeps));
   router.post("/admin/api/leads/:id/send-intake", createSendIntakeHandler(apiDeps));
   router.post("/admin/api/leads/:id/submit-to-visa", createSubmitToVisaHandler(apiDeps));
+  router.post("/admin/api/leads/:id/mark-submitted", createMarkSubmittedHandler(apiDeps));
   // Notes — sub-resource of a lead. Register before the catch-all
   // `/leads/:id` so /:id/notes doesn't get captured as a literal id.
   router.post("/admin/api/leads/:id/notes", createCreateLeadNoteHandler(apiDeps));

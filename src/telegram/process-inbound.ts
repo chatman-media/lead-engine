@@ -131,10 +131,28 @@ function toFunnelStage(raw: string | null): FunnelStage | null {
   return FUNNEL_STAGE_SET.has(raw) ? (raw as FunnelStage) : null;
 }
 
-async function runRagForInbound(
+/** Support mode: a lead past approval that is waiting on the visa
+ *  process. `docs_pending` → still collecting her documents;
+ *  `submitted` → filed with the consulate. Any other lead state (or no
+ *  lead) → undefined (normal sales behaviour). */
+async function resolveSupportPhase(
   d: ProcessInboundDeps,
-): Promise<{ result: AnswerResult; stage?: FunnelStage; skillSlugs: string[] }> {
+): Promise<"docs" | "submitted" | undefined> {
+  const lead = await d.leads.byUserId(d.user.id);
+  if (lead?.state === "docs_pending") return "docs";
+  if (lead?.state === "submitted") return "submitted";
+  return undefined;
+}
+
+async function runRagForInbound(d: ProcessInboundDeps): Promise<{
+  result: AnswerResult;
+  stage?: FunnelStage;
+  skillSlugs: string[];
+  supportPhase?: "docs" | "submitted";
+}> {
   if (!d.rag) throw new Error("runRagForInbound: rag deps required");
+
+  const supportPhase = await resolveSupportPhase(d);
 
   const style = await resolveStyle({
     rag: d.rag,
@@ -269,6 +287,7 @@ async function runRagForInbound(
     ...(d.rag.booksPriority ? { booksPriority: true } : {}),
     ...(vacanciesBlock ? { vacanciesBlock } : {}),
     ...(resolvedSkills && resolvedSkills.length > 0 ? { skills: resolvedSkills } : {}),
+    ...(supportPhase ? { supportPhase } : {}),
   });
   // path is the categorical outcome of the RAG turn — ok / no_context /
   // ungrounded / smalltalk / persona_fact. Bucketed here so the /metrics
@@ -281,6 +300,7 @@ async function runRagForInbound(
     result,
     stage,
     skillSlugs: resolvedSkills?.map((s) => s.slug) ?? [],
+    ...(supportPhase ? { supportPhase } : {}),
   };
 }
 
@@ -425,7 +445,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return;
   }
 
-  const { result, stage, skillSlugs } = await runRagForInbound(d);
+  const { result, stage, skillSlugs, supportPhase } = await runRagForInbound(d);
 
   log.info("rag finished", {
     scope: "webhook",
@@ -436,6 +456,21 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   });
 
   if (result.text === NO_CONTEXT_MARKER) {
+    // Support mode (lead waiting on the visa process): never escalate or
+    // pitch a call. The candidate is already approved — a question we
+    // can't answer from KB just gets a calm reassurance, and the chat
+    // stays in `ai` mode so the bot keeps handling the wait. The
+    // "оператор" keyword still escalates manually (handled earlier).
+    if (supportPhase) {
+      await reply(
+        "Виза сейчас оформляется, всё идёт своим ходом. Как будут новости — обязательно напишу 🌷",
+        { used_chunk_ids: [], telemetry: result.telemetry },
+        stage,
+      );
+      await runPostReplyHooks(d);
+      return;
+    }
+
     // Consecutive-stall anti-deadloop: after STALL_LIMIT silent turns in a row,
     // send a CTA-fallback instead of staying silent. This keeps the candidate
     // engaged rather than watching "Секунду, уточню…" repeat endlessly.

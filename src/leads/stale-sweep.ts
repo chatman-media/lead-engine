@@ -2,17 +2,23 @@ import { type LeadState, LeadsRepo } from "../db/repos/leads.ts";
 import { type AttributionDeps, attributeLeadOutcome } from "./outcome-attribution.ts";
 
 /**
- * "Ghosted" detector. A lead that hasn't seen a state transition in 14
- * days while still in a non-terminal state is auto-closed and counted
- * as a `lost` outcome. This populates the loss side of the win-rate
- * stats so the leaderboard isn't biased by "we only count wins".
+ * "Ghosted" detector. A lead that hasn't seen a state transition in
+ * `STALE_DAYS` days while still in a non-terminal state is auto-closed
+ * and counted as a `lost` outcome. This populates the loss side of the
+ * win-rate stats so the leaderboard isn't biased by "we only count wins".
  *
  * Only sweeps NON-terminal states. Terminal (submitted/docs_complete/
  * rejected/closed) leads stay where they are; their attribution
  * happened at the transition.
+ *
+ * `docs_pending` gets a longer cutoff: the candidate is legitimately
+ * busy gathering passport scans / visa-form answers for ~10 days, and
+ * a 14-day sweep would auto-close her mid-process as "lost".
  */
 const STALE_DAYS = 14;
-const NON_TERMINAL: LeadState[] = ["intake_pending", "intake_complete", "approved", "docs_pending"];
+const STALE_DAYS_DOCS = 30;
+const NON_TERMINAL_SHORT: LeadState[] = ["intake_pending", "intake_complete", "approved"];
+const NON_TERMINAL_DOCS: LeadState[] = ["docs_pending"];
 
 export interface StaleSweepResult {
   scanned: number;
@@ -29,8 +35,13 @@ export interface StaleSweepResult {
  */
 export async function runStaleLeadSweep(deps: AttributionDeps): Promise<StaleSweepResult> {
   const leads = new LeadsRepo(deps.db);
-  const cutoff = Math.floor(Date.now() / 1000) - STALE_DAYS * 24 * 60 * 60;
-  const stale = await leads.listStale(NON_TERMINAL, cutoff);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const cutoffShort = nowSec - STALE_DAYS * 24 * 60 * 60;
+  const cutoffDocs = nowSec - STALE_DAYS_DOCS * 24 * 60 * 60;
+  const stale = [
+    ...(await leads.listStale(NON_TERMINAL_SHORT, cutoffShort)),
+    ...(await leads.listStale(NON_TERMINAL_DOCS, cutoffDocs)),
+  ];
 
   let closed = 0;
   let attributed = 0;

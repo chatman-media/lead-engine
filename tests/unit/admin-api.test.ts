@@ -214,6 +214,67 @@ describe("leads endpoints", () => {
     expect(b.application_id).toBe(a.application_id);
   });
 
+  test("mark-submitted transitions a docs_complete lead to submitted", async () => {
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9212 });
+    const c = await conversations.ensureForUser(u.id);
+    const { lead } = (await (
+      await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
+    ).json()) as { lead: { id: number } };
+    await fetch(url(`/admin/api/leads/${lead.id}/approve`), authed({ method: "POST" }));
+    await fetch(url(`/admin/api/leads/${lead.id}/submit-to-visa`), authed({ method: "POST" }));
+
+    const res = await fetch(
+      url(`/admin/api/leads/${lead.id}/mark-submitted`),
+      authed({ method: "POST" }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      lead: { state: string };
+      application_id: string | null;
+    };
+    expect(body.lead.state).toBe("submitted");
+    expect(body.application_id).toBeTruthy();
+  });
+
+  test("mark-submitted is idempotent — re-call on a submitted lead returns 200", async () => {
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9213 });
+    const c = await conversations.ensureForUser(u.id);
+    const { lead } = (await (
+      await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
+    ).json()) as { lead: { id: number } };
+    await fetch(url(`/admin/api/leads/${lead.id}/approve`), authed({ method: "POST" }));
+    await fetch(url(`/admin/api/leads/${lead.id}/submit-to-visa`), authed({ method: "POST" }));
+    await fetch(url(`/admin/api/leads/${lead.id}/mark-submitted`), authed({ method: "POST" }));
+
+    const again = await fetch(
+      url(`/admin/api/leads/${lead.id}/mark-submitted`),
+      authed({ method: "POST" }),
+    );
+    expect(again.status).toBe(200);
+    const body = (await again.json()) as { lead: { state: string } };
+    expect(body.lead.state).toBe("submitted");
+  });
+
+  test("mark-submitted rejects a lead not in docs_complete with 409", async () => {
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9214 });
+    const c = await conversations.ensureForUser(u.id);
+    const { lead } = (await (
+      await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
+    ).json()) as { lead: { id: number } };
+    // Promoted = intake_complete — mark-submitted requires docs_complete.
+    const res = await fetch(
+      url(`/admin/api/leads/${lead.id}/mark-submitted`),
+      authed({ method: "POST" }),
+    );
+    expect(res.status).toBe(409);
+  });
+
   test("notes: POST creates, lead detail returns the list, DELETE removes", async () => {
     const usersRepo = new UsersRepo(sql);
     const conversations = new ConversationsRepo(sql);

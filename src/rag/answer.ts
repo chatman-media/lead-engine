@@ -105,6 +105,7 @@ async function answerFromHits(opts: {
       ...(input.userFacts ? { userFacts: input.userFacts } : {}),
       ...(input.conversationSummary ? { conversationSummary: input.conversationSummary } : {}),
       ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
+      ...(input.supportPhase ? { supportPhase: input.supportPhase } : {}),
     });
     temperature = input.style.model.temperature;
   } else {
