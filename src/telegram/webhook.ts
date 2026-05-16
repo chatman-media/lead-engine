@@ -259,6 +259,9 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       chatId: message.chat.id,
       text: userMessageText,
       tgUserId,
+      // Bare media (photo/video with no text caption) → acknowledge-only
+      // turn: classify + one deduped ack per album, no chat reply.
+      mediaOnly: !!mediaInfo && !message.text && !message.caption,
       onEvent: deps.onEvent,
     }).catch((err) => {
       console.error("[webhook] background processing failed:", err);
