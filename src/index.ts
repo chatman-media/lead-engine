@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { AdminBus } from "./admin/bus.ts";
+import { createInboundEventBridge } from "./admin/inbound-events.ts";
 import { activeEmbeddingDim, config, llmIsConfigured } from "./config.ts";
 import { runMigrations } from "./db/migrate.ts";
 import { sql } from "./db/postgres.ts";
@@ -18,7 +20,7 @@ import { OpenRouterChatClient } from "./rag/providers/openrouter-chat.ts";
 import { STYLES as BUILTIN_STYLES, getStyle } from "./sales/styles/index.ts";
 import { createServer } from "./server.ts";
 import { TelegramClient } from "./telegram/client.ts";
-import type { RagDeps } from "./telegram/webhook.ts";
+import type { RagDeps, WebhookEvent } from "./telegram/webhook.ts";
 
 process.on("unhandledRejection", (reason) => {
   console.error("[unhandledRejection]", reason);
@@ -217,11 +219,17 @@ if (llmIsConfigured()) {
 
 console.log(`[server] embedding dim in use: ${activeEmbeddingDim()}`);
 
+// Shared admin WebSocket bus. Created here (not inside createServer) so the
+// userbot subprocess can forward its events into the same bus over IPC.
+const bus = new AdminBus();
+const inboundBridge = createInboundEventBridge({ bus, telegram });
+
 const server = createServer({
   sql,
   telegram,
   webhookSecret: config.telegram.webhookSecret,
   rag,
+  bus,
   enableTestHooks: process.env.TEST_HOOKS === "1",
   port: config.port,
   leadsChatId: config.telegram.leadsChatId,
@@ -249,6 +257,12 @@ if (config.userbot.enabled) {
       const proc = Bun.spawn(["bun", "run", "src/telegram/userbot-process.ts"], {
         env: process.env as Record<string, string>,
         stdio: ["ignore", "inherit", "inherit"],
+        // The userbot subprocess forwards inbound-pipeline events here over
+        // IPC; route them into the shared AdminBus so userbot-channel chats
+        // update in real time without a page reload.
+        ipc(message) {
+          inboundBridge(message as WebhookEvent);
+        },
       });
       proc.exited.then((code) => {
         console.warn(`[userbot] process exited (code=${code}), restarting in 10s…`);
