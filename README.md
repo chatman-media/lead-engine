@@ -15,7 +15,7 @@ Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тест�
 
 **Self-play + coaching** — автоматизированный тренировочный цикл: бот (salesperson-LLM) против LLM-кандидата → LLM-судья → ELO-рейтинг стилей → coach-LLM предлагает правки → shadow A/B validation. Без ручного труда. Подробности — [docs/SELF_PLAY.md](docs/SELF_PLAY.md).
 
-**Lead pipeline** — воронка кандидата от диалога до подачи на визу: авто-сбор intake (рост / вес / город / фото / загран), карточка в TG-чат с кнопками одобрить/отклонить, авто-парсинг 27 полей визовой анкеты, финальный пакет с `VS-YYYY-NNNN` в визовый чат. Подробности — [docs/LEADS.md](docs/LEADS.md).
+**Lead pipeline** — воронка кандидата от диалога до подачи на визу: авто-сбор intake (рост / вес / город / фото / загран), карточка в TG-чат с кнопками одобрить/отклонить, авто-парсинг 32 полей визовой анкеты (18 обязательных), финальный пакет с `VS-YYYY-NNNN` в визовый чат. Подробности — [docs/LEADS.md](docs/LEADS.md).
 
 **Vacancies** — быстро-меняющийся слой: оператор добавляет вакансию в `/admin/vacancies` → следующий ответ бота уже её видит, без re-embedding.
 
@@ -405,7 +405,9 @@ POST /telegram/<secret>
           └─ fire-and-forget:
                extractUserFacts → mergeMemoryFacts
                gradeSkills → recordSkillOutcome
+               classifyPhotos → setPhotoClass
                intakeCheck → leadStateTransition
+               extractVisaDocs → updateVisaDocs (if docs_pending)
 
 Telegram personal account (Userbot MTProto, optional)
    msg.reply() per message → same processInbound()

@@ -102,6 +102,7 @@ Userbot и Bot API могут работать одновременно:
 - Отвечает на входящие DM через RAG (тот же пайплайн, тот же style).
 - Обрабатывает непрочитанные при старте.
 - Персистирует сессию в PostgreSQL (одна строка в `userbot_session`).
+- Скачивает фото кандидата через gramjs `downloadMedia`, сохраняет в `config.media.dir`, записывает в `meta_json.media` с `source: "userbot"`. Затем классифицирует (passport / full-body / portrait / other) — intake-счётчики работают так же как в Bot API режиме.
 
 **Не делает:**
 - Не пишет первым (нет метода initiate-conversation в текущей реализации).
