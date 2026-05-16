@@ -45,6 +45,19 @@ describe("parseVisaDocsJson", () => {
     expect((out as Record<string, unknown>).unknown_field).toBeUndefined();
   });
 
+  test("parses the extended anketa fields (birth province, nationality questions, mobile)", () => {
+    const out = parseVisaDocsJson(
+      `{"birth_province":"Moscow Oblast","other_nationalities":"no",` +
+        `"other_permanent_residence":"no","held_other_nationalities":"no",` +
+        `"mobile_phone":"+79990001122"}`,
+    );
+    expect(out.birth_province).toBe("Moscow Oblast");
+    expect(out.other_nationalities).toBe("no");
+    expect(out.other_permanent_residence).toBe("no");
+    expect(out.held_other_nationalities).toBe("no");
+    expect(out.mobile_phone).toBe("+79990001122");
+  });
+
   test("ignores non-string values and oversized strings", () => {
     const huge = "x".repeat(2000);
     const out = parseVisaDocsJson(
