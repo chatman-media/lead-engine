@@ -292,6 +292,19 @@ input, textarea {
   animation: pulse-amber 2s infinite;
 }
 
+/* Transient highlight for a chat that just escalated into the queue —
+   set when the admin UI auto-navigates to the list on a new unanswered
+   chat. Runs ~5s then settles back to the normal card styling. */
+@keyframes chat-card-flash {
+  0%, 100% { background: var(--bg-1); }
+  50% { background: rgba(239, 68, 68, 0.22); }
+}
+
+.chat-card.chat-card-highlight {
+  animation: chat-card-flash 1.2s ease-in-out 4;
+  border-color: var(--red, #ef4444);
+}
+
 .chat-name {
   font-family: var(--mono);
   font-size: 13px;

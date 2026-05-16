@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ws } from "../App.tsx";
 import { api, type Conversation, type ConversationSource } from "../api.ts";
 
@@ -55,7 +55,11 @@ export function Chats() {
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [sourceFilter, setSourceFilter] = useState<ConversationSource | "all">("userbot");
+  // Conversation id to flash — set when Layout navigated here because a
+  // chat just escalated into the queue.
+  const [highlightId, setHighlightId] = useState<number | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const tickRef = useRef<ReturnType<typeof setInterval>>(null);
   // Keep the latest filter in a ref so the WS-triggered reload (set up once
   // in an effect) always reads the current value without re-subscribing.
@@ -110,6 +114,16 @@ export function Chats() {
     reload();
   }, [sourceFilter]);
 
+  // Flash the row of a chat that just escalated — Layout passes its id
+  // (with a timestamp so a repeat escalation re-triggers) via router state.
+  useEffect(() => {
+    const state = location.state as { highlightConvId?: number } | null;
+    if (!state?.highlightConvId) return;
+    setHighlightId(state.highlightConvId);
+    const t = setTimeout(() => setHighlightId(null), 5000);
+    return () => clearTimeout(t);
+  }, [location.state]);
+
   const queued = convs.filter((c) => c.mode === "queued");
   const rest = convs.filter((c) => c.mode !== "queued");
 
@@ -147,7 +161,9 @@ export function Chats() {
               onClick={() => navigate(`/admin/chats/${c.id}`)}
               data-testid={`chat-row-${c.id}`}
               data-mode={c.mode}
-              className={`chat-card fade-in${c.mode === "queued" ? " queued" : ""}`}
+              className={`chat-card fade-in${c.mode === "queued" ? " queued" : ""}${
+                c.id === highlightId ? " chat-card-highlight" : ""
+              }`}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="chat-name">
