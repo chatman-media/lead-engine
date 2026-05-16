@@ -22,6 +22,8 @@ interface SettingSpec {
   label: string;
   hint: string;
   type: SettingType;
+  /** Shown when the env var is absent. For booleans: "1" or "0". */
+  defaultValue?: string;
 }
 
 // Temperature + RAG feature flags — provider-independent. The chat model is
@@ -38,36 +40,63 @@ const TUNABLE_SPECS: readonly SettingSpec[] = [
     label: "Память о собеседнике",
     hint: "Бот запоминает факты о кандидате между сессиями и не переспрашивает их.",
     type: "boolean",
+    defaultValue: "1",
   },
   {
     key: "RAG_QUERY_REWRITE",
     label: "Переформулировка вопросов",
     hint: "Уточняет вопрос перед поиском по базе знаний — лучше понимает «а это?», «там».",
     type: "boolean",
+    defaultValue: "1",
   },
   {
     key: "RAG_REFLECT",
     label: "Проверка фактов в ответах",
     hint: "После генерации проверяет, что факты подтверждены базой знаний.",
     type: "boolean",
+    defaultValue: "1",
   },
   {
     key: "RAG_HYBRID_SEARCH",
     label: "Гибридный поиск",
     hint: "Совмещает смысловой и точный поиск по ключевым словам.",
     type: "boolean",
+    defaultValue: "1",
   },
   {
     key: "RAG_CONVERSATION_SUMMARY",
     label: "Резюме длинных диалогов",
     hint: "Сжимает старые сообщения в краткое резюме при длинной переписке.",
     type: "boolean",
+    defaultValue: "1",
   },
   {
     key: "RAG_TOPIC_ROUTING",
     label: "Поиск по темам",
     hint: "Сужает поиск по базе знаний до темы вопроса (виза, оплата, жильё…).",
     type: "boolean",
+    defaultValue: "1",
+  },
+  {
+    key: "RAG_BOOKS_PRIORITY",
+    label: "Приоритет книг",
+    hint: "Сначала ищет по библиотеке книг; при нулевом результате — по всей базе знаний.",
+    type: "boolean",
+    defaultValue: "1",
+  },
+  {
+    key: "RAG_SKILL_GRADING",
+    label: "Оценка навыков ИИ",
+    hint: "После каждого ответа ИИ определяет, какие навыки продаж были использованы (для аналитики).",
+    type: "boolean",
+    defaultValue: "1",
+  },
+  {
+    key: "VISION_ENABLED",
+    label: "Распознавание фото (ИИ)",
+    hint: "Классифицирует фото кандидата (паспорт, портрет, полный рост) через модель зрения.",
+    type: "boolean",
+    defaultValue: "1",
   },
 ];
 
@@ -156,7 +185,10 @@ async function writeEnvUpdates(path: string, updates: Record<string, string>): P
  */
 export function createGetRuntimeSettingsHandler(deps: AdminApiDeps): RouteHandler {
   return withAdmin(deps.sql, async () => {
-    const settings = allSpecs().map((s) => ({ ...s, value: process.env[s.key] ?? "" }));
+    const settings = allSpecs().map((s) => ({
+      ...s,
+      value: process.env[s.key] ?? s.defaultValue ?? "",
+    }));
     return json({ env_path: envFilePath(), provider: config.llm.provider, settings });
   });
 }
