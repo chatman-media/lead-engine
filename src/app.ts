@@ -121,6 +121,11 @@ export interface AppDeps {
   leadsChatId?: number | null;
   /** Group chat where the visa-submission package is posted. */
   visaChatId?: number | null;
+  /** Whether manual admin replies route through the userbot send queue
+   *  (Alina's personal account) instead of the Bot API. Defaults to
+   *  `config.userbot.enabled`; tests inject it explicitly so they don't
+   *  depend on the developer's local `.env`. */
+  userbotEnabled?: boolean;
 }
 
 // Rate limiters shared across the request lifetime. Telegram webhook is
@@ -237,7 +242,7 @@ export function createRouter(deps: AppDeps): Router {
   const apiDeps = {
     sql: deps.sql,
     telegram: deps.telegram,
-    userbotEnabled: config.userbot.enabled,
+    userbotEnabled: deps.userbotEnabled ?? config.userbot.enabled,
     // Thread the LLM clients through so the style playground endpoint can
     // run dry-run completions. Other admin endpoints don't need this; the
     // playground returns 503 when rag is undefined.
