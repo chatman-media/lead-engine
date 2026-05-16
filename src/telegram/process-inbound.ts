@@ -6,7 +6,14 @@ import type { UserRow } from "../db/repos/users.ts";
 import { renderVacanciesBlock } from "../db/repos/vacancies.ts";
 import { log } from "../log.ts";
 import { inc } from "../metrics.ts";
-import { type AnswerResult, answerWithRag, NO_CONTEXT_MARKER } from "../rag/answer.ts";
+import {
+  type AnswerResult,
+  answerWithRag,
+  generateSoftFallback,
+  NO_CONTEXT_MARKER,
+  type Persona,
+} from "../rag/answer.ts";
+import type { ChatMessage } from "../rag/chat.ts";
 import { gradeSkills } from "../rag/grade-skills.ts";
 import { pickVariant } from "../sales/ab-router.ts";
 import type { SkillForPrompt } from "../sales/prompt.ts";
@@ -149,6 +156,10 @@ async function runRagForInbound(d: ProcessInboundDeps): Promise<{
   stage?: FunnelStage;
   skillSlugs: string[];
   supportPhase?: "docs" | "submitted";
+  /** Conversation history + resolved persona — reused by the soft-fallback
+   *  path when RAG returns NO_CONTEXT so the bot can still answer. */
+  history: ChatMessage[];
+  persona: Persona;
 }> {
   if (!d.rag) throw new Error("runRagForInbound: rag deps required");
 
@@ -296,11 +307,22 @@ async function runRagForInbound(d: ProcessInboundDeps): Promise<{
   if (result.telemetry?.path) {
     inc("rag_kb_hits_total", 1, { path: result.telemetry.path });
   }
+  // Resolved persona — style.persona when a sales style is active, otherwise
+  // the env-configured persona (defaulted). Used by the soft-fallback reply.
+  const persona: Persona = style
+    ? {
+        name: style.persona.name,
+        role: style.persona.role,
+        ...(style.persona.company?.trim() ? { company: style.persona.company.trim() } : {}),
+      }
+    : (d.rag.persona ?? { name: "Менеджер", role: "human" });
   return {
     result,
     stage,
     skillSlugs: resolvedSkills?.map((s) => s.slug) ?? [],
     ...(supportPhase ? { supportPhase } : {}),
+    history,
+    persona,
   };
 }
 
@@ -445,7 +467,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     return;
   }
 
-  const { result, stage, skillSlugs, supportPhase } = await runRagForInbound(d);
+  const { result, stage, skillSlugs, supportPhase, history, persona } = await runRagForInbound(d);
 
   log.info("rag finished", {
     scope: "webhook",
@@ -456,11 +478,11 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   });
 
   if (result.text === NO_CONTEXT_MARKER) {
-    // Support mode (lead waiting on the visa process): never escalate or
-    // pitch a call. The candidate is already approved — a question we
-    // can't answer from KB just gets a calm reassurance, and the chat
-    // stays in `ai` mode so the bot keeps handling the wait. The
-    // "оператор" keyword still escalates manually (handled earlier).
+    // Support mode (lead waiting on the visa process): the candidate is
+    // already approved — a question we can't answer from KB gets a calm,
+    // deterministic reassurance (no LLM call, no risk of a sales CTA),
+    // and the chat stays in `ai` mode so the bot keeps handling the wait.
+    // The "оператор" keyword still escalates manually (handled earlier).
     if (supportPhase) {
       await reply(
         "Виза сейчас оформляется, всё идёт своим ходом. Как будут новости — обязательно напишу 🌷",
@@ -471,52 +493,45 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
       return;
     }
 
-    // Consecutive-stall anti-deadloop: after STALL_LIMIT silent turns in a row,
-    // send a CTA-fallback instead of staying silent. This keeps the candidate
-    // engaged rather than watching "Секунду, уточню…" repeat endlessly.
-    const STALL_LIMIT = 3;
-    const stallCount = (await d.conversations.getStallCount(d.conv)) + 1;
-    await d.conversations.setStallCount(d.conv.id, stallCount);
+    // No groundable answer — no KB hit, or the fact-checker dropped the draft
+    // as ungrounded. The bot must never go silent: reply in its own persona
+    // voice with a soft answer that invents NO specifics (generateSoftFallback
+    // is hard-constrained against fabricating numbers / dates / visa terms).
+    //
+    // The conversation stays in AI mode — no "queued" highlight. The question
+    // is still logged to kb_suggestions so an operator can give a precise
+    // answer later from that section, if they choose to.
 
-    log.debug("stall step", {
-      scope: "webhook",
-      conv_id: d.conv.id,
-      stall: stallCount,
-      stall_limit: STALL_LIMIT,
-    });
-    if (stallCount >= STALL_LIMIT) {
-      // Reset counter so next stall cycle restarts from 0.
-      await d.conversations.setStallCount(d.conv.id, 0);
-      // Send CTA-fallback: pivot to call — moves toward conversion instead
-      // of silently queuing. Keep the conversation in AI mode so the bot can
-      // still reply to follow-ups.
-      const ctaReply =
-        d.rag?.style?.voice?.stallCtaReply ??
-        "Давай созвонимся — так быстрее всё объясню. В какое время удобно? 😊";
-      log.info("stall limit reached — sending CTA", {
+    // Capture the candidate's message id BEFORE replying (reply() inserts an
+    // assistant row, which would otherwise shadow it in recentForContext).
+    const userMsg = (await d.messages.recentForContext(d.conv.id, 1)).find(
+      (m) => m.role === "user",
+    );
+
+    let fallbackText: string;
+    try {
+      fallbackText = await generateSoftFallback({
+        question: d.text,
+        chat: d.rag.chat,
+        persona,
+        history,
+      });
+    } catch (err) {
+      log.error("soft fallback generation failed — using static reply", {
         scope: "webhook",
         conv_id: d.conv.id,
-        stall_limit: STALL_LIMIT,
+        err,
       });
-      await reply(ctaReply, { used_chunk_ids: [], telemetry: result.telemetry }, stage);
-      await runPostReplyHooks(d);
-      return;
+      fallbackText =
+        d.rag?.style?.voice?.stallCtaReply ??
+        "Хороший вопрос — уточню детали и вернусь к вам чуть позже 🙏";
     }
-
-    // Queue the conversation so the operator sees it needs a manual reply.
-    if (d.conv.mode === "ai") {
-      await d.conversations.setMode(d.conv.id, "queued");
-      d.conv.mode = "queued";
-      d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
-    }
+    await reply(fallbackText, { used_chunk_ids: [], telemetry: result.telemetry }, stage);
 
     // Record the unanswered question for the KB approval pipeline.
     // Dedup: if there is already a pending suggestion for this conversation
     // (same question lingering) a new row is NOT inserted — see KbSuggestionsRepo.create.
     try {
-      const userMsg = (await d.messages.recentForContext(d.conv.id, 1)).find(
-        (m) => m.role === "user",
-      );
       const suggestion = await d.kbSuggestions.create({
         questionText: d.text,
         sourceConversationId: d.conv.id,
@@ -535,9 +550,6 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
       });
     }
 
-    // Run memory extraction even on silent turns — the user message itself
-    // may carry persistent facts ("I'm Anya, 25, from Moscow") that we want
-    // remembered regardless of whether RAG could answer.
     await runPostReplyHooks(d);
     return;
   }

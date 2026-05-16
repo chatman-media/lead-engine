@@ -17,6 +17,13 @@ export interface IngestDeps {
    *  docs untagged (still searchable by topic-routed queries via the
    *  NULL fallback). See `kb_documents.topic` and topic-classifier.ts. */
   topic?: string | null;
+  /** Overrides the default `file://<abs>` document source. Callers that
+   *  ingest from a throwaway temp path (e.g. the admin upload route) pass a
+   *  stable, content-addressed source here so re-uploads dedupe. */
+  source?: string;
+  /** Overrides the default `basename(abs)` document title — useful when the
+   *  on-disk filename is a temp name rather than something operator-facing. */
+  title?: string;
 }
 
 export interface IngestFileResult {
@@ -33,8 +40,8 @@ export async function ingestFile(path: string, deps: IngestDeps): Promise<Ingest
   // PDF files are parsed async; text files read synchronously.
   const raw = ext === ".pdf" ? await parsePdf(abs) : readFileSync(abs, "utf8");
   const hash = createHash("sha256").update(raw).digest("hex");
-  const source = `file://${abs}`;
-  const title = basename(abs);
+  const source = deps.source ?? `file://${abs}`;
+  const title = deps.title ?? basename(abs);
 
   const existing = await deps.kb.getDocumentBySource(source);
 

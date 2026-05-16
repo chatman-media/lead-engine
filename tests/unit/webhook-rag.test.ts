@@ -38,6 +38,18 @@ function fakeChat(reply: string): ChatClient {
   };
 }
 
+// Chat double that tells the main RAG generation apart from the no-context
+// soft-fallback call. The soft-fallback system prompt carries a distinctive
+// phrase ("нет точных данных"); every other call is the RAG generation.
+function fallbackAwareChat(opts: { rag: string; fallback: string }): ChatClient {
+  return {
+    async complete(messages: ChatMessage[]) {
+      const sys = messages.find((m) => m.role === "system")?.content ?? "";
+      return sys.includes("нет точных данных") ? opts.fallback : opts.rag;
+    },
+  };
+}
+
 interface OutgoingCall {
   method: string;
   body: Record<string, unknown>;
@@ -154,11 +166,14 @@ describe("webhook RAG integration", () => {
     expect(msgs[1]!.text).toBe("From RAG");
   });
 
-  test("ai mode + LLM returns NO_CONTEXT_MARKER: switches to queued, no Telegram message", async () => {
+  test("ai mode + NO_CONTEXT: sends a soft fallback, stays in ai mode, logs the question", async () => {
     teardownServer(ctx);
     ctx = setup({
       embedder: fakeEmbedder(),
-      chat: fakeChat("__NO_CONTEXT__"),
+      chat: fallbackAwareChat({
+        rag: "__NO_CONTEXT__",
+        fallback: "Уточню этот момент и вернусь 🙏",
+      }),
     });
     const users = new UsersRepo(sql);
     const kb = new KbRepo(sql);
@@ -184,17 +199,26 @@ describe("webhook RAG integration", () => {
     });
     expect(res.status).toBe(200);
 
-    expect(ctx.sent).toHaveLength(0);
+    // The bot never goes silent — a soft fallback reply is sent.
+    expect(ctx.sent).toHaveLength(1);
+    expect(ctx.sent[0]!.body.text).toBe("Уточню этот момент и вернусь 🙏");
 
+    // Conversation stays in ai mode — no "queued" highlight.
     const conv = (await new ConversationsRepo(sql).byUserId(u.id))!;
-    expect(conv.mode).toBe("queued");
+    expect(conv.mode).toBe("ai");
+
+    // The unanswered question is logged for an optional later manual answer.
+    const [row] = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::INTEGER AS n FROM kb_suggestions WHERE source_conversation_id = ${conv.id}
+    `;
+    expect(row!.n).toBe(1);
   });
 
-  test("two NO_CONTEXT in ai: no Telegram traffic, mode queued after first", async () => {
+  test("two NO_CONTEXT turns in ai: each gets a soft fallback, mode stays ai", async () => {
     teardownServer(ctx);
     ctx = setup({
       embedder: fakeEmbedder(),
-      chat: fakeChat("__NO_CONTEXT__"),
+      chat: fallbackAwareChat({ rag: "__NO_CONTEXT__", fallback: "Сейчас уточню детали 🙏" }),
     });
     const users = new UsersRepo(sql);
     const kb = new KbRepo(sql);
@@ -218,64 +242,22 @@ describe("webhook RAG integration", () => {
       body: JSON.stringify(update(420, "off-topic")),
       headers: { "content-type": "application/json" },
     });
-    expect(ctx.sent).toHaveLength(0);
-
     await fetch(url, {
       method: "POST",
       body: JSON.stringify(update(420, "still-off-topic")),
       headers: { "content-type": "application/json" },
     });
-    expect(ctx.sent).toHaveLength(0);
-    expect((await new ConversationsRepo(sql).byUserId(u.id))!.mode).toBe("queued");
+
+    expect(ctx.sent).toHaveLength(2);
+    expect((await new ConversationsRepo(sql).byUserId(u.id))!.mode).toBe("ai");
   });
 
-  test("ai mode: NO_CONTEXT then on-topic question gets RAG reply", async () => {
+  test("kb empty: bot still answers with a soft fallback, mode stays ai", async () => {
     teardownServer(ctx);
-    let turn = 0;
     ctx = setup({
       embedder: fakeEmbedder(),
-      chat: {
-        async complete() {
-          turn++;
-          return turn === 1 ? "__NO_CONTEXT__" : "Ответ из базы после очереди";
-        },
-      },
+      chat: fallbackAwareChat({ rag: "From RAG", fallback: "Уточню и вернусь к вам 🙏" }),
     });
-    const users = new UsersRepo(sql);
-    const kb = new KbRepo(sql);
-    const u = await users.create({ tgUserId: 500 });
-    const doc = await kb.upsertDocument({
-      source: "s://t",
-      title: "vacancy-china",
-      contentHash: "h2",
-    });
-    await kb.insertChunkWithEmbedding({
-      documentId: doc.id,
-      chunkIndex: 0,
-      text: "Вакансии в Китае: подробности в контексте.",
-      tokenCount: 8,
-      embedding: vec(3),
-    });
-
-    const url = `http://127.0.0.1:${ctx.server.port}/telegram/${SECRET}`;
-    await fetch(url, {
-      method: "POST",
-      body: JSON.stringify(update(500, "про рыбалку")),
-      headers: { "content-type": "application/json" },
-    });
-    await fetch(url, {
-      method: "POST",
-      body: JSON.stringify(update(500, "работа в Китае?")),
-      headers: { "content-type": "application/json" },
-    });
-
-    expect(ctx.sent).toHaveLength(1);
-    expect(String(ctx.sent[0]!.body.text)).toBe("Ответ из базы после очереди");
-    const conv = (await new ConversationsRepo(sql).byUserId(u.id))!;
-    expect(conv.mode).toBe("ai");
-  });
-
-  test("kb empty: silent, queued for operator", async () => {
     const users = new UsersRepo(sql);
     await users.create({ tgUserId: 300 });
 
@@ -288,8 +270,9 @@ describe("webhook RAG integration", () => {
     expect(res.status).toBe(200);
     const user = await new UsersRepo(sql).byTgId(300);
     const conv = (await new ConversationsRepo(sql).byUserId(user!.id))!;
-    expect(conv.mode).toBe("queued");
-    expect(ctx.sent).toHaveLength(0);
+    expect(conv.mode).toBe("ai");
+    expect(ctx.sent).toHaveLength(1);
+    expect(ctx.sent[0]!.body.text).toBe("Уточню и вернусь к вам 🙏");
   });
 
   test("ai mode + smalltalk question: replies with persona name, LLM not called", async () => {
