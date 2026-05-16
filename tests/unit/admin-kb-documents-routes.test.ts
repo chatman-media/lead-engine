@@ -46,13 +46,13 @@ async function startServer(withRag: boolean) {
   const admins = new AdminsRepo(sql);
   // startServer may run twice in one test (rag → no-rag restart); the admin
   // row survives in the DB, so only create it the first time.
-  if (!(await admins.byEmail("op@x.test"))) {
-    await admins.create({ email: "op@x.test", password: "longenough" });
+  if (!(await admins.byEmail("op-kbdocs@x.test"))) {
+    await admins.create({ email: "op-kbdocs@x.test", password: "longenough" });
   }
   const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+    body: JSON.stringify({ email: "op-kbdocs@x.test", password: "longenough" }),
   });
   cookie = login.headers.get("set-cookie")!.split(";")[0]!;
 }

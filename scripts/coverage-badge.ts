@@ -1,35 +1,34 @@
 #!/usr/bin/env bun
 /**
- * Generates a coverage badge SVG from Bun's lcov report. Self-contained —
- * no network, no external badge service (the repo is private, so shields.io
- * can't read its data anyway). The badge is committed to the repo and the
- * README references it by relative path.
+ * Generates a coverage badge SVG from Bun's text coverage report.
+ * Self-contained — no network, no external badge service (the repo is
+ * private, so shields.io can't read its data anyway). The badge is
+ * committed to the repo and the README references it by relative path.
  *
- * Reads `coverage/lcov.info` (produced by `bun test --coverage
- * --coverage-reporter=lcov`), sums the `LF:` (lines found) and `LH:` (lines
- * hit) records across all files, and writes a flat-square SVG to
- * `.github/badges/coverage.svg`.
+ * Parses the `All files` row of Bun's `--coverage-reporter=text` output —
+ * the SAME source the CI gate (`check-coverage.ts`) reads, so the badge
+ * and the gate never disagree. Bun's lcov and text reporters count lines
+ * slightly differently, so a lcov-derived badge would drift from the gate.
  *
  * Run:
- *   bun run test:coverage           # produces coverage/lcov.info
- *   bun scripts/coverage-badge.ts   # then regenerate the badge
+ *   bun run test:coverage:badge      # runs coverage + regenerates the badge
+ * Or, with a saved text report:
+ *   bun scripts/coverage-badge.ts < coverage/coverage.txt
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-const LCOV_PATH = join(process.cwd(), "coverage", "lcov.info");
+const REPORT_PATH = join(process.cwd(), "coverage", "coverage.txt");
 const BADGE_PATH = join(process.cwd(), ".github", "badges", "coverage.svg");
 
-/** Sum lcov `LF:`/`LH:` records into an overall line-coverage percentage. */
-function linePercentFromLcov(lcov: string): number {
-  let found = 0;
-  let hit = 0;
-  for (const line of lcov.split("\n")) {
-    if (line.startsWith("LF:")) found += Number(line.slice(3)) || 0;
-    else if (line.startsWith("LH:")) hit += Number(line.slice(3)) || 0;
+/** Pull the line-coverage percent from Bun's text-reporter `All files` row.
+ *  The row looks like: `All files | 91.36 | 90.23 |` (funcs | lines). */
+function linePercentFromTextReport(text: string): number {
+  for (const line of text.split("\n")) {
+    const m = line.match(/^\s*All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/);
+    if (m) return Number(m[2]);
   }
-  if (found === 0) throw new Error("lcov report has no line records (LF: total is 0)");
-  return (hit / found) * 100;
+  throw new Error("could not find the 'All files' row in the coverage text report");
 }
 
 /** shields-style colour ramp keyed off the coverage percentage. */
@@ -61,15 +60,15 @@ function renderBadge(pct: number): string {
 `;
 }
 
-let lcov: string;
+let report: string;
 try {
-  lcov = readFileSync(LCOV_PATH, "utf-8");
+  report = readFileSync(REPORT_PATH, "utf-8");
 } catch {
-  console.error(`[coverage-badge] ${LCOV_PATH} not found — run \`bun run test:coverage\` first`);
+  console.error(`[coverage-badge] ${REPORT_PATH} not found — run \`bun run test:coverage:badge\``);
   process.exit(1);
 }
 
-const pct = linePercentFromLcov(lcov);
+const pct = linePercentFromTextReport(report);
 mkdirSync(dirname(BADGE_PATH), { recursive: true });
 writeFileSync(BADGE_PATH, renderBadge(pct));
 console.error(`[coverage-badge] wrote ${BADGE_PATH} — line coverage ${pct.toFixed(1)}%`);

@@ -34,13 +34,13 @@ async function startServer(withTelegram: boolean) {
   });
   server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
   const admins = new AdminsRepo(sql);
-  if (!(await admins.byEmail("op@x.test"))) {
-    await admins.create({ email: "op@x.test", password: "longenough" });
+  if (!(await admins.byEmail("op-opsproxies@x.test"))) {
+    await admins.create({ email: "op-opsproxies@x.test", password: "longenough" });
   }
   const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+    body: JSON.stringify({ email: "op-opsproxies@x.test", password: "longenough" }),
   });
   cookie = login.headers.get("set-cookie")!.split(";")[0]!;
 }

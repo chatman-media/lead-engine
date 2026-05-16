@@ -40,13 +40,14 @@ async function startServer(withRag: boolean) {
   });
   server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
   const admins = new AdminsRepo(sql);
-  const existing = await admins.byEmail("op@x.test");
+  const existing = await admins.byEmail("op-shadoweval@x.test");
   adminId =
-    existing?.id ?? (await admins.create({ email: "op@x.test", password: "longenough" })).id;
+    existing?.id ??
+    (await admins.create({ email: "op-shadoweval@x.test", password: "longenough" })).id;
   const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+    body: JSON.stringify({ email: "op-shadoweval@x.test", password: "longenough" }),
   });
   cookie = login.headers.get("set-cookie")!.split(";")[0]!;
 }

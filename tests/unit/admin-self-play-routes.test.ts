@@ -22,11 +22,11 @@ beforeEach(async () => {
   server = Bun.serve({ port: 0, fetch: (req) => router.handle(req) });
 
   const admins = new AdminsRepo(sql);
-  await admins.create({ email: "op@x.test", password: "longenough" });
+  await admins.create({ email: "op-selfplay@x.test", password: "longenough" });
   const login = await fetch(`http://127.0.0.1:${server.port}/admin/api/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "op@x.test", password: "longenough" }),
+    body: JSON.stringify({ email: "op-selfplay@x.test", password: "longenough" }),
   });
   cookie = login.headers.get("set-cookie")!.split(";")[0]!;
 }, 30_000);

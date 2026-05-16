@@ -98,12 +98,15 @@ jobs:
         # Bun 1.3.14's coverageThreshold in bunfig.toml is read but never
         # enforced — so the check-coverage wrapper script parses the text
         # report and exits non-zero below the line/function floors. Baseline
-        # at this commit was 77% lines / 82% funcs; we pin floors a few
-        # points below to catch real regressions without false alarms.
+        # at this commit was 90.2% lines / 91.4% funcs (process entrypoints
+        # and test-only seed code are excluded via bunfig
+        # coveragePathIgnorePatterns). Floors sit at 90% to hold the line.
         run: |
           set -o pipefail
+          mkdir -p coverage
           bun test tests/unit --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 \
-            | bun scripts/check-coverage.ts --line 0.70 --function 0.75
+            | bun scripts/check-coverage.ts --line 0.90 --function 0.90 \
+            | tee coverage/coverage.txt
 
       - name: upload coverage (lcov)
         if: always()
