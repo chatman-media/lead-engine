@@ -369,6 +369,18 @@ export interface LeadDetail {
   notes: LeadNote[];
 }
 
+/** One media file a candidate sent — see GET /admin/api/leads/:id/media.
+ *  `file_id` = Bot API media; `file` = userbot media stored on disk. */
+export interface LeadMediaItem {
+  id: number;
+  type: string;
+  file_id: string | null;
+  file: string | null;
+  photo_class: string | null;
+  caption: string;
+  created_at: number;
+}
+
 /** Mirror of the GET /admin/api/status response — see src/admin/api.ts. */
 export interface SystemStatus {
   rag: {
@@ -797,6 +809,8 @@ export const api = {
     }),
 
   leadDetail: (id: number) => req<LeadDetail>(`/admin/api/leads/${id}`),
+
+  leadMedia: (id: number) => req<{ media: LeadMediaItem[] }>(`/admin/api/leads/${id}/media`),
 
   updateVisaDocs: (id: number, docs: Partial<VisaDocs>) =>
     req<{ visa_docs: VisaDocs }>(`/admin/api/leads/${id}/visa-docs`, {

@@ -155,6 +155,50 @@ export class MessagesRepo {
     return result.count > 0;
   }
 
+  /**
+   * All media messages of a conversation (photo / video / document /
+   * voice), oldest first. Used by the admin leads page to show a
+   * candidate's photos inline.
+   */
+  async mediaForConversation(conversationId: number): Promise<
+    {
+      id: number;
+      type: string;
+      file_id: string | null;
+      file: string | null;
+      photo_class: string | null;
+      caption: string;
+      created_at: number;
+    }[]
+  > {
+    return this.sql<
+      {
+        id: number;
+        type: string;
+        file_id: string | null;
+        file: string | null;
+        photo_class: string | null;
+        caption: string;
+        created_at: number;
+      }[]
+    >`
+      SELECT
+        id,
+        text AS caption,
+        created_at,
+        (meta_json::jsonb)->'media'->>'type' AS type,
+        (meta_json::jsonb)->'media'->>'file_id' AS file_id,
+        (meta_json::jsonb)->'media'->>'file' AS file,
+        (meta_json::jsonb)->'media'->>'photo_class' AS photo_class
+      FROM messages
+      WHERE conversation_id = ${conversationId}
+        AND role = 'user'
+        AND meta_json IS NOT NULL
+        AND (meta_json::jsonb)->'media'->>'type' IS NOT NULL
+      ORDER BY id ASC
+    `;
+  }
+
   /** Counts classified photos per vision class for a conversation. */
   async countPhotosByClass(conversationId: number): Promise<Record<PhotoClass, number>> {
     const rows = await this.sql<{ cls: string; n: number }[]>`
