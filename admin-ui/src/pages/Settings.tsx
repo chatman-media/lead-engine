@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
+import { useAdmin } from "../App.tsx";
 import { api, type RuntimeSetting } from "../api.ts";
 import { CONFIGURABLE_TABS, useTabVisibility } from "../useTabVisibility.ts";
 
@@ -300,10 +301,105 @@ function RuntimeSettingsSection() {
   );
 }
 
+// ─── Account (change own password) ──────────────────────────────────────
+
+function AccountSection() {
+  const admin = useAdmin();
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [save, setSave] = useState<SaveState>({ kind: "idle" });
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!current || !next) {
+      setSave({ kind: "error", msg: "Заполните текущий и новый пароль." });
+      return;
+    }
+    if (next.length < 8) {
+      setSave({ kind: "error", msg: "Новый пароль — минимум 8 символов." });
+      return;
+    }
+    if (next !== confirm) {
+      setSave({ kind: "error", msg: "Пароли не совпадают." });
+      return;
+    }
+    setSave({ kind: "saving" });
+    try {
+      await api.changePassword(current, next);
+      setSave({ kind: "saved" });
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+    } catch (err) {
+      setSave({ kind: "error", msg: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    fontFamily: "var(--mono)",
+    fontSize: 12,
+    padding: "6px 8px",
+  };
+
+  return (
+    <div style={{ maxWidth: 560, marginBottom: 32 }}>
+      <div style={sectionLabelStyle}>Аккаунт</div>
+      <div style={{ ...cardStyle, padding: 16 }}>
+        <div style={{ fontSize: 13, color: "var(--text)", marginBottom: 2 }}>{admin.email}</div>
+        <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 16 }}>
+          Роль: {admin.role === "superadmin" ? "суперадминистратор" : "менеджер"}
+        </div>
+        <form onSubmit={submit}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <input
+              type="password"
+              value={current}
+              placeholder="Текущий пароль"
+              autoComplete="current-password"
+              onChange={(e) => setCurrent(e.target.value)}
+              style={inputStyle}
+            />
+            <input
+              type="password"
+              value={next}
+              placeholder="Новый пароль (минимум 8 символов)"
+              autoComplete="new-password"
+              onChange={(e) => setNext(e.target.value)}
+              style={inputStyle}
+            />
+            <input
+              type="password"
+              value={confirm}
+              placeholder="Повторите новый пароль"
+              autoComplete="new-password"
+              onChange={(e) => setConfirm(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+            <button type="submit" className="btn btn-primary" disabled={save.kind === "saving"}>
+              {save.kind === "saving" ? "Сохранение…" : "Сменить пароль"}
+            </button>
+            {save.kind === "saved" && (
+              <span style={{ fontSize: 12, color: "var(--text-3)" }}>Пароль обновлён.</span>
+            )}
+            {save.kind === "error" && (
+              <span style={{ fontSize: 12, color: "var(--red, #ef4444)" }}>{save.msg}</span>
+            )}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ───────────────────────────────────────────────────────────────
 
 export function Settings() {
   const { visible, setTab } = useTabVisibility();
+  const admin = useAdmin();
 
   return (
     <div className="page">
@@ -311,7 +407,9 @@ export function Settings() {
         <div className="page-title">Настройки</div>
       </div>
 
-      <RuntimeSettingsSection />
+      <AccountSection />
+
+      {admin.role === "superadmin" && <RuntimeSettingsSection />}
 
       <div style={{ maxWidth: 560 }}>
         <div style={sectionLabelStyle}>Вкладки в меню</div>

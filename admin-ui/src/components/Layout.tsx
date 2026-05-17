@@ -111,10 +111,15 @@ export function Layout({ admin, children }: LayoutProps) {
       key: "coach",
       badge: pendingCoachCount > 0 ? pendingCoachCount : undefined,
     },
-    { to: "/admin/ops", label: "Операции", key: null },
+    { to: "/admin/ops", label: "Операции", key: null, superadmin: true },
   ];
 
-  const navItems = allNavItems.filter(({ key }) => key === null || visible(key));
+  const navItems = allNavItems.filter(
+    (item) =>
+      (item.key === null || visible(item.key)) &&
+      // Superadmin-only items (destructive ops) are hidden from managers.
+      (!("superadmin" in item) || admin.role === "superadmin"),
+  );
 
   return (
     <div className="layout">

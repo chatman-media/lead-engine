@@ -1,7 +1,7 @@
 import { KbRepo } from "../../db/repos/kb.ts";
 import { ingestText } from "../../rag/ingest.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { parseIdParam, parseJsonBody, withAdmin } from "../handler-helpers.ts";
+import { parseIdParam, parseJsonBody, withAdmin, withSuperadmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 const KB_TOPIC_MAX = 64;
@@ -77,7 +77,7 @@ export function createUpdateKbDocumentHandler(deps: AdminApiDeps): RouteHandler 
 
 export function createDeleteKbDocumentHandler(deps: AdminApiDeps): RouteHandler {
   const kb = new KbRepo(deps.sql);
-  return withAdmin(deps.sql, async ({ params }) => {
+  return withSuperadmin(deps.sql, async ({ params }) => {
     const id = parseIdParam(params);
     if (id instanceof Response) return id;
     const ok = await kb.deleteDocument(id);

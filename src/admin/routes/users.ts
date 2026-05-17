@@ -4,7 +4,7 @@ import { LeadsRepo } from "../../db/repos/leads.ts";
 import { MessagesRepo } from "../../db/repos/messages.ts";
 import { UsersRepo } from "../../db/repos/users.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { parseIdParam, withAdmin } from "../handler-helpers.ts";
+import { parseIdParam, withAdmin, withSuperadmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 export function createListUsersHandler(deps: AdminApiDeps): RouteHandler {
@@ -40,7 +40,7 @@ export function createListUsersHandler(deps: AdminApiDeps): RouteHandler {
  */
 export function createDeleteUserDataHandler(deps: AdminApiDeps): RouteHandler {
   const users = new UsersRepo(deps.sql);
-  return withAdmin(deps.sql, async ({ params, admin }) => {
+  return withSuperadmin(deps.sql, async ({ params, admin }) => {
     const id = parseIdParam(params);
     if (id instanceof Response) return id;
     const user = await users.byId(id);
