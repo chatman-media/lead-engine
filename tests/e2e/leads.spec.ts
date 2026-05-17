@@ -15,7 +15,7 @@ async function loginPage(page: Page) {
   await page.getByTestId("email").fill(ADMIN_EMAIL);
   await page.getByTestId("password").fill(ADMIN_PASSWORD);
   await page.getByTestId("login-submit").click();
-  await page.waitForURL("**/admin/chats");
+  await page.waitForURL("**/admin");
 }
 
 async function seedLeadAtState(req: APIRequestContext, tgUserId: number, state: string) {
