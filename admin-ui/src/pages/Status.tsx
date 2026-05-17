@@ -5,6 +5,7 @@ import { api, type SystemStatus } from "../api.ts";
  * Operator-facing dashboard. Surfaces:
  *   - which RAG layers are currently enabled (env flags)
  *   - which chat / embedding provider + model is wired
+ *   - vision model config + photo-classification stats
  *   - active routing (env override / running experiment / legacy persona)
  *   - KB stats with topic breakdown
  *   - conversation / user / message counters
@@ -77,6 +78,7 @@ export function Status() {
         <RoutingCard status={status} />
         <RagFlagsCard status={status} />
         <ProvidersCard status={status} />
+        <VisionCard status={status} />
         <KbCard status={status} />
         <LeadsCard status={status} />
         <VacanciesCard status={status} />
@@ -218,6 +220,64 @@ function ProvidersCard({ status }: { status: SystemStatus }) {
       <Row label="chat" value={`${chat.provider} / ${chat.model}`} mono />
       <Row label="embed" value={`${embed.provider} / ${embed.model}`} mono />
       <Row label="embed dim" value={String(embed.dim)} mono />
+    </Card>
+  );
+}
+
+function VisionCard({ status }: { status: SystemStatus }) {
+  const v = status.vision;
+  const keyMissing = v.enabled && !v.api_key_configured;
+  const total =
+    v.classified.passport + v.classified.full_body + v.classified.portrait + v.classified.other;
+  return (
+    <Card title="Vision" accent={keyMissing ? "var(--amber)" : undefined}>
+      <Row
+        label="enabled"
+        value={
+          <span
+            style={{
+              color: v.enabled ? "var(--green, #2ea043)" : "var(--text-3)",
+              fontWeight: v.enabled ? 600 : 400,
+            }}
+          >
+            {v.enabled ? "ON" : "off"}
+          </span>
+        }
+        hint="VISION_ENABLED"
+      />
+      <Row label="model" value={`${v.provider} / ${v.model}`} mono hint="VISION_MODEL" />
+      <Row
+        label="api key"
+        value={
+          <span style={{ color: v.api_key_configured ? "var(--text)" : "var(--amber)" }}>
+            {v.api_key_configured ? "configured" : "missing"}
+          </span>
+        }
+        hint="OPENROUTER_API_KEY"
+      />
+      <div
+        style={{
+          marginTop: 10,
+          fontSize: 10,
+          color: "var(--text-3)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          fontFamily: "var(--mono)",
+        }}
+      >
+        classified photos ({total})
+      </div>
+      <Row label="passport" value={String(v.classified.passport)} mono />
+      <Row label="full_body" value={String(v.classified.full_body)} mono />
+      <Row label="portrait" value={String(v.classified.portrait)} mono />
+      <Row label="other" value={String(v.classified.other)} mono />
+      <Row label="unclassified" value={String(v.unclassified)} mono />
+      {keyMissing && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "var(--amber)" }}>
+          ⚠ <code>VISION_ENABLED</code> включён, но <code>OPENROUTER_API_KEY</code> не задан —
+          классификация фото отключена.
+        </div>
+      )}
     </Card>
   );
 }

@@ -397,6 +397,14 @@ export interface SystemStatus {
     chat: { provider: string; model: string };
     embed: { provider: string; model: string; dim: number };
   };
+  vision: {
+    enabled: boolean;
+    model: string;
+    provider: string;
+    api_key_configured: boolean;
+    classified: { passport: number; full_body: number; portrait: number; other: number };
+    unclassified: number;
+  };
   routing: {
     mode: "env_override" | "running_experiment" | "legacy_persona" | "none";
     active_style_slug: string | null;
