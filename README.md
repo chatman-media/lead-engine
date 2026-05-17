@@ -36,8 +36,10 @@ Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тест�
 | [docs/SALES_STYLES.md](docs/SALES_STYLES.md) | Sales-style engine: схема Style, skills, A/B testing, промпт |
 | [docs/SELF_PLAY.md](docs/SELF_PLAY.md) | Self-play / pairwise / coaching / shadow evaluation |
 | [docs/LEADS.md](docs/LEADS.md) | Lead pipeline: state machine, intake/visa-docs, operator workflow |
+| [docs/SUPPORT.md](docs/SUPPORT.md) | Инструкция по поддержке: режимы диалога, перехват, эскалация, сбои |
 | [docs/USERBOT.md](docs/USERBOT.md) | Userbot (MTProto): setup, auth, конфигурация |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Docker / nginx / Cloudflare Tunnel / backups / KB ingest / recovery |
+| [docs/AI_AND_INFRA.md](docs/AI_AND_INFRA.md) | Использование ИИ (вызовы, стоимость) и требования к серверу |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Что в очереди (Tier 3 + recommended turn-on order) |
 | [CHANGELOG.md](CHANGELOG.md) | Что сделано |
 
