@@ -110,7 +110,14 @@ export async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
     user: d.user,
     recentMessages: recentForCard,
   });
-  await service.sendAwaitingApprovalNote({ user: d.user });
+  // Send the "отправила запрос в клуб" note to the candidate exactly
+  // once. A Telegram album fans out into parallel webhook handlers that
+  // can all observe the intake_pending → intake_complete transition, so
+  // gate the DM behind a one-shot claim flag rather than the state guard.
+  const claimed = await d.leads.claimMediaAck(promoted.id, "awaiting_approval_sent");
+  if (claimed) {
+    await service.sendAwaitingApprovalNote({ user: d.user });
+  }
   console.log(
     `[leads] auto-promoted lead ${promoted.id} (user ${d.user.id}) on intake completion` +
       (withCard.ops_message_id ? ` (card msg=${withCard.ops_message_id})` : ""),
