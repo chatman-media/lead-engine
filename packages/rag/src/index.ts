@@ -20,7 +20,7 @@
 export type { ABRouterOptions, ABVariant } from "./ab-router.ts";
 export { ABRouter } from "./ab-router.ts";
 // ── Core answer pipeline ─────────────────────────────────────────────────────
-export { answerWithRag, answerWithRagStream } from "./answer.ts";
+export { answerWithRag, answerWithRagStream, generateSoftFallback } from "./answer.ts";
 export type { AnswerInput, AnswerResult, AnswerTelemetry, Persona } from "./answer-types.ts";
 export { NO_CONTEXT_MARKER } from "./answer-types.ts";
 // ── LLM clients ──────────────────────────────────────────────────────────────
@@ -143,3 +143,17 @@ export { classifyTopic, classifyTopicAll, KNOWN_TOPICS } from "./topic-classifie
 export type { IKbStore, IKbSuggestionsStore, KbSearchHit } from "./types.ts";
 // ── Utilities ─────────────────────────────────────────────────────────────────
 export { reciprocalRankFusion, sanitizeFtsQuery } from "./utils.ts";
+// ── Vision / photo classification ────────────────────────────────────────────
+export type {
+  ClassifyPhotoOptions,
+  PassportIdentity,
+  PhotoClass,
+  VisionProvider,
+} from "./vision.ts";
+export {
+  classifyPhoto,
+  extractPassportIdentity,
+  PHOTO_CLASSES,
+  parsePassportJson,
+  parsePhotoClass,
+} from "./vision.ts";
