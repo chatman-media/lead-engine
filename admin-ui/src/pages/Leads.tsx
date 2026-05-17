@@ -294,6 +294,13 @@ interface IntakeFields {
   videos_count?: number;
   passport_photo_received?: boolean;
   dance_video_received?: boolean;
+  name?: string;
+  nationality?: string;
+  marital_status?: string;
+  children?: string;
+  languages?: string;
+  passport_expiry?: string;
+  work_experience?: string;
 }
 
 function parseIntake(json: string | null): IntakeFields | null {
@@ -1129,8 +1136,44 @@ function IntakeProgress({ intake, leadId }: { intake: IntakeFields; leadId: numb
     }
   }
 
+  // Free-text intake answers the candidate sent — extracted from her
+  // messages into intake_json but not part of the checklist badges.
+  const answers: Array<[string, string | undefined]> = [
+    ["имя", intake.name],
+    ["гражданство", intake.nationality],
+    ["семейное положение", intake.marital_status],
+    ["дети", intake.children],
+    ["языки", intake.languages],
+    ["опыт работы", intake.work_experience],
+    ["загранпаспорт до", intake.passport_expiry],
+  ];
+
   return (
-    <div style={{ marginTop: 4 }}>
+    <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 6 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "140px 1fr",
+          gap: "2px 8px",
+          fontFamily: "var(--mono)",
+          fontSize: 11,
+        }}
+      >
+        {answers.map(([label, value]) => (
+          <div key={label} style={{ display: "contents" }}>
+            <span style={{ color: "var(--text-3)" }}>{label}</span>
+            <span
+              style={{
+                color: value ? "var(--text)" : "var(--text-3)",
+                fontStyle: value ? "normal" : "italic",
+                wordBreak: "break-word",
+              }}
+            >
+              {value || "—"}
+            </span>
+          </div>
+        ))}
+      </div>
       <div
         style={{
           display: "flex",
