@@ -236,6 +236,30 @@ export const AWAITING_APPROVAL_REPLY = `Спасибо, всё получили!
 export const FULL_BODY_PHOTO_NUDGE = `Не хватает фото в полный рост (2-3 шт). Пришлите, пожалуйста 🙏`;
 
 /**
+ * Proactive waiting-period check-ins. While a lead waits (~10 days
+ * collecting documents, ~4-5 days on the consulate decision) the bot
+ * stays silent unless she writes. These warm, support-tone nudges are
+ * sent by the proactive-checkin scheduler so a quiet candidate hears
+ * from us before she starts to worry. Keyed by waiting phase.
+ */
+const PROACTIVE_CHECKINS: Record<"docs" | "submitted", readonly string[]> = {
+  docs: [
+    "Здравствуйте! 🌷 Как у вас дела? Подскажите, как продвигается сбор документов — если есть вопросы, пишите, с радостью помогу.",
+    "Добрый день! 😊 Решила узнать, как настроение. Как идёт подготовка документов? На связи, если что-то нужно подсказать.",
+  ],
+  submitted: [
+    "Здравствуйте! 🌷 Хотела узнать, как ваши дела. По визе пока ждём решение — как будет результат, сразу вам напишу.",
+    "Добрый день! 😊 Всё идёт своим чередом, заявка на рассмотрении. Если появятся вопросы — пишите, я рядом.",
+  ],
+};
+
+/** Pick a check-in message for the given waiting phase. */
+export function proactiveCheckinMessage(phase: "docs" | "submitted"): string {
+  const pool = PROACTIVE_CHECKINS[phase];
+  return pool[Math.floor(Math.random() * pool.length)] ?? pool[0]!;
+}
+
+/**
  * Initial intake field schema. Used by the auto-extractor (Phase 2) and
  * the lead card formatter — kept here so the operator's seven-item list
  * is one source of truth.
