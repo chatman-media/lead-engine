@@ -132,21 +132,17 @@ export function Layout({ admin, children }: LayoutProps) {
 
   return (
     <div className="layout">
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <div className="sidebar-header-actions">
-            <NavLink
-              to="/admin/settings"
-              className="icon-btn"
-              title="Настройки"
-              aria-label="Настройки"
-            >
-              <GearIcon />
-            </NavLink>
-            <ThemeToggle variant="bar" />
-          </div>
-        </div>
+      <NavLink
+        to="/admin/settings"
+        className="settings-fab"
+        title="Настройки"
+        aria-label="Настройки"
+      >
+        <GearIcon />
+      </NavLink>
+      <ThemeToggle />
 
+      <aside className="sidebar">
         <nav className="sidebar-nav">
           {navItems.map(({ to, label, badge, end }) => (
             <NavLink key={to} to={to} end={end} className="nav-item">

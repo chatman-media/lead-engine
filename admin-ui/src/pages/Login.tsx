@@ -32,7 +32,7 @@ export function Login() {
 
   return (
     <div className="login-wrap">
-      <ThemeToggle variant="floating" />
+      <ThemeToggle />
       <div className="login-card fade-in">
         <div className="login-logo">
           <div className="login-logo-name">Infinity Agency</div>

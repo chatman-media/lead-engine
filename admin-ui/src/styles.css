@@ -118,45 +118,9 @@ input, textarea {
   flex-direction: column;
 }
 
-.sidebar-header {
-  border-bottom: 1px solid var(--border);
-}
-
-.sidebar-header-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  padding: 14px 16px;
-}
-
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius);
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-3);
-  cursor: pointer;
-  transition: color 0.12s, border-color 0.12s, background 0.12s;
-}
-
-.icon-btn:hover {
-  color: var(--amber);
-  border-color: var(--amber);
-}
-
-.icon-btn.active {
-  color: var(--amber);
-  border-color: var(--amber);
-  background: var(--amber-dim);
-}
-
 .sidebar-nav {
   flex: 1;
-  padding: 10px 8px;
+  padding: 64px 8px 10px;
 }
 
 .nav-item {
@@ -837,10 +801,11 @@ textarea.input {
 
 /* ─── Theme toggle ────────────────────────────────────── */
 
-.theme-toggle-icon {
+.theme-toggle-icon,
+.settings-fab {
   position: fixed;
   top: 18px;
-  right: 18px;
+  z-index: 20;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -854,8 +819,22 @@ textarea.input {
   transition: color 0.12s, border-color 0.12s, transform 0.1s;
 }
 
-.theme-toggle-icon:hover {
+.theme-toggle-icon {
+  right: 18px;
+}
+
+.settings-fab {
+  left: 18px;
+}
+
+.theme-toggle-icon:hover,
+.settings-fab:hover {
   color: var(--amber);
   border-color: var(--amber);
   transform: translateY(-1px);
+}
+
+.settings-fab.active {
+  color: var(--amber);
+  border-color: var(--amber);
 }
