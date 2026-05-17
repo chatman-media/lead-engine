@@ -7,6 +7,7 @@ import { Chat } from "./pages/Chat.tsx";
 import { Chats } from "./pages/Chats.tsx";
 import { Coach } from "./pages/Coach.tsx";
 import { Experiments } from "./pages/Experiments.tsx";
+import { Home } from "./pages/Home.tsx";
 import { Kb } from "./pages/Kb.tsx";
 import { KbSuggestions } from "./pages/KbSuggestions.tsx";
 import { Leads } from "./pages/Leads.tsx";
@@ -98,7 +99,7 @@ export function App() {
           element={
             <AuthGate>
               <Routes>
-                <Route index element={<Navigate to="status" replace />} />
+                <Route index element={<Home />} />
                 <Route path="status" element={<Status />} />
                 <Route path="analytics" element={<Analytics />} />
                 <Route path="skills" element={<Skills />} />
@@ -121,12 +122,12 @@ export function App() {
                 <Route path="ops" element={<Operations />} />
                 <Route path="operators" element={<Operators />} />
                 <Route path="settings" element={<Settings />} />
-                <Route path="*" element={<Navigate to="status" replace />} />
+                <Route path="*" element={<Navigate to="/admin" replace />} />
               </Routes>
             </AuthGate>
           }
         />
-        <Route path="*" element={<Navigate to="/admin/chats" replace />} />
+        <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
     </BrowserRouter>
   );
