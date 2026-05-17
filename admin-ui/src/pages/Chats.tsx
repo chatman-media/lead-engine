@@ -6,14 +6,20 @@ import { api, type Conversation, type ConversationSource } from "../api.ts";
 function relativeTime(unix: number | null) {
   if (!unix) return "—";
   const diff = Math.floor((Date.now() - unix * 1000) / 1000);
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 60) return `${diff} с назад`;
+  if (diff < 3600) return `${Math.floor(diff / 60)} мин назад`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} ч назад`;
+  return `${Math.floor(diff / 86400)} дн назад`;
 }
 
+const MODE_LABEL: Record<Conversation["mode"], string> = {
+  ai: "бот",
+  queued: "очередь",
+  human: "оператор",
+};
+
 function modeBadge(mode: Conversation["mode"]) {
-  return <span className={`badge badge-${mode}`}>{mode}</span>;
+  return <span className={`badge badge-${mode}`}>{MODE_LABEL[mode] ?? mode}</span>;
 }
 
 // Channel badge — `userbot` is the real funnel, `bot` is test traffic.
@@ -152,7 +158,7 @@ export function Chats() {
       </div>
 
       {loading ? (
-        <div className="loading-text">loading…</div>
+        <div className="loading-text">загрузка…</div>
       ) : (
         <div data-testid="chats-list">
           {[...queued, ...rest].map((c) => (

@@ -33,7 +33,7 @@ export function Users() {
       </div>
 
       {loading ? (
-        <div className="loading-text">loading…</div>
+        <div className="loading-text">загрузка…</div>
       ) : (
         <table className="data-table" data-testid="users-table">
           <thead>

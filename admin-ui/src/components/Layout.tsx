@@ -14,21 +14,16 @@ export function Layout({ admin, children }: LayoutProps) {
   const navigate = useNavigate();
   const [queuedCount, setQueuedCount] = useState(0);
   const [pendingKbCount, setPendingKbCount] = useState(0);
-  const [pendingCoachCount, setPendingCoachCount] = useState(0);
   // Conversation ids currently in the queue, as last observed. A new id
   // appearing here means a chat just escalated and needs an operator.
   const knownQueuedRef = useRef<Set<number>>(new Set());
   const seededRef = useRef(false);
 
   useEffect(() => {
-    // Initial fetch of both counts.
+    // Initial fetch of the pending-questions count.
     api
       .kbSuggestionCounts()
       .then((c) => setPendingKbCount(c.pending))
-      .catch(() => {});
-    api
-      .coachProposals({ status: "pending", limit: 1 })
-      .then((c) => setPendingCoachCount(c.pending_count))
       .catch(() => {});
 
     // Queued-chat watcher: keeps the sidebar badge fresh and, when a chat
@@ -104,13 +99,7 @@ export function Layout({ admin, children }: LayoutProps) {
       key: "kb-suggestions",
       badge: pendingKbCount > 0 ? pendingKbCount : undefined,
     },
-    { to: "/admin/self-play", label: "Self-play", key: "self-play" },
-    {
-      to: "/admin/coach",
-      label: "Coach",
-      key: "coach",
-      badge: pendingCoachCount > 0 ? pendingCoachCount : undefined,
-    },
+    { to: "/admin/self-play", label: "Симуляция диалогов", key: "self-play" },
     { to: "/admin/operators", label: "Операторы", key: null, superadmin: true },
     { to: "/admin/ops", label: "Операции", key: null, superadmin: true },
   ];
@@ -127,12 +116,7 @@ export function Layout({ admin, children }: LayoutProps) {
       <aside className="sidebar">
         <div className="sidebar-header">
           <NavLink to="/admin" end className="sidebar-brand">
-            <img
-              src="/admin/infinity-logo.png"
-              alt="Infinity Agency"
-              className="sidebar-logo-img"
-            />
-            <div className="sidebar-tagline">admin panel</div>
+            <div className="sidebar-logo">Infinity Agency</div>
           </NavLink>
         </div>
 

@@ -339,7 +339,7 @@ export function Coach() {
       </div>
 
       {proposals === null ? (
-        <p style={{ color: "var(--text-3)" }}>Loading…</p>
+        <p style={{ color: "var(--text-3)" }}>Загрузка…</p>
       ) : proposals.length === 0 ? (
         <p style={{ color: "var(--text-3)" }}>No proposals yet — run the coach above.</p>
       ) : (

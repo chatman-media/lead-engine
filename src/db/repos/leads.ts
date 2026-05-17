@@ -177,10 +177,25 @@ export class LeadsRepo {
     `;
   }
 
+  /**
+   * Most recent state this lead was transitioned FROM — i.e. the step it
+   * would land on if an operator undoes the last move. Skips non-transition
+   * events (creation, application_id allocation) where from_state == to_state.
+   */
+  async previousState(leadId: number): Promise<LeadState | null> {
+    const [row] = await this.sql<{ from_state: LeadState }[]>`
+      SELECT from_state FROM lead_events
+      WHERE lead_id = ${leadId} AND from_state IS NOT NULL AND from_state <> to_state
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `;
+    return row?.from_state ?? null;
+  }
+
   async setState(
     id: number,
     state: LeadState,
-    opts: { adminId?: number; rejectedReason?: string } = {},
+    opts: { adminId?: number; rejectedReason?: string; force?: boolean } = {},
   ): Promise<LeadRow | null> {
     // Run the read + UPDATE + event-append inside a single transaction with
     // SELECT … FOR UPDATE so a concurrent auto-promote (from webhook) and
@@ -195,8 +210,9 @@ export class LeadsRepo {
 
       // Reject obviously-invalid transitions so a bug elsewhere can't
       // teleport a closed/submitted lead back into intake. Same-state
-      // writes are tolerated (idempotent re-calls).
-      if (!sameState && !isLegalLeadTransition(before.state, state)) {
+      // writes are tolerated (idempotent re-calls). `force` is set only by
+      // the explicit operator "step back" action, which is intentional.
+      if (!sameState && !opts.force && !isLegalLeadTransition(before.state, state)) {
         throw new Error(`illegal lead transition: ${before.state} → ${state}`);
       }
 

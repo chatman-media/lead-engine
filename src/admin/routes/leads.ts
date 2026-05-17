@@ -346,6 +346,36 @@ export function createMarkSubmittedHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 /**
+ * Undo the last lead-state move — returns the lead to the step it was in
+ * before its most recent transition. For operator mistakes ("кликнул не
+ * туда"). DB-only: deliberately fires no Telegram side effects. The
+ * `force` flag lets it cross the terminal-state guard, since reverting a
+ * mistaken reject/submit is exactly the point.
+ */
+export function createRevertLeadHandler(deps: AdminApiDeps): RouteHandler {
+  return withAdmin(deps.sql, async ({ params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
+
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const lead = await leadsRepo.byId(id);
+    if (!lead) return json({ error: "not found" }, { status: 404 });
+
+    const previous = await leadsRepo.previousState(id);
+    if (!previous || previous === lead.state) {
+      return json({ error: "у лида нет предыдущего шага" }, { status: 409 });
+    }
+
+    const updated = await leadsRepo.setState(id, previous, {
+      adminId: admin.adminId,
+      force: true,
+    });
+    if (!updated) return json({ error: "transition failed" }, { status: 500 });
+    return json({ lead: updated });
+  });
+}
+
+/**
  * Single-lead detail. Returns the lead row joined with the user info,
  * plus parsed `intake` and `visa_docs` so the UI doesn't have to
  * re-parse JSON in the browser, plus the most recent ~30 messages.

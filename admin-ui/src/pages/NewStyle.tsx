@@ -161,7 +161,7 @@ export function NewStyle() {
       {loadError ? (
         <div style={{ color: "var(--red, #f55)" }}>error: {loadError}</div>
       ) : draft === null ? (
-        <div style={{ color: "var(--text-3)" }}>loading template…</div>
+        <div style={{ color: "var(--text-3)" }}>загрузка шаблона…</div>
       ) : (
         <>
           {saveError ? (

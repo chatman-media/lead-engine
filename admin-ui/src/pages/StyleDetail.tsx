@@ -90,7 +90,7 @@ export function StyleDetail() {
       {error ? (
         <div style={{ color: "var(--red, #f55)", marginTop: 16 }}>error: {error}</div>
       ) : style === null ? (
-        <div style={{ color: "var(--text-3)", marginTop: 16 }}>loading…</div>
+        <div style={{ color: "var(--text-3)", marginTop: 16 }}>загрузка…</div>
       ) : (
         <>
           <div
@@ -690,7 +690,7 @@ function SkillsPicker({ styleId }: { styleId: number }) {
             </div>
           )}
 
-          {!catalogue && <div className="loading-text">loading catalogue…</div>}
+          {!catalogue && <div className="loading-text">загрузка каталога…</div>}
 
           {grouped.map(({ family, skills }) => (
             <div key={family}>

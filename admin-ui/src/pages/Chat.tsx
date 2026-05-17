@@ -28,10 +28,10 @@ const ROLE_COLOR: Record<string, string> = {
 };
 
 const ROLE_LABEL: Record<string, string> = {
-  user: "user",
-  assistant: "bot",
-  human: "manager",
-  system: "system",
+  user: "кандидат",
+  assistant: "бот",
+  human: "оператор",
+  system: "система",
 };
 
 const BUBBLE_CLASS: Record<string, string> = {
@@ -170,7 +170,7 @@ export function Chat() {
   if (!conv || !user) {
     return (
       <div className="loading-text" style={{ padding: 32 }}>
-        loading…
+        загрузка…
       </div>
     );
   }
@@ -195,7 +195,7 @@ export function Chat() {
             {user.tg_username ? `@${user.tg_username}` : `tg:${user.tg_user_id}`}
           </div>
           <div className="chat-header-meta">
-            status: {user.status} · tg_id: {user.tg_user_id}
+            статус: {user.status} · Telegram ID: {user.tg_user_id}
           </div>
         </div>
 
@@ -209,14 +209,14 @@ export function Chat() {
               data-testid="release-btn"
               title="Бот отвечает автоматически"
             >
-              🤖 Авто
+              Авто
             </button>
             <button
               className={`mode-btn ${conv.mode === "queued" ? "mode-btn-active mode-btn-queued" : ""}`}
               disabled
               title="Ждёт оператора"
             >
-              ⏳ Очередь
+              Очередь
             </button>
             <button
               className={`mode-btn ${conv.mode === "human" ? "mode-btn-active mode-btn-human" : ""}`}
@@ -225,7 +225,7 @@ export function Chat() {
               data-testid="take-btn"
               title="Оператор отвечает вручную"
             >
-              👤 Я
+              Оператор
             </button>
           </div>
 
@@ -235,7 +235,7 @@ export function Chat() {
             title="Создать лида из этого диалога — бот запостит карточку в LEADS_CHAT_ID с кнопками одобрить/отклонить"
             className="btn btn-warn btn-sm"
           >
-            → Lead
+            → В лиды
           </button>
 
           <button
@@ -244,7 +244,7 @@ export function Chat() {
             title="Показать диагностику ответов бота: путь, латентности, расстояния KB, reflect-вердикт"
             className={`btn btn-sm ${debug ? "btn-warn" : "btn-ghost"}`}
           >
-            {debug ? "DEBUG ON" : "DEBUG"}
+            {debug ? "Диагностика вкл" : "Диагностика"}
           </button>
 
           <a
@@ -259,7 +259,7 @@ export function Chat() {
           </a>
 
           <button onClick={handleDelete} data-testid="delete-btn" className="btn btn-danger btn-sm">
-            Delete
+            Удалить
           </button>
         </div>
       </div>

@@ -165,7 +165,7 @@ export function Pairwise() {
       </div>
 
       {matches === null ? (
-        <p style={{ color: "var(--text-3)" }}>Loading…</p>
+        <p style={{ color: "var(--text-3)" }}>Загрузка…</p>
       ) : matches.length === 0 ? (
         <p style={{ color: "var(--text-3)" }}>No matches under current filters.</p>
       ) : (

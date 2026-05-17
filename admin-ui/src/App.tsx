@@ -75,7 +75,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
           fontFamily: "var(--mono)",
         }}
       >
-        connecting…
+        подключение…
       </div>
     );
   }
