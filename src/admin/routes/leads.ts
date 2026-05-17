@@ -78,9 +78,11 @@ export function createPromoteLeadHandler(deps: AdminApiDeps): RouteHandler {
         user,
         recentMessages: await recentMessagesForCard(messagesRepo, conv.id),
       });
-      // Notify the candidate that the request is being reviewed — this
-      // matches the operator's stock "отправила запрос в клуб" message.
-      await service.sendAwaitingApprovalNote({ user });
+      // NOTE: the candidate is NOT DM'd the "отправила запрос в клуб"
+      // note here — that message is sent exactly once, only by the
+      // auto-promote path (runIntakeUpdate) when the intake checklist
+      // first completes. Sending it from this endpoint too caused
+      // duplicate messages on re-promotion / double-clicks.
     }
     deps.onConversationChanged?.(conv.id);
     return json({ lead });

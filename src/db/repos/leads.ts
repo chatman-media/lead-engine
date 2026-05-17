@@ -233,14 +233,18 @@ export class LeadsRepo {
   }
 
   /**
-   * Atomically claim the one-shot full-body-nudge flag in
-   * `intake_json.media_ack`. Returns true exactly once across concurrent
-   * callers — a Telegram album fans out into many parallel webhook
-   * handlers, so the dedup has to happen in a single conditional UPDATE
-   * (row lock) rather than read-modify-write. The caller sends the nudge
-   * message to the candidate only when this returns true.
+   * Atomically claim a one-shot flag in `intake_json.media_ack` (e.g.
+   * the full-body nudge, or the "запрос в клуб" awaiting-approval note).
+   * Returns true exactly once across concurrent callers — a Telegram
+   * album fans out into many parallel webhook handlers, so the dedup
+   * has to happen in a single conditional UPDATE (row lock) rather than
+   * read-modify-write. The caller performs the one-shot side effect
+   * (sending the message to the candidate) only when this returns true.
    */
-  async claimMediaAck(id: number, key: "full_body_nudged"): Promise<boolean> {
+  async claimMediaAck(
+    id: number,
+    key: "full_body_nudged" | "awaiting_approval_sent",
+  ): Promise<boolean> {
     // `jsonb_set` with create_missing does NOT create intermediate objects,
     // so when `media_ack` is absent it would silently no-op. Build the
     // nested object explicitly via `||` merges instead.
