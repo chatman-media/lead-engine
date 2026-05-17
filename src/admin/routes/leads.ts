@@ -20,10 +20,12 @@ const LEAD_STATES: LeadState[] = [
   "intake_pending",
   "intake_complete",
   "approved",
+  "partner_review",
   "rejected",
   "docs_pending",
   "docs_complete",
   "submitted",
+  "ready_to_work",
   "closed",
 ];
 

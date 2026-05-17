@@ -34,16 +34,25 @@ Bot must be a **member** of both (admin role lets it edit cards in place after a
 
 ## State machine
 
+Operator-facing labels (UI funnel vocabulary) are in parentheses.
+
 | State | Meaning | How you get here | What bot does |
 |-------|---------|-----------------|---------------|
-| `intake_pending` | Default for any new candidate | Created on first message | Collects intake via natural conversation; auto-extracts fields each turn |
-| `intake_complete` | Anketa filled — awaiting operator decision | 8-condition gate passes | Posts card to ops chat; tells candidate "ждите, отправили запрос" |
-| `approved` | Operator approved | inline button OR `/admin/api/leads/:id/approve` | Sends 4-message visa anketa pack to candidate; transitions to `docs_pending` |
-| `rejected` | Operator rejected (terminal) | inline button OR endpoint | Sends polite rejection (or operator's custom reason) |
-| `docs_pending` | Bot collecting visa form | After approve | Auto-extracts 32 fields from each candidate message; operator can edit any; bot answers questions in **support mode** |
-| `docs_complete` | All visa data + package posted | Operator clicks "→ на визу" (`/admin/api/leads/:id/submit-to-visa`) | Allocates `VS-YYYY-NNNN`, posts to VISA_CHAT_ID, DMs candidate "передаём в работу" |
-| `submitted` | Operator confirmed consulate filing | Operator clicks "✅ подал" (`/admin/api/leads/:id/mark-submitted`) | DMs candidate "заявка подана" + application id; keeps answering in **support mode** while the consulate decision is pending |
-| `closed` | Terminal cleanup state | Manual / stale-sweep auto-close | — |
+| `intake_pending` (заполнение анкеты) | Default for any new candidate | Created on first message | Collects intake via natural conversation; auto-extracts fields each turn |
+| `intake_complete` (ожидает решения) | Anketa filled — awaiting operator decision | 8-condition gate passes | Posts card to ops chat; tells candidate "ждите, отправили запрос" |
+| `approved` (одобрено) | Operator approved | inline button OR `/admin/api/leads/:id/approve` | Sends 4-message visa anketa pack to candidate; transitions to `docs_pending` |
+| `partner_review` (ожидает апрув партнёров) | Anketa + 2 videos shown to the Chinese partner club, awaiting their decision | Defined for the partner-review gate; transition wiring is tracked with the proactive-messaging work | — |
+| `rejected` (отклонён) | Operator rejected (terminal) | inline button OR endpoint | Sends polite rejection (or operator's custom reason) |
+| `docs_pending` (ожидание документов) | Bot collecting visa form; ~10 days | After approve | Auto-extracts 32 fields from each candidate message; operator can edit any; bot answers questions in **support mode** |
+| `docs_complete` (подача на документы) | All visa data + package posted | Operator clicks "→ на визу" (`/admin/api/leads/:id/submit-to-visa`) | Allocates `VS-YYYY-NNNN`, posts to VISA_CHAT_ID, DMs candidate "передаём в работу" |
+| `submitted` (подача на визу) | Operator confirmed consulate filing; ~4-5 days | Operator clicks "✅ подал" (`/admin/api/leads/:id/mark-submitted`) | DMs candidate "заявка подана" + application id; keeps answering in **support mode** while the consulate decision is pending |
+| `ready_to_work` (готова к работе) | Success terminal — visa granted, candidate ready to depart | Defined for the funnel; transition wiring is tracked with the proactive-messaging work | — |
+| `closed` (закрыт) | Terminal cleanup state | Manual / stale-sweep auto-close | — |
+
+Expected stage durations (operator-quoted, used for proactive check-ins and UI
+hints) live in [src/leads/sla.ts](../src/leads/sla.ts) — 10 days for
+`docs_pending`, 4-5 days for `submitted`. These are distinct from the
+stale-sweep auto-close thresholds.
 
 ## Intake schema
 
