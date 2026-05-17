@@ -6,6 +6,14 @@ export interface Admin {
   role: AdminRole;
 }
 
+/** An admin account as listed in the operator-management page. */
+export interface AdminSummary {
+  id: number;
+  email: string;
+  role: AdminRole;
+  created_at: number;
+}
+
 export interface User {
   id: number;
   tg_user_id: number;
@@ -506,6 +514,24 @@ export const api = {
     req<{ ok: boolean }>("/admin/api/account/password", {
       method: "POST",
       body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+
+  // ─── Operator management (superadmin only) ────────────────────────────
+  admins: () => req<{ admins: AdminSummary[] }>("/admin/api/admins"),
+
+  createAdmin: (email: string, password: string, role: AdminRole) =>
+    req<{ admin: AdminSummary }>("/admin/api/admins", {
+      method: "POST",
+      body: JSON.stringify({ email, password, role }),
+    }),
+
+  deleteAdmin: (id: number) =>
+    req<{ ok: boolean; deleted: number }>(`/admin/api/admins/${id}`, { method: "DELETE" }),
+
+  resetAdminPassword: (id: number, newPassword: string) =>
+    req<{ ok: boolean }>(`/admin/api/admins/${id}/password`, {
+      method: "POST",
+      body: JSON.stringify({ new_password: newPassword }),
     }),
 
   users: () => req<{ users: User[] }>("/admin/api/users"),

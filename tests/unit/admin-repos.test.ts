@@ -93,6 +93,33 @@ describe("AdminsRepo", () => {
     const a = await admins.create({ email: "pw2@x.test", password: "longenough" });
     await expect(admins.updatePassword(a.id, "short")).rejects.toThrow(/password/i);
   });
+
+  test("list returns every admin without the password hash", async () => {
+    const admins = new AdminsRepo(sql);
+    await admins.create({ email: "l1@x.test", password: "longenough" });
+    await admins.create({ email: "l2@x.test", password: "longenough", role: "manager" });
+    const list = await admins.list();
+    expect(list.length).toBe(2);
+    expect(list.map((a) => a.email).sort()).toEqual(["l1@x.test", "l2@x.test"]);
+    expect((list[0] as { password_hash?: string }).password_hash).toBeUndefined();
+  });
+
+  test("deleteById removes the row and reports whether one matched", async () => {
+    const admins = new AdminsRepo(sql);
+    const a = await admins.create({ email: "del@x.test", password: "longenough" });
+    expect(await admins.deleteById(a.id)).toBe(true);
+    expect(await admins.byId(a.id)).toBeNull();
+    expect(await admins.deleteById(a.id)).toBe(false);
+  });
+
+  test("countByRole counts admins per role", async () => {
+    const admins = new AdminsRepo(sql);
+    await admins.create({ email: "cr1@x.test", password: "longenough", role: "superadmin" });
+    await admins.create({ email: "cr2@x.test", password: "longenough", role: "manager" });
+    await admins.create({ email: "cr3@x.test", password: "longenough", role: "manager" });
+    expect(await admins.countByRole("superadmin")).toBe(1);
+    expect(await admins.countByRole("manager")).toBe(2);
+  });
 });
 
 describe("SessionsRepo", () => {

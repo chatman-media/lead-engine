@@ -111,6 +111,7 @@ export function Layout({ admin, children }: LayoutProps) {
       key: "coach",
       badge: pendingCoachCount > 0 ? pendingCoachCount : undefined,
     },
+    { to: "/admin/operators", label: "Операторы", key: null, superadmin: true },
     { to: "/admin/ops", label: "Операции", key: null, superadmin: true },
   ];
 

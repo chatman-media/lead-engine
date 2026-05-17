@@ -5,6 +5,12 @@
 // `./admin/api.ts` — primarily `src/app.ts` (route registration) and a few
 // tests. New code should import directly from the resource module.
 
+export {
+  createCreateAdminHandler,
+  createDeleteAdminHandler,
+  createListAdminsHandler,
+  createResetAdminPasswordHandler,
+} from "./routes/admins.ts";
 export { createAnalyticsHandler } from "./routes/analytics.ts";
 export {
   createApplyCoachProposalHandler,

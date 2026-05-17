@@ -5,12 +5,14 @@ import {
   createApproveLeadHandler,
   createBulkExportConversationsHandler,
   createConversationDetailHandler,
+  createCreateAdminHandler,
   createCreateExperimentHandler,
   createCreateKbSuggestionHandler,
   createCreateLeadNoteHandler,
   createCreateStyleHandler,
   createCreateVacancyHandler,
   createDecideCoachProposalHandler,
+  createDeleteAdminHandler,
   createDeleteCoachProposalHandler,
   createDeleteConversationHandler,
   createDeleteKbDocumentHandler,
@@ -44,6 +46,7 @@ import {
   createLeadCallbackHandler,
   createLeadDetailHandler,
   createLeadMediaHandler,
+  createListAdminsHandler,
   createListCoachProposalsHandler,
   createListConversationsHandler,
   createListExperimentsHandler,
@@ -68,6 +71,7 @@ import {
   createReleaseHandler,
   createReplyHandler,
   createReseedVacanciesHandler,
+  createResetAdminPasswordHandler,
   createRestartHandler,
   createRollbackCoachProposalHandler,
   createRunCoachHandler,
@@ -277,6 +281,11 @@ export function createRouter(deps: AppDeps): Router {
   };
   router.get("/admin/api/status", createStatusHandler(apiDeps));
   router.get("/admin/api/analytics", createAnalyticsHandler(apiDeps));
+  // Operator management — superadmin-gated (see routes/admins.ts).
+  router.get("/admin/api/admins", createListAdminsHandler(apiDeps));
+  router.post("/admin/api/admins", createCreateAdminHandler(apiDeps));
+  router.post("/admin/api/admins/:id/password", createResetAdminPasswordHandler(apiDeps));
+  router.delete("/admin/api/admins/:id", createDeleteAdminHandler(apiDeps));
   router.get("/admin/api/users", createListUsersHandler(apiDeps));
   // Telegram file proxy — browsers hit this URL from <img>/<video> tags
   // in the admin chat view; admin session cookie is the auth.

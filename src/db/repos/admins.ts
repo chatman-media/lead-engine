@@ -22,6 +22,14 @@ export interface AdminRow {
   created_at: number;
 }
 
+/** Admin row safe to expose over the API — no password hash. */
+export interface AdminSummary {
+  id: number;
+  email: string;
+  role: AdminRole;
+  created_at: number;
+}
+
 const MIN_PASSWORD_LEN = 8;
 
 export class AdminsRepo {
@@ -76,5 +84,28 @@ export class AdminsRepo {
     }
     const hash = await Bun.password.hash(newPassword, { algorithm: "argon2id" });
     await this.sql`UPDATE admins SET password_hash = ${hash} WHERE id = ${id}`;
+  }
+
+  /** All admins, password hash omitted — for the operator-management UI. */
+  async list(): Promise<AdminSummary[]> {
+    return this.sql<AdminSummary[]>`
+      SELECT id, email, role, created_at FROM admins ORDER BY created_at ASC, id ASC
+    `;
+  }
+
+  /** Delete an admin by id. Returns true when a row was removed. Sessions
+   *  cascade via the FK. Caller guards against self-delete / last-superadmin. */
+  async deleteById(id: number): Promise<boolean> {
+    const rows = await this.sql`DELETE FROM admins WHERE id = ${id}`;
+    return rows.count > 0;
+  }
+
+  /** Count admins holding a given role — used to block removing the last
+   *  superadmin (which would lock everyone out of destructive ops). */
+  async countByRole(role: AdminRole): Promise<number> {
+    const [row] = await this.sql<{ n: number }[]>`
+      SELECT COUNT(*)::INTEGER AS n FROM admins WHERE role = ${role}
+    `;
+    return row?.n ?? 0;
   }
 }
