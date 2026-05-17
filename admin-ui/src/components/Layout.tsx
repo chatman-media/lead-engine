@@ -124,7 +124,7 @@ export function Layout({ admin, children }: LayoutProps) {
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-header">
-          <div className="sidebar-logo">Infinity Agency</div>
+          <img src="/admin/infinity-logo.png" alt="Infinity Agency" className="sidebar-logo-img" />
           <div className="sidebar-tagline">admin panel</div>
         </div>
 
