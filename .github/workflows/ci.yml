@@ -211,3 +211,50 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  status:
+    name: ci status badge
+    needs: [check, e2e]
+    # `if: always()` so the badge reflects failures too — without it this job
+    # would be skipped whenever check/e2e fail and the badge would only ever
+    # say "passing".
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # `contents: write` lets the badge step commit .github/badges/ci.svg.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check out the main branch tip (not the detached trigger SHA): this
+          # job runs after `check`, so the tip already includes its coverage
+          # badge commit and `git push` below stays a fast-forward.
+          ref: main
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: update ci badge
+        # Only on push to main: regenerate the SVG from the run result and
+        # commit it if it changed. `[skip ci]` prevents a re-trigger.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if [ "${{ needs.check.result }}" = "success" ] && [ "${{ needs.e2e.result }}" = "success" ]; then
+            bun scripts/ci-badge.ts passing
+          else
+            bun scripts/ci-badge.ts failing
+          fi
+          if git diff --quiet -- .github/badges/ci.svg; then
+            echo "ci badge unchanged"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/badges/ci.svg
+            git commit -m "chore: update ci badge [skip ci]"
+            git push origin HEAD:main
+          fi
