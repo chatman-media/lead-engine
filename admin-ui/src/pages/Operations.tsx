@@ -38,7 +38,9 @@ function ResultView({ result }: { result: Result }) {
         </summary>
         <pre
           style={{
-            background: "var(--surface-2, #1a1a1a)",
+            background: "var(--bg-2)",
+            border: "1px solid var(--border)",
+            color: "var(--text)",
             padding: 8,
             borderRadius: 4,
             fontSize: 12,
@@ -67,9 +69,10 @@ function Card({
   return (
     <section
       style={{
-        background: "var(--surface-1, #111)",
-        border: "1px solid var(--border, #2a2a2a)",
-        borderRadius: 6,
+        background: "var(--bg-1)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius)",
+        boxShadow: "var(--shadow-sm)",
         padding: 16,
         marginBottom: 16,
       }}

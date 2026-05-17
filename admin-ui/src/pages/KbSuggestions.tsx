@@ -157,7 +157,7 @@ export function KbSuggestions() {
       </div>
 
       {suggestions === null ? (
-        <div className="loading-text">Loading…</div>
+        <div className="loading-text">Загрузка…</div>
       ) : suggestions.length === 0 ? (
         <div className="empty">{tab === "pending" ? "Нет вопросов без ответа" : "Нет записей"}</div>
       ) : (

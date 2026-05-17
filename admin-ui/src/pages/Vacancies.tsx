@@ -122,7 +122,7 @@ export function Vacancies() {
       {showAdd && <AddForm onSubmit={handleCreate} />}
 
       {list === null ? (
-        <div className="loading-text">loading…</div>
+        <div className="loading-text">загрузка…</div>
       ) : list.length === 0 ? (
         <EmptyState onAdd={() => setShowAdd(true)} />
       ) : (

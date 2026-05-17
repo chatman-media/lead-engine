@@ -91,7 +91,7 @@ export function Experiments() {
       ) : null}
 
       {experiments === null ? (
-        <div style={{ color: "var(--text-3)" }}>loading…</div>
+        <div style={{ color: "var(--text-3)" }}>загрузка…</div>
       ) : experiments.length === 0 ? (
         <EmptyState envOverride={systemStatus?.routing.mode === "env_override"} />
       ) : (
@@ -289,7 +289,7 @@ function ExperimentCard({
       </div>
 
       {funnel === null ? (
-        <div style={{ color: "var(--text-3)", fontSize: 12 }}>loading funnel…</div>
+        <div style={{ color: "var(--text-3)", fontSize: 12 }}>загрузка воронки…</div>
       ) : funnel.length === 0 ? (
         <div style={{ color: "var(--text-3)", fontSize: 12 }}>no traffic yet</div>
       ) : (

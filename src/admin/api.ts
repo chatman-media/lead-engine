@@ -70,6 +70,7 @@ export {
   createMarkSubmittedHandler,
   createPromoteLeadHandler,
   createRejectLeadHandler,
+  createRevertLeadHandler,
   createSendIntakeHandler,
   createSubmitToVisaHandler,
   createUpdateVisaDocsHandler,

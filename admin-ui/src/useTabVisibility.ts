@@ -10,8 +10,7 @@ export const CONFIGURABLE_TABS: TabKey[] = [
   { key: "analytics", label: "Аналитика", defaultOn: true },
   { key: "vacancies", label: "Вакансии", defaultOn: true },
   { key: "kb-suggestions", label: "Вопросы без ответа", defaultOn: true },
-  { key: "self-play", label: "Self-play", defaultOn: false },
-  { key: "coach", label: "Coach", defaultOn: false },
+  { key: "self-play", label: "Симуляция диалогов", defaultOn: false },
 ];
 
 const STORAGE_KEY = "adminTabVisibility";

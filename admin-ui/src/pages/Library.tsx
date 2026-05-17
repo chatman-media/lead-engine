@@ -92,7 +92,7 @@ export function Library() {
             fontFamily: "var(--mono)",
           }}
         >
-          {totals ? `${totals.documents} books · ${totals.chunks} chunks indexed` : "loading…"}
+          {totals ? `${totals.documents} books · ${totals.chunks} chunks indexed` : "загрузка…"}
         </div>
       </div>
 
@@ -181,7 +181,7 @@ export function Library() {
       )}
 
       {docs === null ? (
-        <div className="loading-text">loading…</div>
+        <div className="loading-text">загрузка…</div>
       ) : docs.length === 0 ? (
         <EmptyState />
       ) : (

@@ -886,6 +886,10 @@ export const api = {
       method: "POST",
     }),
 
+  /** Undo the last lead-state move — returns the lead to its previous step. */
+  revertLead: (id: number) =>
+    req<{ lead: Lead }>(`/admin/api/leads/${id}/revert`, { method: "POST" }),
+
   leadDetail: (id: number) => req<LeadDetail>(`/admin/api/leads/${id}`),
 
   leadMedia: (id: number) => req<{ media: LeadMediaItem[] }>(`/admin/api/leads/${id}/media`),

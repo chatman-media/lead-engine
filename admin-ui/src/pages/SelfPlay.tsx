@@ -89,7 +89,9 @@ export function SelfPlay() {
   return (
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
       <div>
-        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Self-play</h2>
+        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>
+          Симуляция диалогов
+        </h2>
         <div
           style={{
             fontSize: 12,
@@ -166,7 +168,7 @@ export function SelfPlay() {
         </div>
       )}
 
-      {!matches && <div className="loading-text">loading…</div>}
+      {!matches && <div className="loading-text">загрузка…</div>}
       {matches && matches.length === 0 && (
         <div
           style={{
@@ -420,7 +422,7 @@ function MatchRow({
             background: "var(--bg)",
           }}
         >
-          {!detail && <div className="loading-text">loading transcript…</div>}
+          {!detail && <div className="loading-text">загрузка стенограммы…</div>}
           {detail && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <div

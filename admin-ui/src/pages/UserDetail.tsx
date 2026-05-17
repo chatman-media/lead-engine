@@ -46,7 +46,7 @@ export function UserDetail() {
   if (!data) {
     return (
       <div className="loading-text" style={{ padding: 24 }}>
-        loading…
+        загрузка…
       </div>
     );
   }

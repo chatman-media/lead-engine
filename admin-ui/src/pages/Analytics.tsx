@@ -131,7 +131,7 @@ export function Analytics() {
         </div>
       )}
 
-      {loading && !data && <div className="loading-text">loading…</div>}
+      {loading && !data && <div className="loading-text">загрузка…</div>}
 
       {data && (
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>

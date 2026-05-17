@@ -99,7 +99,7 @@ export function Kb() {
             fontFamily: "var(--mono)",
           }}
         >
-          {totals ? `${totals.documents} documents · ${totals.chunks} chunks indexed` : "loading…"}
+          {totals ? `${totals.documents} documents · ${totals.chunks} chunks indexed` : "загрузка…"}
         </div>
       </div>
 
@@ -173,7 +173,7 @@ export function Kb() {
       )}
 
       {docs === null ? (
-        <div className="loading-text">loading…</div>
+        <div className="loading-text">загрузка…</div>
       ) : docs.length === 0 ? (
         <EmptyState />
       ) : (
@@ -544,7 +544,7 @@ function ChunksPane({ docId }: { docId: number }) {
   if (chunks === null) {
     return (
       <div className="loading-text" style={{ marginTop: 12 }}>
-        loading chunks…
+        загрузка фрагментов…
       </div>
     );
   }

@@ -91,7 +91,7 @@ export function Styles() {
       {error ? (
         <div style={{ color: "var(--red, #f55)" }}>error: {error}</div>
       ) : styles === null ? (
-        <div style={{ color: "var(--text-3)" }}>loading…</div>
+        <div style={{ color: "var(--text-3)" }}>загрузка…</div>
       ) : styles.length === 0 ? (
         <div style={{ color: "var(--text-3)" }}>
           no styles in DB — they should be auto-seeded on next server boot.

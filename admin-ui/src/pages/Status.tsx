@@ -39,14 +39,14 @@ export function Status() {
   if (error && !status) {
     return (
       <div style={{ padding: 32, color: "var(--red, #ef4444)", fontFamily: "var(--mono)" }}>
-        Failed to load status: {error}
+        Не удалось загрузить статус: {error}
       </div>
     );
   }
   if (!status) {
     return (
       <div className="loading-text" style={{ padding: 32 }}>
-        loading…
+        загрузка…
       </div>
     );
   }
@@ -54,7 +54,7 @@ export function Status() {
   return (
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Статус</h2>
+        <h2 style={{ fontFamily: "var(--display)", color: "var(--text)", margin: 0 }}>Статус</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {loadedAt && (
             <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-3)" }}>
@@ -91,39 +91,62 @@ export function Status() {
   );
 }
 
+/** Человекочитаемые подписи для режимов диалога. */
+const MODE_LABEL: Record<string, string> = {
+  ai: "бот",
+  queued: "в очереди",
+  human: "оператор",
+};
+
+/** Человекочитаемые подписи для ролей сообщений. */
+const ROLE_LABEL: Record<string, string> = {
+  user: "кандидат",
+  assistant: "бот",
+  human: "оператор",
+  system: "система",
+};
+
 function BotHealthCard({ status }: { status: SystemStatus }) {
   const h = status.bot_health;
   const ok = h.ok;
   const accent = ok ? "var(--green, #2ea043)" : "var(--red, #ef4444)";
   const checkedAgo = Math.max(0, Math.floor(Date.now() / 1000) - h.checked_at);
   return (
-    <Card title="Bot health" accent={accent}>
+    <Card title="Состояние бота" accent={accent}>
       <Row
-        label="status"
+        label="статус"
         value={
           <span style={{ color: accent, fontWeight: 600 }}>
-            {ok ? "● connected" : "✗ unreachable"}
+            {ok ? "● на связи" : "✗ нет связи"}
           </span>
         }
       />
       {ok ? (
         <>
-          <Row label="username" value={h.username ? `@${h.username}` : "—"} mono />
-          <Row label="first name" value={h.first_name ?? "—"} mono />
-          <Row label="bot_id" value={String(h.bot_id)} mono />
+          <Row label="ник" value={h.username ? `@${h.username}` : "—"} mono />
+          <Row label="имя" value={h.first_name ?? "—"} mono />
+          <Row label="ID бота" value={String(h.bot_id)} mono />
         </>
       ) : (
-        <Row label="error" value={<span style={{ color: accent }}>{h.error}</span>} mono />
+        <Row label="ошибка" value={<span style={{ color: accent }}>{h.error}</span>} mono />
       )}
-      <Row label="last check" value={`${checkedAgo}s ago`} hint="cached 60s" />
+      <Row label="проверено" value={`${checkedAgo} с назад`} hint="кэш 60 с" />
       {!ok && (
         <div style={{ marginTop: 6, fontSize: 11, color: accent }}>
-          ⚠ getMe failing — invalid TELEGRAM_BOT_TOKEN, bot deleted, or Telegram API down.
+          ⚠ getMe не отвечает — неверный TELEGRAM_BOT_TOKEN, бот удалён или Telegram API недоступен.
         </div>
       )}
     </Card>
   );
 }
+
+/** Подпись для значения routing.mode. */
+const ROUTING_MODE_LABEL: Record<string, string> = {
+  env_override: "переопределение из .env",
+  running_experiment: "эксперимент",
+  legacy_persona: "устаревшая персона",
+  none: "не настроено",
+};
 
 function RoutingCard({ status }: { status: SystemStatus }) {
   const { routing } = status;
@@ -131,41 +154,41 @@ function RoutingCard({ status }: { status: SystemStatus }) {
   let detailLines: string[] = [];
   switch (routing.mode) {
     case "env_override":
-      summary = `env-override → ${routing.active_style_slug}`;
+      summary = `переопределение из .env → ${routing.active_style_slug}`;
       detailLines = [
-        "BOT_SALES_STYLE is set in .env.",
-        "All conversations use this style. Experiments are ignored.",
+        "BOT_SALES_STYLE задан в .env.",
+        "Все диалоги используют этот стиль. Эксперименты игнорируются.",
       ];
       break;
     case "running_experiment":
-      summary = `experiment → ${routing.running_experiment_slug}`;
+      summary = `эксперимент → ${routing.running_experiment_slug}`;
       detailLines = [
-        "An experiment is running; new conversations get a deterministic per-user variant.",
-        "Existing conversations keep their assigned style.",
+        "Запущен эксперимент: новые диалоги получают детерминированный вариант для каждого пользователя.",
+        "Существующие диалоги сохраняют назначенный стиль.",
       ];
       break;
     case "legacy_persona": {
       const p = routing.legacy_persona!;
-      summary = `legacy persona → ${p.name}${p.company ? ` @ ${p.company}` : ""} (${p.role})`;
+      summary = `устаревшая персона → ${p.name}${p.company ? ` @ ${p.company}` : ""} (${p.role})`;
       detailLines = [
-        "BOT_PERSONA_* env vars are set; sales-style engine is OFF.",
-        "All conversations use the simpler persona prompt without funnel stages or hooks.",
+        "Заданы переменные BOT_PERSONA_*; движок стилей продаж выключен.",
+        "Все диалоги используют упрощённый промпт персоны без этапов воронки и приёмов.",
       ];
       break;
     }
     case "none":
-      summary = "no routing configured";
+      summary = "маршрутизация не настроена";
       detailLines = [
-        "Neither BOT_SALES_STYLE nor BOT_PERSONA_NAME is set, and no experiment is running.",
-        "The bot will reply with a generic AI-assistant persona.",
+        "Ни BOT_SALES_STYLE, ни BOT_PERSONA_NAME не заданы, эксперимент не запущен.",
+        "Бот будет отвечать как обычный ИИ-ассистент.",
       ];
       break;
   }
   return (
-    <Card title="Routing" accent="var(--amber)">
-      <Row label="mode" value={routing.mode} />
-      <Row label="active" value={summary} mono />
-      <Row label="stage classifier" value={routing.stage_classifier} />
+    <Card title="Маршрутизация" accent="var(--amber)">
+      <Row label="режим" value={ROUTING_MODE_LABEL[routing.mode] ?? routing.mode} />
+      <Row label="активно" value={summary} mono />
+      <Row label="классификатор этапа" value={routing.stage_classifier} />
       {detailLines.map((line, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: detail lines are derived deterministically from routing config — index is stable
         <div key={i} style={{ fontSize: 11, color: "var(--text-3)", marginTop: i === 0 ? 8 : 4 }}>
@@ -178,15 +201,15 @@ function RoutingCard({ status }: { status: SystemStatus }) {
 
 function RagFlagsCard({ status }: { status: SystemStatus }) {
   const flags: Array<[string, boolean, string]> = [
-    ["userMemory", status.rag.userMemory, "RAG_USER_MEMORY"],
-    ["queryRewrite", status.rag.queryRewrite, "RAG_QUERY_REWRITE"],
-    ["reflect", status.rag.reflect, "RAG_REFLECT"],
-    ["hybridSearch", status.rag.hybridSearch, "RAG_HYBRID_SEARCH"],
-    ["conversationSummary", status.rag.conversationSummary, "RAG_CONVERSATION_SUMMARY"],
-    ["topicRouting", status.rag.topicRouting, "RAG_TOPIC_ROUTING"],
+    ["Память о собеседнике", status.rag.userMemory, "RAG_USER_MEMORY"],
+    ["Переформулировка запроса", status.rag.queryRewrite, "RAG_QUERY_REWRITE"],
+    ["Проверка фактов", status.rag.reflect, "RAG_REFLECT"],
+    ["Гибридный поиск", status.rag.hybridSearch, "RAG_HYBRID_SEARCH"],
+    ["Резюме диалога", status.rag.conversationSummary, "RAG_CONVERSATION_SUMMARY"],
+    ["Поиск по темам", status.rag.topicRouting, "RAG_TOPIC_ROUTING"],
   ];
   return (
-    <Card title="RAG layers">
+    <Card title="Слои поиска (RAG)">
       {flags.map(([name, on, env]) => (
         <Row
           key={name}
@@ -198,7 +221,7 @@ function RagFlagsCard({ status }: { status: SystemStatus }) {
                 fontWeight: on ? 600 : 400,
               }}
             >
-              {on ? "ON" : "off"}
+              {on ? "вкл" : "выкл"}
             </span>
           }
           hint={env}
@@ -217,10 +240,10 @@ function RagFlagsCard({ status }: { status: SystemStatus }) {
 function ProvidersCard({ status }: { status: SystemStatus }) {
   const { chat, embed } = status.providers;
   return (
-    <Card title="Providers">
-      <Row label="chat" value={`${chat.provider} / ${chat.model}`} mono />
-      <Row label="embed" value={`${embed.provider} / ${embed.model}`} mono />
-      <Row label="embed dim" value={String(embed.dim)} mono />
+    <Card title="Провайдеры ИИ">
+      <Row label="чат-модель" value={`${chat.provider} / ${chat.model}`} mono />
+      <Row label="эмбеддинги" value={`${embed.provider} / ${embed.model}`} mono />
+      <Row label="размерность" value={String(embed.dim)} mono />
     </Card>
   );
 }
@@ -231,9 +254,9 @@ function VisionCard({ status }: { status: SystemStatus }) {
   const total =
     v.classified.passport + v.classified.full_body + v.classified.portrait + v.classified.other;
   return (
-    <Card title="Vision" accent={keyMissing ? "var(--amber)" : undefined}>
+    <Card title="Распознавание фото" accent={keyMissing ? "var(--amber)" : undefined}>
       <Row
-        label="enabled"
+        label="включено"
         value={
           <span
             style={{
@@ -241,17 +264,17 @@ function VisionCard({ status }: { status: SystemStatus }) {
               fontWeight: v.enabled ? 600 : 400,
             }}
           >
-            {v.enabled ? "ON" : "off"}
+            {v.enabled ? "вкл" : "выкл"}
           </span>
         }
         hint="VISION_ENABLED"
       />
-      <Row label="model" value={`${v.provider} / ${v.model}`} mono hint="VISION_MODEL" />
+      <Row label="модель" value={`${v.provider} / ${v.model}`} mono hint="VISION_MODEL" />
       <Row
-        label="api key"
+        label="ключ API"
         value={
           <span style={{ color: v.api_key_configured ? "var(--text)" : "var(--amber)" }}>
-            {v.api_key_configured ? "configured" : "missing"}
+            {v.api_key_configured ? "задан" : "не задан"}
           </span>
         }
         hint="OPENROUTER_API_KEY"
@@ -266,13 +289,13 @@ function VisionCard({ status }: { status: SystemStatus }) {
           fontFamily: "var(--mono)",
         }}
       >
-        classified photos ({total})
+        распознано фото ({total})
       </div>
-      <Row label="passport" value={String(v.classified.passport)} mono />
-      <Row label="full_body" value={String(v.classified.full_body)} mono />
-      <Row label="portrait" value={String(v.classified.portrait)} mono />
-      <Row label="other" value={String(v.classified.other)} mono />
-      <Row label="unclassified" value={String(v.unclassified)} mono />
+      <Row label="загранпаспорт" value={String(v.classified.passport)} mono />
+      <Row label="в полный рост" value={String(v.classified.full_body)} mono />
+      <Row label="портрет" value={String(v.classified.portrait)} mono />
+      <Row label="другое" value={String(v.classified.other)} mono />
+      <Row label="не распознано" value={String(v.unclassified)} mono />
       {keyMissing && (
         <div style={{ marginTop: 6, fontSize: 11, color: "var(--amber)" }}>
           ⚠ <code>VISION_ENABLED</code> включён, но <code>OPENROUTER_API_KEY</code> не задан —
@@ -285,10 +308,10 @@ function VisionCard({ status }: { status: SystemStatus }) {
 
 function KbCard({ status }: { status: SystemStatus }) {
   return (
-    <Card title="Knowledge base">
-      <Row label="total docs" value={String(status.kb.documents)} mono />
-      <Row label="total chunks" value={String(status.kb.chunks)} mono />
-      <Row label="active styles" value={String(status.kb.styles)} mono />
+    <Card title="База знаний">
+      <Row label="всего документов" value={String(status.kb.documents)} mono />
+      <Row label="всего фрагментов" value={String(status.kb.chunks)} mono />
+      <Row label="активных стилей" value={String(status.kb.styles)} mono />
       {status.kb.by_topic.length > 0 && (
         <>
           <div
@@ -301,7 +324,7 @@ function KbCard({ status }: { status: SystemStatus }) {
               fontFamily: "var(--mono)",
             }}
           >
-            by topic
+            по темам
           </div>
           <table
             style={{
@@ -314,16 +337,16 @@ function KbCard({ status }: { status: SystemStatus }) {
           >
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                <th style={thStyle()}>topic</th>
-                <th style={thStyle()}>docs</th>
-                <th style={thStyle()}>chunks</th>
+                <th style={thStyle()}>тема</th>
+                <th style={thStyle()}>док-ты</th>
+                <th style={thStyle()}>фрагменты</th>
               </tr>
             </thead>
             <tbody>
               {status.kb.by_topic.map((row) => (
                 <tr key={row.topic ?? "_null"}>
                   <td style={tdStyle()}>
-                    {row.topic ?? <i style={{ color: "var(--text-3)" }}>untagged</i>}
+                    {row.topic ?? <i style={{ color: "var(--text-3)" }}>без темы</i>}
                   </td>
                   <td style={tdStyle()}>{row.documents}</td>
                   <td style={tdStyle()}>{row.chunks}</td>
@@ -342,8 +365,8 @@ function KbCard({ status }: { status: SystemStatus }) {
             fontFamily: "var(--mono)",
           }}
         >
-          ⚠ topic routing is ON but no documents are tagged. Re-run ingest with --topic or under
-          kb/&lt;topic&gt;/ to benefit from filtering.
+          ⚠ Поиск по темам включён, но у документов нет тегов. Перезапустите импорт с --topic или в
+          kb/&lt;тема&gt;/, чтобы фильтрация работала.
         </div>
       )}
     </Card>
@@ -357,18 +380,13 @@ function ConversationsCard({ status }: { status: SystemStatus }) {
       ? Math.round((summarized / status.conversations.total) * 100)
       : 0;
   return (
-    <Card title="Conversations">
-      <Row label="total" value={String(status.conversations.total)} mono />
+    <Card title="Диалоги">
+      <Row label="всего" value={String(status.conversations.total)} mono />
       {Object.entries(status.conversations.by_mode).map(([mode, count]) => (
-        <Row key={mode} label={mode} value={String(count)} mono />
+        <Row key={mode} label={MODE_LABEL[mode] ?? mode} value={String(count)} mono />
       ))}
       {status.rag.conversationSummary && (
-        <Row
-          label="with summary"
-          value={`${summarized} (${sumPct}%)`}
-          mono
-          hint="from summary_json"
-        />
+        <Row label="с резюме" value={`${summarized} (${sumPct}%)`} mono />
       )}
     </Card>
   );
@@ -378,13 +396,13 @@ function UsersCard({ status }: { status: SystemStatus }) {
   const memCount = status.users.with_memory;
   const memPct = status.users.total > 0 ? Math.round((memCount / status.users.total) * 100) : 0;
   return (
-    <Card title="Users">
-      <Row label="total" value={String(status.users.total)} mono />
+    <Card title="Пользователи">
+      <Row label="всего" value={String(status.users.total)} mono />
       {Object.entries(status.users.by_status).map(([s, c]) => (
         <Row key={s} label={s} value={String(c)} mono />
       ))}
       {status.rag.userMemory && (
-        <Row label="with memory" value={`${memCount} (${memPct}%)`} mono hint="extracted facts" />
+        <Row label="с памятью" value={`${memCount} (${memPct}%)`} mono hint="извлечённые факты" />
       )}
     </Card>
   );
@@ -397,27 +415,27 @@ function LeadsCard({ status }: { status: SystemStatus }) {
   const forSubmit = c.docs_complete;
   const closed = c.rejected + c.closed;
   return (
-    <Card title="Leads pipeline" accent="var(--amber)">
+    <Card title="Воронка лидов" accent="var(--amber)">
       {ready > 0 && (
         <Row
-          label="ready for review"
+          label="ждут решения"
           value={<span style={{ color: "var(--amber)", fontWeight: 600 }}>{ready}</span>}
           mono
         />
       )}
-      <Row label="intake_pending" value={String(c.intake_pending)} mono />
-      <Row label="approved → docs" value={String(inDocs)} mono />
+      <Row label="заполняют анкету" value={String(c.intake_pending)} mono />
+      <Row label="оформляют документы" value={String(inDocs)} mono />
       {forSubmit > 0 && (
         <Row
-          label="ready for visa submit"
+          label="готовы к подаче"
           value={
             <span style={{ color: "var(--green, #2ea043)", fontWeight: 600 }}>{forSubmit}</span>
           }
           mono
         />
       )}
-      <Row label="submitted" value={String(c.submitted)} mono />
-      <Row label="closed/rejected" value={String(closed)} mono />
+      <Row label="поданы" value={String(c.submitted)} mono />
+      <Row label="закрыты/отклонены" value={String(closed)} mono />
       <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-3)" }}>
         <a href="/admin/leads" style={{ color: "var(--amber)" }}>
           воронка →
@@ -434,10 +452,10 @@ function LeadsCard({ status }: { status: SystemStatus }) {
 
 function VacanciesCard({ status }: { status: SystemStatus }) {
   return (
-    <Card title="Vacancies">
-      <Row label="active" value={String(status.vacancies.active)} mono />
+    <Card title="Вакансии">
+      <Row label="активных" value={String(status.vacancies.active)} mono />
       <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 8 }}>
-        Вставляются в RAG-контекст как АКТУАЛЬНЫЕ ВАКАНСИИ на каждом ходу.{" "}
+        Вставляются в контекст бота как АКТУАЛЬНЫЕ ВАКАНСИИ на каждом ходу.{" "}
         <a href="/admin/vacancies" style={{ color: "var(--amber)" }}>
           управление →
         </a>
@@ -450,7 +468,7 @@ function VacanciesCard({ status }: { status: SystemStatus }) {
             color: "var(--text-3)",
           }}
         >
-          Нет активных вакансий — бот отвечает только из KB.
+          Нет активных вакансий — бот отвечает только из базы знаний.
         </div>
       )}
     </Card>
@@ -459,10 +477,10 @@ function VacanciesCard({ status }: { status: SystemStatus }) {
 
 function MessagesCard({ status }: { status: SystemStatus }) {
   return (
-    <Card title="Messages">
-      <Row label="total" value={String(status.messages.total)} mono />
+    <Card title="Сообщения">
+      <Row label="всего" value={String(status.messages.total)} mono />
       {Object.entries(status.messages.by_role).map(([role, count]) => (
-        <Row key={role} label={role} value={String(count)} mono />
+        <Row key={role} label={ROLE_LABEL[role] ?? role} value={String(count)} mono />
       ))}
     </Card>
   );
@@ -525,6 +543,7 @@ function Card({
         background: "var(--bg-1)",
         border: "1px solid var(--border)",
         borderRadius: "var(--radius)",
+        boxShadow: "var(--shadow-sm)",
         padding: 16,
         display: "flex",
         flexDirection: "column",
@@ -533,12 +552,12 @@ function Card({
     >
       <div
         style={{
-          fontFamily: "var(--mono)",
-          fontSize: 11,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: accent ?? "var(--text-3)",
-          marginBottom: 6,
+          fontFamily: "var(--display)",
+          fontSize: 17,
+          fontWeight: 600,
+          letterSpacing: "-0.01em",
+          color: accent ?? "var(--text)",
+          marginBottom: 8,
         }}
       >
         {title}
@@ -565,18 +584,22 @@ function Row({
     >
       <div
         style={{
-          fontFamily: "var(--mono)",
-          fontSize: 11,
-          color: "var(--text-3)",
+          fontFamily: "var(--sans)",
+          fontSize: 12.5,
+          color: "var(--text-2)",
         }}
       >
         {label}
-        {hint && <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.7 }}>({hint})</span>}
+        {hint && (
+          <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.7, fontFamily: "var(--mono)" }}>
+            ({hint})
+          </span>
+        )}
       </div>
       <div
         style={{
           fontFamily: mono ? "var(--mono)" : "var(--sans)",
-          fontSize: 12,
+          fontSize: 13,
           color: "var(--text)",
           textAlign: "right",
         }}

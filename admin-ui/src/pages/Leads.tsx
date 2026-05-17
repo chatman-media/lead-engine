@@ -230,7 +230,7 @@ export function Leads() {
       </div>
 
       {items === null ? (
-        <div className="loading-text">loading…</div>
+        <div className="loading-text">загрузка…</div>
       ) : items.length === 0 ? (
         <EmptyState filter={filter} />
       ) : (
@@ -273,6 +273,16 @@ export function Leads() {
                   return Promise.resolve();
                 }
                 return withBusy(lead.id, () => api.markLeadSubmitted(lead.id));
+              }}
+              onRevert={() => {
+                if (
+                  !confirm(
+                    "Вернуть лида на предыдущий шаг? Используйте, если статус изменили по ошибке. Действие записывается в историю.",
+                  )
+                ) {
+                  return Promise.resolve();
+                }
+                return withBusy(lead.id, () => api.revertLead(lead.id));
               }}
               onDelete={() => {
                 if (!confirm(`Удалить лид #${lead.id}? Нельзя будет его восстановить.`)) return;
@@ -323,6 +333,7 @@ function LeadCard({
   onReject,
   onSubmitToVisa,
   onMarkSubmitted,
+  onRevert,
   onDelete,
 }: {
   lead: Lead;
@@ -333,6 +344,7 @@ function LeadCard({
   onReject: () => void;
   onSubmitToVisa: () => void | Promise<void>;
   onMarkSubmitted: () => void | Promise<void>;
+  onRevert: () => void | Promise<void>;
   onDelete: () => void;
 }) {
   const accent = STATE_ACCENT[lead.state];
@@ -482,6 +494,17 @@ function LeadCard({
               title="Перевести в «подача на визу» — бот пошагово запросит английскую анкету"
             >
               → подача на визу
+            </button>
+          )}
+          {lead.state !== "intake_pending" && (
+            <button
+              onClick={() => void onRevert()}
+              className="btn btn-ghost btn-sm"
+              disabled={busy}
+              data-testid="lead-revert"
+              title="Вернуть лида на предыдущий шаг (если статус изменили по ошибке)"
+            >
+              ← шаг назад
             </button>
           )}
           <button
@@ -655,7 +678,7 @@ function NotesPane({ leadId }: { leadId: number }) {
                 color: "var(--text-3)",
               }}
             >
-              loading…
+              загрузка…
             </div>
           ) : notes.length === 0 ? (
             <div
@@ -962,7 +985,7 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
                 color: "var(--text-3)",
               }}
             >
-              loading…
+              загрузка…
             </div>
           ) : (
             VISA_FIELD_ORDER.map((key) => {

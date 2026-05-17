@@ -78,7 +78,7 @@ export function Skills() {
         >
           {list
             ? `${list.length} skills · ${list.filter((s) => s.is_enabled).length} enabled`
-            : "loading…"}
+            : "загрузка…"}
         </div>
       </div>
 
@@ -116,7 +116,7 @@ export function Skills() {
         </div>
       )}
 
-      {!list && <div className="loading-text">loading…</div>}
+      {!list && <div className="loading-text">загрузка…</div>}
 
       {grouped.map(({ family, skills }) => (
         <section key={family} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
