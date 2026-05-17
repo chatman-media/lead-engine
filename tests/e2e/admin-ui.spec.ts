@@ -16,7 +16,7 @@ async function loginPage(page: Page) {
   await page.getByTestId("email").fill(ADMIN_EMAIL);
   await page.getByTestId("password").fill(ADMIN_PASSWORD);
   await page.getByTestId("login-submit").click();
-  await page.waitForURL("**/admin/chats");
+  await page.waitForURL("**/admin");
 }
 
 async function login(req: APIRequestContext, email = ADMIN_EMAIL, password = ADMIN_PASSWORD) {
@@ -45,13 +45,13 @@ test.describe("Admin Login", () => {
     await expect(page.getByTestId("login-error")).toBeVisible();
   });
 
-  test("valid credentials redirects to /admin/chats", async ({ page }) => {
+  test("valid credentials redirect to the admin home", async ({ page }) => {
     await page.goto("/admin/login");
     await page.getByTestId("email").fill(ADMIN_EMAIL);
     await page.getByTestId("password").fill(ADMIN_PASSWORD);
     await page.getByTestId("login-submit").click();
-    await page.waitForURL("**/admin/chats");
-    await expect(page).toHaveURL(/\/admin\/chats/);
+    await page.waitForURL("**/admin");
+    await expect(page).toHaveURL(/\/admin$/);
   });
 
   test("unauthenticated /admin/chats redirects to login", async ({ page }) => {
