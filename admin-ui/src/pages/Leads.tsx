@@ -503,7 +503,12 @@ function LeadCard({
       <TimelinePane leadId={lead.id} />
 
       {viewOpen && (
-        <AnketaModal intake={intake} leadLabel={leadLabel} onClose={() => setViewOpen(false)} />
+        <AnketaModal
+          intake={intake}
+          leadId={lead.id}
+          leadLabel={leadLabel}
+          onClose={() => setViewOpen(false)}
+        />
       )}
       {sendOpen && (
         <IntakeSendModal
@@ -1158,18 +1163,24 @@ const MODAL_OVERLAY: CSSProperties = {
 
 /**
  * Read-only modal showing the candidate's filled intake questionnaire —
- * every field the bot extracted from her messages, missing ones as "—".
- * Close via ✕, backdrop click, or Escape.
+ * every field the bot extracted from her messages (missing ones as "—")
+ * plus her photos. Close via ✕, backdrop click, or Escape.
  */
 function AnketaModal({
   intake,
+  leadId,
   leadLabel,
   onClose,
 }: {
   intake: IntakeFields | null;
+  leadId: number;
   leadLabel: string;
   onClose: () => void;
 }) {
+  const [media, setMedia] = useState<LeadMediaItem[] | null>(null);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [zoom, setZoom] = useState<string | null>(null);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -1177,6 +1188,25 @@ function AnketaModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .leadMedia(leadId)
+      .then((r) => {
+        if (alive) setMedia(r.media);
+      })
+      .catch((e) => {
+        if (alive) setMediaError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [leadId]);
+
+  // Candidate's own photos — the passport scan is excluded (it has its
+  // own "фото загранпаспорта" row above).
+  const photos = (media ?? []).filter((m) => m.type === "photo" && m.photo_class !== "passport");
 
   const rows: Array<[string, string | undefined]> = intake
     ? [
@@ -1269,6 +1299,54 @@ function AnketaModal({
             ))}
           </div>
         )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-3)" }}>
+            ФОТО{" "}
+            {photos.length > 0 && <span style={{ color: "var(--text-2)" }}>{photos.length}</span>}
+          </span>
+          {mediaError ? (
+            <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--red, #ef4444)" }}>
+              {mediaError}
+            </div>
+          ) : media === null ? (
+            <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-3)" }}>
+              загрузка…
+            </div>
+          ) : photos.length === 0 ? (
+            <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-3)" }}>
+              нет фото
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {photos.map((m) => {
+                const url = m.file_id ? api.tgFileUrl(m.file_id) : api.mediaUrl(m.id);
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setZoom(url)}
+                    style={{ padding: 0, border: "none", background: "none", cursor: "pointer" }}
+                  >
+                    <img
+                      src={url}
+                      alt="фото"
+                      loading="lazy"
+                      style={{
+                        height: 110,
+                        width: "auto",
+                        borderRadius: 4,
+                        display: "block",
+                        border: "1px solid var(--border)",
+                      }}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        {zoom && <Lightbox url={zoom} onClose={() => setZoom(null)} />}
       </div>
     </div>
   );
