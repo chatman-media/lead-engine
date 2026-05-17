@@ -285,3 +285,166 @@ describe("POST /admin/api/account/password", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe("operator management — /admin/api/admins", () => {
+  test("GET — superadmin sees the list, manager → 403", async () => {
+    const superCookie = await loginAs("om-super@x.test", "longenough", "superadmin");
+    const mgrCookie = await loginAs("om-mgr@x.test", "longenough", "manager");
+
+    const ok = await fetch(url("/admin/api/admins"), { headers: { cookie: superCookie } });
+    expect(ok.status).toBe(200);
+    const body = (await ok.json()) as { admins: Array<{ email: string }> };
+    expect(body.admins.length).toBe(2);
+
+    const denied = await fetch(url("/admin/api/admins"), { headers: { cookie: mgrCookie } });
+    expect(denied.status).toBe(403);
+  });
+
+  test("POST — superadmin creates a manager who can then log in", async () => {
+    const cookie = await loginAs("om-c@x.test", "longenough", "superadmin");
+    const res = await fetch(url("/admin/api/admins"), {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ email: "new-mgr@x.test", password: "longenough", role: "manager" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { admin: { role: string } };
+    expect(body.admin.role).toBe("manager");
+
+    const login = await fetch(url("/admin/api/login"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "new-mgr@x.test", password: "longenough" }),
+    });
+    expect(login.status).toBe(200);
+  });
+
+  test("POST — duplicate email → 409, bad role → 400, short password → 400", async () => {
+    const cookie = await loginAs("om-c2@x.test", "longenough", "superadmin");
+    const dup = await fetch(url("/admin/api/admins"), {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ email: "om-c2@x.test", password: "longenough", role: "manager" }),
+    });
+    expect(dup.status).toBe(409);
+
+    const badRole = await fetch(url("/admin/api/admins"), {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ email: "ok@x.test", password: "longenough", role: "owner" }),
+    });
+    expect(badRole.status).toBe(400);
+
+    const shortPw = await fetch(url("/admin/api/admins"), {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ email: "ok2@x.test", password: "short", role: "manager" }),
+    });
+    expect(shortPw.status).toBe(400);
+  });
+
+  test("POST — manager → 403", async () => {
+    const cookie = await loginAs("om-c3@x.test", "longenough", "manager");
+    const res = await fetch(url("/admin/api/admins"), {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ email: "x@x.test", password: "longenough", role: "manager" }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("DELETE — superadmin removes another admin", async () => {
+    const cookie = await loginAs("om-d@x.test", "longenough", "superadmin");
+    const target = await new AdminsRepo(sql).create({
+      email: "om-victim@x.test",
+      password: "longenough",
+      role: "manager",
+    });
+    const res = await fetch(url(`/admin/api/admins/${target.id}`), {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    expect(await new AdminsRepo(sql).byId(target.id)).toBeNull();
+  });
+
+  test("DELETE — cannot delete your own account → 400", async () => {
+    const admins = new AdminsRepo(sql);
+    const self = await admins.create({ email: "om-self@x.test", password: "longenough" });
+    const login = await fetch(url("/admin/api/login"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "om-self@x.test", password: "longenough" }),
+    });
+    const cookie = parseCookie(login.headers.get("set-cookie"))!;
+    const res = await fetch(url(`/admin/api/admins/${self.id}`), {
+      method: "DELETE",
+      headers: { cookie: `${cookie.name}=${cookie.value}` },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("DELETE — unknown id → 404, manager → 403", async () => {
+    const superCookie = await loginAs("om-d2@x.test", "longenough", "superadmin");
+    const missing = await fetch(url("/admin/api/admins/999999"), {
+      method: "DELETE",
+      headers: { cookie: superCookie },
+    });
+    expect(missing.status).toBe(404);
+
+    const mgrCookie = await loginAs("om-d3@x.test", "longenough", "manager");
+    const target = await new AdminsRepo(sql).create({
+      email: "om-d-victim@x.test",
+      password: "longenough",
+      role: "manager",
+    });
+    const denied = await fetch(url(`/admin/api/admins/${target.id}`), {
+      method: "DELETE",
+      headers: { cookie: mgrCookie },
+    });
+    expect(denied.status).toBe(403);
+  });
+
+  test("POST :id/password — superadmin resets another admin's password", async () => {
+    const cookie = await loginAs("om-r@x.test", "longenough", "superadmin");
+    const target = await new AdminsRepo(sql).create({
+      email: "om-reset@x.test",
+      password: "old-password",
+      role: "manager",
+    });
+    const res = await fetch(url(`/admin/api/admins/${target.id}/password`), {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ new_password: "new-password" }),
+    });
+    expect(res.status).toBe(200);
+
+    const oldLogin = await fetch(url("/admin/api/login"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "om-reset@x.test", password: "old-password" }),
+    });
+    expect(oldLogin.status).toBe(401);
+    const newLogin = await fetch(url("/admin/api/login"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "om-reset@x.test", password: "new-password" }),
+    });
+    expect(newLogin.status).toBe(200);
+  });
+
+  test("POST :id/password — manager → 403", async () => {
+    const cookie = await loginAs("om-r2@x.test", "longenough", "manager");
+    const target = await new AdminsRepo(sql).create({
+      email: "om-r-target@x.test",
+      password: "longenough",
+      role: "manager",
+    });
+    const res = await fetch(url(`/admin/api/admins/${target.id}/password`), {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ new_password: "new-password" }),
+    });
+    expect(res.status).toBe(403);
+  });
+});

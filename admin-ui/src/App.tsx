@@ -14,6 +14,7 @@ import { Library } from "./pages/Library.tsx";
 import { Login } from "./pages/Login.tsx";
 import { NewStyle } from "./pages/NewStyle.tsx";
 import { Operations } from "./pages/Operations.tsx";
+import { Operators } from "./pages/Operators.tsx";
 import { Pairwise } from "./pages/Pairwise.tsx";
 import { SelfPlay } from "./pages/SelfPlay.tsx";
 import { Settings } from "./pages/Settings.tsx";
@@ -118,6 +119,7 @@ export function App() {
                 <Route path="styles/:id" element={<StyleDetail />} />
                 <Route path="experiments" element={<Experiments />} />
                 <Route path="ops" element={<Operations />} />
+                <Route path="operators" element={<Operators />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="status" replace />} />
               </Routes>
