@@ -35,6 +35,10 @@ export interface IntakeExtractInput {
    *  when vision classification is enabled — when given, passport
    *  detection uses real counts instead of the >=7 heuristic. */
   photoClasses?: Record<PhotoClass, number>;
+  /** True when the candidate sent a video whose caption explicitly
+   *  labels it a dance video — a precise signal for
+   *  `dance_video_received`, stronger than the ">=3 videos" heuristic. */
+  danceVideoCaptioned?: boolean;
   chat: ChatClient;
 }
 
@@ -95,8 +99,13 @@ export async function extractIntake(input: IntakeExtractInput): Promise<IntakeFi
   } else if (merged.passport_photo_received !== true && input.mediaCounts.photos >= 7) {
     merged.passport_photo_received = true;
   }
-  // Dance video: 2 regular + 1 dance = 3+. Operator confirms by eye.
-  if (merged.dance_video_received !== true && input.mediaCounts.videos >= 3) {
+  // Dance video detection. Preferred signal: the candidate sent a video
+  // captioned as her dance video. Fallback heuristic: 2 regular + 1
+  // dance = 3+ videos (operator confirms by eye).
+  if (
+    merged.dance_video_received !== true &&
+    (input.danceVideoCaptioned || input.mediaCounts.videos >= 3)
+  ) {
     merged.dance_video_received = true;
   }
 

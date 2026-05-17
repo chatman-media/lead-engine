@@ -50,6 +50,9 @@ export async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
     }));
 
   const mediaCounts = await d.messages.countMediaForConversation(d.conv.id);
+  // A video the candidate explicitly captioned as her dance video —
+  // a precise signal for dance_video_received.
+  const danceVideoCaptioned = (await d.messages.countDanceVideoCaptions(d.conv.id)) > 0;
   // When vision classification is enabled, feed per-category photo counts
   // so passport detection is real instead of the ">=7 photos" heuristic.
   // But only once vision has actually classified something: with vision on
@@ -70,6 +73,7 @@ export async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
     messages: messagesForLlm,
     chat: d.rag.chat,
     mediaCounts,
+    danceVideoCaptioned,
     ...(photoClasses ? { photoClasses } : {}),
     ...(existing ? { existingIntake: existing } : {}),
   });

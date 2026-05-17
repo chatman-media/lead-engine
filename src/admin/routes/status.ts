@@ -3,6 +3,7 @@ import { ExperimentsRepo } from "../../db/repos/experiments.ts";
 import { LeadsRepo } from "../../db/repos/leads.ts";
 import { StylesRepo } from "../../db/repos/styles.ts";
 import { VacanciesRepo } from "../../db/repos/vacancies.ts";
+import { PHOTO_CLASSES, type PhotoClass } from "../../rag/vision.ts";
 import { json, type RouteHandler } from "../../router.ts";
 import { withAdmin } from "../handler-helpers.ts";
 import { type AdminApiDeps, readBotHealth } from "../shared.ts";
@@ -101,6 +102,34 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
     `;
     const usersWithMemory = usersWithMemoryRow?.count ?? 0;
 
+    // Vision classification stats: how many candidate photos got a
+    // `photo_class` stamped vs. left unclassified. Diagnostic for whether
+    // the vision model is actually keeping up (or wired at all). NULL class
+    // groups as "unclassified". Mirrors MessagesRepo.countPhotosByClass but
+    // aggregated globally.
+    const photosByClass = await deps.sql<{ cls: string | null; n: number }[]>`
+      SELECT (meta_json::jsonb)->'media'->>'photo_class' AS cls, COUNT(*)::INTEGER AS n
+      FROM messages
+      WHERE role = 'user'
+        AND meta_json IS NOT NULL
+        AND (meta_json::jsonb)->'media'->>'type' = 'photo'
+      GROUP BY cls
+    `;
+    const visionClassified: Record<PhotoClass, number> = {
+      passport: 0,
+      full_body: 0,
+      portrait: 0,
+      other: 0,
+    };
+    let visionUnclassified = 0;
+    for (const row of photosByClass) {
+      if (row.cls && (PHOTO_CLASSES as readonly string[]).includes(row.cls)) {
+        visionClassified[row.cls as PhotoClass] = row.n;
+      } else {
+        visionUnclassified += row.n;
+      }
+    }
+
     return json({
       rag: {
         userMemory: config.rag.userMemory,
@@ -115,6 +144,17 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
       providers: {
         chat: { provider: chatProvider, model: chatModel },
         embed: { provider: embedProvider, model: embedModel, dim: activeEmbeddingDim() },
+      },
+      vision: {
+        enabled: config.vision.enabled,
+        model: config.vision.model,
+        // Photo classification always routes through OpenRouter — see
+        // src/rag/vision.ts. No provider abstraction here.
+        provider: "openrouter",
+        // Bool only — never expose the key itself.
+        api_key_configured: config.openrouter.apiKey != null,
+        classified: visionClassified,
+        unclassified: visionUnclassified,
       },
       routing: {
         mode: routingMode,

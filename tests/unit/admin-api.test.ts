@@ -5,6 +5,7 @@ import { __resetBotHealthCacheForTesting } from "@/admin/api.ts";
 import { createRouter } from "@/app.ts";
 import { AdminsRepo } from "@/db/repos/admins.ts";
 import { ConversationsRepo } from "@/db/repos/conversations.ts";
+import { LeadsRepo } from "@/db/repos/leads.ts";
 import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { type FetchLike, TelegramClient } from "@/telegram/client.ts";
@@ -425,6 +426,65 @@ describe("leads endpoints", () => {
     expect(body.lead.id).toBe(lead.id);
     expect(Number(body.user.tg_user_id)).toBe(9300);
     expect(body.conversation_id).toBe(c.id);
+  });
+
+  test("GET /admin/api/leads/:id/intake-preview composes the partially-filled checklist", async () => {
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9320 });
+    const c = await conversations.ensureForUser(u.id);
+    const { lead } = (await (
+      await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
+    ).json()) as { lead: { id: number } };
+
+    // Auth required.
+    expect((await fetch(url(`/admin/api/leads/${lead.id}/intake-preview`))).status).toBe(401);
+
+    // No intake extracted yet — blank checklist.
+    const r = await fetch(url(`/admin/api/leads/${lead.id}/intake-preview`), authed());
+    expect(r.status).toBe(200);
+    const { text } = (await r.json()) as { text: string };
+    expect(text).toContain("Заполните анкету");
+    expect(text).toContain("3. Рост");
+
+    // With extracted intake — known answers appear inline.
+    await new LeadsRepo(sql).setIntake(
+      lead.id,
+      JSON.stringify({ name: "Sofia Ivanova", height: "165" }),
+    );
+    const r2 = await fetch(url(`/admin/api/leads/${lead.id}/intake-preview?lang=ru`), authed());
+    const body2 = (await r2.json()) as { text: string };
+    expect(body2.text).toContain("3. Рост — 165");
+    expect(body2.text).toContain("Sofia Ivanova");
+
+    // English variant.
+    const r3 = await fetch(url(`/admin/api/leads/${lead.id}/intake-preview?lang=en`), authed());
+    const body3 = (await r3.json()) as { text: string };
+    expect(body3.text).toContain("Please fill in");
+  });
+
+  test("POST /admin/api/leads/:id/send-intake sends the operator-edited text", async () => {
+    const usersRepo = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const u = await usersRepo.create({ tgUserId: 9321 });
+    const c = await conversations.ensureForUser(u.id);
+    const { lead } = (await (
+      await fetch(url(`/admin/api/leads/from-conversation/${c.id}`), authed({ method: "POST" }))
+    ).json()) as { lead: { id: number } };
+
+    const r = await fetch(
+      url(`/admin/api/leads/${lead.id}/send-intake?lang=ru`),
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "Кастомная анкета для теста" }),
+      }),
+    );
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { ok: boolean }).ok).toBe(true);
+
+    const recent = await new MessagesRepo(sql).recentForContext(c.id, 10);
+    expect(recent.some((m) => m.text === "Кастомная анкета для теста")).toBe(true);
   });
 
   test("PATCH /admin/api/leads/:id/visa-docs merges patch with existing", async () => {

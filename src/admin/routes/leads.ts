@@ -3,6 +3,7 @@ import { ConversationsRepo } from "../../db/repos/conversations.ts";
 import { type LeadState, LeadsRepo } from "../../db/repos/leads.ts";
 import { MessagesRepo } from "../../db/repos/messages.ts";
 import { UsersRepo } from "../../db/repos/users.ts";
+import { fillIntakeTemplate, type IntakeFields } from "../../leads/templates.ts";
 import { json, type RouteHandler } from "../../router.ts";
 import { parseIdParam, parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import {
@@ -179,16 +180,24 @@ export function createRejectLeadHandler(deps: AdminApiDeps): RouteHandler {
   });
 }
 
-/** Operator clicks "send intake template" — bot DMs the candidate the
- *  15-item checklist. Useful when the bot's natural greeting hasn't yet
- *  prompted the candidate to start submitting intake. The operator picks
- *  the checklist language via `?lang=ru|en` (defaults to `ru`). */
+/** Operator clicks "send intake" — bot DMs the candidate the 15-item
+ *  checklist. The operator usually reviews/edits a partially-filled
+ *  version first (see `createIntakePreviewHandler`) and passes the final
+ *  text in the body; when the body has no `text`, the partially-filled
+ *  template is composed server-side. Language via `?lang=ru|en`. */
 export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ params, url }) => {
+  return withAdmin(deps.sql, async ({ req, params, url }) => {
     const id = parseIdParam(params);
     if (id instanceof Response) return id;
 
     const lang = url.searchParams.get("lang") === "en" ? "en" : "ru";
+
+    let body: { text?: unknown } = {};
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      // Optional body — when absent the partially-filled template is composed.
+    }
 
     const leadsRepo = new LeadsRepo(deps.sql);
     const usersRepo = new UsersRepo(deps.sql);
@@ -197,12 +206,37 @@ export function createSendIntakeHandler(deps: AdminApiDeps): RouteHandler {
     const user = await usersRepo.byId(lead.user_id);
     if (!user) return json({ error: "user gone" }, { status: 404 });
 
+    const intake = lead.intake_json ? (safeJson(lead.intake_json) as IntakeFields | null) : null;
+    const text =
+      typeof body.text === "string" && body.text.trim()
+        ? body.text
+        : fillIntakeTemplate(intake ?? {}, lang);
+
     const service = buildLeadsService(deps);
     if (!service) {
       return json({ error: "telegram client not configured" }, { status: 503 });
     }
-    await service.sendIntakeTemplate({ user, lang });
+    await service.sendIntakeTemplate({ user, text });
     return json({ ok: true });
+  });
+}
+
+/** Side-effect-free preview of the partially-filled intake checklist —
+ *  the blank template with bot-extracted answers appended inline. The
+ *  admin UI loads this into an editable textarea before sending. */
+export function createIntakePreviewHandler(deps: AdminApiDeps): RouteHandler {
+  return withAdmin(deps.sql, async ({ params, url }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
+
+    const lang = url.searchParams.get("lang") === "en" ? "en" : "ru";
+
+    const leadsRepo = new LeadsRepo(deps.sql);
+    const lead = await leadsRepo.byId(id);
+    if (!lead) return json({ error: "not found" }, { status: 404 });
+
+    const intake = lead.intake_json ? (safeJson(lead.intake_json) as IntakeFields | null) : null;
+    return json({ text: fillIntakeTemplate(intake ?? {}, lang) });
   });
 }
 

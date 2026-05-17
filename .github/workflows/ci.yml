@@ -211,3 +211,73 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  deploy:
+    name: deploy to VPS
+    needs: [check, e2e]
+    # Push to main only — never on PRs. Runs only after check + e2e pass.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # SSHes to the VPS as root and runs deploy.sh (git pull → bun install
+      # → build:ui → systemctl restart chatman.service). Requires two repo
+      # secrets (Settings → Secrets and variables → Actions):
+      #   VPS_HOST    — server hostname or IP
+      #   VPS_SSH_KEY — private SSH key authorised for root on the VPS
+      # A non-default SSH port needs a `port:` line here.
+      - name: deploy via ssh
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: bash /home/chatman/app/deploy.sh
+
+  status:
+    name: ci status badge
+    needs: [check, e2e]
+    # `if: always()` so the badge reflects failures too — without it this job
+    # would be skipped whenever check/e2e fail and the badge would only ever
+    # say "passing".
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # `contents: write` lets the badge step commit .github/badges/ci.svg.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check out the main branch tip (not the detached trigger SHA): this
+          # job runs after `check`, so the tip already includes its coverage
+          # badge commit and `git push` below stays a fast-forward.
+          ref: main
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: update ci badge
+        # Only on push to main: regenerate the SVG from the run result and
+        # commit it if it changed. `[skip ci]` prevents a re-trigger.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if [ "${{ needs.check.result }}" = "success" ] && [ "${{ needs.e2e.result }}" = "success" ]; then
+            bun scripts/ci-badge.ts passing
+          else
+            bun scripts/ci-badge.ts failing
+          fi
+          if git diff --quiet -- .github/badges/ci.svg; then
+            echo "ci badge unchanged"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/badges/ci.svg
+            git commit -m "chore: update ci badge [skip ci]"
+            git push origin HEAD:main
+          fi

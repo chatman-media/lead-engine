@@ -264,6 +264,8 @@ export function buildLeadsService(deps: AdminApiDeps): LeadsService | null {
     telegram: deps.telegram,
     leadsChatId: deps.leadsChatId ?? null,
     visaChatId: deps.visaChatId ?? null,
+    userbotEnabled: deps.userbotEnabled ?? false,
+    sql: deps.sql,
   });
 }
 

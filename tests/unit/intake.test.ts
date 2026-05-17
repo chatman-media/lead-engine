@@ -5,8 +5,10 @@ import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { extractIntake, parseIntakeJson } from "@/leads/intake.ts";
 import {
+  fillIntakeTemplate,
   INTAKE_TEMPLATE,
   INTAKE_TEMPLATE_EN,
+  type IntakeFields,
   intakeTemplate,
   isIntakeComplete,
 } from "@/leads/templates.ts";
@@ -119,6 +121,42 @@ describe("countMediaForConversation", () => {
   });
 });
 
+describe("countDanceVideoCaptions", () => {
+  test("counts only videos whose caption mentions a dance", async () => {
+    const users = new UsersRepo(sql);
+    const convs = new ConversationsRepo(sql);
+    const msgs = new MessagesRepo(sql);
+    const u = await users.create({ tgUserId: 20 });
+    const c = await convs.ensureForUser(u.id);
+
+    // Video captioned as a dance video — counts.
+    await msgs.add({
+      conversationId: c.id,
+      role: "user",
+      text: "вот моё видео танца",
+      meta: { media: { type: "video", file_id: "d1" } },
+    });
+    // English caption — also counts.
+    await msgs.add({
+      conversationId: c.id,
+      role: "user",
+      text: "my dance clip",
+      meta: { media: { type: "video", file_id: "d2" } },
+    });
+    // Plain video without a dance caption — ignored.
+    await msgs.add({
+      conversationId: c.id,
+      role: "user",
+      text: "[video]",
+      meta: { media: { type: "video", file_id: "v1" } },
+    });
+    // A text message mentioning dance but no video — ignored.
+    await msgs.add({ conversationId: c.id, role: "user", text: "люблю танцы" });
+
+    expect(await msgs.countDanceVideoCaptions(c.id)).toBe(2);
+  });
+});
+
 describe("photo classification repo methods", () => {
   test("unclassifiedPhotos / setPhotoClass / countPhotosByClass", async () => {
     const users = new UsersRepo(sql);
@@ -196,6 +234,18 @@ describe("extractIntake + isIntakeComplete", () => {
     expect(intake.videos_count).toBe(1);
     expect(intake.passport_photo_received).toBeUndefined();
     expect(intake.dance_video_received).toBeUndefined();
+  });
+
+  test("marks dance_video_received from a captioned dance video below the count cutoff", async () => {
+    const chat = fakeChat("{}");
+    const intake = await extractIntake({
+      messages: [{ role: "user", content: "вот видео танца" }],
+      mediaCounts: { photos: 0, videos: 1 },
+      danceVideoCaptioned: true,
+      chat,
+    });
+    expect(intake.videos_count).toBe(1);
+    expect(intake.dance_video_received).toBe(true);
   });
 
   test("skips LLM call when there are no user messages", async () => {
@@ -294,5 +344,40 @@ describe("intakeTemplate — RU/EN switch", () => {
         expect(tpl).toContain(`${i}.`);
       }
     }
+  });
+});
+
+describe("fillIntakeTemplate — partially-filled checklist", () => {
+  test("empty intake leaves the blank template unchanged", () => {
+    expect(fillIntakeTemplate({}, "ru")).toBe(INTAKE_TEMPLATE);
+    expect(fillIntakeTemplate({}, "en")).toBe(INTAKE_TEMPLATE_EN);
+  });
+
+  test("appends known answers inline to the matching numbered lines", () => {
+    const fields: IntakeFields = {
+      name: "Sofia Ivanova",
+      age: "22",
+      height: "165",
+      city: "Москва",
+      departure_readiness: "с 1 апреля",
+    };
+    const filled = fillIntakeTemplate(fields, "ru");
+    expect(filled).toContain("1. Имя и фамилия (как в паспорте) — Sofia Ivanova");
+    expect(filled).toContain("2. Возраст — 22");
+    expect(filled).toContain("3. Рост — 165");
+    // City + departure readiness are merged onto the single line 11.
+    expect(filled).toContain("Москва, с 1 апреля");
+  });
+
+  test("leaves lines without a known answer blank", () => {
+    const filled = fillIntakeTemplate({ age: "22" }, "ru");
+    expect(filled).toContain("2. Возраст — 22");
+    expect(filled).toContain("3. Рост\n");
+  });
+
+  test("preserves the curated preamble and footer", () => {
+    const filled = fillIntakeTemplate({ age: "22" }, "ru");
+    expect(filled).toContain("Заполните анкету");
+    expect(filled).toContain("одним сообщением");
   });
 });

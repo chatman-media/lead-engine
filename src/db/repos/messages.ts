@@ -120,6 +120,25 @@ export class MessagesRepo {
   }
 
   /**
+   * Count of inbound videos whose caption explicitly says it is a dance
+   * video ("видео танца", "танец", "dance"). The intake extractor uses
+   * this to mark `dance_video_received` from the candidate's own label
+   * rather than the coarse ">=3 videos" heuristic.
+   */
+  async countDanceVideoCaptions(conversationId: number): Promise<number> {
+    const [row] = await this.sql<{ n: number }[]>`
+      SELECT COUNT(*)::INTEGER AS n
+      FROM messages
+      WHERE conversation_id = ${conversationId}
+        AND role = 'user'
+        AND meta_json IS NOT NULL
+        AND (meta_json::jsonb)->'media'->>'type' = 'video'
+        AND text ~* '(танц|dance)'
+    `;
+    return row?.n ?? 0;
+  }
+
+  /**
    * Inbound photo messages that haven't been vision-classified yet
    * (`meta_json.media.photo_class` absent). Used by the
    * `runPhotoClassification` hook to find work. Oldest first.

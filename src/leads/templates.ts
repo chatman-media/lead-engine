@@ -71,6 +71,51 @@ export function intakeTemplate(lang: IntakeLang): string {
 }
 
 /**
+ * Display value for each of the 15 numbered checklist lines, pulled
+ * from the already-extracted intake. Index 0 = item 1. `undefined`
+ * leaves that line blank for the candidate to fill.
+ */
+function intakeAnswers(f: IntakeFields): Array<string | undefined> {
+  const city = [f.city, f.departure_readiness].filter(Boolean).join(", ") || undefined;
+  return [
+    f.name, // 1. имя и фамилия
+    f.age, // 2. возраст
+    f.height, // 3. рост
+    f.weight, // 4. вес
+    f.nationality, // 5. гражданство
+    f.marital_status, // 6. семейное положение
+    f.children, // 7. дети
+    f.languages, // 8. языки
+    f.work_experience, // 9. опыт работы
+    f.passport_expiry, // 10. загранпаспорт до
+    city, // 11. город + готовность к выезду
+    f.photos_count ? `прислано ${f.photos_count}` : undefined, // 12. фото
+    f.videos_count ? `прислано ${f.videos_count}` : undefined, // 13. видео
+    f.passport_photo_received ? "получено" : undefined, // 14. фото загранпаспорта
+    f.dance_video_received ? "получено" : undefined, // 15. видео танца
+  ];
+}
+
+/**
+ * Partially-filled intake checklist: the blank template with the
+ * bot-extracted answers appended inline to the matching numbered lines
+ * (`3. Рост — 165`). The candidate only fills the remaining gaps. The
+ * operator reviews/edits this in the admin UI before it is sent.
+ */
+export function fillIntakeTemplate(fields: IntakeFields, lang: IntakeLang): string {
+  const answers = intakeAnswers(fields);
+  return intakeTemplate(lang)
+    .split("\n")
+    .map((line) => {
+      const m = line.match(/^(\d{1,2})\.\s/);
+      if (!m) return line;
+      const value = answers[Number(m[1]) - 1];
+      return value ? `${line} — ${value}` : line;
+    })
+    .join("\n");
+}
+
+/**
  * Two-message preamble sent right after operator approves the lead.
  * Sent BEFORE the long English visa anketa so the candidate has the
  * context for what's coming.
@@ -185,12 +230,6 @@ export const SUBMITTED_REPLY = `Подали вашу заявку на визу
 export const AWAITING_APPROVAL_REPLY = `Спасибо, всё получили! Сейчас отправила запрос в клуб по вам, ждите ответа. Обычно в течение дня сообщаю.`;
 
 /**
- * Sent to the candidate once a photo of her international passport is
- * vision-detected — a small acknowledgement so she knows it landed.
- */
-export const PASSPORT_PHOTO_ACK = `✅ Фото загранпаспорта получили.`;
-
-/**
  * Nudge sent once when the candidate has uploaded several photos but
  * none of them is a full-body shot.
  */
@@ -214,10 +253,10 @@ export interface IntakeFields {
   full_body_count?: number;
   passport_photo_received?: boolean;
   dance_video_received?: boolean;
-  /** One-shot flags so the bot acknowledges photos to the candidate
+  /** One-shot flag so the bot nudges for a missing full-body shot
    *  exactly once — Telegram albums arrive as many separate messages,
    *  each triggering the classification hook. Not shown on the card. */
-  media_ack?: { passport?: boolean; full_body_nudged?: boolean };
+  media_ack?: { full_body_nudged?: boolean };
   name?: string;
   nationality?: string;
   marital_status?: string;
