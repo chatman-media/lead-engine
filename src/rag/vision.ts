@@ -1,7 +1,8 @@
+import type { VisionProvider } from "../config.ts";
 import type { FetchLike } from "./chat.ts";
 
 /**
- * Photo classification via a vision-capable model on OpenRouter.
+ * Photo classification via a vision-capable model.
  *
  * The recruiting funnel collects two distinct kinds of photo from a
  * candidate — full-body shots and a photo of her international passport
@@ -9,8 +10,10 @@ import type { FetchLike } from "./chat.ts";
  * them apart so the lead intake counters are accurate (see
  * `src/leads/intake.ts`), instead of the old "total photos >= 7" guess.
  *
- * OpenRouter exposes an OpenAI-compatible `/chat/completions` endpoint;
- * vision input is the standard `image_url` content part with a data URL.
+ * Works with either OpenRouter or OpenAI (set via `provider`). Both expose
+ * an OpenAI-compatible `/chat/completions` endpoint; vision input is the
+ * standard `image_url` content part with a data URL. The OpenRouter-only
+ * `reasoning` request param is sent only for that provider.
  */
 
 export const PHOTO_CLASSES = ["passport", "full_body", "portrait", "other"] as const;
@@ -33,9 +36,11 @@ export interface ClassifyPhotoOptions {
   bytes: ArrayBuffer;
   /** MIME type, e.g. "image/jpeg". Falls back to image/jpeg when empty. */
   mimeType?: string;
-  /** OpenRouter slug of a vision-capable model. */
+  /** Vision-capable model id (OpenRouter slug or OpenAI model name). */
   model: string;
   apiKey: string;
+  /** AI provider. Default: "openrouter". */
+  provider?: VisionProvider;
   /** Default: https://openrouter.ai/api/v1 */
   baseUrl?: string;
   /** Per-request timeout in ms. Default 30_000. */
@@ -72,15 +77,18 @@ export async function classifyPhoto(opts: ClassifyPhotoOptions): Promise<PhotoCl
   const mime = opts.mimeType?.trim() ? opts.mimeType : "image/jpeg";
   const base64 = Buffer.from(opts.bytes).toString("base64");
 
+  const provider = opts.provider ?? "openrouter";
+
   const body = {
     model: opts.model,
     stream: false,
     temperature: 0,
+    max_tokens: 512,
     // Reasoning models (Gemini 2.5 Flash et al.) spend output tokens on
     // internal thinking — a tiny cap there returns EMPTY content. Disable
     // reasoning and leave generous headroom; the answer itself is one word.
-    reasoning: { enabled: false },
-    max_tokens: 512,
+    // `reasoning` is OpenRouter-specific — OpenAI rejects unknown params.
+    ...(provider === "openrouter" ? { reasoning: { enabled: false } } : {}),
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       {
@@ -111,7 +119,7 @@ export async function classifyPhoto(opts: ClassifyPhotoOptions): Promise<PhotoCl
   }
   if (!res.ok || payload.error) {
     throw new Error(
-      `classifyPhoto: OpenRouter error (HTTP ${res.status}): ${payload.error?.message ?? "unknown"}`,
+      `classifyPhoto: vision API error (HTTP ${res.status}): ${payload.error?.message ?? "unknown"}`,
     );
   }
   const choice = payload.choices?.[0];

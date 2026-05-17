@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { type Api, TelegramClient as GramjsClient } from "telegram";
 import { NewMessage } from "telegram/events";
 import { StringSession } from "telegram/sessions";
-import { config, telegramOpenAccess } from "../config.ts";
+import { config, telegramOpenAccess, visionCredentials } from "../config.ts";
 import type { Sql } from "../db/postgres.ts";
 import { type ConversationRow, ConversationsRepo } from "../db/repos/conversations.ts";
 import { ExperimentsRepo } from "../db/repos/experiments.ts";
@@ -181,7 +181,8 @@ async function handleInboundPhoto(d: {
   // re-downloads pending photos by Bot API file_id, which userbot/MTProto
   // media doesn't have — classifying here makes the hook's ack step see
   // the class without needing a re-download.
-  if (config.vision.enabled && config.openrouter.apiKey) {
+  const visionCreds = visionCredentials();
+  if (config.vision.enabled && visionCreds.apiKey) {
     try {
       const bytes = buf.buffer.slice(
         buf.byteOffset,
@@ -189,9 +190,10 @@ async function handleInboundPhoto(d: {
       ) as ArrayBuffer;
       const photoClass = await classifyPhoto({
         bytes,
-        model: config.vision.model,
-        apiKey: config.openrouter.apiKey,
-        baseUrl: config.openrouter.baseUrl,
+        provider: visionCreds.provider,
+        model: visionCreds.model,
+        apiKey: visionCreds.apiKey,
+        baseUrl: visionCreds.baseUrl,
       });
       await messages.setPhotoClass(persisted.message.id, photoClass);
       log.info("userbot: photo classified", {
