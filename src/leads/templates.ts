@@ -185,12 +185,6 @@ export const SUBMITTED_REPLY = `Подали вашу заявку на визу
 export const AWAITING_APPROVAL_REPLY = `Спасибо, всё получили! Сейчас отправила запрос в клуб по вам, ждите ответа. Обычно в течение дня сообщаю.`;
 
 /**
- * Sent to the candidate once a photo of her international passport is
- * vision-detected — a small acknowledgement so she knows it landed.
- */
-export const PASSPORT_PHOTO_ACK = `✅ Фото загранпаспорта получили.`;
-
-/**
  * Nudge sent once when the candidate has uploaded several photos but
  * none of them is a full-body shot.
  */
@@ -214,10 +208,10 @@ export interface IntakeFields {
   full_body_count?: number;
   passport_photo_received?: boolean;
   dance_video_received?: boolean;
-  /** One-shot flags so the bot acknowledges photos to the candidate
+  /** One-shot flag so the bot nudges for a missing full-body shot
    *  exactly once — Telegram albums arrive as many separate messages,
    *  each triggering the classification hook. Not shown on the card. */
-  media_ack?: { passport?: boolean; full_body_nudged?: boolean };
+  media_ack?: { full_body_nudged?: boolean };
   name?: string;
   nationality?: string;
   marital_status?: string;

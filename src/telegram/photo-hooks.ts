@@ -1,5 +1,5 @@
 import { config } from "../config.ts";
-import { FULL_BODY_PHOTO_NUDGE, PASSPORT_PHOTO_ACK } from "../leads/templates.ts";
+import { FULL_BODY_PHOTO_NUDGE } from "../leads/templates.ts";
 import { log } from "../log.ts";
 import { classifyPhoto } from "../rag/vision.ts";
 import type { ProcessInboundDeps } from "./webhook-types.ts";
@@ -7,16 +7,17 @@ import type { ProcessInboundDeps } from "./webhook-types.ts";
 /**
  * Per-turn maintenance hook: classify any not-yet-classified photo the
  * candidate uploaded (passport / full-body / portrait / other) via a
- * vision model on OpenRouter, then acknowledge milestones to her.
+ * vision model on OpenRouter, then nudge her once if a full-body shot
+ * is still missing.
  *
  * Runs BEFORE `runIntakeUpdate` so the freshly-stamped
  * `meta_json.media.photo_class` values are visible to the intake
  * counters. Entirely skipped unless `VISION_ENABLED`.
  *
- * Acknowledgements are deduped via one-shot flags in
+ * The nudge is deduped via a one-shot flag in
  * `lead.intake_json.media_ack` — a Telegram album arrives as many
  * separate messages, each firing this hook, so without the flag the
- * candidate would get the same "passport received" line N times.
+ * candidate would get the same nudge N times.
  */
 
 /** Cap per turn so enabling the feature on an old chat with a big photo
@@ -83,11 +84,9 @@ async function classifyAndAcknowledge(d: ProcessInboundDeps, apiKey: string): Pr
     }
   }
 
-  // 2. Acknowledge milestones to the candidate. Needs a lead to store the
-  //    one-shot dedup flags. Bootstrap one the same way `runIntakeUpdate`
-  //    does (requires an ops chat) so the FIRST photo already gets an
-  //    acknowledgement — otherwise the lead would only be created by the
-  //    intake hook that runs after this one, delaying the reply a turn.
+  // 2. Nudge for a missing full-body shot. Needs a lead to store the
+  //    one-shot dedup flag. Bootstrap one the same way `runIntakeUpdate`
+  //    does (requires an ops chat).
   let lead = await d.leads.byUserId(d.user.id);
   if (!lead) {
     if (d.leadsChatId == null) return;
@@ -101,11 +100,8 @@ async function classifyAndAcknowledge(d: ProcessInboundDeps, apiKey: string): Pr
 
   // `claimMediaAck` flips the dedup flag atomically and returns true to
   // exactly one caller, so an 8-photo album (8 parallel webhooks) yields a
-  // single acknowledgement. Claim BEFORE sending — at-most-once is the
-  // right tradeoff for an ack: a rare lost message beats spamming her.
-  if (counts.passport >= 1 && (await d.leads.claimMediaAck(lead.id, "passport"))) {
-    await sendToCandidate(d, PASSPORT_PHOTO_ACK);
-  }
+  // single nudge. Claim BEFORE sending — at-most-once is the right
+  // tradeoff: a rare lost nudge beats spamming her.
   if (
     totalClassified >= FULL_BODY_NUDGE_MIN_PHOTOS &&
     counts.full_body === 0 &&
