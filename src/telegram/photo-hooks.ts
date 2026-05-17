@@ -110,9 +110,10 @@ async function classifyAndAcknowledge(
       const fields = await extractPassportIdentity({
         bytes,
         ...(photo.mime_type ? { mimeType: photo.mime_type } : {}),
-        model: config.vision.model,
-        apiKey,
-        baseUrl: config.openrouter.baseUrl,
+        provider: creds.provider,
+        model: creds.model,
+        apiKey: creds.apiKey,
+        baseUrl: creds.baseUrl,
       });
       await d.messages.setPassportFields(photo.id, fields);
       log.info("vision: passport fields extracted", {
