@@ -53,6 +53,9 @@ export interface LeadRow {
   decided_by_admin_id: number | null;
   decided_at: number | null;
   last_checkin_at: number | null;
+  /** Step-by-step visa-anketa interview: the `VisaFields` key the bot is
+   *  currently awaiting an answer for. `null` = interview not running. */
+  visa_interview_field: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -268,6 +271,14 @@ export class LeadsRepo {
   async setVisaDocs(id: number, visaDocsJson: string): Promise<void> {
     await this.sql`
       UPDATE leads SET visa_docs_json = ${visaDocsJson}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
+    `;
+  }
+
+  /** Set (or clear with `null`) the visa-anketa interview pointer — the
+   *  `VisaFields` key the bot is currently asking the candidate about. */
+  async setVisaInterviewField(id: number, field: string | null): Promise<void> {
+    await this.sql`
+      UPDATE leads SET visa_interview_field = ${field}, updated_at = EXTRACT(EPOCH FROM NOW())::INTEGER WHERE id = ${id}
     `;
   }
 

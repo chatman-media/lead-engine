@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS leads (
   decided_by_admin_id INTEGER REFERENCES admins(id) ON DELETE SET NULL,
   decided_at INTEGER,
   last_checkin_at INTEGER,
+  visa_interview_field TEXT,
   created_at INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER,
   updated_at INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
 );
@@ -182,6 +183,9 @@ CREATE INDEX IF NOT EXISTS idx_leads_state_recency ON leads(state, updated_at DE
 -- Epoch of the last proactive check-in DM sent while the lead waited in a
 -- docs_pending / submitted stage. Added idempotently for existing deployments.
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_checkin_at INTEGER;
+-- Step-by-step visa-anketa interview: the VisaFields key the bot is
+-- currently awaiting an answer for. NULL = interview not running.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS visa_interview_field TEXT;
 -- Existing deployments predate the partner_review / ready_to_work states;
 -- widen the state CHECK idempotently so transitions into them don't fail.
 ALTER TABLE leads DROP CONSTRAINT IF EXISTS leads_state_check;

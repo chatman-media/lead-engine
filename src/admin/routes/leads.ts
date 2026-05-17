@@ -301,15 +301,13 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 /**
- * Mark a lead as `submitted` — the operator has actually filed the visa
- * application with the consulate. This is the step after `→ visa submit`
- * (which only posts the package to VISA_CHAT_ID and lands the lead in
- * `docs_complete`). Sends the candidate the promised "заявка подана"
- * message with her application id. The conversation stays in `ai` mode —
- * the bot keeps answering her questions during the consulate wait.
+ * Move a lead into `submitted` ("подача на визу"). At this stage the bot
+ * starts the step-by-step English visa-anketa interview: it DMs the
+ * candidate the intro + first question, then collects the rest of the
+ * fields turn-by-turn (see `maybeHandleVisaInterview` in process-inbound).
  *
  * State guard: must be in `docs_complete`. A re-call on an already
- * `submitted` lead is idempotent (200, no duplicate message).
+ * `submitted` lead is idempotent (200, interview not restarted).
  */
 export function createMarkSubmittedHandler(deps: AdminApiDeps): RouteHandler {
   return withAdmin(deps.sql, async ({ params }) => {
@@ -341,7 +339,7 @@ export function createMarkSubmittedHandler(deps: AdminApiDeps): RouteHandler {
 
     const service = buildLeadsService(deps);
     if (service) {
-      await service.sendSubmittedAck({ user, applicationId });
+      await service.startVisaInterview({ lead: transitioned, user });
     }
     return json({ lead: transitioned, application_id: applicationId });
   });
