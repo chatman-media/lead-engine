@@ -85,7 +85,7 @@ OUTPUT FORMAT — RETURN EXACTLY THIS JSON, NOTHING ELSE:
 
 No markdown, no explanation outside the JSON.`;
 
-function transcriptToString(t: SelfPlayMatchResult["transcript"]): string {
+export function transcriptToString(t: SelfPlayMatchResult["transcript"]): string {
   return t
     .map((m, i) => `[${i + 1}] ${m.role === "candidate" ? "candidate" : "salesperson"}: ${m.text}`)
     .join("\n");
@@ -166,7 +166,7 @@ function pickWinner(v: unknown): PairwiseWinner | null {
  * Map pairwise winner → solo `EloOutcome` for style A. B's outcome is
  * the inverse (won↔lost, draw↔draw). Used to drive `eloUpdatePair`.
  */
-function pairwiseToSoloOutcome(w: PairwiseWinner): EloOutcome {
+export function pairwiseToSoloOutcome(w: PairwiseWinner): EloOutcome {
   if (w === "a") return "won";
   if (w === "b") return "lost";
   return "draw";
