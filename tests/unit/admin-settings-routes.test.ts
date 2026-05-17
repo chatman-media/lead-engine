@@ -159,7 +159,7 @@ describe("runtime settings routes", () => {
   });
 
   test("GET masks secrets — never returns the raw key value", async () => {
-    process.env.OPENROUTER_API_KEY = "sk-or-supersecret-9999";
+    process.env.OPENROUTER_API_KEY = "unit-test-fake-9999";
     const res = await fetch(url("/admin/api/settings/runtime"), { headers: { cookie } });
     const body = (await res.json()) as {
       settings: Array<{
@@ -175,22 +175,22 @@ describe("runtime settings routes", () => {
     expect(orKey?.configured).toBe(true);
     expect(orKey?.value).toBe(""); // raw value never leaves the server
     expect(orKey?.preview).toBe("••••9999");
-    expect(JSON.stringify(body)).not.toContain("supersecret");
+    expect(JSON.stringify(body)).not.toContain("unit-test-fake");
   });
 
   test("PUT writes a non-empty secret to the .env file", async () => {
     const res = await fetch(url("/admin/api/settings/runtime"), {
       method: "PUT",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ updates: { OPENROUTER_API_KEY: "sk-or-new-key-0001" } }),
+      body: JSON.stringify({ updates: { OPENROUTER_API_KEY: "unit-test-fake-0001" } }),
     });
     expect(res.status).toBe(200);
-    expect(readFileSync(ENV_FILE, "utf8")).toContain("OPENROUTER_API_KEY=sk-or-new-key-0001");
-    expect(process.env.OPENROUTER_API_KEY).toBe("sk-or-new-key-0001");
+    expect(readFileSync(ENV_FILE, "utf8")).toContain("OPENROUTER_API_KEY=unit-test-fake-0001");
+    expect(process.env.OPENROUTER_API_KEY).toBe("unit-test-fake-0001");
   });
 
   test("PUT with an empty secret keeps the existing key (does not wipe it)", async () => {
-    await Bun.write(ENV_FILE, "OPENROUTER_API_KEY=sk-or-existing-key\n");
+    await Bun.write(ENV_FILE, "OPENROUTER_API_KEY=unit-test-fake-existing\n");
     const res = await fetch(url("/admin/api/settings/runtime"), {
       method: "PUT",
       headers: { cookie, "content-type": "application/json" },
@@ -199,7 +199,7 @@ describe("runtime settings routes", () => {
     });
     expect(res.status).toBe(200);
     const written = readFileSync(ENV_FILE, "utf8");
-    expect(written).toContain("OPENROUTER_API_KEY=sk-or-existing-key");
+    expect(written).toContain("OPENROUTER_API_KEY=unit-test-fake-existing");
     expect(written).toContain("RAG_REFLECT=1");
   });
 });
