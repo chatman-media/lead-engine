@@ -1083,39 +1083,116 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
 
 type MediaTag = "photo" | "passport";
 
+/** Checklist-badge state: green = goal met, amber = partial progress
+ *  (e.g. a few photos but fewer than the 6 required), gray = nothing. */
+type BadgeStatus = "green" | "amber" | "gray";
+
+const BADGE_PALETTE: Record<BadgeStatus, { bg: string; fg: string; border: string }> = {
+  green: { bg: "rgba(34,197,94,0.15)", fg: "var(--green)", border: "rgba(34,197,94,0.35)" },
+  amber: { bg: "var(--amber-dim)", fg: "var(--amber)", border: "var(--amber)" },
+  gray: { bg: "var(--bg-3)", fg: "var(--text-3)", border: "var(--border)" },
+};
+
+/**
+ * Fullscreen photo viewer. Click the backdrop or the ✕, or press
+ * Escape, to close. The image itself swallows clicks so they don't
+ * dismiss the overlay.
+ */
+function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        background: "rgba(0,0,0,0.85)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 32,
+      }}
+      data-testid="lightbox"
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="закрыть"
+        style={{
+          position: "absolute",
+          top: 16,
+          right: 16,
+          width: 36,
+          height: 36,
+          borderRadius: "50%",
+          border: "1px solid var(--border)",
+          background: "var(--bg-1)",
+          color: "var(--text)",
+          fontSize: 18,
+          lineHeight: 1,
+          cursor: "pointer",
+        }}
+      >
+        ✕
+      </button>
+      <img
+        src={url}
+        alt="фото"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: "100%",
+          maxHeight: "100%",
+          objectFit: "contain",
+          borderRadius: 8,
+          boxShadow: "0 8px 40px rgba(0,0,0,0.6)",
+        }}
+      />
+    </div>
+  );
+}
+
 function IntakeProgress({ intake, leadId }: { intake: IntakeFields; leadId: number }) {
   const [openTag, setOpenTag] = useState<MediaTag | null>(null);
   const [media, setMedia] = useState<LeadMediaItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const items: Array<[string, string | undefined, boolean, MediaTag?]> = [
-    ["возраст", intake.age, !!intake.age],
-    ["рост", intake.height, !!intake.height],
-    ["вес", intake.weight, !!intake.weight],
-    ["город", intake.city, !!intake.city],
-    ["выезд", intake.departure_readiness, !!intake.departure_readiness],
+  const countStatus = (n: number, goal: number): BadgeStatus =>
+    n >= goal ? "green" : n > 0 ? "amber" : "gray";
+  const items: Array<[string, string | undefined, BadgeStatus, MediaTag?]> = [
+    ["возраст", intake.age, intake.age ? "green" : "gray"],
+    ["рост", intake.height, intake.height ? "green" : "gray"],
+    ["вес", intake.weight, intake.weight ? "green" : "gray"],
+    ["город", intake.city, intake.city ? "green" : "gray"],
+    ["выезд", intake.departure_readiness, intake.departure_readiness ? "green" : "gray"],
     [
       "фото 6+",
       intake.photos_count !== undefined ? String(intake.photos_count) : "0",
-      (intake.photos_count ?? 0) >= 6,
+      countStatus(intake.photos_count ?? 0, 6),
       "photo",
     ],
     [
       "видео 2+",
       intake.videos_count !== undefined ? String(intake.videos_count) : "0",
-      (intake.videos_count ?? 0) >= 2,
+      countStatus(intake.videos_count ?? 0, 2),
     ],
     [
       "загранпаспорт",
       intake.passport_photo_received ? "получено" : undefined,
-      intake.passport_photo_received === true,
+      intake.passport_photo_received === true ? "green" : "gray",
       "passport",
     ],
     [
       "видео танца",
       intake.dance_video_received ? "получено" : undefined,
-      intake.dance_video_received === true,
+      intake.dance_video_received === true ? "green" : "gray",
     ],
   ];
 
@@ -1183,16 +1260,18 @@ function IntakeProgress({ intake, leadId }: { intake: IntakeFields; leadId: numb
           fontSize: 10,
         }}
       >
-        {items.map(([label, value, ok, tag]) => {
+        {items.map(([label, value, status, tag]) => {
+          const palette = BADGE_PALETTE[status];
           const style: CSSProperties = {
             padding: "2px 8px",
             borderRadius: "var(--radius)",
-            background: ok ? "rgba(46,160,67,0.15)" : "var(--bg-3)",
-            color: ok ? "var(--green, #2ea043)" : "var(--text-3)",
-            border: `1px solid ${ok ? "rgba(46,160,67,0.3)" : "var(--border)"}`,
+            background: palette.bg,
+            color: palette.fg,
+            border: `1px solid ${palette.border}`,
             font: "inherit",
           };
-          const text = `${ok ? "✓" : "·"} ${label}${value && ok ? `: ${value}` : ""}`;
+          const mark = status === "green" ? "✓" : status === "amber" ? "•" : "·";
+          const text = `${mark} ${label}${value && status !== "gray" ? `: ${value}` : ""}`;
           if (!tag) {
             return (
               <span key={label} style={style}>
@@ -1232,6 +1311,7 @@ function MediaPanel({
   loading: boolean;
   error: string | null;
 }) {
+  const [zoom, setZoom] = useState<string | null>(null);
   const note: CSSProperties = {
     marginTop: 6,
     fontFamily: "var(--mono)",
@@ -1248,34 +1328,47 @@ function MediaPanel({
     return <div style={note}>{tag === "passport" ? "нет паспортных фото" : "нет фото"}</div>;
   }
   return (
-    <div
-      style={{
-        marginTop: 6,
-        display: "flex",
-        gap: 6,
-        flexWrap: "wrap",
-      }}
-    >
-      {photos.map((m) => {
-        const url = m.file_id ? api.tgFileUrl(m.file_id) : api.mediaUrl(m.id);
-        return (
-          <a key={m.id} href={url} target="_blank" rel="noopener noreferrer">
-            <img
-              src={url}
-              alt="фото"
-              loading="lazy"
+    <>
+      <div
+        style={{
+          marginTop: 6,
+          display: "flex",
+          gap: 6,
+          flexWrap: "wrap",
+        }}
+      >
+        {photos.map((m) => {
+          const url = m.file_id ? api.tgFileUrl(m.file_id) : api.mediaUrl(m.id);
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setZoom(url)}
               style={{
-                height: 120,
-                width: "auto",
-                borderRadius: 4,
-                display: "block",
-                border: "1px solid var(--border)",
+                padding: 0,
+                border: "none",
+                background: "none",
+                cursor: "pointer",
               }}
-            />
-          </a>
-        );
-      })}
-    </div>
+            >
+              <img
+                src={url}
+                alt="фото"
+                loading="lazy"
+                style={{
+                  height: 120,
+                  width: "auto",
+                  borderRadius: 4,
+                  display: "block",
+                  border: "1px solid var(--border)",
+                }}
+              />
+            </button>
+          );
+        })}
+      </div>
+      {zoom && <Lightbox url={zoom} onClose={() => setZoom(null)} />}
+    </>
   );
 }
 
