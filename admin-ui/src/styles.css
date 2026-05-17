@@ -141,6 +141,14 @@ input, textarea {
   letter-spacing: -0.01em;
 }
 
+.sidebar-logo-img {
+  display: block;
+  width: 100%;
+  max-width: 160px;
+  height: auto;
+  border-radius: 8px;
+}
+
 .sidebar-tagline {
   font-size: 11px;
   color: var(--text-3);
