@@ -17,6 +17,8 @@ import type { EloOutcome } from "../sales/elo.ts";
  * - `docs_complete`  → won (bot's job done — visa team handoff happened)
  * - `submitted`      → won (consul filing confirmed; idempotency dedupes
  *                          if `docs_complete` already attributed)
+ * - `ready_to_work`  → won (success terminal; dedupes against any earlier
+ *                          docs_complete/submitted attribution)
  * - `rejected`       → draw (operator marked unfit; not the bot's fault)
  * - `closed`         → lost (ghosted / operator give-up)
  * - other states     → null (not terminal yet, no attribution)
@@ -25,7 +27,11 @@ export function leadOutcome(lead: LeadRow): {
   outcome: EloOutcome;
   source: SkillOutcomeRow["source"];
 } | null {
-  if (lead.state === "docs_complete" || lead.state === "submitted") {
+  if (
+    lead.state === "docs_complete" ||
+    lead.state === "submitted" ||
+    lead.state === "ready_to_work"
+  ) {
     return { outcome: "won", source: "lead_submitted" };
   }
   if (lead.state === "rejected") {

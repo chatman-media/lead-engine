@@ -5,10 +5,12 @@ export type LeadState =
   | "intake_pending"
   | "intake_complete"
   | "approved"
+  | "partner_review"
   | "rejected"
   | "docs_pending"
   | "docs_complete"
   | "submitted"
+  | "ready_to_work"
   | "closed";
 
 /**
@@ -21,8 +23,11 @@ export type LeadState =
  * branch in setState() and don't pass through this check.
  */
 const TERMINAL_LEAD_TRANSITIONS: Readonly<Partial<Record<LeadState, ReadonlySet<LeadState>>>> = {
-  // From submitted you can only close out (e.g. mark archived).
-  submitted: new Set<LeadState>(["closed"]),
+  // After the visa is filed the only forward move is the successful
+  // outcome (ready_to_work); otherwise the lead is closed out.
+  submitted: new Set<LeadState>(["ready_to_work", "closed"]),
+  // ready_to_work is the success terminal — only an archival close follows.
+  ready_to_work: new Set<LeadState>(["closed"]),
   // Rejected leads also flow only into closed.
   rejected: new Set<LeadState>(["closed"]),
   // Closed is a sink. Resurrection would erase the audit trail.
@@ -338,10 +343,12 @@ export class LeadsRepo {
       intake_pending: 0,
       intake_complete: 0,
       approved: 0,
+      partner_review: 0,
       rejected: 0,
       docs_pending: 0,
       docs_complete: 0,
       submitted: 0,
+      ready_to_work: 0,
       closed: 0,
     };
     for (const r of rows) result[r.state] = r.count;

@@ -124,13 +124,15 @@ const VISA_LONG_FIELDS: ReadonlySet<keyof VisaDocs> = new Set([
  * needs to act) and docs_complete next (ready to submit on consulate).
  */
 const STATE_LABEL: Record<LeadState, string> = {
-  intake_pending: "анкета",
+  intake_pending: "заполнение анкеты",
   intake_complete: "ожидает решения",
-  approved: "одобрен",
+  approved: "одобрено",
+  partner_review: "ожидает апрув партнёров",
   rejected: "отклонён",
-  docs_pending: "документы",
-  docs_complete: "готов к подаче",
-  submitted: "подан",
+  docs_pending: "ожидание документов",
+  docs_complete: "подача на документы",
+  submitted: "подача на визу",
+  ready_to_work: "готова к работе",
   closed: "закрыт",
 };
 
@@ -138,10 +140,12 @@ const STATE_ACCENT: Record<LeadState, string> = {
   intake_pending: "var(--text-3)",
   intake_complete: "var(--amber)",
   approved: "var(--green, #2ea043)",
+  partner_review: "var(--blue)",
   rejected: "var(--red, #ef4444)",
   docs_pending: "var(--blue)",
   docs_complete: "var(--amber)",
   submitted: "var(--green, #2ea043)",
+  ready_to_work: "var(--green, #2ea043)",
   closed: "var(--text-3)",
 };
 
@@ -187,7 +191,7 @@ export function Leads() {
         <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Лиды</h2>
         <div style={{ fontSize: 12, color: "var(--text-3)", fontFamily: "var(--mono)" }}>
           {counts
-            ? `${counts.intake_complete} ожидают решения · ${counts.docs_complete} готовы к подаче`
+            ? `${counts.intake_complete} ожидают решения · ${counts.docs_complete} на подаче документов`
             : "—"}
         </div>
       </div>

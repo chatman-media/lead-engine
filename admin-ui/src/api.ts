@@ -258,10 +258,12 @@ export type LeadState =
   | "intake_pending"
   | "intake_complete"
   | "approved"
+  | "partner_review"
   | "rejected"
   | "docs_pending"
   | "docs_complete"
   | "submitted"
+  | "ready_to_work"
   | "closed";
 
 export interface Lead {
@@ -286,10 +288,12 @@ export interface LeadCounts {
   intake_pending: number;
   intake_complete: number;
   approved: number;
+  partner_review: number;
   rejected: number;
   docs_pending: number;
   docs_complete: number;
   submitted: number;
+  ready_to_work: number;
   closed: number;
 }
 
