@@ -102,8 +102,6 @@ export function Layout({ admin, children }: LayoutProps) {
       key: "kb-suggestions",
       badge: pendingKbCount > 0 ? pendingKbCount : undefined,
     },
-    { to: "/admin/styles", label: "Стили продаж", key: "styles" },
-    { to: "/admin/skills", label: "Навыки", key: "skills" },
     { to: "/admin/self-play", label: "Self-play", key: "self-play" },
     {
       to: "/admin/coach",
