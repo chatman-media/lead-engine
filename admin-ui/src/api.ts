@@ -819,9 +819,14 @@ export const api = {
       body: JSON.stringify(reason ? { reason } : {}),
     }),
 
-  sendIntakeTemplate: (id: number, lang: "ru" | "en" = "ru") =>
+  /** Partially-filled intake checklist for operator review before sending. */
+  intakePreview: (id: number, lang: "ru" | "en" = "ru") =>
+    req<{ text: string }>(`/admin/api/leads/${id}/intake-preview?lang=${lang}`),
+
+  sendIntakeTemplate: (id: number, lang: "ru" | "en" = "ru", text?: string) =>
     req<{ ok: boolean }>(`/admin/api/leads/${id}/send-intake?lang=${lang}`, {
       method: "POST",
+      body: JSON.stringify(text !== undefined ? { text } : {}),
     }),
 
   submitLeadToVisa: (id: number) =>

@@ -244,9 +244,7 @@ export function Leads() {
                     if (conv) navigate(`/admin/chats/${conv.id}`);
                   })
               }
-              onSendIntake={(lang) =>
-                withBusy(lead.id, () => api.sendIntakeTemplate(lead.id, lang))
-              }
+              onIntakeSent={() => refresh()}
               onApprove={() => withBusy(lead.id, () => api.approveLead(lead.id))}
               onReject={() => {
                 const reason = prompt("Причина отказа (Enter для шаблонной формулировки):") ?? "";
@@ -316,7 +314,7 @@ function LeadCard({
   lead,
   busy,
   onOpen,
-  onSendIntake,
+  onIntakeSent,
   onApprove,
   onReject,
   onSubmitToVisa,
@@ -326,7 +324,7 @@ function LeadCard({
   lead: Lead;
   busy: boolean;
   onOpen: () => void;
-  onSendIntake: (lang: "ru" | "en") => void;
+  onIntakeSent: () => void;
   onApprove: () => void;
   onReject: () => void;
   onSubmitToVisa: () => void | Promise<void>;
@@ -345,9 +343,11 @@ function LeadCard({
     lead.state === "approved" || lead.state === "docs_pending" || lead.state === "docs_complete";
   const canMarkSubmitted = lead.state === "docs_complete";
   const intake = parseIntake(lead.intake_json);
-  // Operator-chosen language for the intake checklist — Russian by
-  // default, English for international candidates (e.g. filling abroad).
-  const [intakeLang, setIntakeLang] = useState<"ru" | "en">("ru");
+  const [viewOpen, setViewOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const leadLabel = `#${lead.id} · ${
+    lead.tg_username ? `@${lead.tg_username}` : `tg:${lead.tg_user_id}`
+  }`;
   return (
     <div
       data-testid="lead-card"
@@ -416,48 +416,23 @@ function LeadCard({
           <button onClick={onOpen} className="btn btn-ghost btn-sm" disabled={busy}>
             чат
           </button>
+          <button
+            onClick={() => setViewOpen(true)}
+            className="btn btn-ghost btn-sm"
+            disabled={busy}
+            title="Посмотреть заполненную анкету кандидата"
+          >
+            анкета
+          </button>
           {!decided && !inFlight && (
-            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              <div
-                style={{
-                  display: "flex",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius)",
-                  overflow: "hidden",
-                }}
-              >
-                {(["ru", "en"] as const).map((l) => (
-                  <button
-                    key={l}
-                    type="button"
-                    onClick={() => setIntakeLang(l)}
-                    disabled={busy}
-                    title={l === "ru" ? "Анкета на русском" : "Анкета на английском"}
-                    style={{
-                      padding: "3px 7px",
-                      border: "none",
-                      borderRadius: 0,
-                      cursor: "pointer",
-                      background: intakeLang === l ? "var(--bg-3)" : "transparent",
-                      color: intakeLang === l ? "var(--text)" : "var(--text-3)",
-                      fontFamily: "var(--mono)",
-                      fontSize: 10,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {l.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={() => onSendIntake(intakeLang)}
-                className="btn btn-ghost btn-sm"
-                disabled={busy}
-                title={`Отправить девочке анкету (${intakeLang.toUpperCase()}) — 15 пунктов`}
-              >
-                анкета
-              </button>
-            </div>
+            <button
+              onClick={() => setSendOpen(true)}
+              className="btn btn-ghost btn-sm"
+              disabled={busy}
+              title="Отправить кандидату анкету — превью с редактированием и выбором языка"
+            >
+              отправить анкету
+            </button>
           )}
           {ready && (
             <>
@@ -526,6 +501,18 @@ function LeadCard({
 
       <NotesPane leadId={lead.id} />
       <TimelinePane leadId={lead.id} />
+
+      {viewOpen && (
+        <AnketaModal intake={intake} leadLabel={leadLabel} onClose={() => setViewOpen(false)} />
+      )}
+      {sendOpen && (
+        <IntakeSendModal
+          leadId={lead.id}
+          leadLabel={leadLabel}
+          onClose={() => setSendOpen(false)}
+          onSent={onIntakeSent}
+        />
+      )}
     </div>
   );
 }
@@ -1158,6 +1145,306 @@ function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
   );
 }
 
+const MODAL_OVERLAY: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 1000,
+  background: "rgba(0,0,0,0.85)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 32,
+};
+
+/**
+ * Read-only modal showing the candidate's filled intake questionnaire —
+ * every field the bot extracted from her messages, missing ones as "—".
+ * Close via ✕, backdrop click, or Escape.
+ */
+function AnketaModal({
+  intake,
+  leadLabel,
+  onClose,
+}: {
+  intake: IntakeFields | null;
+  leadLabel: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const rows: Array<[string, string | undefined]> = intake
+    ? [
+        ["имя", intake.name],
+        ["возраст", intake.age],
+        ["рост", intake.height],
+        ["вес", intake.weight],
+        ["гражданство", intake.nationality],
+        ["семейное положение", intake.marital_status],
+        ["дети", intake.children],
+        ["языки", intake.languages],
+        ["опыт работы", intake.work_experience],
+        ["загранпаспорт до", intake.passport_expiry],
+        ["город сейчас", intake.city],
+        ["готовность к выезду", intake.departure_readiness],
+        ["фото", intake.photos_count !== undefined ? String(intake.photos_count) : undefined],
+        ["видео", intake.videos_count !== undefined ? String(intake.videos_count) : undefined],
+        ["фото загранпаспорта", intake.passport_photo_received ? "получено" : undefined],
+        ["видео танца", intake.dance_video_received ? "получено" : undefined],
+      ]
+    : [];
+
+  return (
+    <div onClick={onClose} style={MODAL_OVERLAY} data-testid="anketa-modal">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--bg-1)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          padding: 20,
+          width: "100%",
+          maxWidth: 520,
+          maxHeight: "80vh",
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <h3 style={{ margin: 0, fontFamily: "var(--mono)", color: "var(--amber)", fontSize: 14 }}>
+            Анкета · {leadLabel}
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="закрыть"
+            className="btn btn-ghost btn-sm"
+          >
+            ✕
+          </button>
+        </div>
+        {!intake ? (
+          <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-3)" }}>
+            Анкета ещё не заполнена — бот не извлёк ответы из переписки.
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "160px 1fr",
+              gap: "6px 10px",
+              fontSize: 13,
+            }}
+          >
+            {rows.map(([label, value]) => (
+              <div key={label} style={{ display: "contents" }}>
+                <span
+                  style={{
+                    fontFamily: "var(--mono)",
+                    fontSize: 11,
+                    color: "var(--text-3)",
+                    paddingTop: 2,
+                  }}
+                >
+                  {label}
+                </span>
+                <span
+                  style={{
+                    color: value ? "var(--text)" : "var(--text-3)",
+                    fontStyle: value ? "normal" : "italic",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {value || "—"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Editable preview for sending the intake checklist. Loads the
+ * partially-filled template (blank checklist + bot-extracted answers),
+ * lets the operator pick the language and tweak the text, then sends.
+ * Closes only via explicit buttons so edits aren't lost to a stray
+ * backdrop click. Switching language re-loads the preview.
+ */
+function IntakeSendModal({
+  leadId,
+  leadLabel,
+  onClose,
+  onSent,
+}: {
+  leadId: number;
+  leadLabel: string;
+  onClose: () => void;
+  onSent: () => void;
+}) {
+  const [lang, setLang] = useState<"ru" | "en">("ru");
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setText(null);
+    setError(null);
+    api
+      .intakePreview(leadId, lang)
+      .then((r) => {
+        if (alive) setText(r.text);
+      })
+      .catch((e) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [leadId, lang]);
+
+  async function handleSend() {
+    if (text === null) return;
+    setSending(true);
+    setError(null);
+    try {
+      await api.sendIntakeTemplate(leadId, lang, text);
+      onSent();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setSending(false);
+    }
+  }
+
+  return (
+    <div style={MODAL_OVERLAY} data-testid="intake-send-modal">
+      <div
+        style={{
+          background: "var(--bg-1)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          padding: 20,
+          width: "100%",
+          maxWidth: 600,
+          maxHeight: "85vh",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <h3 style={{ margin: 0, fontFamily: "var(--mono)", color: "var(--amber)", fontSize: 14 }}>
+            Отправить анкету · {leadLabel}
+          </h3>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                overflow: "hidden",
+              }}
+            >
+              {(["ru", "en"] as const).map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  onClick={() => setLang(l)}
+                  disabled={sending}
+                  title={l === "ru" ? "Анкета на русском" : "Анкета на английском"}
+                  style={{
+                    padding: "3px 9px",
+                    border: "none",
+                    borderRadius: 0,
+                    cursor: "pointer",
+                    background: lang === l ? "var(--bg-3)" : "transparent",
+                    color: lang === l ? "var(--text)" : "var(--text-3)",
+                    fontFamily: "var(--mono)",
+                    fontSize: 10,
+                    fontWeight: 600,
+                  }}
+                >
+                  {l.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="закрыть"
+              className="btn btn-ghost btn-sm"
+              disabled={sending}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-3)" }}>
+          Известные ответы уже подставлены. Выберите язык, проверьте и при необходимости поправьте
+          текст перед отправкой кандидату.
+        </div>
+        {error && (
+          <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--red, #ef4444)" }}>
+            {error}
+          </div>
+        )}
+        {text === null ? (
+          <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-3)" }}>
+            загрузка…
+          </div>
+        ) : (
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={18}
+            className="input"
+            style={{ fontSize: 13, fontFamily: "var(--sans)", resize: "vertical" }}
+            data-testid="intake-send-textarea"
+          />
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn btn-ghost btn-sm"
+            disabled={sending}
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            onClick={handleSend}
+            className="btn btn-primary btn-sm"
+            disabled={sending || text === null || !text.trim()}
+            data-testid="intake-send-confirm"
+          >
+            {sending ? "отправка…" : "Отправить"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function IntakeProgress({ intake, leadId }: { intake: IntakeFields; leadId: number }) {
   const [openTag, setOpenTag] = useState<MediaTag | null>(null);
   const [media, setMedia] = useState<LeadMediaItem[] | null>(null);
@@ -1322,7 +1609,9 @@ function MediaPanel({
   if (error) return <div style={{ ...note, color: "var(--red, #f85149)" }}>{error}</div>;
 
   const photos = (media ?? []).filter((m) =>
-    tag === "passport" ? m.type === "photo" && m.photo_class === "passport" : m.type === "photo",
+    tag === "passport"
+      ? m.type === "photo" && m.photo_class === "passport"
+      : m.type === "photo" && m.photo_class !== "passport",
   );
   if (photos.length === 0) {
     return <div style={note}>{tag === "passport" ? "нет паспортных фото" : "нет фото"}</div>;

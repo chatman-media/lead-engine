@@ -14,8 +14,6 @@ import {
   DOCS_COMPLETE_REPLY,
   INTAKE_FIELD_LABELS,
   type IntakeFields,
-  type IntakeLang,
-  intakeTemplate,
   REJECTION_DEFAULT,
   SUBMITTED_REPLY,
   VISA_ANKETA_TEMPLATE,
@@ -213,15 +211,16 @@ export class LeadsService {
     }
   }
 
-  /** Sends the intake checklist in the operator-chosen language
-   *  (defaults to Russian). */
-  async sendIntakeTemplate(input: { user: UserRow; lang?: IntakeLang }): Promise<void> {
+  /** Sends the (operator-reviewed) intake checklist text to the
+   *  candidate. The caller composes the text — blank template or a
+   *  partially-filled one — so the operator can edit before sending. */
+  async sendIntakeTemplate(input: { user: UserRow; text: string }): Promise<void> {
     const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
     await this.relayToCandidate({
       chatId: input.user.tg_user_id,
       conversationId: conv.id,
-      text: intakeTemplate(input.lang ?? "ru"),
+      text: input.text,
     });
   }
 

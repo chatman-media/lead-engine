@@ -5,8 +5,10 @@ import { MessagesRepo } from "@/db/repos/messages.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
 import { extractIntake, parseIntakeJson } from "@/leads/intake.ts";
 import {
+  fillIntakeTemplate,
   INTAKE_TEMPLATE,
   INTAKE_TEMPLATE_EN,
+  type IntakeFields,
   intakeTemplate,
   isIntakeComplete,
 } from "@/leads/templates.ts";
@@ -294,5 +296,40 @@ describe("intakeTemplate — RU/EN switch", () => {
         expect(tpl).toContain(`${i}.`);
       }
     }
+  });
+});
+
+describe("fillIntakeTemplate — partially-filled checklist", () => {
+  test("empty intake leaves the blank template unchanged", () => {
+    expect(fillIntakeTemplate({}, "ru")).toBe(INTAKE_TEMPLATE);
+    expect(fillIntakeTemplate({}, "en")).toBe(INTAKE_TEMPLATE_EN);
+  });
+
+  test("appends known answers inline to the matching numbered lines", () => {
+    const fields: IntakeFields = {
+      name: "Sofia Ivanova",
+      age: "22",
+      height: "165",
+      city: "Москва",
+      departure_readiness: "с 1 апреля",
+    };
+    const filled = fillIntakeTemplate(fields, "ru");
+    expect(filled).toContain("1. Имя и фамилия (как в паспорте) — Sofia Ivanova");
+    expect(filled).toContain("2. Возраст — 22");
+    expect(filled).toContain("3. Рост — 165");
+    // City + departure readiness are merged onto the single line 11.
+    expect(filled).toContain("Москва, с 1 апреля");
+  });
+
+  test("leaves lines without a known answer blank", () => {
+    const filled = fillIntakeTemplate({ age: "22" }, "ru");
+    expect(filled).toContain("2. Возраст — 22");
+    expect(filled).toContain("3. Рост\n");
+  });
+
+  test("preserves the curated preamble and footer", () => {
+    const filled = fillIntakeTemplate({ age: "22" }, "ru");
+    expect(filled).toContain("Заполните анкету");
+    expect(filled).toContain("одним сообщением");
   });
 });

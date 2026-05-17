@@ -56,6 +56,7 @@ export {
   createCreateLeadNoteHandler,
   createDeleteLeadHandler,
   createDeleteLeadNoteHandler,
+  createIntakePreviewHandler,
   createLeadCallbackHandler,
   createLeadDetailHandler,
   createLeadMediaHandler,

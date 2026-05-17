@@ -37,6 +37,7 @@ import {
   createGetStyleSkillsHandler,
   createGetTelegramWebhookHandler,
   createIngestKbDocumentHandler,
+  createIntakePreviewHandler,
   createKbIngestHandler,
   createKbSuggestionCountsHandler,
   createKbWipeHandler,
@@ -380,6 +381,7 @@ export function createRouter(deps: AppDeps): Router {
   router.post("/admin/api/leads/:id/notes", createCreateLeadNoteHandler(apiDeps));
   router.delete("/admin/api/leads/:id/notes/:noteId", createDeleteLeadNoteHandler(apiDeps));
   router.get("/admin/api/leads/:id/media", createLeadMediaHandler(apiDeps));
+  router.get("/admin/api/leads/:id/intake-preview", createIntakePreviewHandler(apiDeps));
   // Detail / patch routes — register AFTER all `/leads/:id/<action>`
   // sub-paths so the literal sub-path matches first (router does
   // linear first-match scanning).
