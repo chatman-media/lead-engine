@@ -10,8 +10,6 @@ export const CONFIGURABLE_TABS: TabKey[] = [
   { key: "analytics", label: "Аналитика", defaultOn: true },
   { key: "vacancies", label: "Вакансии", defaultOn: true },
   { key: "kb-suggestions", label: "Вопросы без ответа", defaultOn: true },
-  { key: "styles", label: "Стили продаж", defaultOn: true },
-  { key: "skills", label: "Навыки", defaultOn: true },
   { key: "self-play", label: "Self-play", defaultOn: false },
   { key: "coach", label: "Coach", defaultOn: false },
 ];
