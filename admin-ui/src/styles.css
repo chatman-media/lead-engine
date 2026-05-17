@@ -122,29 +122,11 @@ input, textarea {
   border-bottom: 1px solid var(--border);
 }
 
-.sidebar-brand {
-  display: block;
-  padding: 8px 16px 18px;
-  border-radius: 0;
-  transition: background 0.12s;
-}
-
-.sidebar-brand:hover {
-  background: var(--bg-2);
-}
-
-.sidebar-logo {
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: 19px;
-  color: var(--text);
-  letter-spacing: -0.02em;
-}
-
 .sidebar-header-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 6px;
-  padding: 14px 16px 0;
+  padding: 14px 16px;
 }
 
 .icon-btn {

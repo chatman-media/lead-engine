@@ -145,9 +145,6 @@ export function Layout({ admin, children }: LayoutProps) {
             </NavLink>
             <ThemeToggle variant="bar" />
           </div>
-          <NavLink to="/admin" end className="sidebar-brand">
-            <div className="sidebar-logo">Infinity Agency</div>
-          </NavLink>
         </div>
 
         <nav className="sidebar-nav">
