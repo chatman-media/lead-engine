@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ws } from "../App.tsx";
 import { api } from "../api.ts";
+import { ThemeToggle } from "../components/ThemeToggle.tsx";
 
 export function Login() {
   const navigate = useNavigate();
@@ -21,7 +22,7 @@ export function Login() {
     try {
       await api.login(email, password);
       ws.connect();
-      navigate("/admin/chats", { replace: true });
+      navigate("/admin", { replace: true });
     } catch {
       setError("Неверный логин или пароль.");
     } finally {
@@ -31,6 +32,7 @@ export function Login() {
 
   return (
     <div className="login-wrap">
+      <ThemeToggle variant="icon" />
       <div className="login-card fade-in">
         <div className="login-logo">
           <div className="login-logo-name">Infinity Agency</div>

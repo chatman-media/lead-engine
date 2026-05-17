@@ -7,23 +7,50 @@
 }
 
 :root {
-  --bg: #09090b;
-  --bg-1: #111113;
-  --bg-2: #18181b;
-  --bg-3: #27272a;
-  --border: #2e2e32;
-  --text: #fafafa;
-  --text-2: #a1a1aa;
-  --text-3: #71717a;
-  --amber: #f59e0b;
-  --amber-dim: rgba(245, 158, 11, 0.15);
-  --red: #ef4444;
-  --green: #22c55e;
-  --blue: #3b82f6;
+  --bg: #faf9f5;
+  --bg-1: #ffffff;
+  --bg-2: #f3f1ea;
+  --bg-3: #e9e6db;
+  --border: #e4e1d5;
+  --text: #2a2824;
+  --text-2: #6b6962;
+  --text-3: #97948a;
+  --amber: #c96442;
+  --amber-hover: #b5563a;
+  --amber-dim: rgba(201, 100, 66, 0.12);
+  --red: #d6492f;
+  --green: #3a9a4e;
+  --blue: #3b6fd4;
   --mono: "IBM Plex Mono", monospace;
-  --sans: "IBM Plex Sans", sans-serif;
-  --radius: 8px;
+  --sans: "Inter", system-ui, sans-serif;
+  --display: "Fraunces", Georgia, serif;
+  --radius: 12px;
+  --shadow-sm: 0 1px 2px rgba(40, 36, 28, 0.05);
+  --shadow-md: 0 4px 14px rgba(40, 36, 28, 0.08);
   --sidebar: 220px;
+  color-scheme: light;
+}
+
+/* Тёмная тема — тёплый charcoal в духе Claude. Переключается атрибутом
+   data-theme на <html> (см. useTheme.ts и inline-скрипт в index.html). */
+:root[data-theme="dark"] {
+  --bg: #262624;
+  --bg-1: #30302e;
+  --bg-2: #393937;
+  --bg-3: #45443f;
+  --border: #44433e;
+  --text: #f3f1ea;
+  --text-2: #b4b2a8;
+  --text-3: #8a887f;
+  --amber: #d9886a;
+  --amber-hover: #e3a085;
+  --amber-dim: rgba(217, 136, 106, 0.16);
+  --red: #e8675b;
+  --green: #5cb868;
+  --blue: #7da3e6;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
 }
 
 html,
@@ -92,23 +119,34 @@ input, textarea {
 }
 
 .sidebar-header {
-  padding: 20px 16px;
   border-bottom: 1px solid var(--border);
 }
 
+.sidebar-brand {
+  display: block;
+  padding: 20px 16px;
+  border-radius: 0;
+  transition: background 0.12s;
+}
+
+.sidebar-brand:hover {
+  background: var(--bg-2);
+}
+
 .sidebar-logo {
-  font-family: var(--mono);
-  font-weight: 700;
-  font-size: 13px;
-  color: var(--amber);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 19px;
+  color: var(--text);
+  letter-spacing: -0.01em;
 }
 
 .sidebar-tagline {
   font-size: 11px;
   color: var(--text-3);
-  margin-top: 4px;
+  margin-top: 2px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .sidebar-nav {
@@ -179,10 +217,10 @@ input, textarea {
 
 .btn-primary {
   background: var(--amber);
-  color: #000;
+  color: #fff;
 }
 .btn-primary:hover:not(:disabled) {
-  background: #fbbf24;
+  background: var(--amber-hover);
 }
 
 .btn-ghost {
@@ -246,12 +284,11 @@ input, textarea {
 }
 
 .page-title {
-  font-family: var(--mono);
-  font-size: 13px;
+  font-family: var(--display);
+  font-size: 22px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-2);
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
 .page-count {
@@ -277,14 +314,15 @@ input, textarea {
   background: var(--bg-1);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, transform 0.1s, box-shadow 0.1s;
 }
 
 .chat-card:hover {
-  background: var(--bg-2);
+  background: var(--bg-1);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-md);
 }
 
 .chat-card.queued {
@@ -297,7 +335,7 @@ input, textarea {
    chat. Runs ~5s then settles back to the normal card styling. */
 @keyframes chat-card-flash {
   0%, 100% { background: var(--bg-1); }
-  50% { background: rgba(239, 68, 68, 0.22); }
+  50% { background: rgba(214, 73, 47, 0.14); }
 }
 
 .chat-card.chat-card-highlight {
@@ -534,19 +572,19 @@ input, textarea {
   width: 360px;
   background: var(--bg-1);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
+  box-shadow: var(--shadow-md);
   padding: 40px 36px;
 }
 
 .login-logo { margin-bottom: 32px; }
 
 .login-logo-name {
-  font-family: var(--mono);
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--amber);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 22px;
+  color: var(--text);
+  letter-spacing: -0.01em;
   margin-bottom: 6px;
 }
 
@@ -642,3 +680,177 @@ textarea.input {
 .status-qualified            { color: var(--amber); }
 .status-won                  { color: var(--green); }
 .status-lost                 { color: var(--red); }
+
+/* ─── Home / dashboard ────────────────────────────────── */
+
+.home {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 40px 32px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.home-hero-title {
+  font-family: var(--display);
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.home-hero-sub {
+  margin-top: 6px;
+  font-size: 15px;
+  color: var(--text-2);
+}
+
+.home-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 12px;
+}
+
+.home-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.stat-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  padding: 9px 16px 9px 13px;
+}
+
+.stat-pill-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.stat-pill-text {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.stat-pill-text b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.home-funnel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.funnel-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 16px 18px;
+}
+
+.funnel-card-num {
+  font-family: var(--display);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.1;
+}
+
+.funnel-card-num.accent { color: var(--amber); }
+
+.funnel-card-label {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.home-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
+  gap: 14px;
+}
+
+.home-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 20px;
+  transition: transform 0.1s, box-shadow 0.12s, border-color 0.12s;
+}
+
+.home-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--amber);
+}
+
+.home-tile-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.home-tile-name {
+  font-family: var(--display);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.home-tile-count {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--amber);
+}
+
+.home-tile-desc {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
+/* ─── Theme toggle ────────────────────────────────────── */
+
+.theme-toggle-icon {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-2);
+  transition: color 0.12s, border-color 0.12s, transform 0.1s;
+}
+
+.theme-toggle-icon:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+  transform: translateY(-1px);
+}
