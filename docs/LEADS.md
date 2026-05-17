@@ -2,24 +2,40 @@
 
 End-to-end воронка кандидата от знакомства до подачи на визу. Бот сам ведёт диалог через RAG + persona, авто-собирает анкету, эскалирует решение оператору в TG-чат, после одобрения собирает структурированные данные на визу, и финально передаёт пакет с auto-generated `application_id` в чат подачи.
 
+```mermaid
+stateDiagram-v2
+    [*] --> intake_pending: первое сообщение
+    intake_pending --> intake_complete: авто — 8-условный гейт
+    intake_complete --> approved: ✅ Одобрить
+    intake_complete --> rejected: ❌ Отклонить
+    approved --> docs_pending: авто, сразу
+    docs_pending --> docs_complete: «→ на визу» (VS-YYYY-NNNN)
+    docs_complete --> submitted: «✅ подал» (старт visa-интервью)
+    submitted --> ready_to_work: виза одобрена
+
+    partner_review: partner_review<br/>(статус определён,<br/>переход пока не запрован)
+
+    rejected --> closed
+    ready_to_work --> [*]
+    closed --> [*]
+
+    note right of closed
+      В closed уходит любой не-терминальный статус
+      через stale-sweep (14 дн; 30 дн для docs_pending)
+    end note
+    note left of intake_complete
+      «← шаг назад» (revert) откатывает лид
+      на предыдущий статус из истории lead_events
+    end note
 ```
-candidate writes  →  bot RAG-replies + collects intake (height/weight/photos/...)
-                              ↓ (auto when the 8-condition gate passes)
-                     intake_complete  →  card posted to LEADS_CHAT_ID
-                                          [✅ Одобрить] [❌ Отклонить]
-                              ↓ operator clicks
-                          approved  →  bot DMs visa anketa template
-                              ↓ (auto, immediately)
-                       docs_pending  →  bot auto-extracts 32 visa fields
-                                       admin can manually edit any
-                                       bot answers her questions in support mode
-                              ↓ operator clicks "→ на визу"
-                       docs_complete  →  package posted to VISA_CHAT_ID
-                                         with VS-YYYY-NNNN
-                              ↓ operator clicks "✅ подал" after filing
-                          submitted  →  bot keeps answering in support mode
-                                         while the consulate decision is pending
-```
+
+Guard переходов **намеренно мягкий** — оператор может перепрыгивать шаги
+(одобрить прямо из `intake_pending`, прыгнуть в `docs_complete` после офлайн-подачи).
+Жёстко блокируются только переходы из терминальных статусов (`closed`, `rejected`,
+`ready_to_work`) — см. `TERMINAL_LEAD_TRANSITIONS` в
+[src/db/repos/leads.ts](../src/db/repos/leads.ts). После approve бот DMs кандидату
+visa-anketa template; в `docs_pending` авто-извлекает 32 поля визы и отвечает в
+support-режиме; на `docs_complete` пакет уходит в `VISA_CHAT_ID`.
 
 ## Configuration
 
@@ -41,12 +57,12 @@ Operator-facing labels (UI funnel vocabulary) are in parentheses.
 | `intake_pending` (заполнение анкеты) | Default for any new candidate | Created on first message | Collects intake via natural conversation; auto-extracts fields each turn |
 | `intake_complete` (ожидает решения) | Anketa filled — awaiting operator decision | 8-condition gate passes | Posts card to ops chat; tells candidate "ждите, отправили запрос" |
 | `approved` (одобрено) | Operator approved | inline button OR `/admin/api/leads/:id/approve` | Sends 4-message visa anketa pack to candidate; transitions to `docs_pending` |
-| `partner_review` (ожидает апрув партнёров) | Anketa + 2 videos shown to the Chinese partner club, awaiting their decision | Defined for the partner-review gate; transition wiring is tracked with the proactive-messaging work | — |
+| `partner_review` (ожидает апрув партнёров) | Anketa + 2 videos shown to the Chinese partner club, awaiting their decision | **Not yet wired** — the state exists in the `LeadState` enum, the `state` CHECK constraint and the funnel counters, but no code path transitions a lead into or out of it. Reserved for the partner-club approval gate | — |
 | `rejected` (отклонён) | Operator rejected (terminal) | inline button OR endpoint | Sends polite rejection (or operator's custom reason) |
 | `docs_pending` (ожидание документов) | Bot collecting visa form; ~10 days | After approve | Auto-extracts 32 fields from each candidate message; operator can edit any; bot answers questions in **support mode** |
 | `docs_complete` (подача на документы) | All visa data + package posted | Operator clicks "→ на визу" (`/admin/api/leads/:id/submit-to-visa`) | Allocates `VS-YYYY-NNNN`, posts to VISA_CHAT_ID, DMs candidate "передаём в работу" |
 | `submitted` (подача на визу) | Operator confirmed consulate filing; ~4-5 days | Operator clicks "✅ подал" (`/admin/api/leads/:id/mark-submitted`) | DMs candidate "заявка подана" + application id; keeps answering in **support mode** while the consulate decision is pending |
-| `ready_to_work` (готова к работе) | Success terminal — visa granted, candidate ready to depart | Defined for the funnel; transition wiring is tracked with the proactive-messaging work | — |
+| `ready_to_work` (готова к работе) | Success terminal — visa granted, candidate ready to depart | `submitted → ready_to_work` is allowed by `TERMINAL_LEAD_TRANSITIONS` and counts as a "won" outcome in [src/leads/outcome-attribution.ts](../src/leads/outcome-attribution.ts), but **no operator action sets it yet** | — |
 | `closed` (закрыт) | Terminal cleanup state | Manual / stale-sweep auto-close | — |
 
 Expected stage durations (operator-quoted, used for proactive check-ins and UI
@@ -131,6 +147,7 @@ processes the filed application (`submitted`). During both stages the bot is
 - Inline edit of visa fields — click `изменить` next to any field; Enter saves, Esc cancels; long fields render as textarea.
 - `→ на визу` — allocates `application_id`, posts visa package to VISA_CHAT_ID, transitions to `docs_complete`. Idempotent on the id (re-press shows `↻ на визу` — re-posts same package, same id).
 - `✅ подал` — shown on `docs_complete` leads. Records that the operator filed the application with the consulate: transitions to `submitted` and DMs the candidate her application id. The chat stays in `ai` mode (support mode handles the consulate wait).
+- `← шаг назад` (`POST /admin/api/leads/:id/revert`) — undoes the last status change. Reads the most recent transition from `lead_events` history (`previousState`, [src/db/repos/leads.ts](../src/db/repos/leads.ts)) and rolls the lead back to that state. Uses `force: true`, so it also reverts out of terminal states (`closed` / `rejected` / `submitted`) — for fixing a mistaken status change. Fires **no Telegram side effects** — the operator re-messages the candidate manually if needed. Returns `409` when there is no earlier state to revert to.
 
 ## Templates
 
