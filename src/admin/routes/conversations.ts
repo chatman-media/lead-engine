@@ -5,7 +5,7 @@ import { enqueue } from "../../db/repos/userbot-send-queue.ts";
 import { UsersRepo } from "../../db/repos/users.ts";
 import { inc } from "../../metrics.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { parseIdParam, parseJsonBody, withAdmin } from "../handler-helpers.ts";
+import { parseIdParam, parseJsonBody, withAdmin, withSuperadmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 export function createListConversationsHandler(deps: AdminApiDeps): RouteHandler {
@@ -142,7 +142,7 @@ export function createReleaseHandler(deps: AdminApiDeps): RouteHandler {
 
 export function createDeleteConversationHandler(deps: AdminApiDeps): RouteHandler {
   const conversations = new ConversationsRepo(deps.sql);
-  return withAdmin(deps.sql, async ({ params, admin }) => {
+  return withSuperadmin(deps.sql, async ({ params, admin }) => {
     const id = parseIdParam(params);
     if (id instanceof Response) return id;
     const conv = await conversations.byId(id);

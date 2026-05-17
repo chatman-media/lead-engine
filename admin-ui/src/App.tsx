@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { type Admin, api } from "./api.ts";
 import { Layout } from "./components/Layout.tsx";
@@ -27,6 +27,17 @@ import { Vacancies } from "./pages/Vacancies.tsx";
 import { AdminWs } from "./ws.ts";
 
 export const ws = new AdminWs();
+
+/** The authenticated admin, available to any component under AuthGate. */
+export const AdminContext = createContext<Admin | null>(null);
+
+/** Read the current admin. Throws if used outside AuthGate (never happens
+ *  for routed pages — they all render inside it). */
+export function useAdmin(): Admin {
+  const admin = useContext(AdminContext);
+  if (!admin) throw new Error("useAdmin used outside AuthGate");
+  return admin;
+}
 
 interface AuthState {
   loading: boolean;
@@ -69,7 +80,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (!state.admin) return null;
 
-  return <Layout admin={state.admin}>{children}</Layout>;
+  return (
+    <AdminContext.Provider value={state.admin}>
+      <Layout admin={state.admin}>{children}</Layout>
+    </AdminContext.Provider>
+  );
 }
 
 export function App() {

@@ -1,6 +1,9 @@
+export type AdminRole = "superadmin" | "manager";
+
 export interface Admin {
   id: number;
   email: string;
+  role: AdminRole;
 }
 
 export interface User {
@@ -498,6 +501,12 @@ export const api = {
   logout: () => req<{ ok: boolean }>("/admin/api/logout", { method: "POST" }),
 
   me: () => req<{ admin: Admin }>("/admin/api/me"),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    req<{ ok: boolean }>("/admin/api/account/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
 
   users: () => req<{ users: User[] }>("/admin/api/users"),
 

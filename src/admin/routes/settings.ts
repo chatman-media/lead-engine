@@ -13,7 +13,7 @@ import { config } from "../../config.ts";
 import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { fetchOpenRouterCredits } from "../../openrouter/credits.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { parseJsonBody, withAdmin } from "../handler-helpers.ts";
+import { parseJsonBody, withSuperadmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 type SettingType = "text" | "number" | "boolean";
@@ -258,7 +258,7 @@ async function writeEnvUpdates(path: string, updates: Record<string, string>): P
  * values (read live from process.env) plus the `.env` path being edited.
  */
 export function createGetRuntimeSettingsHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async () => {
+  return withSuperadmin(deps.sql, async () => {
     const settings = allSpecs().map((s) => {
       const raw = process.env[s.key] ?? "";
       // Secrets: never echo the value back — only whether one is set and
@@ -279,7 +279,7 @@ export function createGetRuntimeSettingsHandler(deps: AdminApiDeps): RouteHandle
  * takes effect for the bot only after a service restart.
  */
 export function createUpdateRuntimeSettingsHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ req, admin }) => {
+  return withSuperadmin(deps.sql, async ({ req, admin }) => {
     const body = await parseJsonBody<{ updates?: unknown }>(req);
     if (body instanceof Response) return body;
     const { updates } = body;
@@ -340,7 +340,7 @@ export function createUpdateRuntimeSettingsHandler(deps: AdminApiDeps): RouteHan
  * clean probe result; 400 only on a malformed request.
  */
 export function createValidateKeyHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ req }) => {
+  return withSuperadmin(deps.sql, async ({ req }) => {
     const body = await parseJsonBody<{ key?: unknown; value?: unknown }>(req);
     if (body instanceof Response) return body;
     const key = typeof body.key === "string" ? body.key : "";

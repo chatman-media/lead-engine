@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useAdmin } from "../App.tsx";
 import { api } from "../api.ts";
 
 /**
@@ -530,6 +531,17 @@ function RestartPanel() {
 }
 
 export function Operations() {
+  const admin = useAdmin();
+  if (admin.role !== "superadmin") {
+    return (
+      <div style={{ padding: 24, maxWidth: 900 }}>
+        <h2 style={{ marginTop: 0, marginBottom: 4 }}>Операции</h2>
+        <div style={{ color: "var(--text-3)", fontSize: 13 }}>
+          Раздел доступен только суперадминистратору.
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
       <h2 style={{ marginTop: 0, marginBottom: 4 }}>Операции</h2>

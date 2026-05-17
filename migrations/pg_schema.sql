@@ -137,6 +137,10 @@ CREATE TABLE IF NOT EXISTS admins (
   password_hash TEXT NOT NULL,
   created_at INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
 );
+-- Two roles: 'superadmin' (full access — destructive ops, system settings)
+-- and 'manager' (day-to-day — leads, chats, KB). Existing admins predate the
+-- column and had unrestricted access, so they default to 'superadmin'.
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'superadmin';
 
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,

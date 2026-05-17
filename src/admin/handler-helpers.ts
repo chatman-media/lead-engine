@@ -9,7 +9,7 @@
 
 import type { Sql } from "../db/postgres.ts";
 import { json, type RouteContext, type RouteHandler } from "../router.ts";
-import { type AuthContext, requireAdmin } from "./auth.ts";
+import { type AuthContext, requireAdmin, requireSuperadmin } from "./auth.ts";
 
 /** Same shape as RouteHandler but with `admin` (the authenticated
  *  AuthContext) injected. */
@@ -27,6 +27,19 @@ export type AdminHandler = (
 export function withAdmin(sql: Sql, handler: AdminHandler): RouteHandler {
   return async (ctx) => {
     const admin = await requireAdmin(sql, ctx.req);
+    if (admin instanceof Response) return admin;
+    return handler({ ...ctx, admin });
+  };
+}
+
+/**
+ * Same as `withAdmin` but rejects authenticated managers with 403. Wrap
+ * destructive operations and system-settings endpoints with this so only
+ * superadmins can run them.
+ */
+export function withSuperadmin(sql: Sql, handler: AdminHandler): RouteHandler {
+  return async (ctx) => {
+    const admin = await requireSuperadmin(sql, ctx.req);
     if (admin instanceof Response) return admin;
     return handler({ ...ctx, admin });
   };

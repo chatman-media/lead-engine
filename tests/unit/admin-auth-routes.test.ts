@@ -58,6 +58,23 @@ function parseCookie(setCookie: string | null): {
   return { name: name!, value: value ?? "", attrs };
 }
 
+/** Create an admin, log in, return the session cookie header value. */
+async function loginAs(
+  email: string,
+  password: string,
+  role?: "superadmin" | "manager",
+): Promise<string> {
+  const admins = new AdminsRepo(sql);
+  await admins.create(role ? { email, password, role } : { email, password });
+  const login = await fetch(url("/admin/api/login"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const cookie = parseCookie(login.headers.get("set-cookie"))!;
+  return `${cookie.name}=${cookie.value}`;
+}
+
 describe("POST /admin/api/login", () => {
   test("valid creds → 200, sets HttpOnly session cookie, returns admin email", async () => {
     const admins = new AdminsRepo(sql);
@@ -166,5 +183,105 @@ describe("POST /admin/api/logout", () => {
       headers: { cookie: `${cookie.name}=${cookie.value}` },
     });
     expect(me.status).toBe(401);
+  });
+});
+
+describe("admin role", () => {
+  test("login + me return the role (superadmin by default)", async () => {
+    const cookie = await loginAs("super@x.test", "longenough");
+    const me = await fetch(url("/admin/api/me"), { headers: { cookie } });
+    const body = (await me.json()) as { admin: { role: string } };
+    expect(body.admin.role).toBe("superadmin");
+  });
+
+  test("a manager account carries role=manager", async () => {
+    const cookie = await loginAs("mgr@x.test", "longenough", "manager");
+    const me = await fetch(url("/admin/api/me"), { headers: { cookie } });
+    const body = (await me.json()) as { admin: { role: string } };
+    expect(body.admin.role).toBe("manager");
+  });
+});
+
+describe("superadmin-gated endpoints", () => {
+  test("manager → 403 on GET /admin/api/settings/runtime", async () => {
+    const cookie = await loginAs("mgr2@x.test", "longenough", "manager");
+    const res = await fetch(url("/admin/api/settings/runtime"), { headers: { cookie } });
+    expect(res.status).toBe(403);
+  });
+
+  test("superadmin → 200 on GET /admin/api/settings/runtime", async () => {
+    const cookie = await loginAs("super2@x.test", "longenough", "superadmin");
+    const res = await fetch(url("/admin/api/settings/runtime"), { headers: { cookie } });
+    expect(res.status).toBe(200);
+  });
+
+  test("no session → 401 (auth checked before role)", async () => {
+    const res = await fetch(url("/admin/api/settings/runtime"));
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("POST /admin/api/account/password", () => {
+  test("changes the password — old creds stop working, new ones log in", async () => {
+    const cookie = await loginAs("pwc@x.test", "old-password");
+    const res = await fetch(url("/admin/api/account/password"), {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ current_password: "old-password", new_password: "new-password" }),
+    });
+    expect(res.status).toBe(200);
+
+    const oldLogin = await fetch(url("/admin/api/login"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "pwc@x.test", password: "old-password" }),
+    });
+    expect(oldLogin.status).toBe(401);
+
+    const newLogin = await fetch(url("/admin/api/login"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "pwc@x.test", password: "new-password" }),
+    });
+    expect(newLogin.status).toBe(200);
+  });
+
+  test("wrong current password → 401", async () => {
+    const cookie = await loginAs("pwc2@x.test", "longenough");
+    const res = await fetch(url("/admin/api/account/password"), {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ current_password: "not-it", new_password: "new-password" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("too-short new password → 400", async () => {
+    const cookie = await loginAs("pwc3@x.test", "longenough");
+    const res = await fetch(url("/admin/api/account/password"), {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ current_password: "longenough", new_password: "short" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("no session → 401", async () => {
+    const res = await fetch(url("/admin/api/account/password"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ current_password: "a", new_password: "longenough" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("a manager can change their own password", async () => {
+    const cookie = await loginAs("pwmgr@x.test", "old-password", "manager");
+    const res = await fetch(url("/admin/api/account/password"), {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ current_password: "old-password", new_password: "new-password" }),
+    });
+    expect(res.status).toBe(200);
   });
 });

@@ -92,7 +92,12 @@ import {
   createUserDetailHandler,
   createValidateKeyHandler,
 } from "./admin/api.ts";
-import { createLoginHandler, createLogoutHandler, createMeHandler } from "./admin/auth.ts";
+import {
+  createChangePasswordHandler,
+  createLoginHandler,
+  createLogoutHandler,
+  createMeHandler,
+} from "./admin/auth.ts";
 import type { AdminBus } from "./admin/bus.ts";
 import { createInboundEventBridge } from "./admin/inbound-events.ts";
 import { config } from "./config.ts";
@@ -242,6 +247,7 @@ export function createRouter(deps: AppDeps): Router {
   );
   router.post("/admin/api/logout", createLogoutHandler(deps.sql));
   router.get("/admin/api/me", createMeHandler(deps.sql));
+  router.post("/admin/api/account/password", createChangePasswordHandler(deps.sql));
 
   const apiDeps = {
     sql: deps.sql,

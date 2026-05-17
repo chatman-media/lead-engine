@@ -5,7 +5,7 @@ import { MessagesRepo } from "../../db/repos/messages.ts";
 import { UsersRepo } from "../../db/repos/users.ts";
 import { fillIntakeTemplate, type IntakeFields } from "../../leads/templates.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { parseIdParam, parseJsonBody, withAdmin } from "../handler-helpers.ts";
+import { parseIdParam, parseJsonBody, withAdmin, withSuperadmin } from "../handler-helpers.ts";
 import {
   type AdminApiDeps,
   buildLeadsService,
@@ -550,7 +550,7 @@ export function createUpdateVisaDocsHandler(deps: AdminApiDeps): RouteHandler {
 }
 
 export function createDeleteLeadHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ params, admin }) => {
+  return withSuperadmin(deps.sql, async ({ params, admin }) => {
     const id = parseIdParam(params);
     if (id instanceof Response) return id;
     const leadsRepo = new LeadsRepo(deps.sql);

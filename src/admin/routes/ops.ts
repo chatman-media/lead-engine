@@ -16,7 +16,7 @@ import { seedInfinityVacancies, VacanciesRepo } from "../../db/repos/vacancies.t
 import { fetchOpenRouterCredits, setCachedCredits } from "../../openrouter/credits.ts";
 import { ingestDirectory } from "../../rag/ingest.ts";
 import { json, type RouteHandler } from "../../router.ts";
-import { parseJsonBody, withAdmin } from "../handler-helpers.ts";
+import { parseJsonBody, withAdmin, withSuperadmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
 
 // Whitelisted ingest sources — accept only known KB roots so a request
@@ -131,7 +131,7 @@ export function createKbIngestHandler(deps: AdminApiDeps): RouteHandler {
  * `confirm: "yes"` in the body to dodge accidental clicks.
  */
 export function createKbWipeHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ req, admin }) => {
+  return withSuperadmin(deps.sql, async ({ req, admin }) => {
     let body: { confirm?: unknown };
     try {
       body = (await req.json()) as typeof body;
@@ -186,7 +186,7 @@ export function createGetTelegramWebhookHandler(deps: AdminApiDeps): RouteHandle
 
 /** PUT /admin/api/ops/telegram/webhook  body: { url, dropPending? } */
 export function createSetTelegramWebhookHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ req }) => {
+  return withSuperadmin(deps.sql, async ({ req }) => {
     if (!deps.telegram) return json({ error: "telegram client not configured" }, { status: 503 });
     const body = await parseJsonBody<{ url?: unknown; dropPending?: unknown }>(req);
     if (body instanceof Response) return body;
@@ -210,7 +210,7 @@ export function createSetTelegramWebhookHandler(deps: AdminApiDeps): RouteHandle
 
 /** DELETE /admin/api/ops/telegram/webhook  body: { dropPending? } */
 export function createDeleteTelegramWebhookHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ req, admin }) => {
+  return withSuperadmin(deps.sql, async ({ req, admin }) => {
     if (!deps.telegram) return json({ error: "telegram client not configured" }, { status: 503 });
     let body: { dropPending?: unknown };
     try {
@@ -256,7 +256,7 @@ interface PurgeBody {
  * Pairwise / shadow / coach rows are intentionally preserved (audit trail).
  */
 export function createPurgeOutcomesHandler(deps: AdminApiDeps): RouteHandler {
-  return withAdmin(deps.sql, async ({ req, admin }) => {
+  return withSuperadmin(deps.sql, async ({ req, admin }) => {
     let body: PurgeBody;
     try {
       body = (await req.json()) as PurgeBody;

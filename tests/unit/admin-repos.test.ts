@@ -62,6 +62,37 @@ describe("AdminsRepo", () => {
       /password/i,
     );
   });
+
+  test("create defaults role to superadmin", async () => {
+    const admins = new AdminsRepo(sql);
+    const a = await admins.create({ email: "owner@x.test", password: "longenough" });
+    expect(a.role).toBe("superadmin");
+  });
+
+  test("create stores an explicit manager role", async () => {
+    const admins = new AdminsRepo(sql);
+    const a = await admins.create({
+      email: "mgr@x.test",
+      password: "longenough",
+      role: "manager",
+    });
+    expect(a.role).toBe("manager");
+    expect((await admins.byEmail("mgr@x.test"))?.role).toBe("manager");
+  });
+
+  test("updatePassword swaps the hash — old fails, new verifies", async () => {
+    const admins = new AdminsRepo(sql);
+    const a = await admins.create({ email: "pw@x.test", password: "old-password" });
+    await admins.updatePassword(a.id, "new-password");
+    expect(await admins.verifyPassword("pw@x.test", "old-password")).toBeNull();
+    expect((await admins.verifyPassword("pw@x.test", "new-password"))?.id).toBe(a.id);
+  });
+
+  test("updatePassword rejects a too-short password", async () => {
+    const admins = new AdminsRepo(sql);
+    const a = await admins.create({ email: "pw2@x.test", password: "longenough" });
+    await expect(admins.updatePassword(a.id, "short")).rejects.toThrow(/password/i);
+  });
 });
 
 describe("SessionsRepo", () => {
