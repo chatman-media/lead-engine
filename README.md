@@ -1,7 +1,9 @@
 # tg-chatbot
 
 [![CI](.github/badges/ci.svg)](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml)
+[![tests](.github/badges/tests.svg)](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml)
 ![coverage](.github/badges/coverage.svg)
+[![deploy](.github/badges/deploy.svg)](https://github.com/chatman-media/sales-guru/actions/workflows/ci.yml)
 
 Telegram sales-funnel бот с RAG, pluggable sales-style engine, A/B-тестами, самообучением через self-play и полноценной операторской админкой. Всё на чистом Bun без HTTP-фреймворка — PostgreSQL + pgvector для векторного поиска, gramjs для MTProto userbot-режима.
 
@@ -405,7 +407,7 @@ bun run test:e2e            # E2E (Playwright)
 
 Playwright поднимает сервер на `E2E_PORT` (по умолчанию `3100`) с тестовой БД и `TEST_HOOKS=1` (seed-эндпоинты `/__test/*`, только с этим флагом).
 
-Бейдж покрытия (`.github/badges/coverage.svg`) обновляется автоматически в CI на push в `main` — шаг `update coverage badge` коммитит SVG, если процент изменился. Локально — `bun run test:coverage:badge`. CI-бейдж (`.github/badges/ci.svg`) тоже локальный SVG (репозиторий приватный, `shields.io` его не читает) — его обновляет job `status` на push в `main`, отражая итог прогона. Локально — `bun scripts/ci-badge.ts passing|failing`.
+Бейдж покрытия (`.github/badges/coverage.svg`) обновляется автоматически в CI на push в `main` — шаг `update coverage badge` коммитит SVG, если процент изменился. Локально — `bun run test:coverage:badge`. Бейджи `ci`, `tests` и `deploy` (`.github/badges/{ci,tests,deploy}.svg`) — тоже локальные SVG (репозиторий приватный, `shields.io` его не читает): их обновляет job `status` на push в `main`, отражая итог прогона `check` + `e2e`, отдельно job `check` и job `deploy`. Локально — `bun scripts/ci-badge.ts passing|failing` и `bun scripts/status-badge.ts <tests|deploy> passing|failing`.
 
 ---
 

@@ -237,15 +237,18 @@ jobs:
 
   status:
     name: ci status badge
-    needs: [check, e2e]
-    # `if: always()` so the badge reflects failures too — without it this job
-    # would be skipped whenever check/e2e fail and the badge would only ever
-    # say "passing".
+    # `deploy` is in needs so its result drives the deploy badge. `deploy`
+    # is skipped on PRs — `if: always()` still runs this job, and the badge
+    # step itself is gated to push-to-main.
+    needs: [check, e2e, deploy]
+    # `if: always()` so the badges reflect failures too — without it this job
+    # would be skipped whenever check/e2e/deploy fail and the badges would
+    # only ever say "passing".
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
-    # `contents: write` lets the badge step commit .github/badges/ci.svg.
+    # `contents: write` lets the badge step commit .github/badges/*.svg.
     permissions:
       contents: write
 
@@ -262,22 +265,36 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
-      - name: update ci badge
-        # Only on push to main: regenerate the SVG from the run result and
-        # commit it if it changed. `[skip ci]` prevents a re-trigger.
+      - name: update status badges
+        # Only on push to main: regenerate the ci / tests / deploy SVGs from
+        # the run results and commit any that changed. `[skip ci]` prevents a
+        # re-trigger.
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
+          # ci — overall pipeline: check + e2e
           if [ "${{ needs.check.result }}" = "success" ] && [ "${{ needs.e2e.result }}" = "success" ]; then
             bun scripts/ci-badge.ts passing
           else
             bun scripts/ci-badge.ts failing
           fi
-          if git diff --quiet -- .github/badges/ci.svg; then
-            echo "ci badge unchanged"
+          # tests — the check job (typecheck + lint + secret-scan + unit tests)
+          if [ "${{ needs.check.result }}" = "success" ]; then
+            bun scripts/status-badge.ts tests passing
+          else
+            bun scripts/status-badge.ts tests failing
+          fi
+          # deploy — the VPS deploy job
+          if [ "${{ needs.deploy.result }}" = "success" ]; then
+            bun scripts/status-badge.ts deploy passing
+          else
+            bun scripts/status-badge.ts deploy failing
+          fi
+          if git diff --quiet -- .github/badges/ci.svg .github/badges/tests.svg .github/badges/deploy.svg; then
+            echo "badges unchanged"
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .github/badges/ci.svg
-            git commit -m "chore: update ci badge [skip ci]"
+            git add .github/badges/ci.svg .github/badges/tests.svg .github/badges/deploy.svg
+            git commit -m "chore: update status badges [skip ci]"
             git push origin HEAD:main
           fi
