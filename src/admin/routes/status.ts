@@ -1,4 +1,4 @@
-import { activeEmbeddingDim, config } from "../../config.ts";
+import { activeEmbeddingDim, config, visionCredentials } from "../../config.ts";
 import { ExperimentsRepo } from "../../db/repos/experiments.ts";
 import { LeadsRepo } from "../../db/repos/leads.ts";
 import { StylesRepo } from "../../db/repos/styles.ts";
@@ -148,11 +148,9 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
       vision: {
         enabled: config.vision.enabled,
         model: config.vision.model,
-        // Photo classification always routes through OpenRouter — see
-        // src/rag/vision.ts. No provider abstraction here.
-        provider: "openrouter",
+        provider: config.vision.provider,
         // Bool only — never expose the key itself.
-        api_key_configured: config.openrouter.apiKey != null,
+        api_key_configured: visionCredentials().apiKey !== "",
         classified: visionClassified,
         unclassified: visionUnclassified,
       },

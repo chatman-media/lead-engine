@@ -1,4 +1,4 @@
-import { config } from "../config.ts";
+import { config, visionCredentials } from "../config.ts";
 import { FULL_BODY_PHOTO_NUDGE } from "../leads/templates.ts";
 import { log } from "../log.ts";
 import { classifyPhoto } from "../rag/vision.ts";
@@ -7,8 +7,8 @@ import type { ProcessInboundDeps } from "./webhook-types.ts";
 /**
  * Per-turn maintenance hook: classify any not-yet-classified photo the
  * candidate uploaded (passport / full-body / portrait / other) via a
- * vision model on OpenRouter, then nudge her once if a full-body shot
- * is still missing.
+ * vision model (OpenRouter or OpenAI, see VISION_PROVIDER), then nudge
+ * her once if a full-body shot is still missing.
  *
  * Runs BEFORE `runIntakeUpdate` so the freshly-stamped
  * `meta_json.media.photo_class` values are visible to the intake
@@ -30,23 +30,29 @@ const FULL_BODY_NUDGE_MIN_PHOTOS = 6;
 
 export async function runPhotoClassification(d: ProcessInboundDeps): Promise<void> {
   if (!config.vision.enabled) return;
-  const apiKey = config.openrouter.apiKey;
-  if (!apiKey) {
-    log.warn("VISION_ENABLED set but OPENROUTER_API_KEY missing — skipping classification", {
-      scope: "vision",
-    });
+  const creds = visionCredentials();
+  if (!creds.apiKey) {
+    log.warn(
+      `VISION_ENABLED set but API key for provider "${creds.provider}" missing — skipping classification`,
+      {
+        scope: "vision",
+      },
+    );
     return;
   }
   // Like every post-reply hook, swallow our own errors so a failure here
   // never aborts the rest of `runPostReplyHooks` (intake / visa-docs).
   try {
-    await classifyAndAcknowledge(d, apiKey);
+    await classifyAndAcknowledge(d, creds);
   } catch (err) {
     log.error("vision: photo-classification hook failed", { scope: "vision", err });
   }
 }
 
-async function classifyAndAcknowledge(d: ProcessInboundDeps, apiKey: string): Promise<void> {
+async function classifyAndAcknowledge(
+  d: ProcessInboundDeps,
+  creds: ReturnType<typeof visionCredentials>,
+): Promise<void> {
   // 1. Classify pending photos.
   const pending = await d.messages.unclassifiedPhotos(d.conv.id);
   for (const photo of pending.slice(0, MAX_PHOTOS_PER_TURN)) {
@@ -64,9 +70,10 @@ async function classifyAndAcknowledge(d: ProcessInboundDeps, apiKey: string): Pr
       const photoClass = await classifyPhoto({
         bytes,
         ...(photo.mime_type ? { mimeType: photo.mime_type } : {}),
-        model: config.vision.model,
-        apiKey,
-        baseUrl: config.openrouter.baseUrl,
+        provider: creds.provider,
+        model: creds.model,
+        apiKey: creds.apiKey,
+        baseUrl: creds.baseUrl,
       });
       await d.messages.setPhotoClass(photo.id, photoClass);
       log.info("vision: photo classified", {

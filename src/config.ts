@@ -65,6 +65,16 @@ const embeddingProvider = envEnum<EmbeddingProvider>(
   llmProvider === "openrouter" ? "ollama" : (llmProvider as EmbeddingProvider),
 );
 
+// Vision (photo classification) provider. Both OpenRouter and OpenAI expose
+// the same OpenAI-compatible /chat/completions endpoint with `image_url`
+// content parts — only the credentials, base URL, default model and the
+// OpenRouter-only `reasoning` request param differ. Decoupled from
+// LLM_PROVIDER so vision can run on a different provider than chat.
+export const VISION_PROVIDERS = ["openrouter", "openai"] as const;
+export type VisionProvider = (typeof VISION_PROVIDERS)[number];
+
+const visionProvider = envEnum<VisionProvider>("VISION_PROVIDER", VISION_PROVIDERS, "openrouter");
+
 export const PERSONA_ROLES = ["human", "assistant"] as const;
 export type PersonaRole = (typeof PERSONA_ROLES)[number];
 
@@ -225,13 +235,18 @@ export const config = {
    * Photo classification: when a candidate sends a photo, classify it as
    * passport / full-body / portrait / other via a vision model. Feeds the
    * lead intake counters (accurate passport detection instead of the
-   * "total photos >= 7" heuristic). Runs through OpenRouter — reuses
-   * `openrouter.apiKey` / `openrouter.baseUrl`. Default: off (opt-in).
+   * "total photos >= 7" heuristic). Routes through OpenRouter or OpenAI
+   * (VISION_PROVIDER) — reuses that provider's apiKey / baseUrl. Resolve
+   * the effective credentials via `visionCredentials()`. Default: off (opt-in).
    */
   vision: {
     enabled: envTruthy("VISION_ENABLED", true),
-    /** OpenRouter slug for a vision-capable model. */
-    model: envOptional("VISION_MODEL", "google/gemini-2.5-flash"),
+    provider: visionProvider,
+    /** Vision-capable model id — OpenRouter slug or OpenAI model name. */
+    model: envOptional(
+      "VISION_MODEL",
+      visionProvider === "openai" ? "gpt-4o-mini" : "google/gemini-2.5-flash",
+    ),
   },
   /**
    * Where userbot-channel media (photos sent to the personal account) is
@@ -337,6 +352,30 @@ export function llmIsConfigured(c: typeof config = config): boolean {
     : c.llm.provider === "openrouter"
       ? !!c.openrouter.apiKey
       : !!c.openai.apiKey;
+}
+
+/** Effective credentials for the photo-classification vision call.
+ *  Picks the OpenRouter or OpenAI endpoint based on `vision.provider`. */
+export function visionCredentials(c: typeof config = config): {
+  provider: VisionProvider;
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+} {
+  if (c.vision.provider === "openai") {
+    return {
+      provider: "openai",
+      apiKey: c.openai.apiKey,
+      baseUrl: c.openai.baseUrl,
+      model: c.vision.model,
+    };
+  }
+  return {
+    provider: "openrouter",
+    apiKey: c.openrouter.apiKey,
+    baseUrl: c.openrouter.baseUrl,
+    model: c.vision.model,
+  };
 }
 
 export { env };
