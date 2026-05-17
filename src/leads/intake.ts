@@ -1,6 +1,6 @@
 import { log } from "../log.ts";
 import type { ChatClient, ChatMessage } from "../rag/chat.ts";
-import type { PhotoClass } from "../rag/vision.ts";
+import type { PassportIdentity, PhotoClass } from "../rag/vision.ts";
 import type { IntakeFields } from "./templates.ts";
 
 /**
@@ -35,6 +35,10 @@ export interface IntakeExtractInput {
    *  when vision classification is enabled — when given, passport
    *  detection uses real counts instead of the >=7 heuristic. */
   photoClasses?: Record<PhotoClass, number>;
+  /** Identity fields read off the candidate's passport photo (vision
+   *  OCR). Authoritative "as in the passport" — when present these
+   *  OVERWRITE the text-extracted name / expiry / number. */
+  passportFields?: PassportIdentity;
   /** True when the candidate sent a video whose caption explicitly
    *  labels it a dance video — a precise signal for
    *  `dance_video_received`, stronger than the ">=3 videos" heuristic. */
@@ -109,8 +113,12 @@ export async function extractIntake(input: IntakeExtractInput): Promise<IntakeFi
     merged.dance_video_received = true;
   }
 
-  // Skip the LLM call when there are no candidate messages to read.
-  if (userMessages.length === 0) return merged;
+  // Skip the LLM call when there are no candidate messages to read —
+  // but still apply passport OCR, which doesn't depend on chat text.
+  if (userMessages.length === 0) {
+    applyPassportFields(merged, input.passportFields);
+    return merged;
+  }
 
   const conversation = input.messages.map((m) => `${m.role}: ${m.content}`).join("\n");
   const existingJson = JSON.stringify({
@@ -142,6 +150,7 @@ export async function extractIntake(input: IntakeExtractInput): Promise<IntakeFi
     );
   } catch (err) {
     log.error("intake LLM extract failed", { scope: "intake", err });
+    applyPassportFields(merged, input.passportFields);
     return merged;
   }
 
@@ -157,9 +166,25 @@ export async function extractIntake(input: IntakeExtractInput): Promise<IntakeFi
   if (extracted.children) merged.children = extracted.children;
   if (extracted.languages) merged.languages = extracted.languages;
   if (extracted.passport_expiry) merged.passport_expiry = extracted.passport_expiry;
+  if (extracted.passport_number) merged.passport_number = extracted.passport_number;
   if (extracted.work_experience) merged.work_experience = extracted.work_experience;
 
+  applyPassportFields(merged, input.passportFields);
+
   return merged;
+}
+
+/**
+ * Applies passport-photo OCR onto the intake fields. Runs AFTER text
+ * extraction so the passport — the authoritative "as in the passport"
+ * source — wins over anything the candidate typed in chat.
+ */
+function applyPassportFields(merged: IntakeFields, passport: PassportIdentity | undefined): void {
+  if (!passport) return;
+  const name = [passport.given_name, passport.family_name].filter(Boolean).join(" ").trim();
+  if (name) merged.name = name;
+  if (passport.passport_expiry) merged.passport_expiry = passport.passport_expiry;
+  if (passport.passport_number) merged.passport_number = passport.passport_number;
 }
 
 /** Strips markdown / think-tags / prefixes and parses the LLM's JSON
@@ -193,6 +218,7 @@ export function parseIntakeJson(raw: string): Partial<IntakeFields> {
     "children",
     "languages",
     "passport_expiry",
+    "passport_number",
     "work_experience",
   ] as const) {
     const val = obj[key];

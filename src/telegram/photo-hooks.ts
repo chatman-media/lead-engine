@@ -1,7 +1,7 @@
 import { config } from "../config.ts";
 import { FULL_BODY_PHOTO_NUDGE } from "../leads/templates.ts";
 import { log } from "../log.ts";
-import { classifyPhoto } from "../rag/vision.ts";
+import { classifyPhoto, extractPassportIdentity } from "../rag/vision.ts";
 import type { ProcessInboundDeps } from "./webhook-types.ts";
 
 /**
@@ -77,6 +77,45 @@ async function classifyAndAcknowledge(d: ProcessInboundDeps, apiKey: string): Pr
     } catch (err) {
       // Leave the photo unclassified — it gets retried on the next turn.
       log.error("vision: photo classification failed", {
+        scope: "vision",
+        messageId: photo.id,
+        err,
+      });
+    }
+  }
+
+  // 1b. Extract identity fields (name / passport number / expiry) from
+  //     photos classified as a passport. Self-healing: picks up both
+  //     freshly-classified photos and any pre-existing backlog.
+  const passportPhotos = await d.messages.passportPhotosNeedingExtraction(d.conv.id);
+  for (const photo of passportPhotos.slice(0, MAX_PHOTOS_PER_TURN)) {
+    try {
+      const res = await d.telegram.downloadFile(photo.file_id);
+      if (!res.ok) {
+        log.error("vision: telegram file download failed (passport extract)", {
+          scope: "vision",
+          messageId: photo.id,
+          status: res.status,
+        });
+        continue;
+      }
+      const bytes = await res.arrayBuffer();
+      const fields = await extractPassportIdentity({
+        bytes,
+        ...(photo.mime_type ? { mimeType: photo.mime_type } : {}),
+        model: config.vision.model,
+        apiKey,
+        baseUrl: config.openrouter.baseUrl,
+      });
+      await d.messages.setPassportFields(photo.id, fields);
+      log.info("vision: passport fields extracted", {
+        scope: "vision",
+        messageId: photo.id,
+        fields: Object.keys(fields),
+      });
+    } catch (err) {
+      // Leave unextracted — retried on the next turn.
+      log.error("vision: passport extraction failed", {
         scope: "vision",
         messageId: photo.id,
         err,

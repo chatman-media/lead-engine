@@ -90,6 +90,7 @@ export class LeadsService {
           lines.push(`  · ${label}: ${value}`);
         }
       };
+      renderField("name", intake.name);
       renderField("height", intake.height);
       renderField("weight", intake.weight);
       renderField("city", intake.city);
@@ -100,6 +101,8 @@ export class LeadsService {
       }
       renderField("videos_count", intake.videos_count ?? 0);
       renderField("passport_photo_received", intake.passport_photo_received ? "получено" : false);
+      renderField("passport_number", intake.passport_number);
+      renderField("passport_expiry", intake.passport_expiry);
       renderField("dance_video_received", intake.dance_video_received ? "получено" : false);
       lines.push("");
     }

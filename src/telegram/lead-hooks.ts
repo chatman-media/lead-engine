@@ -3,7 +3,7 @@ import { extractIntake } from "../leads/intake.ts";
 import { LeadsService } from "../leads/service.ts";
 import { type IntakeFields, isIntakeComplete } from "../leads/templates.ts";
 import { extractVisaDocs, type VisaFields } from "../leads/visa-docs.ts";
-import type { PhotoClass } from "../rag/vision.ts";
+import type { PassportIdentity, PhotoClass } from "../rag/vision.ts";
 import type { ProcessInboundDeps } from "./webhook-types.ts";
 
 /**
@@ -61,11 +61,15 @@ export async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
   // would strand passport detection forever. Leaving photoClasses undefined
   // makes extractIntake fall back to the heuristic until vision catches up.
   let photoClasses: Record<PhotoClass, number> | undefined;
+  // Identity fields read off the passport photo — authoritative, they
+  // overwrite anything the candidate typed (see extractIntake).
+  let passportFields: PassportIdentity | undefined;
   if (config.vision.enabled) {
     const counts = await d.messages.countPhotosByClass(d.conv.id);
     if (counts.passport + counts.full_body + counts.portrait + counts.other > 0) {
       photoClasses = counts;
     }
+    passportFields = (await d.messages.passportFieldsForConversation(d.conv.id)) ?? undefined;
   }
 
   const existing = parseIntakeJson(lead.intake_json);
@@ -75,6 +79,7 @@ export async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
     mediaCounts,
     danceVideoCaptioned,
     ...(photoClasses ? { photoClasses } : {}),
+    ...(passportFields ? { passportFields } : {}),
     ...(existing ? { existingIntake: existing } : {}),
   });
 
