@@ -59,6 +59,7 @@ import {
   createListVacanciesHandler,
   createMarkSubmittedHandler,
   createMediaFileHandler,
+  createOpenRouterCreditsHandler,
   createPromoteLeadHandler,
   createPurgeOutcomesHandler,
   createRecommendSkillsHandler,
@@ -67,6 +68,7 @@ import {
   createReleaseHandler,
   createReplyHandler,
   createReseedVacanciesHandler,
+  createRestartHandler,
   createRollbackCoachProposalHandler,
   createRunCoachHandler,
   createSendIntakeHandler,
@@ -88,6 +90,7 @@ import {
   createUploadBookHandler,
   createUserbotQueueStatsHandler,
   createUserDetailHandler,
+  createValidateKeyHandler,
 } from "./admin/api.ts";
 import { createLoginHandler, createLogoutHandler, createMeHandler } from "./admin/auth.ts";
 import type { AdminBus } from "./admin/bus.ts";
@@ -400,10 +403,14 @@ export function createRouter(deps: AppDeps): Router {
   router.post("/admin/api/ops/vacancies/reseed", createReseedVacanciesHandler(apiDeps));
   router.post("/admin/api/ops/skill-outcomes/purge", createPurgeOutcomesHandler(apiDeps));
   router.get("/admin/api/ops/userbot/queue-stats", createUserbotQueueStatsHandler(apiDeps));
+  router.post("/admin/api/ops/openrouter/credits", createOpenRouterCreditsHandler(apiDeps));
+  router.post("/admin/api/ops/restart", createRestartHandler(apiDeps));
 
-  // Operator-editable runtime settings (LLM model, temperature, RAG flags).
+  // Operator-editable runtime settings (LLM model, temperature, RAG flags,
+  // API keys / tokens).
   router.get("/admin/api/settings/runtime", createGetRuntimeSettingsHandler(apiDeps));
   router.put("/admin/api/settings/runtime", createUpdateRuntimeSettingsHandler(apiDeps));
+  router.post("/admin/api/settings/validate-key", createValidateKeyHandler(apiDeps));
 
   if (deps.enableTestHooks) {
     mountTestHooks(router, deps.sql);

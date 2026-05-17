@@ -25,12 +25,103 @@ type SaveState =
   | { kind: "saved" }
   | { kind: "error"; msg: string };
 
-// ─── Bot parameters (runtime settings backed by the .env file) ──────────
+// ─── Bot parameters + credentials (runtime settings in the .env file) ───
+
+/** Secret keys that can be probed against their provider before saving. */
+const VALIDATABLE_KEYS = new Set([
+  "OPENROUTER_API_KEY",
+  "OPENAI_API_KEY",
+  "EMBED_API_KEY",
+  "TELEGRAM_BOT_TOKEN",
+]);
+
+const rowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 16,
+  padding: "12px 16px",
+};
+
+/** One secret row: password input, masked "currently set" hint, optional
+ *  "Проверить" probe. Empty input means "keep the current value". */
+function SecretField({
+  s,
+  value,
+  onChange,
+  borderTop,
+}: {
+  s: RuntimeSetting;
+  value: string;
+  onChange: (v: string) => void;
+  borderTop: boolean;
+}) {
+  const [check, setCheck] = useState<
+    { kind: "idle" } | { kind: "checking" } | { kind: "done"; ok: boolean; msg: string }
+  >({ kind: "idle" });
+
+  async function validate() {
+    setCheck({ kind: "checking" });
+    try {
+      const r = await api.validateKey(s.key, value);
+      setCheck({ kind: "done", ok: r.ok, msg: r.detail });
+    } catch (err) {
+      setCheck({ kind: "done", ok: false, msg: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return (
+    <div style={{ ...rowStyle, borderTop: borderTop ? "1px solid var(--border)" : undefined }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, color: "var(--text)", marginBottom: 3 }}>{s.label}</div>
+        <div style={{ fontSize: 11, color: "var(--text-3)", lineHeight: 1.4 }}>{s.hint}</div>
+        <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 3 }}>
+          Сейчас: {s.configured ? `задан (${s.preview})` : "не задан"}
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input
+            type="password"
+            value={value}
+            placeholder={s.configured ? "оставить как есть" : "не задан"}
+            autoComplete="new-password"
+            onChange={(e) => onChange(e.target.value)}
+            style={{ width: 230, fontFamily: "var(--mono)", fontSize: 12, padding: "5px 8px" }}
+          />
+          {VALIDATABLE_KEYS.has(s.key) && (
+            <button
+              type="button"
+              className="btn"
+              onClick={validate}
+              disabled={!value || check.kind === "checking"}
+              title="Проверить ключ у провайдера, не сохраняя"
+            >
+              {check.kind === "checking" ? "…" : "Проверить"}
+            </button>
+          )}
+        </div>
+        {check.kind === "done" && (
+          <span
+            style={{
+              fontSize: 11,
+              color: check.ok ? "var(--green, #2ea043)" : "var(--red, #ef4444)",
+            }}
+          >
+            {check.ok ? "✓ " : "✗ "}
+            {check.msg}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function RuntimeSettingsSection() {
   const [settings, setSettings] = useState<RuntimeSetting[] | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [save, setSave] = useState<SaveState>({ kind: "idle" });
+  const [restarting, setRestarting] = useState(false);
 
   function load() {
     api
@@ -68,6 +159,19 @@ function RuntimeSettingsSection() {
     }
   }
 
+  async function applyAndRestart() {
+    if (!confirm("Перезапустить бота сейчас? Он будет недоступен ~15 секунд.")) return;
+    setRestarting(true);
+    try {
+      await api.opsRestart();
+    } catch {
+      // Бот завершает процесс — ответ может не дойти, это нормально.
+    }
+  }
+
+  const main = settings?.filter((s) => !s.secret) ?? [];
+  const secrets = settings?.filter((s) => s.secret) ?? [];
+
   return (
     <div style={{ maxWidth: 560, marginBottom: 32 }}>
       <div style={sectionLabelStyle}>Параметры бота</div>
@@ -77,17 +181,10 @@ function RuntimeSettingsSection() {
       ) : (
         <>
           <div style={cardStyle}>
-            {settings.map((s, i) => (
+            {main.map((s, i) => (
               <div
                 key={s.key}
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  justifyContent: "space-between",
-                  gap: 16,
-                  padding: "12px 16px",
-                  borderTop: i === 0 ? undefined : "1px solid var(--border)",
-                }}
+                style={{ ...rowStyle, borderTop: i === 0 ? undefined : "1px solid var(--border)" }}
               >
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13, color: "var(--text)", marginBottom: 3 }}>
@@ -133,7 +230,38 @@ function RuntimeSettingsSection() {
             ))}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+          {secrets.length > 0 && (
+            <>
+              <div style={{ ...sectionLabelStyle, marginTop: 24 }}>Ключи и токены</div>
+              <div
+                style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 10, lineHeight: 1.5 }}
+              >
+                Пустое поле = оставить текущий ключ. Сами значения наружу не показываются — только
+                последние символы.
+              </div>
+              <div style={cardStyle}>
+                {secrets.map((s, i) => (
+                  <SecretField
+                    key={s.key}
+                    s={s}
+                    value={draft[s.key] ?? ""}
+                    onChange={(v) => setDraft((d) => ({ ...d, [s.key]: v }))}
+                    borderTop={i !== 0}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              marginTop: 14,
+              flexWrap: "wrap",
+            }}
+          >
             <button
               type="button"
               className="btn btn-primary"
@@ -143,6 +271,11 @@ function RuntimeSettingsSection() {
               {save.kind === "saving" ? "Сохранение…" : "Сохранить"}
             </button>
             {save.kind === "saved" && (
+              <button type="button" className="btn" onClick={applyAndRestart} disabled={restarting}>
+                Применить и перезапустить
+              </button>
+            )}
+            {save.kind === "saved" && !restarting && (
               <span style={{ fontSize: 12, color: "var(--text-3)" }}>
                 Сохранено. Изменения применятся после перезапуска бота.
               </span>
@@ -153,6 +286,11 @@ function RuntimeSettingsSection() {
             {save.kind === "idle" && dirty && (
               <span style={{ fontSize: 12, color: "var(--text-3)" }}>
                 Применится после перезапуска бота.
+              </span>
+            )}
+            {restarting && (
+              <span style={{ fontSize: 12, color: "var(--text-3)" }}>
+                Бот перезапускается — обновите страницу через ~15 секунд.
               </span>
             )}
           </div>

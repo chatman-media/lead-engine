@@ -11,6 +11,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { config } from "../../config.ts";
 import { AuditLogRepo } from "../../db/repos/audit-log.ts";
+import { fetchOpenRouterCredits } from "../../openrouter/credits.ts";
 import { json, type RouteHandler } from "../../router.ts";
 import { parseJsonBody, withAdmin } from "../handler-helpers.ts";
 import type { AdminApiDeps } from "../shared.ts";
@@ -24,6 +25,10 @@ interface SettingSpec {
   type: SettingType;
   /** Shown when the env var is absent. For booleans: "1" or "0". */
   defaultValue?: string;
+  /** Credential (API key / token). The real value is never returned by
+   *  GET — only a masked preview — and an empty value on PUT means "keep
+   *  the existing one" instead of "delete". */
+  secret?: boolean;
 }
 
 // Temperature + RAG feature flags — provider-independent. The chat model is
@@ -94,15 +99,70 @@ const TUNABLE_SPECS: readonly SettingSpec[] = [
   {
     key: "VISION_ENABLED",
     label: "Распознавание фото (ИИ)",
-    hint: "Классифицирует фото кандидата (паспорт, портрет, полный рост) через модель зрения.",
+    hint: "Бот определяет по фото: загранпаспорт / в полный рост / портрет. Выкл — грубая прикидка по числу фото.",
     type: "boolean",
     defaultValue: "1",
   },
+];
+
+// API-ключи и токены. Редактируются из UI, но GET никогда не возвращает
+// само значение — только маску. Пустое значение на PUT = «оставить как
+// есть». ADMIN_TG_USER_ID — обычный (несекретный) идентификатор.
+const CREDENTIAL_SPECS: readonly SettingSpec[] = [
   {
-    key: "VISION_ENABLED",
-    label: "Распознавание фото (ИИ)",
-    hint: "Бот определяет по фото: загранпаспорт / в полный рост / портрет. Выкл — грубая прикидка по числу фото.",
-    type: "boolean",
+    key: "OPENROUTER_API_KEY",
+    label: "Ключ OpenRouter",
+    hint: "API-ключ с openrouter.ai/keys. Через него идут платные ответы ИИ.",
+    type: "text",
+    secret: true,
+  },
+  {
+    key: "OPENAI_API_KEY",
+    label: "Ключ OpenAI",
+    hint: "API-ключ OpenAI (если провайдер — openai, либо для эмбеддингов).",
+    type: "text",
+    secret: true,
+  },
+  {
+    key: "EMBED_API_KEY",
+    label: "Ключ для эмбеддингов",
+    hint: "Отдельный ключ для векторного поиска. Пусто — используется ключ OpenAI.",
+    type: "text",
+    secret: true,
+  },
+  {
+    key: "TELEGRAM_BOT_TOKEN",
+    label: "Токен Telegram-бота",
+    hint: "Токен от @BotFather. Меняется при пересоздании бота.",
+    type: "text",
+    secret: true,
+  },
+  {
+    key: "TELEGRAM_WEBHOOK_SECRET",
+    label: "Секрет вебхука Telegram",
+    hint: "Секретная строка в адресе вебхука. После смены заново привяжите вебхук.",
+    type: "text",
+    secret: true,
+  },
+  {
+    key: "TELEGRAM_API_ID",
+    label: "Userbot: API ID",
+    hint: "С my.telegram.org. Нужен только в режиме userbot (личный аккаунт).",
+    type: "text",
+    secret: true,
+  },
+  {
+    key: "TELEGRAM_API_HASH",
+    label: "Userbot: API Hash",
+    hint: "С my.telegram.org. Нужен только в режиме userbot (личный аккаунт).",
+    type: "text",
+    secret: true,
+  },
+  {
+    key: "ADMIN_TG_USER_ID",
+    label: "Telegram ID оператора",
+    hint: "Кому слать уведомления (низкий баланс, новые вопросы). Узнать: @userinfobot.",
+    type: "text",
   },
 ];
 
@@ -123,7 +183,14 @@ function modelSpec(): SettingSpec {
 }
 
 function allSpecs(): SettingSpec[] {
-  return [modelSpec(), ...TUNABLE_SPECS];
+  return [modelSpec(), ...TUNABLE_SPECS, ...CREDENTIAL_SPECS];
+}
+
+/** Masked preview of a secret — last 4 chars, the rest as bullets.
+ *  Never reveals enough to reconstruct the key. */
+function maskSecret(raw: string): string {
+  if (!raw) return "";
+  return raw.length <= 4 ? "••••" : `••••${raw.slice(-4)}`;
 }
 
 /** Path to the `.env` file the running process loads. Overridable via
@@ -152,9 +219,10 @@ function normalizeValue(spec: SettingSpec, raw: unknown): string | Error {
     }
     return String(n);
   }
-  // text
+  // text — secrets get a larger budget (some API keys are long)
   const s = typeof raw === "string" ? raw.trim() : "";
-  if (s.includes("\n") || s.length > 200) {
+  const maxLen = spec.secret ? 500 : 200;
+  if (s.includes("\n") || s.length > maxLen) {
     return new Error(`${spec.label}: недопустимое значение`);
   }
   return s;
@@ -191,10 +259,15 @@ async function writeEnvUpdates(path: string, updates: Record<string, string>): P
  */
 export function createGetRuntimeSettingsHandler(deps: AdminApiDeps): RouteHandler {
   return withAdmin(deps.sql, async () => {
-    const settings = allSpecs().map((s) => ({
-      ...s,
-      value: process.env[s.key] ?? s.defaultValue ?? "",
-    }));
+    const settings = allSpecs().map((s) => {
+      const raw = process.env[s.key] ?? "";
+      // Secrets: never echo the value back — only whether one is set and
+      // a masked tail so the operator can recognise it.
+      if (s.secret) {
+        return { ...s, value: "", configured: raw !== "", preview: maskSecret(raw) };
+      }
+      return { ...s, value: raw || s.defaultValue || "" };
+    });
     return json({ env_path: envFilePath(), provider: config.llm.provider, settings });
   });
 }
@@ -219,6 +292,9 @@ export function createUpdateRuntimeSettingsHandler(deps: AdminApiDeps): RouteHan
     for (const [key, raw] of Object.entries(updates as Record<string, unknown>)) {
       const spec = byKey.get(key);
       if (!spec) return json({ error: `unknown setting: ${key}` }, { status: 400 });
+      // Empty secret = "keep the current one" — the UI never has the real
+      // value to send back, so a blank field must not wipe the key.
+      if (spec.secret && (raw === "" || raw === null || raw === undefined)) continue;
       const value = normalizeValue(spec, raw);
       if (value instanceof Error) return json({ error: value.message }, { status: 400 });
       sanitized[key] = value;
@@ -252,5 +328,57 @@ export function createUpdateRuntimeSettingsHandler(deps: AdminApiDeps): RouteHan
       .catch((err) => console.error("[audit] settings.runtime.update write failed:", err));
 
     return json({ ok: true, updated: Object.keys(sanitized), restart_required: true });
+  });
+}
+
+/**
+ * POST /admin/api/settings/validate-key  body: { key, value }
+ * Probes a credential against its provider WITHOUT saving it, so the
+ * operator gets immediate "key works / doesn't" feedback before applying.
+ * Supported: OPENROUTER_API_KEY, OPENAI_API_KEY, EMBED_API_KEY,
+ * TELEGRAM_BOT_TOKEN. Always returns 200 with `{ ok, detail }` for a
+ * clean probe result; 400 only on a malformed request.
+ */
+export function createValidateKeyHandler(deps: AdminApiDeps): RouteHandler {
+  return withAdmin(deps.sql, async ({ req }) => {
+    const body = await parseJsonBody<{ key?: unknown; value?: unknown }>(req);
+    if (body instanceof Response) return body;
+    const key = typeof body.key === "string" ? body.key : "";
+    const value = typeof body.value === "string" ? body.value.trim() : "";
+    if (!value) {
+      return json({ ok: false, detail: "Введите ключ для проверки" }, { status: 400 });
+    }
+
+    try {
+      if (key === "OPENROUTER_API_KEY") {
+        const c = await fetchOpenRouterCredits({
+          apiKey: value,
+          baseUrl: config.openrouter.baseUrl,
+        });
+        return json({ ok: true, detail: `Ключ рабочий. Остаток: $${c.remaining.toFixed(2)}` });
+      }
+      if (key === "OPENAI_API_KEY" || key === "EMBED_API_KEY") {
+        const base = config.openai.baseUrl.replace(/\/+$/, "");
+        const res = await fetch(`${base}/models`, {
+          headers: { Authorization: `Bearer ${value}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        return res.ok
+          ? json({ ok: true, detail: "Ключ рабочий" })
+          : json({ ok: false, detail: `Провайдер ответил HTTP ${res.status}` });
+      }
+      if (key === "TELEGRAM_BOT_TOKEN") {
+        const res = await fetch(`https://api.telegram.org/bot${value}/getMe`, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        const data = (await res.json()) as { ok?: boolean; result?: { username?: string } };
+        return data.ok
+          ? json({ ok: true, detail: `Бот рабочий: @${data.result?.username ?? "?"}` })
+          : json({ ok: false, detail: "Токен недействителен" });
+      }
+      return json({ ok: false, detail: "Проверка для этого поля недоступна" }, { status: 400 });
+    } catch (err) {
+      return json({ ok: false, detail: err instanceof Error ? err.message : String(err) });
+    }
   });
 }

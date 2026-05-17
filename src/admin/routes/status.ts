@@ -3,6 +3,7 @@ import { ExperimentsRepo } from "../../db/repos/experiments.ts";
 import { LeadsRepo } from "../../db/repos/leads.ts";
 import { StylesRepo } from "../../db/repos/styles.ts";
 import { VacanciesRepo } from "../../db/repos/vacancies.ts";
+import { getCachedCredits } from "../../openrouter/credits.ts";
 import { PHOTO_CLASSES, type PhotoClass } from "../../rag/vision.ts";
 import { json, type RouteHandler } from "../../router.ts";
 import { withAdmin } from "../handler-helpers.ts";
@@ -199,6 +200,23 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
         leads_chat_configured: deps.leadsChatId != null,
         visa_chat_configured: deps.visaChatId != null,
       },
+      // OpenRouter balance — only when chat runs through OpenRouter. The
+      // figure is whatever the background monitor last cached (never a
+      // synchronous API call from this endpoint). `null` until the first
+      // monitor pass completes.
+      openrouter:
+        config.llm.provider === "openrouter"
+          ? (() => {
+              const c = getCachedCredits();
+              return {
+                configured: config.openrouter.apiKey !== "",
+                low_balance_usd: config.openrouter.lowBalanceUsd,
+                remaining: c?.remaining ?? null,
+                total_usage: c?.totalUsage ?? null,
+                checked_at: c?.checkedAt ?? null,
+              };
+            })()
+          : null,
       bot_health: await readBotHealth(deps),
     });
   });

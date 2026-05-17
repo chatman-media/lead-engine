@@ -27,6 +27,9 @@ const TOUCHED_ENV_KEYS = [
   "OPENAI_CHAT_MODEL",
   "OPENROUTER_CHAT_MODEL",
   "OLLAMA_CHAT_MODEL",
+  "OPENROUTER_API_KEY",
+  "OPENAI_API_KEY",
+  "TELEGRAM_BOT_TOKEN",
 ];
 
 function clearTouchedEnv() {
@@ -137,10 +140,11 @@ describe("runtime settings routes", () => {
   });
 
   test("PUT rejects an unknown / non-whitelisted key", async () => {
+    // DATABASE_URL is deliberately NOT editable from the UI.
     const res = await fetch(url("/admin/api/settings/runtime"), {
       method: "PUT",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ updates: { OPENROUTER_API_KEY: "leak" } }),
+      body: JSON.stringify({ updates: { DATABASE_URL: "postgres://leak" } }),
     });
     expect(res.status).toBe(400);
   });
@@ -152,5 +156,50 @@ describe("runtime settings routes", () => {
       body: JSON.stringify({ updates: { RAG_CHAT_TEMPERATURE: 9 } }),
     });
     expect(res.status).toBe(400);
+  });
+
+  test("GET masks secrets — never returns the raw key value", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-supersecret-9999";
+    const res = await fetch(url("/admin/api/settings/runtime"), { headers: { cookie } });
+    const body = (await res.json()) as {
+      settings: Array<{
+        key: string;
+        secret?: boolean;
+        value: string;
+        configured?: boolean;
+        preview?: string;
+      }>;
+    };
+    const orKey = body.settings.find((s) => s.key === "OPENROUTER_API_KEY");
+    expect(orKey?.secret).toBe(true);
+    expect(orKey?.configured).toBe(true);
+    expect(orKey?.value).toBe(""); // raw value never leaves the server
+    expect(orKey?.preview).toBe("••••9999");
+    expect(JSON.stringify(body)).not.toContain("supersecret");
+  });
+
+  test("PUT writes a non-empty secret to the .env file", async () => {
+    const res = await fetch(url("/admin/api/settings/runtime"), {
+      method: "PUT",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ updates: { OPENROUTER_API_KEY: "sk-or-new-key-0001" } }),
+    });
+    expect(res.status).toBe(200);
+    expect(readFileSync(ENV_FILE, "utf8")).toContain("OPENROUTER_API_KEY=sk-or-new-key-0001");
+    expect(process.env.OPENROUTER_API_KEY).toBe("sk-or-new-key-0001");
+  });
+
+  test("PUT with an empty secret keeps the existing key (does not wipe it)", async () => {
+    await Bun.write(ENV_FILE, "OPENROUTER_API_KEY=sk-or-existing-key\n");
+    const res = await fetch(url("/admin/api/settings/runtime"), {
+      method: "PUT",
+      headers: { cookie, "content-type": "application/json" },
+      // Empty secret is skipped; the real setting still applies.
+      body: JSON.stringify({ updates: { OPENROUTER_API_KEY: "", RAG_REFLECT: true } }),
+    });
+    expect(res.status).toBe(200);
+    const written = readFileSync(ENV_FILE, "utf8");
+    expect(written).toContain("OPENROUTER_API_KEY=sk-or-existing-key");
+    expect(written).toContain("RAG_REFLECT=1");
   });
 });

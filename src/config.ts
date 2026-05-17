@@ -220,6 +220,10 @@ export const config = {
     siteUrl: envOptional("OPENROUTER_SITE_URL", ""),
     /** Optional analytics: sent as `X-Title`. */
     appName: envOptional("OPENROUTER_APP_NAME", "tg-chatbot"),
+    /** Balance (USD) below which the monitor DMs the operator a low-balance
+     *  warning. The background check itself is always on when chat runs
+     *  through OpenRouter. */
+    lowBalanceUsd: envFloat("OPENROUTER_LOW_BALANCE_USD", 5) ?? 5,
   },
   /**
    * Photo classification: when a candidate sends a photo, classify it as

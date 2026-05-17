@@ -443,6 +443,92 @@ function PurgeOutcomesPanel() {
 
 // ─── Page ──────────────────────────────────────────────────────────────
 
+// ─── OpenRouter balance ────────────────────────────────────────────────
+
+function OpenRouterBalancePanel() {
+  const [state, setState] = useState<
+    { kind: "idle" } | { kind: "running" } | { kind: "done"; ok: boolean; text: string }
+  >({ kind: "idle" });
+
+  async function run() {
+    setState({ kind: "running" });
+    try {
+      const r = await api.opsOpenRouterCredits();
+      if (r.ok && r.credits) {
+        setState({
+          kind: "done",
+          ok: true,
+          text: `Остаток: $${r.credits.remaining.toFixed(2)} · потрачено $${r.credits.totalUsage.toFixed(2)}`,
+        });
+      } else {
+        setState({ kind: "done", ok: false, text: r.detail ?? "Не удалось получить баланс" });
+      }
+    } catch (err) {
+      setState({ kind: "done", ok: false, text: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return (
+    <Card
+      title="Баланс OpenRouter"
+      hint="Проверяет остаток средств на счёте OpenRouter прямо сейчас. Бот и так следит за балансом в фоне и предупредит при низком остатке."
+    >
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={run}
+        disabled={state.kind === "running"}
+      >
+        {state.kind === "running" ? "Проверяется…" : "Проверить баланс"}
+      </button>
+      {state.kind === "done" && (
+        <div
+          style={{
+            marginTop: 12,
+            fontSize: 13,
+            color: state.ok ? "var(--green, #16a34a)" : "var(--red, #ef4444)",
+          }}
+        >
+          {state.ok ? "✓ " : "✗ "}
+          {state.text}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ─── Restart the bot ───────────────────────────────────────────────────
+
+function RestartPanel() {
+  const [restarting, setRestarting] = useState(false);
+
+  async function run() {
+    if (!confirm("Перезапустить бота? Он будет недоступен ~15 секунд.")) return;
+    setRestarting(true);
+    try {
+      await api.opsRestart();
+    } catch {
+      // Бот завершает процесс — ответ может не дойти, это ожидаемо.
+    }
+  }
+
+  return (
+    <Card
+      title="Перезапустить бота"
+      hint="Нужно после смены ключей или настроек. Работает, если сервис настроен на авто-рестарт (systemd Restart=always — см. docs/RUNBOOK.md)."
+    >
+      <button type="button" className="btn btn-primary" onClick={run} disabled={restarting}>
+        {restarting ? "Перезапуск…" : "Перезапустить"}
+      </button>
+      {restarting && (
+        <div style={{ marginTop: 12, fontSize: 13, color: "var(--text-3)" }}>
+          Бот перезапускается — обновите страницу через ~15 секунд.
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function Operations() {
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
@@ -455,6 +541,8 @@ export function Operations() {
       <KbIngestPanel />
       <ReseedVacanciesPanel />
       <UserbotQueuePanel />
+      <OpenRouterBalancePanel />
+      <RestartPanel />
 
       <details style={{ marginTop: 24 }}>
         <summary

@@ -322,6 +322,23 @@ if (config.leads.proactiveCheckins) {
   console.log(`[server] proactive check-ins enabled (every ${config.leads.checkinIntervalDays}d)`);
 }
 
+// OpenRouter balance monitor: when chat runs through OpenRouter, poll the
+// account balance every few hours and DM the operator before it runs out.
+if (config.llm.provider === "openrouter" && config.openrouter.apiKey) {
+  const { scheduleOpenRouterBalanceMonitor } = await import("./openrouter/balance-monitor.ts");
+  scheduleOpenRouterBalanceMonitor({
+    telegram,
+    apiKey: config.openrouter.apiKey,
+    baseUrl: config.openrouter.baseUrl,
+    lowBalanceUsd: config.openrouter.lowBalanceUsd,
+    adminTgId: config.admin.tgUserId,
+    publicBaseUrl: config.publicBaseUrl,
+  });
+  console.log(
+    `[server] OpenRouter balance monitor on (alert below $${config.openrouter.lowBalanceUsd})`,
+  );
+}
+
 // Pre-load Ollama models in the background. Without this, the first user
 // message after server start has to wait for ~3 min of cold qwen3 weights
 // loading (8B Q4_K_M ≈ 5 GB). Once warm, keep_alive=30m holds them. We
