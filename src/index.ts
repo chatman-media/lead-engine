@@ -292,6 +292,36 @@ if (config.userbot.enabled) {
   });
 }
 
+// Proactive waiting-period check-ins: while a lead waits in docs_pending /
+// submitted, DM a warm "как дела?" nudge so a silent candidate doesn't drop
+// off mid-process. Opt-in via LEAD_PROACTIVE_CHECKINS.
+if (config.leads.proactiveCheckins) {
+  const { scheduleProactiveCheckins } = await import("./leads/proactive-checkin.ts");
+  const { LeadsService } = await import("./leads/service.ts");
+  const { LeadsRepo } = await import("./db/repos/leads.ts");
+  const { UsersRepo } = await import("./db/repos/users.ts");
+  const { ConversationsRepo } = await import("./db/repos/conversations.ts");
+  const { MessagesRepo } = await import("./db/repos/messages.ts");
+  const checkinService = new LeadsService({
+    leads: new LeadsRepo(sql),
+    users: new UsersRepo(sql),
+    conversations: new ConversationsRepo(sql),
+    messages: new MessagesRepo(sql),
+    telegram,
+    leadsChatId: config.telegram.leadsChatId,
+    visaChatId: config.telegram.visaChatId,
+    userbotEnabled: config.userbot.enabled,
+    sql,
+  });
+  scheduleProactiveCheckins({
+    leads: new LeadsRepo(sql),
+    users: new UsersRepo(sql),
+    service: checkinService,
+    intervalDays: config.leads.checkinIntervalDays,
+  });
+  console.log(`[server] proactive check-ins enabled (every ${config.leads.checkinIntervalDays}d)`);
+}
+
 // Pre-load Ollama models in the background. Without this, the first user
 // message after server start has to wait for ~3 min of cold qwen3 weights
 // loading (8B Q4_K_M ≈ 5 GB). Once warm, keep_alive=30m holds them. We

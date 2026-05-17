@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS leads (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
   state TEXT NOT NULL DEFAULT 'intake_pending'
-    CHECK (state IN ('intake_pending','intake_complete','approved','rejected','docs_pending','docs_complete','submitted','closed')),
+    CHECK (state IN ('intake_pending','intake_complete','approved','partner_review','rejected','docs_pending','docs_complete','submitted','ready_to_work','closed')),
   intake_json TEXT,
   visa_docs_json TEXT,
   application_id TEXT UNIQUE,
@@ -170,10 +170,20 @@ CREATE TABLE IF NOT EXISTS leads (
   rejected_reason TEXT,
   decided_by_admin_id INTEGER REFERENCES admins(id) ON DELETE SET NULL,
   decided_at INTEGER,
+  last_checkin_at INTEGER,
   created_at INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER,
   updated_at INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_leads_state_recency ON leads(state, updated_at DESC);
+-- Epoch of the last proactive check-in DM sent while the lead waited in a
+-- docs_pending / submitted stage. Added idempotently for existing deployments.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_checkin_at INTEGER;
+-- Existing deployments predate the partner_review / ready_to_work states;
+-- widen the state CHECK idempotently so transitions into them don't fail.
+ALTER TABLE leads DROP CONSTRAINT IF EXISTS leads_state_check;
+ALTER TABLE leads
+  ADD CONSTRAINT leads_state_check
+  CHECK (state IN ('intake_pending','intake_complete','approved','partner_review','rejected','docs_pending','docs_complete','submitted','ready_to_work','closed'));
 
 CREATE TABLE IF NOT EXISTS lead_events (
   id SERIAL PRIMARY KEY,

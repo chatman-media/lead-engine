@@ -251,6 +251,26 @@ describe("LeadsRepo", () => {
     expect(closed?.state).toBe("closed");
   });
 
+  test("partner_review and ready_to_work are valid funnel states", async () => {
+    const u = await users.create({ tgUserId: 808 });
+    const l = await leads.ensureForUser(u.id);
+    await leads.setState(l.id, "intake_complete");
+    await leads.setState(l.id, "approved", { adminId });
+    // partner_review is non-terminal — the funnel passes through it.
+    const review = await leads.setState(l.id, "partner_review");
+    expect(review?.state).toBe("partner_review");
+    await leads.setState(l.id, "docs_pending");
+    await leads.setState(l.id, "docs_complete");
+    await leads.setState(l.id, "submitted");
+    // submitted now moves forward into the success terminal.
+    const ready = await leads.setState(l.id, "ready_to_work");
+    expect(ready?.state).toBe("ready_to_work");
+    // ready_to_work only closes out — no return to an earlier stage.
+    await expect(leads.setState(l.id, "docs_pending")).rejects.toThrow(/illegal lead transition/);
+    const closed = await leads.setState(l.id, "closed");
+    expect(closed?.state).toBe("closed");
+  });
+
   test("delete cascades — events for a deleted lead disappear", async () => {
     const u = await users.create({ tgUserId: 805 });
     const l = await leads.ensureForUser(u.id);

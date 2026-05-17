@@ -234,6 +234,16 @@ export const config = {
     model: envOptional("VISION_MODEL", "google/gemini-2.5-flash"),
   },
   /**
+   * Proactive waiting-period check-ins: while a lead waits in
+   * `docs_pending` / `submitted`, the bot DMs a warm "как дела?" nudge
+   * every `checkinIntervalDays`. Opt-in — proactive outbound messaging
+   * should be a deliberate operator choice.
+   */
+  leads: {
+    proactiveCheckins: envTruthy("LEAD_PROACTIVE_CHECKINS", false),
+    checkinIntervalDays: envInt("LEAD_CHECKIN_INTERVAL_DAYS", 4),
+  },
+  /**
    * Where userbot-channel media (photos sent to the personal account) is
    * stored on disk. Bot API media is fetched on demand via the bot token,
    * but MTProto media has no Bot API file_id — the userbot downloads the

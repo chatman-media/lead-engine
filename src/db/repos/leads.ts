@@ -52,6 +52,7 @@ export interface LeadRow {
   rejected_reason: string | null;
   decided_by_admin_id: number | null;
   decided_at: number | null;
+  last_checkin_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -370,6 +371,45 @@ export class LeadsRepo {
       WHERE state = ANY(${states}::text[])
         AND updated_at < ${cutoffEpoch}
     `;
+  }
+
+  /**
+   * Leads parked in a waiting stage, each with the epoch it entered that
+   * stage (latest matching `lead_events` row) and its last proactive
+   * check-in. The proactive-checkin scheduler decides per-lead whether a
+   * nudge is due — this only gathers the inputs.
+   */
+  async listCheckinCandidates(states: LeadState[]): Promise<
+    Array<{
+      id: number;
+      state: LeadState;
+      user_id: number;
+      tg_user_id: number;
+      tg_username: string | null;
+      last_checkin_at: number | null;
+      stage_entered_at: number | null;
+    }>
+  > {
+    if (states.length === 0) return [];
+    return this.sql`
+      SELECT l.id, l.state, l.user_id, u.tg_user_id, u.tg_username,
+             l.last_checkin_at,
+             (SELECT MAX(e.created_at) FROM lead_events e
+               WHERE e.lead_id = l.id AND e.to_state = l.state) AS stage_entered_at
+      FROM leads l
+      JOIN users u ON u.id = l.user_id
+      WHERE l.state = ANY(${states}::text[])
+    `;
+  }
+
+  /**
+   * Record that a proactive check-in DM was sent. Deliberately does NOT
+   * bump `updated_at`: a bot-initiated nudge is not lead progression, and
+   * resetting `updated_at` would keep a ghosted lead off the stale-sweep
+   * radar forever.
+   */
+  async markCheckinSent(id: number, atEpoch: number): Promise<void> {
+    await this.sql`UPDATE leads SET last_checkin_at = ${atEpoch} WHERE id = ${id}`;
   }
 
   async delete(id: number): Promise<boolean> {
