@@ -27,13 +27,13 @@ const LEAD_STATE_ORDER = [
 ] as const;
 
 const LEAD_STATE_LABEL: Record<string, string> = {
-  intake_pending: "анкета: ожидание",
-  intake_complete: "анкета: заполнена",
-  approved: "одобрен",
-  partner_review: "апрув партнёров",
-  docs_pending: "документы: ожидание",
-  docs_complete: "документы: собраны",
-  submitted: "подан",
+  intake_pending: "заполнение анкеты",
+  intake_complete: "ожидает решения",
+  approved: "одобрено",
+  partner_review: "ожидает апрув партнёров",
+  docs_pending: "ожидание документов",
+  docs_complete: "подача на документы",
+  submitted: "подача на визу",
   ready_to_work: "готова к работе",
   closed: "закрыт",
   rejected: "отклонён",
