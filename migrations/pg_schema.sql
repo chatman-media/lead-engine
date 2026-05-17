@@ -170,10 +170,14 @@ CREATE TABLE IF NOT EXISTS leads (
   rejected_reason TEXT,
   decided_by_admin_id INTEGER REFERENCES admins(id) ON DELETE SET NULL,
   decided_at INTEGER,
+  last_checkin_at INTEGER,
   created_at INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER,
   updated_at INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_leads_state_recency ON leads(state, updated_at DESC);
+-- Epoch of the last proactive check-in DM sent while the lead waited in a
+-- docs_pending / submitted stage. Added idempotently for existing deployments.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_checkin_at INTEGER;
 -- Existing deployments predate the partner_review / ready_to_work states;
 -- widen the state CHECK idempotently so transitions into them don't fail.
 ALTER TABLE leads DROP CONSTRAINT IF EXISTS leads_state_check;

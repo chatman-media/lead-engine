@@ -103,9 +103,15 @@ processes the filed application (`submitted`). During both stages the bot is
 - No escalation: in support mode a `NO_CONTEXT` turn does **not** queue the chat
   or send the sales call-to-action. The bot sends a soft reassurance and stays
   in `ai` mode. The "оператор" keyword still escalates manually.
-- The bot does **not** proactively message the candidate during the wait — it
-  only replies when she writes. Timed check-ins / reminders are a future
-  enhancement (see [ROADMAP.md](ROADMAP.md)).
+- Proactive check-ins (opt-in): with `LEAD_PROACTIVE_CHECKINS=true` the bot DMs
+  a warm "как дела?" nudge every `LEAD_CHECKIN_INTERVAL_DAYS` (default 4) while
+  the lead waits — so a silent candidate hears from us before she worries. The
+  first nudge lands one interval after stage entry, then recurs. Sent by
+  [src/leads/proactive-checkin.ts](../src/leads/proactive-checkin.ts) and
+  recorded with `meta.source='proactive-checkin'`. Off by default — proactive
+  outbound messaging is a deliberate operator choice. `last_checkin_at` on the
+  lead row tracks the last nudge; it deliberately does not bump `updated_at`, so
+  a genuinely ghosted lead still ages into the stale-sweep.
 - `docs_pending` leads get a longer stale-sweep cutoff (30 days vs the usual 14)
   so a candidate mid-process isn't auto-closed as lost — see
   [src/leads/stale-sweep.ts](../src/leads/stale-sweep.ts).
@@ -139,6 +145,7 @@ All operator-curated wording lives as plain string constants in [src/leads/templ
 - `AWAITING_APPROVAL_REPLY` — what the candidate sees while operator decides.
 - `DOCS_COMPLETE_REPLY` — sent on `submit-to-visa` (promises a message with the application number).
 - `SUBMITTED_REPLY` — sent on `mark-submitted`; substitutes `{applicationId}` and fulfils that promise.
+- `proactiveCheckinMessage(phase)` — warm waiting-period check-in, picked from a small per-phase pool (`docs` / `submitted`).
 
 ## Files
 
@@ -151,6 +158,7 @@ All operator-curated wording lives as plain string constants in [src/leads/templ
 | [`src/leads/visa-docs.ts`](../src/leads/visa-docs.ts) | Auto-extract 32 visa-application fields (18 required) |
 | [`src/leads/service.ts`](../src/leads/service.ts) | LeadsService: card formatting, ops-chat posting, candidate relays, decision side effects |
 | [`src/leads/stale-sweep.ts`](../src/leads/stale-sweep.ts) | Ghosted-lead auto-close (14d default, 30d for `docs_pending`) |
+| [`src/leads/proactive-checkin.ts`](../src/leads/proactive-checkin.ts) | Opt-in waiting-period check-in scheduler (`docs_pending` / `submitted`) |
 | [`src/admin/routes/leads.ts`](../src/admin/routes/leads.ts) | Lead REST handlers + `createLeadCallbackHandler` (TG approve/reject buttons) |
 | [`src/telegram/lead-hooks.ts`](../src/telegram/lead-hooks.ts) | Post-reply hooks: auto-intake update, visa-docs update |
 | [`src/telegram/process-inbound.ts`](../src/telegram/process-inbound.ts) | `resolveSupportPhase` — support mode while waiting on the visa process |
@@ -166,6 +174,7 @@ All operator-curated wording lives as plain string constants in [src/leads/templ
 | Service | [`tests/unit/leads-relay.test.ts`](../tests/unit/leads-relay.test.ts) | relayFromOperator paths (text/photo/video/document), empty-input, meta persistence |
 | Admin | [`tests/unit/admin-api.test.ts`](../tests/unit/admin-api.test.ts) | endpoints — list/promote/approve/reject/submit/mark-submitted/visa-docs PATCH/detail |
 | Stale-sweep | [`tests/unit/stale-sweep.test.ts`](../tests/unit/stale-sweep.test.ts) | per-state cutoff — `docs_pending` 30d vs 14d default |
+| Proactive check-in | [`tests/unit/proactive-checkin.test.ts`](../tests/unit/proactive-checkin.test.ts) | due/not-due, per-interval dedup, waiting-state filter |
 | Support prompt | [`tests/unit/sales/prompt.test.ts`](../tests/unit/sales/prompt.test.ts) | `composeSystemPrompt` support mode — sales blocks dropped, persona/KB kept |
 
 ## Operations checklist

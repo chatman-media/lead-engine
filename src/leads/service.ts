@@ -224,6 +224,23 @@ export class LeadsService {
     });
   }
 
+  /**
+   * Proactive waiting-period nudge — sent by the scheduler, not by an
+   * operator action. Recorded with `meta.source='proactive-checkin'` so
+   * the admin chat view and analytics can tell it apart from the
+   * operator-curated templates and the bot's RAG replies.
+   */
+  async sendProactiveCheckin(input: { user: UserRow; text: string }): Promise<void> {
+    const conv = await this.deps.conversations.byUserId(input.user.id);
+    if (!conv) return;
+    await this.relayToCandidate({
+      chatId: input.user.tg_user_id,
+      conversationId: conv.id,
+      text: input.text,
+      source: "proactive-checkin",
+    });
+  }
+
   async sendAwaitingApprovalNote(input: { user: UserRow }): Promise<void> {
     const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
@@ -475,6 +492,9 @@ export class LeadsService {
     chatId: number;
     conversationId: number;
     text: string;
+    /** `meta.source` for the recorded `messages` row. Defaults to the
+     *  operator-curated template marker. */
+    source?: string;
   }): Promise<void> {
     let tgMessageId: number | undefined;
     if (this.deps.userbotEnabled && this.deps.sql) {
@@ -502,7 +522,7 @@ export class LeadsService {
       role: "assistant",
       text: input.text,
       ...(tgMessageId !== undefined ? { tgMessageId } : {}),
-      meta: { source: "lead-template" },
+      meta: { source: input.source ?? "lead-template" },
     });
     await this.deps.conversations.touch(input.conversationId);
   }

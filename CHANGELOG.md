@@ -48,6 +48,7 @@ The end-to-end lead workflow (intake → approval → docs collection → consul
 | 4 | Operator relay via reply-to-card (text / photo / video / document → candidate DM) |
 | 5 | Docker / docker-compose / DEPLOY.md |
 | 6 | Reachable `submitted` stage — `mark-submitted` endpoint + "✅ подал" button (DMs the candidate her application id) · **support mode**: while a lead waits on the visa process (`docs_pending` / `submitted`) the bot answers questions calmly without selling and never auto-escalates · `docs_pending` stale-sweep cutoff extended to 30 days |
+| 7 | **Proactive waiting-period check-ins** — opt-in (`LEAD_PROACTIVE_CHECKINS`) scheduler DMs a warm "как дела?" nudge every `LEAD_CHECKIN_INTERVAL_DAYS` while a lead waits in `docs_pending` / `submitted`, so a silent candidate doesn't ghost mid-process |
 
 ## Userbot (MTProto)
 
