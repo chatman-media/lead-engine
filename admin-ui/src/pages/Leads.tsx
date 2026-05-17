@@ -1068,7 +1068,7 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
   );
 }
 
-type MediaTag = "photo" | "passport";
+type MediaTag = "photo" | "passport" | "video";
 
 /** Checklist-badge state: green = goal met, amber = partial progress
  *  (e.g. a few photos but fewer than the 6 required), gray = nothing. */
@@ -1469,6 +1469,7 @@ function IntakeProgress({ intake, leadId }: { intake: IntakeFields; leadId: numb
       "видео 2+",
       intake.videos_count !== undefined ? String(intake.videos_count) : "0",
       countStatus(intake.videos_count ?? 0, 2),
+      "video",
     ],
     [
       "загранпаспорт",
@@ -1607,6 +1608,34 @@ function MediaPanel({
   };
   if (loading) return <div style={note}>загрузка…</div>;
   if (error) return <div style={{ ...note, color: "var(--red, #f85149)" }}>{error}</div>;
+
+  if (tag === "video") {
+    const videos = (media ?? []).filter((m) => m.type === "video");
+    if (videos.length === 0) return <div style={note}>нет видео</div>;
+    return (
+      <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {videos.map((m) => {
+          const url = m.file_id ? api.tgFileUrl(m.file_id) : api.mediaUrl(m.id);
+          return (
+            <video
+              key={m.id}
+              src={url}
+              controls
+              preload="metadata"
+              style={{
+                height: 180,
+                borderRadius: 4,
+                border: "1px solid var(--border)",
+                background: "#000",
+              }}
+            >
+              <track kind="captions" />
+            </video>
+          );
+        })}
+      </div>
+    );
+  }
 
   const photos = (media ?? []).filter((m) =>
     tag === "passport"

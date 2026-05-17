@@ -121,6 +121,42 @@ describe("countMediaForConversation", () => {
   });
 });
 
+describe("countDanceVideoCaptions", () => {
+  test("counts only videos whose caption mentions a dance", async () => {
+    const users = new UsersRepo(sql);
+    const convs = new ConversationsRepo(sql);
+    const msgs = new MessagesRepo(sql);
+    const u = await users.create({ tgUserId: 20 });
+    const c = await convs.ensureForUser(u.id);
+
+    // Video captioned as a dance video — counts.
+    await msgs.add({
+      conversationId: c.id,
+      role: "user",
+      text: "вот моё видео танца",
+      meta: { media: { type: "video", file_id: "d1" } },
+    });
+    // English caption — also counts.
+    await msgs.add({
+      conversationId: c.id,
+      role: "user",
+      text: "my dance clip",
+      meta: { media: { type: "video", file_id: "d2" } },
+    });
+    // Plain video without a dance caption — ignored.
+    await msgs.add({
+      conversationId: c.id,
+      role: "user",
+      text: "[video]",
+      meta: { media: { type: "video", file_id: "v1" } },
+    });
+    // A text message mentioning dance but no video — ignored.
+    await msgs.add({ conversationId: c.id, role: "user", text: "люблю танцы" });
+
+    expect(await msgs.countDanceVideoCaptions(c.id)).toBe(2);
+  });
+});
+
 describe("photo classification repo methods", () => {
   test("unclassifiedPhotos / setPhotoClass / countPhotosByClass", async () => {
     const users = new UsersRepo(sql);
@@ -198,6 +234,18 @@ describe("extractIntake + isIntakeComplete", () => {
     expect(intake.videos_count).toBe(1);
     expect(intake.passport_photo_received).toBeUndefined();
     expect(intake.dance_video_received).toBeUndefined();
+  });
+
+  test("marks dance_video_received from a captioned dance video below the count cutoff", async () => {
+    const chat = fakeChat("{}");
+    const intake = await extractIntake({
+      messages: [{ role: "user", content: "вот видео танца" }],
+      mediaCounts: { photos: 0, videos: 1 },
+      danceVideoCaptioned: true,
+      chat,
+    });
+    expect(intake.videos_count).toBe(1);
+    expect(intake.dance_video_received).toBe(true);
   });
 
   test("skips LLM call when there are no user messages", async () => {
