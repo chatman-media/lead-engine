@@ -38,11 +38,11 @@ function MoonIcon() {
 }
 
 /**
- * Переключатель светлой / тёмной темы.
- *   variant="full" — кнопка с подписью (сайдбар админки)
- *   variant="icon" — круглая иконка в углу (страница входа)
+ * Переключатель светлой / тёмной темы — иконка-кнопка.
+ *   variant="bar"      — встроенная иконка (шапка сайдбара админки)
+ *   variant="floating" — плавающая круглая иконка в углу (страница входа)
  */
-export function ThemeToggle({ variant = "full" }: { variant?: "full" | "icon" }) {
+export function ThemeToggle({ variant = "bar" }: { variant?: "bar" | "floating" }) {
   const { theme, toggle } = useTheme();
   const dark = theme === "dark";
   const label = dark ? "Светлая тема" : "Тёмная тема";
@@ -53,11 +53,9 @@ export function ThemeToggle({ variant = "full" }: { variant?: "full" | "icon" })
       onClick={toggle}
       aria-label={label}
       title={label}
-      className={variant === "icon" ? "theme-toggle-icon" : "btn btn-ghost btn-sm btn-block"}
-      style={variant === "full" ? { marginBottom: 8 } : undefined}
+      className={variant === "floating" ? "theme-toggle-icon" : "icon-btn"}
     >
       {dark ? <SunIcon /> : <MoonIcon />}
-      {variant === "full" && <span>{label}</span>}
     </button>
   );
 }

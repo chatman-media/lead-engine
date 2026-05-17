@@ -5,6 +5,25 @@ import { type Admin, api } from "../api.ts";
 import { useTabVisibility } from "../useTabVisibility.ts";
 import { ThemeToggle } from "./ThemeToggle.tsx";
 
+function GearIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
 interface LayoutProps {
   admin: Admin;
   children: React.ReactNode;
@@ -115,6 +134,17 @@ export function Layout({ admin, children }: LayoutProps) {
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-header">
+          <div className="sidebar-header-actions">
+            <NavLink
+              to="/admin/settings"
+              className="icon-btn"
+              title="Настройки"
+              aria-label="Настройки"
+            >
+              <GearIcon />
+            </NavLink>
+            <ThemeToggle variant="bar" />
+          </div>
           <NavLink to="/admin" end className="sidebar-brand">
             <div className="sidebar-logo">Infinity Agency</div>
           </NavLink>
@@ -147,10 +177,6 @@ export function Layout({ admin, children }: LayoutProps) {
         </nav>
 
         <div className="sidebar-footer">
-          <NavLink to="/admin/settings" className="nav-item" style={{ marginBottom: 8 }}>
-            <span>Настройки</span>
-          </NavLink>
-          <ThemeToggle />
           <div className="sidebar-email">{admin.email}</div>
           <button className="btn btn-ghost btn-sm btn-block" onClick={handleLogout}>
             Выйти

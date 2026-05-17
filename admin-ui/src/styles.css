@@ -124,7 +124,7 @@ input, textarea {
 
 .sidebar-brand {
   display: block;
-  padding: 20px 16px;
+  padding: 8px 16px 18px;
   border-radius: 0;
   transition: background 0.12s;
 }
@@ -141,20 +141,35 @@ input, textarea {
   letter-spacing: -0.02em;
 }
 
-.sidebar-logo-img {
-  display: block;
-  width: 100%;
-  max-width: 160px;
-  height: auto;
-  border-radius: 8px;
+.sidebar-header-actions {
+  display: flex;
+  gap: 6px;
+  padding: 14px 16px 0;
 }
 
-.sidebar-tagline {
-  font-size: 11px;
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid var(--border);
   color: var(--text-3);
-  margin-top: 2px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+
+.icon-btn:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.icon-btn.active {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: var(--amber-dim);
 }
 
 .sidebar-nav {
