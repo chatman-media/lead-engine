@@ -6,7 +6,7 @@ import {
   NO_CONTEXT_MARKER,
   type Persona,
 } from "./answer-types.ts";
-import type { ChatMessage } from "./chat.ts";
+import type { ChatClient, ChatMessage } from "./chat.ts";
 import { checkFacts } from "./fact-checker.ts";
 import {
   botPresenceReply,
@@ -103,6 +103,7 @@ async function answerFromHits(opts: {
       ...(input.userFacts ? { userFacts: input.userFacts } : {}),
       ...(input.conversationSummary ? { conversationSummary: input.conversationSummary } : {}),
       ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
+      ...(input.supportPhase ? { supportPhase: input.supportPhase } : {}),
     });
     temperature = input.style.model.temperature;
   } else {
@@ -218,8 +219,24 @@ async function answerFromHits(opts: {
   };
 
   const runVacancyCheck = vacBlock.length > 0 && input.vacancyGuard !== false;
+
+  // The grounding half verifies every claim is backed by KB CONTEXT. At
+  // data-collection stages (opener / qualify / close) the bot ASKS the
+  // candidate for anketa fields — "скинь возраст и фото" reads to the
+  // checker as an unsupported claim, so the whole reply gets dropped and
+  // the candidate sees nothing. Exempt those stages from the grounding
+  // drop; vacancy accuracy is still always enforced. pitch/objection (and
+  // an unknown stage) keep full grounding.
+  const GROUNDING_EXEMPT_STAGES: ReadonlySet<string> = new Set(["opener", "qualify", "close"]);
+  const groundingExempt = input.stage !== undefined && GROUNDING_EXEMPT_STAGES.has(input.stage);
+
   const runFactCheck =
-    (input.reflect || runVacancyCheck) && text !== NO_CONTEXT_MARKER && text.trim().length > 0;
+    (input.reflect || runVacancyCheck) &&
+    text !== NO_CONTEXT_MARKER &&
+    text.trim().length > 0 &&
+    // If grounding is exempt for this stage and there's no vacancy block,
+    // there's nothing left to verify — skip the LLM call entirely.
+    !(groundingExempt && !runVacancyCheck);
 
   if (runFactCheck) {
     const verdict = await checkFacts({
@@ -235,7 +252,7 @@ async function answerFromHits(opts: {
       ...(verdict.reason ? { reason: verdict.reason } : {}),
     };
 
-    if (!verdict.grounded) {
+    if (!verdict.grounded && !groundingExempt) {
       console.warn(
         `[fact-checker] dropping ungrounded answer: ${verdict.reason ?? "unknown"} | answer="${text.slice(0, 120)}"`,
       );
@@ -394,6 +411,7 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
       ...(input.userFacts ? { userFacts: input.userFacts } : {}),
       ...(input.conversationSummary ? { conversationSummary: input.conversationSummary } : {}),
       ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
+      ...(input.supportPhase ? { supportPhase: input.supportPhase } : {}),
     });
     temperature = input.style.model.temperature;
   } else {
@@ -580,4 +598,51 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   const result = await answerFromHits({ hits, baseTelemetry, startedAt, input, activePersona });
   input.onTelemetry?.(result.telemetry);
   return result;
+}
+
+/**
+ * Soft fallback reply for turns where RAG produced nothing groundable — no KB
+ * hit, or the fact-checker dropped the draft as ungrounded. Instead of going
+ * silent, the bot answers in its own persona voice, but is hard-constrained
+ * NOT to invent any specifics (salaries, dates, visa terms, cities, prices).
+ *
+ * Concrete questions get an honest "I'll clarify and come back"; general
+ * questions get a normal conversational answer. The caller is still expected
+ * to log the unanswered question (kb_suggestions) for a later precise reply.
+ */
+export async function generateSoftFallback(input: {
+  question: string;
+  chat: ChatClient;
+  persona: Persona;
+  history?: ChatMessage[];
+}): Promise<string> {
+  const { question, chat, persona, history } = input;
+  const who = persona.company?.trim()
+    ? `${persona.name} из «${persona.company.trim()}»`
+    : persona.name;
+
+  const systemPrompt = [
+    `Ты — ${who}. Ты переписываешься с кандидатом в мессенджере.`,
+    "",
+    "По вопросу кандидата у тебя СЕЙЧАС нет точных данных.",
+    "Ответь живо и по-человечески, своими словами, коротко — 1–3 предложения.",
+    "",
+    "Жёсткие правила:",
+    "- НЕЛЬЗЯ выдумывать конкретику: зарплаты, суммы, проценты, сроки, даты,",
+    "  города, адреса, условия и стоимость визы, названия компаний, требования.",
+    "  Никаких цифр и фактов, которых ты не знаешь наверняка.",
+    "- Если вопрос требует точных данных — честно скажи, что уточнишь этот",
+    "  момент и вернёшься с ответом чуть позже.",
+    "- Если вопрос общий и конкретики не требует — просто ответь по смыслу.",
+    "- Не извиняйся длинно и формально. Тон тёплый и дружелюбный.",
+    "- Не упоминай «базу данных», «систему», не говори, что ты бот или ИИ.",
+  ].join("\n");
+
+  const messages: ChatMessage[] = [
+    { role: "system", content: systemPrompt },
+    ...(history ?? []),
+    { role: "user", content: question },
+  ];
+  const raw = await chat.complete(messages, { temperature: 0.5 });
+  return applyStyleRules(sanitizeLlmOutput(raw));
 }

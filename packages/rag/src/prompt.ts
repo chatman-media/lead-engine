@@ -27,6 +27,22 @@ function kbGroundingReminder(personaRole: Style["persona"]["role"]): string {
     : `${base}скажи prospect, что уточнишь у руководства.`;
 }
 
+/** Calm FAQ-support guidance used in place of the sales blocks when the
+ *  lead is past the sales stage and waiting on a downstream process. */
+function supportBlock(phase: "docs" | "submitted"): string {
+  const common =
+    "РЕЖИМ ПОДДЕРЖКИ: кандидат уже одобрена, идёт оформление рабочей визы. " +
+    "Отвечай тепло, спокойно и по делу на её вопросы про документы, сроки и процесс. " +
+    "НЕ продавай, не дави, не зови на звонок, не возвращай разговор к воронке.";
+  const phaseLine =
+    phase === "docs"
+      ? "Сейчас собираем её документы. Если спросит — помоги заполнить визовую анкету " +
+        "и объясни поля. Оформление документов обычно занимает около 10 дней."
+      : "Заявка уже подана в консульство, ждём решения (обычно 3-4 дня). " +
+        "Как будут новости — оператор напишет ей сам.";
+  return `${common}\n${phaseLine}`;
+}
+
 /**
  * Builds the system prompt for one turn of conversation in the given style
  * and stage. Up to 8 sections: persona, voice, framework, hooks, stage,
@@ -133,19 +149,25 @@ export function composeSystemPrompt(
 
   const needsGroundingReminder = stageCfg?.groundingRequired === true && !preFetchedKbContext;
 
+  // Support mode: the lead is past the sales stage and waiting on a
+  // downstream process. Drop every sales block (framework / hooks / skills /
+  // funnel stage / few-shot) and replace them with a calm FAQ-support block.
+  // Persona, voice, guardrails, KB grounding + context stay intact.
+  const support = options.supportPhase ? supportBlock(options.supportPhase) : "";
+
   return [
     personaBlock,
     telegramShapeBlock,
     voiceBlock,
-    frameworkBlock,
-    hooksBlock,
-    skillsBlock,
-    stageBlock,
+    support ? "" : frameworkBlock,
+    support ? "" : hooksBlock,
+    support ? "" : skillsBlock,
+    support || stageBlock,
     summaryBlock,
     userFactsBlock,
     needsGroundingReminder ? kbGroundingReminder(persona.role) : "",
     guardrailBlock,
-    fewShotBlock,
+    support ? "" : fewShotBlock,
     kbBlock,
   ]
     .filter((s) => s.length > 0)

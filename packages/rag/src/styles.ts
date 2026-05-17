@@ -105,4 +105,11 @@ export interface ComposeOptions {
   userFacts?: Record<string, string>;
   conversationSummary?: string;
   skills?: readonly SkillForPrompt[];
+  /**
+   * Support mode — set when the lead is past the sales stage and waiting on a
+   * downstream process. When set, the prompt drops the sales framework / hooks
+   * / skills / few-shot / funnel-stage guidance and uses a calm FAQ-support
+   * block instead. `docs` = collecting their documents, `submitted` = filed.
+   */
+  supportPhase?: "docs" | "submitted";
 }

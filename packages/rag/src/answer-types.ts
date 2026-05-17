@@ -43,6 +43,14 @@ export interface AnswerInput {
   skills?: readonly SkillForPrompt[];
   booksPriority?: boolean;
   /**
+   * Support mode — set when the lead is past the sales stage and waiting on a
+   * downstream process (`docs` = collecting their documents, `submitted` =
+   * filed). When set AND a `style` is active, the composed system prompt drops
+   * the sales framework / hooks / skills / few-shot / funnel-stage guidance and
+   * uses a calm FAQ-support block instead — answering questions without selling.
+   */
+  supportPhase?: "docs" | "submitted";
+  /**
    * Called after every `answerWithRag` or `answerWithRagStream` call with the
    * final telemetry. Useful for logging, metrics, or A/B experiment recording
    * without having to unwrap the return value.
