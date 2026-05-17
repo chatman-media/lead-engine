@@ -284,6 +284,58 @@ describe("extractIntake + isIntakeComplete", () => {
     expect(intake.full_body_count).toBe(0);
   });
 
+  test("passportFields overwrite the text-extracted name", async () => {
+    const chat = fakeChat('{"name":"София Иванова"}');
+    const intake = await extractIntake({
+      messages: [{ role: "user", content: "меня зовут София Иванова" }],
+      mediaCounts: { photos: 0, videos: 0 },
+      passportFields: { family_name: "IVANOVA", given_name: "SOFIA" },
+      chat,
+    });
+    // Passport (Latin) wins over the Cyrillic name typed in chat.
+    expect(intake.name).toBe("SOFIA IVANOVA");
+  });
+
+  test("passportFields set passport_number and passport_expiry", async () => {
+    const chat = fakeChat("{}");
+    const intake = await extractIntake({
+      messages: [{ role: "user", content: "hi" }],
+      mediaCounts: { photos: 0, videos: 0 },
+      passportFields: {
+        given_name: "SOFIA",
+        passport_number: "71 1234567",
+        passport_expiry: "18.04.2029",
+      },
+      chat,
+    });
+    expect(intake.name).toBe("SOFIA");
+    expect(intake.passport_number).toBe("71 1234567");
+    expect(intake.passport_expiry).toBe("18.04.2029");
+  });
+
+  test("passportFields apply even when there are no user messages", async () => {
+    const chat = fakeChat('{"city":"x"}');
+    const intake = await extractIntake({
+      messages: [{ role: "assistant", content: "hi" }],
+      mediaCounts: { photos: 0, videos: 0 },
+      passportFields: { family_name: "IVANOVA", given_name: "SOFIA" },
+      chat,
+    });
+    expect(chat.calls).toBe(0);
+    expect(intake.name).toBe("SOFIA IVANOVA");
+  });
+
+  test("empty passportFields leave the name untouched", async () => {
+    const chat = fakeChat('{"name":"Sofia Ivanova"}');
+    const intake = await extractIntake({
+      messages: [{ role: "user", content: "Sofia Ivanova" }],
+      mediaCounts: { photos: 0, videos: 0 },
+      passportFields: {},
+      chat,
+    });
+    expect(intake.name).toBe("Sofia Ivanova");
+  });
+
   test("isIntakeComplete only fires when all 7 items present + thresholds met", () => {
     expect(isIntakeComplete(undefined)).toBe(false);
     expect(

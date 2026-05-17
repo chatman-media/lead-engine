@@ -263,6 +263,9 @@ export interface IntakeFields {
   children?: string;
   languages?: string;
   passport_expiry?: string;
+  /** Passport number — extracted from the passport photo (vision OCR).
+   *  No checklist slot of its own; surfaced on the lead card. */
+  passport_number?: string;
   work_experience?: string;
 }
 
@@ -283,6 +286,7 @@ export const INTAKE_FIELD_LABELS: Partial<Record<keyof IntakeFields, string>> = 
   children: "дети",
   languages: "языки",
   passport_expiry: "загранпаспорт до",
+  passport_number: "номер загранпаспорта",
   work_experience: "опыт работы",
 };
 

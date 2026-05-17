@@ -138,6 +138,74 @@ describe("unclassifiedPhotos / setPhotoClass / countPhotosByClass", () => {
   });
 });
 
+describe("passport extraction repo methods", () => {
+  test("needs-extraction list, setPassportFields, fields-for-conversation", async () => {
+    // Passport photo awaiting extraction.
+    const p = await messages.add({
+      conversationId: convId,
+      role: "user",
+      text: "[photo]",
+      meta: {
+        media: {
+          type: "photo",
+          file_id: "pass-1",
+          mime_type: "image/png",
+          photo_class: "passport",
+        },
+      },
+    });
+    // A non-passport photo — never picked up.
+    await messages.add({
+      conversationId: convId,
+      role: "user",
+      text: "[photo]",
+      meta: photoMeta("full-1", "full_body"),
+    });
+
+    let pending = await messages.passportPhotosNeedingExtraction(convId);
+    expect(pending.map((x) => x.file_id)).toEqual(["pass-1"]);
+    expect(pending[0]!.mime_type).toBe("image/png");
+
+    expect(
+      await messages.setPassportFields(p.id, { family_name: "IVANOVA", given_name: "SOFIA" }),
+    ).toBe(true);
+
+    // Once extracted, it drops out of the needs-extraction list.
+    pending = await messages.passportPhotosNeedingExtraction(convId);
+    expect(pending).toHaveLength(0);
+
+    expect(await messages.passportFieldsForConversation(convId)).toEqual({
+      family_name: "IVANOVA",
+      given_name: "SOFIA",
+    });
+  });
+
+  test("empty extraction marks the photo done but yields no conversation fields", async () => {
+    const p = await messages.add({
+      conversationId: convId,
+      role: "user",
+      text: "[photo]",
+      meta: { media: { type: "photo", file_id: "pass-2", photo_class: "passport" } },
+    });
+    await messages.setPassportFields(p.id, {});
+
+    // Not retried — empty object is a valid "attempted" marker.
+    expect(await messages.passportPhotosNeedingExtraction(convId)).toHaveLength(0);
+    // But an empty extraction contributes nothing to the conversation.
+    expect(await messages.passportFieldsForConversation(convId)).toBeNull();
+  });
+
+  test("passportFieldsForConversation returns null when no passport photo", async () => {
+    await messages.add({
+      conversationId: convId,
+      role: "user",
+      text: "[photo]",
+      meta: photoMeta("file-x", "portrait"),
+    });
+    expect(await messages.passportFieldsForConversation(convId)).toBeNull();
+  });
+});
+
 describe("mediaForConversation", () => {
   test("returns every media message oldest-first with class + caption", async () => {
     await messages.add({
