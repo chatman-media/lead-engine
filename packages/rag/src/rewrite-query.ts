@@ -1,4 +1,5 @@
 import type { ChatClient, ChatMessage } from "./chat.ts";
+import { stripThinkBlocks } from "./sanitize.ts";
 
 /**
  * Rewrites a user question into a search-friendly query using recent
@@ -109,7 +110,7 @@ export async function rewriteQuery(input: RewriteQueryInput): Promise<string> {
 /** Strips think-tags, "ответ:" prefixes, markdown, line breaks. Falls back
  *  to original on empty/garbage output. Exported for unit tests. */
 export function sanitizeRewritten(raw: string, fallback: string, maxLength: number): string {
-  let s = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
+  let s = stripThinkBlocks(raw);
   s = s.replace(/```[\s\S]*?```/g, "");
   s = s.replace(/^\s*(ответ|answer)\s*[:\-—]\s*/i, "");
   // Take first non-empty line — the model occasionally adds explanations after.
