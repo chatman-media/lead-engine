@@ -171,7 +171,7 @@ export function Layout({ admin, children }: LayoutProps) {
 
         <div className="sidebar-footer">
           <div className="sidebar-email">{admin.email}</div>
-          <button className="btn btn-ghost btn-sm btn-block" onClick={handleLogout}>
+          <button className="btn btn-sm btn-block btn-logout" onClick={handleLogout}>
             Выйти
           </button>
         </div>

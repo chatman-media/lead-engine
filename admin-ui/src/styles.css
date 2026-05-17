@@ -148,7 +148,15 @@ input, textarea {
 
 .sidebar-footer {
   padding: 14px 16px;
-  border-top: 1px solid var(--border);
+}
+
+.btn-logout {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+}
+.btn-logout:hover:not(:disabled) {
+  color: var(--text);
 }
 
 .sidebar-email {
