@@ -113,6 +113,14 @@ export function createServer(opts: CreateServerOptions): Server<AdminWsData> {
         return ok ? undefined : new Response("Upgrade failed", { status: 500 });
       }
 
+      // Redirect bare /admin to /admin/ — the SPA is built with Vite
+      // base=/admin/, so relative asset URLs only resolve under the slash.
+      if (shouldServeUi && url.pathname === "/admin") {
+        const dest = new URL(url);
+        dest.pathname = "/admin/";
+        return Response.redirect(dest.toString(), 308);
+      }
+
       // Serve SPA for /admin/* paths that are not API routes
       if (
         shouldServeUi &&

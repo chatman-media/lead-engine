@@ -60,6 +60,22 @@ describe("security headers", () => {
     expect(r.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
+  test("bare /admin redirects to /admin/ (308) when UI is served", async () => {
+    const fetchImpl: FetchLike = async () =>
+      new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
+    const telegram = new TelegramClient({ token: "t", fetch: fetchImpl });
+    const uiServer = createServer({ sql, telegram, webhookSecret: "s", port: 0, serveUi: true });
+    try {
+      const r = await fetch(`http://127.0.0.1:${uiServer.port}/admin?x=1`, {
+        redirect: "manual",
+      });
+      expect(r.status).toBe(308);
+      expect(r.headers.get("location")).toBe(`http://127.0.0.1:${uiServer.port}/admin/?x=1`);
+    } finally {
+      uiServer.stop(true);
+    }
+  });
+
   test("CSP forbids inline scripts (script-src does not include 'unsafe-inline')", async () => {
     const r = await fetch(`${baseUrl}/health`);
     const csp = r.headers.get("content-security-policy") ?? "";
