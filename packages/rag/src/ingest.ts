@@ -13,6 +13,13 @@ export interface IngestDeps {
   embedder: EmbeddingClient;
   chunk?: Partial<ChunkOptions>;
   topic?: string | null;
+  /** Overrides the default `file://<abs>` document source. Callers that
+   *  ingest from a throwaway temp path (e.g. an admin upload route) pass a
+   *  stable, content-addressed source here so re-uploads dedupe. */
+  source?: string;
+  /** Overrides the default `basename(abs)` document title — useful when the
+   *  on-disk filename is a temp name rather than something operator-facing. */
+  title?: string;
 }
 
 export interface IngestFileResult {
@@ -27,8 +34,8 @@ export async function ingestFile(path: string, deps: IngestDeps): Promise<Ingest
   const ext = extname(abs).toLowerCase();
   const raw = ext === ".pdf" ? await parsePdf(abs) : readFileSync(abs, "utf8");
   const hash = createHash("sha256").update(raw).digest("hex");
-  const source = `file://${abs}`;
-  const title = basename(abs);
+  const source = deps.source ?? `file://${abs}`;
+  const title = deps.title ?? basename(abs);
 
   const existing = await deps.kb.getDocumentBySource(source);
 
