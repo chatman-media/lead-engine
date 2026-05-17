@@ -1,0 +1,71 @@
+{
+  "name": "@chatman-media/rag",
+  "version": "1.2.1",
+  "description": "Production-grade RAG engine for conversational bots — hybrid retrieval (pgvector + BM25), pluggable LLM providers, sales-style prompt composition, hallucination guard, query rewriting.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun --format esm && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "check": "biome check ./src ./test",
+    "format": "biome format --write ./src ./test",
+    "test": "bun test",
+    "prepublishOnly": "bun run check && bun run typecheck && bun run test && bun run build"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "keywords": [
+    "rag",
+    "retrieval-augmented-generation",
+    "pgvector",
+    "bm25",
+    "hybrid-search",
+    "llm",
+    "chatbot",
+    "sales-bot",
+    "telegram-bot",
+    "ollama",
+    "openai",
+    "openrouter"
+  ],
+  "author": "Alexander Kireev",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chatman-media/rag.git"
+  },
+  "homepage": "https://github.com/chatman-media/rag#readme",
+  "bugs": {
+    "url": "https://github.com/chatman-media/rag/issues"
+  },
+  "dependencies": {
+    "unpdf": "^1.6.2",
+    "zod": "^4.4.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.14",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^12.0.8",
+    "@semantic-release/npm": "^13.1.5",
+    "@types/bun": "latest",
+    "semantic-release": "^25.0.3",
+    "typescript": "^6.0.3"
+  }
+}

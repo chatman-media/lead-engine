@@ -1,0 +1,60 @@
+{
+  "name": "@chatman-media/storage",
+  "version": "1.0.0",
+  "description": "PostgreSQL storage adapters for @chatman-media/sales — Drizzle ORM implementations of all engine interfaces.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target node --format esm && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "check": "biome check ./src",
+    "format": "biome format --write ./src",
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "keywords": [
+    "chatman",
+    "sales",
+    "drizzle",
+    "postgresql",
+    "storage"
+  ],
+  "author": "Alexander Kireev",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chatman-media/storage.git"
+  },
+  "homepage": "https://github.com/chatman-media/storage#readme",
+  "bugs": {
+    "url": "https://github.com/chatman-media/storage/issues"
+  },
+  "peerDependencies": {
+    "@chatman-media/sales": ">=0.1.0",
+    "drizzle-orm": ">=0.36.0",
+    "postgres": ">=3.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.14",
+    "@chatman-media/sales": "^0.1.0",
+    "@types/bun": "1.3.14",
+    "drizzle-kit": "^0.30.0",
+    "drizzle-orm": "^0.36.0",
+    "postgres": "^3.4.5",
+    "typescript": "^6.0.3"
+  }
+}

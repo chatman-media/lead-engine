@@ -7,22 +7,21 @@
 **/.bun
 **/.cache
 **/dist
-admin-ui/dist
 
 # Local data + logs — must come from a volume in production
-data/
+**/data/
 *.db
 *.db-journal
 *.db-shm
 *.db-wal
-logs/
+**/logs/
 *.log
 
 # Secrets — operators mount their .env at run time, never in the image
-.env
-.env.local
-.env.*.local
-sec/
+**/.env
+**/.env.local
+**/.env.*.local
+**/sec/
 
 # VCS / CI / IDE
 .git
@@ -34,22 +33,22 @@ sec/
 .claude
 
 # Tests / coverage — production image runs nothing of this
-tests/
-playwright.config.ts
-playwright-report/
-test-results/
-coverage/
+**/tests/
+**/playwright.config.ts
+**/playwright-report/
+**/test-results/
+**/coverage/
 
 # Source artifacts of the KB pipeline — keep text files, skip binaries
-kb/**/*.webp
-kb/**/*.tgs
-kb/**/*.mp4
-kb/**/*.mp3
-kb/**/*.ogg
-kb/**/*.jpg
-kb/**/*.jpeg
-kb/**/*.png
-kb/**/*.gif
+apps/bot/kb/**/*.webp
+apps/bot/kb/**/*.tgs
+apps/bot/kb/**/*.mp4
+apps/bot/kb/**/*.mp3
+apps/bot/kb/**/*.ogg
+apps/bot/kb/**/*.jpg
+apps/bot/kb/**/*.jpeg
+apps/bot/kb/**/*.png
+apps/bot/kb/**/*.gif
 
 # OS junk
 .DS_Store
@@ -57,10 +56,10 @@ Thumbs.db
 *.swp
 *~
 
-# Documentation that doesn't ship to runtime. Scoped to root-level so the
-# `kb/**/*.md` content (the entire knowledge base) DOES make it into the
-# image — a bare `*.md` here would silently strip every KB file and the
-# in-container ingest would end up with only voice transcripts.
-docs/
-/README.md
-/CHANGELOG.md
+# Documentation that doesn't ship to runtime. The kb/**/*.md content (the
+# knowledge base) DOES make it in — a bare *.md would strip every KB file.
+**/docs/
+README.md
+CHANGELOG.md
+apps/bot/README.md
+apps/bot/CHANGELOG.md

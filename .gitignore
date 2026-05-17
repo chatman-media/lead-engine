@@ -3,8 +3,9 @@ data/
 .env
 .env.local
 .env.test.local
+.env.*.local
 dist/
-admin-ui/dist/
+**/dist/
 playwright-report/
 test-results/
 coverage/
@@ -26,9 +27,9 @@ coverage/
 *.gif
 *.webm
 # …but admin-ui static assets (logo / favicon) ARE part of the app.
-!admin-ui/public/
-!admin-ui/public/*.png
+!apps/admin-ui/public/
+!apps/admin-ui/public/*.png
 # Raw KB export — the curated/extracted markdown is what we ingest, the
 # 5MB+ JSON dump it was generated from doesn't need to live in git.
-kb/result.json
+apps/bot/kb/result.json
 .claude/

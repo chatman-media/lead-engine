@@ -1,0 +1,22 @@
+# Userbot worker image. Build context is the MONOREPO ROOT:
+#   fly deploy --config apps/bot/fly.userbot.toml   (run from repo root)
+FROM oven/bun:1 AS base
+WORKDIR /app
+
+# Root manifest + lockfile, plus every workspace package.json so bun can
+# resolve the workspace graph (cached layer).
+COPY package.json bun.lock* ./
+COPY apps/bot/package.json ./apps/bot/
+COPY apps/admin-ui/package.json ./apps/admin-ui/
+COPY packages/rag/package.json ./packages/rag/
+COPY packages/sales/package.json ./packages/sales/
+COPY packages/storage/package.json ./packages/storage/
+RUN bun install --frozen-lockfile --ignore-scripts
+
+# Copy bot source needed by the userbot worker.
+COPY apps/bot/tsconfig.json apps/bot/tsconfig.src.json ./apps/bot/
+COPY apps/bot/src/ ./apps/bot/src/
+COPY apps/bot/scripts/userbot-local.ts ./apps/bot/scripts/userbot-local.ts
+
+WORKDIR /app/apps/bot
+CMD ["bun", "scripts/userbot-local.ts"]

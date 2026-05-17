@@ -1,0 +1,89 @@
+# lead-engine bot production stack.
+#
+# This compose file lives in apps/bot/ — the build context points at the
+# monorepo root (../..) so the Dockerfile can pull in the workspace
+# lockfile and every workspace package.json. Run it from this directory:
+#   cd apps/bot && docker compose up -d
+#
+# Default profile:  app + PostgreSQL.
+# Optional profile: ollama for fully-local inference (chat + embeddings).
+#
+# Database connection is configured via DATABASE_URL in .env
+# (external PostgreSQL / Supabase — not bundled in this compose file).
+#
+# Quick start:
+#   cp .env.example .env && edit .env  # set DATABASE_URL and other vars
+#   docker compose up -d        # backend only — uses OpenAI / OpenRouter
+#   docker compose --profile ollama up -d
+#                              # full local stack: bot + ollama at :11434
+#
+# The bot listens on PORT (default 3000). Behind a reverse proxy, point
+# the proxy at the container — the Telegram Bot API requires HTTPS for
+# the webhook URL, which the bot itself doesn't terminate. See
+# docs/DEPLOY.md for nginx + Let's Encrypt + Cloudflare-tunnel options.
+
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: apps/bot/Dockerfile
+    image: lead-engine-bot:latest
+    container_name: lead-engine-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # When running with the ollama profile, set OLLAMA_HOST=http://ollama:11434
+      # in your .env — the .env.example default of http://localhost:11434 won't
+      # reach the sibling container. DATABASE_URL comes from the .env file.
+      PORT: 3000
+      SERVE_UI: "1"
+    # Optional: bring in a host-side KB tree if you want to ingest without
+    # exec'ing into the container. Uncomment the block to enable it.
+    # volumes:
+    #   - ./kb:/app/apps/bot/kb:ro
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    # Wait for ollama (when used) before starting the bot warm-up — but
+    # only require the network to be up, not a full readiness handshake,
+    # so this stays light.
+    depends_on:
+      ollama:
+        condition: service_started
+        required: false
+
+  # Local LLM. Skipped unless `--profile ollama` is passed.
+  # Pull a model into the volume after first boot:
+  #   docker compose --profile ollama exec ollama ollama pull qwen3
+  #   docker compose --profile ollama exec ollama ollama pull bge-m3
+  ollama:
+    image: ollama/ollama:latest
+    container_name: lead-engine-ollama
+    restart: unless-stopped
+    profiles: ["ollama"]
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      # Optional: expose to host so you can `ollama list` from the host
+      # without exec'ing in. Comment out if you don't need it.
+      - "${OLLAMA_HOST_PORT:-11434}:11434"
+    # Hint to NVIDIA users: uncomment to enable GPU pass-through. Falls
+    # back to CPU automatically when the GPU runtime isn't available
+    # (so this stays compatible with hosts that don't have nvidia-docker).
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  ollama-models:
+    name: lead-engine-ollama-models

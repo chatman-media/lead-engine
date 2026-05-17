@@ -1,0 +1,16 @@
+# fly.io config for the userbot worker (Alina's gramJS account)
+# Deploy from the monorepo root:
+#   fly deploy --config apps/bot/fly.userbot.toml
+app = "svoi-userbot"
+primary_region = "ams"  # Amsterdam — Telegram MTProto servers are in EU/NL
+
+[build]
+  # Path relative to the build context (monorepo root).
+  dockerfile = "apps/bot/Dockerfile.userbot"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+# No [[services]] — this is a pure background worker, no HTTP

@@ -13,24 +13,18 @@ concurrency:
 
 env:
   # Pin Bun so a future minor change doesn't surprise us. Keep in lockstep
-  # with package.json's @types/bun major.
+  # with apps/bot/package.json's @types/bun major.
   BUN_VERSION: "1.3.8"
 
 jobs:
   check:
-    name: typecheck + lint + secret-scan + unit tests
+    name: bot — typecheck + lint + secret-scan + unit tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    # `contents: write` lets the badge step commit .github/badges/coverage.svg
-    # back to main. All other jobs keep the default read-only token.
-    permissions:
-      contents: write
+    timeout-minutes: 12
 
     services:
       # pgvector image bundles PostgreSQL + the pgvector extension that
-      # KbRepo needs for vector search. tests/helpers/test-db.ts applies
-      # pg_schema.sql which calls CREATE EXTENSION vector.
+      # KbRepo needs for vector search.
       postgres:
         image: pgvector/pgvector:pg16
         env:
@@ -46,17 +40,14 @@ jobs:
           - 5432:5432
 
     env:
-      # Tests use fake embedders with an 8-d shape; setupTestDb patches the
-      # schema accordingly. activeEmbeddingDim() in src/config.ts must agree
-      # so tests that call into it (e.g. kb-management.test.ts) match.
+      # Tests use fake embedders with an 8-d shape; activeEmbeddingDim() in
+      # src/config.ts must agree.
       OPENAI_EMBEDDING_DIM: "8"
       OLLAMA_EMBEDDING_DIM: "8"
 
     steps:
       - uses: actions/checkout@v4
         with:
-          # We use `git ls-files` in scan-secrets.ts; full history isn't
-          # required, but workflow context still benefits from a clean clone.
           fetch-depth: 1
 
       - name: Setup Bun
@@ -70,18 +61,16 @@ jobs:
           path: |
             ~/.bun/install/cache
             node_modules
-            admin-ui/node_modules
-          # Bust on lockfile or workflow change.
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', '.github/workflows/ci.yml') }}
           restore-keys: bun-${{ runner.os }}-
 
-      - name: Install deps (incl. workspace admin-ui)
+      - name: Install deps (workspace)
         run: bun install --frozen-lockfile
 
       - name: typecheck (src + scripts)
         run: bun run typecheck
 
-      - name: biome check
+      - name: biome check (bot + admin-ui)
         run: bun run check
 
       - name: scan-secrets
@@ -90,17 +79,16 @@ jobs:
       - name: unit tests
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/tgchatbot_test
-        run: bun test tests/unit
+        run: bun run test
 
       - name: coverage
+        working-directory: apps/bot
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/tgchatbot_test
-        # Bun 1.3.14's coverageThreshold in bunfig.toml is read but never
-        # enforced — so the check-coverage wrapper script parses the text
-        # report and exits non-zero below the line/function floors. Baseline
-        # at this commit was 90.2% lines / 91.4% funcs (process entrypoints
-        # and test-only seed code are excluded via bunfig
-        # coveragePathIgnorePatterns). Floors sit at 90% to hold the line.
+          OPENAI_EMBEDDING_DIM: "8"
+          OLLAMA_EMBEDDING_DIM: "8"
+        # check-coverage.ts parses the text report and exits non-zero below
+        # the line/function floors (Bun's bunfig coverageThreshold is a no-op).
         run: |
           set -o pipefail
           mkdir -p coverage
@@ -113,41 +101,49 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-lcov
-          path: coverage/lcov.info
+          path: apps/bot/coverage/lcov.info
           retention-days: 14
           if-no-files-found: warn
 
-      - name: update coverage badge
-        # Only on push to main: regenerate the SVG badge from coverage/lcov.info
-        # and commit it if the percentage changed. `[skip ci]` prevents the
-        # bot commit from triggering another CI run.
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          bun scripts/coverage-badge.ts
-          if git diff --quiet -- .github/badges/coverage.svg; then
-            echo "coverage badge unchanged"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .github/badges/coverage.svg
-            git commit -m "chore: update coverage badge [skip ci]"
-            # checkout@v4 leaves a detached HEAD on push events — push the
-            # commit explicitly to main.
-            git push origin HEAD:main
-          fi
-
       - name: build admin UI
-        # Catch UI-side TS errors and Vite-time issues that don't show up in
-        # the source-only typecheck above (admin-ui has its own tsconfig).
+        # Catch UI-side TS / Vite errors that the source-only typecheck misses.
         run: bun run build:ui
+
+  packages:
+    name: packages — build + typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun + node_modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', '.github/workflows/ci.yml') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install deps (workspace)
+        run: bun install --frozen-lockfile
+
+      - name: build packages (rag → sales → storage)
+        run: bun run build:packages
+
+      - name: typecheck packages
+        run: bun run typecheck:packages
 
   e2e:
     name: playwright e2e
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # E2E now blocks the merge. Playwright config sets retries=1 in CI
-    # to absorb a one-off network/scheduler hiccup without masking real
-    # regressions (retried runs are still reported separately).
 
     services:
       postgres:
@@ -178,11 +174,10 @@ jobs:
           path: |
             ~/.bun/install/cache
             node_modules
-            admin-ui/node_modules
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', '.github/workflows/ci.yml') }}
           restore-keys: bun-${{ runner.os }}-
 
-      - name: Install deps
+      - name: Install deps (workspace)
         run: bun install --frozen-lockfile
 
       - name: Cache Playwright browsers
@@ -209,92 +204,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: playwright-report/
+          path: apps/bot/playwright-report/
           retention-days: 7
-
-  deploy:
-    name: deploy to VPS
-    needs: [check, e2e]
-    # Push to main only — never on PRs. Runs only after check + e2e pass.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      # SSHes to the VPS as root and runs deploy.sh (git pull → bun install
-      # → build:ui → systemctl restart chatman.service). Requires two repo
-      # secrets (Settings → Secrets and variables → Actions):
-      #   VPS_HOST    — server hostname or IP
-      #   VPS_SSH_KEY — private SSH key authorised for root on the VPS
-      # A non-default SSH port needs a `port:` line here.
-      - name: deploy via ssh
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: root
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: bash /home/chatman/app/deploy.sh
-
-  status:
-    name: ci status badge
-    # `deploy` is in needs so its result drives the deploy badge. `deploy`
-    # is skipped on PRs — `if: always()` still runs this job, and the badge
-    # step itself is gated to push-to-main.
-    needs: [check, e2e, deploy]
-    # `if: always()` so the badges reflect failures too — without it this job
-    # would be skipped whenever check/e2e/deploy fail and the badges would
-    # only ever say "passing".
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    # `contents: write` lets the badge step commit .github/badges/*.svg.
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Check out the main branch tip (not the detached trigger SHA): this
-          # job runs after `check`, so the tip already includes its coverage
-          # badge commit and `git push` below stays a fast-forward.
-          ref: main
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: update status badges
-        # Only on push to main: regenerate the ci / tests / deploy SVGs from
-        # the run results and commit any that changed. `[skip ci]` prevents a
-        # re-trigger.
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          # ci — overall pipeline: check + e2e
-          if [ "${{ needs.check.result }}" = "success" ] && [ "${{ needs.e2e.result }}" = "success" ]; then
-            bun scripts/ci-badge.ts passing
-          else
-            bun scripts/ci-badge.ts failing
-          fi
-          # tests — the check job (typecheck + lint + secret-scan + unit tests)
-          if [ "${{ needs.check.result }}" = "success" ]; then
-            bun scripts/status-badge.ts tests passing
-          else
-            bun scripts/status-badge.ts tests failing
-          fi
-          # deploy — the VPS deploy job
-          if [ "${{ needs.deploy.result }}" = "success" ]; then
-            bun scripts/status-badge.ts deploy passing
-          else
-            bun scripts/status-badge.ts deploy failing
-          fi
-          if git diff --quiet -- .github/badges/ci.svg .github/badges/tests.svg .github/badges/deploy.svg; then
-            echo "badges unchanged"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .github/badges/ci.svg .github/badges/tests.svg .github/badges/deploy.svg
-            git commit -m "chore: update status badges [skip ci]"
-            git push origin HEAD:main
-          fi
