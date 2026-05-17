@@ -4,6 +4,12 @@ import { type ExperimentsRepo, parseAllocationToExperiment } from "../db/repos/e
 import type { StylesRepo } from "../db/repos/styles.ts";
 import type { UserRow } from "../db/repos/users.ts";
 import { renderVacanciesBlock } from "../db/repos/vacancies.ts";
+import { VISA_PHOTO_REQUIREMENTS } from "../leads/templates.ts";
+import {
+  interviewQuestion,
+  nextInterviewField,
+  VISA_INTERVIEW_DONE,
+} from "../leads/visa-interview.ts";
 import { log } from "../log.ts";
 import { inc } from "../metrics.ts";
 import {
@@ -149,6 +155,55 @@ async function resolveSupportPhase(
   if (lead?.state === "docs_pending") return "docs";
   if (lead?.state === "submitted") return "submitted";
   return undefined;
+}
+
+/**
+ * Step-by-step visa-anketa interview. While a lead is `submitted` ("подача
+ * на визу") and `visa_interview_field` points at a field, every candidate
+ * message is treated as the answer to the current field: it's stored into
+ * `visa_docs_json`, the pointer advances, and the next question is sent.
+ * When the last field is answered the pointer is cleared and the photo /
+ * passport-pages request is sent.
+ *
+ * Returns `true` when it handled the turn (caller must skip RAG), `false`
+ * when the lead is not mid-interview (normal flow continues).
+ */
+async function maybeHandleVisaInterview(
+  d: ProcessInboundDeps,
+  reply: (text: string, meta?: unknown) => Promise<{ messageId: number }>,
+): Promise<boolean> {
+  const lead = await d.leads.byUserId(d.user.id);
+  if (!lead || lead.state !== "submitted" || !lead.visa_interview_field) return false;
+
+  const currentField = lead.visa_interview_field;
+
+  // Store the candidate's answer into the current visa-anketa field.
+  let docs: Record<string, string> = {};
+  if (lead.visa_docs_json) {
+    try {
+      const parsed = JSON.parse(lead.visa_docs_json);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        docs = parsed as Record<string, string>;
+      }
+    } catch {
+      // Corrupt JSON — start fresh rather than abort the interview.
+    }
+  }
+  docs[currentField] = d.text.trim();
+  await d.leads.setVisaDocs(lead.id, JSON.stringify(docs));
+
+  const next = nextInterviewField(currentField);
+  if (next) {
+    await d.leads.setVisaInterviewField(lead.id, next);
+    const question = interviewQuestion(next);
+    if (question) await reply(question, { source: "visa-interview" });
+  } else {
+    await d.leads.setVisaInterviewField(lead.id, null);
+    await reply(`${VISA_INTERVIEW_DONE}\n\n${VISA_PHOTO_REQUIREMENTS}`, {
+      source: "visa-interview",
+    });
+  }
+  return true;
 }
 
 async function runRagForInbound(d: ProcessInboundDeps): Promise<{
@@ -474,6 +529,13 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   if (containsEscalationTrigger(d.text)) {
     await d.conversations.setMode(d.conv.id, "queued");
     d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
+    return;
+  }
+
+  // Step-by-step visa-anketa interview ("подача на визу"): when active,
+  // the candidate's message is an answer to the current field — store it,
+  // ask the next question, skip RAG and the post-reply hooks entirely.
+  if (await maybeHandleVisaInterview(d, reply)) {
     return;
   }
 

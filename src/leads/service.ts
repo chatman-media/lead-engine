@@ -16,9 +16,8 @@ import {
   type IntakeFields,
   REJECTION_DEFAULT,
   SUBMITTED_REPLY,
-  VISA_ANKETA_TEMPLATE,
-  VISA_PHOTO_REQUIREMENTS,
 } from "./templates.ts";
+import { firstInterviewField, interviewQuestion, VISA_INTERVIEW_INTRO } from "./visa-interview.ts";
 
 export interface LeadsServiceDeps {
   leads: LeadsRepo;
@@ -186,9 +185,9 @@ export class LeadsService {
 
   /**
    * After operator approves: bot DMs the candidate the prologue +
-   * contract terms + visa anketa template. Each line goes as a separate
-   * Telegram message (and a separate `messages` row) so the admin can
-   * see them and they're not crammed into one wall.
+   * contract terms. The English visa anketa is NOT sent here — it is
+   * collected step-by-step once the lead reaches `submitted` ("подача на
+   * визу"), see `startVisaInterview`.
    */
   async sendApprovalMessages(input: { lead: LeadRow; user: UserRow }): Promise<void> {
     const conv = await this.deps.conversations.byUserId(input.user.id);
@@ -199,17 +198,44 @@ export class LeadsService {
       });
       return;
     }
-    const messages = [
-      APPROVAL_PROLOGUE,
-      CONTRACT_TERMS,
-      VISA_ANKETA_TEMPLATE,
-      VISA_PHOTO_REQUIREMENTS,
-    ];
-    for (const text of messages) {
+    for (const text of [APPROVAL_PROLOGUE, CONTRACT_TERMS]) {
       await this.relayToCandidate({
         chatId: input.user.tg_user_id,
         conversationId: conv.id,
         text,
+      });
+    }
+  }
+
+  /**
+   * Kick off the step-by-step visa-anketa interview when a lead enters
+   * `submitted` ("подача на визу"): set the interview pointer to the
+   * first field and DM the candidate the intro + the first question.
+   * Subsequent answers are handled turn-by-turn in `processInbound`
+   * (`maybeHandleVisaInterview`).
+   */
+  async startVisaInterview(input: { lead: LeadRow; user: UserRow }): Promise<void> {
+    const conv = await this.deps.conversations.byUserId(input.user.id);
+    if (!conv) {
+      log.warn("no conversation for user (visa interview)", {
+        scope: "leads",
+        user_id: input.user.id,
+      });
+      return;
+    }
+    const firstField = firstInterviewField();
+    await this.deps.leads.setVisaInterviewField(input.lead.id, firstField);
+    await this.relayToCandidate({
+      chatId: input.user.tg_user_id,
+      conversationId: conv.id,
+      text: VISA_INTERVIEW_INTRO,
+    });
+    const firstQuestion = interviewQuestion(firstField);
+    if (firstQuestion) {
+      await this.relayToCandidate({
+        chatId: input.user.tg_user_id,
+        conversationId: conv.id,
+        text: firstQuestion,
       });
     }
   }

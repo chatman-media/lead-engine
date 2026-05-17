@@ -354,7 +354,7 @@ describe("lead pipeline e2e", () => {
     expect(awaitMsgs.length).toBe(1);
   });
 
-  test("callback_query approve: state moves through approved → docs_pending and 4 templates land in candidate DM", async () => {
+  test("callback_query approve: state moves through approved → docs_pending and the approval templates land in candidate DM", async () => {
     nextUpdateId = 1;
     nextTgMessageId = 300;
 
@@ -395,7 +395,9 @@ describe("lead pipeline e2e", () => {
     // so the next candidate turn lands in docs_pending immediately).
     expect(reread.state).toBe("docs_pending");
 
-    // Bot DM'd the candidate the four operator-curated templates.
+    // Bot DM'd the candidate the approval templates (prologue + contract
+    // terms). The English visa anketa is NOT sent here — it is collected
+    // step-by-step later, on the "подача на визу" stage.
     const dmCalls = ctx.tg.sent
       .slice(sentBefore)
       .filter(
@@ -404,12 +406,12 @@ describe("lead pipeline e2e", () => {
           c.body.chat_id === CANDIDATE_TG_ID &&
           typeof c.body.text === "string",
       );
-    expect(dmCalls.length).toBeGreaterThanOrEqual(4);
+    expect(dmCalls.length).toBeGreaterThanOrEqual(2);
     const allText = dmCalls.map((c) => c.body.text as string).join("\n");
     expect(allText).toContain("Вас одобрили");
     expect(allText).toContain("документы платные");
-    expect(allText).toContain("Family name");
-    expect(allText).toContain("3,5×4,5");
+    // Visa anketa fields must NOT leak into the approval messages.
+    expect(allText).not.toContain("Family name");
 
     // Card was edited in place (no buttons after the decision).
     const edits = ctx.tg.sent

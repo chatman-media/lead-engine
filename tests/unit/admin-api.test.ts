@@ -237,6 +237,10 @@ describe("leads endpoints", () => {
     };
     expect(body.lead.state).toBe("submitted");
     expect(body.application_id).toBeTruthy();
+    // Entering "подача на визу" starts the step-by-step visa-anketa
+    // interview — the interview pointer is set to the first field.
+    const after = await new LeadsRepo(sql).byId(lead.id);
+    expect(after?.visa_interview_field).toBe("family_name");
   });
 
   test("mark-submitted is idempotent — re-call on a submitted lead returns 200", async () => {
