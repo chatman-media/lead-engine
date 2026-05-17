@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { ws } from "../App.tsx";
 import { type Admin, api } from "../api.ts";
 import { useTabVisibility } from "../useTabVisibility.ts";
+import { ThemeToggle } from "./ThemeToggle.tsx";
 
 interface LayoutProps {
   admin: Admin;
@@ -84,6 +85,7 @@ export function Layout({ admin, children }: LayoutProps) {
   const { visible } = useTabVisibility();
 
   const allNavItems = [
+    { to: "/admin", label: "Главная", key: null, end: true },
     { to: "/admin/status", label: "Статус", key: null },
     { to: "/admin/analytics", label: "Аналитика", key: "analytics" },
     {
@@ -124,13 +126,19 @@ export function Layout({ admin, children }: LayoutProps) {
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-header">
-          <img src="/admin/infinity-logo.png" alt="Infinity Agency" className="sidebar-logo-img" />
-          <div className="sidebar-tagline">admin panel</div>
+          <NavLink to="/admin" end className="sidebar-brand">
+            <img
+              src="/admin/infinity-logo.png"
+              alt="Infinity Agency"
+              className="sidebar-logo-img"
+            />
+            <div className="sidebar-tagline">admin panel</div>
+          </NavLink>
         </div>
 
         <nav className="sidebar-nav">
-          {navItems.map(({ to, label, badge }) => (
-            <NavLink key={to} to={to} className="nav-item">
+          {navItems.map(({ to, label, badge, end }) => (
+            <NavLink key={to} to={to} end={end} className="nav-item">
               <span>{label}</span>
               {badge !== undefined && (
                 <span
@@ -158,6 +166,7 @@ export function Layout({ admin, children }: LayoutProps) {
           <NavLink to="/admin/settings" className="nav-item" style={{ marginBottom: 8 }}>
             <span>Настройки</span>
           </NavLink>
+          <ThemeToggle />
           <div className="sidebar-email">{admin.email}</div>
           <button className="btn btn-ghost btn-sm btn-block" onClick={handleLogout}>
             Выйти
