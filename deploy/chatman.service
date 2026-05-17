@@ -1,0 +1,32 @@
+# Пример systemd-юнита для tg-chatbot (деплой через deploy.sh, НЕ Docker).
+#
+# Установка (один раз, от root на сервере):
+#   cp deploy/chatman.service /etc/systemd/system/chatman.service
+#   # при необходимости поправьте User / пути / имя сервиса
+#   systemctl daemon-reload
+#   systemctl enable --now chatman.service
+#
+# ВАЖНО: Restart=always обязателен. Кнопка «Применить и перезапустить» в
+# админке завершает процесс бота — поднимает его обратно именно systemd.
+# Без Restart=always (или Restart=on-success) бот просто остановится.
+# Проверить текущий юнит:  systemctl cat chatman
+
+[Unit]
+Description=tg-chatbot (Telegram sales-funnel bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chatman
+WorkingDirectory=/home/chatman/app
+# bun устанавливается per-user — укажите абсолютный путь к бинарнику.
+ExecStart=/home/chatman/.bun/bin/bun run start
+# .env лежит в WorkingDirectory; bun загружает его автоматически.
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -79,6 +79,7 @@ export function Status() {
         <RagFlagsCard status={status} />
         <ProvidersCard status={status} />
         <VisionCard status={status} />
+        <OpenRouterCard status={status} />
         <KbCard status={status} />
         <LeadsCard status={status} />
         <VacanciesCard status={status} />
@@ -463,6 +464,48 @@ function MessagesCard({ status }: { status: SystemStatus }) {
       {Object.entries(status.messages.by_role).map(([role, count]) => (
         <Row key={role} label={role} value={String(count)} mono />
       ))}
+    </Card>
+  );
+}
+
+function OpenRouterCard({ status }: { status: SystemStatus }) {
+  const or = status.openrouter;
+  // Only shown when chat runs through OpenRouter.
+  if (!or) return null;
+  const { remaining } = or;
+  const low = remaining != null && remaining < or.low_balance_usd;
+  const accent = low
+    ? "var(--red, #ef4444)"
+    : remaining != null
+      ? "var(--green, #2ea043)"
+      : undefined;
+  return (
+    <Card title="Баланс OpenRouter" accent={accent}>
+      <Row
+        label="остаток"
+        value={
+          remaining != null ? (
+            <span style={{ color: accent, fontWeight: 600 }}>${remaining.toFixed(2)}</span>
+          ) : (
+            "— (проверяется в фоне)"
+          )
+        }
+        mono
+      />
+      <Row
+        label="потрачено"
+        value={or.total_usage != null ? `$${or.total_usage.toFixed(2)}` : "—"}
+        mono
+      />
+      <Row label="порог алерта" value={`$${or.low_balance_usd}`} mono />
+      {or.checked_at != null && (
+        <Row label="проверено" value={new Date(or.checked_at * 1000).toLocaleString("ru-RU")} />
+      )}
+      {low && (
+        <div style={{ marginTop: 6, fontSize: 11, color: accent }}>
+          ⚠ Баланс заканчивается — пополните на openrouter.ai/credits
+        </div>
+      )}
     </Card>
   );
 }

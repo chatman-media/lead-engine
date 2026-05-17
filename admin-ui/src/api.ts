@@ -444,6 +444,14 @@ export interface SystemStatus {
     leads_chat_configured: boolean;
     visa_chat_configured: boolean;
   };
+  /** OpenRouter balance — null when chat does not run through OpenRouter. */
+  openrouter: {
+    configured: boolean;
+    low_balance_usd: number;
+    remaining: number | null;
+    total_usage: number | null;
+    checked_at: number | null;
+  } | null;
   bot_health:
     | {
         ok: true;
@@ -1085,6 +1093,21 @@ export const api = {
       "/admin/api/settings/runtime",
       { method: "PUT", body: JSON.stringify({ updates }) },
     ),
+
+  validateKey: (key: string, value: string) =>
+    req<{ ok: boolean; detail: string }>("/admin/api/settings/validate-key", {
+      method: "POST",
+      body: JSON.stringify({ key, value }),
+    }),
+
+  opsRestart: () => req<{ ok: boolean }>("/admin/api/ops/restart", { method: "POST" }),
+
+  opsOpenRouterCredits: () =>
+    req<{
+      ok: boolean;
+      detail?: string;
+      credits?: { remaining: number; totalUsage: number; totalCredits: number; checkedAt: number };
+    }>("/admin/api/ops/openrouter/credits", { method: "POST" }),
 };
 
 /** One operator-editable runtime setting (see src/admin/routes/settings.ts). */
@@ -1093,9 +1116,16 @@ export interface RuntimeSetting {
   label: string;
   hint: string;
   type: "text" | "number" | "boolean";
-  /** Current effective value; "" means no override — fall back to defaultValue. */
+  /** Current effective value; "" means no override — fall back to defaultValue.
+   *  Always "" for secrets — the real value is never sent to the browser. */
   value: string;
   defaultValue?: string;
+  /** API key / token: rendered as a password field, empty submit = keep. */
+  secret?: boolean;
+  /** Secrets only: whether a value is currently set. */
+  configured?: boolean;
+  /** Secrets only: masked tail of the current value (e.g. "••••1234"). */
+  preview?: string;
 }
 
 export type ExperimentStatus = "draft" | "running" | "paused" | "done";

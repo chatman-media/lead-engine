@@ -13,6 +13,7 @@ import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { KbRepo } from "../../db/repos/kb.ts";
 import { MAX_SEND_ATTEMPTS } from "../../db/repos/userbot-send-queue.ts";
 import { seedInfinityVacancies, VacanciesRepo } from "../../db/repos/vacancies.ts";
+import { fetchOpenRouterCredits, setCachedCredits } from "../../openrouter/credits.ts";
 import { ingestDirectory } from "../../rag/ingest.ts";
 import { json, type RouteHandler } from "../../router.ts";
 import { parseJsonBody, withAdmin } from "../handler-helpers.ts";
@@ -349,5 +350,48 @@ export function createUserbotQueueStatsHandler(deps: AdminApiDeps): RouteHandler
       by_status: Object.fromEntries(rows.map((r) => [r.status, r.count])),
       userbot_enabled: !!deps.userbotEnabled,
     });
+  });
+}
+
+/**
+ * POST /admin/api/ops/restart
+ * Exits the process so the supervisor restarts it with the freshly-saved
+ * `.env` (systemd `Restart=always`, or a Docker restart policy). The HTTP
+ * response is flushed first; the exit fires ~250 ms later. If no
+ * supervisor is configured the bot simply stops — see docs/RUNBOOK.md.
+ */
+export function createRestartHandler(deps: AdminApiDeps): RouteHandler {
+  return withAdmin(deps.sql, async ({ admin }) => {
+    await new AuditLogRepo(deps.sql)
+      .write({ action: "ops.restart", adminId: admin.adminId })
+      .catch((err) => console.error("[audit] ops.restart write failed:", err));
+    setTimeout(() => {
+      console.log("[ops] restart requested from admin UI — exiting for supervisor restart");
+      process.exit(0);
+    }, 250);
+    return json({ ok: true });
+  });
+}
+
+/**
+ * POST /admin/api/ops/openrouter/credits
+ * Live OpenRouter balance check on operator demand. Refreshes the shared
+ * cache so the /admin/status card reflects the fresh number too.
+ */
+export function createOpenRouterCreditsHandler(deps: AdminApiDeps): RouteHandler {
+  return withAdmin(deps.sql, async () => {
+    if (!config.openrouter.apiKey) {
+      return json({ ok: false, detail: "OPENROUTER_API_KEY не задан" }, { status: 400 });
+    }
+    try {
+      const credits = await fetchOpenRouterCredits({
+        apiKey: config.openrouter.apiKey,
+        baseUrl: config.openrouter.baseUrl,
+      });
+      setCachedCredits(credits);
+      return json({ ok: true, credits });
+    } catch (err) {
+      return json({ ok: false, detail: err instanceof Error ? err.message : String(err) });
+    }
   });
 }

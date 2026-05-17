@@ -74,8 +74,10 @@ export {
   createGetTelegramWebhookHandler,
   createKbIngestHandler,
   createKbWipeHandler,
+  createOpenRouterCreditsHandler,
   createPurgeOutcomesHandler,
   createReseedVacanciesHandler,
+  createRestartHandler,
   createSetTelegramWebhookHandler,
   createUserbotQueueStatsHandler,
 } from "./routes/ops.ts";
@@ -92,6 +94,7 @@ export {
 export {
   createGetRuntimeSettingsHandler,
   createUpdateRuntimeSettingsHandler,
+  createValidateKeyHandler,
 } from "./routes/settings.ts";
 export {
   createGetShadowEvalHandler,
