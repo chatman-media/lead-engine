@@ -1,69 +1,107 @@
+import type { MessageRow } from "../db/repos/messages.ts";
+import type { ChatMessage } from "../rag/chat.ts";
 import { summarizeConversation } from "../rag/summarize-conversation.ts";
 import type { ProcessInboundDeps } from "./webhook-types.ts";
 
-// Conversation summary refresh thresholds. Tunable via constants here, not
-// env vars — these are quality knobs not deployment knobs, and they should
-// stay coupled to RECENT_HISTORY_SIZE (12) used in runRagForInbound.
-const SUMMARY_START_THRESHOLD = 30; // total messages before summary kicks in
-const SUMMARY_RECENT_WINDOW = 12; // last N raw messages always go in prompt
-const SUMMARY_STALENESS = 8; // refresh once we drift this many msgs past last summary
+/**
+ * Conversation summary refresh thresholds. Quality knobs, not deployment
+ * knobs — kept as constants (coupled to RECENT_HISTORY_SIZE used in
+ * runRagForInbound), not env vars.
+ */
+export interface SummaryThresholds {
+  /** Total messages before a summary is worth the LLM cost. */
+  startThreshold: number;
+  /** Last N raw messages that always go into the prompt verbatim. */
+  recentWindow: number;
+  /** Refresh once we drift this many messages past the last summary. */
+  staleness: number;
+}
+
+export const DEFAULT_SUMMARY_THRESHOLDS: SummaryThresholds = {
+  startThreshold: 30,
+  recentWindow: 12,
+  staleness: 8,
+};
+
+/** Stored-summary shape consumed by the planner (subset of ConversationsRepo). */
+export interface StoredSummary {
+  summarizedThroughMsgId?: number;
+  summary?: string;
+}
+
+export interface SummaryPlan {
+  /** New messages to feed the summarizer (oldest first). */
+  messages: ChatMessage[];
+  /** Message id the summary will be current through. */
+  throughId: number;
+  /** True when refining an existing summary rather than creating the first. */
+  refining: boolean;
+}
 
 /**
- * Lazy summary refresh after a reply. Skipped on short conversations to
- * avoid LLM cost when a summary wouldn't help. Otherwise:
- *   - if no summary yet → summarize all but the recent window
- *   - if summary stale (gap to current latest > SUMMARY_STALENESS) → refresh
- *     by passing the previous summary + new chunk to the summarizer (refining,
- *     not re-summarizing the whole history)
- *
- * Fire-and-forget — errors logged, current turn already replied.
+ * Decide whether — and what — to summarize. Pure: no I/O, fully unit-tested.
+ * Returns null to skip (conversation too short, summary still fresh, or
+ * nothing new since the last cutoff).
  */
-export async function runConversationSummaryRefresh(d: ProcessInboundDeps): Promise<void> {
-  if (!d.rag?.conversationSummary) return;
+export function planSummaryRefresh(
+  all: MessageRow[],
+  stored: StoredSummary | null,
+  t: SummaryThresholds = DEFAULT_SUMMARY_THRESHOLDS,
+): SummaryPlan | null {
+  if (all.length < t.startThreshold) return null;
 
-  const all = await d.messages.listByConversation(d.conv.id, 500);
-  if (all.length < SUMMARY_START_THRESHOLD) return;
-
-  const stored = await d.conversations.getSummary(d.conv.id);
-  const _latestId = all[all.length - 1]!.id;
   const lastSummarizedId = stored?.summarizedThroughMsgId ?? 0;
+  // Anything strictly older than the recent window is fair game.
+  const summarizableTail = all.slice(0, all.length - t.recentWindow);
+  const lastSummarizable = summarizableTail[summarizableTail.length - 1];
+  if (!lastSummarizable) return null;
 
-  // Anything strictly older than the recent window is fair game for the
-  // summarizer. We add `+1` margin so the just-replied turn doesn't get
-  // pulled in mid-stride.
-  const summarizableTail = all.slice(0, all.length - SUMMARY_RECENT_WINDOW);
-  if (summarizableTail.length === 0) return;
-
-  const lastSummarizable = summarizableTail[summarizableTail.length - 1]!;
   const gap = lastSummarizable.id - lastSummarizedId;
-  if (stored && gap < SUMMARY_STALENESS) return; // not stale enough yet
+  if (stored && gap < t.staleness) return null; // not stale enough yet
 
-  // When refreshing: only feed the slice that's NEW since the previous
-  // summary cutoff. Combined with `previousSummary` parameter the model
-  // refines instead of re-reading everything.
+  // Only the slice that is NEW since the previous summary cutoff — combined
+  // with `previousSummary` the model refines instead of re-reading all.
   const newSlice = summarizableTail.filter(
     (m) =>
       m.id > lastSummarizedId &&
       (m.role === "user" || m.role === "assistant" || m.role === "human"),
   );
-  if (newSlice.length === 0) return;
+  if (newSlice.length === 0) return null;
 
-  const messages = newSlice.map((m) => ({
-    role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
-    content: m.text,
-  }));
+  return {
+    messages: newSlice.map((m) => ({
+      role: m.role === "user" ? "user" : "assistant",
+      content: m.text,
+    })),
+    throughId: lastSummarizable.id,
+    refining: stored !== null,
+  };
+}
+
+/**
+ * Lazy summary refresh after a reply. Skipped on short conversations to
+ * avoid LLM cost when a summary wouldn't help. Fire-and-forget — errors
+ * logged, current turn already replied.
+ */
+export async function runConversationSummaryRefresh(d: ProcessInboundDeps): Promise<void> {
+  if (!d.rag?.conversationSummary) return;
+
+  const all = await d.messages.listByConversation(d.conv.id, 500);
+  const stored = await d.conversations.getSummary(d.conv.id);
+  const plan = planSummaryRefresh(all, stored);
+  if (!plan) return;
 
   try {
     const summary = await summarizeConversation({
-      messagesToSummarize: messages,
+      messagesToSummarize: plan.messages,
       chat: d.rag.chat,
       ...(stored?.summary ? { previousSummary: stored.summary } : {}),
     });
     if (summary.trim().length > 0) {
-      await d.conversations.setSummary(d.conv.id, summary, lastSummarizable.id);
+      await d.conversations.setSummary(d.conv.id, summary, plan.throughId);
     }
     console.log(
-      `[summary] conv=${d.conv.id} refreshed through msg=${lastSummarizable.id} (gap=${gap}, refined=${stored !== null})`,
+      `[summary] conv=${d.conv.id} refreshed through msg=${plan.throughId} (refined=${plan.refining})`,
     );
   } catch (err) {
     console.error("[summary] refresh failed:", err);
