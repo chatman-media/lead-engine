@@ -2,7 +2,12 @@ import { config } from "../config.ts";
 import { extractIntake } from "../leads/intake.ts";
 import { LeadsService } from "../leads/service.ts";
 import { type IntakeFields, isIntakeComplete } from "../leads/templates.ts";
-import { extractVisaDocs, type VisaFields } from "../leads/visa-docs.ts";
+import {
+  extractVisaDocs,
+  internalPassportToVisaFields,
+  passportToVisaFields,
+  type VisaFields,
+} from "../leads/visa-docs.ts";
 import type { PassportIdentity, PhotoClass } from "../rag/vision.ts";
 import type { ProcessInboundDeps } from "./webhook-types.ts";
 
@@ -178,6 +183,23 @@ export async function runVisaDocsUpdate(d: ProcessInboundDeps): Promise<void> {
     chat: d.rag.chat,
     ...(existing ? { existingDocs: existing } : {}),
   });
+
+  // Pre-fill identity fields the passport-photo OCR already captured —
+  // загранпаспорт first (authoritative Latin / MRZ data), then the internal
+  // passport for the national ID number. Only empty slots are filled so
+  // chat-extracted values stay intact. Mirrors `startVisaInterview` so the
+  // visa anketa shows recognised passport data during docs_pending too,
+  // not only once the lead reaches `submitted`.
+  const fillEmpty = (fields: Partial<Record<string, string>>): void => {
+    const target = merged as Record<string, string>;
+    for (const [key, value] of Object.entries(fields)) {
+      if (value && !target[key]?.trim()) target[key] = value;
+    }
+  };
+  const passport = await d.messages.passportFieldsForConversation(d.conv.id);
+  if (passport) fillEmpty(passportToVisaFields(passport));
+  const internalPassport = await d.messages.internalPassportFieldsForConversation(d.conv.id);
+  if (internalPassport) fillEmpty(internalPassportToVisaFields(internalPassport));
 
   // Only persist when the merge produced any change at all — avoids
   // bumping updated_at + WS noise on every silent turn.
