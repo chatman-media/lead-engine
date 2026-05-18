@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   extractVisaDocs,
   internalPassportToVisaFields,
+  interpretInterviewAnswer,
+  parseInterpretResult,
   parseVisaDocsJson,
   passportToVisaFields,
   toIsoDate,
@@ -109,6 +111,155 @@ describe("extractVisaDocs", () => {
     expect(chat.calls).toBe(0);
     expect(merged.family_name).toBe("Ivanova");
     expect(merged.phone).toBeUndefined();
+  });
+});
+
+describe("parseInterpretResult", () => {
+  test("plain value lands in the current field", () => {
+    const r = parseInterpretResult(
+      `{"patch":{"family_name":"Kireeva"},"answered_current":true,"off_topic":false}`,
+      "family_name",
+      "Kireeva",
+    );
+    expect(r).toEqual({
+      patch: { family_name: "Kireeva" },
+      answeredCurrent: true,
+      offTopic: false,
+      llmFailed: false,
+    });
+  });
+
+  test("cross-field correction: splits name + surname, fixes earlier field", () => {
+    const r = parseInterpretResult(
+      `{"patch":{"given_name":"Alexandra","family_name":"Kireeva"},` +
+        `"answered_current":true,"off_topic":false}`,
+      "given_name",
+      "перепутала Alexandra имя, Kireeva фамилия",
+    );
+    expect(r.patch).toEqual({ given_name: "Alexandra", family_name: "Kireeva" });
+    expect(r.answeredCurrent).toBe(true);
+    expect(r.offTopic).toBe(false);
+    expect(r.llmFailed).toBe(false);
+  });
+
+  test("correction-only message does not answer the current field", () => {
+    const r = parseInterpretResult(
+      `{"patch":{"family_name":"Kireeva"},"answered_current":false,"off_topic":false}`,
+      "given_name",
+      "у меня фамилия неправильная, надо Kireeva",
+    );
+    expect(r.patch).toEqual({ family_name: "Kireeva" });
+    expect(r.answeredCurrent).toBe(false);
+    expect(r.llmFailed).toBe(false);
+  });
+
+  test("off-topic question yields an empty patch", () => {
+    const r = parseInterpretResult(
+      `{"patch":{},"answered_current":false,"off_topic":true}`,
+      "date_of_birth",
+      "а сколько это займёт времени?",
+    );
+    expect(r.offTopic).toBe(true);
+    expect(r.patch).toEqual({});
+    expect(r.llmFailed).toBe(false);
+  });
+
+  test("strips a hallucinated field absent from the message", () => {
+    const r = parseInterpretResult(
+      `{"patch":{"given_name":"Alexandra","passport_number":"123456789"},` +
+        `"answered_current":true,"off_topic":false}`,
+      "given_name",
+      "Alexandra",
+    );
+    expect(r.patch).toEqual({ given_name: "Alexandra" });
+    expect((r.patch as Record<string, unknown>).passport_number).toBeUndefined();
+  });
+
+  test("allows the current field to be normalised (date) even if not a substring", () => {
+    const r = parseInterpretResult(
+      `{"patch":{"date_of_birth":"1998-04-12"},"answered_current":true,"off_topic":false}`,
+      "date_of_birth",
+      "12 апреля 1998",
+    );
+    expect(r.patch.date_of_birth).toBe("1998-04-12");
+    expect(r.answeredCurrent).toBe(true);
+  });
+
+  test("garbage marks llmFailed so the caller falls back", () => {
+    expect(parseInterpretResult("nope", "family_name", "x").llmFailed).toBe(true);
+    expect(parseInterpretResult("", "family_name", "x").llmFailed).toBe(true);
+    expect(parseInterpretResult("{ broken", "family_name", "x").llmFailed).toBe(true);
+  });
+
+  test("answered_current with no value for the current field is inconsistent → llmFailed", () => {
+    const r = parseInterpretResult(
+      `{"patch":{},"answered_current":true,"off_topic":false}`,
+      "family_name",
+      "Kireeva",
+    );
+    expect(r.llmFailed).toBe(true);
+  });
+
+  test("nothing usable (empty patch, not answered, not off-topic) → llmFailed", () => {
+    const r = parseInterpretResult(
+      `{"patch":{},"answered_current":false,"off_topic":false}`,
+      "family_name",
+      "Kireeva",
+    );
+    expect(r.llmFailed).toBe(true);
+  });
+});
+
+describe("interpretInterviewAnswer", () => {
+  test("returns the parsed interpretation from the LLM", async () => {
+    const chat = fakeChat(
+      `{"patch":{"given_name":"Alexandra","family_name":"Kireeva"},` +
+        `"answered_current":true,"off_topic":false}`,
+    );
+    const r = await interpretInterviewAnswer({
+      currentField: "given_name",
+      question: "Given name",
+      userMessage: "перепутала Alexandra имя, Kireeva фамилия",
+      existingDocs: { family_name: "Alexandra" },
+      chat,
+    });
+    expect(chat.calls).toBe(1);
+    expect(r.patch).toEqual({ given_name: "Alexandra", family_name: "Kireeva" });
+    expect(r.answeredCurrent).toBe(true);
+    expect(r.llmFailed).toBe(false);
+  });
+
+  test('treats "нет" as a valid answer for the current field', async () => {
+    const chat = fakeChat(
+      `{"patch":{"other_nationalities":"no"},"answered_current":true,"off_topic":false}`,
+    );
+    const r = await interpretInterviewAnswer({
+      currentField: "other_nationalities",
+      question: "Other nationalities",
+      userMessage: "нет",
+      existingDocs: {},
+      chat,
+    });
+    expect(r.patch.other_nationalities).toBe("no");
+    expect(r.answeredCurrent).toBe(true);
+  });
+
+  test("returns llmFailed on LLM error", async () => {
+    const failing: ChatClient = {
+      async complete() {
+        throw new Error("boom");
+      },
+    };
+    const r = await interpretInterviewAnswer({
+      currentField: "family_name",
+      question: "Family name",
+      userMessage: "Kireeva",
+      existingDocs: {},
+      chat: failing,
+    });
+    expect(r.llmFailed).toBe(true);
+    expect(r.patch).toEqual({});
+    expect(r.answeredCurrent).toBe(false);
   });
 });
 

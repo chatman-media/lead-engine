@@ -20,6 +20,15 @@ export interface RagDeps {
   embedder: EmbeddingClient;
   chat: ChatClient;
   /**
+   * Dedicated chat client for the step-by-step visa-interview answer
+   * interpreter (`interpretInterviewAnswer`). Wired to the vision provider
+   * (Gemini Flash by default) so the interview reads answers with a fast,
+   * cheap model independent of the main `chat` backbone. When unset, the
+   * interview falls back to `chat`, and if that is also unset, to the
+   * legacy verbatim-store behaviour.
+   */
+  visaInterpretChat?: ChatClient;
+  /**
    * Enable cross-session memory: after each turn, extract facts about the
    * candidate and persist them in users.profile_json.memory. Facts are
    * injected into the system prompt on subsequent turns so the bot doesn't
