@@ -35,12 +35,7 @@ import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const sql = getTestSql();
 beforeAll(() => setupTestDb(sql));
-afterEach(async () => {
-  await cleanTestDb(sql);
-  // userbot_delete_queue is not in cleanTestDb's TRUNCATE list; drain it here
-  // so rows from this file's tests don't leak into later tests.
-  await sql`TRUNCATE userbot_delete_queue RESTART IDENTITY`;
-});
+afterEach(() => cleanTestDb(sql));
 afterAll(() => sql.end());
 
 // Skip the argon2 password hash — coach_proposals.decided_by_admin_id has a
