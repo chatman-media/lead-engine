@@ -135,6 +135,7 @@ export function DialogHost() {
             className="dialog"
             role="dialog"
             aria-modal="true"
+            data-testid="dialog"
             onMouseDown={(e) => e.stopPropagation()}
           >
             {dialog.opts.title && <div className="dialog-title">{dialog.opts.title}</div>}
@@ -143,18 +144,25 @@ export function DialogHost() {
               <input
                 ref={inputRef}
                 className="dialog-input"
+                data-testid="dialog-input"
                 value={inputValue}
                 placeholder={dialog.opts.placeholder ?? ""}
                 onChange={(e) => setInputValue(e.target.value)}
               />
             )}
             <div className="dialog-actions">
-              <button type="button" className="btn btn-ghost" onClick={cancel}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                data-testid="dialog-cancel"
+                onClick={cancel}
+              >
                 {dialog.opts.cancelLabel ?? "Отмена"}
               </button>
               <button
                 ref={confirmRef}
                 type="button"
+                data-testid="dialog-confirm"
                 className={
                   dialog.kind === "confirm" && dialog.opts.danger
                     ? "btn btn-danger"

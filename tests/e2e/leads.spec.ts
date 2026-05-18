@@ -70,9 +70,10 @@ test.describe("Lead pipeline e2e", () => {
     const card = page.getByTestId("lead-card").first();
     await expect(card).toBeVisible();
 
-    // Reject prompts for a reason — Playwright's prompt dialog handler.
-    page.once("dialog", (d) => d.accept("не подходит по возрасту"));
+    // Reject opens the custom prompt dialog — fill the reason and confirm.
     await card.getByTestId("lead-reject").click();
+    await page.getByTestId("dialog-input").fill("не подходит по возрасту");
+    await page.getByTestId("dialog-confirm").click();
 
     await expect
       .poll(async () => (await getLeadFromApi(request, 7002)).state, { timeout: 5000 })
@@ -87,8 +88,9 @@ test.describe("Lead pipeline e2e", () => {
 
     const card = page.getByTestId("lead-card").first();
     await expect(card).toBeVisible();
-    page.once("dialog", (d) => d.accept());
+    // Submit opens the custom confirm dialog.
     await card.getByTestId("lead-submit-visa").click();
+    await page.getByTestId("dialog-confirm").click();
 
     await expect
       .poll(async () => (await getLeadFromApi(request, 7003)).application_id, { timeout: 5000 })
