@@ -7,6 +7,7 @@ import {
   type PairwiseMatrixRow,
   type SelfPlayPersona,
 } from "../api.ts";
+import { confirmDialog } from "../components/Dialogs.tsx";
 
 const WINNER_COLOR: Record<PairwiseMatchRow["winner"], string> = {
   a: "var(--green, #2ea043)",
@@ -65,7 +66,15 @@ export function Pairwise() {
   }, [personas]);
 
   async function deleteMatch(id: number) {
-    if (!window.confirm(`Delete pairwise match #${id}? Solo transcripts stay.`)) return;
+    if (
+      !(await confirmDialog("Solo transcripts stay.", {
+        title: `Delete pairwise match #${id}?`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     try {
       await api.deletePairwiseMatch(id);
       await refresh();

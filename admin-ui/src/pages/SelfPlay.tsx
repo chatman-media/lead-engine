@@ -6,6 +6,7 @@ import {
   type SelfPlayMatrixRow,
   type SelfPlayPersona,
 } from "../api.ts";
+import { confirmDialog } from "../components/Dialogs.tsx";
 
 const OUTCOME_COLOR: Record<SelfPlayMatchSummary["outcome"], string> = {
   won: "var(--green, #2ea043)",
@@ -72,8 +73,15 @@ export function SelfPlay() {
   }
 
   async function deleteMatch(id: number) {
-    if (!confirm("Удалить этот матч из статистики? Это не повлияет на скиллы (skill_outcomes)."))
+    if (
+      !(await confirmDialog("Это не повлияет на скиллы (skill_outcomes).", {
+        title: "Удалить матч из статистики?",
+        confirmLabel: "Удалить",
+        danger: true,
+      }))
+    ) {
       return;
+    }
     try {
       await api.deleteSelfPlayMatch(id);
       if (openId === id) {

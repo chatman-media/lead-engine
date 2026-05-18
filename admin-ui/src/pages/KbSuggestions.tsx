@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ws } from "../App.tsx";
 import { api, type KbSuggestion, type SuggestionCounts, type SuggestionStatus } from "../api.ts";
+import { confirmDialog, notify, promptDialog } from "../components/Dialogs.tsx";
 
 const TABS: { key: SuggestionStatus | "all"; label: string }[] = [
   { key: "pending", label: "Ожидает" },
@@ -52,10 +53,17 @@ export function KbSuggestions() {
     const localDraft = draftRefs.current[s.id];
     const draft = localDraft !== undefined ? localDraft : (s.answer_draft ?? "");
     if (!draft.trim()) {
-      alert("Сначала добавьте ответ в поле ниже.");
+      notify("Сначала добавьте ответ в поле ниже.", "error");
       return;
     }
-    if (!confirm(`Добавить в KB?\nВопрос: "${s.question_text}"`)) return;
+    if (
+      !(await confirmDialog(`Вопрос: "${s.question_text}"`, {
+        title: "Добавить в KB?",
+        confirmLabel: "Добавить",
+      }))
+    ) {
+      return;
+    }
     setBusy(s.id);
     try {
       // Save draft to server first if it differs from what's persisted.
@@ -66,21 +74,25 @@ export function KbSuggestions() {
       showFlash(`✓ Добавлено в KB`);
       await load(tab);
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      notify(err instanceof Error ? err.message : String(err), "error");
     } finally {
       setBusy(null);
     }
   }
 
   async function handleReject(s: KbSuggestion) {
-    const reason = prompt("Причина отклонения (необязательно):") ?? "";
+    const reason = await promptDialog("Причина отклонения (необязательно):", {
+      title: "Отклонить предложение",
+      placeholder: "Причина",
+    });
+    if (reason === null) return;
     setBusy(s.id);
     try {
       await api.rejectKbSuggestion(s.id, reason || undefined);
       showFlash("Отклонено");
       await load(tab);
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      notify(err instanceof Error ? err.message : String(err), "error");
     } finally {
       setBusy(null);
     }

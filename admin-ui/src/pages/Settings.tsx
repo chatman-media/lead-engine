@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { useAdmin } from "../App.tsx";
 import { api, type RuntimeSetting } from "../api.ts";
+import { confirmDialog } from "../components/Dialogs.tsx";
 import { CONFIGURABLE_TABS, useTabVisibility } from "../useTabVisibility.ts";
 
 const sectionLabelStyle: React.CSSProperties = {
@@ -161,7 +162,14 @@ function RuntimeSettingsSection() {
   }
 
   async function applyAndRestart() {
-    if (!confirm("Перезапустить бота сейчас? Он будет недоступен ~15 секунд.")) return;
+    if (
+      !(await confirmDialog("Бот будет недоступен ~15 секунд.", {
+        title: "Перезапустить бота сейчас?",
+        confirmLabel: "Перезапустить",
+      }))
+    ) {
+      return;
+    }
     setRestarting(true);
     try {
       await api.opsRestart();

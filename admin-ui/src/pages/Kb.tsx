@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type KbChunkPreview, type KbDocument } from "../api.ts";
+import { confirmDialog } from "../components/Dialogs.tsx";
 
 /**
  * Operator-facing KB management. The KB is the slow-changing background
@@ -45,9 +46,17 @@ export function Kb() {
 
   async function handleDelete(d: KbDocument) {
     const msg =
-      `Удалить документ "${d.title}"? Это удалит и все его чанки из векторного индекса. ` +
+      `Документ "${d.title}" и все его чанки будут удалены из векторного индекса. ` +
       `Бот перестанет ссылаться на эти данные начиная со следующего сообщения.`;
-    if (!confirm(msg)) return;
+    if (
+      !(await confirmDialog(msg, {
+        title: "Удалить документ?",
+        confirmLabel: "Удалить",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setError(null);
     try {
       await api.deleteKbDocument(d.id);

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ws } from "../App.tsx";
 import { api, type Conversation, type ConversationSource } from "../api.ts";
+import { confirmDialog } from "../components/Dialogs.tsx";
 
 function relativeTime(unix: number | null) {
   if (!unix) return "—";
@@ -84,9 +85,10 @@ export function Chats() {
     e.stopPropagation();
     const label = c.user.tg_username ? `@${c.user.tg_username}` : `tg:${c.user.tg_user_id}`;
     if (
-      !confirm(
-        `Удалить чат с ${label}? Сообщения будут стёрты, статус сбросится. Действие необратимо.`,
-      )
+      !(await confirmDialog(
+        `Сообщения чата с ${label} будут стёрты, статус сбросится. Действие необратимо.`,
+        { title: "Удалить чат?", confirmLabel: "Удалить", danger: true },
+      ))
     ) {
       return;
     }

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { type Admin, api } from "./api.ts";
+import { DialogHost } from "./components/Dialogs.tsx";
 import { Layout } from "./components/Layout.tsx";
 import { Analytics } from "./pages/Analytics.tsx";
 import { Chat } from "./pages/Chat.tsx";
@@ -92,6 +93,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 export function App() {
   return (
     <BrowserRouter>
+      <DialogHost />
       <Routes>
         <Route path="/admin/login" element={<Login />} />
         <Route

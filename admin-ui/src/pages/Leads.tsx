@@ -10,6 +10,7 @@ import {
   type LeadState,
   type VisaDocs,
 } from "../api.ts";
+import { confirmDialog, notify, promptDialog } from "../components/Dialogs.tsx";
 
 /**
  * Subset of visa fields the admin shows as "required" — mirrors
@@ -250,42 +251,60 @@ export function Leads() {
               }
               onIntakeSent={() => refresh()}
               onApprove={() => withBusy(lead.id, () => api.approveLead(lead.id))}
-              onReject={() => {
-                const reason = prompt("Причина отказа (Enter для шаблонной формулировки):") ?? "";
+              onReject={async () => {
+                const reason = await promptDialog(
+                  "Причина отказа — оставьте пустым для шаблонной формулировки.",
+                  { title: `Отклонить лида #${lead.id}`, placeholder: "Причина отказа" },
+                );
+                if (reason === null) return;
                 return withBusy(lead.id, () => api.rejectLead(lead.id, reason || undefined));
               }}
-              onSubmitToVisa={() => {
+              onSubmitToVisa={async () => {
                 if (
-                  !confirm(
-                    "Передать в подачу на визу? Бот сгенерирует номер заявки, опубликует пакет в VISA_CHAT_ID и отметит лида как готового к консулу.",
-                  )
+                  !(await confirmDialog(
+                    "Бот сгенерирует номер заявки, опубликует пакет в VISA_CHAT_ID и отметит лида как готового к консулу.",
+                    { title: "Передать в подачу на визу?", confirmLabel: "Передать" },
+                  ))
                 ) {
-                  return Promise.resolve();
+                  return;
                 }
                 return withBusy(lead.id, () => api.submitLeadToVisa(lead.id));
               }}
-              onMarkSubmitted={() => {
+              onMarkSubmitted={async () => {
                 if (
-                  !confirm(
-                    "Перевести в «подача на визу»? Бот начнёт пошагово запрашивать у девушки английскую визовую анкету — по одному пункту.",
-                  )
+                  !(await confirmDialog(
+                    "Бот начнёт пошагово запрашивать у девушки английскую визовую анкету — по одному пункту.",
+                    { title: "Перевести в «подача на визу»?", confirmLabel: "Перевести" },
+                  ))
                 ) {
-                  return Promise.resolve();
+                  return;
                 }
                 return withBusy(lead.id, () => api.markLeadSubmitted(lead.id));
               }}
-              onRevert={() => {
+              onRevert={async () => {
                 if (
-                  !confirm(
-                    "Вернуть лида на предыдущий шаг? Используйте, если статус изменили по ошибке. Действие записывается в историю.",
-                  )
+                  !(await confirmDialog(
+                    "Используйте, если статус изменили по ошибке. Действие записывается в историю.",
+                    { title: "Вернуть лида на предыдущий шаг?", confirmLabel: "Вернуть" },
+                  ))
                 ) {
-                  return Promise.resolve();
+                  return;
                 }
                 return withBusy(lead.id, () => api.revertLead(lead.id));
               }}
-              onDelete={() => {
-                if (!confirm(`Удалить лид #${lead.id}? Нельзя будет его восстановить.`)) return;
+              onDelete={async () => {
+                if (
+                  !(await confirmDialog(
+                    `Лид #${lead.id} будет удалён без возможности восстановления.`,
+                    {
+                      title: "Удалить лида?",
+                      confirmLabel: "Удалить",
+                      danger: true,
+                    },
+                  ))
+                ) {
+                  return;
+                }
                 return withBusy(lead.id, () => api.deleteLead(lead.id));
               }}
             />
@@ -580,19 +599,21 @@ function NotesPane({ leadId }: { leadId: number }) {
       setNotes((prev) => (prev ? [note, ...prev] : [note]));
       setDraft("");
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      notify(err instanceof Error ? err.message : String(err), "error");
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete(noteId: number) {
-    if (!confirm("Удалить заметку?")) return;
+    if (!(await confirmDialog("Удалить заметку?", { confirmLabel: "Удалить", danger: true }))) {
+      return;
+    }
     try {
       await api.deleteLeadNote(leadId, noteId);
       setNotes((prev) => prev?.filter((n) => n.id !== noteId) ?? null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      notify(err instanceof Error ? err.message : String(err), "error");
     }
   }
 

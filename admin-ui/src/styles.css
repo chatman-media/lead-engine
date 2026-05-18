@@ -846,3 +846,131 @@ textarea.input {
   color: var(--amber);
   border-color: var(--amber);
 }
+
+/* ─── Dialogs (confirm / prompt) ─────────────────────────────────────── */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(40, 36, 28, 0.42);
+  backdrop-filter: blur(2px);
+  animation: fade-in 0.12s ease-out;
+}
+
+.dialog {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  animation: dialog-in 0.14s ease-out;
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.dialog-title {
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dialog-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: pre-wrap;
+}
+
+.dialog-input {
+  width: 100%;
+  padding: 8px 11px;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.dialog-input:focus {
+  outline: none;
+  border-color: var(--amber);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ─── Toasts (alert replacement) ─────────────────────────────────────── */
+
+.toast-stack {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 360px;
+}
+
+.toast {
+  text-align: left;
+  padding: 11px 14px;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-3);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  animation: toast-in 0.16s ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.toast-error {
+  border-left-color: var(--red);
+}
+
+.toast-success {
+  border-left-color: var(--green);
+}
+
+.toast-info {
+  border-left-color: var(--blue);
+}
