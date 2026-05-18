@@ -1,14 +1,19 @@
 import { config, visionCredentials } from "../config.ts";
 import { FULL_BODY_PHOTO_NUDGE } from "../leads/templates.ts";
 import { log } from "../log.ts";
-import { classifyPhoto, extractPassportIdentity } from "../rag/vision.ts";
+import {
+  classifyPhoto,
+  extractInternalPassportIdentity,
+  extractPassportIdentity,
+} from "../rag/vision.ts";
 import type { ProcessInboundDeps } from "./webhook-types.ts";
 
 /**
  * Per-turn maintenance hook: classify any not-yet-classified photo the
- * candidate uploaded (passport / full-body / portrait / other) via a
- * vision model (OpenRouter or OpenAI, see VISION_PROVIDER), then nudge
- * her once if a full-body shot is still missing.
+ * candidate uploaded (passport / internal_passport / full-body /
+ * portrait / other) via a vision model (OpenRouter or OpenAI, see
+ * VISION_PROVIDER), then nudge her once if a full-body shot is still
+ * missing.
  *
  * Runs BEFORE `runIntakeUpdate` so the freshly-stamped
  * `meta_json.media.photo_class` values are visible to the intake
@@ -131,6 +136,48 @@ async function classifyAndAcknowledge(
     }
   }
 
+  // 1c. Extract identity fields from photos classified as an internal
+  //     (Russian) passport — national ID number, date / place of birth.
+  //     Same self-healing retry semantics as the загранпаспорт step.
+  const internalPassportPhotos = await d.messages.internalPassportPhotosNeedingExtraction(
+    d.conv.id,
+  );
+  for (const photo of internalPassportPhotos.slice(0, MAX_PHOTOS_PER_TURN)) {
+    try {
+      const res = await d.telegram.downloadFile(photo.file_id);
+      if (!res.ok) {
+        log.error("vision: telegram file download failed (internal passport extract)", {
+          scope: "vision",
+          messageId: photo.id,
+          status: res.status,
+        });
+        continue;
+      }
+      const bytes = await res.arrayBuffer();
+      const fields = await extractInternalPassportIdentity({
+        bytes,
+        ...(photo.mime_type ? { mimeType: photo.mime_type } : {}),
+        provider: creds.provider,
+        model: creds.model,
+        apiKey: creds.apiKey,
+        baseUrl: creds.baseUrl,
+      });
+      await d.messages.setInternalPassportFields(photo.id, fields);
+      log.info("vision: internal passport fields extracted", {
+        scope: "vision",
+        messageId: photo.id,
+        fields: Object.keys(fields),
+      });
+    } catch (err) {
+      // Leave unextracted — retried on the next turn.
+      log.error("vision: internal passport extraction failed", {
+        scope: "vision",
+        messageId: photo.id,
+        err,
+      });
+    }
+  }
+
   // 2. Nudge for a missing full-body shot. Needs a lead to store the
   //    one-shot dedup flag. Bootstrap one the same way `runIntakeUpdate`
   //    does (requires an ops chat).
@@ -143,7 +190,8 @@ async function classifyAndAcknowledge(
   if (lead.state !== "intake_pending" && lead.state !== "intake_complete") return;
 
   const counts = await d.messages.countPhotosByClass(d.conv.id);
-  const totalClassified = counts.passport + counts.full_body + counts.portrait + counts.other;
+  const totalClassified =
+    counts.passport + counts.internal_passport + counts.full_body + counts.portrait + counts.other;
 
   // `claimMediaAck` flips the dedup flag atomically and returns true to
   // exactly one caller, so an 8-photo album (8 parallel webhooks) yields a

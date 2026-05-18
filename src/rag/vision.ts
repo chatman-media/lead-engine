@@ -16,19 +16,26 @@ import type { FetchLike } from "./chat.ts";
  * `reasoning` request param is sent only for that provider.
  */
 
-export const PHOTO_CLASSES = ["passport", "full_body", "portrait", "other"] as const;
+export const PHOTO_CLASSES = [
+  "passport",
+  "internal_passport",
+  "full_body",
+  "portrait",
+  "other",
+] as const;
 export type PhotoClass = (typeof PHOTO_CLASSES)[number];
 
 const SYSTEM_PROMPT = `Ты классифицируешь фотографию из переписки рекрутингового агентства.
 
 Отнеси изображение РОВНО к одной из категорий и верни ТОЛЬКО одно слово:
 
-- passport — фотография или скан страницы паспорта/загранпаспорта (видны поля документа, фото-страница, машиночитаемая зона).
+- passport — страница ЗАГРАНИЧНОГО паспорта (загранпаспорт): фото-страница с латинскими полями и машиночитаемой зоной MRZ внизу (две строки из букв, цифр и символов «<»).
+- internal_passport — страница ВНУТРЕННЕГО / российского паспорта: разворот с фото и полями на русском (фамилия/имя кириллицей, серия и номер, кем выдан), MRZ нет.
 - full_body — человек снят в полный рост (видно всю фигуру от головы до ног или почти всю).
 - portrait — обычное фото человека: лицо, по пояс, селфи, не в полный рост.
 - other — всё остальное (пейзаж, предмет, скриншот, документ, который не паспорт, и т.п.).
 
-Ответь СТРОГО одним словом из списка: passport, full_body, portrait, other.
+Ответь СТРОГО одним словом из списка: passport, internal_passport, full_body, portrait, other.
 Без знаков препинания, без пояснений.`;
 
 export interface ClassifyPhotoOptions {
@@ -56,9 +63,11 @@ interface VisionResponse {
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-/** Maps a free-form model reply onto a `PhotoClass`, defaulting to `other`. */
+/** Maps a free-form model reply onto a `PhotoClass`, defaulting to `other`.
+ *  `internal_passport` is listed first so it isn't shadowed by the
+ *  `passport` substring it contains. */
 export function parsePhotoClass(raw: string): PhotoClass {
-  const word = raw.toLowerCase().match(/passport|full_body|portrait|other/);
+  const word = raw.toLowerCase().match(/internal_passport|passport|full_body|portrait|other/);
   if (word) return word[0] as PhotoClass;
   return "other";
 }
@@ -144,6 +153,12 @@ export interface PassportIdentity {
   passport_number?: string;
   /** Expiration date, formatted dd.mm.yyyy to match the intake field. */
   passport_expiry?: string;
+  /** Date of birth, formatted dd.mm.yyyy (read off the MRZ). */
+  date_of_birth?: string;
+  /** Nationality as an English country name (from the MRZ country code). */
+  nationality?: string;
+  /** Place of birth, exactly as printed on the passport data page. */
+  place_of_birth?: string;
 }
 
 const PASSPORT_PROMPT = `Ты извлекаешь данные из фотографии загранпаспорта.
@@ -156,6 +171,10 @@ const PASSPORT_PROMPT = `Ты извлекаешь данные из фотог�
 - given_name: имя ЛАТИНИЦЕЙ, как напечатано в паспорте / в MRZ
 - passport_number: номер паспорта
 - passport_expiry: дата окончания срока действия в формате дд.мм.гггг
+- date_of_birth: дата рождения в формате дд.мм.гггг (берётся из MRZ)
+- nationality: гражданство — название страны ПО-АНГЛИЙСКИ (например "Russia"),
+  по 3-буквенному коду страны в MRZ
+- place_of_birth: место рождения, как напечатано на странице с данными
 
 Приоритет источника — MRZ (две нижние строки). Если MRZ нечитаема —
 бери печатные латинские поля. Не транслитерируй и не угадывай сам:
@@ -186,7 +205,15 @@ export function parsePassportJson(raw: string): PassportIdentity {
   }
   const obj = parsed as Record<string, unknown>;
   const out: PassportIdentity = {};
-  for (const key of ["family_name", "given_name", "passport_number", "passport_expiry"] as const) {
+  for (const key of [
+    "family_name",
+    "given_name",
+    "passport_number",
+    "passport_expiry",
+    "date_of_birth",
+    "nationality",
+    "place_of_birth",
+  ] as const) {
     const val = obj[key];
     if (typeof val === "string" && val.trim() && val.trim().length <= 100) {
       out[key] = val.trim();
@@ -196,17 +223,19 @@ export function parsePassportJson(raw: string): PassportIdentity {
 }
 
 /**
- * Reads identity fields off a passport photo via the same vision model
- * used for classification. Caller should only invoke this for photos
- * already classified as `passport`. Throws on transport / API errors so
- * the caller can leave the photo for retry; a successful-but-empty model
- * reply returns `{}` (a valid "nothing readable" result).
+ * Shared transport for the passport / internal-passport extractors:
+ * posts the image to the vision model and returns the raw reply text.
+ * Throws on transport / API errors so the caller can leave the photo
+ * for a retry on the next turn.
  */
-export async function extractPassportIdentity(
+async function runVisionImageExtraction(
   opts: ClassifyPhotoOptions,
-): Promise<PassportIdentity> {
+  systemPrompt: string,
+  userText: string,
+  label: string,
+): Promise<string> {
   if (!opts.apiKey || opts.apiKey.trim().length === 0) {
-    throw new Error("extractPassportIdentity: apiKey required");
+    throw new Error(`${label}: apiKey required`);
   }
   const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
   const fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
@@ -220,11 +249,11 @@ export async function extractPassportIdentity(
     reasoning: { enabled: false },
     max_tokens: 512,
     messages: [
-      { role: "system", content: PASSPORT_PROMPT },
+      { role: "system", content: systemPrompt },
       {
         role: "user",
         content: [
-          { type: "text", text: "Извлеки данные из этого загранпаспорта." },
+          { type: "text", text: userText },
           { type: "image_url", image_url: { url: `data:${mime};base64,${base64}` } },
         ],
       },
@@ -245,19 +274,114 @@ export async function extractPassportIdentity(
   try {
     payload = (await res.json()) as VisionResponse;
   } catch {
-    throw new Error(`extractPassportIdentity: non-JSON response (HTTP ${res.status})`);
+    throw new Error(`${label}: non-JSON response (HTTP ${res.status})`);
   }
   if (!res.ok || payload.error) {
     throw new Error(
-      `extractPassportIdentity: OpenRouter error (HTTP ${res.status}): ${payload.error?.message ?? "unknown"}`,
+      `${label}: vision API error (HTTP ${res.status}): ${payload.error?.message ?? "unknown"}`,
     );
   }
   const choice = payload.choices?.[0];
   const content = choice?.message?.content;
   if (!content) {
-    throw new Error(
-      `extractPassportIdentity: empty content (finish_reason=${choice?.finish_reason ?? "?"})`,
-    );
+    throw new Error(`${label}: empty content (finish_reason=${choice?.finish_reason ?? "?"})`);
   }
+  return content;
+}
+
+/**
+ * Reads identity fields off a загранпаспорт photo. Caller should only
+ * invoke this for photos already classified as `passport`. A
+ * successful-but-empty model reply returns `{}` (a valid "nothing
+ * readable" result).
+ */
+export async function extractPassportIdentity(
+  opts: ClassifyPhotoOptions,
+): Promise<PassportIdentity> {
+  const content = await runVisionImageExtraction(
+    opts,
+    PASSPORT_PROMPT,
+    "Извлеки данные из этого загранпаспорта.",
+    "extractPassportIdentity",
+  );
   return parsePassportJson(content);
+}
+
+/**
+ * Identity fields read off a candidate's INTERNAL (Russian) passport
+ * (внутренний паспорт). Unlike the загранпаспорт it carries no MRZ and
+ * the holder's name is in Cyrillic, so we only pull the fields that are
+ * unambiguous and useful for the visa anketa. Every field optional.
+ */
+export interface InternalPassportIdentity {
+  /** Series + number, e.g. "12 34 567890" — the visa anketa's
+   *  `national_id_number`, which the загранпаспорт does not carry. */
+  national_id_number?: string;
+  /** Date of birth, formatted dd.mm.yyyy. */
+  date_of_birth?: string;
+  /** Place of birth, exactly as printed (Cyrillic). */
+  place_of_birth?: string;
+}
+
+const INTERNAL_PASSPORT_PROMPT = `Ты извлекаешь данные из фотографии ВНУТРЕННЕГО (российского) паспорта.
+
+На изображении — разворот внутреннего паспорта с фотографией и полями
+на русском языке. Машиночитаемой зоны (MRZ) на этой странице нет.
+
+Извлеки и верни СТРОГО JSON-объект с полями (все опциональные):
+- national_id_number: серия и номер паспорта (например "12 34 567890")
+- date_of_birth: дата рождения в формате дд.мм.гггг
+- place_of_birth: место рождения, как напечатано в паспорте
+
+Не транслитерируй и не угадывай сам: бери ровно то, что видно.
+
+ВЕРНИ ТОЛЬКО JSON, без markdown, без \`\`\`, без пояснений.
+Если поле не читается — НЕ включай его в JSON. Если не видно ничего —
+верни {}.`;
+
+/**
+ * Strips markdown / think-tags and parses the model's internal-passport
+ * JSON. Validates value types and length. Exported for unit tests.
+ */
+export function parseInternalPassportJson(raw: string): InternalPassportIdentity {
+  let s = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
+  s = s.replace(/```(?:json)?/gi, "").trim();
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(s.slice(start, end + 1));
+  } catch {
+    return {};
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return {};
+  }
+  const obj = parsed as Record<string, unknown>;
+  const out: InternalPassportIdentity = {};
+  for (const key of ["national_id_number", "date_of_birth", "place_of_birth"] as const) {
+    const val = obj[key];
+    if (typeof val === "string" && val.trim() && val.trim().length <= 100) {
+      out[key] = val.trim();
+    }
+  }
+  return out;
+}
+
+/**
+ * Reads identity fields off an internal-passport photo. Caller should
+ * only invoke this for photos already classified as `internal_passport`.
+ * A successful-but-empty model reply returns `{}`.
+ */
+export async function extractInternalPassportIdentity(
+  opts: ClassifyPhotoOptions,
+): Promise<InternalPassportIdentity> {
+  const content = await runVisionImageExtraction(
+    opts,
+    INTERNAL_PASSPORT_PROMPT,
+    "Извлеки данные из этого паспорта.",
+    "extractInternalPassportIdentity",
+  );
+  return parseInternalPassportJson(content);
 }

@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 
 import {
   classifyPhoto,
+  extractInternalPassportIdentity,
   extractPassportIdentity,
+  parseInternalPassportJson,
   parsePassportJson,
   parsePhotoClass,
 } from "@/rag/vision.ts";
@@ -18,6 +20,11 @@ describe("parsePhotoClass", () => {
   test("extracts the class from a noisy reply", () => {
     expect(parsePhotoClass("Это passport.")).toBe("passport");
     expect(parsePhotoClass("  FULL_BODY\n")).toBe("full_body");
+  });
+
+  test("recognises internal_passport without it being shadowed by passport", () => {
+    expect(parsePhotoClass("internal_passport")).toBe("internal_passport");
+    expect(parsePhotoClass("Это internal_passport.")).toBe("internal_passport");
   });
 
   test("falls back to other on garbage", () => {
@@ -140,11 +147,84 @@ describe("parsePassportJson", () => {
     expect(out).toEqual({ given_name: "SOFIA" });
   });
 
+  test("parses the extended passport fields", () => {
+    const out = parsePassportJson(
+      '{"date_of_birth":"12.04.1998","nationality":"Russia","place_of_birth":"MOSCOW"}',
+    );
+    expect(out).toEqual({
+      date_of_birth: "12.04.1998",
+      nationality: "Russia",
+      place_of_birth: "MOSCOW",
+    });
+  });
+
   test("returns empty object on garbage or empty input", () => {
     expect(parsePassportJson("не вижу паспорт")).toEqual({});
     expect(parsePassportJson("")).toEqual({});
     expect(parsePassportJson("{}")).toEqual({});
     expect(parsePassportJson("[1,2,3]")).toEqual({});
+  });
+});
+
+describe("parseInternalPassportJson", () => {
+  test("parses the internal-passport fields", () => {
+    const out = parseInternalPassportJson(
+      '{"national_id_number":"12 34 567890","date_of_birth":"12.04.1998","place_of_birth":"г. МОСКВА"}',
+    );
+    expect(out).toEqual({
+      national_id_number: "12 34 567890",
+      date_of_birth: "12.04.1998",
+      place_of_birth: "г. МОСКВА",
+    });
+  });
+
+  test("keeps only known fields and trims", () => {
+    const out = parseInternalPassportJson(
+      '<think>x</think>```json\n{"national_id_number":"  12 34 567890 ","junk":"y"}\n```',
+    );
+    expect(out).toEqual({ national_id_number: "12 34 567890" });
+  });
+
+  test("returns empty object on garbage or empty input", () => {
+    expect(parseInternalPassportJson("не вижу паспорт")).toEqual({});
+    expect(parseInternalPassportJson("{}")).toEqual({});
+  });
+});
+
+describe("extractInternalPassportIdentity", () => {
+  test("posts the image and returns parsed internal-passport fields", async () => {
+    const fakeFetch = (async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"national_id_number":"12 34 567890"}' } }],
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+
+    const out = await extractInternalPassportIdentity({
+      bytes: new TextEncoder().encode("fakeimg").buffer as ArrayBuffer,
+      mimeType: "image/png",
+      model: "google/gemini-2.5-flash",
+      apiKey: "k",
+      fetch: fakeFetch,
+    });
+    expect(out).toEqual({ national_id_number: "12 34 567890" });
+  });
+
+  test("throws on API error response", async () => {
+    const fakeFetch = (async () =>
+      new Response(JSON.stringify({ error: { message: "bad request" } }), {
+        status: 400,
+      })) as unknown as typeof fetch;
+
+    expect(
+      extractInternalPassportIdentity({
+        bytes: new ArrayBuffer(4),
+        model: "m",
+        apiKey: "k",
+        fetch: fakeFetch,
+      }),
+    ).rejects.toThrow();
   });
 });
 

@@ -252,7 +252,11 @@ function VisionCard({ status }: { status: SystemStatus }) {
   const v = status.vision;
   const keyMissing = v.enabled && !v.api_key_configured;
   const total =
-    v.classified.passport + v.classified.full_body + v.classified.portrait + v.classified.other;
+    v.classified.passport +
+    v.classified.internal_passport +
+    v.classified.full_body +
+    v.classified.portrait +
+    v.classified.other;
   return (
     <Card title="Распознавание фото" accent={keyMissing ? "var(--amber)" : undefined}>
       <Row
@@ -292,6 +296,7 @@ function VisionCard({ status }: { status: SystemStatus }) {
         распознано фото ({total})
       </div>
       <Row label="загранпаспорт" value={String(v.classified.passport)} mono />
+      <Row label="внутренний паспорт" value={String(v.classified.internal_passport)} mono />
       <Row label="в полный рост" value={String(v.classified.full_body)} mono />
       <Row label="портрет" value={String(v.classified.portrait)} mono />
       <Row label="другое" value={String(v.classified.other)} mono />

@@ -4,6 +4,8 @@ import { VISA_FIELD_LABELS } from "@/leads/visa-docs.ts";
 import {
   firstInterviewField,
   interviewQuestion,
+  interviewQuestionWithPrefill,
+  isInterviewConfirmation,
   nextInterviewField,
   VISA_INTERVIEW_STEPS,
 } from "@/leads/visa-interview.ts";
@@ -59,5 +61,46 @@ describe("interviewQuestion", () => {
 
   test("returns undefined for an unknown field", () => {
     expect(interviewQuestion("not_a_field")).toBeUndefined();
+  });
+});
+
+describe("interviewQuestionWithPrefill", () => {
+  test("returns the bare question when the field is not pre-filled", () => {
+    expect(interviewQuestionWithPrefill("date_of_birth", {})).toBe(
+      interviewQuestion("date_of_birth"),
+    );
+    expect(interviewQuestionWithPrefill("date_of_birth", undefined)).toBe(
+      interviewQuestion("date_of_birth"),
+    );
+    expect(interviewQuestionWithPrefill("date_of_birth", { date_of_birth: "   " })).toBe(
+      interviewQuestion("date_of_birth"),
+    );
+  });
+
+  test("appends a confirm-or-correct hint with the pre-filled value", () => {
+    const out = interviewQuestionWithPrefill("date_of_birth", { date_of_birth: "1998-04-12" });
+    expect(out).toContain("Date of birth");
+    expect(out).toContain("«1998-04-12»");
+    expect(out).toContain("«да»");
+  });
+
+  test("returns undefined for an unknown field", () => {
+    expect(interviewQuestionWithPrefill("not_a_field", { not_a_field: "x" })).toBeUndefined();
+  });
+});
+
+describe("isInterviewConfirmation", () => {
+  test("recognises confirmation words regardless of case / spacing", () => {
+    expect(isInterviewConfirmation("да")).toBe(true);
+    expect(isInterviewConfirmation("  Да ")).toBe(true);
+    expect(isInterviewConfirmation("ВЕРНО")).toBe(true);
+    expect(isInterviewConfirmation("yes")).toBe(true);
+    expect(isInterviewConfirmation("всё верно")).toBe(true);
+  });
+
+  test("treats an actual value as a correction, not a confirmation", () => {
+    expect(isInterviewConfirmation("1998-04-12")).toBe(false);
+    expect(isInterviewConfirmation("Ivanova")).toBe(false);
+    expect(isInterviewConfirmation("")).toBe(false);
   });
 });

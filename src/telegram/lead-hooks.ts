@@ -66,7 +66,14 @@ export async function runIntakeUpdate(d: ProcessInboundDeps): Promise<void> {
   let passportFields: PassportIdentity | undefined;
   if (config.vision.enabled) {
     const counts = await d.messages.countPhotosByClass(d.conv.id);
-    if (counts.passport + counts.full_body + counts.portrait + counts.other > 0) {
+    if (
+      counts.passport +
+        counts.internal_passport +
+        counts.full_body +
+        counts.portrait +
+        counts.other >
+      0
+    ) {
       photoClasses = counts;
     }
     passportFields = (await d.messages.passportFieldsForConversation(d.conv.id)) ?? undefined;

@@ -418,6 +418,7 @@ function MessageBody({ message }: { message: Message }) {
   // (no Bot API file_id) is served from disk by message id.
   const url = media.file_id ? api.tgFileUrl(media.file_id) : api.mediaUrl(message.id);
   const isPassport = media.photo_class === "passport";
+  const isInternalPassport = media.photo_class === "internal_passport";
 
   let preview: React.ReactNode = null;
   if (media.type === "photo") {
@@ -473,7 +474,7 @@ function MessageBody({ message }: { message: Message }) {
       data-photo-class={media.photo_class ?? undefined}
       style={{ display: "flex", flexDirection: "column", gap: 4 }}
     >
-      {isPassport && (
+      {(isPassport || isInternalPassport) && (
         <div
           data-testid="passport-badge"
           style={{
@@ -487,7 +488,7 @@ function MessageBody({ message }: { message: Message }) {
             border: "1px solid rgba(46,160,67,0.3)",
           }}
         >
-          🛂 загранпаспорт
+          {isPassport ? "🛂 загранпаспорт" : "🛂 внутренний паспорт"}
         </div>
       )}
       {preview}

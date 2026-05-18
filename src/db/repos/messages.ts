@@ -1,4 +1,4 @@
-import type { PassportIdentity, PhotoClass } from "../../rag/vision.ts";
+import type { InternalPassportIdentity, PassportIdentity, PhotoClass } from "../../rag/vision.ts";
 import type { Sql } from "../postgres.ts";
 
 export type MessageRole = "user" | "assistant" | "human" | "system";
@@ -192,7 +192,10 @@ export class MessagesRepo {
           'family_name', ${fields.family_name ?? null}::text,
           'given_name', ${fields.given_name ?? null}::text,
           'passport_number', ${fields.passport_number ?? null}::text,
-          'passport_expiry', ${fields.passport_expiry ?? null}::text
+          'passport_expiry', ${fields.passport_expiry ?? null}::text,
+          'date_of_birth', ${fields.date_of_birth ?? null}::text,
+          'nationality', ${fields.nationality ?? null}::text,
+          'place_of_birth', ${fields.place_of_birth ?? null}::text
         ))
       )::text
       WHERE id = ${id} AND meta_json IS NOT NULL
@@ -245,6 +248,78 @@ export class MessagesRepo {
     if (!row?.passport) return null;
     try {
       return JSON.parse(row.passport) as PassportIdentity;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Stamps internal-passport identity fields onto
+   * `meta_json.media.internal_passport`. Same `{}`-as-attempted
+   * semantics as `setPassportFields`.
+   */
+  async setInternalPassportFields(id: number, fields: InternalPassportIdentity): Promise<boolean> {
+    const result = await this.sql`
+      UPDATE messages
+      SET meta_json = jsonb_set(
+        meta_json::jsonb,
+        '{media,internal_passport}',
+        jsonb_strip_nulls(jsonb_build_object(
+          'national_id_number', ${fields.national_id_number ?? null}::text,
+          'date_of_birth', ${fields.date_of_birth ?? null}::text,
+          'place_of_birth', ${fields.place_of_birth ?? null}::text
+        ))
+      )::text
+      WHERE id = ${id} AND meta_json IS NOT NULL
+    `;
+    return result.count > 0;
+  }
+
+  /**
+   * Photo messages classified as `internal_passport` that have not had
+   * their identity fields extracted yet
+   * (`meta_json.media.internal_passport` absent). Oldest first.
+   */
+  async internalPassportPhotosNeedingExtraction(
+    conversationId: number,
+  ): Promise<{ id: number; file_id: string; mime_type: string | null }[]> {
+    return this.sql<{ id: number; file_id: string; mime_type: string | null }[]>`
+      SELECT
+        id,
+        (meta_json::jsonb)->'media'->>'file_id' AS file_id,
+        (meta_json::jsonb)->'media'->>'mime_type' AS mime_type
+      FROM messages
+      WHERE conversation_id = ${conversationId}
+        AND role = 'user'
+        AND meta_json IS NOT NULL
+        AND (meta_json::jsonb)->'media'->>'photo_class' = 'internal_passport'
+        AND (meta_json::jsonb)->'media'->'internal_passport' IS NULL
+        AND (meta_json::jsonb)->'media'->>'file_id' IS NOT NULL
+      ORDER BY id ASC
+    `;
+  }
+
+  /**
+   * Latest non-empty internal-passport identity extracted in a
+   * conversation, or `null` when none.
+   */
+  async internalPassportFieldsForConversation(
+    conversationId: number,
+  ): Promise<InternalPassportIdentity | null> {
+    const [row] = await this.sql<{ internal_passport: string }[]>`
+      SELECT ((meta_json::jsonb)->'media'->'internal_passport')::text AS internal_passport
+      FROM messages
+      WHERE conversation_id = ${conversationId}
+        AND role = 'user'
+        AND meta_json IS NOT NULL
+        AND (meta_json::jsonb)->'media'->'internal_passport' IS NOT NULL
+        AND (meta_json::jsonb)->'media'->'internal_passport' != '{}'::jsonb
+      ORDER BY id DESC
+      LIMIT 1
+    `;
+    if (!row?.internal_passport) return null;
+    try {
+      return JSON.parse(row.internal_passport) as InternalPassportIdentity;
     } catch {
       return null;
     }
@@ -308,6 +383,7 @@ export class MessagesRepo {
     `;
     const counts: Record<PhotoClass, number> = {
       passport: 0,
+      internal_passport: 0,
       full_body: 0,
       portrait: 0,
       other: 0,
@@ -315,6 +391,7 @@ export class MessagesRepo {
     for (const r of rows) {
       if (
         r.cls === "passport" ||
+        r.cls === "internal_passport" ||
         r.cls === "full_body" ||
         r.cls === "portrait" ||
         r.cls === "other"
