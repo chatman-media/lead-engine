@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 
 import { LeadsRepo } from "@/db/repos/leads.ts";
 import { UsersRepo } from "@/db/repos/users.ts";
-import { runProactiveCheckins } from "@/leads/proactive-checkin.ts";
+import { runProactiveCheckins, scheduleProactiveCheckins } from "@/leads/proactive-checkin.ts";
 import type { LeadsService } from "@/leads/service.ts";
 import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
@@ -110,5 +110,41 @@ describe("runProactiveCheckins", () => {
 
     expect(result.scanned).toBe(0);
     expect(result.sent).toBe(0);
+  });
+
+  test("recurs at the interval cadence after the first nudge", async () => {
+    const leadId = await makeLeadInState(9007, "docs_pending");
+    await backdateStageEntry(leadId, "docs_pending", 10);
+
+    const first = await runProactiveCheckins({ leads, users, service, intervalDays: 4 });
+    expect(first.sent).toBe(1);
+
+    // Backdate last_checkin_at past the interval so the next pass is due again.
+    await sql`
+      UPDATE leads
+      SET last_checkin_at = ${Math.floor(Date.now() / 1000) - 5 * 24 * 60 * 60}
+      WHERE id = ${leadId}
+    `;
+    const second = await runProactiveCheckins({ leads, users, service, intervalDays: 4 });
+    expect(second.sent).toBe(1);
+    expect(sentCheckins.length).toBe(2);
+  });
+});
+
+describe("scheduleProactiveCheckins", () => {
+  test("fires the first pass after firstRunAfterMs and stop() is idempotent", async () => {
+    const leadId = await makeLeadInState(9100, "docs_pending");
+    await backdateStageEntry(leadId, "docs_pending", 10);
+
+    const handle = scheduleProactiveCheckins(
+      { leads, users, service, intervalDays: 4 },
+      { firstRunAfterMs: 10, intervalMs: 60_000 },
+    );
+    await new Promise((r) => setTimeout(r, 200));
+    handle.stop();
+    handle.stop();
+
+    expect(sentCheckins.length).toBe(1);
+    expect((await leads.byId(leadId))?.last_checkin_at).not.toBeNull();
   });
 });

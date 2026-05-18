@@ -6,9 +6,21 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 
+import { AdminsRepo } from "@/db/repos/admins.ts";
 import { CoachProposalsRepo } from "@/db/repos/coach-proposals.ts";
+import { ExperimentsRepo } from "@/db/repos/experiments.ts";
+import { LeadsRepo } from "@/db/repos/leads.ts";
 import { PairwiseMatchesRepo } from "@/db/repos/pairwise-matches.ts";
+import { SessionsRepo } from "@/db/repos/sessions.ts";
 import { ShadowEvaluationsRepo } from "@/db/repos/shadow-evaluations.ts";
+import { SkillOutcomesRepo, StyleRatingsRepo } from "@/db/repos/skill-outcomes.ts";
+import {
+  dequeuePendingDeletes,
+  enqueueDelete,
+  MAX_DELETE_ATTEMPTS,
+  markDeleted,
+  markDeleteFailed,
+} from "@/db/repos/userbot-delete-queue.ts";
 import {
   dequeuePending,
   enqueue,
@@ -16,12 +28,19 @@ import {
   markFailed,
   markSent,
 } from "@/db/repos/userbot-send-queue.ts";
+import { UsersRepo } from "@/db/repos/users.ts";
 import type { CoachProposal } from "@/sales/coach.ts";
+import { ELO_BASELINE } from "@/sales/elo.ts";
 import { cleanTestDb, getTestSql, setupTestDb } from "../helpers/test-db.ts";
 
 const sql = getTestSql();
 beforeAll(() => setupTestDb(sql));
-afterEach(() => cleanTestDb(sql));
+afterEach(async () => {
+  await cleanTestDb(sql);
+  // userbot_delete_queue is not in cleanTestDb's TRUNCATE list; drain it here
+  // so rows from this file's tests don't leak into later tests.
+  await sql`TRUNCATE userbot_delete_queue RESTART IDENTITY`;
+});
 afterAll(() => sql.end());
 
 // Skip the argon2 password hash — coach_proposals.decided_by_admin_id has a
@@ -480,5 +499,352 @@ describe("ShadowEvaluationsRepo", () => {
   test("latestForProposal returns null when no evals exist", async () => {
     const proposalId = await seedProposalId();
     expect(await new ShadowEvaluationsRepo(sql).latestForProposal(proposalId)).toBeNull();
+  });
+});
+
+// ─── userbot-delete-queue ──────────────────────────────────────────────
+
+describe("userbot-delete-queue", () => {
+  test("enqueueDelete inserts a pending row and returns its id", async () => {
+    const id = await enqueueDelete(sql, 555, 9001);
+    expect(id).toBeGreaterThan(0);
+
+    const [row] = await sql<
+      { tg_user_id: number; tg_message_id: number; done_at: number | null; attempts: number }[]
+    >`SELECT tg_user_id, tg_message_id, done_at, attempts FROM userbot_delete_queue WHERE id = ${id}`;
+    expect(row?.tg_user_id).toBe(555);
+    expect(row?.tg_message_id).toBe(9001);
+    expect(row?.done_at).toBeNull();
+    expect(row?.attempts).toBe(0);
+  });
+
+  test("dequeuePendingDeletes claims pending rows and bumps attempts", async () => {
+    const id1 = await enqueueDelete(sql, 1, 10);
+    const id2 = await enqueueDelete(sql, 2, 20);
+
+    const claimed = await dequeuePendingDeletes(sql);
+    expect(claimed.map((r) => r.id).sort((x, y) => x - y)).toEqual([id1, id2]);
+    expect(claimed.every((r) => r.attempts === 1)).toBe(true);
+
+    // Re-draining the same still-pending rows bumps attempts again.
+    const claimed2 = await dequeuePendingDeletes(sql);
+    expect(claimed2.every((r) => r.attempts === 2)).toBe(true);
+  });
+
+  test("dequeuePendingDeletes excludes rows already marked done", async () => {
+    const doneId = await enqueueDelete(sql, 100, 1);
+    await markDeleted(sql, doneId);
+    const pendingId = await enqueueDelete(sql, 101, 2);
+
+    const claimed = await dequeuePendingDeletes(sql);
+    expect(claimed.map((r) => r.id)).toEqual([pendingId]);
+  });
+
+  test("dequeuePendingDeletes parks rows that hit MAX_DELETE_ATTEMPTS", async () => {
+    const stuckId = await enqueueDelete(sql, 200, 1);
+    await sql`UPDATE userbot_delete_queue SET attempts = ${MAX_DELETE_ATTEMPTS} WHERE id = ${stuckId}`;
+    const freshId = await enqueueDelete(sql, 201, 2);
+
+    const claimed = await dequeuePendingDeletes(sql);
+    expect(claimed.map((r) => r.id)).toEqual([freshId]);
+  });
+
+  test("markDeleted stamps done_at", async () => {
+    const id = await enqueueDelete(sql, 300, 1);
+    await markDeleted(sql, id);
+    const [row] = await sql<{ done_at: number | null }[]>`
+      SELECT done_at FROM userbot_delete_queue WHERE id = ${id}
+    `;
+    expect(row?.done_at).toBeGreaterThan(0);
+  });
+
+  test("markDeleteFailed records the error without marking the row done", async () => {
+    const id = await enqueueDelete(sql, 400, 1);
+    await markDeleteFailed(sql, id, "PEER_ID_INVALID");
+    const [row] = await sql<{ error: string | null; done_at: number | null }[]>`
+      SELECT error, done_at FROM userbot_delete_queue WHERE id = ${id}
+    `;
+    expect(row?.error).toBe("PEER_ID_INVALID");
+    // The drain must keep retrying — done_at stays NULL on a failure.
+    expect(row?.done_at).toBeNull();
+  });
+});
+
+// ─── skill-outcomes + style-ratings ────────────────────────────────────
+
+describe("SkillOutcomesRepo", () => {
+  async function seedLeadId(tgUserId: number): Promise<number> {
+    const users = new UsersRepo(sql);
+    const leads = new LeadsRepo(sql);
+    const u = await users.create({ tgUserId });
+    return (await leads.ensureForUser(u.id)).id;
+  }
+
+  test("record inserts a row and dedupes on (lead, skill, source)", async () => {
+    const repo = new SkillOutcomesRepo(sql);
+    const leadId = await seedLeadId(8001);
+
+    const first = await repo.record({
+      leadId,
+      conversationId: null,
+      messageId: null,
+      styleSlug: "alina",
+      skillSlug: "mirror-objection",
+      outcome: "won",
+      source: "lead_submitted",
+    });
+    expect(first).toBe(true);
+
+    // Same (lead, skill, source) → ON CONFLICT DO NOTHING returns false.
+    const dup = await repo.record({
+      leadId,
+      conversationId: null,
+      messageId: null,
+      styleSlug: "alina",
+      skillSlug: "mirror-objection",
+      outcome: "lost",
+      source: "lead_submitted",
+    });
+    expect(dup).toBe(false);
+
+    // A different source for the same skill is a distinct row.
+    const other = await repo.record({
+      leadId,
+      conversationId: null,
+      messageId: null,
+      styleSlug: "alina",
+      skillSlug: "mirror-objection",
+      outcome: "lost",
+      source: "manual",
+    });
+    expect(other).toBe(true);
+  });
+
+  test("aggregate tallies wins/losses/draws and win_rate per skill", async () => {
+    const repo = new SkillOutcomesRepo(sql);
+    const leadA = await seedLeadId(8002);
+    const leadB = await seedLeadId(8003);
+    const leadC = await seedLeadId(8004);
+
+    await repo.record({
+      leadId: leadA,
+      conversationId: null,
+      messageId: null,
+      styleSlug: null,
+      skillSlug: "hook",
+      outcome: "won",
+      source: "lead_submitted",
+    });
+    await repo.record({
+      leadId: leadB,
+      conversationId: null,
+      messageId: null,
+      styleSlug: null,
+      skillSlug: "hook",
+      outcome: "lost",
+      source: "lead_ghosted",
+    });
+    await repo.record({
+      leadId: leadC,
+      conversationId: null,
+      messageId: null,
+      styleSlug: null,
+      skillSlug: "hook",
+      outcome: "draw",
+      source: "lead_rejected",
+    });
+
+    const agg = await repo.aggregate();
+    const hook = agg.find((a) => a.skill_slug === "hook");
+    expect(hook?.count).toBe(3);
+    expect(hook?.wins).toBe(1);
+    expect(hook?.losses).toBe(1);
+    expect(hook?.draws).toBe(1);
+    expect(hook?.win_rate).toBeCloseTo(1 / 3);
+  });
+
+  test("aggregate honors the sinceUnix lower bound", async () => {
+    const repo = new SkillOutcomesRepo(sql);
+    const leadId = await seedLeadId(8005);
+    await repo.record({
+      leadId,
+      conversationId: null,
+      messageId: null,
+      styleSlug: null,
+      skillSlug: "old-skill",
+      outcome: "won",
+      source: "manual",
+    });
+    // Backdate the row well into the past.
+    await sql`UPDATE skill_outcomes SET created_at = 1000 WHERE skill_slug = 'old-skill'`;
+
+    const future = Math.floor(Date.now() / 1000) + 3600;
+    expect(await repo.aggregate({ sinceUnix: future })).toEqual([]);
+    expect((await repo.aggregate({ sinceUnix: 0 })).length).toBe(1);
+  });
+
+  test("recent returns rows newest-first and respects the limit", async () => {
+    const repo = new SkillOutcomesRepo(sql);
+    const leadId = await seedLeadId(8006);
+    for (const skill of ["s1", "s2", "s3"]) {
+      await repo.record({
+        leadId,
+        conversationId: null,
+        messageId: null,
+        styleSlug: null,
+        skillSlug: skill,
+        outcome: "won",
+        source: "self_play",
+      });
+    }
+    const recent = await repo.recent(2);
+    expect(recent.length).toBe(2);
+    expect(recent[0]!.id).toBeGreaterThan(recent[1]!.id);
+  });
+});
+
+describe("StyleRatingsRepo", () => {
+  test("applyOutcome seeds a new row from the baseline then updates in place", async () => {
+    const repo = new StyleRatingsRepo(sql);
+    expect(await repo.bySlug("alina")).toBeNull();
+
+    const afterWin = await repo.applyOutcome("alina", "won");
+    expect(afterWin.wins).toBe(1);
+    expect(afterWin.elo).toBeGreaterThan(ELO_BASELINE);
+
+    const afterLoss = await repo.applyOutcome("alina", "lost");
+    expect(afterLoss.wins).toBe(1);
+    expect(afterLoss.losses).toBe(1);
+    expect(afterLoss.elo).toBeLessThan(afterWin.elo);
+
+    const afterDraw = await repo.applyOutcome("alina", "draw");
+    expect(afterDraw.draws).toBe(1);
+  });
+
+  test("list orders by elo descending", async () => {
+    const repo = new StyleRatingsRepo(sql);
+    await repo.applyOutcome("winner", "won");
+    await repo.applyOutcome("loser", "lost");
+    const list = await repo.list();
+    expect(list.map((r) => r.style_slug)).toEqual(["winner", "loser"]);
+  });
+
+  test("setElo upserts an exact rating", async () => {
+    const repo = new StyleRatingsRepo(sql);
+    await repo.setElo("masha", 1620);
+    expect((await repo.bySlug("masha"))?.elo).toBe(1620);
+    // Upsert path: a second setElo overwrites.
+    await repo.setElo("masha", 1480);
+    expect((await repo.bySlug("masha"))?.elo).toBe(1480);
+  });
+
+  test("reset restores the baseline and clears W/L/D", async () => {
+    const repo = new StyleRatingsRepo(sql);
+    await repo.applyOutcome("anya", "won");
+    await repo.applyOutcome("anya", "won");
+    await repo.reset("anya");
+    const row = await repo.bySlug("anya");
+    expect(row?.elo).toBe(ELO_BASELINE);
+    expect(row?.wins).toBe(0);
+    expect(row?.losses).toBe(0);
+    expect(row?.last_outcome_at).toBeNull();
+  });
+
+  test("reset also seeds a never-seen style at the baseline", async () => {
+    const repo = new StyleRatingsRepo(sql);
+    await repo.reset("brand-new");
+    expect((await repo.bySlug("brand-new"))?.elo).toBe(ELO_BASELINE);
+  });
+});
+
+// ─── experiments ───────────────────────────────────────────────────────
+
+describe("ExperimentsRepo", () => {
+  test("insert defaults status=draft and success_metric=qualified", async () => {
+    const repo = new ExperimentsRepo(sql);
+    const row = await repo.insert({ slug: "exp-a", allocation: { alina: 1 } });
+    expect(row.status).toBe("draft");
+    expect(row.success_metric).toBe("qualified");
+    expect(row.started_at).toBeNull();
+  });
+
+  test("byId / bySlug roundtrip; both return null for misses", async () => {
+    const repo = new ExperimentsRepo(sql);
+    const row = await repo.insert({ slug: "exp-b", allocation: { a: 1, b: 1 } });
+    expect((await repo.byId(row.id))?.slug).toBe("exp-b");
+    expect((await repo.bySlug("exp-b"))?.id).toBe(row.id);
+    expect(await repo.byId(99999)).toBeNull();
+    expect(await repo.bySlug("nope")).toBeNull();
+  });
+
+  test("getRunning returns the running experiment, or null when none run", async () => {
+    const repo = new ExperimentsRepo(sql);
+    expect(await repo.getRunning()).toBeNull();
+    const row = await repo.insert({
+      slug: "exp-run",
+      status: "running",
+      allocation: { x: 1 },
+      startedAt: 1000,
+    });
+    expect((await repo.getRunning())?.id).toBe(row.id);
+  });
+
+  test("list filters by status", async () => {
+    const repo = new ExperimentsRepo(sql);
+    await repo.insert({ slug: "d1", allocation: { a: 1 } });
+    await repo.insert({ slug: "r1", status: "running", allocation: { a: 1 } });
+    expect((await repo.list()).length).toBe(2);
+    expect((await repo.list({ status: "running" })).map((e) => e.slug)).toEqual(["r1"]);
+  });
+
+  test("setStatus running stamps started_at; done stamps ended_at", async () => {
+    const repo = new ExperimentsRepo(sql);
+    const row = await repo.insert({ slug: "exp-lifecycle", allocation: { a: 1 } });
+
+    await repo.setStatus(row.id, "running");
+    const running = await repo.byId(row.id);
+    expect(running?.status).toBe("running");
+    expect(running?.started_at).toBeGreaterThan(0);
+
+    await repo.setStatus(row.id, "done");
+    const done = await repo.byId(row.id);
+    expect(done?.status).toBe("done");
+    expect(done?.ended_at).toBeGreaterThan(0);
+    // started_at is preserved across the done transition.
+    expect(done?.started_at).toBe(running?.started_at ?? null);
+  });
+
+  test("setStatus paused takes the plain-update branch", async () => {
+    const repo = new ExperimentsRepo(sql);
+    const row = await repo.insert({ slug: "exp-pause", status: "running", allocation: { a: 1 } });
+    await repo.setStatus(row.id, "paused");
+    expect((await repo.byId(row.id))?.status).toBe("paused");
+  });
+});
+
+// ─── sessions: purgeExpired ────────────────────────────────────────────
+
+describe("SessionsRepo.purgeExpired", () => {
+  test("deletes only expired sessions and reports the count removed", async () => {
+    const admins = new AdminsRepo(sql);
+    const sessions = new SessionsRepo(sql);
+    const admin = await admins.create({ email: "purge@x.test", password: "longenough" });
+
+    const live = await sessions.issue(admin.id);
+    await sessions.issue(admin.id, { ttlSeconds: -100 });
+    await sessions.issue(admin.id, { ttlSeconds: -100 });
+
+    const removed = await sessions.purgeExpired();
+    expect(removed).toBe(2);
+    // The live session survives the purge.
+    expect(await sessions.adminIdFor(live)).toBe(admin.id);
+  });
+
+  test("purgeExpired is a no-op when nothing has expired", async () => {
+    const admins = new AdminsRepo(sql);
+    const sessions = new SessionsRepo(sql);
+    const admin = await admins.create({ email: "purge2@x.test", password: "longenough" });
+    await sessions.issue(admin.id);
+    expect(await sessions.purgeExpired()).toBe(0);
   });
 });
