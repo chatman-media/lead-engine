@@ -5,10 +5,22 @@ import type { Sql } from "../postgres.ts";
  *  re-queuing forever on every poll. */
 export const MAX_SEND_ATTEMPTS = 5;
 
-export async function enqueue(sql: Sql, tgUserId: number, text: string): Promise<number> {
+/**
+ * Enqueue an outgoing admin reply for the userbot to send.
+ *
+ * `messageId` links the queue row to its `messages` row — after the userbot
+ * sends the message it stamps the returned Telegram message id back onto that
+ * row's `tg_message_id`, which is what a later "delete from Telegram" needs.
+ */
+export async function enqueue(
+  sql: Sql,
+  tgUserId: number,
+  text: string,
+  messageId?: number,
+): Promise<number> {
   const [row] = await sql<{ id: number }[]>`
-    INSERT INTO userbot_send_queue (tg_user_id, text)
-    VALUES (${tgUserId}, ${text})
+    INSERT INTO userbot_send_queue (tg_user_id, text, message_id)
+    VALUES (${tgUserId}, ${text}, ${messageId ?? null})
     RETURNING id
   `;
   return row.id;
@@ -25,8 +37,12 @@ export async function enqueue(sql: Sql, tgUserId: number, text: string): Promise
  */
 export async function dequeuePending(
   sql: Sql,
-): Promise<{ id: number; tg_user_id: number; text: string; attempts: number }[]> {
-  return sql<{ id: number; tg_user_id: number; text: string; attempts: number }[]>`
+): Promise<
+  { id: number; tg_user_id: number; text: string; attempts: number; message_id: number | null }[]
+> {
+  return sql<
+    { id: number; tg_user_id: number; text: string; attempts: number; message_id: number | null }[]
+  >`
     UPDATE userbot_send_queue
     SET attempts = attempts + 1
     WHERE id IN (
@@ -37,7 +53,7 @@ export async function dequeuePending(
       LIMIT 50
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, tg_user_id, text, attempts
+    RETURNING id, tg_user_id, text, attempts, message_id
   `;
 }
 

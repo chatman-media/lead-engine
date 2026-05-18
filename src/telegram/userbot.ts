@@ -14,6 +14,12 @@ import { MessagesRepo } from "../db/repos/messages.ts";
 import { SkillsRepo } from "../db/repos/skills.ts";
 import { StylesRepo } from "../db/repos/styles.ts";
 import {
+  dequeuePendingDeletes,
+  MAX_DELETE_ATTEMPTS,
+  markDeleted,
+  markDeleteFailed,
+} from "../db/repos/userbot-delete-queue.ts";
+import {
   dequeuePending,
   MAX_SEND_ATTEMPTS,
   markFailed,
@@ -102,6 +108,45 @@ function makeUserbotSender(
       throw new Error("getWebhookInfo not available in userbot mode");
     },
   } as unknown as TelegramClient;
+}
+
+/**
+ * Resolve a gramjs input peer for a Telegram user id.
+ *
+ * Tries the numeric id first (works when the user is in the session's entity
+ * cache — i.e. has ever messaged this account). Falls back to an `@username`
+ * lookup from the DB for users who only ever chatted with the Bot-API bot,
+ * never with the userbot account directly. Shared by the send + delete drains.
+ */
+async function resolvePeer(
+  client: GramjsClient,
+  db: Sql,
+  tgUserId: number,
+): Promise<Awaited<ReturnType<GramjsClient["getInputEntity"]>>> {
+  try {
+    return await client.getInputEntity(tgUserId);
+  } catch (entityErr) {
+    log.warn("userbot: getInputEntity failed, trying username lookup", {
+      scope: "userbot",
+      tg_user_id: tgUserId,
+      err: entityErr,
+    });
+    const [userRow] = await db<{ tg_username: string | null }[]>`
+      SELECT tg_username FROM users WHERE tg_user_id = ${tgUserId} LIMIT 1
+    `;
+    if (!userRow?.tg_username) {
+      throw new Error(
+        `Cannot resolve entity for tg_user_id=${tgUserId}: not in session cache and no tg_username in DB`,
+      );
+    }
+    const peer = await client.getInputEntity(`@${userRow.tg_username}`);
+    log.info("userbot: resolved peer via @username", {
+      scope: "userbot",
+      tg_username: userRow.tg_username,
+      tg_user_id: tgUserId,
+    });
+    return peer;
+  }
 }
 
 /**
@@ -661,37 +706,23 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
         text_len: row.text.length,
       });
       try {
-        // Try resolving by numeric ID first (works if user has ever messaged
-        // this account and their entity is in the gramJS session cache).
-        // Fall back to @username lookup if the ID resolution fails — this
-        // handles admins replying to users who only ever chatted with the bot,
-        // not with Alina's personal account directly.
-        let peer: Awaited<ReturnType<typeof client.getInputEntity>>;
-        try {
-          peer = await client.getInputEntity(row.tg_user_id);
-        } catch (entityErr) {
-          log.warn("send-queue: getInputEntity failed, trying username lookup", {
-            scope: "userbot",
-            tg_user_id: row.tg_user_id,
-            err: entityErr,
-          });
-          const [userRow] = await db<{ tg_username: string | null }[]>`
-            SELECT tg_username FROM users WHERE tg_user_id = ${row.tg_user_id} LIMIT 1
-          `;
-          if (!userRow?.tg_username) {
-            throw new Error(
-              `Cannot resolve entity for tg_user_id=${row.tg_user_id}: not in session cache and no tg_username in DB`,
-            );
-          }
-          peer = await client.getInputEntity(`@${userRow.tg_username}`);
-          log.info("send-queue: resolved via @username", {
-            scope: "userbot",
-            tg_username: userRow.tg_username,
-            tg_user_id: row.tg_user_id,
+        const peer = await resolvePeer(client, db, row.tg_user_id);
+        const sent = await client.sendMessage(peer, { message: row.text });
+        await markSent(db, row.id);
+        // Stamp the Telegram message id back onto the linked `messages` row
+        // so the admin UI can later delete this message from Telegram.
+        if (row.message_id && sent?.id) {
+          await db`
+            UPDATE messages SET tg_message_id = ${sent.id} WHERE id = ${row.message_id}
+          `.catch((err: unknown) => {
+            log.warn("send-queue: failed to stamp tg_message_id", {
+              scope: "userbot",
+              queue_id: row.id,
+              message_id: row.message_id,
+              err,
+            });
           });
         }
-        await client.sendMessage(peer, { message: row.text });
-        await markSent(db, row.id);
         log.info("send-queue: sent ok", { scope: "userbot", queue_id: row.id });
       } catch (err) {
         log.error("send-queue failed", {
@@ -717,6 +748,68 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
   }
   if (typeof (sendQueueHandle as { unref?: () => void }).unref === "function") {
     (sendQueueHandle as { unref: () => void }).unref();
+  }
+
+  // Drain message-delete queue — operators can ask (from the admin UI) to
+  // delete a sent message from Telegram; only the userbot (MTProto) can do
+  // that, so the request is queued in the DB and drained here.
+  let deleting = false;
+  const deleteQueueHandle = setInterval(async () => {
+    if (deleting) return;
+    deleting = true;
+    try {
+      await drainDeleteQueue();
+    } finally {
+      deleting = false;
+    }
+  }, SEND_QUEUE_POLL_MS);
+
+  async function drainDeleteQueue(): Promise<void> {
+    let pending: Awaited<ReturnType<typeof dequeuePendingDeletes>>;
+    try {
+      pending = await dequeuePendingDeletes(db);
+    } catch (err) {
+      log.error("delete-queue dequeuePending failed", { scope: "userbot", err });
+      return;
+    }
+    if (pending.length > 0) {
+      log.info("delete-queue draining", { scope: "userbot", pending: pending.length });
+    }
+    for (const row of pending) {
+      try {
+        const peer = await resolvePeer(client, db, row.tg_user_id);
+        // revoke: true → delete for everyone, so the candidate stops seeing
+        // the message too (works for our own outgoing messages in a DM).
+        await client.deleteMessages(peer, [row.tg_message_id], { revoke: true });
+        await markDeleted(db, row.id);
+        log.info("delete-queue: deleted ok", {
+          scope: "userbot",
+          queue_id: row.id,
+          tg_message_id: row.tg_message_id,
+        });
+      } catch (err) {
+        log.error("delete-queue failed", {
+          scope: "userbot",
+          queue_id: row.id,
+          tg_user_id: row.tg_user_id,
+          tg_message_id: row.tg_message_id,
+          err,
+        });
+        await markDeleteFailed(db, row.id, err instanceof Error ? err.message : String(err)).catch(
+          () => undefined,
+        );
+        if (row.attempts >= MAX_DELETE_ATTEMPTS - 1) {
+          log.warn("delete-queue: row hit attempt cap, giving up", {
+            scope: "userbot",
+            queue_id: row.id,
+            max_attempts: MAX_DELETE_ATTEMPTS,
+          });
+        }
+      }
+    }
+  }
+  if (typeof (deleteQueueHandle as { unref?: () => void }).unref === "function") {
+    (deleteQueueHandle as { unref: () => void }).unref();
   }
 
   log.info("connected and listening for private messages", {

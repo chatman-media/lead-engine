@@ -129,6 +129,29 @@ export function Chat() {
     navigate("/admin/chats");
   }
 
+  async function handleDeleteMessage(m: Message) {
+    if (
+      !(await confirmDialog("Сообщение будет удалено из чата Telegram и из админки.", {
+        title: "Удалить сообщение?",
+        confirmLabel: "Удалить",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    try {
+      const res = await api.deleteMessage(convId, m.id);
+      if (res.tgError) {
+        notify("Удалено из админки. В Telegram удалить не удалось.", "info");
+      } else {
+        notify("Сообщение удалено", "success");
+      }
+    } catch (err) {
+      notify(`Ошибка удаления: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+    reload();
+  }
+
   async function handleSend() {
     const text = replyText.trim();
     if (!text) return;
@@ -279,20 +302,42 @@ export function Chat() {
 
       {/* Messages */}
       <div className="messages" data-testid="messages-list">
-        {messages.map((m) => (
-          <div key={m.id} className={`msg ${m.role === "user" ? "msg-left" : "msg-right"}`}>
-            <div className={BUBBLE_CLASS[m.role] ?? "bubble bubble-user"}>
-              <MessageBody message={m} />
+        {messages.map((m) => {
+          const isDeleted = m.deleted_at != null;
+          // Only outgoing messages can be revoked from Telegram — a candidate's
+          // own message can't be deleted "for everyone" in a private chat.
+          const isOutgoing = m.role === "assistant" || m.role === "human";
+          return (
+            <div key={m.id} className={`msg ${m.role === "user" ? "msg-left" : "msg-right"}`}>
+              <div
+                className={BUBBLE_CLASS[m.role] ?? "bubble bubble-user"}
+                style={isDeleted ? { opacity: 0.5, textDecoration: "line-through" } : undefined}
+              >
+                <MessageBody message={m} />
+              </div>
+              <div className="msg-meta">
+                <span style={{ color: ROLE_COLOR[m.role] ?? "var(--text-3)" }}>
+                  {ROLE_LABEL[m.role] ?? m.role}
+                </span>
+                <span>{tsShort(m.created_at)}</span>
+                {isDeleted && <span style={{ color: "var(--red, #ef4444)" }}>удалено</span>}
+                {isOutgoing && !isDeleted && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteMessage(m)}
+                    data-testid="delete-message-btn"
+                    title="Удалить сообщение из Telegram и админки"
+                    className="btn btn-ghost btn-sm"
+                    style={{ padding: "0 6px", fontSize: 11 }}
+                  >
+                    удалить
+                  </button>
+                )}
+              </div>
+              {debug && <TelemetryStrip message={m} />}
             </div>
-            <div className="msg-meta">
-              <span style={{ color: ROLE_COLOR[m.role] ?? "var(--text-3)" }}>
-                {ROLE_LABEL[m.role] ?? m.role}
-              </span>
-              <span>{tsShort(m.created_at)}</span>
-            </div>
-            {debug && <TelemetryStrip message={m} />}
-          </div>
-        ))}
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 
@@ -418,6 +463,7 @@ function MessageBody({ message }: { message: Message }) {
   // (no Bot API file_id) is served from disk by message id.
   const url = media.file_id ? api.tgFileUrl(media.file_id) : api.mediaUrl(message.id);
   const isPassport = media.photo_class === "passport";
+  const isInternalPassport = media.photo_class === "internal_passport";
 
   let preview: React.ReactNode = null;
   if (media.type === "photo") {
@@ -473,7 +519,7 @@ function MessageBody({ message }: { message: Message }) {
       data-photo-class={media.photo_class ?? undefined}
       style={{ display: "flex", flexDirection: "column", gap: 4 }}
     >
-      {isPassport && (
+      {(isPassport || isInternalPassport) && (
         <div
           data-testid="passport-badge"
           style={{
@@ -487,7 +533,7 @@ function MessageBody({ message }: { message: Message }) {
             border: "1px solid rgba(46,160,67,0.3)",
           }}
         >
-          🛂 загранпаспорт
+          {isPassport ? "🛂 загранпаспорт" : "🛂 внутренний паспорт"}
         </div>
       )}
       {preview}

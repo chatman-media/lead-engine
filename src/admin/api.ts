@@ -24,6 +24,7 @@ export {
 export {
   createConversationDetailHandler,
   createDeleteConversationHandler,
+  createDeleteMessageHandler,
   createListConversationsHandler,
   createReleaseHandler,
   createReplyHandler,

@@ -1,5 +1,6 @@
 import { log } from "../log.ts";
 import type { ChatClient, ChatMessage } from "../rag/chat.ts";
+import type { InternalPassportIdentity, PassportIdentity } from "../rag/vision.ts";
 
 /**
  * Subset of the visa-application form (templates.ts VISA_ANKETA_TEMPLATE)
@@ -263,4 +264,56 @@ export function visaDocsCompleteness(docs: VisaFields | undefined): {
     else missing.push(key);
   }
   return { filled, total, missing };
+}
+
+/**
+ * Normalises a `dd.mm.yyyy` date to the `yyyy-MM-dd` form the visa
+ * anketa uses. A string that doesn't match that shape (already ISO, or
+ * unparseable) is returned unchanged — the operator fixes it by hand.
+ */
+export function toIsoDate(raw: string): string {
+  const m = raw.trim().match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (!m) return raw.trim();
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+/**
+ * Maps passport-photo OCR (`PassportIdentity`) onto visa-anketa fields.
+ * Used to pre-fill `leads.visa_docs_json` before the step-by-step
+ * interview starts, so identity fields the passport already carries
+ * aren't collected from scratch. Dates are converted to `yyyy-MM-dd`;
+ * nationality fills both the citizenship and the passport-issuing
+ * country (a загранпаспорт is issued by the country of citizenship).
+ */
+export function passportToVisaFields(passport: PassportIdentity): Partial<VisaFields> {
+  const out: Partial<VisaFields> = {};
+  if (passport.family_name) out.family_name = passport.family_name;
+  if (passport.given_name) out.given_name = passport.given_name;
+  if (passport.passport_number) out.passport_number = passport.passport_number;
+  if (passport.passport_expiry) {
+    out.passport_expiration_date = toIsoDate(passport.passport_expiry);
+  }
+  if (passport.date_of_birth) out.date_of_birth = toIsoDate(passport.date_of_birth);
+  if (passport.nationality) {
+    out.current_nationality = passport.nationality;
+    out.passport_issuing_country = passport.nationality;
+  }
+  if (passport.place_of_birth) out.city_of_birth = passport.place_of_birth;
+  return out;
+}
+
+/**
+ * Maps internal-passport (внутренний паспорт) OCR onto visa-anketa
+ * fields. Its key contribution is `national_id_number` — the series +
+ * number a загранпаспорт does not carry. Date / place of birth are
+ * filled too, useful as a fallback when no загранпаспорт was sent.
+ */
+export function internalPassportToVisaFields(
+  passport: InternalPassportIdentity,
+): Partial<VisaFields> {
+  const out: Partial<VisaFields> = {};
+  if (passport.national_id_number) out.national_id_number = passport.national_id_number;
+  if (passport.date_of_birth) out.date_of_birth = toIsoDate(passport.date_of_birth);
+  if (passport.place_of_birth) out.city_of_birth = passport.place_of_birth;
+  return out;
 }

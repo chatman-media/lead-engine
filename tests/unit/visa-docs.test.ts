@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   extractVisaDocs,
+  internalPassportToVisaFields,
   parseVisaDocsJson,
+  passportToVisaFields,
+  toIsoDate,
   type VisaFields,
   visaDocsCompleteness,
 } from "@/leads/visa-docs.ts";
@@ -137,5 +140,69 @@ describe("visaDocsCompleteness", () => {
     const r = visaDocsCompleteness(docs);
     expect(r.filled).toBe(1);
     expect(r.missing).toContain("family_name");
+  });
+});
+
+describe("toIsoDate", () => {
+  test("converts dd.mm.yyyy to yyyy-MM-dd", () => {
+    expect(toIsoDate("12.04.1998")).toBe("1998-04-12");
+    expect(toIsoDate("  18.04.2029 ")).toBe("2029-04-18");
+  });
+
+  test("leaves unrecognised formats unchanged", () => {
+    expect(toIsoDate("1998-04-12")).toBe("1998-04-12");
+    expect(toIsoDate("April 18, 2029")).toBe("April 18, 2029");
+    expect(toIsoDate("")).toBe("");
+  });
+});
+
+describe("passportToVisaFields", () => {
+  test("maps all passport identity fields, converting dates", () => {
+    const out = passportToVisaFields({
+      family_name: "IVANOVA",
+      given_name: "SOFIA",
+      passport_number: "71 1234567",
+      passport_expiry: "18.04.2029",
+      date_of_birth: "12.04.1998",
+      nationality: "Russia",
+      place_of_birth: "MOSCOW",
+    });
+    expect(out).toEqual({
+      family_name: "IVANOVA",
+      given_name: "SOFIA",
+      passport_number: "71 1234567",
+      passport_expiration_date: "2029-04-18",
+      date_of_birth: "1998-04-12",
+      current_nationality: "Russia",
+      passport_issuing_country: "Russia",
+      city_of_birth: "MOSCOW",
+    });
+  });
+
+  test("omits absent fields", () => {
+    expect(passportToVisaFields({ given_name: "SOFIA" })).toEqual({ given_name: "SOFIA" });
+    expect(passportToVisaFields({})).toEqual({});
+  });
+});
+
+describe("internalPassportToVisaFields", () => {
+  test("maps the internal-passport fields, converting the date", () => {
+    const out = internalPassportToVisaFields({
+      national_id_number: "12 34 567890",
+      date_of_birth: "12.04.1998",
+      place_of_birth: "г. МОСКВА",
+    });
+    expect(out).toEqual({
+      national_id_number: "12 34 567890",
+      date_of_birth: "1998-04-12",
+      city_of_birth: "г. МОСКВА",
+    });
+  });
+
+  test("omits absent fields", () => {
+    expect(internalPassportToVisaFields({ national_id_number: "12 34 567890" })).toEqual({
+      national_id_number: "12 34 567890",
+    });
+    expect(internalPassportToVisaFields({})).toEqual({});
   });
 });

@@ -5,6 +5,7 @@ import type { MessagesRepo } from "../db/repos/messages.ts";
 import { enqueue } from "../db/repos/userbot-send-queue.ts";
 import type { UserRow, UsersRepo } from "../db/repos/users.ts";
 import { log } from "../log.ts";
+import { applyStyleRules } from "../rag/text-style-rules.ts";
 import type { TelegramClient } from "../telegram/client.ts";
 import type { TgInlineKeyboardButton } from "../telegram/types.ts";
 import {
@@ -17,7 +18,12 @@ import {
   REJECTION_DEFAULT,
   SUBMITTED_REPLY,
 } from "./templates.ts";
-import { firstInterviewField, interviewQuestion, VISA_INTERVIEW_INTRO } from "./visa-interview.ts";
+import { internalPassportToVisaFields, passportToVisaFields } from "./visa-docs.ts";
+import {
+  firstInterviewField,
+  interviewQuestionWithPrefill,
+  VISA_INTERVIEW_INTRO,
+} from "./visa-interview.ts";
 
 /**
  * Outcome of posting to an ops/visa group chat. `skipped` means the chat
@@ -235,6 +241,42 @@ export class LeadsService {
       });
       return;
     }
+    // Pre-fill the visa anketa with whatever the passport-photo OCR
+    // already captured, so the interview shows recognised values for
+    // confirmation instead of collecting identity fields from scratch.
+    // Only empty slots are filled — operator edits / chat-extracted
+    // values are kept intact.
+    let docs: Record<string, string> = {};
+    if (input.lead.visa_docs_json) {
+      try {
+        const parsed = JSON.parse(input.lead.visa_docs_json);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          docs = parsed as Record<string, string>;
+        }
+      } catch {
+        // Corrupt JSON — start fresh rather than abort the interview.
+      }
+    }
+    let changed = false;
+    const fillEmpty = (fields: Partial<Record<string, string>>): void => {
+      for (const [key, value] of Object.entries(fields)) {
+        if (value && !docs[key]?.trim()) {
+          docs[key] = value;
+          changed = true;
+        }
+      }
+    };
+    // Загранпаспорт first — its Latin / MRZ data is authoritative for
+    // the overlapping fields; the internal passport then fills what's
+    // left (national ID number, and DOB / place of birth as fallback).
+    const passport = await this.deps.messages.passportFieldsForConversation(conv.id);
+    if (passport) fillEmpty(passportToVisaFields(passport));
+    const internalPassport = await this.deps.messages.internalPassportFieldsForConversation(
+      conv.id,
+    );
+    if (internalPassport) fillEmpty(internalPassportToVisaFields(internalPassport));
+    if (changed) await this.deps.leads.setVisaDocs(input.lead.id, JSON.stringify(docs));
+
     const firstField = firstInterviewField();
     await this.deps.leads.setVisaInterviewField(input.lead.id, firstField);
     await this.relayToCandidate({
@@ -242,7 +284,7 @@ export class LeadsService {
       conversationId: conv.id,
       text: VISA_INTERVIEW_INTRO,
     });
-    const firstQuestion = interviewQuestion(firstField);
+    const firstQuestion = interviewQuestionWithPrefill(firstField, docs);
     if (firstQuestion) {
       await this.relayToCandidate({
         chatId: input.user.tg_user_id,
@@ -295,11 +337,15 @@ export class LeadsService {
   async sendRejection(input: { user: UserRow; customReason?: string }): Promise<void> {
     const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
-    const text = input.customReason?.trim() || REJECTION_DEFAULT;
+    const customReason = input.customReason?.trim();
+    const text = customReason || REJECTION_DEFAULT;
     await this.relayToCandidate({
       chatId: input.user.tg_user_id,
       conversationId: conv.id,
       text,
+      // Operator-authored custom reason goes verbatim; the default
+      // template is style-guarded like every other template.
+      applyGuard: !customReason,
     });
   }
 
@@ -539,14 +585,21 @@ export class LeadsService {
     /** `meta.source` for the recorded `messages` row. Defaults to the
      *  operator-curated template marker. */
     source?: string;
+    /** Run the outgoing text through the style guard (em-dash → hyphen,
+     *  markdown stripping, robotic lead-in removal). Defaults to `true`;
+     *  set `false` for verbatim operator-authored text. */
+    applyGuard?: boolean;
   }): Promise<void> {
+    // Static templates reach the candidate through here and would
+    // otherwise bypass the "AI tell" sanitization applied to LLM output.
+    const text = input.applyGuard === false ? input.text : applyStyleRules(input.text);
     let tgMessageId: number | undefined;
     if (this.deps.userbotEnabled && this.deps.sql) {
       // Real funnel is on the userbot — enqueue so the message appears
       // from Alina's personal account instead of the agency bot. The
       // userbot poller assigns the tg message id when it actually sends.
       try {
-        await enqueue(this.deps.sql, input.chatId, input.text);
+        await enqueue(this.deps.sql, input.chatId, text);
       } catch (err) {
         log.error("enqueue to userbot send queue failed", { scope: "leads", err });
       }
@@ -554,7 +607,7 @@ export class LeadsService {
       try {
         const sent = await this.deps.telegram.sendMessage({
           chatId: input.chatId,
-          text: input.text,
+          text,
         });
         tgMessageId = sent.message_id;
       } catch (err) {
@@ -564,7 +617,7 @@ export class LeadsService {
     await this.deps.messages.add({
       conversationId: input.conversationId,
       role: "assistant",
-      text: input.text,
+      text,
       ...(tgMessageId !== undefined ? { tgMessageId } : {}),
       meta: { source: input.source ?? "lead-template" },
     });

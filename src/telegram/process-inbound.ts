@@ -6,7 +6,8 @@ import type { UserRow } from "../db/repos/users.ts";
 import { renderVacanciesBlock } from "../db/repos/vacancies.ts";
 import { VISA_PHOTO_REQUIREMENTS } from "../leads/templates.ts";
 import {
-  interviewQuestion,
+  interviewQuestionWithPrefill,
+  isInterviewConfirmation,
   nextInterviewField,
   VISA_INTERVIEW_DONE,
 } from "../leads/visa-interview.ts";
@@ -21,6 +22,7 @@ import {
 } from "../rag/answer.ts";
 import type { ChatMessage } from "../rag/chat.ts";
 import { gradeSkills } from "../rag/grade-skills.ts";
+import { applyStyleRules } from "../rag/text-style-rules.ts";
 import { pickVariant } from "../sales/ab-router.ts";
 import type { SkillForPrompt } from "../sales/prompt.ts";
 import { classifyStage } from "../sales/stage-classifier.ts";
@@ -193,13 +195,21 @@ async function maybeHandleVisaInterview(
       // Corrupt JSON — start fresh rather than abort the interview.
     }
   }
-  docs[currentField] = d.text.trim();
+  // When the field was pre-filled (passport OCR / chat extraction /
+  // operator edit) a bare «да» means "keep it" — don't overwrite the
+  // recognised value with the confirmation word. Any other reply is
+  // treated as a correction.
+  const answer = d.text.trim();
+  const prefilled = docs[currentField]?.trim();
+  if (!(prefilled && isInterviewConfirmation(answer))) {
+    docs[currentField] = answer;
+  }
   await d.leads.setVisaDocs(lead.id, JSON.stringify(docs));
 
   const next = nextInterviewField(currentField);
   if (next) {
     await d.leads.setVisaInterviewField(lead.id, next);
-    const question = interviewQuestion(next);
+    const question = interviewQuestionWithPrefill(next, docs);
     if (question) await reply(question, { source: "visa-interview" });
   } else {
     await d.leads.setVisaInterviewField(lead.id, null);
@@ -439,10 +449,15 @@ async function runSkillGrading(
 
 export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   const reply = async (
-    text: string,
+    rawText: string,
     meta?: unknown,
     stage?: FunnelStage,
   ): Promise<{ messageId: number }> => {
+    // Universal style guard: strip "AI tells" (em-dash, ellipsis, markdown,
+    // robotic lead-ins) from every outgoing message — not just LLM output.
+    // Static templates (visa interview, fallbacks) reach the candidate
+    // through here and would otherwise bypass sanitization.
+    const text = applyStyleRules(rawText);
     let tgMessageId: number | undefined;
     try {
       const sent = await d.telegram.sendMessage({

@@ -1298,9 +1298,12 @@ function AnketaModal({
     };
   }, [leadId]);
 
-  // Candidate's own photos — the passport scan is excluded (it has its
-  // own "фото загранпаспорта" row above).
-  const photos = (media ?? []).filter((m) => m.type === "photo" && m.photo_class !== "passport");
+  // Candidate's own photos — passport scans (both загранпаспорт and the
+  // internal passport) are excluded; they have their own row above.
+  const photos = (media ?? []).filter(
+    (m) =>
+      m.type === "photo" && m.photo_class !== "passport" && m.photo_class !== "internal_passport",
+  );
 
   const rows: Array<[string, string | undefined]> = intake
     ? [
@@ -1813,10 +1816,12 @@ function MediaPanel({
     );
   }
 
+  const isPassportClass = (cls: string | undefined): boolean =>
+    cls === "passport" || cls === "internal_passport";
   const photos = (media ?? []).filter((m) =>
     tag === "passport"
-      ? m.type === "photo" && m.photo_class === "passport"
-      : m.type === "photo" && m.photo_class !== "passport",
+      ? m.type === "photo" && isPassportClass(m.photo_class)
+      : m.type === "photo" && !isPassportClass(m.photo_class),
   );
   if (photos.length === 0) {
     return <div style={note}>{tag === "passport" ? "нет паспортных фото" : "нет фото"}</div>;

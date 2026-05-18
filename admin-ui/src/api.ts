@@ -47,6 +47,9 @@ export interface Message {
   text: string;
   tg_message_id: number | null;
   created_at: number;
+  /** Set when an operator deleted this message. The bubble is rendered
+   *  struck-through; the row stays in history. */
+  deleted_at?: number | null;
   /** Free-form per-message metadata. Set by the webhook when persisting
    *  assistant replies — `used_chunk_ids` (KB hits used for the answer) and
    *  `telemetry` (per-turn diagnostics: retrieval distances, latencies,
@@ -417,7 +420,13 @@ export interface SystemStatus {
     model: string;
     provider: string;
     api_key_configured: boolean;
-    classified: { passport: number; full_body: number; portrait: number; other: number };
+    classified: {
+      passport: number;
+      internal_passport: number;
+      full_body: number;
+      portrait: number;
+      other: number;
+    };
     unclassified: number;
   };
   routing: {
@@ -940,6 +949,15 @@ export const api = {
 
   deleteConversation: (id: number) =>
     req<{ ok: boolean; deleted: number }>(`/admin/api/conversations/${id}`, { method: "DELETE" }),
+
+  /** Delete a previously-sent outgoing message — soft-deletes it in the admin
+   *  UI and removes it from the Telegram chat. `tgError` is set when the
+   *  Telegram leg couldn't run (e.g. message has no stored tg_message_id). */
+  deleteMessage: (conversationId: number, messageId: number) =>
+    req<{ ok: boolean; messageId: number; tgError?: string }>(
+      `/admin/api/conversations/${conversationId}/messages/${messageId}`,
+      { method: "DELETE" },
+    ),
 
   /** URL of the per-conversation JSONL export. Open in a new tab to trigger
    *  the browser's download flow (the server sets Content-Disposition). */
