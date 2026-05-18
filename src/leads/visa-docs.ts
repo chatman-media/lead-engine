@@ -245,6 +245,151 @@ export function parseVisaDocsJson(raw: string): Partial<VisaFields> {
   return out;
 }
 
+const INTERVIEW_INTERPRET_PROMPT = `Ты помогаешь заполнять визовую анкету. Девушке задали ОДИН вопрос анкеты, и она прислала сообщение. Твоя задача — понять, что именно она ответила.
+
+Тебе дают: ключ текущего поля, текст вопроса, список всех полей анкеты, уже заполненные поля и сообщение девушки.
+
+Правила:
+- Извлекай ТОЛЬКО значения, которые девушка ЯВНО написала в этом сообщении. Никаких догадок.
+- Обычно ответ относится к ТЕКУЩЕМУ полю — помести значение в patch под ключом текущего поля.
+- Если девушка явно указывает, что значение относится к ДРУГОМУ полю («это фамилия, а не имя», «перепутала», «имя — X, фамилия — Y»), помести каждое значение под ПРАВИЛЬНЫМ ключом. При необходимости так исправляется ранее заполненное поле.
+- Не исправляй ранее заполненные поля, если девушка явно об этом не просит.
+- answered_current = true, только если сообщение содержит значение для текущего поля. Ответ «нет»/«no» — валидное значение для многих полей: считай его ответом (answered_current = true, в patch текущее поле = "no").
+- off_topic = true, если сообщение — это вопрос или болтовня, а не ответ на анкету. Тогда patch пустой, answered_current = false.
+- Даты по возможности приводи к формату yyyy-MM-dd.
+- Имена и значения для визы пиши латиницей, ровно как написала девушка; ничего не транслитерируй сам.
+
+ВЕРНИ СТРОГО JSON, без markdown, без \`\`\`, без комментариев:
+{"patch": {"<field>": "<value>", ...}, "answered_current": true|false, "off_topic": true|false}`;
+
+/** Outcome of interpreting a single interview answer. */
+export interface InterviewInterpretation {
+  /** Fields to set / correct (may include fields other than the current one). */
+  patch: Partial<VisaFields>;
+  /** True when the message carried a value for the current field. */
+  answeredCurrent: boolean;
+  /** True when the message was a question / chit-chat, not an answer. */
+  offTopic: boolean;
+  /** True when the LLM could not be used — caller falls back to verbatim store. */
+  llmFailed: boolean;
+}
+
+export interface InterpretInterviewInput {
+  /** The `VisaFields` key being awaited. */
+  currentField: keyof VisaFields;
+  /** The question text shown to the candidate. */
+  question: string;
+  /** The candidate's raw reply (already trimmed). */
+  userMessage: string;
+  /** Accumulated answers so far — context for cross-field corrections. */
+  existingDocs: VisaFields;
+  chat: ChatClient;
+}
+
+/**
+ * Interprets a candidate's interview reply via the LLM: turns free-text
+ * ("перепутала, Alexandra имя, Kireeva фамилия") into a structured
+ * `VisaFields` patch and flags whether the current field was answered.
+ * Any LLM / parse failure returns `llmFailed: true` so the caller can
+ * fall back to the legacy verbatim-store behaviour — the interview must
+ * never break.
+ */
+export async function interpretInterviewAnswer(
+  input: InterpretInterviewInput,
+): Promise<InterviewInterpretation> {
+  const fieldList = ALL_FIELDS.map((k) => `- ${k}: ${VISA_FIELD_LABELS[k]}`).join("\n");
+  const userContent =
+    `Текущее поле: ${input.currentField} ("${input.question}")\n\n` +
+    `Все поля анкеты:\n${fieldList}\n\n` +
+    `Уже заполнено: ${JSON.stringify(input.existingDocs)}\n\n` +
+    `Сообщение девушки:\n${input.userMessage}\n\nОтвет:`;
+
+  let raw: string;
+  try {
+    raw = await input.chat.complete(
+      [
+        { role: "system", content: INTERVIEW_INTERPRET_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      { temperature: 0.1 },
+    );
+  } catch (err) {
+    log.error("visa interview interpret failed", { scope: "visa-docs", err });
+    return { patch: {}, answeredCurrent: false, offTopic: false, llmFailed: true };
+  }
+
+  return parseInterpretResult(raw, input.currentField, input.userMessage);
+}
+
+/** Normalises text for the hallucination-guard substring check. */
+function normalizeForMatch(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Parses the interpreter's JSON. Drops unknown / non-string / oversized
+ * patch values. Hallucination guard: a value for a field OTHER than the
+ * current one is kept only when it actually appears in the candidate's
+ * message (the current field is exempt — it may be normalised, e.g. a
+ * date). Returns `llmFailed: true` on garbage, or when the result is
+ * internally inconsistent (claims the current field was answered but
+ * carries no value for it), so the caller falls back to verbatim store.
+ * Exported for unit tests.
+ */
+export function parseInterpretResult(
+  raw: string,
+  currentField: keyof VisaFields,
+  userMessage: string,
+): InterviewInterpretation {
+  const failed: InterviewInterpretation = {
+    patch: {},
+    answeredCurrent: false,
+    offTopic: false,
+    llmFailed: true,
+  };
+
+  let s = raw.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
+  s = s.replace(/```(?:json)?/gi, "").trim();
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) return failed;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(s.slice(start, end + 1));
+  } catch {
+    return failed;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return failed;
+  const obj = parsed as Record<string, unknown>;
+
+  const patchRaw =
+    typeof obj.patch === "object" && obj.patch !== null && !Array.isArray(obj.patch)
+      ? (obj.patch as Record<string, unknown>)
+      : {};
+  const haystack = normalizeForMatch(userMessage);
+  const patch: Partial<VisaFields> = {};
+  for (const key of ALL_FIELDS) {
+    const val = patchRaw[key];
+    if (typeof val !== "string") continue;
+    const trimmed = val.trim();
+    if (!trimmed || trimmed.length > MAX_FIELD_LEN) continue;
+    if (key !== currentField && !haystack.includes(normalizeForMatch(trimmed))) continue;
+    patch[key] = trimmed;
+  }
+
+  const offTopic = obj.off_topic === true;
+  if (offTopic) return { patch, answeredCurrent: false, offTopic: true, llmFailed: false };
+
+  const answeredCurrent = obj.answered_current === true;
+  // Inconsistent: claims the current field was answered but no value for
+  // it survived → fall back to verbatim store rather than advance empty.
+  if (answeredCurrent && !patch[currentField]) return failed;
+  // Nothing usable at all → fall back so a plain answer is never lost.
+  if (!answeredCurrent && Object.keys(patch).length === 0) return failed;
+
+  return { patch, answeredCurrent, offTopic: false, llmFailed: false };
+}
+
 /**
  * % of required fields filled + the list of still-missing keys.
  * Used by the UI progress strip and the auto-promote check.

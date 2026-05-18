@@ -5,7 +5,9 @@ import type { StylesRepo } from "../db/repos/styles.ts";
 import type { UserRow } from "../db/repos/users.ts";
 import { renderVacanciesBlock } from "../db/repos/vacancies.ts";
 import { VISA_PHOTO_REQUIREMENTS } from "../leads/templates.ts";
+import { interpretInterviewAnswer, type VisaFields } from "../leads/visa-docs.ts";
 import {
+  interviewQuestion,
   interviewQuestionWithPrefill,
   isInterviewConfirmation,
   nextInterviewField,
@@ -35,6 +37,22 @@ import { runPhotoClassification } from "./photo-hooks.ts";
 import { runConversationSummaryRefresh } from "./summary-refresh.ts";
 import type { ProcessInboundDeps, RagDeps } from "./webhook-types.ts";
 
+/** Signature of the `reply` closure built inside `processInbound`. */
+type ReplyFn = (
+  text: string,
+  meta?: unknown,
+  stage?: FunnelStage,
+) => Promise<{ messageId: number }>;
+
+/**
+ * Result of `maybeHandleVisaInterview`:
+ *  - `handled`  — the turn was the answer to a visa field; skip RAG.
+ *  - `offtopic` — mid-interview, but the candidate asked a question; let
+ *                 RAG answer it, then re-ask the interview question.
+ *  - `none`     — the lead is not mid-interview; normal flow.
+ */
+type VisaInterviewOutcome = "handled" | "offtopic" | "none";
+
 /**
  * The "after every turn" maintenance tasks that have to run regardless
  * of which branch processInbound took (successful reply, NO_CONTEXT stall,
@@ -47,12 +65,23 @@ import type { ProcessInboundDeps, RagDeps } from "./webhook-types.ts";
  * otherwise race against each other. `runPhotoClassification` runs before
  * `runIntakeUpdate` so the photo classes it stamps feed the intake counters.
  */
-async function runPostReplyHooks(d: ProcessInboundDeps): Promise<void> {
+async function runPostReplyHooks(
+  d: ProcessInboundDeps,
+  reply: ReplyFn,
+  visaOutcome: VisaInterviewOutcome,
+  repliedThisTurn: boolean,
+): Promise<void> {
   await runMemoryExtraction(d);
   await runConversationSummaryRefresh(d);
   await runPhotoClassification(d);
   await runIntakeUpdate(d);
   await runVisaDocsUpdate(d);
+  // The candidate asked something instead of answering the current visa
+  // field — RAG just answered her question, so re-ask the interview
+  // question now (the field pointer was deliberately not advanced).
+  if (visaOutcome === "offtopic" && repliedThisTurn) {
+    await reaskVisaInterview(d, reply);
+  }
 }
 
 /**
@@ -159,65 +188,140 @@ async function resolveSupportPhase(
   return undefined;
 }
 
-/**
- * Step-by-step visa-anketa interview. While a lead is `submitted` ("подача
- * на визу") and `visa_interview_field` points at a field, every candidate
- * message is treated as the answer to the current field: it's stored into
- * `visa_docs_json`, the pointer advances, and the next question is sent.
- * When the last field is answered the pointer is cleared and the photo /
- * passport-pages request is sent.
- *
- * Returns `true` when it handled the turn (caller must skip RAG), `false`
- * when the lead is not mid-interview (normal flow continues).
- */
-async function maybeHandleVisaInterview(
-  d: ProcessInboundDeps,
-  reply: (text: string, meta?: unknown) => Promise<{ messageId: number }>,
-): Promise<boolean> {
-  const lead = await d.leads.byUserId(d.user.id);
-  if (!lead || lead.state !== "submitted" || !lead.visa_interview_field) return false;
-  // A bare photo/media upload is not a text answer — let it fall through to
-  // the media-only handler (classification / ack) without consuming the
-  // current step or overwriting its field with an empty string.
-  if (d.mediaOnly) return false;
-
-  const currentField = lead.visa_interview_field;
-
-  // Store the candidate's answer into the current visa-anketa field.
-  let docs: Record<string, string> = {};
-  if (lead.visa_docs_json) {
-    try {
-      const parsed = JSON.parse(lead.visa_docs_json);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        docs = parsed as Record<string, string>;
-      }
-    } catch {
-      // Corrupt JSON — start fresh rather than abort the interview.
+/** Parses `leads.visa_docs_json` into a plain object; `{}` on null / corrupt
+ *  JSON so a bad blob never aborts the interview. */
+function parseVisaDocs(raw: string | null): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, string>;
     }
+  } catch {
+    // Corrupt JSON — start fresh rather than abort the interview.
   }
-  // When the field was pre-filled (passport OCR / chat extraction /
-  // operator edit) a bare «да» means "keep it" — don't overwrite the
-  // recognised value with the confirmation word. Any other reply is
-  // treated as a correction.
-  const answer = d.text.trim();
-  const prefilled = docs[currentField]?.trim();
-  if (!(prefilled && isInterviewConfirmation(answer))) {
-    docs[currentField] = answer;
-  }
-  await d.leads.setVisaDocs(lead.id, JSON.stringify(docs));
+  return {};
+}
 
+/** Advances the interview pointer past `currentField`: sends the next
+ *  question, or — when the last field is done — clears the pointer and
+ *  sends the completion + photo-requirements message. */
+async function advanceInterview(
+  d: ProcessInboundDeps,
+  leadId: number,
+  docs: Record<string, string>,
+  currentField: string,
+  reply: ReplyFn,
+): Promise<void> {
   const next = nextInterviewField(currentField);
   if (next) {
-    await d.leads.setVisaInterviewField(lead.id, next);
+    await d.leads.setVisaInterviewField(leadId, next);
     const question = interviewQuestionWithPrefill(next, docs);
     if (question) await reply(question, { source: "visa-interview" });
   } else {
-    await d.leads.setVisaInterviewField(lead.id, null);
+    await d.leads.setVisaInterviewField(leadId, null);
     await reply(`${VISA_INTERVIEW_DONE}\n\n${VISA_PHOTO_REQUIREMENTS}`, {
       source: "visa-interview",
     });
   }
-  return true;
+}
+
+/** Re-sends the current interview question. Used after RAG answers a
+ *  question the candidate asked instead of answering the field. */
+async function reaskVisaInterview(d: ProcessInboundDeps, reply: ReplyFn): Promise<void> {
+  const lead = await d.leads.byUserId(d.user.id);
+  if (!lead || lead.state !== "submitted" || !lead.visa_interview_field) return;
+  const docs = parseVisaDocs(lead.visa_docs_json);
+  const question = interviewQuestionWithPrefill(lead.visa_interview_field, docs);
+  if (question) await reply(question, { source: "visa-interview" });
+}
+
+/**
+ * Step-by-step visa-anketa interview. While a lead is `submitted` ("подача
+ * на визу") and `visa_interview_field` points at a field, the candidate's
+ * message is interpreted by the LLM (`interpretInterviewAnswer`): a plain
+ * value lands in the current field, a natural-language correction ("Alexandra
+ * имя, Kireeva фамилия") is split into the right fields — including fixing an
+ * earlier mis-filled one — and an off-topic question is routed to RAG.
+ *
+ * On any LLM failure the answer is stored verbatim into the current field
+ * and the interview advances (legacy behaviour) — the interview never stalls.
+ *
+ * Returns `handled` (caller skips RAG), `offtopic` (caller runs RAG, then the
+ * post-reply hook re-asks), or `none` (lead not mid-interview, normal flow).
+ */
+async function maybeHandleVisaInterview(
+  d: ProcessInboundDeps,
+  reply: ReplyFn,
+): Promise<VisaInterviewOutcome> {
+  const lead = await d.leads.byUserId(d.user.id);
+  if (!lead || lead.state !== "submitted" || !lead.visa_interview_field) return "none";
+  // A bare photo/media upload is not a text answer — let it fall through to
+  // the media-only handler (classification / ack) without consuming the
+  // current step or overwriting its field with an empty string.
+  if (d.mediaOnly) return "none";
+
+  const currentField = lead.visa_interview_field;
+  const docs = parseVisaDocs(lead.visa_docs_json);
+  const answer = d.text.trim();
+  const prefilled = docs[currentField]?.trim();
+
+  // Fast path: a field pre-filled from passport OCR / chat extraction +
+  // a bare «да» means "keep it" — no LLM call, no overwrite.
+  if (prefilled && isInterviewConfirmation(answer)) {
+    await advanceInterview(d, lead.id, docs, currentField, reply);
+    return "handled";
+  }
+
+  // Interpret the answer with the LLM (Gemini Flash). Falls back to the
+  // main chat client, then to verbatim store when no LLM is configured.
+  const interpChat = d.rag?.visaInterpretChat ?? d.rag?.chat;
+  const interp = interpChat
+    ? await interpretInterviewAnswer({
+        currentField: currentField as keyof VisaFields,
+        question: interviewQuestion(currentField) ?? "",
+        userMessage: answer,
+        existingDocs: docs as VisaFields,
+        chat: interpChat,
+      })
+    : null;
+
+  // No LLM, or it failed / returned nothing usable — store the reply
+  // verbatim into the current field and advance (legacy behaviour).
+  if (!interp || interp.llmFailed) {
+    docs[currentField] = answer;
+    await d.leads.setVisaDocs(lead.id, JSON.stringify(docs));
+    await advanceInterview(d, lead.id, docs, currentField, reply);
+    return "handled";
+  }
+
+  // Apply the interpreted patch — may set the current field and/or correct
+  // earlier ones. Corrections are applied silently (no echo to the candidate).
+  let changed = false;
+  for (const [key, value] of Object.entries(interp.patch)) {
+    if (value && docs[key] !== value) {
+      docs[key] = value;
+      changed = true;
+    }
+  }
+
+  // The candidate asked a question instead of answering: hand off to RAG.
+  // The field pointer is NOT advanced — it gets re-asked after RAG replies.
+  if (interp.offTopic) {
+    if (changed) await d.leads.setVisaDocs(lead.id, JSON.stringify(docs));
+    return "offtopic";
+  }
+
+  await d.leads.setVisaDocs(lead.id, JSON.stringify(docs));
+
+  if (interp.answeredCurrent) {
+    await advanceInterview(d, lead.id, docs, currentField, reply);
+  } else {
+    // The message only corrected other fields — re-ask the current one.
+    const question = interviewQuestionWithPrefill(currentField, docs);
+    if (question) await reply(question, { source: "visa-interview" });
+  }
+  return "handled";
 }
 
 async function runRagForInbound(d: ProcessInboundDeps): Promise<{
@@ -448,11 +552,15 @@ async function runSkillGrading(
 }
 
 export async function processInbound(d: ProcessInboundDeps): Promise<void> {
+  // Whether the bot produced any outbound reply this turn — gates the
+  // off-topic interview re-ask (don't re-ask after a silent turn).
+  let repliedThisTurn = false;
   const reply = async (
     rawText: string,
     meta?: unknown,
     stage?: FunnelStage,
   ): Promise<{ messageId: number }> => {
+    repliedThisTurn = true;
     // Universal style guard: strip "AI tells" (em-dash, ellipsis, markdown,
     // robotic lead-ins) from every outgoing message — not just LLM output.
     // Static templates (visa interview, fallbacks) reach the candidate
@@ -504,7 +612,10 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   // candidate's message is an answer to the current field. Without this a
   // lead the operator handled in `human` mode — or a `queued` chat — would
   // never have its answers stored: the interview would stall after Q1.
-  if (await maybeHandleVisaInterview(d, reply)) {
+  // An `offtopic` outcome lets the normal flow run (RAG answers her
+  // question); the post-reply hook then re-asks the interview question.
+  const visaOutcome = await maybeHandleVisaInterview(d, reply);
+  if (visaOutcome === "handled") {
     return;
   }
 
@@ -524,7 +635,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
       scope: "webhook",
       conv_id: d.conv.id,
     });
-    if (d.rag) await runPostReplyHooks(d);
+    if (d.rag) await runPostReplyHooks(d, reply, visaOutcome, repliedThisTurn);
     return;
   }
 
@@ -550,7 +661,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     }
     // Still no answer — stay queued. Run background tasks so intake/memory
     // continue to update even while the conversation awaits a manual reply.
-    await runPostReplyHooks(d);
+    await runPostReplyHooks(d, reply, visaOutcome, repliedThisTurn);
     return;
   }
 
@@ -587,7 +698,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
         { used_chunk_ids: [], telemetry: result.telemetry },
         stage,
       );
-      await runPostReplyHooks(d);
+      await runPostReplyHooks(d, reply, visaOutcome, repliedThisTurn);
       return;
     }
 
@@ -648,7 +759,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
       });
     }
 
-    await runPostReplyHooks(d);
+    await runPostReplyHooks(d, reply, visaOutcome, repliedThisTurn);
     return;
   }
 
@@ -660,7 +771,7 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     { used_chunk_ids: result.usedChunkIds, telemetry: result.telemetry },
     stage,
   );
-  await runPostReplyHooks(d);
+  await runPostReplyHooks(d, reply, visaOutcome, repliedThisTurn);
 
   // Fire-and-forget: self-grade which skills the reply demonstrated, write
   // the result back into meta_json. Gated by RAG_SKILL_GRADING because

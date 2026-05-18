@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { AdminBus } from "./admin/bus.ts";
 import { createInboundEventBridge } from "./admin/inbound-events.ts";
-import { activeEmbeddingDim, config, llmIsConfigured } from "./config.ts";
+import { activeEmbeddingDim, config, llmIsConfigured, visionCredentials } from "./config.ts";
 import { runMigrations } from "./db/migrate.ts";
 import { sql } from "./db/postgres.ts";
 import { AdminsRepo } from "./db/repos/admins.ts";
@@ -152,6 +152,25 @@ if (llmIsConfigured()) {
       : `openai model=${config.openai.embeddingModel} dim=${config.openai.embeddingDim}`;
   console.log(`[server] chat:    ${chatLine}`);
   console.log(`[server] embed:   ${embedLine}`);
+
+  // Dedicated client for the visa-interview answer interpreter — routed to
+  // the vision provider (Gemini Flash by default) so reading the candidate's
+  // answers stays fast and cheap, independent of the main chat backbone.
+  let visaInterpretChat: ChatClient | undefined;
+  const vc = visionCredentials();
+  if (vc.apiKey) {
+    visaInterpretChat =
+      vc.provider === "openrouter"
+        ? new OpenRouterChatClient({
+            apiKey: vc.apiKey,
+            baseUrl: vc.baseUrl,
+            model: vc.model,
+            ...(config.openrouter.siteUrl ? { siteUrl: config.openrouter.siteUrl } : {}),
+            ...(config.openrouter.appName ? { appName: config.openrouter.appName } : {}),
+          })
+        : new OpenAIChatClient({ apiKey: vc.apiKey, baseUrl: vc.baseUrl, model: vc.model });
+    console.log(`[server] visa interpreter: ${vc.provider} model=${vc.model}`);
+  }
   // Resolve sales style from BOT_SALES_STYLE env. When set, it takes
   // precedence over the legacy BOT_PERSONA_* env vars: the bot uses the
   // sales-engine prompt (persona + voice + framework + hooks + stage +
@@ -168,6 +187,7 @@ if (llmIsConfigured()) {
   rag = {
     chat,
     embedder,
+    ...(visaInterpretChat ? { visaInterpretChat } : {}),
     persona: config.persona,
     topK: config.rag.topK,
     maxDistance: config.rag.maxDistance,
