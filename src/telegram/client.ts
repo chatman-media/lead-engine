@@ -195,6 +195,18 @@ export class TelegramClient {
   }
 
   /**
+   * Delete a message we previously sent. Used by the admin "delete message"
+   * action on the Bot-API channel. Telegram lets a bot delete its own
+   * outgoing messages in a private chat with no time limit.
+   */
+  deleteMessage(input: { chatId: number | string; messageId: number }): Promise<true> {
+    return this.call<true>("deleteMessage", {
+      chat_id: input.chatId,
+      message_id: input.messageId,
+    });
+  }
+
+  /**
    * Acknowledge an inline-keyboard click. Telegram requires a response
    * within a few seconds or the spinner on the user's button keeps
    * rotating. Pass `text` to flash a small notification ("Approved!").

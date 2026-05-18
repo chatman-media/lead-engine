@@ -101,6 +101,10 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER,
   stage TEXT
 );
+-- Soft-delete marker — set when an operator deletes a sent message from the
+-- admin UI. The row stays in history (rendered struck-through) so the audit
+-- trail and exports remain intact.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at INTEGER;
 CREATE INDEX IF NOT EXISTS idx_msg_conv_created ON messages(conversation_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_msg_user_tg
   ON messages(conversation_id, tg_message_id)
@@ -369,8 +373,25 @@ CREATE TABLE IF NOT EXISTS userbot_send_queue (
 );
 -- Existing deployments predate the attempts column; add it idempotently.
 ALTER TABLE userbot_send_queue ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+-- Links a queued admin reply to its `messages` row so the userbot can stamp
+-- the Telegram message id back after sending (needed to later delete it).
+ALTER TABLE userbot_send_queue ADD COLUMN IF NOT EXISTS message_id INTEGER;
 CREATE INDEX IF NOT EXISTS idx_userbot_queue_pending
   ON userbot_send_queue(id) WHERE sent_at IS NULL;
+
+-- Queue of outgoing messages an operator asked to delete from Telegram.
+-- Drained by the userbot subprocess (only it can call MTProto deleteMessages).
+CREATE TABLE IF NOT EXISTS userbot_delete_queue (
+  id            SERIAL  PRIMARY KEY,
+  tg_user_id    BIGINT  NOT NULL,
+  tg_message_id INTEGER NOT NULL,
+  created_at    INTEGER NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::INTEGER,
+  done_at       INTEGER,
+  error         TEXT,
+  attempts      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_userbot_delete_queue_pending
+  ON userbot_delete_queue(id) WHERE done_at IS NULL;
 
 -- Operator-action audit trail. Wrote per destructive admin endpoint
 -- (KB wipe, outcomes purge, webhook delete, lead delete, GDPR erase).
