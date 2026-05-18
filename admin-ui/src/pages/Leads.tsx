@@ -150,6 +150,154 @@ const STATE_ACCENT: Record<LeadState, string> = {
   closed: "var(--text-3)",
 };
 
+/**
+ * Ordered funnel milestones for the lead step-chain. Each milestone maps
+ * one or more `LeadState`s; `rejected` / `closed` are handled separately
+ * (they don't sit on the linear happy path).
+ */
+const FUNNEL_STEPS: ReadonlyArray<{ label: string; states: ReadonlyArray<LeadState> }> = [
+  { label: "анкета", states: ["intake_pending"] },
+  { label: "решение", states: ["intake_complete"] },
+  { label: "одобрение", states: ["partner_review", "approved"] },
+  { label: "документы", states: ["docs_pending"] },
+  { label: "подача", states: ["docs_complete"] },
+  { label: "виза", states: ["submitted"] },
+  { label: "работа", states: ["ready_to_work"] },
+];
+
+/** Funnel step at which a `rejected` lead diverges (the approval decision). */
+const REJECT_STEP_INDEX = 2;
+
+type StepStatus = "done" | "current" | "pending" | "rejected";
+
+/**
+ * Horizontal step-chain showing how far a lead has moved through the
+ * funnel — which milestones are done (green ✓), which one is in progress
+ * (amber ●), and which remain (gray). A `rejected` lead shows a red ✕ at
+ * the approval step; `closed` marks the whole chain as settled.
+ */
+function LeadStepper({ state }: { state: LeadState }) {
+  const rejected = state === "rejected";
+  const closed = state === "closed";
+  let current = FUNNEL_STEPS.findIndex((s) => s.states.includes(state));
+  if (rejected) current = REJECT_STEP_INDEX;
+  else if (closed) current = FUNNEL_STEPS.length - 1;
+  else if (current === -1) current = 0;
+
+  return (
+    <div
+      data-testid="lead-stepper"
+      style={{ display: "flex", alignItems: "center", flexWrap: "wrap", rowGap: 6 }}
+    >
+      {FUNNEL_STEPS.map((step, i) => {
+        const status: StepStatus =
+          rejected && i === REJECT_STEP_INDEX
+            ? "rejected"
+            : i < current
+              ? "done"
+              : i === current
+                ? closed
+                  ? "done"
+                  : "current"
+                : "pending";
+        return (
+          <StepNode
+            key={step.label}
+            label={step.label}
+            status={status}
+            connector={i === 0 ? null : i <= current ? "done" : "pending"}
+          />
+        );
+      })}
+      {closed && (
+        <span
+          style={{ marginLeft: 8, fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-3)" }}
+        >
+          · закрыт
+        </span>
+      )}
+    </div>
+  );
+}
+
+function StepNode({
+  label,
+  status,
+  connector,
+}: {
+  label: string;
+  status: StepStatus;
+  connector: "done" | "pending" | null;
+}) {
+  const GREEN = "var(--green, #2ea043)";
+  const RED = "var(--red, #ef4444)";
+  const dotBase: CSSProperties = {
+    width: 16,
+    height: 16,
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 9,
+    lineHeight: 1,
+    flexShrink: 0,
+    boxSizing: "border-box",
+  };
+  let dot: CSSProperties;
+  let mark = "";
+  let labelColor = "var(--text-3)";
+  let labelWeight = 400;
+  if (status === "done") {
+    dot = { ...dotBase, background: GREEN, color: "#fff", border: `1px solid ${GREEN}` };
+    mark = "✓";
+    labelColor = "var(--text-2)";
+  } else if (status === "current") {
+    dot = {
+      ...dotBase,
+      background: "var(--amber-dim, rgba(245,158,11,0.15))",
+      border: "2px solid var(--amber)",
+      color: "var(--amber)",
+    };
+    mark = "●";
+    labelColor = "var(--amber)";
+    labelWeight = 600;
+  } else if (status === "rejected") {
+    dot = { ...dotBase, background: RED, color: "#fff", border: `1px solid ${RED}` };
+    mark = "✕";
+    labelColor = RED;
+    labelWeight = 600;
+  } else {
+    dot = { ...dotBase, background: "transparent", border: "1px solid var(--border)" };
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center" }}>
+      {connector && (
+        <span
+          style={{
+            width: 14,
+            height: 2,
+            flexShrink: 0,
+            background: connector === "done" ? GREEN : "var(--border)",
+          }}
+        />
+      )}
+      <span style={dot}>{mark}</span>
+      <span
+        style={{
+          marginLeft: 5,
+          fontFamily: "var(--mono)",
+          fontSize: 10,
+          color: labelColor,
+          fontWeight: labelWeight,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
 export function Leads() {
   const [items, setItems] = useState<Lead[] | null>(null);
   const [counts, setCounts] = useState<LeadCounts | null>(null);
@@ -563,6 +711,8 @@ function LeadCard({
           </button>
         </div>
       </div>
+
+      <LeadStepper state={lead.state} />
 
       {intake && (lead.state === "intake_pending" || lead.state === "intake_complete") && (
         <IntakeProgress intake={intake} leadId={lead.id} />
