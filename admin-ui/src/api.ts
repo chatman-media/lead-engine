@@ -420,7 +420,13 @@ export interface SystemStatus {
     model: string;
     provider: string;
     api_key_configured: boolean;
-    classified: { passport: number; full_body: number; portrait: number; other: number };
+    classified: {
+      passport: number;
+      internal_passport: number;
+      full_body: number;
+      portrait: number;
+      other: number;
+    };
     unclassified: number;
   };
   routing: {

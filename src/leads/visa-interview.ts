@@ -144,6 +144,35 @@ export function interviewQuestion(field: string): string | undefined {
   return STEP_BY_FIELD.get(field)?.question;
 }
 
+/**
+ * Question text for a field, with a confirm-or-correct hint appended
+ * when `docs` already carries a value for it (pre-filled from passport
+ * OCR, chat extraction, or an operator edit). The candidate confirms
+ * with «да» or sends a corrected value — see `isInterviewConfirmation`.
+ * Returns `undefined` for an unknown field.
+ */
+export function interviewQuestionWithPrefill(
+  field: string,
+  docs: Record<string, string> | undefined,
+): string | undefined {
+  const question = interviewQuestion(field);
+  if (!question) return undefined;
+  const existing = docs?.[field]?.trim();
+  if (!existing) return question;
+  return (
+    `${question}\n\nУ нас уже есть для этого поля: «${existing}».\n` +
+    `Если всё верно — ответьте «да». Если нужно исправить — пришлите правильное значение.`
+  );
+}
+
+/**
+ * True when the candidate's reply is a plain confirmation of a
+ * pre-filled interview field (rather than a corrected value).
+ */
+export function isInterviewConfirmation(text: string): boolean {
+  return /^(да|верно|ок|окей|yes|y|ok|правильно|корректно|всё верно|все верно)$/i.test(text.trim());
+}
+
 /** The field that follows `current`, or `null` when `current` is the last
  *  step (or is not a known step). */
 export function nextInterviewField(current: string): string | null {

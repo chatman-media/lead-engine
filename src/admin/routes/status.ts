@@ -118,6 +118,7 @@ export function createStatusHandler(deps: AdminApiDeps): RouteHandler {
     `;
     const visionClassified: Record<PhotoClass, number> = {
       passport: 0,
+      internal_passport: 0,
       full_body: 0,
       portrait: 0,
       other: 0,

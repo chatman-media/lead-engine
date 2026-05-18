@@ -197,7 +197,13 @@ describe("photo classification repo methods", () => {
     expect(await msgs.unclassifiedPhotos(c.id)).toEqual([]);
 
     const counts = await msgs.countPhotosByClass(c.id);
-    expect(counts).toEqual({ passport: 1, full_body: 1, portrait: 0, other: 0 });
+    expect(counts).toEqual({
+      passport: 1,
+      internal_passport: 0,
+      full_body: 1,
+      portrait: 0,
+      other: 0,
+    });
   });
 });
 
@@ -264,7 +270,7 @@ describe("extractIntake + isIntakeComplete", () => {
     const intake = await extractIntake({
       messages: [{ role: "user", content: "hi" }],
       mediaCounts: { photos: 9, videos: 0 },
-      photoClasses: { passport: 0, full_body: 2, portrait: 7, other: 0 },
+      photoClasses: { passport: 0, internal_passport: 0, full_body: 2, portrait: 7, other: 0 },
       chat,
     });
     // 9 photos would trip the legacy heuristic — but vision says no passport.
@@ -277,7 +283,7 @@ describe("extractIntake + isIntakeComplete", () => {
     const intake = await extractIntake({
       messages: [{ role: "user", content: "hi" }],
       mediaCounts: { photos: 3, videos: 0 },
-      photoClasses: { passport: 1, full_body: 0, portrait: 2, other: 0 },
+      photoClasses: { passport: 1, internal_passport: 0, full_body: 0, portrait: 2, other: 0 },
       chat,
     });
     expect(intake.passport_photo_received).toBe(true);

@@ -17,7 +17,12 @@ import {
   REJECTION_DEFAULT,
   SUBMITTED_REPLY,
 } from "./templates.ts";
-import { firstInterviewField, interviewQuestion, VISA_INTERVIEW_INTRO } from "./visa-interview.ts";
+import { internalPassportToVisaFields, passportToVisaFields } from "./visa-docs.ts";
+import {
+  firstInterviewField,
+  interviewQuestionWithPrefill,
+  VISA_INTERVIEW_INTRO,
+} from "./visa-interview.ts";
 
 export interface LeadsServiceDeps {
   leads: LeadsRepo;
@@ -223,6 +228,42 @@ export class LeadsService {
       });
       return;
     }
+    // Pre-fill the visa anketa with whatever the passport-photo OCR
+    // already captured, so the interview shows recognised values for
+    // confirmation instead of collecting identity fields from scratch.
+    // Only empty slots are filled — operator edits / chat-extracted
+    // values are kept intact.
+    let docs: Record<string, string> = {};
+    if (input.lead.visa_docs_json) {
+      try {
+        const parsed = JSON.parse(input.lead.visa_docs_json);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          docs = parsed as Record<string, string>;
+        }
+      } catch {
+        // Corrupt JSON — start fresh rather than abort the interview.
+      }
+    }
+    let changed = false;
+    const fillEmpty = (fields: Partial<Record<string, string>>): void => {
+      for (const [key, value] of Object.entries(fields)) {
+        if (value && !docs[key]?.trim()) {
+          docs[key] = value;
+          changed = true;
+        }
+      }
+    };
+    // Загранпаспорт first — its Latin / MRZ data is authoritative for
+    // the overlapping fields; the internal passport then fills what's
+    // left (national ID number, and DOB / place of birth as fallback).
+    const passport = await this.deps.messages.passportFieldsForConversation(conv.id);
+    if (passport) fillEmpty(passportToVisaFields(passport));
+    const internalPassport = await this.deps.messages.internalPassportFieldsForConversation(
+      conv.id,
+    );
+    if (internalPassport) fillEmpty(internalPassportToVisaFields(internalPassport));
+    if (changed) await this.deps.leads.setVisaDocs(input.lead.id, JSON.stringify(docs));
+
     const firstField = firstInterviewField();
     await this.deps.leads.setVisaInterviewField(input.lead.id, firstField);
     await this.relayToCandidate({
@@ -230,7 +271,7 @@ export class LeadsService {
       conversationId: conv.id,
       text: VISA_INTERVIEW_INTRO,
     });
-    const firstQuestion = interviewQuestion(firstField);
+    const firstQuestion = interviewQuestionWithPrefill(firstField, docs);
     if (firstQuestion) {
       await this.relayToCandidate({
         chatId: input.user.tg_user_id,

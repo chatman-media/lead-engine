@@ -206,6 +206,61 @@ describe("passport extraction repo methods", () => {
   });
 });
 
+describe("internal passport extraction repo methods", () => {
+  test("needs-extraction list, setInternalPassportFields, fields-for-conversation", async () => {
+    const p = await messages.add({
+      conversationId: convId,
+      role: "user",
+      text: "[photo]",
+      meta: {
+        media: {
+          type: "photo",
+          file_id: "int-1",
+          mime_type: "image/png",
+          photo_class: "internal_passport",
+        },
+      },
+    });
+    // A загранпаспорт photo — must NOT be picked up by the internal list.
+    await messages.add({
+      conversationId: convId,
+      role: "user",
+      text: "[photo]",
+      meta: photoMeta("pass-1", "passport"),
+    });
+
+    let pending = await messages.internalPassportPhotosNeedingExtraction(convId);
+    expect(pending.map((x) => x.file_id)).toEqual(["int-1"]);
+
+    expect(
+      await messages.setInternalPassportFields(p.id, {
+        national_id_number: "12 34 567890",
+        date_of_birth: "12.04.1998",
+      }),
+    ).toBe(true);
+
+    pending = await messages.internalPassportPhotosNeedingExtraction(convId);
+    expect(pending).toHaveLength(0);
+
+    expect(await messages.internalPassportFieldsForConversation(convId)).toEqual({
+      national_id_number: "12 34 567890",
+      date_of_birth: "12.04.1998",
+    });
+  });
+
+  test("empty extraction marks the photo done but yields no conversation fields", async () => {
+    const p = await messages.add({
+      conversationId: convId,
+      role: "user",
+      text: "[photo]",
+      meta: { media: { type: "photo", file_id: "int-2", photo_class: "internal_passport" } },
+    });
+    await messages.setInternalPassportFields(p.id, {});
+    expect(await messages.internalPassportPhotosNeedingExtraction(convId)).toHaveLength(0);
+    expect(await messages.internalPassportFieldsForConversation(convId)).toBeNull();
+  });
+});
+
 describe("mediaForConversation", () => {
   test("returns every media message oldest-first with class + caption", async () => {
     await messages.add({
