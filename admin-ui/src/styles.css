@@ -120,7 +120,7 @@ input, textarea {
 
 .sidebar-nav {
   flex: 1;
-  padding: 64px 8px 10px;
+  padding: 16px 8px 10px;
 }
 
 .nav-item {
@@ -812,7 +812,7 @@ textarea.input {
 .theme-toggle-icon,
 .settings-fab {
   position: fixed;
-  top: 18px;
+  top: 14px;
   z-index: 20;
   display: inline-flex;
   align-items: center;
@@ -832,7 +832,7 @@ textarea.input {
 }
 
 .settings-fab {
-  left: 18px;
+  right: 62px;
 }
 
 .theme-toggle-icon:hover,

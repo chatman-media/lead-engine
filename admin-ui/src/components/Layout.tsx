@@ -177,7 +177,9 @@ export function Layout({ admin, children }: LayoutProps) {
         </div>
       </aside>
 
-      <main style={{ flex: 1, overflow: "auto", background: "var(--bg)" }}>{children}</main>
+      <main style={{ flex: 1, overflow: "auto", background: "var(--bg)", paddingTop: 56 }}>
+        {children}
+      </main>
     </div>
   );
 }
