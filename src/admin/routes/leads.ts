@@ -3,6 +3,7 @@ import { ConversationsRepo } from "../../db/repos/conversations.ts";
 import { type LeadState, LeadsRepo } from "../../db/repos/leads.ts";
 import { MessagesRepo } from "../../db/repos/messages.ts";
 import { UsersRepo } from "../../db/repos/users.ts";
+import type { OpsPostResult } from "../../leads/service.ts";
 import { fillIntakeTemplate, type IntakeFields } from "../../leads/templates.ts";
 import { json, type RouteHandler } from "../../router.ts";
 import { parseIdParam, parseJsonBody, withAdmin, withSuperadmin } from "../handler-helpers.ts";
@@ -283,10 +284,11 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
     runAttribution(deps, transitioned);
 
     const service = buildLeadsService(deps);
+    let visaPost: OpsPostResult | null = null;
     if (service) {
       const conv = await conversations.byUserId(user.id);
       if (conv) {
-        await service.postVisaSubmissionPackage({
+        visaPost = await service.postVisaSubmissionPackage({
           lead: transitioned,
           user,
           recentMessages: await recentMessagesForCard(messagesRepo, conv.id),
@@ -296,7 +298,7 @@ export function createSubmitToVisaHandler(deps: AdminApiDeps): RouteHandler {
       // Acknowledge to the candidate so they're not left in the dark.
       await service.sendDocsCompleteAck({ user });
     }
-    return json({ lead: transitioned, application_id: applicationId });
+    return json({ lead: transitioned, application_id: applicationId, visa_post: visaPost });
   });
 }
 
