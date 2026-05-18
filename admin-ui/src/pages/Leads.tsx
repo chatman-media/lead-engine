@@ -173,14 +173,16 @@ export function Leads() {
     refresh();
   }, [filter]);
 
-  async function withBusy(id: number, fn: () => Promise<unknown>) {
+  async function withBusy<T>(id: number, fn: () => Promise<T>): Promise<T | undefined> {
     setBusy(id);
     setError(null);
     try {
-      await fn();
+      const result = await fn();
       await refresh();
+      return result;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return undefined;
     } finally {
       setBusy(null);
     }
@@ -268,7 +270,22 @@ export function Leads() {
                 ) {
                   return;
                 }
-                return withBusy(lead.id, () => api.submitLeadToVisa(lead.id));
+                const res = await withBusy(lead.id, () => api.submitLeadToVisa(lead.id));
+                if (!res) return;
+                const post = res.visa_post;
+                if (!post || post.skipped) {
+                  notify(
+                    "Лид передан, но VISA_CHAT_ID не настроен — пакет в группу не опубликован.",
+                    "error",
+                  );
+                } else if (!post.posted) {
+                  notify(
+                    `Лид передан, но публикация в группу не удалась: ${post.error ?? "неизвестная ошибка"}`,
+                    "error",
+                  );
+                } else {
+                  notify(`Пакет опубликован в группу. Заявка ${res.application_id}.`, "success");
+                }
               }}
               onMarkSubmitted={async () => {
                 if (
@@ -279,7 +296,7 @@ export function Leads() {
                 ) {
                   return;
                 }
-                return withBusy(lead.id, () => api.markLeadSubmitted(lead.id));
+                await withBusy(lead.id, () => api.markLeadSubmitted(lead.id));
               }}
               onRevert={async () => {
                 if (
@@ -290,7 +307,7 @@ export function Leads() {
                 ) {
                   return;
                 }
-                return withBusy(lead.id, () => api.revertLead(lead.id));
+                await withBusy(lead.id, () => api.revertLead(lead.id));
               }}
               onDelete={async () => {
                 if (
@@ -379,6 +396,7 @@ function LeadCard({
   const canMarkSubmitted = lead.state === "docs_complete";
   const intake = parseIntake(lead.intake_json);
   const [viewOpen, setViewOpen] = useState(false);
+  const [visaOpen, setVisaOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const leadLabel = `#${lead.id} · ${
     lead.tg_username ? `@${lead.tg_username}` : `tg:${lead.tg_user_id}`
@@ -455,9 +473,18 @@ function LeadCard({
             onClick={() => setViewOpen(true)}
             className="btn btn-ghost btn-sm"
             disabled={busy}
-            title="Посмотреть заполненную анкету кандидата"
+            title="Посмотреть анкету кандидата на русском"
           >
             анкета
+          </button>
+          <button
+            onClick={() => setVisaOpen(true)}
+            className="btn btn-ghost btn-sm"
+            disabled={busy}
+            title="Посмотреть и отредактировать визовую анкету"
+            data-testid="lead-visa-anketa"
+          >
+            виза
           </button>
           {!decided && !inFlight && (
             <button
@@ -541,10 +568,6 @@ function LeadCard({
         <IntakeProgress intake={intake} leadId={lead.id} />
       )}
 
-      {(lead.state === "docs_pending" ||
-        lead.state === "docs_complete" ||
-        lead.state === "submitted") && <VisaDocsPane leadId={lead.id} />}
-
       <NotesPane leadId={lead.id} />
       <TimelinePane leadId={lead.id} />
 
@@ -554,6 +577,13 @@ function LeadCard({
           leadId={lead.id}
           leadLabel={leadLabel}
           onClose={() => setViewOpen(false)}
+        />
+      )}
+      {visaOpen && (
+        <VisaAnketaModal
+          leadId={lead.id}
+          leadLabel={leadLabel}
+          onClose={() => setVisaOpen(false)}
         />
       )}
       {sendOpen && (
@@ -572,7 +602,7 @@ function LeadCard({
  * Operator-facing note panel: free-form commentary on a lead, distinct
  * from the bot-driven message log and the auto-tracked timeline.
  * Add via inline form, delete with × per note. Lazy-loaded on first
- * expand (same pattern as TimelinePane / VisaDocsPane).
+ * expand (same pattern as TimelinePane).
  */
 function NotesPane({ leadId }: { leadId: number }) {
   const [open, setOpen] = useState(false);
@@ -777,7 +807,7 @@ function NotesPane({ leadId }: { leadId: number }) {
  * Collapsible audit-trail of every state transition on the lead, plus
  * application-id allocation. Lazy-loaded on first expand to avoid a
  * fetch storm on the list view. Detail endpoint is the same one
- * VisaDocsPane already uses, so two opens hit the cache once.
+ * VisaAnketaModal already uses, so two opens hit the cache once.
  */
 function TimelinePane({ leadId }: { leadId: number }) {
   const [open, setOpen] = useState(false);
@@ -898,27 +928,51 @@ function TimelineRow({ event: ev }: { event: LeadEvent }) {
   );
 }
 
-function VisaDocsPane({ leadId }: { leadId: number }) {
-  const [open, setOpen] = useState(false);
+/**
+ * Modal viewer/editor for the candidate's visa questionnaire — the 32
+ * fields the bot auto-extracts during `docs_pending`. Operators can
+ * correct any field inline. Mirrors AnketaModal's chrome so the leads
+ * page exposes both questionnaires (intake + visa) the same way.
+ */
+function VisaAnketaModal({
+  leadId,
+  leadLabel,
+  onClose,
+}: {
+  leadId: number;
+  leadLabel: string;
+  onClose: () => void;
+}) {
   const [docs, setDocs] = useState<VisaDocs | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<keyof VisaDocs | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Lazy-load on first expand so the list view doesn't trigger a fetch
-  // per card on mount. After load, the operator can re-collapse and
-  // we keep the state.
-  async function ensureLoaded() {
-    if (loaded) return;
-    try {
-      const detail = await api.leadDetail(leadId);
-      setDocs(detail.visa_docs ?? {});
-      setLoaded(true);
-    } catch (err) {
-      console.error("[visa-docs] load failed", err);
+  // Escape closes the modal — but while a field edit is in progress it
+  // cancels the edit instead (handled on the input's onKeyDown).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && editingKey === null) onClose();
     }
-  }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, editingKey]);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .leadDetail(leadId)
+      .then((detail) => {
+        if (alive) setDocs(detail.visa_docs ?? {});
+      })
+      .catch((e) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [leadId]);
 
   function startEdit(key: keyof VisaDocs) {
     setEditingKey(key);
@@ -949,67 +1003,59 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
   const pct = totalRequired > 0 ? Math.round((filled / totalRequired) * 100) : 0;
 
   return (
-    <div
-      style={{
-        marginTop: 8,
-        borderTop: "1px solid var(--border)",
-        paddingTop: 8,
-      }}
-    >
-      <button
-        type="button"
-        onClick={() => {
-          setOpen((o) => !o);
-          if (!open) void ensureLoaded();
-        }}
+    <div onClick={onClose} style={MODAL_OVERLAY} data-testid="visa-anketa-modal">
+      <div
+        onClick={(e) => e.stopPropagation()}
         style={{
-          background: "transparent",
-          border: "none",
-          color: "var(--text-3)",
-          fontFamily: "var(--mono)",
-          fontSize: 11,
-          cursor: "pointer",
-          padding: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
+          background: "var(--bg-1)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          padding: 20,
           width: "100%",
+          maxWidth: 640,
+          maxHeight: "80vh",
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
         }}
-        data-testid="visa-docs-toggle"
       >
-        <span style={{ width: 10, display: "inline-block" }}>{open ? "▾" : "▸"}</span>
-        <span>ВИЗОВАЯ АНКЕТА</span>
-        <span
-          style={{
-            color: pct >= 100 ? "var(--green, #2ea043)" : "var(--amber)",
-            fontWeight: 600,
-          }}
-        >
-          {filled}/{totalRequired} required ({pct}%)
-        </span>
-      </button>
-
-      {open && (
-        <div
-          style={{
-            marginTop: 8,
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-          }}
-        >
-          {!loaded ? (
-            <div
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <h3
+            style={{ margin: 0, fontFamily: "var(--display)", color: "var(--text)", fontSize: 14 }}
+          >
+            Визовая анкета · {leadLabel}
+            <span
               style={{
+                marginLeft: 10,
                 fontFamily: "var(--mono)",
-                fontSize: 11,
-                color: "var(--text-3)",
+                fontWeight: 600,
+                color: pct >= 100 ? "var(--green, #2ea043)" : "var(--amber)",
               }}
             >
-              загрузка…
-            </div>
-          ) : (
-            VISA_FIELD_ORDER.map((key) => {
+              {filled}/{totalRequired} required ({pct}%)
+            </span>
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="закрыть"
+            className="btn btn-ghost btn-sm"
+          >
+            ✕
+          </button>
+        </div>
+        {error ? (
+          <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--red, #ef4444)" }}>
+            {error}
+          </div>
+        ) : docs === null ? (
+          <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-3)" }}>
+            загрузка…
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {VISA_FIELD_ORDER.map((key) => {
               const value = docs?.[key] ?? "";
               const required = (VISA_REQUIRED as ReadonlyArray<keyof VisaDocs>).includes(key);
               const isLong = VISA_LONG_FIELDS.has(key);
@@ -1113,10 +1159,10 @@ function VisaDocsPane({ leadId }: { leadId: number }) {
                   </div>
                 </div>
               );
-            })
-          )}
-        </div>
-      )}
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

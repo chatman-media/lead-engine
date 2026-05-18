@@ -24,6 +24,7 @@ import {
 } from "../rag/answer.ts";
 import type { ChatMessage } from "../rag/chat.ts";
 import { gradeSkills } from "../rag/grade-skills.ts";
+import { applyStyleRules } from "../rag/text-style-rules.ts";
 import { pickVariant } from "../sales/ab-router.ts";
 import type { SkillForPrompt } from "../sales/prompt.ts";
 import { classifyStage } from "../sales/stage-classifier.ts";
@@ -555,11 +556,16 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   // off-topic interview re-ask (don't re-ask after a silent turn).
   let repliedThisTurn = false;
   const reply = async (
-    text: string,
+    rawText: string,
     meta?: unknown,
     stage?: FunnelStage,
   ): Promise<{ messageId: number }> => {
     repliedThisTurn = true;
+    // Universal style guard: strip "AI tells" (em-dash, ellipsis, markdown,
+    // robotic lead-ins) from every outgoing message — not just LLM output.
+    // Static templates (visa interview, fallbacks) reach the candidate
+    // through here and would otherwise bypass sanitization.
+    const text = applyStyleRules(rawText);
     let tgMessageId: number | undefined;
     try {
       const sent = await d.telegram.sendMessage({

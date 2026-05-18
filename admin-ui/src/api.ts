@@ -886,7 +886,11 @@ export const api = {
     }),
 
   submitLeadToVisa: (id: number) =>
-    req<{ lead: Lead; application_id: string }>(`/admin/api/leads/${id}/submit-to-visa`, {
+    req<{
+      lead: Lead;
+      application_id: string;
+      visa_post: { posted: boolean; skipped?: boolean; error?: string } | null;
+    }>(`/admin/api/leads/${id}/submit-to-visa`, {
       method: "POST",
     }),
 
