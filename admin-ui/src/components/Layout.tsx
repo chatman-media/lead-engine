@@ -132,6 +132,7 @@ export function Layout({ admin, children }: LayoutProps) {
 
   return (
     <div className="layout">
+      <div className="account-email">{admin.email}</div>
       <NavLink
         to="/admin/settings"
         className="settings-fab"
@@ -170,7 +171,6 @@ export function Layout({ admin, children }: LayoutProps) {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="sidebar-email">{admin.email}</div>
           <button className="btn btn-sm btn-block btn-logout" onClick={handleLogout}>
             Выйти
           </button>
