@@ -19,6 +19,17 @@ import {
 } from "./templates.ts";
 import { firstInterviewField, interviewQuestion, VISA_INTERVIEW_INTRO } from "./visa-interview.ts";
 
+/**
+ * Outcome of posting to an ops/visa group chat. `skipped` means the chat
+ * id was not configured; `error` carries the Telegram failure text so the
+ * admin UI can surface it instead of reporting a silent success.
+ */
+export interface OpsPostResult {
+  posted: boolean;
+  skipped?: boolean;
+  error?: string;
+}
+
 export interface LeadsServiceDeps {
   leads: LeadsRepo;
   users: UsersRepo;
@@ -176,6 +187,7 @@ export class LeadsService {
     } catch (err) {
       log.error("failed to post lead card", {
         scope: "leads",
+        lead_id: input.lead.id,
         leads_chat_id: this.deps.leadsChatId,
         err,
       });
@@ -331,8 +343,8 @@ export class LeadsService {
     user: UserRow;
     recentMessages: Array<{ role: string; text: string }>;
     applicationId: string;
-  }): Promise<void> {
-    if (this.deps.visaChatId == null) return;
+  }): Promise<OpsPostResult> {
+    if (this.deps.visaChatId == null) return { posted: false, skipped: true };
     const intake = parseJson<IntakeFields>(input.lead.intake_json);
     const lines: string[] = [];
     lines.push(`📋 ПОДАЧА НА ВИЗУ · ${input.applicationId}`);
@@ -371,12 +383,15 @@ export class LeadsService {
         chatId: this.deps.visaChatId,
         text: lines.join("\n"),
       });
+      return { posted: true };
     } catch (err) {
       log.error("failed to post visa package", {
         scope: "leads",
+        lead_id: input.lead.id,
         visa_chat_id: this.deps.visaChatId,
         err,
       });
+      return { posted: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
