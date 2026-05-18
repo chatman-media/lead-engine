@@ -593,17 +593,27 @@ export class LeadsService {
     // Static templates reach the candidate through here and would
     // otherwise bypass the "AI tell" sanitization applied to LLM output.
     const text = input.applyGuard === false ? input.text : applyStyleRules(input.text);
-    let tgMessageId: number | undefined;
+    const source = input.source ?? "lead-template";
     if (this.deps.userbotEnabled && this.deps.sql) {
       // Real funnel is on the userbot — enqueue so the message appears
-      // from Alina's personal account instead of the agency bot. The
-      // userbot poller assigns the tg message id when it actually sends.
+      // from Alina's personal account instead of the agency bot. Persist
+      // the `messages` row FIRST: its id links the send-queue row, and the
+      // userbot poller stamps `tg_message_id` back onto it after sending —
+      // which is what a later "delete from Telegram" needs. Enqueuing
+      // without that link leaves `tg_message_id` permanently NULL.
+      const inserted = await this.deps.messages.add({
+        conversationId: input.conversationId,
+        role: "assistant",
+        text,
+        meta: { source },
+      });
       try {
-        await enqueue(this.deps.sql, input.chatId, text);
+        await enqueue(this.deps.sql, input.chatId, text, inserted.id);
       } catch (err) {
         log.error("enqueue to userbot send queue failed", { scope: "leads", err });
       }
     } else {
+      let tgMessageId: number | undefined;
       try {
         const sent = await this.deps.telegram.sendMessage({
           chatId: input.chatId,
@@ -613,14 +623,14 @@ export class LeadsService {
       } catch (err) {
         log.error("sendMessage to candidate failed", { scope: "leads", err });
       }
+      await this.deps.messages.add({
+        conversationId: input.conversationId,
+        role: "assistant",
+        text,
+        ...(tgMessageId !== undefined ? { tgMessageId } : {}),
+        meta: { source },
+      });
     }
-    await this.deps.messages.add({
-      conversationId: input.conversationId,
-      role: "assistant",
-      text,
-      ...(tgMessageId !== undefined ? { tgMessageId } : {}),
-      meta: { source: input.source ?? "lead-template" },
-    });
     await this.deps.conversations.touch(input.conversationId);
   }
 }

@@ -253,3 +253,41 @@ describe("LeadsService outgoing style guard", () => {
     expect(list[0]!.text).toBe("Спасибо за интерес — пока не готовы взять.");
   });
 });
+
+describe("LeadsService userbot send path", () => {
+  test("relayed message links the messages row to the send-queue row", async () => {
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const messages = new MessagesRepo(sql);
+    const leads = new LeadsRepo(sql);
+    const u = await users.create({ tgUserId: 557_000 });
+    const conv = await conversations.ensureForUser(u.id);
+    await leads.ensureForUser(u.id);
+    const service = new LeadsService({
+      leads,
+      users,
+      conversations,
+      messages,
+      telegram: fakeTelegram().client,
+      leadsChatId: -100_111,
+      visaChatId: null,
+      userbotEnabled: true,
+      sql,
+    });
+
+    await service.sendIntakeTemplate({ user: u, text: "Заполните анкету по пунктам." });
+
+    const list = await messages.listByConversation(conv.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.role).toBe("assistant");
+
+    const queue = await sql<
+      { message_id: number | null }[]
+    >`SELECT message_id FROM userbot_send_queue WHERE tg_user_id = ${u.tg_user_id}`;
+    expect(queue).toHaveLength(1);
+    // The send-queue row must carry the messages row id so the userbot
+    // poller can stamp tg_message_id back after sending — without it,
+    // "delete from Telegram" can never work for this message.
+    expect(queue[0]!.message_id).toBe(list[0]!.id);
+  });
+});
