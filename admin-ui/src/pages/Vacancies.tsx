@@ -96,7 +96,9 @@ export function Vacancies() {
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div>
-          <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Вакансии</h2>
+          <h2 style={{ fontFamily: "var(--display)", color: "var(--text)", margin: 0 }}>
+            Вакансии
+          </h2>
           <div
             style={{
               fontSize: 12,

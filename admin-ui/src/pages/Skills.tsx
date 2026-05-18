@@ -65,7 +65,7 @@ export function Skills() {
   return (
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
       <div>
-        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>
+        <h2 style={{ fontFamily: "var(--display)", color: "var(--text)", margin: 0 }}>
           Persuasion skills
         </h2>
         <div

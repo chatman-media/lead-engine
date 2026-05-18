@@ -112,8 +112,8 @@ export function NewStyle() {
         <div>
           <h2
             style={{
-              fontFamily: "var(--mono)",
-              color: "var(--amber)",
+              fontFamily: "var(--display)",
+              color: "var(--text)",
               margin: 0,
             }}
           >

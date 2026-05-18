@@ -90,7 +90,9 @@ export function Analytics() {
     <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div>
-          <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: 0 }}>Аналитика</h2>
+          <h2 style={{ fontFamily: "var(--display)", color: "var(--text)", margin: 0 }}>
+            Аналитика
+          </h2>
           <div
             style={{
               fontSize: 12,
@@ -471,13 +473,13 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <div
       style={{
-        fontFamily: "var(--mono)",
-        fontSize: 13,
-        color: "var(--text-2)",
-        textTransform: "uppercase",
-        letterSpacing: 1,
+        fontFamily: "var(--display)",
+        fontSize: 18,
+        fontWeight: 600,
+        letterSpacing: "-0.01em",
+        color: "var(--text)",
         borderBottom: "1px solid var(--border)",
-        paddingBottom: 6,
+        paddingBottom: 8,
       }}
     >
       {children}
@@ -522,11 +524,10 @@ function Card({
     >
       <div
         style={{
-          fontFamily: "var(--mono)",
-          fontSize: 11,
-          color: "var(--text-3)",
-          textTransform: "uppercase",
-          letterSpacing: 1,
+          fontFamily: "var(--display)",
+          fontSize: 14,
+          fontWeight: 600,
+          color: "var(--text)",
         }}
       >
         {title}

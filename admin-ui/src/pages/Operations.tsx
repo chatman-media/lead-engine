@@ -554,7 +554,7 @@ export function Operations() {
   if (admin.role !== "superadmin") {
     return (
       <div style={{ padding: 24, maxWidth: 900 }}>
-        <h2 style={{ marginTop: 0, marginBottom: 4 }}>Операции</h2>
+        <h2 style={{ marginTop: 0, marginBottom: 4, fontFamily: "var(--display)" }}>Операции</h2>
         <div style={{ color: "var(--text-3)", fontSize: 13 }}>
           Раздел доступен только суперадминистратору.
         </div>
@@ -563,7 +563,7 @@ export function Operations() {
   }
   return (
     <div style={{ padding: 24, maxWidth: 900 }}>
-      <h2 style={{ marginTop: 0, marginBottom: 4 }}>Операции</h2>
+      <h2 style={{ marginTop: 0, marginBottom: 4, fontFamily: "var(--display)" }}>Операции</h2>
       <div style={{ color: "var(--text-3)", fontSize: 13, marginBottom: 20 }}>
         Обслуживающие действия. Обычные — сверху; технические — в блоке «Для разработчика».
       </div>
