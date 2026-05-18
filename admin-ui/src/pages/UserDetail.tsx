@@ -63,7 +63,7 @@ export function UserDetail() {
         >
           ← все пользователи
         </Link>
-        <h2 style={{ fontFamily: "var(--mono)", color: "var(--amber)", margin: "8px 0 0" }}>
+        <h2 style={{ fontFamily: "var(--display)", color: "var(--text)", margin: "8px 0 0" }}>
           {user.tg_username ? `@${user.tg_username}` : `tg:${user.tg_user_id}`}
         </h2>
         <div
