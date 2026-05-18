@@ -174,6 +174,10 @@ async function maybeHandleVisaInterview(
 ): Promise<boolean> {
   const lead = await d.leads.byUserId(d.user.id);
   if (!lead || lead.state !== "submitted" || !lead.visa_interview_field) return false;
+  // A bare photo/media upload is not a text answer — let it fall through to
+  // the media-only handler (classification / ack) without consuming the
+  // current step or overwriting its field with an empty string.
+  if (d.mediaOnly) return false;
 
   const currentField = lead.visa_interview_field;
 
@@ -480,6 +484,15 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
     tg_user_id: d.tgUserId,
   });
 
+  // Step-by-step visa-anketa interview ("подача на визу") takes precedence
+  // over the conversation-mode gates below: while it's active, the
+  // candidate's message is an answer to the current field. Without this a
+  // lead the operator handled in `human` mode — or a `queued` chat — would
+  // never have its answers stored: the interview would stall after Q1.
+  if (await maybeHandleVisaInterview(d, reply)) {
+    return;
+  }
+
   if (d.conv.mode === "human") {
     log.debug("skipped (human mode)", { scope: "webhook", conv_id: d.conv.id });
     return;
@@ -529,13 +542,6 @@ export async function processInbound(d: ProcessInboundDeps): Promise<void> {
   if (containsEscalationTrigger(d.text)) {
     await d.conversations.setMode(d.conv.id, "queued");
     d.onEvent?.({ type: "conversation-mode-changed", conversationId: d.conv.id });
-    return;
-  }
-
-  // Step-by-step visa-anketa interview ("подача на визу"): when active,
-  // the candidate's message is an answer to the current field — store it,
-  // ask the next question, skip RAG and the post-reply hooks entirely.
-  if (await maybeHandleVisaInterview(d, reply)) {
     return;
   }
 
