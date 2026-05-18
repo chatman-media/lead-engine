@@ -5,6 +5,7 @@ import type { MessagesRepo } from "../db/repos/messages.ts";
 import { enqueue } from "../db/repos/userbot-send-queue.ts";
 import type { UserRow, UsersRepo } from "../db/repos/users.ts";
 import { log } from "../log.ts";
+import { applyStyleRules } from "../rag/text-style-rules.ts";
 import type { TelegramClient } from "../telegram/client.ts";
 import type { TgInlineKeyboardButton } from "../telegram/types.ts";
 import {
@@ -324,11 +325,15 @@ export class LeadsService {
   async sendRejection(input: { user: UserRow; customReason?: string }): Promise<void> {
     const conv = await this.deps.conversations.byUserId(input.user.id);
     if (!conv) return;
-    const text = input.customReason?.trim() || REJECTION_DEFAULT;
+    const customReason = input.customReason?.trim();
+    const text = customReason || REJECTION_DEFAULT;
     await this.relayToCandidate({
       chatId: input.user.tg_user_id,
       conversationId: conv.id,
       text,
+      // Operator-authored custom reason goes verbatim; the default
+      // template is style-guarded like every other template.
+      applyGuard: !customReason,
     });
   }
 
@@ -565,14 +570,21 @@ export class LeadsService {
     /** `meta.source` for the recorded `messages` row. Defaults to the
      *  operator-curated template marker. */
     source?: string;
+    /** Run the outgoing text through the style guard (em-dash → hyphen,
+     *  markdown stripping, robotic lead-in removal). Defaults to `true`;
+     *  set `false` for verbatim operator-authored text. */
+    applyGuard?: boolean;
   }): Promise<void> {
+    // Static templates reach the candidate through here and would
+    // otherwise bypass the "AI tell" sanitization applied to LLM output.
+    const text = input.applyGuard === false ? input.text : applyStyleRules(input.text);
     let tgMessageId: number | undefined;
     if (this.deps.userbotEnabled && this.deps.sql) {
       // Real funnel is on the userbot — enqueue so the message appears
       // from Alina's personal account instead of the agency bot. The
       // userbot poller assigns the tg message id when it actually sends.
       try {
-        await enqueue(this.deps.sql, input.chatId, input.text);
+        await enqueue(this.deps.sql, input.chatId, text);
       } catch (err) {
         log.error("enqueue to userbot send queue failed", { scope: "leads", err });
       }
@@ -580,7 +592,7 @@ export class LeadsService {
       try {
         const sent = await this.deps.telegram.sendMessage({
           chatId: input.chatId,
-          text: input.text,
+          text,
         });
         tgMessageId = sent.message_id;
       } catch (err) {
@@ -590,7 +602,7 @@ export class LeadsService {
     await this.deps.messages.add({
       conversationId: input.conversationId,
       role: "assistant",
-      text: input.text,
+      text,
       ...(tgMessageId !== undefined ? { tgMessageId } : {}),
       meta: { source: input.source ?? "lead-template" },
     });

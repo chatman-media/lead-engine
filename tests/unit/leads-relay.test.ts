@@ -170,4 +170,86 @@ describe("LeadsService.relayFromOperator", () => {
     expect(meta.media.type).toBe("photo");
     expect(meta.media.file_id).toBe("AgADxxx");
   });
+
+  test("operator-relayed text keeps the em-dash verbatim (no style guard)", async () => {
+    const { users, conversations, messages, leads, u, conv, lead } = await build();
+    const tg = fakeTelegram();
+    const service = new LeadsService({
+      leads,
+      users,
+      conversations,
+      messages,
+      telegram: tg.client,
+      leadsChatId: -100_111,
+      visaChatId: null,
+    });
+    await service.relayFromOperator({
+      lead,
+      user: u,
+      text: "Конечно — отправлю образец визы чуть позже",
+    });
+    const list = await messages.listByConversation(conv.id);
+    // Operator is a human; their wording (em-dash, lead-in) goes untouched.
+    expect(list[0]!.text).toBe("Конечно — отправлю образец визы чуть позже");
+  });
+});
+
+describe("LeadsService outgoing style guard", () => {
+  async function build() {
+    const users = new UsersRepo(sql);
+    const conversations = new ConversationsRepo(sql);
+    const messages = new MessagesRepo(sql);
+    const leads = new LeadsRepo(sql);
+    const u = await users.create({ tgUserId: 556_000 });
+    const conv = await conversations.ensureForUser(u.id);
+    const lead = await leads.ensureForUser(u.id);
+    const tg = fakeTelegram();
+    const service = new LeadsService({
+      leads,
+      users,
+      conversations,
+      messages,
+      telegram: tg.client,
+      leadsChatId: -100_111,
+      visaChatId: null,
+    });
+    return { users, conversations, messages, leads, u, conv, lead, service };
+  }
+
+  test("template text is style-guarded — em-dash normalised to hyphen", async () => {
+    const { messages, u, conv, service } = await build();
+    await service.sendIntakeTemplate({ user: u, text: "Заполните анкету — по пунктам." });
+    const list = await messages.listByConversation(conv.id);
+    expect(list[0]!.text).not.toContain("—");
+    expect(list[0]!.text).toBe("Заполните анкету - по пунктам.");
+  });
+
+  test("visa interview intro is style-guarded — no em-dash, no robotic lead-in", async () => {
+    const { messages, u, conv, lead, service } = await build();
+    await service.startVisaInterview({ lead, user: u });
+    const list = await messages.listByConversation(conv.id);
+    const intro = list[0]!.text;
+    expect(intro).not.toContain("—");
+    expect(intro.startsWith("Отлично")).toBe(false);
+    expect(intro.startsWith("Теперь оформляем рабочую визу")).toBe(true);
+    // First interview question is relayed too — also guarded.
+    expect(list[1]!.text).not.toContain("—");
+  });
+
+  test("default rejection template is guarded; operator custom reason is verbatim", async () => {
+    const { messages, conversations, leads, u, conv, service } = await build();
+    await service.sendRejection({ user: u });
+    let list = await messages.listByConversation(conv.id);
+    expect(list[0]!.text).not.toContain("—");
+
+    const u2 = await new UsersRepo(sql).create({ tgUserId: 556_001 });
+    const conv2 = await conversations.ensureForUser(u2.id);
+    await leads.ensureForUser(u2.id);
+    await service.sendRejection({
+      user: u2,
+      customReason: "Спасибо за интерес — пока не готовы взять.",
+    });
+    list = await messages.listByConversation(conv2.id);
+    expect(list[0]!.text).toBe("Спасибо за интерес — пока не готовы взять.");
+  });
 });
