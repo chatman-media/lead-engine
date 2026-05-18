@@ -276,7 +276,7 @@ export function createRouter(deps: AppDeps): Router {
       deps.bus?.publish({ type: "conversation:updated", conversationId });
     },
     onMessageSent: ({ conversationId, tgUserId }: { conversationId: number; tgUserId: number }) => {
-      deps.bus?.publish({ type: "message:new", conversationId, tgUserId });
+      deps.bus?.publish({ type: "message:new", conversationId, tgUserId, direction: "out" });
     },
     leadsChatId: deps.leadsChatId ?? null,
     visaChatId: deps.visaChatId ?? null,

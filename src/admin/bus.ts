@@ -5,6 +5,10 @@ export type AdminEvent =
       type: "message:new";
       conversationId: number;
       tgUserId: number;
+      /** "in" — сообщение от пользователя боту; "out" — ответ бота/оператора. */
+      direction: "in" | "out";
+      /** Короткий превью-текст входящего сообщения (только для direction "in"). */
+      preview?: string;
     }
   | {
       type: "conversation:updated";

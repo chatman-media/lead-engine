@@ -17,12 +17,23 @@ export function createInboundEventBridge(deps: {
 }): (event: WebhookEvent) => void {
   return (event) => {
     switch (event.type) {
-      case "user-message-persisted":
+      case "user-message-persisted": {
+        const preview = event.text?.trim().slice(0, 120);
+        deps.bus?.publish({
+          type: "message:new",
+          conversationId: event.conversationId,
+          tgUserId: event.tgUserId,
+          direction: "in",
+          ...(preview ? { preview } : {}),
+        });
+        return;
+      }
       case "assistant-replied":
         deps.bus?.publish({
           type: "message:new",
           conversationId: event.conversationId,
           tgUserId: event.tgUserId,
+          direction: "out",
         });
         return;
       case "conversation-mode-changed":

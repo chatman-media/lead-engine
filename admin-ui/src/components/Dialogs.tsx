@@ -27,11 +27,11 @@ type ActiveDialog =
   | { kind: "confirm"; opts: ConfirmOptions; resolve: (v: boolean) => void }
   | { kind: "prompt"; opts: PromptOptions; resolve: (v: string | null) => void };
 
-type Toast = { id: number; message: string; kind: ToastKind };
+type Toast = { id: number; message: string; kind: ToastKind; onClick?: () => void };
 
 let openConfirm: ((opts: ConfirmOptions) => Promise<boolean>) | null = null;
 let openPrompt: ((opts: PromptOptions) => Promise<string | null>) | null = null;
-let pushToast: ((message: string, kind: ToastKind) => void) | null = null;
+let pushToast: ((message: string, kind: ToastKind, onClick?: () => void) => void) | null = null;
 
 /** Styled confirm dialog. Resolves true when the user confirms. */
 export function confirmDialog(
@@ -51,13 +51,15 @@ export function promptDialog(
   return openPrompt({ message, ...opts });
 }
 
-/** Styled toast notification — the replacement for window.alert. */
-export function notify(message: string, kind: ToastKind = "info"): void {
+/** Styled toast notification — the replacement for window.alert. When
+ *  `onClick` is provided the toast becomes actionable: clicking it runs the
+ *  callback (and dismisses the toast) instead of merely dismissing it. */
+export function notify(message: string, kind: ToastKind = "info", onClick?: () => void): void {
   if (!pushToast) {
     window.alert(message);
     return;
   }
-  pushToast(message, kind);
+  pushToast(message, kind, onClick);
 }
 
 let toastSeq = 0;
@@ -79,10 +81,11 @@ export function DialogHost() {
         setInputValue(opts.defaultValue ?? "");
         setDialog({ kind: "prompt", opts, resolve });
       });
-    pushToast = (message, kind) => {
+    pushToast = (message, kind, onClick) => {
       const id = ++toastSeq;
-      setToasts((t) => [...t, { id, message, kind }]);
-      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
+      setToasts((t) => [...t, { id, message, kind, onClick }]);
+      // Actionable toasts linger longer so the operator has time to click.
+      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), onClick ? 10000 : 5000);
     };
     return () => {
       openConfirm = null;
@@ -183,7 +186,10 @@ export function DialogHost() {
               key={t.id}
               type="button"
               className={`toast toast-${t.kind}`}
-              onClick={() => setToasts((cur) => cur.filter((x) => x.id !== t.id))}
+              onClick={() => {
+                setToasts((cur) => cur.filter((x) => x.id !== t.id));
+                t.onClick?.();
+              }}
             >
               {t.message}
             </button>

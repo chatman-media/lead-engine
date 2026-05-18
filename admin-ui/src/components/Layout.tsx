@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { ws } from "../App.tsx";
 import { type Admin, api } from "../api.ts";
 import { useTabVisibility } from "../useTabVisibility.ts";
+import { notify } from "./Dialogs.tsx";
 import { ThemeToggle } from "./ThemeToggle.tsx";
 
 function GearIcon() {
@@ -82,6 +83,17 @@ export function Layout({ admin, children }: LayoutProps) {
       }
       if (evt.type === "kb-suggestion:created") {
         setPendingKbCount((n) => n + 1);
+      }
+      // Toast on any inbound message, from any page. Click → open the chat.
+      // Skip it when the operator is already viewing that exact chat.
+      if (evt.type === "message:new" && evt.direction === "in") {
+        const chatPath = `/admin/chats/${evt.conversationId}`;
+        if (window.location.pathname === chatPath) return;
+        notify(
+          evt.preview ? `Новое сообщение: ${evt.preview}` : "Новое входящее сообщение",
+          "info",
+          () => navigate(chatPath),
+        );
       }
     });
     return () => {

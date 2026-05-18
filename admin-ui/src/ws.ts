@@ -1,5 +1,11 @@
 export type AdminEvent =
-  | { type: "message:new"; conversationId: number; tgUserId: number }
+  | {
+      type: "message:new";
+      conversationId: number;
+      tgUserId: number;
+      direction: "in" | "out";
+      preview?: string;
+    }
   | { type: "conversation:updated"; conversationId: number }
   | { type: "kb-suggestion:created"; suggestionId: number; conversationId: number }
   | { type: "queued:count"; count: number };
