@@ -1,6 +1,7 @@
 import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { ConversationsRepo } from "../../db/repos/conversations.ts";
 import { MessagesRepo } from "../../db/repos/messages.ts";
+import { enqueueDelete } from "../../db/repos/userbot-delete-queue.ts";
 import { enqueue } from "../../db/repos/userbot-send-queue.ts";
 import { UsersRepo } from "../../db/repos/users.ts";
 import { inc } from "../../metrics.ts";
@@ -185,39 +186,40 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
     const user = await users.byId(conv.user_id);
     if (!user) return json({ error: "user not found" }, { status: 404 });
 
-    let tgMessageId: number | undefined;
     let tgError: string | undefined;
     if (deps.userbotEnabled) {
-      // Route through the userbot send queue — message will appear from Alina's account.
-      await enqueue(deps.sql, user.tg_user_id, text).catch((err) => {
+      // Route through the userbot send queue — message appears from Alina's
+      // account. The send is async (the userbot subprocess drains the queue),
+      // so insert the `messages` row first and link the queue entry to it:
+      // the userbot stamps `tg_message_id` back onto this row after sending,
+      // which is what a later "delete from Telegram" needs.
+      const inserted = await messages.add({ conversationId: id, role: "human", text });
+      await enqueue(deps.sql, user.tg_user_id, text, inserted.id).catch((err) => {
         tgError = err instanceof Error ? err.message : String(err);
         console.error("[admin reply] userbot enqueue failed:", err);
       });
       if (!tgError) inc("tg_replies_total", 1, { source: "admin_userbot" });
-    } else if (deps.telegram) {
-      try {
-        const sent = await deps.telegram.sendMessage({
-          chatId: user.tg_user_id,
-          text,
-        });
-        tgMessageId = sent.message_id;
-        inc("tg_replies_total", 1, { source: "admin_bot" });
-      } catch (err) {
-        tgError = err instanceof Error ? err.message : String(err);
-        console.error("[admin reply] Telegram send failed:", err);
-      }
     } else {
-      console.warn(
-        "[admin reply] no send path: userbotEnabled=false and telegram=undefined — message saved to DB only",
-      );
+      let tgMessageId: number | undefined;
+      if (deps.telegram) {
+        try {
+          const sent = await deps.telegram.sendMessage({
+            chatId: user.tg_user_id,
+            text,
+          });
+          tgMessageId = sent.message_id;
+          inc("tg_replies_total", 1, { source: "admin_bot" });
+        } catch (err) {
+          tgError = err instanceof Error ? err.message : String(err);
+          console.error("[admin reply] Telegram send failed:", err);
+        }
+      } else {
+        console.warn(
+          "[admin reply] no send path: userbotEnabled=false and telegram=undefined — message saved to DB only",
+        );
+      }
+      await messages.add({ conversationId: id, role: "human", text, tgMessageId });
     }
-
-    await messages.add({
-      conversationId: id,
-      role: "human",
-      text,
-      tgMessageId,
-    });
     await conversations.touch(id);
 
     deps.onMessageSent?.({ conversationId: id, tgUserId: user.tg_user_id });
@@ -226,5 +228,86 @@ export function createReplyHandler(deps: AdminApiDeps): RouteHandler {
     // the client clears the input and reloads; surface tgError as a warning
     // field so the admin UI can optionally toast about it without blocking.
     return json({ ok: true, conversationId: id, tgUserId: user.tg_user_id, tgError });
+  });
+}
+
+/**
+ * Delete a previously-sent outgoing message. The message is soft-deleted in
+ * the DB (struck through in the admin UI) and, if it has a `tg_message_id`,
+ * removed from the Telegram chat too — via the userbot delete queue (the only
+ * thing that can revoke MTProto messages) or the Bot API on the bot channel.
+ *
+ * Only `assistant` / `human` messages are deletable: Telegram doesn't let us
+ * revoke a candidate's own message for everyone in a private chat.
+ */
+export function createDeleteMessageHandler(deps: AdminApiDeps): RouteHandler {
+  const conversations = new ConversationsRepo(deps.sql);
+  const messages = new MessagesRepo(deps.sql);
+  const users = new UsersRepo(deps.sql);
+
+  return withAdmin(deps.sql, async ({ params, admin }) => {
+    const id = parseIdParam(params);
+    if (id instanceof Response) return id;
+    const messageId = parseIdParam(params, "messageId");
+    if (messageId instanceof Response) return messageId;
+
+    const conv = await conversations.byId(id);
+    if (!conv) return json({ error: "not found" }, { status: 404 });
+
+    const message = await messages.byId(messageId);
+    if (!message || message.conversation_id !== id) {
+      return json({ error: "message not found" }, { status: 404 });
+    }
+    if (message.role !== "assistant" && message.role !== "human") {
+      return json({ error: "only outgoing messages can be deleted" }, { status: 400 });
+    }
+    if (message.deleted_at) {
+      return json({ ok: true, messageId, alreadyDeleted: true });
+    }
+
+    const user = await users.byId(conv.user_id);
+    if (!user) return json({ error: "user not found" }, { status: 404 });
+
+    // `tgError` is a non-blocking warning — the message is always soft-deleted
+    // in the DB; the UI can toast "deleted from admin only" when set.
+    let tgError: string | undefined;
+    if (message.tg_message_id) {
+      if (deps.userbotEnabled) {
+        await enqueueDelete(deps.sql, user.tg_user_id, message.tg_message_id).catch((err) => {
+          tgError = err instanceof Error ? err.message : String(err);
+          console.error("[admin delete] userbot enqueue failed:", err);
+        });
+      } else if (deps.telegram) {
+        try {
+          await deps.telegram.deleteMessage({
+            chatId: user.tg_user_id,
+            messageId: message.tg_message_id,
+          });
+        } catch (err) {
+          tgError = err instanceof Error ? err.message : String(err);
+          console.error("[admin delete] Telegram delete failed:", err);
+        }
+      } else {
+        tgError = "no send path configured";
+      }
+    } else {
+      // Predates tg_message_id capture (old operator reply, or a reply that
+      // never reached Telegram) — can only be removed from the admin UI.
+      tgError = "no tg_message_id";
+    }
+
+    await messages.softDelete(messageId);
+    await new AuditLogRepo(deps.sql)
+      .write({
+        action: "message.delete",
+        adminId: admin.adminId,
+        targetKind: "message",
+        targetId: messageId,
+        details: { conversationId: id, role: message.role, tgError: tgError ?? null },
+      })
+      .catch((err) => console.error("[audit] message.delete write failed:", err));
+
+    deps.onConversationChanged?.(id);
+    return json({ ok: true, messageId, tgError });
   });
 }

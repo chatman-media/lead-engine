@@ -12,6 +12,9 @@ export interface MessageRow {
   meta_json: string | null;
   created_at: number;
   stage: string | null;
+  /** Set when an operator deleted this message from the admin UI. The row
+   *  stays in history (rendered struck-through). */
+  deleted_at: number | null;
 }
 
 export class MessagesRepo {
@@ -88,6 +91,19 @@ export class MessagesRepo {
   async setMeta(id: number, meta: unknown): Promise<boolean> {
     const json = meta === null || meta === undefined ? null : JSON.stringify(meta);
     const result = await this.sql`UPDATE messages SET meta_json = ${json} WHERE id = ${id}`;
+    return result.count > 0;
+  }
+
+  /**
+   * Soft-delete a message — stamps `deleted_at`. No-op (returns false) if the
+   * row is already deleted, so the admin delete endpoint stays idempotent.
+   */
+  async softDelete(id: number): Promise<boolean> {
+    const result = await this.sql`
+      UPDATE messages
+      SET deleted_at = EXTRACT(EPOCH FROM NOW())::INTEGER
+      WHERE id = ${id} AND deleted_at IS NULL
+    `;
     return result.count > 0;
   }
 

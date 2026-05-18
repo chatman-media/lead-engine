@@ -18,6 +18,7 @@ import {
   createDeleteKbDocumentHandler,
   createDeleteLeadHandler,
   createDeleteLeadNoteHandler,
+  createDeleteMessageHandler,
   createDeletePairwiseMatchHandler,
   createDeleteSelfPlayMatchHandler,
   createDeleteStyleHandler,
@@ -315,6 +316,10 @@ export function createRouter(deps: AppDeps): Router {
   router.post("/admin/api/conversations/:id/take", createTakeHandler(apiDeps));
   router.post("/admin/api/conversations/:id/release", createReleaseHandler(apiDeps));
   router.post("/admin/api/conversations/:id/reply", createReplyHandler(apiDeps));
+  router.delete(
+    "/admin/api/conversations/:id/messages/:messageId",
+    createDeleteMessageHandler(apiDeps),
+  );
   router.delete("/admin/api/conversations/:id", createDeleteConversationHandler(apiDeps));
 
   // Sales-style engine endpoints (Phase 2b).
