@@ -332,7 +332,7 @@ export function Leads() {
   );
 }
 
-interface IntakeFields {
+export interface IntakeFields {
   age?: string;
   height?: string;
   weight?: string;
@@ -351,7 +351,7 @@ interface IntakeFields {
   work_experience?: string;
 }
 
-function parseIntake(json: string | null): IntakeFields | null {
+export function parseIntake(json: string | null): IntakeFields | null {
   if (!json) return null;
   try {
     return JSON.parse(json) as IntakeFields;
@@ -481,10 +481,10 @@ function LeadCard({
             onClick={() => setVisaOpen(true)}
             className="btn btn-ghost btn-sm"
             disabled={busy}
-            title="Посмотреть и отредактировать визовую анкету"
+            title="Посмотреть и отредактировать анкету на визу"
             data-testid="lead-visa-anketa"
           >
-            виза
+            анкета на визу
           </button>
           {!decided && !inFlight && (
             <button
@@ -567,6 +567,10 @@ function LeadCard({
       {intake && (lead.state === "intake_pending" || lead.state === "intake_complete") && (
         <IntakeProgress intake={intake} leadId={lead.id} />
       )}
+
+      {(lead.state === "docs_pending" ||
+        lead.state === "docs_complete" ||
+        lead.state === "submitted") && <VisaProgress visaJson={lead.visa_docs_json} />}
 
       <NotesPane leadId={lead.id} />
       <TimelinePane leadId={lead.id} />
@@ -934,7 +938,7 @@ function TimelineRow({ event: ev }: { event: LeadEvent }) {
  * correct any field inline. Mirrors AnketaModal's chrome so the leads
  * page exposes both questionnaires (intake + visa) the same way.
  */
-function VisaAnketaModal({
+export function VisaAnketaModal({
   leadId,
   leadLabel,
   onClose,
@@ -1260,7 +1264,7 @@ const MODAL_OVERLAY: CSSProperties = {
  * every field the bot extracted from her messages (missing ones as "—")
  * plus her photos. Close via ✕, backdrop click, or Escape.
  */
-function AnketaModal({
+export function AnketaModal({
   intake,
   leadId,
   leadLabel,
@@ -1620,6 +1624,54 @@ function IntakeSendModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Compact at-a-glance progress line for the visa questionnaire, shown
+ * inline on the lead card while docs are being collected. The full
+ * editable form lives in VisaAnketaModal — this is a read-only summary.
+ */
+function VisaProgress({ visaJson }: { visaJson: string | null }) {
+  let docs: VisaDocs | null = null;
+  if (visaJson) {
+    try {
+      docs = JSON.parse(visaJson) as VisaDocs;
+    } catch {
+      docs = null;
+    }
+  }
+  const d = docs;
+  const filled = d
+    ? VISA_REQUIRED.filter((k) => {
+        const v = d[k];
+        return typeof v === "string" && v.trim();
+      }).length
+    : 0;
+  const total = VISA_REQUIRED.length;
+  const pct = total > 0 ? Math.round((filled / total) * 100) : 0;
+  return (
+    <div
+      data-testid="visa-progress"
+      style={{
+        marginTop: 8,
+        borderTop: "1px solid var(--border)",
+        paddingTop: 8,
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
+        fontFamily: "var(--mono)",
+        fontSize: 11,
+        color: "var(--text-3)",
+      }}
+    >
+      <span>ВИЗОВАЯ АНКЕТА</span>
+      <span
+        style={{ color: pct >= 100 ? "var(--green, #2ea043)" : "var(--amber)", fontWeight: 600 }}
+      >
+        {filled}/{total} required ({pct}%)
+      </span>
     </div>
   );
 }

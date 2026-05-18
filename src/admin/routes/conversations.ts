@@ -1,5 +1,6 @@
 import { AuditLogRepo } from "../../db/repos/audit-log.ts";
 import { ConversationsRepo } from "../../db/repos/conversations.ts";
+import { LeadsRepo } from "../../db/repos/leads.ts";
 import { MessagesRepo } from "../../db/repos/messages.ts";
 import { enqueueDelete } from "../../db/repos/userbot-delete-queue.ts";
 import { enqueue } from "../../db/repos/userbot-send-queue.ts";
@@ -45,6 +46,7 @@ export function createConversationDetailHandler(deps: AdminApiDeps): RouteHandle
   const conversations = new ConversationsRepo(deps.sql);
   const users = new UsersRepo(deps.sql);
   const messages = new MessagesRepo(deps.sql);
+  const leads = new LeadsRepo(deps.sql);
   return withAdmin(deps.sql, async ({ params }) => {
     const id = parseIdParam(params);
     if (id instanceof Response) return id;
@@ -61,12 +63,17 @@ export function createConversationDetailHandler(deps: AdminApiDeps): RouteHandle
     // chat is too short to have triggered summarization yet, which the UI
     // handles by hiding the summary pane.
     const summary = await conversations.getSummary(id);
+    // The candidate's lead row (one per user) — lets the chat view open
+    // the intake / visa questionnaires without a separate round-trip.
+    // Null when no lead has been created from this conversation yet.
+    const lead = await leads.byUserId(user.id);
     return json({
       conversation: conv,
       user,
       messages: await messages.listByConversation(id, 200),
       memory,
       summary,
+      lead,
     });
   });
 }

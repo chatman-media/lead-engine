@@ -575,6 +575,9 @@ export const api = {
       messages: Message[];
       memory: UserMemory;
       summary: ConversationSummary | null;
+      /** The candidate's lead row, or null if no lead exists yet. Only
+       *  the fields the chat view needs to open the questionnaires. */
+      lead: Pick<Lead, "id" | "state" | "intake_json"> | null;
     }>(`/admin/api/conversations/${id}`),
 
   status: () => req<SystemStatus>("/admin/api/status"),

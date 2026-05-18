@@ -5,6 +5,7 @@ import {
   api,
   type Conversation,
   type ConversationSummary,
+  type Lead,
   type Message,
   type MessageTelemetry,
   type User,
@@ -13,6 +14,7 @@ import {
 import { confirmDialog, notify } from "../components/Dialogs.tsx";
 import { MemoryPane } from "../components/MemoryPane";
 import { SummaryPane } from "../components/SummaryPane";
+import { AnketaModal, parseIntake, VisaAnketaModal } from "./Leads.tsx";
 
 function tsShort(unix: number) {
   return new Date(unix * 1000).toLocaleTimeString("ru-RU", {
@@ -52,6 +54,10 @@ export function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [memory, setMemory] = useState<UserMemory | null>(null);
   const [summary, setSummary] = useState<ConversationSummary | null>(null);
+  const [lead, setLead] = useState<Pick<Lead, "id" | "state" | "intake_json"> | null>(null);
+  // Read-only questionnaire viewers — intake (RU) and visa anketa.
+  const [anketaOpen, setAnketaOpen] = useState(false);
+  const [visaOpen, setVisaOpen] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
   // After a successful reply, prompt operator to add Q&A to KB.
@@ -64,12 +70,13 @@ export function Chat() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   function reload() {
-    api.conversation(convId).then(({ conversation, user, messages, memory, summary }) => {
+    api.conversation(convId).then(({ conversation, user, messages, memory, summary, lead }) => {
       setConv(conversation);
       setUser(user);
       setMessages(messages);
       setMemory(memory);
       setSummary(summary);
+      setLead(lead);
     });
   }
 
@@ -266,6 +273,27 @@ export function Chat() {
             → В лиды
           </button>
 
+          {lead && (
+            <>
+              <button
+                onClick={() => setAnketaOpen(true)}
+                data-testid="chat-anketa-ru"
+                title="Посмотреть анкету кандидата на русском"
+                className="btn btn-ghost btn-sm"
+              >
+                Анкета (рус)
+              </button>
+              <button
+                onClick={() => setVisaOpen(true)}
+                data-testid="chat-anketa-visa"
+                title="Посмотреть и отредактировать анкету на визу"
+                className="btn btn-ghost btn-sm"
+              >
+                Анкета на визу
+              </button>
+            </>
+          )}
+
           <button
             onClick={() => setDebug((d) => !d)}
             data-testid="debug-toggle"
@@ -291,6 +319,22 @@ export function Chat() {
           </button>
         </div>
       </div>
+
+      {lead && anketaOpen && (
+        <AnketaModal
+          intake={parseIntake(lead.intake_json)}
+          leadId={lead.id}
+          leadLabel={`#${lead.id} · ${user.tg_username ? `@${user.tg_username}` : `tg:${user.tg_user_id}`}`}
+          onClose={() => setAnketaOpen(false)}
+        />
+      )}
+      {lead && visaOpen && (
+        <VisaAnketaModal
+          leadId={lead.id}
+          leadLabel={`#${lead.id} · ${user.tg_username ? `@${user.tg_username}` : `tg:${user.tg_user_id}`}`}
+          onClose={() => setVisaOpen(false)}
+        />
+      )}
 
       {/* Cross-session memory pane (collapsed by default) */}
       {memory && (
