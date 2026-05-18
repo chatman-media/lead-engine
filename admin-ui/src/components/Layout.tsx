@@ -100,8 +100,6 @@ export function Layout({ admin, children }: LayoutProps) {
 
   const allNavItems = [
     { to: "/admin", label: "Главная", key: null, end: true },
-    { to: "/admin/status", label: "Статус", key: null },
-    { to: "/admin/analytics", label: "Аналитика", key: "analytics" },
     {
       to: "/admin/chats",
       label: "Чаты",
@@ -110,6 +108,7 @@ export function Layout({ admin, children }: LayoutProps) {
     },
     { to: "/admin/leads", label: "Лиды", key: null },
     { to: "/admin/users", label: "Пользователи", key: null },
+    { to: "/admin/operators", label: "Операторы", key: null, superadmin: true },
     { to: "/admin/vacancies", label: "Вакансии", key: "vacancies" },
     { to: "/admin/kb", label: "База знаний", key: null },
     {
@@ -119,7 +118,8 @@ export function Layout({ admin, children }: LayoutProps) {
       badge: pendingKbCount > 0 ? pendingKbCount : undefined,
     },
     { to: "/admin/self-play", label: "Симуляция диалогов", key: "self-play" },
-    { to: "/admin/operators", label: "Операторы", key: null, superadmin: true },
+    { to: "/admin/status", label: "Статус", key: null },
+    { to: "/admin/analytics", label: "Аналитика", key: "analytics" },
     { to: "/admin/ops", label: "Операции", key: null, superadmin: true },
   ];
 
@@ -132,6 +132,7 @@ export function Layout({ admin, children }: LayoutProps) {
 
   return (
     <div className="layout">
+      <div className="account-email">{admin.email}</div>
       <NavLink
         to="/admin/settings"
         className="settings-fab"
@@ -170,7 +171,6 @@ export function Layout({ admin, children }: LayoutProps) {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="sidebar-email">{admin.email}</div>
           <button className="btn btn-sm btn-block btn-logout" onClick={handleLogout}>
             Выйти
           </button>
