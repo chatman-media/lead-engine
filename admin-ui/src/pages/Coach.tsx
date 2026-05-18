@@ -7,6 +7,7 @@ import {
   type SelfPlayPersona,
   type ShadowEvalRow,
 } from "../api.ts";
+import { confirmDialog } from "../components/Dialogs.tsx";
 
 const STATUS_COLOR: Record<CoachProposalStatus, string> = {
   pending: "var(--amber, #d97706)",
@@ -157,12 +158,15 @@ export function Coach() {
 
   async function applyAsNewVersion(id: number) {
     if (
-      !window.confirm(
-        "Fork a new version of this style with the proposal's edits applied?\n\n" +
-          "The current version will be marked is_active=0 (historical) but stays " +
+      !(await confirmDialog(
+        "The current version will be marked is_active=0 (historical) but stays " +
           "available for already-pinned conversations. The new version becomes the " +
           "active default for new chats.",
-      )
+        {
+          title: "Fork a new version with the proposal's edits?",
+          confirmLabel: "Fork version",
+        },
+      ))
     ) {
       return;
     }
@@ -195,14 +199,15 @@ export function Coach() {
 
   async function rollback(id: number) {
     if (
-      !window.confirm(
-        "Roll back this proposal?\n\n" +
-          "The new style version will be deactivated and the parent will be reactivated. " +
+      !(await confirmDialog(
+        "The new style version will be deactivated and the parent will be reactivated. " +
           "Conversations already pinned to the new version keep working — this only affects " +
           "which version becomes the default for new chats.",
-      )
-    )
+        { title: "Roll back this proposal?", confirmLabel: "Roll back" },
+      ))
+    ) {
       return;
+    }
     setRollingBack(true);
     try {
       await api.rollbackCoachProposal(id);
@@ -218,7 +223,15 @@ export function Coach() {
   }
 
   async function deleteProposal(id: number) {
-    if (!window.confirm(`Delete proposal #${id}?`)) return;
+    if (
+      !(await confirmDialog(`Proposal #${id} will be deleted.`, {
+        title: "Delete proposal?",
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     try {
       await api.deleteCoachProposal(id);
       if (openId === id) setOpenId(null);

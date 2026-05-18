@@ -10,6 +10,7 @@ import {
   type User,
   type UserMemory,
 } from "../api";
+import { confirmDialog, notify } from "../components/Dialogs.tsx";
 import { MemoryPane } from "../components/MemoryPane";
 import { SummaryPane } from "../components/SummaryPane";
 
@@ -107,16 +108,20 @@ export function Chat() {
       // is intentionally absent — Leads page shows the new card.
       void lead;
     } catch (err) {
-      alert(`Не удалось продвинуть в лиды: ${err instanceof Error ? err.message : String(err)}`);
+      notify(
+        `Не удалось продвинуть в лиды: ${err instanceof Error ? err.message : String(err)}`,
+        "error",
+      );
     }
   }
 
   async function handleDelete() {
     const userLabel = user?.tg_username ? `@${user.tg_username}` : `tg:${user?.tg_user_id}`;
     if (
-      !confirm(
-        `Удалить чат с ${userLabel}? Сообщения будут стёрты, статус сбросится. Действие необратимо.`,
-      )
+      !(await confirmDialog(
+        `Сообщения чата с ${userLabel} будут стёрты, статус сбросится. Действие необратимо.`,
+        { title: "Удалить чат?", confirmLabel: "Удалить", danger: true },
+      ))
     ) {
       return;
     }
@@ -138,7 +143,7 @@ export function Chat() {
         console.warn("[admin reply] Telegram delivery failed:", res.tgError);
       }
     } catch (err) {
-      alert(`Ошибка отправки: ${err instanceof Error ? err.message : String(err)}`);
+      notify(`Ошибка отправки: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
     // Find last user message to pre-fill the KB suggestion question —
     // outside the try so the prompt opens even when the Telegram leg
@@ -163,7 +168,7 @@ export function Chat() {
       setKbFlash("✓ Добавлено в очередь KB");
       setTimeout(() => setKbFlash(null), 3000);
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      notify(err instanceof Error ? err.message : String(err), "error");
     }
   }
 

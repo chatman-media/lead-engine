@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Vacancy } from "../api.ts";
+import { confirmDialog } from "../components/Dialogs.tsx";
 
 /**
  * CRUD over admin-managed vacancies. These rows are NOT in the embedded KB —
@@ -71,7 +72,15 @@ export function Vacancies() {
   }
 
   async function handleDelete(v: Vacancy) {
-    if (!confirm(`Удалить вакансию "${v.title}"? Это необратимо.`)) return;
+    if (
+      !(await confirmDialog(`Вакансия "${v.title}" будет удалена. Это необратимо.`, {
+        title: "Удалить вакансию?",
+        confirmLabel: "Удалить",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setError(null);
     try {
       await api.deleteVacancy(v.id);

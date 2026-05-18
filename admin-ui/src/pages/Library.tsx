@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type KbDocument } from "../api.ts";
+import { confirmDialog } from "../components/Dialogs.tsx";
 
 /**
  * Management page for the book knowledge base (topic="books").
@@ -56,8 +57,16 @@ export function Library() {
   }
 
   async function handleDelete(d: KbDocument) {
-    const msg = `Удалить «${d.title}»? Это удалит ${d.chunk_count ?? 0} чанков из векторного индекса.`;
-    if (!confirm(msg)) return;
+    const msg = `«${d.title}» и ${d.chunk_count ?? 0} чанков будут удалены из векторного индекса.`;
+    if (
+      !(await confirmDialog(msg, {
+        title: "Удалить документ?",
+        confirmLabel: "Удалить",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setError(null);
     try {
       await api.deleteKbDocument(d.id);

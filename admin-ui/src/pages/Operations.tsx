@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAdmin } from "../App.tsx";
 import { api } from "../api.ts";
+import { confirmDialog } from "../components/Dialogs.tsx";
 
 /**
  * Operations page — routine maintenance actions.
@@ -329,7 +330,15 @@ function TelegramWebhookPanel() {
   }
 
   async function deleteHook() {
-    if (!window.confirm("Удалить вебхук? Бот перестанет получать сообщения из Telegram.")) return;
+    if (
+      !(await confirmDialog("Бот перестанет получать сообщения из Telegram.", {
+        title: "Удалить вебхук?",
+        confirmLabel: "Удалить",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -507,7 +516,14 @@ function RestartPanel() {
   const [restarting, setRestarting] = useState(false);
 
   async function run() {
-    if (!confirm("Перезапустить бота? Он будет недоступен ~15 секунд.")) return;
+    if (
+      !(await confirmDialog("Бот будет недоступен ~15 секунд.", {
+        title: "Перезапустить бота?",
+        confirmLabel: "Перезапустить",
+      }))
+    ) {
+      return;
+    }
     setRestarting(true);
     try {
       await api.opsRestart();

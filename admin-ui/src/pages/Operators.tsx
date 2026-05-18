@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { useAdmin } from "../App.tsx";
 import { type AdminRole, type AdminSummary, api } from "../api.ts";
+import { confirmDialog } from "../components/Dialogs.tsx";
 
 const sectionLabelStyle: React.CSSProperties = {
   fontFamily: "var(--mono)",
@@ -95,7 +96,15 @@ export function Operators() {
   }
 
   async function remove(a: AdminSummary) {
-    if (!window.confirm(`Удалить оператора ${a.email}? Это действие необратимо.`)) return;
+    if (
+      !(await confirmDialog(`Оператор ${a.email} будет удалён. Это действие необратимо.`, {
+        title: "Удалить оператора?",
+        confirmLabel: "Удалить",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setError(null);
     setBusy(true);
     try {
