@@ -214,7 +214,12 @@ async function handleInboundPhoto(d: {
   if (!persisted.isNew) return NOT_NEW;
 
   await conversations.touch(conv.id);
-  onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
+  onEvent?.({
+    type: "user-message-persisted",
+    conversationId: conv.id,
+    tgUserId,
+    text: caption || "[фото]",
+  });
   log.info("userbot: photo persisted", {
     scope: "userbot",
     tg_message_id: msg.id,
@@ -358,7 +363,12 @@ async function processUnread(d: ProcessUnreadDeps): Promise<void> {
         mediaOnly = false;
         if (isNew) {
           await d.conversations.touch(conv.id);
-          d.onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
+          d.onEvent?.({
+            type: "user-message-persisted",
+            conversationId: conv.id,
+            tgUserId,
+            text,
+          });
         }
       }
       if (!isNew) continue;
@@ -591,7 +601,12 @@ export async function startUserbot(deps: UserbotDeps): Promise<GramjsClient> {
         mediaOnly = false;
         if (isNew) {
           await conversations.touch(conv.id);
-          onEvent?.({ type: "user-message-persisted", conversationId: conv.id, tgUserId });
+          onEvent?.({
+            type: "user-message-persisted",
+            conversationId: conv.id,
+            tgUserId,
+            text,
+          });
         }
       }
       if (!isNew) return;

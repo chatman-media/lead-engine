@@ -226,6 +226,7 @@ export function createWebhookHandler(deps: WebhookDeps): RouteHandler {
       type: "user-message-persisted",
       conversationId: conv.id,
       tgUserId,
+      text: userMessageText,
     });
 
     // Decide what we *intend* to do, synchronously, so the webhook

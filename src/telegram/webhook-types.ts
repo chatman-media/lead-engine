@@ -83,7 +83,7 @@ export interface RagDeps {
 }
 
 export type WebhookEvent =
-  | { type: "user-message-persisted"; conversationId: number; tgUserId: number }
+  | { type: "user-message-persisted"; conversationId: number; tgUserId: number; text?: string }
   | { type: "assistant-replied"; conversationId: number; tgUserId: number }
   | { type: "conversation-mode-changed"; conversationId: number }
   | { type: "kb-suggestion:created"; suggestionId: number; conversationId: number };
