@@ -10,6 +10,7 @@ import {
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
+  withTenant,
 } from "@chatman-media/conversation-engine";
 import type { JsonLogger, PlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
@@ -39,7 +40,6 @@ export function startWebInboundRunner(opts: {
   log: JsonLogger;
 }): Promise<void> {
   const { entry, db, signal, log } = opts;
-  const repoCtx = { db, tenantId: entry.tenantId };
   const template = opts.resolveTemplate?.(entry.tenantSlug);
 
   return (async () => {
@@ -47,30 +47,35 @@ export function startWebInboundRunner(opts: {
       for await (const inbound of entry.adapter.receive(signal)) {
         const startedAt = performance.now();
         try {
-          const result = await processInbound(inbound, {
-            tenant: {
-              tenantId: entry.tenantId,
-              slug: entry.tenantSlug,
-              llmBillingMode: "byok",
-            },
-            channel: {
-              channelId: entry.channelDbId,
-              kind: "web",
-              externalId: entry.externalId,
-            },
-            channelDbId: entry.channelDbId,
-            contacts: new ContactsRepo(repoCtx),
-            identities: new ChannelIdentitiesRepo(repoCtx),
-            conversations: new ConversationsRepo(repoCtx),
-            messages: new MessagesRepo(repoCtx),
-            outbound: new OutboundQueueRepo(repoCtx),
-            reply: opts.replyStrategy ?? null,
-            ...(template ? { template } : {}),
-            ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
-            ...(opts.stageClassifier
-              ? { stageClassifier: opts.stageClassifier, db }
-              : {}),
-            ...(opts.sink ? { sink: opts.sink } : {}),
+          // См. webhook-telegram.ts — pipeline-call оборачивается в
+          // withTenant для атомарности + RLS на non-bypass role'и.
+          const result = await withTenant(db, entry.tenantId, async (tx) => {
+            const repoCtx = { db: tx, tenantId: entry.tenantId };
+            return processInbound(inbound, {
+              tenant: {
+                tenantId: entry.tenantId,
+                slug: entry.tenantSlug,
+                llmBillingMode: "byok",
+              },
+              channel: {
+                channelId: entry.channelDbId,
+                kind: "web",
+                externalId: entry.externalId,
+              },
+              channelDbId: entry.channelDbId,
+              contacts: new ContactsRepo(repoCtx),
+              identities: new ChannelIdentitiesRepo(repoCtx),
+              conversations: new ConversationsRepo(repoCtx),
+              messages: new MessagesRepo(repoCtx),
+              outbound: new OutboundQueueRepo(repoCtx),
+              reply: opts.replyStrategy ?? null,
+              ...(template ? { template } : {}),
+              ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
+              ...(opts.stageClassifier
+                ? { stageClassifier: opts.stageClassifier, db: tx }
+                : {}),
+              ...(opts.sink ? { sink: opts.sink } : {}),
+            });
           });
           if (!result.persisted) {
             opts.metrics?.inboundDeduped.inc(1, { tenant: String(entry.tenantId) });

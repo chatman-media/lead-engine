@@ -1,0 +1,41 @@
+# Dev / тестовый Postgres для lead-engine. Image pgvector/pgvector:pg17
+# нужен для `CREATE EXTENSION vector` (миграция 0000) — обычный postgres:17
+# не подойдёт, миграции упадут.
+#
+# Использование:
+#   docker compose up -d                # поднять
+#   export DATABASE_URL="postgres://lead:lead@localhost:5434/lead_engine"
+#   docker compose down -v              # снести с volume
+#
+# Порт 5434 (не 5432/5433) — чтобы не конфликтовать с system Postgres'ом
+# и контейнерами других проектов (chatman-postgres, marketplace-postgres,
+# и т.п.). Если 5434 тоже занят — менять здесь и в .env.
+#
+# Для prod-like тестов RLS нужен NOSUPERUSER NOBYPASSRLS пользователь:
+# тесты сами создают такого on the fly (см. packages/storage/src/rls.integration.test.ts).
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: lead-engine-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lead
+      POSTGRES_PASSWORD: lead
+      POSTGRES_DB: lead_engine
+      # Без LC_COLLATE/LC_CTYPE проблема со ru-text full-text search'ем
+      # в RAG — миграция 0000 строит tsvector('russian', ...) с GIN-индексом.
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF8"
+    ports:
+      - "5434:5432"
+    volumes:
+      - lead-engine-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lead -d lead_engine"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  lead-engine-pgdata:
+    name: lead-engine-pgdata

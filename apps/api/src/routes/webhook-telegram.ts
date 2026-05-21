@@ -11,6 +11,7 @@ import {
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
+  withTenant,
 } from "@chatman-media/conversation-engine";
 import type { PlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
@@ -130,30 +131,44 @@ export function makeTelegramWebhookRoutes(opts: {
     }
     const inbound = next.value;
 
-    const repoCtx = { db: opts.db, tenantId: entry.tenantId };
     const template = opts.resolveTemplate?.(entry.tenantSlug);
-    const result = await processInbound(inbound, {
-      tenant: {
-        tenantId: entry.tenantId,
-        slug: entry.tenantSlug,
-        llmBillingMode: "byok",
-      },
-      channel: {
-        channelId: entry.channelDbId,
-        kind: entry.kind,
-        externalId: entry.externalId,
-      },
-      channelDbId: entry.channelDbId,
-      contacts: new ContactsRepo(repoCtx),
-      identities: new ChannelIdentitiesRepo(repoCtx),
-      conversations: new ConversationsRepo(repoCtx),
-      messages: new MessagesRepo(repoCtx),
-      outbound: new OutboundQueueRepo(repoCtx),
-      reply: opts.replyStrategy ?? null,
-      ...(template ? { template } : {}),
-      ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
-      ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: opts.db } : {}),
-      ...(opts.sink ? { sink: opts.sink } : {}),
+    // Весь pipeline-call оборачивается в withTenant — pipeline делает
+    // несколько repo-INSERT'ов (Contact + ChannelIdentity + Conversation +
+    // Message + OutboundQueue), и они должны (а) видеть друг друга
+    // одновременно через атомарную tx, (б) проходить RLS policy на
+    // production non-bypass role'и (см. миграцию 0004 + checkRlsEnforcement).
+    //
+    // Тradeoff: LLM-call внутри pipeline'а (reply-strategy) тоже происходит
+    // под открытой Postgres tx — это держит pool connection во время slow
+    // external request'а. Mitigation на будущее: split pipeline на
+    // persist-only + reply-generate phases в отдельных tx; не делаем
+    // сейчас чтобы не растягивать scope. На текущих latencies (~1-2s LLM)
+    // и pool=10 это OK для pilot-load'а.
+    const result = await withTenant(opts.db, entry.tenantId, async (tx) => {
+      const repoCtx = { db: tx, tenantId: entry.tenantId };
+      return processInbound(inbound, {
+        tenant: {
+          tenantId: entry.tenantId,
+          slug: entry.tenantSlug,
+          llmBillingMode: "byok",
+        },
+        channel: {
+          channelId: entry.channelDbId,
+          kind: entry.kind,
+          externalId: entry.externalId,
+        },
+        channelDbId: entry.channelDbId,
+        contacts: new ContactsRepo(repoCtx),
+        identities: new ChannelIdentitiesRepo(repoCtx),
+        conversations: new ConversationsRepo(repoCtx),
+        messages: new MessagesRepo(repoCtx),
+        outbound: new OutboundQueueRepo(repoCtx),
+        reply: opts.replyStrategy ?? null,
+        ...(template ? { template } : {}),
+        ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
+        ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
+        ...(opts.sink ? { sink: opts.sink } : {}),
+      });
     });
 
     // Inbound deduped path: persisted=false означает что messages.id
