@@ -65,6 +65,13 @@ export interface ApiConfig {
    *   alina-infinity-v1, flirty-belfort-v1, empathetic-nepq-v1, cold-direct-pas-v1
    */
   defaultStyleSlug: string;
+  /**
+   * Стратегия классификации sales-stage'а реплики:
+   *   - "regex" — быстрый regex-classifier (русские паттерны recruitment-uae)
+   *   - "llm" — LLM-based (использует chat-config), точнее но дороже
+   *   - "" (по умолчанию) — выключен, conversation.current_stage не пишется
+   */
+  stageClassifier: "regex" | "llm" | "";
 }
 
 function required(name: string): string {
@@ -98,5 +105,7 @@ export function loadApiConfig(): ApiConfig {
       dim: Number.parseInt(process.env.LLM_EMBED_DIM ?? "1536", 10),
     },
     defaultStyleSlug: process.env.STYLE_SLUG ?? "",
+    stageClassifier:
+      (process.env.STAGE_CLASSIFIER ?? "") as ApiConfig["stageClassifier"],
   };
 }

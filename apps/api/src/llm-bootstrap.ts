@@ -3,11 +3,14 @@ import {
   DrizzleKbStore,
   LlmMemoryExtractor,
   LlmReplyStrategy,
+  LlmStageClassifier,
   type MemoryExtractor,
   MessagesRepo,
   parseStyleConfig,
   RagReplyStrategy,
+  RegexStageClassifier,
   type ReplyStrategy,
+  type StageClassifier,
   StylesRepo,
 } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
@@ -48,6 +51,40 @@ export function makeMemoryExtractor(cfg: ApiConfig, db: Db): MemoryExtractor | n
     { resolveChat: (tenantId: number) => router.resolveChat(tenantId, "chat") },
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
   );
+}
+
+/**
+ * Опциональный stage classifier. На "regex" — pure CPU без LLM cost.
+ * На "llm" — требует chat-config (тот же что reply-strategy). На пустом —
+ * null (current_stage не пишется).
+ */
+export function makeStageClassifier(cfg: ApiConfig, db: Db): StageClassifier | null {
+  void db; // db не нужен classifier'у; pipeline передаёт deps.db в applyClassifiedStage.
+  if (cfg.stageClassifier === "regex") {
+    return new RegexStageClassifier();
+  }
+  if (cfg.stageClassifier === "llm") {
+    if (!cfg.llm.provider || !cfg.llm.apiKey || !cfg.llm.model) {
+      console.warn(
+        "[apps/api] STAGE_CLASSIFIER=llm requested but chat LLM not configured — disabling",
+      );
+      return null;
+    }
+    const router = new InMemoryLlmRouter();
+    router.setConfig({
+      tenantId: 1,
+      purpose: "chat",
+      provider: cfg.llm.provider,
+      model: cfg.llm.model,
+      apiKey: cfg.llm.apiKey,
+      ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
+    });
+    return new LlmStageClassifier({
+      resolveChat: (tenantId: number) => router.resolveChat(tenantId, "chat"),
+      tenantId: 1,
+    });
+  }
+  return null;
 }
 
 export function makeReplyStrategy(cfg: ApiConfig, db: Db): ReplyStrategy | null {

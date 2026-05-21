@@ -9,6 +9,7 @@ import {
   OutboundQueueRepo,
   processInbound,
   type ReplyStrategy,
+  type StageClassifier,
 } from "@chatman-media/conversation-engine";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { Hono } from "hono";
@@ -57,6 +58,13 @@ export function makeTelegramWebhookRoutes(opts: {
    * логируется и не ломает reply-loop.
    */
   memoryExtractor?: MemoryExtractor | null;
+  /**
+   * Опциональный stage classifier (regex или LLM). Если задан, после
+   * persist user-message pipeline классифицирует sales-stage и пишет
+   * в conversations.current_stage. Exception в classifier'е логируется,
+   * pipeline продолжает.
+   */
+  stageClassifier?: StageClassifier | null;
 }): Hono {
   const app = new Hono();
 
@@ -126,6 +134,7 @@ export function makeTelegramWebhookRoutes(opts: {
       reply: opts.replyStrategy ?? null,
       ...(template ? { template } : {}),
       ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
+      ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: opts.db } : {}),
     });
 
     return c.json({ ok: true, processed: true, result });

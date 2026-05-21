@@ -4,7 +4,11 @@ import { Hono } from "hono";
 import { ChannelRegistry } from "./channel-registry.ts";
 import { loadApiConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
-import { makeMemoryExtractor, makeReplyStrategy } from "./llm-bootstrap.ts";
+import {
+  makeMemoryExtractor,
+  makeReplyStrategy,
+  makeStageClassifier,
+} from "./llm-bootstrap.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 
@@ -56,6 +60,11 @@ async function main() {
     console.log("[apps/api] memory extractor enabled");
   }
 
+  const stageClassifier = makeStageClassifier(cfg, db);
+  if (stageClassifier) {
+    console.log(`[apps/api] stage classifier enabled: ${cfg.stageClassifier}`);
+  }
+
   app.route(
     "/",
     makeTelegramWebhookRoutes({
@@ -65,6 +74,7 @@ async function main() {
       replyStrategy,
       resolveTemplate,
       memoryExtractor,
+      stageClassifier,
     }),
   );
 
