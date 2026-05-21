@@ -20,9 +20,19 @@ export {
   type OutboundQueueRow,
   parseAllocation,
   type RepoCtx,
+  type SkillAggregateRow,
+  type SkillOutcomeRow,
+  SkillOutcomesRepo,
   StylesRepo,
   type StyleRow,
 } from "./dal/index.ts";
+export {
+  type AnalyzeLeadOpts,
+  type AnalysisResult,
+  CoachAnalyzer,
+  type CoachAnalyzerOpts,
+  extractUserAssistantPairs,
+} from "./coach-analyzer.ts";
 export {
   allowedTransitions,
   FunnelTransitionError,

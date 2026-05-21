@@ -11,5 +11,10 @@ export {
 export { LeadsRepo, type LeadRow } from "./leads.ts";
 export { MessagesRepo, type MessageRow } from "./messages.ts";
 export { OutboundQueueRepo, type OutboundQueueRow } from "./outbound.ts";
+export {
+  type SkillAggregateRow,
+  type SkillOutcomeRow,
+  SkillOutcomesRepo,
+} from "./skill-outcomes.ts";
 export { StylesRepo, type StyleRow } from "./styles.ts";
 export type { Db, RepoCtx } from "./types.ts";
