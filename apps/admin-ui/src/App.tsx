@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { getToken, saas } from "./api/saas.ts";
 import { SaasChannels } from "./pages/SaasChannels.tsx";
+import { SaasConversations } from "./pages/SaasConversations.tsx";
 import { SaasDashboard } from "./pages/SaasDashboard.tsx";
 import { SaasLogin } from "./pages/SaasLogin.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
@@ -80,6 +81,22 @@ export function App() {
           element={
             <AuthGate>
               <SaasChannels />
+            </AuthGate>
+          }
+        />
+        <Route
+          path="/conversations"
+          element={
+            <AuthGate>
+              <SaasConversations />
+            </AuthGate>
+          }
+        />
+        <Route
+          path="/conversations/:id"
+          element={
+            <AuthGate>
+              <SaasConversations />
             </AuthGate>
           }
         />

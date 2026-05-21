@@ -545,3 +545,168 @@ a:hover {
   padding: 6px 12px;
   font-size: 12px;
 }
+
+/* ── Inbox (conversations) ─────────────────────────────────────────────── */
+
+.inbox-layout {
+  max-width: 1200px;
+}
+
+.inbox-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 18px;
+  min-height: 60vh;
+}
+
+.inbox-sidebar {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  overflow: auto;
+  max-height: 70vh;
+}
+
+.inbox-sidebar h2 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.inbox-item {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 4px;
+  color: var(--text);
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.inbox-item:hover {
+  background: var(--panel-2);
+  text-decoration: none;
+}
+
+.inbox-item.active {
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+
+.inbox-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.inbox-item-head small {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.inbox-item-meta {
+  display: block;
+  margin-top: 4px;
+}
+
+.inbox-thread {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+}
+
+.inbox-thread-header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.inbox-thread-header h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.inbox-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 6px;
+}
+
+.msg {
+  max-width: 75%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+
+.msg-user {
+  align-self: flex-start;
+}
+
+.msg-assistant {
+  align-self: flex-end;
+  background: rgba(106, 166, 255, 0.08);
+  border-color: rgba(106, 166, 255, 0.3);
+}
+
+.msg-human {
+  align-self: flex-end;
+  background: rgba(145, 217, 144, 0.08);
+  border-color: rgba(145, 217, 144, 0.3);
+}
+
+.msg-system {
+  align-self: center;
+  max-width: 90%;
+  background: transparent;
+  border: 1px dashed var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.msg-deleted .msg-text {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.msg-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.msg-role {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.msg-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

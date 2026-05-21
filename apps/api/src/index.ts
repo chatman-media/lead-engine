@@ -22,6 +22,7 @@ import {
 import { makeRequireAuth } from "./middleware/require-auth.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
 import { makeAdminChannelsRoutes } from "./routes/admin-channels.ts";
+import { makeAdminConversationsRoutes } from "./routes/admin-conversations.ts";
 import { makeAdminKbRoutes } from "./routes/admin-kb.ts";
 import { makeAdminLlmConfigsRoutes } from "./routes/admin-llm-configs.ts";
 import { makeAdminOnboardingRoutes } from "./routes/admin-onboarding.ts";
@@ -164,6 +165,10 @@ async function main() {
   // Onboarding status aggregator (channel + LLM + KB).
   app.route("/", makeAdminOnboardingRoutes({ db }));
   log.info("admin-onboarding route enabled");
+
+  // Read-only conversations + messages для admin-UI inbox.
+  app.route("/", makeAdminConversationsRoutes({ db }));
+  log.info("admin-conversations routes enabled (list + thread)");
 
   app.route(
     "/",
