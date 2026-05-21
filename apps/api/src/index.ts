@@ -1,7 +1,9 @@
 import { checkRlsEnforcement } from "@chatman-media/conversation-engine";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
+import { tenants } from "@chatman-media/storage";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
+import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { ChannelRegistry } from "./channel-registry.ts";
 import { loadApiConfig } from "./config.ts";
@@ -60,6 +62,16 @@ async function main() {
     log.info("RLS enforced", { role: rlsCheck.role });
   }
 
+  // Загружаем active tenant IDs для регистрации LLM-config'а per-tenant.
+  // Single-tenant legacy путь использовал hardcoded tenantId=1; в multi-tenant
+  // need register config для каждого tenant'а иначе InMemoryLlmRouter throws
+  // "LLM config not set: tenantId=X" когда inbound приходит от не-1 tenant.
+  // Hot-reload не делаем — новый tenant onboarding требует рестарта apps/api.
+  const activeTenantIds = (
+    await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.status, "active"))
+  ).map((r) => r.id);
+  log.info("active tenants loaded for LLM config", { count: activeTenantIds.length, ids: activeTenantIds });
+
   const channels = new ChannelRegistry();
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
   await channels.loadFromDb(db as any);
@@ -76,7 +88,7 @@ async function main() {
       timeoutMs: cfg.healthCheckTimeoutMs,
     }),
   );
-  const replyStrategy = makeReplyStrategy(cfg, db, metrics);
+  const replyStrategy = makeReplyStrategy(cfg, db, metrics, activeTenantIds);
   if (replyStrategy) {
     const strategyKind = cfg.embed.provider && cfg.embed.apiKey ? "RAG" : "LLM-only";
     log.info("reply strategy configured", {
@@ -92,10 +104,10 @@ async function main() {
     log.info("LLM not configured — bot will persist messages but stay silent");
   }
 
-  const memoryExtractor = makeMemoryExtractor(cfg, db, metrics);
+  const memoryExtractor = makeMemoryExtractor(cfg, db, metrics, activeTenantIds);
   if (memoryExtractor) log.info("memory extractor enabled");
 
-  const stageClassifier = makeStageClassifier(cfg, db, metrics);
+  const stageClassifier = makeStageClassifier(cfg, db, metrics, activeTenantIds);
   if (stageClassifier) {
     log.info("stage classifier enabled", { kind: cfg.stageClassifier });
   }
