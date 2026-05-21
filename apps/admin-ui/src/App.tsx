@@ -5,6 +5,7 @@ import { SaasAudit } from "./pages/SaasAudit.tsx";
 import { SaasChannels } from "./pages/SaasChannels.tsx";
 import { SaasConversations } from "./pages/SaasConversations.tsx";
 import { SaasDashboard } from "./pages/SaasDashboard.tsx";
+import { SaasDiagnostics } from "./pages/SaasDiagnostics.tsx";
 import { SaasLogin } from "./pages/SaasLogin.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
 import { SaasSignup } from "./pages/SaasSignup.tsx";
@@ -106,6 +107,14 @@ export function App() {
           element={
             <AuthGate>
               <SaasAudit />
+            </AuthGate>
+          }
+        />
+        <Route
+          path="/diagnostics"
+          element={
+            <AuthGate>
+              <SaasDiagnostics />
             </AuthGate>
           }
         />

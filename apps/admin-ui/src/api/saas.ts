@@ -108,6 +108,26 @@ export interface MessageRow {
   deletedAt: number | null;
 }
 
+export type DiagnosticStatus = "pass" | "warn" | "fail" | "skip";
+
+export interface DiagnosticCheck {
+  name: string;
+  status: DiagnosticStatus;
+  latencyMs?: number;
+  message?: string;
+}
+
+export interface DiagnosticsResult {
+  checks: DiagnosticCheck[];
+  summary: {
+    overall: DiagnosticStatus;
+    passed: number;
+    failed: number;
+    warned: number;
+    total: number;
+  };
+}
+
 export interface TenantInfo {
   id: number;
   slug: string;
@@ -324,6 +344,11 @@ export const saas = {
       method: "POST",
       body: JSON.stringify({ text }),
     });
+  },
+
+  // ── Diagnostics ──────────────────────────────────────────────────────
+  runDiagnostics() {
+    return request<DiagnosticsResult>("/api/admin/diagnostics");
   },
 
   // ── Tenant management ────────────────────────────────────────────────
