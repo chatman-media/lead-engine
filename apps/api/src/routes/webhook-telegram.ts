@@ -9,6 +9,7 @@ import {
   processInbound,
   type ReplyStrategy,
 } from "@chatman-media/conversation-engine";
+import type { VerticalTemplate } from "@chatman-media/verticals";
 import { Hono } from "hono";
 import type { ChannelRegistry } from "../channel-registry.ts";
 
@@ -33,11 +34,21 @@ export function makeTelegramWebhookRoutes(opts: {
   channels: ChannelRegistry;
   webhookSecret: string;
   /**
-   * Стратегия ответа. На текущем deploy null (бот молчит, оператор
-   * отвечает руками через admin-ui). RAG/sales-strategy подключаются
-   * в Этапе 4 часть 2.
+   * Стратегия ответа. null = pipeline persist'ит inbound и не отвечает
+   * (бот silent — оператор отвечает руками через admin-ui).
    */
   replyStrategy?: ReplyStrategy | null;
+  /**
+   * Резолвер vertical-template по tenant_slug. Если задан и для tenant'а
+   * есть template — pipeline дёрнет hooks.extractFields на новые user-
+   * messages (автозаполнение questionnaire-полей в contact.attributes_json)
+   * и валидирует transitions через funnel state machine.
+   *
+   * После Этапа 8 будет lookup через funnels.vertical_template_id из БД.
+   * Сейчас — env-mapped (apps/api index.ts передаёт RECRUITMENT_UAE_V1 для
+   * legacy tenant'а).
+   */
+  resolveTemplate?: (tenantSlug: string) => VerticalTemplate | undefined;
 }): Hono {
   const app = new Hono();
 
@@ -86,6 +97,7 @@ export function makeTelegramWebhookRoutes(opts: {
     const inbound = next.value;
 
     const repoCtx = { db: opts.db, tenantId: entry.tenantId };
+    const template = opts.resolveTemplate?.(entry.tenantSlug);
     const result = await processInbound(inbound, {
       tenant: {
         tenantId: entry.tenantId,
@@ -104,6 +116,7 @@ export function makeTelegramWebhookRoutes(opts: {
       messages: new MessagesRepo(repoCtx),
       outbound: new OutboundQueueRepo(repoCtx),
       reply: opts.replyStrategy ?? null,
+      ...(template ? { template } : {}),
     });
 
     return c.json({ ok: true, processed: true, result });
