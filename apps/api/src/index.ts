@@ -1,3 +1,4 @@
+import { checkRlsEnforcement } from "@chatman-media/conversation-engine";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
@@ -41,6 +42,23 @@ async function main() {
   const log = makeDefaultLogger("apps/api");
   const metrics = makePlatformMetrics();
   const { db, close } = makeDb(cfg.databaseUrl);
+
+  // RLS-guard: миграция 0004 включает FORCE ROW LEVEL SECURITY, но
+  // если DATABASE_URL коннектится под superuser / BYPASSRLS-role'ью —
+  // policy игнорируется и tenant-isolation как defense-in-depth не
+  // работает. Surface'им это в логе на boot.
+  const rlsCheck = await checkRlsEnforcement(db);
+  if (!rlsCheck.isEnforced) {
+    log.warn("RLS not enforced — connection role bypasses row-level security", {
+      role: rlsCheck.role,
+      isSuperuser: rlsCheck.isSuperuser,
+      hasBypassRls: rlsCheck.hasBypassRls,
+      remediation:
+        "Use a NOSUPERUSER NOBYPASSRLS Postgres role for apps/api connection. See migration 0004 comments.",
+    });
+  } else {
+    log.info("RLS enforced", { role: rlsCheck.role });
+  }
 
   const channels = new ChannelRegistry();
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
