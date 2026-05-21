@@ -1,8 +1,11 @@
-import type { ChatClient } from "@chatman-media/llm-router";
+import type {
+  LeadRow,
+  MessageRow,
+  MessagesRepo,
+  SkillOutcomesRepo,
+} from "@chatman-media/conversation-engine";
 import { gradeSkills } from "@chatman-media/kb";
-import type { LeadRow } from "./dal/leads.ts";
-import type { MessageRow, MessagesRepo } from "./dal/messages.ts";
-import type { SkillOutcomesRepo } from "./dal/skill-outcomes.ts";
+import type { ChatClient } from "@chatman-media/llm-router";
 
 /**
  * Coach analyzer — post-hoc разбор completed conversation'ов. После того как

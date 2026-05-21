@@ -26,13 +26,10 @@ export {
   StylesRepo,
   type StyleRow,
 } from "./dal/index.ts";
-export {
-  type AnalyzeLeadOpts,
-  type AnalysisResult,
-  CoachAnalyzer,
-  type CoachAnalyzerOpts,
-  extractUserAssistantPairs,
-} from "./coach-analyzer.ts";
+// CoachAnalyzer переехал в @chatman-media/sales (sales-domain code).
+// Back-compat re-export невозможен — создал бы circular dep (sales импортит
+// conv-engine для DAL-типов). Consumer'ы должны импортировать напрямую
+// из `@chatman-media/sales`. См. apps/api/scripts/coach-batch.ts.
 export {
   allowedTransitions,
   FunnelTransitionError,

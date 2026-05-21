@@ -1,7 +1,7 @@
+import type { MessageRow } from "@chatman-media/conversation-engine";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import { describe, expect, it } from "bun:test";
 import { CoachAnalyzer, extractUserAssistantPairs } from "./coach-analyzer.ts";
-import type { MessageRow } from "./dal/messages.ts";
 
 function msg(opts: Partial<MessageRow> & { id: number; role: MessageRow["role"]; text: string }): MessageRow {
   return {

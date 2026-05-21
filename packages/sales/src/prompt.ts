@@ -1,5 +1,6 @@
 import { renderSummaryBlock, renderUserFactsBlock } from "@chatman-media/kb";
-import type { FunnelStage, Hook, Style } from "./types.ts";
+import type { FunnelStage } from "@chatman-media/kb";
+import type { Hook, Style } from "./types.ts";
 
 const HOOK_LABELS: Record<Hook["kind"], string> = {
   social_proof: "СОЦ. ДОКАЗАТЕЛЬСТВО",

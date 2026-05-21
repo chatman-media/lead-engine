@@ -1,12 +1,25 @@
 // ─── Core types ─────────────────────────────────────────────────────────────
 
-// ─── A/B testing ─────────────────────────────────────────────────────────────
-export {
-  type Experiment,
-  type ExperimentVariant,
-  pickVariant,
-} from "./ab-router.ts";
+// NB: A/B routing (pickVariant) удалён — production использует
+// `ABRouter` class из `@chatman-media/kb` через apps/api/llm-bootstrap.ts.
+// Если sales-engine'у когда-то понадобится свой picker (например для
+// self-play match'ей) — добавится отдельный модуль; пока избегаем 3-й
+// независимой имплементации.
+
 // ─── Coach ───────────────────────────────────────────────────────────────────
+// `proposeStyleEdits` (coach.ts) — LLM coach который читает worst self-play
+// transcripts и предлагает edits для Style spec'а. Out-of-band, admin-trigger.
+// `CoachAnalyzer` (coach-analyzer.ts) — post-hoc grader, который для
+// closed-lead'ов проходит transcript и записывает skill_outcomes (через
+// gradeSkills из kb). Запускается отдельным admin-cron'ом — см.
+// apps/api/scripts/coach-batch.ts.
+export {
+  type AnalyzeLeadOpts,
+  type AnalysisResult,
+  CoachAnalyzer,
+  type CoachAnalyzerOpts,
+  extractUserAssistantPairs,
+} from "./coach-analyzer.ts";
 export {
   applyEditsToStyle,
   type CoachInput,

@@ -25,6 +25,7 @@
     "@chatman-media/llm-router": "workspace:*",
     "@chatman-media/observability": "workspace:*",
     "@chatman-media/kb": "workspace:*",
+    "@chatman-media/sales": "workspace:*",
     "@chatman-media/storage": "workspace:*",
     "@chatman-media/vertical-recruitment-uae": "workspace:*",
     "@chatman-media/verticals": "workspace:*",

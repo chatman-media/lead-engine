@@ -19,12 +19,12 @@
  */
 
 import {
-  CoachAnalyzer,
   ConversationsRepo,
   MessagesRepo,
   SkillOutcomesRepo,
 } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
+import { CoachAnalyzer } from "@chatman-media/sales";
 import { makeDefaultLogger } from "@chatman-media/observability";
 import * as schema from "@chatman-media/storage";
 import { leads, tenants } from "@chatman-media/storage";

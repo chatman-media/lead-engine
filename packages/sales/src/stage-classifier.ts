@@ -1,7 +1,7 @@
 import type { ChatClient } from "@chatman-media/llm-router";
 import { extractJsonObject } from "./llm-json.ts";
 import { nextStage } from "./stage-router.ts";
-import { FUNNEL_STAGES, type FunnelStage } from "./types.ts";
+import { FUNNEL_STAGES, type FunnelStage } from "@chatman-media/kb";
 
 /**
  * LLM-based funnel-stage classifier with regex fallback.

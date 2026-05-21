@@ -19,6 +19,7 @@
       "@chatman-media/llm-router": ["../../packages/llm-router/src/index.ts"],
       "@chatman-media/observability": ["../../packages/observability/src/index.ts"],
       "@chatman-media/kb": ["../../packages/kb/src/index.ts"],
+      "@chatman-media/sales": ["../../packages/sales/src/index.ts"],
       "@chatman-media/storage": ["../../packages/storage/src/index.ts"],
       "@chatman-media/vertical-recruitment-uae": [
         "../vertical-recruitment-uae/src/index.ts"

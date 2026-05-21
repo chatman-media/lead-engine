@@ -1,4 +1,4 @@
-import type { FunnelStage } from "./types.ts";
+import type { FunnelStage } from "@chatman-media/kb";
 
 export interface StageInput {
   /** 1-based count of user messages received so far in this conversation. */
