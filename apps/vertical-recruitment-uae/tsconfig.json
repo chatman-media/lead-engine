@@ -11,7 +11,8 @@
     "types": ["bun"],
     "skipLibCheck": true,
     "paths": {
-      "@chatman-media/rag": ["../../packages/rag/src/index.ts"],
+      "@chatman-media/llm-router": ["../../packages/llm-router/src/index.ts"],
+      "@chatman-media/kb": ["../../packages/kb/src/index.ts"],
       "@chatman-media/verticals": ["../../packages/verticals/src/index.ts"]
     }
   },

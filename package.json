@@ -19,6 +19,10 @@
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
     "check": "bun run --filter '*' check",
-    "build:packages": "bun run --cwd packages/rag build && bun run --cwd packages/sales build && bun run --cwd packages/storage build && bun run --cwd packages/channel-core build && bun run --cwd packages/channel-telegram build && bun run --cwd packages/llm-router build && bun run --cwd packages/verticals build && bun run --cwd packages/conversation-engine build"
+    "build:packages": "bun run --cwd packages/kb build && bun run --cwd packages/sales build && bun run --cwd packages/storage build && bun run --cwd packages/channel-core build && bun run --cwd packages/channel-telegram build && bun run --cwd packages/llm-router build && bun run --cwd packages/verticals build && bun run --cwd packages/conversation-engine build",
+    "db:up": "docker compose up -d && docker compose exec -T postgres bash -c 'until pg_isready -U lead -d lead_engine >/dev/null 2>&1; do sleep 1; done' && echo 'postgres ready @ localhost:5434'",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && docker compose up -d && docker compose exec -T postgres bash -c 'until pg_isready -U lead -d lead_engine >/dev/null 2>&1; do sleep 1; done' && DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun run apps/api/scripts/reset-and-migrate.ts",
+    "db:psql": "docker compose exec postgres psql -U lead lead_engine"
   }
 }

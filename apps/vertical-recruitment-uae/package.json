@@ -15,7 +15,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@chatman-media/rag": "workspace:*",
+    "@chatman-media/kb": "workspace:*",
     "@chatman-media/verticals": "workspace:*"
   },
   "devDependencies": {

@@ -26,13 +26,10 @@ export {
   StylesRepo,
   type StyleRow,
 } from "./dal/index.ts";
-export {
-  type AnalyzeLeadOpts,
-  type AnalysisResult,
-  CoachAnalyzer,
-  type CoachAnalyzerOpts,
-  extractUserAssistantPairs,
-} from "./coach-analyzer.ts";
+// CoachAnalyzer переехал в @chatman-media/sales (sales-domain code).
+// Back-compat re-export невозможен — создал бы circular dep (sales импортит
+// conv-engine для DAL-типов). Consumer'ы должны импортировать напрямую
+// из `@chatman-media/sales`. См. apps/api/scripts/coach-batch.ts.
 export {
   allowedTransitions,
   FunnelTransitionError,
@@ -51,12 +48,10 @@ export {
   type MemoryExtractor,
   runMemoryExtraction,
 } from "./memory-extractor.ts";
-export {
-  applyClassifiedStage,
-  LlmStageClassifier,
-  RegexStageClassifier,
-  type StageClassifier,
-} from "./stage-classifier.ts";
+// Stage-classifier impls (RegexStageClassifier, LlmStageClassifier) переехали
+// в @chatman-media/sales — это sales-domain heuristics. Conv-engine оставляет
+// только pipeline contract (StageClassifier interface) + persistence helper.
+export { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
 export {
   decryptSecret,
   encryptSecret,
@@ -64,6 +59,11 @@ export {
   SecretCryptoError,
   setEncryptedSecret,
 } from "./secrets.ts";
+export {
+  generateReplyAndEnqueue,
+  type GenerateReplyAndEnqueueDeps,
+  type GenerateReplyResult,
+} from "./dispatch-reply.ts";
 export { dispatchOutbound } from "./outbound-dispatch.ts";
 export {
   processInbound,

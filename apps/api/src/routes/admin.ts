@@ -16,11 +16,13 @@
 import {
   ContactsRepo,
   ConversationsRepo,
+  type Db,
   ExperimentsRepo,
   LeadsRepo,
   MessagesRepo,
   SkillOutcomesRepo,
   StylesRepo,
+  withTenant,
 } from "@chatman-media/conversation-engine";
 import { tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
@@ -70,6 +72,13 @@ export function makeAdminRoutes(opts: AdminRoutesOpts): Hono {
     });
   });
 
+  // NB: каждый handler ниже после resolveTenantId оборачивает repo-вызовы
+  // в withTenant. На non-BYPASSRLS production role'и (см. миграцию 0004
+  // + checkRlsEnforcement в apps/api/src/index.ts) policy tenant_isolation
+  // отрезала бы SELECT'ы без `SET LOCAL app.tenant_id`. Без обёртки
+  // admin-API на проде вернул бы пустые списки для любого tenant'а —
+  // самая стрёмная категория молчаливых багов.
+
   /**
    * GET /admin/conversations?limit=50 — последние conversations tenant'а.
    * Для inbox-view UI.
@@ -78,8 +87,10 @@ export function makeAdminRoutes(opts: AdminRoutesOpts): Hono {
     const tenantId = await resolveTenantId(opts.db, c.var.tenantSlug!);
     if (tenantId === null) return c.json({ error: "tenant not found" }, 404);
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? "50"), 1), 200);
-    const conversations = new ConversationsRepo({ db: opts.db, tenantId });
-    const rows = await conversations.recent(limit);
+    const rows = await withTenant(opts.db as Db, tenantId, async (tx) => {
+      const conversations = new ConversationsRepo({ db: tx, tenantId });
+      return conversations.recent(limit);
+    });
     return c.json({ tenantId, items: rows });
   });
 
@@ -92,8 +103,10 @@ export function makeAdminRoutes(opts: AdminRoutesOpts): Hono {
     const id = Number.parseInt(c.req.param("id"), 10);
     if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? "100"), 1), 1000);
-    const messages = new MessagesRepo({ db: opts.db, tenantId });
-    const rows = await messages.recent(id, limit);
+    const rows = await withTenant(opts.db as Db, tenantId, async (tx) => {
+      const messages = new MessagesRepo({ db: tx, tenantId });
+      return messages.recent(id, limit);
+    });
     return c.json({ conversationId: id, items: rows });
   });
 
@@ -105,8 +118,10 @@ export function makeAdminRoutes(opts: AdminRoutesOpts): Hono {
     if (tenantId === null) return c.json({ error: "tenant not found" }, 404);
     const id = Number.parseInt(c.req.param("id"), 10);
     if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
-    const contacts = new ContactsRepo({ db: opts.db, tenantId });
-    const row = await contacts.byId(id);
+    const row = await withTenant(opts.db as Db, tenantId, async (tx) => {
+      const contacts = new ContactsRepo({ db: tx, tenantId });
+      return contacts.byId(id);
+    });
     if (!row) return c.json({ error: "contact not found" }, 404);
     return c.json(row);
   });
@@ -119,8 +134,10 @@ export function makeAdminRoutes(opts: AdminRoutesOpts): Hono {
     if (tenantId === null) return c.json({ error: "tenant not found" }, 404);
     const id = Number.parseInt(c.req.param("id"), 10);
     if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
-    const leads = new LeadsRepo({ db: opts.db, tenantId });
-    const row = await leads.byId(id);
+    const row = await withTenant(opts.db as Db, tenantId, async (tx) => {
+      const leads = new LeadsRepo({ db: tx, tenantId });
+      return leads.byId(id);
+    });
     if (!row) return c.json({ error: "lead not found" }, 404);
     return c.json(row);
   });
@@ -132,8 +149,10 @@ export function makeAdminRoutes(opts: AdminRoutesOpts): Hono {
   app.get("/admin/styles", async (c) => {
     const tenantId = await resolveTenantId(opts.db, c.var.tenantSlug!);
     if (tenantId === null) return c.json({ error: "tenant not found" }, 404);
-    const styles = new StylesRepo({ db: opts.db, tenantId });
-    const rows = await styles.listActive();
+    const rows = await withTenant(opts.db as Db, tenantId, async (tx) => {
+      const styles = new StylesRepo({ db: tx, tenantId });
+      return styles.listActive();
+    });
     return c.json({ items: rows });
   });
 
@@ -143,8 +162,10 @@ export function makeAdminRoutes(opts: AdminRoutesOpts): Hono {
   app.get("/admin/experiments", async (c) => {
     const tenantId = await resolveTenantId(opts.db, c.var.tenantSlug!);
     if (tenantId === null) return c.json({ error: "tenant not found" }, 404);
-    const experiments = new ExperimentsRepo({ db: opts.db, tenantId });
-    const rows = await experiments.listAll();
+    const rows = await withTenant(opts.db as Db, tenantId, async (tx) => {
+      const experiments = new ExperimentsRepo({ db: tx, tenantId });
+      return experiments.listAll();
+    });
     return c.json({ items: rows });
   });
 
@@ -155,8 +176,10 @@ export function makeAdminRoutes(opts: AdminRoutesOpts): Hono {
   app.get("/admin/skills/aggregates", async (c) => {
     const tenantId = await resolveTenantId(opts.db, c.var.tenantSlug!);
     if (tenantId === null) return c.json({ error: "tenant not found" }, 404);
-    const repo = new SkillOutcomesRepo({ db: opts.db, tenantId });
-    const items = await repo.aggregates();
+    const items = await withTenant(opts.db as Db, tenantId, async (tx) => {
+      const repo = new SkillOutcomesRepo({ db: tx, tenantId });
+      return repo.aggregates();
+    });
     return c.json({ items });
   });
 

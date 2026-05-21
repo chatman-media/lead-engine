@@ -1,4 +1,4 @@
-import type { Style } from "@chatman-media/rag";
+import type { Style } from "@chatman-media/kb";
 import { alinaInfinity } from "./alina-infinity.ts";
 import { coldDirectPas } from "./cold-direct-pas.ts";
 import { empatheticNepq } from "./empathetic-nepq.ts";

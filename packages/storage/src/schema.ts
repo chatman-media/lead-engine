@@ -53,25 +53,20 @@ const tsvector = customType<{ data: string; driverData: string }>({
 // Утилита для эпохи-default'а на колонке INTEGER created_at/updated_at.
 const epochNow = () => sql`EXTRACT(EPOCH FROM NOW())::INTEGER`;
 
-// ---- Core funnel: users / conversations / messages ---------------------
-
-export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  tgUserId: bigint("tg_user_id", { mode: "number" }).notNull().unique(),
-  tgUsername: text("tg_username"),
-  status: text("status").notNull().default("new"),
-  profileJson: text("profile_json"),
-  createdAt: integer("created_at").notNull().default(epochNow()),
-  updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("users_status_check", sql`${t.status} IN ('new', 'questionnaire_pending', 'qualified', 'won', 'lost')`),
-]);
+// ---- Core funnel: conversations / messages (legacy `users` дропнут в 0008) ----
+//
+// Историческая `users` таблица удалена миграцией 0008_drop_users.sql.
+// Backfill (0003) перенёс данные 1:1 в `contacts` (id preservation),
+// миграция 0007 переключила все FK с users.id → contacts.id. Все
+// `user_id` колонки ниже (questionnaire_tokens.user_id, conversations.
+// user_id, leads.user_id) — это исторические имена, реально ссылающиеся
+// на contacts.id. Переименование колонок отложено до отдельной миграции
+// (требует update apps/admin-ui Drizzle типов).
 
 export const questionnaireTokens = pgTable("questionnaire_tokens", {
   token: text("token").primaryKey(),
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
   expiresAt: integer("expires_at").notNull(),
   usedAt: integer("used_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
@@ -116,7 +111,7 @@ export const experiments = pgTable("experiments", {
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
   // Канал входа: bot (BotAPI, для тестов), userbot (MTProto, реальные лиды),
   // self_play (синтетические диалоги). Тот же кандидат, пишущий в bot и
   // userbot, получает два независимых conversation.
@@ -249,7 +244,7 @@ export const vacancies = pgTable("vacancies", {
 export const leads = pgTable("leads", {
   id: serial("id").primaryKey(),
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  userId: integer("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().unique().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
   state: text("state").notNull().default("intake_pending"),
   intakeJson: text("intake_json"),
   visaDocsJson: text("visa_docs_json"),

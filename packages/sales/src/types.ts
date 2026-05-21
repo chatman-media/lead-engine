@@ -11,16 +11,13 @@
  * unit of A/B testing — rotate one axis while holding the other three
  * constant to isolate the effect on conversion.
  */
+import { FUNNEL_STAGES, type FunnelStage } from "@chatman-media/kb";
 import { z } from "zod";
 
-export const FUNNEL_STAGES = [
-  "opener",
-  "qualify",
-  "pitch",
-  "objection",
-  "close",
-] as const;
-export type FunnelStage = (typeof FUNNEL_STAGES)[number];
+// Re-export FUNNEL_STAGES для backwards-compat sales-consumers (sales/index.ts).
+// Canonical home — packages/kb/src/styles.ts: используется conv-engine
+// pipeline'ом, vertical-uae styles, RAG answer.
+export { FUNNEL_STAGES, type FunnelStage };
 
 export const SALES_FRAMEWORKS = [
   "AIDA",

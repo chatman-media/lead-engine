@@ -17,6 +17,7 @@ export {
 export {
   ChatApiError,
   type ChatClient,
+  type ChatCompletionOpts,
   type ChatMessage,
   type ChatRole,
   ChatTruncatedError,
@@ -24,4 +25,5 @@ export {
   EmbeddingApiError,
   type FetchLike,
   NullEmbeddingClient,
+  parseOpenAiSseStream,
 } from "./types.ts";

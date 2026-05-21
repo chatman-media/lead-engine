@@ -1,4 +1,4 @@
-import { type Style, StyleSchema } from "@chatman-media/rag";
+import { type Style, StyleSchema } from "@chatman-media/kb";
 
 /**
  * Alina @ INFINITY AGENCY — production sales-style mirroring (and slightly

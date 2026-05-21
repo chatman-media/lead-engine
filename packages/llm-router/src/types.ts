@@ -1,24 +1,73 @@
 // Канал-агностичные интерфейсы LLM-провайдеров. Реализации (OpenAI / Ollama /
 // OpenRouter / Anthropic / …) живут в `providers/`. Этот модуль не должен
 // импортировать ничего из providers — providers зависят от него.
+//
+// История: до PR refactor/llm-router-absorb chat/embed/providers жили в
+// `packages/rag` (теперь `packages/kb`), дублируясь с упрощёнными копиями
+// здесь. Теперь llm-router — единственный source of truth.
 
 export type FetchLike = typeof fetch;
 
-export type ChatRole = "system" | "user" | "assistant";
+export type ChatRole = "system" | "user" | "assistant" | "tool";
 
 export interface ChatMessage {
   role: ChatRole;
-  content: string;
+  /**
+   * Null допустим ТОЛЬКО для assistant-сообщений, несущих `tool_calls`
+   * вместо текста (OpenAI tool-calling API). Все остальные роли требуют
+   * non-null строку.
+   */
+  content: string | null;
+  /** Populated by the model when it decides to call a tool. */
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
+  /** Required when role === "tool" — references the tool_call id. */
+  tool_call_id?: string;
+}
+
+export interface ChatCompletionOpts {
+  temperature?: number;
+  /** Optional output-token cap (`num_predict` for Ollama, `max_tokens`
+   *  for OpenAI). Implementations free to ignore or pick a default. */
+  numPredict?: number;
 }
 
 export interface ChatClient {
-  complete(
+  complete(messages: ChatMessage[], opts?: ChatCompletionOpts): Promise<string>;
+  /**
+   * Token-by-token streaming variant. Yields raw text chunks as they arrive.
+   * Optional — callers should check `typeof client.stream === "function"`
+   * before using, or fall back to `complete()`.
+   */
+  stream?(messages: ChatMessage[], opts?: ChatCompletionOpts): AsyncIterable<string>;
+  /**
+   * Tool-calling variant. Возвращает либо text response, либо list of tool
+   * calls которые модель хочет сделать. Optional — fallback на prompt-based
+   * tool injection если не реализовано.
+   */
+  completeWithTools?(
     messages: ChatMessage[],
-    opts?: {
-      temperature?: number;
-      /** Output-token cap. OpenAI `max_tokens`, Ollama `num_predict`. */
-      numPredict?: number;
-    },
+    tools: Array<{
+      type: "function";
+      function: { name: string; description: string; parameters: Record<string, unknown> };
+    }>,
+    opts?: ChatCompletionOpts,
+  ): Promise<{
+    content: string | null;
+    toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
+  }>;
+  /**
+   * Structured output variant. Returns a raw JSON string validated against the
+   * provided JSON Schema. Uses OpenAI's `response_format` when available.
+   * Optional — `answerWithRag` falls back to prompt injection when not implemented.
+   */
+  completeStructured?(
+    messages: ChatMessage[],
+    jsonSchema: Record<string, unknown>,
+    opts?: ChatCompletionOpts,
   ): Promise<string>;
 }
 
@@ -53,6 +102,41 @@ export class ChatTruncatedError extends ChatApiError {
       `truncated by max_tokens (finish_reason=${finishReason}, numPredict=${numPredict ?? "default"}, partial="${partial.slice(0, 80)}")`,
     );
     this.name = "ChatTruncatedError";
+  }
+}
+
+/** Parse OpenAI-compatible SSE stream, yielding text delta chunks. */
+export async function* parseOpenAiSseStream(
+  body: ReadableStream<Uint8Array>,
+): AsyncIterable<string> {
+  const decoder = new TextDecoder();
+  const reader = body.getReader();
+  let buf = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === "[DONE]") return;
+        try {
+          const chunk = JSON.parse(data) as {
+            choices?: Array<{ delta?: { content?: string } }>;
+          };
+          const token = chunk.choices?.[0]?.delta?.content;
+          if (token) yield token;
+        } catch {
+          // malformed SSE line — skip
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
   }
 }
 

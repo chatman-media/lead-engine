@@ -11,7 +11,12 @@
     "types": ["bun"],
     "skipLibCheck": true,
     "paths": {
-      "@chatman-media/rag": ["../rag/src/index.ts"]
+      "@chatman-media/channel-core": ["../channel-core/src/index.ts"],
+      "@chatman-media/conversation-engine": ["../conversation-engine/src/index.ts"],
+      "@chatman-media/kb": ["../kb/src/index.ts"],
+      "@chatman-media/llm-router": ["../llm-router/src/index.ts"],
+      "@chatman-media/storage": ["../storage/src/index.ts"],
+      "@chatman-media/verticals": ["../verticals/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "examples/**/*.ts"]

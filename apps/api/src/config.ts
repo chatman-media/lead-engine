@@ -14,6 +14,13 @@ export interface ApiConfig {
    */
   masterKeyHex: string;
   /**
+   * Secret для HMAC-SHA256 sign/verify session tokens (admin-API auth).
+   * env PLATFORM_AUTH_SECRET. Fallback на PLATFORM_MASTER_KEY если первый
+   * не задан — для dev-deploy'ев которые ещё не добавили отдельный env.
+   * Production: обязан быть отдельный 32+ byte secret.
+   */
+  authSecret: string;
+  /**
    * Webhook secret для Telegram setWebhook — Telegram пробрасывает
    * заголовок `X-Telegram-Bot-Api-Secret-Token`, мы валидируем его до
    * парсинга payload'а. Один секрет на платформу (per-tenant роутинг —
@@ -26,6 +33,13 @@ export interface ApiConfig {
    * Пусто = WhatsApp webhook'и не принимаются.
    */
   whatsappVerifyToken: string;
+  /**
+   * App secret из Meta dashboard → App Settings → Basic. Используется
+   * для HMAC-SHA256 валидации `X-Hub-Signature-256` header'а в POST
+   * webhook'ах. Если пусто — signature check пропускается (warning
+   * на boot). Production deploy ОБЯЗАН задавать.
+   */
+  whatsappAppSecret: string;
   /**
    * Stripe webhook signing secret (whsec_...) — опционально. Если пусто,
    * /webhook/stripe не подключается и Stripe-billing просто не работает.
@@ -66,7 +80,7 @@ export interface ApiConfig {
   /**
    * Опционально: slug дефолтного sales-style для legacy tenant'а. Если
    * задан, RagReplyStrategy.resolveStyle подгрузит StylesRepo.findActiveBySlug
-   * (с парсингом через @chatman-media/rag StyleSchema) и передаст в
+   * (с парсингом через @chatman-media/kb StyleSchema) и передаст в
    * answerWithRag. Стиль строит system prompt через composeSystemPrompt
    * (persona + sales framework + hooks + skills).
    *
@@ -132,8 +146,10 @@ export function loadApiConfig(): ApiConfig {
     port: Number.parseInt(process.env.PORT ?? "3000", 10),
     databaseUrl: required("DATABASE_URL"),
     masterKeyHex: required("PLATFORM_MASTER_KEY"),
+    authSecret: process.env.PLATFORM_AUTH_SECRET ?? required("PLATFORM_MASTER_KEY"),
     telegramWebhookSecret: required("TELEGRAM_WEBHOOK_SECRET"),
     whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
+    whatsappAppSecret: process.env.WHATSAPP_APP_SECRET ?? "",
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
     healthCheckTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "2000", 10),
     llm: {

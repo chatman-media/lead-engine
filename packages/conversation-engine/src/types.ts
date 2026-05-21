@@ -39,6 +39,21 @@ export interface ProcessInboundResult {
    * pipeline-проходе. 0 = бот ничего не отвечает (mediaOnly / handover-mode).
    */
   outboundEnqueued: number;
+  /**
+   * Текст user-сообщения (после inboundText() свёртки). Заполняется когда
+   * pipeline вызван с `deferReply: true` — `generateReplyAndEnqueue` потом
+   * использует это значение для reply.generate БЕЗ нового read'а из БД.
+   * Когда deferReply=false (default) — поле не выставляется.
+   */
+  userMessageText?: string;
+  /** True если только media без caption (бот не должен отвечать). */
+  mediaOnly?: boolean;
+  /**
+   * True если processInbound пропустил reply.generate (deferReply=true) —
+   * caller должен вызвать `generateReplyAndEnqueue` чтобы завершить
+   * pipeline. False (или undefined) = pipeline отработал полностью.
+   */
+  replyDeferred?: boolean;
   /** Если конверсация переключилась в режим оператора — сюда попадает причина. */
   escalatedReason?: string;
 }

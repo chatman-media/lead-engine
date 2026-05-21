@@ -85,6 +85,20 @@ export interface ProcessInboundDeps {
    * Когда stageClassifier=null — может быть опущен.
    */
   db?: import("./dal/types.ts").Db;
+  /**
+   * Когда true — pipeline ЗАВЕРШАЕТСЯ после persist + classify + memory
+   * extract БЕЗ вызова `reply.generate` и enqueue outbound. Result содержит
+   * `replyDeferred: true`, `userMessageText`, `mediaOnly` — caller должен
+   * затем вызвать `generateReplyAndEnqueue(...)` ВНЕ открытой Postgres-tx.
+   *
+   * Зачем: reply.generate — это LLM call ~1-2s, который не должен держать
+   * Postgres pool connection. Pool=10, под нагрузкой это становится
+   * bottleneck'ом. Split на phases освобождает connection для других
+   * inbound'ов пока ждём LLM.
+   *
+   * Default false (legacy single-tx path для existing callers).
+   */
+  deferReply?: boolean;
   sink?: PipelineSink;
   clock?: Clock;
 }
@@ -254,6 +268,7 @@ export async function processInbound(
   if (deps.stageClassifier && deps.db && !existingMsg && text.length > 0) {
     try {
       const newStage = await deps.stageClassifier.classify({
+        tenantId: deps.tenant.tenantId,
         userMessageText: text,
         previousStage: conversation.currentStage,
         isFirstUserMessage: conversationCreated,
@@ -311,6 +326,23 @@ export async function processInbound(
   }
 
   // 6. Reply generation.
+  //
+  // Когда `deferReply: true` — pipeline ВОЗВРАЩАЕТСЯ перед reply.generate,
+  // caller вызывает generateReplyAndEnqueue вне открытой tx чтобы LLM call
+  // не держал Postgres-connection (см. doc в ProcessInboundDeps.deferReply).
+  if (deps.deferReply) {
+    void messageId;
+    return {
+      contactId: contact.id,
+      conversationId: conversation.id,
+      persisted: !existingMsg,
+      outboundEnqueued: 0,
+      userMessageText: text,
+      mediaOnly,
+      replyDeferred: true,
+    };
+  }
+
   let outboundCount = 0;
   if (conversation.mode === "ai" && deps.reply && !mediaOnly) {
     const envelopes = await deps.reply.generate({

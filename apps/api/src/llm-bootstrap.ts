@@ -4,20 +4,22 @@ import {
   ExperimentsRepo,
   LlmMemoryExtractor,
   LlmReplyStrategy,
-  LlmStageClassifier,
   loadExperimentVariants,
   type MemoryExtractor,
   MessagesRepo,
   parseStyleConfig,
   RagReplyStrategy,
-  RegexStageClassifier,
   type ReplyStrategy,
   type StageClassifier,
   StylesRepo,
 } from "@chatman-media/conversation-engine";
-import { InMemoryLlmRouter } from "@chatman-media/llm-router";
+import { ABRouter, type Style } from "@chatman-media/kb";
+import {
+  type EmbeddingClient as RagEmbeddingClient,
+  InMemoryLlmRouter,
+} from "@chatman-media/llm-router";
 import type { PlatformMetrics } from "@chatman-media/observability";
-import { ABRouter, type EmbeddingClient as RagEmbeddingClient, type Style } from "@chatman-media/rag";
+import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import type { ApiConfig } from "./config.ts";
 import { wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
@@ -29,7 +31,7 @@ import { wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.t
  *
  * Выбор стратегии:
  *   - Если задан и chat-config, и embed-config → RagReplyStrategy
- *     (KB-aware ответы через @chatman-media/rag.answerWithRag).
+ *     (KB-aware ответы через @chatman-media/kb.answerWithRag).
  *   - Если только chat-config → LlmReplyStrategy (история + system prompt,
  *     без KB).
  *   - Если chat не задан → null (бот persist'ит и молчит).
@@ -42,19 +44,24 @@ export function makeMemoryExtractor(
   cfg: ApiConfig,
   db: Db,
   metrics?: PlatformMetrics,
+  /** Active tenant IDs — register chat config per-tenant. Default [1] (legacy). */
+  tenantIds: readonly number[] = [1],
 ): MemoryExtractor | null {
-  if (!cfg.llm.provider || !cfg.llm.apiKey || !cfg.llm.model) {
-    return null;
-  }
+  // Ollama не требует apiKey (локальный сервер без auth). Для openai/openrouter —
+  // apiKey обязателен (см. buildChat в InMemoryLlmRouter).
+  if (!cfg.llm.provider || !cfg.llm.model) return null;
+  if (cfg.llm.provider !== "ollama" && !cfg.llm.apiKey) return null;
   const router = new InMemoryLlmRouter();
-  router.setConfig({
-    tenantId: 1,
-    purpose: "chat",
-    provider: cfg.llm.provider,
-    model: cfg.llm.model,
-    apiKey: cfg.llm.apiKey,
-    ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
-  });
+  for (const tenantId of tenantIds) {
+    router.setConfig({
+      tenantId,
+      purpose: "chat",
+      provider: cfg.llm.provider,
+      model: cfg.llm.model,
+      apiKey: cfg.llm.apiKey,
+      ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
+    });
+  }
   return new LlmMemoryExtractor(
     {
       resolveChat: (tenantId: number) => {
@@ -77,6 +84,8 @@ export function makeStageClassifier(
   cfg: ApiConfig,
   db: Db,
   metrics?: PlatformMetrics,
+  /** Active tenant IDs — register chat config per-tenant. Default [1] (legacy). */
+  tenantIds: readonly number[] = [1],
 ): StageClassifier | null {
   void db; // db не нужен classifier'у; pipeline передаёт deps.db в applyClassifiedStage.
   if (cfg.stageClassifier === "regex") {
@@ -90,14 +99,16 @@ export function makeStageClassifier(
       return null;
     }
     const router = new InMemoryLlmRouter();
-    router.setConfig({
-      tenantId: 1,
-      purpose: "chat",
-      provider: cfg.llm.provider,
-      model: cfg.llm.model,
-      apiKey: cfg.llm.apiKey,
-      ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
-    });
+    for (const tenantId of tenantIds) {
+      router.setConfig({
+        tenantId,
+        purpose: "chat",
+        provider: cfg.llm.provider,
+        model: cfg.llm.model,
+        apiKey: cfg.llm.apiKey,
+        ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
+      });
+    }
     return new LlmStageClassifier({
       resolveChat: (tenantId: number) => {
         const inner = router.resolveChat(tenantId, "chat");
@@ -105,7 +116,6 @@ export function makeStageClassifier(
           ? wrapChatClient(inner, metrics, { provider: cfg.llm.provider, purpose: "stage" })
           : inner;
       },
-      tenantId: 1,
     });
   }
   return null;
@@ -115,25 +125,32 @@ export function makeReplyStrategy(
   cfg: ApiConfig,
   db: Db,
   metrics?: PlatformMetrics,
+  /** Active tenant IDs — register chat config per-tenant. Default [1] (legacy). */
+  tenantIds: readonly number[] = [1],
 ): ReplyStrategy | null {
-  if (!cfg.llm.provider || !cfg.llm.apiKey || !cfg.llm.model) {
-    return null;
-  }
+  // Ollama не требует apiKey (локальный сервер без auth). Для openai/openrouter —
+  // apiKey обязателен (см. buildChat в InMemoryLlmRouter).
+  if (!cfg.llm.provider || !cfg.llm.model) return null;
+  if (cfg.llm.provider !== "ollama" && !cfg.llm.apiKey) return null;
   const chatProvider = cfg.llm.provider;
   const router = new InMemoryLlmRouter();
-  router.setConfig({
-    tenantId: 1,
-    purpose: "chat",
-    provider: chatProvider,
-    model: cfg.llm.model,
-    apiKey: cfg.llm.apiKey,
-    ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
-  });
+  for (const tenantId of tenantIds) {
+    router.setConfig({
+      tenantId,
+      purpose: "chat",
+      provider: chatProvider,
+      model: cfg.llm.model,
+      apiKey: cfg.llm.apiKey,
+      ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
+    });
+  }
 
   const template = RECRUITMENT_UAE_V1;
 
   const embedProvider = cfg.embed.provider;
-  if (!embedProvider || !cfg.embed.apiKey || !cfg.embed.model) {
+  // Аналогично chat: Ollama embed без apiKey работает.
+  const embedNeedsApiKey = embedProvider && embedProvider !== "ollama";
+  if (!embedProvider || (embedNeedsApiKey && !cfg.embed.apiKey) || !cfg.embed.model) {
     return new LlmReplyStrategy(
       {
         template,
@@ -143,15 +160,17 @@ export function makeReplyStrategy(
     );
   }
 
-  router.setConfig({
-    tenantId: 1,
-    purpose: "embed",
-    provider: embedProvider,
-    model: cfg.embed.model,
-    apiKey: cfg.embed.apiKey,
-    embedDim: cfg.embed.dim,
-    ...(cfg.embed.baseUrl ? { baseUrl: cfg.embed.baseUrl } : {}),
-  });
+  for (const tenantId of tenantIds) {
+    router.setConfig({
+      tenantId,
+      purpose: "embed",
+      provider: embedProvider,
+      model: cfg.embed.model,
+      apiKey: cfg.embed.apiKey,
+      embedDim: cfg.embed.dim,
+      ...(cfg.embed.baseUrl ? { baseUrl: cfg.embed.baseUrl } : {}),
+    });
+  }
 
   // resolveStyle: priority chain
   //   1. EXPERIMENT_SLUG задан → ABRouter поверх variants из experiments.

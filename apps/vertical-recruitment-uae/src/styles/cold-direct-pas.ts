@@ -1,4 +1,4 @@
-import { type Style, StyleSchema } from "@chatman-media/rag";
+import { type Style, StyleSchema } from "@chatman-media/kb";
 
 export const coldDirectPas: Style = StyleSchema.parse({
   slug: "cold-direct-pas-v1",

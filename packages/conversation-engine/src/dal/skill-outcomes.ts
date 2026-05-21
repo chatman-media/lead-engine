@@ -31,7 +31,7 @@ export interface SkillAggregateRow {
 /**
  * Per-skill outcome tracking. После того как lead закрыт (won/lost/ghosted),
  * coach-analyzer проходит по messages в conversation и для каждой assistant-
- * реплики дёргает gradeSkills из @chatman-media/rag — возвращённые slugs
+ * реплики дёргает gradeSkills из @chatman-media/kb — возвращённые slugs
  * пишутся в skill_outcomes с этим outcome'ом. Aggregate'ы дают win-rate
  * per skill для admin-UI / coach-proposals.
  *

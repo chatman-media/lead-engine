@@ -1,8 +1,8 @@
 import {
   ChatApiError,
   type ChatClient,
+  type ChatCompletionOpts,
   type ChatMessage,
-  ChatTruncatedError,
   type FetchLike,
 } from "../types.ts";
 
@@ -43,11 +43,6 @@ interface ChatResponse {
   choices?: Array<{
     index?: number;
     message?: { role: string; content: string };
-    /** OpenRouter normalises model-specific signals to OpenAI's
-     *  `finish_reason`. `"length"` means the response hit `max_tokens`
-     *  and was cut mid-sentence — we treat that as a hard error rather
-     *  than silently forwarding half a reply to the candidate. */
-    finish_reason?: string;
   }>;
   error?: { message?: string; code?: number | string };
 }
@@ -80,21 +75,13 @@ export class OpenRouterChatClient implements ChatClient {
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
-  async complete(
-    messages: ChatMessage[],
-    opts: { temperature?: number; numPredict?: number } = {},
-  ): Promise<string> {
+  async complete(messages: ChatMessage[], opts: ChatCompletionOpts = {}): Promise<string> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages,
       stream: false,
     };
     if (opts.temperature !== undefined) body.temperature = opts.temperature;
-    // `numPredict` is the cross-provider name; for OpenRouter (OpenAI-
-    // compatible) it maps to `max_tokens`. Without this, style.model.maxTokens
-    // silently never reached the API — the bot's reply was capped by the
-    // upstream model default and could be chopped mid-sentence (no terminator).
-    if (opts.numPredict !== undefined) body.max_tokens = opts.numPredict;
 
     const headers: Record<string, string> = {
       "content-type": "application/json",
@@ -138,18 +125,78 @@ export class OpenRouterChatClient implements ChatClient {
       );
     }
 
-    const choice = payload.choices?.[0];
-    const content = choice?.message?.content;
+    const content = payload.choices?.[0]?.message?.content;
     if (!content || content.trim().length === 0) {
       throw new ChatApiError(res.status, "no choices[0].message.content in OpenRouter response");
     }
-    // Truncation guard: when the upstream model is cut off by max_tokens,
-    // OpenRouter passes `finish_reason: "length"` through. Forward as a
-    // ChatTruncatedError so callers can drop the half-formed reply
-    // (silence > "Алина, это абсолютно" with no continuation).
-    if (choice?.finish_reason === "length") {
-      throw new ChatTruncatedError(content.trim(), opts.numPredict, choice.finish_reason);
-    }
     return content.trim();
+  }
+
+  async *stream(messages: ChatMessage[], opts: ChatCompletionOpts = {}): AsyncIterable<string> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages,
+      stream: true,
+    };
+    if (opts.temperature !== undefined) body.temperature = opts.temperature;
+    if (opts.numPredict !== undefined) body.max_tokens = opts.numPredict;
+
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      authorization: `Bearer ${this.apiKey}`,
+    };
+    if (this.siteUrl) headers["HTTP-Referer"] = this.siteUrl;
+    if (this.appName) headers["X-Title"] = this.appName;
+
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (err) {
+      const cause = err instanceof Error ? err.message : String(err);
+      throw new ChatApiError(0, `OpenRouter unreachable at ${this.baseUrl}: ${cause}`);
+    }
+
+    if (!res.ok || !res.body) {
+      const errPayload = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+      throw new ChatApiError(
+        res.status,
+        errPayload.error?.message ?? `OpenRouter stream error (HTTP ${res.status})`,
+      );
+    }
+
+    const decoder = new TextDecoder();
+    const reader = res.body.getReader();
+    let buf = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === "[DONE]") return;
+          try {
+            const chunk = JSON.parse(data) as {
+              choices?: Array<{ delta?: { content?: string } }>;
+            };
+            const token = chunk.choices?.[0]?.delta?.content;
+            if (token) yield token;
+          } catch {
+            // skip malformed SSE line
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
   }
 }

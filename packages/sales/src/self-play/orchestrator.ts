@@ -9,15 +9,13 @@
  * actual prompt — not a stub. The candidate side runs a lighter
  * persona-prompt loop (no KB, no skills).
  */
+import type { ChatClient, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
 import {
   answerWithRag,
-  type ChatClient,
-  type ChatMessage,
-  type EmbeddingClient,
   gradeSkills,
   type IKbStore,
   NO_CONTEXT_MARKER,
-} from "@chatman-media/rag";
+} from "@chatman-media/kb";
 import type { EloOutcome } from "../elo.ts";
 import { eloUpdate } from "../elo.ts";
 import type { SkillForPrompt } from "../prompt.ts";

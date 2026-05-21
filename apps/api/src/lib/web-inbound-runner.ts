@@ -3,6 +3,7 @@ import {
   ContactsRepo,
   ConversationsRepo,
   type Db,
+  generateReplyAndEnqueue,
   type MemoryExtractor,
   MessagesRepo,
   OutboundQueueRepo,
@@ -10,6 +11,7 @@ import {
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
+  withTenant,
 } from "@chatman-media/conversation-engine";
 import type { JsonLogger, PlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
@@ -39,7 +41,6 @@ export function startWebInboundRunner(opts: {
   log: JsonLogger;
 }): Promise<void> {
   const { entry, db, signal, log } = opts;
-  const repoCtx = { db, tenantId: entry.tenantId };
   const template = opts.resolveTemplate?.(entry.tenantSlug);
 
   return (async () => {
@@ -47,31 +48,54 @@ export function startWebInboundRunner(opts: {
       for await (const inbound of entry.adapter.receive(signal)) {
         const startedAt = performance.now();
         try {
-          const result = await processInbound(inbound, {
-            tenant: {
-              tenantId: entry.tenantId,
-              slug: entry.tenantSlug,
-              llmBillingMode: "byok",
-            },
-            channel: {
-              channelId: entry.channelDbId,
-              kind: "web",
-              externalId: entry.externalId,
-            },
-            channelDbId: entry.channelDbId,
-            contacts: new ContactsRepo(repoCtx),
-            identities: new ChannelIdentitiesRepo(repoCtx),
-            conversations: new ConversationsRepo(repoCtx),
-            messages: new MessagesRepo(repoCtx),
-            outbound: new OutboundQueueRepo(repoCtx),
-            reply: opts.replyStrategy ?? null,
-            ...(template ? { template } : {}),
-            ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
-            ...(opts.stageClassifier
-              ? { stageClassifier: opts.stageClassifier, db }
-              : {}),
-            ...(opts.sink ? { sink: opts.sink } : {}),
+          const tenant = {
+            tenantId: entry.tenantId,
+            slug: entry.tenantSlug,
+            llmBillingMode: "byok" as const,
+          };
+          const channel = {
+            channelId: entry.channelDbId,
+            kind: "web" as const,
+            externalId: entry.externalId,
+          };
+          // ── Phase 1: persist + classify + memory (одна короткая tx) ──
+          // См. webhook-telegram.ts — split на phases для освобождения
+          // pool connection во время reply.generate (LLM 1-2s).
+          let result = await withTenant(db, entry.tenantId, async (tx) => {
+            const repoCtx = { db: tx, tenantId: entry.tenantId };
+            return processInbound(inbound, {
+              tenant,
+              channel,
+              channelDbId: entry.channelDbId,
+              contacts: new ContactsRepo(repoCtx),
+              identities: new ChannelIdentitiesRepo(repoCtx),
+              conversations: new ConversationsRepo(repoCtx),
+              messages: new MessagesRepo(repoCtx),
+              outbound: new OutboundQueueRepo(repoCtx),
+              reply: opts.replyStrategy ?? null,
+              deferReply: true,
+              ...(template ? { template } : {}),
+              ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
+              ...(opts.stageClassifier
+                ? { stageClassifier: opts.stageClassifier, db: tx }
+                : {}),
+              ...(opts.sink ? { sink: opts.sink } : {}),
+            });
           });
+          // ── Phase 2: reply.generate ВНЕ tx + enqueue новой короткой tx ──
+          if (result.replyDeferred && opts.replyStrategy) {
+            const gen = await generateReplyAndEnqueue({
+              db,
+              tenant,
+              channel,
+              channelDbId: entry.channelDbId,
+              inbound,
+              result,
+              replyStrategy: opts.replyStrategy,
+              ...(opts.sink ? { sink: opts.sink } : {}),
+            });
+            result = { ...result, outboundEnqueued: gen.outboundEnqueued };
+          }
           if (!result.persisted) {
             opts.metrics?.inboundDeduped.inc(1, { tenant: String(entry.tenantId) });
           }
