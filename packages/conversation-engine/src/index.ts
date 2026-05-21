@@ -37,6 +37,12 @@ export {
   runMemoryExtraction,
 } from "./memory-extractor.ts";
 export {
+  applyClassifiedStage,
+  LlmStageClassifier,
+  RegexStageClassifier,
+  type StageClassifier,
+} from "./stage-classifier.ts";
+export {
   decryptSecret,
   encryptSecret,
   getDecryptedSecret,
