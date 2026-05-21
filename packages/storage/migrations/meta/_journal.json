@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1779321285802,
+      "tag": "0000_init_full_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779322549183,
+      "tag": "0001_multi_tenant",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779322919626,
+      "tag": "0002_tenant_id_existing_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1779400000000,
+      "tag": "0003_backfill_users_to_contacts",
+      "breakpoints": true
+    }
+  ]
+}
