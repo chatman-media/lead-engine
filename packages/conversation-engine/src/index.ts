@@ -8,12 +8,26 @@ export {
   ConversationsRepo,
   type ConversationRow,
   type Db,
+  LeadsRepo,
+  type LeadRow,
   MessagesRepo,
   type MessageRow,
   OutboundQueueRepo,
   type OutboundQueueRow,
   type RepoCtx,
 } from "./dal/index.ts";
+export {
+  allowedTransitions,
+  FunnelTransitionError,
+  getInitialStage,
+  isTerminal,
+  validateTransition,
+} from "./funnel-machine.ts";
+export {
+  ensureLead,
+  type LeadHookContext,
+  transitionLeadState,
+} from "./lead-lifecycle.ts";
 export { dispatchOutbound } from "./outbound-dispatch.ts";
 export {
   processInbound,
