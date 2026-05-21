@@ -12,6 +12,7 @@ import { makeMetricsSink } from "./lib/metrics-sink.ts";
 import { WebChannelRegistry } from "./lib/web-channel-registry.ts";
 import { WebOutboundDispatcher } from "./lib/web-dispatcher.ts";
 import { startWebInboundRunner } from "./lib/web-inbound-runner.ts";
+import { loadTenantLlmConfigs } from "./lib/llm-config-loader.ts";
 import {
   makeEmbedderResolver,
   makeMemoryExtractor,
@@ -77,6 +78,21 @@ async function main() {
   ).map((r) => r.id);
   log.info("active tenants loaded for LLM config", { count: activeTenantIds.length, ids: activeTenantIds });
 
+  // Per-tenant LLM configs: DB (llm_provider_configs) + decrypted secrets,
+  // env как fallback для tenants без DB config'а. Hot-reload — TODO.
+  const loadedLlmConfigs = await loadTenantLlmConfigs({
+    db,
+    tenantIds: activeTenantIds,
+    envFallback: cfg,
+    masterKeyHex: cfg.masterKeyHex,
+    onError: (msg, ctx) => log.warn(`llm-config-loader: ${msg}`, ctx),
+  });
+  log.info("llm configs resolved", {
+    tenants: loadedLlmConfigs.byTenant.size,
+    anyChat: loadedLlmConfigs.anyTenantHasChat,
+    anyEmbed: loadedLlmConfigs.anyTenantHasEmbed,
+  });
+
   const channels = new ChannelRegistry();
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
   await channels.loadFromDb(db as any);
@@ -107,14 +123,12 @@ async function main() {
   // через UI без env-vars.
   app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
 
-  const embedderResolver = makeEmbedderResolver(cfg, activeTenantIds);
+  const embedderResolver = makeEmbedderResolver(loadedLlmConfigs);
   if (embedderResolver) {
     app.route("/", makeAdminKbRoutes({ db, resolveEmbedder: embedderResolver }));
-    log.info("admin-kb routes enabled (KB upload + list + delete)", {
-      embedProvider: cfg.embed.provider,
-    });
+    log.info("admin-kb routes enabled (KB upload + list + delete)");
   } else {
-    log.info("admin-kb routes disabled — LLM_EMBED_PROVIDER not configured");
+    log.info("admin-kb routes disabled — no tenant has embed config (DB or env)");
   }
 
   // Per-tenant LLM provider config CRUD (GET/PUT/DELETE /api/admin/llm-configs).
@@ -132,26 +146,22 @@ async function main() {
       timeoutMs: cfg.healthCheckTimeoutMs,
     }),
   );
-  const replyStrategy = makeReplyStrategy(cfg, db, metrics, activeTenantIds);
+  const replyStrategy = makeReplyStrategy(loadedLlmConfigs, cfg, db, metrics);
   if (replyStrategy) {
-    const strategyKind = cfg.embed.provider && cfg.embed.apiKey ? "RAG" : "LLM-only";
     log.info("reply strategy configured", {
-      kind: strategyKind,
-      chat: `${cfg.llm.provider}/${cfg.llm.model}`,
-      ...(cfg.embed.provider
-        ? { embed: `${cfg.embed.provider}/${cfg.embed.model}` }
-        : {}),
+      kind: loadedLlmConfigs.anyTenantHasEmbed ? "RAG" : "LLM-only",
+      tenants: loadedLlmConfigs.byTenant.size,
       ...(cfg.defaultStyleSlug ? { style: cfg.defaultStyleSlug } : {}),
       ...(cfg.experimentSlug ? { experiment: cfg.experimentSlug } : {}),
     });
   } else {
-    log.info("LLM not configured — bot will persist messages but stay silent");
+    log.info("LLM not configured for any tenant — bot will persist messages but stay silent");
   }
 
-  const memoryExtractor = makeMemoryExtractor(cfg, db, metrics, activeTenantIds);
+  const memoryExtractor = makeMemoryExtractor(loadedLlmConfigs, db, metrics);
   if (memoryExtractor) log.info("memory extractor enabled");
 
-  const stageClassifier = makeStageClassifier(cfg, db, metrics, activeTenantIds);
+  const stageClassifier = makeStageClassifier(loadedLlmConfigs, cfg, db, metrics);
   if (stageClassifier) {
     log.info("stage classifier enabled", { kind: cfg.stageClassifier });
   }

@@ -17,58 +17,79 @@ import { ABRouter, type Style } from "@chatman-media/kb";
 import {
   type EmbeddingClient as RagEmbeddingClient,
   InMemoryLlmRouter,
+  type LlmProviderConfig as RouterCfg,
 } from "@chatman-media/llm-router";
 import type { PlatformMetrics } from "@chatman-media/observability";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import type { ApiConfig } from "./config.ts";
 import { wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
+import {
+  getConfig,
+  type LoadedLlmConfigs,
+  type ResolvedLlmConfig,
+} from "./lib/llm-config-loader.ts";
 
 /**
- * Bootstrap LlmRouter + ReplyStrategy. На текущем этапе single-tenant
- * shim через env-vars (legacy tenant_id=1). После Этапа 8 router'у
- * хочется читать llm_provider_configs из БД per tenant.
+ * Bootstrap LlmRouter + ReplyStrategy. Per-tenant configs приходят из
+ * `LoadedLlmConfigs` (DB → env fallback, см. llm-config-loader). Каждая
+ * фабрика регистрирует в общем `InMemoryLlmRouter`'е только те tenants
+ * у которых есть нужный purpose, и возвращает null если ни один tenant
+ * не имеет config'а (поведение legacy single-tenant сохраняется).
  *
  * Выбор стратегии:
- *   - Если задан и chat-config, и embed-config → RagReplyStrategy
- *     (KB-aware ответы через @chatman-media/kb.answerWithRag).
- *   - Если только chat-config → LlmReplyStrategy (история + system prompt,
- *     без KB).
- *   - Если chat не задан → null (бот persist'ит и молчит).
+ *   - Если any tenant имеет chat + embed → RagReplyStrategy.
+ *   - Если any tenant имеет только chat → LlmReplyStrategy.
+ *   - Если ни один tenant не имеет chat → null (бот persist'ит и молчит).
+ *
+ * NB: Hot-reload не делаем — config меняется только при boot. После
+ * admin PUT нужен restart apps/api. Pub/sub-based invalidation — TODO.
  */
+
+function toRouterConfig(
+  tenantId: number,
+  purpose: "chat" | "embed" | "vision" | "judge",
+  cfg: ResolvedLlmConfig,
+): RouterCfg {
+  // RouterCfg union'нится по provider; cast'им через any к одному shape'у.
+  return {
+    tenantId,
+    purpose,
+    provider: cfg.provider as RouterCfg["provider"],
+    model: cfg.model,
+    ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}),
+    ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
+    ...(cfg.embedDim !== undefined ? { embedDim: cfg.embedDim } : {}),
+    ...(cfg.timeoutMs !== undefined ? { timeoutMs: cfg.timeoutMs } : {}),
+    // biome-ignore lint/suspicious/noExplicitAny: union of provider-specific shapes
+  } as any;
+}
+
 /**
  * Опциональный memory extractor. Использует тот же chat-config что и
  * reply-strategy. apps/api прокидывает его в webhook-route → ProcessInboundDeps.
  */
 export function makeMemoryExtractor(
-  cfg: ApiConfig,
+  loaded: LoadedLlmConfigs,
   db: Db,
   metrics?: PlatformMetrics,
-  /** Active tenant IDs — register chat config per-tenant. Default [1] (legacy). */
-  tenantIds: readonly number[] = [1],
 ): MemoryExtractor | null {
-  // Ollama не требует apiKey (локальный сервер без auth). Для openai/openrouter —
-  // apiKey обязателен (см. buildChat в InMemoryLlmRouter).
-  if (!cfg.llm.provider || !cfg.llm.model) return null;
-  if (cfg.llm.provider !== "ollama" && !cfg.llm.apiKey) return null;
+  if (!loaded.anyTenantHasChat) return null;
   const router = new InMemoryLlmRouter();
-  for (const tenantId of tenantIds) {
-    router.setConfig({
-      tenantId,
-      purpose: "chat",
-      provider: cfg.llm.provider,
-      model: cfg.llm.model,
-      apiKey: cfg.llm.apiKey,
-      ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
-    });
+  for (const [tenantId, perPurpose] of loaded.byTenant) {
+    const chat = perPurpose.get("chat");
+    if (chat) router.setConfig(toRouterConfig(tenantId, "chat", chat));
   }
   return new LlmMemoryExtractor(
     {
       resolveChat: (tenantId: number) => {
         const inner = router.resolveChat(tenantId, "chat");
-        return metrics
-          ? wrapChatClient(inner, metrics, { provider: cfg.llm.provider, purpose: "memory" })
-          : inner;
+        if (!metrics) return inner;
+        const cfg = getConfig(loaded, tenantId, "chat");
+        return wrapChatClient(inner, metrics, {
+          provider: cfg?.provider ?? "unknown",
+          purpose: "memory",
+        });
       },
     },
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
@@ -81,40 +102,36 @@ export function makeMemoryExtractor(
  * null (current_stage не пишется).
  */
 export function makeStageClassifier(
+  loaded: LoadedLlmConfigs,
   cfg: ApiConfig,
   db: Db,
   metrics?: PlatformMetrics,
-  /** Active tenant IDs — register chat config per-tenant. Default [1] (legacy). */
-  tenantIds: readonly number[] = [1],
 ): StageClassifier | null {
   void db; // db не нужен classifier'у; pipeline передаёт deps.db в applyClassifiedStage.
   if (cfg.stageClassifier === "regex") {
     return new RegexStageClassifier();
   }
   if (cfg.stageClassifier === "llm") {
-    if (!cfg.llm.provider || !cfg.llm.apiKey || !cfg.llm.model) {
+    if (!loaded.anyTenantHasChat) {
       console.warn(
-        "[apps/api] STAGE_CLASSIFIER=llm requested but chat LLM not configured — disabling",
+        "[apps/api] STAGE_CLASSIFIER=llm requested but no tenant has chat LLM configured — disabling",
       );
       return null;
     }
     const router = new InMemoryLlmRouter();
-    for (const tenantId of tenantIds) {
-      router.setConfig({
-        tenantId,
-        purpose: "chat",
-        provider: cfg.llm.provider,
-        model: cfg.llm.model,
-        apiKey: cfg.llm.apiKey,
-        ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
-      });
+    for (const [tenantId, perPurpose] of loaded.byTenant) {
+      const chat = perPurpose.get("chat");
+      if (chat) router.setConfig(toRouterConfig(tenantId, "chat", chat));
     }
     return new LlmStageClassifier({
       resolveChat: (tenantId: number) => {
         const inner = router.resolveChat(tenantId, "chat");
-        return metrics
-          ? wrapChatClient(inner, metrics, { provider: cfg.llm.provider, purpose: "stage" })
-          : inner;
+        if (!metrics) return inner;
+        const chatCfg = getConfig(loaded, tenantId, "chat");
+        return wrapChatClient(inner, metrics, {
+          provider: chatCfg?.provider ?? "unknown",
+          purpose: "stage",
+        });
       },
     });
   }
@@ -122,35 +139,25 @@ export function makeStageClassifier(
 }
 
 export function makeReplyStrategy(
+  loaded: LoadedLlmConfigs,
   cfg: ApiConfig,
   db: Db,
   metrics?: PlatformMetrics,
-  /** Active tenant IDs — register chat config per-tenant. Default [1] (legacy). */
-  tenantIds: readonly number[] = [1],
 ): ReplyStrategy | null {
-  // Ollama не требует apiKey (локальный сервер без auth). Для openai/openrouter —
-  // apiKey обязателен (см. buildChat в InMemoryLlmRouter).
-  if (!cfg.llm.provider || !cfg.llm.model) return null;
-  if (cfg.llm.provider !== "ollama" && !cfg.llm.apiKey) return null;
-  const chatProvider = cfg.llm.provider;
+  if (!loaded.anyTenantHasChat) return null;
+
   const router = new InMemoryLlmRouter();
-  for (const tenantId of tenantIds) {
-    router.setConfig({
-      tenantId,
-      purpose: "chat",
-      provider: chatProvider,
-      model: cfg.llm.model,
-      apiKey: cfg.llm.apiKey,
-      ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
-    });
+  for (const [tenantId, perPurpose] of loaded.byTenant) {
+    const chat = perPurpose.get("chat");
+    if (chat) router.setConfig(toRouterConfig(tenantId, "chat", chat));
+    const embed = perPurpose.get("embed");
+    if (embed) router.setConfig(toRouterConfig(tenantId, "embed", embed));
   }
 
   const template = RECRUITMENT_UAE_V1;
 
-  const embedProvider = cfg.embed.provider;
-  // Аналогично chat: Ollama embed без apiKey работает.
-  const embedNeedsApiKey = embedProvider && embedProvider !== "ollama";
-  if (!embedProvider || (embedNeedsApiKey && !cfg.embed.apiKey) || !cfg.embed.model) {
+  // Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
+  if (!loaded.anyTenantHasEmbed) {
     return new LlmReplyStrategy(
       {
         template,
@@ -160,28 +167,7 @@ export function makeReplyStrategy(
     );
   }
 
-  for (const tenantId of tenantIds) {
-    router.setConfig({
-      tenantId,
-      purpose: "embed",
-      provider: embedProvider,
-      model: cfg.embed.model,
-      apiKey: cfg.embed.apiKey,
-      embedDim: cfg.embed.dim,
-      ...(cfg.embed.baseUrl ? { baseUrl: cfg.embed.baseUrl } : {}),
-    });
-  }
-
-  // resolveStyle: priority chain
-  //   1. EXPERIMENT_SLUG задан → ABRouter поверх variants из experiments.
-  //      allocation_json. Deterministic by hash(contactId+experiment.slug) —
-  //      один контакт всегда получает тот же variant.
-  //   2. STYLE_SLUG задан → load active style → передать as-is.
-  //   3. Иначе → undefined, RagReplyStrategy fall back'нет на DEFAULT_PERSONA.
-  //
-  // Кеширование: experiment variants и default style загружаются один раз
-  // на первый запрос per tenant, дальше держатся в памяти. Operator-правки
-  // (паузу эксперимента, swap style) требуют рестарта apps/api.
+  // resolveStyle: priority chain (см. предыдущую версию для деталей).
   const styleCache = new Map<number, Style | null>();
   const experimentCache = new Map<number, ABRouter | "absent">();
   const defaultSlug = cfg.defaultStyleSlug;
@@ -190,32 +176,30 @@ export function makeReplyStrategy(
   const resolveStyle =
     experimentSlug || defaultSlug
       ? async (input: { tenantId: number; contactId: number }): Promise<Style | null> => {
-          // (1) experiment first
           if (experimentSlug) {
-            let router = experimentCache.get(input.tenantId);
-            if (router === undefined) {
+            let abRouter = experimentCache.get(input.tenantId);
+            if (abRouter === undefined) {
               const expRepo = new ExperimentsRepo({ db, tenantId: input.tenantId });
               const stylesRepo = new StylesRepo({ db, tenantId: input.tenantId });
               const exp = await expRepo.findRunningBySlug(experimentSlug);
               if (exp) {
                 const variants = await loadExperimentVariants(exp, stylesRepo);
                 if (variants) {
-                  router = new ABRouter({ variants, salt: exp.slug });
-                  experimentCache.set(input.tenantId, router);
+                  abRouter = new ABRouter({ variants, salt: exp.slug });
+                  experimentCache.set(input.tenantId, abRouter);
                 } else {
                   experimentCache.set(input.tenantId, "absent");
-                  router = "absent";
+                  abRouter = "absent";
                 }
               } else {
                 experimentCache.set(input.tenantId, "absent");
-                router = "absent";
+                abRouter = "absent";
               }
             }
-            if (router !== "absent") {
-              return router.assign(String(input.contactId)).style;
+            if (abRouter !== "absent") {
+              return abRouter.assign(String(input.contactId)).style;
             }
           }
-          // (2) default-style fallback
           if (defaultSlug) {
             const cached = styleCache.get(input.tenantId);
             if (cached !== undefined) return cached;
@@ -229,28 +213,26 @@ export function makeReplyStrategy(
         }
       : undefined;
 
-  const chatProviderLabel = cfg.llm.provider;
-  const embedProviderLabel = embedProvider;
-
   return new RagReplyStrategy(
     {
       template,
       resolveChat: (tenantId: number) => {
         const inner = router.resolveChat(tenantId, "chat");
-        return metrics
-          ? wrapChatClient(inner, metrics, { provider: chatProviderLabel, purpose: "chat" })
-          : inner;
+        if (!metrics) return inner;
+        const chatCfg = getConfig(loaded, tenantId, "chat");
+        return wrapChatClient(inner, metrics, {
+          provider: chatCfg?.provider ?? "unknown",
+          purpose: "chat",
+        });
       },
-      // llm-router'овский EmbeddingClient structurally compatible с
-      // rag's EmbeddingClient (embed(inputs)→number[][] + dim).
       resolveEmbed: (tenantId: number) => {
         const inner = router.resolveEmbed(tenantId);
-        const wrapped = metrics
-          ? wrapEmbeddingClient(inner, metrics, {
-              provider: embedProviderLabel,
-              purpose: "embed",
-            })
-          : inner;
+        if (!metrics) return inner as unknown as RagEmbeddingClient;
+        const embedCfg = getConfig(loaded, tenantId, "embed");
+        const wrapped = wrapEmbeddingClient(inner, metrics, {
+          provider: embedCfg?.provider ?? "unknown",
+          purpose: "embed",
+        });
         return wrapped as unknown as RagEmbeddingClient;
       },
       resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
@@ -263,29 +245,16 @@ export function makeReplyStrategy(
 /**
  * Standalone embedder resolver — для admin-API endpoints'ов (KB upload),
  * которые не используют RagReplyStrategy но нуждаются в `EmbeddingClient`
- * per tenant. Возвращает null если embed-config не задан в env.
- *
- * Symmetric с makeReplyStrategy в плане tenant-config registration: loops
- * через active tenant IDs.
+ * per tenant. Возвращает null если ни один tenant не имеет embed config'а.
  */
 export function makeEmbedderResolver(
-  cfg: ApiConfig,
-  tenantIds: readonly number[] = [1],
+  loaded: LoadedLlmConfigs,
 ): ((tenantId: number) => import("@chatman-media/llm-router").EmbeddingClient) | null {
-  const provider = cfg.embed.provider;
-  if (!provider || !cfg.embed.model) return null;
-  if (provider !== "ollama" && !cfg.embed.apiKey) return null;
+  if (!loaded.anyTenantHasEmbed) return null;
   const router = new InMemoryLlmRouter();
-  for (const tenantId of tenantIds) {
-    router.setConfig({
-      tenantId,
-      purpose: "embed",
-      provider,
-      model: cfg.embed.model,
-      apiKey: cfg.embed.apiKey,
-      embedDim: cfg.embed.dim,
-      ...(cfg.embed.baseUrl ? { baseUrl: cfg.embed.baseUrl } : {}),
-    });
+  for (const [tenantId, perPurpose] of loaded.byTenant) {
+    const embed = perPurpose.get("embed");
+    if (embed) router.setConfig(toRouterConfig(tenantId, "embed", embed));
   }
   return (tenantId: number) => router.resolveEmbed(tenantId);
 }
