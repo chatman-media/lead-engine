@@ -49,6 +49,12 @@ export interface AdminChannelsRoutesOpts {
    * Если publicUrl задан — этот тоже обязан быть.
    */
   webhookSecret?: string;
+  /**
+   * Hot-reload hook — вызывается после успешного POST/DELETE с tenantId.
+   * Перестраивает ChannelRegistry entries для этого tenant'а в текущем
+   * процессе. apps/worker — отдельный процесс, ему нужен restart.
+   */
+  onReload?: (tenantId: number) => Promise<void>;
 }
 
 interface TelegramCreateBody {
@@ -240,6 +246,15 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
         }
       }
 
+      let reloadError: string | undefined;
+      if (opts.onReload) {
+        try {
+          await opts.onReload(tenantId);
+        } catch (err) {
+          reloadError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
       return c.json({
         ok: true,
         ...result,
@@ -247,6 +262,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
         botId,
         webhookSet,
         ...(webhookError ? { webhookError } : {}),
+        ...(reloadError ? { reloadError } : {}),
       });
     } catch (err) {
       // Unique-violation guard на случай race.
@@ -277,6 +293,19 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
       return result.length;
     });
     if (deleted === 0) return c.json({ error: "channel not found" }, 404);
+
+    if (opts.onReload) {
+      try {
+        await opts.onReload(tenantId);
+      } catch (err) {
+        return c.json({
+          ok: true,
+          deleted,
+          reloadError: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return c.json({ ok: true, deleted });
   });
 

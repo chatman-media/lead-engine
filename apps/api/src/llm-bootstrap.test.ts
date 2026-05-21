@@ -3,17 +3,29 @@
 //   2. возвращают объект когда any tenant имеет нужный purpose
 //   3. resolveChat/resolveEmbed работают для tenants с config'ами
 
+import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { describe, expect, it } from "bun:test";
 import type { ApiConfig } from "./config.ts";
 import type { LoadedLlmConfigs } from "./lib/llm-config-loader.ts";
 import {
+  type LoadedRef,
   makeEmbedderResolver,
   makeMemoryExtractor,
   makeReplyStrategy,
   makeStageClassifier,
 } from "./llm-bootstrap.ts";
 
-function loadedWith(opts: {
+function refWith(opts: {
+  chat?: { tenantIds: number[]; provider?: "openai" | "ollama"; model?: string };
+  embed?: { tenantIds: number[]; provider?: "openai" | "ollama"; model?: string; dim?: number };
+}): LoadedRef {
+  return {
+    current: buildLoaded(opts),
+    router: new InMemoryLlmRouter(),
+  };
+}
+
+function buildLoaded(opts: {
   chat?: { tenantIds: number[]; provider?: "openai" | "ollama"; model?: string };
   embed?: { tenantIds: number[]; provider?: "openai" | "ollama"; model?: string; dim?: number };
 }): LoadedLlmConfigs {
@@ -66,19 +78,19 @@ const FAKE_CFG = {
 
 describe("makeReplyStrategy", () => {
   it("no chat config anywhere → null", () => {
-    const loaded = loadedWith({});
+    const loaded = refWith({});
     expect(makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB)).toBeNull();
   });
 
   it("chat only → LlmReplyStrategy", () => {
-    const loaded = loadedWith({ chat: { tenantIds: [1] } });
+    const loaded = refWith({ chat: { tenantIds: [1] } });
     const strat = makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB);
     expect(strat).not.toBeNull();
     expect(strat?.constructor.name).toBe("LlmReplyStrategy");
   });
 
   it("chat + embed → RagReplyStrategy", () => {
-    const loaded = loadedWith({
+    const loaded = refWith({
       chat: { tenantIds: [1] },
       embed: { tenantIds: [1] },
     });
@@ -87,7 +99,7 @@ describe("makeReplyStrategy", () => {
   });
 
   it("multi-tenant: tenant 2 имеет chat, tenant 1 — embed → RagReplyStrategy", () => {
-    const loaded = loadedWith({
+    const loaded = refWith({
       chat: { tenantIds: [2] },
       embed: { tenantIds: [1] },
     });
@@ -99,10 +111,10 @@ describe("makeReplyStrategy", () => {
 
 describe("makeMemoryExtractor", () => {
   it("no chat → null", () => {
-    expect(makeMemoryExtractor(loadedWith({}), FAKE_DB)).toBeNull();
+    expect(makeMemoryExtractor(refWith({}), FAKE_DB)).toBeNull();
   });
   it("chat → LlmMemoryExtractor", () => {
-    const ext = makeMemoryExtractor(loadedWith({ chat: { tenantIds: [1] } }), FAKE_DB);
+    const ext = makeMemoryExtractor(refWith({ chat: { tenantIds: [1] } }), FAKE_DB);
     expect(ext?.constructor.name).toBe("LlmMemoryExtractor");
   });
 });
@@ -110,29 +122,29 @@ describe("makeMemoryExtractor", () => {
 describe("makeStageClassifier", () => {
   it("cfg.stageClassifier=regex → RegexStageClassifier (no LLM needed)", () => {
     const cfg = { ...FAKE_CFG, stageClassifier: "regex" } as unknown as ApiConfig;
-    const cls = makeStageClassifier(loadedWith({}), cfg, FAKE_DB);
+    const cls = makeStageClassifier(refWith({}), cfg, FAKE_DB);
     expect(cls?.constructor.name).toBe("RegexStageClassifier");
   });
   it("cfg.stageClassifier=llm + no chat → null", () => {
     const cfg = { ...FAKE_CFG, stageClassifier: "llm" } as unknown as ApiConfig;
-    expect(makeStageClassifier(loadedWith({}), cfg, FAKE_DB)).toBeNull();
+    expect(makeStageClassifier(refWith({}), cfg, FAKE_DB)).toBeNull();
   });
   it("cfg.stageClassifier=llm + chat config → LlmStageClassifier", () => {
     const cfg = { ...FAKE_CFG, stageClassifier: "llm" } as unknown as ApiConfig;
-    const cls = makeStageClassifier(loadedWith({ chat: { tenantIds: [1] } }), cfg, FAKE_DB);
+    const cls = makeStageClassifier(refWith({ chat: { tenantIds: [1] } }), cfg, FAKE_DB);
     expect(cls?.constructor.name).toBe("LlmStageClassifier");
   });
   it("cfg.stageClassifier=off → null", () => {
-    expect(makeStageClassifier(loadedWith({ chat: { tenantIds: [1] } }), FAKE_CFG, FAKE_DB)).toBeNull();
+    expect(makeStageClassifier(refWith({ chat: { tenantIds: [1] } }), FAKE_CFG, FAKE_DB)).toBeNull();
   });
 });
 
 describe("makeEmbedderResolver", () => {
   it("no embed → null", () => {
-    expect(makeEmbedderResolver(loadedWith({}))).toBeNull();
+    expect(makeEmbedderResolver(refWith({}))).toBeNull();
   });
   it("embed config → resolver function", () => {
-    const r = makeEmbedderResolver(loadedWith({ embed: { tenantIds: [1] } }));
+    const r = makeEmbedderResolver(refWith({ embed: { tenantIds: [1] } }));
     expect(typeof r).toBe("function");
     if (!r) throw new Error("expected resolver");
     const client = r(1);
@@ -140,7 +152,7 @@ describe("makeEmbedderResolver", () => {
     expect(client.dim).toBe(1536);
   });
   it("embed for tenant 2 only → resolve(2) works, resolve(1) throws", () => {
-    const r = makeEmbedderResolver(loadedWith({ embed: { tenantIds: [2] } }));
+    const r = makeEmbedderResolver(refWith({ embed: { tenantIds: [2] } }));
     if (!r) throw new Error("expected resolver");
     expect(() => r(1)).toThrow(/LLM config not set/);
     expect(r(2)).toBeDefined();
