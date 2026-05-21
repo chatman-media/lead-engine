@@ -81,7 +81,11 @@ export class OutboundQueueRepo {
    * processing→pending после timeout'а — отдельный job в Issue #3 / M-2.
    */
   async claimPending(opts: { limit: number; nowEpoch: number }): Promise<OutboundQueueRow[]> {
-    const rows = await this.ctx.db.execute(sql`
+    // db.execute(sql`...`) с postgres-js возвращает snake_case columns —
+    // в отличие от drizzle's .select() / .update().returning() которые
+    // мапят на camelCase через schema. Map'им вручную чтобы остальной
+    // dispatcher code мог обращаться к row.channelId / row.tenantId.
+    const raw = (await this.ctx.db.execute(sql`
       UPDATE ${outboundQueue}
       SET status = 'processing'
       WHERE id IN (
@@ -94,8 +98,24 @@ export class OutboundQueueRepo {
         FOR UPDATE SKIP LOCKED
       )
       RETURNING *
-    `);
-    return rows as unknown as OutboundQueueRow[];
+    `)) as unknown as Array<Record<string, unknown>>;
+    return raw.map(
+      (r): OutboundQueueRow => ({
+        id: r.id as number,
+        tenantId: r.tenant_id as number,
+        channelId: r.channel_id as number,
+        conversationId: (r.conversation_id ?? null) as number | null,
+        payloadJson: r.payload_json as string,
+        idempotencyKey: (r.idempotency_key ?? null) as string | null,
+        scheduledAt: r.scheduled_at as number,
+        status: r.status as OutboundQueueRow["status"],
+        attempt: r.attempt as number,
+        lastError: (r.last_error ?? null) as string | null,
+        externalMessageId: (r.external_message_id ?? null) as string | null,
+        sentAt: (r.sent_at ?? null) as number | null,
+        createdAt: r.created_at as number,
+      }),
+    );
   }
 
   /**

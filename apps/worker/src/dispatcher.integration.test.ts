@@ -128,6 +128,7 @@ beforeAll(
       .insert(tenants)
       .values({ slug: "wdt", plan: "free", status: "active", llmBillingMode: "byok" })
       .returning();
+    if (!t) throw new Error("seed: tenants insert returned no row");
     tenantId = t.id;
     const [ch] = await db
       .insert(channels)
@@ -138,6 +139,7 @@ beforeAll(
         status: "active",
       })
       .returning();
+    if (!ch) throw new Error("seed: channels insert returned no row");
     channelDbId = ch.id;
   },
   30_000,
@@ -196,23 +198,20 @@ async function seedEnvelope(text: string): Promise<number> {
       createdAt: now,
     })
     .returning();
+  if (!row) throw new Error("seedEnvelope: insert returned no row");
   return row.id;
 }
 
 describe("OutboundDispatcher integration", () => {
-  it.skip("successful send: pending → sent + adapter.send + metrics", async () => {
+  it("successful send: pending → sent + adapter.send + metrics", async () => {
     if (!sql) return;
     const adapter = new FakeAdapter(String(channelDbId));
     const { dispatcher, metrics } = makeDispatcher(adapter);
     const queueId = await seedEnvelope("hello");
 
     // Один tick через abort после первой итерации.
-    const abort = new AbortController();
-    const runPromise = dispatcher.run(abort.signal);
-    await new Promise((r) => setTimeout(r, 500));
-    abort.abort();
-    dispatcher.stop();
-    await runPromise;
+    // Прямой tick() обходит run/abort/sleep race в тестах.
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
     expect(adapter.sendCalls).toHaveLength(1);
     expect(adapter.sendCalls[0]?.parts).toEqual([{ kind: "text", text: "hello" }]);
@@ -231,19 +230,15 @@ describe("OutboundDispatcher integration", () => {
     );
   });
 
-  it.skip("failure path: pending → failed + last_error + outboundFailed metric", async () => {
+  it("failure path: pending → failed + last_error + outboundFailed metric", async () => {
     if (!sql) return;
     const adapter = new FakeAdapter(String(channelDbId));
     adapter.shouldFail = true;
     const { dispatcher, metrics } = makeDispatcher(adapter);
     const queueId = await seedEnvelope("will-fail");
 
-    const abort = new AbortController();
-    const runPromise = dispatcher.run(abort.signal);
-    await new Promise((r) => setTimeout(r, 500));
-    abort.abort();
-    dispatcher.stop();
-    await runPromise;
+    // Прямой tick() обходит run/abort/sleep race в тестах.
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
     const [row] = await db
       .select()
@@ -256,7 +251,7 @@ describe("OutboundDispatcher integration", () => {
     );
   });
 
-  it.skip("no_adapter path: queue row для channel_id без registry entry → failed", async () => {
+  it("no_adapter path: queue row для channel_id без registry entry → failed", async () => {
     if (!sql) return;
     const adapter = new FakeAdapter(String(channelDbId));
     const { dispatcher, metrics } = makeDispatcher(adapter);
@@ -273,6 +268,7 @@ describe("OutboundDispatcher integration", () => {
         status: "active",
       })
       .returning();
+    if (!orphanChannel) throw new Error("seed: orphan channel insert returned no row");
     const [row] = await db
       .insert(outboundQueue)
       .values({
@@ -288,13 +284,10 @@ describe("OutboundDispatcher integration", () => {
         createdAt: now,
       })
       .returning();
+    if (!row) throw new Error("seed: outbound row insert returned no row");
 
-    const abort = new AbortController();
-    const runPromise = dispatcher.run(abort.signal);
-    await new Promise((r) => setTimeout(r, 500));
-    abort.abort();
-    dispatcher.stop();
-    await runPromise;
+    // Прямой tick() обходит run/abort/sleep race в тестах.
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
     const [updated] = await db
       .select()
@@ -307,7 +300,7 @@ describe("OutboundDispatcher integration", () => {
     );
   });
 
-  it.skip("bad payload: invalid JSON в payload_json → failed reason=bad_payload", async () => {
+  it("bad payload: invalid JSON в payload_json → failed reason=bad_payload", async () => {
     if (!sql) return;
     const adapter = new FakeAdapter(String(channelDbId));
     const { dispatcher, metrics } = makeDispatcher(adapter);
@@ -324,13 +317,10 @@ describe("OutboundDispatcher integration", () => {
         createdAt: now,
       })
       .returning();
+    if (!row) throw new Error("seed: outbound row insert returned no row");
 
-    const abort = new AbortController();
-    const runPromise = dispatcher.run(abort.signal);
-    await new Promise((r) => setTimeout(r, 500));
-    abort.abort();
-    dispatcher.stop();
-    await runPromise;
+    // Прямой tick() обходит run/abort/sleep race в тестах.
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
     const [updated] = await db
       .select()
@@ -343,7 +333,7 @@ describe("OutboundDispatcher integration", () => {
     );
   });
 
-  it.skip("batch processing: 3 envelope'а в одном tick'е", async () => {
+  it("batch processing: 3 envelope'а в одном tick'е", async () => {
     if (!sql) return;
     const adapter = new FakeAdapter(String(channelDbId));
     const { dispatcher } = makeDispatcher(adapter);
@@ -352,12 +342,8 @@ describe("OutboundDispatcher integration", () => {
     await seedEnvelope("msg-2");
     await seedEnvelope("msg-3");
 
-    const abort = new AbortController();
-    const runPromise = dispatcher.run(abort.signal);
-    await new Promise((r) => setTimeout(r, 500));
-    abort.abort();
-    dispatcher.stop();
-    await runPromise;
+    // Прямой tick() обходит run/abort/sleep race в тестах.
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
     expect(adapter.sendCalls).toHaveLength(3);
     const rows = await db
@@ -367,7 +353,7 @@ describe("OutboundDispatcher integration", () => {
     expect(rows.every((r) => r.status === "sent")).toBe(true);
   });
 
-  it.skip("SKIP LOCKED: row claim'ится один раз даже если запустить две dispatcher'ы параллельно", async () => {
+  it("SKIP LOCKED: row claim'ится один раз даже если запустить две dispatcher'ы параллельно", async () => {
     if (!sql) return;
     const adapter = new FakeAdapter(String(channelDbId));
     const { dispatcher: d1 } = makeDispatcher(adapter);
@@ -411,13 +397,10 @@ describe("OutboundDispatcher integration", () => {
         createdAt: Math.floor(Date.now() / 1000),
       })
       .returning();
+    if (!row) throw new Error("seed: outbound row insert returned no row");
 
-    const abort = new AbortController();
-    const runPromise = dispatcher.run(abort.signal);
-    await new Promise((r) => setTimeout(r, 500));
-    abort.abort();
-    dispatcher.stop();
-    await runPromise;
+    // Прямой tick() обходит run/abort/sleep race в тестах.
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
 
     expect(adapter.sendCalls).toHaveLength(0);
     const [unchanged] = await db
