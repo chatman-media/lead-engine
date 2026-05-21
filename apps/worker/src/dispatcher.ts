@@ -37,6 +37,14 @@ export class OutboundDispatcher {
       stuckCheckPeriodTicks?: number;
       /** Опциональный PlatformMetrics для счётчиков outbound_sent/failed/latency. */
       metrics?: PlatformMetrics;
+      /**
+       * Whitelist channels.kind для claim'а. По умолчанию worker
+       * обрабатывает push-channels (telegram_*, whatsapp). Web-канал
+       * исключается, потому что у него адаптер живёт в apps/api с
+       * pinned WebSocket-connection'ом — worker не сможет deliver и
+       * mark'нет fail с reason="no_adapter".
+       */
+      claimKinds?: string[];
     },
   ) {}
 
@@ -89,6 +97,9 @@ export class OutboundDispatcher {
       const claimed = await repo.claimPending({
         limit: this.opts.batchSize,
         nowEpoch: now,
+        ...(this.opts.claimKinds && this.opts.claimKinds.length > 0
+          ? { kinds: this.opts.claimKinds }
+          : {}),
       });
       for (const row of claimed) {
         await this.deliverOne(repo, row);

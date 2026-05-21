@@ -161,7 +161,11 @@ beforeEach(async () => {
   await db.execute(drizzleSql`DELETE FROM outbound_queue WHERE tenant_id = ${tenantId}`);
 });
 
-function makeDispatcher(adapter: FakeAdapter, metrics = makePlatformMetrics()) {
+function makeDispatcher(
+  adapter: FakeAdapter,
+  metrics = makePlatformMetrics(),
+  dispatcherOpts: { claimKinds?: string[] } = {},
+) {
   const registry = new TestRegistry();
   registry.setEntry({
     channelDbId,
@@ -177,6 +181,7 @@ function makeDispatcher(adapter: FakeAdapter, metrics = makePlatformMetrics()) {
       pollMs: 50,
       batchSize: 16,
       metrics,
+      ...(dispatcherOpts.claimKinds ? { claimKinds: dispatcherOpts.claimKinds } : {}),
     }),
   };
 }
@@ -374,6 +379,64 @@ describe("OutboundDispatcher integration", () => {
     // Adapter.send должен быть вызван ровно один раз — другая dispatcher
     // claim'ит уже processing row через SKIP LOCKED и пропускает.
     expect(adapter.sendCalls).toHaveLength(1);
+  });
+
+  it("kinds filter: web rows не claim'ятся когда whitelist=[telegram_bot]", async () => {
+    if (!sql) return;
+    const adapter = new FakeAdapter(String(channelDbId));
+    const { dispatcher } = makeDispatcher(adapter, undefined, {
+      claimKinds: ["telegram_bot"],
+    });
+
+    // Создаём отдельный web-канал и envelope для него — dispatcher
+    // должен пропустить эту row (нет в whitelist'е).
+    const [webChannel] = await db
+      .insert(channels)
+      .values({
+        tenantId,
+        kind: "web",
+        externalId: `web-${Math.random()}`,
+        status: "active",
+      })
+      .returning();
+    if (!webChannel) throw new Error("seed: web channel insert returned no row");
+    const now = Math.floor(Date.now() / 1000);
+    const [webRow] = await db
+      .insert(outboundQueue)
+      .values({
+        tenantId,
+        channelId: webChannel.id,
+        payloadJson: JSON.stringify({
+          channelId: String(webChannel.id),
+          externalUserId: "u1",
+          parts: [{ kind: "text", text: "for-web" }],
+        }),
+        scheduledAt: now,
+        status: "pending",
+        createdAt: now,
+      })
+      .returning();
+    if (!webRow) throw new Error("seed: web row insert returned no row");
+
+    // Кладём также telegram_bot envelope — должен claim'нуться + delivered.
+    const tgQueueId = await seedEnvelope("for-telegram");
+
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
+
+    // telegram_bot row — sent.
+    const [tgRow] = await db
+      .select()
+      .from(outboundQueue)
+      .where(eq(outboundQueue.id, tgQueueId));
+    expect(tgRow?.status).toBe("sent");
+    expect(adapter.sendCalls).toHaveLength(1);
+
+    // web row — всё ещё pending (filter отсёк).
+    const [webRowAfter] = await db
+      .select()
+      .from(outboundQueue)
+      .where(eq(outboundQueue.id, webRow.id));
+    expect(webRowAfter?.status).toBe("pending");
   });
 
   it("scheduled_at in future: row не claim'ится в этом tick'е", async () => {

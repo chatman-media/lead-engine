@@ -1,5 +1,5 @@
 import type { OutboundEnvelope } from "@chatman-media/channel-core";
-import { outboundQueue } from "@chatman-media/storage";
+import { channels, outboundQueue } from "@chatman-media/storage";
 import { and, eq, sql } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
@@ -80,11 +80,32 @@ export class OutboundQueueRepo {
    * row застрянет в processing иначе. Cleanup-cron для возврата
    * processing→pending после timeout'а — отдельный job в Issue #3 / M-2.
    */
-  async claimPending(opts: { limit: number; nowEpoch: number }): Promise<OutboundQueueRow[]> {
+  /**
+   * @param opts.kinds  Опциональный whitelist `channels.kind` для claim'а.
+   *   Когда задан, JOIN'имся с `channels` и берём только rows для каналов
+   *   указанных типов. Используется чтобы worker не claim'ил web-rows
+   *   (адаптер web-канала живёт в apps/api in-memory с WS-connection'ом —
+   *   worker до него не достанется и mark'нет fail спустя no_adapter).
+   *   undefined → не фильтруем (legacy / тесты).
+   */
+  async claimPending(opts: {
+    limit: number;
+    nowEpoch: number;
+    kinds?: string[];
+  }): Promise<OutboundQueueRow[]> {
     // db.execute(sql`...`) с postgres-js возвращает snake_case columns —
     // в отличие от drizzle's .select() / .update().returning() которые
     // мапят на camelCase через schema. Map'им вручную чтобы остальной
     // dispatcher code мог обращаться к row.channelId / row.tenantId.
+    const kindFilter =
+      opts.kinds && opts.kinds.length > 0
+        ? sql`AND ${outboundQueue.channelId} IN (
+            SELECT id FROM ${channels} WHERE ${channels.kind} IN (${sql.join(
+              opts.kinds.map((k) => sql`${k}`),
+              sql`, `,
+            )})
+          )`
+        : sql``;
     const raw = (await this.ctx.db.execute(sql`
       UPDATE ${outboundQueue}
       SET status = 'processing'
@@ -93,6 +114,7 @@ export class OutboundQueueRepo {
         WHERE tenant_id = ${this.ctx.tenantId}
           AND status = 'pending'
           AND scheduled_at <= ${opts.nowEpoch}
+          ${kindFilter}
         ORDER BY scheduled_at ASC
         LIMIT ${opts.limit}
         FOR UPDATE SKIP LOCKED
