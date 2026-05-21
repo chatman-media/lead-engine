@@ -71,6 +71,16 @@ export interface ApiConfig {
    */
   defaultStyleSlug: string;
   /**
+   * Корневой домен платформы (env PLATFORM_BASE_DOMAIN). Если задан —
+   * admin-API routes под /admin/* активируются с tenant-context-middleware:
+   * subdomain → c.var.tenantSlug. Без него admin-API отключён (только
+   * webhook'и и /metrics + /healthz).
+   *
+   * Примеры: "leadengine.app", "staging.leadengine.app". В dev оставляем
+   * пустым.
+   */
+  platformBaseDomain: string;
+  /**
    * Slug запущенного эксперимента (status='running' в БД). Если задан,
    * RagReplyStrategy.resolveStyle использует ABRouter поверх variants
    * из experiments.allocation_json (a/b routing by hash(contactId)).
@@ -117,6 +127,7 @@ export function loadApiConfig(): ApiConfig {
       baseUrl: process.env.LLM_EMBED_BASE_URL ?? "",
       dim: Number.parseInt(process.env.LLM_EMBED_DIM ?? "1536", 10),
     },
+    platformBaseDomain: process.env.PLATFORM_BASE_DOMAIN ?? "",
     defaultStyleSlug: process.env.STYLE_SLUG ?? "",
     experimentSlug: process.env.EXPERIMENT_SLUG ?? "",
     stageClassifier:

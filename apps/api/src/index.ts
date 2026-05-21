@@ -10,6 +10,8 @@ import {
   makeReplyStrategy,
   makeStageClassifier,
 } from "./llm-bootstrap.ts";
+import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
+import { makeAdminRoutes } from "./routes/admin.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
@@ -86,6 +88,19 @@ async function main() {
       stageClassifier,
     }),
   );
+
+  // Admin-API под /admin/*: tenant resolved из subdomain через
+  // makeTenantContextMiddleware (P), затем requireTenant guard 404'ит
+  // если запрос пришёл на apex. Auth (JWT) добавится отдельным коммитом
+  // когда apps/admin-ui начнёт wire-up'аться — сейчас все endpoints
+  // публичны.
+  if (cfg.platformBaseDomain) {
+    app.use("/admin/*", makeTenantContextMiddleware({ baseDomain: cfg.platformBaseDomain }));
+    app.use("/admin/*", requireTenant);
+    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+    app.route("/", makeAdminRoutes({ db: db as any }));
+    log.info("admin-api routes enabled", { baseDomain: cfg.platformBaseDomain });
+  }
 
   if (cfg.stripeWebhookSecret) {
     app.route(

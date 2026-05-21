@@ -1,5 +1,5 @@
 import { experiments as experimentsTable } from "@chatman-media/storage";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
 export interface ExperimentRow {
@@ -47,6 +47,19 @@ export class ExperimentsRepo {
         ),
       );
     return (row as ExperimentRow) ?? null;
+  }
+
+  /**
+   * Все experiments tenant'а (для admin-UI list view, включая draft/done).
+   * Sorted DESC by created_at — recent first.
+   */
+  async listAll(): Promise<ExperimentRow[]> {
+    const rows = await this.ctx.db
+      .select()
+      .from(experimentsTable)
+      .where(eq(experimentsTable.tenantId, this.ctx.tenantId))
+      .orderBy(desc(experimentsTable.createdAt));
+    return rows as ExperimentRow[];
   }
 }
 
