@@ -65,3 +65,4 @@ export {
   systemClock,
   type TenantContext,
 } from "./types.ts";
+export { withTenant } from "./with-tenant.ts";
