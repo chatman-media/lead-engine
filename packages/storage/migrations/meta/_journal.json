@@ -6,14 +6,21 @@
       "idx": 0,
       "version": "7",
       "when": 1779321285802,
-      "tag": "0000_watery_luminals",
+      "tag": "0000_init_full_schema",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
       "when": 1779322549183,
-      "tag": "0001_happy_stepford_cuckoos",
+      "tag": "0001_multi_tenant",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779322919626,
+      "tag": "0002_tenant_id_existing_tables",
       "breakpoints": true
     }
   ]

@@ -57,6 +57,7 @@ const epochNow = () => sql`EXTRACT(EPOCH FROM NOW())::INTEGER`;
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   tgUserId: bigint("tg_user_id", { mode: "number" }).notNull().unique(),
   tgUsername: text("tg_username"),
   status: text("status").notNull().default("new"),
@@ -69,6 +70,7 @@ export const users = pgTable("users", {
 
 export const questionnaireTokens = pgTable("questionnaire_tokens", {
   token: text("token").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   expiresAt: integer("expires_at").notNull(),
   usedAt: integer("used_at"),
@@ -79,6 +81,7 @@ export const questionnaireTokens = pgTable("questionnaire_tokens", {
 
 export const styles = pgTable("styles", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   slug: text("slug").notNull(),
   displayName: text("display_name").notNull(),
   configJson: text("config_json").notNull(),
@@ -96,6 +99,7 @@ export const styles = pgTable("styles", {
 
 export const experiments = pgTable("experiments", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   slug: text("slug").notNull().unique(),
   status: text("status").notNull(),
   allocationJson: text("allocation_json").notNull(),
@@ -111,6 +115,7 @@ export const experiments = pgTable("experiments", {
 
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   // Канал входа: bot (BotAPI, для тестов), userbot (MTProto, реальные лиды),
   // self_play (синтетические диалоги). Тот же кандидат, пишущий в bot и
@@ -137,6 +142,7 @@ export const conversations = pgTable("conversations", {
 
 export const messages = pgTable("messages", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   conversationId: integer("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
   role: text("role").notNull(),
   text: text("text").notNull(),
@@ -158,6 +164,7 @@ export const messages = pgTable("messages", {
 
 export const kbDocuments = pgTable("kb_documents", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   source: text("source").notNull(),
   title: text("title").notNull(),
   contentHash: text("content_hash").notNull(),
@@ -170,6 +177,7 @@ export const kbDocuments = pgTable("kb_documents", {
 
 export const kbChunks = pgTable("kb_chunks", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   documentId: integer("document_id").notNull().references(() => kbDocuments.id, { onDelete: "cascade" }),
   chunkIndex: integer("chunk_index").notNull(),
   text: text("text").notNull(),
@@ -191,6 +199,7 @@ export const kbChunks = pgTable("kb_chunks", {
 
 export const admins = pgTable("admins", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   // 'superadmin' (полный доступ — деструктивные операции, system settings)
@@ -203,12 +212,14 @@ export const admins = pgTable("admins", {
 // (например, тема light/dark). Не per-admin — одно значение на весь UI.
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   value: text("value").notNull(),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 });
 
 export const sessions = pgTable("sessions", {
   id: text("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   adminId: integer("admin_id").notNull().references(() => admins.id, { onDelete: "cascade" }),
   expiresAt: integer("expires_at").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
@@ -220,6 +231,7 @@ export const sessions = pgTable("sessions", {
 
 export const vacancies = pgTable("vacancies", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   body: text("body").notNull(),
   url: text("url"),
@@ -236,6 +248,7 @@ export const vacancies = pgTable("vacancies", {
 
 export const leads = pgTable("leads", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   userId: integer("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   state: text("state").notNull().default("intake_pending"),
   intakeJson: text("intake_json"),
@@ -264,6 +277,7 @@ export const leads = pgTable("leads", {
 
 export const leadEvents = pgTable("lead_events", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
   fromState: text("from_state"),
   toState: text("to_state").notNull(),
@@ -276,6 +290,7 @@ export const leadEvents = pgTable("lead_events", {
 
 export const leadNotes = pgTable("lead_notes", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
   byAdminId: integer("by_admin_id").references(() => admins.id, { onDelete: "set null" }),
   body: text("body").notNull(),
@@ -289,6 +304,7 @@ export const leadNotes = pgTable("lead_notes", {
 
 export const kbSuggestions = pgTable("kb_suggestions", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   questionText: text("question_text").notNull(),
   answerDraft: text("answer_draft"),
   status: text("status").notNull().default("pending"),
@@ -310,6 +326,7 @@ export const kbSuggestions = pgTable("kb_suggestions", {
 
 export const skills = pgTable("skills", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   slug: text("slug").notNull().unique(),
   family: text("family").notNull(),
   displayName: text("display_name").notNull(),
@@ -326,6 +343,7 @@ export const skills = pgTable("skills", {
 ]);
 
 export const styleSkills = pgTable("style_skills", {
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   styleId: integer("style_id").notNull().references(() => styles.id, { onDelete: "cascade" }),
   skillId: integer("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
 }, (t) => [
@@ -335,6 +353,7 @@ export const styleSkills = pgTable("style_skills", {
 
 export const skillOutcomes = pgTable("skill_outcomes", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
   conversationId: integer("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
   messageId: integer("message_id").references(() => messages.id, { onDelete: "set null" }),
@@ -359,6 +378,7 @@ export const skillOutcomes = pgTable("skill_outcomes", {
 
 export const styleRatings = pgTable("style_ratings", {
   styleSlug: text("style_slug").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   elo: integer("elo").notNull().default(1500),
   wins: integer("wins").notNull().default(0),
   losses: integer("losses").notNull().default(0),
@@ -369,6 +389,7 @@ export const styleRatings = pgTable("style_ratings", {
 
 export const selfPlayMatches = pgTable("self_play_matches", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   styleSlug: text("style_slug").notNull(),
   personaSlug: text("persona_slug").notNull(),
   outcome: text("outcome").notNull(),
@@ -388,6 +409,7 @@ export const selfPlayMatches = pgTable("self_play_matches", {
 
 export const pairwiseMatches = pgTable("pairwise_matches", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   styleASlug: text("style_a_slug").notNull(),
   styleBSlug: text("style_b_slug").notNull(),
   personaSlug: text("persona_slug").notNull(),
@@ -408,6 +430,7 @@ export const pairwiseMatches = pgTable("pairwise_matches", {
 
 export const userbotSession = pgTable("userbot_session", {
   id: integer("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   sessionString: text("session_string").notNull().default(""),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
@@ -418,6 +441,7 @@ export const userbotSession = pgTable("userbot_session", {
 
 export const coachProposals = pgTable("coach_proposals", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   styleSlug: text("style_slug").notNull(),
   sampleSize: integer("sample_size").notNull(),
   personaFilter: text("persona_filter"),
@@ -439,6 +463,7 @@ export const coachProposals = pgTable("coach_proposals", {
 
 export const shadowEvaluations = pgTable("shadow_evaluations", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   proposalId: integer("proposal_id").notNull().references(() => coachProposals.id, { onDelete: "cascade" }),
   parentStyleSlug: text("parent_style_slug").notNull(),
   parentStyleId: integer("parent_style_id").notNull(),
@@ -468,6 +493,7 @@ export const shadowEvaluations = pgTable("shadow_evaluations", {
 
 export const userbotSendQueue = pgTable("userbot_send_queue", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   tgUserId: bigint("tg_user_id", { mode: "number" }).notNull(),
   text: text("text").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
@@ -485,6 +511,7 @@ export const userbotSendQueue = pgTable("userbot_send_queue", {
 // userbot-подпроцессом (только он может вызвать MTProto deleteMessages).
 export const userbotDeleteQueue = pgTable("userbot_delete_queue", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   tgUserId: bigint("tg_user_id", { mode: "number" }).notNull(),
   tgMessageId: integer("tg_message_id").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
@@ -499,6 +526,7 @@ export const userbotDeleteQueue = pgTable("userbot_delete_queue", {
 
 export const auditLog = pgTable("audit_log", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   action: text("action").notNull(),
   adminId: integer("admin_id").references(() => admins.id, { onDelete: "set null" }),
   targetKind: text("target_kind"),
