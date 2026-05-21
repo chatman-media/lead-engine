@@ -66,75 +66,12 @@ jobs:
       - name: Typecheck all workspace members (apps/* + packages/*)
         run: bun run --filter '*' typecheck
 
-      - name: Unit tests (all workspace members)
+      - name: Unit + integration tests (all workspace members)
         env:
-          # Если какой-то тест случайно поднимет DB — даём ему живой PG.
+          # @chatman-media/storage интеграционные тесты apply'ят все
+          # migrations 0000–0005 + verify invariants (RLS-enabled таблицы,
+          # legacy tenant, outbound status union, pgvector extension,
+          # idempotent backfill). Бывший отдельный `migrations` job теперь
+          # покрыт здесь.
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/lead_engine_test
         run: bun run --filter '*' test
-
-  migrations:
-    name: migrations — apply 0000–0004 на чистый PG
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: lead_engine_migration_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Install deps (workspace)
-        run: bun install --frozen-lockfile
-
-      - name: Install psql client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
-
-      - name: Apply migrations sequentially
-        env:
-          PGPASSWORD: postgres
-        run: |
-          set -e
-          for f in packages/storage/migrations/0*.sql; do
-            echo "=== applying $f ==="
-            psql -h localhost -U postgres -d lead_engine_migration_test \
-              -v ON_ERROR_STOP=1 -q -f "$f"
-          done
-
-      - name: Verify schema invariants
-        env:
-          PGPASSWORD: postgres
-        run: |
-          set -e
-          # Должно быть 33+ tenant_id-таблиц с RLS включённым (0004).
-          rls_count=$(psql -h localhost -U postgres -d lead_engine_migration_test -tc \
-            "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND rowsecurity=true")
-          echo "rls_enabled tables: $rls_count"
-          if [ "$(echo $rls_count | xargs)" != "33" ]; then
-            echo "Expected 33 RLS-enabled tables, got $rls_count"
-            exit 1
-          fi
-          # Legacy tenant id=1 должен присутствовать (seed из 0001).
-          legacy=$(psql -h localhost -U postgres -d lead_engine_migration_test -tc \
-            "SELECT count(*) FROM tenants WHERE id=1")
-          if [ "$(echo $legacy | xargs)" != "1" ]; then
-            echo "Legacy tenant missing"
-            exit 1
-          fi
-          echo "Schema invariants OK"
