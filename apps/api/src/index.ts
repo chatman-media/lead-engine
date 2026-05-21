@@ -13,12 +13,15 @@ import { WebChannelRegistry } from "./lib/web-channel-registry.ts";
 import { WebOutboundDispatcher } from "./lib/web-dispatcher.ts";
 import { startWebInboundRunner } from "./lib/web-inbound-runner.ts";
 import { loadTenantLlmConfigs } from "./lib/llm-config-loader.ts";
+import { makeTenantReloader } from "./lib/tenant-reloader.ts";
 import {
+  type LoadedRef,
   makeEmbedderResolver,
   makeMemoryExtractor,
   makeReplyStrategy,
   makeStageClassifier,
 } from "./llm-bootstrap.ts";
+import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeRequireAuth } from "./middleware/require-auth.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
 import { makeAdminChannelsRoutes } from "./routes/admin-channels.ts";
@@ -81,8 +84,10 @@ async function main() {
   ).map((r) => r.id);
   log.info("active tenants loaded for LLM config", { count: activeTenantIds.length, ids: activeTenantIds });
 
-  // Per-tenant LLM configs: DB (llm_provider_configs) + decrypted secrets,
-  // env как fallback для tenants без DB config'а. Hot-reload — TODO.
+  // Per-tenant LLM configs: DB + env fallback. LoadedRef shared между
+  // фабриками + tenant-reloader (mutable; reload через admin API меняет
+  // .current snapshot и router.setConfig, фабрики reflect'ят через
+  // closures без рестарта).
   const loadedLlmConfigs = await loadTenantLlmConfigs({
     db,
     tenantIds: activeTenantIds,
@@ -90,6 +95,10 @@ async function main() {
     masterKeyHex: cfg.masterKeyHex,
     onError: (msg, ctx) => log.warn(`llm-config-loader: ${msg}`, ctx),
   });
+  const loadedRef: LoadedRef = {
+    current: loadedLlmConfigs,
+    router: new InMemoryLlmRouter(),
+  };
   log.info("llm configs resolved", {
     tenants: loadedLlmConfigs.byTenant.size,
     anyChat: loadedLlmConfigs.anyTenantHasChat,
@@ -129,7 +138,18 @@ async function main() {
   // через UI без env-vars.
   app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
 
-  const embedderResolver = makeEmbedderResolver(loadedLlmConfigs);
+  // Hot-reload bus: admin routes вызывают reloadLlm/reloadChannels(tenantId)
+  // после изменения, live применяя в текущем процессе. apps/worker — отдельный
+  // процесс, ему пока нужен restart.
+  const reloader = makeTenantReloader({
+    db,
+    cfg,
+    ref: loadedRef,
+    registry: channels,
+    log: (msg, ctx) => log.info(`reloader: ${msg}`, ctx ?? {}),
+  });
+
+  const embedderResolver = makeEmbedderResolver(loadedRef);
   if (embedderResolver) {
     app.route("/", makeAdminKbRoutes({ db, resolveEmbedder: embedderResolver }));
     log.info("admin-kb routes enabled (KB upload + list + delete)");
@@ -141,8 +161,15 @@ async function main() {
   // NB: изменения вступают в силу после рестарта apps/api — текущий
   // InMemoryLlmRouter резолвится на boot из env + activeTenantIds.
   // Hot-reload — отдельный PR.
-  app.route("/", makeAdminLlmConfigsRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
-  log.info("admin-llm-configs routes enabled (per-tenant LLM config CRUD)");
+  app.route(
+    "/",
+    makeAdminLlmConfigsRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      onReload: reloader.reloadLlm,
+    }),
+  );
+  log.info("admin-llm-configs routes enabled (per-tenant LLM config CRUD + hot-reload)");
 
   // Per-tenant channel CRUD (Telegram bot onboarding по token-paste).
   // Token validate'ится через Telegram getMe, encrypted в tenant_secrets.
@@ -156,9 +183,10 @@ async function main() {
       masterKeyHex: cfg.masterKeyHex,
       ...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
       webhookSecret: cfg.telegramWebhookSecret,
+      onReload: reloader.reloadChannels,
     }),
   );
-  log.info("admin-channels routes enabled (per-tenant channel CRUD)", {
+  log.info("admin-channels routes enabled (per-tenant channel CRUD + hot-reload)", {
     autoSetWebhook: !!cfg.publicUrl,
   });
 
@@ -178,11 +206,11 @@ async function main() {
       timeoutMs: cfg.healthCheckTimeoutMs,
     }),
   );
-  const replyStrategy = makeReplyStrategy(loadedLlmConfigs, cfg, db, metrics);
+  const replyStrategy = makeReplyStrategy(loadedRef, cfg, db, metrics);
   if (replyStrategy) {
     log.info("reply strategy configured", {
-      kind: loadedLlmConfigs.anyTenantHasEmbed ? "RAG" : "LLM-only",
-      tenants: loadedLlmConfigs.byTenant.size,
+      kind: loadedRef.current.anyTenantHasEmbed ? "RAG" : "LLM-only",
+      tenants: loadedRef.current.byTenant.size,
       ...(cfg.defaultStyleSlug ? { style: cfg.defaultStyleSlug } : {}),
       ...(cfg.experimentSlug ? { experiment: cfg.experimentSlug } : {}),
     });
@@ -190,10 +218,10 @@ async function main() {
     log.info("LLM not configured for any tenant — bot will persist messages but stay silent");
   }
 
-  const memoryExtractor = makeMemoryExtractor(loadedLlmConfigs, db, metrics);
+  const memoryExtractor = makeMemoryExtractor(loadedRef, db, metrics);
   if (memoryExtractor) log.info("memory extractor enabled");
 
-  const stageClassifier = makeStageClassifier(loadedLlmConfigs, cfg, db, metrics);
+  const stageClassifier = makeStageClassifier(loadedRef, cfg, db, metrics);
   if (stageClassifier) {
     log.info("stage classifier enabled", { kind: cfg.stageClassifier });
   }

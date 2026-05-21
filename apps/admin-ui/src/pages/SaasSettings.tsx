@@ -188,7 +188,7 @@ export function SaasSettings() {
       {error && <div className="dashboard-error">{error}</div>}
 
       <div className="settings-warning">
-        ⚠ Изменения вступают в силу после рестарта сервера. Hot-reload — TODO.
+        ✓ Изменения применяются live — рестарт не нужен.
       </div>
 
       {PURPOSES.map(({ value: purpose, label, hint }) => {

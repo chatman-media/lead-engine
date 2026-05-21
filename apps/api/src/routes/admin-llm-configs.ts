@@ -31,6 +31,12 @@ export interface AdminLlmConfigsRoutesOpts {
   db: Db;
   /** Master key для AES-256-GCM шифрования API ключей (env PLATFORM_MASTER_KEY). */
   masterKeyHex: string;
+  /**
+   * Hot-reload hook — вызывается после успешного PUT/DELETE с tenantId.
+   * Если задан — изменения применяются live без рестарта apps/api.
+   * Если null — нужен restart (legacy путь).
+   */
+  onReload?: (tenantId: number) => Promise<void>;
 }
 
 type Purpose = "chat" | "embed" | "vision" | "judge";
@@ -212,6 +218,21 @@ export function makeAdminLlmConfigsRoutes(opts: AdminLlmConfigsRoutesOpts): Hono
       return { updated: false, id: inserted!.id };
     });
 
+    // Hot-reload: вступает в силу live без рестарта apps/api.
+    if (opts.onReload) {
+      try {
+        await opts.onReload(tenantId);
+      } catch (err) {
+        // НЕ откатываем DB-update — reload может fail при corrupted master key,
+        // но запись валидна. Restart восстановит.
+        return c.json({
+          ok: true,
+          ...result,
+          reloadError: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return c.json({ ok: true, ...result });
   });
 
@@ -239,6 +260,19 @@ export function makeAdminLlmConfigsRoutes(opts: AdminLlmConfigsRoutesOpts): Hono
       return result.length;
     });
     if (deleted === 0) return c.json({ error: "config not found" }, 404);
+
+    if (opts.onReload) {
+      try {
+        await opts.onReload(tenantId);
+      } catch (err) {
+        return c.json({
+          ok: true,
+          deleted,
+          reloadError: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return c.json({ ok: true, deleted });
   });
 

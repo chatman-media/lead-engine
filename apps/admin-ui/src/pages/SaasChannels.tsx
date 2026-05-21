@@ -130,8 +130,8 @@ export function SaasChannels() {
 
       {lastCreated && (
         <div className="settings-warning">
-          ✓ Бот @{lastCreated.username} подключён. Для активации перезапустите apps/api +
-          apps/worker (CD-deploy).
+          ✓ Бот @{lastCreated.username} подключён и активирован — webhook настроен,
+          канал работает. (Worker для outbound может потребовать рестарт.)
         </div>
       )}
 

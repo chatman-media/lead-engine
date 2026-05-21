@@ -112,7 +112,13 @@ export class ChannelRegistry {
     return process.env[envKey] ?? process.env.WA_ACCESS_TOKEN ?? null;
   }
 
+  /** Кеш opts чтобы reloadTenant использовал тот же masterKey + onWarn. */
+  private loadOpts: LoadFromDbOpts = {};
+  private dbRef: Db | null = null;
+
   async loadFromDb(db: Db, opts: LoadFromDbOpts = {}): Promise<void> {
+    this.loadOpts = opts;
+    this.dbRef = db;
     const rows = await db
       .select({
         channelId: channels.id,
@@ -158,6 +164,95 @@ export class ChannelRegistry {
       } else {
         // telegram_userbot и web в apps/api НЕ загружаются — userbot живёт
         // в apps/worker, web обрабатывается через отдельный WS-endpoint.
+        continue;
+      }
+      const entry: ChannelEntry = {
+        channelDbId: row.channelId,
+        tenantId: row.tenantId,
+        tenantSlug: row.tenantSlug,
+        kind: row.kind as ChannelEntry["kind"],
+        externalId: row.externalId,
+        adapter,
+      };
+      const list = this.byTenantSlug.get(row.tenantSlug) ?? [];
+      list.push(entry);
+      this.byTenantSlug.set(row.tenantSlug, list);
+      this.byDbId.set(row.channelId, entry);
+    }
+  }
+
+  /**
+   * Hot-reload: re-load channel entries для одного tenant'а из БД.
+   * Закрывает старые адаптеры, инстанциирует новые. Используется после
+   * POST/DELETE /api/admin/channels через onReload callback.
+   *
+   * Idempotent: вызов с пустыми channels удаляет tenant entries; с теми же
+   * channels — пересоздаст adapter'ы (token rotation).
+   */
+  async reloadTenant(tenantId: number, tenantSlug: string): Promise<void> {
+    if (!this.dbRef) return; // не было loadFromDb — nothing to reload.
+
+    // Close & remove existing entries для этого tenant'а.
+    const existing = this.byTenantSlug.get(tenantSlug) ?? [];
+    for (const entry of existing) {
+      try {
+        entry.adapter.close();
+      } catch {
+        // ignore close errors (already-closed adapter)
+      }
+      this.byDbId.delete(entry.channelDbId);
+    }
+    this.byTenantSlug.delete(tenantSlug);
+
+    // Re-query channels for this tenant only.
+    const rows = await this.dbRef
+      .select({
+        channelId: channels.id,
+        kind: channels.kind,
+        externalId: channels.externalId,
+        credentialsRef: channels.credentialsRef,
+        tenantId: tenants.id,
+        tenantSlug: tenants.slug,
+      })
+      .from(channels)
+      .innerJoin(tenants, eq(tenants.id, channels.tenantId))
+      .where(
+        and(
+          eq(channels.tenantId, tenantId),
+          eq(channels.status, "active"),
+          eq(tenants.status, "active"),
+        ),
+      );
+
+    for (const row of rows) {
+      let adapter: TelegramBotAdapter | WhatsAppCloudAdapter | null = null;
+      if (row.kind === "telegram_bot") {
+        const token = await this.resolveBotToken(
+          this.dbRef,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          this.loadOpts.masterKeyHex,
+          this.loadOpts.onWarn,
+        );
+        if (!token) continue;
+        adapter = new TelegramBotAdapter({ id: String(row.channelId), token });
+      } else if (row.kind === "whatsapp") {
+        const token = await this.resolveWhatsAppToken(
+          this.dbRef,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          this.loadOpts.masterKeyHex,
+          this.loadOpts.onWarn,
+        );
+        if (!token) continue;
+        adapter = new WhatsAppCloudAdapter({
+          id: String(row.channelId),
+          phoneNumberId: row.externalId,
+          accessToken: token,
+        });
+      } else {
         continue;
       }
       const entry: ChannelEntry = {
