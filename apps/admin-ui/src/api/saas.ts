@@ -30,6 +30,29 @@ export interface KbUploadResult {
   created: boolean;
 }
 
+export type LlmPurpose = "chat" | "embed" | "vision" | "judge";
+export type LlmProvider = "openai" | "openrouter" | "ollama" | "anthropic";
+
+export interface LlmConfig {
+  purpose: LlmPurpose;
+  provider: LlmProvider;
+  model: string;
+  baseUrl: string | null;
+  embedDim: number | null;
+  timeoutMs: number | null;
+  hasSecret: boolean;
+  updatedAt: number;
+}
+
+export interface UpsertLlmConfigInput {
+  provider: LlmProvider;
+  model: string;
+  apiKey?: string;
+  baseUrl?: string;
+  embedDim?: number;
+  timeoutMs?: number;
+}
+
 const TOKEN_KEY = "lead_engine_token";
 
 export function getToken(): string | null {
@@ -143,6 +166,23 @@ export const saas = {
   deleteDoc(id: number) {
     return request<{ ok: boolean; deleted: number }>(
       `/api/admin/kb/documents/${id}`,
+      { method: "DELETE" },
+    );
+  },
+
+  // ── LLM provider configs (per-tenant) ───────────────────────────────
+  listLlmConfigs() {
+    return request<{ items: LlmConfig[] }>("/api/admin/llm-configs");
+  },
+  upsertLlmConfig(purpose: LlmPurpose, input: UpsertLlmConfigInput) {
+    return request<{ ok: boolean; updated: boolean; id: number }>(
+      `/api/admin/llm-configs/${purpose}`,
+      { method: "PUT", body: JSON.stringify(input) },
+    );
+  },
+  deleteLlmConfig(purpose: LlmPurpose) {
+    return request<{ ok: boolean; deleted: number }>(
+      `/api/admin/llm-configs/${purpose}`,
       { method: "DELETE" },
     );
   },

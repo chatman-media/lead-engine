@@ -21,6 +21,7 @@ import {
 import { makeRequireAuth } from "./middleware/require-auth.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
 import { makeAdminKbRoutes } from "./routes/admin-kb.ts";
+import { makeAdminLlmConfigsRoutes } from "./routes/admin-llm-configs.ts";
 import { makeAdminRoutes } from "./routes/admin.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
@@ -101,9 +102,13 @@ async function main() {
   // extract'ит Bearer token из Authorization header → выставляет
   // c.var.{adminId, tenantId, role, adminEmail}. Все routes сами
   // wrap'ятся в withTenant для RLS.
+  // requireAuth gating /api/admin/* — нужно всегда, даже если embedder
+  // не сконфигурирован: /api/admin/llm-configs позволяет настроить LLM
+  // через UI без env-vars.
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
+
   const embedderResolver = makeEmbedderResolver(cfg, activeTenantIds);
   if (embedderResolver) {
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
     app.route("/", makeAdminKbRoutes({ db, resolveEmbedder: embedderResolver }));
     log.info("admin-kb routes enabled (KB upload + list + delete)", {
       embedProvider: cfg.embed.provider,
@@ -111,6 +116,13 @@ async function main() {
   } else {
     log.info("admin-kb routes disabled — LLM_EMBED_PROVIDER not configured");
   }
+
+  // Per-tenant LLM provider config CRUD (GET/PUT/DELETE /api/admin/llm-configs).
+  // NB: изменения вступают в силу после рестарта apps/api — текущий
+  // InMemoryLlmRouter резолвится на boot из env + activeTenantIds.
+  // Hot-reload — отдельный PR.
+  app.route("/", makeAdminLlmConfigsRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
+  log.info("admin-llm-configs routes enabled (per-tenant LLM config CRUD)");
 
   app.route(
     "/",

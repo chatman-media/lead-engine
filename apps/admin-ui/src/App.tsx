@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-route
 import { getToken, saas } from "./api/saas.ts";
 import { SaasDashboard } from "./pages/SaasDashboard.tsx";
 import { SaasLogin } from "./pages/SaasLogin.tsx";
+import { SaasSettings } from "./pages/SaasSettings.tsx";
 import { SaasSignup } from "./pages/SaasSignup.tsx";
 
 /**
@@ -62,6 +63,14 @@ export function App() {
           element={
             <AuthGate>
               <SaasDashboard />
+            </AuthGate>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <AuthGate>
+              <SaasSettings />
             </AuthGate>
           }
         />

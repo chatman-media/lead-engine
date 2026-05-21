@@ -329,3 +329,146 @@ a:hover {
 .doc-row button:hover {
   border-color: var(--danger);
 }
+
+/* ── Dashboard nav ─────────────────────────────────────────────────────── */
+
+.dashboard-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nav-link {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+}
+
+.nav-link:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+.back-link {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ── Settings page ─────────────────────────────────────────────────────── */
+
+.settings-warning {
+  padding: 10px 14px;
+  background: rgba(149, 193, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+
+.settings-section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+  margin-bottom: 18px;
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.btn-danger-link {
+  background: transparent;
+  border: 0;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.btn-danger-link:hover {
+  text-decoration: underline;
+}
+
+.settings-section .hint {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-status {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  background: var(--panel-2);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.settings-status code {
+  color: var(--accent);
+  background: transparent;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.badge-warning {
+  color: #f0c674;
+}
+
+.settings-form {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.settings-form input,
+.settings-form select {
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+}
+
+.settings-form input:focus,
+.settings-form select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-form button {
+  justify-self: start;
+  padding: 8px 18px;
+  background: var(--accent);
+  color: #0b0d10;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.settings-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
