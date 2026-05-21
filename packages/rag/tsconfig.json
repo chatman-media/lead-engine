@@ -9,7 +9,10 @@
     "noEmit": true,
     "lib": ["ES2022"],
     "types": ["bun"],
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@chatman-media/llm-router": ["../llm-router/src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

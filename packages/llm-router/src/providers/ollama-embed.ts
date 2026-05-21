@@ -1,4 +1,6 @@
-import { EmbeddingApiError, type EmbeddingClient, type FetchLike } from "../types.ts";
+import { EmbeddingApiError, type EmbeddingClient } from "../types.ts";
+
+export type FetchLike = typeof fetch;
 
 export interface OllamaEmbeddingOptions {
   host: string;

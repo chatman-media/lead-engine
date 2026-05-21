@@ -55,6 +55,7 @@
     "url": "https://github.com/chatman-media/rag/issues"
   },
   "dependencies": {
+    "@chatman-media/llm-router": "workspace:*",
     "unpdf": "^1.6.2",
     "zod": "^4.4.1"
   },
