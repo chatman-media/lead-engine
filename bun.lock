@@ -29,6 +29,7 @@
         "@chatman-media/channel-telegram": "workspace:*",
         "@chatman-media/conversation-engine": "workspace:*",
         "@chatman-media/llm-router": "workspace:*",
+        "@chatman-media/rag": "workspace:*",
         "@chatman-media/storage": "workspace:*",
         "@chatman-media/vertical-recruitment-uae": "workspace:*",
         "@chatman-media/verticals": "workspace:*",

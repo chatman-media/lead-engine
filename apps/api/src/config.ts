@@ -40,6 +40,18 @@ export interface ApiConfig {
     apiKey: string;
     baseUrl: string;
   };
+  /**
+   * Опционально: embedder для RAG. Если все поля заданы (provider+model+
+   * apiKey+dim) — apps/api инжектит RagReplyStrategy (KB-aware ответы).
+   * Иначе fallback на LlmReplyStrategy (просто history-prompt без KB).
+   */
+  embed: {
+    provider: "openai" | "openrouter" | "ollama" | "";
+    model: string;
+    apiKey: string;
+    baseUrl: string;
+    dim: number;
+  };
 }
 
 function required(name: string): string {
@@ -52,6 +64,7 @@ function required(name: string): string {
 
 export function loadApiConfig(): ApiConfig {
   const provider = (process.env.LLM_PROVIDER ?? "") as ApiConfig["llm"]["provider"];
+  const embedProvider = (process.env.LLM_EMBED_PROVIDER ?? "") as ApiConfig["embed"]["provider"];
   return {
     port: Number.parseInt(process.env.PORT ?? "3000", 10),
     databaseUrl: required("DATABASE_URL"),
@@ -63,6 +76,13 @@ export function loadApiConfig(): ApiConfig {
       model: process.env.LLM_MODEL ?? "",
       apiKey: process.env.LLM_API_KEY ?? "",
       baseUrl: process.env.LLM_BASE_URL ?? "",
+    },
+    embed: {
+      provider: embedProvider,
+      model: process.env.LLM_EMBED_MODEL ?? "",
+      apiKey: process.env.LLM_EMBED_API_KEY ?? process.env.LLM_API_KEY ?? "",
+      baseUrl: process.env.LLM_EMBED_BASE_URL ?? "",
+      dim: Number.parseInt(process.env.LLM_EMBED_DIM ?? "1536", 10),
     },
   };
 }

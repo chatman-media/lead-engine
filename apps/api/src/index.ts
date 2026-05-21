@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { ChannelRegistry } from "./channel-registry.ts";
 import { loadApiConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
-import { makeLlmReplyStrategy } from "./llm-bootstrap.ts";
+import { makeReplyStrategy } from "./llm-bootstrap.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 
@@ -24,9 +24,14 @@ async function main() {
       timeoutMs: cfg.healthCheckTimeoutMs,
     }),
   );
-  const replyStrategy = makeLlmReplyStrategy(cfg, db);
+  const replyStrategy = makeReplyStrategy(cfg, db);
   if (replyStrategy) {
-    console.log(`[apps/api] LLM reply strategy: ${cfg.llm.provider}/${cfg.llm.model}`);
+    const strategyKind = cfg.embed.provider && cfg.embed.apiKey ? "RAG" : "LLM-only";
+    console.log(
+      `[apps/api] reply strategy: ${strategyKind} (chat=${cfg.llm.provider}/${cfg.llm.model}${
+        cfg.embed.provider ? `, embed=${cfg.embed.provider}/${cfg.embed.model}` : ""
+      })`,
+    );
   } else {
     console.log("[apps/api] LLM not configured — bot will persist messages but stay silent");
   }
