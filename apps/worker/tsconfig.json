@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "lib": ["ES2022"],
+    "types": ["bun"],
+    "skipLibCheck": true,
+    "paths": {
+      "@chatman-media/channel-core": ["../../packages/channel-core/src/index.ts"],
+      "@chatman-media/channel-telegram": ["../../packages/channel-telegram/src/index.ts"],
+      "@chatman-media/conversation-engine": [
+        "../../packages/conversation-engine/src/index.ts"
+      ],
+      "@chatman-media/llm-router": ["../../packages/llm-router/src/index.ts"],
+      "@chatman-media/storage": ["../../packages/storage/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}
