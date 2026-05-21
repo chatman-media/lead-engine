@@ -1,0 +1,191 @@
+import type { Inbound, OutboundEnvelope } from "@chatman-media/channel-core";
+import { beforeEach, describe, expect, it } from "bun:test";
+import type { ContactsRepo } from "./dal/index.ts";
+import { processInbound, type ReplyStrategy } from "./process-inbound.ts";
+import {
+  FakeChannelIdentitiesRepo,
+  FakeContactsRepo,
+  FakeConversationsRepo,
+  FakeMessagesRepo,
+  FakeOutboundQueueRepo,
+} from "./testkit.ts";
+import type { ChannelContext, Clock, TenantContext } from "./types.ts";
+
+const TENANT: TenantContext = {
+  tenantId: 1,
+  slug: "legacy",
+  llmBillingMode: "byok",
+};
+const CHANNEL: ChannelContext = {
+  channelId: 10,
+  kind: "telegram_bot",
+  externalId: "test_bot",
+};
+
+function fixedClock(epoch: number): Clock {
+  return { nowEpoch: () => epoch };
+}
+
+function textInbound(opts: { extUserId: string; extMessageId: string; text: string }): Inbound {
+  return {
+    channelId: "tg-1",
+    externalMessageId: opts.extMessageId,
+    externalUserId: opts.extUserId,
+    parts: [{ kind: "text", text: opts.text }],
+    receivedAt: 1700000000,
+    raw: {},
+  };
+}
+
+function makeDeps(reply: ReplyStrategy | null = null) {
+  const contacts = new FakeContactsRepo(TENANT.tenantId);
+  const identities = new FakeChannelIdentitiesRepo();
+  const conversations = new FakeConversationsRepo(TENANT.tenantId);
+  const messages = new FakeMessagesRepo(TENANT.tenantId);
+  const outbound = new FakeOutboundQueueRepo(TENANT.tenantId);
+  return {
+    tenant: TENANT,
+    channel: CHANNEL,
+    channelDbId: 10,
+    contacts: contacts as unknown as ContactsRepo,
+    identities: identities as unknown as Parameters<typeof processInbound>[1]["identities"],
+    conversations: conversations as unknown as Parameters<
+      typeof processInbound
+    >[1]["conversations"],
+    messages: messages as unknown as Parameters<typeof processInbound>[1]["messages"],
+    outbound: outbound as unknown as Parameters<typeof processInbound>[1]["outbound"],
+    reply,
+    clock: fixedClock(1700000000),
+    // Expose fakes back для assertions.
+    _fakes: { contacts, identities, conversations, messages, outbound },
+  };
+}
+
+describe("processInbound", () => {
+  let deps: ReturnType<typeof makeDeps>;
+  beforeEach(() => {
+    deps = makeDeps();
+  });
+
+  it("создаёт Contact + ChannelIdentity + Conversation на новый external_user_id", async () => {
+    const inbound = textInbound({ extUserId: "u1", extMessageId: "100", text: "hi" });
+    const result = await processInbound(inbound, deps);
+
+    expect(result.persisted).toBe(true);
+    expect(deps._fakes.contacts.all()).toHaveLength(1);
+    expect(deps._fakes.identities.all()).toHaveLength(1);
+    expect(deps._fakes.conversations.all()).toHaveLength(1);
+    expect(deps._fakes.messages.all()).toHaveLength(1);
+    expect(deps._fakes.messages.all()[0]).toMatchObject({
+      role: "user",
+      text: "hi",
+      tgMessageId: 100,
+    });
+  });
+
+  it("второй inbound от того же external_user_id переиспользует Contact и Conversation", async () => {
+    await processInbound(
+      textInbound({ extUserId: "u1", extMessageId: "100", text: "first" }),
+      deps,
+    );
+    await processInbound(
+      textInbound({ extUserId: "u1", extMessageId: "101", text: "second" }),
+      deps,
+    );
+    expect(deps._fakes.contacts.all()).toHaveLength(1);
+    expect(deps._fakes.conversations.all()).toHaveLength(1);
+    expect(deps._fakes.messages.all()).toHaveLength(2);
+  });
+
+  it("дедупает повторный inbound с тем же external_message_id (Telegram retry webhook)", async () => {
+    const inbound = textInbound({ extUserId: "u1", extMessageId: "100", text: "hi" });
+    const first = await processInbound(inbound, deps);
+    const second = await processInbound(inbound, deps);
+    expect(first.persisted).toBe(true);
+    expect(second.persisted).toBe(false);
+    expect(deps._fakes.messages.all()).toHaveLength(1);
+  });
+
+  it("в conversation.mode='queued' / 'human' не зовёт reply-strategy", async () => {
+    const reply: ReplyStrategy = {
+      generate: async () => {
+        throw new Error("reply.generate must not be called in non-ai mode");
+      },
+    };
+    deps = makeDeps(reply);
+    // Создаём Conversation вручную с mode='queued'.
+    await deps._fakes.conversations.create({
+      contactId: 1,
+      source: "bot",
+      mode: "queued",
+      nowEpoch: 1700000000,
+    });
+    await deps._fakes.contacts.create({});
+    await deps._fakes.identities.create({ contactId: 1, channelId: 10, externalUserId: "u1" });
+
+    const result = await processInbound(
+      textInbound({ extUserId: "u1", extMessageId: "100", text: "ping" }),
+      deps,
+    );
+    expect(result.outboundEnqueued).toBe(0);
+    expect(deps._fakes.outbound.all()).toHaveLength(0);
+  });
+
+  it("в mode='ai' зовёт reply-strategy и кладёт envelopes в outbound_queue", async () => {
+    const envelope: OutboundEnvelope = {
+      channelId: "tg-1",
+      externalUserId: "u1",
+      parts: [{ kind: "text", text: "pong" }],
+    };
+    const reply: ReplyStrategy = { generate: async () => [envelope] };
+    deps = makeDeps(reply);
+
+    const result = await processInbound(
+      textInbound({ extUserId: "u1", extMessageId: "100", text: "ping" }),
+      deps,
+    );
+    expect(result.outboundEnqueued).toBe(1);
+    expect(deps._fakes.outbound.all()).toHaveLength(1);
+    expect(deps._fakes.outbound.all()[0]?.payloadJson).toContain("pong");
+  });
+
+  it("media-only inbound (photo без caption) персистит message, но reply не вызывается", async () => {
+    const reply: ReplyStrategy = { generate: async () => [] };
+    deps = makeDeps(reply);
+    const inbound: Inbound = {
+      channelId: "tg-1",
+      externalMessageId: "100",
+      externalUserId: "u1",
+      parts: [
+        {
+          kind: "photo",
+          mediaRef: { channelId: "tg-1", externalRef: "file123" },
+        },
+      ],
+      receivedAt: 1700000000,
+      raw: {},
+    };
+    const result = await processInbound(inbound, deps);
+    expect(result.persisted).toBe(true);
+    expect(result.outboundEnqueued).toBe(0);
+    expect(deps._fakes.messages.all()[0]?.text).toBe("");
+    expect(deps._fakes.messages.all()[0]?.metaJson).toContain("photo");
+  });
+
+  it("callback_query не персистится как message (отдельный handler)", async () => {
+    const inbound: Inbound = {
+      channelId: "tg-1",
+      externalMessageId: "100",
+      externalUserId: "u1",
+      parts: [{ kind: "callback_query", data: "approve:42", originalMessageId: "999" }],
+      receivedAt: 1700000000,
+      raw: {},
+    };
+    const result = await processInbound(inbound, deps);
+    expect(result.persisted).toBe(false);
+    expect(deps._fakes.messages.all()).toHaveLength(0);
+    // Но Contact + Conversation всё равно создаются (нужны downstream'у).
+    expect(deps._fakes.contacts.all()).toHaveLength(1);
+    expect(deps._fakes.conversations.all()).toHaveLength(1);
+  });
+});
