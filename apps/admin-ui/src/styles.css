@@ -193,6 +193,43 @@ a:hover {
   font-size: 13px;
 }
 
+.dashboard-paused {
+  padding: 12px 16px;
+  background: rgba(240, 198, 116, 0.12);
+  border: 1px solid #f0c674;
+  border-radius: var(--radius);
+  color: #f0c674;
+  margin-bottom: 16px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+}
+
+.dashboard-active {
+  padding: 8px 14px;
+  background: rgba(145, 217, 144, 0.08);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.link-button {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+}
+
+.link-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .upload-section,
 .docs-section {
   margin-bottom: 32px;

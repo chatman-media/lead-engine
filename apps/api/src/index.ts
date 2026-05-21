@@ -30,6 +30,7 @@ import { makeAdminConversationsRoutes } from "./routes/admin-conversations.ts";
 import { makeAdminKbRoutes } from "./routes/admin-kb.ts";
 import { makeAdminLlmConfigsRoutes } from "./routes/admin-llm-configs.ts";
 import { makeAdminOnboardingRoutes } from "./routes/admin-onboarding.ts";
+import { makeAdminTenantRoutes } from "./routes/admin-tenant.ts";
 import { makeAdminRoutes } from "./routes/admin.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
@@ -202,6 +203,13 @@ async function main() {
   // Audit log read API.
   app.route("/", makeAdminAuditRoutes({ db }));
   log.info("admin-audit routes enabled (read-only)");
+
+  // Tenant info + pause/resume.
+  app.route(
+    "/",
+    makeAdminTenantRoutes({ db, onStatusChange: reloader.reloadChannels }),
+  );
+  log.info("admin-tenant routes enabled (pause/resume)");
 
   app.route(
     "/",

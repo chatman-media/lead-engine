@@ -8,6 +8,7 @@ import {
   type OnboardingStatus,
   saas,
   type Tenant,
+  type TenantInfo,
 } from "../api/saas.ts";
 import { OnboardingChecklist } from "../components/OnboardingChecklist.tsx";
 
@@ -17,6 +18,8 @@ export function SaasDashboard() {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
+  const [tenantInfo, setTenantInfo] = useState<TenantInfo | null>(null);
+  const [togglingPause, setTogglingPause] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -54,6 +57,36 @@ export function SaasDashboard() {
     }
   }
 
+  async function refreshTenantInfo() {
+    try {
+      const { tenant } = await saas.getTenantInfo();
+      setTenantInfo(tenant);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+      }
+    }
+  }
+
+  async function handleTogglePause() {
+    if (!tenantInfo) return;
+    const newPaused = tenantInfo.status === "active";
+    if (newPaused && !confirm("Бот перестанет принимать сообщения. Продолжить?")) {
+      return;
+    }
+    setTogglingPause(true);
+    setError("");
+    try {
+      await saas.setTenantPaused(newPaused);
+      await refreshTenantInfo();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTogglingPause(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -62,7 +95,7 @@ export function SaasDashboard() {
         if (cancelled) return;
         setAdmin(me.admin);
         setTenant(me.tenant);
-        await Promise.all([refreshDocs(), refreshOnboarding()]);
+        await Promise.all([refreshDocs(), refreshOnboarding(), refreshTenantInfo()]);
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
@@ -176,6 +209,35 @@ export function SaasDashboard() {
       </header>
 
       {error && <div className="dashboard-error">{error}</div>}
+
+      {tenantInfo && tenantInfo.status === "suspended" && (
+        <div className="dashboard-paused">
+          ⏸ Бот на паузе — сообщения от клиентов не обрабатываются.
+          <button
+            type="button"
+            className="nav-link"
+            onClick={handleTogglePause}
+            disabled={togglingPause}
+            style={{ marginLeft: 12 }}
+          >
+            {togglingPause ? "Включаем…" : "Возобновить"}
+          </button>
+        </div>
+      )}
+
+      {tenantInfo && tenantInfo.status === "active" && onboarding?.done && (
+        <div className="dashboard-active">
+          ✓ Бот активен.{" "}
+          <button
+            type="button"
+            className="link-button"
+            onClick={handleTogglePause}
+            disabled={togglingPause}
+          >
+            {togglingPause ? "Ставим на паузу…" : "Поставить на паузу"}
+          </button>
+        </div>
+      )}
 
       {onboarding && <OnboardingChecklist status={onboarding} />}
 
