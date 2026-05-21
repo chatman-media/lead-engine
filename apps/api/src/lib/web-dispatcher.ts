@@ -3,6 +3,7 @@ import {
   type Db,
   OutboundQueueRepo,
   type OutboundQueueRow,
+  withTenant,
 } from "@chatman-media/conversation-engine";
 import type { JsonLogger, PlatformMetrics } from "@chatman-media/observability";
 import { tenants } from "@chatman-media/storage";
@@ -67,24 +68,26 @@ export class WebOutboundDispatcher {
       .from(tenants)
       .where(eq(tenants.status, "active"));
 
+    // См. dispatcher.ts (worker): каждый repo-вызов оборачивается в
+    // withTenant, иначе на non-BYPASSRLS role'и policy tenant_isolation
+    // отрезала бы все UPDATE'ы. adapter.send (WS-frame) делается ВНЕ tx.
     const now = Math.floor(Date.now() / 1000);
     for (const t of activeTenants) {
-      const repo = new OutboundQueueRepo({ db: this.db, tenantId: t.id });
-      const claimed = await repo.claimPending({
-        limit: this.opts.batchSize,
-        nowEpoch: now,
-        kinds: ["web"],
+      const claimed = await withTenant(this.db, t.id, async (tx) => {
+        const txRepo = new OutboundQueueRepo({ db: tx, tenantId: t.id });
+        return txRepo.claimPending({
+          limit: this.opts.batchSize,
+          nowEpoch: now,
+          kinds: ["web"],
+        });
       });
       for (const row of claimed) {
-        await this.deliverOne(repo, row);
+        await this.deliverOne(row);
       }
     }
   }
 
-  private async deliverOne(
-    repo: OutboundQueueRepo,
-    row: OutboundQueueRow,
-  ): Promise<void> {
+  private async deliverOne(row: OutboundQueueRow): Promise<void> {
     const tenantLabel = { tenant: String(row.tenantId) };
     const entry = this.channels.byChannelId(row.channelId);
     if (!entry) {
@@ -92,7 +95,7 @@ export class WebOutboundDispatcher {
       // что web-канал есть в БД, но в registry не загружен (race с
       // hot-discovery'ем нового tenant'а). markFailed → row будет видна
       // в admin'е как стрёмная.
-      await repo.markFailed(row.id, `web registry miss for channel_id=${row.channelId}`);
+      await this.markFailed(row, `web registry miss for channel_id=${row.channelId}`);
       this.opts.metrics?.outboundFailed.inc(1, {
         ...tenantLabel,
         reason: "web_registry_miss",
@@ -103,7 +106,7 @@ export class WebOutboundDispatcher {
     try {
       envelope = JSON.parse(row.payloadJson) as OutboundEnvelope;
     } catch (err) {
-      await repo.markFailed(row.id, `invalid payload_json: ${err}`);
+      await this.markFailed(row, `invalid payload_json: ${err}`);
       this.opts.metrics?.outboundFailed.inc(1, { ...tenantLabel, reason: "bad_payload" });
       return;
     }
@@ -111,7 +114,10 @@ export class WebOutboundDispatcher {
     try {
       const sent = await entry.adapter.send(envelope);
       const sentAt = Math.floor(Date.now() / 1000);
-      await repo.markSent(row.id, sent.externalMessageId, sentAt);
+      await withTenant(this.db, row.tenantId, async (tx) => {
+        const txRepo = new OutboundQueueRepo({ db: tx, tenantId: row.tenantId });
+        await txRepo.markSent(row.id, sent.externalMessageId, sentAt);
+      });
       const dispatchLag = sentAt - row.createdAt;
       this.opts.metrics?.outboundSent.inc(1, { ...tenantLabel, kind: "web" });
       this.opts.metrics?.outboundDispatchLatency.observe(
@@ -123,11 +129,18 @@ export class WebOutboundDispatcher {
       // offline, доставка failed. Future: retry-policy + exp-backoff через
       // status='pending' + scheduled_at. Пока — terminal fail.
       const msg = err instanceof Error ? err.message : String(err);
-      await repo.markFailed(row.id, msg);
+      await this.markFailed(row, msg);
       this.opts.metrics?.outboundFailed.inc(1, {
         ...tenantLabel,
         reason: msg.startsWith("WebChannel:") ? "web_offline" : "send_error",
       });
     }
+  }
+
+  private async markFailed(row: OutboundQueueRow, error: string): Promise<void> {
+    await withTenant(this.db, row.tenantId, async (tx) => {
+      const txRepo = new OutboundQueueRepo({ db: tx, tenantId: row.tenantId });
+      await txRepo.markFailed(row.id, error);
+    });
   }
 }
