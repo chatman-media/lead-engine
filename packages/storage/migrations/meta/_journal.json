@@ -50,6 +50,13 @@
       "when": 1779700000000,
       "tag": "0006_stripe_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779800000000,
+      "tag": "0007_conversations_to_contacts_fk",
+      "breakpoints": true
     }
   ]
 }
