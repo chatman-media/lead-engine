@@ -36,6 +36,13 @@ export {
   type MemoryExtractor,
   runMemoryExtraction,
 } from "./memory-extractor.ts";
+export {
+  decryptSecret,
+  encryptSecret,
+  getDecryptedSecret,
+  SecretCryptoError,
+  setEncryptedSecret,
+} from "./secrets.ts";
 export { dispatchOutbound } from "./outbound-dispatch.ts";
 export {
   processInbound,
