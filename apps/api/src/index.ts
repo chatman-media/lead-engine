@@ -1,3 +1,4 @@
+import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import { Hono } from "hono";
@@ -10,6 +11,7 @@ import {
   makeStageClassifier,
 } from "./llm-bootstrap.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
+import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 
 /**
@@ -27,6 +29,8 @@ function resolveTemplate(tenantSlug: string): VerticalTemplate | undefined {
 
 async function main() {
   const cfg = loadApiConfig();
+  const log = makeDefaultLogger("apps/api");
+  const metrics = makePlatformMetrics();
   const { db, close } = makeDb(cfg.databaseUrl);
 
   const channels = new ChannelRegistry();
@@ -34,6 +38,8 @@ async function main() {
   await channels.loadFromDb(db as any);
 
   const app = new Hono();
+
+  app.route("/", makeMetricsRoutes(metrics));
 
   app.route(
     "/",
@@ -46,23 +52,24 @@ async function main() {
   const replyStrategy = makeReplyStrategy(cfg, db);
   if (replyStrategy) {
     const strategyKind = cfg.embed.provider && cfg.embed.apiKey ? "RAG" : "LLM-only";
-    console.log(
-      `[apps/api] reply strategy: ${strategyKind} (chat=${cfg.llm.provider}/${cfg.llm.model}${
-        cfg.embed.provider ? `, embed=${cfg.embed.provider}/${cfg.embed.model}` : ""
-      }${cfg.defaultStyleSlug ? `, style=${cfg.defaultStyleSlug}` : ""})`,
-    );
+    log.info("reply strategy configured", {
+      kind: strategyKind,
+      chat: `${cfg.llm.provider}/${cfg.llm.model}`,
+      ...(cfg.embed.provider
+        ? { embed: `${cfg.embed.provider}/${cfg.embed.model}` }
+        : {}),
+      ...(cfg.defaultStyleSlug ? { style: cfg.defaultStyleSlug } : {}),
+    });
   } else {
-    console.log("[apps/api] LLM not configured — bot will persist messages but stay silent");
+    log.info("LLM not configured — bot will persist messages but stay silent");
   }
 
   const memoryExtractor = makeMemoryExtractor(cfg, db);
-  if (memoryExtractor) {
-    console.log("[apps/api] memory extractor enabled");
-  }
+  if (memoryExtractor) log.info("memory extractor enabled");
 
   const stageClassifier = makeStageClassifier(cfg, db);
   if (stageClassifier) {
-    console.log(`[apps/api] stage classifier enabled: ${cfg.stageClassifier}`);
+    log.info("stage classifier enabled", { kind: cfg.stageClassifier });
   }
 
   app.route(
@@ -83,11 +90,11 @@ async function main() {
     fetch: app.fetch,
   });
 
-  console.log(`[apps/api] listening on http://localhost:${server.port}`);
+  log.info("listening", { port: server.port, url: `http://localhost:${server.port}` });
 
   // Graceful shutdown: дренируем channels, закрываем DB-пул.
   const shutdown = async () => {
-    console.log("[apps/api] shutting down");
+    log.info("shutting down");
     server.stop();
     channels.closeAll();
     await close();
@@ -98,6 +105,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[apps/api] fatal", err);
+  const log = makeDefaultLogger("apps/api");
+  log.error("fatal", { err: err instanceof Error ? err : new Error(String(err)) });
   process.exit(1);
 });

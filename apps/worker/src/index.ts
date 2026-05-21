@@ -1,3 +1,4 @@
+import { makeDefaultLogger } from "@chatman-media/observability";
 import { WorkerChannelRegistry } from "./channel-registry.ts";
 import { loadWorkerConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
@@ -5,6 +6,7 @@ import { OutboundDispatcher } from "./dispatcher.ts";
 
 async function main() {
   const cfg = loadWorkerConfig();
+  const log = makeDefaultLogger("apps/worker");
   const { db, close } = makeDb(cfg.databaseUrl);
 
   const channels = new WorkerChannelRegistry();
@@ -17,17 +19,18 @@ async function main() {
     batchSize: cfg.dispatcherBatchSize,
   });
 
-  console.log(
-    `[apps/worker] starting; channels=${channels.size()}, ` +
-      `dispatcher pollMs=${cfg.dispatcherPollMs} batchSize=${cfg.dispatcherBatchSize}`,
-  );
+  log.info("starting", {
+    channels: channels.size(),
+    pollMs: cfg.dispatcherPollMs,
+    batchSize: cfg.dispatcherBatchSize,
+  });
 
   const dispatcherPromise = dispatcher.run(abort.signal).catch((err) => {
-    console.error("[dispatcher] fatal", err);
+    log.error("dispatcher fatal", { err: err instanceof Error ? err : new Error(String(err)) });
   });
 
   const shutdown = async () => {
-    console.log("[apps/worker] shutting down");
+    log.info("shutting down");
     abort.abort();
     dispatcher.stop();
     await dispatcherPromise;
@@ -42,6 +45,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[apps/worker] fatal", err);
+  const log = makeDefaultLogger("apps/worker");
+  log.error("fatal", { err: err instanceof Error ? err : new Error(String(err)) });
   process.exit(1);
 });
