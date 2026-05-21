@@ -8,6 +8,7 @@ export {
   ConversationsRepo,
   type ConversationRow,
   type Db,
+  DrizzleKbStore,
   LeadsRepo,
   type LeadRow,
   MessagesRepo,

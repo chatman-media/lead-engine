@@ -35,6 +35,7 @@
   "dependencies": {
     "@chatman-media/channel-core": "workspace:*",
     "@chatman-media/llm-router": "workspace:*",
+    "@chatman-media/rag": "workspace:*",
     "@chatman-media/storage": "workspace:*",
     "@chatman-media/verticals": "workspace:*"
   },
