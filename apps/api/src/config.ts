@@ -52,6 +52,19 @@ export interface ApiConfig {
     baseUrl: string;
     dim: number;
   };
+  /**
+   * Опционально: slug дефолтного sales-style для legacy tenant'а. Если
+   * задан, RagReplyStrategy.resolveStyle подгрузит StylesRepo.findActiveBySlug
+   * (с парсингом через @chatman-media/rag StyleSchema) и передаст в
+   * answerWithRag. Стиль строит system prompt через composeSystemPrompt
+   * (persona + sales framework + hooks + skills).
+   *
+   * Пусто = answerWithRag fallback на DEFAULT_PERSONA.
+   *
+   * Доступные styles в legacy tenant'е (после seed-styles script):
+   *   alina-infinity-v1, flirty-belfort-v1, empathetic-nepq-v1, cold-direct-pas-v1
+   */
+  defaultStyleSlug: string;
 }
 
 function required(name: string): string {
@@ -84,5 +97,6 @@ export function loadApiConfig(): ApiConfig {
       baseUrl: process.env.LLM_EMBED_BASE_URL ?? "",
       dim: Number.parseInt(process.env.LLM_EMBED_DIM ?? "1536", 10),
     },
+    defaultStyleSlug: process.env.STYLE_SLUG ?? "",
   };
 }

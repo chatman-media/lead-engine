@@ -5,11 +5,13 @@ import {
   LlmReplyStrategy,
   type MemoryExtractor,
   MessagesRepo,
+  parseStyleConfig,
   RagReplyStrategy,
   type ReplyStrategy,
+  StylesRepo,
 } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
-import type { EmbeddingClient as RagEmbeddingClient } from "@chatman-media/rag";
+import type { EmbeddingClient as RagEmbeddingClient, Style } from "@chatman-media/rag";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import type { ApiConfig } from "./config.ts";
 
@@ -86,6 +88,26 @@ export function makeReplyStrategy(cfg: ApiConfig, db: Db): ReplyStrategy | null 
     ...(cfg.embed.baseUrl ? { baseUrl: cfg.embed.baseUrl } : {}),
   });
 
+  // resolveStyle: per-call lookup активного style по slug из БД. Если
+  // STYLE_SLUG не задан в env → resolveStyle не передаётся и RagReplyStrategy
+  // fall back'нет на DEFAULT_PERSONA. Лёгкий per-tenant cache на N-секунд
+  // здесь намеренно не делаем — invalidate'ить нечем, операторские правки
+  // styles прилетают редко; lookup из БД дешёвый (single row по
+  // partial-unique index uniq_styles_active_slug).
+  const styleCache = new Map<number, Style | null>();
+  const defaultSlug = cfg.defaultStyleSlug;
+  const resolveStyle = defaultSlug
+    ? async (input: { tenantId: number }): Promise<Style | null> => {
+        const cached = styleCache.get(input.tenantId);
+        if (cached !== undefined) return cached;
+        const repo = new StylesRepo({ db, tenantId: input.tenantId });
+        const row = await repo.findActiveBySlug(defaultSlug);
+        const parsed = row ? parseStyleConfig(row.configJson) : null;
+        styleCache.set(input.tenantId, parsed);
+        return parsed;
+      }
+    : undefined;
+
   return new RagReplyStrategy(
     {
       template,
@@ -95,6 +117,7 @@ export function makeReplyStrategy(cfg: ApiConfig, db: Db): ReplyStrategy | null 
       resolveEmbed: (tenantId: number) =>
         router.resolveEmbed(tenantId) as unknown as RagEmbeddingClient,
       resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
+      ...(resolveStyle ? { resolveStyle } : {}),
     },
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
   );

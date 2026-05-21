@@ -45,7 +45,7 @@ async function main() {
     console.log(
       `[apps/api] reply strategy: ${strategyKind} (chat=${cfg.llm.provider}/${cfg.llm.model}${
         cfg.embed.provider ? `, embed=${cfg.embed.provider}/${cfg.embed.model}` : ""
-      })`,
+      }${cfg.defaultStyleSlug ? `, style=${cfg.defaultStyleSlug}` : ""})`,
     );
   } else {
     console.log("[apps/api] LLM not configured — bot will persist messages but stay silent");
