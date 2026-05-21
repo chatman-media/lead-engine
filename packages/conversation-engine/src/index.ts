@@ -59,6 +59,11 @@ export {
   SecretCryptoError,
   setEncryptedSecret,
 } from "./secrets.ts";
+export {
+  generateReplyAndEnqueue,
+  type GenerateReplyAndEnqueueDeps,
+  type GenerateReplyResult,
+} from "./dispatch-reply.ts";
 export { dispatchOutbound } from "./outbound-dispatch.ts";
 export {
   processInbound,

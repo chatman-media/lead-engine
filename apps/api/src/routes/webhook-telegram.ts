@@ -4,6 +4,7 @@ import {
   ContactsRepo,
   ConversationsRepo,
   type Db,
+  generateReplyAndEnqueue,
   type MemoryExtractor,
   MessagesRepo,
   OutboundQueueRepo,
@@ -132,44 +133,66 @@ export function makeTelegramWebhookRoutes(opts: {
     const inbound = next.value;
 
     const template = opts.resolveTemplate?.(entry.tenantSlug);
-    // Весь pipeline-call оборачивается в withTenant — pipeline делает
-    // несколько repo-INSERT'ов (Contact + ChannelIdentity + Conversation +
-    // Message + OutboundQueue), и они должны (а) видеть друг друга
-    // одновременно через атомарную tx, (б) проходить RLS policy на
-    // production non-bypass role'и (см. миграцию 0004 + checkRlsEnforcement).
+    const tenant = {
+      tenantId: entry.tenantId,
+      slug: entry.tenantSlug,
+      llmBillingMode: "byok" as const,
+    };
+    const channel = {
+      channelId: entry.channelDbId,
+      kind: entry.kind,
+      externalId: entry.externalId,
+    };
+
+    // ── Phase 1: persist + classify + memory extract (одна короткая tx) ──
+    // Все DB-операции (Contact / ChannelIdentity / Conversation / Message /
+    // applyClassifiedStage / mergeAttributes) живут в одной atomic tx с
+    // SET LOCAL app.tenant_id (RLS-correct под non-bypass role'ю).
     //
-    // Тradeoff: LLM-call внутри pipeline'а (reply-strategy) тоже происходит
-    // под открытой Postgres tx — это держит pool connection во время slow
-    // external request'а. Mitigation на будущее: split pipeline на
-    // persist-only + reply-generate phases в отдельных tx; не делаем
-    // сейчас чтобы не растягивать scope. На текущих latencies (~1-2s LLM)
-    // и pool=10 это OK для pilot-load'а.
-    const result = await withTenant(opts.db, entry.tenantId, async (tx) => {
+    // Stage classifier + memory extractor (LLM ~300-500ms каждый) пока
+    // ОСТАЮТСЯ inside tx — они быстрые относительно reply.generate, split
+    // их добавил бы значительную сложность за маленький win.
+    //
+    // `reply.generate` (1-2s LLM) НЕ вызывается здесь — deferReply=true
+    // прерывает pipeline перед reply step'ом.
+    let result = await withTenant(opts.db, entry.tenantId, async (tx) => {
       const repoCtx = { db: tx, tenantId: entry.tenantId };
       return processInbound(inbound, {
-        tenant: {
-          tenantId: entry.tenantId,
-          slug: entry.tenantSlug,
-          llmBillingMode: "byok",
-        },
-        channel: {
-          channelId: entry.channelDbId,
-          kind: entry.kind,
-          externalId: entry.externalId,
-        },
+        tenant,
+        channel,
         channelDbId: entry.channelDbId,
         contacts: new ContactsRepo(repoCtx),
         identities: new ChannelIdentitiesRepo(repoCtx),
         conversations: new ConversationsRepo(repoCtx),
         messages: new MessagesRepo(repoCtx),
         outbound: new OutboundQueueRepo(repoCtx),
+        // reply остаётся для conv-engine'а как gate — но НЕ вызывается
+        // при deferReply, processInbound вернётся раньше.
         reply: opts.replyStrategy ?? null,
+        deferReply: true,
         ...(template ? { template } : {}),
         ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
         ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
         ...(opts.sink ? { sink: opts.sink } : {}),
       });
     });
+
+    // ── Phase 2: reply.generate (LLM ВНЕ tx) + enqueue в новой короткой tx ──
+    // Освобождает Postgres pool connection на время LLM call'а (~1-2s).
+    // Pool=10, под нагрузкой это устраняет typical bottleneck.
+    if (result.replyDeferred && opts.replyStrategy) {
+      const gen = await generateReplyAndEnqueue({
+        db: opts.db,
+        tenant,
+        channel,
+        channelDbId: entry.channelDbId,
+        inbound,
+        result,
+        replyStrategy: opts.replyStrategy,
+        ...(opts.sink ? { sink: opts.sink } : {}),
+      });
+      result = { ...result, outboundEnqueued: gen.outboundEnqueued };
+    }
 
     // Inbound deduped path: persisted=false означает что messages.id
     // existed (uniq_msg_user_tg hit) — это retry от Telegram'а.

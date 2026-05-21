@@ -3,6 +3,7 @@ import {
   ContactsRepo,
   ConversationsRepo,
   type Db,
+  generateReplyAndEnqueue,
   type MemoryExtractor,
   MessagesRepo,
   OutboundQueueRepo,
@@ -140,24 +141,25 @@ export function makeWhatsAppWebhookRoutes(opts: {
       if (next.done) break;
       const inbound = next.value;
       const template = opts.resolveTemplate?.(entry.tenantSlug);
-      // См. webhook-telegram.ts — pipeline целиком в withTenant для
-      // RLS на non-bypass role'и + атомарности pipeline-INSERT'ов.
-      // Каждое сообщение в batch'е — отдельная tx (короче чем одна tx
-      // на весь batch — если 49-е сообщение fail'нёт, первые 48 уже
-      // committed).
-      const result = await withTenant(opts.db, entry.tenantId, async (tx) => {
+      const tenant = {
+        tenantId: entry.tenantId,
+        slug: entry.tenantSlug,
+        llmBillingMode: "byok" as const,
+      };
+      const channel = {
+        channelId: entry.channelDbId,
+        kind: entry.kind,
+        externalId: entry.externalId,
+      };
+      // ── Phase 1: persist + classify + memory (одна короткая tx) ──
+      // См. webhook-telegram.ts по split-rationale. Для batch'а каждое
+      // сообщение получает свою phase1+phase2 пару — если 49-е fail'нёт,
+      // первые 48 уже committed.
+      let result = await withTenant(opts.db, entry.tenantId, async (tx) => {
         const repoCtx = { db: tx, tenantId: entry.tenantId };
         return processInbound(inbound, {
-          tenant: {
-            tenantId: entry.tenantId,
-            slug: entry.tenantSlug,
-            llmBillingMode: "byok",
-          },
-          channel: {
-            channelId: entry.channelDbId,
-            kind: entry.kind,
-            externalId: entry.externalId,
-          },
+          tenant,
+          channel,
           channelDbId: entry.channelDbId,
           contacts: new ContactsRepo(repoCtx),
           identities: new ChannelIdentitiesRepo(repoCtx),
@@ -165,12 +167,27 @@ export function makeWhatsAppWebhookRoutes(opts: {
           messages: new MessagesRepo(repoCtx),
           outbound: new OutboundQueueRepo(repoCtx),
           reply: opts.replyStrategy ?? null,
+          deferReply: true,
           ...(template ? { template } : {}),
           ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
           ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
           ...(opts.sink ? { sink: opts.sink } : {}),
         });
       });
+      // ── Phase 2: reply.generate (LLM) ВНЕ tx + enqueue новой короткой tx ──
+      if (result.replyDeferred && opts.replyStrategy) {
+        const gen = await generateReplyAndEnqueue({
+          db: opts.db,
+          tenant,
+          channel,
+          channelDbId: entry.channelDbId,
+          inbound,
+          result,
+          replyStrategy: opts.replyStrategy,
+          ...(opts.sink ? { sink: opts.sink } : {}),
+        });
+        result = { ...result, outboundEnqueued: gen.outboundEnqueued };
+      }
       if (!result.persisted) {
         opts.metrics?.inboundDeduped.inc(1, { tenant: String(entry.tenantId) });
       }
