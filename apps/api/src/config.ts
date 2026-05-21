@@ -27,6 +27,13 @@ export interface ApiConfig {
    */
   whatsappVerifyToken: string;
   /**
+   * App secret из Meta dashboard → App Settings → Basic. Используется
+   * для HMAC-SHA256 валидации `X-Hub-Signature-256` header'а в POST
+   * webhook'ах. Если пусто — signature check пропускается (warning
+   * на boot). Production deploy ОБЯЗАН задавать.
+   */
+  whatsappAppSecret: string;
+  /**
    * Stripe webhook signing secret (whsec_...) — опционально. Если пусто,
    * /webhook/stripe не подключается и Stripe-billing просто не работает.
    */
@@ -134,6 +141,7 @@ export function loadApiConfig(): ApiConfig {
     masterKeyHex: required("PLATFORM_MASTER_KEY"),
     telegramWebhookSecret: required("TELEGRAM_WEBHOOK_SECRET"),
     whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
+    whatsappAppSecret: process.env.WHATSAPP_APP_SECRET ?? "",
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
     healthCheckTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "2000", 10),
     llm: {

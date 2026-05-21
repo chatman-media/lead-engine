@@ -21,6 +21,10 @@ import type { PlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { Hono } from "hono";
 import type { ChannelRegistry } from "../channel-registry.ts";
+import {
+  verifyWhatsAppSignature,
+  WhatsAppSignatureError,
+} from "../lib/whatsapp-signature.ts";
 
 /**
  * WhatsApp Cloud webhook handler. Meta делает два типа запросов:
@@ -32,16 +36,23 @@ import type { ChannelRegistry } from "../channel-registry.ts";
  *        → payload с events (messages/statuses/etc). Один POST может содержать
  *          batch из N сообщений; pipeline обрабатывает каждое отдельно.
  *
- * Signature verification: Meta пробрасывает X-Hub-Signature-256 с HMAC-SHA256
- * от raw body. Сейчас НЕ проверяется — payload идёт открыто, fraud risk
- * минимальный т.к. payload без секретов. Проверку можно добавить отдельным
- * коммитом если понадобится (нужен app_secret из Meta dashboard).
+ * Signature verification: Meta пробрасывает X-Hub-Signature-256 с
+ * HMAC-SHA256 от raw body. Если `appSecret` задан в opts — проверяем
+ * каждый POST, reject 401 на mismatch. Если не задан — bypass (для
+ * dev/staging локальных тестов). Production deploy ДОЛЖЕН выставлять
+ * appSecret из Meta dashboard → App Settings → Basic.
  */
 export function makeWhatsAppWebhookRoutes(opts: {
   db: Db;
   channels: ChannelRegistry;
   /** Token который Meta попросил configure в Verify Token поле webhook setup'а. */
   verifyToken: string;
+  /**
+   * App secret из Meta dashboard для HMAC-SHA256 валидации
+   * `X-Hub-Signature-256` header'а. Если пусто — signature check
+   * пропускается (warning'ом в логах apps/api log boot'ит сценарий).
+   */
+  appSecret?: string;
   replyStrategy?: ReplyStrategy | null;
   resolveTemplate?: (tenantSlug: string) => VerticalTemplate | undefined;
   memoryExtractor?: MemoryExtractor | null;
@@ -66,6 +77,32 @@ export function makeWhatsAppWebhookRoutes(opts: {
 
   app.post("/webhook/whatsapp/:slug", async (c) => {
     const startedAt = performance.now();
+
+    // ── Signature verification ДО любых других проверок ──────────────
+    // 1. Без appSecret — bypass (dev mode); warning'ом в boot-логе.
+    // 2. HMAC считается от RAW request body (c.req.text), не от
+    //    re-сериализованного JSON — иначе любая нормализация (whitespace
+    //    / key order / unicode escape) даст другой digest.
+    // 3. Расположение ПЕРЕД tenant lookup — anti-enumeration: 404 vs 401
+    //    раскрыло бы attacker'у какие slug'и есть в платформе.
+    const rawBody = await c.req.text();
+    if (opts.appSecret) {
+      try {
+        verifyWhatsAppSignature({
+          secret: opts.appSecret,
+          payload: rawBody,
+          header: c.req.header("X-Hub-Signature-256"),
+        });
+      } catch (err) {
+        opts.metrics?.webhookRequests.inc(1, { channel: "whatsapp", status: "401" });
+        if (err instanceof WhatsAppSignatureError) {
+          // biome-ignore lint/suspicious/noConsole: webhook diag в stdout
+          console.warn("[whatsapp-webhook] signature rejected", err.reason);
+        }
+        return c.json({ error: "invalid signature" }, 401);
+      }
+    }
+
     const slug = c.req.param("slug");
     const entries = opts.channels.getWhatsAppByTenant(slug);
     if (entries.length === 0) {
@@ -77,7 +114,7 @@ export function makeWhatsAppWebhookRoutes(opts: {
 
     let payload: WaWebhookPayload;
     try {
-      payload = (await c.req.json()) as WaWebhookPayload;
+      payload = JSON.parse(rawBody) as WaWebhookPayload;
     } catch {
       opts.metrics?.webhookRequests.inc(1, { channel: "whatsapp", status: "400" });
       return c.json({ error: "invalid json" }, 400);

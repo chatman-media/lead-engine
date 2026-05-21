@@ -137,6 +137,7 @@ async function main() {
         db,
         channels,
         verifyToken: cfg.whatsappVerifyToken,
+        ...(cfg.whatsappAppSecret ? { appSecret: cfg.whatsappAppSecret } : {}),
         replyStrategy,
         resolveTemplate,
         memoryExtractor,
@@ -145,7 +146,14 @@ async function main() {
         metrics,
       }),
     );
-    log.info("whatsapp webhook enabled");
+    if (!cfg.whatsappAppSecret) {
+      log.warn("whatsapp webhook signature verification disabled", {
+        remediation: "Set WHATSAPP_APP_SECRET env (Meta dashboard → App Settings → Basic)",
+      });
+    }
+    log.info("whatsapp webhook enabled", {
+      signatureCheck: cfg.whatsappAppSecret ? "enabled" : "off (dev mode)",
+    });
   }
 
   if (cfg.stripeWebhookSecret) {
