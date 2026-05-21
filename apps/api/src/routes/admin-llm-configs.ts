@@ -6,6 +6,7 @@ import {
 import { llmProviderConfigs } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
+import { recordAudit } from "../lib/audit.ts";
 
 /**
  * Per-tenant LLM provider configuration CRUD под /api/admin/llm-configs/*.
@@ -218,6 +219,23 @@ export function makeAdminLlmConfigsRoutes(opts: AdminLlmConfigsRoutesOpts): Hono
       return { updated: false, id: inserted!.id };
     });
 
+    // Audit log: actor + purpose + provider/model (без apiKey value).
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId: c.var.adminId,
+      action: result.updated ? "llm_config.update" : "llm_config.create",
+      targetKind: "llm_provider_config",
+      targetId: purpose,
+      details: {
+        provider,
+        model,
+        hasApiKey: !!apiKey,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(embedDim !== null ? { embedDim } : {}),
+        ...(timeoutMs !== null ? { timeoutMs } : {}),
+      },
+    });
+
     // Hot-reload: вступает в силу live без рестарта apps/api.
     if (opts.onReload) {
       try {
@@ -260,6 +278,14 @@ export function makeAdminLlmConfigsRoutes(opts: AdminLlmConfigsRoutesOpts): Hono
       return result.length;
     });
     if (deleted === 0) return c.json({ error: "config not found" }, 404);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId: c.var.adminId,
+      action: "llm_config.delete",
+      targetKind: "llm_provider_config",
+      targetId: purpose,
+    });
 
     if (opts.onReload) {
       try {

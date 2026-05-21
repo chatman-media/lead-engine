@@ -7,6 +7,7 @@ import {
 import { channels, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
+import { recordAudit } from "../lib/audit.ts";
 
 /**
  * Per-tenant channel CRUD под /api/admin/channels/*.
@@ -246,6 +247,20 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
         }
       }
 
+      await recordAudit(opts.db, {
+        tenantId,
+        adminId: c.var.adminId,
+        action: result.updated ? "channel.update" : "channel.create",
+        targetKind: "channel",
+        targetId: result.id,
+        details: {
+          kind: "telegram_bot",
+          username,
+          botId,
+          webhookSet,
+        },
+      });
+
       let reloadError: string | undefined;
       if (opts.onReload) {
         try {
@@ -293,6 +308,14 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
       return result.length;
     });
     if (deleted === 0) return c.json({ error: "channel not found" }, 404);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId: c.var.adminId,
+      action: "channel.delete",
+      targetKind: "channel",
+      targetId: id,
+    });
 
     if (opts.onReload) {
       try {

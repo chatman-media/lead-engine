@@ -9,6 +9,7 @@ import {
 } from "@chatman-media/storage";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { Hono } from "hono";
+import { recordAudit } from "../lib/audit.ts";
 
 /**
  * Per-tenant read-only conversations API под /api/admin/conversations/*.
@@ -291,6 +292,20 @@ export function makeAdminConversationsRoutes(
         409,
       );
     }
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "conversation.reply",
+      targetKind: "conversation",
+      targetId: conversationId,
+      details: {
+        messageId: outcome.messageId,
+        channelKind: outcome.channelKind,
+        textLength: text.length,
+      },
+    });
+
     return c.json({
       ok: true,
       messageId: outcome.messageId,
