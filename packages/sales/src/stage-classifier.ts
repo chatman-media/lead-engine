@@ -18,10 +18,12 @@ import type { StageClassifier } from "@chatman-media/conversation-engine";
  */
 export class RegexStageClassifier implements StageClassifier {
   classify(input: {
+    tenantId: number;
     userMessageText: string;
     previousStage: string | null;
     isFirstUserMessage: boolean;
   }): FunnelStage | null {
+    void input.tenantId; // regex-impl не использует tenantId (нет LLM call'а)
     const text = input.userMessageText.toLowerCase().trim();
     if (text.length === 0) return input.previousStage as FunnelStage | null;
 
@@ -72,13 +74,13 @@ export class LlmStageClassifier implements StageClassifier {
   constructor(
     private readonly opts: {
       resolveChat: (tenantId: number) => ChatClient;
-      tenantId: number;
       /** Default 0.6. Ниже — больше нулей; выше — больше false-positives. */
       confidenceThreshold?: number;
     },
   ) {}
 
   async classify(input: {
+    tenantId: number;
     userMessageText: string;
     previousStage: string | null;
     isFirstUserMessage: boolean;
@@ -86,7 +88,7 @@ export class LlmStageClassifier implements StageClassifier {
     if (input.userMessageText.length === 0) {
       return input.previousStage as FunnelStage | null;
     }
-    const chat = this.opts.resolveChat(this.opts.tenantId);
+    const chat = this.opts.resolveChat(input.tenantId);
     const stagesList = FUNNEL_STAGES.join(" | ");
     const reply = await chat.complete(
       [

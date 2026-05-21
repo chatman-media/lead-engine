@@ -116,7 +116,6 @@ export function makeStageClassifier(
           ? wrapChatClient(inner, metrics, { provider: cfg.llm.provider, purpose: "stage" })
           : inner;
       },
-      tenantId: 1,
     });
   }
   return null;

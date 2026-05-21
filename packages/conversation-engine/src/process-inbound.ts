@@ -268,6 +268,7 @@ export async function processInbound(
   if (deps.stageClassifier && deps.db && !existingMsg && text.length > 0) {
     try {
       const newStage = await deps.stageClassifier.classify({
+        tenantId: deps.tenant.tenantId,
         userMessageText: text,
         previousStage: conversation.currentStage,
         isFirstUserMessage: conversationCreated,

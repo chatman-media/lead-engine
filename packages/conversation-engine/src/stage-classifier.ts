@@ -23,6 +23,13 @@ export interface StageClassifier {
    * Возвращает FunnelStage или null если уверенности нет.
    */
   classify(input: {
+    /**
+     * Tenant контекст — нужен LLM-based реализациям для resolveChat
+     * (per-tenant LLM-config). Regex-impl игнорирует, но в interface
+     * required чтобы pipeline call-site всегда передавал реальный
+     * tenantId из processInbound deps.
+     */
+    tenantId: number;
     userMessageText: string;
     previousStage: string | null;
     isFirstUserMessage: boolean;
