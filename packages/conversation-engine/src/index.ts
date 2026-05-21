@@ -34,6 +34,7 @@ export {
   type ProcessInboundDeps,
   type ReplyStrategy,
 } from "./process-inbound.ts";
+export { LlmReplyStrategy, type LlmReplyStrategyOpts } from "./reply-strategy/index.ts";
 export {
   type ChannelContext,
   type Clock,

@@ -1,5 +1,5 @@
 import { messages as messagesTable } from "@chatman-media/storage";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
 export interface MessageRow {
@@ -70,5 +70,30 @@ export class MessagesRepo {
         ),
       );
     return (row as MessageRow) ?? null;
+  }
+
+  /**
+   * Последние N не-удалённых сообщений в conversation, в хронологическом
+   * порядке (oldest → newest). Используется ReplyStrategy для построения
+   * history-промпта.
+   *
+   * Skip'ает soft-deleted (deleted_at NOT NULL) и system-role (их не
+   * показываем LLM как историю — они для внутренних флагов).
+   */
+  async recent(conversationId: number, limit: number): Promise<MessageRow[]> {
+    const rows = await this.ctx.db
+      .select()
+      .from(messagesTable)
+      .where(
+        and(
+          eq(messagesTable.tenantId, this.ctx.tenantId),
+          eq(messagesTable.conversationId, conversationId),
+          isNull(messagesTable.deletedAt),
+          sql`role <> 'system'`,
+        ),
+      )
+      .orderBy(desc(messagesTable.createdAt))
+      .limit(limit);
+    return (rows as MessageRow[]).reverse();
   }
 }
