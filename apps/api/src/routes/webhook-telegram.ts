@@ -7,10 +7,12 @@ import {
   type MemoryExtractor,
   MessagesRepo,
   OutboundQueueRepo,
+  type PipelineSink,
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
 } from "@chatman-media/conversation-engine";
+import type { PlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { Hono } from "hono";
 import type { ChannelRegistry } from "../channel-registry.ts";
@@ -65,18 +67,29 @@ export function makeTelegramWebhookRoutes(opts: {
    * pipeline продолжает.
    */
   stageClassifier?: StageClassifier | null;
+  /**
+   * Опциональные observability hooks — PipelineSink + PlatformMetrics.
+   * apps/api инжектит их через makeMetricsSink, тогда webhook handler
+   * считает webhookRequests / webhookLatency, а pipeline эмитит inbound/
+   * outbound counters через sink.emit.
+   */
+  sink?: PipelineSink;
+  metrics?: PlatformMetrics;
 }): Hono {
   const app = new Hono();
 
   app.post("/webhook/telegram/:slug", async (c) => {
+    const startedAt = performance.now();
     const got = c.req.header("X-Telegram-Bot-Api-Secret-Token");
     if (got !== opts.webhookSecret) {
+      opts.metrics?.webhookRequests.inc(1, { channel: "telegram_bot", status: "401" });
       return c.json({ error: "invalid secret" }, 401);
     }
 
     const slug = c.req.param("slug");
     const entries = opts.channels.getTelegramBotsByTenant(slug);
     if (entries.length === 0) {
+      opts.metrics?.webhookRequests.inc(1, { channel: "telegram_bot", status: "404" });
       return c.json({ error: "no active telegram_bot channel for tenant" }, 404);
     }
     // На текущем этапе один tenant держит один telegram_bot. Когда появится
@@ -88,6 +101,7 @@ export function makeTelegramWebhookRoutes(opts: {
     try {
       update = (await c.req.json()) as TgUpdate;
     } catch {
+      opts.metrics?.webhookRequests.inc(1, { channel: "telegram_bot", status: "400" });
       return c.json({ error: "invalid json" }, 400);
     }
 
@@ -135,7 +149,18 @@ export function makeTelegramWebhookRoutes(opts: {
       ...(template ? { template } : {}),
       ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
       ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: opts.db } : {}),
+      ...(opts.sink ? { sink: opts.sink } : {}),
     });
+
+    // Inbound deduped path: persisted=false означает что messages.id
+    // existed (uniq_msg_user_tg hit) — это retry от Telegram'а.
+    if (!result.persisted) {
+      opts.metrics?.inboundDeduped.inc(1, { tenant: String(entry.tenantId) });
+    }
+    const elapsedSec = (performance.now() - startedAt) / 1000;
+    opts.metrics?.webhookLatency.observe(elapsedSec, { channel: "telegram_bot" });
+    opts.metrics?.pipelineLatency.observe(elapsedSec, { tenant: String(entry.tenantId) });
+    opts.metrics?.webhookRequests.inc(1, { channel: "telegram_bot", status: "200" });
 
     return c.json({ ok: true, processed: true, result });
   });

@@ -4,6 +4,7 @@ import {
   OutboundQueueRepo,
   type OutboundQueueRow,
 } from "@chatman-media/conversation-engine";
+import type { PlatformMetrics } from "@chatman-media/observability";
 import { tenants } from "@chatman-media/storage";
 import { eq } from "drizzle-orm";
 import type { WorkerChannelRegistry } from "./channel-registry.ts";
@@ -34,6 +35,8 @@ export class OutboundDispatcher {
       stuckProcessingSec?: number;
       /** Каждый N-й tick запускать releaseStuckProcessing. Default 60 (=1 минута при pollMs=1000). */
       stuckCheckPeriodTicks?: number;
+      /** Опциональный PlatformMetrics для счётчиков outbound_sent/failed/latency. */
+      metrics?: PlatformMetrics;
     },
   ) {}
 
@@ -94,9 +97,11 @@ export class OutboundDispatcher {
   }
 
   private async deliverOne(repo: OutboundQueueRepo, row: OutboundQueueRow): Promise<void> {
+    const tenantLabel = { tenant: String(row.tenantId) };
     const entry = this.channels.byChannelId(row.channelId);
     if (!entry) {
       await repo.markFailed(row.id, `no active adapter for channel_id=${row.channelId}`);
+      this.opts.metrics?.outboundFailed.inc(1, { ...tenantLabel, reason: "no_adapter" });
       return;
     }
     let envelope: OutboundEnvelope;
@@ -104,14 +109,24 @@ export class OutboundDispatcher {
       envelope = JSON.parse(row.payloadJson) as OutboundEnvelope;
     } catch (err) {
       await repo.markFailed(row.id, `invalid payload_json: ${err}`);
+      this.opts.metrics?.outboundFailed.inc(1, { ...tenantLabel, reason: "bad_payload" });
       return;
     }
+    const startedAt = performance.now();
     try {
       const sent = await entry.adapter.send(envelope);
-      await repo.markSent(row.id, sent.externalMessageId, Math.floor(Date.now() / 1000));
+      const sentAt = Math.floor(Date.now() / 1000);
+      await repo.markSent(row.id, sent.externalMessageId, sentAt);
+      const dispatchLag = sentAt - row.createdAt;
+      this.opts.metrics?.outboundSent.inc(1, { ...tenantLabel, kind: entry.kind });
+      this.opts.metrics?.outboundDispatchLatency.observe(
+        Math.max(dispatchLag, (performance.now() - startedAt) / 1000),
+        tenantLabel,
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await repo.markFailed(row.id, msg);
+      this.opts.metrics?.outboundFailed.inc(1, { ...tenantLabel, reason: "send_error" });
     }
   }
 }

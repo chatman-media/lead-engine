@@ -13,6 +13,7 @@ import {
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
 import { makeAdminRoutes } from "./routes/admin.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
+import { makeMetricsSink } from "./lib/metrics-sink.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
@@ -76,6 +77,8 @@ async function main() {
     log.info("stage classifier enabled", { kind: cfg.stageClassifier });
   }
 
+  const sink = makeMetricsSink(metrics);
+
   app.route(
     "/",
     makeTelegramWebhookRoutes({
@@ -86,6 +89,8 @@ async function main() {
       resolveTemplate,
       memoryExtractor,
       stageClassifier,
+      sink,
+      metrics,
     }),
   );
 
