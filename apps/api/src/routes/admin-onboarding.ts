@@ -1,0 +1,109 @@
+import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import {
+  channels,
+  kbDocuments,
+  llmProviderConfigs,
+} from "@chatman-media/storage";
+import { and, eq } from "drizzle-orm";
+import { Hono } from "hono";
+
+/**
+ * Onboarding-status endpoint. Возвращает сводку по setup'у tenant'а:
+ * подключён ли канал, настроен ли LLM, есть ли docs в KB. UI на
+ * dashboard'е рендерит чек-лист.
+ *
+ * NB: одна агрегирующая ручка вместо 3-х отдельных GET'ов — снижает
+ * round-trip'ы и упрощает UI-state (один effect, один loading state).
+ */
+export interface AdminOnboardingRoutesOpts {
+  db: Db;
+}
+
+export function makeAdminOnboardingRoutes(opts: AdminOnboardingRoutesOpts): Hono {
+  const app = new Hono();
+
+  app.get("/api/admin/onboarding-status", async (c) => {
+    const tenantId = c.var.tenantId;
+
+    const status = await withTenant(opts.db, tenantId, async (tx) => {
+      // 1. Любой active channel?
+      const [chRow] = await tx
+        .select({ id: channels.id, kind: channels.kind, externalId: channels.externalId })
+        .from(channels)
+        .where(
+          and(eq(channels.tenantId, tenantId), eq(channels.status, "active")),
+        )
+        .limit(1);
+
+      // 2. Chat LLM config?
+      const [chatCfg] = await tx
+        .select({
+          provider: llmProviderConfigs.provider,
+          model: llmProviderConfigs.model,
+          secretRef: llmProviderConfigs.secretRef,
+        })
+        .from(llmProviderConfigs)
+        .where(
+          and(
+            eq(llmProviderConfigs.tenantId, tenantId),
+            eq(llmProviderConfigs.purpose, "chat"),
+          ),
+        )
+        .limit(1);
+
+      // 3. Embed LLM config (optional но даёт RAG).
+      const [embedCfg] = await tx
+        .select({
+          provider: llmProviderConfigs.provider,
+          model: llmProviderConfigs.model,
+        })
+        .from(llmProviderConfigs)
+        .where(
+          and(
+            eq(llmProviderConfigs.tenantId, tenantId),
+            eq(llmProviderConfigs.purpose, "embed"),
+          ),
+        )
+        .limit(1);
+
+      // 4. KB docs count (любое > 0 = done).
+      const [doc] = await tx
+        .select({ id: kbDocuments.id })
+        .from(kbDocuments)
+        .where(eq(kbDocuments.tenantId, tenantId))
+        .limit(1);
+
+      return {
+        channelConnected: !!chRow,
+        ...(chRow
+          ? {
+              channelKind: chRow.kind,
+              channelExternalId: chRow.externalId,
+            }
+          : {}),
+        chatLlmConfigured: !!chatCfg,
+        ...(chatCfg
+          ? {
+              chatProvider: chatCfg.provider,
+              chatModel: chatCfg.model,
+              chatHasSecret: chatCfg.secretRef !== null && chatCfg.secretRef !== "",
+            }
+          : {}),
+        embedLlmConfigured: !!embedCfg,
+        ...(embedCfg
+          ? {
+              embedProvider: embedCfg.provider,
+              embedModel: embedCfg.model,
+            }
+          : {}),
+        hasKbDocuments: !!doc,
+      };
+    });
+
+    const done =
+      status.channelConnected && status.chatLlmConfigured && status.hasKbDocuments;
+    return c.json({ ...status, done });
+  });
+
+  return app;
+}

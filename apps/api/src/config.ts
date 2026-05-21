@@ -101,6 +101,16 @@ export interface ApiConfig {
    */
   platformBaseDomain: string;
   /**
+   * Полный externally-reachable URL apps/api (env PLATFORM_PUBLIC_URL).
+   * Используется для авто-setup Telegram webhook'а при channel-create
+   * через UI: setWebhook(url=`<publicUrl>/webhook/telegram/<slug>`).
+   *
+   * Примеры: "https://api.leadengine.app", "https://example.ngrok.io".
+   * Если пусто — auto-setWebhook отключается, admin должен настроить
+   * webhook вручную после рестарта.
+   */
+  publicUrl: string;
+  /**
    * Slug запущенного эксперимента (status='running' в БД). Если задан,
    * RagReplyStrategy.resolveStyle использует ABRouter поверх variants
    * из experiments.allocation_json (a/b routing by hash(contactId)).
@@ -166,6 +176,7 @@ export function loadApiConfig(): ApiConfig {
       dim: Number.parseInt(process.env.LLM_EMBED_DIM ?? "1536", 10),
     },
     platformBaseDomain: process.env.PLATFORM_BASE_DOMAIN ?? "",
+    publicUrl: (process.env.PLATFORM_PUBLIC_URL ?? "").replace(/\/$/, ""),
     defaultStyleSlug: process.env.STYLE_SLUG ?? "",
     experimentSlug: process.env.EXPERIMENT_SLUG ?? "",
     stageClassifier:

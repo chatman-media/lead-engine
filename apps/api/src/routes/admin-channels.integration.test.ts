@@ -44,14 +44,37 @@ let tenantIdA = 0;
 let tokenB = "";
 let tenantIdB = 0;
 
+// Tracking для setWebhook вызовов чтобы тест мог проверить что fetch был.
+const setWebhookCalls: Array<{ token: string; url: string; secretToken?: string }> = [];
+
 /**
- * Fake fetch для Telegram getMe. Возвращает фиксированного bot'а для
- * "good" токенов, 401 если число-часть начинается на "9999".
+ * Fake fetch для Telegram getMe + setWebhook. Возвращает фиксированного
+ * bot'а для "good" токенов, 401 если число-часть начинается на "9999".
+ * setWebhook records запрос в setWebhookCalls для assertion'ов.
  */
 const fakeTelegramFetch = (async (
   input: string | URL | Request,
+  init?: RequestInit,
 ): Promise<Response> => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  // setWebhook intercept
+  if (url.includes("/setWebhook")) {
+    const tokenMatch = url.match(/\/bot([^/]+)\/setWebhook/);
+    const bodyStr = init?.body ? String(init.body) : "{}";
+    const body = JSON.parse(bodyStr) as {
+      url?: string;
+      secret_token?: string;
+    };
+    setWebhookCalls.push({
+      token: tokenMatch?.[1] ?? "",
+      url: body.url ?? "",
+      ...(body.secret_token ? { secretToken: body.secret_token } : {}),
+    });
+    return new Response(JSON.stringify({ ok: true, result: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
   // Token живёт в URL: /bot<TOKEN>/getMe
   const m = url.match(/\/bot([^/]+)\/getMe/);
   const token = m?.[1] ?? "";
@@ -98,6 +121,8 @@ beforeAll(
         db,
         masterKeyHex: MASTER_KEY_HEX,
         fetchImpl: fakeTelegramFetch,
+        publicUrl: "https://api.example.test",
+        webhookSecret: "test-webhook-secret-12345",
       }),
     );
 
@@ -200,8 +225,9 @@ describe("admin-channels CRUD", () => {
     expect(res.status).toBe(401);
   });
 
-  it("POST с valid token → создаёт channel + encrypted token", async () => {
+  it("POST с valid token → создаёт channel + encrypted token + auto-setWebhook", async () => {
     if (!sql) return;
+    setWebhookCalls.length = 0;
     const goodToken = "1234567890:abcdefghijklmnopqrstuvwxyz123456ABCD";
     const res = await authReq(tokenA, "/api/admin/channels/telegram", {
       method: "POST",
@@ -215,12 +241,20 @@ describe("admin-channels CRUD", () => {
       updated: boolean;
       username: string;
       botId: number;
+      webhookSet: boolean;
     };
     expect(body.ok).toBe(true);
     expect(body.updated).toBe(false);
     expect(body.id).toBeGreaterThan(0);
     expect(body.username).toMatch(/^testbot_/);
     expect(body.botId).toBe(12345);
+    // Auto-setWebhook fired.
+    expect(body.webhookSet).toBe(true);
+    expect(setWebhookCalls.length).toBe(1);
+    const call = setWebhookCalls[0]!;
+    expect(call.token).toBe(goodToken);
+    expect(call.url).toMatch(/^https:\/\/api\.example\.test\/webhook\/telegram\//);
+    expect(call.secretToken).toBe("test-webhook-secret-12345");
 
     // Verify channel row.
     const [chan] = await db

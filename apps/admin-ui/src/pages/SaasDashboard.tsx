@@ -5,15 +5,18 @@ import {
   ApiError,
   clearToken,
   type KbDoc,
+  type OnboardingStatus,
   saas,
   type Tenant,
 } from "../api/saas.ts";
+import { OnboardingChecklist } from "../components/OnboardingChecklist.tsx";
 
 export function SaasDashboard() {
   const navigate = useNavigate();
   const [admin, setAdmin] = useState<Admin | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [docs, setDocs] = useState<KbDoc[]>([]);
+  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -37,6 +40,20 @@ export function SaasDashboard() {
     }
   }
 
+  async function refreshOnboarding() {
+    try {
+      const s = await saas.onboardingStatus();
+      setOnboarding(s);
+    } catch (err) {
+      // Onboarding panel опционален — не валим dashboard если ручка
+      // отсутствует (старый backend) или возвращает 401.
+      if (err instanceof ApiError && err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+      }
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -45,7 +62,7 @@ export function SaasDashboard() {
         if (cancelled) return;
         setAdmin(me.admin);
         setTenant(me.tenant);
-        await refreshDocs();
+        await Promise.all([refreshDocs(), refreshOnboarding()]);
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
@@ -88,7 +105,7 @@ export function SaasDashboard() {
       setPasteTitle("");
       setPasteBody("");
       setPasteTopic("");
-      await refreshDocs();
+      await Promise.all([refreshDocs(), refreshOnboarding()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -103,7 +120,7 @@ export function SaasDashboard() {
     setError("");
     try {
       await saas.uploadFile(file);
-      await refreshDocs();
+      await Promise.all([refreshDocs(), refreshOnboarding()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -116,7 +133,7 @@ export function SaasDashboard() {
     if (!confirm("Удалить документ?")) return;
     try {
       await saas.deleteDoc(id);
-      await refreshDocs();
+      await Promise.all([refreshDocs(), refreshOnboarding()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -153,6 +170,8 @@ export function SaasDashboard() {
       </header>
 
       {error && <div className="dashboard-error">{error}</div>}
+
+      {onboarding && <OnboardingChecklist status={onboarding} />}
 
       <section className="upload-section">
         <h2>Добавить документ</h2>

@@ -72,6 +72,23 @@ export interface CreateTelegramChannelResult {
   updated: boolean;
   username: string;
   botId: number;
+  webhookSet?: boolean;
+  webhookError?: string;
+}
+
+export interface OnboardingStatus {
+  channelConnected: boolean;
+  channelKind?: string;
+  channelExternalId?: string;
+  chatLlmConfigured: boolean;
+  chatProvider?: string;
+  chatModel?: string;
+  chatHasSecret?: boolean;
+  embedLlmConfigured: boolean;
+  embedProvider?: string;
+  embedModel?: string;
+  hasKbDocuments: boolean;
+  done: boolean;
 }
 
 const TOKEN_KEY = "lead_engine_token";
@@ -222,5 +239,10 @@ export const saas = {
     return request<{ ok: boolean; deleted: number }>(`/api/admin/channels/${id}`, {
       method: "DELETE",
     });
+  },
+
+  // ── Onboarding ───────────────────────────────────────────────────────
+  onboardingStatus() {
+    return request<OnboardingStatus>("/api/admin/onboarding-status");
   },
 };

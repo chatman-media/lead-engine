@@ -472,3 +472,76 @@ a:hover {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── Onboarding checklist ──────────────────────────────────────────────── */
+
+.onboarding-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+  margin-bottom: 32px;
+}
+
+.onboarding-header h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.onboarding-header small {
+  font-size: 13px;
+}
+
+.onboarding-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.onboarding-step {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.onboarding-step.done {
+  opacity: 0.7;
+}
+
+.onboarding-mark {
+  font-size: 18px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.onboarding-step.done .onboarding-mark {
+  color: var(--ok);
+}
+
+.onboarding-step-body strong {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.onboarding-step-body small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.onboarding-cta {
+  padding: 6px 12px;
+  font-size: 12px;
+}
