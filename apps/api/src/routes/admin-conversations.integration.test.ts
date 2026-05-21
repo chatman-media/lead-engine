@@ -4,14 +4,19 @@
 
 import {
   applyAllMigrations,
+  channelIdentities,
+  channels,
   contacts,
   conversations,
   createIsolatedDb,
   messages,
+  outboundQueue,
   schema,
+  tenants,
   tryConnectToPg,
 } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
@@ -261,3 +266,161 @@ describe("admin-conversations", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("POST /api/admin/conversations/:id/reply", () => {
+  it("без auth → 401", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    const res = await app.request(`/api/admin/conversations/${id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "hi" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("invalid id → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/conversations/not-num/reply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "hi" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("empty text → 400", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("non-existent conversation → 404", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/conversations/999999/reply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "hi" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("conversation без channel_identity → 409", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    // У conv A0 нет channel_identity (мы их не seed'или) → 409.
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "hello from operator" }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("conversation с активным channel_identity → 200, message + outbound row", async () => {
+    if (!sql) return;
+    // Setup: добавить channel + identity для conv A0's contact.
+    const id = conversationIdsA[0]!;
+    const [conv] = await db
+      .select({ contactId: conversations.userId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    const contactId = conv!.contactId;
+
+    const now = Math.floor(Date.now() / 1000);
+    const [ch] = await db
+      .insert(channels)
+      .values({
+        tenantId: tenantA,
+        kind: "telegram_bot",
+        externalId: "replybot",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: channels.id });
+    await db.insert(channelIdentities).values({
+      contactId,
+      channelId: ch!.id,
+      externalUserId: "tg-user-42",
+      createdAt: now,
+    });
+
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Привет от оператора" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      messageId: number;
+      channelKind: string;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.channelKind).toBe("telegram_bot");
+    expect(body.messageId).toBeGreaterThan(0);
+
+    // Verify message in DB with role=human.
+    const [msg] = await db
+      .select({ role: messages.role, text: messages.text, metaJson: messages.metaJson })
+      .from(messages)
+      .where(eq(messages.id, body.messageId));
+    expect(msg!.role).toBe("human");
+    expect(msg!.text).toBe("Привет от оператора");
+    expect(msg!.metaJson).toContain("adminId");
+
+    // Verify outbound queue row.
+    const [out] = await db
+      .select()
+      .from(outboundQueue)
+      .where(eq(outboundQueue.idempotencyKey, `admin-reply-${body.messageId}`));
+    expect(out).toBeDefined();
+    expect(out!.status).toBe("pending");
+    expect(out!.channelId).toBe(ch!.id);
+    const payload = JSON.parse(out!.payloadJson) as {
+      externalUserId: string;
+      parts: Array<{ kind: string; text: string }>;
+    };
+    expect(payload.externalUserId).toBe("tg-user-42");
+    expect(payload.parts[0]!.text).toBe("Привет от оператора");
+
+    // Verify conversation.mode → human.
+    const [convAfter] = await db
+      .select({ mode: conversations.mode })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(convAfter!.mode).toBe("human");
+  });
+
+  it("cross-tenant: B пытается reply на A's conv → 404", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    const res = await authReq(tokenB, `/api/admin/conversations/${id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "trying" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("text > 4000 → 400", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    const longText = "x".repeat(4001);
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: longText }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+// tenantB used only as cross-tenant guard
+void tenants;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
@@ -41,6 +41,8 @@ export function SaasConversations() {
   } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState("");
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
@@ -106,6 +108,33 @@ export function SaasConversations() {
     };
     // biome-ignore lint/correctness/useExhaustiveDependencies: navigate stable
   }, [selectedId]);
+
+  async function handleReply(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedId) return;
+    const text = replyText.trim();
+    if (!text) return;
+    setSending(true);
+    setError("");
+    try {
+      await saas.replyToConversation(selectedId, text);
+      setReplyText("");
+      await refreshDetail(selectedId);
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      if (err instanceof ApiError) {
+        if (err.status === 409) {
+          setError("Не удалось отправить: канал клиента недоступен (удалён?)");
+        } else {
+          setError(`Ошибка ${err.status}: ${err.errorCode}`);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setSending(false);
+    }
+  }
 
   // Auto-poll the selected thread + list every 5s.
   useEffect(() => {
@@ -207,6 +236,23 @@ export function SaasConversations() {
                   ))
                 )}
               </div>
+              <form className="inbox-reply" onSubmit={handleReply}>
+                <textarea
+                  placeholder={
+                    detail.conversation.mode === "human"
+                      ? "Ваше сообщение от имени оператора…"
+                      : "Перехватить диалог — отправить от оператора. Бот перестанет отвечать (mode → human)."
+                  }
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  rows={2}
+                  maxLength={4000}
+                  disabled={sending}
+                />
+                <button type="submit" disabled={sending || !replyText.trim()}>
+                  {sending ? "Отправляем…" : "Отправить"}
+                </button>
+              </form>
             </>
           ) : (
             <p className="muted">Диалог не загружен</p>

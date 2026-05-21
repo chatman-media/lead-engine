@@ -1,5 +1,12 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
-import { contacts, conversations, messages } from "@chatman-media/storage";
+import {
+  channelIdentities,
+  channels,
+  contacts,
+  conversations,
+  messages,
+  outboundQueue,
+} from "@chatman-media/storage";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { Hono } from "hono";
 
@@ -156,6 +163,138 @@ export function makeAdminConversationsRoutes(
     return c.json({
       conversation: result.conversation,
       messages: [...result.messages].reverse(),
+    });
+  });
+
+  /**
+   * POST /api/admin/conversations/:id/reply
+   * Body: { text }
+   *
+   * Operator takeover: вставляет message с role='human', enqueue'ит
+   * outbound для отправки клиенту через channel-adapter (worker pickup),
+   * выставляет conversation.mode='human' (AI больше не отвечает).
+   *
+   * Errors:
+   *   400 — invalid id / empty text / no json
+   *   404 — conversation не найден
+   *   409 — нет channel_identity для этого contact'а (контакт пришёл из
+   *         channel, который удалили; нечем доставить ответ)
+   *
+   * NB: для пилотов берём первый telegram_bot channel_identity. Multi-channel
+   * routing (whatsapp/web) — отдельный PR.
+   */
+  app.post("/api/admin/conversations/:id/reply", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId;
+    const idStr = c.req.param("id");
+    const conversationId = Number.parseInt(idStr, 10);
+    if (!Number.isFinite(conversationId) || conversationId <= 0) {
+      return c.json({ error: "invalid conversation id" }, 400);
+    }
+    let body: { text?: unknown };
+    try {
+      body = (await c.req.json()) as { text?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text) return c.json({ error: "text required" }, 400);
+    if (text.length > 4000) {
+      return c.json({ error: "text too long (max 4000)" }, 400);
+    }
+
+    const nowEpoch = Math.floor(Date.now() / 1000);
+
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      // 1. Find conversation + contactId.
+      const [conv] = await tx
+        .select({
+          id: conversations.id,
+          contactId: conversations.userId,
+        })
+        .from(conversations)
+        .where(
+          and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)),
+        );
+      if (!conv) return { kind: "not_found" } as const;
+
+      // 2. Find first active telegram_bot channel_identity для этого contact'а.
+      const [identity] = await tx
+        .select({
+          channelDbId: channels.id,
+          channelKind: channels.kind,
+          externalUserId: channelIdentities.externalUserId,
+        })
+        .from(channelIdentities)
+        .innerJoin(channels, eq(channels.id, channelIdentities.channelId))
+        .where(
+          and(
+            eq(channelIdentities.contactId, conv.contactId),
+            eq(channels.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!identity) return { kind: "no_channel" } as const;
+
+      // 3. Insert message (role='human', adminId в meta для аудита).
+      const [msg] = await tx
+        .insert(messages)
+        .values({
+          tenantId,
+          conversationId,
+          role: "human",
+          text,
+          metaJson: JSON.stringify({ adminId, sentVia: "admin-reply" }),
+          createdAt: nowEpoch,
+        })
+        .returning({ id: messages.id });
+
+      // 4. Build OutboundEnvelope JSON и enqueue.
+      const envelope = {
+        channelId: String(identity.channelDbId),
+        externalUserId: identity.externalUserId,
+        parts: [{ kind: "text", text }],
+      };
+      // idempotencyKey производный от message.id (auto-increment serial),
+      // поэтому коллизий не будет — onConflict не нужен (partial unique
+      // index требует WHERE clause, drizzle target column'у этого не даёт).
+      const idempotencyKey = `admin-reply-${msg!.id}`;
+      await tx.insert(outboundQueue).values({
+        tenantId,
+        channelId: identity.channelDbId,
+        conversationId,
+        payloadJson: JSON.stringify(envelope),
+        idempotencyKey,
+        scheduledAt: nowEpoch,
+        createdAt: nowEpoch,
+      });
+
+      // 5. Conversation mode → human, lastMessageAt → now.
+      await tx
+        .update(conversations)
+        .set({ mode: "human", lastMessageAt: nowEpoch })
+        .where(eq(conversations.id, conversationId));
+
+      return {
+        kind: "sent",
+        messageId: msg!.id,
+        channelKind: identity.channelKind,
+      } as const;
+    });
+
+    if (outcome.kind === "not_found") {
+      return c.json({ error: "conversation not found" }, 404);
+    }
+    if (outcome.kind === "no_channel") {
+      return c.json(
+        { error: "no active channel for this contact — cannot deliver" },
+        409,
+      );
+    }
+    return c.json({
+      ok: true,
+      messageId: outcome.messageId,
+      channelKind: outcome.channelKind,
     });
   });
 

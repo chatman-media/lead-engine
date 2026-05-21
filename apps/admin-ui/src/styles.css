@@ -710,3 +710,44 @@ a:hover {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.inbox-reply {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.inbox-reply textarea {
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  resize: vertical;
+  font: inherit;
+  min-height: 44px;
+}
+
+.inbox-reply textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.inbox-reply button {
+  padding: 10px 18px;
+  background: var(--accent);
+  color: #0b0d10;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.inbox-reply button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
