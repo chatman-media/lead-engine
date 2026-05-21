@@ -9,16 +9,30 @@ export {
   type ConversationRow,
   type Db,
   DrizzleKbStore,
+  type ExperimentAllocationEntry,
+  ExperimentsRepo,
+  type ExperimentRow,
   LeadsRepo,
   type LeadRow,
   MessagesRepo,
   type MessageRow,
   OutboundQueueRepo,
   type OutboundQueueRow,
+  parseAllocation,
   type RepoCtx,
+  type SkillAggregateRow,
+  type SkillOutcomeRow,
+  SkillOutcomesRepo,
   StylesRepo,
   type StyleRow,
 } from "./dal/index.ts";
+export {
+  type AnalyzeLeadOpts,
+  type AnalysisResult,
+  CoachAnalyzer,
+  type CoachAnalyzerOpts,
+  extractUserAssistantPairs,
+} from "./coach-analyzer.ts";
 export {
   allowedTransitions,
   FunnelTransitionError,
@@ -31,11 +45,18 @@ export {
   type LeadHookContext,
   transitionLeadState,
 } from "./lead-lifecycle.ts";
+export { loadExperimentVariants } from "./experiment-router.ts";
 export {
   LlmMemoryExtractor,
   type MemoryExtractor,
   runMemoryExtraction,
 } from "./memory-extractor.ts";
+export {
+  applyClassifiedStage,
+  LlmStageClassifier,
+  RegexStageClassifier,
+  type StageClassifier,
+} from "./stage-classifier.ts";
 export {
   decryptSecret,
   encryptSecret,
@@ -65,3 +86,4 @@ export {
   systemClock,
   type TenantContext,
 } from "./types.ts";
+export { withTenant } from "./with-tenant.ts";

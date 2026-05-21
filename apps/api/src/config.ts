@@ -21,6 +21,17 @@ export interface ApiConfig {
    */
   telegramWebhookSecret: string;
   /**
+   * Verify-token для WhatsApp Cloud setup'а (Meta dashboard → Webhooks →
+   * Verify Token). Если задан, /webhook/whatsapp/:slug подключается.
+   * Пусто = WhatsApp webhook'и не принимаются.
+   */
+  whatsappVerifyToken: string;
+  /**
+   * Stripe webhook signing secret (whsec_...) — опционально. Если пусто,
+   * /webhook/stripe не подключается и Stripe-billing просто не работает.
+   */
+  stripeWebhookSecret: string;
+  /**
    * Опционально: дополнительный fast-path SELECT во время /healthz —
    * если БД лежит, мы возвращаем 503 и трафик переключается на старый
    * sales-guru до восстановления.
@@ -52,6 +63,58 @@ export interface ApiConfig {
     baseUrl: string;
     dim: number;
   };
+  /**
+   * Опционально: slug дефолтного sales-style для legacy tenant'а. Если
+   * задан, RagReplyStrategy.resolveStyle подгрузит StylesRepo.findActiveBySlug
+   * (с парсингом через @chatman-media/rag StyleSchema) и передаст в
+   * answerWithRag. Стиль строит system prompt через composeSystemPrompt
+   * (persona + sales framework + hooks + skills).
+   *
+   * Пусто = answerWithRag fallback на DEFAULT_PERSONA.
+   *
+   * Доступные styles в legacy tenant'е (после seed-styles script):
+   *   alina-infinity-v1, flirty-belfort-v1, empathetic-nepq-v1, cold-direct-pas-v1
+   */
+  defaultStyleSlug: string;
+  /**
+   * Корневой домен платформы (env PLATFORM_BASE_DOMAIN). Если задан —
+   * admin-API routes под /admin/* активируются с tenant-context-middleware:
+   * subdomain → c.var.tenantSlug. Без него admin-API отключён (только
+   * webhook'и и /metrics + /healthz).
+   *
+   * Примеры: "leadengine.app", "staging.leadengine.app". В dev оставляем
+   * пустым.
+   */
+  platformBaseDomain: string;
+  /**
+   * Slug запущенного эксперимента (status='running' в БД). Если задан,
+   * RagReplyStrategy.resolveStyle использует ABRouter поверх variants
+   * из experiments.allocation_json (a/b routing by hash(contactId)).
+   * Эксперимент имеет приоритет над defaultStyleSlug.
+   */
+  experimentSlug: string;
+  /**
+   * Стратегия классификации sales-stage'а реплики:
+   *   - "regex" — быстрый regex-classifier (русские паттерны recruitment-uae)
+   *   - "llm" — LLM-based (использует chat-config), точнее но дороже
+   *   - "" (по умолчанию) — выключен, conversation.current_stage не пишется
+   */
+  stageClassifier: "regex" | "llm" | "";
+  /**
+   * Channel-web WebSocket-endpoint config:
+   *   - `enabled` — поднимается ли вообще (default true когда в БД есть
+   *      хотя бы один `channels.kind='web'` row, false иначе — runtime check'нется)
+   *   - `authSecret` — опциональный shared-secret для pilot-stage auth
+   *     (`?auth=X` в URL). Пусто = auth выключен. Production-grade JWT —
+   *     следующая итерация.
+   *   - `dispatcherPollMs` / `dispatcherBatchSize` — для in-process
+   *     WebOutboundDispatcher (claim'ит kind='web' rows из outbound_queue).
+   */
+  web: {
+    authSecret: string;
+    dispatcherPollMs: number;
+    dispatcherBatchSize: number;
+  };
 }
 
 function required(name: string): string {
@@ -70,6 +133,8 @@ export function loadApiConfig(): ApiConfig {
     databaseUrl: required("DATABASE_URL"),
     masterKeyHex: required("PLATFORM_MASTER_KEY"),
     telegramWebhookSecret: required("TELEGRAM_WEBHOOK_SECRET"),
+    whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
+    stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
     healthCheckTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "2000", 10),
     llm: {
       provider,
@@ -83,6 +148,16 @@ export function loadApiConfig(): ApiConfig {
       apiKey: process.env.LLM_EMBED_API_KEY ?? process.env.LLM_API_KEY ?? "",
       baseUrl: process.env.LLM_EMBED_BASE_URL ?? "",
       dim: Number.parseInt(process.env.LLM_EMBED_DIM ?? "1536", 10),
+    },
+    platformBaseDomain: process.env.PLATFORM_BASE_DOMAIN ?? "",
+    defaultStyleSlug: process.env.STYLE_SLUG ?? "",
+    experimentSlug: process.env.EXPERIMENT_SLUG ?? "",
+    stageClassifier:
+      (process.env.STAGE_CLASSIFIER ?? "") as ApiConfig["stageClassifier"],
+    web: {
+      authSecret: process.env.WEB_WS_AUTH_SECRET ?? "",
+      dispatcherPollMs: Number.parseInt(process.env.WEB_DISPATCHER_POLL_MS ?? "200", 10),
+      dispatcherBatchSize: Number.parseInt(process.env.WEB_DISPATCHER_BATCH ?? "32", 10),
     },
   };
 }

@@ -14,6 +14,13 @@ export {
   INTAKE_INTRO_RU,
   RECRUITMENT_UAE_INTAKE,
 } from "./intake.ts";
+export {
+  alinaInfinity,
+  coldDirectPas,
+  empatheticNepq,
+  flirtyBelfort,
+  RECRUITMENT_UAE_STYLES,
+} from "./styles/index.ts";
 export { RECRUITMENT_UAE_V1 } from "./template.ts";
 export {
   RECRUITMENT_UAE_VISA_INTERVIEW,

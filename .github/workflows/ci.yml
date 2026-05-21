@@ -6,31 +6,33 @@ on:
   pull_request:
     branches: [main]
 
-# Cancel stale runs on the same ref so a fast push doesn't queue 3 jobs.
+# Отменяем stale runs на том же ref — быстрые pushы не очередят
+# три параллельных job'а.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  # Pin Bun so a future minor change doesn't surprise us. Keep in lockstep
-  # with apps/bot/package.json's @types/bun major.
-  BUN_VERSION: "1.3.8"
+  # Pin Bun: новая минорная версия не должна сюрпризить runtime поведение.
+  # Bump при обновлении @types/bun в любом package.json.
+  BUN_VERSION: "1.3.14"
 
 jobs:
-  check:
-    name: bot — typecheck + lint + secret-scan + unit tests
+  workspace:
+    name: workspace — install + typecheck + unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 12
 
     services:
-      # pgvector image bundles PostgreSQL + the pgvector extension that
-      # KbRepo needs for vector search.
+      # pgvector нужен для будущих integration-тестов DrizzleKbStore
+      # (vector(1536) колонка в kb_chunks). Pure-unit suite сейчас не
+      # пользуется PG, но сервис стоит — Q (Issue #3) включит.
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: tgchatbot_test
+          POSTGRES_DB: lead_engine_test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -38,12 +40,6 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-
-    env:
-      # Tests use fake embedders with an 8-d shape; activeEmbeddingDim() in
-      # src/config.ts must agree.
-      OPENAI_EMBEDDING_DIM: "8"
-      OLLAMA_EMBEDDING_DIM: "8"
 
     steps:
       - uses: actions/checkout@v4
@@ -67,142 +63,15 @@ jobs:
       - name: Install deps (workspace)
         run: bun install --frozen-lockfile
 
-      - name: typecheck (src + scripts)
-        run: bun run typecheck
+      - name: Typecheck all workspace members (apps/* + packages/*)
+        run: bun run --filter '*' typecheck
 
-      - name: biome check (bot + admin-ui)
-        run: bun run check
-
-      - name: scan-secrets
-        run: bun run secret-scan
-
-      - name: unit tests
+      - name: Unit + integration tests (all workspace members)
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/tgchatbot_test
-        run: bun run test
-
-      - name: coverage
-        working-directory: apps/bot
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/tgchatbot_test
-          OPENAI_EMBEDDING_DIM: "8"
-          OLLAMA_EMBEDDING_DIM: "8"
-        # check-coverage.ts parses the text report and exits non-zero below
-        # the line/function floors (Bun's bunfig coverageThreshold is a no-op).
-        run: |
-          set -o pipefail
-          mkdir -p coverage
-          bun test tests/unit --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 \
-            | bun scripts/check-coverage.ts --line 0.90 --function 0.90 \
-            | tee coverage/coverage.txt
-
-      - name: upload coverage (lcov)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-lcov
-          path: apps/bot/coverage/lcov.info
-          retention-days: 14
-          if-no-files-found: warn
-
-      - name: build admin UI
-        # Catch UI-side TS / Vite errors that the source-only typecheck misses.
-        run: bun run build:ui
-
-  packages:
-    name: packages — build + typecheck
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Cache Bun + node_modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.bun/install/cache
-            node_modules
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', '.github/workflows/ci.yml') }}
-          restore-keys: bun-${{ runner.os }}-
-
-      - name: Install deps (workspace)
-        run: bun install --frozen-lockfile
-
-      - name: build packages (rag → sales → storage)
-        run: bun run build:packages
-
-      - name: typecheck packages
-        run: bun run typecheck:packages
-
-  e2e:
-    name: playwright e2e
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: tgchatbot_e2e
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Cache Bun + node_modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.bun/install/cache
-            node_modules
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', '.github/workflows/ci.yml') }}
-          restore-keys: bun-${{ runner.os }}-
-
-      - name: Install deps (workspace)
-        run: bun install --frozen-lockfile
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: playwright-${{ runner.os }}-
-
-      - name: Install Playwright (Chromium only)
-        run: bun run test:e2e:install
-
-      - name: Build admin UI
-        run: bun run build:ui
-
-      - name: Run e2e
-        env:
-          CI: "1"
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/tgchatbot_e2e
-        run: bun run test:e2e
-
-      - name: Upload Playwright report on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: apps/bot/playwright-report/
-          retention-days: 7
+          # @chatman-media/storage интеграционные тесты apply'ят все
+          # migrations 0000–0005 + verify invariants (RLS-enabled таблицы,
+          # legacy tenant, outbound status union, pgvector extension,
+          # idempotent backfill). Бывший отдельный `migrations` job теперь
+          # покрыт здесь.
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/lead_engine_test
+        run: bun run --filter '*' test

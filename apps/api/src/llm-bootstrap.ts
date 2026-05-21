@@ -1,17 +1,26 @@
 import {
   type Db,
   DrizzleKbStore,
+  ExperimentsRepo,
   LlmMemoryExtractor,
   LlmReplyStrategy,
+  LlmStageClassifier,
+  loadExperimentVariants,
   type MemoryExtractor,
   MessagesRepo,
+  parseStyleConfig,
   RagReplyStrategy,
+  RegexStageClassifier,
   type ReplyStrategy,
+  type StageClassifier,
+  StylesRepo,
 } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
-import type { EmbeddingClient as RagEmbeddingClient } from "@chatman-media/rag";
+import type { PlatformMetrics } from "@chatman-media/observability";
+import { ABRouter, type EmbeddingClient as RagEmbeddingClient, type Style } from "@chatman-media/rag";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import type { ApiConfig } from "./config.ts";
+import { wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
 
 /**
  * Bootstrap LlmRouter + ReplyStrategy. На текущем этапе single-tenant
@@ -29,7 +38,11 @@ import type { ApiConfig } from "./config.ts";
  * Опциональный memory extractor. Использует тот же chat-config что и
  * reply-strategy. apps/api прокидывает его в webhook-route → ProcessInboundDeps.
  */
-export function makeMemoryExtractor(cfg: ApiConfig, db: Db): MemoryExtractor | null {
+export function makeMemoryExtractor(
+  cfg: ApiConfig,
+  db: Db,
+  metrics?: PlatformMetrics,
+): MemoryExtractor | null {
   if (!cfg.llm.provider || !cfg.llm.apiKey || !cfg.llm.model) {
     return null;
   }
@@ -43,12 +56,66 @@ export function makeMemoryExtractor(cfg: ApiConfig, db: Db): MemoryExtractor | n
     ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
   });
   return new LlmMemoryExtractor(
-    { resolveChat: (tenantId: number) => router.resolveChat(tenantId, "chat") },
+    {
+      resolveChat: (tenantId: number) => {
+        const inner = router.resolveChat(tenantId, "chat");
+        return metrics
+          ? wrapChatClient(inner, metrics, { provider: cfg.llm.provider, purpose: "memory" })
+          : inner;
+      },
+    },
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
   );
 }
 
-export function makeReplyStrategy(cfg: ApiConfig, db: Db): ReplyStrategy | null {
+/**
+ * Опциональный stage classifier. На "regex" — pure CPU без LLM cost.
+ * На "llm" — требует chat-config (тот же что reply-strategy). На пустом —
+ * null (current_stage не пишется).
+ */
+export function makeStageClassifier(
+  cfg: ApiConfig,
+  db: Db,
+  metrics?: PlatformMetrics,
+): StageClassifier | null {
+  void db; // db не нужен classifier'у; pipeline передаёт deps.db в applyClassifiedStage.
+  if (cfg.stageClassifier === "regex") {
+    return new RegexStageClassifier();
+  }
+  if (cfg.stageClassifier === "llm") {
+    if (!cfg.llm.provider || !cfg.llm.apiKey || !cfg.llm.model) {
+      console.warn(
+        "[apps/api] STAGE_CLASSIFIER=llm requested but chat LLM not configured — disabling",
+      );
+      return null;
+    }
+    const router = new InMemoryLlmRouter();
+    router.setConfig({
+      tenantId: 1,
+      purpose: "chat",
+      provider: cfg.llm.provider,
+      model: cfg.llm.model,
+      apiKey: cfg.llm.apiKey,
+      ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
+    });
+    return new LlmStageClassifier({
+      resolveChat: (tenantId: number) => {
+        const inner = router.resolveChat(tenantId, "chat");
+        return metrics
+          ? wrapChatClient(inner, metrics, { provider: cfg.llm.provider, purpose: "stage" })
+          : inner;
+      },
+      tenantId: 1,
+    });
+  }
+  return null;
+}
+
+export function makeReplyStrategy(
+  cfg: ApiConfig,
+  db: Db,
+  metrics?: PlatformMetrics,
+): ReplyStrategy | null {
   if (!cfg.llm.provider || !cfg.llm.apiKey || !cfg.llm.model) {
     return null;
   }
@@ -86,15 +153,89 @@ export function makeReplyStrategy(cfg: ApiConfig, db: Db): ReplyStrategy | null 
     ...(cfg.embed.baseUrl ? { baseUrl: cfg.embed.baseUrl } : {}),
   });
 
+  // resolveStyle: priority chain
+  //   1. EXPERIMENT_SLUG задан → ABRouter поверх variants из experiments.
+  //      allocation_json. Deterministic by hash(contactId+experiment.slug) —
+  //      один контакт всегда получает тот же variant.
+  //   2. STYLE_SLUG задан → load active style → передать as-is.
+  //   3. Иначе → undefined, RagReplyStrategy fall back'нет на DEFAULT_PERSONA.
+  //
+  // Кеширование: experiment variants и default style загружаются один раз
+  // на первый запрос per tenant, дальше держатся в памяти. Operator-правки
+  // (паузу эксперимента, swap style) требуют рестарта apps/api.
+  const styleCache = new Map<number, Style | null>();
+  const experimentCache = new Map<number, ABRouter | "absent">();
+  const defaultSlug = cfg.defaultStyleSlug;
+  const experimentSlug = cfg.experimentSlug;
+
+  const resolveStyle =
+    experimentSlug || defaultSlug
+      ? async (input: { tenantId: number; contactId: number }): Promise<Style | null> => {
+          // (1) experiment first
+          if (experimentSlug) {
+            let router = experimentCache.get(input.tenantId);
+            if (router === undefined) {
+              const expRepo = new ExperimentsRepo({ db, tenantId: input.tenantId });
+              const stylesRepo = new StylesRepo({ db, tenantId: input.tenantId });
+              const exp = await expRepo.findRunningBySlug(experimentSlug);
+              if (exp) {
+                const variants = await loadExperimentVariants(exp, stylesRepo);
+                if (variants) {
+                  router = new ABRouter({ variants, salt: exp.slug });
+                  experimentCache.set(input.tenantId, router);
+                } else {
+                  experimentCache.set(input.tenantId, "absent");
+                  router = "absent";
+                }
+              } else {
+                experimentCache.set(input.tenantId, "absent");
+                router = "absent";
+              }
+            }
+            if (router !== "absent") {
+              return router.assign(String(input.contactId)).style;
+            }
+          }
+          // (2) default-style fallback
+          if (defaultSlug) {
+            const cached = styleCache.get(input.tenantId);
+            if (cached !== undefined) return cached;
+            const repo = new StylesRepo({ db, tenantId: input.tenantId });
+            const row = await repo.findActiveBySlug(defaultSlug);
+            const parsed = row ? parseStyleConfig(row.configJson) : null;
+            styleCache.set(input.tenantId, parsed);
+            return parsed;
+          }
+          return null;
+        }
+      : undefined;
+
+  const chatProviderLabel = cfg.llm.provider;
+  const embedProviderLabel = embedProvider;
+
   return new RagReplyStrategy(
     {
       template,
-      resolveChat: (tenantId: number) => router.resolveChat(tenantId, "chat"),
+      resolveChat: (tenantId: number) => {
+        const inner = router.resolveChat(tenantId, "chat");
+        return metrics
+          ? wrapChatClient(inner, metrics, { provider: chatProviderLabel, purpose: "chat" })
+          : inner;
+      },
       // llm-router'овский EmbeddingClient structurally compatible с
       // rag's EmbeddingClient (embed(inputs)→number[][] + dim).
-      resolveEmbed: (tenantId: number) =>
-        router.resolveEmbed(tenantId) as unknown as RagEmbeddingClient,
+      resolveEmbed: (tenantId: number) => {
+        const inner = router.resolveEmbed(tenantId);
+        const wrapped = metrics
+          ? wrapEmbeddingClient(inner, metrics, {
+              provider: embedProviderLabel,
+              purpose: "embed",
+            })
+          : inner;
+        return wrapped as unknown as RagEmbeddingClient;
+      },
       resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
+      ...(resolveStyle ? { resolveStyle } : {}),
     },
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
   );

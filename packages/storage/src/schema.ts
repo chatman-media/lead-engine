@@ -678,7 +678,7 @@ export const outboundQueue = pgTable("outbound_queue", {
   sentAt: integer("sent_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
 }, (t) => [
-  check("outbound_status_check", sql`${t.status} IN ('pending','sent','failed','cancelled')`),
+  check("outbound_status_check", sql`${t.status} IN ('pending','processing','sent','failed','cancelled')`),
   // Главный индекс для воркер-полинга: pending ordered by scheduled_at.
   index("idx_outbound_pending").on(t.status, t.scheduledAt).where(sql`status = 'pending'`),
   index("idx_outbound_tenant_channel").on(t.tenantId, t.channelId),
@@ -715,4 +715,60 @@ export const llmProviderConfigs = pgTable("llm_provider_configs", {
     sql`${t.provider} IN ('openai','openrouter','ollama','anthropic')`,
   ),
   uniqueIndex("uniq_llm_configs_tenant_purpose").on(t.tenantId, t.purpose),
+]);
+
+// ---- Stripe billing (миграция 0006) -----------------------------------
+
+// Tenant ↔ Stripe Customer (1:1). Один tenant в Stripe = одна Customer
+// карточка с своим email + payment methods.
+export const stripeCustomers = pgTable("stripe_customers", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  stripeCustomerId: text("stripe_customer_id").notNull(),
+  email: text("email"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("stripe_customers_tenant_unique").on(t.tenantId),
+  uniqueIndex("stripe_customers_external_unique").on(t.stripeCustomerId),
+  index("idx_stripe_customers_tenant").on(t.tenantId),
+]);
+
+// История подписок tenant'а. Webhook'ом customer.subscription.updated мы
+// UPSERT'им строку (stripe_subscription_id — UNIQUE). Текущая active —
+// одна на tenant'а; canceled/incomplete_expired остаются в истории.
+export const stripeSubscriptions = pgTable("stripe_subscriptions", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  stripeCustomerId: text("stripe_customer_id").notNull(),
+  stripeSubscriptionId: text("stripe_subscription_id").notNull(),
+  stripePriceId: text("stripe_price_id").notNull(),
+  status: text("status").notNull(),
+  currentPeriodStart: integer("current_period_start"),
+  currentPeriodEnd: integer("current_period_end"),
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+  metadataJson: text("metadata_json"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check(
+    "stripe_subscriptions_status_check",
+    sql`${t.status} IN ('incomplete','incomplete_expired','trialing','active','past_due','canceled','unpaid','paused')`,
+  ),
+  uniqueIndex("stripe_subscriptions_external_unique").on(t.stripeSubscriptionId),
+  index("idx_stripe_subscriptions_tenant").on(t.tenantId),
+  index("idx_stripe_subscriptions_status").on(t.status),
+]);
+
+// Idempotency для webhook'ов — Stripe at-least-once delivers, иногда
+// дублирует на retry. Перед обработкой смотрим есть ли event.id —
+// если есть, skip с 200.
+export const stripeWebhookEvents = pgTable("stripe_webhook_events", {
+  stripeEventId: text("stripe_event_id").primaryKey(),
+  type: text("type").notNull(),
+  tenantId: integer("tenant_id").references(() => tenants.id, { onDelete: "set null" }),
+  processedAt: integer("processed_at").notNull().default(epochNow()),
+  rawPayload: text("raw_payload").notNull(),
+}, (t) => [
+  index("idx_stripe_webhook_events_type").on(t.type, sql`${t.processedAt} DESC`),
 ]);

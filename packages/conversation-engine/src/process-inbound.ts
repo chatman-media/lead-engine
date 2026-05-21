@@ -11,6 +11,7 @@ import type {
 } from "./dal/index.ts";
 import { type MemoryExtractor, runMemoryExtraction } from "./memory-extractor.ts";
 import { dispatchOutbound } from "./outbound-dispatch.ts";
+import { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
 import {
   type ChannelContext,
   type Clock,
@@ -69,6 +70,21 @@ export interface ProcessInboundDeps {
    * template.hooks.extractFields (тот — regex; этот — LLM).
    */
   memoryExtractor?: MemoryExtractor;
+  /**
+   * Опциональный stage classifier (opener|qualify|pitch|objection|close).
+   * Если задан, после persist user-message pipeline классифицирует stage
+   * и пишет в conversations.current_stage (если отличается от previous).
+   *
+   * Sales-engine использует current_stage для выбора stage-specific
+   * промптов в composeSystemPrompt; admin-UI — для отображения позиции
+   * кандидата в воронке.
+   */
+  stageClassifier?: StageClassifier;
+  /**
+   * Drizzle db, нужен stage classifier'у для UPDATE conversations.current_stage.
+   * Когда stageClassifier=null — может быть опущен.
+   */
+  db?: import("./dal/types.ts").Db;
   sink?: PipelineSink;
   clock?: Clock;
 }
@@ -225,6 +241,39 @@ export async function processInbound(
       // Hook-failure не должен ломать main pipeline — reply всё равно
       // должен сработать. Логируем, продолжаем.
       deps.sink?.log?.("warn", "extractFields hook failed", {
+        tenantId: deps.tenant.tenantId,
+        conversationId: conversation.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // 5a-bis. Stage classification (если classifier задан). Идёт ПОСЛЕ
+  // extractFields и ПЕРЕД memory + reply: новая current_stage будет
+  // прочитана reply-strategy'ей если она инжектит её в composeSystemPrompt.
+  if (deps.stageClassifier && deps.db && !existingMsg && text.length > 0) {
+    try {
+      const newStage = await deps.stageClassifier.classify({
+        userMessageText: text,
+        previousStage: conversation.currentStage,
+        isFirstUserMessage: conversationCreated,
+      });
+      const changed = await applyClassifiedStage({
+        db: deps.db,
+        tenantId: deps.tenant.tenantId,
+        conversationId: conversation.id,
+        newStage,
+      });
+      if (changed) {
+        deps.sink?.log?.("debug", "conversation stage classified", {
+          tenantId: deps.tenant.tenantId,
+          conversationId: conversation.id,
+          from: conversation.currentStage,
+          to: newStage,
+        });
+      }
+    } catch (err) {
+      deps.sink?.log?.("warn", "stage classifier failed", {
         tenantId: deps.tenant.tenantId,
         conversationId: conversation.id,
         error: err instanceof Error ? err.message : String(err),

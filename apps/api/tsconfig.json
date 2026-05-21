@@ -13,8 +13,11 @@
     "paths": {
       "@chatman-media/channel-core": ["../../packages/channel-core/src/index.ts"],
       "@chatman-media/channel-telegram": ["../../packages/channel-telegram/src/index.ts"],
+      "@chatman-media/channel-web": ["../../packages/channel-web/src/index.ts"],
+      "@chatman-media/channel-whatsapp": ["../../packages/channel-whatsapp/src/index.ts"],
       "@chatman-media/conversation-engine": ["../../packages/conversation-engine/src/index.ts"],
       "@chatman-media/llm-router": ["../../packages/llm-router/src/index.ts"],
+      "@chatman-media/observability": ["../../packages/observability/src/index.ts"],
       "@chatman-media/rag": ["../../packages/rag/src/index.ts"],
       "@chatman-media/storage": ["../../packages/storage/src/index.ts"],
       "@chatman-media/vertical-recruitment-uae": [

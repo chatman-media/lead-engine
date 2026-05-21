@@ -29,6 +29,14 @@ export interface LeadRow {
 export class LeadsRepo {
   constructor(private readonly ctx: RepoCtx) {}
 
+  async byId(id: number): Promise<LeadRow | null> {
+    const [row] = await this.ctx.db
+      .select()
+      .from(leadsTable)
+      .where(and(eq(leadsTable.id, id), eq(leadsTable.tenantId, this.ctx.tenantId)));
+    return (row as LeadRow) ?? null;
+  }
+
   async findByContactId(contactId: number): Promise<LeadRow | null> {
     const [row] = await this.ctx.db
       .select()

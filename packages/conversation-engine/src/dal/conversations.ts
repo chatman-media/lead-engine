@@ -1,5 +1,5 @@
 import { conversations as conversationsTable } from "@chatman-media/storage";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
 export interface ConversationRow {
@@ -73,6 +73,20 @@ export class ConversationsRepo {
       .returning();
     if (!row) throw new Error("conversations.create: insert returned no row");
     return row as ConversationRow;
+  }
+
+  /**
+   * Последние N conversations tenant'а, sorted DESC by last_message_at
+   * (NULLS LAST). Для admin-UI inbox.
+   */
+  async recent(limit: number): Promise<ConversationRow[]> {
+    const rows = await this.ctx.db
+      .select()
+      .from(conversationsTable)
+      .where(eq(conversationsTable.tenantId, this.ctx.tenantId))
+      .orderBy(sql`last_message_at DESC NULLS LAST`)
+      .limit(limit);
+    return rows as ConversationRow[];
   }
 
   async touchLastMessageAt(conversationId: number, nowEpoch: number): Promise<void> {

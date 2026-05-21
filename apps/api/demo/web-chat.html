@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lead-engine · channel-web demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: dark light;
+        --bg: #0b0d10;
+        --panel: #13161b;
+        --text: #e8eaed;
+        --muted: #8a8f98;
+        --accent: #6aa6ff;
+        --err: #ff8b8b;
+        --ok: #91d990;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      body {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 16px;
+        gap: 12px;
+      }
+      h1 {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0;
+      }
+      .controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr auto;
+        gap: 8px;
+        background: var(--panel);
+        padding: 10px;
+        border-radius: 6px;
+      }
+      .controls label {
+        display: grid;
+        gap: 4px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .controls input {
+        background: var(--bg);
+        border: 1px solid #2a2f37;
+        color: var(--text);
+        padding: 6px 8px;
+        border-radius: 4px;
+        font: inherit;
+      }
+      button {
+        background: var(--accent);
+        color: #0b0d10;
+        border: 0;
+        padding: 6px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 600;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      button.secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid #2a2f37;
+      }
+      #log {
+        background: var(--panel);
+        border-radius: 6px;
+        padding: 12px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 12px;
+      }
+      .row {
+        margin: 4px 0;
+      }
+      .row .ts {
+        color: var(--muted);
+        margin-right: 8px;
+      }
+      .row.user {
+        color: var(--accent);
+      }
+      .row.bot {
+        color: var(--ok);
+      }
+      .row.system {
+        color: var(--muted);
+        font-style: italic;
+      }
+      .row.error {
+        color: var(--err);
+      }
+      .compose {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+      }
+      .compose input {
+        background: var(--panel);
+        border: 1px solid #2a2f37;
+        color: var(--text);
+        padding: 8px 12px;
+        border-radius: 4px;
+        font: inherit;
+      }
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .status::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #6c727b;
+      }
+      .status.connected::before {
+        background: var(--ok);
+      }
+      .status.error::before {
+        background: var(--err);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>lead-engine · channel-web demo client</h1>
+      <p style="color: var(--muted); margin: 4px 0 0">
+        Standalone HTML — открыть локально (file://) или с любого host'а. Соединяется через
+        WebSocket с <code>ws[s]://&lt;host&gt;/ws/&lt;tenantSlug&gt;</code>. Auth через
+        опциональный shared-secret (<code>?auth=...</code>) — должен совпадать с
+        <code>WEB_WS_AUTH_SECRET</code> в env apps/api.
+      </p>
+      <div id="status" class="status">disconnected</div>
+    </header>
+
+    <section class="controls">
+      <label>
+        host
+        <input id="host" value="localhost:3000" />
+      </label>
+      <label>
+        tenant slug
+        <input id="slug" value="legacy" />
+      </label>
+      <label>
+        user id
+        <input id="user" value="demo-user-1" />
+      </label>
+      <label>
+        auth (optional)
+        <input id="auth" value="" placeholder="WEB_WS_AUTH_SECRET" />
+      </label>
+      <div style="grid-column: 1 / -1; display: flex; gap: 8px">
+        <button id="connect">Connect</button>
+        <button id="disconnect" class="secondary" disabled>Disconnect</button>
+        <button id="clear" class="secondary">Clear log</button>
+      </div>
+    </section>
+
+    <div id="log"></div>
+
+    <form id="compose" class="compose">
+      <input id="text" placeholder="Type a message and press Enter" autocomplete="off" />
+      <button type="submit" id="send" disabled>Send</button>
+    </form>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const log = $("log");
+      const status = $("status");
+      let ws = null;
+
+      function nowTs() {
+        return new Date().toISOString().slice(11, 19);
+      }
+      function append(kind, text) {
+        const row = document.createElement("div");
+        row.className = `row ${kind}`;
+        row.innerHTML = `<span class="ts">${nowTs()}</span>${
+          kind === "user" ? "→" : kind === "bot" ? "←" : "·"
+        } ${text}`;
+        log.appendChild(row);
+        log.scrollTop = log.scrollHeight;
+      }
+
+      function setConnected(open) {
+        $("connect").disabled = open;
+        $("disconnect").disabled = !open;
+        $("send").disabled = !open;
+        status.className = open ? "status connected" : "status";
+        status.textContent = open ? "connected" : "disconnected";
+      }
+
+      function uuid() {
+        return crypto.randomUUID();
+      }
+
+      $("connect").onclick = () => {
+        const host = $("host").value.trim();
+        const slug = $("slug").value.trim();
+        const user = $("user").value.trim();
+        const auth = $("auth").value.trim();
+        if (!host || !slug || !user) {
+          append("error", "host, slug, user — все обязательны");
+          return;
+        }
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        const params = new URLSearchParams({ user });
+        if (auth) params.set("auth", auth);
+        const url = `${proto}://${host}/ws/${slug}?${params.toString()}`;
+        append("system", `connecting to ${url}`);
+
+        try {
+          ws = new WebSocket(url);
+        } catch (err) {
+          append("error", `WebSocket constructor: ${err.message}`);
+          return;
+        }
+        ws.addEventListener("open", () => {
+          setConnected(true);
+        });
+        ws.addEventListener("message", (ev) => {
+          let frame;
+          try {
+            frame = JSON.parse(ev.data);
+          } catch {
+            append("error", `non-JSON: ${ev.data}`);
+            return;
+          }
+          if (frame.type === "ready") {
+            append("system", `ready (channel=${frame.channelId}, user=${frame.userId})`);
+          } else if (frame.type === "bot_text") {
+            append("bot", frame.text);
+          } else if (frame.type === "error") {
+            append("error", `server: ${frame.code} — ${frame.message}`);
+          } else {
+            append("system", JSON.stringify(frame));
+          }
+        });
+        ws.addEventListener("close", (ev) => {
+          append("system", `closed code=${ev.code}${ev.reason ? ` reason=${ev.reason}` : ""}`);
+          setConnected(false);
+          ws = null;
+        });
+        ws.addEventListener("error", () => {
+          status.className = "status error";
+          status.textContent = "error (см. devtools)";
+        });
+      };
+
+      $("disconnect").onclick = () => {
+        ws?.close(1000, "client requested");
+      };
+
+      $("clear").onclick = () => {
+        log.innerHTML = "";
+      };
+
+      $("compose").onsubmit = (e) => {
+        e.preventDefault();
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const text = $("text").value.trim();
+        if (!text) return;
+        const id = uuid();
+        ws.send(JSON.stringify({ type: "user_text", id, text }));
+        append("user", text);
+        $("text").value = "";
+      };
+    </script>
+  </body>
+</html>

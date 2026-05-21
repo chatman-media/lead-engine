@@ -17,4 +17,9 @@ export type {
   TgVoice,
 } from "./bot-api/types.ts";
 export { parseUpdate } from "./bot-api/update-parser.ts";
-export { TelegramUserbotAdapter } from "./userbot/adapter.ts";
+export {
+  TelegramUserbotAdapter,
+  type TelegramUserbotAdapterOptions,
+  type UserbotHealthEvent,
+  type UserbotHealthStatus,
+} from "./userbot/adapter.ts";
