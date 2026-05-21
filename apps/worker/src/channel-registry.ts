@@ -1,8 +1,8 @@
 import type { ChannelAdapter } from "@chatman-media/channel-core";
 import { TelegramBotAdapter } from "@chatman-media/channel-telegram";
+import { type Db, getDecryptedSecret } from "@chatman-media/conversation-engine";
 import { channels, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 /**
  * Worker-side channel registry. В отличие от apps/api (которая держит
@@ -18,21 +18,56 @@ export interface WorkerChannelEntry {
   adapter: ChannelAdapter;
 }
 
+export interface LoadFromDbOpts {
+  /** Master-key для расшифровки tenant_secrets. Если не задан — только env fallback. */
+  masterKeyHex?: string;
+  /** Logger hook для warning'ов о decrypt-ошибках. */
+  onWarn?: (msg: string, ctx: Record<string, unknown>) => void;
+}
+
 export class WorkerChannelRegistry {
   private readonly byDbId = new Map<number, WorkerChannelEntry>();
 
-  private resolveBotToken(tenantSlug: string): string | null {
+  /**
+   * Priority: tenant_secrets[credentialsRef] (decrypt) → env fallback.
+   * См. apps/api/src/channel-registry.ts для rationale.
+   */
+  private async resolveBotToken(
+    db: Db,
+    tenantId: number,
+    tenantSlug: string,
+    credentialsRef: string | null,
+    masterKeyHex: string | undefined,
+    onWarn: ((msg: string, ctx: Record<string, unknown>) => void) | undefined,
+  ): Promise<string | null> {
+    if (credentialsRef && masterKeyHex) {
+      try {
+        const decrypted = await getDecryptedSecret({
+          db,
+          tenantId,
+          key: credentialsRef,
+          masterKeyHex,
+        });
+        if (decrypted) return decrypted;
+      } catch (err) {
+        onWarn?.("failed to decrypt worker channel bot token", {
+          tenantId,
+          tenantSlug,
+          credentialsRef,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     const envKey = `BOT_TOKEN_${tenantSlug.toUpperCase().replace(/-/g, "_")}`;
     return process.env[envKey] ?? process.env.BOT_TOKEN ?? null;
   }
 
-  async loadFromDb(
-    db: PostgresJsDatabase<{ channels: typeof channels; tenants: typeof tenants }>,
-  ): Promise<void> {
+  async loadFromDb(db: Db, opts: LoadFromDbOpts = {}): Promise<void> {
     const rows = await db
       .select({
         channelId: channels.id,
         kind: channels.kind,
+        credentialsRef: channels.credentialsRef,
         tenantId: tenants.id,
         tenantSlug: tenants.slug,
       })
@@ -42,7 +77,14 @@ export class WorkerChannelRegistry {
 
     for (const row of rows) {
       if (row.kind !== "telegram_bot") continue;
-      const token = this.resolveBotToken(row.tenantSlug);
+      const token = await this.resolveBotToken(
+        db,
+        row.tenantId,
+        row.tenantSlug,
+        row.credentialsRef,
+        opts.masterKeyHex,
+        opts.onWarn,
+      );
       if (!token) continue;
       const adapter = new TelegramBotAdapter({ id: String(row.channelId), token });
       this.byDbId.set(row.channelId, {

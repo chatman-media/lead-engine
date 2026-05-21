@@ -29,7 +29,10 @@ async function main() {
 
   const channels = new WorkerChannelRegistry();
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
-  await channels.loadFromDb(db as any);
+  await channels.loadFromDb(db as any, {
+    masterKeyHex: cfg.masterKeyHex,
+    onWarn: (msg, ctx) => log.warn(`worker-channel-registry: ${msg}`, ctx),
+  });
 
   const abort = new AbortController();
   const dispatcher = new OutboundDispatcher(db, channels, {
