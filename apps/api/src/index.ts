@@ -59,6 +59,7 @@ async function main() {
         ? { embed: `${cfg.embed.provider}/${cfg.embed.model}` }
         : {}),
       ...(cfg.defaultStyleSlug ? { style: cfg.defaultStyleSlug } : {}),
+      ...(cfg.experimentSlug ? { experiment: cfg.experimentSlug } : {}),
     });
   } else {
     log.info("LLM not configured — bot will persist messages but stay silent");

@@ -66,6 +66,13 @@ export interface ApiConfig {
    */
   defaultStyleSlug: string;
   /**
+   * Slug запущенного эксперимента (status='running' в БД). Если задан,
+   * RagReplyStrategy.resolveStyle использует ABRouter поверх variants
+   * из experiments.allocation_json (a/b routing by hash(contactId)).
+   * Эксперимент имеет приоритет над defaultStyleSlug.
+   */
+  experimentSlug: string;
+  /**
    * Стратегия классификации sales-stage'а реплики:
    *   - "regex" — быстрый regex-classifier (русские паттерны recruitment-uae)
    *   - "llm" — LLM-based (использует chat-config), точнее но дороже
@@ -105,6 +112,7 @@ export function loadApiConfig(): ApiConfig {
       dim: Number.parseInt(process.env.LLM_EMBED_DIM ?? "1536", 10),
     },
     defaultStyleSlug: process.env.STYLE_SLUG ?? "",
+    experimentSlug: process.env.EXPERIMENT_SLUG ?? "",
     stageClassifier:
       (process.env.STAGE_CLASSIFIER ?? "") as ApiConfig["stageClassifier"],
   };

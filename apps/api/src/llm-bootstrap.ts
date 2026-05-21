@@ -1,9 +1,11 @@
 import {
   type Db,
   DrizzleKbStore,
+  ExperimentsRepo,
   LlmMemoryExtractor,
   LlmReplyStrategy,
   LlmStageClassifier,
+  loadExperimentVariants,
   type MemoryExtractor,
   MessagesRepo,
   parseStyleConfig,
@@ -14,7 +16,7 @@ import {
   StylesRepo,
 } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
-import type { EmbeddingClient as RagEmbeddingClient, Style } from "@chatman-media/rag";
+import { ABRouter, type EmbeddingClient as RagEmbeddingClient, type Style } from "@chatman-media/rag";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import type { ApiConfig } from "./config.ts";
 
@@ -125,25 +127,62 @@ export function makeReplyStrategy(cfg: ApiConfig, db: Db): ReplyStrategy | null 
     ...(cfg.embed.baseUrl ? { baseUrl: cfg.embed.baseUrl } : {}),
   });
 
-  // resolveStyle: per-call lookup активного style по slug из БД. Если
-  // STYLE_SLUG не задан в env → resolveStyle не передаётся и RagReplyStrategy
-  // fall back'нет на DEFAULT_PERSONA. Лёгкий per-tenant cache на N-секунд
-  // здесь намеренно не делаем — invalidate'ить нечем, операторские правки
-  // styles прилетают редко; lookup из БД дешёвый (single row по
-  // partial-unique index uniq_styles_active_slug).
+  // resolveStyle: priority chain
+  //   1. EXPERIMENT_SLUG задан → ABRouter поверх variants из experiments.
+  //      allocation_json. Deterministic by hash(contactId+experiment.slug) —
+  //      один контакт всегда получает тот же variant.
+  //   2. STYLE_SLUG задан → load active style → передать as-is.
+  //   3. Иначе → undefined, RagReplyStrategy fall back'нет на DEFAULT_PERSONA.
+  //
+  // Кеширование: experiment variants и default style загружаются один раз
+  // на первый запрос per tenant, дальше держатся в памяти. Operator-правки
+  // (паузу эксперимента, swap style) требуют рестарта apps/api.
   const styleCache = new Map<number, Style | null>();
+  const experimentCache = new Map<number, ABRouter | "absent">();
   const defaultSlug = cfg.defaultStyleSlug;
-  const resolveStyle = defaultSlug
-    ? async (input: { tenantId: number }): Promise<Style | null> => {
-        const cached = styleCache.get(input.tenantId);
-        if (cached !== undefined) return cached;
-        const repo = new StylesRepo({ db, tenantId: input.tenantId });
-        const row = await repo.findActiveBySlug(defaultSlug);
-        const parsed = row ? parseStyleConfig(row.configJson) : null;
-        styleCache.set(input.tenantId, parsed);
-        return parsed;
-      }
-    : undefined;
+  const experimentSlug = cfg.experimentSlug;
+
+  const resolveStyle =
+    experimentSlug || defaultSlug
+      ? async (input: { tenantId: number; contactId: number }): Promise<Style | null> => {
+          // (1) experiment first
+          if (experimentSlug) {
+            let router = experimentCache.get(input.tenantId);
+            if (router === undefined) {
+              const expRepo = new ExperimentsRepo({ db, tenantId: input.tenantId });
+              const stylesRepo = new StylesRepo({ db, tenantId: input.tenantId });
+              const exp = await expRepo.findRunningBySlug(experimentSlug);
+              if (exp) {
+                const variants = await loadExperimentVariants(exp, stylesRepo);
+                if (variants) {
+                  router = new ABRouter({ variants, salt: exp.slug });
+                  experimentCache.set(input.tenantId, router);
+                } else {
+                  experimentCache.set(input.tenantId, "absent");
+                  router = "absent";
+                }
+              } else {
+                experimentCache.set(input.tenantId, "absent");
+                router = "absent";
+              }
+            }
+            if (router !== "absent") {
+              return router.assign(String(input.contactId)).style;
+            }
+          }
+          // (2) default-style fallback
+          if (defaultSlug) {
+            const cached = styleCache.get(input.tenantId);
+            if (cached !== undefined) return cached;
+            const repo = new StylesRepo({ db, tenantId: input.tenantId });
+            const row = await repo.findActiveBySlug(defaultSlug);
+            const parsed = row ? parseStyleConfig(row.configJson) : null;
+            styleCache.set(input.tenantId, parsed);
+            return parsed;
+          }
+          return null;
+        }
+      : undefined;
 
   return new RagReplyStrategy(
     {

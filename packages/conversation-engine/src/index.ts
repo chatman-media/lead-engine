@@ -9,12 +9,16 @@ export {
   type ConversationRow,
   type Db,
   DrizzleKbStore,
+  type ExperimentAllocationEntry,
+  ExperimentsRepo,
+  type ExperimentRow,
   LeadsRepo,
   type LeadRow,
   MessagesRepo,
   type MessageRow,
   OutboundQueueRepo,
   type OutboundQueueRow,
+  parseAllocation,
   type RepoCtx,
   StylesRepo,
   type StyleRow,
@@ -31,6 +35,7 @@ export {
   type LeadHookContext,
   transitionLeadState,
 } from "./lead-lifecycle.ts";
+export { loadExperimentVariants } from "./experiment-router.ts";
 export {
   LlmMemoryExtractor,
   type MemoryExtractor,
