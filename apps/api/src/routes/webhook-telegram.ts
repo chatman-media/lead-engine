@@ -18,6 +18,7 @@ import type { PlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { Hono } from "hono";
 import type { ChannelRegistry } from "../channel-registry.ts";
+import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
 
 /**
  * Telegram webhook handler. Telegram постит JSON на /webhook/telegram/:slug
@@ -77,6 +78,12 @@ export function makeTelegramWebhookRoutes(opts: {
    */
   sink?: PipelineSink;
   metrics?: PlatformMetrics;
+  /**
+   * Опциональный per-tenant rate limiter (см. apps/api/src/lib/rate-limiter.ts).
+   * Если задан и tenant превысил лимит — webhook handler возвращает 429 с
+   * Retry-After header (Telegram уважает 429 и replay'нёт позже).
+   */
+  rateLimiter?: InboundRateLimiter;
 }): Hono {
   const app = new Hono();
 
@@ -98,6 +105,23 @@ export function makeTelegramWebhookRoutes(opts: {
     // несколько (multi-bot per tenant) — нужен дополнительный
     // dispatch-критерий, например `bot_id` в URL.
     const entry = entries[0]!;
+
+    // Rate-limit check: protect от spam-волн which drain LLM credits.
+    if (opts.rateLimiter) {
+      const decision = opts.rateLimiter.check(entry.tenantId);
+      if (!decision.allowed) {
+        opts.metrics?.webhookRequests.inc(1, { channel: "telegram_bot", status: "429" });
+        c.header("Retry-After", String(decision.retryAfterSec ?? 60));
+        return c.json(
+          {
+            error: "rate_limit_exceeded",
+            reason: decision.reason,
+            retryAfterSec: decision.retryAfterSec,
+          },
+          429,
+        );
+      }
+    }
 
     let update: TgUpdate;
     try {

@@ -125,6 +125,16 @@ export interface ApiConfig {
    */
   stageClassifier: "regex" | "llm" | "";
   /**
+   * Inbound rate limit per tenant. Защита от runaway-волн (spam) которые
+   * сжигают LLM credits. Disabled если оба значения = 0.
+   *  - perMinute: msg/min/tenant (default 60)
+   *  - perHour: msg/hour/tenant (default 600)
+   */
+  rateLimit: {
+    perMinute: number;
+    perHour: number;
+  };
+  /**
    * Channel-web WebSocket-endpoint config:
    *   - `enabled` — поднимается ли вообще (default true когда в БД есть
    *      хотя бы один `channels.kind='web'` row, false иначе — runtime check'нется)
@@ -185,6 +195,10 @@ export function loadApiConfig(): ApiConfig {
       authSecret: process.env.WEB_WS_AUTH_SECRET ?? "",
       dispatcherPollMs: Number.parseInt(process.env.WEB_DISPATCHER_POLL_MS ?? "200", 10),
       dispatcherBatchSize: Number.parseInt(process.env.WEB_DISPATCHER_BATCH ?? "32", 10),
+    },
+    rateLimit: {
+      perMinute: Number.parseInt(process.env.RATE_LIMIT_PER_MIN ?? "60", 10),
+      perHour: Number.parseInt(process.env.RATE_LIMIT_PER_HOUR ?? "600", 10),
     },
   };
 }

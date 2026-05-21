@@ -13,6 +13,7 @@ import { WebChannelRegistry } from "./lib/web-channel-registry.ts";
 import { WebOutboundDispatcher } from "./lib/web-dispatcher.ts";
 import { startWebInboundRunner } from "./lib/web-inbound-runner.ts";
 import { loadTenantLlmConfigs } from "./lib/llm-config-loader.ts";
+import { InboundRateLimiter } from "./lib/rate-limiter.ts";
 import { makeTenantReloader } from "./lib/tenant-reloader.ts";
 import {
   type LoadedRef,
@@ -246,6 +247,23 @@ async function main() {
 
   const sink = makeMetricsSink(metrics);
 
+  // Per-tenant inbound rate-limit. Disabled если оба значения = 0.
+  const rateLimiter =
+    cfg.rateLimit.perMinute > 0 || cfg.rateLimit.perHour > 0
+      ? new InboundRateLimiter({
+          perMinute: cfg.rateLimit.perMinute,
+          perHour: cfg.rateLimit.perHour,
+        })
+      : undefined;
+  if (rateLimiter) {
+    log.info("inbound rate-limit enabled", {
+      perMinute: cfg.rateLimit.perMinute,
+      perHour: cfg.rateLimit.perHour,
+    });
+  } else {
+    log.warn("inbound rate-limit disabled — runaway-cost protection off");
+  }
+
   app.route(
     "/",
     makeTelegramWebhookRoutes({
@@ -258,6 +276,7 @@ async function main() {
       stageClassifier,
       sink,
       metrics,
+      ...(rateLimiter ? { rateLimiter } : {}),
     }),
   );
 
@@ -288,6 +307,7 @@ async function main() {
         stageClassifier,
         sink,
         metrics,
+        ...(rateLimiter ? { rateLimiter } : {}),
       }),
     );
     if (!cfg.whatsappAppSecret) {

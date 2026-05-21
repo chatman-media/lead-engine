@@ -22,6 +22,7 @@ import type { PlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { Hono } from "hono";
 import type { ChannelRegistry } from "../channel-registry.ts";
+import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
 import {
   verifyWhatsAppSignature,
   WhatsAppSignatureError,
@@ -60,6 +61,7 @@ export function makeWhatsAppWebhookRoutes(opts: {
   stageClassifier?: StageClassifier | null;
   sink?: PipelineSink;
   metrics?: PlatformMetrics;
+  rateLimiter?: InboundRateLimiter;
 }): Hono {
   const app = new Hono();
 
@@ -111,6 +113,24 @@ export function makeWhatsAppWebhookRoutes(opts: {
       return c.json({ error: "no active whatsapp channel for tenant" }, 404);
     }
     const entry = entries[0]!;
+
+    // Rate-limit check (см. webhook-telegram).
+    if (opts.rateLimiter) {
+      const decision = opts.rateLimiter.check(entry.tenantId);
+      if (!decision.allowed) {
+        opts.metrics?.webhookRequests.inc(1, { channel: "whatsapp", status: "429" });
+        c.header("Retry-After", String(decision.retryAfterSec ?? 60));
+        return c.json(
+          {
+            error: "rate_limit_exceeded",
+            reason: decision.reason,
+            retryAfterSec: decision.retryAfterSec,
+          },
+          429,
+        );
+      }
+    }
+
     const adapter = entry.adapter as WhatsAppCloudAdapter;
 
     let payload: WaWebhookPayload;
