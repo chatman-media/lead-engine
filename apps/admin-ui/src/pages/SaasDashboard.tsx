@@ -202,6 +202,9 @@ export function SaasDashboard() {
           <Link to="/audit" className="nav-link">
             Аудит
           </Link>
+          <Link to="/diagnostics" className="nav-link">
+            Диагностика
+          </Link>
           <button type="button" onClick={handleLogout}>
             Выйти
           </button>

@@ -27,6 +27,7 @@ import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-
 import { makeAdminAuditRoutes } from "./routes/admin-audit.ts";
 import { makeAdminChannelsRoutes } from "./routes/admin-channels.ts";
 import { makeAdminConversationsRoutes } from "./routes/admin-conversations.ts";
+import { makeAdminDiagnosticsRoutes } from "./routes/admin-diagnostics.ts";
 import { makeAdminKbRoutes } from "./routes/admin-kb.ts";
 import { makeAdminLlmConfigsRoutes } from "./routes/admin-llm-configs.ts";
 import { makeAdminOnboardingRoutes } from "./routes/admin-onboarding.ts";
@@ -210,6 +211,10 @@ async function main() {
     makeAdminTenantRoutes({ db, onStatusChange: reloader.reloadChannels }),
   );
   log.info("admin-tenant routes enabled (pause/resume)");
+
+  // Diagnostics — health-check для tenant setup'а.
+  app.route("/", makeAdminDiagnosticsRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
+  log.info("admin-diagnostics route enabled");
 
   app.route(
     "/",
