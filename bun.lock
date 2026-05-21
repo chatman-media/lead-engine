@@ -47,6 +47,18 @@
         "typescript": "^6.0.3",
       },
     },
+    "packages/channel-telegram": {
+      "name": "@chatman-media/channel-telegram",
+      "version": "0.1.0",
+      "dependencies": {
+        "@chatman-media/channel-core": "workspace:*",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "^2.4.14",
+        "@types/bun": "1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
     "packages/rag": {
       "name": "@chatman-media/rag",
       "version": "1.2.1",
@@ -165,6 +177,8 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.4.14", "", { "os": "win32", "cpu": "x64" }, "sha512-WL0EG5qE+EAKomGXbf2g6VnSKJhTL3tXC0QRzWRwA5VpjxNYa6H4P7ZWfymbGE4IhZZQi1KXQ2R0YjwInmz2fA=="],
 
     "@chatman-media/channel-core": ["@chatman-media/channel-core@workspace:packages/channel-core"],
+
+    "@chatman-media/channel-telegram": ["@chatman-media/channel-telegram@workspace:packages/channel-telegram"],
 
     "@chatman-media/rag": ["@chatman-media/rag@workspace:packages/rag"],
 
