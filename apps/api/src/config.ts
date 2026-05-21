@@ -100,6 +100,21 @@ export interface ApiConfig {
    *   - "" (по умолчанию) — выключен, conversation.current_stage не пишется
    */
   stageClassifier: "regex" | "llm" | "";
+  /**
+   * Channel-web WebSocket-endpoint config:
+   *   - `enabled` — поднимается ли вообще (default true когда в БД есть
+   *      хотя бы один `channels.kind='web'` row, false иначе — runtime check'нется)
+   *   - `authSecret` — опциональный shared-secret для pilot-stage auth
+   *     (`?auth=X` в URL). Пусто = auth выключен. Production-grade JWT —
+   *     следующая итерация.
+   *   - `dispatcherPollMs` / `dispatcherBatchSize` — для in-process
+   *     WebOutboundDispatcher (claim'ит kind='web' rows из outbound_queue).
+   */
+  web: {
+    authSecret: string;
+    dispatcherPollMs: number;
+    dispatcherBatchSize: number;
+  };
 }
 
 function required(name: string): string {
@@ -139,5 +154,10 @@ export function loadApiConfig(): ApiConfig {
     experimentSlug: process.env.EXPERIMENT_SLUG ?? "",
     stageClassifier:
       (process.env.STAGE_CLASSIFIER ?? "") as ApiConfig["stageClassifier"],
+    web: {
+      authSecret: process.env.WEB_WS_AUTH_SECRET ?? "",
+      dispatcherPollMs: Number.parseInt(process.env.WEB_DISPATCHER_POLL_MS ?? "200", 10),
+      dispatcherBatchSize: Number.parseInt(process.env.WEB_DISPATCHER_BATCH ?? "32", 10),
+    },
   };
 }

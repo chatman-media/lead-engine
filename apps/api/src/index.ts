@@ -5,6 +5,10 @@ import { Hono } from "hono";
 import { ChannelRegistry } from "./channel-registry.ts";
 import { loadApiConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
+import { makeMetricsSink } from "./lib/metrics-sink.ts";
+import { WebChannelRegistry } from "./lib/web-channel-registry.ts";
+import { WebOutboundDispatcher } from "./lib/web-dispatcher.ts";
+import { startWebInboundRunner } from "./lib/web-inbound-runner.ts";
 import {
   makeMemoryExtractor,
   makeReplyStrategy,
@@ -13,11 +17,11 @@ import {
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
 import { makeAdminRoutes } from "./routes/admin.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
-import { makeMetricsSink } from "./lib/metrics-sink.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 import { makeWhatsAppWebhookRoutes } from "./routes/webhook-whatsapp.ts";
+import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
 /**
  * Mapping tenant.slug → VerticalTemplate. На текущем этапе один tenant —
@@ -138,9 +142,74 @@ async function main() {
     log.info("stripe webhook enabled");
   }
 
+  // ---- channel-web wire-up ----
+  // WebChannelAdapter держит pinned WS-connection'ы — adapter и
+  // dispatcher для web живут в этом процессе, в отличие от
+  // telegram/whatsapp где dispatcher в apps/worker. См. комментарий
+  // в WebOutboundDispatcher для rationale.
+  const webRegistry = new WebChannelRegistry();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
+  await webRegistry.loadFromDb(db as any);
+  const webAbort = new AbortController();
+  const webRunners: Promise<void>[] = [];
+  for (const entry of webRegistry.entries()) {
+    const runner = startWebInboundRunner({
+      entry,
+      db,
+      signal: webAbort.signal,
+      replyStrategy: replyStrategy ?? null,
+      resolveTemplate,
+      memoryExtractor,
+      stageClassifier,
+      sink,
+      metrics,
+      log,
+    });
+    webRunners.push(runner);
+  }
+  const webDispatcher = new WebOutboundDispatcher(db, webRegistry, {
+    pollMs: cfg.web.dispatcherPollMs,
+    batchSize: cfg.web.dispatcherBatchSize,
+    metrics,
+    log,
+  });
+  const webDispatcherPromise = webDispatcher.run(webAbort.signal).catch((err) => {
+    log.error("web dispatcher fatal", {
+      err: err instanceof Error ? err : new Error(String(err)),
+    });
+  });
+  const wsRoutes = makeWebSocketRoutes({
+    registry: webRegistry,
+    log,
+    metrics,
+    ...(cfg.web.authSecret ? { sharedSecret: cfg.web.authSecret } : {}),
+  });
+  if (webRegistry.size() > 0) {
+    log.info("channel-web enabled", {
+      channels: webRegistry.size(),
+      authSecret: cfg.web.authSecret ? "configured" : "off (dev mode)",
+    });
+  }
+
   const server = Bun.serve({
     port: cfg.port,
-    fetch: app.fetch,
+    // Кастомный fetch: сначала пытаемся upgrade'нуть WS, иначе — Hono app.
+    // Bun.serve.upgrade требует `server` reference, поэтому Hono mount'нуть
+    // как простой `fetch: app.fetch` нельзя.
+    fetch(req, srv) {
+      const upgradeFailure = wsRoutes.tryUpgrade(req, srv);
+      if (upgradeFailure) return upgradeFailure;
+      // tryUpgrade вернул undefined либо потому что upgrade прошёл (Bun
+      // ответит сам), либо потому что URL не /ws/* — отдаём Hono.
+      if (new URL(req.url).pathname.startsWith("/ws/")) {
+        // upgrade успешен — Bun сам ответит 101. Возвращать здесь нечего,
+        // но fetch обязан вернуть Response. Возвращаем заглушку, Bun её
+        // не отдаст клиенту т.к. socket уже hijacked.
+        return new Response(null, { status: 101 });
+      }
+      return app.fetch(req, srv);
+    },
+    websocket: wsRoutes.websocket,
   });
 
   log.info("listening", { port: server.port, url: `http://localhost:${server.port}` });
@@ -149,6 +218,10 @@ async function main() {
   const shutdown = async () => {
     log.info("shutting down");
     server.stop();
+    webAbort.abort();
+    webDispatcher.stop();
+    await Promise.allSettled([webDispatcherPromise, ...webRunners]);
+    webRegistry.closeAll();
     channels.closeAll();
     await close();
     process.exit(0);
