@@ -1,133 +1,72 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
-import { type Admin, api } from "./api.ts";
-import { Layout } from "./components/Layout.tsx";
-import { Analytics } from "./pages/Analytics.tsx";
-import { Chat } from "./pages/Chat.tsx";
-import { Chats } from "./pages/Chats.tsx";
-import { Coach } from "./pages/Coach.tsx";
-import { Experiments } from "./pages/Experiments.tsx";
-import { Home } from "./pages/Home.tsx";
-import { Kb } from "./pages/Kb.tsx";
-import { KbSuggestions } from "./pages/KbSuggestions.tsx";
-import { Leads } from "./pages/Leads.tsx";
-import { Library } from "./pages/Library.tsx";
-import { Login } from "./pages/Login.tsx";
-import { NewStyle } from "./pages/NewStyle.tsx";
-import { Operations } from "./pages/Operations.tsx";
-import { Operators } from "./pages/Operators.tsx";
-import { Pairwise } from "./pages/Pairwise.tsx";
-import { SelfPlay } from "./pages/SelfPlay.tsx";
-import { Settings } from "./pages/Settings.tsx";
-import { Skills } from "./pages/Skills.tsx";
-import { Status } from "./pages/Status.tsx";
-import { StyleDetail } from "./pages/StyleDetail.tsx";
-import { Styles } from "./pages/Styles.tsx";
-import { UserDetail } from "./pages/UserDetail.tsx";
-import { Users } from "./pages/Users.tsx";
-import { Vacancies } from "./pages/Vacancies.tsx";
-import { AdminWs } from "./ws.ts";
+import { getToken, saas } from "./api/saas.ts";
+import { SaasDashboard } from "./pages/SaasDashboard.tsx";
+import { SaasLogin } from "./pages/SaasLogin.tsx";
+import { SaasSignup } from "./pages/SaasSignup.tsx";
 
-export const ws = new AdminWs();
-
-/** The authenticated admin, available to any component under AuthGate. */
-export const AdminContext = createContext<Admin | null>(null);
-
-/** Read the current admin. Throws if used outside AuthGate (never happens
- *  for routed pages — they all render inside it). */
-export function useAdmin(): Admin {
-  const admin = useContext(AdminContext);
-  if (!admin) throw new Error("useAdmin used outside AuthGate");
-  return admin;
-}
-
-interface AuthState {
-  loading: boolean;
-  admin: Admin | null;
-}
-
+/**
+ * SaaS routing — заменяет легаси 24-страничный admin под старый
+ * tg-chatbot backend. Текущий scope: signup / login / dashboard
+ * (KB upload + list). Дополнительные страницы (conversations, leads,
+ * etc.) будут добавляться по мере wire-up'а соответствующих
+ * /api/admin/* endpoint'ов.
+ *
+ * Token хранится в localStorage (см. api/saas.ts). AuthGate проверяет
+ * /api/auth/me на mount; 401 → редирект на /login. Stateless server-
+ * side — token живёт 30 дней.
+ */
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<AuthState>({ loading: true, admin: null });
+  const [status, setStatus] = useState<"checking" | "auth" | "anon">("checking");
   const navigate = useNavigate();
 
   useEffect(() => {
-    api
+    let cancelled = false;
+    const token = getToken();
+    if (!token) {
+      setStatus("anon");
+      navigate("/login", { replace: true });
+      return;
+    }
+    saas
       .me()
-      .then(({ admin }) => {
-        setState({ loading: false, admin });
-        ws.connect();
+      .then(() => {
+        if (!cancelled) setStatus("auth");
       })
       .catch(() => {
-        setState({ loading: false, admin: null });
-        navigate("/admin/login", { replace: true });
+        if (!cancelled) {
+          setStatus("anon");
+          navigate("/login", { replace: true });
+        }
       });
+    return () => {
+      cancelled = true;
+    };
   }, [navigate]);
 
-  if (state.loading) {
-    return (
-      <div
-        style={{
-          height: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "var(--text-3)",
-          fontFamily: "var(--mono)",
-        }}
-      >
-        connecting…
-      </div>
-    );
+  if (status === "checking") {
+    return <div className="auth-checking">Проверяем сессию…</div>;
   }
-
-  if (!state.admin) return null;
-
-  return (
-    <AdminContext.Provider value={state.admin}>
-      <Layout admin={state.admin}>{children}</Layout>
-    </AdminContext.Provider>
-  );
+  if (status === "anon") return null;
+  return <>{children}</>;
 }
 
 export function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/admin/login" element={<Login />} />
+        <Route path="/login" element={<SaasLogin />} />
+        <Route path="/signup" element={<SaasSignup />} />
         <Route
-          path="/admin/*"
+          path="/dashboard"
           element={
             <AuthGate>
-              <Routes>
-                <Route index element={<Home />} />
-                <Route path="status" element={<Status />} />
-                <Route path="analytics" element={<Analytics />} />
-                <Route path="skills" element={<Skills />} />
-                <Route path="self-play" element={<SelfPlay />} />
-                <Route path="pairwise" element={<Pairwise />} />
-                <Route path="coach" element={<Coach />} />
-                <Route path="chats" element={<Chats />} />
-                <Route path="chats/:id" element={<Chat />} />
-                <Route path="users" element={<Users />} />
-                <Route path="users/:id" element={<UserDetail />} />
-                <Route path="leads" element={<Leads />} />
-                <Route path="vacancies" element={<Vacancies />} />
-                <Route path="kb" element={<Kb />} />
-                <Route path="kb-suggestions" element={<KbSuggestions />} />
-                <Route path="library" element={<Library />} />
-                <Route path="styles" element={<Styles />} />
-                <Route path="styles/new" element={<NewStyle />} />
-                <Route path="styles/:id" element={<StyleDetail />} />
-                <Route path="experiments" element={<Experiments />} />
-                <Route path="ops" element={<Operations />} />
-                <Route path="operators" element={<Operators />} />
-                <Route path="settings" element={<Settings />} />
-                <Route path="*" element={<Navigate to="/admin" replace />} />
-              </Routes>
+              <SaasDashboard />
             </AuthGate>
           }
         />
-        <Route path="*" element={<Navigate to="/admin" replace />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </BrowserRouter>
   );
