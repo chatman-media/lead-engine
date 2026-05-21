@@ -59,6 +59,15 @@
         "typescript": "^6.0.3",
       },
     },
+    "packages/llm-router": {
+      "name": "@chatman-media/llm-router",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@biomejs/biome": "^2.4.14",
+        "@types/bun": "1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
     "packages/rag": {
       "name": "@chatman-media/rag",
       "version": "1.2.1",
@@ -179,6 +188,8 @@
     "@chatman-media/channel-core": ["@chatman-media/channel-core@workspace:packages/channel-core"],
 
     "@chatman-media/channel-telegram": ["@chatman-media/channel-telegram@workspace:packages/channel-telegram"],
+
+    "@chatman-media/llm-router": ["@chatman-media/llm-router@workspace:packages/llm-router"],
 
     "@chatman-media/rag": ["@chatman-media/rag@workspace:packages/rag"],
 
