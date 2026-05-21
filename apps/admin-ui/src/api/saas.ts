@@ -108,6 +108,17 @@ export interface MessageRow {
   deletedAt: number | null;
 }
 
+export interface AuditEntry {
+  id: number;
+  action: string;
+  targetKind: string | null;
+  targetId: string | null;
+  details: Record<string, unknown> | null;
+  adminId: number | null;
+  adminEmail: string | null;
+  createdAt: number;
+}
+
 export interface OnboardingStatus {
   channelConnected: boolean;
   channelKind?: string;
@@ -304,5 +315,17 @@ export const saas = {
       method: "POST",
       body: JSON.stringify({ text }),
     });
+  },
+
+  // ── Audit log (read-only) ────────────────────────────────────────────
+  listAuditLog(opts: { limit?: number; cursor?: number } = {}) {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.cursor) params.set("cursor", String(opts.cursor));
+    const qs = params.toString();
+    return request<{
+      items: AuditEntry[];
+      nextCursor?: number;
+    }>(`/api/admin/audit-log${qs ? `?${qs}` : ""}`);
   },
 };

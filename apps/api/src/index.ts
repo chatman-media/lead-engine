@@ -24,6 +24,7 @@ import {
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeRequireAuth } from "./middleware/require-auth.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
+import { makeAdminAuditRoutes } from "./routes/admin-audit.ts";
 import { makeAdminChannelsRoutes } from "./routes/admin-channels.ts";
 import { makeAdminConversationsRoutes } from "./routes/admin-conversations.ts";
 import { makeAdminKbRoutes } from "./routes/admin-kb.ts";
@@ -196,7 +197,11 @@ async function main() {
 
   // Read-only conversations + messages для admin-UI inbox.
   app.route("/", makeAdminConversationsRoutes({ db }));
-  log.info("admin-conversations routes enabled (list + thread)");
+  log.info("admin-conversations routes enabled (list + thread + reply)");
+
+  // Audit log read API.
+  app.route("/", makeAdminAuditRoutes({ db }));
+  log.info("admin-audit routes enabled (read-only)");
 
   app.route(
     "/",

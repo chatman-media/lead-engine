@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { getToken, saas } from "./api/saas.ts";
+import { SaasAudit } from "./pages/SaasAudit.tsx";
 import { SaasChannels } from "./pages/SaasChannels.tsx";
 import { SaasConversations } from "./pages/SaasConversations.tsx";
 import { SaasDashboard } from "./pages/SaasDashboard.tsx";
@@ -97,6 +98,14 @@ export function App() {
           element={
             <AuthGate>
               <SaasConversations />
+            </AuthGate>
+          }
+        />
+        <Route
+          path="/audit"
+          element={
+            <AuthGate>
+              <SaasAudit />
             </AuthGate>
           }
         />
