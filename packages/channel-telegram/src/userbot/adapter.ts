@@ -9,9 +9,26 @@ import type {
   OutboundEnvelope,
   Sent,
 } from "@chatman-media/channel-core";
-import { TelegramClient as GramjsClient } from "telegram";
+import { Api, TelegramClient as GramjsClient } from "telegram";
 import { NewMessage, type NewMessageEvent } from "telegram/events/index.js";
 import { StringSession } from "telegram/sessions/index.js";
+
+/**
+ * Healthcheck-статусы MTProto userbot'а. apps/worker отслеживает их через
+ * healthEvents() async iterable и:
+ *   - "connected" → нормальная работа
+ *   - "auth_key_duplicated" → session revoked (оператор нажал "Terminate
+ *     other sessions" в TG-клиенте, либо Telegram сам killед). Требует
+ *     re-auth через admin-UI; supervisor НЕ должен respawn в петле.
+ *   - "connection_failed" → transient (network blip); supervisor respawn'ит.
+ */
+export type UserbotHealthStatus = "connected" | "auth_key_duplicated" | "connection_failed";
+
+export interface UserbotHealthEvent {
+  status: UserbotHealthStatus;
+  reason?: string;
+  at: number;
+}
 
 /**
  * MTProto userbot адаптер (личный аккаунт оператора через gramjs).
@@ -75,6 +92,17 @@ export class TelegramUserbotAdapter implements ChannelAdapter {
   private readonly inbox: Inbound[] = [];
   private waiters: Array<(v: IteratorResult<Inbound>) => void> = [];
   private closed = false;
+  /**
+   * LRU-кэш Message-объектов для последующего downloadMedia. Ключ —
+   * `${external_user_id}:${msg_id}`. Размер ограничен MAX_RECENT_MESSAGES
+   * чтобы long-running процесс не утекал. Если worker'у нужен старый
+   * media — он должен скачать его сразу в onInbound, не отсрочивать.
+   */
+  private static readonly MAX_RECENT_MESSAGES = 256;
+  private readonly recentMessages = new Map<string, unknown>();
+  /** Healthcheck events queue (separate от inbox'а). */
+  private readonly healthQueue: UserbotHealthEvent[] = [];
+  private healthWaiters: Array<(v: IteratorResult<UserbotHealthEvent>) => void> = [];
 
   constructor(opts: TelegramUserbotAdapterOptions) {
     this.id = opts.id;
@@ -114,16 +142,64 @@ export class TelegramUserbotAdapter implements ChannelAdapter {
         }
       } catch (err) {
         lastErr = err instanceof Error ? err.message : String(err);
+        // AUTH_KEY_DUPLICATED / AUTH_KEY_UNREGISTERED — terminal состояние.
+        // Прерываем retry-loop, эмитим health event "auth_key_duplicated"
+        // и бросаем — supervisor НЕ должен respawn (требуется операторская
+        // re-auth через admin-UI).
+        if (lastErr && /AUTH_KEY_(DUPLICATED|UNREGISTERED)/i.test(lastErr)) {
+          this.emitHealth({ status: "auth_key_duplicated", reason: lastErr });
+          throw new Error(`[telegram-userbot] auth key revoked: ${lastErr}`);
+        }
       }
       if (attempt < maxAttempts) {
         await new Promise((r) => setTimeout(r, this.opts.retryDelayMs ?? 5000));
       }
     }
+    this.emitHealth({ status: "connection_failed", reason: lastErr ?? "no specific error" });
     throw new Error(
       `[telegram-userbot] connect failed after ${maxAttempts} attempts${
         lastErr ? `: ${lastErr}` : ""
       }`,
     );
+  }
+
+  // ---- Health events stream ---------------------------------------------
+
+  private emitHealth(event: Omit<UserbotHealthEvent, "at">): void {
+    const full: UserbotHealthEvent = { ...event, at: Math.floor(Date.now() / 1000) };
+    const waiter = this.healthWaiters.shift();
+    if (waiter) {
+      waiter({ value: full, done: false });
+      return;
+    }
+    this.healthQueue.push(full);
+  }
+
+  /**
+   * Async iterable healthcheck-events для supervisor'а в apps/worker.
+   * Emit'ится при connect success ("connected") / connect failure
+   * ("connection_failed") / auth revocation ("auth_key_duplicated").
+   * Supervisor читает их и решает: respawn vs notify-operator-and-stop.
+   */
+  healthEvents(): AsyncIterable<UserbotHealthEvent> {
+    const self = this;
+    return {
+      [Symbol.asyncIterator](): AsyncIterator<UserbotHealthEvent> {
+        return {
+          next(): Promise<IteratorResult<UserbotHealthEvent>> {
+            const queued = self.healthQueue.shift();
+            if (queued) return Promise.resolve({ value: queued, done: false });
+            if (self.closed) {
+              return Promise.resolve({
+                value: undefined as unknown as UserbotHealthEvent,
+                done: true,
+              });
+            }
+            return new Promise((resolve) => self.healthWaiters.push(resolve));
+          },
+        };
+      },
+    };
   }
 
   private registerHandler(client: GramjsClient): void {
@@ -132,8 +208,29 @@ export class TelegramUserbotAdapter implements ChannelAdapter {
       if (!msg) return;
       if ("out" in msg && (msg as { out?: boolean }).out) return; // skip own outgoing
       const inbound = this.eventToInbound(event);
-      if (inbound) this.enqueue(inbound);
+      if (inbound) {
+        // Кэш для downloadMedia — без него mediaRef из Inbound не резолвится
+        // обратно к Message-объекту (MTProto не даёт публичный file_id).
+        this.cacheMessage(inbound.externalUserId, inbound.externalMessageId, msg);
+        this.enqueue(inbound);
+      }
     }, new NewMessage({}));
+    this.emitHealth({ status: "connected" });
+  }
+
+  private cacheMessage(externalUserId: string, externalMessageId: string, msg: unknown): void {
+    const key = `${externalUserId}:${externalMessageId}`;
+    this.recentMessages.set(key, msg);
+    if (this.recentMessages.size > TelegramUserbotAdapter.MAX_RECENT_MESSAGES) {
+      // Map preserves insertion order — drop oldest entries first.
+      const dropCount = this.recentMessages.size - TelegramUserbotAdapter.MAX_RECENT_MESSAGES;
+      const it = this.recentMessages.keys();
+      for (let i = 0; i < dropCount; i++) {
+        const next = it.next();
+        if (next.done) break;
+        this.recentMessages.delete(next.value);
+      }
+    }
   }
 
   private eventToInbound(event: NewMessageEvent): Inbound | null {
@@ -235,6 +332,11 @@ export class TelegramUserbotAdapter implements ChannelAdapter {
       const w = this.waiters.shift();
       w?.({ value: undefined as unknown as Inbound, done: true });
     }
+    while (this.healthWaiters.length > 0) {
+      const w = this.healthWaiters.shift();
+      w?.({ value: undefined as unknown as UserbotHealthEvent, done: true });
+    }
+    this.recentMessages.clear();
     if (this.client) {
       try {
         await this.client.disconnect();
@@ -336,36 +438,61 @@ export class TelegramUserbotAdapter implements ChannelAdapter {
     );
   }
 
-  async downloadMedia(mediaRef: MediaRef): Promise<Response> {
+  /**
+   * Скачивает медиа через cached Message-объект. mediaRef.externalRef —
+   * msg.id из last-received Inbound; caller вызывает downloadMedia сразу
+   * после inbound'а (worker pipe'ит в media-кэш).
+   *
+   * mediaRef.externalRef сам по себе не хватает (gramjs.downloadMedia
+   * требует Message), поэтому мы кэшируем последние MAX_RECENT_MESSAGES
+   * объектов в recentMessages Map при registerHandler.
+   *
+   * Throws если: client не подключён / mediaRef не найден в кэше /
+   * downloadMedia ошибается.
+   */
+  async downloadMedia(mediaRef: MediaRef, opts?: { externalUserId?: string }): Promise<Response> {
     if (!this.client) {
       throw new Error("[telegram-userbot] downloadMedia called before connect()");
     }
-    // MTProto не отдаёт URL — сразу streams bytes. Заворачиваем в Response
-    // через ReadableStream для единообразия с channel-core API.
-    const messageId = Number(mediaRef.externalRef);
-    if (Number.isNaN(messageId)) {
-      throw new Error("[telegram-userbot] downloadMedia: invalid externalRef");
+    if (!opts?.externalUserId) {
+      throw new Error(
+        "[telegram-userbot] downloadMedia requires opts.externalUserId — pass it from Inbound.externalUserId",
+      );
     }
-    // gramjs.downloadMedia требует Message-объект (либо id+chat). Поскольку
-    // у нас нет chat-контекста на этом уровне (mediaRef channel-agnostic),
-    // реализация сейчас минимальна — апстрим вызов делается в worker'е,
-    // который держит контекст из последнего Inbound.event.raw.
-    throw new Error(
-      "[telegram-userbot] downloadMedia: implement via Inbound.raw — pending integration with worker",
-    );
+    const key = `${opts.externalUserId}:${mediaRef.externalRef}`;
+    const cached = this.recentMessages.get(key);
+    if (!cached) {
+      throw new Error(
+        `[telegram-userbot] downloadMedia: msg ${key} evicted from cache (>${TelegramUserbotAdapter.MAX_RECENT_MESSAGES} messages ago); download immediately on inbound`,
+      );
+    }
+    // gramjs.downloadMedia принимает Message + опции и возвращает Buffer.
+    const bytes = (await this.client.downloadMedia(
+      cached as Parameters<GramjsClient["downloadMedia"]>[0],
+    )) as Buffer | Uint8Array | string | null;
+    if (!bytes) {
+      throw new Error("[telegram-userbot] downloadMedia: empty result");
+    }
+    const buf = typeof bytes === "string" ? Buffer.from(bytes) : Buffer.from(bytes);
+    return new Response(buf);
   }
 
   async signalTyping(externalUserId: string): Promise<void> {
     if (!this.client) return;
     try {
       const peer = await this.resolvePeer(externalUserId);
-      // gramjs invoke setTyping через Api.messages.SetTyping не выставлено
-      // в публичном TelegramClient API напрямую. sales-guru делал это через
-      // raw invoke; здесь — no-op, чтобы не падать. Когда добавим raw
-      // Api.* проброс — заменим.
-      void peer;
+      // Raw Api.messages.SetTyping. action=SendMessageTypingAction — indicator
+      // погаснет автоматически через ~6 сек у клиента, либо при send'е
+      // следующего сообщения.
+      // biome-ignore lint/suspicious/noExplicitAny: raw gramjs invoke API
+      await (this.client as any).invoke(
+        new Api.messages.SetTyping({
+          peer: peer as Parameters<GramjsClient["sendMessage"]>[0],
+          action: new Api.SendMessageTypingAction(),
+        }),
+      );
     } catch {
-      // peer не резолвился — typing-индикатор optional, glob'аем
+      // typing-индикатор optional, не ломаем pipeline если не получилось.
     }
   }
 
