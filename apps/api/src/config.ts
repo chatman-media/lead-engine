@@ -14,6 +14,13 @@ export interface ApiConfig {
    */
   masterKeyHex: string;
   /**
+   * Secret для HMAC-SHA256 sign/verify session tokens (admin-API auth).
+   * env PLATFORM_AUTH_SECRET. Fallback на PLATFORM_MASTER_KEY если первый
+   * не задан — для dev-deploy'ев которые ещё не добавили отдельный env.
+   * Production: обязан быть отдельный 32+ byte secret.
+   */
+  authSecret: string;
+  /**
    * Webhook secret для Telegram setWebhook — Telegram пробрасывает
    * заголовок `X-Telegram-Bot-Api-Secret-Token`, мы валидируем его до
    * парсинга payload'а. Один секрет на платформу (per-tenant роутинг —
@@ -139,6 +146,7 @@ export function loadApiConfig(): ApiConfig {
     port: Number.parseInt(process.env.PORT ?? "3000", 10),
     databaseUrl: required("DATABASE_URL"),
     masterKeyHex: required("PLATFORM_MASTER_KEY"),
+    authSecret: process.env.PLATFORM_AUTH_SECRET ?? required("PLATFORM_MASTER_KEY"),
     telegramWebhookSecret: required("TELEGRAM_WEBHOOK_SECRET"),
     whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
     whatsappAppSecret: process.env.WHATSAPP_APP_SECRET ?? "",

@@ -19,6 +19,7 @@ import {
 } from "./llm-bootstrap.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
 import { makeAdminRoutes } from "./routes/admin.ts";
+import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
@@ -79,6 +80,19 @@ async function main() {
   const app = new Hono();
 
   app.route("/", makeMetricsRoutes(metrics));
+
+  // Auth routes — public (POST /api/auth/signup, /login, /logout, GET /me).
+  // НЕ wrap'аются в tenant-middleware: signup создаёт tenant, login
+  // резолвит его из email.
+  app.route(
+    "/",
+    makeAuthRoutes({
+      // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+      db: db as any,
+      secret: cfg.authSecret,
+    }),
+  );
+  log.info("auth routes enabled", { tokenSecret: cfg.authSecret ? "configured" : "missing!" });
 
   app.route(
     "/",
