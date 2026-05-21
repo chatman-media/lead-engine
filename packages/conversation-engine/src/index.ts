@@ -48,12 +48,10 @@ export {
   type MemoryExtractor,
   runMemoryExtraction,
 } from "./memory-extractor.ts";
-export {
-  applyClassifiedStage,
-  LlmStageClassifier,
-  RegexStageClassifier,
-  type StageClassifier,
-} from "./stage-classifier.ts";
+// Stage-classifier impls (RegexStageClassifier, LlmStageClassifier) переехали
+// в @chatman-media/sales — это sales-domain heuristics. Conv-engine оставляет
+// только pipeline contract (StageClassifier interface) + persistence helper.
+export { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
 export {
   decryptSecret,
   encryptSecret,

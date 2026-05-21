@@ -4,23 +4,22 @@ import {
   ExperimentsRepo,
   LlmMemoryExtractor,
   LlmReplyStrategy,
-  LlmStageClassifier,
   loadExperimentVariants,
   type MemoryExtractor,
   MessagesRepo,
   parseStyleConfig,
   RagReplyStrategy,
-  RegexStageClassifier,
   type ReplyStrategy,
   type StageClassifier,
   StylesRepo,
 } from "@chatman-media/conversation-engine";
+import { ABRouter, type Style } from "@chatman-media/kb";
 import {
   type EmbeddingClient as RagEmbeddingClient,
   InMemoryLlmRouter,
 } from "@chatman-media/llm-router";
 import type { PlatformMetrics } from "@chatman-media/observability";
-import { ABRouter, type Style } from "@chatman-media/kb";
+import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import type { ApiConfig } from "./config.ts";
 import { wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";

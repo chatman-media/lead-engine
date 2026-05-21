@@ -1,10 +1,7 @@
+import type { StageClassifier } from "@chatman-media/conversation-engine";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import { describe, expect, it } from "bun:test";
-import {
-  LlmStageClassifier,
-  RegexStageClassifier,
-  type StageClassifier,
-} from "./stage-classifier.ts";
+import { LlmStageClassifier, RegexStageClassifier } from "./stage-classifier.ts";
 
 describe("RegexStageClassifier", () => {
   const c = new RegexStageClassifier();

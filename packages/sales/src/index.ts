@@ -108,13 +108,11 @@ export {
   type SkillIntent,
   SkillSchema,
 } from "./skills/catalogue.ts";
-export {
-  type ClassifyInput,
-  type ClassifyResult,
-  classifyStage,
-  parseClassifierOutput,
-  type StageSource,
-} from "./stage-classifier.ts";
+// Stage classifier impls. Pipeline contract `StageClassifier` re-export'ить
+// нельзя (живёт в conv-engine для избежания circular dep) — consumers
+// импортят его напрямую из `@chatman-media/conversation-engine`, а конкретные
+// реализации — отсюда.
+export { LlmStageClassifier, RegexStageClassifier } from "./stage-classifier.ts";
 // ─── Stage routing ───────────────────────────────────────────────────────────
 export { nextStage, type StageInput } from "./stage-router.ts";
 // ─── Storage interfaces ──────────────────────────────────────────────────────
