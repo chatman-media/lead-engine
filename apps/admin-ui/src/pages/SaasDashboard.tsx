@@ -140,6 +140,9 @@ export function SaasDashboard() {
           </p>
         </div>
         <div className="dashboard-nav">
+          <Link to="/channels" className="nav-link">
+            Каналы
+          </Link>
           <Link to="/settings" className="nav-link">
             Настройки LLM
           </Link>

@@ -53,6 +53,27 @@ export interface UpsertLlmConfigInput {
   timeoutMs?: number;
 }
 
+export type ChannelKind = "telegram_bot" | "telegram_userbot" | "whatsapp" | "web";
+export type ChannelStatus = "active" | "paused" | "error";
+
+export interface ChannelItem {
+  id: number;
+  kind: ChannelKind;
+  externalId: string;
+  status: ChannelStatus;
+  hasCredentials: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateTelegramChannelResult {
+  ok: boolean;
+  id: number;
+  updated: boolean;
+  username: string;
+  botId: number;
+}
+
 const TOKEN_KEY = "lead_engine_token";
 
 export function getToken(): string | null {
@@ -185,5 +206,21 @@ export const saas = {
       `/api/admin/llm-configs/${purpose}`,
       { method: "DELETE" },
     );
+  },
+
+  // ── Channels (per-tenant) ────────────────────────────────────────────
+  listChannels() {
+    return request<{ items: ChannelItem[] }>("/api/admin/channels");
+  },
+  createTelegramChannel(botToken: string) {
+    return request<CreateTelegramChannelResult>("/api/admin/channels/telegram", {
+      method: "POST",
+      body: JSON.stringify({ botToken }),
+    });
+  },
+  deleteChannel(id: number) {
+    return request<{ ok: boolean; deleted: number }>(`/api/admin/channels/${id}`, {
+      method: "DELETE",
+    });
   },
 };

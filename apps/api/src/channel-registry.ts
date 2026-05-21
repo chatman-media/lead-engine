@@ -1,8 +1,8 @@
 import { TelegramBotAdapter } from "@chatman-media/channel-telegram";
+import { type Db, getDecryptedSecret } from "@chatman-media/conversation-engine";
 import { WhatsAppCloudAdapter } from "@chatman-media/channel-whatsapp";
-import { channels, tenants, tenantSecrets } from "@chatman-media/storage";
+import { channels, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 /**
  * Реестр живых ChannelAdapter'ов в процессе apps/api. На boot загружает
@@ -14,9 +14,14 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
  * handler'а попадал в правильный exposed Inbound-stream. Реальный
  * receive() & dispatch — в worker'е.
  *
- * Per-tenant decryption секретов будет добавлен в следующей миграции —
- * сейчас credentials_ref резолвится как plain-text имя env-переменной
- * (упрощение для single-tenant legacy deploy).
+ * Credentials resolution:
+ *   1. Если `channels.credentials_ref` указывает на ключ в `tenant_secrets`,
+ *      decrypt'им AES-256-GCM (per-tenant ключ хранится зашифрованным).
+ *   2. Если decrypt failed или secret отсутствует — env fallback
+ *      (BOT_TOKEN_<SLUG> / WA_ACCESS_TOKEN_<SLUG>) для legacy single-tenant.
+ *
+ * Hot-reload не поддерживается — добавление channel через UI требует
+ * рестарта apps/api. См. todo в admin-channels.ts.
  */
 export interface ChannelEntry {
   channelDbId: number;
@@ -28,39 +33,92 @@ export interface ChannelEntry {
   adapter: TelegramBotAdapter | WhatsAppCloudAdapter;
 }
 
+export interface LoadFromDbOpts {
+  /** Master-key для расшифровки tenant_secrets. Если не задан — только env fallback. */
+  masterKeyHex?: string;
+  /** Logger hook для warning'ов о decrypt-ошибках. */
+  onWarn?: (msg: string, ctx: Record<string, unknown>) => void;
+}
+
 export class ChannelRegistry {
   private readonly byTenantSlug = new Map<string, ChannelEntry[]>();
   private readonly byDbId = new Map<number, ChannelEntry>();
 
   /**
-   * Резолв per-tenant credentials. Сейчас минимальный shim для legacy
-   * tenant'а: bot-token берётся из env BOT_TOKEN_<tenantSlug> (или
-   * fallback BOT_TOKEN). После Этапа 8 — расшифровка tenant_secrets с
-   * masterKey + AES-256-GCM.
+   * Резолв per-tenant credentials. Priority:
+   *   1. tenant_secrets[credentialsRef] (decrypt AES-256-GCM) — если есть.
+   *   2. env BOT_TOKEN_<SLUG> → BOT_TOKEN (legacy single-tenant).
    */
-  private resolveBotToken(tenantSlug: string): string | null {
+  private async resolveBotToken(
+    db: Db,
+    tenantId: number,
+    tenantSlug: string,
+    credentialsRef: string | null,
+    masterKeyHex: string | undefined,
+    onWarn: ((msg: string, ctx: Record<string, unknown>) => void) | undefined,
+  ): Promise<string | null> {
+    if (credentialsRef && masterKeyHex) {
+      try {
+        const decrypted = await getDecryptedSecret({
+          db,
+          tenantId,
+          key: credentialsRef,
+          masterKeyHex,
+        });
+        if (decrypted) return decrypted;
+      } catch (err) {
+        onWarn?.("failed to decrypt channel bot token", {
+          tenantId,
+          tenantSlug,
+          credentialsRef,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     const envKey = `BOT_TOKEN_${tenantSlug.toUpperCase().replace(/-/g, "_")}`;
     return process.env[envKey] ?? process.env.BOT_TOKEN ?? null;
   }
 
   /**
-   * Резолвит WhatsApp Cloud access-token для tenant'а. Аналогично
-   * resolveBotToken: env override WA_ACCESS_TOKEN_<SLUG>, fallback
-   * WA_ACCESS_TOKEN. После Этапа 8 — из tenant_secrets с AES-256-GCM.
+   * Аналогично resolveBotToken: сначала tenant_secrets, потом env.
    */
-  private resolveWhatsAppToken(tenantSlug: string): string | null {
+  private async resolveWhatsAppToken(
+    db: Db,
+    tenantId: number,
+    tenantSlug: string,
+    credentialsRef: string | null,
+    masterKeyHex: string | undefined,
+    onWarn: ((msg: string, ctx: Record<string, unknown>) => void) | undefined,
+  ): Promise<string | null> {
+    if (credentialsRef && masterKeyHex) {
+      try {
+        const decrypted = await getDecryptedSecret({
+          db,
+          tenantId,
+          key: credentialsRef,
+          masterKeyHex,
+        });
+        if (decrypted) return decrypted;
+      } catch (err) {
+        onWarn?.("failed to decrypt channel whatsapp token", {
+          tenantId,
+          tenantSlug,
+          credentialsRef,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     const envKey = `WA_ACCESS_TOKEN_${tenantSlug.toUpperCase().replace(/-/g, "_")}`;
     return process.env[envKey] ?? process.env.WA_ACCESS_TOKEN ?? null;
   }
 
-  async loadFromDb(
-    db: PostgresJsDatabase<{ channels: typeof channels; tenants: typeof tenants; tenantSecrets: typeof tenantSecrets }>,
-  ): Promise<void> {
+  async loadFromDb(db: Db, opts: LoadFromDbOpts = {}): Promise<void> {
     const rows = await db
       .select({
         channelId: channels.id,
         kind: channels.kind,
         externalId: channels.externalId,
+        credentialsRef: channels.credentialsRef,
         tenantId: tenants.id,
         tenantSlug: tenants.slug,
       })
@@ -71,11 +129,25 @@ export class ChannelRegistry {
     for (const row of rows) {
       let adapter: TelegramBotAdapter | WhatsAppCloudAdapter | null = null;
       if (row.kind === "telegram_bot") {
-        const token = this.resolveBotToken(row.tenantSlug);
+        const token = await this.resolveBotToken(
+          db,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          opts.masterKeyHex,
+          opts.onWarn,
+        );
         if (!token) continue;
         adapter = new TelegramBotAdapter({ id: String(row.channelId), token });
       } else if (row.kind === "whatsapp") {
-        const token = this.resolveWhatsAppToken(row.tenantSlug);
+        const token = await this.resolveWhatsAppToken(
+          db,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          opts.masterKeyHex,
+          opts.onWarn,
+        );
         if (!token) continue;
         // external_id у whatsapp канала = phone_number_id (Meta).
         adapter = new WhatsAppCloudAdapter({

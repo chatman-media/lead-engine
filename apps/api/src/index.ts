@@ -21,6 +21,7 @@ import {
 } from "./llm-bootstrap.ts";
 import { makeRequireAuth } from "./middleware/require-auth.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
+import { makeAdminChannelsRoutes } from "./routes/admin-channels.ts";
 import { makeAdminKbRoutes } from "./routes/admin-kb.ts";
 import { makeAdminLlmConfigsRoutes } from "./routes/admin-llm-configs.ts";
 import { makeAdminRoutes } from "./routes/admin.ts";
@@ -95,7 +96,10 @@ async function main() {
 
   const channels = new ChannelRegistry();
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
-  await channels.loadFromDb(db as any);
+  await channels.loadFromDb(db as any, {
+    masterKeyHex: cfg.masterKeyHex,
+    onWarn: (msg, ctx) => log.warn(`channel-registry: ${msg}`, ctx),
+  });
 
   const app = new Hono();
 
@@ -137,6 +141,12 @@ async function main() {
   // Hot-reload — отдельный PR.
   app.route("/", makeAdminLlmConfigsRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
   log.info("admin-llm-configs routes enabled (per-tenant LLM config CRUD)");
+
+  // Per-tenant channel CRUD (Telegram bot onboarding по token-paste).
+  // Token validate'ится через Telegram getMe, encrypted в tenant_secrets.
+  // Channels подхватываются ChannelRegistry на boot — restart нужен.
+  app.route("/", makeAdminChannelsRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
+  log.info("admin-channels routes enabled (per-tenant channel CRUD)");
 
   app.route(
     "/",
