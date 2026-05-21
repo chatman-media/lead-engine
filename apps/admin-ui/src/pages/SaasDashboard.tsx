@@ -157,6 +157,9 @@ export function SaasDashboard() {
           </p>
         </div>
         <div className="dashboard-nav">
+          <Link to="/conversations" className="nav-link">
+            Диалоги
+          </Link>
           <Link to="/channels" className="nav-link">
             Каналы
           </Link>

@@ -76,6 +76,38 @@ export interface CreateTelegramChannelResult {
   webhookError?: string;
 }
 
+export interface ConversationListItem {
+  id: number;
+  contactId: number;
+  contactName: string | null;
+  source: string;
+  mode: string;
+  currentStage: string | null;
+  lastMessageAt: number | null;
+  createdAt: number;
+}
+
+export interface ConversationDetail {
+  id: number;
+  contactId: number;
+  contactName: string | null;
+  source: string;
+  mode: string;
+  currentStage: string | null;
+  lastMessageAt: number | null;
+  createdAt: number;
+  escalatedAt: number | null;
+}
+
+export interface MessageRow {
+  id: number;
+  role: "user" | "assistant" | "human" | "system";
+  text: string;
+  createdAt: number;
+  stage: string | null;
+  deletedAt: number | null;
+}
+
 export interface OnboardingStatus {
   channelConnected: boolean;
   channelKind?: string;
@@ -244,5 +276,23 @@ export const saas = {
   // ── Onboarding ───────────────────────────────────────────────────────
   onboardingStatus() {
     return request<OnboardingStatus>("/api/admin/onboarding-status");
+  },
+
+  // ── Conversations (read-only) ────────────────────────────────────────
+  listConversations(opts: { limit?: number; cursor?: number } = {}) {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.cursor) params.set("cursor", String(opts.cursor));
+    const qs = params.toString();
+    return request<{
+      items: ConversationListItem[];
+      nextCursor?: number;
+    }>(`/api/admin/conversations${qs ? `?${qs}` : ""}`);
+  },
+  getConversation(id: number) {
+    return request<{
+      conversation: ConversationDetail;
+      messages: MessageRow[];
+    }>(`/api/admin/conversations/${id}`);
   },
 };
