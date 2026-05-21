@@ -27,6 +27,9 @@ export interface LoadFromDbOpts {
 
 export class WorkerChannelRegistry {
   private readonly byDbId = new Map<number, WorkerChannelEntry>();
+  /** Cached opts чтобы reloadAll использовал тот же masterKey + onWarn. */
+  private loadOpts: LoadFromDbOpts = {};
+  private dbRef: Db | null = null;
 
   /**
    * Priority: tenant_secrets[credentialsRef] (decrypt) → env fallback.
@@ -63,6 +66,8 @@ export class WorkerChannelRegistry {
   }
 
   async loadFromDb(db: Db, opts: LoadFromDbOpts = {}): Promise<void> {
+    this.loadOpts = opts;
+    this.dbRef = db;
     const rows = await db
       .select({
         channelId: channels.id,
@@ -95,6 +100,22 @@ export class WorkerChannelRegistry {
         adapter,
       });
     }
+  }
+
+  /**
+   * Hot-reload: close existing adapters + re-load from DB. Polling-based
+   * (см. WORKER_CHANNEL_RELOAD_MS). Идемпотентен — повторный вызов без
+   * изменений в БД даст то же состояние (с пересозданными adapter'ами).
+   *
+   * Returns delta для логирования.
+   */
+  async reloadAll(): Promise<{ before: number; after: number }> {
+    if (!this.dbRef) return { before: 0, after: 0 };
+    const before = this.byDbId.size;
+    this.closeAll();
+    this.byDbId.clear();
+    await this.loadFromDb(this.dbRef, this.loadOpts);
+    return { before, after: this.byDbId.size };
   }
 
   byChannelId(channelId: number): WorkerChannelEntry | undefined {

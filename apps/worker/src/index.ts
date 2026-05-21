@@ -66,8 +66,31 @@ async function main() {
     log.error("dispatcher fatal", { err: err instanceof Error ? err : new Error(String(err)) });
   });
 
+  // Periodic channel reload — подхватывает newly-onboarded боты которые
+  // tenant добавил через apps/api UI после worker boot. apps/api делает
+  // in-process hot-reload, worker — отдельный процесс, polling.
+  let reloadTimer: ReturnType<typeof setInterval> | null = null;
+  if (cfg.channelReloadIntervalMs > 0) {
+    reloadTimer = setInterval(async () => {
+      try {
+        const delta = await channels.reloadAll();
+        if (delta.before !== delta.after) {
+          log.info("worker channels reloaded", { ...delta });
+        }
+      } catch (err) {
+        log.warn("worker channel reload failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }, cfg.channelReloadIntervalMs);
+    log.info("channel reload poller enabled", {
+      intervalMs: cfg.channelReloadIntervalMs,
+    });
+  }
+
   const shutdown = async () => {
     log.info("shutting down");
+    if (reloadTimer) clearInterval(reloadTimer);
     abort.abort();
     dispatcher.stop();
     metricsServer?.stop();
