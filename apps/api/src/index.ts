@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { ChannelRegistry } from "./channel-registry.ts";
 import { loadApiConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
+import { makeLlmReplyStrategy } from "./llm-bootstrap.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 
@@ -23,14 +24,20 @@ async function main() {
       timeoutMs: cfg.healthCheckTimeoutMs,
     }),
   );
+  const replyStrategy = makeLlmReplyStrategy(cfg, db);
+  if (replyStrategy) {
+    console.log(`[apps/api] LLM reply strategy: ${cfg.llm.provider}/${cfg.llm.model}`);
+  } else {
+    console.log("[apps/api] LLM not configured — bot will persist messages but stay silent");
+  }
+
   app.route(
     "/",
     makeTelegramWebhookRoutes({
       db,
       channels,
       webhookSecret: cfg.telegramWebhookSecret,
-      // ReplyStrategy подключается в Этапе 4 часть 2 (RAG + sales).
-      replyStrategy: null,
+      replyStrategy,
     }),
   );
 

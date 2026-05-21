@@ -26,6 +26,20 @@ export interface ApiConfig {
    * sales-guru до восстановления.
    */
   healthCheckTimeoutMs: number;
+  /**
+   * Bootstrap LLM-config для legacy tenant'а. После Этапа 8 (расшифровка
+   * tenant_secrets) этого не будет — конфиг будет читаться из БД per
+   * tenant_id. Сейчас минимальный shim для одного-tenant'ного deploy.
+   *
+   * Пустые значения = не подключать LlmReplyStrategy (бот persist'ит и
+   * молчит).
+   */
+  llm: {
+    provider: "openai" | "openrouter" | "ollama" | "";
+    model: string;
+    apiKey: string;
+    baseUrl: string;
+  };
 }
 
 function required(name: string): string {
@@ -37,11 +51,18 @@ function required(name: string): string {
 }
 
 export function loadApiConfig(): ApiConfig {
+  const provider = (process.env.LLM_PROVIDER ?? "") as ApiConfig["llm"]["provider"];
   return {
     port: Number.parseInt(process.env.PORT ?? "3000", 10),
     databaseUrl: required("DATABASE_URL"),
     masterKeyHex: required("PLATFORM_MASTER_KEY"),
     telegramWebhookSecret: required("TELEGRAM_WEBHOOK_SECRET"),
     healthCheckTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "2000", 10),
+    llm: {
+      provider,
+      model: process.env.LLM_MODEL ?? "",
+      apiKey: process.env.LLM_API_KEY ?? "",
+      baseUrl: process.env.LLM_BASE_URL ?? "",
+    },
   };
 }
