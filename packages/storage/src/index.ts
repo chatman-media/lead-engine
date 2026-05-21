@@ -7,3 +7,12 @@
 
 export * as schema from "./schema.ts";
 export * from "./schema.ts";
+// Integration-test helpers — exposed для других packages/apps что хотят
+// reuse setup'а isolated test-БД (createIsolatedDb, applyAllMigrations).
+// НЕ для production runtime — admin/dev utility.
+export {
+  applyAllMigrations,
+  createIsolatedDb,
+  dropIsolatedDb,
+  tryConnectToPg,
+} from "./integration-helpers.ts";
