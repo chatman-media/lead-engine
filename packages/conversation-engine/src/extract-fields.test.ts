@@ -84,7 +84,7 @@ describe("processInbound + extractFields hook", () => {
     const deps = makeDeps(template);
     await processInbound(textInbound("u1", "100", "Привет, меня зовут Алина"), deps);
 
-    expect(hookCalledWith).toBe("Привет, меня зовут Алина");
+    expect(hookCalledWith as string | null).toBe("Привет, меня зовут Алина");
     const contact = deps._fakes.contacts.all()[0]!;
     expect(JSON.parse(contact.attributesJson!)).toEqual({ name: "Алина" });
   });

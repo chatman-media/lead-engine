@@ -1,7 +1,9 @@
 import {
   type Db,
   DrizzleKbStore,
+  LlmMemoryExtractor,
   LlmReplyStrategy,
+  type MemoryExtractor,
   MessagesRepo,
   RagReplyStrategy,
   type ReplyStrategy,
@@ -23,6 +25,29 @@ import type { ApiConfig } from "./config.ts";
  *     без KB).
  *   - Если chat не задан → null (бот persist'ит и молчит).
  */
+/**
+ * Опциональный memory extractor. Использует тот же chat-config что и
+ * reply-strategy. apps/api прокидывает его в webhook-route → ProcessInboundDeps.
+ */
+export function makeMemoryExtractor(cfg: ApiConfig, db: Db): MemoryExtractor | null {
+  if (!cfg.llm.provider || !cfg.llm.apiKey || !cfg.llm.model) {
+    return null;
+  }
+  const router = new InMemoryLlmRouter();
+  router.setConfig({
+    tenantId: 1,
+    purpose: "chat",
+    provider: cfg.llm.provider,
+    model: cfg.llm.model,
+    apiKey: cfg.llm.apiKey,
+    ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
+  });
+  return new LlmMemoryExtractor(
+    { resolveChat: (tenantId: number) => router.resolveChat(tenantId, "chat") },
+    (tenantId: number) => new MessagesRepo({ db, tenantId }),
+  );
+}
+
 export function makeReplyStrategy(cfg: ApiConfig, db: Db): ReplyStrategy | null {
   if (!cfg.llm.provider || !cfg.llm.apiKey || !cfg.llm.model) {
     return null;

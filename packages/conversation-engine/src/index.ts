@@ -29,6 +29,11 @@ export {
   type LeadHookContext,
   transitionLeadState,
 } from "./lead-lifecycle.ts";
+export {
+  LlmMemoryExtractor,
+  type MemoryExtractor,
+  runMemoryExtraction,
+} from "./memory-extractor.ts";
 export { dispatchOutbound } from "./outbound-dispatch.ts";
 export {
   processInbound,

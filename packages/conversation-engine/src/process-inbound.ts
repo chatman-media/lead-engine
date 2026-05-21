@@ -9,6 +9,7 @@ import type {
   MessagesRepo,
   OutboundQueueRepo,
 } from "./dal/index.ts";
+import { type MemoryExtractor, runMemoryExtraction } from "./memory-extractor.ts";
 import { dispatchOutbound } from "./outbound-dispatch.ts";
 import {
   type ChannelContext,
@@ -61,6 +62,13 @@ export interface ProcessInboundDeps {
    * без блокировки reply-loop.
    */
   template?: VerticalTemplate;
+  /**
+   * Опциональный LLM-based memory extractor. Если задан, после persist
+   * user-message pipeline вытащит из истории facts через
+   * extractUserFacts и merge'нёт в contact.attributes_json. Дополняет
+   * template.hooks.extractFields (тот — regex; этот — LLM).
+   */
+  memoryExtractor?: MemoryExtractor;
   sink?: PipelineSink;
   clock?: Clock;
 }
@@ -217,6 +225,35 @@ export async function processInbound(
       // Hook-failure не должен ломать main pipeline — reply всё равно
       // должен сработать. Логируем, продолжаем.
       deps.sink?.log?.("warn", "extractFields hook failed", {
+        tenantId: deps.tenant.tenantId,
+        conversationId: conversation.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // 5b. LLM-based memory extraction (если extractor задан и не dedup).
+  // Дополняет vertical-template extractFields: тот — regex (узкие шаблоны),
+  // этот — LLM (русский NER, импликации). Exception → log, продолжаем.
+  if (deps.memoryExtractor && !existingMsg && text.length > 0) {
+    try {
+      const extracted = await runMemoryExtraction({
+        extractor: deps.memoryExtractor,
+        tenantId: deps.tenant.tenantId,
+        conversationId: conversation.id,
+        contactId: contact.id,
+        contacts: deps.contacts,
+        nowEpoch: now,
+      });
+      if (Object.keys(extracted).length > 0) {
+        deps.sink?.log?.("debug", "memory facts extracted", {
+          tenantId: deps.tenant.tenantId,
+          conversationId: conversation.id,
+          keys: Object.keys(extracted),
+        });
+      }
+    } catch (err) {
+      deps.sink?.log?.("warn", "memory extractor failed", {
         tenantId: deps.tenant.tenantId,
         conversationId: conversation.id,
         error: err instanceof Error ? err.message : String(err),

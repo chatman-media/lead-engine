@@ -4,6 +4,7 @@ import {
   ContactsRepo,
   ConversationsRepo,
   type Db,
+  type MemoryExtractor,
   MessagesRepo,
   OutboundQueueRepo,
   processInbound,
@@ -49,6 +50,13 @@ export function makeTelegramWebhookRoutes(opts: {
    * legacy tenant'а).
    */
   resolveTemplate?: (tenantSlug: string) => VerticalTemplate | undefined;
+  /**
+   * Опциональный LLM-based memory extractor (apps/api инжектит когда
+   * сконфигурирован chat-LLM). Вызывается после persist user-message
+   * и merge'ит facts в contact.attributes_json. Exception в extractor'е
+   * логируется и не ломает reply-loop.
+   */
+  memoryExtractor?: MemoryExtractor | null;
 }): Hono {
   const app = new Hono();
 
@@ -117,6 +125,7 @@ export function makeTelegramWebhookRoutes(opts: {
       outbound: new OutboundQueueRepo(repoCtx),
       reply: opts.replyStrategy ?? null,
       ...(template ? { template } : {}),
+      ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
     });
 
     return c.json({ ok: true, processed: true, result });

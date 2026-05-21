@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { ChannelRegistry } from "./channel-registry.ts";
 import { loadApiConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
-import { makeReplyStrategy } from "./llm-bootstrap.ts";
+import { makeMemoryExtractor, makeReplyStrategy } from "./llm-bootstrap.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 
@@ -51,6 +51,11 @@ async function main() {
     console.log("[apps/api] LLM not configured — bot will persist messages but stay silent");
   }
 
+  const memoryExtractor = makeMemoryExtractor(cfg, db);
+  if (memoryExtractor) {
+    console.log("[apps/api] memory extractor enabled");
+  }
+
   app.route(
     "/",
     makeTelegramWebhookRoutes({
@@ -59,6 +64,7 @@ async function main() {
       webhookSecret: cfg.telegramWebhookSecret,
       replyStrategy,
       resolveTemplate,
+      memoryExtractor,
     }),
   );
 
