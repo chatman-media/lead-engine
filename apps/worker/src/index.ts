@@ -1,3 +1,4 @@
+import { checkRlsEnforcement } from "@chatman-media/conversation-engine";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { WorkerChannelRegistry } from "./channel-registry.ts";
 import { loadWorkerConfig } from "./config.ts";
@@ -10,6 +11,21 @@ async function main() {
   const log = makeDefaultLogger("apps/worker");
   const metrics = makePlatformMetrics();
   const { db, close } = makeDb(cfg.databaseUrl);
+
+  // См. apps/api/src/index.ts — тот же rationale: warning если worker
+  // запущен под BYPASSRLS-role'ью, RLS как defense-in-depth не работает.
+  const rlsCheck = await checkRlsEnforcement(db);
+  if (!rlsCheck.isEnforced) {
+    log.warn("RLS not enforced — connection role bypasses row-level security", {
+      role: rlsCheck.role,
+      isSuperuser: rlsCheck.isSuperuser,
+      hasBypassRls: rlsCheck.hasBypassRls,
+      remediation:
+        "Use a NOSUPERUSER NOBYPASSRLS Postgres role for apps/worker connection. See migration 0004 comments.",
+    });
+  } else {
+    log.info("RLS enforced", { role: rlsCheck.role });
+  }
 
   const channels = new WorkerChannelRegistry();
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
