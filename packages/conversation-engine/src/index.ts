@@ -87,3 +87,4 @@ export {
   type TenantContext,
 } from "./types.ts";
 export { withTenant } from "./with-tenant.ts";
+export { checkRlsEnforcement, type RlsRoleCheck } from "./rls-guard.ts";
