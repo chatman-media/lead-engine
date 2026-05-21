@@ -16,9 +16,11 @@ import {
   StylesRepo,
 } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
+import type { PlatformMetrics } from "@chatman-media/observability";
 import { ABRouter, type EmbeddingClient as RagEmbeddingClient, type Style } from "@chatman-media/rag";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import type { ApiConfig } from "./config.ts";
+import { wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
 
 /**
  * Bootstrap LlmRouter + ReplyStrategy. На текущем этапе single-tenant
@@ -36,7 +38,11 @@ import type { ApiConfig } from "./config.ts";
  * Опциональный memory extractor. Использует тот же chat-config что и
  * reply-strategy. apps/api прокидывает его в webhook-route → ProcessInboundDeps.
  */
-export function makeMemoryExtractor(cfg: ApiConfig, db: Db): MemoryExtractor | null {
+export function makeMemoryExtractor(
+  cfg: ApiConfig,
+  db: Db,
+  metrics?: PlatformMetrics,
+): MemoryExtractor | null {
   if (!cfg.llm.provider || !cfg.llm.apiKey || !cfg.llm.model) {
     return null;
   }
@@ -50,7 +56,14 @@ export function makeMemoryExtractor(cfg: ApiConfig, db: Db): MemoryExtractor | n
     ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
   });
   return new LlmMemoryExtractor(
-    { resolveChat: (tenantId: number) => router.resolveChat(tenantId, "chat") },
+    {
+      resolveChat: (tenantId: number) => {
+        const inner = router.resolveChat(tenantId, "chat");
+        return metrics
+          ? wrapChatClient(inner, metrics, { provider: cfg.llm.provider, purpose: "memory" })
+          : inner;
+      },
+    },
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
   );
 }
@@ -60,7 +73,11 @@ export function makeMemoryExtractor(cfg: ApiConfig, db: Db): MemoryExtractor | n
  * На "llm" — требует chat-config (тот же что reply-strategy). На пустом —
  * null (current_stage не пишется).
  */
-export function makeStageClassifier(cfg: ApiConfig, db: Db): StageClassifier | null {
+export function makeStageClassifier(
+  cfg: ApiConfig,
+  db: Db,
+  metrics?: PlatformMetrics,
+): StageClassifier | null {
   void db; // db не нужен classifier'у; pipeline передаёт deps.db в applyClassifiedStage.
   if (cfg.stageClassifier === "regex") {
     return new RegexStageClassifier();
@@ -82,14 +99,23 @@ export function makeStageClassifier(cfg: ApiConfig, db: Db): StageClassifier | n
       ...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
     });
     return new LlmStageClassifier({
-      resolveChat: (tenantId: number) => router.resolveChat(tenantId, "chat"),
+      resolveChat: (tenantId: number) => {
+        const inner = router.resolveChat(tenantId, "chat");
+        return metrics
+          ? wrapChatClient(inner, metrics, { provider: cfg.llm.provider, purpose: "stage" })
+          : inner;
+      },
       tenantId: 1,
     });
   }
   return null;
 }
 
-export function makeReplyStrategy(cfg: ApiConfig, db: Db): ReplyStrategy | null {
+export function makeReplyStrategy(
+  cfg: ApiConfig,
+  db: Db,
+  metrics?: PlatformMetrics,
+): ReplyStrategy | null {
   if (!cfg.llm.provider || !cfg.llm.apiKey || !cfg.llm.model) {
     return null;
   }
@@ -184,14 +210,30 @@ export function makeReplyStrategy(cfg: ApiConfig, db: Db): ReplyStrategy | null 
         }
       : undefined;
 
+  const chatProviderLabel = cfg.llm.provider;
+  const embedProviderLabel = embedProvider;
+
   return new RagReplyStrategy(
     {
       template,
-      resolveChat: (tenantId: number) => router.resolveChat(tenantId, "chat"),
+      resolveChat: (tenantId: number) => {
+        const inner = router.resolveChat(tenantId, "chat");
+        return metrics
+          ? wrapChatClient(inner, metrics, { provider: chatProviderLabel, purpose: "chat" })
+          : inner;
+      },
       // llm-router'овский EmbeddingClient structurally compatible с
       // rag's EmbeddingClient (embed(inputs)→number[][] + dim).
-      resolveEmbed: (tenantId: number) =>
-        router.resolveEmbed(tenantId) as unknown as RagEmbeddingClient,
+      resolveEmbed: (tenantId: number) => {
+        const inner = router.resolveEmbed(tenantId);
+        const wrapped = metrics
+          ? wrapEmbeddingClient(inner, metrics, {
+              provider: embedProviderLabel,
+              purpose: "embed",
+            })
+          : inner;
+        return wrapped as unknown as RagEmbeddingClient;
+      },
       resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
       ...(resolveStyle ? { resolveStyle } : {}),
     },

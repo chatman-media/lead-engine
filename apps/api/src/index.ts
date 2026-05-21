@@ -54,7 +54,7 @@ async function main() {
       timeoutMs: cfg.healthCheckTimeoutMs,
     }),
   );
-  const replyStrategy = makeReplyStrategy(cfg, db);
+  const replyStrategy = makeReplyStrategy(cfg, db, metrics);
   if (replyStrategy) {
     const strategyKind = cfg.embed.provider && cfg.embed.apiKey ? "RAG" : "LLM-only";
     log.info("reply strategy configured", {
@@ -70,10 +70,10 @@ async function main() {
     log.info("LLM not configured — bot will persist messages but stay silent");
   }
 
-  const memoryExtractor = makeMemoryExtractor(cfg, db);
+  const memoryExtractor = makeMemoryExtractor(cfg, db, metrics);
   if (memoryExtractor) log.info("memory extractor enabled");
 
-  const stageClassifier = makeStageClassifier(cfg, db);
+  const stageClassifier = makeStageClassifier(cfg, db, metrics);
   if (stageClassifier) {
     log.info("stage classifier enabled", { kind: cfg.stageClassifier });
   }

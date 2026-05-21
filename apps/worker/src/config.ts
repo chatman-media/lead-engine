@@ -7,6 +7,12 @@ export interface WorkerConfig {
   dispatcherBatchSize: number;
   /** На сколько разрешено отстать от scheduled_at (для testов/replay). */
   dispatcherMaxLagSec: number;
+  /**
+   * Port для /metrics endpoint'а (Prometheus scraper). Если не задан — 0 —
+   * worker НЕ поднимает HTTP-сервер, метрики недоступны извне. Recommended:
+   * 9100 (Prometheus exporter port standard).
+   */
+  metricsPort: number;
 }
 
 function required(name: string): string {
@@ -24,5 +30,6 @@ export function loadWorkerConfig(): WorkerConfig {
     dispatcherPollMs: Number.parseInt(process.env.DISPATCHER_POLL_MS ?? "1000", 10),
     dispatcherBatchSize: Number.parseInt(process.env.DISPATCHER_BATCH_SIZE ?? "16", 10),
     dispatcherMaxLagSec: Number.parseInt(process.env.DISPATCHER_MAX_LAG_SEC ?? "60", 10),
+    metricsPort: Number.parseInt(process.env.METRICS_PORT ?? "0", 10),
   };
 }

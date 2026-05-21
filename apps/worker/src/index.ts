@@ -1,12 +1,14 @@
-import { makeDefaultLogger } from "@chatman-media/observability";
+import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { WorkerChannelRegistry } from "./channel-registry.ts";
 import { loadWorkerConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
 import { OutboundDispatcher } from "./dispatcher.ts";
+import { type MetricsServer, startMetricsServer } from "./metrics-server.ts";
 
 async function main() {
   const cfg = loadWorkerConfig();
   const log = makeDefaultLogger("apps/worker");
+  const metrics = makePlatformMetrics();
   const { db, close } = makeDb(cfg.databaseUrl);
 
   const channels = new WorkerChannelRegistry();
@@ -17,7 +19,17 @@ async function main() {
   const dispatcher = new OutboundDispatcher(db, channels, {
     pollMs: cfg.dispatcherPollMs,
     batchSize: cfg.dispatcherBatchSize,
+    metrics,
   });
+
+  let metricsServer: MetricsServer | null = null;
+  if (cfg.metricsPort > 0) {
+    metricsServer = startMetricsServer(metrics, cfg.metricsPort);
+    log.info("metrics server enabled", {
+      port: metricsServer.port,
+      url: `http://localhost:${metricsServer.port}/metrics`,
+    });
+  }
 
   log.info("starting", {
     channels: channels.size(),
@@ -33,6 +45,7 @@ async function main() {
     log.info("shutting down");
     abort.abort();
     dispatcher.stop();
+    metricsServer?.stop();
     await dispatcherPromise;
     channels.closeAll();
     await close();
