@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   type Admin,
   ApiError,
@@ -139,9 +139,14 @@ export function SaasDashboard() {
             {admin?.email} · {tenant?.slug ?? "—"} · {tenant?.plan ?? "—"}
           </p>
         </div>
-        <button type="button" onClick={handleLogout}>
-          Выйти
-        </button>
+        <div className="dashboard-nav">
+          <Link to="/settings" className="nav-link">
+            Настройки LLM
+          </Link>
+          <button type="button" onClick={handleLogout}>
+            Выйти
+          </button>
+        </div>
       </header>
 
       {error && <div className="dashboard-error">{error}</div>}
