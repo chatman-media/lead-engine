@@ -13,6 +13,13 @@ export interface WorkerConfig {
    * 9100 (Prometheus exporter port standard).
    */
   metricsPort: number;
+  /**
+   * Период polling-based reload channels из БД, ms. apps/api делает
+   * hot-reload in-process, но worker — отдельный процесс, ему нужно
+   * периодически опрашивать channels из БД чтобы подхватить newly-onboarded
+   * боты. Default 30000 (30 сек). 0 — отключить (только при boot).
+   */
+  channelReloadIntervalMs: number;
 }
 
 function required(name: string): string {
@@ -31,5 +38,9 @@ export function loadWorkerConfig(): WorkerConfig {
     dispatcherBatchSize: Number.parseInt(process.env.DISPATCHER_BATCH_SIZE ?? "16", 10),
     dispatcherMaxLagSec: Number.parseInt(process.env.DISPATCHER_MAX_LAG_SEC ?? "60", 10),
     metricsPort: Number.parseInt(process.env.METRICS_PORT ?? "0", 10),
+    channelReloadIntervalMs: Number.parseInt(
+      process.env.WORKER_CHANNEL_RELOAD_MS ?? "30000",
+      10,
+    ),
   };
 }
