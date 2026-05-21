@@ -77,31 +77,31 @@ describe("migrations integration", () => {
     expect(migrationFiles).toEqual(sorted);
   });
 
-  it("создаёт ровно 39 таблиц (28 existing + 8 multi-tenant + 3 stripe)", async () => {
+  it("создаёт ровно 38 таблиц (28 existing − 1 users (dropped 0008) + 8 multi-tenant + 3 stripe)", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_tables WHERE schemaname = 'public'
     `;
-    // 28 existing + 8 multi-tenant + 3 stripe = 39.
-    expect(rows[0]?.count).toBeGreaterThanOrEqual(39);
+    // 28 existing − 1 dropped (users) + 8 multi-tenant + 3 stripe = 38.
+    expect(rows[0]?.count).toBeGreaterThanOrEqual(38);
   });
 
-  it("RLS-policies включены на 35 таблицах с tenant_id (33 + 2 stripe)", async () => {
+  it("RLS-policies включены на 34 таблицах с tenant_id (35 − 1 dropped users)", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_tables
       WHERE schemaname = 'public' AND rowsecurity = true
     `;
-    expect(rows[0]?.count).toBe(35);
+    expect(rows[0]?.count).toBe(34);
   });
 
-  it("tenant_isolation policies = 35 (по одной на каждую RLS-таблицу)", async () => {
+  it("tenant_isolation policies = 34 (по одной на каждую RLS-таблицу)", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_policies
       WHERE schemaname = 'public' AND policyname = 'tenant_isolation'
     `;
-    expect(rows[0]?.count).toBe(35);
+    expect(rows[0]?.count).toBe(34);
   });
 
   it("legacy tenant (id=1) сидится из 0001", async () => {
@@ -131,33 +131,9 @@ describe("migrations integration", () => {
   });
 });
 
-describe("users → contacts backfill (0003)", () => {
-  it("идемпотентен на повторном прогоне", async () => {
-    if (!sql) return;
-    // Очистим contacts/channel_identities на случай предыдущего seed'а.
-    await sql.unsafe(`DELETE FROM channel_identities`);
-    await sql.unsafe(`DELETE FROM contacts WHERE id > 0`);
-
-    // Засеять users (под legacy tenant id=1).
-    await sql.unsafe(`
-      INSERT INTO users (tg_user_id, tg_username, status, tenant_id)
-      VALUES (1001, 'alice', 'new', 1), (1002, 'bob', 'qualified', 1)
-    `);
-
-    // Re-apply миграции 0003 — она должна upsert'ить.
-    const body = await Bun.file(join(migrationsDir, "0003_backfill_users_to_contacts.sql")).text();
-    await sql.unsafe(body);
-
-    const c1 = await sql<Array<{ count: number }>>`SELECT COUNT(*)::int AS count FROM contacts`;
-    const ci1 = await sql<Array<{ count: number }>>`SELECT COUNT(*)::int AS count FROM channel_identities`;
-    expect(c1[0]?.count).toBeGreaterThanOrEqual(2);
-    expect(ci1[0]?.count).toBeGreaterThanOrEqual(2);
-
-    // Второй раз — counts не растут.
-    await sql.unsafe(body);
-    const c2 = await sql<Array<{ count: number }>>`SELECT COUNT(*)::int AS count FROM contacts`;
-    const ci2 = await sql<Array<{ count: number }>>`SELECT COUNT(*)::int AS count FROM channel_identities`;
-    expect(c2[0]?.count).toBe(c1[0]?.count);
-    expect(ci2[0]?.count).toBe(ci1[0]?.count);
-  });
-});
+// NB: ранее здесь был test "users → contacts backfill (0003) идемпотентен".
+// Удалён после миграции 0008_drop_users — re-применять backfill после того
+// как source-table (users) удалена, не имеет смысла. Idempotency самого
+// миграционного скрипта 0003 проверяется через applyAllMigrations
+// при boot'е в beforeAll (любой ON CONFLICT DO NOTHING сработает; CRASH
+// detect'нется).

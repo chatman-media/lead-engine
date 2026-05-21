@@ -265,8 +265,11 @@ describe("RLS tenant_isolation policy", () => {
     // Список ДОЛЖЕН совпадать с массивом в миграции 0004 (это контрактный
     // тест — если кто-то добавит таблицу с tenant_id и забудет про RLS,
     // здесь падёт).
+    // NB: 'users' исключена — table удалена миграцией 0008 (legacy).
+    // RLS-migration 0004 включала её, но в 0008 DROP TABLE снёс и
+    // policy/RLS-flag вместе с таблицей. Все её данные жили в contacts
+    // (backfill в 0003).
     const expectedTables = [
-      "users",
       "questionnaire_tokens",
       "styles",
       "experiments",
