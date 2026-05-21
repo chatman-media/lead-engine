@@ -1,4 +1,5 @@
 import { TelegramBotAdapter } from "@chatman-media/channel-telegram";
+import { WhatsAppCloudAdapter } from "@chatman-media/channel-whatsapp";
 import { channels, tenants, tenantSecrets } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -23,7 +24,8 @@ export interface ChannelEntry {
   tenantSlug: string;
   kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "web";
   externalId: string;
-  adapter: TelegramBotAdapter; // в будущем — union с другими adapter-классами
+  /** Конкретный adapter в зависимости от kind. */
+  adapter: TelegramBotAdapter | WhatsAppCloudAdapter;
 }
 
 export class ChannelRegistry {
@@ -39,6 +41,16 @@ export class ChannelRegistry {
   private resolveBotToken(tenantSlug: string): string | null {
     const envKey = `BOT_TOKEN_${tenantSlug.toUpperCase().replace(/-/g, "_")}`;
     return process.env[envKey] ?? process.env.BOT_TOKEN ?? null;
+  }
+
+  /**
+   * Резолвит WhatsApp Cloud access-token для tenant'а. Аналогично
+   * resolveBotToken: env override WA_ACCESS_TOKEN_<SLUG>, fallback
+   * WA_ACCESS_TOKEN. После Этапа 8 — из tenant_secrets с AES-256-GCM.
+   */
+  private resolveWhatsAppToken(tenantSlug: string): string | null {
+    const envKey = `WA_ACCESS_TOKEN_${tenantSlug.toUpperCase().replace(/-/g, "_")}`;
+    return process.env[envKey] ?? process.env.WA_ACCESS_TOKEN ?? null;
   }
 
   async loadFromDb(
@@ -57,20 +69,30 @@ export class ChannelRegistry {
       .where(and(eq(channels.status, "active"), eq(tenants.status, "active")));
 
     for (const row of rows) {
-      // На текущей stage поддерживаем только telegram_bot — остальные
-      // адаптеры приходят в Этап 2b-cont (MTProto) и далее (WhatsApp).
-      if (row.kind !== "telegram_bot") continue;
-      const token = this.resolveBotToken(row.tenantSlug);
-      if (!token) continue;
-      const adapter = new TelegramBotAdapter({
-        id: String(row.channelId),
-        token,
-      });
+      let adapter: TelegramBotAdapter | WhatsAppCloudAdapter | null = null;
+      if (row.kind === "telegram_bot") {
+        const token = this.resolveBotToken(row.tenantSlug);
+        if (!token) continue;
+        adapter = new TelegramBotAdapter({ id: String(row.channelId), token });
+      } else if (row.kind === "whatsapp") {
+        const token = this.resolveWhatsAppToken(row.tenantSlug);
+        if (!token) continue;
+        // external_id у whatsapp канала = phone_number_id (Meta).
+        adapter = new WhatsAppCloudAdapter({
+          id: String(row.channelId),
+          phoneNumberId: row.externalId,
+          accessToken: token,
+        });
+      } else {
+        // telegram_userbot и web в apps/api НЕ загружаются — userbot живёт
+        // в apps/worker, web обрабатывается через отдельный WS-endpoint.
+        continue;
+      }
       const entry: ChannelEntry = {
         channelDbId: row.channelId,
         tenantId: row.tenantId,
         tenantSlug: row.tenantSlug,
-        kind: row.kind as "telegram_bot",
+        kind: row.kind as ChannelEntry["kind"],
         externalId: row.externalId,
         adapter,
       };
@@ -86,6 +108,11 @@ export class ChannelRegistry {
     return (this.byTenantSlug.get(tenantSlug) ?? []).filter((e) => e.kind === "telegram_bot");
   }
 
+  /** Все WhatsApp Cloud каналы для tenant'а. */
+  getWhatsAppByTenant(tenantSlug: string): ChannelEntry[] {
+    return (this.byTenantSlug.get(tenantSlug) ?? []).filter((e) => e.kind === "whatsapp");
+  }
+
   byChannelId(channelId: number): ChannelEntry | undefined {
     return this.byDbId.get(channelId);
   }
@@ -94,5 +121,8 @@ export class ChannelRegistry {
     for (const entry of this.byDbId.values()) {
       entry.adapter.close();
     }
+  }
+  size(): number {
+    return this.byDbId.size;
   }
 }

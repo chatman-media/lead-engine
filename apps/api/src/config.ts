@@ -21,6 +21,12 @@ export interface ApiConfig {
    */
   telegramWebhookSecret: string;
   /**
+   * Verify-token для WhatsApp Cloud setup'а (Meta dashboard → Webhooks →
+   * Verify Token). Если задан, /webhook/whatsapp/:slug подключается.
+   * Пусто = WhatsApp webhook'и не принимаются.
+   */
+  whatsappVerifyToken: string;
+  /**
    * Stripe webhook signing secret (whsec_...) — опционально. Если пусто,
    * /webhook/stripe не подключается и Stripe-billing просто не работает.
    */
@@ -112,6 +118,7 @@ export function loadApiConfig(): ApiConfig {
     databaseUrl: required("DATABASE_URL"),
     masterKeyHex: required("PLATFORM_MASTER_KEY"),
     telegramWebhookSecret: required("TELEGRAM_WEBHOOK_SECRET"),
+    whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
     healthCheckTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "2000", 10),
     llm: {

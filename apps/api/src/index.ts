@@ -17,6 +17,7 @@ import { makeMetricsSink } from "./lib/metrics-sink.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
+import { makeWhatsAppWebhookRoutes } from "./routes/webhook-whatsapp.ts";
 
 /**
  * Mapping tenant.slug → VerticalTemplate. На текущем этапе один tenant —
@@ -105,6 +106,24 @@ async function main() {
     // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
     app.route("/", makeAdminRoutes({ db: db as any }));
     log.info("admin-api routes enabled", { baseDomain: cfg.platformBaseDomain });
+  }
+
+  if (cfg.whatsappVerifyToken) {
+    app.route(
+      "/",
+      makeWhatsAppWebhookRoutes({
+        db,
+        channels,
+        verifyToken: cfg.whatsappVerifyToken,
+        replyStrategy,
+        resolveTemplate,
+        memoryExtractor,
+        stageClassifier,
+        sink,
+        metrics,
+      }),
+    );
+    log.info("whatsapp webhook enabled");
   }
 
   if (cfg.stripeWebhookSecret) {

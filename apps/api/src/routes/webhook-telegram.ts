@@ -1,4 +1,4 @@
-import type { TgUpdate } from "@chatman-media/channel-telegram";
+import type { TelegramBotAdapter, TgUpdate } from "@chatman-media/channel-telegram";
 import {
   ChannelIdentitiesRepo,
   ContactsRepo,
@@ -105,10 +105,14 @@ export function makeTelegramWebhookRoutes(opts: {
       return c.json({ error: "invalid json" }, 400);
     }
 
+    // getTelegramBotsByTenant возвращает строго telegram_bot — но TS не
+    // narrow'нет union TelegramBotAdapter|WhatsAppCloudAdapter без явного cast'а.
+    const adapter = entry.adapter as TelegramBotAdapter;
+
     // 1. Pushим в адаптер чтобы apps/worker.receive() loop увидел
     //    это (для будущего merge-flow). На данный момент worker не
     //    читает receive() из api-process'а — у него свой ChannelRegistry.
-    entry.adapter.pushUpdate(update);
+    adapter.pushUpdate(update);
 
     // 2. Сразу синхронно дёргаем processInbound — это безопасно потому
     //    что pipeline сам не делает HTTP-вызовов наружу. Долгие действия
@@ -119,7 +123,7 @@ export function makeTelegramWebhookRoutes(opts: {
     //
     //    Future: переключиться на receive()-streaming если pipeline'у
     //    потребуется state между сообщениями.
-    const iter = entry.adapter.receive()[Symbol.asyncIterator]();
+    const iter = adapter.receive()[Symbol.asyncIterator]();
     const next = await iter.next();
     if (next.done) {
       return c.json({ ok: true, processed: false });
