@@ -1,4 +1,5 @@
 import type { Inbound, OutboundEnvelope } from "@chatman-media/channel-core";
+import type { VerticalTemplate } from "@chatman-media/verticals";
 import { resolveContact } from "./contact-resolver.ts";
 import { resolveConversation } from "./conversation-resolver.ts";
 import type {
@@ -52,6 +53,14 @@ export interface ProcessInboundDeps {
   outbound: OutboundQueueRepo;
   /** Стратегия ответа. null = pipeline сохраняет inbound и не отвечает. */
   reply?: ReplyStrategy | null;
+  /**
+   * Vertical-template для текущей conversation. Если задан и в нём
+   * есть hooks.extractFields — pipeline после persist user-message
+   * дёрнет hook и merge'нёт извлечённые поля в contact.attributes_json.
+   * Это даёт автозаполнение questionnaire (имя/возраст/паспорт/...)
+   * без блокировки reply-loop.
+   */
+  template?: VerticalTemplate;
   sink?: PipelineSink;
   clock?: Clock;
 }
@@ -191,7 +200,31 @@ export async function processInbound(
     await deps.conversations.touchLastMessageAt(conversation.id, now);
   }
 
-  // 5. Reply generation.
+  // 5. Vertical extractFields hook (если задан и не дублирующийся inbound).
+  // Hook резолвит structured fields из текста (имя/возраст/паспорт/etc.)
+  // и сохраняет их в contact.attributes_json. Дублям hook не зовётся —
+  // повторный extract на retry'е webhook'а не должен переписывать данные.
+  if (deps.template?.hooks?.extractFields && !existingMsg && text.length > 0) {
+    try {
+      const extracted = await deps.template.hooks.extractFields(
+        { tenantId: deps.tenant.tenantId, contactId: contact.id, conversationId: conversation.id },
+        text,
+      );
+      if (extracted && Object.keys(extracted).length > 0) {
+        await deps.contacts.mergeAttributes(contact.id, extracted, now);
+      }
+    } catch (err) {
+      // Hook-failure не должен ломать main pipeline — reply всё равно
+      // должен сработать. Логируем, продолжаем.
+      deps.sink?.log?.("warn", "extractFields hook failed", {
+        tenantId: deps.tenant.tenantId,
+        conversationId: conversation.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // 6. Reply generation.
   let outboundCount = 0;
   if (conversation.mode === "ai" && deps.reply && !mediaOnly) {
     const envelopes = await deps.reply.generate({

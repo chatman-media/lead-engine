@@ -33,6 +33,22 @@ export class FakeContactsRepo {
     this.rows.set(id, row);
     return row;
   }
+  async mergeAttributes(
+    contactId: number,
+    partial: Record<string, unknown>,
+    nowEpoch: number,
+  ): Promise<ContactRow | null> {
+    const existing = this.rows.get(contactId);
+    if (!existing) return null;
+    if (Object.keys(partial).length === 0) return existing;
+    const current = existing.attributesJson
+      ? (JSON.parse(existing.attributesJson) as Record<string, unknown>)
+      : {};
+    const merged = { ...current, ...partial };
+    existing.attributesJson = JSON.stringify(merged);
+    existing.updatedAt = nowEpoch;
+    return existing;
+  }
   all(): ContactRow[] {
     return [...this.rows.values()];
   }
