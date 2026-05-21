@@ -295,4 +295,14 @@ export const saas = {
       messages: MessageRow[];
     }>(`/api/admin/conversations/${id}`);
   },
+  replyToConversation(id: number, text: string) {
+    return request<{
+      ok: boolean;
+      messageId: number;
+      channelKind: string;
+    }>(`/api/admin/conversations/${id}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+  },
 };
