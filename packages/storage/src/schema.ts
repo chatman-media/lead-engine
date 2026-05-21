@@ -510,3 +510,181 @@ export const auditLog = pgTable("audit_log", {
   index("idx_audit_log_admin_id").on(t.adminId, sql`${t.createdAt} DESC`),
   index("idx_audit_log_action").on(t.action, sql`${t.createdAt} DESC`),
 ]);
+
+// ========================================================================
+// MULTI-TENANT ФУНДАМЕНТ (Этап 6 плана re-design)
+// ========================================================================
+//
+// Tenant — корень изоляции. Всё ниже него имеет tenant_id. Над Tenant нет
+// агрегатов: биллинг/план — атрибуты на самом Tenant.
+//
+// Существующие 28 таблиц получают tenant_id отдельной миграцией (default=1
+// для legacy данных). В этой ревизии — только новые таблицы.
+
+// ---- Tenants & secrets ------------------------------------------------
+
+export const tenants = pgTable("tenants", {
+  id: serial("id").primaryKey(),
+  slug: text("slug").notNull().unique(),
+  plan: text("plan").notNull().default("free"),
+  status: text("status").notNull().default("active"),
+  // BYOK = клиент приносит свои LLM-ключи; managed = платформа держит аккаунт.
+  llmBillingMode: text("llm_billing_mode").notNull().default("byok"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("tenants_status_check", sql`${t.status} IN ('active','suspended','deleted')`),
+  check("tenants_llm_billing_check", sql`${t.llmBillingMode} IN ('byok','managed')`),
+]);
+
+// Зашифрованные секреты per-tenant: telegram-tokens, OpenAI keys, etc.
+// `encryptedValue` — opaque blob (формат: aes-256-gcm + master key из env).
+// Хранится отдельно от tenants чтобы select * tenants не светил секретов в логи.
+export const tenantSecrets = pgTable("tenant_secrets", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  key: text("key").notNull(),
+  encryptedValue: text("encrypted_value").notNull(),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_tenant_secrets_key").on(t.tenantId, t.key),
+]);
+
+// ---- Channels (Telegram bot/userbot, WhatsApp, web — N на tenant) -----
+
+export const channels = pgTable("channels", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  // Должно соответствовать ChannelKind из @chatman-media/channel-core.
+  kind: text("kind").notNull(),
+  // External id канала в платформе провайдера — bot username, phone number, etc.
+  externalId: text("external_id").notNull(),
+  // Ссылка на tenant_secrets.key, где лежат creds (bot token / sessionString).
+  credentialsRef: text("credentials_ref"),
+  status: text("status").notNull().default("active"),
+  metadataJson: text("metadata_json"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check(
+    "channels_kind_check",
+    sql`${t.kind} IN ('telegram_bot','telegram_userbot','whatsapp','web')`,
+  ),
+  check("channels_status_check", sql`${t.status} IN ('active','paused','error')`),
+  uniqueIndex("uniq_channels_tenant_kind_external").on(t.tenantId, t.kind, t.externalId),
+  index("idx_channels_tenant_status").on(t.tenantId, t.status),
+]);
+
+// ---- Channel-agnostic Contact (бывший users, но per-tenant + multi-channel) ----
+
+// На текущей миграции contacts создаются как НОВАЯ таблица. Старая `users`
+// остаётся как legacy. Backfill users → contacts + ChannelIdentity для legacy
+// записей произойдёт в Этапе 8 (onboarding 2-го tenant'а), либо в отдельной
+// data-migration. Это разделение позволяет channels/funnels писать новый код
+// против contacts без блокировки на риск миграции прод-БД.
+export const contacts = pgTable("contacts", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  displayName: text("display_name"),
+  attributesJson: text("attributes_json"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  index("idx_contacts_tenant").on(t.tenantId),
+]);
+
+// Маппинг Contact ↔ конкретный мессенджер. Один Contact может иметь несколько
+// channel_identities (Telegram bot + WhatsApp + tg userbot) — даёт unified inbox.
+export const channelIdentities = pgTable("channel_identities", {
+  id: serial("id").primaryKey(),
+  contactId: integer("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
+  channelId: integer("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+  externalUserId: text("external_user_id").notNull(),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_channel_identities_channel_external").on(t.channelId, t.externalUserId),
+  index("idx_channel_identities_contact").on(t.contactId),
+]);
+
+// ---- Funnels ----------------------------------------------------------
+
+export const funnels = pgTable("funnels", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  slug: text("slug").notNull(),
+  // Опциональный template из packages/verticals (например, 'recruitment_uae_v1').
+  // При nullable funnel ведётся "руками" — stages_json задаёт состояния.
+  verticalTemplateId: text("vertical_template_id"),
+  // jsonb с array состояний: [{ slug, kind, label }]
+  stagesJson: text("stages_json").notNull().default("[]"),
+  defaultStyleId: integer("default_style_id").references(() => styles.id, { onDelete: "set null" }),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_funnels_tenant_slug").on(t.tenantId, t.slug),
+  index("idx_funnels_tenant_active").on(t.tenantId, t.isActive),
+]);
+
+// ---- Outbound queue (единая, channel-agnostic) ------------------------
+
+// Заменяет userbot_send_queue в multi-tenant + multi-channel мире. Worker
+// читает pending записи в порядке scheduled_at, дёргает ChannelAdapter.send(),
+// записывает результат (external_message_id) и помечает sent.
+export const outboundQueue = pgTable("outbound_queue", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  channelId: integer("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+  conversationId: integer("conversation_id"),
+  // Сериализованный OutboundEnvelope (см. channel-core).
+  payloadJson: text("payload_json").notNull(),
+  // Идемпотентный ключ — позволяет защититься от дублей при retry воркером.
+  idempotencyKey: text("idempotency_key"),
+  scheduledAt: integer("scheduled_at").notNull().default(epochNow()),
+  status: text("status").notNull().default("pending"),
+  attempt: integer("attempt").notNull().default(0),
+  lastError: text("last_error"),
+  // Заполняется после успешной отправки.
+  externalMessageId: text("external_message_id"),
+  sentAt: integer("sent_at"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  check("outbound_status_check", sql`${t.status} IN ('pending','sent','failed','cancelled')`),
+  // Главный индекс для воркер-полинга: pending ordered by scheduled_at.
+  index("idx_outbound_pending").on(t.status, t.scheduledAt).where(sql`status = 'pending'`),
+  index("idx_outbound_tenant_channel").on(t.tenantId, t.channelId),
+  uniqueIndex("uniq_outbound_idempotency")
+    .on(t.idempotencyKey)
+    .where(sql`idempotency_key IS NOT NULL`),
+]);
+
+// ---- LLM provider configs (per (tenant, purpose)) ---------------------
+
+// Читается LlmRouter'ом для resolveChat/resolveEmbed (см. packages/llm-router).
+// На N tenants × M purposes здесь до N*M строк. secret_ref — ключ в
+// tenant_secrets (там лежит зашифрованный apiKey).
+export const llmProviderConfigs = pgTable("llm_provider_configs", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  purpose: text("purpose").notNull(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  secretRef: text("secret_ref"),
+  baseUrl: text("base_url"),
+  // Только для purpose='embed'.
+  embedDim: integer("embed_dim"),
+  timeoutMs: integer("timeout_ms"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check(
+    "llm_configs_purpose_check",
+    sql`${t.purpose} IN ('chat','embed','vision','judge')`,
+  ),
+  check(
+    "llm_configs_provider_check",
+    sql`${t.provider} IN ('openai','openrouter','ollama','anthropic')`,
+  ),
+  uniqueIndex("uniq_llm_configs_tenant_purpose").on(t.tenantId, t.purpose),
+]);
