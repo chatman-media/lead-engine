@@ -64,6 +64,7 @@
       "name": "@chatman-media/vertical-recruitment-uae",
       "version": "0.1.0",
       "dependencies": {
+        "@chatman-media/rag": "workspace:*",
         "@chatman-media/verticals": "workspace:*",
       },
       "devDependencies": {
