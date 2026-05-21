@@ -1,5 +1,5 @@
 import type { ChatClient } from "@chatman-media/llm-router";
-import { FUNNEL_STAGES, type FunnelStage } from "@chatman-media/rag";
+import { FUNNEL_STAGES, type FunnelStage } from "@chatman-media/kb";
 import { sql, eq, and } from "drizzle-orm";
 import { conversations as conversationsTable } from "@chatman-media/storage";
 import type { Db } from "./dal/types.ts";

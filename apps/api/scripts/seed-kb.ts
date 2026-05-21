@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Seed KB documents для tenant'а через @chatman-media/rag.ingestDirectory.
+ * Seed KB documents для tenant'а через @chatman-media/kb.ingestDirectory.
  * Скрипт читает все поддерживаемые файлы из директории, чанкует, эмбеддит,
  * пишет в kb_documents + kb_chunks через DrizzleKbStore (tenant-scoped).
  *
@@ -23,8 +23,11 @@
  */
 
 import { DrizzleKbStore } from "@chatman-media/conversation-engine";
-import { InMemoryLlmRouter } from "@chatman-media/llm-router";
-import { ingestDirectory, type EmbeddingClient as RagEmbeddingClient } from "@chatman-media/rag";
+import {
+  type EmbeddingClient as RagEmbeddingClient,
+  InMemoryLlmRouter,
+} from "@chatman-media/llm-router";
+import { ingestDirectory } from "@chatman-media/kb";
 import * as schema from "@chatman-media/storage";
 import { tenants } from "@chatman-media/storage";
 import { drizzle } from "drizzle-orm/postgres-js";

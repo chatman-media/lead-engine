@@ -3,22 +3,22 @@ import {
   type KbSearchHit,
   reciprocalRankFusion,
   sanitizeFtsQuery,
-} from "@chatman-media/rag";
+} from "@chatman-media/kb";
 import { sql } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
 /**
- * Drizzle/Postgres implementation `IKbStore` контракта из @chatman-media/rag.
+ * Drizzle/Postgres implementation `IKbStore` контракта из @chatman-media/kb.
  * Все запросы tenant_id-scoped: WHERE c.tenant_id = ? AND d.tenant_id = ?.
  *
  * Ingest-методы реализованы — пакет нужен и admin'ам (через
- * @chatman-media/rag's ingestFile/Directory) и runtime (search).
+ * @chatman-media/kb's ingestFile/Directory) и runtime (search).
  *
  * Особенности относительно sales-guru's src/db/repos/kb.ts:
  *   - tenant_id обязателен в KOAЖ-дый JOIN'е (защита от cross-tenant leak)
  *   - конструируем pgvector литерал как '[...]' строку → cast ::vector
- *   - sanitizeFtsQuery импортируется из @chatman-media/rag (общая логика)
- *   - hybridSearch использует RRF из @chatman-media/rag
+ *   - sanitizeFtsQuery импортируется из @chatman-media/kb (общая логика)
+ *   - hybridSearch использует RRF из @chatman-media/kb
  */
 export class DrizzleKbStore implements IKbStore {
   constructor(private readonly ctx: RepoCtx) {}

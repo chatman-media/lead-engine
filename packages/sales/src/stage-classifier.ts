@@ -1,4 +1,4 @@
-import type { ChatClient } from "@chatman-media/rag";
+import type { ChatClient } from "@chatman-media/llm-router";
 import { extractJsonObject } from "./llm-json.ts";
 import { nextStage } from "./stage-router.ts";
 import { FUNNEL_STAGES, type FunnelStage } from "./types.ts";

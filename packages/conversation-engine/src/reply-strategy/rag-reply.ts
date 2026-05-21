@@ -1,12 +1,10 @@
 import type { OutboundEnvelope } from "@chatman-media/channel-core";
-import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
-import {
-  answerWithRag,
-  type IKbStore,
-  type EmbeddingClient as RagEmbeddingClient,
-  type Style,
-  StyleSchema,
-} from "@chatman-media/rag";
+import type {
+  ChatClient,
+  ChatMessage,
+  EmbeddingClient as RagEmbeddingClient,
+} from "@chatman-media/llm-router";
+import { answerWithRag, type IKbStore, type Style, StyleSchema } from "@chatman-media/kb";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
@@ -18,7 +16,7 @@ import type { ReplyStrategy } from "../process-inbound.ts";
  *   3. answerWithRag(chunks + history + system prompt) → text reply.
  *   4. Вернуть OutboundEnvelope.
  *
- * answerWithRag из @chatman-media/rag сам строит system prompt из chunks,
+ * answerWithRag из @chatman-media/kb сам строит system prompt из chunks,
  * делает query rewriting + reflection (если флаги включены) и
  * sanitize'ит output. Мы только инжектим деп'ы и history.
  *

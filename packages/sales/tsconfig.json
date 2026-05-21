@@ -12,7 +12,7 @@
     "skipLibCheck": true,
     "paths": {
       "@chatman-media/llm-router": ["../llm-router/src/index.ts"],
-      "@chatman-media/rag": ["../rag/src/index.ts"]
+      "@chatman-media/kb": ["../kb/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "examples/**/*.ts"]

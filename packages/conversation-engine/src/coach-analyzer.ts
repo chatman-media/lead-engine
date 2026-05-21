@@ -1,5 +1,5 @@
 import type { ChatClient } from "@chatman-media/llm-router";
-import { gradeSkills } from "@chatman-media/rag";
+import { gradeSkills } from "@chatman-media/kb";
 import type { LeadRow } from "./dal/leads.ts";
 import type { MessageRow, MessagesRepo } from "./dal/messages.ts";
 import type { SkillOutcomesRepo } from "./dal/skill-outcomes.ts";
@@ -7,7 +7,7 @@ import type { SkillOutcomesRepo } from "./dal/skill-outcomes.ts";
 /**
  * Coach analyzer — post-hoc разбор completed conversation'ов. После того как
  * lead закрылся (won/lost/ghosted), для каждой пары (user-question, bot-reply)
- * в transcript'е дёргает gradeSkills из @chatman-media/rag — возвращённые
+ * в transcript'е дёргает gradeSkills из @chatman-media/kb — возвращённые
  * skill-slugs пишутся в skill_outcomes таблицу с одним общим outcome'ом
  * лида.
  *

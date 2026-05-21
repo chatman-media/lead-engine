@@ -8,7 +8,7 @@
  * piece is `judgePairwise` (LLM picks A / B / draw) and
  * `runPairwiseMatch` (drives the two solo runs in sequence).
  */
-import type { ChatClient, ChatMessage } from "@chatman-media/rag";
+import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { EloOutcome } from "../elo.ts";
 import { eloUpdatePair } from "../elo.ts";
 import { extractJsonObject } from "../llm-json.ts";

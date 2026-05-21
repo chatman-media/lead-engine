@@ -2,10 +2,9 @@
 // OpenRouter / Anthropic / …) живут в `providers/`. Этот модуль не должен
 // импортировать ничего из providers — providers зависят от него.
 //
-// История: до этого пакета chat/embed/providers жили в `packages/rag` —
-// дублируясь с упрощёнными копиями здесь. Сейчас llm-router — единственный
-// source of truth, rag re-export'ит для backwards-compat существующих
-// `@chatman-media/rag` consumers. См. PR refactor/llm-router-absorb.
+// История: до PR refactor/llm-router-absorb chat/embed/providers жили в
+// `packages/rag` (теперь `packages/kb`), дублируясь с упрощёнными копиями
+// здесь. Теперь llm-router — единственный source of truth.
 
 export type FetchLike = typeof fetch;
 

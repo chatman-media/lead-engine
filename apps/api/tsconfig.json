@@ -18,7 +18,7 @@
       "@chatman-media/conversation-engine": ["../../packages/conversation-engine/src/index.ts"],
       "@chatman-media/llm-router": ["../../packages/llm-router/src/index.ts"],
       "@chatman-media/observability": ["../../packages/observability/src/index.ts"],
-      "@chatman-media/rag": ["../../packages/rag/src/index.ts"],
+      "@chatman-media/kb": ["../../packages/kb/src/index.ts"],
       "@chatman-media/storage": ["../../packages/storage/src/index.ts"],
       "@chatman-media/vertical-recruitment-uae": [
         "../vertical-recruitment-uae/src/index.ts"

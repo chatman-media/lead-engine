@@ -49,12 +49,12 @@
     "url": "https://github.com/chatman-media/sales/issues"
   },
   "peerDependencies": {
-    "@chatman-media/rag": ">=1.0.0",
+    "@chatman-media/kb": "workspace:*",
     "zod": ">=4.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.14",
-    "@chatman-media/rag": "^1.0.0",
+    "@chatman-media/kb": "workspace:*",
     "@types/bun": "1.3.14",
     "typescript": "^6.0.3",
     "zod": "^4.4.1"

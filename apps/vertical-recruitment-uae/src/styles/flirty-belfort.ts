@@ -1,4 +1,4 @@
-import { type Style, StyleSchema } from "@chatman-media/rag";
+import { type Style, StyleSchema } from "@chatman-media/kb";
 
 export const flirtyBelfort: Style = StyleSchema.parse({
   slug: "flirty-belfort-v1",

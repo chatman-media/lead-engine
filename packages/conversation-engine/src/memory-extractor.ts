@@ -1,5 +1,5 @@
 import type { ChatClient, ChatMessage as LlmChatMessage } from "@chatman-media/llm-router";
-import { extractUserFacts } from "@chatman-media/rag";
+import { extractUserFacts } from "@chatman-media/kb";
 import type { ContactsRepo } from "./dal/contacts.ts";
 import type { MessageRow, MessagesRepo } from "./dal/messages.ts";
 
@@ -28,7 +28,7 @@ export interface MemoryExtractor {
 }
 
 /**
- * LLM-based реализация через @chatman-media/rag.extractUserFacts.
+ * LLM-based реализация через @chatman-media/kb.extractUserFacts.
  * MessagesRepo — для загрузки history, ChatClient — для LLM-вызова.
  */
 export class LlmMemoryExtractor implements MemoryExtractor {

@@ -73,7 +73,7 @@ export interface ApiConfig {
   /**
    * Опционально: slug дефолтного sales-style для legacy tenant'а. Если
    * задан, RagReplyStrategy.resolveStyle подгрузит StylesRepo.findActiveBySlug
-   * (с парсингом через @chatman-media/rag StyleSchema) и передаст в
+   * (с парсингом через @chatman-media/kb StyleSchema) и передаст в
    * answerWithRag. Стиль строит system prompt через composeSystemPrompt
    * (persona + sales framework + hooks + skills).
    *

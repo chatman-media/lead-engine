@@ -15,9 +15,12 @@ import {
   type StageClassifier,
   StylesRepo,
 } from "@chatman-media/conversation-engine";
-import { InMemoryLlmRouter } from "@chatman-media/llm-router";
+import {
+  type EmbeddingClient as RagEmbeddingClient,
+  InMemoryLlmRouter,
+} from "@chatman-media/llm-router";
 import type { PlatformMetrics } from "@chatman-media/observability";
-import { ABRouter, type EmbeddingClient as RagEmbeddingClient, type Style } from "@chatman-media/rag";
+import { ABRouter, type Style } from "@chatman-media/kb";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import type { ApiConfig } from "./config.ts";
 import { wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
@@ -29,7 +32,7 @@ import { wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.t
  *
  * Выбор стратегии:
  *   - Если задан и chat-config, и embed-config → RagReplyStrategy
- *     (KB-aware ответы через @chatman-media/rag.answerWithRag).
+ *     (KB-aware ответы через @chatman-media/kb.answerWithRag).
  *   - Если только chat-config → LlmReplyStrategy (история + system prompt,
  *     без KB).
  *   - Если chat не задан → null (бот persist'ит и молчит).

@@ -1,4 +1,4 @@
-import type { Style } from "@chatman-media/rag";
+import type { Style } from "@chatman-media/kb";
 import type { ExperimentRow, StylesRepo } from "./dal/index.ts";
 import { parseAllocation } from "./dal/experiments.ts";
 import { parseStyleConfig } from "./reply-strategy/rag-reply.ts";

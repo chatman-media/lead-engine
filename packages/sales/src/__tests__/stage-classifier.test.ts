@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatClient } from "@chatman-media/rag";
+import type { ChatClient } from "@chatman-media/llm-router";
 import { classifyStage, parseClassifierOutput } from "../stage-classifier.ts";
 
 /** Minimal ChatClient whose `complete` returns (or throws) a fixed value. */
