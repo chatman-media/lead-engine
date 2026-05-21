@@ -1,0 +1,34 @@
+{
+  "name": "@chatman-media/channel-whatsapp",
+  "version": "0.1.0",
+  "description": "WhatsApp Cloud API channel adapter (Meta Graph) — text + media через webhook + Graph API send.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target node --format esm --external @chatman-media/channel-core && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "check": "biome check ./src",
+    "format": "biome format --write ./src",
+    "test": "bun test"
+  },
+  "keywords": ["lead-engine", "channel", "whatsapp", "meta", "graph-api"],
+  "author": "Alexander Kireev",
+  "license": "MIT",
+  "dependencies": {
+    "@chatman-media/channel-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.14",
+    "@types/bun": "1.3.14",
+    "typescript": "^6.0.3"
+  }
+}

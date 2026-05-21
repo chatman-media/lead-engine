@@ -117,6 +117,18 @@
         "typescript": "^6.0.3",
       },
     },
+    "packages/channel-whatsapp": {
+      "name": "@chatman-media/channel-whatsapp",
+      "version": "0.1.0",
+      "dependencies": {
+        "@chatman-media/channel-core": "workspace:*",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "^2.4.14",
+        "@types/bun": "1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
     "packages/conversation-engine": {
       "name": "@chatman-media/conversation-engine",
       "version": "0.1.0",
@@ -288,6 +300,8 @@
     "@chatman-media/channel-telegram": ["@chatman-media/channel-telegram@workspace:packages/channel-telegram"],
 
     "@chatman-media/channel-web": ["@chatman-media/channel-web@workspace:packages/channel-web"],
+
+    "@chatman-media/channel-whatsapp": ["@chatman-media/channel-whatsapp@workspace:packages/channel-whatsapp"],
 
     "@chatman-media/conversation-engine": ["@chatman-media/conversation-engine@workspace:packages/conversation-engine"],
 
