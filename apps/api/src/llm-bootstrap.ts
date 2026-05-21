@@ -259,3 +259,33 @@ export function makeReplyStrategy(
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
   );
 }
+
+/**
+ * Standalone embedder resolver — для admin-API endpoints'ов (KB upload),
+ * которые не используют RagReplyStrategy но нуждаются в `EmbeddingClient`
+ * per tenant. Возвращает null если embed-config не задан в env.
+ *
+ * Symmetric с makeReplyStrategy в плане tenant-config registration: loops
+ * через active tenant IDs.
+ */
+export function makeEmbedderResolver(
+  cfg: ApiConfig,
+  tenantIds: readonly number[] = [1],
+): ((tenantId: number) => import("@chatman-media/llm-router").EmbeddingClient) | null {
+  const provider = cfg.embed.provider;
+  if (!provider || !cfg.embed.model) return null;
+  if (provider !== "ollama" && !cfg.embed.apiKey) return null;
+  const router = new InMemoryLlmRouter();
+  for (const tenantId of tenantIds) {
+    router.setConfig({
+      tenantId,
+      purpose: "embed",
+      provider,
+      model: cfg.embed.model,
+      apiKey: cfg.embed.apiKey,
+      embedDim: cfg.embed.dim,
+      ...(cfg.embed.baseUrl ? { baseUrl: cfg.embed.baseUrl } : {}),
+    });
+  }
+  return (tenantId: number) => router.resolveEmbed(tenantId);
+}
