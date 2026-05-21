@@ -65,6 +65,14 @@ export interface AnswerInput {
    */
   tools?: AnyRagTool[];
   /**
+   * Maximum number of agentic tool-calling cycles. Each cycle is one LLM call
+   * that may request tools, followed by execution of those tools. When the
+   * limit is reached, a final answer is forced WITHOUT tools. Only relevant
+   * when `tools` is set. Default: 4 (caps at 5 LLM calls including the final
+   * answer — note the latency and cost of a long tool chain).
+   */
+  maxToolCycles?: number;
+  /**
    * When provided, the LLM is instructed to return a JSON object matching this
    * Zod schema. The parsed and validated value is available as `result.output`.
    * Uses OpenAI's native `response_format` when available; falls back to prompt
@@ -98,8 +106,23 @@ export interface AnswerTelemetry {
   original_query?: string;
   rewritten_query?: string;
   factCheck?: { grounded: boolean; vacancyOk: boolean; reason?: string };
-  /** Populated when a tool was called during answer generation. */
+  /**
+   * @deprecated Use `toolCalls`. Retained for backward compatibility — set to
+   * the first tool call when any tools ran during answer generation.
+   */
   toolCall?: { name: string; result: unknown };
+  /**
+   * Every tool call executed across all agentic cycles, in order. Note that
+   * `args` may contain user-derived input — treat as sensitive if your tools
+   * receive PII.
+   */
+  toolCalls?: Array<{
+    name: string;
+    args: Record<string, unknown>;
+    result: unknown;
+    error?: boolean;
+    cycle: number;
+  }>;
 }
 
 export interface AnswerResult<TOutput = unknown> {

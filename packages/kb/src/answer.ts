@@ -31,8 +31,8 @@ import {
   legacyRagSamplingTemperature,
 } from "./system-prompt.ts";
 import { applyStyleRules } from "./text-style-rules.ts";
+import { buildToolTelemetry, DEFAULT_MAX_TOOL_CYCLES, runToolLoop } from "./tool-loop.ts";
 import type { AnyRagTool } from "./tools.ts";
-import { toolToOpenAIFunction } from "./tools.ts";
 import { classifyTopic } from "./topic-classifier.ts";
 import type { KbSearchHit } from "./types.ts";
 
@@ -126,41 +126,33 @@ async function answerFromHits(opts: {
   const numPredict = input.numPredict ?? input.style?.model.maxTokens;
   const llmOpts = { temperature, ...(numPredict !== undefined ? { numPredict } : {}) };
 
+  // ── Agentic tool-calling loop ────────────────────────────────────────────
+  // Multi-cycle: LLM может вызвать tools → увидеть результаты → вызвать
+  // снова, пока не достигнет финального ответа или maxToolCycles cap'а.
+  // Single-cycle behavior получается при maxToolCycles=1. Если первый
+  // cycle вернул content (no tools requested) — early-return как раньше.
   let toolCallTelemetry: AnswerTelemetry["toolCall"] | undefined;
+  let multiCycleToolCalls: AnswerTelemetry["toolCalls"] | undefined;
 
   if (input.tools && input.tools.length > 0 && typeof input.chat.completeWithTools === "function") {
-    const toolDefs = input.tools.map(toolToOpenAIFunction);
-    const toolResult = await input.chat.completeWithTools(messages, toolDefs, llmOpts);
+    const maxCycles = input.maxToolCycles ?? DEFAULT_MAX_TOOL_CYCLES;
+    const loopResult = await runToolLoop({
+      chat: input.chat,
+      messages,
+      tools: input.tools as AnyRagTool[],
+      llmOpts,
+      maxCycles,
+    });
+    const telemetryFields = buildToolTelemetry(loopResult.toolCalls);
+    toolCallTelemetry = telemetryFields.toolCall;
+    multiCycleToolCalls = telemetryFields.toolCalls;
 
-    if (toolResult.toolCalls.length > 0) {
-      const tc = toolResult.toolCalls[0];
-      if (!tc)
-        return {
-          text: NO_CONTEXT_MARKER,
-          usedChunkIds: [],
-          hits: [],
-          telemetry: { ...baseTelemetry, path: "no_context", total_ms: Date.now() - startedAt },
-        };
-      const tool = (input.tools as AnyRagTool[]).find((t) => t.name === tc.name);
-      if (tool) {
-        const result = await tool.execute(tc.args);
-        toolCallTelemetry = { name: tc.name, result };
-
-        messages.push({
-          role: "assistant",
-          content: null,
-          tool_calls: [
-            {
-              id: tc.id,
-              type: "function",
-              function: { name: tc.name, arguments: JSON.stringify(tc.args) },
-            },
-          ],
-        });
-        messages.push({ role: "tool", content: JSON.stringify(result), tool_call_id: tc.id });
-      }
-    } else if (toolResult.content !== null) {
-      const text = sanitizeLlmOutput(toolResult.content);
+    // Если loop сам вернул финальный текст (no tools requested на последнем
+    // cycle) — отдаём как ok. Иначе messages mutated с tool-results и
+    // pipeline продолжает к final-completion ниже.
+    if (loopResult.content !== null && loopResult.toolCalls.length === 0) {
+      // No tools were ever called — model сам ответил с первого cycle'а.
+      const text = sanitizeLlmOutput(loopResult.content);
       const generationMs = Date.now() - generationStart;
       const telemetry: AnswerTelemetry = { ...baseTelemetry, generation_ms: generationMs };
       const result: AnswerResult = {
@@ -172,6 +164,10 @@ async function answerFromHits(opts: {
       input.onTelemetry?.(result.telemetry);
       return result;
     }
+    // loopResult.content !== null AND toolCalls.length > 0 means: tools
+    // were called and model produced a final answer in last cycle. Pipeline
+    // will skip the tools-then-no-final case below and fall through to
+    // normal completion (which will re-run on the mutated messages).
   }
 
   // ── Structured output ────────────────────────────────────────────────────

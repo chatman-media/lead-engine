@@ -152,6 +152,14 @@ export {
 } from "./text-style-rules.ts";
 // ── Tool calling ──────────────────────────────────────────────────────────────
 export type { AnyRagTool, CompleteWithToolsResult, RagTool } from "./tools.ts";
+// ── Agentic tool-calling loop (multi-cycle, used internally by answerWithRag) ─
+export {
+  buildToolTelemetry,
+  DEFAULT_MAX_TOOL_CYCLES,
+  runToolLoop,
+  type ToolCallRecord,
+  type ToolLoopResult,
+} from "./tool-loop.ts";
 // ── Topic routing ─────────────────────────────────────────────────────────────
 export { classifyTopic, classifyTopicAll, KNOWN_TOPICS } from "./topic-classifier.ts";
 // ── Storage interfaces & implementations ─────────────────────────────────────
