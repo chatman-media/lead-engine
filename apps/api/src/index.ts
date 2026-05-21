@@ -24,6 +24,7 @@ import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-
 import { makeAdminChannelsRoutes } from "./routes/admin-channels.ts";
 import { makeAdminKbRoutes } from "./routes/admin-kb.ts";
 import { makeAdminLlmConfigsRoutes } from "./routes/admin-llm-configs.ts";
+import { makeAdminOnboardingRoutes } from "./routes/admin-onboarding.ts";
 import { makeAdminRoutes } from "./routes/admin.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
@@ -144,9 +145,25 @@ async function main() {
 
   // Per-tenant channel CRUD (Telegram bot onboarding по token-paste).
   // Token validate'ится через Telegram getMe, encrypted в tenant_secrets.
-  // Channels подхватываются ChannelRegistry на boot — restart нужен.
-  app.route("/", makeAdminChannelsRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
-  log.info("admin-channels routes enabled (per-tenant channel CRUD)");
+  // Если PLATFORM_PUBLIC_URL задан — auto-setWebhook на Telegram при create.
+  // Channels подхватываются ChannelRegistry на boot — restart нужен для
+  // дальнейшей обработки inbound, но webhook уже указывает сюда.
+  app.route(
+    "/",
+    makeAdminChannelsRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      ...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
+      webhookSecret: cfg.telegramWebhookSecret,
+    }),
+  );
+  log.info("admin-channels routes enabled (per-tenant channel CRUD)", {
+    autoSetWebhook: !!cfg.publicUrl,
+  });
+
+  // Onboarding status aggregator (channel + LLM + KB).
+  app.route("/", makeAdminOnboardingRoutes({ db }));
+  log.info("admin-onboarding route enabled");
 
   app.route(
     "/",

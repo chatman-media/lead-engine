@@ -4,7 +4,7 @@ import {
   setEncryptedSecret,
   withTenant,
 } from "@chatman-media/conversation-engine";
-import { channels } from "@chatman-media/storage";
+import { channels, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 
@@ -34,8 +34,21 @@ import { Hono } from "hono";
 export interface AdminChannelsRoutesOpts {
   db: Db;
   masterKeyHex: string;
-  /** Custom fetch для тестов — позволяет stub'нуть Telegram getMe. */
+  /** Custom fetch для тестов — позволяет stub'нуть Telegram getMe + setWebhook. */
   fetchImpl?: typeof fetch;
+  /**
+   * External-facing URL apps/api (e.g. "https://api.leadengine.app").
+   * Если задан — POST /telegram автоматически setWebhook'ает Telegram на
+   * `<publicUrl>/webhook/telegram/<tenant.slug>`. Если пусто — admin
+   * настраивает webhook вручную.
+   */
+  publicUrl?: string;
+  /**
+   * Secret-token для X-Telegram-Bot-Api-Secret-Token (см. cfg.telegramWebhookSecret).
+   * Передаётся в setWebhook чтобы наш webhook handler фильтровал spoofed POST'ы.
+   * Если publicUrl задан — этот тоже обязан быть.
+   */
+  webhookSecret?: string;
 }
 
 interface TelegramCreateBody {
@@ -201,7 +214,40 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
           .returning({ id: channels.id });
         return { id: inserted!.id, updated: false };
       });
-      return c.json({ ok: true, ...result, username, botId });
+      // Auto-setWebhook: после успешного create вызываем Telegram setWebhook
+      // чтобы канал заработал без manual configure. Если webhook setup fails —
+      // НЕ откатываем channel (он валиден, можно retry'нуть позже).
+      let webhookSet = false;
+      let webhookError: string | undefined;
+      if (opts.publicUrl && opts.webhookSecret) {
+        try {
+          // Резолвим tenant slug для URL.
+          const [tenant] = await opts.db
+            .select({ slug: tenants.slug })
+            .from(tenants)
+            .where(eq(tenants.id, tenantId));
+          if (tenant) {
+            const webhookUrl = `${opts.publicUrl}/webhook/telegram/${tenant.slug}`;
+            await tgClient.setWebhook({
+              url: webhookUrl,
+              secretToken: opts.webhookSecret,
+              allowedUpdates: ["message", "callback_query", "edited_message"],
+            });
+            webhookSet = true;
+          }
+        } catch (err) {
+          webhookError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
+      return c.json({
+        ok: true,
+        ...result,
+        username,
+        botId,
+        webhookSet,
+        ...(webhookError ? { webhookError } : {}),
+      });
     } catch (err) {
       // Unique-violation guard на случай race.
       if (err instanceof Error && /unique|duplicate/i.test(err.message)) {
