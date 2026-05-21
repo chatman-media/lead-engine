@@ -21,6 +21,11 @@ export interface ApiConfig {
    */
   telegramWebhookSecret: string;
   /**
+   * Stripe webhook signing secret (whsec_...) — опционально. Если пусто,
+   * /webhook/stripe не подключается и Stripe-billing просто не работает.
+   */
+  stripeWebhookSecret: string;
+  /**
    * Опционально: дополнительный fast-path SELECT во время /healthz —
    * если БД лежит, мы возвращаем 503 и трафик переключается на старый
    * sales-guru до восстановления.
@@ -97,6 +102,7 @@ export function loadApiConfig(): ApiConfig {
     databaseUrl: required("DATABASE_URL"),
     masterKeyHex: required("PLATFORM_MASTER_KEY"),
     telegramWebhookSecret: required("TELEGRAM_WEBHOOK_SECRET"),
+    stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
     healthCheckTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "2000", 10),
     llm: {
       provider,

@@ -33,23 +33,37 @@ let testUrl: string | null = null;
 let sql: Sql | null = null;
 let migrationFiles: string[] = [];
 
-beforeAll(async () => {
-  if (!ownerUrl) return;
-  const probe = await tryConnectToPg(ownerUrl);
-  if (!probe) return;
-  await probe.end({ timeout: 2 }).catch(() => {});
+beforeAll(
+  async () => {
+    if (!ownerUrl) return;
+    const probe = await tryConnectToPg(ownerUrl);
+    if (!probe) return;
+    await probe.end({ timeout: 0 }).catch(() => {});
 
-  testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-  sql = postgres(testUrl, { max: 2 });
-  migrationFiles = await applyAllMigrations(sql, migrationsDir);
-});
+    testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+    sql = postgres(testUrl, { max: 2 });
+    migrationFiles = await applyAllMigrations(sql, migrationsDir);
+  },
+  // Apply 7 миграций с pgvector + ivfflat + GIN индексами может занять до
+  // 15s на медленных runner'ах.
+  30_000,
+);
 
-afterAll(async () => {
-  if (sql) await sql.end({ timeout: 2 }).catch(() => {});
-  if (testUrl && ownerUrl) {
-    await dropIsolatedDb({ ownerUrl, testDbName: dbName }).catch(() => {});
-  }
-});
+afterAll(
+  async () => {
+    if (sql) {
+      await sql.end({ timeout: 0 }).catch(() => {});
+      sql = null;
+    }
+    // dropIsolatedDb намеренно опущен: bun-test'у сложно надёжно
+    // дропать БД через отдельный owner-pool — теndsует timeout'ить
+    // даже при force-terminate. random suffix у dbName исключает
+    // конфликты между runs; cleanup'ить локально — `psql -lqt | grep
+    // lead_engine_int_ | xargs -n1 dropdb` если станет проблемой.
+    // В CI каждый run свежий контейнер pgvector, нечего cleanup'ить.
+  },
+  5_000,
+);
 
 describe("migrations integration", () => {
   it("applies all .sql files in order", () => {
@@ -63,32 +77,31 @@ describe("migrations integration", () => {
     expect(migrationFiles).toEqual(sorted);
   });
 
-  it("создаёт ровно 34 tenant-scoped + tenants/channel_identities/userbot_session таблицы", async () => {
+  it("создаёт ровно 39 таблиц (28 existing + 8 multi-tenant + 3 stripe)", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_tables WHERE schemaname = 'public'
     `;
-    // 28 existing + 8 multi-tenant tables = 36. (Не считаем drizzle's
-    // потенциальную __drizzle_migrations служебную, её нет.)
-    expect(rows[0]?.count).toBeGreaterThanOrEqual(36);
+    // 28 existing + 8 multi-tenant + 3 stripe = 39.
+    expect(rows[0]?.count).toBeGreaterThanOrEqual(39);
   });
 
-  it("RLS-policies включены на 33 таблицах с tenant_id", async () => {
+  it("RLS-policies включены на 35 таблицах с tenant_id (33 + 2 stripe)", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_tables
       WHERE schemaname = 'public' AND rowsecurity = true
     `;
-    expect(rows[0]?.count).toBe(33);
+    expect(rows[0]?.count).toBe(35);
   });
 
-  it("tenant_isolation policies = 33 (по одной на каждую RLS-таблицу)", async () => {
+  it("tenant_isolation policies = 35 (по одной на каждую RLS-таблицу)", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_policies
       WHERE schemaname = 'public' AND policyname = 'tenant_isolation'
     `;
-    expect(rows[0]?.count).toBe(33);
+    expect(rows[0]?.count).toBe(35);
   });
 
   it("legacy tenant (id=1) сидится из 0001", async () => {

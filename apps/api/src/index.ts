@@ -12,6 +12,7 @@ import {
 } from "./llm-bootstrap.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
+import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 
 /**
@@ -85,6 +86,18 @@ async function main() {
       stageClassifier,
     }),
   );
+
+  if (cfg.stripeWebhookSecret) {
+    app.route(
+      "/",
+      makeStripeWebhookRoutes({
+        // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
+        db: db as any,
+        webhookSecret: cfg.stripeWebhookSecret,
+      }),
+    );
+    log.info("stripe webhook enabled");
+  }
 
   const server = Bun.serve({
     port: cfg.port,
