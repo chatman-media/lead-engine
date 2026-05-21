@@ -1,6 +1,6 @@
 import type { OutboundEnvelope } from "@chatman-media/channel-core";
 import { outboundQueue } from "@chatman-media/storage";
-import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
 export interface OutboundQueueRow {
@@ -11,7 +11,7 @@ export interface OutboundQueueRow {
   payloadJson: string;
   idempotencyKey: string | null;
   scheduledAt: number;
-  status: "pending" | "sent" | "failed" | "cancelled";
+  status: "pending" | "processing" | "sent" | "failed" | "cancelled";
   attempt: number;
   lastError: string | null;
   externalMessageId: string | null;
@@ -70,24 +70,53 @@ export class OutboundQueueRepo {
   }
 
   /**
-   * Pop'нуть pending envelope'ы для worker'а. Сортирует по scheduled_at,
-   * лимитирует. Worker сам помечает их status='sent'/'failed' после
-   * фактической отправки через ChannelAdapter.
+   * Атомарно claim'ает до `limit` pending envelope'ов: UPDATE'ом переводит
+   * их в status='processing' и returning'ом отдаёт worker'у. Использует
+   * `FOR UPDATE SKIP LOCKED` в inner SELECT — multi-worker safe: каждая
+   * row claim'ается ровно одним worker'ом, остальные пропускают её
+   * без блокировки.
+   *
+   * Worker'у обязательно вызвать markSent или markFailed после processing —
+   * row застрянет в processing иначе. Cleanup-cron для возврата
+   * processing→pending после timeout'а — отдельный job в Issue #3 / M-2.
    */
   async claimPending(opts: { limit: number; nowEpoch: number }): Promise<OutboundQueueRow[]> {
-    const rows = await this.ctx.db
-      .select()
-      .from(outboundQueue)
-      .where(
-        and(
-          eq(outboundQueue.tenantId, this.ctx.tenantId),
-          eq(outboundQueue.status, "pending"),
-          lte(outboundQueue.scheduledAt, opts.nowEpoch),
-        ),
+    const rows = await this.ctx.db.execute(sql`
+      UPDATE ${outboundQueue}
+      SET status = 'processing'
+      WHERE id IN (
+        SELECT id FROM ${outboundQueue}
+        WHERE tenant_id = ${this.ctx.tenantId}
+          AND status = 'pending'
+          AND scheduled_at <= ${opts.nowEpoch}
+        ORDER BY scheduled_at ASC
+        LIMIT ${opts.limit}
+        FOR UPDATE SKIP LOCKED
       )
-      .orderBy(asc(outboundQueue.scheduledAt))
-      .limit(opts.limit);
-    return rows as OutboundQueueRow[];
+      RETURNING *
+    `);
+    return rows as unknown as OutboundQueueRow[];
+  }
+
+  /**
+   * Откатить зависшие processing rows обратно в pending. Идёт по rows
+   * у которых status='processing' дольше `stuckSec` секунд (worker умер
+   * не дойдя до markSent/markFailed). Cron'ится из apps/worker раз в N минут.
+   */
+  async releaseStuckProcessing(opts: {
+    nowEpoch: number;
+    stuckSec: number;
+  }): Promise<number> {
+    const cutoff = opts.nowEpoch - opts.stuckSec;
+    const rows = await this.ctx.db.execute(sql`
+      UPDATE ${outboundQueue}
+      SET status = 'pending'
+      WHERE tenant_id = ${this.ctx.tenantId}
+        AND status = 'processing'
+        AND scheduled_at < ${cutoff}
+      RETURNING id
+    `);
+    return Array.isArray(rows) ? rows.length : 0;
   }
 
   async markSent(id: number, externalMessageId: string, nowEpoch: number): Promise<void> {

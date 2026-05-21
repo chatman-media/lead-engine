@@ -10,18 +10,19 @@ import type { WorkerChannelRegistry } from "./channel-registry.ts";
 
 /**
  * Outbound dispatcher: long-running loop, который:
- *   1. SELECT'ит активные tenant_id из БД
- *   2. Для каждого — pop'ает pending outbound_queue (claimPending)
- *   3. Для каждой строки — резолвит ChannelAdapter и зовёт adapter.send(envelope)
- *   4. Маркирует строку как 'sent' (с external_message_id) или 'failed'
- *      (с error и инкрементом attempt)
- *
- * Не использует SELECT FOR UPDATE — claim-then-mark стратегия. На одиночном
- * worker'е достаточно. Для horizontal scaling в Этапе 9+ заменим на advisory
- * lock или транзакционный SKIP LOCKED.
+ *   1. SELECT активных tenant_id из БД
+ *   2. Для каждого — claim'ает до batchSize pending → processing (атомарно
+ *      через UPDATE … FOR UPDATE SKIP LOCKED → status='processing'). Multi-
+ *      worker safe: каждая row пойдёт ровно одному worker'у.
+ *   3. Для каждой строки — резолвит ChannelAdapter и зовёт adapter.send.
+ *   4. На успех → markSent с external_message_id; на ошибку → markFailed.
+ *   5. Раз в `stuckCheckPeriod` tick'ов вызывает releaseStuckProcessing —
+ *      возвращает зависшие processing rows (worker умер не вызвав mark*)
+ *      обратно в pending для retry'я.
  */
 export class OutboundDispatcher {
   private stopped = false;
+  private ticksSinceStuckCheck = 0;
 
   constructor(
     private readonly db: Db,
@@ -29,6 +30,10 @@ export class OutboundDispatcher {
     private readonly opts: {
       pollMs: number;
       batchSize: number;
+      /** Сколько секунд держать processing до auto-recovery. Default 300 (5 мин). */
+      stuckProcessingSec?: number;
+      /** Каждый N-й tick запускать releaseStuckProcessing. Default 60 (=1 минута при pollMs=1000). */
+      stuckCheckPeriodTicks?: number;
     },
   ) {}
 
@@ -58,13 +63,31 @@ export class OutboundDispatcher {
       .where(eq(tenants.status, "active"));
 
     const now = Math.floor(Date.now() / 1000);
+    const stuckCheckPeriod = this.opts.stuckCheckPeriodTicks ?? 60;
+    const shouldCheckStuck = this.ticksSinceStuckCheck >= stuckCheckPeriod;
+    if (shouldCheckStuck) this.ticksSinceStuckCheck = 0;
+    else this.ticksSinceStuckCheck += 1;
+
     for (const t of activeTenantIds) {
       const repo = new OutboundQueueRepo({ db: this.db, tenantId: t.id });
-      const pending = await repo.claimPending({
+
+      if (shouldCheckStuck) {
+        const released = await repo.releaseStuckProcessing({
+          nowEpoch: now,
+          stuckSec: this.opts.stuckProcessingSec ?? 300,
+        });
+        if (released > 0) {
+          console.log(
+            `[dispatcher] released ${released} stuck processing rows for tenant=${t.id}`,
+          );
+        }
+      }
+
+      const claimed = await repo.claimPending({
         limit: this.opts.batchSize,
         nowEpoch: now,
       });
-      for (const row of pending) {
+      for (const row of claimed) {
         await this.deliverOne(repo, row);
       }
     }

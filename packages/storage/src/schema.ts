@@ -678,7 +678,7 @@ export const outboundQueue = pgTable("outbound_queue", {
   sentAt: integer("sent_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
 }, (t) => [
-  check("outbound_status_check", sql`${t.status} IN ('pending','sent','failed','cancelled')`),
+  check("outbound_status_check", sql`${t.status} IN ('pending','processing','sent','failed','cancelled')`),
   // Главный индекс для воркер-полинга: pending ordered by scheduled_at.
   index("idx_outbound_pending").on(t.status, t.scheduledAt).where(sql`status = 'pending'`),
   index("idx_outbound_tenant_channel").on(t.tenantId, t.channelId),
