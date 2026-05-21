@@ -22,7 +22,7 @@
     "typecheck": "tsc --noEmit",
     "check": "biome check ./src",
     "format": "biome format --write ./src",
-    "test": "bun test",
+    "test": "echo 'storage: schema-only; integration tests are in dependent packages with live PG'",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },

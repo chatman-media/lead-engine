@@ -3,22 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/admin-ui",
+    "apps/api",
+    "apps/vertical-recruitment-uae",
+    "apps/worker",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "bun run --cwd apps/bot dev",
-    "start": "bun run --cwd apps/bot start",
+    "dev": "bun run --cwd apps/api dev",
+    "start": "bun run --cwd apps/api start",
+    "dev:worker": "bun run --cwd apps/worker dev",
     "dev:ui": "bun run --cwd apps/admin-ui dev",
     "build:ui": "bun run --cwd apps/admin-ui build",
-    "test": "bun run --cwd apps/bot test",
-    "test:e2e": "bun run --cwd apps/bot test:e2e",
-    "test:e2e:install": "bun run --cwd apps/bot test:e2e:install",
-    "typecheck": "bun run --cwd apps/bot typecheck",
-    "check": "bun run --cwd apps/bot check && bun run --cwd apps/admin-ui check",
-    "secret-scan": "bun run --cwd apps/bot secret-scan",
-    "ci": "bun run --cwd apps/bot ci",
-    "build:packages": "bun run --cwd packages/rag build && bun run --cwd packages/sales build && bun run --cwd packages/storage build",
-    "typecheck:packages": "bun run --cwd packages/rag typecheck && bun run --cwd packages/sales typecheck && bun run --cwd packages/storage typecheck",
-    "test:packages": "bun run --cwd packages/rag test && bun run --cwd packages/sales test && bun run --cwd packages/storage test",
-    "postinstall": "bun run --cwd apps/bot hooks:install || true"
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun run --filter '*' test",
+    "check": "bun run --filter '*' check",
+    "build:packages": "bun run --cwd packages/rag build && bun run --cwd packages/sales build && bun run --cwd packages/storage build && bun run --cwd packages/channel-core build && bun run --cwd packages/channel-telegram build && bun run --cwd packages/llm-router build && bun run --cwd packages/verticals build && bun run --cwd packages/conversation-engine build"
   }
 }

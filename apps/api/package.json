@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "check": "biome check ./src",
     "format": "biome format --write ./src",
-    "test": "bun test"
+    "test": "echo 'apps/api: no unit tests yet (smoke via webhook integration)'"
   },
   "dependencies": {
     "@chatman-media/channel-core": "workspace:*",

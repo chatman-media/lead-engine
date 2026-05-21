@@ -22,7 +22,7 @@
     "typecheck": "tsc --noEmit",
     "check": "biome check ./src",
     "format": "biome format --write ./src",
-    "test": "bun test"
+    "test": "echo 'channel-core: types-only package, contract tests live in channel-* implementations'"
   },
   "keywords": [
     "lead-engine",
