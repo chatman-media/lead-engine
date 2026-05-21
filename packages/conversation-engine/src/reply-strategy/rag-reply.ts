@@ -1,6 +1,12 @@
 import type { OutboundEnvelope } from "@chatman-media/channel-core";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
-import { answerWithRag, type IKbStore, type EmbeddingClient as RagEmbeddingClient } from "@chatman-media/rag";
+import {
+  answerWithRag,
+  type IKbStore,
+  type EmbeddingClient as RagEmbeddingClient,
+  type Style,
+  StyleSchema,
+} from "@chatman-media/rag";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
@@ -48,6 +54,18 @@ export interface RagReplyStrategyOpts {
   resolveChat: (tenantId: number) => ChatClient;
   resolveEmbed: (tenantId: number) => RagEmbeddingClient;
   resolveKb: (tenantId: number) => IKbStore;
+  /**
+   * Опциональный sales-style resolver. Если задан и возвращает Style —
+   * answerWithRag использует его для построения system-prompt (persona,
+   * sales framework, hooks, skills). При null/undefined — rag fallback'нет
+   * на DEFAULT_PERSONA. Лёгкое расширение для A/B routing в будущем:
+   * resolveStyle может смотреть на conversation.style_id или experiment_id.
+   */
+  resolveStyle?: (input: {
+    tenantId: number;
+    conversationId: number;
+    contactId: number;
+  }) => Promise<Style | null> | Style | null;
 }
 
 function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
@@ -58,6 +76,24 @@ function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
       out.push({ role: "assistant", content: m.text });
   }
   return out;
+}
+
+/**
+ * Helper: распарсить style.config_json (из storage StyleRow) в типизированный
+ * rag's Style через zod StyleSchema. Возвращает null если JSON невалидный —
+ * pipeline'у тогда fall back на DEFAULT_PERSONA вместо crash'а.
+ *
+ * Использовать снаружи (apps/api) при построении resolveStyle hook'а:
+ *   const styleRow = await stylesRepo.findActiveBySlug(slug);
+ *   return parseStyleConfig(styleRow.configJson);
+ */
+export function parseStyleConfig(configJson: string): Style | null {
+  try {
+    const raw = JSON.parse(configJson);
+    return StyleSchema.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 export class RagReplyStrategy implements ReplyStrategy {
@@ -88,6 +124,13 @@ export class RagReplyStrategy implements ReplyStrategy {
     const chat = this.opts.resolveChat(tenantId);
     const embedder = this.opts.resolveEmbed(tenantId);
     const kb = this.opts.resolveKb(tenantId);
+    const style = this.opts.resolveStyle
+      ? await this.opts.resolveStyle({
+          tenantId,
+          conversationId: input.conversationId,
+          contactId: input.contactId,
+        })
+      : null;
 
     // answerWithRag принимает rag's ChatClient/EmbeddingClient. Структурно
     // наш llm-router'овский ChatClient compatible (rag's ChatMessage.content
@@ -104,13 +147,10 @@ export class RagReplyStrategy implements ReplyStrategy {
       rewriteQueryBeforeRetrieval: this.opts.rewriteQueryBeforeRetrieval ?? true,
       reflect: this.opts.reflect ?? false,
       numPredict: this.opts.maxOutputTokens ?? 600,
-      // Persona.role в rag типизирован как "human" | "assistant" — это
-      // semantic-флаг (бот=AI vs живой человек), не место для свободной
-      // строки. Vertical-template'овский systemPromptFragment в rag'овский
-      // pipeline инжектится через style.config_json в полной интеграции;
-      // эту wire-up планируем в Этапе 4 часть 2c-3 (sales-style selection
-      // + composeSystemPrompt). Сейчас отдаём минимальную Persona — answerWithRag
-      // подхватит свой DEFAULT_PERSONA если поле опущено.
+      // Style: если resolveStyle вернул Style — answerWithRag использует его
+      // persona, sales framework, hooks, skills для построения system prompt.
+      // При null — rag fallback'нет на DEFAULT_PERSONA и базовый промпт.
+      ...(style ? { style } : {}),
     });
 
     if (!result.text || result.text.trim().length === 0) return null;

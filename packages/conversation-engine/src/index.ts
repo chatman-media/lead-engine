@@ -16,6 +16,8 @@ export {
   OutboundQueueRepo,
   type OutboundQueueRow,
   type RepoCtx,
+  StylesRepo,
+  type StyleRow,
 } from "./dal/index.ts";
 export {
   allowedTransitions,
@@ -43,6 +45,7 @@ export {
 export {
   LlmReplyStrategy,
   type LlmReplyStrategyOpts,
+  parseStyleConfig,
   RagReplyStrategy,
   type RagReplyStrategyOpts,
 } from "./reply-strategy/index.ts";
