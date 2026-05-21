@@ -108,6 +108,15 @@ export interface MessageRow {
   deletedAt: number | null;
 }
 
+export interface TenantInfo {
+  id: number;
+  slug: string;
+  plan: string;
+  status: "active" | "suspended" | "deleted";
+  llmBillingMode: "byok" | "managed";
+  createdAt: number;
+}
+
 export interface AuditEntry {
   id: number;
   action: string;
@@ -315,6 +324,17 @@ export const saas = {
       method: "POST",
       body: JSON.stringify({ text }),
     });
+  },
+
+  // ── Tenant management ────────────────────────────────────────────────
+  getTenantInfo() {
+    return request<{ tenant: TenantInfo }>("/api/admin/tenant");
+  },
+  setTenantPaused(paused: boolean) {
+    return request<{ ok: boolean; status: TenantInfo["status"]; reloadError?: string }>(
+      "/api/admin/tenant/status",
+      { method: "PUT", body: JSON.stringify({ paused }) },
+    );
   },
 
   // ── Audit log (read-only) ────────────────────────────────────────────

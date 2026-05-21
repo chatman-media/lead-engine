@@ -1,0 +1,138 @@
+import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import { tenants } from "@chatman-media/storage";
+import { eq } from "drizzle-orm";
+import { Hono } from "hono";
+import { recordAudit } from "../lib/audit.ts";
+
+/**
+ * Per-tenant tenant management endpoints — pause/resume bot, etc.
+ *
+ * Endpoints:
+ *   GET  /api/admin/tenant         — tenant info (slug, plan, status, llmBillingMode)
+ *   PUT  /api/admin/tenant/status  — { paused: boolean } toggle 'active' ↔ 'suspended'
+ *
+ * Pause flow:
+ *   tenant.status='suspended' → ChannelRegistry.loadFromDb filter exclude'ит
+ *   все channels этого tenant'а → webhook handler возвращает 404 (no active
+ *   channel), inbound сообщения отбрасываются. Admin auth по-прежнему
+ *   работает (auth не проверяет tenant.status), tenant может un-pause.
+ *
+ * NB: deleted статус ЗАЩИЩЁН от этого endpoint'а — только хардкорный
+ * superadmin / drizzle migration может выставить.
+ */
+export interface AdminTenantRoutesOpts {
+  db: Db;
+  /**
+   * Hot-reload hook — после status change нужно reloadChannels (registry
+   * фильтрует по tenants.status='active', существующие entries надо
+   * evict/restore).
+   */
+  onStatusChange?: (tenantId: number) => Promise<void>;
+}
+
+export function makeAdminTenantRoutes(opts: AdminTenantRoutesOpts): Hono {
+  const app = new Hono();
+
+  /**
+   * GET /api/admin/tenant
+   * Returns: { id, slug, plan, status, llmBillingMode, createdAt }
+   */
+  app.get("/api/admin/tenant", async (c) => {
+    const tenantId = c.var.tenantId;
+    const row = await withTenant(opts.db, tenantId, async (tx) => {
+      const [r] = await tx
+        .select({
+          id: tenants.id,
+          slug: tenants.slug,
+          plan: tenants.plan,
+          status: tenants.status,
+          llmBillingMode: tenants.llmBillingMode,
+          createdAt: tenants.createdAt,
+        })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId));
+      return r ?? null;
+    });
+    if (!row) return c.json({ error: "tenant not found" }, 404);
+    return c.json({ tenant: row });
+  });
+
+  /**
+   * PUT /api/admin/tenant/status
+   * Body: { paused: boolean }
+   *
+   * paused=true → status='suspended' (channels go offline)
+   * paused=false → status='active' (channels resume)
+   *
+   * 409 если tenant.status='deleted' (cannot un-delete через UI).
+   */
+  app.put("/api/admin/tenant/status", async (c) => {
+    const tenantId = c.var.tenantId;
+    let body: { paused?: unknown };
+    try {
+      body = (await c.req.json()) as { paused?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    if (typeof body.paused !== "boolean") {
+      return c.json({ error: "paused (boolean) required" }, 400);
+    }
+    const newStatus = body.paused ? "suspended" : "active";
+    const nowEpoch = Math.floor(Date.now() / 1000);
+
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      const [existing] = await tx
+        .select({ status: tenants.status })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId));
+      if (!existing) return { kind: "not_found" } as const;
+      if (existing.status === "deleted") {
+        return { kind: "deleted" } as const;
+      }
+      if (existing.status === newStatus) {
+        return { kind: "noop", status: newStatus } as const;
+      }
+      await tx
+        .update(tenants)
+        .set({ status: newStatus, updatedAt: nowEpoch })
+        .where(eq(tenants.id, tenantId));
+      return { kind: "changed", from: existing.status, to: newStatus } as const;
+    });
+
+    if (result.kind === "not_found") {
+      return c.json({ error: "tenant not found" }, 404);
+    }
+    if (result.kind === "deleted") {
+      return c.json({ error: "tenant is deleted — cannot toggle status" }, 409);
+    }
+
+    if (result.kind === "changed") {
+      await recordAudit(opts.db, {
+        tenantId,
+        adminId: c.var.adminId,
+        action: body.paused ? "tenant.pause" : "tenant.resume",
+        targetKind: "tenant",
+        targetId: tenantId,
+        details: { from: result.from, to: result.to },
+      });
+
+      // Hot-reload channels: ChannelRegistry фильтрует по tenants.status,
+      // existing entries должны быть evicted на pause.
+      if (opts.onStatusChange) {
+        try {
+          await opts.onStatusChange(tenantId);
+        } catch (err) {
+          return c.json({
+            ok: true,
+            status: newStatus,
+            reloadError: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
+
+    return c.json({ ok: true, status: newStatus });
+  });
+
+  return app;
+}
