@@ -13,14 +13,9 @@
       }
     ],
     [
-      "@semantic-release/npm",
-      {
-        "npmPublish": false
-      }
-    ],
-    [
       "@semantic-release/exec",
       {
+        "prepareCmd": "node ../../scripts/set-pkg-version.mjs ${nextRelease.version}",
         "publishCmd": "bun publish --access public --no-git-checks"
       }
     ],

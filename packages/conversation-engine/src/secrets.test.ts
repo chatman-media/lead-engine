@@ -31,7 +31,10 @@ describe("encryptSecret / decryptSecret", () => {
   it("modified ciphertext → auth tag mismatch", () => {
     const mk = masterKey();
     const enc = encryptSecret(mk, "secret");
-    const tampered = enc.replace(/.$/, "X");
+    // Flip the final ciphertext nibble to a *different valid* hex digit so the
+    // payload stays well-formed hex of the same length — the rejection must come
+    // from the GCM auth-tag check, not from a hex-decode quirk on an invalid char.
+    const tampered = enc.replace(/.$/, (c) => (c === "a" ? "b" : "a"));
     expect(() => decryptSecret(mk, tampered)).toThrow(SecretCryptoError);
   });
 
