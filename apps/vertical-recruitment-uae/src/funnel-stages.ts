@@ -6,7 +6,7 @@ import type { FunnelStageDef } from "@chatman-media/verticals";
  * conversation-engine при попытке смены state валидирует переход по
  * этой машине.
  *
- * Историческая справка (sales-guru): stage 'submitted' был расщеплён на
+ * Историческая справка: stage 'submitted' был расщеплён на
  * visa_form / visa_filing / visa_waiting когда добавили step-by-step
  * визовое интервью. В этом template'е visa_form — единственный stage
  * с активным взаимодействием бот↔кандидат во время визовой анкеты.

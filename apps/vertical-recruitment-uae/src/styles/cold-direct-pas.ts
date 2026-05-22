@@ -6,7 +6,7 @@ export const coldDirectPas: Style = StyleSchema.parse({
   persona: {
     name: "Игорь",
     role: "human",
-    company: "ALINA Models",
+    company: "Agency",
   },
   voice: {
     tone: "сухой, прямой, по делу, без эмодзи, без лишних слов",

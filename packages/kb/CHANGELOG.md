@@ -26,7 +26,7 @@
 ### Bug Fixes
 
 * **ci:** add @types/bun and skipLibCheck to fix typecheck in CI ([b1d59e0](https://github.com/chatman-media/rag/commit/b1d59e0788682cc3ed6593d54fcbb3a005831b10))
-* correct main repo references from tg-chatbot to sales-guru ([7e48cc9](https://github.com/chatman-media/rag/commit/7e48cc9734ccba170d35ca1196607297711957e6))
+* correct main repo references from tg-chatbot to lead-engine ([7e48cc9](https://github.com/chatman-media/rag/commit/7e48cc9734ccba170d35ca1196607297711957e6))
 * correct package name to @chatman-media/chatbot_rag (underscore) ([f04fb7a](https://github.com/chatman-media/rag/commit/f04fb7af2aa0cde19dcbb2e58f9a5ec458945ea4))
 * **lint:** eliminate all noNonNullAssertion warnings ([856fce6](https://github.com/chatman-media/rag/commit/856fce6a957309acaf7aca090223eb3f37d8e5e9))
 * rename package from @chatman/rag to @chatman-media/chatbot-rag ([a8b9a9c](https://github.com/chatman-media/rag/commit/a8b9a9c91adf47e0a51ab44714b25ce1a49cf466))

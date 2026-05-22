@@ -9,7 +9,7 @@ AI отвечает клиентам через эти каналы. Operator м
 Каждый клиент — независимый `tenant` с собственными каналами, LLM-
 конфигом, базой знаний, изоляцией данных на уровне Postgres RLS.
 
-Извлечён из `chatman-media/sales-guru` (legacy Telegram-only бот) через
+Извлечён из legacy Telegram-бота через
 серию архитектурных PR'ов (см. `docs/ROADMAP.md` и git log).
 
 📖 **См. также:**

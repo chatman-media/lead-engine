@@ -3,7 +3,7 @@
  * intake_complete → approved → docs_complete → visa_form кандидата ведут
  * по этим вопросам последовательно. Ответы пишутся в leads.visa_docs_json.
  *
- * Portовано из sales-guru/src/leads/visa-interview.ts. Поля совпадают
+ * Ported из legacy codebase. Поля совпадают
  * с VisaFields там — формат yyyy-MM-dd для дат, латиница для имён.
  */
 
