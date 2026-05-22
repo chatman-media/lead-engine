@@ -1,31 +1,35 @@
+import { SendHorizontalIcon } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import {
   ApiError,
-  clearToken,
   type ConversationDetail,
   type ConversationListItem,
+  clearToken,
   type MessageRow,
   saas,
 } from "../api/saas.ts";
 
-/**
- * Inbox view: список диалогов (left) + thread активного (right).
- * Auto-poll каждые 5s для активного thread'а — простой long-polling
- * shim до настоящего WS-feed'а (отдельный PR).
- */
 const POLL_INTERVAL_MS = 5000;
 
 function fmtTime(epoch: number | null): string {
   if (!epoch) return "—";
-  return new Date(epoch * 1000).toLocaleString();
-}
-
-function fmtShortTime(epoch: number): string {
-  return new Date(epoch * 1000).toLocaleTimeString([], {
+  return new Date(epoch * 1000).toLocaleString("ru", {
+    day: "2-digit",
+    month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+function fmtShortTime(epoch: number): string {
+  return new Date(epoch * 1000).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
 }
 
 export function SaasConversations() {
@@ -37,10 +41,7 @@ export function SaasConversations() {
   const [listLoading, setListLoading] = useState(true);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  // Ref tracks how many items the user has currently loaded. Used by the
-  // auto-poll to fetch at least that many so paginated items aren't lost.
   const loadedCountRef = useRef(30);
-  // Ref to the bottom of the message thread — used for auto-scroll.
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [detail, setDetail] = useState<{
     conversation: ConversationDetail;
@@ -94,8 +95,7 @@ export function SaasConversations() {
 
   async function refreshDetail(id: number) {
     try {
-      const res = await saas.getConversation(id);
-      setDetail(res);
+      setDetail(await saas.getConversation(id));
     } catch (err) {
       if (handleAuthError(err)) return;
       if (err instanceof ApiError && err.status === 404) {
@@ -107,7 +107,6 @@ export function SaasConversations() {
     }
   }
 
-  // Initial list load
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -117,10 +116,9 @@ export function SaasConversations() {
     return () => {
       cancelled = true;
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: navigate stable
+    // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
 
-  // Load detail when id changes
   useEffect(() => {
     if (!selectedId) {
       setDetail(null);
@@ -135,15 +133,13 @@ export function SaasConversations() {
     return () => {
       cancelled = true;
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: navigate stable
+    // biome-ignore lint/correctness/useExhaustiveDependencies: selectedId only
   }, [selectedId]);
 
   async function handleToggleMode() {
     if (!detail || !selectedId) return;
     const next = detail.conversation.mode === "human" ? "ai" : "human";
-    if (next === "human" && !confirm("Перехватить диалог? AI перестанет отвечать.")) {
-      return;
-    }
+    if (next === "human" && !confirm("Перехватить диалог? AI перестанет отвечать.")) return;
     setTogglingMode(true);
     setError("");
     try {
@@ -170,12 +166,10 @@ export function SaasConversations() {
       await refreshDetail(selectedId);
     } catch (err) {
       if (handleAuthError(err)) return;
-      if (err instanceof ApiError) {
-        if (err.status === 409) {
-          setError("Не удалось отправить: канал клиента недоступен (удалён?)");
-        } else {
-          setError(`Ошибка ${err.status}: ${err.errorCode}`);
-        }
+      if (err instanceof ApiError && err.status === 409) {
+        setError("Не удалось отправить: канал клиента недоступен (удалён?)");
+      } else if (err instanceof ApiError) {
+        setError(`Ошибка ${err.status}: ${err.errorCode}`);
       } else {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -184,173 +178,203 @@ export function SaasConversations() {
     }
   }
 
-  // Auto-scroll to bottom whenever messages change (new message arrived or initial load).
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [detail?.messages]);
 
-  // Auto-poll the selected thread + list every 5s.
-  // refreshList is called with the current loaded count (not just 30) so that
-  // items the user loaded via "Загрузить ещё" are not dropped on each tick.
   useEffect(() => {
     const t = setInterval(() => {
       void refreshList(Math.max(30, loadedCountRef.current));
       if (selectedId) void refreshDetail(selectedId);
     }, POLL_INTERVAL_MS);
     return () => clearInterval(t);
-    // biome-ignore lint/correctness/useExhaustiveDependencies: navigate stable
+    // biome-ignore lint/correctness/useExhaustiveDependencies: selectedId only
   }, [selectedId]);
 
   return (
-    <div className="dashboard inbox-layout">
-      <header className="dashboard-header">
-        <div>
-          <h1>Диалоги</h1>
-          <p className="dashboard-sub">
-            Входящие от клиентов + ответы бота. Авто-обновление каждые 5 сек.
-          </p>
-        </div>
-        <Link to="/dashboard" className="back-link">
-          ← К базе знаний
-        </Link>
-      </header>
+    <div className="space-y-5">
+      <PageHeader
+        title="Диалоги"
+        description="Входящие от клиентов и ответы бота. Авто-обновление каждые 5 секунд."
+      />
 
-      {error && <div className="dashboard-error">{error}</div>}
+      {error && (
+        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
 
-      <div className="inbox-grid">
-        <aside className="inbox-sidebar">
-          <h2>Список ({list.length}{nextCursor ? "+" : ""})</h2>
-          {listLoading ? (
-            <p className="muted">Загрузка…</p>
-          ) : list.length === 0 ? (
-            <p className="empty-state">Пока нет диалогов</p>
-          ) : (
-            <>
-              <ul className="inbox-list">
-                {list.map((c) => (
-                  <li key={c.id}>
-                    <Link
-                      to={`/conversations/${c.id}`}
-                      className={`inbox-item ${c.id === selectedId ? "active" : ""}`}
-                    >
-                      <div className="inbox-item-head">
-                        <strong>{c.contactName ?? `Контакт #${c.contactId}`}</strong>
-                        <small>{fmtTime(c.lastMessageAt)}</small>
-                      </div>
-                      <small className="inbox-item-meta">
-                        <span className="badge">{c.source}</span>{" "}
-                        <span className="badge">{c.mode}</span>{" "}
-                        {c.currentStage && <span className="badge">{c.currentStage}</span>}
-                        {c.escalatedAt && (
-                          <span className="badge badge-warning">эскалация</span>
+      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+        {/* Список */}
+        <Card className="flex max-h-[72vh] flex-col gap-0 overflow-hidden py-0">
+          <div className="border-b px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Список {list.length}
+            {nextCursor ? "+" : ""}
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            {listLoading ? (
+              <p className="p-4 text-sm text-muted-foreground">Загрузка…</p>
+            ) : list.length === 0 ? (
+              <p className="p-4 text-center text-sm text-muted-foreground">Пока нет диалогов</p>
+            ) : (
+              <>
+                <ul className="space-y-1">
+                  {list.map((c) => (
+                    <li key={c.id}>
+                      <Link
+                        to={`/conversations/${c.id}`}
+                        className={cn(
+                          "block rounded-lg border px-3 py-2.5 transition-colors",
+                          c.id === selectedId
+                            ? "border-primary/50 bg-accent"
+                            : "border-transparent hover:bg-muted/60",
                         )}
-                      </small>
-                      {c.lastMessagePreview && (
-                        <p className="inbox-item-preview">{c.lastMessagePreview}</p>
-                      )}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-              {nextCursor && (
-                <button
-                  type="button"
-                  className="inbox-load-more"
-                  onClick={loadMore}
-                  disabled={loadingMore}
-                >
-                  {loadingMore ? "Загружаем…" : "Загрузить ещё"}
-                </button>
-              )}
-            </>
-          )}
-        </aside>
+                      >
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="truncate text-sm font-medium">
+                            {c.contactName ?? `Контакт #${c.contactId}`}
+                          </span>
+                          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                            {fmtTime(c.lastMessageAt)}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <Badge variant="secondary">{c.source}</Badge>
+                          <Badge variant={c.mode === "human" ? "warning" : "outline"}>
+                            {c.mode}
+                          </Badge>
+                          {c.escalatedAt && <Badge variant="destructive">эскалация</Badge>}
+                        </div>
+                        {c.lastMessagePreview && (
+                          <p className="mt-1 truncate text-xs text-muted-foreground">
+                            {c.lastMessagePreview}
+                          </p>
+                        )}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                {nextCursor && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2 w-full"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                  >
+                    {loadingMore ? "Загружаем…" : "Загрузить ещё"}
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+        </Card>
 
-        <main className="inbox-thread">
+        {/* Тред */}
+        <Card className="flex max-h-[72vh] flex-col gap-0 overflow-hidden py-0">
           {!selectedId ? (
-            <div className="empty-state">
-              <p>Выберите диалог слева</p>
+            <div className="grid flex-1 place-items-center p-8 text-sm text-muted-foreground">
+              Выберите диалог слева
             </div>
           ) : detailLoading && !detail ? (
-            <p className="muted">Загрузка…</p>
+            <p className="p-4 text-sm text-muted-foreground">Загрузка…</p>
           ) : detail ? (
             <>
-              <div className="inbox-thread-header">
-                <div className="inbox-thread-title">
-                  <h2>
-                    {detail.conversation.contactName ??
-                      `Контакт #${detail.conversation.contactId}`}
-                  </h2>
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={handleToggleMode}
-                    disabled={togglingMode}
-                  >
-                    {togglingMode
-                      ? "…"
-                      : detail.conversation.mode === "human"
-                        ? "Вернуть AI"
-                        : "Перехватить"}
-                  </button>
+              <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">
+                    {detail.conversation.contactName ?? `Контакт #${detail.conversation.contactId}`}
+                  </p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                    <Badge variant="secondary">{detail.conversation.source}</Badge>
+                    <Badge variant={detail.conversation.mode === "human" ? "warning" : "outline"}>
+                      {detail.conversation.mode === "human" ? "оператор" : "AI"}
+                    </Badge>
+                    {detail.conversation.currentStage && (
+                      <Badge variant="outline">{detail.conversation.currentStage}</Badge>
+                    )}
+                    {detail.conversation.escalatedAt && (
+                      <Badge variant="destructive">эскалация</Badge>
+                    )}
+                  </div>
                 </div>
-                <small>
-                  <span className="badge">{detail.conversation.source}</span>{" "}
-                  {detail.conversation.mode === "human" ? (
-                    <span className="badge badge-warning">оператор</span>
-                  ) : (
-                    <span className="badge">AI</span>
-                  )}{" "}
-                  {detail.conversation.currentStage && (
-                    <span className="badge">{detail.conversation.currentStage}</span>
-                  )}{" "}
-                  {detail.conversation.escalatedAt && (
-                    <span className="badge badge-warning">эскалация</span>
-                  )}
-                </small>
+                <Button
+                  variant={detail.conversation.mode === "human" ? "outline" : "default"}
+                  size="sm"
+                  onClick={handleToggleMode}
+                  disabled={togglingMode}
+                >
+                  {togglingMode
+                    ? "…"
+                    : detail.conversation.mode === "human"
+                      ? "Вернуть AI"
+                      : "Перехватить"}
+                </Button>
               </div>
-              <div className="inbox-messages">
+
+              <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
                 {detail.messages.length === 0 ? (
-                  <p className="empty-state">Сообщений нет</p>
+                  <p className="text-center text-sm text-muted-foreground">Сообщений нет</p>
                 ) : (
-                  detail.messages.map((m) => (
-                    <div
-                      key={m.id}
-                      className={`msg msg-${m.role} ${m.deletedAt ? "msg-deleted" : ""}`}
-                    >
-                      <div className="msg-meta">
-                        <span className="msg-role">{m.role}</span>
-                        <span className="msg-time">{fmtShortTime(m.createdAt)}</span>
+                  detail.messages.map((m) => {
+                    const mine = m.role === "assistant" || m.role === "human";
+                    const system = m.role === "system";
+                    return (
+                      <div
+                        key={m.id}
+                        className={cn(
+                          "max-w-[78%] rounded-2xl border px-3.5 py-2 text-sm",
+                          system &&
+                            "max-w-[92%] self-center border-dashed bg-transparent text-xs text-muted-foreground",
+                          !system && !mine && "self-start bg-muted",
+                          m.role === "assistant" && "self-end border-primary/30 bg-primary/10",
+                          m.role === "human" &&
+                            "self-end border-[var(--success)]/30 bg-[color-mix(in_oklch,var(--success)_12%,transparent)]",
+                          m.deletedAt && "opacity-50",
+                        )}
+                      >
+                        <div className="mb-0.5 flex items-center justify-between gap-3 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          <span>{m.role}</span>
+                          <span className="font-mono">{fmtShortTime(m.createdAt)}</span>
+                        </div>
+                        <div
+                          className={cn(
+                            "whitespace-pre-wrap break-words",
+                            m.deletedAt && "line-through",
+                          )}
+                        >
+                          {m.text}
+                        </div>
                       </div>
-                      <div className="msg-text">{m.text}</div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
-                {/* Sentinel div — auto-scroll target. */}
                 <div ref={messagesEndRef} />
               </div>
-              <form className="inbox-reply" onSubmit={handleReply}>
-                <textarea
+
+              <form onSubmit={handleReply} className="flex items-end gap-2 border-t p-3">
+                <Textarea
                   placeholder={
                     detail.conversation.mode === "human"
-                      ? "Ваше сообщение от имени оператора…"
-                      : "Перехватить диалог — отправить от оператора. Бот перестанет отвечать (mode → human)."
+                      ? "Сообщение от имени оператора…"
+                      : "Отправить от оператора — бот перестанет отвечать (mode → human)."
                   }
                   value={replyText}
                   onChange={(e) => setReplyText(e.target.value)}
                   rows={2}
                   maxLength={4000}
                   disabled={sending}
+                  className="min-h-11 flex-1 resize-none"
                 />
-                <button type="submit" disabled={sending || !replyText.trim()}>
-                  {sending ? "Отправляем…" : "Отправить"}
-                </button>
+                <Button type="submit" size="icon" disabled={sending || !replyText.trim()}>
+                  <SendHorizontalIcon className="size-4" />
+                </Button>
               </form>
             </>
           ) : (
-            <p className="muted">Диалог не загружен</p>
+            <p className="p-4 text-sm text-muted-foreground">Диалог не загружен</p>
           )}
-        </main>
+        </Card>
       </div>
     </div>
   );

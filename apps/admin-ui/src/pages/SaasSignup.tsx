@@ -1,5 +1,10 @@
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+
+import { AuthLayout } from "@/components/auth-layout";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ApiError, saas, setToken } from "../api/saas.ts";
 
 export function SaasSignup() {
@@ -28,13 +33,9 @@ export function SaasSignup() {
       navigate("/onboarding", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.status === 409) {
-          setError("Email или slug уже занят.");
-        } else if (err.status === 400) {
-          setError(`Невалидные данные: ${err.errorCode}`);
-        } else {
-          setError(`Ошибка: ${err.errorCode}`);
-        }
+        if (err.status === 409) setError("Email или slug уже занят.");
+        else if (err.status === 400) setError(`Невалидные данные: ${err.errorCode}`);
+        else setError(`Ошибка: ${err.errorCode}`);
       } else {
         setError("Сеть недоступна. Попробуйте позже.");
       }
@@ -44,53 +45,69 @@ export function SaasSignup() {
   }
 
   return (
-    <div className="auth-wrap">
-      <div className="auth-card">
-        <h1>Создать аккаунт</h1>
-        <p className="auth-sub">Своя база знаний + AI-ассистент. Без credit card. Free plan.</p>
-        <form onSubmit={handleSubmit} className="auth-form">
-          <label>
-            Email
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoFocus
-            />
-          </label>
-          <label>
-            Пароль (≥ 8 символов)
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              minLength={8}
-              required
-            />
-          </label>
-          <label>
-            Slug аккаунта (опционально)
-            <input
-              type="text"
-              value={tenantSlug}
-              onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
-              placeholder="оставьте пустым — сгенерим из email"
-              pattern="[a-z0-9][a-z0-9-]{1,30}[a-z0-9]"
-              title="Lowercase a-z 0-9 -, 3-32 символа"
-            />
-          </label>
-          {error && <div className="auth-error">{error}</div>}
-          <button type="submit" disabled={loading}>
-            {loading ? "Создаём..." : "Зарегистрироваться"}
-          </button>
-        </form>
-        <p className="auth-alt">
-          Уже есть аккаунт? <Link to="/login">Войти</Link>
-        </p>
-      </div>
-    </div>
+    <AuthLayout
+      title="Создать аккаунт"
+      subtitle="Своя база знаний + AI-ассистент. Без карты, free-план."
+      footer={
+        <>
+          Уже есть аккаунт?{" "}
+          <Link to="/login" className="font-medium text-primary hover:underline">
+            Войти
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@company.com"
+            required
+            // biome-ignore lint/a11y/noAutofocus: первичное поле формы регистрации
+            autoFocus
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="password">Пароль (≥ 8 символов)</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            minLength={8}
+            required
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="slug">
+            Slug аккаунта <span className="text-muted-foreground">(опционально)</span>
+          </Label>
+          <Input
+            id="slug"
+            type="text"
+            value={tenantSlug}
+            onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
+            placeholder="сгенерим из email"
+            pattern="[a-z0-9][a-z0-9-]{1,30}[a-z0-9]"
+            title="Lowercase a-z 0-9 -, 3-32 символа"
+          />
+        </div>
+        {error && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        <Button type="submit" className="w-full" disabled={loading}>
+          {loading ? "Создаём…" : "Зарегистрироваться"}
+        </Button>
+      </form>
+    </AuthLayout>
   );
 }

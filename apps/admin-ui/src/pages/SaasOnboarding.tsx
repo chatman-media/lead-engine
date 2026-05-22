@@ -1,5 +1,22 @@
+import { ArrowRightIcon, CheckIcon, RocketIcon, UploadIcon } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+
+import { ModeToggle } from "@/components/mode-toggle";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import {
   ApiError,
   type ChannelItem,
@@ -12,21 +29,15 @@ import {
 } from "../api/saas.ts";
 
 /**
- * Пошаговый мастер первичной настройки кабинета. Ведёт нового
- * пользователя по шагам: канал → API-ключи → база знаний → готово.
- *
- * Мастер самодостаточен и переиспользует готовые saas.* методы. Формы
- * лёгкие (только необходимое для старта); продвинутые опции — на полных
- * страницах /channels и /settings, куда даём ссылки. Порядок не случаен:
- * эмбеддинги базы знаний требуют ключ embed-провайдера, поэтому ключи
- * идут раньше базы.
+ * Пошаговый мастер первичной настройки: канал → API-ключи → база знаний →
+ * готово. Порядок не случаен: эмбеддинги базы требуют ключ embed-провайдера.
  */
 
 const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: "openai", label: "OpenAI" },
   { value: "openrouter", label: "OpenRouter" },
   { value: "anthropic", label: "Anthropic" },
-  { value: "ollama", label: "Ollama (local, без API key)" },
+  { value: "ollama", label: "Ollama (local)" },
 ];
 
 const STEP_LABELS = ["Канал", "API-ключи", "База знаний", "Готово"];
@@ -55,18 +66,15 @@ export function SaasOnboarding() {
   const [configs, setConfigs] = useState<LlmConfig[]>([]);
   const [docs, setDocs] = useState<KbDoc[]>([]);
 
-  // Step 1 — Telegram
   const [botToken, setBotToken] = useState("");
   const [tgSubmitting, setTgSubmitting] = useState(false);
 
-  // Step 2 — keys
   const [keyForms, setKeyForms] = useState<Record<"chat" | "embed", KeyForm>>({
     chat: { ...EMPTY_KEY_FORM },
     embed: { ...EMPTY_KEY_FORM },
   });
   const [savingPurpose, setSavingPurpose] = useState<LlmPurpose | null>(null);
 
-  // Step 3 — KB
   const [pasteTitle, setPasteTitle] = useState("");
   const [pasteTopic, setPasteTopic] = useState("");
   const [pasteBody, setPasteBody] = useState("");
@@ -84,11 +92,9 @@ export function SaasOnboarding() {
   function reachable(target: number): boolean {
     if (target <= 0) return true;
     if (target === 1) return channelDone;
-    // keys (2) and done (3) require channel + keys; KB is optional
     return channelDone && keysDone;
   }
 
-  /** Возвращает обработчик 401 (сброс токена + редирект) или false. */
   function handleAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
       clearToken();
@@ -100,10 +106,6 @@ export function SaasOnboarding() {
 
   async function loadState() {
     const [ch, cfg] = await Promise.all([saas.listChannels(), saas.listLlmConfigs()]);
-    // KB-роуты на бэкенде включаются только если у какого-то тенанта есть
-    // embed-конфиг на старте. У нового пользователя их ещё нет → listDocs
-    // отдаёт 404. Для онбординга это не фатально (KB-шаг опционален), поэтому
-    // глотаем не-401 ошибки и считаем, что документов пока нет.
     let docItems: KbDoc[] = [];
     try {
       docItems = (await saas.listDocs()).items;
@@ -143,9 +145,7 @@ export function SaasOnboarding() {
         setStep(!cDone ? 0 : !kDone ? 1 : !dDone ? 2 : 3);
       } catch (err) {
         if (cancelled) return;
-        if (!handleAuthError(err)) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -153,6 +153,7 @@ export function SaasOnboarding() {
     return () => {
       cancelled = true;
     };
+    // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
 
   function updateKeyForm(purpose: "chat" | "embed", patch: Partial<KeyForm>) {
@@ -226,9 +227,7 @@ export function SaasOnboarding() {
         configReady(cfg.find((c) => c.purpose === "embed"));
       if (ready) setStep(2);
     } catch (err) {
-      if (!handleAuthError(err)) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSavingPurpose(null);
     }
@@ -236,8 +235,7 @@ export function SaasOnboarding() {
 
   function handleKbError(err: unknown) {
     if (err instanceof ApiError && err.status === 402) {
-      const hint = err.extra?.upgradeHint as string | undefined;
-      setError(hint ?? "Лимит документов исчерпан — повысьте план");
+      setError((err.extra?.upgradeHint as string) ?? "Лимит документов исчерпан — повысьте план");
     } else if (!handleAuthError(err)) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -287,294 +285,366 @@ export function SaasOnboarding() {
 
   if (loading) {
     return (
-      <div className="dashboard-loading">
-        <p>Загрузка…</p>
+      <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">
+        Загрузка…
       </div>
     );
   }
 
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <div>
-          <h1>Настройка кабинета</h1>
-          <p className="dashboard-sub">Несколько шагов — и бот начнёт отвечать вашим клиентам.</p>
-        </div>
-        <Link to="/dashboard" className="back-link">
-          Пропустить → в кабинет
+    <div className="min-h-screen">
+      <header className="flex h-14 items-center justify-between border-b px-4 md:px-8">
+        <Link to="/dashboard" className="flex items-center gap-2.5">
+          <span className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-primary to-chart-5 text-primary-foreground">
+            <RocketIcon className="size-4" />
+          </span>
+          <span className="text-[15px] font-semibold tracking-tight">
+            lead<span className="text-primary">·</span>engine
+          </span>
         </Link>
+        <div className="flex items-center gap-1">
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/dashboard">Пропустить →</Link>
+          </Button>
+          <ModeToggle />
+        </div>
       </header>
 
-      {error && <div className="dashboard-error">{error}</div>}
-
-      <ol className="wizard-steps">
-        {STEP_LABELS.map((label, i) => {
-          const done = stepDone[i];
-          const active = step === i;
-          const canGo = reachable(i);
-          return (
-            <li
-              key={label}
-              className={`wizard-step ${active ? "active" : ""} ${done ? "done" : ""} ${
-                canGo ? "" : "locked"
-              }`}
-            >
-              <button
-                type="button"
-                className="wizard-step-btn"
-                disabled={!canGo}
-                onClick={() => canGo && setStep(i)}
-              >
-                <span className="wizard-step-mark">{done ? "✓" : i + 1}</span>
-                <span className="wizard-step-label">{label}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-
-      {step === 0 && (
-        <section className="settings-section">
-          <div className="settings-header">
-            <h2>Шаг 1. Подключите канал</h2>
-          </div>
-          <p className="hint">
-            Создайте бота в{" "}
-            <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">
-              @BotFather
-            </a>{" "}
-            и вставьте токен (формат <code>123456:ABC-DEF…</code>). Webhook настроится
-            автоматически.
+      <div className="mx-auto w-full max-w-2xl px-4 py-10">
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-semibold tracking-tight">Настройка кабинета</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Несколько шагов — и бот начнёт отвечать вашим клиентам.
           </p>
-          {channelDone && (
-            <p className="settings-status">
-              Подключено каналов: <code>{channels.length}</code>{" "}
-              <span className="badge badge-ok">готово</span>
-            </p>
-          )}
-          <form className="settings-form" onSubmit={handleTelegram}>
-            <label>
-              Telegram bot token
-              <input
-                type="password"
-                autoComplete="off"
-                value={botToken}
-                onChange={(e) => setBotToken(e.target.value)}
-                placeholder="123456789:AAEhBP…"
-              />
-            </label>
-            <button type="submit" disabled={tgSubmitting || !botToken.trim()}>
-              {tgSubmitting ? "Проверяем…" : "Подключить"}
-            </button>
-          </form>
-          <p className="hint" style={{ marginTop: 12 }}>
-            Нужен WhatsApp или web-виджет? <Link to="/channels">Все типы каналов →</Link>
-          </p>
-          {channelDone && (
-            <button type="button" className="wizard-next" onClick={() => setStep(1)}>
-              Далее: API-ключи →
-            </button>
-          )}
-        </section>
-      )}
+        </div>
 
-      {step === 1 && (
-        <section className="settings-section">
-          <div className="settings-header">
-            <h2>Шаг 2. API-ключи</h2>
-          </div>
-          <p className="hint">
-            BYOK — ваши ключи для генерации ответов (chat) и поиска по базе знаний (embed). Хранятся
-            зашифрованными (AES-256-GCM).
-          </p>
-
-          {(["chat", "embed"] as const).map((purpose) => {
-            const cfg = purpose === "chat" ? chatCfg : embedCfg;
-            const f = keyForms[purpose];
-            const isChat = purpose === "chat";
+        {/* Stepper */}
+        <ol className="mb-8 flex items-center gap-2">
+          {STEP_LABELS.map((label, i) => {
+            const done = stepDone[i];
+            const active = step === i;
+            const canGo = reachable(i);
             return (
-              <div key={purpose} className="wizard-key-block">
-                <h3>{isChat ? "Chat — ответы ассистента" : "Embeddings — поиск по базе"}</h3>
-                {cfg && (
-                  <p className="settings-status">
-                    <code>{cfg.provider}</code> / <code>{cfg.model}</code>{" "}
-                    {configReady(cfg) ? (
-                      <span className="badge badge-ok">ключ есть</span>
-                    ) : (
-                      <span className="badge badge-warning">без ключа</span>
+              <li key={label} className="flex flex-1 items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!canGo}
+                  onClick={() => canGo && setStep(i)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+                    active && "border-primary/50 bg-accent text-foreground",
+                    !active && canGo && "text-muted-foreground hover:bg-muted/60",
+                    !canGo && "cursor-not-allowed opacity-50",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-semibold",
+                      done
+                        ? "bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
+                        : active
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-muted-foreground",
                     )}
-                  </p>
-                )}
-                <form className="settings-form" onSubmit={(e) => handleSaveKey(e, purpose)}>
-                  <label>
-                    Provider
-                    <select
-                      value={f.provider}
-                      onChange={(e) =>
-                        updateKeyForm(purpose, { provider: e.target.value as LlmProvider })
-                      }
-                    >
-                      {PROVIDERS.map((p) => (
-                        <option key={p.value} value={p.value}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Model
-                    <input
-                      type="text"
-                      value={f.model}
-                      onChange={(e) => updateKeyForm(purpose, { model: e.target.value })}
-                      placeholder={isChat ? "gpt-4o-mini" : "text-embedding-3-small"}
-                    />
-                  </label>
-                  {f.provider !== "ollama" && (
-                    <label>
-                      API key {cfg?.hasSecret ? "(пусто — не менять)" : ""}
-                      <input
-                        type="password"
-                        autoComplete="new-password"
-                        value={f.apiKey}
-                        onChange={(e) => updateKeyForm(purpose, { apiKey: e.target.value })}
-                        placeholder={cfg?.hasSecret ? "•••••••• (сохранён)" : "sk-…"}
-                      />
-                    </label>
-                  )}
-                  {!isChat && (
-                    <label>
-                      Размерность embed (обязательно)
-                      <input
-                        type="number"
-                        value={f.embedDim}
-                        onChange={(e) => updateKeyForm(purpose, { embedDim: e.target.value })}
-                        placeholder="1536"
-                      />
-                    </label>
-                  )}
-                  <button type="submit" disabled={savingPurpose !== null}>
-                    {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
-                  </button>
-                </form>
-              </div>
+                  >
+                    {done ? <CheckIcon className="size-3" /> : i + 1}
+                  </span>
+                  <span className="hidden font-medium sm:inline">{label}</span>
+                </button>
+              </li>
             );
           })}
+        </ol>
 
-          <p className="hint" style={{ marginTop: 12 }}>
-            Base URL, timeout и др. — <Link to="/settings">расширенные настройки →</Link>
+        {error && (
+          <p className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
           </p>
-          {keysDone && (
-            <button type="button" className="wizard-next" onClick={() => setStep(2)}>
-              Далее: база знаний →
-            </button>
-          )}
-        </section>
-      )}
+        )}
 
-      {step === 2 && (
-        <section className="settings-section">
-          <div className="settings-header">
-            <h2>Шаг 3. База знаний (опционально)</h2>
-          </div>
-          <p className="hint">
-            Загрузите документы — бот будет отвечать по вашей базе (RAG). Файлы при загрузке
-            автоматически индексируются. Шаг можно пропустить.
-          </p>
+        {step === 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Шаг 1. Подключите канал</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Создайте бота в{" "}
+                <a
+                  href="https://t.me/BotFather"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  @BotFather
+                </a>{" "}
+                и вставьте токен. Webhook настроится автоматически.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {channelDone && (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  Подключено каналов: <code className="font-mono">{channels.length}</code>
+                  <Badge variant="success">готово</Badge>
+                </p>
+              )}
+              <form onSubmit={handleTelegram} className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Telegram bot token</Label>
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    value={botToken}
+                    onChange={(e) => setBotToken(e.target.value)}
+                    placeholder="123456789:AAEhBP…"
+                  />
+                </div>
+                <Button type="submit" disabled={tgSubmitting || !botToken.trim()}>
+                  {tgSubmitting ? "Проверяем…" : "Подключить"}
+                </Button>
+              </form>
+              <p className="text-sm text-muted-foreground">
+                Нужен WhatsApp или web-виджет?{" "}
+                <Link to="/channels" className="text-primary hover:underline">
+                  Все типы каналов →
+                </Link>
+              </p>
+              {channelDone && (
+                <Button onClick={() => setStep(1)}>
+                  Далее: API-ключи <ArrowRightIcon />
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-          {lastIndexed !== null && (
-            <div className="settings-warning" style={{ color: "var(--ok)" }}>
-              ✓ Документ проиндексирован — {lastIndexed} фрагментов.
-            </div>
-          )}
+        {step === 1 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Шаг 2. API-ключи</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                BYOK — ключи для ответов (chat) и поиска по базе (embed). Хранятся зашифрованными.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {(["chat", "embed"] as const).map((purpose) => {
+                const cfg = purpose === "chat" ? chatCfg : embedCfg;
+                const f = keyForms[purpose];
+                const isChat = purpose === "chat";
+                return (
+                  <div
+                    key={purpose}
+                    className="space-y-3 border-t pt-5 first:border-t-0 first:pt-0"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold">
+                        {isChat ? "Chat — ответы ассистента" : "Embeddings — поиск по базе"}
+                      </h3>
+                      {cfg &&
+                        (configReady(cfg) ? (
+                          <Badge variant="success">ключ есть</Badge>
+                        ) : (
+                          <Badge variant="warning">без ключа</Badge>
+                        ))}
+                    </div>
+                    <form
+                      onSubmit={(e) => handleSaveKey(e, purpose)}
+                      className="grid gap-3 sm:grid-cols-2"
+                    >
+                      <div className="space-y-1.5">
+                        <Label>Provider</Label>
+                        <Select
+                          value={f.provider}
+                          onValueChange={(v) =>
+                            updateKeyForm(purpose, { provider: v as LlmProvider })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PROVIDERS.map((p) => (
+                              <SelectItem key={p.value} value={p.value}>
+                                {p.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Model</Label>
+                        <Input
+                          value={f.model}
+                          onChange={(e) => updateKeyForm(purpose, { model: e.target.value })}
+                          placeholder={isChat ? "gpt-4o-mini" : "text-embedding-3-small"}
+                        />
+                      </div>
+                      {f.provider !== "ollama" && (
+                        <div className="space-y-1.5">
+                          <Label>API key {cfg?.hasSecret ? "(пусто — не менять)" : ""}</Label>
+                          <Input
+                            type="password"
+                            autoComplete="new-password"
+                            value={f.apiKey}
+                            onChange={(e) => updateKeyForm(purpose, { apiKey: e.target.value })}
+                            placeholder={cfg?.hasSecret ? "•••••••• (сохранён)" : "sk-…"}
+                          />
+                        </div>
+                      )}
+                      {!isChat && (
+                        <div className="space-y-1.5">
+                          <Label>Размерность embed</Label>
+                          <Input
+                            type="number"
+                            value={f.embedDim}
+                            onChange={(e) => updateKeyForm(purpose, { embedDim: e.target.value })}
+                            placeholder="1536"
+                          />
+                        </div>
+                      )}
+                      <div className="sm:col-span-2">
+                        <Button type="submit" disabled={savingPurpose !== null}>
+                          {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
+                );
+              })}
+              <p className="text-sm text-muted-foreground">
+                Base URL, timeout и др. —{" "}
+                <Link to="/settings" className="text-primary hover:underline">
+                  расширенные настройки →
+                </Link>
+              </p>
+              {keysDone && (
+                <Button onClick={() => setStep(2)}>
+                  Далее: база знаний <ArrowRightIcon />
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-          <div className="upload-card">
-            <h3>Загрузить файл</h3>
-            <p className="hint">.txt, .md, .json, .pdf</p>
-            <input
-              type="file"
-              accept=".txt,.md,.json,.pdf"
-              onChange={handleFileUpload}
-              disabled={uploading}
-            />
-          </div>
+        {step === 2 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Шаг 3. База знаний (опционально)</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Загрузите документы — бот будет отвечать по вашей базе (RAG). Шаг можно пропустить.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {lastIndexed !== null && (
+                <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
+                  ✓ Документ проиндексирован — {lastIndexed} фрагментов.
+                </p>
+              )}
 
-          <div className="upload-card">
-            <h3>Или вставить текст</h3>
-            <form onSubmit={handlePaste} className="paste-form">
-              <input
-                type="text"
-                placeholder="Заголовок"
-                value={pasteTitle}
-                onChange={(e) => setPasteTitle(e.target.value)}
-              />
-              <input
-                type="text"
-                placeholder="Тема (опционально)"
-                value={pasteTopic}
-                onChange={(e) => setPasteTopic(e.target.value)}
-              />
-              <textarea
-                placeholder="Текст документа…"
-                rows={6}
-                value={pasteBody}
-                onChange={(e) => setPasteBody(e.target.value)}
-              />
-              <button type="submit" disabled={uploading || !pasteBody.trim()}>
-                {uploading ? "Загружаем…" : "Добавить"}
-              </button>
-            </form>
-          </div>
+              <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/30 px-4 py-7 text-center transition-colors hover:border-primary/50 hover:bg-muted/50">
+                <span className="grid size-9 place-items-center rounded-full bg-primary/15 text-primary">
+                  <UploadIcon className="size-4" />
+                </span>
+                <span className="text-sm font-medium">Загрузить файл</span>
+                <span className="text-xs text-muted-foreground">.txt, .md, .json, .pdf</span>
+                <input
+                  type="file"
+                  accept=".txt,.md,.json,.pdf"
+                  onChange={handleFileUpload}
+                  disabled={uploading}
+                  className="sr-only"
+                />
+              </label>
 
-          {docs.length > 0 && (
-            <p className="settings-status">
-              Документов в базе: <code>{docs.length}</code>
-            </p>
-          )}
+              <form onSubmit={handlePaste} className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input
+                    placeholder="Заголовок"
+                    value={pasteTitle}
+                    onChange={(e) => setPasteTitle(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Тема (опционально)"
+                    value={pasteTopic}
+                    onChange={(e) => setPasteTopic(e.target.value)}
+                  />
+                </div>
+                <Textarea
+                  placeholder="Текст документа…"
+                  rows={5}
+                  className="font-mono text-xs"
+                  value={pasteBody}
+                  onChange={(e) => setPasteBody(e.target.value)}
+                />
+                <Button type="submit" variant="outline" disabled={uploading || !pasteBody.trim()}>
+                  {uploading ? "Загружаем…" : "Добавить текст"}
+                </Button>
+              </form>
 
-          <button type="button" className="wizard-next" onClick={() => setStep(3)}>
-            {kbDone ? "Далее →" : "Пропустить →"}
-          </button>
-        </section>
-      )}
+              {docs.length > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Документов в базе: <code className="font-mono">{docs.length}</code>
+                </p>
+              )}
 
-      {step === 3 && (
-        <section className="settings-section">
-          <div className="settings-header">
-            <h2>Готово!</h2>
-          </div>
-          <ul className="onboarding-list">
-            <li className={`onboarding-step ${channelDone ? "done" : ""}`}>
-              <span className="onboarding-mark">{channelDone ? "✓" : "○"}</span>
-              <div className="onboarding-step-body">
-                <strong>Канал</strong>
-                <small>{channelDone ? `Подключено: ${channels.length}` : "Не подключён"}</small>
-              </div>
-            </li>
-            <li className={`onboarding-step ${keysDone ? "done" : ""}`}>
-              <span className="onboarding-mark">{keysDone ? "✓" : "○"}</span>
-              <div className="onboarding-step-body">
-                <strong>API-ключи</strong>
-                <small>{keysDone ? "chat + embed настроены" : "Не настроены"}</small>
-              </div>
-            </li>
-            <li className={`onboarding-step ${kbDone ? "done" : ""}`}>
-              <span className="onboarding-mark">{kbDone ? "✓" : "○"}</span>
-              <div className="onboarding-step-body">
-                <strong>База знаний</strong>
-                <small>{kbDone ? `Документов: ${docs.length}` : "Пропущено (опционально)"}</small>
-              </div>
-            </li>
-          </ul>
-          <button
-            type="button"
-            className="wizard-next"
-            onClick={() => navigate("/dashboard", { replace: true })}
-          >
-            Перейти в кабинет →
-          </button>
-        </section>
-      )}
+              <Button onClick={() => setStep(3)}>
+                {kbDone ? "Далее" : "Пропустить"} <ArrowRightIcon />
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {step === 3 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Готово!</CardTitle>
+              <p className="text-sm text-muted-foreground">Можно переходить к работе.</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <ul className="space-y-2">
+                {[
+                  {
+                    done: channelDone,
+                    title: "Канал",
+                    hint: channelDone ? `Подключено: ${channels.length}` : "Не подключён",
+                  },
+                  {
+                    done: keysDone,
+                    title: "API-ключи",
+                    hint: keysDone ? "chat + embed настроены" : "Не настроены",
+                  },
+                  {
+                    done: kbDone,
+                    title: "База знаний",
+                    hint: kbDone ? `Документов: ${docs.length}` : "Пропущено (опционально)",
+                  },
+                ].map((s) => (
+                  <li
+                    key={s.title}
+                    className="flex items-center gap-3 rounded-lg border px-3 py-2.5"
+                  >
+                    <span
+                      className={cn(
+                        "grid size-6 shrink-0 place-items-center rounded-full text-xs",
+                        s.done
+                          ? "bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
+                          : "border text-muted-foreground",
+                      )}
+                    >
+                      {s.done ? <CheckIcon className="size-3.5" /> : "○"}
+                    </span>
+                    <div>
+                      <p className="text-sm font-medium leading-tight">{s.title}</p>
+                      <p className="text-xs text-muted-foreground">{s.hint}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <Button className="w-full" onClick={() => navigate("/dashboard", { replace: true })}>
+                Перейти в кабинет <ArrowRightIcon />
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }

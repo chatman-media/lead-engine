@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { AppShell } from "@/components/app-shell";
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 import { getToken, saas } from "./api/saas.ts";
 import { SaasAcceptInvite } from "./pages/SaasAcceptInvite.tsx";
 import { SaasAudit } from "./pages/SaasAudit.tsx";
@@ -14,15 +17,9 @@ import { SaasSignup } from "./pages/SaasSignup.tsx";
 import { SaasTeam } from "./pages/SaasTeam.tsx";
 
 /**
- * SaaS routing — заменяет легаси 24-страничный admin под старый
- * tg-chatbot backend. Текущий scope: signup / login / dashboard
- * (KB upload + list). Дополнительные страницы (conversations, leads,
- * etc.) будут добавляться по мере wire-up'а соответствующих
- * /api/admin/* endpoint'ов.
- *
- * Token хранится в localStorage (см. api/saas.ts). AuthGate проверяет
- * /api/auth/me на mount; 401 → редирект на /login. Stateless server-
- * side — token живёт 30 дней.
+ * SaaS routing. Token в localStorage (api/saas.ts). AuthGate проверяет
+ * /api/auth/me на mount; 401 → /login. Authed-страницы рендерятся внутри
+ * AppShell (левый сайдбар + шапка). Onboarding — full-screen без шелла.
  */
 function AuthGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<"checking" | "auth" | "anon">("checking");
@@ -53,94 +50,110 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   }, [navigate]);
 
   if (status === "checking") {
-    return <div className="auth-checking">Проверяем сессию…</div>;
+    return (
+      <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">
+        Проверяем сессию…
+      </div>
+    );
   }
   if (status === "anon") return null;
   return <>{children}</>;
 }
 
+/** Authed-страница в шелле (сайдбар + шапка). */
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <AuthGate>
+      <AppShell>{children}</AppShell>
+    </AuthGate>
+  );
+}
+
 export function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<SaasLogin />} />
-        <Route path="/signup" element={<SaasSignup />} />
-        <Route path="/accept-invite" element={<SaasAcceptInvite />} />
-        <Route
-          path="/dashboard"
-          element={
-            <AuthGate>
-              <SaasDashboard />
-            </AuthGate>
-          }
-        />
-        <Route
-          path="/onboarding"
-          element={
-            <AuthGate>
-              <SaasOnboarding />
-            </AuthGate>
-          }
-        />
-        <Route
-          path="/settings"
-          element={
-            <AuthGate>
-              <SaasSettings />
-            </AuthGate>
-          }
-        />
-        <Route
-          path="/channels"
-          element={
-            <AuthGate>
-              <SaasChannels />
-            </AuthGate>
-          }
-        />
-        <Route
-          path="/conversations"
-          element={
-            <AuthGate>
-              <SaasConversations />
-            </AuthGate>
-          }
-        />
-        <Route
-          path="/conversations/:id"
-          element={
-            <AuthGate>
-              <SaasConversations />
-            </AuthGate>
-          }
-        />
-        <Route
-          path="/audit"
-          element={
-            <AuthGate>
-              <SaasAudit />
-            </AuthGate>
-          }
-        />
-        <Route
-          path="/diagnostics"
-          element={
-            <AuthGate>
-              <SaasDiagnostics />
-            </AuthGate>
-          }
-        />
-        <Route
-          path="/team"
-          element={
-            <AuthGate>
-              <SaasTeam />
-            </AuthGate>
-          }
-        />
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<SaasLogin />} />
+          <Route path="/signup" element={<SaasSignup />} />
+          <Route path="/accept-invite" element={<SaasAcceptInvite />} />
+          <Route
+            path="/onboarding"
+            element={
+              <AuthGate>
+                <SaasOnboarding />
+              </AuthGate>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <Shell>
+                <SaasDashboard />
+              </Shell>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <Shell>
+                <SaasSettings />
+              </Shell>
+            }
+          />
+          <Route
+            path="/channels"
+            element={
+              <Shell>
+                <SaasChannels />
+              </Shell>
+            }
+          />
+          <Route
+            path="/conversations"
+            element={
+              <Shell>
+                <SaasConversations />
+              </Shell>
+            }
+          />
+          <Route
+            path="/conversations/:id"
+            element={
+              <Shell>
+                <SaasConversations />
+              </Shell>
+            }
+          />
+          <Route
+            path="/audit"
+            element={
+              <Shell>
+                <SaasAudit />
+              </Shell>
+            }
+          />
+          <Route
+            path="/diagnostics"
+            element={
+              <Shell>
+                <SaasDiagnostics />
+              </Shell>
+            }
+          />
+          <Route
+            path="/team"
+            element={
+              <Shell>
+                <SaasTeam />
+              </Shell>
+            }
+          />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </BrowserRouter>
+      <Toaster />
+    </ThemeProvider>
   );
 }

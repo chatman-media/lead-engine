@@ -1,5 +1,15 @@
+import { FileTextIcon, PauseIcon, PlayIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+
+import { OnboardingChecklist } from "@/components/OnboardingChecklist";
+import { PlanWidget } from "@/components/PlanWidget";
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   type Admin,
   ApiError,
@@ -11,8 +21,6 @@ import {
   type Tenant,
   type TenantInfo,
 } from "../api/saas.ts";
-import { OnboardingChecklist } from "../components/OnboardingChecklist.tsx";
-import { PlanWidget } from "../components/PlanWidget.tsx";
 
 export function SaasDashboard() {
   const navigate = useNavigate();
@@ -21,77 +29,63 @@ export function SaasDashboard() {
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
   const [billing, setBilling] = useState<BillingPlan | null>(null);
-  const [stripeEnabled, setStripeEnabled] = useState<boolean>(false);
+  const [stripeEnabled, setStripeEnabled] = useState(false);
   const [tenantInfo, setTenantInfo] = useState<TenantInfo | null>(null);
   const [togglingPause, setTogglingPause] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Upload form state
   const [pasteTitle, setPasteTitle] = useState("");
   const [pasteBody, setPasteBody] = useState("");
   const [pasteTopic, setPasteTopic] = useState("");
   const [uploading, setUploading] = useState(false);
+
+  function onAuthError(err: unknown): boolean {
+    if (err instanceof ApiError && err.status === 401) {
+      clearToken();
+      navigate("/login", { replace: true });
+      return true;
+    }
+    return false;
+  }
 
   async function refreshDocs() {
     try {
       const list = await saas.listDocs();
       setDocs(list.items);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        clearToken();
-        navigate("/login", { replace: true });
-        return;
-      }
-      setError(err instanceof Error ? err.message : String(err));
+      if (!onAuthError(err)) setError(err instanceof Error ? err.message : String(err));
     }
   }
-
   async function refreshOnboarding() {
     try {
-      const s = await saas.onboardingStatus();
-      setOnboarding(s);
+      setOnboarding(await saas.onboardingStatus());
     } catch (err) {
-      // Onboarding panel опционален — не валим dashboard если ручка
-      // отсутствует (старый backend) или возвращает 401.
-      if (err instanceof ApiError && err.status === 401) {
-        clearToken();
-        navigate("/login", { replace: true });
-      }
+      onAuthError(err);
     }
   }
-
   async function refreshBilling() {
     try {
       const [b, p] = await Promise.all([saas.getBillingPlan(), saas.listPlans()]);
       setBilling(b);
       setStripeEnabled(p.stripeEnabled);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        clearToken();
-        navigate("/login", { replace: true });
-      }
+      onAuthError(err);
     }
   }
-
   async function refreshTenantInfo() {
     try {
       const { tenant } = await saas.getTenantInfo();
       setTenantInfo(tenant);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        clearToken();
-        navigate("/login", { replace: true });
-      }
+      onAuthError(err);
     }
   }
 
   async function handleTogglePause() {
     if (!tenantInfo) return;
     const newPaused = tenantInfo.status === "active";
-    if (newPaused && !confirm("Бот перестанет принимать сообщения. Продолжить?")) {
-      return;
-    }
+    if (newPaused && !confirm("Бот перестанет принимать сообщения. Продолжить?")) return;
     setTogglingPause(true);
     setError("");
     try {
@@ -120,12 +114,7 @@ export function SaasDashboard() {
         ]);
       } catch (err) {
         if (cancelled) return;
-        if (err instanceof ApiError && err.status === 401) {
-          clearToken();
-          navigate("/login", { replace: true });
-          return;
-        }
-        setError(err instanceof Error ? err.message : String(err));
+        if (!onAuthError(err)) setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -133,18 +122,8 @@ export function SaasDashboard() {
     return () => {
       cancelled = true;
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: navigate stable
+    // biome-ignore lint/correctness/useExhaustiveDependencies: run once on mount
   }, []);
-
-  async function handleLogout() {
-    try {
-      await saas.logout();
-    } catch {
-      // ignore
-    }
-    clearToken();
-    navigate("/login", { replace: true });
-  }
 
   async function handlePaste(e: FormEvent) {
     e.preventDefault();
@@ -163,9 +142,8 @@ export function SaasDashboard() {
       await Promise.all([refreshDocs(), refreshOnboarding()]);
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
-        const hint = err.extra?.upgradeHint as string | undefined;
-        setError(hint ?? "Лимит документов исчерпан — повысьте план");
-      } else {
+        setError((err.extra?.upgradeHint as string) ?? "Лимит документов исчерпан — повысьте план");
+      } else if (!onAuthError(err)) {
         setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
@@ -183,10 +161,8 @@ export function SaasDashboard() {
       await Promise.all([refreshDocs(), refreshOnboarding()]);
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
-        // Quota exceeded — show upgrade hint from backend
-        const hint = err.extra?.upgradeHint as string | undefined;
-        setError(hint ?? "Лимит документов исчерпан — повысьте план");
-      } else {
+        setError((err.extra?.upgradeHint as string) ?? "Лимит документов исчерпан — повысьте план");
+      } else if (!onAuthError(err)) {
         setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
@@ -206,157 +182,157 @@ export function SaasDashboard() {
   }
 
   if (loading) {
-    return (
-      <div className="dashboard-loading">
-        <p>Загрузка…</p>
-      </div>
-    );
+    return <p className="text-sm text-muted-foreground">Загрузка…</p>;
   }
 
+  const paused = tenantInfo?.status === "suspended";
+
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <div>
-          <h1>База знаний</h1>
-          <p className="dashboard-sub">
-            {admin?.email} · {tenant?.slug ?? "—"} · {tenant?.plan ?? "—"}
-          </p>
-        </div>
-        <div className="dashboard-nav">
-          <Link to="/conversations" className="nav-link">
-            Диалоги
-          </Link>
-          <Link to="/channels" className="nav-link">
-            Каналы
-          </Link>
-          <Link to="/settings" className="nav-link">
-            Настройки LLM
-          </Link>
-          <Link to="/audit" className="nav-link">
-            Аудит
-          </Link>
-          <Link to="/diagnostics" className="nav-link">
-            Диагностика
-          </Link>
-          <Link to="/team" className="nav-link">
-            Команда
-          </Link>
-          <button type="button" onClick={handleLogout}>
-            Выйти
-          </button>
-        </div>
-      </header>
+    <div className="space-y-6">
+      <PageHeader
+        title="База знаний"
+        description={`${admin?.email ?? ""} · ${tenant?.slug ?? "—"} · ${tenant?.plan ?? "free"}`}
+        actions={
+          tenantInfo && (
+            <Button
+              variant={paused ? "default" : "outline"}
+              size="sm"
+              onClick={handleTogglePause}
+              disabled={togglingPause}
+            >
+              {paused ? <PlayIcon /> : <PauseIcon />}
+              {paused ? "Возобновить бота" : "Пауза"}
+            </Button>
+          )
+        }
+      />
 
-      {error && <div className="dashboard-error">{error}</div>}
-
-      {tenantInfo && tenantInfo.status === "suspended" && (
-        <div className="dashboard-paused">
-          ⏸ Бот на паузе — сообщения от клиентов не обрабатываются.
-          <button
-            type="button"
-            className="nav-link"
-            onClick={handleTogglePause}
-            disabled={togglingPause}
-            style={{ marginLeft: 12 }}
-          >
-            {togglingPause ? "Включаем…" : "Возобновить"}
-          </button>
-        </div>
+      {error && (
+        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
       )}
 
-      {tenantInfo && tenantInfo.status === "active" && onboarding?.done && (
-        <div className="dashboard-active">
-          ✓ Бот активен.{" "}
-          <button
-            type="button"
-            className="link-button"
-            onClick={handleTogglePause}
-            disabled={togglingPause}
-          >
-            {togglingPause ? "Ставим на паузу…" : "Поставить на паузу"}
-          </button>
-        </div>
+      {paused && (
+        <p className="flex items-center gap-2 rounded-lg border border-[var(--warning)]/40 bg-[color-mix(in_oklch,var(--warning)_12%,transparent)] px-4 py-2.5 text-sm text-[var(--warning)]">
+          <PauseIcon className="size-4 shrink-0" /> Бот на паузе — сообщения от клиентов не
+          обрабатываются.
+        </p>
       )}
 
       {onboarding && <OnboardingChecklist status={onboarding} />}
 
-      {billing && (
-        <PlanWidget
-          billing={billing}
-          stripeEnabled={stripeEnabled}
-          onRefresh={refreshBilling}
-        />
-      )}
+      <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Добавить документ</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/30 px-4 py-8 text-center transition-colors hover:border-primary/50 hover:bg-muted/50">
+                <span className="grid size-10 place-items-center rounded-full bg-primary/15 text-primary">
+                  <UploadIcon className="size-5" />
+                </span>
+                <span className="text-sm font-medium">Загрузить файл</span>
+                <span className="text-xs text-muted-foreground">.txt, .md, .json, .pdf</span>
+                <input
+                  type="file"
+                  accept=".txt,.md,.json,.pdf"
+                  onChange={handleFileUpload}
+                  disabled={uploading}
+                  className="sr-only"
+                />
+              </label>
 
-      <section className="upload-section">
-        <h2>Добавить документ</h2>
-
-        <div className="upload-card">
-          <h3>Загрузить файл</h3>
-          <p className="hint">.txt, .md, .json, .pdf</p>
-          <input
-            type="file"
-            accept=".txt,.md,.json,.pdf"
-            onChange={handleFileUpload}
-            disabled={uploading}
-          />
-        </div>
-
-        <div className="upload-card">
-          <h3>Или вставить текст</h3>
-          <form onSubmit={handlePaste} className="paste-form">
-            <input
-              type="text"
-              placeholder="Заголовок"
-              value={pasteTitle}
-              onChange={(e) => setPasteTitle(e.target.value)}
-            />
-            <input
-              type="text"
-              placeholder="Тема (опционально)"
-              value={pasteTopic}
-              onChange={(e) => setPasteTopic(e.target.value)}
-            />
-            <textarea
-              placeholder="Текст документа..."
-              rows={8}
-              value={pasteBody}
-              onChange={(e) => setPasteBody(e.target.value)}
-              required
-            />
-            <button type="submit" disabled={uploading || !pasteBody.trim()}>
-              {uploading ? "Загружаем…" : "Добавить"}
-            </button>
-          </form>
-        </div>
-      </section>
-
-      <section className="docs-section">
-        <h2>Документы ({docs.length})</h2>
-        {docs.length === 0 ? (
-          <p className="empty-state">Документов пока нет. Загрузите первый ↑</p>
-        ) : (
-          <ul className="docs-list">
-            {docs.map((d) => (
-              <li key={d.id} className="doc-row">
-                <div className="doc-meta">
-                  <strong>{d.title}</strong>
-                  <small>
-                    {d.topic && <span className="badge">{d.topic}</span>}{" "}
-                    <span className="muted">{d.source}</span>{" "}
-                    <span className="muted">
-                      · {new Date(d.createdAt * 1000).toLocaleString()}
-                    </span>
-                  </small>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
                 </div>
-                <button type="button" onClick={() => handleDelete(d.id)}>
-                  Удалить
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                <div className="relative flex justify-center">
+                  <span className="bg-card px-2 text-xs uppercase tracking-wider text-muted-foreground">
+                    или вставить текст
+                  </span>
+                </div>
+              </div>
+
+              <form onSubmit={handlePaste} className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input
+                    placeholder="Заголовок"
+                    value={pasteTitle}
+                    onChange={(e) => setPasteTitle(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Тема (опционально)"
+                    value={pasteTopic}
+                    onChange={(e) => setPasteTopic(e.target.value)}
+                  />
+                </div>
+                <Textarea
+                  placeholder="Текст документа…"
+                  rows={6}
+                  className="font-mono text-xs"
+                  value={pasteBody}
+                  onChange={(e) => setPasteBody(e.target.value)}
+                />
+                <Button type="submit" disabled={uploading || !pasteBody.trim()}>
+                  {uploading ? "Загружаем…" : "Добавить документ"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex-row items-center justify-between space-y-0">
+              <CardTitle>Документы</CardTitle>
+              <Badge variant="secondary">{docs.length}</Badge>
+            </CardHeader>
+            <CardContent>
+              {docs.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  Документов пока нет. Загрузите первый ↑
+                </p>
+              ) : (
+                <ul className="divide-y">
+                  {docs.map((d) => (
+                    <li key={d.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+                        <FileTextIcon className="size-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{d.title}</p>
+                        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                          {d.topic && <Badge variant="outline">{d.topic}</Badge>}
+                          <span className="font-mono">{d.source}</span>
+                          <span>· {new Date(d.createdAt * 1000).toLocaleDateString("ru")}</span>
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDelete(d.id)}
+                      >
+                        <Trash2Icon className="size-4" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          {billing && (
+            <PlanWidget
+              billing={billing}
+              stripeEnabled={stripeEnabled}
+              onRefresh={refreshBilling}
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
 }

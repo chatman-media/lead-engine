@@ -1,5 +1,23 @@
+import {
+  CheckIcon,
+  CopyIcon,
+  GlobeIcon,
+  MessageCircleIcon,
+  SendIcon,
+  Trash2Icon,
+  TriangleAlertIcon,
+  UserIcon,
+} from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ApiError,
   type ChannelItem,
@@ -9,17 +27,31 @@ import {
   saas,
 } from "../api/saas.ts";
 
-/**
- * Per-tenant channel onboarding. Telegram (auto-setWebhook) + WhatsApp
- * (manual Meta dashboard setup с copy-paste snippet'ом) + Web widget
- * (snippet для customer site, без token'ов — anonymized externalUserId).
- *
- * Backend encrypt'ит токены через AES-256-GCM в tenant_secrets,
- * ChannelRegistry hot-reload'ится в apps/api (без рестарта).
- * apps/worker требует рестарта для подхвата новых каналов.
- */
 type ChannelTab = "telegram" | "userbot" | "whatsapp" | "web";
 type UserbotStep = "phone" | "code" | "2fa";
+
+const KIND_META: Record<string, { icon: typeof SendIcon; label: string }> = {
+  telegram_bot: { icon: SendIcon, label: "Telegram-бот" },
+  telegram_userbot: { icon: UserIcon, label: "Личный аккаунт" },
+  whatsapp: { icon: MessageCircleIcon, label: "WhatsApp" },
+  web: { icon: GlobeIcon, label: "Web-виджет" },
+};
+
+function ErrorNote({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+      {children}
+    </p>
+  );
+}
+
+function OkNote({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
+      {children}
+    </p>
+  );
+}
 
 export function SaasChannels() {
   const navigate = useNavigate();
@@ -28,12 +60,10 @@ export function SaasChannels() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Telegram form
   const [botToken, setBotToken] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [lastCreated, setLastCreated] = useState<{ username: string } | null>(null);
 
-  // Telegram userbot (личный аккаунт) — пошаговый логин
   const [ubStep, setUbStep] = useState<UserbotStep>("phone");
   const [ubPhone, setUbPhone] = useState("");
   const [ubCode, setUbCode] = useState("");
@@ -43,14 +73,12 @@ export function SaasChannels() {
   const [ubError, setUbError] = useState("");
   const [ubDone, setUbDone] = useState<{ username: string | null } | null>(null);
 
-  // WhatsApp form
   const [waPhoneId, setWaPhoneId] = useState("");
   const [waAccessToken, setWaAccessToken] = useState("");
   const [waBizId, setWaBizId] = useState("");
   const [waSubmitting, setWaSubmitting] = useState(false);
   const [waResult, setWaResult] = useState<CreateWhatsAppChannelResult | null>(null);
 
-  // Web widget form
   const [webBrand, setWebBrand] = useState("");
   const [webColor, setWebColor] = useState("");
   const [webSubmitting, setWebSubmitting] = useState(false);
@@ -81,7 +109,7 @@ export function SaasChannels() {
     return () => {
       cancelled = true;
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: navigate stable
+    // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
 
   async function handleSubmit(e: FormEvent) {
@@ -102,8 +130,6 @@ export function SaasChannels() {
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 401) {
-          // Could be either auth-401 (token expired) или telegram-401 (bad bot token).
-          // Telegram-rejected message comes back via errorCode "Telegram rejected token (invalid)".
           if (err.errorCode.toLowerCase().includes("telegram")) {
             setError("Telegram отверг токен — проверьте, что вставили правильно из @BotFather");
           } else {
@@ -129,7 +155,7 @@ export function SaasChannels() {
   }
 
   async function handleDelete(id: number, externalId: string) {
-    if (!confirm(`Отключить канал @${externalId}? Token в tenant_secrets останется.`)) return;
+    if (!confirm(`Отключить канал ${externalId}? Креды в tenant_secrets останутся.`)) return;
     try {
       await saas.deleteChannel(id);
       await refresh();
@@ -158,8 +184,6 @@ export function SaasChannels() {
           clearToken();
           navigate("/login", { replace: true });
           return;
-        } else if (err.status === 400) {
-          setError(`Ошибка: ${err.errorCode}`);
         } else {
           setError(`Ошибка ${err.status}: ${err.errorCode}`);
         }
@@ -178,7 +202,7 @@ export function SaasChannels() {
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
       copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Clipboard API may be unavailable (non-HTTPS or old browser).
+      // clipboard может быть недоступен
     }
   }
 
@@ -214,8 +238,6 @@ export function SaasChannels() {
           }
         } else if (err.status === 404) {
           setError("phone_number_id не найден — проверьте Meta dashboard → WhatsApp → API Setup");
-        } else if (err.status === 400) {
-          setError(`Ошибка: ${err.errorCode}`);
         } else if (err.status === 502) {
           setError("Meta Graph недоступен — попробуйте позже");
         } else {
@@ -304,9 +326,7 @@ export function SaasChannels() {
     setUbSubmitting(true);
     try {
       const res = await saas.submitUserbot2fa(ubLoginId, ubPassword);
-      if (!("awaiting" in res)) {
-        setUbDone({ username: res.username });
-      }
+      if (!("awaiting" in res)) setUbDone({ username: res.username });
       resetUserbot();
       await refresh();
     } catch (err) {
@@ -316,404 +336,371 @@ export function SaasChannels() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="dashboard-loading">
-        <p>Загрузка…</p>
-      </div>
-    );
-  }
+  if (loading) return <p className="text-sm text-muted-foreground">Загрузка…</p>;
 
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <div>
-          <h1>Каналы</h1>
-          <p className="dashboard-sub">
-            Telegram-боты, через которые приходят сообщения от клиентов.
-          </p>
-        </div>
-        <Link to="/dashboard" className="back-link">
-          ← К базе знаний
-        </Link>
-      </header>
+    <div className="space-y-6">
+      <PageHeader
+        title="Каналы"
+        description="Подключите источники сообщений: Telegram-бот, личный аккаунт, WhatsApp или web-виджет."
+      />
 
-      {error && <div className="dashboard-error">{error}</div>}
-
+      {error && <ErrorNote>{error}</ErrorNote>}
       {lastCreated && (
-        <div className="settings-warning">
-          ✓ Бот @{lastCreated.username} подключён и активирован — webhook настроен, канал работает.
-        </div>
+        <OkNote>✓ Бот @{lastCreated.username} подключён — webhook настроен, канал работает.</OkNote>
       )}
-
       {ubDone && (
-        <div className="settings-warning">
+        <OkNote>
           ✓ Личный аккаунт{ubDone.username ? ` @${ubDone.username}` : ""} подключён — входящие
-          сообщения обрабатываются ассистентом.
-        </div>
+          обрабатываются ассистентом.
+        </OkNote>
       )}
 
-      {waResult && (
-        <div className="settings-warning">
-          ✓ WhatsApp канал {waResult.displayPhoneNumber ?? waResult.phoneNumberId} (
-          {waResult.verifiedName ?? "no verified name"}) подключён.
-          {waResult.webhookSetupHint && (
-            <div style={{ marginTop: 8 }}>
-              <strong>Настройте webhook в Meta dashboard:</strong>
-              <pre style={{ marginTop: 4, padding: 8 }}>
-                URL: {waResult.webhookSetupHint.url}
-                {"\n"}
-                Verify token: {waResult.webhookSetupHint.verifyToken}
-                {"\n"}
-                {waResult.webhookSetupHint.appSecretHint}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as ChannelTab)}>
+        <TabsList>
+          <TabsTrigger value="telegram">
+            <SendIcon /> Telegram
+          </TabsTrigger>
+          <TabsTrigger value="userbot">
+            <UserIcon /> Личный
+          </TabsTrigger>
+          <TabsTrigger value="whatsapp">
+            <MessageCircleIcon /> WhatsApp
+          </TabsTrigger>
+          <TabsTrigger value="web">
+            <GlobeIcon /> Web
+          </TabsTrigger>
+        </TabsList>
 
-      <div className="channel-tabs">
-        <button
-          type="button"
-          className={`channel-tab ${tab === "telegram" ? "active" : ""}`}
-          onClick={() => setTab("telegram")}
-        >
-          Telegram
-        </button>
-        <button
-          type="button"
-          className={`channel-tab ${tab === "userbot" ? "active" : ""}`}
-          onClick={() => setTab("userbot")}
-        >
-          Telegram (личный)
-        </button>
-        <button
-          type="button"
-          className={`channel-tab ${tab === "whatsapp" ? "active" : ""}`}
-          onClick={() => setTab("whatsapp")}
-        >
-          WhatsApp
-        </button>
-        <button
-          type="button"
-          className={`channel-tab ${tab === "web" ? "active" : ""}`}
-          onClick={() => setTab("web")}
-        >
-          Web виджет
-        </button>
-      </div>
-
-      {tab === "telegram" && (
-        <section className="settings-section">
-          <div className="settings-header">
-            <h2>Подключить Telegram-бота</h2>
-          </div>
-          <p className="hint">
-            Создайте бота в{" "}
-            <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">
-              @BotFather
-            </a>{" "}
-            и вставьте сюда токен (формат <code>123456:ABC-DEF...</code>). Webhook настроится
-            автоматически.
-          </p>
-          <form className="settings-form" onSubmit={handleSubmit}>
-            <label>
-              Bot token
-              <input
-                type="password"
-                autoComplete="off"
-                value={botToken}
-                onChange={(e) => setBotToken(e.target.value)}
-                placeholder="123456789:AAEhBP..."
-                required
-              />
-            </label>
-            <button type="submit" disabled={submitting || !botToken.trim()}>
-              {submitting ? "Проверяем…" : "Подключить"}
-            </button>
-          </form>
-        </section>
-      )}
-
-      {tab === "whatsapp" && (
-        <section className="settings-section">
-          <div className="settings-header">
-            <h2>Подключить WhatsApp Business</h2>
-          </div>
-          <p className="hint">
-            Откройте{" "}
-            <a
-              href="https://developers.facebook.com/apps/"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Meta for Developers
-            </a>{" "}
-            → ваше WhatsApp Business приложение → API Setup. Скопируйте <code>Phone number ID</code>{" "}
-            + сгенерируйте <code>Access token</code> (рекомендуется system user token, не временный
-            24h). После создания канала здесь — UI покажет URL+token для webhook setup'а в Meta
-            dashboard.
-          </p>
-          <form className="settings-form" onSubmit={handleWhatsAppSubmit}>
-            <label>
-              Phone number ID
-              <input
-                type="text"
-                value={waPhoneId}
-                onChange={(e) => setWaPhoneId(e.target.value)}
-                placeholder="123456789012345"
-                pattern="\d{10,20}"
-                required
-              />
-            </label>
-            <label>
-              Access token (Bearer)
-              <input
-                type="password"
-                autoComplete="off"
-                value={waAccessToken}
-                onChange={(e) => setWaAccessToken(e.target.value)}
-                placeholder="EAAJZBxxxxxxx..."
-                required
-              />
-            </label>
-            <label>
-              Business account ID (опционально)
-              <input
-                type="text"
-                value={waBizId}
-                onChange={(e) => setWaBizId(e.target.value)}
-                placeholder="123456789012345"
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={waSubmitting || !waPhoneId.trim() || !waAccessToken.trim()}
-            >
-              {waSubmitting ? "Проверяем у Meta…" : "Подключить"}
-            </button>
-          </form>
-        </section>
-      )}
-
-      {tab === "web" && (
-        <section className="settings-section">
-          <div className="settings-header">
-            <h2>Web-виджет на сайт</h2>
-          </div>
-          <p className="hint">
-            Включает чат-виджет для вашего сайта — посетители пишут через плавающий bubble. Backend
-            без token'ов (channel-web использует WS-соединение, anonymized externalUserId). После
-            включения UI покажет готовый snippet — вставьте перед закрывающим
-            <code>{"</body>"}</code>.
-          </p>
-          <form className="settings-form" onSubmit={handleWebSubmit}>
-            <label>
-              Brand name (опционально)
-              <input
-                type="text"
-                value={webBrand}
-                onChange={(e) => setWebBrand(e.target.value)}
-                placeholder="Acme Support"
-                maxLength={64}
-              />
-            </label>
-            <label>
-              Цвет акцента (hex, опционально)
-              <input
-                type="text"
-                value={webColor}
-                onChange={(e) => setWebColor(e.target.value)}
-                placeholder="#6aa6ff"
-                pattern="#[0-9a-fA-F]{3,8}"
-              />
-            </label>
-            <button type="submit" disabled={webSubmitting}>
-              {webSubmitting ? "Создаём…" : webResult ? "Обновить" : "Включить виджет"}
-            </button>
-          </form>
-
-          {webResult?.snippet && (
-            <div className="snippet-box">
-              <strong>Embed snippet</strong>
-              <p className="hint">
-                Скопируйте этот HTML и вставьте на ваш сайт перед закрывающим тегом
-                <code>{"</body>"}</code>:
-              </p>
-              <pre>{webResult.snippet.html}</pre>
-              <button
-                type="button"
-                className="nav-link"
-                onClick={() => copySnippet(webResult.snippet!.html)}
-              >
-                {copied ? "✓ Скопировано" : "Копировать"}
-              </button>
-              <p className="hint" style={{ marginTop: 12 }}>
-                Smoke-test:{" "}
-                <a href={webResult.snippet.demoUrl} target="_blank" rel="noopener noreferrer">
-                  открыть demo-чат
+        <TabsContent value="telegram">
+          <Card>
+            <CardHeader>
+              <CardTitle>Подключить Telegram-бота</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Создайте бота в{" "}
+                <a
+                  href="https://t.me/BotFather"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  @BotFather
                 </a>{" "}
-                · WS URL: <code>{webResult.snippet.wsUrl}</code>
+                и вставьте токен. Webhook настроится автоматически.
               </p>
-            </div>
-          )}
-          {webResult && !webResult.snippet && (
-            <div className="settings-warning">
-              ⚠ {webResult.snippetHint ?? "snippet недоступен"}
-            </div>
-          )}
-        </section>
-      )}
-
-      {tab === "userbot" && (
-        <section className="settings-section">
-          <div className="settings-header">
-            <h2>Подключить личный Telegram-аккаунт</h2>
-          </div>
-          <p className="hint">
-            Для случаев, когда лиды пишут в личку (а не боту). Подключается ваш личный аккаунт через
-            MTProto. Доступно только для superadmin.
-          </p>
-          <div className="settings-warning" style={{ color: "#f0c674" }}>
-            ⚠ Это автоматизация личного аккаунта. Подключайте только аккаунт, которым владеете, и
-            используйте для ответов своим лидам — массовая рассылка нарушает правила Telegram и
-            грозит блокировкой.
-          </div>
-
-          {ubError && <div className="dashboard-error">{ubError}</div>}
-
-          {ubStep === "phone" && (
-            <form className="settings-form" onSubmit={handleUbPhone}>
-              <label>
-                Номер телефона аккаунта
-                <input
-                  type="tel"
-                  value={ubPhone}
-                  onChange={(e) => setUbPhone(e.target.value)}
-                  placeholder="+79991234567"
-                  autoComplete="off"
-                />
-              </label>
-              <button type="submit" disabled={ubSubmitting || !ubPhone.trim()}>
-                {ubSubmitting ? "Отправляем код…" : "Получить код"}
-              </button>
-            </form>
-          )}
-
-          {ubStep === "code" && (
-            <>
-              <form className="settings-form" onSubmit={handleUbCode}>
-                <p className="hint">
-                  Telegram отправил код подтверждения на {ubPhone} (в приложение или SMS). Введите
-                  его.
-                </p>
-                <label>
-                  Код подтверждения
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    value={ubCode}
-                    onChange={(e) => setUbCode(e.target.value)}
-                    placeholder="12345"
-                  />
-                </label>
-                <button type="submit" disabled={ubSubmitting || !ubCode.trim()}>
-                  {ubSubmitting ? "Проверяем…" : "Подтвердить"}
-                </button>
-              </form>
-              <button type="button" className="link-button" onClick={resetUserbot}>
-                ← Изменить номер
-              </button>
-            </>
-          )}
-
-          {ubStep === "2fa" && (
-            <>
-              <form className="settings-form" onSubmit={handleUb2fa}>
-                <p className="hint">
-                  У аккаунта включён облачный пароль (2FA). Введите его, чтобы завершить вход.
-                </p>
-                <label>
-                  Пароль 2FA
-                  <input
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmit} className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Bot token</Label>
+                  <Input
                     type="password"
                     autoComplete="off"
-                    value={ubPassword}
-                    onChange={(e) => setUbPassword(e.target.value)}
-                    placeholder="••••••••"
+                    value={botToken}
+                    onChange={(e) => setBotToken(e.target.value)}
+                    placeholder="123456789:AAEhBP…"
                   />
-                </label>
-                <button type="submit" disabled={ubSubmitting || !ubPassword}>
-                  {ubSubmitting ? "Проверяем…" : "Войти"}
-                </button>
+                </div>
+                <Button type="submit" disabled={submitting || !botToken.trim()}>
+                  {submitting ? "Проверяем…" : "Подключить"}
+                </Button>
               </form>
-              <button type="button" className="link-button" onClick={resetUserbot}>
-                ← Начать заново
-              </button>
-            </>
-          )}
-        </section>
-      )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      <section className="docs-section">
-        <h2>Подключённые каналы ({channels.length})</h2>
-        {channels.length === 0 ? (
-          <p className="empty-state">Пока ничего не подключено. Вставьте токен ↑</p>
-        ) : (
-          <ul className="docs-list">
-            {channels.map((ch) => (
-              <li key={ch.id} className="doc-row">
-                <div className="doc-meta">
-                  <strong>
-                    {ch.kind === "telegram_bot"
-                      ? `@${ch.externalId}`
-                      : ch.kind === "telegram_userbot"
-                        ? `${ch.username ? `@${ch.username}` : `TG ${ch.externalId}`} (личный)`
-                        : ch.kind === "whatsapp"
-                          ? `WhatsApp #${ch.externalId}`
-                          : ch.kind === "web"
-                            ? `Web виджет (${ch.externalId})`
-                            : ch.externalId}
-                  </strong>
-                  <small>
-                    <span className="badge">{ch.kind}</span>{" "}
-                    <span className={`badge ${ch.status === "error" ? "badge-warning" : ""}`}>
-                      {ch.status}
-                    </span>{" "}
-                    {ch.hasCredentials ? (
-                      <span className="badge">creds OK</span>
-                    ) : (
-                      <span className="badge badge-warning">no creds</span>
-                    )}{" "}
-                    <span className="muted">
-                      · добавлен {new Date(ch.createdAt * 1000).toLocaleString()}
+        <TabsContent value="userbot">
+          <Card>
+            <CardHeader>
+              <CardTitle>Подключить личный Telegram-аккаунт</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Для случаев, когда лиды пишут в личку (а не боту). Подключается через MTProto.
+                Только для superadmin.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="flex items-start gap-2 rounded-md border border-[var(--warning)]/40 bg-[color-mix(in_oklch,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
+                <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+                Это автоматизация личного аккаунта. Подключайте только свой аккаунт и для ответов
+                своим лидам — массовая рассылка нарушает правила Telegram.
+              </p>
+              {ubError && <ErrorNote>{ubError}</ErrorNote>}
+
+              {ubStep === "phone" && (
+                <form onSubmit={handleUbPhone} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label>Номер телефона аккаунта</Label>
+                    <Input
+                      type="tel"
+                      autoComplete="off"
+                      value={ubPhone}
+                      onChange={(e) => setUbPhone(e.target.value)}
+                      placeholder="+79991234567"
+                    />
+                  </div>
+                  <Button type="submit" disabled={ubSubmitting || !ubPhone.trim()}>
+                    {ubSubmitting ? "Отправляем код…" : "Получить код"}
+                  </Button>
+                </form>
+              )}
+
+              {ubStep === "code" && (
+                <form onSubmit={handleUbCode} className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    Telegram отправил код на {ubPhone}. Введите его.
+                  </p>
+                  <div className="space-y-1.5">
+                    <Label>Код подтверждения</Label>
+                    <Input
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      value={ubCode}
+                      onChange={(e) => setUbCode(e.target.value)}
+                      placeholder="12345"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={ubSubmitting || !ubCode.trim()}>
+                      {ubSubmitting ? "Проверяем…" : "Подтвердить"}
+                    </Button>
+                    <Button type="button" variant="ghost" onClick={resetUserbot}>
+                      Изменить номер
+                    </Button>
+                  </div>
+                </form>
+              )}
+
+              {ubStep === "2fa" && (
+                <form onSubmit={handleUb2fa} className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    У аккаунта включён облачный пароль (2FA). Введите его.
+                  </p>
+                  <div className="space-y-1.5">
+                    <Label>Пароль 2FA</Label>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={ubPassword}
+                      onChange={(e) => setUbPassword(e.target.value)}
+                      placeholder="••••••••"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={ubSubmitting || !ubPassword}>
+                      {ubSubmitting ? "Проверяем…" : "Войти"}
+                    </Button>
+                    <Button type="button" variant="ghost" onClick={resetUserbot}>
+                      Начать заново
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="whatsapp">
+          <Card>
+            <CardHeader>
+              <CardTitle>Подключить WhatsApp Business</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Из{" "}
+                <a
+                  href="https://developers.facebook.com/apps/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  Meta for Developers
+                </a>{" "}
+                → API Setup: <code className="font-mono">Phone number ID</code> + system user{" "}
+                <code className="font-mono">Access token</code>.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <form onSubmit={handleWhatsAppSubmit} className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Phone number ID</Label>
+                  <Input
+                    value={waPhoneId}
+                    onChange={(e) => setWaPhoneId(e.target.value)}
+                    placeholder="123456789012345"
+                    pattern="\d{10,20}"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Access token</Label>
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    value={waAccessToken}
+                    onChange={(e) => setWaAccessToken(e.target.value)}
+                    placeholder="EAAJZBxxxxxxx…"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Business account ID (опционально)</Label>
+                  <Input
+                    value={waBizId}
+                    onChange={(e) => setWaBizId(e.target.value)}
+                    placeholder="123456789012345"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  disabled={waSubmitting || !waPhoneId.trim() || !waAccessToken.trim()}
+                >
+                  {waSubmitting ? "Проверяем у Meta…" : "Подключить"}
+                </Button>
+              </form>
+              {waResult && (
+                <OkNote>
+                  ✓ WhatsApp {waResult.displayPhoneNumber ?? waResult.phoneNumberId} подключён.
+                  {waResult.webhookSetupHint && (
+                    <span className="mt-2 block font-mono text-xs">
+                      Webhook URL: {waResult.webhookSetupHint.url}
+                      <br />
+                      Verify token: {waResult.webhookSetupHint.verifyToken}
                     </span>
-                  </small>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {ch.kind === "telegram_userbot" && ch.status === "error" && (
-                    <button
-                      type="button"
-                      className="link-button"
-                      onClick={() => {
-                        resetUserbot();
-                        setUbDone(null);
-                        setTab("userbot");
-                      }}
-                    >
-                      Авторизовать заново
-                    </button>
                   )}
-                  <button type="button" onClick={() => handleDelete(ch.id, ch.externalId)}>
-                    Отключить
-                  </button>
+                </OkNote>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="web">
+          <Card>
+            <CardHeader>
+              <CardTitle>Web-виджет на сайт</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Плавающий чат для вашего сайта. После включения покажем готовый snippet.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <form onSubmit={handleWebSubmit} className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Brand name (опц.)</Label>
+                    <Input
+                      value={webBrand}
+                      onChange={(e) => setWebBrand(e.target.value)}
+                      placeholder="Acme Support"
+                      maxLength={64}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Цвет акцента (hex)</Label>
+                    <Input
+                      value={webColor}
+                      onChange={(e) => setWebColor(e.target.value)}
+                      placeholder="#6aa6ff"
+                      pattern="#[0-9a-fA-F]{3,8}"
+                    />
+                  </div>
                 </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                <Button type="submit" disabled={webSubmitting}>
+                  {webSubmitting ? "Создаём…" : webResult ? "Обновить" : "Включить виджет"}
+                </Button>
+              </form>
+
+              {webResult?.snippet && (
+                <div className="space-y-2 rounded-lg border bg-muted/40 p-4">
+                  <p className="text-sm font-medium">Embed snippet</p>
+                  <pre className="overflow-x-auto rounded-md bg-background p-3 font-mono text-xs">
+                    {webResult.snippet.html}
+                  </pre>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => webResult.snippet && copySnippet(webResult.snippet.html)}
+                  >
+                    {copied ? <CheckIcon /> : <CopyIcon />}
+                    {copied ? "Скопировано" : "Копировать"}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle>Подключённые каналы</CardTitle>
+          <Badge variant="secondary">{channels.length}</Badge>
+        </CardHeader>
+        <CardContent>
+          {channels.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Пока ничего не подключено.
+            </p>
+          ) : (
+            <ul className="divide-y">
+              {channels.map((ch) => {
+                const meta = KIND_META[ch.kind] ?? { icon: GlobeIcon, label: ch.kind };
+                const Icon = meta.icon;
+                const title =
+                  ch.kind === "telegram_userbot"
+                    ? `${ch.username ? `@${ch.username}` : `TG ${ch.externalId}`} · личный`
+                    : ch.kind === "telegram_bot"
+                      ? `@${ch.externalId}`
+                      : ch.kind === "whatsapp"
+                        ? `WhatsApp #${ch.externalId}`
+                        : ch.kind === "web"
+                          ? `Web (${ch.externalId})`
+                          : ch.externalId;
+                return (
+                  <li key={ch.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+                      <Icon className="size-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{title}</p>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                        <Badge variant={ch.status === "error" ? "warning" : "secondary"}>
+                          {ch.status}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(ch.createdAt * 1000).toLocaleDateString("ru")}
+                        </span>
+                      </div>
+                    </div>
+                    {ch.kind === "telegram_userbot" && ch.status === "error" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          resetUserbot();
+                          setUbDone(null);
+                          setTab("userbot");
+                        }}
+                      >
+                        Авторизовать заново
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => handleDelete(ch.id, ch.externalId)}
+                    >
+                      <Trash2Icon className="size-4" />
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <p className="text-center text-xs text-muted-foreground">
+        Нужна расширенная настройка?{" "}
+        <Link to="/onboarding" className="text-primary hover:underline">
+          Мастер онбординга →
+        </Link>
+      </p>
     </div>
   );
 }
