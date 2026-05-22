@@ -60,29 +60,34 @@ Token живёт 30 дней (`signAuthToken` в `apps/api/src/lib/auth.ts`).
 http://localhost:5173/channels
 ```
 
+UI имеет две вкладки: **Telegram** и **WhatsApp**.
+
+### 2a. Telegram (auto-setWebhook)
+
 1. Открыть Telegram, найти `@BotFather`, отправить `/newbot`
-2. Bot Father даст token формата `123456789:AAEhBP...`
+2. BotFather даст token формата `123456789:AAEhBP...`
 3. Вставить token в форму "Bot token", нажать "Подключить"
 
 Backend (`POST /api/admin/channels/telegram`):
 
 ```
 1. Validate format regex /^\d+:[\w-]{30,}$/  → 400 если bad
-2. TelegramClient.getMe() с token             → 401 если bad
-3. encrypt token AES-256-GCM → tenant_secrets[channel_telegram_bot_<username>]
-4. INSERT channels (kind=telegram_bot, external_id=<username>, ...)
-5. setWebhook(url=<PLATFORM_PUBLIC_URL>/webhook/telegram/<tenantSlug>,
+2. Quota check (canAddChannel) → 402 если over plan limit
+3. TelegramClient.getMe() с token             → 401 если bad
+4. encrypt token AES-256-GCM → tenant_secrets[channel_telegram_bot_<username>]
+5. INSERT channels (kind=telegram_bot, external_id=<username>, ...)
+6. setWebhook(url=<PLATFORM_PUBLIC_URL>/webhook/telegram/<tenantSlug>,
               secret_token=<TELEGRAM_WEBHOOK_SECRET>)
-6. recordAudit('channel.create', ...)
-7. reloader.reloadChannels(tenantId)   ← hot-reload в apps/api
-8. apps/worker подхватит ≤30 сек через polling
+7. recordAudit('channel.create', ...)
+8. reloader.reloadChannels(tenantId)   ← hot-reload в apps/api
+9. apps/worker подхватит ≤30 сек через polling
 ```
 
 UI отображает:
 
 ```
 ✓ Бот @acme_support_bot подключён и активирован — webhook настроен,
-  канал работает. (Worker для outbound может потребовать рестарт.)
+  канал работает.
 ```
 
 curl-вариант для CI/CD:
@@ -92,6 +97,61 @@ curl -X POST http://localhost:3000/api/admin/channels/telegram \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"botToken":"123456789:AAE..."}'
+```
+
+### 2b. WhatsApp (Meta webhook — manual)
+
+1. Открыть [Meta for Developers](https://developers.facebook.com/apps/) →
+   ваше WhatsApp Business App → **API Setup**
+2. Скопировать `Phone number ID` (15-значный numeric) и сгенерировать
+   permanent system user access token (не временный 24h)
+3. Вставить оба значения в форму на вкладке "WhatsApp", optional
+   `Business Account ID`
+
+Backend (`POST /api/admin/channels/whatsapp`):
+
+```
+1. Validate phoneNumberId regex /^\d{10,20}$/ → 400 если bad
+2. Quota check → 402 если over limit
+3. WhatsAppClient.getPhoneInfo() — GET /<phone_number_id>:
+   - 401 если bad token, 404 если bad phoneNumberId
+   - returns { verifiedName, displayPhoneNumber, qualityRating }
+4. encrypt token → tenant_secrets[channel_whatsapp_<phoneNumberId>]
+5. INSERT channels (kind=whatsapp, external_id=phoneNumberId,
+                    metadata: { verifiedName, displayPhoneNumber, qualityRating })
+6. recordAudit + reloadChannels
+```
+
+В отличие от Telegram, **Meta webhook нельзя настроить автоматически** —
+Meta не предоставляет API для self-serve webhook subscription. Response
+содержит `webhookSetupHint`:
+
+```json
+{
+  "webhookSetupHint": {
+    "url": "https://api.example.com/webhook/whatsapp/acme",
+    "verifyToken": "<WHATSAPP_VERIFY_TOKEN>",
+    "appSecretHint": "Meta dashboard → App settings → Basic → App Secret — добавить в WHATSAPP_APP_SECRET env"
+  }
+}
+```
+
+UI показывает эти три значения в banner для copy-paste в Meta dashboard
+→ Webhooks → Edit subscription:
+- **Callback URL** = `webhookSetupHint.url`
+- **Verify Token** = `webhookSetupHint.verifyToken`
+- Подписаться на `messages` events
+
+После этого Meta отправит GET с challenge, lead-engine ответит plaintext
+challenge (см. `verifyWebhookSubscription` в `packages/channel-whatsapp`).
+
+curl:
+
+```sh
+curl -X POST http://localhost:3000/api/admin/channels/whatsapp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"phoneNumberId":"123456789012345","accessToken":"EAAJZB..."}'
 ```
 
 ---
@@ -247,6 +307,20 @@ reply.
 - Outbound queue → worker → клиент получает в Telegram message от
   оператора
 
+Кроме reply есть отдельный toggle "Перехватить" / "Вернуть AI" в header
+thread'а — переключает `conversations.mode` без отправки сообщения:
+
+```sh
+curl -X PUT http://localhost:3000/api/admin/conversations/<id>/mode \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"mode":"human"}'   # AI замолкает
+# или
+  -d '{"mode":"ai"}'      # AI снова отвечает
+```
+
+Use-case: оператор взял диалог, разрулил вручную, нажал "Вернуть AI" —
+бот продолжает обработку с того места.
+
 ---
 
 ## Шаг 6. Операционные действия
@@ -270,6 +344,62 @@ inbound сообщения отбрасываются (Telegram retry'ит по�
 Просто paste новый token в `/channels` для того же бота → backend
 re-encrypts + updates row + reload. Старый ciphertext остаётся в
 `tenant_secrets` (manual cleanup отдельной операцией для безопасности).
+
+### Upgrade plan (Stripe Checkout)
+
+Дашборд показывает `PlanWidget` — текущий план, usage bars (каналы /
+KB docs / rate), кнопки "Starter $49" / "Pro $149" если на `free`.
+
+Flow:
+
+1. Клик "Starter $49" → `POST /api/admin/billing/checkout { plan: 'starter' }`
+2. Backend: `createCustomer` (если нет) + `createCheckoutSession`
+   (14-day trial) → возвращает `url`
+3. UI: `window.location.href = url` — Stripe Checkout
+4. Tenant вводит карту, подтверждает trial
+5. Stripe POST `/webhook/stripe` с `customer.subscription.created`:
+   - upsert `stripe_subscriptions`
+   - priceMap[priceId] → newPlan='starter'
+   - `tenants.plan = 'starter'` (status='trialing')
+6. Redirect назад на `STRIPE_CHECKOUT_SUCCESS_URL`
+7. PlanWidget reload → видит новый план, quota = 3 channel / 500 docs
+8. Следующий `POST /api/admin/channels/...` → quota check проходит
+
+Управление подпиской — кнопка "Управлять" в PlanWidget:
+
+1. `POST /api/admin/billing/portal` → returns Stripe Customer Portal URL
+2. Tenant меняет карту / cancel / change plan через Stripe UI
+3. Webhook events sync обратно `tenants.plan`
+
+curl:
+
+```sh
+# Start checkout
+curl -X POST http://localhost:3000/api/admin/billing/checkout \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"plan":"starter"}'
+# Returns: { ok: true, url: "https://checkout.stripe.com/...", sessionId }
+
+# Customer Portal
+curl -X POST http://localhost:3000/api/admin/billing/portal \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{}'
+# Returns: { ok: true, url: "https://billing.stripe.com/..." }
+```
+
+Quota errors (402 Payment Required):
+
+```json
+{
+  "error": "quota_exceeded",
+  "reason": "max_channels",
+  "limit": 1, "current": 1,
+  "plan": "free", "planLabel": "Free",
+  "upgradeHint": "Перейдите на план Starter ($49/мес) для большего числа каналов"
+}
+```
+
+UI ловит этот response и показывает Upgrade CTA.
 
 ### Rotate LLM key
 
@@ -350,6 +480,13 @@ Usage:
 | Bot не отвечает | `tenant.status='suspended'` или LLM key неверный | `/diagnostics` → видно где fail |
 | Inbox пустой после сообщения | Webhook не доходит / rate-limit / canal paused | Логи apps/api: `webhookRequests{status="429"}` — over rate limit; `404` — нет канала |
 | Send-from-admin → 409 "no channel" | Channel удалён после inbound | Re-paste token в /channels |
+| WhatsApp POST → 401 "Meta rejected" | Bad access token (истёк / нет permissions) | Сгенерировать permanent system user token в Meta dashboard |
+| WhatsApp POST → 404 "phoneNumberId not found" | Опечатка в phoneNumberId или token не от этой WABA | Скопировать `Phone number ID` точно из API Setup |
+| WhatsApp webhook не приходит | Meta dashboard webhook не настроен | Скопировать `webhookSetupHint.url` + `verifyToken` в Meta dashboard → Webhooks |
+| POST /channels → 402 "quota_exceeded" | План free лимит 1 канал | Upgrade на Starter / Pro через PlanWidget или DELETE старого канала |
+| POST /kb/documents → 402 | Free план — 50 docs cap | Удалить старые docs или upgrade plan |
+| Stripe Checkout → 503 "stripe_not_configured" | `STRIPE_SECRET_KEY` пустой на платформе | Set env STRIPE_SECRET_KEY + STRIPE_PRICE_STARTER + STRIPE_PRICE_PRO |
+| После checkout план не обновился | Webhook не получен (нет STRIPE_WEBHOOK_SECRET или Stripe URL не указывает на /webhook/stripe) | Проверить Stripe dashboard → Webhooks → delivery attempts |
 
 ---
 

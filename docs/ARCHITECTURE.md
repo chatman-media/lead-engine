@@ -273,6 +273,95 @@ tenant'а — следующий resolve пересоберёт с новым co
 
 ---
 
+## Plan tiers + quota
+
+`apps/api/src/lib/plans.ts` — source-of-truth:
+
+| Plan | maxChannels | maxKbDocuments | rateLimitPerMinute | priceUsd |
+|---|---|---|---|---|
+| `free` | 1 | 50 | 30 | 0 |
+| `starter` | 3 | 500 | 60 | 49 |
+| `pro` | 10 | 10000 | 120 | 149 |
+| `enterprise` | 100 | 100000 | 600 | null (custom / self-host) |
+
+`resolvePlan(planStr)` маппит `tenants.plan` строку в `PlanLimits`.
+Unknown plan → fallback на `free` с warning hook.
+
+**Quota enforcement** — `apps/api/src/lib/quota.ts`:
+
+- `canAddChannel({ db, tenantId })` — вызывается в `POST /api/admin/channels/telegram`
+  и `/whatsapp` **только** на new-channel path. Token rotation для существующего
+  channel bypass'ит quota.
+- `canAddKbDocument({ db, tenantId })` — вызывается в `POST /api/admin/kb/documents`.
+  Dedup по `content_hash` работает orthogonally — same-content re-upload не
+  увеличивает count.
+
+Превышение → `402 Payment Required` со structured response:
+
+```json
+{
+  "error": "quota_exceeded",
+  "reason": "max_channels",
+  "limit": 1,
+  "current": 1,
+  "plan": "free",
+  "planLabel": "Free",
+  "upgradeHint": "Перейдите на план Starter ($49/мес) для большего числа каналов"
+}
+```
+
+---
+
+## Stripe billing
+
+`apps/api/src/lib/stripe-api.ts` — минимальный REST-wrapper над Stripe API
+(без `stripe-node` dependency). Покрывает три use-case'а:
+
+- `createCustomer({ email, tenantId, tenantSlug })` — POST `/v1/customers`
+  с `metadata.tenant_id` для idempotency lookup.
+- `createCheckoutSession({ customerId, priceId, tenantId, successUrl,
+  cancelUrl, trialDays })` — subscription mode + `client_reference_id=tenantId`
+  для webhook resolve.
+- `createBillingPortalSession({ customerId, returnUrl })` — Customer
+  Portal session для self-service cancel / change card.
+
+**Endpoint flow (M1b):**
+
+```
+POST /api/admin/billing/checkout { plan: 'starter' | 'pro' }
+  ↓
+  1. Lookup admin.email + tenant.slug
+  2. Lookup или create stripe_customers row (idempotent)
+  3. createCheckoutSession (14-day trial)
+  4. recordAudit billing.checkout_started
+  5. Return { url, sessionId }
+  ↓
+client redirect → window.location.href = res.url
+  ↓
+Tenant платит на Stripe Checkout
+  ↓
+Stripe POST /webhook/stripe (HMAC-SHA256 verify)
+  ↓
+  customer.subscription.created/updated:
+    - INSERT/UPDATE stripe_subscriptions
+    - priceMap[priceId] → newPlan ('starter' | 'pro')
+    - status='active'|'trialing' → tenants.plan = newPlan
+  customer.subscription.deleted:
+    - tenants.plan = 'free'
+  ↓
+Next /api/admin/channels POST → canAddChannel reads fresh tenants.plan →
+quota lifted instantly без рестарта.
+```
+
+`priceToPlan` map передаётся в `makeStripeWebhookRoutes` на boot из env
+(`STRIPE_PRICE_STARTER` / `STRIPE_PRICE_PRO`). Unknown priceId → warning,
+`tenants.plan` не меняется.
+
+Идемпотентность: `stripeWebhookEvents.stripe_event_id` уникальный, дубли
+events возвращают `{ ok: true, deduped: true }`.
+
+---
+
 ## Audit log
 
 `apps/api/src/lib/audit.ts`:
@@ -292,6 +381,23 @@ Fail-quiet: ошибка audit'а не валит request. Записи живу
 
 Чтение — `GET /api/admin/audit-log?limit=N&cursor=<epoch>` (cursor по
 `createdAt DESC`). UI рендерит JSON details collapsibly.
+
+**Текущая taxonomy actions:**
+
+```
+auth.signup                       — tenant + admin создан
+llm_config.create / update / delete
+channel.create / update / delete  — kind='telegram_bot' | 'whatsapp'
+conversation.reply                — operator отправил message с role='human'
+conversation.mode.takeover        — mode 'ai' → 'human'
+conversation.mode.return_to_ai    — mode 'human' → 'ai'
+tenant.pause                      — tenant.status 'active' → 'suspended'
+tenant.resume                     — tenant.status 'suspended' → 'active'
+billing.checkout_started          — POST /checkout, details: { plan, priceId, customerId }
+```
+
+Raw secrets / tokens / apiKey НИКОГДА не попадают в `details` — verified
+в integration-тестах через `expect(JSON.stringify(details)).not.toContain(rawToken)`.
 
 ---
 
@@ -383,6 +489,10 @@ lead_engine_llm_errors_total{provider, purpose, kind} — error rates
 | Tenant reloader (hot-reload bus) | `apps/api/src/lib/tenant-reloader.ts` |
 | Audit helper | `apps/api/src/lib/audit.ts` |
 | Rate limiter | `apps/api/src/lib/rate-limiter.ts` |
+| Plan tiers (PlanLimits) | `apps/api/src/lib/plans.ts` |
+| Quota helpers | `apps/api/src/lib/quota.ts` |
+| Stripe API wrapper | `apps/api/src/lib/stripe-api.ts` |
+| Stripe signature verification | `apps/api/src/lib/stripe-signature.ts` |
 | Secrets (AES-256-GCM) | `packages/conversation-engine/src/secrets.ts` |
 | withTenant wrapper | `packages/conversation-engine/src/with-tenant.ts` |
 | RLS check | `packages/conversation-engine/src/rls-check.ts` |
