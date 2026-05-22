@@ -203,6 +203,44 @@ export const admins = pgTable("admins", {
   createdAt: integer("created_at").notNull().default(epochNow()),
 });
 
+// Per-tenant LLM call usage tracking. Каждый успешный или failed вызов
+// chat/embed модели append'ит row сюда. UI показывает аггрегаты за месяц
+// (BYOK customers видят сколько раз их ключ дёрнули) + per-purpose
+// breakdown.
+//
+// Token counts пока не capture'аем — нужен provider-level patch для
+// извлечения `usage` из response.body. Текущий MVP — только counts +
+// latency. Tokens / cost-USD — отдельный PR.
+export const llmUsageEvents = pgTable("llm_usage_events", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  /** chat | embed | vision | judge — что вызывали. */
+  purpose: text("purpose").notNull(),
+  /** openai | openrouter | ollama | anthropic — какой provider. */
+  provider: text("provider").notNull(),
+  /** Конкретная model (gpt-4o-mini / text-embedding-3-small / llama3 / ...). */
+  model: text("model"),
+  /** Latency call'а в миллисекундах. */
+  latencyMs: integer("latency_ms").notNull(),
+  /** Успех (1) или ошибка (0). При ошибке `errorKind` заполняется. */
+  success: boolean("success").notNull(),
+  /** ChatApiError.name / ChatTruncatedError / EmbeddingApiError / etc. */
+  errorKind: text("error_kind"),
+  /** Опционально prompt-токены (provider-supplied). Null если не captured. */
+  promptTokens: integer("prompt_tokens"),
+  /** Опционально completion-токены. Null для embed (там input only). */
+  completionTokens: integer("completion_tokens"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  check(
+    "llm_usage_purpose_check",
+    sql`${t.purpose} IN ('chat','embed','vision','judge','memory','stage')`,
+  ),
+  // Главный индекс для monthly aggregator: (tenant, created_at).
+  index("idx_llm_usage_tenant_ts").on(t.tenantId, sql`${t.createdAt} DESC`),
+  index("idx_llm_usage_purpose").on(t.tenantId, t.purpose, sql`${t.createdAt} DESC`),
+]);
+
 // Multi-admin invite tokens per tenant. SuperadminB генерит invite-ссылку
 // (POST /api/admin/admins/invite) → передаёт коллеге out-of-band (TG/email/
 // мессенджер) → коллега открывает /accept-invite?token=... → создаёт пароль

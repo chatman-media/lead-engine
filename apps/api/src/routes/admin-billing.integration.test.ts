@@ -7,6 +7,7 @@ import {
   channels,
   createIsolatedDb,
   kbDocuments,
+  llmUsageEvents,
   schema,
   stripeCustomers,
   tenants,
@@ -238,6 +239,100 @@ describe("admin-billing", () => {
     const res = await app.request("/api/admin/billing/plan", {
       headers: { Authorization: "Bearer bad" },
     });
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /billing/usage → пустой report для fresh tenant", async () => {
+    if (!sql) return;
+    const res = await authReq("/api/admin/billing/usage");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      periodDays: number;
+      totals: { calls: number; errors: number; successRate: number };
+      byPurpose: unknown[];
+      byProvider: unknown[];
+      thisMonth: { calls: number };
+    };
+    expect(body.periodDays).toBe(30);
+    expect(body.totals.calls).toBe(0);
+    expect(body.totals.successRate).toBe(1);
+    expect(body.byPurpose).toEqual([]);
+    expect(body.byProvider).toEqual([]);
+    expect(body.thisMonth.calls).toBe(0);
+  });
+
+  it("GET /billing/usage с insert'нутыми events → aggregates корректно", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    // Insert 10 events: 8 chat openai success, 2 embed openai error.
+    const rows = [
+      ...Array.from({ length: 8 }, () => ({
+        tenantId,
+        purpose: "chat" as const,
+        provider: "openai",
+        model: "gpt-4o-mini",
+        latencyMs: 500,
+        success: true,
+        createdAt: now,
+      })),
+      ...Array.from({ length: 2 }, () => ({
+        tenantId,
+        purpose: "embed" as const,
+        provider: "openai",
+        model: "text-embedding-3-small",
+        latencyMs: 100,
+        success: false,
+        errorKind: "EmbeddingApiError",
+        createdAt: now,
+      })),
+    ];
+    await db.insert(llmUsageEvents).values(rows);
+
+    const res = await authReq("/api/admin/billing/usage");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      totals: { calls: number; errors: number; successRate: number; avgLatencyMs: number };
+      byPurpose: Array<{ purpose: string; calls: number; errors: number }>;
+      byProvider: Array<{ provider: string; calls: number }>;
+      thisMonth: { calls: number; errors: number };
+    };
+    expect(body.totals.calls).toBe(10);
+    expect(body.totals.errors).toBe(2);
+    expect(body.totals.successRate).toBe(0.8);
+    expect(body.totals.avgLatencyMs).toBeGreaterThan(0);
+    // 8 chat * 500 + 2 embed * 100 = 4200, /10 = 420
+    expect(body.totals.avgLatencyMs).toBe(420);
+
+    const chat = body.byPurpose.find((p) => p.purpose === "chat");
+    expect(chat?.calls).toBe(8);
+    expect(chat?.errors).toBe(0);
+    const embed = body.byPurpose.find((p) => p.purpose === "embed");
+    expect(embed?.calls).toBe(2);
+    expect(embed?.errors).toBe(2);
+
+    expect(body.byProvider[0]?.provider).toBe("openai");
+    expect(body.byProvider[0]?.calls).toBe(10);
+
+    expect(body.thisMonth.calls).toBe(10);
+  });
+
+  it("GET /billing/usage?days=7 → custom period", async () => {
+    if (!sql) return;
+    const res = await authReq("/api/admin/billing/usage?days=7");
+    const body = (await res.json()) as { periodDays: number };
+    expect(body.periodDays).toBe(7);
+  });
+
+  it("GET /billing/usage?days=999 → clamped to 365", async () => {
+    if (!sql) return;
+    const res = await authReq("/api/admin/billing/usage?days=999");
+    const body = (await res.json()) as { periodDays: number };
+    expect(body.periodDays).toBe(365);
+  });
+
+  it("usage без auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request("/api/admin/billing/usage");
     expect(res.status).toBe(401);
   });
 });
