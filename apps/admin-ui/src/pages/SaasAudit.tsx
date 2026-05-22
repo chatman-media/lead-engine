@@ -28,6 +28,13 @@ function fmtAction(action: string): string {
     "channel.update": "Обновлён канал",
     "channel.delete": "Отключён канал",
     "conversation.reply": "Ответ оператора",
+    "conversation.mode.takeover": "Оператор перехватил диалог",
+    "conversation.mode.return_to_ai": "AI возвращён в диалог",
+    "tenant.pause": "Бот поставлен на паузу",
+    "tenant.resume": "Бот возобновлён",
+    "admin_invite.create": "Создано приглашение",
+    "admin_invite.revoke": "Приглашение отозвано",
+    "billing.checkout_started": "Начало оплаты",
   };
   return labels[action] ?? action;
 }

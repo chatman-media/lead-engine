@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
@@ -37,6 +37,9 @@ export function SaasConversations() {
   const [listLoading, setListLoading] = useState(true);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Ref tracks how many items the user has currently loaded. Used by the
+  // auto-poll to fetch at least that many so paginated items aren't lost.
+  const loadedCountRef = useRef(30);
   const [detail, setDetail] = useState<{
     conversation: ConversationDetail;
     messages: MessageRow[];
@@ -56,11 +59,12 @@ export function SaasConversations() {
     return false;
   }
 
-  async function refreshList() {
+  async function refreshList(limit = 30) {
     try {
-      const res = await saas.listConversations({ limit: 30 });
+      const res = await saas.listConversations({ limit });
       setList(res.items);
       setNextCursor(res.nextCursor ?? null);
+      loadedCountRef.current = res.items.length;
     } catch (err) {
       if (handleAuthError(err)) return;
       setError(err instanceof Error ? err.message : String(err));
@@ -72,7 +76,11 @@ export function SaasConversations() {
     setLoadingMore(true);
     try {
       const res = await saas.listConversations({ limit: 30, cursor: nextCursor });
-      setList((prev) => [...prev, ...res.items]);
+      setList((prev) => {
+        const merged = [...prev, ...res.items];
+        loadedCountRef.current = merged.length;
+        return merged;
+      });
       setNextCursor(res.nextCursor ?? null);
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -175,9 +183,11 @@ export function SaasConversations() {
   }
 
   // Auto-poll the selected thread + list every 5s.
+  // refreshList is called with the current loaded count (not just 30) so that
+  // items the user loaded via "Загрузить ещё" are not dropped on each tick.
   useEffect(() => {
     const t = setInterval(() => {
-      void refreshList();
+      void refreshList(Math.max(30, loadedCountRef.current));
       if (selectedId) void refreshDetail(selectedId);
     }, POLL_INTERVAL_MS);
     return () => clearInterval(t);
