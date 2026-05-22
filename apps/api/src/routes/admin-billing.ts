@@ -1,8 +1,10 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
-import { channels, kbDocuments, tenants } from "@chatman-media/storage";
+import { admins, channels, kbDocuments, stripeCustomers, tenants } from "@chatman-media/storage";
 import { count, eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { allPlans, resolvePlan } from "../lib/plans.ts";
+import { recordAudit } from "../lib/audit.ts";
+import { allPlans, type PlanKind, resolvePlan } from "../lib/plans.ts";
+import { StripeApi, StripeApiError, type StripeFetchLike } from "../lib/stripe-api.ts";
 
 /**
  * Per-tenant billing & plan endpoints (M1a — без Stripe).
@@ -15,6 +17,20 @@ import { allPlans, resolvePlan } from "../lib/plans.ts";
  */
 export interface AdminBillingRoutesOpts {
   db: Db;
+  /**
+   * Stripe config — если secretKey пуст, /checkout и /portal вернут 503.
+   * priceMap: { starter: "price_...", pro: "price_..." } из env.
+   * successUrl / cancelUrl могут содержать placeholder `{TENANT}` —
+   * подставляется tenant slug.
+   */
+  stripe?: {
+    secretKey: string;
+    priceMap: Partial<Record<PlanKind, string>>;
+    successUrl: string;
+    cancelUrl: string;
+  };
+  /** Custom fetch для тестов (intercept'ит Stripe API). */
+  fetchImpl?: StripeFetchLike;
 }
 
 export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
@@ -91,7 +107,193 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
         maxKbDocuments: limits.maxKbDocuments,
         rateLimitPerMinute: limits.rateLimitPerMinute,
       })),
+      stripeEnabled: !!opts.stripe?.secretKey,
     });
+  });
+
+  /**
+   * POST /api/admin/billing/checkout
+   * Body: { plan: 'starter' | 'pro' }
+   *
+   * Creates a Stripe Checkout Session, returns redirect URL.
+   * Flow:
+   *  1. Lookup or create Stripe Customer (по tenantId).
+   *  2. Map plan → priceId через opts.stripe.priceMap.
+   *  3. createCheckoutSession с client_reference_id=tenantId (webhook
+   *     handler resolves tenantId назад).
+   *  4. recordAudit billing.checkout_started.
+   *  5. Return { url } — client делает window.location = url.
+   *
+   * Errors:
+   *   400 — bad plan / plan не имеет stripe price (e.g. enterprise)
+   *   404 — admin email/tenant не найден
+   *   502 — Stripe API down
+   *   503 — Stripe не настроен на платформе (STRIPE_SECRET_KEY пустой)
+   */
+  app.post("/api/admin/billing/checkout", async (c) => {
+    if (!opts.stripe?.secretKey) {
+      return c.json({ error: "stripe_not_configured" }, 503);
+    }
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId;
+
+    let body: { plan?: unknown };
+    try {
+      body = (await c.req.json()) as { plan?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const plan = body.plan;
+    if (plan !== "starter" && plan !== "pro") {
+      return c.json({ error: "plan must be 'starter' or 'pro'" }, 400);
+    }
+    const priceId = opts.stripe.priceMap[plan];
+    if (!priceId) {
+      return c.json({ error: `no Stripe price configured for plan ${plan}` }, 400);
+    }
+
+    // Lookup tenant + admin email для Stripe Customer.
+    const [tenant] = await opts.db
+      .select({ id: tenants.id, slug: tenants.slug })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    if (!tenant) return c.json({ error: "tenant not found" }, 404);
+    const [admin] = await opts.db
+      .select({ email: admins.email })
+      .from(admins)
+      .where(eq(admins.id, adminId));
+    if (!admin) return c.json({ error: "admin not found" }, 404);
+
+    const stripe = new StripeApi({
+      secretKey: opts.stripe.secretKey,
+      ...(opts.fetchImpl ? { fetch: opts.fetchImpl } : {}),
+    });
+
+    // Lookup or create Stripe Customer.
+    const [existingCust] = await opts.db
+      .select({ stripeCustomerId: stripeCustomers.stripeCustomerId })
+      .from(stripeCustomers)
+      .where(eq(stripeCustomers.tenantId, tenantId));
+    let customerId = existingCust?.stripeCustomerId;
+    if (!customerId) {
+      try {
+        const created = await stripe.createCustomer({
+          email: admin.email,
+          tenantId,
+          tenantSlug: tenant.slug,
+        });
+        customerId = created.id;
+        // Persist для последующих checkouts. Webhook handler также insert'ит
+        // на customer.created, но мы здесь preempt'им чтобы race не словить.
+        const nowEpoch = Math.floor(Date.now() / 1000);
+        await opts.db
+          .insert(stripeCustomers)
+          .values({
+            tenantId,
+            stripeCustomerId: customerId,
+            email: admin.email,
+            createdAt: nowEpoch,
+            updatedAt: nowEpoch,
+          })
+          .onConflictDoNothing();
+      } catch (err) {
+        if (err instanceof StripeApiError) {
+          return c.json({ error: "stripe_create_customer_failed", detail: err.message }, 502);
+        }
+        throw err;
+      }
+    }
+
+    const successUrl = opts.stripe.successUrl.replace("{TENANT}", tenant.slug);
+    const cancelUrl = opts.stripe.cancelUrl.replace("{TENANT}", tenant.slug);
+
+    try {
+      const session = await stripe.createCheckoutSession({
+        customerId,
+        priceId,
+        tenantId,
+        successUrl,
+        cancelUrl,
+        trialDays: 14, // ROADMAP M1: 14-day trial
+      });
+      await recordAudit(opts.db, {
+        tenantId,
+        adminId,
+        action: "billing.checkout_started",
+        targetKind: "stripe_checkout",
+        targetId: session.id,
+        details: { plan, priceId, customerId },
+      });
+      return c.json({ ok: true, url: session.url, sessionId: session.id });
+    } catch (err) {
+      if (err instanceof StripeApiError) {
+        return c.json({ error: "stripe_checkout_failed", detail: err.message }, 502);
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * POST /api/admin/billing/portal
+   * Body: { returnUrl?: string } — куда redirect'нуть после.
+   *
+   * Создаёт Stripe Customer Portal session — tenant сам управляет картой,
+   * cancel subscription, etc. Требует существующий stripeCustomers row
+   * (т.е. tenant должен был хотя бы раз пройти checkout).
+   */
+  app.post("/api/admin/billing/portal", async (c) => {
+    if (!opts.stripe?.secretKey) {
+      return c.json({ error: "stripe_not_configured" }, 503);
+    }
+    const tenantId = c.var.tenantId;
+
+    let body: { returnUrl?: unknown };
+    try {
+      body = (await c.req.json().catch(() => ({}))) as { returnUrl?: unknown };
+    } catch {
+      body = {};
+    }
+    const [tenant] = await opts.db
+      .select({ slug: tenants.slug })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    if (!tenant) return c.json({ error: "tenant not found" }, 404);
+
+    const [cust] = await opts.db
+      .select({ stripeCustomerId: stripeCustomers.stripeCustomerId })
+      .from(stripeCustomers)
+      .where(eq(stripeCustomers.tenantId, tenantId));
+    if (!cust) {
+      return c.json(
+        { error: "no_stripe_customer", hint: "Start with /checkout first" },
+        404,
+      );
+    }
+
+    const returnUrl =
+      typeof body.returnUrl === "string" && body.returnUrl
+        ? body.returnUrl
+        : (opts.stripe.successUrl || "https://leadengine.app/dashboard").replace(
+            "{TENANT}",
+            tenant.slug,
+          );
+
+    const stripe = new StripeApi({
+      secretKey: opts.stripe.secretKey,
+      ...(opts.fetchImpl ? { fetch: opts.fetchImpl } : {}),
+    });
+    try {
+      const session = await stripe.createBillingPortalSession({
+        customerId: cust.stripeCustomerId,
+        returnUrl,
+      });
+      return c.json({ ok: true, url: session.url });
+    } catch (err) {
+      if (err instanceof StripeApiError) {
+        return c.json({ error: "stripe_portal_failed", detail: err.message }, 502);
+      }
+      throw err;
+    }
   });
 
   return app;

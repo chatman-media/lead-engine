@@ -219,9 +219,30 @@ async function main() {
   app.route("/", makeAdminDiagnosticsRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
   log.info("admin-diagnostics route enabled");
 
-  // Billing & plan tiers — quota gating (M1a без Stripe).
-  app.route("/", makeAdminBillingRoutes({ db }));
-  log.info("admin-billing routes enabled (plan tiers + quota; Stripe — M1b)");
+  // Billing & plan tiers — quota gating + Stripe checkout/portal (M1b).
+  app.route(
+    "/",
+    makeAdminBillingRoutes({
+      db,
+      ...(cfg.stripe.secretKey
+        ? {
+            stripe: {
+              secretKey: cfg.stripe.secretKey,
+              priceMap: {
+                ...(cfg.stripe.priceStarter ? { starter: cfg.stripe.priceStarter } : {}),
+                ...(cfg.stripe.pricePro ? { pro: cfg.stripe.pricePro } : {}),
+              },
+              successUrl: cfg.stripe.successUrl,
+              cancelUrl: cfg.stripe.cancelUrl,
+            },
+          }
+        : {}),
+    }),
+  );
+  log.info("admin-billing routes enabled", {
+    plansEnabled: true,
+    stripeEnabled: !!cfg.stripe.secretKey,
+  });
 
   app.route(
     "/",
@@ -327,15 +348,21 @@ async function main() {
   }
 
   if (cfg.stripeWebhookSecret) {
+    const priceToPlan: Record<string, "starter" | "pro"> = {};
+    if (cfg.stripe.priceStarter) priceToPlan[cfg.stripe.priceStarter] = "starter";
+    if (cfg.stripe.pricePro) priceToPlan[cfg.stripe.pricePro] = "pro";
     app.route(
       "/",
       makeStripeWebhookRoutes({
         // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
         db: db as any,
         webhookSecret: cfg.stripeWebhookSecret,
+        priceToPlan,
       }),
     );
-    log.info("stripe webhook enabled");
+    log.info("stripe webhook enabled", {
+      knownPrices: Object.keys(priceToPlan).length,
+    });
   }
 
   // ---- channel-web wire-up ----

@@ -1,11 +1,17 @@
-import type { BillingPlan } from "../api/saas.ts";
+import { useState } from "react";
+import { ApiError, type BillingPlan, saas } from "../api/saas.ts";
 
 /**
- * Plan + usage widget на dashboard. Показывает текущий tier, лимиты,
- * usage-bar'ы. Под Stripe-up'у (M1b) добавит "Upgrade" CTA → checkout.
+ * Plan + usage widget на dashboard. Stripe Upgrade / Portal CTA.
+ * Если STRIPE_SECRET_KEY не задан на платформе — Upgrade disabled
+ * с tooltip "billing not configured".
  */
 export interface PlanWidgetProps {
   billing: BillingPlan;
+  /** Stripe enabled на платформе (resolved через GET /billing/plans). */
+  stripeEnabled?: boolean;
+  /** Callback после успешного visit'а Stripe — refresh billing. */
+  onRefresh?: () => void;
 }
 
 function pct(curr: number, max: number): number {
@@ -19,10 +25,51 @@ function barClass(p: number): string {
   return "plan-bar-fill";
 }
 
-export function PlanWidget({ billing }: PlanWidgetProps) {
+export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWidgetProps) {
   const { plan, usage, status } = billing;
   const chPct = pct(usage.channels, plan.maxChannels);
   const kbPct = pct(usage.kbDocuments, plan.maxKbDocuments);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleUpgrade(target: "starter" | "pro") {
+    if (!stripeEnabled) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await saas.createCheckoutSession(target);
+      // Stripe expects a top-level redirect.
+      window.location.href = res.url;
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(`Не удалось открыть checkout: ${err.errorCode}`);
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+      setBusy(false);
+    }
+  }
+
+  async function handlePortal() {
+    if (!stripeEnabled) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await saas.createBillingPortalSession();
+      window.location.href = res.url;
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(`Не удалось открыть портал: ${err.errorCode}`);
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+      setBusy(false);
+    }
+    if (onRefresh) onRefresh();
+  }
+
+  const canUpgrade = stripeEnabled && (plan.kind === "free" || plan.kind === "starter");
+  const canManage = stripeEnabled && plan.kind !== "free" && plan.kind !== "enterprise";
 
   return (
     <section className="plan-widget">
@@ -39,12 +86,53 @@ export function PlanWidget({ billing }: PlanWidgetProps) {
                 : `$${plan.priceUsd}/мес`}
           </small>
         </div>
-        {plan.kind !== "enterprise" && plan.kind !== "pro" && (
-          <button type="button" className="nav-link" disabled title="Stripe checkout — M1b">
-            Upgrade
-          </button>
-        )}
+        <div className="plan-actions">
+          {plan.kind === "free" && (
+            <>
+              <button
+                type="button"
+                className="nav-link"
+                onClick={() => handleUpgrade("starter")}
+                disabled={!canUpgrade || busy}
+                title={!stripeEnabled ? "Stripe не настроен на платформе" : undefined}
+              >
+                Starter $49
+              </button>
+              <button
+                type="button"
+                className="nav-link"
+                onClick={() => handleUpgrade("pro")}
+                disabled={!canUpgrade || busy}
+                title={!stripeEnabled ? "Stripe не настроен на платформе" : undefined}
+              >
+                Pro $149
+              </button>
+            </>
+          )}
+          {plan.kind === "starter" && (
+            <button
+              type="button"
+              className="nav-link"
+              onClick={() => handleUpgrade("pro")}
+              disabled={!canUpgrade || busy}
+            >
+              Upgrade Pro
+            </button>
+          )}
+          {canManage && (
+            <button
+              type="button"
+              className="nav-link"
+              onClick={handlePortal}
+              disabled={busy}
+            >
+              Управлять
+            </button>
+          )}
+        </div>
       </div>
+
+      {error && <div className="plan-warning">{error}</div>}
 
       <div className="plan-row">
         <div className="plan-row-label">
