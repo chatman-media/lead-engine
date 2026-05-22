@@ -21,6 +21,7 @@ export function SaasDashboard() {
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
   const [billing, setBilling] = useState<BillingPlan | null>(null);
+  const [stripeEnabled, setStripeEnabled] = useState<boolean>(false);
   const [tenantInfo, setTenantInfo] = useState<TenantInfo | null>(null);
   const [togglingPause, setTogglingPause] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -62,8 +63,9 @@ export function SaasDashboard() {
 
   async function refreshBilling() {
     try {
-      const b = await saas.getBillingPlan();
+      const [b, p] = await Promise.all([saas.getBillingPlan(), saas.listPlans()]);
       setBilling(b);
+      setStripeEnabled(p.stripeEnabled);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearToken();
@@ -264,7 +266,13 @@ export function SaasDashboard() {
 
       {onboarding && <OnboardingChecklist status={onboarding} />}
 
-      {billing && <PlanWidget billing={billing} />}
+      {billing && (
+        <PlanWidget
+          billing={billing}
+          stripeEnabled={stripeEnabled}
+          onRefresh={refreshBilling}
+        />
+      )}
 
       <section className="upload-section">
         <h2>Добавить документ</h2>

@@ -8,6 +8,7 @@ import {
   createIsolatedDb,
   kbDocuments,
   schema,
+  stripeCustomers,
   tenants,
   tryConnectToPg,
 } from "@chatman-media/storage";
@@ -238,5 +239,256 @@ describe("admin-billing", () => {
       headers: { Authorization: "Bearer bad" },
     });
     expect(res.status).toBe(401);
+  });
+});
+
+// ── Stripe checkout / portal — fake Stripe fetch ─────────────────────────
+
+const stripeCalls: Array<{ url: string; body: string }> = [];
+const fakeStripeFetch = (async (
+  input: string | URL | Request,
+  init?: RequestInit,
+): Promise<Response> => {
+  const url =
+    typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const bodyStr = init?.body ? String(init.body) : "";
+  stripeCalls.push({ url, body: bodyStr });
+
+  // Auth check — каждый запрос должен иметь Bearer.
+  const headers = init?.headers as Record<string, string> | undefined;
+  const auth = headers?.authorization ?? headers?.Authorization ?? "";
+  if (!auth.startsWith("Bearer ") || auth.includes("bad-key")) {
+    return new Response(
+      JSON.stringify({ error: { code: "api_key_invalid", message: "Bad key" } }),
+      { status: 401, headers: { "content-type": "application/json" } },
+    );
+  }
+
+  if (url.includes("/v1/customers")) {
+    return new Response(
+      JSON.stringify({ id: `cus_${Math.random().toString(36).slice(2, 12)}`, email: "x@y" }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
+  if (url.includes("/v1/checkout/sessions")) {
+    const id = `cs_test_${Math.random().toString(36).slice(2, 12)}`;
+    return new Response(
+      JSON.stringify({ id, url: `https://checkout.stripe.com/c/pay/${id}` }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
+  if (url.includes("/v1/billing_portal/sessions")) {
+    const id = `bps_${Math.random().toString(36).slice(2, 12)}`;
+    return new Response(
+      JSON.stringify({ id, url: `https://billing.stripe.com/p/session/${id}` }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
+  return new Response("{}", { status: 200 });
+}) as unknown as typeof fetch;
+
+let appWithStripe: Hono;
+let tokenStripe = "";
+let tenantIdStripe = 0;
+let sqlStripe: Sql | null = null;
+const stripeDbName = `lead_engine_billstripe_${Math.random().toString(36).slice(2, 10)}`;
+let dbStripe: PostgresJsDatabase<typeof schema>;
+
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: stripeDbName });
+  sqlStripe = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sqlStripe, migrationsDir);
+  dbStripe = drizzle(sqlStripe, { schema });
+
+  appWithStripe = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  appWithStripe.route("/", makeAuthRoutes({ db: dbStripe as any, secret: SECRET }));
+  appWithStripe.use(
+    "/api/admin/*",
+    makeRequireAuth({ db: dbStripe as never, secret: SECRET }),
+  );
+  appWithStripe.route(
+    "/",
+    makeAdminBillingRoutes({
+      db: dbStripe,
+      stripe: {
+        secretKey: "sk_test_fake",
+        priceMap: {
+          starter: "price_starter_test",
+          pro: "price_pro_test",
+        },
+        successUrl: "https://app.test/dashboard?success",
+        cancelUrl: "https://app.test/dashboard?cancel",
+      },
+      fetchImpl: fakeStripeFetch,
+    }),
+  );
+
+  const sa = await appWithStripe.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "stripe@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  tokenStripe = sba.token;
+  tenantIdStripe = sba.admin.tenantId;
+}, 30_000);
+
+afterAll(async () => {
+  if (sqlStripe) {
+    await sqlStripe.end({ timeout: 0 }).catch(() => {});
+    sqlStripe = null;
+  }
+}, 10_000);
+
+async function stripeReq(path: string, init: RequestInit = {}): Promise<Response> {
+  return await appWithStripe.request(path, {
+    ...init,
+    headers: { ...(init.headers ?? {}), Authorization: `Bearer ${tokenStripe}` },
+  });
+}
+
+describe("admin-billing /checkout + /portal", () => {
+  it("POST /checkout без auth → 401", async () => {
+    if (!sqlStripe) return;
+    const res = await appWithStripe.request("/api/admin/billing/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: "starter" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("/billing/plans включает stripeEnabled=true", async () => {
+    if (!sqlStripe) return;
+    const res = await stripeReq("/api/admin/billing/plans");
+    const body = (await res.json()) as { stripeEnabled: boolean };
+    expect(body.stripeEnabled).toBe(true);
+  });
+
+  it("invalid plan → 400", async () => {
+    if (!sqlStripe) return;
+    const res = await stripeReq("/api/admin/billing/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: "free" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("invalid json → 400", async () => {
+    if (!sqlStripe) return;
+    const res = await stripeReq("/api/admin/billing/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{nope",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("valid /checkout starter → создаёт customer + session, возвращает URL", async () => {
+    if (!sqlStripe) return;
+    stripeCalls.length = 0;
+    const res = await stripeReq("/api/admin/billing/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: "starter" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; url: string; sessionId: string };
+    expect(body.ok).toBe(true);
+    expect(body.url).toMatch(/checkout\.stripe\.com/);
+    expect(body.sessionId).toMatch(/^cs_test_/);
+
+    // Stripe API called: customers + checkout sessions
+    const calls = stripeCalls.map((c) => c.url);
+    expect(calls.some((u) => u.includes("/v1/customers"))).toBe(true);
+    expect(calls.some((u) => u.includes("/v1/checkout/sessions"))).toBe(true);
+
+    // Form-encoded body должен содержать price + tenant_id + trial.
+    const checkoutCall = stripeCalls.find((c) => c.url.includes("/checkout/sessions"));
+    expect(checkoutCall!.body).toContain("price_starter_test");
+    expect(checkoutCall!.body).toContain("trial_period_days");
+    expect(checkoutCall!.body).toContain(`client_reference_id=${tenantIdStripe}`);
+
+    // stripe_customers row persisted.
+    const [cust] = await dbStripe
+      .select()
+      .from(stripeCustomers)
+      .where(eq(stripeCustomers.tenantId, tenantIdStripe));
+    expect(cust).toBeDefined();
+    expect(cust!.stripeCustomerId).toMatch(/^cus_/);
+  });
+
+  it("second /checkout reuses existing customer (не дёргает /v1/customers)", async () => {
+    if (!sqlStripe) return;
+    stripeCalls.length = 0;
+    const res = await stripeReq("/api/admin/billing/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: "pro" }),
+    });
+    expect(res.status).toBe(200);
+    const customerCalls = stripeCalls.filter((c) => c.url.endsWith("/v1/customers"));
+    expect(customerCalls.length).toBe(0); // НЕ создан второй customer
+  });
+
+  it("POST /portal без существующего customer → 404", async () => {
+    if (!sqlStripe) return;
+    // Tenant 2 без checkout — /portal fail'нет.
+    const sa = await appWithStripe.request("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "stripe-b@demo.io", password: "strong-pwd-12345" }),
+    });
+    const sba = (await sa.json()) as { token: string };
+    const res = await appWithStripe.request("/api/admin/billing/portal", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${sba.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("POST /portal после checkout → возвращает portal URL", async () => {
+    if (!sqlStripe) return;
+    const res = await stripeReq("/api/admin/billing/portal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { url: string };
+    expect(body.url).toMatch(/billing\.stripe\.com/);
+  });
+
+  it("если STRIPE_SECRET_KEY не задан → /checkout 503", async () => {
+    if (!sqlStripe) return;
+    // Отдельный app instance без stripe config.
+    const appNoStripe = new Hono();
+    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+    appNoStripe.route("/", makeAuthRoutes({ db: dbStripe as any, secret: SECRET }));
+    appNoStripe.use(
+      "/api/admin/*",
+      makeRequireAuth({ db: dbStripe as never, secret: SECRET }),
+    );
+    appNoStripe.route("/", makeAdminBillingRoutes({ db: dbStripe }));
+
+    const res = await appNoStripe.request("/api/admin/billing/checkout", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tokenStripe}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ plan: "starter" }),
+    });
+    expect(res.status).toBe(503);
   });
 });

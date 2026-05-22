@@ -135,6 +135,25 @@ export interface ApiConfig {
     perHour: number;
   };
   /**
+   * Stripe checkout / customer portal config. Если `secretKey` пуст —
+   * checkout/portal endpoints возвращают 503 (UI disable'ит Upgrade CTA).
+   * Webhook handler работает независимо (uses signing secret).
+   *
+   *  - secretKey: env STRIPE_SECRET_KEY (sk_test_... / sk_live_...)
+   *  - priceStarter / pricePro: env STRIPE_PRICE_STARTER / STRIPE_PRICE_PRO
+   *    (price_xxx IDs из Stripe dashboard → Products → ...)
+   *  - successUrl / cancelUrl: redirect назад в UI после checkout. Tenant
+   *    slug подставляется как `{TENANT}` placeholder, например
+   *    "https://acme.leadengine.app/dashboard?upgrade=success"
+   */
+  stripe: {
+    secretKey: string;
+    priceStarter: string;
+    pricePro: string;
+    successUrl: string;
+    cancelUrl: string;
+  };
+  /**
    * Channel-web WebSocket-endpoint config:
    *   - `enabled` — поднимается ли вообще (default true когда в БД есть
    *      хотя бы один `channels.kind='web'` row, false иначе — runtime check'нется)
@@ -199,6 +218,13 @@ export function loadApiConfig(): ApiConfig {
     rateLimit: {
       perMinute: Number.parseInt(process.env.RATE_LIMIT_PER_MIN ?? "60", 10),
       perHour: Number.parseInt(process.env.RATE_LIMIT_PER_HOUR ?? "600", 10),
+    },
+    stripe: {
+      secretKey: process.env.STRIPE_SECRET_KEY ?? "",
+      priceStarter: process.env.STRIPE_PRICE_STARTER ?? "",
+      pricePro: process.env.STRIPE_PRICE_PRO ?? "",
+      successUrl: process.env.STRIPE_CHECKOUT_SUCCESS_URL ?? "",
+      cancelUrl: process.env.STRIPE_CHECKOUT_CANCEL_URL ?? "",
     },
   };
 }

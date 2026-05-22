@@ -405,6 +405,30 @@ export const saas = {
   getBillingPlan() {
     return request<BillingPlan>("/api/admin/billing/plan");
   },
+  listPlans() {
+    return request<{
+      plans: Array<{
+        kind: PlanKind;
+        label: string;
+        priceUsd: number | null;
+        maxChannels: number;
+        maxKbDocuments: number;
+      }>;
+      stripeEnabled: boolean;
+    }>("/api/admin/billing/plans");
+  },
+  createCheckoutSession(plan: "starter" | "pro") {
+    return request<{ ok: boolean; url: string; sessionId: string }>(
+      "/api/admin/billing/checkout",
+      { method: "POST", body: JSON.stringify({ plan }) },
+    );
+  },
+  createBillingPortalSession(returnUrl?: string) {
+    return request<{ ok: boolean; url: string }>("/api/admin/billing/portal", {
+      method: "POST",
+      body: JSON.stringify(returnUrl ? { returnUrl } : {}),
+    });
+  },
 
   // ── Tenant management ────────────────────────────────────────────────
   getTenantInfo() {

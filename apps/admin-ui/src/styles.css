@@ -641,6 +641,22 @@ a:hover {
   font-weight: 600;
 }
 
+.plan-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plan-actions .nav-link {
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.plan-actions .nav-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .plan-row {
   margin-bottom: 10px;
 }

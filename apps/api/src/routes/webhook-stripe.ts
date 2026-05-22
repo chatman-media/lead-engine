@@ -59,7 +59,15 @@ interface StripeSubscription {
 export function makeStripeWebhookRoutes(opts: {
   db: PostgresJsDatabase<Record<string, never>>;
   webhookSecret: string;
+  /**
+   * Map Stripe priceId → plan kind. Webhook handler по получении
+   * `customer.subscription.created/updated` resolves плану и mutates
+   * `tenants.plan`. На `customer.subscription.deleted` → downgrade to 'free'.
+   * Если pricing unknown — plan не меняется (warning в log'е).
+   */
+  priceToPlan?: Record<string, "starter" | "pro">;
 }): Hono {
+  const priceMap = opts.priceToPlan ?? {};
   const app = new Hono();
 
   app.post("/webhook/stripe", async (c) => {
@@ -97,7 +105,7 @@ export function makeStripeWebhookRoutes(opts: {
 
     let tenantId: number | null = null;
     try {
-      tenantId = await applyEvent(opts.db, event);
+      tenantId = await applyEvent(opts.db, event, priceMap);
     } catch (err) {
       console.warn(`[stripe webhook] event ${event.id} (${event.type}) failed:`, err);
       // Не записываем в processed — Stripe ретриит, и при retry'е попытаемся
@@ -132,6 +140,7 @@ async function applyEvent(
   // biome-ignore lint/suspicious/noExplicitAny: PostgresJsDatabase generic
   db: any,
   event: StripeEventBase,
+  priceMap: Record<string, "starter" | "pro">,
 ): Promise<number | null> {
   if (!HANDLED_EVENTS.has(event.type)) return null;
 
@@ -142,7 +151,12 @@ async function applyEvent(
 
   if (event.type.startsWith("customer.subscription.")) {
     const sub = event.data.object as unknown as StripeSubscription;
-    return applySubscription(db, sub, event.type === "customer.subscription.deleted");
+    return applySubscription(
+      db,
+      sub,
+      event.type === "customer.subscription.deleted",
+      priceMap,
+    );
   }
 
   // invoice.payment_succeeded / failed — пока no-op (только audit-log).
@@ -198,6 +212,7 @@ async function applySubscription(
   db: any,
   sub: StripeSubscription,
   isDeleted: boolean,
+  priceMap: Record<string, "starter" | "pro">,
 ): Promise<number | null> {
   const [customer] = await db
     .select({ tenantId: stripeCustomers.tenantId })
@@ -241,5 +256,27 @@ async function applySubscription(
         updatedAt: sql`EXTRACT(EPOCH FROM NOW())::INTEGER`,
       },
     });
+
+  // Sync tenants.plan based on subscription status + priceId.
+  // - isDeleted → 'free' (canceled, no entitlement).
+  // - status='active' | 'trialing' → map priceId → plan.
+  // - status='past_due' | 'unpaid' → keep current plan (Stripe grace);
+  //   downgrade on .deleted.
+  // - unknown priceId → no plan change, warning логируется.
+  let newPlan: "free" | "starter" | "pro" | null = null;
+  if (isDeleted) {
+    newPlan = "free";
+  } else if (status === "active" || status === "trialing") {
+    const mapped = priceMap[priceId];
+    if (mapped) newPlan = mapped;
+    else console.warn(`[stripe] unknown priceId ${priceId} — tenant.plan не меняется`);
+  }
+  if (newPlan) {
+    await db
+      .update(tenants)
+      .set({ plan: newPlan, updatedAt: sql`EXTRACT(EPOCH FROM NOW())::INTEGER` })
+      .where(eq(tenants.id, customer.tenantId));
+  }
+
   return customer.tenantId;
 }
