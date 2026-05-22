@@ -1,5 +1,10 @@
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+
+import { AuthLayout } from "@/components/auth-layout";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ApiError, saas, setToken } from "../api/saas.ts";
 
 export function SaasLogin() {
@@ -34,40 +39,54 @@ export function SaasLogin() {
   }
 
   return (
-    <div className="auth-wrap">
-      <div className="auth-card">
-        <h1>Вход</h1>
-        <form onSubmit={handleSubmit} className="auth-form">
-          <label>
-            Email
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoFocus
-            />
-          </label>
-          <label>
-            Пароль
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </label>
-          {error && <div className="auth-error">{error}</div>}
-          <button type="submit" disabled={loading}>
-            {loading ? "Входим..." : "Войти"}
-          </button>
-        </form>
-        <p className="auth-alt">
-          Нет аккаунта? <Link to="/signup">Зарегистрироваться</Link>
-        </p>
-      </div>
-    </div>
+    <AuthLayout
+      title="С возвращением"
+      subtitle="Войдите в панель управления ассистентом"
+      footer={
+        <>
+          Нет аккаунта?{" "}
+          <Link to="/signup" className="font-medium text-primary hover:underline">
+            Зарегистрироваться
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@company.com"
+            required
+            // biome-ignore lint/a11y/noAutofocus: первичное поле формы входа
+            autoFocus
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="password">Пароль</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            required
+          />
+        </div>
+        {error && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        <Button type="submit" className="w-full" disabled={loading}>
+          {loading ? "Входим…" : "Войти"}
+        </Button>
+      </form>
+    </AuthLayout>
   );
 }

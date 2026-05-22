@@ -1,16 +1,14 @@
+import { AlertTriangleIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { ApiError, type BillingPlan, saas, type UsageReport } from "../api/saas.ts";
 
-/**
- * Plan + usage widget на dashboard. Stripe Upgrade / Portal CTA.
- * Если STRIPE_SECRET_KEY не задан на платформе — Upgrade disabled
- * с tooltip "billing not configured".
- */
 export interface PlanWidgetProps {
   billing: BillingPlan;
-  /** Stripe enabled на платформе (resolved через GET /billing/plans). */
   stripeEnabled?: boolean;
-  /** Callback после успешного visit'а Stripe — refresh billing. */
   onRefresh?: () => void;
 }
 
@@ -19,16 +17,31 @@ function pct(curr: number, max: number): number {
   return Math.min(100, Math.round((curr / max) * 100));
 }
 
-function barClass(p: number): string {
-  if (p >= 100) return "plan-bar-fill plan-bar-over";
-  if (p >= 80) return "plan-bar-fill plan-bar-warn";
-  return "plan-bar-fill";
+function Meter({ label, current, max }: { label: string; current: number; max: number }) {
+  const p = pct(current, max);
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-mono text-xs tabular-nums text-muted-foreground">
+          {current} / {max}
+        </span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn(
+            "h-full rounded-full transition-all",
+            p >= 100 ? "bg-destructive" : p >= 80 ? "bg-[var(--warning)]" : "bg-primary",
+          )}
+          style={{ width: `${p}%` }}
+        />
+      </div>
+    </div>
+  );
 }
 
 export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWidgetProps) {
   const { plan, usage, status } = billing;
-  const chPct = pct(usage.channels, plan.maxChannels);
-  const kbPct = pct(usage.kbDocuments, plan.maxKbDocuments);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [llmUsage, setLlmUsage] = useState<UsageReport | null>(null);
@@ -40,9 +53,7 @@ export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWi
       .then((u) => {
         if (!cancelled) setLlmUsage(u);
       })
-      .catch(() => {
-        // Usage отчёт опционален — не валим виджет если endpoint падает.
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -54,14 +65,11 @@ export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWi
     setError("");
     try {
       const res = await saas.createCheckoutSession(target);
-      // Stripe expects a top-level redirect.
       window.location.href = res.url;
     } catch (err) {
-      if (err instanceof ApiError) {
-        setError(`Не удалось открыть checkout: ${err.errorCode}`);
-      } else {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      setError(
+        err instanceof ApiError ? `Не удалось открыть checkout: ${err.errorCode}` : String(err),
+      );
       setBusy(false);
     }
   }
@@ -74,133 +82,93 @@ export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWi
       const res = await saas.createBillingPortalSession();
       window.location.href = res.url;
     } catch (err) {
-      if (err instanceof ApiError) {
-        setError(`Не удалось открыть портал: ${err.errorCode}`);
-      } else {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      setError(
+        err instanceof ApiError ? `Не удалось открыть портал: ${err.errorCode}` : String(err),
+      );
       setBusy(false);
     }
-    if (onRefresh) onRefresh();
+    onRefresh?.();
   }
 
   const canUpgrade = stripeEnabled && (plan.kind === "free" || plan.kind === "starter");
   const canManage = stripeEnabled && plan.kind !== "free" && plan.kind !== "enterprise";
+  const price =
+    plan.priceUsd === 0 ? "Бесплатно" : plan.priceUsd === null ? "Custom" : `$${plan.priceUsd}/мес`;
 
   return (
-    <section className="plan-widget">
-      <div className="plan-widget-head">
-        <div>
-          <h3>
-            План: <strong>{plan.label}</strong>
-          </h3>
-          <small className="muted">
-            {plan.priceUsd === 0
-              ? "Бесплатно"
-              : plan.priceUsd === null
-                ? "Custom"
-                : `$${plan.priceUsd}/мес`}
-          </small>
+    <Card>
+      <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
+        <div className="space-y-0.5">
+          <p className="text-xs uppercase tracking-wider text-muted-foreground">Тариф</p>
+          <p className="text-lg font-semibold">{plan.label}</p>
+          <p className="text-sm text-muted-foreground">{price}</p>
         </div>
-        <div className="plan-actions">
+        <div className="flex flex-wrap justify-end gap-2">
           {plan.kind === "free" && (
             <>
-              <button
-                type="button"
-                className="nav-link"
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={() => handleUpgrade("starter")}
                 disabled={!canUpgrade || busy}
                 title={!stripeEnabled ? "Stripe не настроен на платформе" : undefined}
               >
                 Starter $99
-              </button>
-              <button
-                type="button"
-                className="nav-link"
-                onClick={() => handleUpgrade("pro")}
-                disabled={!canUpgrade || busy}
-                title={!stripeEnabled ? "Stripe не настроен на платформе" : undefined}
-              >
+              </Button>
+              <Button size="sm" onClick={() => handleUpgrade("pro")} disabled={!canUpgrade || busy}>
                 Pro $199
-              </button>
+              </Button>
             </>
           )}
           {plan.kind === "starter" && (
-            <button
-              type="button"
-              className="nav-link"
-              onClick={() => handleUpgrade("pro")}
-              disabled={!canUpgrade || busy}
-            >
-              Upgrade Pro
-            </button>
+            <Button size="sm" onClick={() => handleUpgrade("pro")} disabled={!canUpgrade || busy}>
+              Перейти на Pro
+            </Button>
           )}
           {canManage && (
-            <button
-              type="button"
-              className="nav-link"
-              onClick={handlePortal}
-              disabled={busy}
-            >
+            <Button size="sm" variant="outline" onClick={handlePortal} disabled={busy}>
               Управлять
-            </button>
+            </Button>
           )}
         </div>
-      </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {error && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        <Meter label="Каналы" current={usage.channels} max={plan.maxChannels} />
+        <Meter label="База знаний" current={usage.kbDocuments} max={plan.maxKbDocuments} />
 
-      {error && <div className="plan-warning">{error}</div>}
-
-      <div className="plan-row">
-        <div className="plan-row-label">
-          <span>Каналы</span>
-          <span className="muted">
-            {usage.channels} / {plan.maxChannels}
-          </span>
-        </div>
-        <div className="plan-bar">
-          <div className={barClass(chPct)} style={{ width: `${chPct}%` }} />
-        </div>
-      </div>
-
-      <div className="plan-row">
-        <div className="plan-row-label">
-          <span>База знаний</span>
-          <span className="muted">
-            {usage.kbDocuments} / {plan.maxKbDocuments}
-          </span>
-        </div>
-        <div className="plan-bar">
-          <div className={barClass(kbPct)} style={{ width: `${kbPct}%` }} />
-        </div>
-      </div>
-
-      {llmUsage && (
-        <div className="plan-usage-row">
-          <div className="plan-row-label">
-            <span>LLM-вызовы (этот месяц)</span>
-            <span className="muted">
-              {llmUsage.thisMonth.calls.toLocaleString("ru")}
-              {llmUsage.thisMonth.errors > 0 ? ` (${llmUsage.thisMonth.errors} ошибок)` : ""}
-            </span>
+        {llmUsage && (
+          <div className="border-t pt-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">LLM-вызовы (месяц)</span>
+              <span className="font-mono text-xs tabular-nums">
+                {llmUsage.thisMonth.calls.toLocaleString("ru")}
+                {llmUsage.thisMonth.errors > 0 ? ` · ${llmUsage.thisMonth.errors} ош.` : ""}
+              </span>
+            </div>
+            {llmUsage.byProvider.length > 0 && (
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                {llmUsage.byProvider
+                  .map((p) => `${p.provider}: ${p.calls.toLocaleString("ru")}`)
+                  .join(" · ")}{" "}
+                · avg {llmUsage.totals.avgLatencyMs}ms ·{" "}
+                {Math.round(llmUsage.totals.successRate * 100)}%
+              </p>
+            )}
           </div>
-          {llmUsage.byProvider.length > 0 && (
-            <small className="muted plan-usage-providers">
-              {llmUsage.byProvider
-                .map((p) => `${p.provider}: ${p.calls.toLocaleString("ru")}`)
-                .join(" · ")}{" "}
-              · avg {llmUsage.totals.avgLatencyMs}ms · success{" "}
-              {Math.round(llmUsage.totals.successRate * 100)}%
-            </small>
-          )}
-        </div>
-      )}
+        )}
 
-      {status !== "ok" && (
-        <div className="plan-warning">
-          ⚠ Лимит превышен ({status === "over_limit_channels" ? "каналы" : "KB документы"}).
-          Удалите неиспользуемое или повысьте план.
-        </div>
-      )}
-    </section>
+        {status !== "ok" && (
+          <p className="flex items-center gap-2 rounded-md border border-[var(--warning)]/40 bg-[color-mix(in_oklch,var(--warning)_12%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
+            <AlertTriangleIcon className="size-4 shrink-0" />
+            Лимит превышен ({status === "over_limit_channels" ? "каналы" : "KB документы"}).
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

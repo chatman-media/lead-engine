@@ -1,5 +1,20 @@
+import { CheckCircle2Icon, KeyRoundIcon, Trash2Icon } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   ApiError,
   clearToken,
@@ -9,21 +24,11 @@ import {
   saas,
 } from "../api/saas.ts";
 
-/**
- * Per-tenant LLM provider configuration UI. Form per purpose (chat/embed).
- * API ключ хранится encrypted в tenant_secrets (AES-256-GCM); UI пишет
- * один раз, обратно не читает (hasSecret-флаг показывает, что ключ есть).
- *
- * NB: изменения применяются live через TenantReloader (reloadLlm) без
- * рестарта apps/api. apps/worker требует рестарта (cross-process reload
- * через pg_notify — отдельный PR).
- */
-
 const PURPOSES: { value: LlmPurpose; label: string; hint: string }[] = [
-  { value: "chat", label: "Chat (ответ ассистента)", hint: "LLM для диалога с пользователем" },
+  { value: "chat", label: "Chat — ответ ассистента", hint: "LLM для диалога с пользователем" },
   {
     value: "embed",
-    label: "Embeddings (поиск по KB)",
+    label: "Embeddings — поиск по базе",
     hint: "Модель для векторизации документов и запросов",
   },
 ];
@@ -32,7 +37,7 @@ const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: "openai", label: "OpenAI" },
   { value: "openrouter", label: "OpenRouter" },
   { value: "anthropic", label: "Anthropic" },
-  { value: "ollama", label: "Ollama (local, без API key)" },
+  { value: "ollama", label: "Ollama (local)" },
 ];
 
 interface FormState {
@@ -60,7 +65,6 @@ export function SaasSettings() {
   const [error, setError] = useState("");
   const [savingPurpose, setSavingPurpose] = useState<LlmPurpose | null>(null);
 
-  // Change password form state
   const [currentPwd, setCurrentPwd] = useState("");
   const [newPwd, setNewPwd] = useState("");
   const [pwdSaving, setPwdSaving] = useState(false);
@@ -68,7 +72,7 @@ export function SaasSettings() {
   const [pwdSuccess, setPwdSuccess] = useState(false);
   const [forms, setForms] = useState<Record<LlmPurpose, FormState>>({
     chat: { ...EMPTY_FORM },
-    embed: { ...EMPTY_FORM, provider: "openai" },
+    embed: { ...EMPTY_FORM },
     vision: { ...EMPTY_FORM },
     judge: { ...EMPTY_FORM },
   });
@@ -111,7 +115,7 @@ export function SaasSettings() {
     return () => {
       cancelled = true;
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: navigate stable
+    // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
 
   function updateForm(purpose: LlmPurpose, patch: Partial<FormState>) {
@@ -127,12 +131,12 @@ export function SaasSettings() {
       return;
     }
     if (purpose === "embed" && !f.embedDim) {
-      setError("embed: укажите embedDim (например, 1536 для OpenAI text-embedding-3-small)");
+      setError("embed: укажите embedDim (например, 1536 для text-embedding-3-small)");
       return;
     }
     const existing = configs.find((c) => c.purpose === purpose);
     if (f.provider !== "ollama" && !f.apiKey && !existing?.hasSecret) {
-      setError(`${purpose}: укажите API key (или сохраните уже существующий)`);
+      setError(`${purpose}: укажите API key`);
       return;
     }
     setSavingPurpose(purpose);
@@ -160,8 +164,7 @@ export function SaasSettings() {
   }
 
   async function handleDelete(purpose: LlmPurpose) {
-    if (!confirm(`Удалить конфиг ${purpose}? API key в tenant_secrets останется (manual cleanup).`))
-      return;
+    if (!confirm(`Удалить конфиг ${purpose}? API key в tenant_secrets останется.`)) return;
     try {
       await saas.deleteLlmConfig(purpose);
       setForms((prev) => ({ ...prev, [purpose]: { ...EMPTY_FORM } }));
@@ -200,182 +203,185 @@ export function SaasSettings() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="dashboard-loading">
-        <p>Загрузка…</p>
-      </div>
-    );
-  }
+  if (loading) return <p className="text-sm text-muted-foreground">Загрузка…</p>;
 
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <div>
-          <h1>Настройки LLM</h1>
-          <p className="dashboard-sub">
-            BYOK — собственные API ключи для chat / embed. Хранятся encrypted (AES-256-GCM).
-          </p>
-        </div>
-        <Link to="/dashboard" className="back-link">
-          ← К базе знаний
-        </Link>
-      </header>
+    <div className="space-y-6">
+      <PageHeader
+        title="Настройки LLM"
+        description="BYOK — собственные ключи для chat / embed. Хранятся зашифрованными (AES-256-GCM), применяются live."
+      />
 
-      {error && <div className="dashboard-error">{error}</div>}
+      {error && (
+        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
 
-      <div className="settings-warning">
-        ✓ Изменения применяются live — рестарт не нужен.
+      <div className="grid gap-6 lg:grid-cols-2">
+        {PURPOSES.map(({ value: purpose, label, hint }) => {
+          const cfg = configs.find((c) => c.purpose === purpose);
+          const f = forms[purpose];
+          return (
+            <Card key={purpose}>
+              <CardHeader className="flex-row items-start justify-between space-y-0">
+                <div className="space-y-1">
+                  <CardTitle>{label}</CardTitle>
+                  <p className="text-sm text-muted-foreground">{hint}</p>
+                </div>
+                {cfg && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDelete(purpose)}
+                  >
+                    <Trash2Icon className="size-4" />
+                  </Button>
+                )}
+              </CardHeader>
+              <CardContent>
+                {cfg && (
+                  <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-sm">
+                    <code className="font-mono text-primary">{cfg.provider}</code>
+                    <span className="text-muted-foreground">/</span>
+                    <code className="font-mono">{cfg.model}</code>
+                    {cfg.hasSecret ? (
+                      <Badge variant="success">ключ есть</Badge>
+                    ) : (
+                      <Badge variant="warning">без ключа</Badge>
+                    )}
+                  </div>
+                )}
+                <form onSubmit={(e) => handleSubmit(e, purpose)} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label>Provider</Label>
+                    <Select
+                      value={f.provider}
+                      onValueChange={(v) => updateForm(purpose, { provider: v as LlmProvider })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PROVIDERS.map((p) => (
+                          <SelectItem key={p.value} value={p.value}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Model</Label>
+                    <Input
+                      value={f.model}
+                      onChange={(e) => updateForm(purpose, { model: e.target.value })}
+                      placeholder={purpose === "embed" ? "text-embedding-3-small" : "gpt-4o-mini"}
+                    />
+                  </div>
+                  {f.provider !== "ollama" && (
+                    <div className="space-y-1.5">
+                      <Label>API key {cfg?.hasSecret ? "(пусто — не менять)" : ""}</Label>
+                      <Input
+                        type="password"
+                        autoComplete="new-password"
+                        value={f.apiKey}
+                        onChange={(e) => updateForm(purpose, { apiKey: e.target.value })}
+                        placeholder={cfg?.hasSecret ? "•••••••• (сохранён)" : "sk-…"}
+                      />
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    {purpose === "embed" && (
+                      <div className="space-y-1.5">
+                        <Label>Embed dim</Label>
+                        <Input
+                          type="number"
+                          value={f.embedDim}
+                          onChange={(e) => updateForm(purpose, { embedDim: e.target.value })}
+                          placeholder="1536"
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-1.5">
+                      <Label>Timeout (ms)</Label>
+                      <Input
+                        type="number"
+                        value={f.timeoutMs}
+                        onChange={(e) => updateForm(purpose, { timeoutMs: e.target.value })}
+                        placeholder="30000"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Base URL (опционально)</Label>
+                    <Input
+                      value={f.baseUrl}
+                      onChange={(e) => updateForm(purpose, { baseUrl: e.target.value })}
+                      placeholder={
+                        f.provider === "ollama"
+                          ? "http://localhost:11434"
+                          : "https://api.openai.com/v1"
+                      }
+                    />
+                  </div>
+                  <Button type="submit" disabled={savingPurpose !== null}>
+                    {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
-      <section className="settings-section">
-        <div className="settings-header">
-          <h2>Смена пароля</h2>
-        </div>
-        {pwdError && <div className="dashboard-error">{pwdError}</div>}
-        {pwdSuccess && (
-          <div className="settings-warning" style={{ color: "var(--success, #4caf50)" }}>
-            ✓ Пароль успешно изменён.
-          </div>
-        )}
-        <form className="settings-form" onSubmit={handleChangePassword}>
-          <label>
-            Текущий пароль
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={currentPwd}
-              onChange={(e) => setCurrentPwd(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
-          </label>
-          <label>
-            Новый пароль (не менее 8 символов)
-            <input
-              type="password"
-              autoComplete="new-password"
-              value={newPwd}
-              onChange={(e) => setNewPwd(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
-          </label>
-          <button type="submit" disabled={pwdSaving}>
-            {pwdSaving ? "Сохраняем…" : "Изменить пароль"}
-          </button>
-        </form>
-      </section>
-
-      {PURPOSES.map(({ value: purpose, label, hint }) => {
-        const cfg = configs.find((c) => c.purpose === purpose);
-        const f = forms[purpose];
-        return (
-          <section key={purpose} className="settings-section">
-            <div className="settings-header">
-              <h2>{label}</h2>
-              {cfg && (
-                <button
-                  type="button"
-                  className="btn-danger-link"
-                  onClick={() => handleDelete(purpose)}
-                >
-                  Удалить
-                </button>
-              )}
+      <Card className="max-w-md">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <KeyRoundIcon className="size-4 text-muted-foreground" /> Смена пароля
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {pwdError && (
+            <p className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {pwdError}
+            </p>
+          )}
+          {pwdSuccess && (
+            <p className="mb-3 flex items-center gap-2 rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
+              <CheckCircle2Icon className="size-4" /> Пароль успешно изменён.
+            </p>
+          )}
+          <form onSubmit={handleChangePassword} className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Текущий пароль</Label>
+              <Input
+                type="password"
+                autoComplete="current-password"
+                value={currentPwd}
+                onChange={(e) => setCurrentPwd(e.target.value)}
+                placeholder="••••••••"
+                required
+              />
             </div>
-            <p className="hint">{hint}</p>
-            {cfg && (
-              <p className="settings-status">
-                Активен: <code>{cfg.provider}</code> / <code>{cfg.model}</code>{" "}
-                {cfg.hasSecret ? (
-                  <span className="badge">API key есть</span>
-                ) : (
-                  <span className="badge badge-warning">без API key</span>
-                )}
-              </p>
-            )}
-            <form className="settings-form" onSubmit={(e) => handleSubmit(e, purpose)}>
-              <label>
-                Provider
-                <select
-                  value={f.provider}
-                  onChange={(e) =>
-                    updateForm(purpose, { provider: e.target.value as LlmProvider })
-                  }
-                >
-                  {PROVIDERS.map((p) => (
-                    <option key={p.value} value={p.value}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Model
-                <input
-                  type="text"
-                  value={f.model}
-                  onChange={(e) => updateForm(purpose, { model: e.target.value })}
-                  placeholder={
-                    purpose === "embed" ? "text-embedding-3-small" : "gpt-4o-mini"
-                  }
-                  required
-                />
-              </label>
-              {f.provider !== "ollama" && (
-                <label>
-                  API key {cfg?.hasSecret ? "(оставьте пустым, чтобы не менять)" : ""}
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    value={f.apiKey}
-                    onChange={(e) => updateForm(purpose, { apiKey: e.target.value })}
-                    placeholder={cfg?.hasSecret ? "•••••••• (сохранён)" : "sk-..."}
-                  />
-                </label>
-              )}
-              <label>
-                Base URL (опционально)
-                <input
-                  type="text"
-                  value={f.baseUrl}
-                  onChange={(e) => updateForm(purpose, { baseUrl: e.target.value })}
-                  placeholder={
-                    f.provider === "ollama"
-                      ? "http://localhost:11434"
-                      : "https://api.openai.com/v1"
-                  }
-                />
-              </label>
-              {purpose === "embed" && (
-                <label>
-                  Embed dim (обязательно)
-                  <input
-                    type="number"
-                    value={f.embedDim}
-                    onChange={(e) => updateForm(purpose, { embedDim: e.target.value })}
-                    placeholder="1536"
-                    required
-                  />
-                </label>
-              )}
-              <label>
-                Timeout (ms, опционально)
-                <input
-                  type="number"
-                  value={f.timeoutMs}
-                  onChange={(e) => updateForm(purpose, { timeoutMs: e.target.value })}
-                  placeholder="30000"
-                />
-              </label>
-              <button type="submit" disabled={savingPurpose !== null}>
-                {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
-              </button>
-            </form>
-          </section>
-        );
-      })}
+            <div className="space-y-1.5">
+              <Label>Новый пароль (≥ 8 символов)</Label>
+              <Input
+                type="password"
+                autoComplete="new-password"
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                placeholder="••••••••"
+                required
+              />
+            </div>
+            <Button type="submit" disabled={pwdSaving}>
+              {pwdSaving ? "Сохраняем…" : "Изменить пароль"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

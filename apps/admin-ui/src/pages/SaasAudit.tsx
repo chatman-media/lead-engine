@@ -1,43 +1,33 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import {
-  ApiError,
-  type AuditEntry,
-  clearToken,
-  saas,
-} from "../api/saas.ts";
+import { useNavigate } from "react-router-dom";
 
-/**
- * Read-only audit log: показывает кто из admin'ов tenant'а что менял
- * когда. Запись происходит из backend handlers (см. lib/audit.ts).
- *
- * Лимит — 50 записей за page, cursor-based pagination по createdAt.
- */
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { ApiError, type AuditEntry, clearToken, saas } from "../api/saas.ts";
 
 function fmtTime(epoch: number): string {
-  return new Date(epoch * 1000).toLocaleString();
+  return new Date(epoch * 1000).toLocaleString("ru");
 }
 
-function fmtAction(action: string): string {
-  // human-readable label для known actions; unknown — as-is.
-  const labels: Record<string, string> = {
-    "llm_config.create": "Добавлен LLM конфиг",
-    "llm_config.update": "Изменён LLM конфиг",
-    "llm_config.delete": "Удалён LLM конфиг",
-    "channel.create": "Подключён канал",
-    "channel.update": "Обновлён канал",
-    "channel.delete": "Отключён канал",
-    "conversation.reply": "Ответ оператора",
-    "conversation.mode.takeover": "Оператор перехватил диалог",
-    "conversation.mode.return_to_ai": "AI возвращён в диалог",
-    "tenant.pause": "Бот поставлен на паузу",
-    "tenant.resume": "Бот возобновлён",
-    "admin_invite.create": "Создано приглашение",
-    "admin_invite.revoke": "Приглашение отозвано",
-    "billing.checkout_started": "Начало оплаты",
-  };
-  return labels[action] ?? action;
-}
+const ACTION_LABELS: Record<string, string> = {
+  "llm_config.create": "Добавлен LLM конфиг",
+  "llm_config.update": "Изменён LLM конфиг",
+  "llm_config.delete": "Удалён LLM конфиг",
+  "channel.create": "Подключён канал",
+  "channel.update": "Обновлён канал",
+  "channel.delete": "Отключён канал",
+  "channel.error": "Ошибка канала",
+  "conversation.reply": "Ответ оператора",
+  "conversation.mode.takeover": "Оператор перехватил диалог",
+  "conversation.mode.return_to_ai": "AI возвращён в диалог",
+  "tenant.pause": "Бот на паузе",
+  "tenant.resume": "Бот возобновлён",
+  "admin_invite.create": "Создано приглашение",
+  "admin_invite.revoke": "Приглашение отозвано",
+  "billing.checkout_started": "Начало оплаты",
+};
 
 export function SaasAudit() {
   const navigate = useNavigate();
@@ -85,78 +75,61 @@ export function SaasAudit() {
     return () => {
       cancelled = true;
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: navigate stable
+    // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
 
-  if (loading) {
-    return (
-      <div className="dashboard-loading">
-        <p>Загрузка…</p>
-      </div>
-    );
-  }
+  if (loading) return <p className="text-sm text-muted-foreground">Загрузка…</p>;
 
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <div>
-          <h1>Аудит-лог</h1>
-          <p className="dashboard-sub">
-            Кто из admin'ов что менял. Запись автоматическая (нельзя редактировать).
-          </p>
-        </div>
-        <Link to="/dashboard" className="back-link">
-          ← К базе знаний
-        </Link>
-      </header>
+    <div className="space-y-6">
+      <PageHeader
+        title="Аудит-лог"
+        description="Кто из администраторов что менял. Запись автоматическая, неизменяемая."
+      />
 
-      {error && <div className="dashboard-error">{error}</div>}
+      {error && (
+        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
 
       {items.length === 0 ? (
-        <p className="empty-state">Пока ничего не происходило</p>
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            Пока ничего не происходило
+          </CardContent>
+        </Card>
       ) : (
-        <ul className="audit-list">
+        <ol className="relative ml-3 space-y-4 border-l pl-6">
           {items.map((e) => (
-            <li key={e.id} className="audit-row">
-              <div className="audit-head">
-                <strong>{fmtAction(e.action)}</strong>
-                <small>{fmtTime(e.createdAt)}</small>
-              </div>
-              <small className="audit-meta">
-                <span className="muted">
-                  {e.adminEmail ?? `admin#${e.adminId ?? "?"}`}
+            <li key={e.id} className="relative">
+              <span className="absolute -left-[27px] top-1.5 size-2.5 rounded-full border-2 border-background bg-primary" />
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium">{ACTION_LABELS[e.action] ?? e.action}</span>
+                {e.targetKind && <Badge variant="outline">{e.targetKind}</Badge>}
+                <span className="ml-auto font-mono text-xs text-muted-foreground">
+                  {fmtTime(e.createdAt)}
                 </span>
-                {e.targetKind && (
-                  <>
-                    {" · "}
-                    <span className="badge">{e.targetKind}</span>
-                  </>
-                )}
-                {e.targetId && (
-                  <>
-                    {" · "}
-                    <span className="muted">id={e.targetId}</span>
-                  </>
-                )}
-              </small>
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {e.adminEmail ?? `admin#${e.adminId ?? "?"}`}
+                {e.targetId ? ` · id=${e.targetId}` : ""}
+              </p>
               {e.details && (
-                <pre className="audit-details">{JSON.stringify(e.details, null, 2)}</pre>
+                <pre className="mt-2 max-h-44 overflow-auto rounded-md border bg-muted/40 p-2.5 font-mono text-[11px] text-muted-foreground">
+                  {JSON.stringify(e.details, null, 2)}
+                </pre>
               )}
             </li>
           ))}
-        </ul>
+        </ol>
       )}
 
       {nextCursor && (
-        <div style={{ marginTop: 16, textAlign: "center" }}>
-          <button
-            type="button"
-            className="nav-link"
-            onClick={loadMore}
-            disabled={loadingMore}
-          >
+        <div className="text-center">
+          <Button variant="outline" onClick={loadMore} disabled={loadingMore}>
             {loadingMore ? "Загрузка…" : "Загрузить ещё"}
-          </button>
+          </Button>
         </div>
       )}
     </div>

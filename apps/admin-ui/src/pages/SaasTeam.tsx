@@ -1,19 +1,29 @@
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   type AdminRow,
   ApiError,
-  clearToken,
   type CreateInviteResult,
+  clearToken,
   type InviteRow,
   saas,
 } from "../api/saas.ts";
 
-/**
- * Team management — список admin'ов + invite flow. Email-доставка
- * приглашений пока не автоматизирована (нет email-infra) — superadmin
- * получает share-url и передаёт коллеге out-of-band (TG/WA/etc).
- */
 export function SaasTeam() {
   const navigate = useNavigate();
   const [admins, setAdmins] = useState<AdminRow[]>([]);
@@ -39,10 +49,7 @@ export function SaasTeam() {
 
   async function refresh() {
     try {
-      const [adminsRes, invitesRes] = await Promise.all([
-        saas.listAdmins(),
-        saas.listInvites(),
-      ]);
+      const [adminsRes, invitesRes] = await Promise.all([saas.listAdmins(), saas.listInvites()]);
       setAdmins(adminsRes.items);
       setInvites(invitesRes.items);
     } catch (err) {
@@ -60,7 +67,7 @@ export function SaasTeam() {
     return () => {
       cancelled = true;
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: navigate stable
+    // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
 
   async function handleInvite(e: FormEvent) {
@@ -82,7 +89,6 @@ export function SaasTeam() {
       if (err instanceof ApiError) {
         if (err.status === 403) setError("Только superadmin может приглашать");
         else if (err.status === 409) setError("Admin с этим email уже существует");
-        else if (err.status === 400) setError(`Ошибка: ${err.errorCode}`);
         else setError(`Ошибка ${err.status}: ${err.errorCode}`);
       } else {
         setError(err instanceof Error ? err.message : String(err));
@@ -92,8 +98,8 @@ export function SaasTeam() {
     }
   }
 
-  async function handleRevoke(id: number, email: string) {
-    if (!confirm(`Отозвать приглашение для ${email}?`)) return;
+  async function handleRevoke(id: number, mail: string) {
+    if (!confirm(`Отозвать приглашение для ${mail}?`)) return;
     try {
       await saas.revokeInvite(id);
       await refresh();
@@ -110,153 +116,161 @@ export function SaasTeam() {
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
       copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Clipboard API may be unavailable (non-HTTPS or old browser).
+      // clipboard может быть недоступен
     }
   }
 
-  if (loading) {
-    return (
-      <div className="dashboard-loading">
-        <p>Загрузка…</p>
-      </div>
-    );
-  }
+  if (loading) return <p className="text-sm text-muted-foreground">Загрузка…</p>;
 
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <div>
-          <h1>Команда</h1>
-          <p className="dashboard-sub">
-            Управление admin'ами и приглашениями коллег.
-          </p>
-        </div>
-        <Link to="/dashboard" className="back-link">
-          ← К базе знаний
-        </Link>
-      </header>
+    <div className="space-y-6">
+      <PageHeader
+        title="Команда"
+        description="Управление администраторами и приглашениями коллег."
+      />
 
-      {error && <div className="dashboard-error">{error}</div>}
-
-      <section className="settings-section">
-        <div className="settings-header">
-          <h2>Пригласить коллегу</h2>
-        </div>
-        <p className="hint">
-          Email-доставка пока не автоматизирована. Создайте приглашение, скопируйте
-          ссылку и отправьте коллеге через Telegram / WhatsApp / email.
+      {error && (
+        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
         </p>
-        <form className="settings-form" onSubmit={handleInvite}>
-          <label>
-            Email
-            <input
-              type="email"
-              autoComplete="off"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="colleague@yourcompany.com"
-              required
-            />
-          </label>
-          <label>
-            Роль
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as "manager" | "superadmin")}
-            >
-              <option value="manager">Manager (повседневный доступ)</option>
-              <option value="superadmin">Superadmin (полный доступ)</option>
-            </select>
-          </label>
-          <button type="submit" disabled={submitting || !email.trim()}>
-            {submitting ? "Создаём…" : "Создать приглашение"}
-          </button>
-        </form>
+      )}
 
-        {lastCreated?.shareUrl && (
-          <div className="snippet-box">
-            <strong>Ссылка-приглашение для {lastCreated.email}</strong>
-            <p className="hint">
-              Скопируйте и отправьте коллеге. Действует 7 дней.
+      <Card>
+        <CardHeader>
+          <CardTitle>Пригласить коллегу</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Email-доставка пока не автоматизирована — создайте приглашение и отправьте ссылку
+            коллеге (Telegram / WhatsApp / email).
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <form onSubmit={handleInvite} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-1.5">
+              <Label>Email</Label>
+              <Input
+                type="email"
+                autoComplete="off"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="colleague@company.com"
+                required
+              />
+            </div>
+            <div className="space-y-1.5 sm:w-56">
+              <Label>Роль</Label>
+              <Select value={role} onValueChange={(v) => setRole(v as "manager" | "superadmin")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manager">Manager — повседневный</SelectItem>
+                  <SelectItem value="superadmin">Superadmin — полный</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button type="submit" disabled={submitting || !email.trim()}>
+              {submitting ? "Создаём…" : "Пригласить"}
+            </Button>
+          </form>
+
+          {lastCreated?.shareUrl && (
+            <div className="space-y-2 rounded-lg border bg-muted/40 p-4">
+              <p className="text-sm font-medium">Ссылка-приглашение для {lastCreated.email}</p>
+              <p className="text-xs text-muted-foreground">Действует 7 дней.</p>
+              <pre className="overflow-x-auto rounded-md bg-background p-3 font-mono text-xs">
+                {lastCreated.shareUrl}
+              </pre>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => lastCreated.shareUrl && copyShareUrl(lastCreated.shareUrl)}
+              >
+                {copied ? <CheckIcon /> : <CopyIcon />}
+                {copied ? "Скопировано" : "Копировать"}
+              </Button>
+            </div>
+          )}
+          {lastCreated && !lastCreated.shareUrl && (
+            <p className="rounded-md border border-[var(--warning)]/40 bg-[color-mix(in_oklch,var(--warning)_12%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
+              ⚠ PLATFORM_PUBLIC_URL не настроен. Token:{" "}
+              <code className="font-mono">{lastCreated.token}</code>
             </p>
-            <pre>{lastCreated.shareUrl}</pre>
-            <button
-              type="button"
-              className="nav-link"
-              onClick={() => copyShareUrl(lastCreated.shareUrl!)}
-            >
-              {copied ? "✓ Скопировано" : "Копировать"}
-            </button>
-          </div>
-        )}
-        {lastCreated && !lastCreated.shareUrl && (
-          <div className="settings-warning">
-            ⚠ PLATFORM_PUBLIC_URL не настроен. Token: <code>{lastCreated.token}</code>{" "}
-            — передайте коллеге вместе с URL вашего admin-UI.
-          </div>
-        )}
-      </section>
+          )}
+        </CardContent>
+      </Card>
 
-      <section className="docs-section">
-        <h2>Admin'ы ({admins.length})</h2>
-        {admins.length === 0 ? (
-          <p className="empty-state">Никого нет</p>
-        ) : (
-          <ul className="docs-list">
-            {admins.map((a) => (
-              <li key={a.id} className="doc-row">
-                <div className="doc-meta">
-                  <strong>{a.email}</strong>
-                  <small>
-                    <span className="badge">{a.role}</span>{" "}
-                    <span className="muted">
-                      · добавлен {new Date(a.createdAt * 1000).toLocaleString()}
-                    </span>
-                  </small>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="docs-section">
-        <h2>Приглашения ({invites.length})</h2>
-        {invites.length === 0 ? (
-          <p className="empty-state">Нет приглашений</p>
-        ) : (
-          <ul className="docs-list">
-            {invites.map((inv) => (
-              <li key={inv.id} className="doc-row">
-                <div className="doc-meta">
-                  <strong>{inv.email}</strong>
-                  <small>
-                    <span className="badge">{inv.role}</span>{" "}
-                    {inv.status === "pending" && <span className="badge">⏳ pending</span>}
-                    {inv.status === "accepted" && (
-                      <span className="badge badge-ok">✓ принято</span>
-                    )}
-                    {inv.status === "expired" && (
-                      <span className="badge badge-warning">истёк</span>
-                    )}{" "}
-                    <span className="muted">
-                      · создано {new Date(inv.createdAt * 1000).toLocaleString()}
-                    </span>
-                  </small>
-                </div>
-                {inv.status === "pending" && (
-                  <button
-                    type="button"
-                    onClick={() => handleRevoke(inv.id, inv.email)}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle>Администраторы</CardTitle>
+            <Badge variant="secondary">{admins.length}</Badge>
+          </CardHeader>
+          <CardContent>
+            {admins.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">Никого нет</p>
+            ) : (
+              <ul className="divide-y">
+                {admins.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
                   >
-                    Отозвать
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{a.email}</p>
+                      <p className="text-xs text-muted-foreground">
+                        добавлен {new Date(a.createdAt * 1000).toLocaleDateString("ru")}
+                      </p>
+                    </div>
+                    <Badge variant={a.role === "superadmin" ? "default" : "secondary"}>
+                      {a.role}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle>Приглашения</CardTitle>
+            <Badge variant="secondary">{invites.length}</Badge>
+          </CardHeader>
+          <CardContent>
+            {invites.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">Нет приглашений</p>
+            ) : (
+              <ul className="divide-y">
+                {invites.map((inv) => (
+                  <li
+                    key={inv.id}
+                    className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{inv.email}</p>
+                      <div className="mt-0.5 flex items-center gap-1.5">
+                        <Badge variant="outline">{inv.role}</Badge>
+                        {inv.status === "pending" && <Badge variant="warning">ожидает</Badge>}
+                        {inv.status === "accepted" && <Badge variant="success">принято</Badge>}
+                        {inv.status === "expired" && <Badge variant="secondary">истёк</Badge>}
+                      </div>
+                    </div>
+                    {inv.status === "pending" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRevoke(inv.id, inv.email)}
+                      >
+                        Отозвать
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

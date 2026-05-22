@@ -1,14 +1,13 @@
+import { ArrowRightIcon, CheckIcon } from "lucide-react";
 import { Link } from "react-router-dom";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import type { OnboardingStatus } from "../api/saas.ts";
 
-/**
- * Onboarding-checklist карточка. Показывает 3 шага (канал, LLM,
- * документы) с цветовыми статусами и deep-link'ами на нужные страницы.
- * Авто-скрывается когда все три зелёные.
- */
 export interface OnboardingChecklistProps {
   status: OnboardingStatus;
-  /** Если true — показывать даже когда done. Default: false (скрываем). */
   alwaysShow?: boolean;
 }
 
@@ -16,73 +15,79 @@ interface StepProps {
   done: boolean;
   title: string;
   hint: string;
-  ctaLabel: string;
-  ctaTo: string;
-  doneText?: string;
 }
 
-function Step({ done, title, hint, ctaLabel, ctaTo, doneText }: StepProps) {
+function Step({ done, title, hint }: StepProps) {
   return (
-    <li className={`onboarding-step ${done ? "done" : ""}`}>
-      <span className="onboarding-mark">{done ? "✓" : "○"}</span>
-      <div className="onboarding-step-body">
-        <strong>{title}</strong>
-        <small>{done && doneText ? doneText : hint}</small>
+    <li className="flex items-center gap-3 rounded-lg border bg-card/40 px-3 py-2.5">
+      <span
+        className={cn(
+          "grid size-6 shrink-0 place-items-center rounded-full border text-xs",
+          done
+            ? "border-transparent bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
+            : "border-border text-muted-foreground",
+        )}
+      >
+        {done ? <CheckIcon className="size-3.5" /> : ""}
+      </span>
+      <div className="min-w-0">
+        <p className="text-sm font-medium leading-tight">{title}</p>
+        <p className="truncate text-xs text-muted-foreground">{hint}</p>
       </div>
-      {!done && (
-        <Link to={ctaTo} className="nav-link onboarding-cta">
-          {ctaLabel}
-        </Link>
-      )}
     </li>
   );
 }
 
 export function OnboardingChecklist({ status, alwaysShow = false }: OnboardingChecklistProps) {
   if (status.done && !alwaysShow) return null;
+  const channelDone = status.channelConnected;
+  const llmDone = status.chatLlmConfigured && (status.chatHasSecret ?? false);
+  const kbDone = status.hasKbDocuments;
 
   return (
-    <section className="onboarding-card">
-      <div className="onboarding-header">
-        <h2>Начало работы</h2>
-        <small>
-          {status.done ? (
-            <span className="muted">Всё готово — бот принимает сообщения</span>
-          ) : (
-            <span className="muted">Выполните шаги ниже, чтобы бот начал отвечать клиентам</span>
-          )}
-        </small>
-      </div>
-      <ul className="onboarding-list">
-        <Step
-          done={status.channelConnected}
-          title="1. Подключите канал"
-          hint="Telegram-бот через токен @BotFather"
-          ctaLabel="Подключить"
-          ctaTo="/onboarding"
-          {...(status.channelExternalId
-            ? { doneText: `@${status.channelExternalId} активен` }
-            : {})}
-        />
-        <Step
-          done={status.chatLlmConfigured && (status.chatHasSecret ?? false)}
-          title="2. Настройте LLM"
-          hint="Свой OpenAI / Anthropic / Ollama ключ"
-          ctaLabel="Настроить"
-          ctaTo="/onboarding"
-          {...(status.chatProvider
-            ? { doneText: `${status.chatProvider} / ${status.chatModel ?? ""}` }
-            : {})}
-        />
-        <Step
-          done={status.hasKbDocuments}
-          title="3. Загрузите документы в KB"
-          hint="Опционально, но даёт RAG-ответы по своей базе"
-          ctaLabel="Загрузить"
-          ctaTo="/onboarding"
-          {...(status.hasKbDocuments ? { doneText: "Есть документы" } : {})}
-        />
-      </ul>
-    </section>
+    <Card className="border-primary/30 bg-gradient-to-b from-primary/[0.06] to-transparent">
+      <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
+        <div className="space-y-1">
+          <CardTitle>Начало работы</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            {status.done
+              ? "Всё готово — бот принимает сообщения"
+              : "Несколько шагов, чтобы бот начал отвечать клиентам"}
+          </p>
+        </div>
+        <Button asChild size="sm">
+          <Link to="/onboarding">
+            Продолжить <ArrowRightIcon />
+          </Link>
+        </Button>
+      </CardHeader>
+      <CardContent>
+        <ul className="grid gap-2 sm:grid-cols-3">
+          <Step
+            done={channelDone}
+            title="Канал"
+            hint={
+              channelDone && status.channelExternalId
+                ? `@${status.channelExternalId}`
+                : "Telegram / WhatsApp / web"
+            }
+          />
+          <Step
+            done={llmDone}
+            title="API-ключи"
+            hint={
+              llmDone && status.chatProvider
+                ? `${status.chatProvider} / ${status.chatModel ?? ""}`
+                : "chat + embed"
+            }
+          />
+          <Step
+            done={kbDone}
+            title="База знаний"
+            hint={kbDone ? "Документы есть" : "Опционально"}
+          />
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
