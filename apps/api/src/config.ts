@@ -174,6 +174,23 @@ export interface ApiConfig {
     dispatcherPollMs: number;
     dispatcherBatchSize: number;
   };
+  /**
+   * Telegram MTProto app credentials (my.telegram.org → API development tools).
+   * Платформенные — одно приложение на всю платформу, используется для
+   * onboarding'а personal-account userbot'ов (kind='telegram_userbot').
+   * Если apiId=0 или apiHash пуст — userbot-onboarding отключён (роуты
+   * возвращают 503, UI прячет таб).
+   *
+   *  - dispatcherPollMs / dispatcherBatchSize — для in-process
+   *    UserbotOutboundDispatcher (claim'ит kind='telegram_userbot' rows,
+   *    отправка через pinned MTProto-соединение в этом процессе).
+   */
+  telegramUserbot: {
+    apiId: number;
+    apiHash: string;
+    dispatcherPollMs: number;
+    dispatcherBatchSize: number;
+  };
 }
 
 function required(name: string): string {
@@ -215,12 +232,17 @@ export function loadApiConfig(): ApiConfig {
     webWidgetScriptUrl: (process.env.WEB_WIDGET_SCRIPT_URL ?? "").replace(/\/$/, ""),
     defaultStyleSlug: process.env.STYLE_SLUG ?? "",
     experimentSlug: process.env.EXPERIMENT_SLUG ?? "",
-    stageClassifier:
-      (process.env.STAGE_CLASSIFIER ?? "") as ApiConfig["stageClassifier"],
+    stageClassifier: (process.env.STAGE_CLASSIFIER ?? "") as ApiConfig["stageClassifier"],
     web: {
       authSecret: process.env.WEB_WS_AUTH_SECRET ?? "",
       dispatcherPollMs: Number.parseInt(process.env.WEB_DISPATCHER_POLL_MS ?? "200", 10),
       dispatcherBatchSize: Number.parseInt(process.env.WEB_DISPATCHER_BATCH ?? "32", 10),
+    },
+    telegramUserbot: {
+      apiId: Number.parseInt(process.env.TELEGRAM_API_ID ?? "0", 10),
+      apiHash: process.env.TELEGRAM_API_HASH ?? "",
+      dispatcherPollMs: Number.parseInt(process.env.USERBOT_DISPATCHER_POLL_MS ?? "300", 10),
+      dispatcherBatchSize: Number.parseInt(process.env.USERBOT_DISPATCHER_BATCH ?? "16", 10),
     },
     rateLimit: {
       perMinute: Number.parseInt(process.env.RATE_LIMIT_PER_MIN ?? "60", 10),

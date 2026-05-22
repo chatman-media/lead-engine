@@ -1,15 +1,21 @@
-import { TelegramApiError, TelegramClient } from "@chatman-media/channel-telegram";
-import { WhatsAppApiError, WhatsAppClient } from "@chatman-media/channel-whatsapp";
+import { randomUUID } from "node:crypto";
 import {
-  type Db,
-  setEncryptedSecret,
-  withTenant,
-} from "@chatman-media/conversation-engine";
+  type FinishedUserbotLogin,
+  startUserbotLogin,
+  submitUserbot2fa,
+  submitUserbotCode,
+  TelegramApiError,
+  TelegramClient,
+  UserbotLoginError,
+} from "@chatman-media/channel-telegram";
+import { WhatsAppApiError, WhatsAppClient } from "@chatman-media/channel-whatsapp";
+import { type Db, setEncryptedSecret, withTenant } from "@chatman-media/conversation-engine";
 import { channels, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { canAddChannel } from "../lib/quota.ts";
+import type { UserbotLoginStore } from "../lib/userbot-login-store.ts";
 
 /**
  * Per-tenant channel CRUD под /api/admin/channels/*.
@@ -71,6 +77,15 @@ export interface AdminChannelsRoutesOpts {
    * link для smoke-теста.
    */
   webWidgetScriptUrl?: string;
+  /**
+   * Telegram MTProto app credentials (платформенные, из env). Нужны для
+   * onboarding'а personal-account userbot'ов. Если apiId=0 / apiHash пуст /
+   * userbotLoginStore не передан — userbot-роуты возвращают 503.
+   */
+  telegramApiId?: number;
+  telegramApiHash?: string;
+  /** In-memory стор незавершённых userbot-логинов (см. userbot-login-store.ts). */
+  userbotLoginStore?: UserbotLoginStore;
 }
 
 function generateWebWidgetSnippet(opts: {
@@ -114,6 +129,17 @@ function escapeHtmlAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
+/** Достаёт `username` из metadata_json канала (для UI), null если нет/невалидно. */
+function parseChannelUsername(metadataJson: string | null): string | null {
+  if (!metadataJson) return null;
+  try {
+    const meta = JSON.parse(metadataJson) as { username?: unknown };
+    return typeof meta.username === "string" ? meta.username : null;
+  } catch {
+    return null;
+  }
+}
+
 interface TelegramCreateBody {
   botToken: unknown;
 }
@@ -150,6 +176,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
           externalId: channels.externalId,
           credentialsRef: channels.credentialsRef,
           status: channels.status,
+          metadataJson: channels.metadataJson,
           createdAt: channels.createdAt,
           updatedAt: channels.updatedAt,
         })
@@ -163,6 +190,8 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
         externalId: r.externalId,
         status: r.status,
         hasCredentials: r.credentialsRef !== null && r.credentialsRef !== "",
+        // username для userbot/telegram — для дружелюбного отображения в UI.
+        username: parseChannelUsername(r.metadataJson),
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
       })),
@@ -415,10 +444,8 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
     } catch {
       return c.json({ error: "invalid json" }, 400);
     }
-    const phoneNumberId =
-      typeof body.phoneNumberId === "string" ? body.phoneNumberId.trim() : "";
-    const accessToken =
-      typeof body.accessToken === "string" ? body.accessToken.trim() : "";
+    const phoneNumberId = typeof body.phoneNumberId === "string" ? body.phoneNumberId.trim() : "";
+    const accessToken = typeof body.accessToken === "string" ? body.accessToken.trim() : "";
     if (!phoneNumberId) {
       return c.json({ error: "phoneNumberId required" }, 400);
     }
@@ -426,10 +453,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
       return c.json({ error: "accessToken required" }, 400);
     }
     if (!/^\d{10,20}$/.test(phoneNumberId)) {
-      return c.json(
-        { error: "phoneNumberId must be Meta numeric ID (10-20 digits)" },
-        400,
-      );
+      return c.json({ error: "phoneNumberId must be Meta numeric ID (10-20 digits)" }, 400);
     }
     const businessAccountId =
       typeof body.businessAccountId === "string" && body.businessAccountId.trim()
@@ -583,9 +607,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
       }
 
       // Resolve tenant slug для webhookSetupHint.
-      let webhookSetupHint:
-        | { url: string; verifyToken: string; appSecretHint: string }
-        | undefined;
+      let webhookSetupHint: { url: string; verifyToken: string; appSecretHint: string } | undefined;
       if (opts.publicUrl) {
         const [tenant] = await opts.db
           .select({ slug: tenants.slug })
@@ -644,9 +666,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
       }
     }
     const externalIdInput =
-      typeof body.externalId === "string" && body.externalId.trim()
-        ? body.externalId.trim()
-        : "";
+      typeof body.externalId === "string" && body.externalId.trim() ? body.externalId.trim() : "";
     const brandName =
       typeof body.brandName === "string" && body.brandName.trim()
         ? body.brandName.trim()
@@ -657,10 +677,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
         : undefined;
 
     if (externalIdInput && !/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/i.test(externalIdInput)) {
-      return c.json(
-        { error: "externalId must be alphanumeric/dash, 3-64 chars" },
-        400,
-      );
+      return c.json({ error: "externalId must be alphanumeric/dash, 3-64 chars" }, 400);
     }
 
     const [tenant] = await opts.db
@@ -774,7 +791,11 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
       externalId,
       ...(brandName ? { brandName } : {}),
       ...(primaryColor ? { primaryColor } : {}),
-      ...(snippet ? { snippet } : { snippetHint: "PLATFORM_PUBLIC_URL не задан — snippet нельзя сгенерировать" }),
+      ...(snippet
+        ? { snippet }
+        : {
+            snippetHint: "PLATFORM_PUBLIC_URL не задан — snippet нельзя сгенерировать",
+          }),
       ...(reloadError ? { reloadError } : {}),
     });
   });
@@ -886,6 +907,288 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
     }
 
     return c.json({ ok: true, deleted });
+  });
+
+  // ── Telegram userbot (личный аккаунт, MTProto) onboarding ───────────────
+  // Многошаговый stateful-логин: phone → code → (2fa). gramjs-client живёт
+  // в userbotLoginStore между запросами. По завершении session шифруется в
+  // tenant_secrets, создаётся channels row, reloader поднимает adapter.
+  //
+  // Только superadmin: подключается личный аккаунт организации.
+
+  const userbotEnabled = () =>
+    !!opts.userbotLoginStore && !!opts.telegramApiId && !!opts.telegramApiHash;
+
+  /** Маппинг UserbotLoginError → HTTP-код + тело для UI. */
+  function loginErrorResponse(err: unknown) {
+    if (err instanceof UserbotLoginError) {
+      const status =
+        err.code === "flood_wait"
+          ? 429
+          : err.code === "code_expired"
+            ? 410
+            : err.code === "unknown"
+              ? 502
+              : 400;
+      return {
+        body: {
+          error: err.code,
+          message: err.message,
+          ...(err.retryAfterSec ? { retryAfterSec: err.retryAfterSec } : {}),
+        },
+        status: status as 400 | 410 | 429 | 502,
+      };
+    }
+    return {
+      body: {
+        error: "userbot_login_failed",
+        message: err instanceof Error ? err.message : String(err),
+      },
+      status: 502 as const,
+    };
+  }
+
+  /**
+   * Финализация логина: encrypt session + upsert channels row + audit + reload.
+   * Дисконнектит login-client (registry поднимет свежий adapter из сессии).
+   */
+  async function finalizeUserbot(c: Context, loginId: string, finished: FinishedUserbotLogin) {
+    const tenantId = c.var.tenantId;
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const externalId = finished.userId;
+    const secretKey = `channel_telegram_userbot_${externalId}`;
+    const metadataJson = JSON.stringify({
+      username: finished.username,
+      phone: finished.phone,
+    });
+
+    const [existing] = await opts.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(
+        and(
+          eq(channels.tenantId, tenantId),
+          eq(channels.kind, "telegram_userbot"),
+          eq(channels.externalId, externalId),
+        ),
+      );
+
+    if (!existing) {
+      const quota = await canAddChannel({ db: opts.db, tenantId });
+      if (!quota.allowed) {
+        await opts.userbotLoginStore?.discard(loginId);
+        return c.json(
+          {
+            error: "quota_exceeded",
+            reason: quota.reason,
+            limit: quota.limit,
+            current: quota.current,
+            plan: quota.plan,
+            planLabel: quota.planLabel,
+            upgradeHint: "Перейдите на план Starter ($99/мес) для большего числа каналов",
+          },
+          402,
+        );
+      }
+    }
+
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      await setEncryptedSecret({
+        db: tx,
+        tenantId,
+        key: secretKey,
+        value: finished.sessionString,
+        masterKeyHex: opts.masterKeyHex,
+        nowEpoch,
+      });
+      if (existing) {
+        await tx
+          .update(channels)
+          .set({
+            credentialsRef: secretKey,
+            status: "active",
+            metadataJson,
+            updatedAt: nowEpoch,
+          })
+          .where(eq(channels.id, existing.id));
+        return { id: existing.id, updated: true };
+      }
+      const [inserted] = await tx
+        .insert(channels)
+        .values({
+          tenantId,
+          kind: "telegram_userbot",
+          externalId,
+          credentialsRef: secretKey,
+          status: "active",
+          metadataJson,
+          createdAt: nowEpoch,
+          updatedAt: nowEpoch,
+        })
+        .returning({ id: channels.id });
+      return { id: inserted!.id, updated: false };
+    });
+
+    // Login-client больше не нужен — registry поднимет свежий adapter из сессии.
+    await opts.userbotLoginStore?.discard(loginId);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId: c.var.adminId,
+      action: result.updated ? "channel.update" : "channel.create",
+      targetKind: "channel",
+      targetId: result.id,
+      details: {
+        kind: "telegram_userbot",
+        userId: externalId,
+        username: finished.username,
+      },
+    });
+
+    let reloadError: string | undefined;
+    if (opts.onReload) {
+      try {
+        await opts.onReload(tenantId);
+      } catch (err) {
+        reloadError = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    return c.json({
+      ok: true,
+      ...result,
+      externalId,
+      username: finished.username,
+      ...(reloadError ? { reloadError } : {}),
+    });
+  }
+
+  app.post("/api/admin/channels/userbot/start", async (c) => {
+    if (c.var.role !== "superadmin") {
+      return c.json({ error: "forbidden", message: "Только superadmin" }, 403);
+    }
+    if (!userbotEnabled()) {
+      return c.json(
+        {
+          error: "userbot_disabled",
+          message: "TELEGRAM_API_ID/HASH не заданы",
+        },
+        503,
+      );
+    }
+    let body: { phone?: unknown };
+    try {
+      body = (await c.req.json()) as { phone?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+    if (!/^\+?\d{7,15}$/.test(phone)) {
+      return c.json(
+        {
+          error: "phone_invalid",
+          message: "Укажите номер в формате +79991234567",
+        },
+        400,
+      );
+    }
+    try {
+      const started = await startUserbotLogin({
+        apiId: opts.telegramApiId as number,
+        apiHash: opts.telegramApiHash as string,
+        phone,
+      });
+      const loginId = randomUUID();
+      opts.userbotLoginStore?.create({
+        loginId,
+        client: started.client,
+        phoneCodeHash: started.phoneCodeHash,
+        phone,
+        tenantId: c.var.tenantId,
+      });
+      return c.json({ ok: true, loginId, awaiting: "code" });
+    } catch (err) {
+      const { body: errBody, status } = loginErrorResponse(err);
+      return c.json(errBody, status);
+    }
+  });
+
+  app.post("/api/admin/channels/userbot/verify", async (c) => {
+    if (c.var.role !== "superadmin") {
+      return c.json({ error: "forbidden" }, 403);
+    }
+    if (!userbotEnabled()) return c.json({ error: "userbot_disabled" }, 503);
+    let body: { loginId?: unknown; code?: unknown };
+    try {
+      body = (await c.req.json()) as { loginId?: unknown; code?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const loginId = typeof body.loginId === "string" ? body.loginId : "";
+    const code = typeof body.code === "string" ? body.code.trim() : "";
+    if (!loginId || !code) return c.json({ error: "loginId and code required" }, 400);
+    const pending = opts.userbotLoginStore?.get(loginId, c.var.tenantId);
+    if (!pending) {
+      return c.json(
+        {
+          error: "login_expired",
+          message: "Сессия логина истекла — начните заново",
+        },
+        410,
+      );
+    }
+    try {
+      const res = await submitUserbotCode({
+        client: pending.client,
+        phone: pending.phone,
+        phoneCodeHash: pending.phoneCodeHash,
+        code,
+      });
+      if (res.needs2fa) {
+        opts.userbotLoginStore?.markAwaiting2fa(loginId);
+        return c.json({ ok: true, awaiting: "2fa" });
+      }
+      return finalizeUserbot(c, loginId, res);
+    } catch (err) {
+      const { body: errBody, status } = loginErrorResponse(err);
+      return c.json(errBody, status);
+    }
+  });
+
+  app.post("/api/admin/channels/userbot/2fa", async (c) => {
+    if (c.var.role !== "superadmin") {
+      return c.json({ error: "forbidden" }, 403);
+    }
+    if (!userbotEnabled()) return c.json({ error: "userbot_disabled" }, 503);
+    let body: { loginId?: unknown; password?: unknown };
+    try {
+      body = (await c.req.json()) as { loginId?: unknown; password?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const loginId = typeof body.loginId === "string" ? body.loginId : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!loginId || !password) return c.json({ error: "loginId and password required" }, 400);
+    const pending = opts.userbotLoginStore?.get(loginId, c.var.tenantId);
+    if (!pending) {
+      return c.json(
+        {
+          error: "login_expired",
+          message: "Сессия логина истекла — начните заново",
+        },
+        410,
+      );
+    }
+    try {
+      const finished = await submitUserbot2fa({
+        client: pending.client,
+        password,
+      });
+      return finalizeUserbot(c, loginId, finished);
+    } catch (err) {
+      const { body: errBody, status } = loginErrorResponse(err);
+      return c.json(errBody, status);
+    }
   });
 
   return app;

@@ -15,13 +15,14 @@
  * cross-process reload — отдельный PR.
  */
 
-import { type Db } from "@chatman-media/conversation-engine";
+import type { Db } from "@chatman-media/conversation-engine";
 import { tenants } from "@chatman-media/storage";
 import { eq } from "drizzle-orm";
 import type { ChannelRegistry } from "../channel-registry.ts";
 import type { ApiConfig } from "../config.ts";
 import type { LoadedRef } from "../llm-bootstrap.ts";
 import { loadTenantLlmConfigs } from "./llm-config-loader.ts";
+import type { UserbotChannelRegistry } from "./userbot-channel-registry.ts";
 import type { WebChannelRegistry } from "./web-channel-registry.ts";
 
 export interface TenantReloaderOpts {
@@ -33,6 +34,9 @@ export interface TenantReloaderOpts {
   /** Опциональный WebChannelRegistry — если передан, reloadChannels так же
    * перестроит web-каналы tenant'а. */
   webRegistry?: WebChannelRegistry;
+  /** Опциональный UserbotChannelRegistry — reloadChannels подключает/тушит
+   * personal-account userbot'ы tenant'а (connect из сохранённой сессии). */
+  userbotRegistry?: UserbotChannelRegistry;
   log: (msg: string, ctx?: Record<string, unknown>) => void;
 }
 
@@ -109,11 +113,15 @@ export function makeTenantReloader(opts: TenantReloaderOpts): TenantReloader {
     if (opts.webRegistry) {
       await opts.webRegistry.reloadTenant(tenantId, tenant.slug);
     }
+    if (opts.userbotRegistry) {
+      await opts.userbotRegistry.reloadTenant(tenantId, tenant.slug);
+    }
     opts.log("channels reloaded for tenant", {
       tenantId,
       tenantSlug: tenant.slug,
       telegram: opts.registry.getTelegramBotsByTenant(tenant.slug).length,
       web: opts.webRegistry?.byTenant(tenant.slug) ? 1 : 0,
+      userbot: opts.userbotRegistry?.byTenant(tenantId).length ?? 0,
     });
   }
 

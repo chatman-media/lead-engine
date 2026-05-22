@@ -3,9 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   ApiError,
   type ChannelItem,
-  clearToken,
   type CreateWebChannelResult,
   type CreateWhatsAppChannelResult,
+  clearToken,
   saas,
 } from "../api/saas.ts";
 
@@ -18,7 +18,8 @@ import {
  * ChannelRegistry hot-reload'ится в apps/api (без рестарта).
  * apps/worker требует рестарта для подхвата новых каналов.
  */
-type ChannelTab = "telegram" | "whatsapp" | "web";
+type ChannelTab = "telegram" | "userbot" | "whatsapp" | "web";
+type UserbotStep = "phone" | "code" | "2fa";
 
 export function SaasChannels() {
   const navigate = useNavigate();
@@ -31,6 +32,16 @@ export function SaasChannels() {
   const [botToken, setBotToken] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [lastCreated, setLastCreated] = useState<{ username: string } | null>(null);
+
+  // Telegram userbot (личный аккаунт) — пошаговый логин
+  const [ubStep, setUbStep] = useState<UserbotStep>("phone");
+  const [ubPhone, setUbPhone] = useState("");
+  const [ubCode, setUbCode] = useState("");
+  const [ubPassword, setUbPassword] = useState("");
+  const [ubLoginId, setUbLoginId] = useState("");
+  const [ubSubmitting, setUbSubmitting] = useState(false);
+  const [ubError, setUbError] = useState("");
+  const [ubDone, setUbDone] = useState<{ username: string | null } | null>(null);
 
   // WhatsApp form
   const [waPhoneId, setWaPhoneId] = useState("");
@@ -218,6 +229,93 @@ export function SaasChannels() {
     }
   }
 
+  function userbotErrMessage(err: unknown): string {
+    if (err instanceof ApiError) {
+      if (err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+        return "";
+      }
+      if (err.status === 503) return "Userbot отключён на сервере (нет TELEGRAM_API_ID/HASH)";
+      if (err.status === 403) return "Доступно только для superadmin";
+      const msg = err.extra?.message as string | undefined;
+      const retry = err.extra?.retryAfterSec as number | undefined;
+      if (err.errorCode === "flood_wait") {
+        return `Слишком много попыток — подождите ${retry ?? "?"} сек`;
+      }
+      return msg ?? `Ошибка: ${err.errorCode}`;
+    }
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  function resetUserbot() {
+    setUbStep("phone");
+    setUbPhone("");
+    setUbCode("");
+    setUbPassword("");
+    setUbLoginId("");
+    setUbError("");
+  }
+
+  async function handleUbPhone(e: FormEvent) {
+    e.preventDefault();
+    setUbError("");
+    setUbDone(null);
+    const phone = ubPhone.trim();
+    if (!/^\+?\d{7,15}$/.test(phone)) {
+      setUbError("Укажите номер в формате +79991234567");
+      return;
+    }
+    setUbSubmitting(true);
+    try {
+      const res = await saas.startUserbotLogin(phone);
+      setUbLoginId(res.loginId);
+      setUbStep("code");
+    } catch (err) {
+      setUbError(userbotErrMessage(err));
+    } finally {
+      setUbSubmitting(false);
+    }
+  }
+
+  async function handleUbCode(e: FormEvent) {
+    e.preventDefault();
+    setUbError("");
+    setUbSubmitting(true);
+    try {
+      const res = await saas.verifyUserbotCode(ubLoginId, ubCode.trim());
+      if ("awaiting" in res) {
+        setUbStep("2fa");
+      } else {
+        setUbDone({ username: res.username });
+        resetUserbot();
+        await refresh();
+      }
+    } catch (err) {
+      setUbError(userbotErrMessage(err));
+    } finally {
+      setUbSubmitting(false);
+    }
+  }
+
+  async function handleUb2fa(e: FormEvent) {
+    e.preventDefault();
+    setUbError("");
+    setUbSubmitting(true);
+    try {
+      const res = await saas.submitUserbot2fa(ubLoginId, ubPassword);
+      if (!("awaiting" in res)) {
+        setUbDone({ username: res.username });
+      }
+      resetUserbot();
+      await refresh();
+    } catch (err) {
+      setUbError(userbotErrMessage(err));
+    } finally {
+      setUbSubmitting(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="dashboard-loading">
@@ -244,8 +342,14 @@ export function SaasChannels() {
 
       {lastCreated && (
         <div className="settings-warning">
-          ✓ Бот @{lastCreated.username} подключён и активирован — webhook настроен,
-          канал работает.
+          ✓ Бот @{lastCreated.username} подключён и активирован — webhook настроен, канал работает.
+        </div>
+      )}
+
+      {ubDone && (
+        <div className="settings-warning">
+          ✓ Личный аккаунт{ubDone.username ? ` @${ubDone.username}` : ""} подключён — входящие
+          сообщения обрабатываются ассистентом.
         </div>
       )}
 
@@ -278,6 +382,13 @@ export function SaasChannels() {
         </button>
         <button
           type="button"
+          className={`channel-tab ${tab === "userbot" ? "active" : ""}`}
+          onClick={() => setTab("userbot")}
+        >
+          Telegram (личный)
+        </button>
+        <button
+          type="button"
           className={`channel-tab ${tab === "whatsapp" ? "active" : ""}`}
           onClick={() => setTab("whatsapp")}
         >
@@ -302,8 +413,8 @@ export function SaasChannels() {
             <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">
               @BotFather
             </a>{" "}
-            и вставьте сюда токен (формат <code>123456:ABC-DEF...</code>). Webhook
-            настроится автоматически.
+            и вставьте сюда токен (формат <code>123456:ABC-DEF...</code>). Webhook настроится
+            автоматически.
           </p>
           <form className="settings-form" onSubmit={handleSubmit}>
             <label>
@@ -338,10 +449,10 @@ export function SaasChannels() {
             >
               Meta for Developers
             </a>{" "}
-            → ваше WhatsApp Business приложение → API Setup. Скопируйте{" "}
-            <code>Phone number ID</code> + сгенерируйте <code>Access token</code>{" "}
-            (рекомендуется system user token, не временный 24h). После создания
-            канала здесь — UI покажет URL+token для webhook setup'а в Meta dashboard.
+            → ваше WhatsApp Business приложение → API Setup. Скопируйте <code>Phone number ID</code>{" "}
+            + сгенерируйте <code>Access token</code> (рекомендуется system user token, не временный
+            24h). После создания канала здесь — UI покажет URL+token для webhook setup'а в Meta
+            dashboard.
           </p>
           <form className="settings-form" onSubmit={handleWhatsAppSubmit}>
             <label>
@@ -391,10 +502,9 @@ export function SaasChannels() {
             <h2>Web-виджет на сайт</h2>
           </div>
           <p className="hint">
-            Включает чат-виджет для вашего сайта — посетители пишут через
-            плавающий bubble. Backend без token'ов (channel-web использует
-            WS-соединение, anonymized externalUserId). После включения
-            UI покажет готовый snippet — вставьте перед закрывающим
+            Включает чат-виджет для вашего сайта — посетители пишут через плавающий bubble. Backend
+            без token'ов (channel-web использует WS-соединение, anonymized externalUserId). После
+            включения UI покажет готовый snippet — вставьте перед закрывающим
             <code>{"</body>"}</code>.
           </p>
           <form className="settings-form" onSubmit={handleWebSubmit}>
@@ -440,15 +550,10 @@ export function SaasChannels() {
               </button>
               <p className="hint" style={{ marginTop: 12 }}>
                 Smoke-test:{" "}
-                <a
-                  href={webResult.snippet.demoUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <a href={webResult.snippet.demoUrl} target="_blank" rel="noopener noreferrer">
                   открыть demo-чат
                 </a>{" "}
-                · WS URL:{" "}
-                <code>{webResult.snippet.wsUrl}</code>
+                · WS URL: <code>{webResult.snippet.wsUrl}</code>
               </p>
             </div>
           )}
@@ -456,6 +561,97 @@ export function SaasChannels() {
             <div className="settings-warning">
               ⚠ {webResult.snippetHint ?? "snippet недоступен"}
             </div>
+          )}
+        </section>
+      )}
+
+      {tab === "userbot" && (
+        <section className="settings-section">
+          <div className="settings-header">
+            <h2>Подключить личный Telegram-аккаунт</h2>
+          </div>
+          <p className="hint">
+            Для случаев, когда лиды пишут в личку (а не боту). Подключается ваш личный аккаунт через
+            MTProto. Доступно только для superadmin.
+          </p>
+          <div className="settings-warning" style={{ color: "#f0c674" }}>
+            ⚠ Это автоматизация личного аккаунта. Подключайте только аккаунт, которым владеете, и
+            используйте для ответов своим лидам — массовая рассылка нарушает правила Telegram и
+            грозит блокировкой.
+          </div>
+
+          {ubError && <div className="dashboard-error">{ubError}</div>}
+
+          {ubStep === "phone" && (
+            <form className="settings-form" onSubmit={handleUbPhone}>
+              <label>
+                Номер телефона аккаунта
+                <input
+                  type="tel"
+                  value={ubPhone}
+                  onChange={(e) => setUbPhone(e.target.value)}
+                  placeholder="+79991234567"
+                  autoComplete="off"
+                />
+              </label>
+              <button type="submit" disabled={ubSubmitting || !ubPhone.trim()}>
+                {ubSubmitting ? "Отправляем код…" : "Получить код"}
+              </button>
+            </form>
+          )}
+
+          {ubStep === "code" && (
+            <>
+              <form className="settings-form" onSubmit={handleUbCode}>
+                <p className="hint">
+                  Telegram отправил код подтверждения на {ubPhone} (в приложение или SMS). Введите
+                  его.
+                </p>
+                <label>
+                  Код подтверждения
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    value={ubCode}
+                    onChange={(e) => setUbCode(e.target.value)}
+                    placeholder="12345"
+                  />
+                </label>
+                <button type="submit" disabled={ubSubmitting || !ubCode.trim()}>
+                  {ubSubmitting ? "Проверяем…" : "Подтвердить"}
+                </button>
+              </form>
+              <button type="button" className="link-button" onClick={resetUserbot}>
+                ← Изменить номер
+              </button>
+            </>
+          )}
+
+          {ubStep === "2fa" && (
+            <>
+              <form className="settings-form" onSubmit={handleUb2fa}>
+                <p className="hint">
+                  У аккаунта включён облачный пароль (2FA). Введите его, чтобы завершить вход.
+                </p>
+                <label>
+                  Пароль 2FA
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={ubPassword}
+                    onChange={(e) => setUbPassword(e.target.value)}
+                    placeholder="••••••••"
+                  />
+                </label>
+                <button type="submit" disabled={ubSubmitting || !ubPassword}>
+                  {ubSubmitting ? "Проверяем…" : "Войти"}
+                </button>
+              </form>
+              <button type="button" className="link-button" onClick={resetUserbot}>
+                ← Начать заново
+              </button>
+            </>
           )}
         </section>
       )}
@@ -472,15 +668,19 @@ export function SaasChannels() {
                   <strong>
                     {ch.kind === "telegram_bot"
                       ? `@${ch.externalId}`
-                      : ch.kind === "whatsapp"
-                        ? `WhatsApp #${ch.externalId}`
-                        : ch.kind === "web"
-                          ? `Web виджет (${ch.externalId})`
-                          : ch.externalId}
+                      : ch.kind === "telegram_userbot"
+                        ? `${ch.username ? `@${ch.username}` : `TG ${ch.externalId}`} (личный)`
+                        : ch.kind === "whatsapp"
+                          ? `WhatsApp #${ch.externalId}`
+                          : ch.kind === "web"
+                            ? `Web виджет (${ch.externalId})`
+                            : ch.externalId}
                   </strong>
                   <small>
                     <span className="badge">{ch.kind}</span>{" "}
-                    <span className="badge">{ch.status}</span>{" "}
+                    <span className={`badge ${ch.status === "error" ? "badge-warning" : ""}`}>
+                      {ch.status}
+                    </span>{" "}
                     {ch.hasCredentials ? (
                       <span className="badge">creds OK</span>
                     ) : (
@@ -491,9 +691,24 @@ export function SaasChannels() {
                     </span>
                   </small>
                 </div>
-                <button type="button" onClick={() => handleDelete(ch.id, ch.externalId)}>
-                  Отключить
-                </button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {ch.kind === "telegram_userbot" && ch.status === "error" && (
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => {
+                        resetUserbot();
+                        setUbDone(null);
+                        setTab("userbot");
+                      }}
+                    >
+                      Авторизовать заново
+                    </button>
+                  )}
+                  <button type="button" onClick={() => handleDelete(ch.id, ch.externalId)}>
+                    Отключить
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

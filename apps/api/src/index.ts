@@ -1,21 +1,26 @@
 import { checkRlsEnforcement } from "@chatman-media/conversation-engine";
+import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { tenants } from "@chatman-media/storage";
-import type { VerticalTemplate } from "@chatman-media/verticals";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
+import type { VerticalTemplate } from "@chatman-media/verticals";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { ChannelRegistry } from "./channel-registry.ts";
 import { loadApiConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
+import { loadTenantLlmConfigs } from "./lib/llm-config-loader.ts";
+import { LlmUsageWriter } from "./lib/llm-usage-writer.ts";
 import { makeMetricsSink } from "./lib/metrics-sink.ts";
+import { InboundRateLimiter } from "./lib/rate-limiter.ts";
+import { makeTenantReloader } from "./lib/tenant-reloader.ts";
+import { UserbotChannelRegistry } from "./lib/userbot-channel-registry.ts";
+import { UserbotOutboundDispatcher } from "./lib/userbot-dispatcher.ts";
+import { startUserbotInboundRunner } from "./lib/userbot-inbound-runner.ts";
+import { UserbotLoginStore } from "./lib/userbot-login-store.ts";
 import { WebChannelRegistry } from "./lib/web-channel-registry.ts";
 import { WebOutboundDispatcher } from "./lib/web-dispatcher.ts";
 import { startWebInboundRunner } from "./lib/web-inbound-runner.ts";
-import { loadTenantLlmConfigs } from "./lib/llm-config-loader.ts";
-import { LlmUsageWriter } from "./lib/llm-usage-writer.ts";
-import { InboundRateLimiter } from "./lib/rate-limiter.ts";
-import { makeTenantReloader } from "./lib/tenant-reloader.ts";
 import {
   type LoadedRef,
   makeEmbedderResolver,
@@ -23,9 +28,9 @@ import {
   makeReplyStrategy,
   makeStageClassifier,
 } from "./llm-bootstrap.ts";
-import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeRequireAuth } from "./middleware/require-auth.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
+import { makeAdminRoutes } from "./routes/admin.ts";
 import { makeAdminAdminsRoutes } from "./routes/admin-admins.ts";
 import { makeAdminAuditRoutes } from "./routes/admin-audit.ts";
 import { makeAdminBillingRoutes } from "./routes/admin-billing.ts";
@@ -36,15 +41,14 @@ import { makeAdminKbRoutes } from "./routes/admin-kb.ts";
 import { makeAdminLlmConfigsRoutes } from "./routes/admin-llm-configs.ts";
 import { makeAdminOnboardingRoutes } from "./routes/admin-onboarding.ts";
 import { makeAdminTenantRoutes } from "./routes/admin-tenant.ts";
-import { makeAdminRoutes } from "./routes/admin.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 import { makeWhatsAppWebhookRoutes } from "./routes/webhook-whatsapp.ts";
-import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 import { makeWidgetStaticRoutes } from "./routes/widget-static.ts";
+import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
 /**
  * Mapping tenant.slug → VerticalTemplate. На текущем этапе один tenant —
@@ -90,7 +94,10 @@ async function main() {
   const activeTenantIds = (
     await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.status, "active"))
   ).map((r) => r.id);
-  log.info("active tenants loaded for LLM config", { count: activeTenantIds.length, ids: activeTenantIds });
+  log.info("active tenants loaded for LLM config", {
+    count: activeTenantIds.length,
+    ids: activeTenantIds,
+  });
 
   // Per-tenant LLM configs: DB + env fallback. LoadedRef shared между
   // фабриками + tenant-reloader (mutable; reload через admin API меняет
@@ -139,7 +146,9 @@ async function main() {
       secret: cfg.authSecret,
     }),
   );
-  log.info("auth routes enabled", { tokenSecret: cfg.authSecret ? "configured" : "missing!" });
+  log.info("auth routes enabled", {
+    tokenSecret: cfg.authSecret ? "configured" : "missing!",
+  });
 
   // Authenticated admin-API под /api/admin/*. Middleware requireAuth
   // extract'ит Bearer token из Authorization header → выставляет
@@ -156,6 +165,18 @@ async function main() {
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
   await webRegistry.loadFromDb(db as any);
 
+  // Userbot (personal-account MTProto) registry + login-store — early init
+  // чтобы reloader мог подключать/тушить userbot'ы при onboarding/delete.
+  // Runner-factory + loadFromDb выставляются ниже (нужны pipeline-deps).
+  const userbotRegistry = new UserbotChannelRegistry({
+    apiId: cfg.telegramUserbot.apiId,
+    apiHash: cfg.telegramUserbot.apiHash,
+    masterKeyHex: cfg.masterKeyHex,
+    log,
+  });
+  const userbotEnabled = cfg.telegramUserbot.apiId > 0 && !!cfg.telegramUserbot.apiHash;
+  const userbotLoginStore = userbotEnabled ? new UserbotLoginStore() : undefined;
+
   // Hot-reload bus: admin routes вызывают reloadLlm/reloadChannels(tenantId)
   // после изменения, live применяя в текущем процессе. apps/worker — отдельный
   // процесс, ему пока нужен restart.
@@ -165,6 +186,7 @@ async function main() {
     ref: loadedRef,
     registry: channels,
     webRegistry,
+    userbotRegistry,
     log: (msg, ctx) => log.info(`reloader: ${msg}`, ctx ?? {}),
   });
 
@@ -219,6 +241,9 @@ async function main() {
       webhookSecret: cfg.telegramWebhookSecret,
       ...(cfg.whatsappVerifyToken ? { whatsappVerifyToken: cfg.whatsappVerifyToken } : {}),
       ...(cfg.webWidgetScriptUrl ? { webWidgetScriptUrl: cfg.webWidgetScriptUrl } : {}),
+      ...(userbotEnabled ? { telegramApiId: cfg.telegramUserbot.apiId } : {}),
+      ...(userbotEnabled ? { telegramApiHash: cfg.telegramUserbot.apiHash } : {}),
+      ...(userbotLoginStore ? { userbotLoginStore } : {}),
       onReload: reloader.reloadChannels,
     }),
   );
@@ -249,10 +274,7 @@ async function main() {
   log.info("admin-admins routes enabled (invite / list / revoke)");
 
   // Tenant info + pause/resume.
-  app.route(
-    "/",
-    makeAdminTenantRoutes({ db, onStatusChange: reloader.reloadChannels }),
-  );
+  app.route("/", makeAdminTenantRoutes({ db, onStatusChange: reloader.reloadChannels }));
   log.info("admin-tenant routes enabled (pause/resume)");
 
   // Diagnostics — health-check для tenant setup'а.
@@ -365,7 +387,9 @@ async function main() {
     app.use("/admin/*", requireTenant);
     // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
     app.route("/", makeAdminRoutes({ db: db as any }));
-    log.info("admin-api routes enabled", { baseDomain: cfg.platformBaseDomain });
+    log.info("admin-api routes enabled", {
+      baseDomain: cfg.platformBaseDomain,
+    });
   }
 
   if (cfg.whatsappVerifyToken) {
@@ -447,6 +471,45 @@ async function main() {
       err: err instanceof Error ? err : new Error(String(err)),
     });
   });
+
+  // ---- Telegram userbot wire-up (personal-account MTProto) ----
+  // Та же модель, что web: pinned-соединение + inbound-runner + отдельный
+  // outbound-dispatcher живут в apps/api. Registry владеет lifecycle'ом
+  // соединений; runner-factory инжектит pipeline-deps (replyStrategy и т.д.).
+  const userbotAbort = new AbortController();
+  let userbotDispatcherPromise: Promise<void> = Promise.resolve();
+  if (userbotEnabled) {
+    userbotRegistry.setRunnerFactory((entry, signal) =>
+      startUserbotInboundRunner({
+        entry,
+        db,
+        signal,
+        replyStrategy: replyStrategy ?? null,
+        resolveTemplate,
+        memoryExtractor,
+        stageClassifier,
+        sink,
+        metrics,
+        log,
+      }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
+    await userbotRegistry.loadFromDb(db as any);
+    const userbotDispatcher = new UserbotOutboundDispatcher(db, userbotRegistry, {
+      pollMs: cfg.telegramUserbot.dispatcherPollMs,
+      batchSize: cfg.telegramUserbot.dispatcherBatchSize,
+      metrics,
+      log,
+    });
+    userbotDispatcherPromise = userbotDispatcher.run(userbotAbort.signal).catch((err) => {
+      log.error("userbot dispatcher fatal", {
+        err: err instanceof Error ? err : new Error(String(err)),
+      });
+    });
+    log.info("channel-userbot enabled", { connected: userbotRegistry.size() });
+  } else {
+    log.info("channel-userbot disabled — TELEGRAM_API_ID/HASH not set");
+  }
   const wsRoutes = makeWebSocketRoutes({
     registry: webRegistry,
     log,
@@ -481,7 +544,10 @@ async function main() {
     websocket: wsRoutes.websocket,
   });
 
-  log.info("listening", { port: server.port, url: `http://localhost:${server.port}` });
+  log.info("listening", {
+    port: server.port,
+    url: `http://localhost:${server.port}`,
+  });
 
   // Graceful shutdown: дренируем channels, закрываем DB-пул.
   const shutdown = async () => {
@@ -489,8 +555,11 @@ async function main() {
     server.stop();
     webAbort.abort();
     webDispatcher.stop();
-    await Promise.allSettled([webDispatcherPromise, ...webRunners]);
+    userbotAbort.abort();
+    await Promise.allSettled([webDispatcherPromise, ...webRunners, userbotDispatcherPromise]);
     webRegistry.closeAll();
+    await userbotRegistry.closeAll();
+    if (userbotLoginStore) await userbotLoginStore.stop();
     channels.closeAll();
     // Flush buffered usage events перед close DB.
     await usageWriter.stop();
@@ -503,6 +572,8 @@ async function main() {
 
 main().catch((err) => {
   const log = makeDefaultLogger("apps/api");
-  log.error("fatal", { err: err instanceof Error ? err : new Error(String(err)) });
+  log.error("fatal", {
+    err: err instanceof Error ? err : new Error(String(err)),
+  });
   process.exit(1);
 });

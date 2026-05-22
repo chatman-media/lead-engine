@@ -1165,3 +1165,100 @@ a:hover {
   font-size: 11px;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
+
+/* ── Onboarding wizard ─────────────────────────────────────────────────── */
+
+.wizard-steps {
+  list-style: none;
+  margin: 0 0 28px;
+  padding: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.wizard-step {
+  flex: 1;
+}
+
+.wizard-step-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.wizard-step-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.wizard-step.active .wizard-step-btn {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.wizard-step-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.wizard-step.active .wizard-step-mark {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.wizard-step.done .wizard-step-mark {
+  background: rgba(145, 217, 144, 0.15);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.wizard-step-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.wizard-key-block {
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+
+.wizard-key-block:first-of-type {
+  border-top: 0;
+}
+
+.wizard-key-block h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wizard-next {
+  margin-top: 18px;
+  padding: 10px 20px;
+  background: var(--accent);
+  color: #0b0d10;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.wizard-next:hover {
+  background: var(--accent-2);
+}

@@ -62,9 +62,29 @@ export interface ChannelItem {
   externalId: string;
   status: ChannelStatus;
   hasCredentials: boolean;
+  /** Для telegram_userbot/bot — @username из metadata (если есть). */
+  username?: string | null;
   createdAt: number;
   updatedAt: number;
 }
+
+export interface UserbotLoginStartResult {
+  ok: boolean;
+  loginId: string;
+  awaiting: "code";
+}
+
+/** verify/2fa: либо запрашиваем 2FA, либо логин завершён (канал создан). */
+export type UserbotLoginStepResult =
+  | { ok: true; awaiting: "2fa" }
+  | {
+      ok: true;
+      id: number;
+      updated: boolean;
+      externalId: string;
+      username: string | null;
+      reloadError?: string;
+    };
 
 export interface CreateTelegramChannelResult {
   ok: boolean;
@@ -305,11 +325,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(
-  path: string,
-  init: RequestInit = {},
-  withAuth = true,
-): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, withAuth = true): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...((init.headers as Record<string, string>) ?? {}),
@@ -320,7 +336,7 @@ async function request<T>(
   }
   const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     const errorCode = (body.error as string | undefined) ?? res.statusText;
     // Preserve extra body fields for callers that want richer error details
     // (e.g. upgradeHint in 402 quota-exceeded responses).
@@ -338,7 +354,7 @@ async function uploadMultipart<T>(path: string, form: FormData): Promise<T> {
     body: form,
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     const errorCode = (body.error as string | undefined) ?? res.statusText;
     const { error: _e, ...extra } = body;
     throw new ApiError(res.status, errorCode, Object.keys(extra).length > 0 ? extra : undefined);
@@ -402,10 +418,9 @@ export const saas = {
     return uploadMultipart<KbUploadResult>("/api/admin/kb/documents", form);
   },
   deleteDoc(id: number) {
-    return request<{ ok: boolean; deleted: number }>(
-      `/api/admin/kb/documents/${id}`,
-      { method: "DELETE" },
-    );
+    return request<{ ok: boolean; deleted: number }>(`/api/admin/kb/documents/${id}`, {
+      method: "DELETE",
+    });
   },
 
   // ── LLM provider configs (per-tenant) ───────────────────────────────
@@ -419,10 +434,9 @@ export const saas = {
     );
   },
   deleteLlmConfig(purpose: LlmPurpose) {
-    return request<{ ok: boolean; deleted: number }>(
-      `/api/admin/llm-configs/${purpose}`,
-      { method: "DELETE" },
-    );
+    return request<{ ok: boolean; deleted: number }>(`/api/admin/llm-configs/${purpose}`, {
+      method: "DELETE",
+    });
   },
 
   // ── Channels (per-tenant) ────────────────────────────────────────────
@@ -445,11 +459,7 @@ export const saas = {
       body: JSON.stringify(input),
     });
   },
-  createWebChannel(input: {
-    externalId?: string;
-    brandName?: string;
-    primaryColor?: string;
-  } = {}) {
+  createWebChannel(input: { externalId?: string; brandName?: string; primaryColor?: string } = {}) {
     return request<CreateWebChannelResult>("/api/admin/channels/web", {
       method: "POST",
       body: JSON.stringify(input),
@@ -457,6 +467,25 @@ export const saas = {
   },
   getWebSnippet() {
     return request<WebSnippet>("/api/admin/channels/web/snippet");
+  },
+  // ── Telegram userbot (личный аккаунт, MTProto) — пошаговый логин ──────
+  startUserbotLogin(phone: string) {
+    return request<UserbotLoginStartResult>("/api/admin/channels/userbot/start", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    });
+  },
+  verifyUserbotCode(loginId: string, code: string) {
+    return request<UserbotLoginStepResult>("/api/admin/channels/userbot/verify", {
+      method: "POST",
+      body: JSON.stringify({ loginId, code }),
+    });
+  },
+  submitUserbot2fa(loginId: string, password: string) {
+    return request<UserbotLoginStepResult>("/api/admin/channels/userbot/2fa", {
+      method: "POST",
+      body: JSON.stringify({ loginId, password }),
+    });
   },
   deleteChannel(id: number) {
     return request<{ ok: boolean; deleted: number }>(`/api/admin/channels/${id}`, {
@@ -497,10 +526,10 @@ export const saas = {
     });
   },
   setConversationMode(id: number, mode: "ai" | "human") {
-    return request<{ ok: boolean; mode: "ai" | "human" }>(
-      `/api/admin/conversations/${id}/mode`,
-      { method: "PUT", body: JSON.stringify({ mode }) },
-    );
+    return request<{ ok: boolean; mode: "ai" | "human" }>(`/api/admin/conversations/${id}/mode`, {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    });
   },
 
   // ── Diagnostics ──────────────────────────────────────────────────────
@@ -535,10 +564,10 @@ export const saas = {
     }>("/api/admin/billing/plans");
   },
   createCheckoutSession(plan: "starter" | "pro") {
-    return request<{ ok: boolean; url: string; sessionId: string }>(
-      "/api/admin/billing/checkout",
-      { method: "POST", body: JSON.stringify({ plan }) },
-    );
+    return request<{ ok: boolean; url: string; sessionId: string }>("/api/admin/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan }),
+    });
   },
   createBillingPortalSession(returnUrl?: string) {
     return request<{ ok: boolean; url: string }>("/api/admin/billing/portal", {
