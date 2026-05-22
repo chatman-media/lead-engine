@@ -35,6 +35,8 @@ export function SaasConversations() {
 
   const [list, setList] = useState<ConversationListItem[]>([]);
   const [listLoading, setListLoading] = useState(true);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [detail, setDetail] = useState<{
     conversation: ConversationDetail;
     messages: MessageRow[];
@@ -56,11 +58,27 @@ export function SaasConversations() {
 
   async function refreshList() {
     try {
-      const res = await saas.listConversations({ limit: 50 });
+      const res = await saas.listConversations({ limit: 30 });
       setList(res.items);
+      setNextCursor(res.nextCursor ?? null);
     } catch (err) {
       if (handleAuthError(err)) return;
       setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await saas.listConversations({ limit: 30, cursor: nextCursor });
+      setList((prev) => [...prev, ...res.items]);
+      setNextCursor(res.nextCursor ?? null);
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -184,32 +202,44 @@ export function SaasConversations() {
 
       <div className="inbox-grid">
         <aside className="inbox-sidebar">
-          <h2>Список ({list.length})</h2>
+          <h2>Список ({list.length}{nextCursor ? "+" : ""})</h2>
           {listLoading ? (
             <p className="muted">Загрузка…</p>
           ) : list.length === 0 ? (
             <p className="empty-state">Пока нет диалогов</p>
           ) : (
-            <ul className="inbox-list">
-              {list.map((c) => (
-                <li key={c.id}>
-                  <Link
-                    to={`/conversations/${c.id}`}
-                    className={`inbox-item ${c.id === selectedId ? "active" : ""}`}
-                  >
-                    <div className="inbox-item-head">
-                      <strong>{c.contactName ?? `Контакт #${c.contactId}`}</strong>
-                      <small>{fmtTime(c.lastMessageAt)}</small>
-                    </div>
-                    <small className="inbox-item-meta">
-                      <span className="badge">{c.source}</span>{" "}
-                      <span className="badge">{c.mode}</span>{" "}
-                      {c.currentStage && <span className="badge">{c.currentStage}</span>}
-                    </small>
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="inbox-list">
+                {list.map((c) => (
+                  <li key={c.id}>
+                    <Link
+                      to={`/conversations/${c.id}`}
+                      className={`inbox-item ${c.id === selectedId ? "active" : ""}`}
+                    >
+                      <div className="inbox-item-head">
+                        <strong>{c.contactName ?? `Контакт #${c.contactId}`}</strong>
+                        <small>{fmtTime(c.lastMessageAt)}</small>
+                      </div>
+                      <small className="inbox-item-meta">
+                        <span className="badge">{c.source}</span>{" "}
+                        <span className="badge">{c.mode}</span>{" "}
+                        {c.currentStage && <span className="badge">{c.currentStage}</span>}
+                      </small>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              {nextCursor && (
+                <button
+                  type="button"
+                  className="inbox-load-more"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? "Загружаем…" : "Загрузить ещё"}
+                </button>
+              )}
+            </>
           )}
         </aside>
 

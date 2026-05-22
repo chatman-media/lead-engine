@@ -23,6 +23,7 @@ const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
 const CHECK_LABELS: Record<string, string> = {
   "channel.telegram": "Telegram канал",
   "llm.chat": "LLM (chat)",
+  "llm.ping": "LLM live ping",
   "llm.embed": "LLM (embed)",
   tenant_secrets: "Шифрование секретов",
 };
@@ -33,11 +34,11 @@ export function SaasDiagnostics() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
 
-  async function run() {
+  async function run(live = false) {
     setRunning(true);
     setError("");
     try {
-      const res = await saas.runDiagnostics();
+      const res = await saas.runDiagnostics({ live });
       setResult(res);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -68,14 +69,25 @@ export function SaasDiagnostics() {
       {error && <div className="dashboard-error">{error}</div>}
 
       <section className="settings-section">
-        <button
-          type="button"
-          onClick={run}
-          disabled={running}
-          className="diag-run-btn"
-        >
-          {running ? "Проверяем…" : result ? "Перепроверить" : "Запустить проверку"}
-        </button>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => run(false)}
+            disabled={running}
+            className="diag-run-btn"
+          >
+            {running ? "Проверяем…" : result ? "Перепроверить" : "Запустить проверку"}
+          </button>
+          <button
+            type="button"
+            onClick={() => run(true)}
+            disabled={running}
+            className="diag-run-btn diag-run-btn-secondary"
+            title="Делает реальный LLM-вызов (~1 токен) для проверки connectivity"
+          >
+            {running ? "Проверяем…" : "Live LLM ping"}
+          </button>
+        </div>
 
         {result && (
           <>

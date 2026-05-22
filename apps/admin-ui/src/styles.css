@@ -823,6 +823,28 @@ a:hover {
   margin-top: 4px;
 }
 
+.inbox-load-more {
+  width: 100%;
+  padding: 8px;
+  margin-top: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.inbox-load-more:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.inbox-load-more:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .inbox-thread {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1030,6 +1052,16 @@ a:hover {
 .diag-run-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.diag-run-btn-secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.diag-run-btn-secondary:hover:not(:disabled) {
+  background: rgba(106, 166, 255, 0.1);
 }
 
 .diag-summary {
