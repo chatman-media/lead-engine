@@ -54,7 +54,10 @@ export function SaasDashboard() {
       const list = await saas.listDocs();
       setDocs(list.items);
     } catch (err) {
-      if (!onAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+      // KB-роуты на бэкенде включаются только если у какого-то тенанта есть
+      // embed-конфиг (boot-gate) — иначе listDocs отдаёт 404. Это не ошибка
+      // дашборда: считаем, что документов пока нет, и не пугаем баннером.
+      if (!onAuthError(err)) setDocs([]);
     }
   }
   async function refreshOnboarding() {
