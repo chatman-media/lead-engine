@@ -322,8 +322,12 @@ export const leads = pgTable("leads", {
   id: serial("id").primaryKey(),
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   userId: integer("user_id").notNull().unique().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
+  // TODO Phase 2 (multi-vertical): `state` default должен браться из
+  // первого funnelStage vertical-template'а конкретного tenant'а (не хардкод).
   state: text("state").notNull().default("intake_pending"),
   intakeJson: text("intake_json"),
+  // TODO Phase 2: rename visa_docs_json → custom_data_json (generic JSONB
+  // blob для любого vertical, не только UAE). Потребует migration 0011+.
   visaDocsJson: text("visa_docs_json"),
   applicationId: text("application_id").unique(),
   opsChatId: bigint("ops_chat_id", { mode: "number" }),
@@ -336,10 +340,15 @@ export const leads = pgTable("leads", {
   lastCheckinAt: integer("last_checkin_at"),
   // Step-by-step visa-anketa interview: ключ VisaFields, на ответ по которому
   // бот сейчас ждёт. NULL = интервью не идёт.
+  // TODO Phase 2: rename visa_interview_field → questionnaire_field (generic).
   visaInterviewField: text("visa_interview_field"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
+  // TODO Phase 2 (multi-vertical): убрать hardcoded UAE stage slugs.
+  // Заменить на dynamic check per-tenant vertical template либо убрать вовсе
+  // (application-level validation через funnel-machine достаточна).
+  // Пока Phase 1 = recruitment-only, этот constraint не блокирует.
   check(
     "leads_state_check",
     sql`${t.state} IN ('intake_pending','intake_complete','approved','partner_review','rejected','docs_pending','docs_complete','visa_form','visa_filing','visa_waiting','ready_to_work','closed')`,
