@@ -25,19 +25,36 @@ AI отвечает клиентам через эти каналы. Operator м
 Полный цикл онбординга **без env vars, без рестартов**:
 
 ```
-1. /signup       → email + password → JWT + tenant created
-2. /channels     → paste @BotFather token → backend setWebhook + encrypt + reload
-                   ✓ Бот принимает inbound сразу
-3. /settings     → save OpenAI key → encrypted AES-256-GCM в tenant_secrets,
-                   InMemoryLlmRouter.invalidate + setConfig → hot-reload
-                   ✓ AI готов отвечать
+1. /signup       → email + password → JWT + tenant created (free plan)
+2. /channels     → tab Telegram: paste @BotFather token → auto setWebhook + encrypt + reload
+                   tab WhatsApp: paste { phoneNumberId, accessToken } → Meta Graph
+                   validate → encrypt + webhook-setup-hint для Meta dashboard
+                   ✓ Каналы принимают inbound сразу (Worker reload ≤30s)
+3. /settings     → save OpenAI / Anthropic / Ollama key → encrypted AES-256-GCM,
+                   InMemoryLlmRouter hot-reload → ✓ AI готов отвечать
 4. /dashboard    → upload .txt / .md / .json → ingest + embed → kb_chunks
                    ✓ RAG-ответы по знаниям бизнеса
-5. /conversations → inbox с auto-poll 5s, operator может перехватить
-                   (mode='human' → AI замолкает на этом диалоге)
-6. /audit        → кто из админов что менял
+5. /conversations → inbox с auto-poll 5s. "Перехватить" → mode='human' →
+                   AI замолкает на этом диалоге. "Вернуть AI" → обратно
+6. /audit        → кто из админов что менял (всё PUT/POST/DELETE)
 7. /diagnostics  → health check всего setup'а одной кнопкой
+8. /dashboard    → PlanWidget: usage bars + "Upgrade Starter $49 / Pro $149"
+                   → Stripe Checkout (14-day trial) → webhook поднимает план →
+                   quota мгновенно увеличивается
 ```
+
+**Quota по tier'ам** (см. `apps/api/src/lib/plans.ts`):
+
+| Plan | Channels | KB docs | Rate/min | Цена |
+|---|---|---|---|---|
+| `free` | 1 | 50 | 30 | $0 |
+| `starter` | 3 | 500 | 60 | $49/мес |
+| `pro` | 10 | 10000 | 120 | $149/мес |
+| `enterprise` | 100 | 100000 | 600 | custom (self-host) |
+
+Превышение лимита на channel/KB POST → `402 Payment Required` со structured
+response (`{ reason, limit, current, plan, upgradeHint }`) — UI показывает
+"Upgrade" CTA.
 
 Изменения применяются **live** через in-process bus (`apps/api`) +
 30-сек polling reload (`apps/worker`). Подробности в
@@ -225,7 +242,10 @@ secret_token=<TELEGRAM_WEBHOOK_SECRET>)`. Канал работает сразу
 |---|---|---|
 | `PUT /api/admin/llm-configs/:purpose` | `InMemoryLlmRouter.invalidate(tenantId)` + setConfig + mutate `LoadedRef.current` | instant |
 | `POST /api/admin/channels/telegram` | `ChannelRegistry.reloadTenant(tenantId)` в `apps/api` instant; `apps/worker` подхватит через polling | instant в api, ≤30s в worker |
+| `POST /api/admin/channels/whatsapp` | то же, Meta webhook setup в Meta dashboard ручной | instant в api, ≤30s в worker |
 | `PUT /api/admin/tenant/status` (pause/resume) | reloadChannels — evict при pause, restore при resume | instant в api |
+| `PUT /api/admin/conversations/:id/mode` | mutate `conversations.mode`, pipeline сразу respect'ит | instant |
+| Stripe webhook `customer.subscription.*` | `tenants.plan` mutates на основе priceId map | instant (после Stripe delivery) |
 | KB upload | DrizzleKbStore читает live из БД | instant |
 
 Подробности в [`docs/ARCHITECTURE.md#hot-reload`](docs/ARCHITECTURE.md).
@@ -244,10 +264,11 @@ POST   /api/auth/logout                          — invalidate (client-side)
 
 GET    /api/admin/onboarding-status              — checklist (channel/llm/kb)
 GET    /api/admin/tenant                         — { id, slug, plan, status, ... }
-PUT    /api/admin/tenant/status                  — { paused: boolean }
+PUT    /api/admin/tenant/status                  — { paused: boolean } → pause/resume
 GET    /api/admin/diagnostics                    — health-check (channel + LLM + KB)
 
 POST   /api/admin/channels/telegram              — { botToken } → auto-setWebhook
+POST   /api/admin/channels/whatsapp              — { phoneNumberId, accessToken } → Meta Graph validate + webhook-setup-hint
 GET    /api/admin/channels                       — list (без credentials)
 DELETE /api/admin/channels/:id
 
@@ -262,8 +283,14 @@ DELETE /api/admin/kb/documents/:id
 GET    /api/admin/conversations                  — paginated list (cursor)
 GET    /api/admin/conversations/:id              — thread + messages
 POST   /api/admin/conversations/:id/reply        — operator reply (mode=human)
+PUT    /api/admin/conversations/:id/mode         — { mode: 'ai'|'human' } toggle takeover
 
 GET    /api/admin/audit-log                      — cursor-paginated audit history
+
+GET    /api/admin/billing/plan                   — current plan + usage + status
+GET    /api/admin/billing/plans                  — list 4 tiers + stripeEnabled bool
+POST   /api/admin/billing/checkout               — { plan: 'starter'|'pro' } → Stripe Checkout URL
+POST   /api/admin/billing/portal                 — Stripe Customer Portal URL
 ```
 
 ---
@@ -274,7 +301,9 @@ GET    /api/admin/audit-log                      — cursor-paginated audit hist
 DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 ```
 
-**700+ tests** в ~60 файлах. Highlights:
+**741 tests** в 13 пакетах (apps/api: 305; kb: 156; sales: 116; conversation-engine: 59;
+worker: 15; storage: 15; channel-whatsapp: 17; observability: 16; channel-telegram: 11;
+channel-web: 11; llm-router: 9; verticals: 6; vertical-recruitment-uae: 5). Highlights:
 
 - **Multi-tenant E2E** (`apps/api/src/multi-tenant.integration.test.ts`): tenant isolation через real webhook handler + admin API
 - **RLS contract** (`packages/storage/src/rls.integration.test.ts`): non-bypass role validation
@@ -299,6 +328,9 @@ DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 | `PLATFORM_PUBLIC_URL` | opt | Базовый URL apps/api для auto-setWebhook (`https://api.example.com`) |
 | `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | opt | Meta webhook setup |
 | `WEB_WS_AUTH_SECRET` | opt | Shared secret для `/ws/:slug?auth=...` |
+| `STRIPE_SECRET_KEY` | opt | `sk_test_xxx` / `sk_live_xxx`. Пусто → `/checkout` и `/portal` вернут 503 |
+| `STRIPE_PRICE_STARTER` / `STRIPE_PRICE_PRO` | opt | Price IDs из Stripe dashboard. Webhook handler маппит priceId → plan |
+| `STRIPE_CHECKOUT_SUCCESS_URL` / `STRIPE_CHECKOUT_CANCEL_URL` | opt | Redirect URLs (поддерживают `{TENANT}` placeholder) |
 | `STRIPE_WEBHOOK_SECRET` | opt | Stripe webhook HMAC |
 | `LLM_*` / `LLM_EMBED_*` | opt | Env fallback если у tenant'а нет DB config'а |
 | `RATE_LIMIT_PER_MIN` / `RATE_LIMIT_PER_HOUR` | opt | Default 60 / 600. `0` = disabled |
@@ -311,8 +343,11 @@ DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 - [ ] `WHATSAPP_APP_SECRET` set если WhatsApp активен
 - [ ] `WEB_WS_AUTH_SECRET` set если web channels активны (или JWT-auth)
 - [ ] `PLATFORM_MASTER_KEY` ротировать через `rotate-master-key.ts` скрипт
-- [ ] `PLATFORM_PUBLIC_URL` set для auto-setWebhook UX
+- [ ] `PLATFORM_PUBLIC_URL` set для auto-setWebhook UX (Telegram channel onboarding)
 - [ ] `RATE_LIMIT_*` set (не оставлять disabled в prod — runaway-cost защита)
+- [ ] Stripe: `STRIPE_SECRET_KEY` + `STRIPE_PRICE_STARTER` + `STRIPE_PRICE_PRO` +
+      `STRIPE_WEBHOOK_SECRET` + success/cancel URLs. В Stripe dashboard
+      зарегистрировать webhook на `<PLATFORM_PUBLIC_URL>/webhook/stripe`
 - [ ] Boot log check: `"RLS enforced"` в info; `"RLS not enforced"` warn = misconfigured
 
 ---

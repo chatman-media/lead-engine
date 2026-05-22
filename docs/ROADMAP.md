@@ -24,7 +24,7 @@ agency mode + operator handoff first-class + OSS-ready core**.
 - ✅ Multi-tenant ground (`tenant_id` + FORCE RLS + `withTenant`)
 - ✅ Vertical templates registry (`recruitment_uae_v1` — реальный прод-tenant)
 
-### SaaS self-service (PR #19–33, 12 PRs в одной сессии)
+### SaaS self-service (PR #19–38, 16 PRs)
 
 - ✅ **Auth** — HMAC-SHA256 stateless tokens, `bun.password` (argon2id)
 - ✅ **KB upload UI** — multipart файлы + paste text, dedup по `content_hash`
@@ -41,6 +41,15 @@ agency mode + operator handoff first-class + OSS-ready core**.
 - ✅ **Tenant pause/resume** — `status='suspended'` → channels evict via reloadChannels
 - ✅ **Diagnostics page** — health-check кнопка (channel + LLM + KB)
 - ✅ **Inbound rate limiter** — sliding-window per tenant (60/min, 600/hour default)
+- ✅ **Conversation mode toggle** (PR #35) — operator "Перехватить" → mode='human',
+  AI замолкает; "Вернуть AI" → mode='ai'
+- ✅ **WhatsApp channel onboarding via UI** (PR #36) — paste {phoneNumberId, accessToken}
+  → Meta Graph validate (`getPhoneInfo`) → encrypt + webhook-setup-hint snippet
+- ✅ **Plan tiers + quota** (PR #37) — free/starter/pro/enterprise с лимитами
+  channels + KB docs + rate. POST channel/KB → 402 over-limit с upgradeHint
+- ✅ **Stripe checkout + portal + webhook sync** (PR #38) — `POST /billing/checkout` →
+  Stripe Checkout 14-day trial; `POST /billing/portal` → Customer Portal;
+  webhook `customer.subscription.*` mutates `tenants.plan` по priceId map
 
 ### Reliability infra
 
@@ -50,7 +59,10 @@ agency mode + operator handoff first-class + OSS-ready core**.
 - ✅ Signature verification (Telegram secret-token, WhatsApp HMAC, Stripe HMAC)
 - ✅ Anti-enumeration в whatsapp-webhook (signature check до tenant lookup)
 - ✅ Observability — `PlatformMetrics` + `JsonLogger` + `makeMetricsSink`
-- ✅ **700+ tests** (multi-tenant E2E, RLS contract, withTenant wiring, split-pipeline invariant, ratelimit, hot-reload)
+- ✅ **741 tests** across 13 packages (apps/api: 305; kb: 156; sales: 116;
+  conversation-engine: 59; channel-whatsapp: 17; observability: 16; worker: 15;
+  storage: 15; channel-telegram: 11; channel-web: 11; llm-router: 9;
+  verticals: 6; vertical-recruitment-uae: 5). 0 fail.
 
 ---
 
@@ -59,33 +71,33 @@ agency mode + operator handoff first-class + OSS-ready core**.
 Цель: довести продукт до точки **"платящий клиент №1"** + добавить
 critical channel coverage.
 
-### M1. Stripe billing wire-up
+### ✅ M1. Stripe billing wire-up — DONE (PR #37 M1a + PR #38 M1b)
 
-Схема `stripe_customers` / `stripe_subscriptions` уже есть (миграция
-0006). Не хватает:
+- ✅ Plan tiers: `free` (1 канал, 50 docs, 30/min), `starter` $49/мес (3/500/60),
+  `pro` $149/мес (10/10K/120), `enterprise` (100/100K/600, self-host)
+- ✅ `POST /api/admin/billing/checkout` — создаёт Stripe Checkout Session
+  (subscription mode + 14-day trial + `client_reference_id=tenantId`)
+- ✅ `/webhook/stripe` обрабатывает `customer.subscription.*` events,
+  mutates `tenants.plan` по `priceId → plan` map
+- ✅ Plan enforcement: `canAddChannel` / `canAddKbDocument` в routes →
+  402 с `{ reason, limit, current, plan, upgradeHint }`
+- ✅ `POST /api/admin/billing/portal` — Stripe Customer Portal session
+- ✅ Trial: 14 дней (через `subscription_data[trial_period_days]=14`)
+- 🔲 **Plan-aware rate-limiter** — сейчас env-based default 60/min; full
+  plan integration → DB-backed counters (M14, Q1'27)
+- 🔲 **Email уведомления** trial-ending / payment-failed — TODO (нужна
+  email-infra: SES / Resend integration)
 
-- [ ] Plan tiers: `free` (100 convo/мес, 1 канал, 50 КБ docs), `starter`
-  $49/мес (1K convo, 3 канала, 500 docs), `pro` $149/мес (10K, 10
-  каналов, unlimited), `enterprise` self-host (см. COMPETITORS §6)
-- [ ] `POST /api/admin/billing/checkout` — создаёт Stripe Checkout Session
-- [ ] `POST /webhook/stripe` (route уже есть!) — обрабатывать
-  `customer.subscription.created/updated/deleted`, mutate `tenants.plan`
-- [ ] Plan enforcement: rate-limiter читает лимит из plan
-- [ ] Stripe Customer Portal link в `/settings`
-- [ ] Trial: 14 дней `pro` после signup, потом downgrade на `free`
+### ✅ M2. WhatsApp channel UI — DONE (PR #36)
 
-**Bizdev**: первые 3–5 клиентов вручную выставлять счёт. Stripe важен
-когда onboard #5+.
-
-### M2. WhatsApp channel UI
-
-Telegram-onboarding уже работает. WhatsApp template-flow:
-
-- [ ] UI `/channels` → tab "WhatsApp" → paste {phone_number_id, access_token}
-- [ ] Encrypt token, insert `channels(kind='whatsapp')`
-- [ ] Meta webhook setup (нельзя авто — UI генерит copy-paste snippet
-  с verify_token + URL для Meta dashboard)
-- [ ] Diagnostics check для WhatsApp: `GET /<phone_number_id>/messaging_profile`
+- ✅ UI `/channels` → tab "WhatsApp" → form {phoneNumberId, accessToken,
+  businessAccountId?}
+- ✅ Encrypt token (AES-256-GCM), insert `channels(kind='whatsapp')`
+- ✅ Meta webhook setup: UI после create показывает `webhookSetupHint`
+  с URL + verify_token для Meta dashboard copy-paste
+- ✅ `WhatsAppClient.getPhoneInfo()` — validate token + phone_number_id +
+  return verifiedName + displayPhoneNumber + qualityRating
+- 🔲 Diagnostics check для WhatsApp в `/diagnostics` — TODO
 
 ### M3. Embed widget для web
 
@@ -107,13 +119,13 @@ JS. Нужен:
   без billing/channels)
 - [ ] UI `/team` — list + invite + remove
 
-### M5. Per-conversation `role='human'` enforcement
+### ✅ M5. Per-conversation `role='human'` enforcement — DONE (PR #35)
 
-Сейчас `operator-reply` ставит `mode='human'` но pipeline не читает —
-AI снова отвечает на следующий inbound. Fix:
-
-- [ ] processInbound читает `mode='human'` → пропускает reply.generate
-- [ ] UI badge "Manual mode" + кнопка "Return to AI" (mode → 'ai')
+- ✅ `processInbound:347` уже respect'ит `conversation.mode === 'ai'` для запуска
+  reply.generate (фиксили инспекцией — pipeline check уже был там)
+- ✅ UI badge `[AI | оператор]` + кнопка "Перехватить" / "Вернуть AI"
+- ✅ `PUT /api/admin/conversations/:id/mode` — { mode: 'ai'|'human' }, audit-log
+  пишет `conversation.mode.takeover` / `.return_to_ai`
 
 ---
 
@@ -295,13 +307,17 @@ Vision purpose уже в schema (`llm_provider_configs.purpose='vision'`):
 
 | Метрика | Сейчас | Q3 target | Q4 target | Q1'27 target |
 |---|---|---|---|---|
-| Signup → first bot reply | ~10 мин (manual help) | < 5 мин self-serve | < 3 мин | < 2 мин |
+| Signup → first bot reply | < 5 мин self-serve ✅ | < 5 мин | < 3 мин | < 2 мин |
 | Active tenants | 1 (sales-guru legacy) | 5–10 | 25–50 | 100+ |
 | MRR | $0 | $1K | $10K | $50K |
-| Channel coverage | TG bot + WA backend + web | + WA UI + widget | + TG userbot UI | + voice |
+| Channel coverage | TG (UI) + WA (UI) + web | + widget | + TG userbot UI | + voice |
 | Vertical templates | 1 (UAE) | 1 | 5 | 8 |
-| Tests | 700+ | 1K+ | 1.5K+ | 2K+ |
+| Tests | 741 | 1K+ | 1.5K+ | 2K+ |
 | Compliance | none | none | none | SOC 2 Type I in flight |
+| Monetization | Stripe-ready ✅ | first paying #1 | $10K MRR | $50K MRR |
+
+**Q3 status:** M1 ✅, M2 ✅, M5 ✅. M3 (embed widget) и M4 (multi-admin invite)
+остались.
 
 ---
 
@@ -325,13 +341,27 @@ Vision purpose уже в schema (`llm_provider_configs.purpose='vision'`):
 
 ## Краткий summary
 
-**Где мы сейчас:** инфра-фундамент готов, self-service onboarding работает
-(12 PR'ов за май 2026), 1 живой prod tenant (recruitment UAE), 700+ tests,
-hot-reload без рестартов, multi-tenant с RLS.
+**Где мы сейчас (после 17 PR'ов май 2026):**
 
-**Куда движемся:** monetization (Stripe), channel coverage (WhatsApp UI,
-web widget, voice), vertical packs (e-commerce / real-estate / clinic /
-edtech), агентность (tool-loop), enterprise readiness (SOC 2).
+- Self-service onboarding работает end-to-end без env vars / рестартов
+- Channels: **Telegram + WhatsApp** через UI с auto-validate + encrypt + hot-reload
+- LLM: BYOK для OpenAI / Anthropic / OpenRouter / Ollama, hot-reload
+- KB: file/text upload + RAG retrieval, dedup по content_hash
+- **Stripe billing wired** — checkout с 14-day trial, customer portal, webhook
+  sync `tenants.plan`. 402 quota enforcement
+- Operator: inbox с auto-poll 5s, reply через UI, mode-toggle для takeover,
+  audit log всех действий, diagnostics, pause/resume bot
+- 741 tests, multi-tenant RLS, encrypted secrets, rate-limit, observability
+- 1 живой prod tenant (recruitment UAE), Stripe-ready
+
+**Куда движемся (Q3'26 финиш):** embed widget для web (M3), multi-admin
+invite (M4).
+
+**Q4'26:** 5 vertical packs (e-commerce / real-estate / clinic / edtech /
+recruitment v2), agentic tool-loop (calendar/CRM/payment), AmoCRM/Bitrix24
+для CIS, TG userbot UI.
+
+**Q1'27:** SOC 2 Type I, voice channel (Vapi), self-host AGPL dual edition.
 
 **Где наш moat:** BYOK + Telegram-native + multi-tenant agency + operator
 handoff first-class + OSS-ready. См. [`COMPETITORS.md`](COMPETITORS.md) §5.
