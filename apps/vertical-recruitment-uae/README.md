@@ -9,7 +9,7 @@ Vertical template для рекрутинговых агентств: найм �
 - Определяет 12-state funnel machine (intake_pending → closed/rejected)
 - 15-field intake questionnaire (анкета кандидата, включая фото/видео)
 - 32-field step-by-step visa interview (для китайской рабочей визы, латиница)
-- 4 production-curated sales-styles (alina-infinity, flirty-belfort,
+- 3 production-curated sales-styles (flirty-belfort,
   empathetic-nepq, cold-direct-pas)
 - Регистрируется в `@chatman-media/verticals#defaultRegistry` через side-effect
   import

@@ -16,7 +16,7 @@ export interface ExperimentRow {
 
 /**
  * Experiments repo. allocation_json — TEXT с JSON-массивом
- *   [{ "style_slug": "alina-infinity-v1", "weight": 2 }, ...]
+ *   [{ "style_slug": "empathetic-nepq-v1", "weight": 2 }, ...]
  * status — enum 'draft|running|paused|done' (storage CHECK).
  */
 export class ExperimentsRepo {

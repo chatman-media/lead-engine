@@ -6,7 +6,7 @@ export const flirtyBelfort: Style = StyleSchema.parse({
   persona: {
     name: "Алина",
     role: "human",
-    company: "ALINA Models",
+    company: "Agency",
     facts: {
       city: "Шаохинге",
       age: "26",

@@ -15,7 +15,6 @@ export {
   RECRUITMENT_UAE_INTAKE,
 } from "./intake.ts";
 export {
-  alinaInfinity,
   coldDirectPas,
   empatheticNepq,
   flirtyBelfort,

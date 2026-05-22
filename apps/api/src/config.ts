@@ -48,7 +48,7 @@ export interface ApiConfig {
   /**
    * Опционально: дополнительный fast-path SELECT во время /healthz —
    * если БД лежит, мы возвращаем 503 и трафик переключается на старый
-   * sales-guru до восстановления.
+   * production-db до восстановления.
    */
   healthCheckTimeoutMs: number;
   /**
@@ -87,7 +87,7 @@ export interface ApiConfig {
    * Пусто = answerWithRag fallback на DEFAULT_PERSONA.
    *
    * Доступные styles в legacy tenant'е (после seed-styles script):
-   *   alina-infinity-v1, flirty-belfort-v1, empathetic-nepq-v1, cold-direct-pas-v1
+   *   flirty-belfort-v1, empathetic-nepq-v1, cold-direct-pas-v1
    */
   defaultStyleSlug: string;
   /**

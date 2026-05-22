@@ -1,5 +1,5 @@
-// Полная schema платформы. Сгенерирована из миграции production-БД sales-guru
-// (см. migrations/pg_schema.sql в репозитории chatman-media/sales-guru).
+// Полная schema платформы.
+// Drizzle — единственный источник истины по DDL начиная с первой migration.
 //
 // Этап 1 re-design (план в lead-engine):
 //   1. Перенести ВСЕ 24 таблицы прод-БД в Drizzle, чтобы пакет storage стал

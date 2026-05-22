@@ -135,13 +135,13 @@ Also rewrite `@/rag/*` imports in any **surviving** test files (see triage).
   `types.ts`, `self-play/` (judge, orchestrator, pairwise, personas),
   `skills/catalogue.ts`.
 - **KEEP (bot-specific style DATA, not in the package):**
-  `src/sales/styles/` — `alina-infinity.ts` is the bot's production style;
+  `src/sales/styles/` — `empathetic-nepq.ts` is the bot's production style;
   the package only ships the generic `marina-prime`. Keep `styles/` and its
   index. Retarget their `Style`/`StyleSchema`/`FunnelStage` imports from
   `../types.ts` → `@chatman-media/sales`.
 
   > Decision needed: confirm `marina-prime` (package) is fine to leave as a
-  > generic example and `alina-infinity` stays bot-side, OR consolidate.
+  > generic example and styles stay in vertical-pack, OR consolidate.
 
 ### 2.2 Rewrite sales imports → `@chatman-media/sales`
 
@@ -177,7 +177,7 @@ so re-verify `packages/sales` tests (115) after.
 - Delete the engine files listed in 2.1.
 - Delete `apps/bot/tests/unit/sales/` engine tests (`ab-router`, `prompt`,
   `stage-router`, …) — covered by `packages/sales/src/__tests__/` (115
-  tests). **Keep** `styles.test.ts` if it tests the bot's `alina-infinity`
+  tests). **Keep** `styles.test.ts` if it tests the bot's styles
   data — retarget it.
 
 ### 2.5 Verify
@@ -203,7 +203,7 @@ so re-verify `packages/sales` tests (115) after.
 - Production bot — keep changes reviewable; commit Phase 1 and Phase 2
   separately so each is independently test-verified.
 - The `src/sales/styles/` keep-list is the subtle part — don't delete the
-  bot's `alina-infinity` style data.
+  bot's style data.
 - `store.ts` interface widening (2.3) edits package code — re-run the
   package test suites after.
 - Watch for config values the old in-bot rag/sales read from `config`

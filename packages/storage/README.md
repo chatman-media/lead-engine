@@ -9,7 +9,7 @@
 
 **PostgreSQL storage adapters for [@chatman-media/sales](https://github.com/chatman-media/sales).** Drizzle ORM implementations of all engine repository interfaces — users, conversations, leads, skills, ELO ratings, self-play matches, pairwise comparisons, and shadow evaluations.
 
-Built from the production persistence layer of [sales-guru](https://github.com/chatman-media/sales-guru) — a Telegram recruitment bot that runs 24/7 qualifying inbound candidates for foreign work contracts.
+Built from the production persistence layer of the lead-engine platform — multi-tenant SaaS with Postgres RLS.
 
 ---
 

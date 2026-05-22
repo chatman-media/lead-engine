@@ -2,7 +2,7 @@ import type { QuestionnaireSchema } from "@chatman-media/verticals";
 
 /**
  * Сообщение, которым бот открывает intake — оператор-curated, 15 пунктов,
- * сохраняется verbatim. Portовано из sales-guru/src/leads/templates.ts.
+ * сохраняется verbatim. Portовано из legacy codebase.
  */
 export const INTAKE_INTRO_RU = `Замечательно, а теперь приступим к заполнению анкеты!
 
