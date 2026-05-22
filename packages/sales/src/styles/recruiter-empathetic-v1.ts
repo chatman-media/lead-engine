@@ -35,7 +35,9 @@ export const recruiterEmpatheticV1: Style = StyleSchema.parse({
       "придумывать вакансии или условия которых нет в базе знаний",
     ],
   },
-  framework: "SPIN+NEPQ",
+  // SPIN для квалификации — основной framework. NEPQ-логика (нейро-эмоциональные вопросы)
+  // прописана через stages.qualify.guidance и stages.objection.guidance.
+  framework: "SPIN",
   hooks: [
     {
       kind: "reciprocity",
@@ -48,9 +50,11 @@ export const recruiterEmpatheticV1: Style = StyleSchema.parse({
         "используй micro-yes: маленькие согласия (имя, город, опыт) перед большим шагом (анкета, встреча)",
     },
     {
-      kind: "unity",
+      // "unity" — Cialdini's 7th principle, не входит в HOOK_KINDS v1.
+      // Заменяем на liking (чувство причастности/принадлежности — closest semantic match).
+      kind: "liking",
       text:
-        "говори 'наши кандидаты', 'мы поможем', 'наша команда' — кандидат вступает в сообщество",
+        "говори 'наши кандидаты', 'мы поможем', 'наша команда' — кандидат чувствует причастность",
     },
   ],
   stages: {

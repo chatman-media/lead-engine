@@ -14,8 +14,9 @@ import {
  * API ключ хранится encrypted в tenant_secrets (AES-256-GCM); UI пишет
  * один раз, обратно не читает (hasSecret-флаг показывает, что ключ есть).
  *
- * NB: backend применяет изменения только после рестарта apps/api —
- * текущий InMemoryLlmRouter резолвится на boot. Hot-reload — TODO.
+ * NB: изменения применяются live через TenantReloader (reloadLlm) без
+ * рестарта apps/api. apps/worker требует рестарта (cross-process reload
+ * через pg_notify — отдельный PR).
  */
 
 const PURPOSES: { value: LlmPurpose; label: string; hint: string }[] = [

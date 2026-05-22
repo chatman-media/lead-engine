@@ -11,8 +11,10 @@
  * Возвращает: per-tenant per-purpose Map с resolved-config + summary
  * (anyTenantHasChat/Embed) — для null-checks в bootstrap'е.
  *
- * NB: вызывается ОДИН раз на boot apps/api. Hot-reload — TODO (требует
- * pub/sub from admin-llm-configs PUT + router.invalidate(tenantId)).
+ * NB: вызывается на boot (начальный snapshot), и повторно через
+ * TenantReloader.reloadLlm(tenantId) при PUT /api/admin/llm-configs —
+ * apps/api получает hot-reload без рестарта. apps/worker требует
+ * рестарта (cross-process pg_notify reload — Phase 2).
  */
 
 import { type Db, getDecryptedSecret } from "@chatman-media/conversation-engine";

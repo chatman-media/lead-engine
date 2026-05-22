@@ -494,8 +494,14 @@ export const saas = {
   },
 
   // ── Diagnostics ──────────────────────────────────────────────────────
-  runDiagnostics() {
-    return request<DiagnosticsResult>("/api/admin/diagnostics");
+  /**
+   * Запускает health-check'и tenant'а.
+   * @param live Если true — делает реальный LLM call (~1 токен) для проверки
+   *   connectivity. Добавляет check `llm.ping` в результат.
+   */
+  runDiagnostics(opts: { live?: boolean } = {}) {
+    const qs = opts.live ? "?live=1" : "";
+    return request<DiagnosticsResult>(`/api/admin/diagnostics${qs}`);
   },
 
   // ── Billing & plan ───────────────────────────────────────────────────
