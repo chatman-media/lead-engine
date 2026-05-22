@@ -49,7 +49,7 @@ ARPU $99–199/мес. [Phase 2: real estate. Phase 3: horizontal.]
                    AI замолкает на этом диалоге. "Вернуть AI" → обратно
 6. /audit        → кто из админов что менял (всё PUT/POST/DELETE)
 7. /diagnostics  → health check всего setup'а одной кнопкой
-8. /dashboard    → PlanWidget: usage bars + "Upgrade Starter $49 / Pro $149"
+8. /dashboard    → PlanWidget: usage bars + "Upgrade Starter $99 / Pro $199"
                    → Stripe Checkout (14-day trial) → webhook поднимает план →
                    quota мгновенно увеличивается
 ```
@@ -59,8 +59,8 @@ ARPU $99–199/мес. [Phase 2: real estate. Phase 3: horizontal.]
 | Plan | Channels | KB docs | Rate/min | Цена |
 |---|---|---|---|---|
 | `free` | 1 | 50 | 30 | $0 |
-| `starter` | 3 | 500 | 60 | $49/мес |
-| `pro` | 10 | 10000 | 120 | $149/мес |
+| `starter` | 3 | 500 | 60 | $99/мес |
+| `pro` | 10 | 10000 | 120 | $199/мес |
 | `enterprise` | 100 | 100000 | 600 | custom (self-host) |
 
 Превышение лимита на channel/KB POST → `402 Payment Required` со structured
