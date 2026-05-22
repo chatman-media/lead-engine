@@ -22,7 +22,8 @@
     "typecheck": "tsc --noEmit",
     "check": "biome check ./src",
     "format": "biome format --write ./src",
-    "test": "bun test"
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
   },
   "keywords": [
     "lead-engine",
@@ -48,5 +49,17 @@
     "drizzle-orm": "^0.36.0",
     "postgres": "^3.4.5",
     "typescript": "^6.0.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chatman-media/lead-engine.git",
+    "directory": "packages/conversation-engine"
+  },
+  "homepage": "https://github.com/chatman-media/lead-engine/tree/main/packages/conversation-engine#readme",
+  "bugs": {
+    "url": "https://github.com/chatman-media/lead-engine/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
