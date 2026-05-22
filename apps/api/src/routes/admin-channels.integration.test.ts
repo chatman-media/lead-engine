@@ -541,3 +541,125 @@ describe("admin-channels POST /whatsapp", () => {
     expect(wa!.hasCredentials).toBe(true);
   });
 });
+
+describe("admin-channels POST /web + GET /web/snippet", () => {
+  it("POST /web без auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request("/api/admin/channels/web", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /web invalid externalId → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/channels/web", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ externalId: "ab" }), // too short
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /web без body → создаёт канал с tenant.slug как externalId + snippet", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/channels/web", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      id: number;
+      updated: boolean;
+      externalId: string;
+      snippet: { html: string; wsUrl: string; demoUrl: string };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.updated).toBe(false);
+    expect(body.externalId.length).toBeGreaterThan(0);
+    expect(body.snippet.html).toContain("<script");
+    expect(body.snippet.html).toContain(body.externalId);
+    expect(body.snippet.wsUrl).toMatch(/^wss?:\/\//);
+    expect(body.snippet.wsUrl).toContain("/ws/");
+    expect(body.snippet.demoUrl).toContain("/demo/web-chat.html");
+  });
+
+  it("POST /web с brandName + primaryColor → metadata + snippet с data-attrs", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/channels/web", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        brandName: "Acme Support",
+        primaryColor: "#6aa6ff",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      updated: boolean;
+      brandName?: string;
+      primaryColor?: string;
+      snippet: { html: string };
+    };
+    expect(body.updated).toBe(true); // существующий с предыдущего теста
+    expect(body.brandName).toBe("Acme Support");
+    expect(body.primaryColor).toBe("#6aa6ff");
+    expect(body.snippet.html).toContain('data-brand="Acme Support"');
+    expect(body.snippet.html).toContain('data-color="#6aa6ff"');
+  });
+
+  it("POST /web с невалидным primaryColor → игнорируется (не в snippet)", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/channels/web", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ primaryColor: "not-a-hex" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { snippet: { html: string } };
+    expect(body.snippet.html).not.toContain("data-color=");
+  });
+
+  it("GET /web/snippet → возвращает свежий snippet для активного канала", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/channels/web/snippet");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      externalId: string;
+      snippet: { html: string };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.snippet.html).toContain("<script");
+  });
+
+  it("GET /web/snippet для tenant'а без web-канала → 404", async () => {
+    if (!sql) return;
+    // tenantA активирует только Telegram в этих тестах
+    const res = await authReq(tokenA, "/api/admin/channels/web/snippet");
+    expect(res.status).toBe(404);
+  });
+
+  it("POST /web invalid json → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/channels/web", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{not-json",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("snippet НЕ leak'ит чувствительные данные", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/channels/web/snippet");
+    const body = (await res.json()) as { snippet: { html: string; wsUrl: string } };
+    // Master key / API keys / etc — НЕ в snippet
+    expect(body.snippet.html).not.toMatch(/sk-|api_key|secret/i);
+    expect(body.snippet.wsUrl).not.toMatch(/sk-|api_key|secret/i);
+  });
+});

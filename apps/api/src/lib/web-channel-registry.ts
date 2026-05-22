@@ -21,13 +21,15 @@ export interface WebChannelEntry {
   adapter: WebChannelAdapter;
 }
 
+type DbType = PostgresJsDatabase<{ channels: typeof channels; tenants: typeof tenants }>;
+
 export class WebChannelRegistry {
   private readonly byChannelDbId = new Map<number, WebChannelEntry>();
   private readonly byTenantSlug = new Map<string, WebChannelEntry>();
+  private dbRef: DbType | null = null;
 
-  async loadFromDb(
-    db: PostgresJsDatabase<{ channels: typeof channels; tenants: typeof tenants }>,
-  ): Promise<void> {
+  async loadFromDb(db: DbType): Promise<void> {
+    this.dbRef = db;
     const rows = await db
       .select({
         channelId: channels.id,
@@ -40,6 +42,58 @@ export class WebChannelRegistry {
       .innerJoin(tenants, eq(tenants.id, channels.tenantId))
       .where(
         and(
+          eq(channels.kind, "web"),
+          eq(channels.status, "active"),
+          eq(tenants.status, "active"),
+        ),
+      );
+
+    for (const row of rows) {
+      this.set({
+        channelDbId: row.channelId,
+        tenantId: row.tenantId,
+        tenantSlug: row.tenantSlug,
+        externalId: row.externalId,
+        adapter: new WebChannelAdapter({ id: String(row.channelId) }),
+      });
+    }
+  }
+
+  /**
+   * Hot-reload web-каналов для одного tenant'а. Закрывает старые WS-
+   * адаптеры (разрывает pinned connection'ы), затем re-query DB +
+   * instantiates новые. Inbound runner поднимается только на boot
+   * apps/api, но WS upgrade'ы через ws-web.ts.tryUpgrade сразу видят
+   * новые entries; outbound через WebOutboundDispatcher poll'ит DB
+   * напрямую — kind='web' rows подхватываются без runner'а.
+   */
+  async reloadTenant(tenantId: number, tenantSlug: string): Promise<void> {
+    if (!this.dbRef) return;
+    // Close old adapters для этого tenant'а.
+    for (const [chId, entry] of [...this.byChannelDbId]) {
+      if (entry.tenantId === tenantId) {
+        try {
+          entry.adapter.close();
+        } catch {
+          // ignore close errors
+        }
+        this.byChannelDbId.delete(chId);
+      }
+    }
+    this.byTenantSlug.delete(tenantSlug);
+
+    const rows = await this.dbRef
+      .select({
+        channelId: channels.id,
+        externalId: channels.externalId,
+        tenantId: tenants.id,
+        tenantSlug: tenants.slug,
+      })
+      .from(channels)
+      .innerJoin(tenants, eq(tenants.id, channels.tenantId))
+      .where(
+        and(
+          eq(channels.tenantId, tenantId),
           eq(channels.kind, "web"),
           eq(channels.status, "active"),
           eq(tenants.status, "active"),

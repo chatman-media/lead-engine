@@ -422,6 +422,35 @@ a:hover {
   border-bottom-color: var(--accent);
 }
 
+/* ── Snippet box (Web widget embed) ────────────────────────────────────── */
+
+.snippet-box {
+  margin-top: 18px;
+  padding: 14px 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.snippet-box pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.snippet-box code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--accent);
+}
+
 /* ── Settings page ─────────────────────────────────────────────────────── */
 
 .settings-warning {
