@@ -24,7 +24,8 @@
     "format": "biome format --write ./src",
     "test": "bun test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "prepublishOnly": "bun run build"
   },
   "keywords": [
     "chatman",
@@ -37,11 +38,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/chatman-media/storage.git"
+    "url": "git+https://github.com/chatman-media/lead-engine.git",
+    "directory": "packages/storage"
   },
-  "homepage": "https://github.com/chatman-media/storage#readme",
+  "homepage": "https://github.com/chatman-media/lead-engine/tree/main/packages/storage#readme",
   "bugs": {
-    "url": "https://github.com/chatman-media/storage/issues"
+    "url": "https://github.com/chatman-media/lead-engine/issues"
   },
   "peerDependencies": {
     "@chatman-media/sales": ">=0.1.0",
@@ -56,5 +58,8 @@
     "drizzle-orm": "^0.36.0",
     "postgres": "^3.4.5",
     "typescript": "^6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -8,6 +8,10 @@
     "outDir": "./dist",
     "allowImportingTsExtensions": false,
     "rewriteRelativeImportExtensions": true,
-    "paths": {}
-  }
+    "paths": {},
+    "rootDir": "./src"
+  },
+  "include": [
+    "src/**/*.ts"
+  ]
 }
