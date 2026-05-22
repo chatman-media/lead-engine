@@ -576,6 +576,14 @@ export const saas = {
   },
 
   // ── Audit log (read-only) ────────────────────────────────────────────
+  changePassword(currentPassword: string, newPassword: string) {
+    return request<{ ok: true }>("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+  },
+
   listAuditLog(opts: { limit?: number; cursor?: number } = {}) {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));

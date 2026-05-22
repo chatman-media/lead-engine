@@ -211,3 +211,83 @@ describe("auth signup/login/me flow", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe("auth change-password", () => {
+  /** Login alice and return token. alice was created in first describe block. */
+  async function loginAlice(): Promise<string> {
+    const res = await post("/api/auth/login", {
+      email: "alice@example.com",
+      password: "strong-password-12345",
+    });
+    const body = (await res.json()) as { token: string };
+    return body.token;
+  }
+
+  it("POST /api/auth/change-password без токена → 401", async () => {
+    if (!sql) return;
+    const res = await post("/api/auth/change-password", {
+      currentPassword: "strong-password-12345",
+      newPassword: "new-strong-password-99",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/auth/change-password неверный currentPassword → 401", async () => {
+    if (!sql) return;
+    const token = await loginAlice();
+    const res = await post(
+      "/api/auth/change-password",
+      { currentPassword: "wrong-password-999", newPassword: "new-strong-password-99" },
+      { Authorization: `Bearer ${token}` },
+    );
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/current password/i);
+  });
+
+  it("POST /api/auth/change-password newPassword < 8 chars → 400", async () => {
+    if (!sql) return;
+    const token = await loginAlice();
+    const res = await post(
+      "/api/auth/change-password",
+      { currentPassword: "strong-password-12345", newPassword: "tiny" },
+      { Authorization: `Bearer ${token}` },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /api/auth/change-password happy path → 200 + старый пароль больше не работает", async () => {
+    if (!sql) return;
+    const token = await loginAlice();
+    const res = await post(
+      "/api/auth/change-password",
+      { currentPassword: "strong-password-12345", newPassword: "new-strong-password-99" },
+      { Authorization: `Bearer ${token}` },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+
+    // Old password no longer works.
+    const oldLoginRes = await post("/api/auth/login", {
+      email: "alice@example.com",
+      password: "strong-password-12345",
+    });
+    expect(oldLoginRes.status).toBe(401);
+
+    // New password works.
+    const newLoginRes = await post("/api/auth/login", {
+      email: "alice@example.com",
+      password: "new-strong-password-99",
+    });
+    expect(newLoginRes.status).toBe(200);
+
+    // Restore original password so other tests (if added) still work.
+    const newToken = ((await newLoginRes.json()) as { token: string }).token;
+    await post(
+      "/api/auth/change-password",
+      { currentPassword: "new-strong-password-99", newPassword: "strong-password-12345" },
+      { Authorization: `Bearer ${newToken}` },
+    );
+  });
+});

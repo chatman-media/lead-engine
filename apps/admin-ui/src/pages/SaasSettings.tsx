@@ -59,6 +59,13 @@ export function SaasSettings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [savingPurpose, setSavingPurpose] = useState<LlmPurpose | null>(null);
+
+  // Change password form state
+  const [currentPwd, setCurrentPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [pwdSaving, setPwdSaving] = useState(false);
+  const [pwdError, setPwdError] = useState("");
+  const [pwdSuccess, setPwdSuccess] = useState(false);
   const [forms, setForms] = useState<Record<LlmPurpose, FormState>>({
     chat: { ...EMPTY_FORM },
     embed: { ...EMPTY_FORM, provider: "openai" },
@@ -164,6 +171,35 @@ export function SaasSettings() {
     }
   }
 
+  async function handleChangePassword(e: FormEvent) {
+    e.preventDefault();
+    setPwdError("");
+    setPwdSuccess(false);
+    if (!currentPwd || !newPwd) {
+      setPwdError("Заполните оба поля");
+      return;
+    }
+    if (newPwd.length < 8) {
+      setPwdError("Новый пароль должен быть не менее 8 символов");
+      return;
+    }
+    setPwdSaving(true);
+    try {
+      await saas.changePassword(currentPwd, newPwd);
+      setCurrentPwd("");
+      setNewPwd("");
+      setPwdSuccess(true);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setPwdError("Неверный текущий пароль");
+        return;
+      }
+      setPwdError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPwdSaving(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="dashboard-loading">
@@ -191,6 +227,45 @@ export function SaasSettings() {
       <div className="settings-warning">
         ✓ Изменения применяются live — рестарт не нужен.
       </div>
+
+      <section className="settings-section">
+        <div className="settings-header">
+          <h2>Смена пароля</h2>
+        </div>
+        {pwdError && <div className="dashboard-error">{pwdError}</div>}
+        {pwdSuccess && (
+          <div className="settings-warning" style={{ color: "var(--success, #4caf50)" }}>
+            ✓ Пароль успешно изменён.
+          </div>
+        )}
+        <form className="settings-form" onSubmit={handleChangePassword}>
+          <label>
+            Текущий пароль
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={currentPwd}
+              onChange={(e) => setCurrentPwd(e.target.value)}
+              placeholder="••••••••"
+              required
+            />
+          </label>
+          <label>
+            Новый пароль (не менее 8 символов)
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={newPwd}
+              onChange={(e) => setNewPwd(e.target.value)}
+              placeholder="••••••••"
+              required
+            />
+          </label>
+          <button type="submit" disabled={pwdSaving}>
+            {pwdSaving ? "Сохраняем…" : "Изменить пароль"}
+          </button>
+        </form>
+      </section>
 
       {PURPOSES.map(({ value: purpose, label, hint }) => {
         const cfg = configs.find((c) => c.purpose === purpose);
