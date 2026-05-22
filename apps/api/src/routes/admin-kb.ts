@@ -1,5 +1,5 @@
 import { type Db, DrizzleKbStore, withTenant } from "@chatman-media/conversation-engine";
-import { ingestText } from "@chatman-media/kb";
+import { ingestText, parsePdfBuffer } from "@chatman-media/kb";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
 import { kbDocuments } from "@chatman-media/storage";
 import { and, desc, eq } from "drizzle-orm";
@@ -21,11 +21,10 @@ import { canAddKbDocument } from "../lib/quota.ts";
  *   - application/json:    { title, body, topic? } — paste mode
  *
  * Multipart парсится в memory через Bun's `await req.formData()` — для
- * больших файлов (>10MB) переключиться на streaming variant в future.
- * PDF / .md / .txt поддерживаются (за счёт `ingestText` который принимает
- * raw body); PDF binary не парсится в этом endpoint'е — это требует
- * `ingestFile` с filesystem path, что upload-route'у не подходит.
- * Для PDF — TODO: написать в /tmp + ingestFile + cleanup.
+ * больших файлов (>10MB) переключиться на streaming variant in future.
+ * Поддерживаемые форматы файлов: .pdf (text-based), .txt, .md, .json и
+ * любые UTF-8 текстовые форматы. Scanned PDF (без текстового слоя) вернёт
+ * 422 — нужен предварительный OCR.
  */
 export interface AdminKbRoutesOpts {
   db: Db;
@@ -65,7 +64,7 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
    * Two content-types accepted:
    *
    *   multipart/form-data:
-   *     - file: Blob (txt/md/json; PDF не поддерживается в этом MVP)
+   *     - file: Blob (.pdf, .txt, .md, .json и любой UTF-8 текстовый формат)
    *     - title?: string (defaults to file.name)
    *     - topic?: string
    *
@@ -90,12 +89,23 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
       }
       const file = fileField as File;
       const fileName = file.name || "upload";
-      // Read as text (UTF-8). PDF binary upload requires extra step
-      // (write to tmp + ingestFile) — TODO в follow-up.
       if (fileName.toLowerCase().endsWith(".pdf")) {
-        return c.json({ error: "PDF upload not yet supported via this endpoint" }, 415);
+        const buffer = new Uint8Array(await file.arrayBuffer());
+        try {
+          body = await parsePdfBuffer(buffer);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return c.json({ error: `PDF parse failed: ${msg}` }, 422);
+        }
+        if (body.length === 0) {
+          return c.json(
+            { error: "PDF contains no extractable text (possibly scanned image — use OCR first)" },
+            422,
+          );
+        }
+      } else {
+        body = await file.text();
       }
-      body = await file.text();
       const titleField = form.get("title");
       title = typeof titleField === "string" && titleField.length > 0 ? titleField : fileName;
       const topicField = form.get("topic");

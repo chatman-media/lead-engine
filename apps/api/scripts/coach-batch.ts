@@ -176,7 +176,16 @@ async function main() {
         skippedLeads += 1;
         continue;
       }
-      const styleSlug: string | null = null; // TODO: resolve styles.slug по conv.style_id если есть
+      // Resolve style slug from conv.styleId if present.
+      let styleSlug: string | null = null;
+      if (convBot.styleId != null) {
+        const [styleRow] = await db
+          .select({ slug: schema.styles.slug })
+          .from(schema.styles)
+          .where(eq(schema.styles.id, convBot.styleId))
+          .limit(1);
+        styleSlug = styleRow?.slug ?? null;
+      }
       void drizzleSql; // не используется, оставлено для future raw queries
       try {
         const result = await analyzer.analyzeLead(
