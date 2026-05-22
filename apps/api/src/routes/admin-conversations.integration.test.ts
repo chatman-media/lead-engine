@@ -183,6 +183,26 @@ describe("admin-conversations", () => {
     expect(body.items[0]!.contactName).toBe("Contact A0"); // newest
   });
 
+  it("GET list → items содержат lastMessagePreview и escalatedAt", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/conversations");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: Array<{
+        lastMessagePreview?: string | null;
+        escalatedAt?: number | null;
+      }>;
+    };
+    // Все 3 диалога имеют сообщения — lastMessagePreview не null.
+    for (const item of body.items) {
+      expect(item.lastMessagePreview).toBeTruthy();
+    }
+    // escalatedAt либо отсутствует либо null (не эскалировано в fixtures).
+    for (const item of body.items) {
+      expect(item.escalatedAt ?? null).toBeNull();
+    }
+  });
+
   it("GET list с limit=2 → возвращает 2 + nextCursor", async () => {
     if (!sql) return;
     const res = await authReq(tokenA, "/api/admin/conversations?limit=2");

@@ -241,7 +241,13 @@ export function SaasConversations() {
                         <span className="badge">{c.source}</span>{" "}
                         <span className="badge">{c.mode}</span>{" "}
                         {c.currentStage && <span className="badge">{c.currentStage}</span>}
+                        {c.escalatedAt && (
+                          <span className="badge badge-warning">эскалация</span>
+                        )}
                       </small>
+                      {c.lastMessagePreview && (
+                        <p className="inbox-item-preview">{c.lastMessagePreview}</p>
+                      )}
                     </Link>
                   </li>
                 ))}
