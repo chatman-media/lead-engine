@@ -1,5 +1,5 @@
 /**
- * Post-processing rules for LLM output — the sales-guru analog of "skills":
+ * Post-processing rules for LLM output — the legacy-codebase analog of "skills":
  * small, named, composable text transforms that run after the model returns.
  * Each one targets a specific "AI tell" that breaks the human-manager
  * illusion (the candidate must believe they're talking to a real recruiter,

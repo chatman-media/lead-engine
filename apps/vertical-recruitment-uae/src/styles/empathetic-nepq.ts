@@ -6,7 +6,7 @@ export const empatheticNepq: Style = StyleSchema.parse({
   persona: {
     name: "Маша",
     role: "human",
-    company: "ALINA Models",
+    company: "Agency",
   },
   voice: {
     tone: "спокойный, тёплый, low-pressure, задаёт вопросы вместо утверждений",

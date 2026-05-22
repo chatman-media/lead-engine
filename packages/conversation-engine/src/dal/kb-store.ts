@@ -14,7 +14,7 @@ import type { RepoCtx } from "./types.ts";
  * Ingest-методы реализованы — пакет нужен и admin'ам (через
  * @chatman-media/kb's ingestFile/Directory) и runtime (search).
  *
- * Особенности относительно sales-guru's src/db/repos/kb.ts:
+ * Особенности относительно legacy kb-store implementation:
  *   - tenant_id обязателен в KOAЖ-дый JOIN'е (защита от cross-tenant leak)
  *   - конструируем pgvector литерал как '[...]' строку → cast ::vector
  *   - sanitizeFtsQuery импортируется из @chatman-media/kb (общая логика)

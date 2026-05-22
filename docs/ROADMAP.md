@@ -351,7 +351,7 @@ Vision purpose уже в schema (`llm_provider_configs.purpose='vision'`):
 | Метрика | Сейчас | Q3 target | Q4 target | Q1'27 target |
 |---|---|---|---|---|
 | Signup → first bot reply | < 5 мин self-serve ✅ | < 5 мин | < 3 мин | < 2 мин |
-| Active tenants | 1 (sales-guru legacy) | 5–10 | 25–50 | 100+ |
+| Active tenants | 1 (recruitment-uae) | 5–10 | 25–50 | 100+ |
 | MRR | $0 | $1K | $10K | $50K |
 | Channel coverage | TG (UI) + WA (UI) + web | + widget | + TG userbot UI | + voice |
 | Vertical templates | 1 (UAE) | 1 | 5 | 8 |

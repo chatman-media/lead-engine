@@ -2,7 +2,7 @@
 /**
  * Seed production sales-styles в `styles` таблицу. Использует
  * RECRUITMENT_UAE_STYLES из @chatman-media/vertical-recruitment-uae —
- * 4 готовых production-curated стиля портированных из sales-guru.
+ * 4 production-curated стиля для recruitment-UAE vertical.
  *
  * Usage:
  *   bun run apps/api/scripts/seed-styles.ts --tenant=legacy

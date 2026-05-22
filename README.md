@@ -20,7 +20,7 @@ ARPU $99–199/мес. [Phase 2: real estate. Phase 3: horizontal.]
 > мессенджер-воронкой. В Phase 1 фокус на recruitment для laser-precision
 > go-to-market. Подробнее: [`docs/COMPETITORS.md §0`](docs/COMPETITORS.md).
 
-Извлечён из `chatman-media/sales-guru` (legacy Telegram-only бот) через
+Извлечён из legacy Telegram-бота через
 серию архитектурных PR'ов (см. `docs/ROADMAP.md` и git log).
 
 📖 **См. также:**

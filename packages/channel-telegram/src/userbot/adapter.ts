@@ -34,7 +34,7 @@ export interface UserbotHealthEvent {
  * MTProto userbot адаптер (личный аккаунт оператора через gramjs).
  *
  * Минимальная функциональность: connect, receive (NewMessage → Inbound),
- * send (text), downloadMedia (через client.downloadMedia). Полная sales-guru
+ * send (text), downloadMedia (через client.downloadMedia). Полная legacy-codebase
  * импл'я имеет +supervisor для AUTH_KEY_DUPLICATED, delete-queue, per-
  * conversation serialization, vision/photo-classify — это всё надстраивается
  * сверху в conversation-engine и apps/worker.
@@ -404,7 +404,7 @@ export class TelegramUserbotAdapter implements ChannelAdapter {
         sentId = (result as { id?: number }).id;
       } else {
         // Send-by-mediaRef не поддерживается в минимальной реализации —
-        // sales-guru использует filePath из медиа-кэша. Для платформы это
+        // legacy-codebase использует filePath из медиа-кэша. Для платформы это
         // добавляется когда worker'у понадобится re-relay медиа.
         throw new Error(`[telegram-userbot] send: unsupported part.kind=${part.kind}`);
       }

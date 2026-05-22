@@ -2,7 +2,7 @@
  * Storage interfaces for the RAG engine.
  *
  * The package defines these interfaces; consumers provide implementations.
- * The reference implementation (`PgKbStore`) ships with the main sales-guru
+ * The reference implementation (`PgKbStore`) ships with the lead-engine platform
  * project and wraps the PostgreSQL + pgvector repos.
  */
 

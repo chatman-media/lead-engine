@@ -149,7 +149,7 @@ describe("CoachAnalyzer", () => {
       {
         lead,
         conversationId: 100,
-        styleSlug: "alina-infinity-v1",
+        styleSlug: "empathetic-nepq-v1",
         outcome: "won",
         source: "lead_submitted",
         nowEpoch: 1700000000,
