@@ -256,7 +256,15 @@ async function main() {
   log.info("admin-tenant routes enabled (pause/resume)");
 
   // Diagnostics — health-check для tenant setup'а.
-  app.route("/", makeAdminDiagnosticsRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
+  // resolveChat передаём для ?live=1 LLM smoke-test (стоит ~1 токен).
+  app.route(
+    "/",
+    makeAdminDiagnosticsRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    }),
+  );
   log.info("admin-diagnostics route enabled");
 
   // Billing & plan tiers — quota gating + Stripe checkout/portal (M1b).

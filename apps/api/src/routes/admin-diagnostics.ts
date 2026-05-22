@@ -4,6 +4,7 @@ import {
   getDecryptedSecret,
   withTenant,
 } from "@chatman-media/conversation-engine";
+import type { ChatClient } from "@chatman-media/llm-router";
 import {
   channels,
   llmProviderConfigs,
@@ -19,17 +20,22 @@ import { Hono } from "hono";
  *
  * Checks:
  *   1. channel.telegram — bot token валиден (Telegram getMe не throw'ит)
- *   2. llm.chat — provider config есть + apiKey decryptable + ping (TBD)
+ *   2. llm.chat — provider config есть + apiKey decryptable; если ?live=1
+ *      делает реальный ChatClient.complete("hi", numPredict:1) ping
  *   3. llm.embed — то же для embed-purpose
  *   4. kb — есть хотя бы один document
  *
- * NB: на текущем этапе НЕ делает live LLM-call (стоит токенов). Только
- * config-level + decrypt validation. Live LLM smoke-test — TODO behind
- * env flag.
+ * ?live=1 — включает live LLM-вызов (стоит ~1 токен). По умолчанию off.
  */
 export interface AdminDiagnosticsRoutesOpts {
   db: Db;
   masterKeyHex: string;
+  /**
+   * Optional: если передан, `/api/admin/diagnostics?live=1` сделает
+   * реальный ChatClient.complete() ping для проверки LLM connectivity.
+   * Стоит ~1 токен — не вызывается по умолчанию.
+   */
+  resolveChat?: (tenantId: number) => ChatClient;
   /** Custom fetch для тестов (intercept'ит Telegram getMe). */
   fetchImpl?: typeof fetch;
 }
@@ -50,6 +56,7 @@ export function makeAdminDiagnosticsRoutes(
 
   app.get("/api/admin/diagnostics", async (c) => {
     const tenantId = c.var.tenantId;
+    const livePing = c.req.query("live") === "1";
     const checks: CheckResult[] = [];
 
     await withTenant(opts.db, tenantId, async (tx) => {
@@ -204,6 +211,32 @@ export function makeAdminDiagnosticsRoutes(
           status: "pass",
           message: `${chatCfg.provider} / ${chatCfg.model} (local)`,
         });
+      }
+
+      // 2b. LLM live ping — только если ?live=1 и resolveChat передан.
+      if (
+        livePing &&
+        opts.resolveChat &&
+        checks.some((ch) => ch.name === "llm.chat" && ch.status === "pass")
+      ) {
+        const pingStart = performance.now();
+        try {
+          const client = opts.resolveChat(tenantId);
+          await client.complete([{ role: "user", content: "hi" }], { numPredict: 1 });
+          checks.push({
+            name: "llm.ping",
+            status: "pass",
+            latencyMs: Math.round(performance.now() - pingStart),
+            message: "live LLM response received",
+          });
+        } catch (err) {
+          checks.push({
+            name: "llm.ping",
+            status: "fail",
+            latencyMs: Math.round(performance.now() - pingStart),
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       // 3. LLM embed — optional но даёт RAG.

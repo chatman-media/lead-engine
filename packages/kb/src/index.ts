@@ -67,7 +67,7 @@ export {
   stripNonContent,
 } from "./ingest.ts";
 // ── PDF parsing ───────────────────────────────────────────────────────────────
-export { parsePdf } from "./parse-pdf.ts";
+export { parsePdf, parsePdfBuffer } from "./parse-pdf.ts";
 // ── Persona shortcuts ─────────────────────────────────────────────────────────
 export {
   botPresenceReply,

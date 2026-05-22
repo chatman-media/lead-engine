@@ -7,7 +7,18 @@ import { extractText, getDocumentProxy } from "unpdf";
  */
 export async function parsePdf(filePath: string): Promise<string> {
   const buffer = readFileSync(filePath);
-  const pdf = await getDocumentProxy(new Uint8Array(buffer));
+  return parsePdfBuffer(new Uint8Array(buffer));
+}
+
+/**
+ * Extract plain text directly from a PDF buffer (Uint8Array). Use this when
+ * the PDF is already in memory (e.g. HTTP multipart upload) to avoid writing
+ * a temporary file.
+ *
+ * Throws on corrupt or encrypted PDFs.
+ */
+export async function parsePdfBuffer(buffer: Uint8Array): Promise<string> {
+  const pdf = await getDocumentProxy(buffer);
   const { text } = await extractText(pdf, { mergePages: false });
   return (Array.isArray(text) ? text : [text]).join("\n\n").trim();
 }
