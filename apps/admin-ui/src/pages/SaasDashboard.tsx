@@ -43,7 +43,10 @@ export function SaasDashboard() {
         navigate("/login", { replace: true });
         return;
       }
-      setError(err instanceof Error ? err.message : String(err));
+      // KB-роуты могут быть выключены на бэкенде, если ни у одного тенанта
+      // нет embed-конфига — тогда listDocs отдаёт 404. Это не ошибка для
+      // нового тенанта: считаем, что документов пока нет.
+      setDocs([]);
     }
   }
 
