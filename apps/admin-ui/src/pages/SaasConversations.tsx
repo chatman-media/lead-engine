@@ -40,6 +40,8 @@ export function SaasConversations() {
   // Ref tracks how many items the user has currently loaded. Used by the
   // auto-poll to fetch at least that many so paginated items aren't lost.
   const loadedCountRef = useRef(30);
+  // Ref to the bottom of the message thread — used for auto-scroll.
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [detail, setDetail] = useState<{
     conversation: ConversationDetail;
     messages: MessageRow[];
@@ -182,6 +184,11 @@ export function SaasConversations() {
     }
   }
 
+  // Auto-scroll to bottom whenever messages change (new message arrived or initial load).
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [detail?.messages]);
+
   // Auto-poll the selected thread + list every 5s.
   // refreshList is called with the current loaded count (not just 30) so that
   // items the user loaded via "Загрузить ещё" are not dropped on each tick.
@@ -313,6 +320,8 @@ export function SaasConversations() {
                     </div>
                   ))
                 )}
+                {/* Sentinel div — auto-scroll target. */}
+                <div ref={messagesEndRef} />
               </div>
               <form className="inbox-reply" onSubmit={handleReply}>
                 <textarea

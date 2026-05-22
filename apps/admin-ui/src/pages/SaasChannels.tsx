@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ApiError,
@@ -44,6 +44,8 @@ export function SaasChannels() {
   const [webColor, setWebColor] = useState("");
   const [webSubmitting, setWebSubmitting] = useState(false);
   const [webResult, setWebResult] = useState<CreateWebChannelResult | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function refresh() {
     try {
@@ -161,8 +163,11 @@ export function SaasChannels() {
   async function copySnippet(text: string) {
     try {
       await navigator.clipboard.writeText(text);
+      setCopied(true);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
-      // fallback
+      // Clipboard API may be unavailable (non-HTTPS or old browser).
     }
   }
 
@@ -431,7 +436,7 @@ export function SaasChannels() {
                 className="nav-link"
                 onClick={() => copySnippet(webResult.snippet!.html)}
               >
-                Копировать
+                {copied ? "✓ Скопировано" : "Копировать"}
               </button>
               <p className="hint" style={{ marginTop: 12 }}>
                 Smoke-test:{" "}
