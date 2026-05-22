@@ -60,6 +60,14 @@
         "typescript": "^6.0.3",
       },
     },
+    "apps/widget": {
+      "name": "@lead-engine/widget",
+      "version": "0.1.0",
+      "devDependencies": {
+        "typescript": "^6.0.3",
+        "vite": "^6.3.4",
+      },
+    },
     "apps/worker": {
       "name": "@chatman-media/worker",
       "version": "0.1.0",
@@ -402,6 +410,8 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@lead-engine/admin-ui": ["@lead-engine/admin-ui@workspace:apps/admin-ui"],
+
+    "@lead-engine/widget": ["@lead-engine/widget@workspace:apps/widget"],
 
     "@octokit/auth-token": ["@octokit/auth-token@6.0.0", "", {}, "sha512-P4YJBPdPSpWTQ1NU4XYdvHvXJJDxM6YwpS0FZHRgP7YFkdVxsWcpWGy/NVqlAA7PcPCnMacXlRm1y2PFZRWL/w=="],
 

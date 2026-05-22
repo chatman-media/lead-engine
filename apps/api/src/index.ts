@@ -43,6 +43,7 @@ import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 import { makeWhatsAppWebhookRoutes } from "./routes/webhook-whatsapp.ts";
 import { makeWebSocketRoutes } from "./routes/ws-web.ts";
+import { makeWidgetStaticRoutes } from "./routes/widget-static.ts";
 
 /**
  * Mapping tenant.slug → VerticalTemplate. На текущем этапе один tenant —
@@ -121,6 +122,10 @@ async function main() {
   const app = new Hono();
 
   app.route("/", makeMetricsRoutes(metrics));
+
+  // Static: widget bundle + demo HTML. Public routes (без auth), CORS open
+  // — widget script загружается с customer-домена.
+  app.route("/", makeWidgetStaticRoutes());
 
   // Auth routes — public (POST /api/auth/signup, /login, /logout, GET /me).
   // НЕ wrap'аются в tenant-middleware: signup создаёт tenant, login

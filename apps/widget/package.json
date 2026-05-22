@@ -1,0 +1,17 @@
+{
+  "name": "@lead-engine/widget",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Floating chat widget bundle for customer sites. Vanilla TS — no framework dep. Builds to single IIFE script ~10KB gzip.",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "test": "exit 0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vite": "^6.3.4"
+  }
+}
