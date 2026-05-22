@@ -143,6 +143,12 @@ async function main() {
   // через UI без env-vars.
   app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
 
+  // Web channel registry — early init чтобы reloader мог его перестраивать
+  // при POST /api/admin/channels/web. WS-runner / dispatcher поднимутся ниже.
+  const webRegistry = new WebChannelRegistry();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
+  await webRegistry.loadFromDb(db as any);
+
   // Hot-reload bus: admin routes вызывают reloadLlm/reloadChannels(tenantId)
   // после изменения, live применяя в текущем процессе. apps/worker — отдельный
   // процесс, ему пока нужен restart.
@@ -151,6 +157,7 @@ async function main() {
     cfg,
     ref: loadedRef,
     registry: channels,
+    webRegistry,
     log: (msg, ctx) => log.info(`reloader: ${msg}`, ctx ?? {}),
   });
 
@@ -189,6 +196,7 @@ async function main() {
       ...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
       webhookSecret: cfg.telegramWebhookSecret,
       ...(cfg.whatsappVerifyToken ? { whatsappVerifyToken: cfg.whatsappVerifyToken } : {}),
+      ...(cfg.webWidgetScriptUrl ? { webWidgetScriptUrl: cfg.webWidgetScriptUrl } : {}),
       onReload: reloader.reloadChannels,
     }),
   );
@@ -370,9 +378,7 @@ async function main() {
   // dispatcher для web живут в этом процессе, в отличие от
   // telegram/whatsapp где dispatcher в apps/worker. См. комментарий
   // в WebOutboundDispatcher для rationale.
-  const webRegistry = new WebChannelRegistry();
-  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature
-  await webRegistry.loadFromDb(db as any);
+  // (`webRegistry` уже инициализирован выше — нужен для reloader'а.)
   const webAbort = new AbortController();
   const webRunners: Promise<void>[] = [];
   for (const entry of webRegistry.entries()) {

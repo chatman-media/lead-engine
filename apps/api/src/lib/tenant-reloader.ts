@@ -22,6 +22,7 @@ import type { ChannelRegistry } from "../channel-registry.ts";
 import type { ApiConfig } from "../config.ts";
 import type { LoadedRef } from "../llm-bootstrap.ts";
 import { loadTenantLlmConfigs } from "./llm-config-loader.ts";
+import type { WebChannelRegistry } from "./web-channel-registry.ts";
 
 export interface TenantReloaderOpts {
   db: Db;
@@ -29,6 +30,9 @@ export interface TenantReloaderOpts {
   /** Shared LoadedRef (mutable). После reload содержит свежий snapshot + router. */
   ref: LoadedRef;
   registry: ChannelRegistry;
+  /** Опциональный WebChannelRegistry — если передан, reloadChannels так же
+   * перестроит web-каналы tenant'а. */
+  webRegistry?: WebChannelRegistry;
   log: (msg: string, ctx?: Record<string, unknown>) => void;
 }
 
@@ -102,10 +106,14 @@ export function makeTenantReloader(opts: TenantReloaderOpts): TenantReloader {
       return;
     }
     await opts.registry.reloadTenant(tenantId, tenant.slug);
+    if (opts.webRegistry) {
+      await opts.webRegistry.reloadTenant(tenantId, tenant.slug);
+    }
     opts.log("channels reloaded for tenant", {
       tenantId,
       tenantSlug: tenant.slug,
-      channels: opts.registry.getTelegramBotsByTenant(tenant.slug).length,
+      telegram: opts.registry.getTelegramBotsByTenant(tenant.slug).length,
+      web: opts.webRegistry?.byTenant(tenant.slug) ? 1 : 0,
     });
   }
 

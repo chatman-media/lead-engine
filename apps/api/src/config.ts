@@ -111,6 +111,12 @@ export interface ApiConfig {
    */
   publicUrl: string;
   /**
+   * URL CDN-bundle'а web-widget'а (`/widget.js`). Если задан — admin-UI
+   * POST /api/admin/channels/web вернёт production-ready snippet с
+   * `<script src=...>`. Пусто = fallback на demo HTML link.
+   */
+  webWidgetScriptUrl: string;
+  /**
    * Slug запущенного эксперимента (status='running' в БД). Если задан,
    * RagReplyStrategy.resolveStyle использует ABRouter поверх variants
    * из experiments.allocation_json (a/b routing by hash(contactId)).
@@ -206,6 +212,7 @@ export function loadApiConfig(): ApiConfig {
     },
     platformBaseDomain: process.env.PLATFORM_BASE_DOMAIN ?? "",
     publicUrl: (process.env.PLATFORM_PUBLIC_URL ?? "").replace(/\/$/, ""),
+    webWidgetScriptUrl: (process.env.WEB_WIDGET_SCRIPT_URL ?? "").replace(/\/$/, ""),
     defaultStyleSlug: process.env.STYLE_SLUG ?? "",
     experimentSlug: process.env.EXPERIMENT_SLUG ?? "",
     stageClassifier:

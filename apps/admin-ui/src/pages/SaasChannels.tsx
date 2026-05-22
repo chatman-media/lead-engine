@@ -4,18 +4,20 @@ import {
   ApiError,
   type ChannelItem,
   clearToken,
+  type CreateWebChannelResult,
   type CreateWhatsAppChannelResult,
   saas,
 } from "../api/saas.ts";
 
 /**
  * Per-tenant channel onboarding. Telegram (auto-setWebhook) + WhatsApp
- * (manual Meta dashboard setup с copy-paste snippet'ом).
+ * (manual Meta dashboard setup с copy-paste snippet'ом) + Web widget
+ * (snippet для customer site, без token'ов — anonymized externalUserId).
  *
  * Backend encrypt'ит токены через AES-256-GCM в tenant_secrets,
  * ChannelRegistry hot-reload'ится в apps/api (worker подхватит ≤30 сек).
  */
-type ChannelTab = "telegram" | "whatsapp";
+type ChannelTab = "telegram" | "whatsapp" | "web";
 
 export function SaasChannels() {
   const navigate = useNavigate();
@@ -35,6 +37,12 @@ export function SaasChannels() {
   const [waBizId, setWaBizId] = useState("");
   const [waSubmitting, setWaSubmitting] = useState(false);
   const [waResult, setWaResult] = useState<CreateWhatsAppChannelResult | null>(null);
+
+  // Web widget form
+  const [webBrand, setWebBrand] = useState("");
+  const [webColor, setWebColor] = useState("");
+  const [webSubmitting, setWebSubmitting] = useState(false);
+  const [webResult, setWebResult] = useState<CreateWebChannelResult | null>(null);
 
   async function refresh() {
     try {
@@ -113,6 +121,47 @@ export function SaasChannels() {
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleWebSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setWebResult(null);
+    setWebSubmitting(true);
+    try {
+      const res = await saas.createWebChannel({
+        ...(webBrand.trim() ? { brandName: webBrand.trim() } : {}),
+        ...(/^#[0-9a-fA-F]{3,8}$/.test(webColor) ? { primaryColor: webColor } : {}),
+      });
+      setWebResult(res);
+      await refresh();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 402) {
+          setError("Лимит каналов исчерпан — обновите план для добавления web-виджета");
+        } else if (err.status === 401) {
+          clearToken();
+          navigate("/login", { replace: true });
+          return;
+        } else if (err.status === 400) {
+          setError(`Ошибка: ${err.errorCode}`);
+        } else {
+          setError(`Ошибка ${err.status}: ${err.errorCode}`);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setWebSubmitting(false);
+    }
+  }
+
+  async function copySnippet(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // fallback
     }
   }
 
@@ -228,6 +277,13 @@ export function SaasChannels() {
         >
           WhatsApp
         </button>
+        <button
+          type="button"
+          className={`channel-tab ${tab === "web" ? "active" : ""}`}
+          onClick={() => setTab("web")}
+        >
+          Web виджет
+        </button>
       </div>
 
       {tab === "telegram" && (
@@ -323,6 +379,81 @@ export function SaasChannels() {
         </section>
       )}
 
+      {tab === "web" && (
+        <section className="settings-section">
+          <div className="settings-header">
+            <h2>Web-виджет на сайт</h2>
+          </div>
+          <p className="hint">
+            Включает чат-виджет для вашего сайта — посетители пишут через
+            плавающий bubble. Backend без token'ов (channel-web использует
+            WS-соединение, anonymized externalUserId). После включения
+            UI покажет готовый snippet — вставьте перед закрывающим
+            <code>{"</body>"}</code>.
+          </p>
+          <form className="settings-form" onSubmit={handleWebSubmit}>
+            <label>
+              Brand name (опционально)
+              <input
+                type="text"
+                value={webBrand}
+                onChange={(e) => setWebBrand(e.target.value)}
+                placeholder="Acme Support"
+                maxLength={64}
+              />
+            </label>
+            <label>
+              Цвет акцента (hex, опционально)
+              <input
+                type="text"
+                value={webColor}
+                onChange={(e) => setWebColor(e.target.value)}
+                placeholder="#6aa6ff"
+                pattern="#[0-9a-fA-F]{3,8}"
+              />
+            </label>
+            <button type="submit" disabled={webSubmitting}>
+              {webSubmitting ? "Создаём…" : webResult ? "Обновить" : "Включить виджет"}
+            </button>
+          </form>
+
+          {webResult?.snippet && (
+            <div className="snippet-box">
+              <strong>Embed snippet</strong>
+              <p className="hint">
+                Скопируйте этот HTML и вставьте на ваш сайт перед закрывающим тегом
+                <code>{"</body>"}</code>:
+              </p>
+              <pre>{webResult.snippet.html}</pre>
+              <button
+                type="button"
+                className="nav-link"
+                onClick={() => copySnippet(webResult.snippet!.html)}
+              >
+                Копировать
+              </button>
+              <p className="hint" style={{ marginTop: 12 }}>
+                Smoke-test:{" "}
+                <a
+                  href={webResult.snippet.demoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  открыть demo-чат
+                </a>{" "}
+                · WS URL:{" "}
+                <code>{webResult.snippet.wsUrl}</code>
+              </p>
+            </div>
+          )}
+          {webResult && !webResult.snippet && (
+            <div className="settings-warning">
+              ⚠ {webResult.snippetHint ?? "snippet недоступен"}
+            </div>
+          )}
+        </section>
+      )}
+
       <section className="docs-section">
         <h2>Подключённые каналы ({channels.length})</h2>
         {channels.length === 0 ? (
@@ -337,7 +468,9 @@ export function SaasChannels() {
                       ? `@${ch.externalId}`
                       : ch.kind === "whatsapp"
                         ? `WhatsApp #${ch.externalId}`
-                        : ch.externalId}
+                        : ch.kind === "web"
+                          ? `Web виджет (${ch.externalId})`
+                          : ch.externalId}
                   </strong>
                   <small>
                     <span className="badge">{ch.kind}</span>{" "}

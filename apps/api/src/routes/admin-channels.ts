@@ -64,6 +64,54 @@ export interface AdminChannelsRoutesOpts {
    * configuration).
    */
   whatsappVerifyToken?: string;
+  /**
+   * URL CDN-bundle'а виджета. Если задан — POST /web возвращает
+   * production-ready `<script src="...">` snippet. Если пусто (текущее
+   * состояние M3a — bundle ещё не задеплоен) — fallback на demo HTML
+   * link для smoke-теста.
+   */
+  webWidgetScriptUrl?: string;
+}
+
+function generateWebWidgetSnippet(opts: {
+  publicUrl: string;
+  tenantSlug: string;
+  externalId: string;
+  webWidgetScriptUrl: string | undefined;
+  brandName: string | undefined;
+  primaryColor: string | undefined;
+  authSecret: string | undefined;
+}): { html: string; wsUrl: string; demoUrl: string } {
+  const wsBase = opts.publicUrl.replace(/^http/, "ws").replace(/\/+$/, "");
+  const wsUrl = `${wsBase}/ws/${opts.externalId}`;
+  const demoUrl = `${opts.publicUrl}/demo/web-chat.html?host=${encodeURIComponent(
+    opts.publicUrl,
+  )}&slug=${encodeURIComponent(opts.externalId)}`;
+
+  const dataAttrs = [
+    `data-slug="${opts.externalId}"`,
+    `data-host="${opts.publicUrl}"`,
+    opts.brandName ? `data-brand="${escapeHtmlAttr(opts.brandName)}"` : "",
+    opts.primaryColor ? `data-color="${escapeHtmlAttr(opts.primaryColor)}"` : "",
+    opts.authSecret ? `data-auth="REPLACE_WITH_USER_JWT"` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const scriptSrc = opts.webWidgetScriptUrl
+    ? opts.webWidgetScriptUrl
+    : `${opts.publicUrl}/widget.js`; // placeholder — M3b shipped bundle
+
+  const html = [
+    "<!-- lead-engine chat widget — вставить перед </body> -->",
+    `<script async src="${scriptSrc}" ${dataAttrs}></script>`,
+  ].join("\n");
+
+  return { html, wsUrl, demoUrl };
+}
+
+function escapeHtmlAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
 interface TelegramCreateBody {
@@ -74,6 +122,14 @@ interface WhatsAppCreateBody {
   phoneNumberId: unknown;
   accessToken: unknown;
   businessAccountId?: unknown;
+}
+
+interface WebCreateBody {
+  /** Optional override external_id (по умолчанию tenant.slug). */
+  externalId?: unknown;
+  /** Optional branding для widget snippet (UI кастомизация). */
+  brandName?: unknown;
+  primaryColor?: unknown;
 }
 
 export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
@@ -560,6 +616,232 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
       }
       throw err;
     }
+  });
+
+  /**
+   * POST /api/admin/channels/web
+   * Body: { externalId?, brandName?, primaryColor? }
+   *
+   * Enables web channel для tenant'а — создаёт `channels(kind='web')` row +
+   * возвращает ready-to-paste embed snippet. Никаких external API вызовов
+   * (в отличие от Telegram/WhatsApp), поэтому idempotent — повторный POST
+   * с тем же externalId обновляет brand metadata.
+   *
+   * Errors:
+   *   400 — bad json / externalId invalid
+   *   402 — quota_exceeded (plan limit on channels)
+   */
+  app.post("/api/admin/channels/web", async (c) => {
+    const tenantId = c.var.tenantId;
+    // Body opt: пустой → enable без customization; не-пустой но bad json → 400.
+    const raw = await c.req.text().catch(() => "");
+    let body: WebCreateBody = {};
+    if (raw.length > 0) {
+      try {
+        body = JSON.parse(raw) as WebCreateBody;
+      } catch {
+        return c.json({ error: "invalid json" }, 400);
+      }
+    }
+    const externalIdInput =
+      typeof body.externalId === "string" && body.externalId.trim()
+        ? body.externalId.trim()
+        : "";
+    const brandName =
+      typeof body.brandName === "string" && body.brandName.trim()
+        ? body.brandName.trim()
+        : undefined;
+    const primaryColor =
+      typeof body.primaryColor === "string" && /^#[0-9a-fA-F]{3,8}$/.test(body.primaryColor)
+        ? body.primaryColor
+        : undefined;
+
+    if (externalIdInput && !/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/i.test(externalIdInput)) {
+      return c.json(
+        { error: "externalId must be alphanumeric/dash, 3-64 chars" },
+        400,
+      );
+    }
+
+    const [tenant] = await opts.db
+      .select({ slug: tenants.slug })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    if (!tenant) return c.json({ error: "tenant not found" }, 404);
+
+    const externalId = externalIdInput || tenant.slug;
+    const nowEpoch = Math.floor(Date.now() / 1000);
+
+    // Quota check (только для new-channel path).
+    const [maybeExistingWeb] = await opts.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(
+        and(
+          eq(channels.tenantId, tenantId),
+          eq(channels.kind, "web"),
+          eq(channels.externalId, externalId),
+        ),
+      );
+    if (!maybeExistingWeb) {
+      const quota = await canAddChannel({ db: opts.db, tenantId });
+      if (!quota.allowed) {
+        return c.json(
+          {
+            error: "quota_exceeded",
+            reason: quota.reason,
+            limit: quota.limit,
+            current: quota.current,
+            plan: quota.plan,
+            planLabel: quota.planLabel,
+            upgradeHint: "Перейдите на план Starter ($49/мес) для большего числа каналов",
+          },
+          402,
+        );
+      }
+    }
+
+    const metadata = JSON.stringify({
+      ...(brandName ? { brandName } : {}),
+      ...(primaryColor ? { primaryColor } : {}),
+    });
+
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      if (maybeExistingWeb) {
+        await tx
+          .update(channels)
+          .set({
+            status: "active",
+            metadataJson: metadata,
+            updatedAt: nowEpoch,
+          })
+          .where(eq(channels.id, maybeExistingWeb.id));
+        return { id: maybeExistingWeb.id, updated: true };
+      }
+      const [inserted] = await tx
+        .insert(channels)
+        .values({
+          tenantId,
+          kind: "web",
+          externalId,
+          status: "active",
+          metadataJson: metadata,
+          createdAt: nowEpoch,
+          updatedAt: nowEpoch,
+        })
+        .returning({ id: channels.id });
+      return { id: inserted!.id, updated: false };
+    });
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId: c.var.adminId,
+      action: result.updated ? "channel.update" : "channel.create",
+      targetKind: "channel",
+      targetId: result.id,
+      details: {
+        kind: "web",
+        externalId,
+        ...(brandName ? { brandName } : {}),
+        ...(primaryColor ? { primaryColor } : {}),
+      },
+    });
+
+    let reloadError: string | undefined;
+    if (opts.onReload) {
+      try {
+        await opts.onReload(tenantId);
+      } catch (err) {
+        reloadError = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    const snippet = opts.publicUrl
+      ? generateWebWidgetSnippet({
+          publicUrl: opts.publicUrl,
+          tenantSlug: tenant.slug,
+          externalId,
+          webWidgetScriptUrl: opts.webWidgetScriptUrl,
+          brandName,
+          primaryColor,
+          authSecret: undefined,
+        })
+      : undefined;
+
+    return c.json({
+      ok: true,
+      ...result,
+      externalId,
+      ...(brandName ? { brandName } : {}),
+      ...(primaryColor ? { primaryColor } : {}),
+      ...(snippet ? { snippet } : { snippetHint: "PLATFORM_PUBLIC_URL не задан — snippet нельзя сгенерировать" }),
+      ...(reloadError ? { reloadError } : {}),
+    });
+  });
+
+  /**
+   * GET /api/admin/channels/web/snippet
+   * Возвращает свежий snippet для уже-enabled web-channel'а. Если несколько
+   * web-каналов — берём первый. 404 если ни одного нет.
+   */
+  app.get("/api/admin/channels/web/snippet", async (c) => {
+    const tenantId = c.var.tenantId;
+    const [tenant] = await opts.db
+      .select({ slug: tenants.slug })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    if (!tenant) return c.json({ error: "tenant not found" }, 404);
+
+    const [ch] = await opts.db
+      .select({
+        externalId: channels.externalId,
+        metadataJson: channels.metadataJson,
+      })
+      .from(channels)
+      .where(
+        and(
+          eq(channels.tenantId, tenantId),
+          eq(channels.kind, "web"),
+          eq(channels.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!ch) return c.json({ error: "no active web channel" }, 404);
+
+    let brandName: string | undefined;
+    let primaryColor: string | undefined;
+    if (ch.metadataJson) {
+      try {
+        const parsed = JSON.parse(ch.metadataJson) as {
+          brandName?: string;
+          primaryColor?: string;
+        };
+        brandName = parsed.brandName;
+        primaryColor = parsed.primaryColor;
+      } catch {
+        // ignore malformed metadata
+      }
+    }
+
+    if (!opts.publicUrl) {
+      return c.json({ error: "PLATFORM_PUBLIC_URL not configured" }, 503);
+    }
+    const snippet = generateWebWidgetSnippet({
+      publicUrl: opts.publicUrl,
+      tenantSlug: tenant.slug,
+      externalId: ch.externalId,
+      webWidgetScriptUrl: opts.webWidgetScriptUrl,
+      brandName,
+      primaryColor,
+      authSecret: undefined,
+    });
+    return c.json({
+      ok: true,
+      externalId: ch.externalId,
+      ...(brandName ? { brandName } : {}),
+      ...(primaryColor ? { primaryColor } : {}),
+      snippet,
+    });
   });
 
   /**

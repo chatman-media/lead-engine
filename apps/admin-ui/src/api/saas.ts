@@ -91,6 +91,34 @@ export interface CreateWhatsAppChannelResult {
   reloadError?: string;
 }
 
+export interface CreateWebChannelResult {
+  ok: boolean;
+  id: number;
+  updated: boolean;
+  externalId: string;
+  brandName?: string;
+  primaryColor?: string;
+  snippet?: {
+    html: string;
+    wsUrl: string;
+    demoUrl: string;
+  };
+  snippetHint?: string;
+  reloadError?: string;
+}
+
+export interface WebSnippet {
+  ok: boolean;
+  externalId: string;
+  brandName?: string;
+  primaryColor?: string;
+  snippet: {
+    html: string;
+    wsUrl: string;
+    demoUrl: string;
+  };
+}
+
 export interface ConversationListItem {
   id: number;
   contactId: number;
@@ -350,6 +378,19 @@ export const saas = {
       method: "POST",
       body: JSON.stringify(input),
     });
+  },
+  createWebChannel(input: {
+    externalId?: string;
+    brandName?: string;
+    primaryColor?: string;
+  } = {}) {
+    return request<CreateWebChannelResult>("/api/admin/channels/web", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  getWebSnippet() {
+    return request<WebSnippet>("/api/admin/channels/web/snippet");
   },
   deleteChannel(id: number) {
     return request<{ ok: boolean; deleted: number }>(`/api/admin/channels/${id}`, {
