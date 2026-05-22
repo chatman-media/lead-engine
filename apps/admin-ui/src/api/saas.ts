@@ -76,6 +76,21 @@ export interface CreateTelegramChannelResult {
   webhookError?: string;
 }
 
+export interface CreateWhatsAppChannelResult {
+  ok: boolean;
+  id: number;
+  updated: boolean;
+  phoneNumberId: string;
+  verifiedName?: string;
+  displayPhoneNumber?: string;
+  webhookSetupHint?: {
+    url: string;
+    verifyToken: string;
+    appSecretHint: string;
+  };
+  reloadError?: string;
+}
+
 export interface ConversationListItem {
   id: number;
   contactId: number;
@@ -305,6 +320,16 @@ export const saas = {
     return request<CreateTelegramChannelResult>("/api/admin/channels/telegram", {
       method: "POST",
       body: JSON.stringify({ botToken }),
+    });
+  },
+  createWhatsAppChannel(input: {
+    phoneNumberId: string;
+    accessToken: string;
+    businessAccountId?: string;
+  }) {
+    return request<CreateWhatsAppChannelResult>("/api/admin/channels/whatsapp", {
+      method: "POST",
+      body: JSON.stringify(input),
     });
   },
   deleteChannel(id: number) {

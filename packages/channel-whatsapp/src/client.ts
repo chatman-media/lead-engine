@@ -90,6 +90,41 @@ export class WhatsAppClient {
   }
 
   /**
+   * Validate phone_number_id + access_token: GET /<phone_number_id>.
+   * Возвращает identity row (verified_name, display_phone_number).
+   * Бросает WhatsAppApiError на 401/403 (bad token) или 404 (bad ID).
+   */
+  async getPhoneInfo(): Promise<{
+    id: string;
+    verifiedName?: string;
+    displayPhoneNumber?: string;
+    qualityRating?: string;
+  }> {
+    const res = await this.fetchImpl(this.url(`/${this.phoneNumberId}`), {
+      headers: this.authHeaders(),
+    });
+    if (!res.ok) {
+      throw new WhatsAppApiError(
+        "getPhoneInfo",
+        res.status,
+        await res.text().catch(() => "no body"),
+      );
+    }
+    const body = (await res.json()) as {
+      id: string;
+      verified_name?: string;
+      display_phone_number?: string;
+      quality_rating?: string;
+    };
+    return {
+      id: body.id,
+      ...(body.verified_name ? { verifiedName: body.verified_name } : {}),
+      ...(body.display_phone_number ? { displayPhoneNumber: body.display_phone_number } : {}),
+      ...(body.quality_rating ? { qualityRating: body.quality_rating } : {}),
+    };
+  }
+
+  /**
    * Re-relay уже загруженного media (по media_id) — без download/re-upload.
    * Cloud API позволяет указать `id` вместо `link`.
    */

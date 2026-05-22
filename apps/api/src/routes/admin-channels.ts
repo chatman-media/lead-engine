@@ -1,4 +1,5 @@
 import { TelegramApiError, TelegramClient } from "@chatman-media/channel-telegram";
+import { WhatsAppApiError, WhatsAppClient } from "@chatman-media/channel-whatsapp";
 import {
   type Db,
   setEncryptedSecret,
@@ -56,10 +57,22 @@ export interface AdminChannelsRoutesOpts {
    * процессе. apps/worker — отдельный процесс, ему нужен restart.
    */
   onReload?: (tenantId: number) => Promise<void>;
+  /**
+   * WhatsApp Meta verify_token — нужен для webhookSetupHint в POST /whatsapp
+   * response (UI показывает copy-paste snippet для Meta dashboard webhook
+   * configuration).
+   */
+  whatsappVerifyToken?: string;
 }
 
 interface TelegramCreateBody {
   botToken: unknown;
+}
+
+interface WhatsAppCreateBody {
+  phoneNumberId: unknown;
+  accessToken: unknown;
+  businessAccountId?: unknown;
 }
 
 export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
@@ -283,6 +296,207 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
       // Unique-violation guard на случай race.
       if (err instanceof Error && /unique|duplicate/i.test(err.message)) {
         return c.json({ error: "channel already exists", username }, 409);
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * POST /api/admin/channels/whatsapp
+   * Body: { phoneNumberId, accessToken, businessAccountId? }
+   *
+   * 1. Validate via Meta Graph `GET /<phone_number_id>` — Bearer token.
+   * 2. Encrypt token в tenant_secrets[channel_whatsapp_<phoneNumberId>].
+   * 3. Insert channels row (kind=whatsapp, external_id=phoneNumberId).
+   *
+   * Meta webhook setup НЕ авто-настраивается (Meta dashboard ручной).
+   * Response содержит `webhookSetupHint` с URL + verify_token для UI
+   * copy-paste-инструкции.
+   *
+   * Errors:
+   *   400 — bad json / required fields missing
+   *   401 — Meta отверг token (Bearer auth failed) или phoneNumberId
+   *         не принадлежит этому token
+   *   404 — phoneNumberId не существует
+   *   502 — Meta unreachable
+   */
+  app.post("/api/admin/channels/whatsapp", async (c) => {
+    const tenantId = c.var.tenantId;
+    let body: WhatsAppCreateBody;
+    try {
+      body = (await c.req.json()) as WhatsAppCreateBody;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const phoneNumberId =
+      typeof body.phoneNumberId === "string" ? body.phoneNumberId.trim() : "";
+    const accessToken =
+      typeof body.accessToken === "string" ? body.accessToken.trim() : "";
+    if (!phoneNumberId) {
+      return c.json({ error: "phoneNumberId required" }, 400);
+    }
+    if (!accessToken) {
+      return c.json({ error: "accessToken required" }, 400);
+    }
+    if (!/^\d{10,20}$/.test(phoneNumberId)) {
+      return c.json(
+        { error: "phoneNumberId must be Meta numeric ID (10-20 digits)" },
+        400,
+      );
+    }
+    const businessAccountId =
+      typeof body.businessAccountId === "string" && body.businessAccountId.trim()
+        ? body.businessAccountId.trim()
+        : null;
+
+    // Validate via Meta Graph.
+    const waClient = new WhatsAppClient({
+      phoneNumberId,
+      accessToken,
+      ...(opts.fetchImpl ? { fetch: opts.fetchImpl } : {}),
+    });
+    let phoneInfo: Awaited<ReturnType<WhatsAppClient["getPhoneInfo"]>>;
+    try {
+      phoneInfo = await waClient.getPhoneInfo();
+    } catch (err) {
+      if (err instanceof WhatsAppApiError) {
+        if (err.statusCode === 401 || err.statusCode === 403) {
+          return c.json({ error: "Meta rejected token (invalid)" }, 401);
+        }
+        if (err.statusCode === 404) {
+          return c.json({ error: "phoneNumberId not found" }, 404);
+        }
+      }
+      return c.json(
+        {
+          error: "Meta Graph unreachable or rejected",
+          detail: err instanceof Error ? err.message : String(err),
+        },
+        502,
+      );
+    }
+
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const secretKey = `channel_whatsapp_${phoneNumberId}`;
+
+    try {
+      const result = await withTenant(opts.db, tenantId, async (tx) => {
+        const [existing] = await tx
+          .select({ id: channels.id })
+          .from(channels)
+          .where(
+            and(
+              eq(channels.tenantId, tenantId),
+              eq(channels.kind, "whatsapp"),
+              eq(channels.externalId, phoneNumberId),
+            ),
+          );
+
+        const metadata = JSON.stringify({
+          verifiedName: phoneInfo.verifiedName,
+          displayPhoneNumber: phoneInfo.displayPhoneNumber,
+          qualityRating: phoneInfo.qualityRating,
+          ...(businessAccountId ? { businessAccountId } : {}),
+        });
+
+        if (existing) {
+          await setEncryptedSecret({
+            db: tx,
+            tenantId,
+            key: secretKey,
+            value: accessToken,
+            masterKeyHex: opts.masterKeyHex,
+            nowEpoch,
+          });
+          await tx
+            .update(channels)
+            .set({
+              credentialsRef: secretKey,
+              status: "active",
+              metadataJson: metadata,
+              updatedAt: nowEpoch,
+            })
+            .where(eq(channels.id, existing.id));
+          return { id: existing.id, updated: true };
+        }
+        await setEncryptedSecret({
+          db: tx,
+          tenantId,
+          key: secretKey,
+          value: accessToken,
+          masterKeyHex: opts.masterKeyHex,
+          nowEpoch,
+        });
+        const [inserted] = await tx
+          .insert(channels)
+          .values({
+            tenantId,
+            kind: "whatsapp",
+            externalId: phoneNumberId,
+            credentialsRef: secretKey,
+            status: "active",
+            metadataJson: metadata,
+            createdAt: nowEpoch,
+            updatedAt: nowEpoch,
+          })
+          .returning({ id: channels.id });
+        return { id: inserted!.id, updated: false };
+      });
+
+      await recordAudit(opts.db, {
+        tenantId,
+        adminId: c.var.adminId,
+        action: result.updated ? "channel.update" : "channel.create",
+        targetKind: "channel",
+        targetId: result.id,
+        details: {
+          kind: "whatsapp",
+          phoneNumberId,
+          verifiedName: phoneInfo.verifiedName,
+          displayPhoneNumber: phoneInfo.displayPhoneNumber,
+        },
+      });
+
+      let reloadError: string | undefined;
+      if (opts.onReload) {
+        try {
+          await opts.onReload(tenantId);
+        } catch (err) {
+          reloadError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
+      // Resolve tenant slug для webhookSetupHint.
+      let webhookSetupHint:
+        | { url: string; verifyToken: string; appSecretHint: string }
+        | undefined;
+      if (opts.publicUrl) {
+        const [tenant] = await opts.db
+          .select({ slug: tenants.slug })
+          .from(tenants)
+          .where(eq(tenants.id, tenantId));
+        if (tenant) {
+          webhookSetupHint = {
+            url: `${opts.publicUrl}/webhook/whatsapp/${tenant.slug}`,
+            verifyToken: opts.whatsappVerifyToken ?? "<set WHATSAPP_VERIFY_TOKEN env>",
+            appSecretHint:
+              "Meta dashboard → App settings → Basic → App Secret — добавить в WHATSAPP_APP_SECRET env",
+          };
+        }
+      }
+
+      return c.json({
+        ok: true,
+        ...result,
+        phoneNumberId,
+        verifiedName: phoneInfo.verifiedName,
+        displayPhoneNumber: phoneInfo.displayPhoneNumber,
+        ...(webhookSetupHint ? { webhookSetupHint } : {}),
+        ...(reloadError ? { reloadError } : {}),
+      });
+    } catch (err) {
+      if (err instanceof Error && /unique|duplicate/i.test(err.message)) {
+        return c.json({ error: "channel already exists", phoneNumberId }, 409);
       }
       throw err;
     }

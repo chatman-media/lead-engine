@@ -48,15 +48,45 @@ let tenantIdB = 0;
 const setWebhookCalls: Array<{ token: string; url: string; secretToken?: string }> = [];
 
 /**
- * Fake fetch для Telegram getMe + setWebhook. Возвращает фиксированного
- * bot'а для "good" токенов, 401 если число-часть начинается на "9999".
- * setWebhook records запрос в setWebhookCalls для assertion'ов.
+ * Fake fetch для Telegram getMe + setWebhook + Meta Graph
+ * `GET /<phone_number_id>` (для WhatsApp onboarding). Telegram: токен
+ * `9999...` rejected, иначе bot returned. WhatsApp: phoneNumberId
+ * начинающийся на `9999` → 404, accessToken `bad-` → 401.
  */
 const fakeTelegramFetch = (async (
   input: string | URL | Request,
   init?: RequestInit,
 ): Promise<Response> => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  // ── WhatsApp Meta Graph intercept ────────────────────────────────────
+  // Pattern: https://graph.facebook.com/v18.0/<phone_number_id>
+  if (url.includes("graph.facebook.com")) {
+    const headers = init?.headers as Record<string, string> | undefined;
+    const auth = headers?.authorization ?? headers?.Authorization ?? "";
+    if (auth.includes("bad-token")) {
+      return new Response(
+        JSON.stringify({ error: { code: 190, message: "Invalid OAuth access token" } }),
+        { status: 401, headers: { "content-type": "application/json" } },
+      );
+    }
+    const m = url.match(/\/v\d+\.\d+\/(\d+)$/);
+    const phoneId = m?.[1] ?? "";
+    if (phoneId.startsWith("9999")) {
+      return new Response(
+        JSON.stringify({ error: { code: 100, message: "Unsupported get request" } }),
+        { status: 404, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        id: phoneId,
+        verified_name: "Acme Demo",
+        display_phone_number: "+1 555-0100",
+        quality_rating: "GREEN",
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
   // setWebhook intercept
   if (url.includes("/setWebhook")) {
     const tokenMatch = url.match(/\/bot([^/]+)\/setWebhook/);
@@ -123,6 +153,7 @@ beforeAll(
         fetchImpl: fakeTelegramFetch,
         publicUrl: "https://api.example.test",
         webhookSecret: "test-webhook-secret-12345",
+        whatsappVerifyToken: "test-wa-verify-token",
       }),
     );
 
@@ -370,5 +401,143 @@ describe("admin-channels CRUD", () => {
       headers: { Authorization: "Bearer not-a-valid-token" },
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("admin-channels POST /whatsapp", () => {
+  it("без auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request("/api/admin/channels/whatsapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneNumberId: "1", accessToken: "x" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("без phoneNumberId → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/whatsapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessToken: "valid-token" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("без accessToken → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/whatsapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneNumberId: "1234567890" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("invalid phoneNumberId format → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/whatsapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneNumberId: "abc", accessToken: "tok" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("invalid json → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/whatsapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{not-json",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("bad-token (Meta 401) → 401", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/whatsapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phoneNumberId: "1234567890",
+        accessToken: "bad-token-here",
+      }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("non-existent phoneNumberId (9999...) → 404", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/whatsapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phoneNumberId: "9999999999",
+        accessToken: "good-token",
+      }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("valid token + phone → channel created + encrypted + webhookSetupHint", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/whatsapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phoneNumberId: "1234567890",
+        accessToken: "EAAJZBgoodtoken",
+        businessAccountId: "987654321098765",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      id: number;
+      updated: boolean;
+      phoneNumberId: string;
+      verifiedName?: string;
+      webhookSetupHint?: { url: string; verifyToken: string };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.updated).toBe(false);
+    expect(body.phoneNumberId).toBe("1234567890");
+    expect(body.verifiedName).toBe("Acme Demo");
+    // Webhook hint содержит публичный URL + verify_token.
+    expect(body.webhookSetupHint).toBeDefined();
+    expect(body.webhookSetupHint!.url).toMatch(/\/webhook\/whatsapp\//);
+    expect(body.webhookSetupHint!.verifyToken).toBe("test-wa-verify-token");
+
+    // Raw access token не в response.
+    expect(JSON.stringify(body)).not.toContain("EAAJZBgoodtoken");
+  });
+
+  it("re-POST same phoneNumberId → updated=true (token rotation)", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/whatsapp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phoneNumberId: "1234567890",
+        accessToken: "EAAJZBrotated-token",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { updated: boolean };
+    expect(body.updated).toBe(true);
+  });
+
+  it("GET /channels → WhatsApp канал в списке с hasCredentials=true", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels");
+    const body = (await res.json()) as {
+      items: Array<{ kind: string; externalId: string; hasCredentials: boolean }>;
+    };
+    const wa = body.items.find((i) => i.kind === "whatsapp");
+    expect(wa).toBeDefined();
+    expect(wa!.externalId).toBe("1234567890");
+    expect(wa!.hasCredentials).toBe(true);
   });
 });
