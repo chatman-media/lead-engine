@@ -24,6 +24,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
 
+    env:
+      # @chatman-media/storage интеграционные тесты apply'ят все migrations
+      # + verify invariants (RLS-таблицы, legacy tenant, outbound status
+      # union, pgvector extension, idempotent backfill). Multi-tenant E2E
+      # suite в apps/api тоже бьёт по PG.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/lead_engine_test
+
     services:
       # pgvector нужен для integration-тестов DrizzleKbStore
       # (vector(1536) колонка в kb_chunks) и multi-tenant RLS suite.
@@ -66,16 +73,17 @@ jobs:
       - name: Typecheck all workspace members (apps/* + packages/*)
         run: bun run --filter '*' typecheck
 
-      - name: Tests + coverage (all workspace members)
-        env:
-          # @chatman-media/storage интеграционные тесты apply'ят все
-          # migrations + verify invariants (RLS-enabled таблицы, legacy
-          # tenant, outbound status union, pgvector extension, idempotent
-          # backfill). Multi-tenant E2E suite в apps/api тоже бьёт по PG.
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/lead_engine_test
+      # Покрытие гоняем только по packages/* (publishable библиотеки):
+      # все они на `bun test` (channel-core — на echo, тоже терпит флаги).
+      # Apps тестируем отдельным шагом без --coverage: у widget скрипт
+      # `exit 0`, который ломается на лишних аргументах.
+      - name: Tests — apps
+        run: bun run --filter './apps/*' test
+
+      - name: Tests + coverage — packages
         run: |
           set -o pipefail
-          bun run --filter '*' test \
+          bun run --filter './packages/*' test \
             --coverage \
             --coverage-reporter=text \
             --coverage-reporter=lcov 2>&1 | tee coverage.txt
