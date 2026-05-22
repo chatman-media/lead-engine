@@ -3,6 +3,7 @@ import { coldDirectPas } from "./cold-direct-pas.ts";
 import { empatheticNepq } from "./empathetic-nepq.ts";
 import { flirtyBelfort } from "./flirty-belfort.ts";
 import { marinaPrime } from "./marina-prime.ts";
+import { recruiterEmpatheticV1 } from "./recruiter-empathetic-v1.ts";
 
 /**
  * In-memory style registry. For Phase 1 (env-flag opt-in) this is the source
@@ -13,6 +14,7 @@ export const STYLES: readonly Style[] = [
   flirtyBelfort,
   empatheticNepq,
   coldDirectPas,
+  recruiterEmpatheticV1,
 ];
 
 export function listStyles(): readonly Style[] {

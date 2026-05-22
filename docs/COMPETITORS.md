@@ -4,6 +4,63 @@
 публичный прайс на момент исследования и могут меняться ежеквартально —
 перепроверить перед использованием в pitch'ах.
 
+---
+
+## 0. Стратегический выбор (Phase 1)
+
+> **Phase 1 ICP:** Рекрутинговые агентства в RU/CIS/MENA.
+> **Всё остальное — Phase 2+.**
+
+### Почему recruitment, не generic CX
+
+Продукт технически универсален (любой бизнес с входящей воронкой в
+мессенджерах), но архитектурно 55%+ кода recruitment-specific (visa-docs,
+passport-OCR, dance-video, 12-state funnel, `recruitment_uae_v1` в проде).
+
+**Конкретный целевой клиент Phase 1:**
+- Visa staffing / talent sourcing agencies — Dubai, Москва, Алматы,
+  Тбилиси, Бишкек
+- 5–50 сотрудников, inbound лиды через Telegram (русскоязычная аудитория)
+- Pain: операторы не успевают → 30–60% leads cooling до escalation
+- ARPU: $99–299/мес (Starter/Pro tiers)
+
+### Positioning
+
+> **AI-ассистент для рекрутингового агентства, который не теряет лидов.**
+> Отвечает на входящие в Telegram за 30 секунд, ведёт кандидата от
+> "хочу узнать" до сданной анкеты, передаёт hot-lead'ы рекрутеру.
+> Использует sales-методики (SPIN, NEPQ, AIDA) — не FAQ-бот.
+
+### 5 приоритетных moat'ов Phase 1
+
+| # | Moat | Доказательство |
+|---|------|---------------|
+| **1** | Recruitment-vertical expertise | `recruitment_uae_v1` pack в проде, visa-docs / passport-OCR / dance-video / 12-state funnel — реальный клиент |
+| **2** | Sales-engine (SPIN + NEPQ + Cialdini) | `@chatman-media/sales`: 5 frameworks + 6 Cialdini hooks + ELO + 3 Phase 1 skills. Unique vs Chatbase/Tidio/Sierra |
+| **3** | Telegram-first DX | auto-setWebhook за 60 сек. RU/CIS/MENA рынок — TG dominant |
+| **4** | BYOK | ARPU-sensitive агентства. Chatbase включает inference в цену ($40–500/мес) — мы нет |
+| **5** | Operator handoff first-class | Built-in inbox + mode toggle, не $300/мес add-on |
+
+### Что НЕ маркетим в Phase 1
+
+- Real estate / dental / edtech / e-com → Phase 2+
+- "Customer service" / "FAQ bot" → мы про closing
+- White-label / agency reseller → Phase 2
+- OSS / self-host → Phase 3
+- Voice / SOC 2 → Phase 3
+
+### Какие конкуренты НЕ занимают recruitment-niche
+
+- **Chatbase / Tidio Lyro**: SMB FAQ-bots без SPIN/NEPQ, нет Telegram, нет vertical знаний
+- **Sierra / Decagon**: $200K+/year F500 только, недосягаемы для $99/мес SMB
+- **Crisp**: inbox-first, нет autonomous agent, нет sales-skills
+- **ManyChat**: Telegram-heavy но flow-builder, не LLM-driven
+
+→ **Ниша recruitment-SMB в Telegram с persuasion-engine на RU/CIS/MENA рынке
+практически незаполнена** (дата: май 2026).
+
+---
+
 ## 1. Контекст
 
 Мы строим **lead-engine** — multi-tenant SaaS, где бизнес:

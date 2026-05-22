@@ -1,13 +1,24 @@
 # lead-engine
 
-**Multi-tenant SaaS платформа клиентского сервиса с AI-ботом.** Бизнес
-регается → подключает свой Telegram / WhatsApp / web-чат → конфигурит
-свой OpenAI / Anthropic / Ollama ключ (BYOK) → грузит документы в KB →
-AI отвечает клиентам через эти каналы. Operator может перехватить
-диалог в любой момент.
+**AI Sales Closer для рекрутинговых агентств в Telegram.**
+Multi-tenant SaaS платформа. Отвечает на входящие лиды за 30 секунд,
+ведёт кандидата от "хочу узнать" до сданной анкеты, передаёт hot-lead'ы
+рекрутеру. Использует sales-методики (SPIN, NEPQ, AIDA) — не FAQ-бот.
+
+**Phase 1 ICP:** Рекрутинговые агентства в RU/CIS/MENA, Telegram-first,
+ARPU $99–199/мес. [Phase 2: real estate. Phase 3: horizontal.]
+
+**Как работает:** бизнес регается → подключает свой Telegram-бот
+(auto-setWebhook за 60 сек) → конфигурит свой OpenAI / Anthropic ключ
+(BYOK) → грузит документы в KB → AI отвечает и ведёт воронку.
+Оператор перехватывает диалог в любой момент из inbox.
 
 Каждый клиент — независимый `tenant` с собственными каналами, LLM-
 конфигом, базой знаний, изоляцией данных на уровне Postgres RLS.
+
+> Продукт технически универсален для любого клиентского бизнеса с
+> мессенджер-воронкой. В Phase 1 фокус на recruitment для laser-precision
+> go-to-market. Подробнее: [`docs/COMPETITORS.md §0`](docs/COMPETITORS.md).
 
 Извлечён из `chatman-media/sales-guru` (legacy Telegram-only бот) через
 серию архитектурных PR'ов (см. `docs/ROADMAP.md` и git log).
