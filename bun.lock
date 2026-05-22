@@ -47,6 +47,21 @@
         "typescript": "^6.0.3",
       },
     },
+    "apps/landing": {
+      "name": "@lead-engine/landing",
+      "version": "0.0.1",
+      "dependencies": {
+        "react": "^19.1.0",
+        "react-dom": "^19.1.0",
+      },
+      "devDependencies": {
+        "@types/react": "^19.1.2",
+        "@types/react-dom": "^19.1.2",
+        "@vitejs/plugin-react": "^4.4.1",
+        "typescript": "^6.0.3",
+        "vite": "^6.3.4",
+      },
+    },
     "apps/vertical-recruitment-uae": {
       "name": "@chatman-media/vertical-recruitment-uae",
       "version": "0.1.0",
@@ -410,6 +425,8 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@lead-engine/admin-ui": ["@lead-engine/admin-ui@workspace:apps/admin-ui"],
+
+    "@lead-engine/landing": ["@lead-engine/landing@workspace:apps/landing"],
 
     "@lead-engine/widget": ["@lead-engine/widget@workspace:apps/widget"],
 
