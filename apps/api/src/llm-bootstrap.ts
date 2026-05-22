@@ -23,7 +23,15 @@ import type { PlatformMetrics } from "@chatman-media/observability";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import type { ApiConfig } from "./config.ts";
-import { wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
+import { type OnUsage, wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
+
+/**
+ * Опциональный hook: фабрики передают каждому wrapped client'у callback
+ * который фиксирует usage event per-call. apps/api на boot wire'ит его к
+ * LlmUsageWriter'у — events batch'аются в DB для billing dashboard'а.
+ * `tenantId` приходит из `resolveChat(tid)` контекста.
+ */
+export type RecordUsage = (tenantId: number, event: Parameters<OnUsage>[0]) => void;
 import {
   getConfig,
   type LoadedLlmConfigs,
@@ -82,6 +90,7 @@ export function makeMemoryExtractor(
   ref: LoadedRef,
   db: Db,
   metrics?: PlatformMetrics,
+  recordUsage?: RecordUsage,
 ): MemoryExtractor | null {
   if (!ref.current.anyTenantHasChat) return null;
   // Регистрируем initial configs. После hot-reload tenant-reloader сам
@@ -96,10 +105,16 @@ export function makeMemoryExtractor(
         const inner = ref.router.resolveChat(tenantId, "chat");
         if (!metrics) return inner;
         const cfg = getConfig(ref.current, tenantId, "chat");
-        return wrapChatClient(inner, metrics, {
-          provider: cfg?.provider ?? "unknown",
-          purpose: "memory",
-        });
+        return wrapChatClient(
+          inner,
+          metrics,
+          {
+            provider: cfg?.provider ?? "unknown",
+            purpose: "memory",
+            ...(cfg?.model ? { model: cfg.model } : {}),
+          },
+          recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
+        );
       },
     },
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
@@ -116,6 +131,7 @@ export function makeStageClassifier(
   cfg: ApiConfig,
   db: Db,
   metrics?: PlatformMetrics,
+  recordUsage?: RecordUsage,
 ): StageClassifier | null {
   void db; // db не нужен classifier'у; pipeline передаёт deps.db в applyClassifiedStage.
   if (cfg.stageClassifier === "regex") {
@@ -137,10 +153,16 @@ export function makeStageClassifier(
         const inner = ref.router.resolveChat(tenantId, "chat");
         if (!metrics) return inner;
         const chatCfg = getConfig(ref.current, tenantId, "chat");
-        return wrapChatClient(inner, metrics, {
-          provider: chatCfg?.provider ?? "unknown",
-          purpose: "stage",
-        });
+        return wrapChatClient(
+          inner,
+          metrics,
+          {
+            provider: chatCfg?.provider ?? "unknown",
+            purpose: "stage",
+            ...(chatCfg?.model ? { model: chatCfg.model } : {}),
+          },
+          recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
+        );
       },
     });
   }
@@ -152,6 +174,7 @@ export function makeReplyStrategy(
   cfg: ApiConfig,
   db: Db,
   metrics?: PlatformMetrics,
+  recordUsage?: RecordUsage,
 ): ReplyStrategy | null {
   if (!ref.current.anyTenantHasChat) return null;
 
@@ -232,19 +255,31 @@ export function makeReplyStrategy(
         const inner = ref.router.resolveChat(tenantId, "chat");
         if (!metrics) return inner;
         const chatCfg = getConfig(ref.current, tenantId, "chat");
-        return wrapChatClient(inner, metrics, {
-          provider: chatCfg?.provider ?? "unknown",
-          purpose: "chat",
-        });
+        return wrapChatClient(
+          inner,
+          metrics,
+          {
+            provider: chatCfg?.provider ?? "unknown",
+            purpose: "chat",
+            ...(chatCfg?.model ? { model: chatCfg.model } : {}),
+          },
+          recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
+        );
       },
       resolveEmbed: (tenantId: number) => {
         const inner = ref.router.resolveEmbed(tenantId);
         if (!metrics) return inner as unknown as RagEmbeddingClient;
         const embedCfg = getConfig(ref.current, tenantId, "embed");
-        const wrapped = wrapEmbeddingClient(inner, metrics, {
-          provider: embedCfg?.provider ?? "unknown",
-          purpose: "embed",
-        });
+        const wrapped = wrapEmbeddingClient(
+          inner,
+          metrics,
+          {
+            provider: embedCfg?.provider ?? "unknown",
+            purpose: "embed",
+            ...(embedCfg?.model ? { model: embedCfg.model } : {}),
+          },
+          recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
+        );
         return wrapped as unknown as RagEmbeddingClient;
       },
       resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),

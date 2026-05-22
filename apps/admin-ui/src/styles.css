@@ -736,6 +736,18 @@ a:hover {
   font-size: 12px;
 }
 
+.plan-usage-row {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.plan-usage-providers {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+}
+
 /* ── Inbox (conversations) ─────────────────────────────────────────────── */
 
 .inbox-layout {

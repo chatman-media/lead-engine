@@ -1,6 +1,13 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
-import { admins, channels, kbDocuments, stripeCustomers, tenants } from "@chatman-media/storage";
-import { count, eq } from "drizzle-orm";
+import {
+  admins,
+  channels,
+  kbDocuments,
+  llmUsageEvents,
+  stripeCustomers,
+  tenants,
+} from "@chatman-media/storage";
+import { and, count, eq, gte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { allPlans, type PlanKind, resolvePlan } from "../lib/plans.ts";
@@ -231,6 +238,125 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
       }
       throw err;
     }
+  });
+
+  /**
+   * GET /api/admin/billing/usage
+   * Optional query: `?days=30` (default 30, max 365)
+   *
+   * Returns: {
+   *   periodDays: 30,
+   *   totals: { calls: N, errors: N, successRate: 0.97, avgLatencyMs: N },
+   *   byPurpose: [{ purpose, calls, errors, avgLatencyMs }],
+   *   byProvider: [{ provider, calls }],
+   *   thisMonth: { calls, errors, since (epoch) }
+   * }
+   *
+   * Использует `llm_usage_events` (одна row на каждый LLM call). UI billing
+   * dashboard'а показывает summary для BYOK transparency.
+   */
+  app.get("/api/admin/billing/usage", async (c) => {
+    const tenantId = c.var.tenantId;
+    const daysRaw = Number.parseInt(c.req.query("days") ?? "30", 10);
+    const days = Math.min(Math.max(Number.isFinite(daysRaw) ? daysRaw : 30, 1), 365);
+    const sinceEpoch = Math.floor(Date.now() / 1000) - days * 86400;
+
+    // Beginning-of-month boundary для "thisMonth" поля.
+    const now = new Date();
+    const monthStart = new Date(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0);
+    const monthStartEpoch = Math.floor(monthStart.getTime() / 1000);
+
+    const data = await withTenant(opts.db, tenantId, async (tx) => {
+      // Totals для period.
+      const totalsRows = await tx
+        .select({
+          calls: count(),
+          errors: sql<number>`SUM(CASE WHEN ${llmUsageEvents.success} = false THEN 1 ELSE 0 END)::int`,
+          avgLatencyMs: sql<number>`COALESCE(AVG(${llmUsageEvents.latencyMs}), 0)::int`,
+        })
+        .from(llmUsageEvents)
+        .where(
+          and(
+            eq(llmUsageEvents.tenantId, tenantId),
+            gte(llmUsageEvents.createdAt, sinceEpoch),
+          ),
+        );
+
+      const byPurposeRows = await tx
+        .select({
+          purpose: llmUsageEvents.purpose,
+          calls: count(),
+          errors: sql<number>`SUM(CASE WHEN ${llmUsageEvents.success} = false THEN 1 ELSE 0 END)::int`,
+          avgLatencyMs: sql<number>`COALESCE(AVG(${llmUsageEvents.latencyMs}), 0)::int`,
+        })
+        .from(llmUsageEvents)
+        .where(
+          and(
+            eq(llmUsageEvents.tenantId, tenantId),
+            gte(llmUsageEvents.createdAt, sinceEpoch),
+          ),
+        )
+        .groupBy(llmUsageEvents.purpose);
+
+      const byProviderRows = await tx
+        .select({
+          provider: llmUsageEvents.provider,
+          calls: count(),
+        })
+        .from(llmUsageEvents)
+        .where(
+          and(
+            eq(llmUsageEvents.tenantId, tenantId),
+            gte(llmUsageEvents.createdAt, sinceEpoch),
+          ),
+        )
+        .groupBy(llmUsageEvents.provider);
+
+      const monthRows = await tx
+        .select({
+          calls: count(),
+          errors: sql<number>`SUM(CASE WHEN ${llmUsageEvents.success} = false THEN 1 ELSE 0 END)::int`,
+        })
+        .from(llmUsageEvents)
+        .where(
+          and(
+            eq(llmUsageEvents.tenantId, tenantId),
+            gte(llmUsageEvents.createdAt, monthStartEpoch),
+          ),
+        );
+
+      return { totalsRows, byPurposeRows, byProviderRows, monthRows };
+    });
+
+    const totals = data.totalsRows[0] ?? { calls: 0, errors: 0, avgLatencyMs: 0 };
+    const callsNum = Number(totals.calls);
+    const errorsNum = Number(totals.errors ?? 0);
+    const monthData = data.monthRows[0] ?? { calls: 0, errors: 0 };
+
+    return c.json({
+      periodDays: days,
+      totals: {
+        calls: callsNum,
+        errors: errorsNum,
+        successRate: callsNum > 0 ? Number(((callsNum - errorsNum) / callsNum).toFixed(4)) : 1,
+        avgLatencyMs: Number(totals.avgLatencyMs),
+      },
+      byPurpose: data.byPurposeRows.map((r) => ({
+        purpose: r.purpose,
+        calls: Number(r.calls),
+        errors: Number(r.errors ?? 0),
+        avgLatencyMs: Number(r.avgLatencyMs),
+      })),
+      byProvider: data.byProviderRows.map((r) => ({
+        provider: r.provider,
+        calls: Number(r.calls),
+      })),
+      thisMonth: {
+        calls: Number(monthData.calls),
+        errors: Number(monthData.errors ?? 0),
+        since: monthStartEpoch,
+      },
+    });
   });
 
   /**

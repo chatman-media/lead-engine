@@ -13,6 +13,7 @@ import { WebChannelRegistry } from "./lib/web-channel-registry.ts";
 import { WebOutboundDispatcher } from "./lib/web-dispatcher.ts";
 import { startWebInboundRunner } from "./lib/web-inbound-runner.ts";
 import { loadTenantLlmConfigs } from "./lib/llm-config-loader.ts";
+import { LlmUsageWriter } from "./lib/llm-usage-writer.ts";
 import { InboundRateLimiter } from "./lib/rate-limiter.ts";
 import { makeTenantReloader } from "./lib/tenant-reloader.ts";
 import {
@@ -167,6 +168,21 @@ async function main() {
     log: (msg, ctx) => log.info(`reloader: ${msg}`, ctx ?? {}),
   });
 
+  // LLM usage writer — batched DB writes для billing dashboard.
+  // Каждый wrapChatClient/wrapEmbeddingClient вызов append'ит event
+  // через recordUsage callback. Writer flush'ает каждые 5 сек или при
+  // overflow buffer'а (200 events).
+  const usageWriter = new LlmUsageWriter({
+    db,
+    onError: (err, dropped) =>
+      log.warn("llm-usage-writer flush failed", {
+        err: err instanceof Error ? err.message : String(err),
+        droppedEvents: dropped,
+      }),
+  });
+  const recordUsage = (tenantId: number, ev: Parameters<typeof usageWriter.record>[1]) =>
+    usageWriter.record(tenantId, ev);
+
   const embedderResolver = makeEmbedderResolver(loadedRef);
   if (embedderResolver) {
     app.route("/", makeAdminKbRoutes({ db, resolveEmbedder: embedderResolver }));
@@ -276,7 +292,7 @@ async function main() {
       timeoutMs: cfg.healthCheckTimeoutMs,
     }),
   );
-  const replyStrategy = makeReplyStrategy(loadedRef, cfg, db, metrics);
+  const replyStrategy = makeReplyStrategy(loadedRef, cfg, db, metrics, recordUsage);
   if (replyStrategy) {
     log.info("reply strategy configured", {
       kind: loadedRef.current.anyTenantHasEmbed ? "RAG" : "LLM-only",
@@ -288,10 +304,10 @@ async function main() {
     log.info("LLM not configured for any tenant — bot will persist messages but stay silent");
   }
 
-  const memoryExtractor = makeMemoryExtractor(loadedRef, db, metrics);
+  const memoryExtractor = makeMemoryExtractor(loadedRef, db, metrics, recordUsage);
   if (memoryExtractor) log.info("memory extractor enabled");
 
-  const stageClassifier = makeStageClassifier(loadedRef, cfg, db, metrics);
+  const stageClassifier = makeStageClassifier(loadedRef, cfg, db, metrics, recordUsage);
   if (stageClassifier) {
     log.info("stage classifier enabled", { kind: cfg.stageClassifier });
   }
@@ -468,6 +484,8 @@ async function main() {
     await Promise.allSettled([webDispatcherPromise, ...webRunners]);
     webRegistry.closeAll();
     channels.closeAll();
+    // Flush buffered usage events перед close DB.
+    await usageWriter.stop();
     await close();
     process.exit(0);
   };

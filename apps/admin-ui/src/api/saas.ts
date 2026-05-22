@@ -200,6 +200,24 @@ export interface DiagnosticsResult {
 
 export type PlanKind = "free" | "starter" | "pro" | "enterprise";
 
+export interface UsageReport {
+  periodDays: number;
+  totals: {
+    calls: number;
+    errors: number;
+    successRate: number;
+    avgLatencyMs: number;
+  };
+  byPurpose: Array<{
+    purpose: string;
+    calls: number;
+    errors: number;
+    avgLatencyMs: number;
+  }>;
+  byProvider: Array<{ provider: string; calls: number }>;
+  thisMonth: { calls: number; errors: number; since: number };
+}
+
 export interface BillingPlan {
   plan: {
     kind: PlanKind;
@@ -483,6 +501,10 @@ export const saas = {
   // ── Billing & plan ───────────────────────────────────────────────────
   getBillingPlan() {
     return request<BillingPlan>("/api/admin/billing/plan");
+  },
+  getBillingUsage(days?: number) {
+    const qs = days ? `?days=${days}` : "";
+    return request<UsageReport>(`/api/admin/billing/usage${qs}`);
   },
   listPlans() {
     return request<{

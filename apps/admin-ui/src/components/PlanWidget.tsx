@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ApiError, type BillingPlan, saas } from "../api/saas.ts";
+import { useEffect, useState } from "react";
+import { ApiError, type BillingPlan, saas, type UsageReport } from "../api/saas.ts";
 
 /**
  * Plan + usage widget на dashboard. Stripe Upgrade / Portal CTA.
@@ -31,6 +31,22 @@ export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWi
   const kbPct = pct(usage.kbDocuments, plan.maxKbDocuments);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [llmUsage, setLlmUsage] = useState<UsageReport | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void saas
+      .getBillingUsage(30)
+      .then((u) => {
+        if (!cancelled) setLlmUsage(u);
+      })
+      .catch(() => {
+        // Usage отчёт опционален — не валим виджет если endpoint падает.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleUpgrade(target: "starter" | "pro") {
     if (!stripeEnabled) return;
@@ -157,6 +173,27 @@ export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWi
           <div className={barClass(kbPct)} style={{ width: `${kbPct}%` }} />
         </div>
       </div>
+
+      {llmUsage && (
+        <div className="plan-usage-row">
+          <div className="plan-row-label">
+            <span>LLM-вызовы (этот месяц)</span>
+            <span className="muted">
+              {llmUsage.thisMonth.calls.toLocaleString("ru")}
+              {llmUsage.thisMonth.errors > 0 ? ` (${llmUsage.thisMonth.errors} ошибок)` : ""}
+            </span>
+          </div>
+          {llmUsage.byProvider.length > 0 && (
+            <small className="muted plan-usage-providers">
+              {llmUsage.byProvider
+                .map((p) => `${p.provider}: ${p.calls.toLocaleString("ru")}`)
+                .join(" · ")}{" "}
+              · avg {llmUsage.totals.avgLatencyMs}ms · success{" "}
+              {Math.round(llmUsage.totals.successRate * 100)}%
+            </small>
+          )}
+        </div>
+      )}
 
       {status !== "ok" && (
         <div className="plan-warning">
