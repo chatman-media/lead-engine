@@ -26,6 +26,7 @@ import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeRequireAuth } from "./middleware/require-auth.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
 import { makeAdminAuditRoutes } from "./routes/admin-audit.ts";
+import { makeAdminBillingRoutes } from "./routes/admin-billing.ts";
 import { makeAdminChannelsRoutes } from "./routes/admin-channels.ts";
 import { makeAdminConversationsRoutes } from "./routes/admin-conversations.ts";
 import { makeAdminDiagnosticsRoutes } from "./routes/admin-diagnostics.ts";
@@ -217,6 +218,10 @@ async function main() {
   // Diagnostics — health-check для tenant setup'а.
   app.route("/", makeAdminDiagnosticsRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
   log.info("admin-diagnostics route enabled");
+
+  // Billing & plan tiers — quota gating (M1a без Stripe).
+  app.route("/", makeAdminBillingRoutes({ db }));
+  log.info("admin-billing routes enabled (plan tiers + quota; Stripe — M1b)");
 
   app.route(
     "/",

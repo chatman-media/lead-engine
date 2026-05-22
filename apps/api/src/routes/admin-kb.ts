@@ -4,6 +4,7 @@ import type { EmbeddingClient } from "@chatman-media/llm-router";
 import { kbDocuments } from "@chatman-media/storage";
 import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
+import { canAddKbDocument } from "../lib/quota.ts";
 
 /**
  * Authenticated KB management endpoints — per-tenant.
@@ -121,6 +122,27 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
       return c.json({ error: "body too large (>5MB)" }, 413);
     }
     if (!title) title = "untitled";
+
+    // Plan-aware quota check (free=50, starter=500, pro=10K). Same-content
+    // re-upload dedup'ится по content_hash — будет created=false и НЕ
+    // увеличит count, поэтому проверка тут на add-новый-doc корректна для
+    // подавляющего числа cases (edge: дубль точно вписался бы over-limit,
+    // но dedup ловит — допустимое misalignment).
+    const quota = await canAddKbDocument({ db: opts.db, tenantId });
+    if (!quota.allowed) {
+      return c.json(
+        {
+          error: "quota_exceeded",
+          reason: quota.reason,
+          limit: quota.limit,
+          current: quota.current,
+          plan: quota.plan,
+          planLabel: quota.planLabel,
+          upgradeHint: "Перейдите на план Starter ($49/мес) для большей базы знаний",
+        },
+        402,
+      );
+    }
 
     // Ingest in tenant-scoped tx. KbStore методы зависят от RLS context.
     let embedder: EmbeddingClient;

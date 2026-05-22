@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   type Admin,
   ApiError,
+  type BillingPlan,
   clearToken,
   type KbDoc,
   type OnboardingStatus,
@@ -11,6 +12,7 @@ import {
   type TenantInfo,
 } from "../api/saas.ts";
 import { OnboardingChecklist } from "../components/OnboardingChecklist.tsx";
+import { PlanWidget } from "../components/PlanWidget.tsx";
 
 export function SaasDashboard() {
   const navigate = useNavigate();
@@ -18,6 +20,7 @@ export function SaasDashboard() {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
+  const [billing, setBilling] = useState<BillingPlan | null>(null);
   const [tenantInfo, setTenantInfo] = useState<TenantInfo | null>(null);
   const [togglingPause, setTogglingPause] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -50,6 +53,18 @@ export function SaasDashboard() {
     } catch (err) {
       // Onboarding panel опционален — не валим dashboard если ручка
       // отсутствует (старый backend) или возвращает 401.
+      if (err instanceof ApiError && err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+      }
+    }
+  }
+
+  async function refreshBilling() {
+    try {
+      const b = await saas.getBillingPlan();
+      setBilling(b);
+    } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearToken();
         navigate("/login", { replace: true });
@@ -95,7 +110,12 @@ export function SaasDashboard() {
         if (cancelled) return;
         setAdmin(me.admin);
         setTenant(me.tenant);
-        await Promise.all([refreshDocs(), refreshOnboarding(), refreshTenantInfo()]);
+        await Promise.all([
+          refreshDocs(),
+          refreshOnboarding(),
+          refreshTenantInfo(),
+          refreshBilling(),
+        ]);
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
@@ -243,6 +263,8 @@ export function SaasDashboard() {
       )}
 
       {onboarding && <OnboardingChecklist status={onboarding} />}
+
+      {billing && <PlanWidget billing={billing} />}
 
       <section className="upload-section">
         <h2>Добавить документ</h2>
