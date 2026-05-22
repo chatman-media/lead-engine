@@ -4,11 +4,43 @@
 
 Стратегический контекст — см. [`COMPETITORS.md`](COMPETITORS.md).
 
-**TL;DR позиционирование:** AI-first customer service для мессенджер-
-центричных рынков (Telegram + WhatsApp first, web — поддержка). Мы
-играем в middle band ($30–$500/мес SaaS) с moat'ом которого нет у
-Chatbase / Tidio Lyro / Crisp: **BYOK + Telegram-native + multi-tenant
-agency mode + operator handoff first-class + OSS-ready core**.
+**TL;DR позиционирование (Phase 1):** AI Sales Closer для рекрутинговых
+агентств в Telegram. Отвечает на входящие лиды за 30 секунд, ведёт
+кандидата от "хочу узнать" до сданной анкеты, передаёт hot-lead'ы
+рекрутеру. Telegram-first, RU/CIS/MENA рынок, BYOK.
+
+> **Позиционирование Phase 2 (месяц 4+):** Расширение на real estate +
+> agency-tier SKU. **Phase 3:** horizontal CX, OSS, voice.
+
+---
+
+## Стратегический план: Phase 1 → 2 → 3
+
+| Фаза | Период | ICP | MRR target | Trigger |
+|------|--------|-----|------------|---------|
+| **Phase 1** | месяцы 1–3 | Recruitment agencies RU/CIS/MENA | $1–1.5K | launch |
+| **Phase 2** | месяцы 4–9 | + Real estate agencies | $5–10K | $1K MRR + 10 customers + case study |
+| **Phase 3** | месяцы 10–15 | Horizontal: coaching, B2B SaaS, edtech | $50K+ | $10K MRR + 50 customers |
+
+### Phase 1 metrics (tracking)
+
+| Метрика | Месяц 1 | Месяц 2 | Месяц 3 |
+|---|---|---|---|
+| Cumulative outreach DMs | 60 | 200 | 350 |
+| Demos | 5 | 15 | 30 |
+| Paying customers | 1 | 5 | 10–15 |
+| MRR | $99 | $500–1K | $1–1.5K |
+| Case studies live | 0 | 0–1 | 1–2 |
+
+### Phase 1 приоритетные moat'ы
+
+1. **Recruitment-vertical expertise** — `recruitment_uae_v1` pack в проде
+2. **Sales-engine (SPIN + NEPQ + Cialdini)** — `@chatman-media/sales` + 3 Phase 1 skills
+3. **Telegram-first** — RU/CIS/MENA доминирующий канал
+4. **BYOK** — ARPU-sensitive агентства используют свой OpenAI ключ
+5. **Operator handoff** — built-in inbox, не $300/мес add-on
+
+---
 
 ---
 
@@ -64,6 +96,20 @@ agency mode + operator handoff first-class + OSS-ready core**.
   storage: 15; channel-telegram: 11; channel-web: 11; llm-router: 9;
   verticals: 6; vertical-recruitment-uae: 5). 0 fail.
 
+### Phase 1 prep (PR #39–44, май 2026)
+
+- ✅ **Phase 1 pricing pivot** (PR #41) — Starter $49→**$99**, Pro $149→**$199**
+  (recruitment-ICP ARPU $99–299; $49 был SMB-anchor Chatbase-уровня)
+- ✅ **Multi-admin invite flow** (PR #42) — `POST /api/admin/admins/invite` →
+  magic link email → `POST /api/auth/accept-invite` → join; role: manager/superadmin
+- ✅ **Widget bundle** (PR #43) — `apps/widget` Vite ESM bundle < 50KB gzip;
+  `GET /widget.js` served from api; tenant snippet через `/api/admin/widget/snippet`
+- ✅ **Per-tenant LLM usage tracking** (PR #44) — `llm_usage_events` table;
+  `LlmUsageWriter` batching flush; `GET /api/admin/billing/usage` endpoint;
+  PlanWidget показывает calls/errors/latency за 30 дней
+- ✅ **Recruitment skills (Phase 1)** — 3 новых skill: `qualify-budget-via-spin`,
+  `objection-visa-cost`, `close-soft-deposit`; style `recruiter-empathetic-v1`
+
 ---
 
 ## Q3 2026 (Jun–Aug) — Monetization + Coverage 💰
@@ -71,10 +117,11 @@ agency mode + operator handoff first-class + OSS-ready core**.
 Цель: довести продукт до точки **"платящий клиент №1"** + добавить
 critical channel coverage.
 
-### ✅ M1. Stripe billing wire-up — DONE (PR #37 M1a + PR #38 M1b)
+### ✅ M1. Stripe billing wire-up — DONE (PR #37 M1a + PR #38 M1b + PR #41 re-price)
 
-- ✅ Plan tiers: `free` (1 канал, 50 docs, 30/min), `starter` $49/мес (3/500/60),
-  `pro` $149/мес (10/10K/120), `enterprise` (100/100K/600, self-host)
+- ✅ Plan tiers: `free` (1 канал, 50 docs, 30/min), `starter` **$99/мес** (3/500/60),
+  `pro` **$199/мес** (10/10K/120), `enterprise` (100/100K/600, self-host)
+  _(re-priced PR #41: $49→$99, $149→$199 — recruitment ICP ARPU $99–299)_
 - ✅ `POST /api/admin/billing/checkout` — создаёт Stripe Checkout Session
   (subscription mode + 14-day trial + `client_reference_id=tenantId`)
 - ✅ `/webhook/stripe` обрабатывает `customer.subscription.*` events,
@@ -99,25 +146,21 @@ critical channel coverage.
   return verifiedName + displayPhoneNumber + qualityRating
 - 🔲 Diagnostics check для WhatsApp в `/diagnostics` — TODO
 
-### M3. Embed widget для web
+### ✅ M3. Embed widget для web — DONE (PR #43)
 
-Channel-web уже есть (WS-based), но клиент должен своими руками вставлять
-JS. Нужен:
+- ✅ `<script src="<PLATFORM_URL>/widget.js" data-slug="acme"></script>` — auto-init
+- ✅ Floating chat bubble (mobile + desktop), настраиваемые цвета через tenant config
+- ✅ `apps/widget` — Vite ESM bundle < 50KB gzip, served через `GET /widget.js`
+- ✅ `/api/admin/widget/snippet` — генерит готовый HTML snippet для copy-paste
+- 🔲 CDN hosting (`cdn.leadengine.app`) — TODO когда появится domain
 
-- [ ] `<script src="https://cdn.leadengine.app/widget.js" data-slug="acme"></script>`
-- [ ] Floating chat bubble (mobile + desktop), customizable colors per tenant
-- [ ] `apps/widget` — Vite-built ESM bundle, размер < 50KB gzip
-- [ ] `/api/admin/widget/snippet` — генерит готовый snippet
+### ✅ M4. Multi-admin per tenant — DONE (PR #42)
 
-### M4. Multi-admin per tenant
-
-Сейчас только один admin. Команды нужны:
-
-- [ ] `POST /api/admin/admins/invite` — { email, role } → magic link email
-- [ ] `POST /api/auth/accept-invite` — token → создать password → join
-- [ ] Role-based: `superadmin` (полный доступ), `manager` (read + reply,
+- ✅ `POST /api/admin/admins/invite` — { email, role } → magic link email
+- ✅ `POST /api/auth/accept-invite` — token → создать password → join
+- ✅ Role-based: `superadmin` (полный доступ), `manager` (read + reply,
   без billing/channels)
-- [ ] UI `/team` — list + invite + remove
+- ✅ UI `/team` — list + invite + remove
 
 ### ✅ M5. Per-conversation `role='human'` enforcement — DONE (PR #35)
 
@@ -316,8 +359,8 @@ Vision purpose уже в schema (`llm_provider_configs.purpose='vision'`):
 | Compliance | none | none | none | SOC 2 Type I in flight |
 | Monetization | Stripe-ready ✅ | first paying #1 | $10K MRR | $50K MRR |
 
-**Q3 status:** M1 ✅, M2 ✅, M5 ✅. M3 (embed widget) и M4 (multi-admin invite)
-остались.
+**Q3 status:** M1 ✅, M2 ✅, M3 ✅, M4 ✅, M5 ✅. Phase 1 pricing pivot ✅.
+Recruitment skills seeds + `recruiter-empathetic-v1` style ✅.
 
 ---
 
@@ -354,10 +397,14 @@ Vision purpose уже в schema (`llm_provider_configs.purpose='vision'`):
 - 741 tests, multi-tenant RLS, encrypted secrets, rate-limit, observability
 - 1 живой prod tenant (recruitment UAE), Stripe-ready
 
-**Куда движемся (Q3'26 финиш):** embed widget для web (M3), multi-admin
-invite (M4).
+**Куда движемся (Phase 1, ближайшие 3 мес):** cold outreach 60→350 DMs,
+первые платящие клиенты ($1–1.5K MRR), landing page для recruitment ICP.
+Код: только customer-driven (AmoCRM/Bitrix24 если prospect просит).
 
-**Q4'26:** 5 vertical packs (e-commerce / real-estate / clinic / edtech /
+**Q4'26 (Phase 2 trigger):** real-estate vertical pack, `vertical-realestate-v1`,
+agency SKU, Stripe live mode → авто-billing вместо ручного инвойсинга.
+
+**Q4'26 также:** 5 vertical packs (e-commerce / real-estate / clinic / edtech /
 recruitment v2), agentic tool-loop (calendar/CRM/payment), AmoCRM/Bitrix24
 для CIS, TG userbot UI.
 
