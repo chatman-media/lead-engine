@@ -203,6 +203,45 @@ export const admins = pgTable("admins", {
   createdAt: integer("created_at").notNull().default(epochNow()),
 });
 
+// Multi-admin invite tokens per tenant. SuperadminB генерит invite-ссылку
+// (POST /api/admin/admins/invite) → передаёт коллеге out-of-band (TG/email/
+// мессенджер) → коллега открывает /accept-invite?token=... → создаёт пароль
+// → joinит tenant как admin с заданной role'ю.
+//
+// Token — opaque random string (32 hex). Истекает через `expiresAt`. После
+// использования помечается `usedAt` чтобы тот же token нельзя было активировать
+// дважды.
+export const adminInvites = pgTable("admin_invites", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  /** Email приглашаемого. Используется для display + dup-detection. */
+  email: text("email").notNull(),
+  /** Роль для нового админа: 'superadmin' | 'manager'. */
+  role: text("role").notNull().default("manager"),
+  /** Opaque token (hex). UNIQUE по всем tenants — random'ный 32-byte → коллизии не реалистичны. */
+  token: text("token").notNull().unique(),
+  /** Admin создавший invite. NULL если invitor удалён. */
+  invitedByAdminId: integer("invited_by_admin_id").references(() => admins.id, {
+    onDelete: "set null",
+  }),
+  /** Когда истекает (default = +7 дней от createdAt). */
+  expiresAt: integer("expires_at").notNull(),
+  /** Когда использован (NULL = pending). После usage row не удаляется — audit trail. */
+  usedAt: integer("used_at"),
+  /** ID admin'а который был создан при accept. NULL до accept. */
+  acceptedAdminId: integer("accepted_admin_id").references(() => admins.id, {
+    onDelete: "set null",
+  }),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  check(
+    "admin_invites_role_check",
+    sql`${t.role} IN ('superadmin','manager')`,
+  ),
+  index("idx_admin_invites_tenant").on(t.tenantId, sql`${t.createdAt} DESC`),
+  index("idx_admin_invites_email").on(t.tenantId, t.email),
+]);
+
 // Global key-value store для admin-UI настроек, шарящихся между админами
 // (например, тема light/dark). Не per-admin — одно значение на весь UI.
 export const appSettings = pgTable("app_settings", {

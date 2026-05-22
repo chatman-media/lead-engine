@@ -107,6 +107,33 @@ export interface CreateWebChannelResult {
   reloadError?: string;
 }
 
+export interface AdminRow {
+  id: number;
+  email: string;
+  role: "superadmin" | "manager";
+  createdAt: number;
+}
+
+export interface InviteRow {
+  id: number;
+  email: string;
+  role: "superadmin" | "manager";
+  status: "pending" | "accepted" | "expired";
+  expiresAt: number;
+  usedAt: number | null;
+  createdAt: number;
+}
+
+export interface CreateInviteResult {
+  ok: boolean;
+  id: number;
+  token: string;
+  shareUrl?: string;
+  email: string;
+  role: "superadmin" | "manager";
+  expiresAt: number;
+}
+
 export interface WebSnippet {
   ok: boolean;
   externalId: string;
@@ -314,6 +341,17 @@ export const saas = {
     clearToken();
     return request<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
   },
+  acceptInvite(token: string, password: string) {
+    return request<{
+      token: string;
+      admin: Admin;
+      tenant: Tenant | null;
+    }>(
+      "/api/auth/accept-invite",
+      { method: "POST", body: JSON.stringify({ token, password }) },
+      false,
+    );
+  },
   me() {
     return request<{ admin: Admin; tenant: Tenant | null }>("/api/auth/me");
   },
@@ -480,6 +518,25 @@ export const saas = {
       "/api/admin/tenant/status",
       { method: "PUT", body: JSON.stringify({ paused }) },
     );
+  },
+
+  // ── Multi-admin (M4) ─────────────────────────────────────────────────
+  listAdmins() {
+    return request<{ items: AdminRow[] }>("/api/admin/admins");
+  },
+  listInvites() {
+    return request<{ items: InviteRow[] }>("/api/admin/admins/invites");
+  },
+  inviteAdmin(input: { email: string; role: "superadmin" | "manager" }) {
+    return request<CreateInviteResult>("/api/admin/admins/invite", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  revokeInvite(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/admins/invites/${id}`, {
+      method: "DELETE",
+    });
   },
 
   // ── Audit log (read-only) ────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { withTenant } from "@chatman-media/conversation-engine";
-import { admins, tenants } from "@chatman-media/storage";
+import { adminInvites, admins, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
@@ -227,6 +227,115 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
         role,
         tenantId: adminRow.tenantId,
       },
+    });
+  });
+
+  /**
+   * POST /api/auth/accept-invite
+   * Body: { token, password }
+   * Returns: { token: <session>, admin, tenant } — same shape как /signup.
+   *
+   * Создаёт admin row с email + role из invite, mark'ает invite usedAt.
+   * Token одноразовый. Token expired → 401, invite уже использован → 409,
+   * email уже зарегистрирован в tenant'е → 409.
+   *
+   * Password rules: ≥ 8 chars (same as signup).
+   */
+  app.post("/api/auth/accept-invite", async (c) => {
+    let body: { token?: unknown; password?: unknown };
+    try {
+      body = (await c.req.json()) as { token?: unknown; password?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const token = typeof body.token === "string" ? body.token.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!token) return c.json({ error: "token required" }, 400);
+    if (!password || password.length < 8) {
+      return c.json({ error: "password must be at least 8 chars" }, 400);
+    }
+
+    // Lookup invite (без tenant context — cross-tenant lookup by token).
+    const [invite] = await opts.db
+      .select({
+        id: adminInvites.id,
+        tenantId: adminInvites.tenantId,
+        email: adminInvites.email,
+        role: adminInvites.role,
+        expiresAt: adminInvites.expiresAt,
+        usedAt: adminInvites.usedAt,
+      })
+      .from(adminInvites)
+      .where(eq(adminInvites.token, token));
+    if (!invite) return c.json({ error: "invalid token" }, 401);
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    if (invite.usedAt !== null) {
+      return c.json({ error: "invite already used" }, 409);
+    }
+    if (invite.expiresAt < nowEpoch) {
+      return c.json({ error: "invite expired" }, 401);
+    }
+
+    // Check dup email в этом tenant'е.
+    const [existingAdmin] = await opts.db
+      .select({ id: admins.id })
+      .from(admins)
+      .where(
+        and(eq(admins.tenantId, invite.tenantId), eq(admins.email, invite.email)),
+      );
+    if (existingAdmin) {
+      return c.json(
+        { error: "admin with this email already exists in tenant" },
+        409,
+      );
+    }
+
+    const passwordHash = await hashPassword(password);
+
+    const result = await withTenant(opts.db, invite.tenantId, async (tx) => {
+      const [adminRow] = await tx
+        .insert(admins)
+        .values({
+          tenantId: invite.tenantId,
+          email: invite.email,
+          passwordHash,
+          role: invite.role,
+          createdAt: nowEpoch,
+        })
+        .returning();
+      await tx
+        .update(adminInvites)
+        .set({ usedAt: nowEpoch, acceptedAdminId: adminRow!.id })
+        .where(eq(adminInvites.id, invite.id));
+      return adminRow!;
+    });
+
+    const [tenantRow] = await opts.db
+      .select({ slug: tenants.slug, plan: tenants.plan })
+      .from(tenants)
+      .where(eq(tenants.id, invite.tenantId));
+
+    const sessionToken = signAuthToken(
+      {
+        adminId: result.id,
+        tenantId: invite.tenantId,
+        role: result.role as "superadmin" | "manager",
+        exp: nowEpoch + DEFAULT_TOKEN_LIFETIME_SEC,
+      },
+      opts.secret,
+    );
+
+    return c.json({
+      token: sessionToken,
+      admin: {
+        id: result.id,
+        email: result.email,
+        role: result.role,
+        tenantId: result.tenantId,
+      },
+      tenant: tenantRow
+        ? { id: invite.tenantId, slug: tenantRow.slug, plan: tenantRow.plan }
+        : null,
     });
   });
 

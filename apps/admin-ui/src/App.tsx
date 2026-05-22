@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { getToken, saas } from "./api/saas.ts";
+import { SaasAcceptInvite } from "./pages/SaasAcceptInvite.tsx";
 import { SaasAudit } from "./pages/SaasAudit.tsx";
 import { SaasChannels } from "./pages/SaasChannels.tsx";
 import { SaasConversations } from "./pages/SaasConversations.tsx";
@@ -9,6 +10,7 @@ import { SaasDiagnostics } from "./pages/SaasDiagnostics.tsx";
 import { SaasLogin } from "./pages/SaasLogin.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
 import { SaasSignup } from "./pages/SaasSignup.tsx";
+import { SaasTeam } from "./pages/SaasTeam.tsx";
 
 /**
  * SaaS routing — заменяет легаси 24-страничный admin под старый
@@ -62,6 +64,7 @@ export function App() {
       <Routes>
         <Route path="/login" element={<SaasLogin />} />
         <Route path="/signup" element={<SaasSignup />} />
+        <Route path="/accept-invite" element={<SaasAcceptInvite />} />
         <Route
           path="/dashboard"
           element={
@@ -115,6 +118,14 @@ export function App() {
           element={
             <AuthGate>
               <SaasDiagnostics />
+            </AuthGate>
+          }
+        />
+        <Route
+          path="/team"
+          element={
+            <AuthGate>
+              <SaasTeam />
             </AuthGate>
           }
         />
