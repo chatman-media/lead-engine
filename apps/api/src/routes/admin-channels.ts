@@ -9,6 +9,7 @@ import { channels, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
+import { canAddChannel } from "../lib/quota.ts";
 
 /**
  * Per-tenant channel CRUD под /api/admin/channels/*.
@@ -176,6 +177,36 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
 
     const nowEpoch = Math.floor(Date.now() / 1000);
     const secretKey = `channel_telegram_bot_${username}`;
+
+    // Quota check: только для new-channel path. Token rotation для
+    // existing channel (тот же username) не считается against quota.
+    const [maybeExisting] = await opts.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(
+        and(
+          eq(channels.tenantId, tenantId),
+          eq(channels.kind, "telegram_bot"),
+          eq(channels.externalId, username),
+        ),
+      );
+    if (!maybeExisting) {
+      const quota = await canAddChannel({ db: opts.db, tenantId });
+      if (!quota.allowed) {
+        return c.json(
+          {
+            error: "quota_exceeded",
+            reason: quota.reason,
+            limit: quota.limit,
+            current: quota.current,
+            plan: quota.plan,
+            planLabel: quota.planLabel,
+            upgradeHint: "Перейдите на план Starter ($49/мес) для большего числа каналов",
+          },
+          402,
+        );
+      }
+    }
 
     try {
       const result = await withTenant(opts.db, tenantId, async (tx) => {
@@ -378,6 +409,35 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
 
     const nowEpoch = Math.floor(Date.now() / 1000);
     const secretKey = `channel_whatsapp_${phoneNumberId}`;
+
+    // Quota check для new WhatsApp channel (см. telegram POST).
+    const [maybeExistingWa] = await opts.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(
+        and(
+          eq(channels.tenantId, tenantId),
+          eq(channels.kind, "whatsapp"),
+          eq(channels.externalId, phoneNumberId),
+        ),
+      );
+    if (!maybeExistingWa) {
+      const quota = await canAddChannel({ db: opts.db, tenantId });
+      if (!quota.allowed) {
+        return c.json(
+          {
+            error: "quota_exceeded",
+            reason: quota.reason,
+            limit: quota.limit,
+            current: quota.current,
+            plan: quota.plan,
+            planLabel: quota.planLabel,
+            upgradeHint: "Перейдите на план Starter ($49/мес) для большего числа каналов",
+          },
+          402,
+        );
+      }
+    }
 
     try {
       const result = await withTenant(opts.db, tenantId, async (tx) => {

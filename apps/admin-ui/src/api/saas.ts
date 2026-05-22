@@ -143,6 +143,25 @@ export interface DiagnosticsResult {
   };
 }
 
+export type PlanKind = "free" | "starter" | "pro" | "enterprise";
+
+export interface BillingPlan {
+  plan: {
+    kind: PlanKind;
+    label: string;
+    priceUsd: number | null;
+    maxChannels: number;
+    maxKbDocuments: number;
+    rateLimitPerMinute: number;
+    rateLimitPerHour: number;
+  };
+  usage: {
+    channels: number;
+    kbDocuments: number;
+  };
+  status: "ok" | "over_limit_channels" | "over_limit_kb";
+}
+
 export interface TenantInfo {
   id: number;
   slug: string;
@@ -380,6 +399,11 @@ export const saas = {
   // ── Diagnostics ──────────────────────────────────────────────────────
   runDiagnostics() {
     return request<DiagnosticsResult>("/api/admin/diagnostics");
+  },
+
+  // ── Billing & plan ───────────────────────────────────────────────────
+  getBillingPlan() {
+    return request<BillingPlan>("/api/admin/billing/plan");
   },
 
   // ── Tenant management ────────────────────────────────────────────────

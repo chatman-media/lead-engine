@@ -613,6 +613,80 @@ a:hover {
   font-size: 12px;
 }
 
+/* ── Plan widget ───────────────────────────────────────────────────────── */
+
+.plan-widget {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 32px;
+}
+
+.plan-widget-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.plan-widget-head h3 {
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.plan-widget-head h3 strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.plan-row {
+  margin-bottom: 10px;
+}
+
+.plan-row:last-child {
+  margin-bottom: 0;
+}
+
+.plan-row-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.plan-bar {
+  height: 6px;
+  background: var(--panel-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.plan-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+.plan-bar-warn {
+  background: #f0c674;
+}
+
+.plan-bar-over {
+  background: var(--danger);
+}
+
+.plan-warning {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(240, 198, 116, 0.12);
+  border: 1px solid #f0c674;
+  border-radius: 4px;
+  color: #f0c674;
+  font-size: 12px;
+}
+
 /* ── Inbox (conversations) ─────────────────────────────────────────────── */
 
 .inbox-layout {
