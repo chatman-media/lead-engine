@@ -96,7 +96,7 @@ export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWi
                 disabled={!canUpgrade || busy}
                 title={!stripeEnabled ? "Stripe не настроен на платформе" : undefined}
               >
-                Starter $49
+                Starter $99
               </button>
               <button
                 type="button"
@@ -105,7 +105,7 @@ export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWi
                 disabled={!canUpgrade || busy}
                 title={!stripeEnabled ? "Stripe не настроен на платформе" : undefined}
               >
-                Pro $149
+                Pro $199
               </button>
             </>
           )}

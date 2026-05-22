@@ -138,7 +138,7 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
           current: quota.current,
           plan: quota.plan,
           planLabel: quota.planLabel,
-          upgradeHint: "Перейдите на план Starter ($49/мес) для большей базы знаний",
+          upgradeHint: "Перейдите на план Starter ($99/мес) для большей базы знаний",
         },
         402,
       );
