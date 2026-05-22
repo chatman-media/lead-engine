@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   type AdminRow,
@@ -25,6 +25,8 @@ export function SaasTeam() {
   const [role, setRole] = useState<"manager" | "superadmin">("manager");
   const [submitting, setSubmitting] = useState(false);
   const [lastCreated, setLastCreated] = useState<CreateInviteResult | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
@@ -104,8 +106,11 @@ export function SaasTeam() {
   async function copyShareUrl(url: string) {
     try {
       await navigator.clipboard.writeText(url);
+      setCopied(true);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
-      // fallback — пользователь руками
+      // Clipboard API may be unavailable (non-HTTPS or old browser).
     }
   }
 
@@ -180,7 +185,7 @@ export function SaasTeam() {
               className="nav-link"
               onClick={() => copyShareUrl(lastCreated.shareUrl!)}
             >
-              Копировать
+              {copied ? "✓ Скопировано" : "Копировать"}
             </button>
           </div>
         )}

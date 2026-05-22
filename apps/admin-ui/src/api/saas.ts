@@ -295,6 +295,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public errorCode: string,
+    /** Optional extra fields from error response body (e.g. upgradeHint for 402). */
+    public extra?: Record<string, unknown>,
   ) {
     super(`API ${status}: ${errorCode}`);
     this.name = "ApiError";
@@ -316,8 +318,12 @@ async function request<T>(
   }
   const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, (body as { error?: string }).error ?? res.statusText);
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    const errorCode = (body.error as string | undefined) ?? res.statusText;
+    // Preserve extra body fields for callers that want richer error details
+    // (e.g. upgradeHint in 402 quota-exceeded responses).
+    const { error: _e, ...extra } = body;
+    throw new ApiError(res.status, errorCode, Object.keys(extra).length > 0 ? extra : undefined);
   }
   return res.json() as Promise<T>;
 }
@@ -330,8 +336,10 @@ async function uploadMultipart<T>(path: string, form: FormData): Promise<T> {
     body: form,
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, (body as { error?: string }).error ?? res.statusText);
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    const errorCode = (body.error as string | undefined) ?? res.statusText;
+    const { error: _e, ...extra } = body;
+    throw new ApiError(res.status, errorCode, Object.keys(extra).length > 0 ? extra : undefined);
   }
   return res.json() as Promise<T>;
 }

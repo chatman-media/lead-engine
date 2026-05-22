@@ -162,7 +162,12 @@ export function SaasDashboard() {
       setPasteTopic("");
       await Promise.all([refreshDocs(), refreshOnboarding()]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (err instanceof ApiError && err.status === 402) {
+        const hint = err.extra?.upgradeHint as string | undefined;
+        setError(hint ?? "Лимит документов исчерпан — повысьте план");
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setUploading(false);
     }
@@ -177,7 +182,13 @@ export function SaasDashboard() {
       await saas.uploadFile(file);
       await Promise.all([refreshDocs(), refreshOnboarding()]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (err instanceof ApiError && err.status === 402) {
+        // Quota exceeded — show upgrade hint from backend
+        const hint = err.extra?.upgradeHint as string | undefined;
+        setError(hint ?? "Лимит документов исчерпан — повысьте план");
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setUploading(false);
       e.target.value = "";
