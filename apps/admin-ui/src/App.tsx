@@ -8,6 +8,7 @@ import { SaasConversations } from "./pages/SaasConversations.tsx";
 import { SaasDashboard } from "./pages/SaasDashboard.tsx";
 import { SaasDiagnostics } from "./pages/SaasDiagnostics.tsx";
 import { SaasLogin } from "./pages/SaasLogin.tsx";
+import { SaasOnboarding } from "./pages/SaasOnboarding.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
 import { SaasSignup } from "./pages/SaasSignup.tsx";
 import { SaasTeam } from "./pages/SaasTeam.tsx";
@@ -70,6 +71,14 @@ export function App() {
           element={
             <AuthGate>
               <SaasDashboard />
+            </AuthGate>
+          }
+        />
+        <Route
+          path="/onboarding"
+          element={
+            <AuthGate>
+              <SaasOnboarding />
             </AuthGate>
           }
         />

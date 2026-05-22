@@ -25,7 +25,7 @@ export function SaasSignup() {
     try {
       const res = await saas.signup(email, password, tenantSlug || undefined);
       setToken(res.token);
-      navigate("/dashboard", { replace: true });
+      navigate("/onboarding", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 409) {
@@ -47,9 +47,7 @@ export function SaasSignup() {
     <div className="auth-wrap">
       <div className="auth-card">
         <h1>Создать аккаунт</h1>
-        <p className="auth-sub">
-          Своя база знаний + AI-ассистент. Без credit card. Free plan.
-        </p>
+        <p className="auth-sub">Своя база знаний + AI-ассистент. Без credit card. Free plan.</p>
         <form onSubmit={handleSubmit} className="auth-form">
           <label>
             Email

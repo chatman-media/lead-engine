@@ -49,9 +49,7 @@ export function OnboardingChecklist({ status, alwaysShow = false }: OnboardingCh
           {status.done ? (
             <span className="muted">Всё готово — бот принимает сообщения</span>
           ) : (
-            <span className="muted">
-              Выполните шаги ниже, чтобы бот начал отвечать клиентам
-            </span>
+            <span className="muted">Выполните шаги ниже, чтобы бот начал отвечать клиентам</span>
           )}
         </small>
       </div>
@@ -61,7 +59,7 @@ export function OnboardingChecklist({ status, alwaysShow = false }: OnboardingCh
           title="1. Подключите канал"
           hint="Telegram-бот через токен @BotFather"
           ctaLabel="Подключить"
-          ctaTo="/channels"
+          ctaTo="/onboarding"
           {...(status.channelExternalId
             ? { doneText: `@${status.channelExternalId} активен` }
             : {})}
@@ -71,7 +69,7 @@ export function OnboardingChecklist({ status, alwaysShow = false }: OnboardingCh
           title="2. Настройте LLM"
           hint="Свой OpenAI / Anthropic / Ollama ключ"
           ctaLabel="Настроить"
-          ctaTo="/settings"
+          ctaTo="/onboarding"
           {...(status.chatProvider
             ? { doneText: `${status.chatProvider} / ${status.chatModel ?? ""}` }
             : {})}
@@ -81,7 +79,7 @@ export function OnboardingChecklist({ status, alwaysShow = false }: OnboardingCh
           title="3. Загрузите документы в KB"
           hint="Опционально, но даёт RAG-ответы по своей базе"
           ctaLabel="Загрузить"
-          ctaTo="/dashboard"
+          ctaTo="/onboarding"
           {...(status.hasKbDocuments ? { doneText: "Есть документы" } : {})}
         />
       </ul>
