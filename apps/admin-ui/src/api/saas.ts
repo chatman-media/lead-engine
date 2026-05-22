@@ -155,6 +155,8 @@ export interface ConversationListItem {
   currentStage: string | null;
   lastMessageAt: number | null;
   createdAt: number;
+  escalatedAt?: number | null;
+  lastMessagePreview?: string | null;
 }
 
 export interface ConversationDetail {

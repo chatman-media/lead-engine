@@ -823,6 +823,16 @@ a:hover {
   margin-top: 4px;
 }
 
+.inbox-item-preview {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .inbox-load-more {
   width: 100%;
   padding: 8px;

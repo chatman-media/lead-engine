@@ -7,7 +7,7 @@ import {
   messages,
   outboundQueue,
 } from "@chatman-media/storage";
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 
@@ -37,7 +37,7 @@ export function makeAdminConversationsRoutes(
    *
    * Returns: {
    *   items: [{ id, contactId, contactName?, source, mode, currentStage?,
-   *             lastMessageAt, createdAt, lastMessagePreview? }],
+   *             lastMessageAt, createdAt, escalatedAt?, lastMessagePreview? }],
    *   nextCursor?: number
    * }
    */
@@ -49,7 +49,20 @@ export function makeAdminConversationsRoutes(
     const cursor = cursorRaw ? Number.parseInt(cursorRaw, 10) : null;
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
-      const baseQuery = tx
+      // Correlated subquery для last message preview: берём последний non-system
+      // текст (role IN ('user','assistant','human')) — до 120 символов.
+      // Выполняется один раз per-row (indexed by conversation_id + created_at DESC).
+      const lastMsgPreview = sql<string | null>`(
+        SELECT left(text, 120)
+        FROM messages
+        WHERE tenant_id = ${tenantId}
+          AND conversation_id = conversations.id
+          AND role IN ('user', 'assistant', 'human')
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      )`;
+
+      return tx
         .select({
           id: conversations.id,
           contactId: conversations.userId,
@@ -59,6 +72,8 @@ export function makeAdminConversationsRoutes(
           currentStage: conversations.currentStage,
           lastMessageAt: conversations.lastMessageAt,
           createdAt: conversations.createdAt,
+          escalatedAt: conversations.escalatedAt,
+          lastMessagePreview: lastMsgPreview,
         })
         .from(conversations)
         .leftJoin(contacts, eq(contacts.id, conversations.userId))
@@ -72,7 +87,6 @@ export function makeAdminConversationsRoutes(
         )
         .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
         .limit(limit + 1);
-      return await baseQuery;
     });
 
     const hasMore = rows.length > limit;
@@ -92,6 +106,8 @@ export function makeAdminConversationsRoutes(
         currentStage: r.currentStage,
         lastMessageAt: r.lastMessageAt,
         createdAt: r.createdAt,
+        ...(r.escalatedAt !== null ? { escalatedAt: r.escalatedAt } : {}),
+        ...(r.lastMessagePreview !== null ? { lastMessagePreview: r.lastMessagePreview } : {}),
       })),
       ...(nextCursor !== null ? { nextCursor } : {}),
     });
