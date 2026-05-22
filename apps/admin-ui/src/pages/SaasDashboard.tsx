@@ -282,10 +282,10 @@ export function SaasDashboard() {
 
         <div className="upload-card">
           <h3>Загрузить файл</h3>
-          <p className="hint">.txt, .md, .json (PDF — пока вручную через API)</p>
+          <p className="hint">.txt, .md, .json, .pdf</p>
           <input
             type="file"
-            accept=".txt,.md,.json"
+            accept=".txt,.md,.json,.pdf"
             onChange={handleFileUpload}
             disabled={uploading}
           />
