@@ -36,8 +36,10 @@ ARPU $99–199/мес. [Phase 2: real estate. Phase 3: horizontal.]
 Полный цикл онбординга **без env vars, без рестартов**:
 
 ```
-1. /signup       → email + password → JWT + tenant created (free plan)
+1. /signup       → email + password → JWT + tenant created (free plan) →
+                   redirect в /onboarding (guided wizard: канал → ключи → KB → готово)
 2. /channels     → tab Telegram: paste @BotFather token → auto setWebhook + encrypt + reload
+                   tab «Личный»: phone → code → 2FA (MTProto userbot, superadmin)
                    tab WhatsApp: paste { phoneNumberId, accessToken } → Meta Graph
                    validate → encrypt + webhook-setup-hint для Meta dashboard
                    ✓ Каналы принимают inbound сразу (Worker reload ≤30s)
@@ -81,7 +83,7 @@ response (`{ reason, limit, current, plan, upgradeHint }`) — UI показыв
 |---|---|---|
 | `apps/api` | HTTP-сервер: webhook handlers (telegram/whatsapp/stripe), `/ws/:slug` (web), admin-API (auth + KB + LLM-config + channels + conversations + audit + diagnostics + tenant pause), `/metrics`, `/healthz` | Fly app / Node-hosting |
 | `apps/worker` | Outbound dispatcher (`SKIP LOCKED` очередь), polling channel-reload, cron jobs | Fly app process group |
-| `apps/admin-ui` | React 19 + Vite SPA — full SaaS UI (signup → channels → settings → conversations → audit → diagnostics) | Static / CDN |
+| `apps/admin-ui` | React 19 + Vite SPA на **Tailwind v4 + shadcn/ui** (Linear-тема, левый сайдбар, светлая/тёмная темы) — full SaaS UI: guided onboarding wizard + dashboard / channels / settings / conversations / team / audit / diagnostics | Static / CDN |
 | `apps/vertical-recruitment-uae` | Vertical template (KB seed + funnel stages + style prompts) — НЕ деплоится, грузится через `packages/verticals` | — |
 
 ### Packages (доменные модули)
@@ -141,8 +143,8 @@ bun run dev:worker   # apps/worker (outbound + reload polling)
 cd apps/admin-ui && bun run dev   # admin-ui на http://localhost:5173
 ```
 
-Открыть `http://localhost:5173/signup` → создать tenant → пройти 5-шаговый
-onboarding checklist.
+Открыть `http://localhost:5173/signup` → создать tenant → guided onboarding
+wizard (`/onboarding`): канал → API-ключи → база знаний → готово.
 
 ### Bun shortcuts
 
@@ -163,7 +165,7 @@ bun run test       # bun test по всему монорепо (700+ тесто�
 scoped по `tenant_id`:
 
 ```
-tenants ─┬─ admins (multi-admin per tenant — invite flow TODO)
+tenants ─┬─ admins (multi-admin per tenant + invite flow) ─ admin_invites
          ├─ channels (telegram_bot / telegram_userbot / whatsapp / web)
          ├─ contacts ─ channel_identities (channel-agnostic person ↔ messenger)
          ├─ conversations ─ messages
@@ -203,7 +205,7 @@ Validated в `packages/storage/src/rls.integration.test.ts` (8 tests) и
 | Channel | Inbound | Outbound | Где adapter |
 |---|---|---|---|
 | `telegram_bot` | webhook `POST /webhook/telegram/:slug` (X-Telegram-Bot-Api-Secret-Token) | `apps/worker` → BotAPI HTTPS | apps/api + apps/worker |
-| `telegram_userbot` | `apps/worker` MTProto receive loop | `apps/worker` → MTProto | apps/worker |
+| `telegram_userbot` | `apps/api` MTProto receive loop (pinned-соединение, как web) | `apps/api` in-process через `UserbotOutboundDispatcher` | apps/api only |
 | `whatsapp` | webhook `POST /webhook/whatsapp/:slug` (X-Hub-Signature-256) | `apps/worker` → Meta Graph | apps/api + apps/worker |
 | `web` | WebSocket `/ws/:slug?user=X&auth=Y` | `apps/api` in-process через `WebOutboundDispatcher` (pinned WS) | apps/api only |
 
@@ -241,8 +243,8 @@ secret_token=<TELEGRAM_WEBHOOK_SECRET>)`. Канал работает сразу
    освобождён.
 8. Phase 3 (tx2, withTenant): enqueue OutboundEnvelope[] в outbound_queue.
 9. Webhook → 200 ack (< 100ms typical).
-10. apps/worker (TG/WA/userbot) или apps/api (web) дренируют outbound_queue
-    через SKIP LOCKED → adapter.send → mark sent.
+10. apps/worker (TG-bot / WA) или apps/api (web / TG userbot) дренируют
+    outbound_queue через SKIP LOCKED → adapter.send → mark sent.
 ```
 
 ---
@@ -280,8 +282,16 @@ GET    /api/admin/diagnostics                    — health-check (channel + LLM
 
 POST   /api/admin/channels/telegram              — { botToken } → auto-setWebhook
 POST   /api/admin/channels/whatsapp              — { phoneNumberId, accessToken } → Meta Graph validate + webhook-setup-hint
+POST   /api/admin/channels/userbot/start         — { phone } → MTProto sendCode (superadmin)
+POST   /api/admin/channels/userbot/verify        — { loginId, code } → signIn (или needs2fa)
+POST   /api/admin/channels/userbot/2fa           — { loginId, password } → SRP → канал создан
 GET    /api/admin/channels                       — list (без credentials)
 DELETE /api/admin/channels/:id
+
+GET    /api/admin/admins                         — список admin'ов
+GET    /api/admin/admins/invites                 — список приглашений
+POST   /api/admin/admins/invite                  — { email, role } → magic-link (superadmin)
+DELETE /api/admin/admins/invites/:id             — отозвать приглашение
 
 PUT    /api/admin/llm-configs/:purpose           — { provider, model, apiKey?, ... }
 GET    /api/admin/llm-configs                    — list (без secret values)
@@ -336,6 +346,7 @@ channel-web: 11; llm-router: 9; verticals: 6; vertical-recruitment-uae: 5). High
 | `PLATFORM_MASTER_KEY` | ✅ | 32-byte hex для AES-256-GCM (tenant_secrets) |
 | `PLATFORM_AUTH_SECRET` | opt | HMAC секрет для JWT-like auth tokens (fallback на MASTER_KEY) |
 | `TELEGRAM_WEBHOOK_SECRET` | ✅ | X-Telegram-Bot-Api-Secret-Token header |
+| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | opt | MTProto app (my.telegram.org). Нужны для onboarding'а личного TG-аккаунта (userbot). Пусто → таб «Личный» скрыт, роуты 503 |
 | `PLATFORM_PUBLIC_URL` | opt | Базовый URL apps/api для auto-setWebhook (`https://api.example.com`) |
 | `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | opt | Meta webhook setup |
 | `WEB_WS_AUTH_SECRET` | opt | Shared secret для `/ws/:slug?auth=...` |

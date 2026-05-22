@@ -1,6 +1,6 @@
 # Roadmap
 
-Последнее обновление: 2026-05.
+Последнее обновление: 2026-05-23.
 
 Стратегический контекст — см. [`COMPETITORS.md`](COMPETITORS.md).
 
@@ -110,6 +110,20 @@
 - ✅ **Recruitment skills (Phase 1)** — 3 новых skill: `qualify-budget-via-spin`,
   `objection-visa-cost`, `close-soft-deposit`; style `recruiter-empathetic-v1`
 
+### UX + Telegram userbot (май 2026)
+
+- ✅ **Guided onboarding wizard** (`/onboarding`) — после signup ведёт по шагам
+  канал → API-ключи → база знаний → готово, с прогрессом и возобновлением.
+  Чеклист и редирект после регистрации ведут в мастер.
+- ✅ **Telegram userbot (личный аккаунт) — M9** — пошаговый MTProto-логин
+  phone → code → 2FA (GramJS) с in-memory login-store; сессия encrypted в
+  `tenant_secrets`. Userbot живёт в `apps/api` (как web): registry + inbound-runner
+  (`receive → processInbound`) + outbound-dispatcher. UI: таб «Telegram (личный)» +
+  re-auth при revoked-сессии. `apiId/apiHash` платформенные из env.
+- ✅ **Admin-UI редизайн** — Tailwind v4 + shadcn/ui, Linear-эстетика
+  (oklch-токены, индиго-акцент), левый сайдбар со всеми разделами,
+  светлая/тёмная/системная темы. Все страницы переведены на shadcn.
+
 ---
 
 ## Q3 2026 (Jun–Aug) — Monetization + Coverage 💰
@@ -213,14 +227,19 @@ Stripe не работает в РФ. Нужно для CIS market:
 - [ ] AmoCRM webhook + REST API integration
 - [ ] Bitrix24 webhook + REST API integration
 
-### M9. Telegram userbot UI onboarding
+### ✅ M9. Telegram userbot UI onboarding — DONE (май 2026)
 
-Userbot (MTProto) уже работает в `apps/worker`. Нет UI:
+Use-case: рекрутеры / sales-teams, чьи лиды пишут на личный аккаунт.
 
-- [ ] `/channels` tab "Telegram (личный аккаунт)" — phone, code, 2FA
-- [ ] QR-code login flow
-- [ ] Session string encrypted в `tenant_secrets`
-- [ ] Use-case: рекрутеры / sales-teams чьи лиды пишут на личный аккаунт
+- ✅ `/channels` tab «Telegram (личный аккаунт)» — phone → code → 2FA
+- ✅ Пошаговый MTProto-логин (GramJS) через in-memory login-store; session
+  string encrypted в `tenant_secrets`
+- ✅ Runtime в `apps/api` (не worker — pinned MTProto-соединение, как у web):
+  `UserbotChannelRegistry` + inbound-runner (`receive → processInbound`) +
+  `UserbotOutboundDispatcher`. `telegram_userbot` убран из claimKinds воркера.
+- ✅ Re-auth при revoked-сессии (auth_key_duplicated → status='error' → кнопка в UI)
+- ✅ Платформенные `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (env)
+- 🔲 QR-code login flow — отложено (текущего phone+code+2FA достаточно)
 
 ---
 
@@ -353,7 +372,7 @@ Vision purpose уже в schema (`llm_provider_configs.purpose='vision'`):
 | Signup → first bot reply | < 5 мин self-serve ✅ | < 5 мин | < 3 мин | < 2 мин |
 | Active tenants | 1 (recruitment-uae) | 5–10 | 25–50 | 100+ |
 | MRR | $0 | $1K | $10K | $50K |
-| Channel coverage | TG (UI) + WA (UI) + web | + widget | + TG userbot UI | + voice |
+| Channel coverage | TG + WA + web + **TG userbot** (UI) | + widget | ✅ TG userbot UI | + voice |
 | Vertical templates | 1 (UAE) | 1 | 5 | 8 |
 | Tests | 741 | 1K+ | 1.5K+ | 2K+ |
 | Compliance | none | none | none | SOC 2 Type I in flight |
@@ -361,6 +380,9 @@ Vision purpose уже в schema (`llm_provider_configs.purpose='vision'`):
 
 **Q3 status:** M1 ✅, M2 ✅, M3 ✅, M4 ✅, M5 ✅. Phase 1 pricing pivot ✅.
 Recruitment skills seeds + `recruiter-empathetic-v1` style ✅.
+
+**Q4 status:** M9 (Telegram userbot UI + runtime) ✅. Guided onboarding wizard ✅.
+Admin-UI редизайн (Tailwind v4 + shadcn, dark/light) ✅. M6–M8 — впереди.
 
 ---
 
