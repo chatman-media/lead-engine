@@ -11,6 +11,7 @@ import type {
 } from "@chatman-media/channel-core";
 import { Api, TelegramClient as GramjsClient } from "telegram";
 import { NewMessage, type NewMessageEvent } from "telegram/events/index.js";
+import { LogLevel } from "telegram/extensions/Logger.js";
 import { StringSession } from "telegram/sessions/index.js";
 
 /**
@@ -124,6 +125,11 @@ export class TelegramUserbotAdapter implements ChannelAdapter {
       retryDelay: this.opts.retryDelayMs ?? 3000,
       timeout: 30,
     });
+    // GramJS на уровне ERROR console.error'ит рутинные ping-timeout'ы своего
+    // update-loop'а (он сам их ловит и делает reconnect — см. updates.js).
+    // Для long-running SaaS это шум; значимые статусы (connected /
+    // connection_failed / auth_key_duplicated) мы отдаём через healthEvents().
+    client.setLogLevel(LogLevel.NONE);
 
     const maxAttempts = this.opts.connectionRetries ?? 5;
     let lastErr: string | null = null;
@@ -398,9 +404,12 @@ export class TelegramUserbotAdapter implements ChannelAdapter {
       // (file:path) добавляется отдельной миграцией если понадобится.
       let sentId: number | undefined;
       if (part.kind === "text") {
-        const result = await this.client.sendMessage(peer as Parameters<GramjsClient["sendMessage"]>[0], {
-          message: part.text,
-        });
+        const result = await this.client.sendMessage(
+          peer as Parameters<GramjsClient["sendMessage"]>[0],
+          {
+            message: part.text,
+          },
+        );
         sentId = (result as { id?: number }).id;
       } else {
         // Send-by-mediaRef не поддерживается в минимальной реализации —

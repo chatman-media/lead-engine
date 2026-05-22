@@ -1,15 +1,7 @@
 import { TelegramApiError, TelegramClient } from "@chatman-media/channel-telegram";
-import {
-  type Db,
-  getDecryptedSecret,
-  withTenant,
-} from "@chatman-media/conversation-engine";
+import { type Db, getDecryptedSecret, withTenant } from "@chatman-media/conversation-engine";
 import type { ChatClient } from "@chatman-media/llm-router";
-import {
-  channels,
-  llmProviderConfigs,
-  tenantSecrets,
-} from "@chatman-media/storage";
+import { channels, llmProviderConfigs, tenantSecrets } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 
@@ -49,9 +41,7 @@ export interface CheckResult {
   message?: string;
 }
 
-export function makeAdminDiagnosticsRoutes(
-  opts: AdminDiagnosticsRoutesOpts,
-): Hono {
+export function makeAdminDiagnosticsRoutes(opts: AdminDiagnosticsRoutesOpts): Hono {
   const app = new Hono();
 
   app.get("/api/admin/diagnostics", async (c) => {
@@ -78,11 +68,44 @@ export function makeAdminDiagnosticsRoutes(
         )
         .limit(1);
       if (!tgChannel) {
-        checks.push({
-          name: "channel.telegram",
-          status: "fail",
-          message: "Нет активного Telegram-канала",
-        });
+        // Нет telegram_bot — но канал может быть другого типа (личный
+        // userbot / WhatsApp / web). У них валидация не через getMe (другой
+        // транспорт), поэтому считаем pass при наличии активного канала.
+        const [anyChannel] = await tx
+          .select({
+            kind: channels.kind,
+            externalId: channels.externalId,
+            metadataJson: channels.metadataJson,
+          })
+          .from(channels)
+          .where(and(eq(channels.tenantId, tenantId), eq(channels.status, "active")))
+          .limit(1);
+        if (anyChannel) {
+          let label = `${anyChannel.kind} (${anyChannel.externalId})`;
+          if (anyChannel.kind === "telegram_userbot") {
+            let username: string | null = null;
+            try {
+              username =
+                (JSON.parse(anyChannel.metadataJson ?? "{}") as { username?: string }).username ??
+                null;
+            } catch {
+              // metadata невалиден — покажем externalId
+            }
+            label = `личный аккаунт ${username ? `@${username}` : anyChannel.externalId}`;
+          }
+          checks.push({
+            name: "channel.telegram",
+            status: "pass",
+            message: `Активен канал: ${label}`,
+            latencyMs: Math.round(performance.now() - tgStart),
+          });
+        } else {
+          checks.push({
+            name: "channel.telegram",
+            status: "fail",
+            message: "Нет активного канала (Telegram-бот / личный аккаунт / WhatsApp / web)",
+          });
+        }
       } else if (!tgChannel.credentialsRef) {
         checks.push({
           name: "channel.telegram",
@@ -129,10 +152,7 @@ export function makeAdminDiagnosticsRoutes(
               name: "channel.telegram",
               status,
               latencyMs: Math.round(performance.now() - tgStart),
-              message:
-                err instanceof Error
-                  ? err.message
-                  : String(err),
+              message: err instanceof Error ? err.message : String(err),
             });
           }
         } else if (token === null) {
@@ -158,10 +178,7 @@ export function makeAdminDiagnosticsRoutes(
         })
         .from(llmProviderConfigs)
         .where(
-          and(
-            eq(llmProviderConfigs.tenantId, tenantId),
-            eq(llmProviderConfigs.purpose, "chat"),
-          ),
+          and(eq(llmProviderConfigs.tenantId, tenantId), eq(llmProviderConfigs.purpose, "chat")),
         );
       if (!chatCfg) {
         checks.push({
@@ -249,10 +266,7 @@ export function makeAdminDiagnosticsRoutes(
         })
         .from(llmProviderConfigs)
         .where(
-          and(
-            eq(llmProviderConfigs.tenantId, tenantId),
-            eq(llmProviderConfigs.purpose, "embed"),
-          ),
+          and(eq(llmProviderConfigs.tenantId, tenantId), eq(llmProviderConfigs.purpose, "embed")),
         );
       if (!embedCfg) {
         checks.push({
