@@ -9,6 +9,7 @@ import {
   deriveTenantSlug,
   hashPassword,
   signAuthToken,
+  verifyAuthToken,
   verifyPassword,
 } from "../lib/auth.ts";
 
@@ -340,6 +341,61 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
   });
 
   /**
+   * POST /api/auth/change-password
+   * Requires Authorization Bearer token. Body: { currentPassword, newPassword }
+   *
+   * Verifies currentPassword against stored hash, then replaces with new
+   * hash. Returns 200 { ok: true } on success.
+   *
+   * Errors:
+   *   400 — missing/invalid fields, newPassword < 8 chars
+   *   401 — missing/invalid token, or currentPassword wrong
+   */
+  app.post("/api/auth/change-password", async (c) => {
+    const header = c.req.header("Authorization") ?? "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    if (!token) return c.json({ error: "missing Authorization Bearer token" }, 401);
+    let claims: ReturnType<typeof verifyAuthToken>;
+    try {
+      claims = verifyAuthToken(token, opts.secret);
+    } catch {
+      return c.json({ error: "invalid token" }, 401);
+    }
+
+    let body: { currentPassword?: unknown; newPassword?: unknown };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const currentPassword = typeof body.currentPassword === "string" ? body.currentPassword : "";
+    const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+    if (!currentPassword || !newPassword) {
+      return c.json({ error: "currentPassword and newPassword required" }, 400);
+    }
+    if (newPassword.length < 8) {
+      return c.json({ error: "newPassword must be at least 8 characters" }, 400);
+    }
+
+    const [adminRow] = await opts.db
+      .select({ id: admins.id, passwordHash: admins.passwordHash })
+      .from(admins)
+      .where(and(eq(admins.id, claims.adminId), eq(admins.tenantId, claims.tenantId)));
+    if (!adminRow) return c.json({ error: "admin not found" }, 401);
+
+    const ok = await verifyPassword(currentPassword, adminRow.passwordHash);
+    if (!ok) return c.json({ error: "current password is incorrect" }, 401);
+
+    const newHash = await hashPassword(newPassword);
+    await opts.db
+      .update(admins)
+      .set({ passwordHash: newHash })
+      .where(eq(admins.id, adminRow.id));
+
+    return c.json({ ok: true });
+  });
+
+  /**
    * POST /api/auth/logout
    * Stateless server side — client drops token. Endpoint существует только
    * для symmetric API + чтобы clients могли централизованно вызвать flow.
@@ -361,7 +417,7 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
     if (!token) return c.json({ error: "missing Authorization Bearer token" }, 401);
     let claims: ReturnType<typeof verifyAuthToken>;
     try {
-      claims = (await import("../lib/auth.ts")).verifyAuthToken(token, opts.secret);
+      claims = verifyAuthToken(token, opts.secret);
     } catch (err) {
       if (err instanceof AuthTokenError) return c.json({ error: err.reason }, 401);
       return c.json({ error: "auth failed" }, 401);
@@ -389,5 +445,3 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
   return app;
 }
 
-// Re-import для типизации в /me (избегаем top-level cycle).
-import { verifyAuthToken } from "../lib/auth.ts";
