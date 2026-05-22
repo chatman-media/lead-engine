@@ -15,7 +15,8 @@ import {
  * (snippet для customer site, без token'ов — anonymized externalUserId).
  *
  * Backend encrypt'ит токены через AES-256-GCM в tenant_secrets,
- * ChannelRegistry hot-reload'ится в apps/api (worker подхватит ≤30 сек).
+ * ChannelRegistry hot-reload'ится в apps/api (без рестарта).
+ * apps/worker требует рестарта для подхвата новых каналов.
  */
 type ChannelTab = "telegram" | "whatsapp" | "web";
 

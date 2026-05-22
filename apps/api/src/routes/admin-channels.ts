@@ -30,9 +30,9 @@ import { canAddChannel } from "../lib/quota.ts";
  *   2. Encrypt token в tenant_secrets под key=`channel_telegram_bot_<username>`.
  *   3. Insert channels row с credentials_ref на этот key.
  *
- * NB: Channels подхватываются ChannelRegistry только при boot apps/api +
- * apps/worker. После POST нужен restart обоих процессов (CD-deploy hooks
- * — TODO).
+ * NB: apps/api hot-reload'ит ChannelRegistry через onReload callback
+ * (TenantReloader.reloadChannels) — без рестарта. apps/worker требует
+ * рестарта для подхвата новых каналов (cross-process pub/sub — Phase 2).
  */
 export interface AdminChannelsRoutesOpts {
   db: Db;
