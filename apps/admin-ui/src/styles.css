@@ -526,6 +526,10 @@ a:hover {
   color: #f0c674;
 }
 
+.badge-ok {
+  color: var(--ok);
+}
+
 .settings-form {
   display: grid;
   gap: 12px;

@@ -25,6 +25,7 @@ import {
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeRequireAuth } from "./middleware/require-auth.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
+import { makeAdminAdminsRoutes } from "./routes/admin-admins.ts";
 import { makeAdminAuditRoutes } from "./routes/admin-audit.ts";
 import { makeAdminBillingRoutes } from "./routes/admin-billing.ts";
 import { makeAdminChannelsRoutes } from "./routes/admin-channels.ts";
@@ -215,6 +216,16 @@ async function main() {
   // Audit log read API.
   app.route("/", makeAdminAuditRoutes({ db }));
   log.info("admin-audit routes enabled (read-only)");
+
+  // Multi-admin invite (Q3'26 M4) — token-link flow без email-infrastructure.
+  app.route(
+    "/",
+    makeAdminAdminsRoutes({
+      db,
+      ...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
+    }),
+  );
+  log.info("admin-admins routes enabled (invite / list / revoke)");
 
   // Tenant info + pause/resume.
   app.route(
