@@ -7,10 +7,11 @@ on:
     branches: [main]
 
 # Отменяем stale runs на том же ref — быстрые pushы не очередят
-# три параллельных job'а.
+# параллельные job'ы. Релиз (push в main) не отменяем — иначе можно
+# прервать публикацию на полпути.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Pin Bun: новая минорная версия не должна сюрпризить runtime поведение.
@@ -19,14 +20,20 @@ env:
 
 jobs:
   workspace:
-    name: workspace — install + typecheck + unit tests
+    name: workspace — install + typecheck + tests + coverage
     runs-on: ubuntu-latest
     timeout-minutes: 12
 
+    env:
+      # @chatman-media/storage интеграционные тесты apply'ят все migrations
+      # + verify invariants (RLS-таблицы, legacy tenant, outbound status
+      # union, pgvector extension, idempotent backfill). Multi-tenant E2E
+      # suite в apps/api тоже бьёт по PG.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/lead_engine_test
+
     services:
-      # pgvector нужен для будущих integration-тестов DrizzleKbStore
-      # (vector(1536) колонка в kb_chunks). Pure-unit suite сейчас не
-      # пользуется PG, но сервис стоит — Q (Issue #3) включит.
+      # pgvector нужен для integration-тестов DrizzleKbStore
+      # (vector(1536) колонка в kb_chunks) и multi-tenant RLS suite.
       postgres:
         image: pgvector/pgvector:pg17
         env:
@@ -66,12 +73,111 @@ jobs:
       - name: Typecheck all workspace members (apps/* + packages/*)
         run: bun run --filter '*' typecheck
 
-      - name: Unit + integration tests (all workspace members)
+      # Покрытие гоняем только по packages/* (publishable библиотеки):
+      # все они на `bun test` (channel-core — на echo, тоже терпит флаги).
+      # Apps тестируем отдельным шагом без --coverage: у widget скрипт
+      # `exit 0`, который ломается на лишних аргументах.
+      - name: Tests — apps
+        run: bun run --filter './apps/*' test
+
+      - name: Tests + coverage — packages
+        run: |
+          set -o pipefail
+          bun run --filter './packages/*' test \
+            --coverage \
+            --coverage-reporter=text \
+            --coverage-reporter=lcov 2>&1 | tee coverage.txt
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          {
+            echo '## Test coverage (per workspace member)'
+            echo ''
+            echo '```'
+            grep 'All files' coverage.txt || echo 'no coverage rows captured'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage (lcov)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: |
+            packages/*/coverage/lcov.info
+            apps/*/coverage/lcov.info
+          if-no-files-found: ignore
+
+  release:
+    name: Release — publish @chatman-media/* to npm
+    needs: workspace
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # semantic-release нужна полная история + теги для анализа
+          # commit-range и вычисления next version.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node (semantic-release runtime)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install deps (workspace)
+        run: bun install --frozen-lockfile
+
+      - name: Configure npm auth for bun publish
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
         env:
-          # @chatman-media/storage интеграционные тесты apply'ят все
-          # migrations 0000–0005 + verify invariants (RLS-enabled таблицы,
-          # legacy tenant, outbound status union, pgvector extension,
-          # idempotent backfill). Бывший отдельный `migrations` job теперь
-          # покрыт здесь.
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/lead_engine_test
-        run: bun run --filter '*' test
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Build all packages (topological)
+        # Гарантируем, что dist/*.d.ts каждого пакета существует ДО
+        # semantic-release: dependent может выпускаться, даже если его
+        # workspace-зависимость в этом прогоне без релиза (и потому её
+        # prepublishOnly-build не запустится).
+        run: bun run build:packages
+
+      - name: Release each package (dependency order)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Топологический порядок: пакет публикуется только после своих
+          # workspace-зависимостей, чтобы bun publish зарезолвил
+          # workspace:* в уже опубликованную версию.
+          PACKAGES=(
+            observability
+            channel-core
+            llm-router
+            verticals
+            storage
+            channel-telegram
+            channel-web
+            channel-whatsapp
+            kb
+            conversation-engine
+            sales
+          )
+          for pkg in "${PACKAGES[@]}"; do
+            echo "::group::semantic-release @chatman-media/$pkg"
+            (cd "packages/$pkg" && bunx semantic-release)
+            echo "::endgroup::"
+          done

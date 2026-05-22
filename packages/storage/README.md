@@ -1,13 +1,13 @@
 # @chatman-media/storage
 
 [![npm](https://img.shields.io/npm/v/@chatman-media/storage)](https://www.npmjs.com/package/@chatman-media/storage)
-[![CI](https://github.com/chatman-media/storage/actions/workflows/ci.yml/badge.svg)](https://github.com/chatman-media/storage/actions/workflows/ci.yml)
+[![CI](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Bun](https://img.shields.io/badge/runtime-Bun-fbf0df?logo=bun&logoColor=black)](https://bun.sh)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![used by @chatman-media/sales](https://img.shields.io/badge/used%20by-@chatman--media%2Fsales-6366f1)](https://github.com/chatman-media/sales)
+[![used by @chatman-media/sales](https://img.shields.io/badge/used%20by-@chatman--media%2Fsales-6366f1)](https://github.com/chatman-media/lead-engine/tree/main/packages/sales)
 
-**PostgreSQL storage adapters for [@chatman-media/sales](https://github.com/chatman-media/sales).** Drizzle ORM implementations of all engine repository interfaces — users, conversations, leads, skills, ELO ratings, self-play matches, pairwise comparisons, and shadow evaluations.
+**PostgreSQL storage adapters for [@chatman-media/sales](https://github.com/chatman-media/lead-engine/tree/main/packages/sales).** Drizzle ORM implementations of all engine repository interfaces — users, conversations, leads, skills, ELO ratings, self-play matches, pairwise comparisons, and shadow evaluations.
 
 Built from the production persistence layer of the lead-engine platform — multi-tenant SaaS with Postgres RLS.
 
@@ -114,7 +114,7 @@ class MyMatchesRepo implements ISelfPlayMatchesRepo {
 └── index.ts           Public exports
 ```
 
-Depends on [`@chatman-media/sales`](https://github.com/chatman-media/sales) for repo interfaces and domain types (`SelfPlayMatchRecord`, `SkillAggregate`, `SkillRow`, …).
+Depends on [`@chatman-media/sales`](https://github.com/chatman-media/lead-engine/tree/main/packages/sales) for repo interfaces and domain types (`SelfPlayMatchRecord`, `SkillAggregate`, `SkillRow`, …).
 
 ---
 

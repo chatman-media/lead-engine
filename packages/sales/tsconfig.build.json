@@ -6,7 +6,13 @@
     "declaration": true,
     "declarationMap": true,
     "rootDir": "./src",
-    "outDir": "./dist"
+    "outDir": "./dist",
+    "paths": {}
   },
-  "exclude": ["src/__tests__/**"]
+  "exclude": [
+    "src/__tests__/**"
+  ],
+  "include": [
+    "src/**/*.ts"
+  ]
 }

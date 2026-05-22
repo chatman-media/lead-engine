@@ -12,15 +12,26 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target node --format esm --external @chatman-media/channel-core && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "check": "biome check ./src",
     "format": "biome format --write ./src",
-    "test": "bun test"
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
   },
-  "keywords": ["lead-engine", "channel", "whatsapp", "meta", "graph-api"],
+  "keywords": [
+    "lead-engine",
+    "channel",
+    "whatsapp",
+    "meta",
+    "graph-api"
+  ],
   "author": "Alexander Kireev",
   "license": "MIT",
   "dependencies": {
@@ -30,5 +41,17 @@
     "@biomejs/biome": "^2.4.14",
     "@types/bun": "1.3.14",
     "typescript": "^6.0.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chatman-media/lead-engine.git",
+    "directory": "packages/channel-whatsapp"
+  },
+  "homepage": "https://github.com/chatman-media/lead-engine/tree/main/packages/channel-whatsapp#readme",
+  "bugs": {
+    "url": "https://github.com/chatman-media/lead-engine/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

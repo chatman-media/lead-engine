@@ -22,7 +22,8 @@
     "typecheck": "tsc --noEmit",
     "check": "biome check ./src",
     "format": "biome format --write ./src",
-    "test": "bun test"
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
   },
   "keywords": [
     "lead-engine",
@@ -35,5 +36,17 @@
     "@biomejs/biome": "^2.4.14",
     "@types/bun": "1.3.14",
     "typescript": "^6.0.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chatman-media/lead-engine.git",
+    "directory": "packages/verticals"
+  },
+  "homepage": "https://github.com/chatman-media/lead-engine/tree/main/packages/verticals#readme",
+  "bugs": {
+    "url": "https://github.com/chatman-media/lead-engine/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
