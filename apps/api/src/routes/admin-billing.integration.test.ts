@@ -140,7 +140,7 @@ describe("admin-billing", () => {
     };
     expect(body.plan.kind).toBe("starter");
     expect(body.plan.maxChannels).toBe(3);
-    expect(body.plan.priceUsd).toBe(49);
+    expect(body.plan.priceUsd).toBe(99);
   });
 
   it("downgrade back to free + усиленный insert → over_limit_channels status", async () => {

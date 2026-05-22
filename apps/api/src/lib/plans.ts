@@ -29,11 +29,22 @@ export interface PlanLimits {
   stripePriceId: string | null;
 }
 
+// Phase 1 pricing (recruitment-first ICP, ARPU $99-299):
+// - Free: trial limits, conversion funnel only (1 channel, 50 docs, 30 msg/min,
+//   100 LLM-replied msgs/мес мягкое ограничение через rate-limit cap'ы).
+// - Starter $99: solo рекрутер / 1-2 человека (3 каналов, 500 docs, 60 msg/min).
+// - Pro $199: команда recruitment-агентства (10 каналов, 10K docs, 120 msg/min).
+// - Enterprise: self-host / custom (Phase 3+).
+//
+// Phase 1 ARPU pivot (старые $49/$149 → $99/$199): recruitment-агентства
+// ОК платят $100+ за tool который заменяет ручную работу оператора. $49 был
+// SMB-anchor от Tidio/Chatbase — низковато для нашего persuasion-engine USP.
+// Если Phase 2 (real-estate) или Phase 3 (broader CX) — pricing revisited.
 const FREE: PlanLimits = {
   maxChannels: 1,
   maxKbDocuments: 50,
-  rateLimitPerMinute: 30,
-  rateLimitPerHour: 300,
+  rateLimitPerMinute: 20,
+  rateLimitPerHour: 200,
   label: "Free",
   priceUsd: 0,
   stripePriceId: null,
@@ -45,8 +56,8 @@ const STARTER: PlanLimits = {
   rateLimitPerMinute: 60,
   rateLimitPerHour: 600,
   label: "Starter",
-  priceUsd: 49,
-  stripePriceId: null, // TODO M1b: set from env STRIPE_PRICE_STARTER
+  priceUsd: 99,
+  stripePriceId: null, // env STRIPE_PRICE_STARTER, см. apps/api/src/index.ts wire-up
 };
 
 const PRO: PlanLimits = {
@@ -55,8 +66,8 @@ const PRO: PlanLimits = {
   rateLimitPerMinute: 120,
   rateLimitPerHour: 2400,
   label: "Pro",
-  priceUsd: 149,
-  stripePriceId: null, // TODO M1b: set from env STRIPE_PRICE_PRO
+  priceUsd: 199,
+  stripePriceId: null, // env STRIPE_PRICE_PRO
 };
 
 const ENTERPRISE: PlanLimits = {

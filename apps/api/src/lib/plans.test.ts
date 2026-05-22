@@ -33,7 +33,8 @@ describe("plans", () => {
   it("free plan zero price, enterprise null price", () => {
     expect(resolvePlan("free").priceUsd).toBe(0);
     expect(resolvePlan("enterprise").priceUsd).toBeNull();
-    expect(resolvePlan("starter").priceUsd).toBe(49);
-    expect(resolvePlan("pro").priceUsd).toBe(149);
+    // Phase 1 pricing pivot — was $49/$149, now $99/$199 для recruitment ARPU.
+    expect(resolvePlan("starter").priceUsd).toBe(99);
+    expect(resolvePlan("pro").priceUsd).toBe(199);
   });
 });

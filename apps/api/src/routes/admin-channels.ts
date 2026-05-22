@@ -257,7 +257,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
             current: quota.current,
             plan: quota.plan,
             planLabel: quota.planLabel,
-            upgradeHint: "Перейдите на план Starter ($49/мес) для большего числа каналов",
+            upgradeHint: "Перейдите на план Starter ($99/мес) для большего числа каналов",
           },
           402,
         );
@@ -488,7 +488,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
             current: quota.current,
             plan: quota.plan,
             planLabel: quota.planLabel,
-            upgradeHint: "Перейдите на план Starter ($49/мес) для большего числа каналов",
+            upgradeHint: "Перейдите на план Starter ($99/мес) для большего числа каналов",
           },
           402,
         );
@@ -694,7 +694,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
             current: quota.current,
             plan: quota.plan,
             planLabel: quota.planLabel,
-            upgradeHint: "Перейдите на план Starter ($49/мес) для большего числа каналов",
+            upgradeHint: "Перейдите на план Starter ($99/мес) для большего числа каналов",
           },
           402,
         );
