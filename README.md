@@ -1,12 +1,47 @@
 # lead-engine
 
-**Multi-tenant SaaS platform для AI sales bots.** Принимает inbound через
-Telegram / WhatsApp / Web, ведёт диалог через RAG + sales-engine, копит
-metrics для admin-UI. Каждый клиент — независимый tenant с собственными
-каналами, LLM-конфигом и data isolation на уровне Postgres RLS.
+**Multi-tenant SaaS платформа клиентского сервиса с AI-ботом.** Бизнес
+регается → подключает свой Telegram / WhatsApp / web-чат → конфигурит
+свой OpenAI / Anthropic / Ollama ключ (BYOK) → грузит документы в KB →
+AI отвечает клиентам через эти каналы. Operator может перехватить
+диалог в любой момент.
 
-Извлечён из `chatman-media/sales-guru` (legacy Telegram-only bot) через
-серию архитектурных PR'ов (см. CHANGELOG / git log).
+Каждый клиент — независимый `tenant` с собственными каналами, LLM-
+конфигом, базой знаний, изоляцией данных на уровне Postgres RLS.
+
+Извлечён из `chatman-media/sales-guru` (legacy Telegram-only бот) через
+серию архитектурных PR'ов (см. `docs/ROADMAP.md` и git log).
+
+📖 **См. также:**
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — детали data flow, RLS, hot-reload
+- [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — путь нового tenant'а (UI + curl)
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — что готово, что в работе, что дальше
+- [`docs/COMPETITORS.md`](docs/COMPETITORS.md) — анализ конкурентов и позиционирование
+
+---
+
+## Self-service tenant flow
+
+Полный цикл онбординга **без env vars, без рестартов**:
+
+```
+1. /signup       → email + password → JWT + tenant created
+2. /channels     → paste @BotFather token → backend setWebhook + encrypt + reload
+                   ✓ Бот принимает inbound сразу
+3. /settings     → save OpenAI key → encrypted AES-256-GCM в tenant_secrets,
+                   InMemoryLlmRouter.invalidate + setConfig → hot-reload
+                   ✓ AI готов отвечать
+4. /dashboard    → upload .txt / .md / .json → ingest + embed → kb_chunks
+                   ✓ RAG-ответы по знаниям бизнеса
+5. /conversations → inbox с auto-poll 5s, operator может перехватить
+                   (mode='human' → AI замолкает на этом диалоге)
+6. /audit        → кто из админов что менял
+7. /diagnostics  → health check всего setup'а одной кнопкой
+```
+
+Изменения применяются **live** через in-process bus (`apps/api`) +
+30-сек polling reload (`apps/worker`). Подробности в
+[`docs/ARCHITECTURE.md#hot-reload`](docs/ARCHITECTURE.md).
 
 ---
 
@@ -16,32 +51,33 @@ metrics для admin-UI. Каждый клиент — независимый te
 
 | App | Что это | Деплой |
 |---|---|---|
-| `apps/api` | HTTP-сервер: webhook handlers (telegram/whatsapp), `/ws/:slug` (web channel), admin-API, /metrics, /healthz | Fly app / любой Node-hosting |
-| `apps/worker` | Long-running: outbound dispatcher (SKIP LOCKED очередь), cron jobs | Fly app process group |
-| `apps/admin-ui` | React + Vite SPA (legacy, wire-up под новый admin-API отложен) | Static / CDN |
-| `apps/vertical-recruitment-uae` | Vertical template (KB + funnel stages + style fragments). НЕ деплоится — грузится `packages/verticals` | — |
+| `apps/api` | HTTP-сервер: webhook handlers (telegram/whatsapp/stripe), `/ws/:slug` (web), admin-API (auth + KB + LLM-config + channels + conversations + audit + diagnostics + tenant pause), `/metrics`, `/healthz` | Fly app / Node-hosting |
+| `apps/worker` | Outbound dispatcher (`SKIP LOCKED` очередь), polling channel-reload, cron jobs | Fly app process group |
+| `apps/admin-ui` | React 19 + Vite SPA — full SaaS UI (signup → channels → settings → conversations → audit → diagnostics) | Static / CDN |
+| `apps/vertical-recruitment-uae` | Vertical template (KB seed + funnel stages + style prompts) — НЕ деплоится, грузится через `packages/verticals` | — |
 
 ### Packages (доменные модули)
 
 ```
-@chatman-media/storage          — Drizzle schema + миграции, integration helpers
-@chatman-media/observability    — JsonLogger, Counter/Histogram, PlatformMetrics
-@chatman-media/channel-core     — ChannelAdapter контракт, Inbound, OutboundEnvelope
-@chatman-media/channel-telegram — BotAPI + MTProto userbot
-@chatman-media/channel-whatsapp — Meta Graph API
-@chatman-media/channel-web      — WebSocket-based chat-widget channel
-@chatman-media/llm-router       — LLM I/O (chat/embed/providers/router). Single source of truth
-@chatman-media/kb               — KB retrieval (RAG: ingest, answer, stores, hybrid search)
-@chatman-media/sales            — sales-domain (CoachAnalyzer, StageClassifier, ELO, self-play, styles)
-@chatman-media/conversation-engine — Pipeline contracts + DAL + persistence helpers
-@chatman-media/verticals        — VerticalTemplate registry (recruitment_uae_v1)
+@chatman-media/storage            — Drizzle schema + миграции, integration helpers
+@chatman-media/observability      — JsonLogger, Counter/Histogram, PlatformMetrics
+@chatman-media/channel-core       — ChannelAdapter контракт, Inbound, OutboundEnvelope
+@chatman-media/channel-telegram   — BotAPI + MTProto userbot
+@chatman-media/channel-whatsapp   — Meta Graph API
+@chatman-media/channel-web        — WebSocket-based chat-widget channel
+@chatman-media/llm-router         — LLM I/O (chat/embed/providers/router). Per-tenant config
+@chatman-media/kb                 — RAG (ingest, answer, hybrid search, ABRouter)
+@chatman-media/sales              — sales-domain (CoachAnalyzer, StageClassifier, ELO)
+@chatman-media/conversation-engine — Pipeline contracts + DAL + persistence
+@chatman-media/verticals          — VerticalTemplate registry (recruitment_uae_v1)
 ```
 
-**Dependency direction** (никаких циклов):
+**Dependency direction** (без циклов):
+
 ```
 conversation-engine ── llm-router
                   ├── kb ── llm-router
-                  ├── sales ── kb, llm-router, conversation-engine (для DAL типов)
+                  ├── sales ── kb, llm-router
                   └── storage
 channel-* ── channel-core
 apps/api ── conversation-engine, channel-*, sales, kb, llm-router
@@ -53,6 +89,7 @@ apps/worker ── conversation-engine, channel-telegram
 ## Quick start (local dev)
 
 ### Требования
+
 - [Bun](https://bun.sh) 1.3.14+
 - Docker (для Postgres с pgvector)
 
@@ -64,31 +101,30 @@ cd lead-engine
 bun install
 
 cp .env.example .env
-# отредактировать .env — minimum: PLATFORM_MASTER_KEY (openssl rand -hex 32),
-# TELEGRAM_WEBHOOK_SECRET (любая строка)
+# Minimum: PLATFORM_MASTER_KEY (openssl rand -hex 32),
+#          TELEGRAM_WEBHOOK_SECRET (любая строка),
+#          PLATFORM_PUBLIC_URL=http://localhost:3000 (для auto-setWebhook)
 
-bun db:up          # docker compose up postgres (pgvector/pg17) на 5434
-bun run apps/api/scripts/reset-and-migrate.ts   # apply 0000..0008 миграций
+bun db:up                                                    # postgres@5434
+bun run apps/api/scripts/reset-and-migrate.ts                # apply миграций
 
-# Smoke onboard первого tenant'а (web-only — без telegram):
-bun run apps/api/scripts/onboard-tenant.ts --slug=demo --with-web
-
-# Запустить:
-bun run dev        # apps/api на PORT 3000
-bun run dev:worker # apps/worker (опционально, для outbound dispatching)
+bun run dev          # apps/api на PORT 3000
+bun run dev:worker   # apps/worker (outbound + reload polling)
+cd apps/admin-ui && bun run dev   # admin-ui на http://localhost:5173
 ```
 
-Web-channel smoke: открыть `apps/api/demo/web-chat.html` в браузере, host=localhost:3000, slug=demo, user=u1.
+Открыть `http://localhost:5173/signup` → создать tenant → пройти 5-шаговый
+onboarding checklist.
 
-### Bun-shortcuts
+### Bun shortcuts
 
 ```bash
 bun db:up          # поднять Postgres-контейнер
 bun db:down        # остановить
-bun db:reset       # снести с volume + re-migrate (чистая БД)
+bun db:reset       # снести + re-migrate (чистая БД)
 bun db:psql        # psql shell в контейнере
-bun run typecheck  # tsc по всем 14 пакетам
-bun run test       # bun test по всему монорепо
+bun run typecheck  # tsc по всем 15 пакетам
+bun run test       # bun test по всему монорепо (700+ тестов)
 ```
 
 ---
@@ -99,48 +135,35 @@ bun run test       # bun test по всему монорепо
 scoped по `tenant_id`:
 
 ```
-tenants ─┬─ channels (telegram_bot / telegram_userbot / whatsapp / web)
-         ├─ contacts (channel-agnostic person) ─ channel_identities (mapping per channel)
+tenants ─┬─ admins (multi-admin per tenant — invite flow TODO)
+         ├─ channels (telegram_bot / telegram_userbot / whatsapp / web)
+         ├─ contacts ─ channel_identities (channel-agnostic person ↔ messenger)
          ├─ conversations ─ messages
-         ├─ leads, lead_events, lead_notes
-         ├─ kb_documents ─ kb_chunks (per-tenant KB)
+         ├─ leads ─ lead_events ─ lead_notes
+         ├─ kb_documents ─ kb_chunks (per-tenant RAG)
          ├─ styles, experiments, skills, ...
-         ├─ outbound_queue
-         ├─ tenant_secrets (зашифрованы AES-256-GCM)
-         └─ llm_provider_configs
+         ├─ outbound_queue (SKIP LOCKED)
+         ├─ tenant_secrets (AES-256-GCM encrypted)
+         ├─ llm_provider_configs (per-purpose: chat | embed | vision | judge)
+         └─ audit_log
 ```
 
 ### RLS — Row-Level Security
 
-**Миграция 0004** включает `FORCE ROW LEVEL SECURITY` на 34
-tenant-scoped таблицах с policy:
+`FORCE ROW LEVEL SECURITY` на 34 tenant-scoped таблицах с policy:
+
 ```sql
 USING (tenant_id = current_setting('app.tenant_id', true)::int)
 WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::int)
 ```
 
-Все production code paths оборачивают repo-вызовы в `withTenant(db, tenantId, fn)`,
-который открывает транзакцию + `SET LOCAL app.tenant_id = X`.
+Все production code paths оборачивают repo-вызовы в `withTenant(db, tenantId, fn)`
+— открывает транзакцию + `SET LOCAL app.tenant_id = X`.
 
-#### Critical для prod-deploy:
-
-**apps/api / apps/worker ДОЛЖНЫ коннектиться под non-bypass Postgres role**
-(NOSUPERUSER NOBYPASSRLS). Иначе RLS bypass'ится и tenant-isolation —
-иллюзорна.
-
-На boot apps/api + apps/worker логируют:
-- `info` "RLS enforced" если current_user без bypass
-- `warn` "RLS not enforced — connection role bypasses row-level security" +
-  remediation hint иначе
-
-Создать prod role:
-```sql
-CREATE ROLE lead_engine_app LOGIN PASSWORD '...' NOSUPERUSER NOBYPASSRLS;
-GRANT USAGE ON SCHEMA public TO lead_engine_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO lead_engine_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO lead_engine_app;
--- Миграции запускать отдельным BYPASSRLS role'м (owner / superuser)
-```
+**Production critical:** `apps/api` / `apps/worker` ДОЛЖНЫ коннектиться
+под `NOSUPERUSER NOBYPASSRLS` Postgres role. Иначе RLS bypass'ится. На
+boot оба процесса логируют `info "RLS enforced"` или
+`warn "RLS not enforced"` с remediation hint.
 
 Validated в `packages/storage/src/rls.integration.test.ts` (8 tests) и
 `apps/api/src/multi-tenant.integration.test.ts` (10 E2E tests).
@@ -149,85 +172,98 @@ Validated в `packages/storage/src/rls.integration.test.ts` (8 tests) и
 
 ## Channels
 
-| Channel | Inbound | Outbound | Где живёт adapter |
+| Channel | Inbound | Outbound | Где adapter |
 |---|---|---|---|
-| `telegram_bot` | webhook `POST /webhook/telegram/:slug` (X-Telegram-Bot-Api-Secret-Token) | `apps/worker` через outbound-dispatcher → BotAPI HTTPS | apps/api + apps/worker |
-| `telegram_userbot` | apps/worker MTProto receive loop | apps/worker через outbound-dispatcher → MTProto | apps/worker |
-| `whatsapp` | webhook `POST /webhook/whatsapp/:slug` (X-Hub-Signature-256 HMAC-SHA256) + GET verify handshake | `apps/worker` через outbound-dispatcher → Meta Graph | apps/api + apps/worker |
-| `web` | WebSocket `/ws/:slug?user=X&auth=Y` (apps/api) | apps/api in-process через `WebOutboundDispatcher` (pinned WS-connection) | apps/api ONLY |
+| `telegram_bot` | webhook `POST /webhook/telegram/:slug` (X-Telegram-Bot-Api-Secret-Token) | `apps/worker` → BotAPI HTTPS | apps/api + apps/worker |
+| `telegram_userbot` | `apps/worker` MTProto receive loop | `apps/worker` → MTProto | apps/worker |
+| `whatsapp` | webhook `POST /webhook/whatsapp/:slug` (X-Hub-Signature-256) | `apps/worker` → Meta Graph | apps/api + apps/worker |
+| `web` | WebSocket `/ws/:slug?user=X&auth=Y` | `apps/api` in-process через `WebOutboundDispatcher` (pinned WS) | apps/api only |
 
-**Web особенный**: pinned WebSocket-connection живёт в HTTP-сервере apps/api,
-поэтому outbound dispatch для `kind='web'` rows тоже в apps/api (отдельный
-mini-dispatcher). Worker'овский dispatcher фильтрует `claimKinds:
-['telegram_bot', 'telegram_userbot', 'whatsapp']` чтобы не пытаться
-претендовать на web-rows.
+**Auto-setWebhook**: `POST /api/admin/channels/telegram` после insert
+автоматически дёргает Telegram `setWebhook(url=<PLATFORM_PUBLIC_URL>/webhook/telegram/<slug>,
+secret_token=<TELEGRAM_WEBHOOK_SECRET>)`. Канал работает сразу, без
+ручной curl-команды.
 
 ### Signature verification
 
-- **Telegram**: `X-Telegram-Bot-Api-Secret-Token` = env `TELEGRAM_WEBHOOK_SECRET`
-- **WhatsApp**: `X-Hub-Signature-256: sha256=<hex>` HMAC от raw body с
-  `WHATSAPP_APP_SECRET` (Meta dashboard → App Settings → Basic). **Проверяется
-  ДО tenant lookup** (anti-enumeration: 404 vs 401 раскрыло бы attacker'у
-  какие slug'и существуют).
-- **Web**: опциональный shared-secret через `WEB_WS_AUTH_SECRET` (`?auth=`
-  в query). JWT-auth — следующая итерация когда admin-ui начнёт issue'ить
-  tokens.
-- **Stripe**: webhook signing secret в env `STRIPE_WEBHOOK_SECRET`.
-
----
-
-## Onboarding нового tenant'а
-
-```bash
-# Только Telegram:
-bun run apps/api/scripts/onboard-tenant.ts \
-  --slug=studio-alpha \
-  --bot-token=123456:ABC-DEF... \
-  --vertical=recruitment_uae_v1
-
-# Только Web:
-bun run apps/api/scripts/onboard-tenant.ts --slug=acme --with-web
-
-# Multi-channel:
-bun run apps/api/scripts/onboard-tenant.ts \
-  --slug=acme --bot-token=... --with-web
-```
-
-Скрипт:
-1. INSERT в `tenants` с `slug`, `plan=free`, `status=active`, `llm_billing_mode=byok`
-2. Для `--bot-token`: encrypt через AES-256-GCM (`PLATFORM_MASTER_KEY`) → `tenant_secrets` → channel row `telegram_bot`
-3. Для `--with-web`: channel row `web` с `external_id = slug`
-4. Опц. `--vertical=...`: создаёт funnel row с `vertical_template_id`
-
-Webhook setup для Telegram:
-```bash
-curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
-  -d "url=https://<HOST>/webhook/telegram/<SLUG>&secret_token=<TELEGRAM_WEBHOOK_SECRET>"
-```
+- **Telegram**: `X-Telegram-Bot-Api-Secret-Token` = `TELEGRAM_WEBHOOK_SECRET`
+- **WhatsApp**: `X-Hub-Signature-256` HMAC-SHA256 от raw body с `WHATSAPP_APP_SECRET`. Проверяется **до** tenant lookup (anti-enumeration).
+- **Web**: опциональный shared-secret через `WEB_WS_AUTH_SECRET`. JWT — следующая итерация.
+- **Stripe**: HMAC-SHA256 с `STRIPE_WEBHOOK_SECRET`.
 
 ---
 
 ## Pipeline (inbound → outbound)
 
 ```
-1. Webhook handler принимает HTTP POST  (apps/api)
-2. Validate signature (Telegram/WhatsApp)
-3. Lookup tenant + channel via ChannelRegistry
-4. adapter.pushUpdate(payload) → adapter inbox
-5. ┌─ Phase 1 (tx1, withTenant): persist inside Postgres ─────────┐
-   │  - resolveContact (lookup or create Contact + ChannelIdentity) │
-   │  - resolveConversation (lookup or create per channel)          │
-   │  - persist Message (uniq dedup по external_message_id)         │
-   │  - vertical-template extractFields hook                        │
-   │  - stageClassifier (~300ms LLM) → applyClassifiedStage         │
-   │  - memoryExtractor (~500ms LLM) → mergeAttributes              │
-   └────────────────────────────────────────────────────────────────┘
-6. Phase 2 (НЕ в tx): reply.generate(...) — ~1-2s LLM call. Pool connection
-   освобождён на это время (split из PR #14).
-7. Phase 3 (tx2, withTenant): enqueue OutboundEnvelope[] в outbound_queue.
-8. Webhook возвращает 200 (быстро, < 100ms typical).
-9. apps/worker (telegram/whatsapp/userbot) или apps/api (web) дренируют
-   outbound_queue через SKIP LOCKED, шлют через adapter.send, mark sent/failed.
+1. Webhook handler принимает HTTP POST                          (apps/api)
+2. Validate signature → 401 если bad
+3. Lookup tenant + channel via ChannelRegistry (in-memory)
+4. Rate-limit check per tenant (60/min, 600/hour default) → 429 если over
+5. adapter.pushUpdate(payload) → adapter inbox
+6. ┌─ Phase 1 (tx1, withTenant): persist inside Postgres ──────┐
+   │  - resolveContact (lookup or create Contact + ChannelIdentity)
+   │  - resolveConversation (per channel)
+   │  - persist Message (uniq dedup по external_message_id)
+   │  - vertical-template extractFields hook
+   │  - stageClassifier (~300ms LLM) → applyClassifiedStage
+   │  - memoryExtractor (~500ms LLM) → mergeAttributes
+   └────────────────────────────────────────────────────────────┘
+7. Phase 2 (НЕ в tx): reply.generate(...) — ~1-2s LLM. Pool connection
+   освобождён.
+8. Phase 3 (tx2, withTenant): enqueue OutboundEnvelope[] в outbound_queue.
+9. Webhook → 200 ack (< 100ms typical).
+10. apps/worker (TG/WA/userbot) или apps/api (web) дренируют outbound_queue
+    через SKIP LOCKED → adapter.send → mark sent.
+```
+
+---
+
+## Hot-reload (без рестартов apps)
+
+| Изменение | Effect | Latency |
+|---|---|---|
+| `PUT /api/admin/llm-configs/:purpose` | `InMemoryLlmRouter.invalidate(tenantId)` + setConfig + mutate `LoadedRef.current` | instant |
+| `POST /api/admin/channels/telegram` | `ChannelRegistry.reloadTenant(tenantId)` в `apps/api` instant; `apps/worker` подхватит через polling | instant в api, ≤30s в worker |
+| `PUT /api/admin/tenant/status` (pause/resume) | reloadChannels — evict при pause, restore при resume | instant в api |
+| KB upload | DrizzleKbStore читает live из БД | instant |
+
+Подробности в [`docs/ARCHITECTURE.md#hot-reload`](docs/ARCHITECTURE.md).
+
+---
+
+## Admin API endpoints (SaaS-flow)
+
+Все под `/api/admin/*`, требуют `Authorization: Bearer <jwt>` (`/api/auth/signup` или `/login`).
+
+```
+GET    /api/auth/me                              — admin + tenant info
+POST   /api/auth/signup                          — создать tenant + admin
+POST   /api/auth/login                           — выдать JWT
+POST   /api/auth/logout                          — invalidate (client-side)
+
+GET    /api/admin/onboarding-status              — checklist (channel/llm/kb)
+GET    /api/admin/tenant                         — { id, slug, plan, status, ... }
+PUT    /api/admin/tenant/status                  — { paused: boolean }
+GET    /api/admin/diagnostics                    — health-check (channel + LLM + KB)
+
+POST   /api/admin/channels/telegram              — { botToken } → auto-setWebhook
+GET    /api/admin/channels                       — list (без credentials)
+DELETE /api/admin/channels/:id
+
+PUT    /api/admin/llm-configs/:purpose           — { provider, model, apiKey?, ... }
+GET    /api/admin/llm-configs                    — list (без secret values)
+DELETE /api/admin/llm-configs/:purpose
+
+POST   /api/admin/kb/documents                   — multipart file ИЛИ { title, body, topic? }
+GET    /api/admin/kb/documents                   — list
+DELETE /api/admin/kb/documents/:id
+
+GET    /api/admin/conversations                  — paginated list (cursor)
+GET    /api/admin/conversations/:id              — thread + messages
+POST   /api/admin/conversations/:id/reply        — operator reply (mode=human)
+
+GET    /api/admin/audit-log                      — cursor-paginated audit history
 ```
 
 ---
@@ -235,66 +271,63 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 ## Testing
 
 ```bash
-DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine \
-  bun test
+DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 ```
 
-**524 tests** в 59 файлах, включая:
-- **Multi-tenant E2E** (`apps/api/src/multi-tenant.integration.test.ts`): 10 tests, валидируют tenant isolation через real webhook handler + admin API
-- **RLS contract** (`packages/storage/src/rls.integration.test.ts`): 8 tests с non-bypass Postgres role
-- **withTenant wiring** (`apps/worker/src/dispatcher.rls.integration.test.ts`, `apps/api/src/routes/admin.rls.integration.test.ts`): regression oracle'ы — если кто-то откатит withTenant, тест fail'нёт
-- **Split processInbound invariant** (`packages/conversation-engine/src/dispatch-reply.test.ts`): events.indexOf("llm-call") < events.indexOf("tx-open")
-- **WhatsApp signature gating** (7 tests): valid/invalid/missing/malformed sig, anti-enumeration
+**700+ tests** в ~60 файлах. Highlights:
+
+- **Multi-tenant E2E** (`apps/api/src/multi-tenant.integration.test.ts`): tenant isolation через real webhook handler + admin API
+- **RLS contract** (`packages/storage/src/rls.integration.test.ts`): non-bypass role validation
+- **withTenant wiring** regression oracles в apps/api + apps/worker
+- **Split processInbound invariant**: `events.indexOf("llm-call") < events.indexOf("tx-open")`
+- **SaaS routes** (auth, KB, LLM-configs, channels, conversations, onboarding, audit, diagnostics, tenant-pause): ~250 integration tests
+- **Rate-limiter**: 6 unit + 3 webhook integration tests
+- **Hot-reload**: 6 tenant-reloader tests (LLM + channels)
 
 ---
 
-## Deployment notes
+## Deployment
 
 ### Env vars (см. `.env.example`)
 
 | Var | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | ✅ | Postgres connection string. **Должен быть под NOSUPERUSER NOBYPASSRLS role** в prod |
-| `PLATFORM_MASTER_KEY` | ✅ | 32-byte hex для AES-256-GCM шифрования tenant_secrets |
-| `TELEGRAM_WEBHOOK_SECRET` | ✅ если Telegram | header X-Telegram-Bot-Api-Secret-Token |
-| `WHATSAPP_VERIFY_TOKEN` | opt | Meta verify handshake |
-| `WHATSAPP_APP_SECRET` | ⚠️ | Production обязан — иначе signature check выключен (warning в logs) |
+| `DATABASE_URL` | ✅ | Postgres connection. **NOSUPERUSER NOBYPASSRLS role в prod** |
+| `PLATFORM_MASTER_KEY` | ✅ | 32-byte hex для AES-256-GCM (tenant_secrets) |
+| `PLATFORM_AUTH_SECRET` | opt | HMAC секрет для JWT-like auth tokens (fallback на MASTER_KEY) |
+| `TELEGRAM_WEBHOOK_SECRET` | ✅ | X-Telegram-Bot-Api-Secret-Token header |
+| `PLATFORM_PUBLIC_URL` | opt | Базовый URL apps/api для auto-setWebhook (`https://api.example.com`) |
+| `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | opt | Meta webhook setup |
 | `WEB_WS_AUTH_SECRET` | opt | Shared secret для `/ws/:slug?auth=...` |
 | `STRIPE_WEBHOOK_SECRET` | opt | Stripe webhook HMAC |
-| `LLM_*`, `LLM_EMBED_*` | opt | LLM provider config (если null — pipeline persist'ит inbound, не отвечает) |
-| `PLATFORM_BASE_DOMAIN` | opt | Активирует admin-API под subdomain (e.g. `acme.leadengine.app`) |
+| `LLM_*` / `LLM_EMBED_*` | opt | Env fallback если у tenant'а нет DB config'а |
+| `RATE_LIMIT_PER_MIN` / `RATE_LIMIT_PER_HOUR` | opt | Default 60 / 600. `0` = disabled |
+| `WORKER_CHANNEL_RELOAD_MS` | opt | Worker polling interval. Default 30000. `0` = disabled |
 
 ### Production checklist
-- [ ] Postgres role с `NOSUPERUSER NOBYPASSRLS` (НЕ owner / НЕ superuser)
-- [ ] Migrations run отдельным BYPASSRLS-role'м (owner/superuser)
-- [ ] `WHATSAPP_APP_SECRET` set если WhatsApp channels active
-- [ ] `WEB_WS_AUTH_SECRET` set если web channels active (или сделать JWT-auth)
+
+- [ ] Postgres role `NOSUPERUSER NOBYPASSRLS` для apps (НЕ owner / НЕ superuser)
+- [ ] Migrations run отдельным BYPASSRLS-role (owner / superuser)
+- [ ] `WHATSAPP_APP_SECRET` set если WhatsApp активен
+- [ ] `WEB_WS_AUTH_SECRET` set если web channels активны (или JWT-auth)
 - [ ] `PLATFORM_MASTER_KEY` ротировать через `rotate-master-key.ts` скрипт
-- [ ] Boot log check: ожидаем "RLS enforced" в info; "RLS not enforced" warn = misconfigured
+- [ ] `PLATFORM_PUBLIC_URL` set для auto-setWebhook UX
+- [ ] `RATE_LIMIT_*` set (не оставлять disabled в prod — runaway-cost защита)
+- [ ] Boot log check: `"RLS enforced"` в info; `"RLS not enforced"` warn = misconfigured
 
 ---
 
-## Архитектурные решения
+## Roadmap & competitors
 
-### Что отложено / не сделано (по решению)
-- `apps/admin-ui` wire-up к новому admin-API — admin-ui 1251-строчный legacy
-  под старый tg-chatbot backend (99 endpoints, ~24 страницы), современный
-  admin-API exposes 8 endpoints. Migration требует major frontend rewrite —
-  отложен до product-pressure.
-- Stage classifier + memory extractor LLM ВНУТРИ tx — split #3 закрыл
-  только большой reply.generate (1-2s). Stage/memory (~300-500ms каждый)
-  пока inside tx — full 3-phase split возможен но сложен (нужно split
-  runMemoryExtraction на read-existing-facts + LLM-extract + write).
-- Rename колонок `user_id` → `contact_id` в conversations/leads/
-  questionnaire_tokens — отложено (требует sync с admin-ui Drizzle типами).
+- **Что готово / в работе / дальше** — см. [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- **Анализ рынка и позиционирование** — см. [`docs/COMPETITORS.md`](docs/COMPETITORS.md)
 
-### Что НЕ делаем сейчас (по плану)
-- Реальная multi-region / sharding (один Postgres до ~50 tenant'ов хватит).
-- Stripe billing — manually первые 3-5 клиентов.
-- Custom domains для admin-ui (subdomain *.leadengine.app достаточно).
-- Реальный WhatsApp business → opt-in (Meta dashboard вручную).
-- Event-sourcing / CQRS (обычные CRUD + append-only messages).
-- Per-tenant Postgres database — одна БД, `tenant_id` колонка.
+TL;DR продуктовая ниша: **AI-first customer service для мессенджер-
+центричных рынков** (Telegram / WhatsApp). Конкуренты типа Intercom Fin
+/ Sierra / Decagon — enterprise + web-chat-first. Chatbase / CustomGPT
+— простые knowledge bots без operator-takeover и channels-as-a-service.
+Наша позиция: open-architecture + BYOK + Telegram-first + полный
+operator-workflow (inbox + reply + audit + диагностика).
 
 ---
 
