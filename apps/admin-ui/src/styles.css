@@ -682,6 +682,13 @@ a:hover {
   color: var(--text);
 }
 
+.inbox-thread-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
 .inbox-messages {
   flex: 1;
   overflow-y: auto;
