@@ -422,5 +422,121 @@ describe("POST /api/admin/conversations/:id/reply", () => {
   });
 });
 
+describe("PUT /api/admin/conversations/:id/mode", () => {
+  it("без auth → 401", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    const res = await app.request(`/api/admin/conversations/${id}/mode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "human" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("invalid mode → 400", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/mode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "queued" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("not-found id → 404", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/conversations/999999/mode", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "human" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("invalid id (non-numeric) → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/conversations/abc/mode", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "human" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("PUT { mode: 'human' } → conversation flipped + audit", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[1]!; // используем второй чтобы не aliasing'ить
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/mode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "human" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; mode: string };
+    expect(body.mode).toBe("human");
+
+    const [conv] = await db
+      .select({ mode: conversations.mode })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(conv!.mode).toBe("human");
+  });
+
+  it("PUT same mode dважды → noop, audit не записывается во 2-й раз", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[1]!;
+    // Уже human после предыдущего теста. PUT human снова — noop.
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/mode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "human" }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("PUT { mode: 'ai' } → return-to-AI", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[1]!;
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/mode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "ai" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { mode: string };
+    expect(body.mode).toBe("ai");
+
+    const [conv] = await db
+      .select({ mode: conversations.mode })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(conv!.mode).toBe("ai");
+  });
+
+  it("cross-tenant: B пытается изменить A's conv → 404", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    const res = await authReq(tokenB, `/api/admin/conversations/${id}/mode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "human" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("invalid json → 400", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/mode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: "not-json",
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 // tenantB used only as cross-tenant guard
 void tenants;

@@ -43,6 +43,7 @@ export function SaasConversations() {
   const [error, setError] = useState("");
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
+  const [togglingMode, setTogglingMode] = useState(false);
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
@@ -108,6 +109,25 @@ export function SaasConversations() {
     };
     // biome-ignore lint/correctness/useExhaustiveDependencies: navigate stable
   }, [selectedId]);
+
+  async function handleToggleMode() {
+    if (!detail || !selectedId) return;
+    const next = detail.conversation.mode === "human" ? "ai" : "human";
+    if (next === "human" && !confirm("Перехватить диалог? AI перестанет отвечать.")) {
+      return;
+    }
+    setTogglingMode(true);
+    setError("");
+    try {
+      await saas.setConversationMode(selectedId, next);
+      await refreshDetail(selectedId);
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTogglingMode(false);
+    }
+  }
 
   async function handleReply(e: FormEvent) {
     e.preventDefault();
@@ -203,13 +223,31 @@ export function SaasConversations() {
           ) : detail ? (
             <>
               <div className="inbox-thread-header">
-                <h2>
-                  {detail.conversation.contactName ??
-                    `Контакт #${detail.conversation.contactId}`}
-                </h2>
+                <div className="inbox-thread-title">
+                  <h2>
+                    {detail.conversation.contactName ??
+                      `Контакт #${detail.conversation.contactId}`}
+                  </h2>
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={handleToggleMode}
+                    disabled={togglingMode}
+                  >
+                    {togglingMode
+                      ? "…"
+                      : detail.conversation.mode === "human"
+                        ? "Вернуть AI"
+                        : "Перехватить"}
+                  </button>
+                </div>
                 <small>
                   <span className="badge">{detail.conversation.source}</span>{" "}
-                  <span className="badge">{detail.conversation.mode}</span>{" "}
+                  {detail.conversation.mode === "human" ? (
+                    <span className="badge badge-warning">оператор</span>
+                  ) : (
+                    <span className="badge">AI</span>
+                  )}{" "}
                   {detail.conversation.currentStage && (
                     <span className="badge">{detail.conversation.currentStage}</span>
                   )}{" "}

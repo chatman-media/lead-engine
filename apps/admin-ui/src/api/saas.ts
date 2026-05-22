@@ -345,6 +345,12 @@ export const saas = {
       body: JSON.stringify({ text }),
     });
   },
+  setConversationMode(id: number, mode: "ai" | "human") {
+    return request<{ ok: boolean; mode: "ai" | "human" }>(
+      `/api/admin/conversations/${id}/mode`,
+      { method: "PUT", body: JSON.stringify({ mode }) },
+    );
+  },
 
   // ── Diagnostics ──────────────────────────────────────────────────────
   runDiagnostics() {

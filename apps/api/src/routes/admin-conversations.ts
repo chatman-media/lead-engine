@@ -313,5 +313,73 @@ export function makeAdminConversationsRoutes(
     });
   });
 
+  /**
+   * PUT /api/admin/conversations/:id/mode
+   * Body: { mode: 'ai' | 'human' }
+   *
+   * Operator toggle:
+   *  - mode='human' — AI замолкает (pipeline в processInbound уже respect'ит
+   *    conversation.mode === 'ai' для запуска reply.generate).
+   *  - mode='ai'   — вернуть управление AI после operator takeover.
+   *
+   * 400 если mode не валидный, 404 если conversation не найден или
+   * принадлежит другому tenant'у (RLS).
+   */
+  app.put("/api/admin/conversations/:id/mode", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId;
+    const idStr = c.req.param("id");
+    const conversationId = Number.parseInt(idStr, 10);
+    if (!Number.isFinite(conversationId) || conversationId <= 0) {
+      return c.json({ error: "invalid conversation id" }, 400);
+    }
+    let body: { mode?: unknown };
+    try {
+      body = (await c.req.json()) as { mode?: unknown };
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    if (body.mode !== "ai" && body.mode !== "human") {
+      return c.json({ error: "mode must be 'ai' or 'human'" }, 400);
+    }
+    const newMode = body.mode;
+    const nowEpoch = Math.floor(Date.now() / 1000);
+
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      const [existing] = await tx
+        .select({ mode: conversations.mode })
+        .from(conversations)
+        .where(
+          and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)),
+        );
+      if (!existing) return { kind: "not_found" } as const;
+      if (existing.mode === newMode) {
+        return { kind: "noop", mode: newMode } as const;
+      }
+      await tx
+        .update(conversations)
+        .set({ mode: newMode, lastMessageAt: nowEpoch })
+        .where(eq(conversations.id, conversationId));
+      return { kind: "changed", from: existing.mode, to: newMode } as const;
+    });
+
+    if (outcome.kind === "not_found") {
+      return c.json({ error: "conversation not found" }, 404);
+    }
+
+    if (outcome.kind === "changed") {
+      await recordAudit(opts.db, {
+        tenantId,
+        adminId,
+        action: newMode === "human" ? "conversation.mode.takeover" : "conversation.mode.return_to_ai",
+        targetKind: "conversation",
+        targetId: conversationId,
+        details: { from: outcome.from, to: outcome.to },
+      });
+    }
+
+    return c.json({ ok: true, mode: newMode });
+  });
+
   return app;
 }
