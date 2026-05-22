@@ -176,15 +176,16 @@ describe("admin-kb upload/list/delete flow", () => {
     expect(res.status).toBe(400);
   });
 
-  it("POST PDF multipart → 415 (PDF не поддерживается в MVP)", async () => {
+  it("POST PDF multipart с невалидными байтами → 422 (parse failed)", async () => {
     if (!sql) return;
     const form = new FormData();
+    // «fake pdf bytes» — не настоящий PDF, parsePdfBuffer упадёт с ошибкой → 422
     form.append("file", new Blob(["fake pdf bytes"]), "test.pdf");
     const res = await authReq("/api/admin/kb/documents", {
       method: "POST",
       body: form,
     });
-    expect(res.status).toBe(415);
+    expect(res.status).toBe(422);
   });
 
   it("POST multipart .txt → ingest works", async () => {
