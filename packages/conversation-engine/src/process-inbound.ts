@@ -140,14 +140,13 @@ function inboundText(inbound: Inbound): { text: string; mediaOnly: boolean } {
  *   5. Push каждого envelope в outbound_queue.
  *   6. Touch conversations.last_message_at.
  *
- * Что отсутствует на этом этапе (TODO следующих итераций):
- *   - vertical-hooks (onLeadStageChange, extractFields)
- *   - memory extraction в users.profile_json
- *   - conversation summarization при длинных диалогах
- *   - photo-classification + dispatch в lead-hooks
+ * Реализовано: vertical-hooks.extractFields (шаг 5), LLM-memory extraction
+ * (шаг 5b), stage classifier (шаг 5a-bis), RAG + LLM reply через
+ * ReplyStrategy (шаг 6). Оставшиеся Phase 2 TODO:
+ *   - conversation summarization при длинных диалогах (context overflow)
+ *   - photo-classification + dispatch в lead-hooks (passport OCR, etc.)
  *   - escalation rules (не отвечать N часов → перевод в queued)
- *   - sales-engine call (style → A/B routing → coach feedback)
- *   - RAG: KB search + LLM reply
+ *   - A/B routing (styleId → experiment allocation через ExperimentsRepo)
  */
 export async function processInbound(
   inbound: Inbound,
