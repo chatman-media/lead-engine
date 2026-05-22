@@ -6,6 +6,7 @@
   "workspaces": [
     "apps/admin-ui",
     "apps/api",
+    "apps/landing",
     "apps/vertical-recruitment-uae",
     "apps/widget",
     "apps/worker",
@@ -16,7 +17,9 @@
     "start": "bun run --cwd apps/api start",
     "dev:worker": "bun run --cwd apps/worker dev",
     "dev:ui": "bun run --cwd apps/admin-ui dev",
+    "dev:landing": "bun run --cwd apps/landing dev",
     "build:ui": "bun run --cwd apps/admin-ui build",
+    "build:landing": "bun run --cwd apps/landing build",
     "build:widget": "bun run --cwd apps/widget build",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
