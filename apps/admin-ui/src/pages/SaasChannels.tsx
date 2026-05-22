@@ -4,25 +4,37 @@ import {
   ApiError,
   type ChannelItem,
   clearToken,
+  type CreateWhatsAppChannelResult,
   saas,
 } from "../api/saas.ts";
 
 /**
- * Per-tenant channel onboarding. MVP: Telegram bot — пользователь
- * вставляет token из @BotFather, backend validate'ит через getMe,
- * encrypted token живёт в tenant_secrets.
+ * Per-tenant channel onboarding. Telegram (auto-setWebhook) + WhatsApp
+ * (manual Meta dashboard setup с copy-paste snippet'ом).
  *
- * NB: после create нужен restart apps/api + apps/worker чтобы новый
- * channel был подхвачен в ChannelRegistry. Hot-reload — TODO.
+ * Backend encrypt'ит токены через AES-256-GCM в tenant_secrets,
+ * ChannelRegistry hot-reload'ится в apps/api (worker подхватит ≤30 сек).
  */
+type ChannelTab = "telegram" | "whatsapp";
+
 export function SaasChannels() {
   const navigate = useNavigate();
+  const [tab, setTab] = useState<ChannelTab>("telegram");
   const [channels, setChannels] = useState<ChannelItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Telegram form
   const [botToken, setBotToken] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [lastCreated, setLastCreated] = useState<{ username: string } | null>(null);
+
+  // WhatsApp form
+  const [waPhoneId, setWaPhoneId] = useState("");
+  const [waAccessToken, setWaAccessToken] = useState("");
+  const [waBizId, setWaBizId] = useState("");
+  const [waSubmitting, setWaSubmitting] = useState(false);
+  const [waResult, setWaResult] = useState<CreateWhatsAppChannelResult | null>(null);
 
   async function refresh() {
     try {
@@ -104,6 +116,53 @@ export function SaasChannels() {
     }
   }
 
+  async function handleWhatsAppSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setWaResult(null);
+    const phoneNumberId = waPhoneId.trim();
+    const accessToken = waAccessToken.trim();
+    if (!phoneNumberId || !accessToken) {
+      setError("phone_number_id и access_token обязательны");
+      return;
+    }
+    setWaSubmitting(true);
+    try {
+      const res = await saas.createWhatsAppChannel({
+        phoneNumberId,
+        accessToken,
+        ...(waBizId.trim() ? { businessAccountId: waBizId.trim() } : {}),
+      });
+      setWaResult(res);
+      setWaAccessToken("");
+      await refresh();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 401) {
+          if (err.errorCode.toLowerCase().includes("meta")) {
+            setError("Meta отвергла access_token — проверьте permissions и срок действия");
+          } else {
+            clearToken();
+            navigate("/login", { replace: true });
+            return;
+          }
+        } else if (err.status === 404) {
+          setError("phone_number_id не найден — проверьте Meta dashboard → WhatsApp → API Setup");
+        } else if (err.status === 400) {
+          setError(`Ошибка: ${err.errorCode}`);
+        } else if (err.status === 502) {
+          setError("Meta Graph недоступен — попробуйте позже");
+        } else {
+          setError(`Ошибка ${err.status}: ${err.errorCode}`);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setWaSubmitting(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="dashboard-loading">
@@ -131,38 +190,138 @@ export function SaasChannels() {
       {lastCreated && (
         <div className="settings-warning">
           ✓ Бот @{lastCreated.username} подключён и активирован — webhook настроен,
-          канал работает. (Worker для outbound может потребовать рестарт.)
+          канал работает.
         </div>
       )}
 
-      <section className="settings-section">
-        <div className="settings-header">
-          <h2>Подключить Telegram-бота</h2>
+      {waResult && (
+        <div className="settings-warning">
+          ✓ WhatsApp канал {waResult.displayPhoneNumber ?? waResult.phoneNumberId} (
+          {waResult.verifiedName ?? "no verified name"}) подключён.
+          {waResult.webhookSetupHint && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Настройте webhook в Meta dashboard:</strong>
+              <pre style={{ marginTop: 4, padding: 8 }}>
+                URL: {waResult.webhookSetupHint.url}
+                {"\n"}
+                Verify token: {waResult.webhookSetupHint.verifyToken}
+                {"\n"}
+                {waResult.webhookSetupHint.appSecretHint}
+              </pre>
+            </div>
+          )}
         </div>
-        <p className="hint">
-          Создайте бота в{" "}
-          <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">
-            @BotFather
-          </a>{" "}
-          и вставьте сюда токен (формат <code>123456:ABC-DEF...</code>).
-        </p>
-        <form className="settings-form" onSubmit={handleSubmit}>
-          <label>
-            Bot token
-            <input
-              type="password"
-              autoComplete="off"
-              value={botToken}
-              onChange={(e) => setBotToken(e.target.value)}
-              placeholder="123456789:AAEhBP..."
-              required
-            />
-          </label>
-          <button type="submit" disabled={submitting || !botToken.trim()}>
-            {submitting ? "Проверяем…" : "Подключить"}
-          </button>
-        </form>
-      </section>
+      )}
+
+      <div className="channel-tabs">
+        <button
+          type="button"
+          className={`channel-tab ${tab === "telegram" ? "active" : ""}`}
+          onClick={() => setTab("telegram")}
+        >
+          Telegram
+        </button>
+        <button
+          type="button"
+          className={`channel-tab ${tab === "whatsapp" ? "active" : ""}`}
+          onClick={() => setTab("whatsapp")}
+        >
+          WhatsApp
+        </button>
+      </div>
+
+      {tab === "telegram" && (
+        <section className="settings-section">
+          <div className="settings-header">
+            <h2>Подключить Telegram-бота</h2>
+          </div>
+          <p className="hint">
+            Создайте бота в{" "}
+            <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">
+              @BotFather
+            </a>{" "}
+            и вставьте сюда токен (формат <code>123456:ABC-DEF...</code>). Webhook
+            настроится автоматически.
+          </p>
+          <form className="settings-form" onSubmit={handleSubmit}>
+            <label>
+              Bot token
+              <input
+                type="password"
+                autoComplete="off"
+                value={botToken}
+                onChange={(e) => setBotToken(e.target.value)}
+                placeholder="123456789:AAEhBP..."
+                required
+              />
+            </label>
+            <button type="submit" disabled={submitting || !botToken.trim()}>
+              {submitting ? "Проверяем…" : "Подключить"}
+            </button>
+          </form>
+        </section>
+      )}
+
+      {tab === "whatsapp" && (
+        <section className="settings-section">
+          <div className="settings-header">
+            <h2>Подключить WhatsApp Business</h2>
+          </div>
+          <p className="hint">
+            Откройте{" "}
+            <a
+              href="https://developers.facebook.com/apps/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Meta for Developers
+            </a>{" "}
+            → ваше WhatsApp Business приложение → API Setup. Скопируйте{" "}
+            <code>Phone number ID</code> + сгенерируйте <code>Access token</code>{" "}
+            (рекомендуется system user token, не временный 24h). После создания
+            канала здесь — UI покажет URL+token для webhook setup'а в Meta dashboard.
+          </p>
+          <form className="settings-form" onSubmit={handleWhatsAppSubmit}>
+            <label>
+              Phone number ID
+              <input
+                type="text"
+                value={waPhoneId}
+                onChange={(e) => setWaPhoneId(e.target.value)}
+                placeholder="123456789012345"
+                pattern="\d{10,20}"
+                required
+              />
+            </label>
+            <label>
+              Access token (Bearer)
+              <input
+                type="password"
+                autoComplete="off"
+                value={waAccessToken}
+                onChange={(e) => setWaAccessToken(e.target.value)}
+                placeholder="EAAJZBxxxxxxx..."
+                required
+              />
+            </label>
+            <label>
+              Business account ID (опционально)
+              <input
+                type="text"
+                value={waBizId}
+                onChange={(e) => setWaBizId(e.target.value)}
+                placeholder="123456789012345"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={waSubmitting || !waPhoneId.trim() || !waAccessToken.trim()}
+            >
+              {waSubmitting ? "Проверяем у Meta…" : "Подключить"}
+            </button>
+          </form>
+        </section>
+      )}
 
       <section className="docs-section">
         <h2>Подключённые каналы ({channels.length})</h2>
@@ -174,7 +333,11 @@ export function SaasChannels() {
               <li key={ch.id} className="doc-row">
                 <div className="doc-meta">
                   <strong>
-                    {ch.kind === "telegram_bot" ? `@${ch.externalId}` : ch.externalId}
+                    {ch.kind === "telegram_bot"
+                      ? `@${ch.externalId}`
+                      : ch.kind === "whatsapp"
+                        ? `WhatsApp #${ch.externalId}`
+                        : ch.externalId}
                   </strong>
                   <small>
                     <span className="badge">{ch.kind}</span>{" "}

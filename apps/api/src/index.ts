@@ -187,6 +187,7 @@ async function main() {
       masterKeyHex: cfg.masterKeyHex,
       ...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
       webhookSecret: cfg.telegramWebhookSecret,
+      ...(cfg.whatsappVerifyToken ? { whatsappVerifyToken: cfg.whatsappVerifyToken } : {}),
       onReload: reloader.reloadChannels,
     }),
   );
