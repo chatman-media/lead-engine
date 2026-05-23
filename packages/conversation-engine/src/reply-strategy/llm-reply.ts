@@ -42,6 +42,8 @@ export interface LlmReplyStrategyOpts {
    * нового.
    */
   resolveChat: (tenantId: number) => ChatClient;
+  /** Если возвращает true — стадия лида помечена supportMode, бот молчит. */
+  resolveIsSupport?: (input: { tenantId: number; contactId: number }) => Promise<boolean>;
 }
 
 const BASE_SYSTEM_PROMPT =
@@ -75,6 +77,14 @@ export class LlmReplyStrategy implements ReplyStrategy {
     userMessageText: string;
   }): Promise<OutboundEnvelope[] | null> {
     if (input.userMessageText.length === 0) return null;
+
+    if (this.opts.resolveIsSupport) {
+      const isSupport = await this.opts.resolveIsSupport({
+        tenantId: input.tenant.tenantId,
+        contactId: input.contactId,
+      });
+      if (isSupport) return null;
+    }
 
     const messages = this.messagesRepoFor(input.tenant.tenantId);
     const history = await messages.recent(input.conversationId, this.opts.historyLimit ?? 20);

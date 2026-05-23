@@ -64,6 +64,15 @@ export interface RagReplyStrategyOpts {
     conversationId: number;
     contactId: number;
   }) => Promise<Style | null> | Style | null;
+  /**
+   * Опциональная проверка support-mode. Если возвращает true — стадия лида
+   * помечена как supportMode и бот не отвечает (возвращает null). Оператор
+   * ведёт диалог вручную пока лид не переведут на другую стадию.
+   */
+  resolveIsSupport?: (input: {
+    tenantId: number;
+    contactId: number;
+  }) => Promise<boolean>;
 }
 
 function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
@@ -111,6 +120,12 @@ export class RagReplyStrategy implements ReplyStrategy {
     if (input.userMessageText.length === 0) return null;
 
     const tenantId = input.tenant.tenantId;
+
+    if (this.opts.resolveIsSupport) {
+      const isSupport = await this.opts.resolveIsSupport({ tenantId, contactId: input.contactId });
+      if (isSupport) return null;
+    }
+
     const messages = this.messagesRepoFor(tenantId);
 
     // Грузим history БЕЗ текущего user message (answerWithRag сам добавит

@@ -21,6 +21,8 @@ import {
 } from "@chatman-media/llm-router";
 import type { PlatformMetrics } from "@chatman-media/observability";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
+import { leads, stageDefinitions } from "@chatman-media/storage";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import type { ApiConfig } from "./config.ts";
 import { type OnUsage, wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
@@ -169,6 +171,24 @@ export function makeStageClassifier(
   return null;
 }
 
+function makeSupportModeResolver(db: Db) {
+  return async (input: { tenantId: number; contactId: number }): Promise<boolean> => {
+    const rows = await db
+      .select({ supportMode: stageDefinitions.supportMode })
+      .from(leads)
+      .leftJoin(stageDefinitions, eq(leads.stageDefinitionId, stageDefinitions.id))
+      .where(
+        and(
+          eq(leads.tenantId, input.tenantId),
+          eq(leads.userId, input.contactId),
+          isNotNull(leads.stageDefinitionId),
+        ),
+      )
+      .limit(1);
+    return rows[0]?.supportMode === true;
+  };
+}
+
 export function makeReplyStrategy(
   ref: LoadedRef,
   cfg: ApiConfig,
@@ -197,6 +217,7 @@ export function makeReplyStrategy(
       {
         template,
         resolveChat: (tenantId: number) => ref.router.resolveChat(tenantId, "chat"),
+        resolveIsSupport: makeSupportModeResolver(db),
       },
       (tenantId: number) => new MessagesRepo({ db, tenantId }),
     );
@@ -284,6 +305,7 @@ export function makeReplyStrategy(
       },
       resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
       ...(resolveStyle ? { resolveStyle } : {}),
+      resolveIsSupport: makeSupportModeResolver(db),
     },
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
   );
