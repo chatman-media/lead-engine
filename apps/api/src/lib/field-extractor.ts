@@ -2,6 +2,8 @@
  * AI field extraction for universal lead pipeline.
  *
  * After processInbound persists a user message, this module:
+ *   0. If the contact has no lead and the tenant has an active funnel →
+ *      auto-creates a lead in the funnel's first stage.
  *   1. Finds the contact's lead and its current stage.
  *   2. Loads stage fields with ai_extractable = true.
  *   3. Asks the tenant's chat LLM to extract structured values from the text.
@@ -14,13 +16,14 @@
 
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import {
+  funnels,
   leadEvents,
   leadFieldValues,
   leads,
   stageDefinitions,
   stageFields,
 } from "@chatman-media/storage";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { LoadedRef } from "../llm-bootstrap.ts";
 
 export interface FieldExtractor {
@@ -47,8 +50,8 @@ export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
       const now = Math.floor(Date.now() / 1000);
 
       await withTenant(db, tenantId, async (tx) => {
-        // 1. Find lead for this contact
-        const [lead] = await tx
+        // 0. Find lead for this contact; auto-create if funnel exists
+        let [lead] = await tx
           .select({
             id: leads.id,
             state: leads.state,
@@ -56,6 +59,44 @@ export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
           })
           .from(leads)
           .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)));
+
+        if (!lead) {
+          // No lead — try to auto-create in the first stage of the active funnel
+          const [activeFunnel] = await tx
+            .select({ id: funnels.id })
+            .from(funnels)
+            .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
+            .limit(1);
+
+          if (activeFunnel) {
+            const [firstStage] = await tx
+              .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
+              .from(stageDefinitions)
+              .where(eq(stageDefinitions.funnelId, activeFunnel.id))
+              .orderBy(asc(stageDefinitions.position))
+              .limit(1);
+
+            if (firstStage) {
+              const [created] = await tx
+                .insert(leads)
+                .values({
+                  tenantId,
+                  userId: contactId,
+                  state: firstStage.slug,
+                  stageDefinitionId: firstStage.id,
+                  createdAt: now,
+                  updatedAt: now,
+                })
+                .onConflictDoNothing()
+                .returning({
+                  id: leads.id,
+                  state: leads.state,
+                  stageDefinitionId: leads.stageDefinitionId,
+                });
+              if (created) lead = created;
+            }
+          }
+        }
 
         if (!lead?.stageDefinitionId) return;
 
