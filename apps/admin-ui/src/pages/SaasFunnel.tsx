@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type DragEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ApiError,
@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { ChevronDownIcon, ChevronUpIcon, LayersIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { GripVerticalIcon, LayersIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "form_fill", label: "Сбор данных" },
@@ -53,10 +53,10 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
 ];
 
 const KIND_COLORS: Record<string, string> = {
-  intake: "bg-blue-50 border-blue-200",
-  active: "bg-white border-gray-200",
-  terminal_won: "bg-emerald-50 border-emerald-200",
-  terminal_lost: "bg-red-50 border-red-200",
+  intake: "bg-blue-500/10 border-blue-500/30",
+  active: "bg-card border-border",
+  terminal_won: "bg-emerald-500/10 border-emerald-500/30",
+  terminal_lost: "bg-red-500/10 border-red-500/30",
 };
 
 export function SaasFunnel() {
@@ -67,6 +67,8 @@ export function SaasFunnel() {
   const [expandedStage, setExpandedStage] = useState<number | null>(null);
   const [addingStage, setAddingStage] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [draggedId, setDraggedId] = useState<number | null>(null);
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
   const [newStage, setNewStage] = useState({
     slug: "",
     displayName: "",
@@ -126,24 +128,36 @@ export function SaasFunnel() {
     }
   }
 
-  async function handleMoveStage(stage: StageDefinition, dir: "up" | "down") {
-    if (!funnel) return;
-    const idx = funnel.stages.findIndex((s) => s.id === stage.id);
-    const swapIdx = dir === "up" ? idx - 1 : idx + 1;
-    if (swapIdx < 0 || swapIdx >= funnel.stages.length) return;
+  function handleDragStart(stageId: number) {
+    setDraggedId(stageId);
+  }
 
-    const order = funnel.stages.map((s, i) => {
-      if (i === idx) return { id: s.id, position: funnel.stages[swapIdx].position };
-      if (i === swapIdx) return { id: s.id, position: stage.position };
-      return { id: s.id, position: s.position };
-    });
+  function handleDragOver(e: DragEvent, stageId: number) {
+    e.preventDefault();
+    if (stageId !== draggedId) setDragOverId(stageId);
+  }
 
-    try {
-      await saas.reorderStages(order);
-      reload();
-    } catch (err) {
-      onAuthError(err);
-    }
+  function handleDrop(e: DragEvent, targetId: number) {
+    e.preventDefault();
+    if (!draggedId || draggedId === targetId || !funnel) return;
+
+    const stages = [...funnel.stages];
+    const fromIdx = stages.findIndex((s) => s.id === draggedId);
+    const toIdx = stages.findIndex((s) => s.id === targetId);
+    const [moved] = stages.splice(fromIdx, 1);
+    stages.splice(toIdx, 0, moved);
+
+    const order = stages.map((s, i) => ({ id: s.id, position: i * 10 }));
+
+    setDraggedId(null);
+    setDragOverId(null);
+    setFunnel((f) => f ? { ...f, stages: stages.map((s, i) => ({ ...s, position: i * 10 })) } : f);
+    saas.reorderStages(order).catch(() => reload());
+  }
+
+  function handleDragEnd() {
+    setDraggedId(null);
+    setDragOverId(null);
   }
 
   async function handleUpdateStage(stageId: number, patch: Partial<StageDefinition>) {
@@ -222,16 +236,18 @@ export function SaasFunnel() {
 
       {funnel?.funnel && (
         <div className="flex flex-col gap-3">
-          {funnel.stages.map((stage, idx) => (
+          {funnel.stages.map((stage) => (
             <StageCard
               key={stage.id}
               stage={stage}
               isExpanded={expandedStage === stage.id}
-              isFirst={idx === 0}
-              isLast={idx === funnel.stages.length - 1}
+              isDragging={draggedId === stage.id}
+              isDragOver={dragOverId === stage.id}
               onToggle={() => setExpandedStage(expandedStage === stage.id ? null : stage.id)}
-              onMoveUp={() => handleMoveStage(stage, "up")}
-              onMoveDown={() => handleMoveStage(stage, "down")}
+              onDragStart={() => handleDragStart(stage.id)}
+              onDragOver={(e) => handleDragOver(e, stage.id)}
+              onDrop={(e) => handleDrop(e, stage.id)}
+              onDragEnd={handleDragEnd}
               onDelete={() => handleDeleteStage(stage.id)}
               onUpdate={(patch) => handleUpdateStage(stage.id, patch)}
               onReload={reload}
@@ -344,22 +360,26 @@ export function SaasFunnel() {
 function StageCard({
   stage,
   isExpanded,
-  isFirst,
-  isLast,
+  isDragging,
+  isDragOver,
   onToggle,
-  onMoveUp,
-  onMoveDown,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
   onDelete,
   onUpdate,
   onReload,
 }: {
   stage: StageDefinition;
   isExpanded: boolean;
-  isFirst: boolean;
-  isLast: boolean;
+  isDragging: boolean;
+  isDragOver: boolean;
   onToggle: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
+  onDragStart: () => void;
+  onDragOver: (e: DragEvent) => void;
+  onDrop: (e: DragEvent) => void;
+  onDragEnd: () => void;
   onDelete: () => void;
   onUpdate: (patch: Partial<StageDefinition>) => void;
   onReload: () => void;
@@ -398,27 +418,22 @@ function StageCard({
   }
 
   return (
-    <Card className={`border ${KIND_COLORS[stage.kind] ?? ""}`}>
+    <Card
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      className={[
+        "border transition-opacity",
+        KIND_COLORS[stage.kind] ?? "",
+        isDragging ? "opacity-40" : "",
+        isDragOver ? "ring-2 ring-primary ring-offset-1" : "",
+      ].join(" ")}
+    >
       <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
-          <div className="flex flex-col gap-0.5">
-            <button
-              type="button"
-              onClick={onMoveUp}
-              disabled={isFirst}
-              className="size-4 text-muted-foreground hover:text-foreground disabled:opacity-30"
-            >
-              <ChevronUpIcon className="size-4" />
-            </button>
-            <button
-              type="button"
-              onClick={onMoveDown}
-              disabled={isLast}
-              className="size-4 text-muted-foreground hover:text-foreground disabled:opacity-30"
-            >
-              <ChevronDownIcon className="size-4" />
-            </button>
-          </div>
+          <GripVerticalIcon className="size-4 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" />
 
           <button
             type="button"

@@ -6,11 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const FAMILY_COLORS: Record<string, string> = {
-  cialdini: "bg-blue-100 text-blue-800",
-  voss: "bg-purple-100 text-purple-800",
-  nlp: "bg-green-100 text-green-800",
-  classical: "bg-orange-100 text-orange-800",
-  custom: "bg-gray-100 text-gray-800",
+  cialdini: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  voss: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
+  nlp: "bg-green-500/10 text-green-600 dark:text-green-400",
+  classical: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  custom: "bg-secondary text-secondary-foreground",
 };
 
 export function SaasSkills() {
@@ -57,7 +57,7 @@ export function SaasSkills() {
                     <CardTitle className="flex items-center justify-between text-sm">
                       <span>{skill.displayName}</span>
                       <Badge
-                        className={FAMILY_COLORS[skill.family] ?? "bg-gray-100 text-gray-800"}
+                        className={FAMILY_COLORS[skill.family] ?? "bg-secondary text-secondary-foreground"}
                         variant="outline"
                       >
                         {skill.family}
