@@ -1,6 +1,6 @@
 # Анализ конкурентов — lead-engine
 
-Последнее обновление: 2026-05. Источники приведены инлайн; цены —
+Последнее обновление: 2026-05-23. Источники приведены инлайн; цены —
 публичный прайс на момент исследования и могут меняться ежеквартально —
 перепроверить перед использованием в pitch'ах.
 
@@ -101,7 +101,7 @@ BYOK + Telegram-native + multi-tenant + operator-handoff + готовность
 | 2 | **Sierra** | Enterprise | Voice + chat outcome-based агент для F500 ритейла / финтеха / телекома. $10B Series C в 2025, $15.8B Series E май 2026. | По договорённости — TCO 1-го года **$200K–$350K+**; outcome-based | F500 ритейл, финтех (SoFi, Ramp, Brex) | Мы не конкурируем; мы on-ramp до того, как они подпишут контракт Sierra |
 | 3 | **Decagon** | Enterprise | "Концьерж"-агент для consumer-брендов. $250M Series D январь 2026, оценка $4.5B. Per-conversation / per-resolution тарификация. | По договорённости — шестизначные суммы | Notion, Duolingo, Affirm, Chime, авиалинии, телеком | То же что Sierra — aspirational tier выше |
 | 4 | **Ada CX** | Enterprise | Omnichannel AI-агент поверх Zendesk/Salesforce. Resolution-based $1–$3.50/тикет. | От **$30K/год**, типичный $50K–$300K+ | CX-команды с 300K+ тикетов/год | Прозрачность цены, BYOK, Telegram-native |
-| 5 | **Intercom Fin** | Mid-Enterprise | AI-агент-надстройка над helpdesk'ом Intercom. Per-resolution. | **$0.99 / resolution** + Intercom seat fee; минимум 50 resolution при external helpdesk | Существующие клиенты Intercom | Channel-agnostic, нет helpdesk lock-in, BYOK, Telegram |
+| 5 | **Intercom Fin** | Mid-Enterprise | AI-агент-надстройка над helpdesk'ом Intercom. Per-resolution. **Fin for Sales** запущен окт 2025 — inbound AI SDR с configurable qualification playbooks (BANT/MEDDIC как flow). 8K+ бизнесов уже на Intercom. | **$0.99 / resolution** + Intercom seat fee; минимум 50 resolution при external helpdesk | Существующие клиенты Intercom | Channel-agnostic, нет helpdesk lock-in, BYOK, **нет Telegram, нет NEPQ/Cialdini, нет CIS** |
 | 6 | **Forethought** | Mid-Enterprise | Agentic multi-channel resolution + Agent QA + Browser Agents (окт 2025). | По договорённости — медианный ACV **~$56–60K/год** (Vendr) | Mid-market support-команды на Zendesk | Более дешёвый вход, Telegram, путь к self-host |
 | 7 | **Ada (Tidio) Lyro** | Mid (SMB) | AI-агент Tidio для e-com; web-чат, email, Messenger, IG, WhatsApp. **Telegram отсутствует**. | Lyro от **$39/мес** на 100 диалогов; Tidio Starter $24/мес | Shopify-магазины, e-com SMB | **Telegram-first**, BYOK, multi-tenant agency mode |
 | 8 | **Crisp + MagicReply** | Mid (SMB) | Omnichannel inbox с AI reply-suggester'ом. Каналы: WhatsApp, IG, Messenger, **Telegram**, SMS, Line, Viber, Discord. | Mini $45, Essentials $95, Plus $295, Unlimited $495/мес (flat за workspace) | EU SMB, multi-channel команды | Глубже RAG, BYOK, autonomous agent (Crisp — больше co-pilot) |
@@ -116,35 +116,51 @@ BYOK + Telegram-native + multi-tenant + operator-handoff + готовность
 | 17 | **Help Scout AI Agent** | Mid | Email-first helpdesk с новым AI-агентом + AI resolutions. | Help Scout per-contact + AI **$0.75/resolution** | Email-heavy SMB | Messenger-first, real-time каналы, не email-центрик |
 | 18 | **eesel AI** | Mid | "Wrapper" AI-агент поверх существующих helpdesk'ов (Zendesk, Freshdesk, Intercom). | От ~$49/мес до enterprise quote | Команды уже на helpdesk'е, хотят AI наверху | Мы replace, не augment; мы владеем каналом + operator UX |
 | 19 | **OSS альтернативы**: LibreChat, AnythingLLM, Chatwoot + LLM-плагины, Typebot, Flowise | OSS | Self-host RAG / chat / flow builder. | Бесплатно | Девелоперы, privacy-conscious SMB | Turn-key SaaS + managed Telegram + tenant-isolation; OSS-юзеры — кандидаты на upgrade когда ops-расходы >$99/мес |
+| 20 | **1mind** | Mid-Enterprise | Официальный преемник Drift (март 2026). "AI Superhuman" — named AI rep, квалифицирует + демо + возражения + запись встречи через chat/video (Zoom/Teams/Meet). | $100K+/год контракты | Sales-led enterprise, замена SDR команды | Enterprise только. Нет Telegram. Нет CIS/MENA. Нет вертикальных методологий. |
+| 21 | **Sense** | Mid (Staffing) | AI engagement platform для staffing-агентств. Multi-client support, SMS/WhatsApp/web/voice. **Voice AI добавлен в 2025.** | По договорённости — ~$10–30K/год | Крупные staffing/recruiting агентства EN-рынка | **Telegram-first**, NEPQ/Cialdini engine, BYOK, RU/CIS/Arabic support, $99/мес вход |
+| 22 | **Humanly** | Mid (HR Tech) | AI-рекрутер, проводит ~9K AI-интервью в день. $25M (нач. 2026). "Service as software" — они сами проводят скрининг, не только инструмент. | По договорённости — $25K+/год | Средние и крупные HR-команды EN-рынка | Мы **enablement** (агентство сами управляют AI), не аутсорс. $99/мес vs корпоративный контракт. Telegram. CIS. |
 
-Финансирование Sierra: $350M Series C при $10B (сент 2025), $950M Series E при $15.8B (май 2026). Decagon: $131M Series C при $1.5B (июнь 2025), $250M Series D при $4.5B (январь 2026). Cognigy: поглощён NICE за ~$955M (сент 2025). Botpress: $25M Series B (2025).
+Финансирование Sierra: $350M Series C при $10B (сент 2025), $950M Series E при $15.8B (май 2026). Decagon: $131M Series C при $1.5B (июнь 2025), $250M Series D при $4.5B (январь 2026). Cognigy: поглощён NICE за ~$955M (сент 2025). Botpress: $25M Series B (2025). 1mind: $40M total ($30M Series A). Humanly: $25M (нач. 2026). Parloa: $350M Series D при $3B (янв 2026).
 
 ---
 
-## 3. Карта позиционирования
+## 3. Карта позиционирования (обновлена май 2026)
 
 ```
                      ВЫСОКАЯ АВТОНОМИЯ (агент действует)
                               ▲
-                Sierra ●  ● Decagon
+                Sierra ●  ● Decagon  ● 1mind (новый)
                               │
                         Ada ● │ ● Forethought
                               │ ● Cognigy
-              Intercom Fin ● │
-                              │   ● lead-engine (цель)
-                  CustomGPT ● │ ● Chatbase
+              Intercom Fin ● ─┤← Fin for Sales (окт 2025, ближе к нам)
+              for Sales        │
+                              │   ● lead-engine ← МЫ ЗДЕСЬ
+                  CustomGPT ● │   (NEPQ+Cialdini+TG-native, CIS/MENA)
                   Lyro/Tidio ●│ ● Crisp MagicReply
                               │ ● Sendbird AI
-                              │
+                              │  ← Telegram Managed Bots (апр 2026, риск)
                   Botpress ●  │ ● Voiceflow
                               │ ● Rasa
                               │
                    ManyChat ●─┴────────────────►
                               flow / co-pilot / suggestion
-   ГОРИЗОНТАЛЬНЫЙ ◄───────────┼───────► VERTICAL / CX-СПЕЦИФИЧНЫЙ
+   ГОРИЗОНТАЛЬНЫЙ ◄───────────┼───────► VERTICAL / SALES-СПЕЦИФИЧНЫЙ
                               ▼
                        НИЗКАЯ АВТОНОМИЯ
 ```
+
+**Ключевые изменения с прошлой версии карты:**
+- Fin for Sales (Intercom) поднялся вверх — теперь ближайший web-конкурент на inbound qualification
+- 1mind появился в enterprise tier как Drift-преемник ($100K+/yr)
+- Telegram сам запустил Managed Bots (апр 2026) — платформенный игрок рядом с нами
+
+**В чём lead-engine по-прежнему выигрывает:**
+- Telegram-native (все новые конкуренты web-first)
+- NEPQ/Cialdini/SPIN как первоклассные фичи (никто так не делает)
+- CIS/MENA/RU рынок (все — EN-ориентированы)
+- BYOK (все новые конкуренты включают inference в цену)
+- $99/мес вход (1mind $100K+/yr, Sense/Humanly $25K+/yr)
 
 **В чём lead-engine выигрывает**
 
@@ -327,30 +343,51 @@ VK / Avito / OK — бонусный moat; ни один не-российски
    channel-native UX, operator workflows, billing, compliance — везде,
    куда lead-engine должен ставить флаги.
 
+9. **Persuasion Engine — white space подтверждён (май 2026).** Ни один
+   mainstream конкурент не шипает NEPQ, Cialdini, Belfort или SPIN как
+   first-class продуктовую фичу:
+   - Huthwaite (создатели SPIN) выпустили "AI SPIN Mentor" в авг 2025 —
+     **coaching tool**, не live chat бот.
+   - 7Q.ai, AskJeremy.ai — NEPQ-коучинг, не деплоябельный агент.
+   - Relevance AI имеет SPIN template в marketplace — обычный prompt, не engine.
+   - Wharton/Cialdini research 2025: принципы Cialdini удваивают compliance
+     у LLM — академическое подтверждение подхода.
+   - **Вывод:** "Persuasion Engine" как named product feature = первый на рынке.
+     Выносить в marketing narrative, не прятать в technical docs.
+
+10. **Telegram как платформа для AI агентов (апр 2026).** Telegram запустил
+    "Managed Bots" (один бот управляет другими, два тапа). Business Account
+    Bots работают без Premium у пользователя. Bot-to-bot API добавлен.
+    - **Риск:** Telegram commoditizes Telegram API-интеграцию. Наш moat —
+      не умение работать с API, а **вертикальный контент** (persona, persuasion,
+      vertical packs) и operator UX.
+    - **Возможность:** lead-engine как Managed Bot внутри экосистемы Telegram.
+      Официальный Business Bot API как primary channel (вместо MTProto userbot).
+
 ---
 
 ## 8. Action items (инжиниринг и GTM)
 
-1. **Отгрузить Telegram-first onboarding flow**, который попадает в
-   "AI отвечает реальному лиду" за <5 минут — самая защищаемая
-   демонстрация против Tidio / Intercom / Sierra в наших гео.
-2. **BYOK billing UI** — явный pitch "ты подключаешь свой Anthropic
-   ключ, мы берём $49 платформенной комиссии, всё". Поставить
-   side-by-side калькулятор на маркетинг-сайте против $0.99 × N
-   resolutions у Fin и bundled credits у Chatbase.
-3. **5 vertical templates к EOY 2026**: recruitment intake (есть),
+### GTM (приоритет #1 — до первого клиента)
+1. **Landing page для recruitment ICP** — messaging "Первый AI рекрутер
+   с Persuasion Engine для Telegram". Не generic SaaS page.
+2. **BYOK калькулятор vs Intercom Fin** — side-by-side: $0.99/resolution × N
+   у Fin против flat $99/мес у нас с BYOK. Конкретные цифры на маркетинг-сайте.
+3. **"Persuasion Engine" как named feature** — выносить в заголовки,
+   не прятать в technical docs. NEPQ / Cialdini — узнаваемые имена в CIS LinkedIn.
+4. **Cold outreach 60-350 DMs** — recruitment agencies Dubai, Москва,
+   Алматы (по плану Phase 1).
+
+### Инжиниринг (только под клиентский запрос)
+5. **Telegram Business Bot API** — изучить migration с MTProto userbot
+   на официальный Business Account Bots API для новых tenants.
+6. **5 vertical templates к EOY 2026**: recruitment intake (есть),
    стоматологическая клиника, real-estate qualifier, телеком SIM-swap,
-   edtech course consultant. Каждый — 1 неделя работы и 10x marketing
-   asset.
-4. **Operator inbox-паритет с Crisp** — table stakes UX, который наши
-   конкуренты gate'ят за $200+ helpdesk SKU.
-5. **Public-source ядро** под AGPL к Q4 2026 — SEO play, dev-доверие,
-   OSS-юзеры — upgrade pipeline.
-6. **Интеграции AmoCRM + Bitrix24** — не оспариваются ни одним западным
-   вендором на этой странице; привязывает нас к RU/CIS SMB.
-7. **Compliance roadmap**: SOC 2 Type I к середине 2027, 152-ФЗ-
-   совместимый RU hosting-партнёр, путь к ISO 27001. Без этого тир
-   self-host $24K+/год не закроется.
+   edtech course consultant.
+7. **Интеграции AmoCRM + Bitrix24** — только если prospect просит.
+   Не оспариваются ни одним западным вендором.
+8. **Compliance roadmap**: SOC 2 Type I к середине 2027, 152-ФЗ-
+   совместимый RU hosting-партнёр, путь к ISO 27001.
 
 ---
 
@@ -375,3 +412,9 @@ VK / Avito / OK — бонусный moat; ни один не-российски
 - [Customer service trends 2026 — Robylon](https://www.robylon.ai/blog/11-customer-service-trends-2026); [AI agent trends 2026 — Google Cloud](https://cloud.google.com/resources/content/ai-agent-trends-2026); [Vertical AI Agents 2026 — ACTGSYS](https://actgsys.com/en/blog/vertical-ai-agents-industry-specific-2026)
 - [Telegram CRM Eastern Europe context — Sinch](https://sinch.com/blog/telegram-bot-for-business/); [Telegram marketing stats 2026 — AffDude](https://affdude.com/telegram-marketing-statistics/)
 - [BYOK trend — Surfmind](https://surfmind.ai/blog/byok-bring-your-own-key-future-of-ai-tools); [BYOKList directory](https://byoklist.com/)
+- [1mind — Drift successor — TheAIAgentIndex](https://theaiagentindex.com/agents/1mind); [Drift sunset announcement](https://salesenablement.wordpress.com/2026/03/27/sunsetting-drift-clari-salesloft-will-refer-existing-drift-clients-to-1mind/)
+- [Fin for Sales explained — Intercom](https://www.intercom.com/help/en/articles/13927072-fin-for-sales-explained)
+- [Humanly raises $25M — GeekWire](https://www.geekwire.com/2026/humanly-raises-25m-to-put-ai-to-work-for-job-seekers-not-just-the-companies-hiring-them/)
+- [Recruitment chatbots 2026 — Pin](https://www.pin.com/blog/recruitment-chatbots/)
+- [Huthwaite SPIN AI Mentor launch — Huthwaite](https://www.huthwaiteinternational.com/blog/ai-solutions-press-release)
+- [Telegram Managed Bots — BanklessTimes](https://www.banklesstimes.com/articles/2026/04/16/telegram-unveils-two-tap-agentic-bots-to-simplify-ai-assistance/); [Telegram Bot API changelog](https://core.telegram.org/bots/api-changelog)
