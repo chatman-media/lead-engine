@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.0.1...@chatman-media/storage-v1.1.0) (2026-05-23)
+
+
+### Features
+
+* **gtm:** partner referral codes, recruitment_generic template, dashboard closures metric ([#89](https://github.com/chatman-media/lead-engine/issues/89)) ([b6384c6](https://github.com/chatman-media/lead-engine/commit/b6384c61793567e6143aba7bdc157feea0c88b71))
+
 # [@chatman-media/storage-v1.0.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.0.0...@chatman-media/storage-v1.0.1) (2026-05-23)
 
 
