@@ -21,5 +21,5 @@ CREATE INDEX idx_director_hooks_active ON director_hooks (tenant_id) WHERE is_ac
 -- RLS: tenant isolation
 ALTER TABLE director_hooks ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY director_hooks_tenant_isolation ON director_hooks
+CREATE POLICY tenant_isolation ON director_hooks
   USING (tenant_id = current_setting('app.tenant_id', TRUE)::INTEGER);
