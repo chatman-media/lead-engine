@@ -664,6 +664,95 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       fields: [],
     },
   ],
+
+  // Воронка продаж lead-engine самого себя.
+  // Используется для тенанта-бота, который квалифицирует рекрутинговые
+  // агентства как потенциальных клиентов платформы. Мета-демо: человек
+  // видит продукт в действии прямо в процессе продажи.
+  leadengine_sales_v1: [
+    {
+      slug: "new_lead",
+      displayName: "Новый контакт",
+      kind: "intake",
+      stageType: "form_fill",
+      position: 0,
+      color: "#3b82f6",
+      nextStages: ["qualifying", "not_interested"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "name", displayName: "Имя", fieldType: "text", required: true, aiExtractable: true, position: 0 },
+        { slug: "agency_name", displayName: "Название агентства", fieldType: "text", required: true, aiExtractable: true, position: 1 },
+        { slug: "city", displayName: "Город / страна", fieldType: "text", required: false, aiExtractable: true, position: 2 },
+      ],
+    },
+    {
+      slug: "qualifying",
+      displayName: "Квалификация (NEPQ)",
+      kind: "active",
+      stageType: "form_fill",
+      position: 1,
+      color: "#f59e0b",
+      nextStages: ["objection_handling", "trial_offered", "not_interested"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "leads_per_day", displayName: "Входящих лидов в день", fieldType: "number", required: true, aiExtractable: true, hint: "примерно сколько пишут в Telegram/WhatsApp в день", position: 0 },
+        { slug: "response_time_problem", displayName: "Теряете лиды из-за скорости ответа", fieldType: "boolean", required: true, aiExtractable: true, position: 1 },
+        { slug: "current_tool", displayName: "Текущий инструмент", fieldType: "select", required: true, aiExtractable: true, position: 2,
+          optionsJson: '[{"value":"none","label":"Ничего, отвечаем вручную"},{"value":"manychat","label":"ManyChat"},{"value":"other_bot","label":"Другой бот"},{"value":"crm","label":"CRM с чатом"},{"value":"other","label":"Другое"}]' },
+        { slug: "team_size", displayName: "Операторов на входящих", fieldType: "number", required: false, aiExtractable: true, hint: "сколько человек обрабатывают входящие заявки", position: 3 },
+        { slug: "monthly_budget_ok", displayName: "Готов к $99/мес", fieldType: "boolean", required: false, aiExtractable: true, hint: "если упомянули бюджет или цену", position: 4 },
+      ],
+    },
+    {
+      slug: "objection_handling",
+      displayName: "Работа с возражением",
+      kind: "active",
+      stageType: "assessment",
+      position: 2,
+      color: "#8b5cf6",
+      staleTimeoutDays: 3,
+      nextStages: ["trial_offered", "not_interested"],
+      fields: [
+        { slug: "main_objection", displayName: "Главное возражение", fieldType: "select", required: false, aiExtractable: true, position: 0,
+          optionsJson: '[{"value":"price","label":"Дорого"},{"value":"need_developer","label":"Сложно без разработчика"},{"value":"data_safety","label":"Безопасность данных"},{"value":"ai_quality","label":"AI не так хорошо отвечает"},{"value":"no_time","label":"Нет времени разбираться"},{"value":"other","label":"Другое"}]' },
+        { slug: "objection_resolved", displayName: "Возражение закрыто", fieldType: "boolean", required: false, aiExtractable: true, position: 1 },
+      ],
+    },
+    {
+      slug: "trial_offered",
+      displayName: "Триал предложен",
+      kind: "active",
+      stageType: "milestone",
+      position: 3,
+      color: "#ec4899",
+      staleTimeoutDays: 7,
+      nextStages: ["trial_started", "not_interested"],
+      fields: [
+        { slug: "signup_link_sent", displayName: "Ссылка на регистрацию отправлена", fieldType: "boolean", required: true, aiExtractable: false, position: 0 },
+        { slug: "referral_code_shared", displayName: "Партнёрский код передан", fieldType: "text", required: false, aiExtractable: false, hint: "если лид пришёл от партнёра", position: 1 },
+      ],
+    },
+    {
+      slug: "trial_started",
+      displayName: "Зарегистрировался",
+      kind: "terminal_won",
+      stageType: "milestone",
+      position: 4,
+      color: "#22c55e",
+      nextStages: [],
+      fields: [],
+    },
+    {
+      slug: "not_interested",
+      displayName: "Не интересует",
+      kind: "terminal_lost",
+      stageType: "milestone",
+      position: 5,
+      color: "#6b7280",
+      nextStages: [],
+      fields: [],
+    },
+  ],
 };
 
 /**
