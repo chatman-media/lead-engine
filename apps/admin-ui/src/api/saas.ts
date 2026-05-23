@@ -481,6 +481,34 @@ export interface FunnelAnalytics {
   stages: FunnelAnalyticsStage[];
 }
 
+// ── Director hooks ────────────────────────────────────────────────────────
+
+export interface DirectorHook {
+  id: number;
+  tenantId: number;
+  name: string;
+  body: string;
+  triggerHint: string | null;
+  isActive: boolean;
+  position: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateDirectorHookInput {
+  name: string;
+  body: string;
+  triggerHint?: string;
+  isActive?: boolean;
+}
+
+export interface UpdateDirectorHookInput {
+  name?: string;
+  body?: string;
+  triggerHint?: string | null;
+  isActive?: boolean;
+}
+
 // ── Audit entry (for audit log page) ────────────────────────────────────
 
 const TOKEN_KEY = "lead_engine_token";
@@ -987,6 +1015,18 @@ export const saas = {
   listSkills() {
     return request<{ items: SkillItem[] }>("/api/admin/skills");
   },
+  seedSkills() {
+    return request<{ ok: boolean; seeded: number; updated: number; skipped: number; total: number }>(
+      "/api/admin/skills/seed",
+      { method: "POST" },
+    );
+  },
+  updateSkill(slug: string, data: { isEnabled?: boolean; promptFragment?: string }) {
+    return request<{ ok: boolean }>(`/api/admin/skills/${slug}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
   listStyles() {
     return request<{ items: StyleItem[] }>("/api/admin/styles");
   },
@@ -1017,5 +1057,31 @@ export const saas = {
   },
   deleteVacancy(id: number) {
     return request<{ ok: boolean }>(`/api/admin/vacancies/${id}`, { method: "DELETE" });
+  },
+
+  // ── Director hooks ────────────────────────────────────────────────────
+  listDirectorHooks() {
+    return request<{ items: DirectorHook[] }>("/api/admin/director-hooks");
+  },
+  createDirectorHook(data: CreateDirectorHookInput) {
+    return request<DirectorHook>("/api/admin/director-hooks", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateDirectorHook(id: number, data: UpdateDirectorHookInput) {
+    return request<{ ok: boolean }>(`/api/admin/director-hooks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  deleteDirectorHook(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/director-hooks/${id}`, { method: "DELETE" });
+  },
+  reorderDirectorHooks(ids: number[]) {
+    return request<{ ok: boolean }>("/api/admin/director-hooks/reorder", {
+      method: "PATCH",
+      body: JSON.stringify({ ids }),
+    });
   },
 };

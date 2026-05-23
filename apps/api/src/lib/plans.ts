@@ -47,7 +47,7 @@ export interface PlanLimits {
 const FREE: PlanLimits = {
   maxChannels: 1,
   maxKbDocuments: 50,
-  maxAdmins: 1,
+  maxAdmins: 3,
   maxLeads: 100,
   rateLimitPerMinute: 20,
   rateLimitPerHour: 200,

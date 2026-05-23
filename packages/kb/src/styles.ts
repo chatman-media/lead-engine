@@ -96,8 +96,25 @@ export interface SkillForPrompt {
   slug: string;
   displayName: string;
   promptFragment: string;
-  /** Stages where this skill applies. Empty = always applicable. */
-  applicableStages: readonly FunnelStage[];
+  /**
+   * Stages where this skill applies. Empty array = always applicable.
+   * May contain FunnelStage names ("qualify", "pitch"…) or stage-kind
+   * strings ("intake", "active") — `composeSystemPrompt` does string
+   * comparison against the current stage/kind value so both work.
+   */
+  applicableStages: readonly string[];
+}
+
+/**
+ * A director-level persuasion hook — tenant-specific scripted mini-technique.
+ * Unlike universal skills (from the catalogue), hooks are always injected for
+ * this tenant regardless of which style or stage is active.
+ */
+export interface DirectorHookForPrompt {
+  name: string;
+  body: string;
+  /** Optional natural-language hint for when to apply this hook. */
+  triggerHint?: string | null;
 }
 
 export interface ComposeOptions {
@@ -105,6 +122,12 @@ export interface ComposeOptions {
   userFacts?: Record<string, string>;
   conversationSummary?: string;
   skills?: readonly SkillForPrompt[];
+  /**
+   * Tenant-specific persuasion scripts added by the director. Injected as a
+   * "ХУКИ УБЕЖДЕНИЯ" block BEFORE the universal skills block. Always active —
+   * not filtered by stage or style.
+   */
+  directorHooks?: readonly DirectorHookForPrompt[];
   /**
    * Support mode — set when the lead is past the sales stage and waiting on a
    * downstream process. When set, the prompt drops the sales framework / hooks

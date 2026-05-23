@@ -13,7 +13,7 @@ import {
   type StageClassifier,
   StylesRepo,
 } from "@chatman-media/conversation-engine";
-import { ABRouter, type Style } from "@chatman-media/kb";
+import { ABRouter, type DirectorHookForPrompt, type SkillForPrompt, type Style } from "@chatman-media/kb";
 import {
   type EmbeddingClient as RagEmbeddingClient,
   InMemoryLlmRouter,
@@ -21,8 +21,8 @@ import {
 } from "@chatman-media/llm-router";
 import type { PlatformMetrics } from "@chatman-media/observability";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
-import { leads, stageDefinitions } from "@chatman-media/storage";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { directorHooks, leads, skills, stageDefinitions } from "@chatman-media/storage";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
 import type { ApiConfig } from "./config.ts";
 import { type OnUsage, wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
@@ -269,6 +269,58 @@ export function makeReplyStrategy(
         }
       : undefined;
 
+  // resolveSkills: loads all enabled skills for the tenant.
+  // Stage-kind filtering (intake/active/always) happens inside composeSystemPrompt.
+  // Results are cached per-tenant (skills rarely change at runtime; restart invalidates).
+  const skillsCache = new Map<number, readonly SkillForPrompt[]>();
+  async function resolveSkills(input: { tenantId: number }): Promise<readonly SkillForPrompt[]> {
+    const cached = skillsCache.get(input.tenantId);
+    if (cached !== undefined) return cached;
+    const rows = await db
+      .select({
+        slug: skills.slug,
+        displayName: skills.displayName,
+        promptFragment: skills.promptFragment,
+        applicableStagesJson: skills.applicableStagesJson,
+      })
+      .from(skills)
+      .where(and(eq(skills.tenantId, input.tenantId), eq(skills.isEnabled, true)))
+      .orderBy(asc(skills.family), asc(skills.displayName));
+    const result: SkillForPrompt[] = rows.map((r) => ({
+      slug: r.slug,
+      displayName: r.displayName,
+      promptFragment: r.promptFragment,
+      // applicableStagesJson is a JSON array of FunnelStage strings (or empty = always).
+      applicableStages: (() => {
+        try {
+          return JSON.parse(r.applicableStagesJson) as string[];
+        } catch {
+          return [];
+        }
+      })() as readonly string[],
+    }));
+    skillsCache.set(input.tenantId, result);
+    return result;
+  }
+
+  // resolveDirectorHooks: loads active director hooks for the tenant.
+  // No server-side cache — hooks can change at any time from the UI.
+  // Each reply triggers one fast indexed query (idx_director_hooks_active).
+  async function resolveDirectorHooks(input: {
+    tenantId: number;
+  }): Promise<readonly DirectorHookForPrompt[]> {
+    const rows = await db
+      .select({
+        name: directorHooks.name,
+        body: directorHooks.body,
+        triggerHint: directorHooks.triggerHint,
+      })
+      .from(directorHooks)
+      .where(and(eq(directorHooks.tenantId, input.tenantId), eq(directorHooks.isActive, true)))
+      .orderBy(asc(directorHooks.position), asc(directorHooks.id));
+    return rows;
+  }
+
   return new RagReplyStrategy(
     {
       template,
@@ -306,6 +358,8 @@ export function makeReplyStrategy(
       resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
       ...(resolveStyle ? { resolveStyle } : {}),
       resolveIsSupport: makeSupportModeResolver(db),
+      resolveSkills,
+      resolveDirectorHooks,
     },
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
   );

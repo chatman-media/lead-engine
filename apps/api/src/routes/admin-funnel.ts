@@ -10,6 +10,7 @@ import {
   styles,
 } from "@chatman-media/storage";
 import { and, asc, count, eq, isNull, sql } from "drizzle-orm";
+import { SKILLS_CATALOGUE } from "../lib/skills-catalogue.ts";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 
@@ -1156,6 +1157,101 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
     );
 
     return c.json({ items: rows });
+  });
+
+  /**
+   * POST /api/admin/skills/seed
+   * Засевает каталог навыков из SKILLS_CATALOGUE.
+   * Новые slug'и → INSERT, изменившиеся promptFragment → UPDATE.
+   * Удалённые из каталога slug'и — НЕ трогаются (data stays).
+   * Returns: { seeded, updated, skipped }
+   */
+  app.post("/api/admin/skills/seed", async (c) => {
+    const tenantId = c.var.tenantId;
+    const nowEpoch = Math.floor(Date.now() / 1000);
+
+    let seeded = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    await withTenant(opts.db, tenantId, async (tx) => {
+      for (const entry of SKILLS_CATALOGUE) {
+        const [existing] = await tx
+          .select({ id: skills.id, promptFragment: skills.promptFragment })
+          .from(skills)
+          .where(and(eq(skills.tenantId, tenantId), eq(skills.slug, entry.slug)));
+
+        if (!existing) {
+          await tx.insert(skills).values({
+            tenantId,
+            slug: entry.slug,
+            family: entry.family,
+            displayName: entry.displayName,
+            description: entry.description,
+            promptFragment: entry.promptFragment,
+            applicableStagesJson: JSON.stringify(entry.applicableStageKinds),
+            intent: entry.intent,
+            isEnabled: entry.isEnabled,
+            createdAt: nowEpoch,
+            updatedAt: nowEpoch,
+          });
+          seeded++;
+        } else if (existing.promptFragment !== entry.promptFragment) {
+          await tx
+            .update(skills)
+            .set({ promptFragment: entry.promptFragment, updatedAt: nowEpoch })
+            .where(eq(skills.id, existing.id));
+          updated++;
+        } else {
+          skipped++;
+        }
+      }
+    });
+
+    return c.json({ ok: true, seeded, updated, skipped, total: SKILLS_CATALOGUE.length });
+  });
+
+  /**
+   * PATCH /api/admin/skills/:slug
+   * Обновить isEnabled и/или promptFragment конкретного навыка.
+   * Body: { isEnabled?: boolean, promptFragment?: string }
+   */
+  app.patch("/api/admin/skills/:slug", async (c) => {
+    const tenantId = c.var.tenantId;
+    const slug = c.req.param("slug");
+
+    let body: { isEnabled?: unknown; promptFragment?: unknown };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+
+    const hasIsEnabled = typeof body.isEnabled === "boolean";
+    const hasPromptFragment =
+      typeof body.promptFragment === "string" && body.promptFragment.trim().length > 0;
+    if (!hasIsEnabled && !hasPromptFragment) {
+      return c.json({ error: "nothing to update" }, 400);
+    }
+
+    const setValues: {
+      updatedAt: number;
+      isEnabled?: boolean;
+      promptFragment?: string;
+    } = { updatedAt: Math.floor(Date.now() / 1000) };
+    if (hasIsEnabled) setValues.isEnabled = body.isEnabled as boolean;
+    if (hasPromptFragment) setValues.promptFragment = (body.promptFragment as string).trim();
+
+    const updated = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .update(skills)
+        .set(setValues)
+        .where(and(eq(skills.tenantId, tenantId), eq(skills.slug, slug)))
+        .returning({ id: skills.id }),
+    );
+
+    if (updated.length === 0) return c.json({ error: "skill not found" }, 404);
+    return c.json({ ok: true });
   });
 
   /**

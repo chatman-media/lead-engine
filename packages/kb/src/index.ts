@@ -114,6 +114,7 @@ export { InMemoryKbStore } from "./stores/memory-store.ts";
 export { parseStructuredOutput, zodToJsonSchema } from "./structured-output.ts";
 export type {
   ComposeOptions,
+  DirectorHookForPrompt,
   FunnelStage,
   Hook,
   HookKind,
