@@ -374,6 +374,11 @@ export interface LeadDetail {
   contact: { id: number; displayName: string | null; attributesJson: string | null } | undefined;
 }
 
+export interface ContactItem {
+  id: number;
+  displayName: string | null;
+}
+
 export interface SkillItem {
   id: number;
   slug: string;
@@ -777,6 +782,19 @@ export const saas = {
       method: "POST",
       body: JSON.stringify({ body }),
     });
+  },
+  createLead(contactId: number, stageDefinitionId?: number) {
+    return request<{ id: number }>("/api/admin/leads", {
+      method: "POST",
+      body: JSON.stringify({ contactId, stageDefinitionId }),
+    });
+  },
+  listContacts(opts: { q?: string; limit?: number } = {}) {
+    const p = new URLSearchParams();
+    if (opts.q) p.set("q", opts.q);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    const qs = p.toString();
+    return request<{ items: ContactItem[] }>(`/api/admin/contacts${qs ? `?${qs}` : ""}`);
   },
 
   // ── Funnel builder ───────────────────────────────────────────────────

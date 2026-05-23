@@ -8,7 +8,7 @@ import {
   stageDefinitions,
   stageFields,
 } from "@chatman-media/storage";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 
@@ -368,6 +368,36 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     });
 
     return c.json({ ok: true, advanced: advanced !== null, newStageSlug: advanced });
+  });
+
+  /**
+   * GET /api/admin/contacts
+   * Query: ?q=<search> | ?limit=N | ?offset=N
+   * Список контактов для поиска при создании лида.
+   */
+  app.get("/api/admin/contacts", async (c) => {
+    const tenantId = c.var.tenantId;
+    const limit = Math.min(Number(c.req.query("limit") ?? "50"), 200);
+    const offset = Math.max(Number(c.req.query("offset") ?? "0"), 0);
+    const q = c.req.query("q")?.trim() ?? "";
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) => {
+      const conditions = [eq(contacts.tenantId, tenantId)];
+      if (q.length > 0) {
+        conditions.push(
+          ilike(contacts.displayName, `%${q}%`) as ReturnType<typeof eq>,
+        );
+      }
+      return tx
+        .select({ id: contacts.id, displayName: contacts.displayName })
+        .from(contacts)
+        .where(and(...conditions))
+        .orderBy(desc(contacts.id))
+        .limit(limit)
+        .offset(offset);
+    });
+
+    return c.json({ items: rows, limit, offset });
   });
 
   /**

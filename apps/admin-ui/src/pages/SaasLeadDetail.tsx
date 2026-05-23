@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ApiError, clearToken, saas, type LeadDetail, type StageField } from "@/api/saas";
+import { ApiError, clearToken, saas, type FunnelData, type LeadDetail, type StageField } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeftIcon, CheckIcon, EditIcon, SendIcon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, CheckIcon, EditIcon, RefreshCwIcon, SendIcon, XIcon } from "lucide-react";
 
 function formatDate(epoch: number) {
   return new Date(epoch * 1000).toLocaleString("ru-RU", {
@@ -190,10 +190,16 @@ export function SaasLeadDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [data, setData] = useState<LeadDetail | null>(null);
+  const [funnel, setFunnel] = useState<FunnelData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [noteText, setNoteText] = useState("");
   const [addingNote, setAddingNote] = useState(false);
+
+  // Stage change state
+  const [stageChanging, setStageChanging] = useState(false);
+  const [selectedStageId, setSelectedStageId] = useState<string>("");
+  const [movingStage, setMovingStage] = useState(false);
 
   // Field editing state
   const [editing, setEditing] = useState(false);
@@ -223,6 +229,7 @@ export function SaasLeadDetail() {
 
   useEffect(() => {
     reload();
+    saas.getFunnel().then(setFunnel).catch(() => {});
   }, [id]);
 
   async function handleAddNote() {
@@ -236,6 +243,21 @@ export function SaasLeadDetail() {
       onAuthError(err);
     } finally {
       setAddingNote(false);
+    }
+  }
+
+  async function handleMoveStage() {
+    if (!id || !selectedStageId) return;
+    setMovingStage(true);
+    try {
+      await saas.moveLeadStage(Number(id), Number(selectedStageId));
+      setStageChanging(false);
+      setSelectedStageId("");
+      reload();
+    } catch (err) {
+      onAuthError(err);
+    } finally {
+      setMovingStage(false);
     }
   }
 
@@ -317,7 +339,23 @@ export function SaasLeadDetail() {
           {/* Текущая стадия */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Текущая стадия</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm">Текущая стадия</CardTitle>
+                {funnel?.stages && funnel.stages.length > 0 && !stageChanging && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      setSelectedStageId(String(lead.stageDefinitionId ?? ""));
+                      setStageChanging(true);
+                    }}
+                  >
+                    <RefreshCwIcon className="size-3 mr-1" />
+                    Сменить стадию
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-3">
@@ -334,6 +372,40 @@ export function SaasLeadDetail() {
                 <p className="mt-2 text-sm text-destructive">
                   Причина отказа: {lead.rejectedReason}
                 </p>
+              )}
+              {stageChanging && funnel?.stages && (
+                <div className="mt-3 flex items-center gap-2">
+                  <Select value={selectedStageId} onValueChange={setSelectedStageId}>
+                    <SelectTrigger className="h-8 text-sm flex-1">
+                      <SelectValue placeholder="Выбрать стадию…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {funnel.stages.map((s) => (
+                        <SelectItem key={s.id} value={String(s.id)}>
+                          {s.displayName}
+                          <span className="ml-1 text-xs text-muted-foreground">({s.kind})</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    size="sm"
+                    className="h-8 px-2"
+                    disabled={!selectedStageId || movingStage}
+                    onClick={handleMoveStage}
+                  >
+                    <CheckIcon className="size-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 px-2"
+                    onClick={() => setStageChanging(false)}
+                    disabled={movingStage}
+                  >
+                    <XIcon className="size-3" />
+                  </Button>
+                </div>
               )}
             </CardContent>
           </Card>
