@@ -1,6 +1,6 @@
 {
   "name": "@chatman-media/channel-web",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "WebSocket-based web-chat adapter — text-only канал для in-browser клиентов. Реализует ChannelAdapter из @chatman-media/channel-core.",
   "type": "module",
   "main": "./dist/index.js",
