@@ -63,7 +63,7 @@
         "@chatman-media/observability": "workspace:*",
         "@chatman-media/sales": "workspace:*",
         "@chatman-media/storage": "workspace:*",
-        "@chatman-media/vertical-recruitment-uae": "workspace:*",
+        "@chatman-media/vertical-recruitment": "workspace:*",
         "@chatman-media/verticals": "workspace:*",
         "drizzle-orm": "^0.36.0",
         "hono": "^4.6.0",
@@ -90,8 +90,8 @@
         "vite": "^6.3.4",
       },
     },
-    "apps/vertical-recruitment-uae": {
-      "name": "@chatman-media/vertical-recruitment-uae",
+    "apps/vertical-recruitment": {
+      "name": "@chatman-media/vertical-recruitment",
       "version": "0.1.0",
       "dependencies": {
         "@chatman-media/kb": "workspace:*",
@@ -374,7 +374,7 @@
 
     "@chatman-media/storage": ["@chatman-media/storage@workspace:packages/storage"],
 
-    "@chatman-media/vertical-recruitment-uae": ["@chatman-media/vertical-recruitment-uae@workspace:apps/vertical-recruitment-uae"],
+    "@chatman-media/vertical-recruitment": ["@chatman-media/vertical-recruitment@workspace:apps/vertical-recruitment"],
 
     "@chatman-media/verticals": ["@chatman-media/verticals@workspace:packages/verticals"],
 
