@@ -1,11 +1,13 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import {
+  experiments,
   funnels,
   skills,
   stageDefinitions,
   stageFields,
+  styles,
 } from "@chatman-media/storage";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 
@@ -946,6 +948,42 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
         .from(skills)
         .where(eq(skills.tenantId, tenantId))
         .orderBy(asc(skills.family), asc(skills.displayName)),
+    );
+
+    return c.json({ items: rows });
+  });
+
+  /**
+   * GET /api/admin/styles
+   * Список стилей тенанта (не удалённых).
+   */
+  app.get("/api/admin/styles", async (c) => {
+    const tenantId = c.var.tenantId;
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select()
+        .from(styles)
+        .where(and(eq(styles.tenantId, tenantId), isNull(styles.deletedAt)))
+        .orderBy(asc(styles.slug), asc(styles.version)),
+    );
+
+    return c.json({ items: rows });
+  });
+
+  /**
+   * GET /api/admin/experiments
+   * Список экспериментов тенанта.
+   */
+  app.get("/api/admin/experiments", async (c) => {
+    const tenantId = c.var.tenantId;
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select()
+        .from(experiments)
+        .where(eq(experiments.tenantId, tenantId))
+        .orderBy(asc(experiments.createdAt)),
     );
 
     return c.json({ items: rows });
