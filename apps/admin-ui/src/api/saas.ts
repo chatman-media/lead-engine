@@ -752,17 +752,21 @@ export const saas = {
   },
 
   // ── Lead pipeline ────────────────────────────────────────────────────
-  listLeads(opts: { stageId?: number; state?: string; contactId?: number; limit?: number; offset?: number } = {}) {
+  listLeads(opts: { stageId?: number; state?: string; contactId?: number; q?: string; limit?: number; offset?: number } = {}) {
     const p = new URLSearchParams();
     if (opts.stageId) p.set("stageId", String(opts.stageId));
     if (opts.state) p.set("state", opts.state);
     if (opts.contactId) p.set("contactId", String(opts.contactId));
+    if (opts.q) p.set("q", opts.q);
     if (opts.limit) p.set("limit", String(opts.limit));
     if (opts.offset) p.set("offset", String(opts.offset));
     const qs = p.toString();
     return request<{ items: LeadListItem[]; limit: number; offset: number }>(
       `/api/admin/leads${qs ? `?${qs}` : ""}`,
     );
+  },
+  deleteLead(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/leads/${id}`, { method: "DELETE" });
   },
   getLead(id: number) {
     return request<LeadDetail>(`/api/admin/leads/${id}`);

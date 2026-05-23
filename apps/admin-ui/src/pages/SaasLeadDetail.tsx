@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeftIcon, CheckIcon, EditIcon, RefreshCwIcon, SendIcon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, CheckIcon, EditIcon, RefreshCwIcon, SendIcon, Trash2Icon, XIcon } from "lucide-react";
 
 function formatDate(epoch: number) {
   return new Date(epoch * 1000).toLocaleString("ru-RU", {
@@ -208,6 +208,9 @@ export function SaasLeadDetail() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
+  // Delete state
+  const [deleting, setDeleting] = useState(false);
+
   function onAuthError(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
       clearToken();
@@ -291,6 +294,19 @@ export function SaasLeadDetail() {
     setSaveMsg("");
   }
 
+  async function handleDelete() {
+    if (!id) return;
+    if (!window.confirm("Удалить лида? Это действие необратимо.")) return;
+    setDeleting(true);
+    try {
+      await saas.deleteLead(Number(id));
+      navigate("/leads", { replace: true });
+    } catch (err) {
+      onAuthError(err);
+      setDeleting(false);
+    }
+  }
+
   async function handleSave() {
     if (!id || !data) return;
     setSaving(true);
@@ -339,6 +355,17 @@ export function SaasLeadDetail() {
           title={contact?.displayName ?? `Лид #${lead.id}`}
           description={lead.applicationId ? `ID: ${lead.applicationId}` : undefined}
         />
+        <div className="ml-auto">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={deleting}
+            onClick={handleDelete}
+          >
+            <Trash2Icon className="size-3.5" />
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">

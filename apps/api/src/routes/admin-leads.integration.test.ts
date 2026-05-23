@@ -264,10 +264,10 @@ describe("GET /api/admin/leads", () => {
       limit: number;
       offset: number;
     };
-    expect(body.items).toHaveLength(2);
+    expect(body.items).toHaveLength(3); // leadIdA, leadIdA2, leadIdA3 (Dave Validation)
     expect(body.limit).toBe(50);
     expect(body.offset).toBe(0);
-    // First lead should be more recent (leadIdA)
+    // First lead should be most recent (leadIdA)
     expect(body.items[0]!.id).toBe(leadIdA);
     expect(body.items[0]!.contactName).toBe("Alice Wonderland");
     expect(body.items[0]!.state).toBe("intake_pending");
@@ -286,6 +286,24 @@ describe("GET /api/admin/leads", () => {
   it("?contactId= for contact with no leads → empty list", async () => {
     if (!sql) return;
     const res = await authReq(tokenA, "/api/admin/leads?contactId=999999");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[] };
+    expect(body.items).toHaveLength(0);
+  });
+
+  it("?q= search filters leads by contact name (case-insensitive)", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads?q=alice");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: Array<{ id: number; contactName: string }> };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]!.id).toBe(leadIdA);
+    expect(body.items[0]!.contactName).toBe("Alice Wonderland");
+  });
+
+  it("?q= with no match → empty list", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads?q=zzznomatch");
     expect(res.status).toBe(200);
     const body = (await res.json()) as { items: unknown[] };
     expect(body.items).toHaveLength(0);
@@ -723,6 +741,48 @@ describe("PATCH /api/admin/leads/:id/stage — transition validation", () => {
       body: JSON.stringify({ stageDefinitionId: stageIdA3 }),
     });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("DELETE /api/admin/leads/:id", () => {
+  it("deletes lead and returns 200 { ok: true }", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [c] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Deletable Lead" })
+      .returning({ id: contacts.id });
+    const [newLead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: c!.id,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+
+    const res = await authReq(tokenA, `/api/admin/leads/${newLead!.id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+
+    // Verify lead is gone
+    const check = await authReq(tokenA, `/api/admin/leads/${newLead!.id}`);
+    expect(check.status).toBe(404);
+  });
+
+  it("cross-tenant: cannot delete another tenant's lead", async () => {
+    if (!sql) return;
+    // leadIdA belongs to tenantA — tenant B should get 200 but not actually delete it
+    const res = await authReq(tokenB, `/api/admin/leads/${leadIdA}`, { method: "DELETE" });
+    // 200 is returned (no lead found in tenantB ctx → no-op)
+    expect(res.status).toBe(200);
+    // But lead should still exist for tenant A
+    const check = await authReq(tokenA, `/api/admin/leads/${leadIdA}`);
+    expect(check.status).toBe(200);
   });
 });
 
