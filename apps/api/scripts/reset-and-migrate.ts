@@ -81,14 +81,11 @@ async function main() {
         ) AS exists
       `;
       if (existing?.exists) {
-        // Seed _migrations with all files that were presumably already applied.
-        // We detect "already applied" by checking if the file's first CREATE TABLE
-        // target exists. Simpler: mark everything before 0011 as applied.
+        // Seed _migrations with all existing files — on first tracking run,
+        // assume everything already on disk was applied to this DB.
         for (const f of files) {
-          if (f < "0011_") {
-            await sql`INSERT INTO _migrations (name) VALUES (${f}) ON CONFLICT DO NOTHING`;
-            appliedSet.add(f);
-          }
+          await sql`INSERT INTO _migrations (name) VALUES (${f}) ON CONFLICT DO NOTHING`;
+          appliedSet.add(f);
         }
         console.log(`[reset] seeded _migrations with ${appliedSet.size} pre-existing migrations`);
       }
