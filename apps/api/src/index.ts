@@ -1,7 +1,7 @@
 import { checkRlsEnforcement } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
-import { tenants } from "@chatman-media/storage";
+import { funnels, tenants } from "@chatman-media/storage";
 import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { eq } from "drizzle-orm";
@@ -54,18 +54,10 @@ import { makeWhatsAppWebhookRoutes } from "./routes/webhook-whatsapp.ts";
 import { makeWidgetStaticRoutes } from "./routes/widget-static.ts";
 import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
-/**
- * Mapping tenant.slug → VerticalTemplate. На текущем этапе один tenant —
- * legacy — c hardcoded recruitment_uae_v1. После Этапа 8 будет lookup
- * через funnels.vertical_template_id из БД (per tenant + per funnel).
- */
-const TEMPLATE_BY_TENANT_SLUG: Record<string, VerticalTemplate> = {
-  legacy: RECRUITMENT_UAE_V1,
+/** Known vertical templates by slug. */
+const KNOWN_TEMPLATES: Record<string, VerticalTemplate> = {
+  recruitment_uae_v1: RECRUITMENT_UAE_V1,
 };
-
-function resolveTemplate(tenantSlug: string): VerticalTemplate | undefined {
-  return TEMPLATE_BY_TENANT_SLUG[tenantSlug];
-}
 
 async function main() {
   const cfg = loadApiConfig();
@@ -95,13 +87,39 @@ async function main() {
   // need register config для каждого tenant'а иначе InMemoryLlmRouter throws
   // "LLM config not set: tenantId=X" когда inbound приходит от не-1 tenant.
   // Hot-reload не делаем — новый tenant onboarding требует рестарта apps/api.
-  const activeTenantIds = (
-    await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.status, "active"))
-  ).map((r) => r.id);
+  const activeTenantRows = await db
+    .select({ id: tenants.id, slug: tenants.slug })
+    .from(tenants)
+    .where(eq(tenants.status, "active"));
+  const activeTenantIds = activeTenantRows.map((r) => r.id);
   log.info("active tenants loaded for LLM config", {
     count: activeTenantIds.length,
     ids: activeTenantIds,
   });
+
+  // Строим mapping tenantSlug → VerticalTemplate из funnels.vertical_template_id.
+  // На старте читаем один раз; новый tenant требует рестарта (acceptable trade-off).
+  const templateByTenantSlug: Record<string, VerticalTemplate> = {};
+  if (activeTenantRows.length > 0) {
+    const funnelRows = await db
+      .select({ tenantId: funnels.tenantId, verticalTemplateId: funnels.verticalTemplateId })
+      .from(funnels)
+      .where(eq(funnels.isActive, true));
+    const tenantIdToSlug = new Map(activeTenantRows.map((r) => [r.id, r.slug]));
+    for (const row of funnelRows) {
+      if (!row.verticalTemplateId) continue;
+      const slug = tenantIdToSlug.get(row.tenantId);
+      if (!slug) continue;
+      const tpl = KNOWN_TEMPLATES[row.verticalTemplateId];
+      if (tpl) templateByTenantSlug[slug] = tpl;
+    }
+  }
+  // Hardcoded fallback for the legacy tenant if not already covered.
+  if (!templateByTenantSlug.legacy) {
+    templateByTenantSlug.legacy = RECRUITMENT_UAE_V1;
+  }
+  const resolveTemplate = (tenantSlug: string): VerticalTemplate | undefined =>
+    templateByTenantSlug[tenantSlug];
 
   // Per-tenant LLM configs: DB + env fallback. LoadedRef shared между
   // фабриками + tenant-reloader (mutable; reload через admin API меняет
