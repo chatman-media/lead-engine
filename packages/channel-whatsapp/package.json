@@ -1,6 +1,6 @@
 {
   "name": "@chatman-media/channel-whatsapp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "WhatsApp Cloud API channel adapter (Meta Graph) — text + media через webhook + Graph API send.",
   "type": "module",
   "main": "./dist/index.js",
