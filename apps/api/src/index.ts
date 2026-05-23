@@ -47,6 +47,7 @@ import { makeAdminLeadsRoutes } from "./routes/admin-leads.ts";
 import { makeAdminFunnelRoutes } from "./routes/admin-funnel.ts";
 import { makeAdminDashboardRoutes } from "./routes/admin-dashboard.ts";
 import { makeAdminVacanciesRoutes } from "./routes/admin-vacancies.ts";
+import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
@@ -316,6 +317,10 @@ async function main() {
   // Vacancies CRUD.
   app.route("/", makeAdminVacanciesRoutes({ db }));
   log.info("admin-vacancies routes enabled");
+
+  // Director hooks (tenant-specific persuasion scripts).
+  app.route("/", makeAdminDirectorHooksRoutes({ db }));
+  log.info("admin-director-hooks routes enabled");
 
   // Diagnostics — health-check для tenant setup'а.
   // resolveChat передаём для ?live=1 LLM smoke-test (стоит ~1 токен).

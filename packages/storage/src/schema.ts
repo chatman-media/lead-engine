@@ -578,6 +578,23 @@ export const selfPlayMatches = pgTable("self_play_matches", {
   index("idx_self_play_persona").on(t.personaSlug, sql`${t.createdAt} DESC`),
 ]);
 
+// ---- Director hooks (tenant-specific persuasion scripts) -------------------
+
+export const directorHooks = pgTable("director_hooks", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  body: text("body").notNull(),
+  triggerHint: text("trigger_hint"),
+  isActive: boolean("is_active").notNull().default(true),
+  position: integer("position").notNull().default(0),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  index("idx_director_hooks_tenant").on(t.tenantId, t.position),
+  index("idx_director_hooks_active").on(t.tenantId).where(sql`is_active = TRUE`),
+]);
+
 export const pairwiseMatches = pgTable("pairwise_matches", {
   id: serial("id").primaryKey(),
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
