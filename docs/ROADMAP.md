@@ -1,16 +1,16 @@
 # Roadmap
 
-Последнее обновление: 2026-05-23.
+Последнее обновление: 2026-05-23 (переоценка конкурентов + стратегия).
 
 Стратегический контекст — см. [`COMPETITORS.md`](COMPETITORS.md).
 
-**TL;DR позиционирование (Phase 1):** AI Sales Closer для рекрутинговых
-агентств в Telegram. Отвечает на входящие лиды за 30 секунд, ведёт
-кандидата от "хочу узнать" до сданной анкеты, передаёт hot-lead'ы
-рекрутеру. Telegram-first, RU/CIS/MENA рынок, BYOK.
+**TL;DR позиционирование (Phase 1):** Первый AI рекрутер с **Persuasion Engine**
+для Telegram. Отвечает на входящих кандидатов за 30 секунд, ведёт по NEPQ-
+методологии, не теряет лидов — передаёт рекрутеру только горячие анкеты.
+BYOK, RU/CIS/MENA рынок, flat-fee $99/мес.
 
 > **Позиционирование Phase 2 (месяц 4+):** Расширение на real estate +
-> agency-tier SKU. **Phase 3:** horizontal CX, OSS, voice.
+> dental/clinic + agency-tier SKU. **Phase 3:** horizontal CX, OSS, voice.
 
 ---
 
@@ -19,7 +19,7 @@
 | Фаза | Период | ICP | MRR target | Trigger |
 |------|--------|-----|------------|---------|
 | **Phase 1** | месяцы 1–3 | Recruitment agencies RU/CIS/MENA | $1–1.5K | launch |
-| **Phase 2** | месяцы 4–9 | + Real estate agencies | $5–10K | $1K MRR + 10 customers + case study |
+| **Phase 2** | месяцы 4–9 | + Real estate + Dental/Clinic | $5–10K | $1K MRR + 10 customers + case study |
 | **Phase 3** | месяцы 10–15 | Horizontal: coaching, B2B SaaS, edtech | $50K+ | $10K MRR + 50 customers |
 
 ### Phase 1 metrics (tracking)
@@ -195,10 +195,12 @@ critical channel coverage.
 
 5 готовых пакетов с KB seed, funnel stages, prompt fragments:
 
-- [ ] `ecommerce_orders_v1` — order tracking, return policy, shipping
 - [ ] `realestate_leads_v1` — listing inquiries, viewing scheduling, mortgage qualification
+- [ ] `clinic_appointments_v1` — **Phase 2 вертикаль #2** (параллельно с RE):
+  booking, insurance, pre-visit questionnaires. Telegram-dominant в RU клиниках,
+  предсказуемый лид (не сезонный как RE), высокий ARPU.
+- [ ] `ecommerce_orders_v1` — order tracking, return policy, shipping
 - [ ] `edtech_courses_v1` — course discovery, enrollment, support FAQ
-- [ ] `clinic_appointments_v1` — booking, insurance, pre-visit questionnaires
 - [ ] `recruitment_v2` — generalize'ить UAE template на любой найм
 
 Каждый vertical: package `@chatman-media/vertical-*`. UI `/settings/vertical`
@@ -240,6 +242,21 @@ Use-case: рекрутеры / sales-teams, чьи лиды пишут на ли
 - ✅ Re-auth при revoked-сессии (auth_key_duplicated → status='error' → кнопка в UI)
 - ✅ Платформенные `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (env)
 - 🔲 QR-code login flow — отложено (текущего phone+code+2FA достаточно)
+
+> **Переоценка (май 2026):** Telegram запустил официальный **Business Account
+> Bots API** без требования Premium у пользователя (апр 2026). MTProto userbot
+> остаётся для legacy-аккаунтов; новые tenants предпочтительно онбордить через
+> официальный Business Bot API (см. M9-bis ниже). Moat — не MTProto-умение,
+> а вертикальный контент + persuasion engine + operator UX.
+
+### 🔲 M9-bis. Telegram Business Bot API (Q3 2026)
+
+Официальный API для работы с бизнес-аккаунтами без Premium у пользователя.
+
+- [ ] `channel-telegram` adapter: поддержка `business_connection_id` в webhook
+- [ ] `sendMessage` с `business_connection_id` — ответ от имени бизнес-аккаунта
+- [ ] UI: новый таб «Telegram (бизнес-аккаунт)» параллельно с userbot
+- [ ] Использование Bot-to-bot API для потенциального Managed Bot сценария
 
 ---
 
