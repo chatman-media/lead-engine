@@ -1,0 +1,25 @@
+# @chatman-media/storage-v1.0.0 (2026-05-23)
+
+
+### Bug Fixes
+
+* **release:** publish via bun instead of @semantic-release/npm (workspace: protocol) ([#66](https://github.com/chatman-media/lead-engine/issues/66)) ([942c3f9](https://github.com/chatman-media/lead-engine/commit/942c3f9a9f46f00b5cdb416d26303375bc20a7d6))
+
+
+### Features
+
+* admin-routes integration tests (14 tests) + expose storage integration helpers ([884b58e](https://github.com/chatman-media/lead-engine/commit/884b58ec46f8127abce1dfa7a4b3f8956f60200f))
+* **api,admin-ui:** multi-admin invite flow (Q3'26 M4) ([6222764](https://github.com/chatman-media/lead-engine/commit/6222764a714cf1d6a59822b53592f893a70c86d5))
+* **api,admin-ui:** per-tenant LLM usage tracking (calls/latency/errors) ([92f8627](https://github.com/chatman-media/lead-engine/commit/92f86279447aa82dce98b14ac61d36bbf40b3732))
+* horizontal scaling — SKIP LOCKED claim + stuck recovery (Issue [#3](https://github.com/chatman-media/lead-engine/issues/3) / M) ([26228a6](https://github.com/chatman-media/lead-engine/commit/26228a605f53b39e9c936be3395d8b1e0d99f326))
+* migration 0007 — переключить conversations/leads/questionnaire_tokens FK на contacts + reset-script ([841e059](https://github.com/chatman-media/lead-engine/commit/841e0594cc1885dcafd844430d90eaf79df742e7))
+* Persuasion Engine + bot wiring + roadmap features ([#83](https://github.com/chatman-media/lead-engine/issues/83)) ([c0ba642](https://github.com/chatman-media/lead-engine/commit/c0ba642d659ac8f0c09683b3980f089f509235c0))
+* RLS contract validation + boot-time enforcement check ([7d68777](https://github.com/chatman-media/lead-engine/commit/7d68777d3b1e24bde23ba9fa9b1bcb0e737b41cf))
+* **storage:** integration tests миграций через живой PG + cleanup CI (Issue [#3](https://github.com/chatman-media/lead-engine/issues/3) / Q) ([cf71184](https://github.com/chatman-media/lead-engine/commit/cf711849674ed9048c3a98e5fd20f6665b3fbbbc))
+* **storage:** multi-tenant фундамент — 8 новых таблиц + legacy tenant seed (Этап 6, часть 1) ([e5885bf](https://github.com/chatman-media/lead-engine/commit/e5885bf8ce94b89f6f6747af9c2fe702ae9f4cb9))
+* **storage:** RLS-policies + withTenant helper (Issue [#3](https://github.com/chatman-media/lead-engine/issues/3) / D) ([87da5e2](https://github.com/chatman-media/lead-engine/commit/87da5e2d8db03037864a0908fab6f4146614df50))
+* **storage:** tenant_id во всех 28 существующих таблицах (Этап 6, часть 2) ([5893a9d](https://github.com/chatman-media/lead-engine/commit/5893a9d992999ea314870c1c6b291d4a16935973))
+* **storage:** миграция 0003 — backfill users → contacts + channel_identities (Этап 8, часть 2) ([bf56a2e](https://github.com/chatman-media/lead-engine/commit/bf56a2e68d99c11189781e9081a45483e8ed0eae))
+* **storage:** расширить schema до полной модели sales-guru (Этап 1) ([bfa982a](https://github.com/chatman-media/lead-engine/commit/bfa982a670cd833340edba03f164b82508e680ec))
+* Stripe billing — migration 0006 + signature verify + webhook handler (Issue [#3](https://github.com/chatman-media/lead-engine/issues/3) / O) ([25fada7](https://github.com/chatman-media/lead-engine/commit/25fada7a22a95a43e264c61818700571a0148d17))
+* universal lead pipeline — configurable stages, fields & admin UI ([#72](https://github.com/chatman-media/lead-engine/issues/72)) ([0a8f7a6](https://github.com/chatman-media/lead-engine/commit/0a8f7a6e5a7096a627d916d005872cd3b58b9eb6))
