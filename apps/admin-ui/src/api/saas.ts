@@ -23,6 +23,22 @@ export interface KbDoc {
   createdAt: number;
 }
 
+export interface KbSuggestion {
+  id: number;
+  tenantId: number;
+  questionText: string;
+  answerDraft: string | null;
+  status: "pending" | "ingested" | "rejected";
+  sourceConversationId: number | null;
+  sourceMessageId: number | null;
+  decidedByAdminId: number | null;
+  decidedAt: number | null;
+  kbDocumentId: number | null;
+  rejectedReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface KbUploadResult {
   documentId: number;
   source: string;
@@ -414,6 +430,57 @@ export interface ExperimentItem {
   createdAt: number;
 }
 
+export interface VacancyItem {
+  id: number;
+  tenantId: number;
+  title: string;
+  body: string;
+  url: string | null;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DashboardStats {
+  leads: {
+    total: number;
+    byStage: Array<{
+      slug: string;
+      displayName: string;
+      kind: string;
+      color: string | null;
+      position: number;
+      count: number;
+    }>;
+  };
+  conversations: {
+    open: number;
+    escalated: number;
+    today: number;
+  };
+  messages: {
+    last7days: number;
+  };
+}
+
+// ── Funnel analytics ─────────────────────────────────────────────────────
+
+export interface FunnelAnalyticsStage {
+  id: number;
+  slug: string;
+  displayName: string;
+  kind: string;
+  color: string | null;
+  position: number;
+  leadsCurrent: number;
+  leadsEntered: number;
+  avgDaysInStage: number | null;
+}
+
+export interface FunnelAnalytics {
+  stages: FunnelAnalyticsStage[];
+}
+
 // ── Audit entry (for audit log page) ────────────────────────────────────
 
 const TOKEN_KEY = "lead_engine_token";
@@ -544,6 +611,27 @@ export const saas = {
   deleteDoc(id: number) {
     return request<{ ok: boolean; deleted: number }>(`/api/admin/kb/documents/${id}`, {
       method: "DELETE",
+    });
+  },
+
+  // ── KB suggestions ───────────────────────────────────────────────────
+  listKbSuggestions(opts: { status?: "pending" | "ingested" | "rejected"; limit?: number; offset?: number } = {}) {
+    const p = new URLSearchParams();
+    if (opts.status) p.set("status", opts.status);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    if (opts.offset) p.set("offset", String(opts.offset));
+    return request<{ items: KbSuggestion[]; pendingCount: number; limit: number; offset: number }>(
+      `/api/admin/kb/suggestions?${p}`,
+    );
+  },
+  decideKbSuggestion(
+    id: number,
+    action: "approve" | "reject",
+    opts: { answerDraft?: string; rejectedReason?: string } = {},
+  ) {
+    return request<{ ok: boolean; kbDocumentId?: number }>(`/api/admin/kb/suggestions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ action, ...opts }),
     });
   },
 
@@ -768,6 +856,20 @@ export const saas = {
   deleteLead(id: number) {
     return request<{ ok: boolean }>(`/api/admin/leads/${id}`, { method: "DELETE" });
   },
+  async exportLeadsCsv(): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/admin/leads/export.csv`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "leads.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
   getLead(id: number) {
     return request<LeadDetail>(`/api/admin/leads/${id}`);
   },
@@ -877,6 +979,10 @@ export const saas = {
     });
   },
 
+  getFunnelAnalytics() {
+    return request<FunnelAnalytics>("/api/admin/funnel/analytics");
+  },
+
   // ── Skills / Styles / Experiments ────────────────────────────────────
   listSkills() {
     return request<{ items: SkillItem[] }>("/api/admin/skills");
@@ -886,5 +992,30 @@ export const saas = {
   },
   listExperiments() {
     return request<{ items: ExperimentItem[] }>("/api/admin/experiments");
+  },
+
+  // ── Dashboard ────────────────────────────────────────────────────────
+  getDashboardStats() {
+    return request<DashboardStats>("/api/admin/dashboard");
+  },
+
+  // ── Vacancies ────────────────────────────────────────────────────────
+  listVacancies() {
+    return request<{ items: VacancyItem[] }>("/api/admin/vacancies");
+  },
+  createVacancy(data: { title: string; body: string; url?: string; isActive?: boolean }) {
+    return request<VacancyItem>("/api/admin/vacancies", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateVacancy(id: number, data: { title?: string; body?: string; url?: string | null; isActive?: boolean }) {
+    return request<VacancyItem>(`/api/admin/vacancies/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  deleteVacancy(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/vacancies/${id}`, { method: "DELETE" });
   },
 };

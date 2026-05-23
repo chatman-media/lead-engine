@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DownloadIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 
 const KIND_COLOR: Record<string, string> = {
   intake: "border-blue-300",
@@ -48,6 +48,7 @@ export function SaasLeads() {
 
   // Lead search
   const [leadSearch, setLeadSearch] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   // Create lead dialog
   const [creating, setCreating] = useState(false);
@@ -174,6 +175,18 @@ export function SaasLeads() {
               className="h-8 pl-8 text-sm w-48"
             />
           </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={exporting || leads.length === 0}
+            onClick={async () => {
+              setExporting(true);
+              try { await saas.exportLeadsCsv(); } catch { /* ignore */ } finally { setExporting(false); }
+            }}
+          >
+            <DownloadIcon className="mr-1.5 size-3.5" />
+            {exporting ? "Экспорт…" : "CSV"}
+          </Button>
           <Button size="sm" onClick={() => { setCreating(true); setContacts([]); setContactSearch(""); }}>
             <PlusIcon className="mr-1.5 size-3.5" />
             Новый лид

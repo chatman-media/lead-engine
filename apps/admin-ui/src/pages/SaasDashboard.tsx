@@ -1,4 +1,4 @@
-import { FileTextIcon, PauseIcon, PlayIcon, Trash2Icon, UploadIcon } from "lucide-react";
+import { CheckIcon, FileTextIcon, LightbulbIcon, PauseIcon, PlayIcon, Trash2Icon, UploadIcon, XIcon } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -15,7 +15,9 @@ import {
   ApiError,
   type BillingPlan,
   clearToken,
+  type DashboardStats,
   type KbDoc,
+  type KbSuggestion,
   type OnboardingStatus,
   saas,
   type Tenant,
@@ -31,6 +33,7 @@ export function SaasDashboard() {
   const [billing, setBilling] = useState<BillingPlan | null>(null);
   const [stripeEnabled, setStripeEnabled] = useState(false);
   const [tenantInfo, setTenantInfo] = useState<TenantInfo | null>(null);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
   const [togglingPause, setTogglingPause] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -40,6 +43,11 @@ export function SaasDashboard() {
   const [pasteTopic, setPasteTopic] = useState("");
   const [uploading, setUploading] = useState(false);
 
+  // KB suggestions
+  const [suggestions, setSuggestions] = useState<KbSuggestion[]>([]);
+  const [suggestionDrafts, setSuggestionDrafts] = useState<Record<number, string>>({});
+  const [decidingId, setDecidingId] = useState<number | null>(null);
+
   function onAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
       clearToken();
@@ -47,6 +55,36 @@ export function SaasDashboard() {
       return true;
     }
     return false;
+  }
+
+  async function refreshSuggestions() {
+    try {
+      const res = await saas.listKbSuggestions({ status: "pending", limit: 20 });
+      setSuggestions(res.items);
+      setSuggestionDrafts((prev) => {
+        const next = { ...prev };
+        for (const s of res.items) {
+          if (!(s.id in next)) next[s.id] = s.answerDraft ?? "";
+        }
+        return next;
+      });
+    } catch {
+      // ignore — suggestions might not exist yet
+    }
+  }
+
+  async function handleDecide(id: number, action: "approve" | "reject") {
+    setDecidingId(id);
+    try {
+      await saas.decideKbSuggestion(id, action, {
+        answerDraft: action === "approve" ? suggestionDrafts[id] : undefined,
+      });
+      await Promise.all([refreshSuggestions(), refreshDocs(), refreshOnboarding()]);
+    } catch {
+      // ignore
+    } finally {
+      setDecidingId(null);
+    }
   }
 
   async function refreshDocs() {
@@ -111,9 +149,11 @@ export function SaasDashboard() {
         setTenant(me.tenant);
         await Promise.all([
           refreshDocs(),
+          refreshSuggestions(),
           refreshOnboarding(),
           refreshTenantInfo(),
           refreshBilling(),
+          saas.getDashboardStats().then(setStats).catch(() => {}),
         ]);
       } catch (err) {
         if (cancelled) return;
@@ -225,6 +265,61 @@ export function SaasDashboard() {
 
       {onboarding && <OnboardingChecklist status={onboarding} />}
 
+      {stats && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <p className="text-2xl font-bold">{stats.leads.total}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Лидов всего</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <p className="text-2xl font-bold">{stats.conversations.open}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Активных диалогов</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <p className="text-2xl font-bold text-amber-500">{stats.conversations.escalated}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Ждут оператора</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <p className="text-2xl font-bold">{stats.messages.last7days}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Сообщений за 7 дней</p>
+            </CardContent>
+          </Card>
+          {stats.leads.byStage.length > 0 && (
+            <div className="col-span-2 sm:col-span-4">
+              <Card>
+                <CardContent className="pt-4 pb-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Лиды по стадиям</p>
+                  <div className="flex flex-wrap gap-2">
+                    {stats.leads.byStage.map((s) => (
+                      <div
+                        key={s.slug}
+                        className="flex items-center gap-1.5 rounded-md border px-2.5 py-1"
+                      >
+                        {s.color && (
+                          <span
+                            className="size-2 rounded-full shrink-0"
+                            style={{ backgroundColor: s.color }}
+                          />
+                        )}
+                        <span className="text-xs text-muted-foreground">{s.displayName}</span>
+                        <span className="text-xs font-semibold">{s.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <div className="space-y-6">
           <Card>
@@ -324,6 +419,56 @@ export function SaasDashboard() {
               )}
             </CardContent>
           </Card>
+
+          {/* KB Suggestions */}
+          {suggestions.length > 0 && (
+            <Card>
+              <CardHeader className="flex-row items-center justify-between space-y-0">
+                <CardTitle className="flex items-center gap-2">
+                  <LightbulbIcon className="size-4 text-amber-500" />
+                  Предложения в базу знаний
+                </CardTitle>
+                <Badge variant="secondary">{suggestions.length}</Badge>
+              </CardHeader>
+              <CardContent>
+                <ul className="divide-y">
+                  {suggestions.map((s) => (
+                    <li key={s.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
+                      <p className="text-sm font-medium">{s.questionText}</p>
+                      <textarea
+                        className="min-h-[80px] w-full rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                        placeholder="Ответ для добавления в базу знаний…"
+                        value={suggestionDrafts[s.id] ?? ""}
+                        onChange={(e) =>
+                          setSuggestionDrafts((prev) => ({ ...prev, [s.id]: e.target.value }))
+                        }
+                      />
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          disabled={decidingId === s.id || !(suggestionDrafts[s.id] ?? "").trim()}
+                          onClick={() => handleDecide(s.id, "approve")}
+                        >
+                          <CheckIcon className="mr-1.5 size-3.5" />
+                          Добавить в КБ
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-muted-foreground hover:text-destructive"
+                          disabled={decidingId === s.id}
+                          onClick={() => handleDecide(s.id, "reject")}
+                        >
+                          <XIcon className="mr-1.5 size-3.5" />
+                          Отклонить
+                        </Button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         <div className="space-y-6">

@@ -17,6 +17,10 @@ export interface PlanLimits {
   maxChannels: number;
   /** Maximum KB documents. */
   maxKbDocuments: number;
+  /** Maximum admin team members (including superadmin). -1 = unlimited. */
+  maxAdmins: number;
+  /** Maximum active leads. -1 = unlimited. */
+  maxLeads: number;
   /** Inbound rate limit per minute (overrides env default if задан). */
   rateLimitPerMinute: number;
   /** Inbound rate limit per hour. */
@@ -43,6 +47,8 @@ export interface PlanLimits {
 const FREE: PlanLimits = {
   maxChannels: 1,
   maxKbDocuments: 50,
+  maxAdmins: 1,
+  maxLeads: 100,
   rateLimitPerMinute: 20,
   rateLimitPerHour: 200,
   label: "Free",
@@ -53,6 +59,8 @@ const FREE: PlanLimits = {
 const STARTER: PlanLimits = {
   maxChannels: 3,
   maxKbDocuments: 500,
+  maxAdmins: 3,
+  maxLeads: 1000,
   rateLimitPerMinute: 60,
   rateLimitPerHour: 600,
   label: "Starter",
@@ -63,6 +71,8 @@ const STARTER: PlanLimits = {
 const PRO: PlanLimits = {
   maxChannels: 10,
   maxKbDocuments: 10000,
+  maxAdmins: 10,
+  maxLeads: -1, // unlimited
   rateLimitPerMinute: 120,
   rateLimitPerHour: 2400,
   label: "Pro",
@@ -74,6 +84,8 @@ const ENTERPRISE: PlanLimits = {
   // Эффективно unlimited; реальные tenants сидят на self-host deploy'е.
   maxChannels: 100,
   maxKbDocuments: 100000,
+  maxAdmins: -1,
+  maxLeads: -1,
   rateLimitPerMinute: 600,
   rateLimitPerHour: 60000,
   label: "Enterprise",

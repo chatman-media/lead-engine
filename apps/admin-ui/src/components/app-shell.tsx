@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   BarChart2Icon,
+  BriefcaseIcon,
   CableIcon,
   DatabaseIcon,
   FlaskConicalIcon,
@@ -17,8 +18,9 @@ import {
   UserCircleIcon,
   ZapIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { type Admin, clearToken, saas, type Tenant } from "@/api/saas";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -44,6 +46,7 @@ const NAV: NavItem[] = [
   { to: "/leads", label: "Лиды", icon: UserCircleIcon },
   { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
   { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
+  { to: "/vacancies", label: "Вакансии", icon: BriefcaseIcon },
   { to: "/dashboard", label: "База знаний", icon: DatabaseIcon },
   { to: "/skills", label: "Навыки", icon: ZapIcon },
   { to: "/styles", label: "Стили", icon: SparklesIcon },
@@ -69,12 +72,16 @@ function Brand() {
   );
 }
 
-function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+function NavLinks({
+  onNavigate,
+  escalatedCount,
+}: { onNavigate?: () => void; escalatedCount?: number }) {
   const { pathname } = useLocation();
   return (
     <nav className="flex flex-col gap-0.5">
       {NAV.map(({ to, label, icon: Icon }) => {
         const active = pathname === to || pathname.startsWith(`${to}/`);
+        const badge = to === "/conversations" && (escalatedCount ?? 0) > 0 ? escalatedCount : null;
         return (
           <NavLink
             key={to}
@@ -91,7 +98,12 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
               <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary" />
             )}
             <Icon className="size-4 shrink-0" />
-            {label}
+            <span className="flex-1">{label}</span>
+            {badge !== null && (
+              <span className="ml-auto grid min-w-[18px] place-items-center rounded-full bg-amber-500 px-1 py-0.5 text-[10px] font-bold leading-none text-white">
+                {badge}
+              </span>
+            )}
           </NavLink>
         );
       })}
@@ -104,11 +116,13 @@ function SidebarBody({
   tenant,
   onLogout,
   onNavigate,
+  escalatedCount,
 }: {
   admin: Admin | null;
   tenant: Tenant | null;
   onLogout: () => void;
   onNavigate?: () => void;
+  escalatedCount?: number;
 }) {
   const initials = (admin?.email ?? "?").slice(0, 2).toUpperCase();
   return (
@@ -121,7 +135,7 @@ function SidebarBody({
         <p className="px-2.5 pb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
           Рабочее пространство
         </p>
-        <NavLinks onNavigate={onNavigate} />
+        <NavLinks onNavigate={onNavigate} escalatedCount={escalatedCount} />
 
         <p className="mt-6 px-2.5 pb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
           Настройка
@@ -179,6 +193,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [admin, setAdmin] = useState<Admin | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [escalatedCount, setEscalatedCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,6 +210,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Poll for escalated conversations every 30s; show toast on new escalations.
+  const prevEscalatedRef = useRef<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      try {
+        const stats = await saas.getDashboardStats();
+        if (cancelled) return;
+        const n = stats.conversations.escalated;
+        setEscalatedCount(n);
+        if (prevEscalatedRef.current !== null && n > prevEscalatedRef.current) {
+          const delta = n - prevEscalatedRef.current;
+          toast.warning(
+            delta === 1
+              ? "Новый диалог ждёт оператора"
+              : `${delta} новых диалога ждут оператора`,
+            {
+              description: "Перейдите в Диалоги чтобы ответить",
+              action: { label: "Перейти", onClick: () => navigate("/conversations") },
+              duration: 8000,
+            },
+          );
+        }
+        prevEscalatedRef.current = n;
+      } catch {
+        // ignore — no auth yet or network error
+      }
+    }
+    poll();
+    const id = setInterval(poll, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // biome-ignore lint/correctness/useExhaustiveDependencies: navigate is stable
+  }, []);
+
   async function handleLogout() {
     try {
       await saas.logout();
@@ -208,7 +260,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
       <aside className="bg-sidebar text-sidebar-foreground sticky top-0 hidden h-screen w-64 shrink-0 border-r border-sidebar-border md:block">
-        <SidebarBody admin={admin} tenant={tenant} onLogout={handleLogout} />
+        <SidebarBody admin={admin} tenant={tenant} onLogout={handleLogout} escalatedCount={escalatedCount} />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -226,6 +278,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 tenant={tenant}
                 onLogout={handleLogout}
                 onNavigate={() => setMobileOpen(false)}
+                escalatedCount={escalatedCount}
               />
             </SheetContent>
           </Sheet>

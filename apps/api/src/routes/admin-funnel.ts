@@ -2,12 +2,14 @@ import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import {
   experiments,
   funnels,
+  leadEvents,
+  leads,
   skills,
   stageDefinitions,
   stageFields,
   styles,
 } from "@chatman-media/storage";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, count, eq, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 
@@ -1047,6 +1049,96 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
   });
 
   // ── Skills ────────────────────────────────────────────────────────────────
+
+  /**
+   * GET /api/admin/funnel/analytics
+   * Per-stage funnel analytics: current leads, entries, exits, avg time in stage.
+   */
+  app.get("/api/admin/funnel/analytics", async (c) => {
+    const tenantId = c.var.tenantId;
+
+    const stages = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select({
+          id: stageDefinitions.id,
+          slug: stageDefinitions.slug,
+          displayName: stageDefinitions.displayName,
+          kind: stageDefinitions.kind,
+          color: stageDefinitions.color,
+          position: stageDefinitions.position,
+        })
+        .from(stageDefinitions)
+        .where(eq(stageDefinitions.tenantId, tenantId))
+        .orderBy(asc(stageDefinitions.position)),
+    );
+
+    if (stages.length === 0) return c.json({ stages: [] });
+
+    // Leads currently in each stage
+    const currentCounts = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select({
+          stageDefinitionId: leads.stageDefinitionId,
+          n: count(),
+        })
+        .from(leads)
+        .where(eq(leads.tenantId, tenantId))
+        .groupBy(leads.stageDefinitionId),
+    );
+    const currentMap = new Map(currentCounts.map((r) => [r.stageDefinitionId, Number(r.n)]));
+
+    // Entries per stage slug (toState events)
+    const entryCounts = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select({ toState: leadEvents.toState, n: count() })
+        .from(leadEvents)
+        .where(eq(leadEvents.tenantId, tenantId))
+        .groupBy(leadEvents.toState),
+    );
+    const entryMap = new Map(entryCounts.map((r) => [r.toState, Number(r.n)]));
+
+    // Average time in stage: for each (lead, stageSlug) entry event, find the
+    // next exit event and compute duration. Aggregated per stageSlug.
+    const avgTimeRows = await withTenant(opts.db, tenantId, async (tx) =>
+      tx.execute(sql`
+        SELECT
+          e_in.to_state AS slug,
+          AVG(e_out.created_at - e_in.created_at)::float AS avg_seconds
+        FROM lead_events e_in
+        JOIN LATERAL (
+          SELECT created_at
+          FROM lead_events
+          WHERE lead_id = e_in.lead_id
+            AND from_state = e_in.to_state
+            AND created_at > e_in.created_at
+          ORDER BY created_at ASC
+          LIMIT 1
+        ) e_out ON TRUE
+        WHERE e_in.tenant_id = ${tenantId}
+        GROUP BY e_in.to_state
+      `),
+    );
+    const avgMap = new Map<string, number>();
+    for (const row of avgTimeRows as unknown as Array<{ slug: string; avg_seconds: number | null }>) {
+      if (row.avg_seconds !== null) {
+        avgMap.set(row.slug, row.avg_seconds / 86400); // seconds → days
+      }
+    }
+
+    const result = stages.map((s) => ({
+      id: s.id,
+      slug: s.slug,
+      displayName: s.displayName,
+      kind: s.kind,
+      color: s.color,
+      position: s.position,
+      leadsCurrent: currentMap.get(s.id) ?? 0,
+      leadsEntered: entryMap.get(s.slug) ?? 0,
+      avgDaysInStage: avgMap.has(s.slug) ? Math.round(avgMap.get(s.slug)! * 10) / 10 : null,
+    }));
+
+    return c.json({ stages: result });
+  });
 
   /**
    * GET /api/admin/skills
