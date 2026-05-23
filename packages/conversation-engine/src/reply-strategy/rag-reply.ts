@@ -4,7 +4,14 @@ import type {
   ChatMessage,
   EmbeddingClient as RagEmbeddingClient,
 } from "@chatman-media/llm-router";
-import { answerWithRag, type IKbStore, type Style, StyleSchema } from "@chatman-media/kb";
+import {
+  answerWithRag,
+  type DirectorHookForPrompt,
+  type IKbStore,
+  type SkillForPrompt,
+  type Style,
+  StyleSchema,
+} from "@chatman-media/kb";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
@@ -73,6 +80,23 @@ export interface RagReplyStrategyOpts {
     tenantId: number;
     contactId: number;
   }) => Promise<boolean>;
+  /**
+   * Загрузить включённые навыки убеждения для тенанта. Возвращает список
+   * SkillForPrompt, уже отфильтрованных по is_enabled = true.
+   * Stage-фильтрация (intake/active/always) выполняется внутри
+   * composeSystemPrompt по applicableStages.
+   * Если не задан — навыки не инжектируются (silent fallback).
+   */
+  resolveSkills?: (input: {
+    tenantId: number;
+  }) => Promise<readonly SkillForPrompt[]>;
+  /**
+   * Загрузить активные директорские хуки тенанта (is_active = true).
+   * Если не задан — хуки не инжектируются.
+   */
+  resolveDirectorHooks?: (input: {
+    tenantId: number;
+  }) => Promise<readonly DirectorHookForPrompt[]>;
 }
 
 function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
@@ -145,6 +169,16 @@ export class RagReplyStrategy implements ReplyStrategy {
         })
       : null;
 
+    // Load persuasion skills and director hooks in parallel.
+    // Both are optional — if resolvers not configured, arrays stay empty
+    // and composeSystemPrompt silently skips those blocks.
+    const [skills, directorHooks] = await Promise.all([
+      this.opts.resolveSkills ? this.opts.resolveSkills({ tenantId }) : Promise.resolve([]),
+      this.opts.resolveDirectorHooks
+        ? this.opts.resolveDirectorHooks({ tenantId })
+        : Promise.resolve([]),
+    ]);
+
     // answerWithRag принимает rag's ChatClient/EmbeddingClient. Структурно
     // наш llm-router'овский ChatClient compatible (rag's ChatMessage.content
     // допускает null — наш string ужe; complete(messages, opts?) совпадает).
@@ -164,6 +198,8 @@ export class RagReplyStrategy implements ReplyStrategy {
       // persona, sales framework, hooks, skills для построения system prompt.
       // При null — rag fallback'нет на DEFAULT_PERSONA и базовый промпт.
       ...(style ? { style } : {}),
+      ...(skills.length > 0 ? { skills } : {}),
+      ...(directorHooks.length > 0 ? { directorHooks } : {}),
     });
 
     if (!result.text || result.text.trim().length === 0) return null;

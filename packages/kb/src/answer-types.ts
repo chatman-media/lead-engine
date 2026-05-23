@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
-import type { FunnelStage, SkillForPrompt, Style } from "./styles.ts";
+import type { DirectorHookForPrompt, FunnelStage, SkillForPrompt, Style } from "./styles.ts";
 import type { AnyRagTool } from "./tools.ts";
 import type { IKbStore, KbSearchHit } from "./types.ts";
 
@@ -41,6 +41,12 @@ export interface AnswerInput {
   vacanciesBlock?: string;
   vacancyGuard?: boolean;
   skills?: readonly SkillForPrompt[];
+  /**
+   * Tenant-specific director hooks to inject into the system prompt.
+   * Loaded from `director_hooks` table filtered by `is_active = true`.
+   * Always injected (not stage-filtered) — the LLM decides when to apply.
+   */
+  directorHooks?: readonly DirectorHookForPrompt[];
   booksPriority?: boolean;
   /**
    * Support mode — set when the lead is past the sales stage and waiting on a

@@ -98,6 +98,20 @@ export function composeSystemPrompt(
       hooks.map((h) => `- ${HOOK_LABELS[h.kind]}: ${h.text}`).join("\n")
     : "";
 
+  // Director hooks: tenant-specific scripted persuasion techniques. Always
+  // injected when present — not filtered by stage. Appear BEFORE universal
+  // skills so they take priority in LLM attention.
+  const directorHooksBlock =
+    options.directorHooks && options.directorHooks.length > 0
+      ? `ХУКИ УБЕЖДЕНИЯ (применяй когда уместно — не все сразу):\n` +
+        options.directorHooks
+          .map((h) => {
+            const triggerLine = h.triggerHint ? `Когда: ${h.triggerHint}\n` : "";
+            return `━━ ${h.name} ━━\n${triggerLine}${h.body}`;
+          })
+          .join("\n\n")
+      : "";
+
   const skillsForStage =
     options.skills?.filter(
       (s) => s.applicableStages.length === 0 || s.applicableStages.includes(stage),
@@ -161,6 +175,7 @@ export function composeSystemPrompt(
     voiceBlock,
     support ? "" : frameworkBlock,
     support ? "" : hooksBlock,
+    support ? "" : directorHooksBlock,
     support ? "" : skillsBlock,
     support || stageBlock,
     summaryBlock,
