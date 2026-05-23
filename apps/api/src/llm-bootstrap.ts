@@ -2,6 +2,7 @@ import {
   type Db,
   DrizzleKbStore,
   ExperimentsRepo,
+  getDecryptedSecret,
   LlmMemoryExtractor,
   LlmReplyStrategy,
   loadExperimentVariants,
@@ -13,7 +14,7 @@ import {
   type StageClassifier,
   StylesRepo,
 } from "@chatman-media/conversation-engine";
-import { ABRouter, type DirectorHookForPrompt, type SkillForPrompt, type Style } from "@chatman-media/kb";
+import { ABRouter, type AnyRagTool, type DirectorHookForPrompt, makeBookingLinkTool, type SkillForPrompt, type Style } from "@chatman-media/kb";
 import {
   type EmbeddingClient as RagEmbeddingClient,
   InMemoryLlmRouter,
@@ -189,13 +190,23 @@ function makeSupportModeResolver(db: Db) {
   };
 }
 
+export interface ReplyStrategyBundle {
+  strategy: ReplyStrategy;
+  /**
+   * Invalidate the per-tenant tools cache for a specific tenant.
+   * Call this after the tenant updates their tool configuration (booking URL, etc.)
+   * so the next incoming message picks up the new config without a restart.
+   */
+  invalidateToolsFor: (tenantId: number) => void;
+}
+
 export function makeReplyStrategy(
   ref: LoadedRef,
   cfg: ApiConfig,
   db: Db,
   metrics?: PlatformMetrics,
   recordUsage?: RecordUsage,
-): ReplyStrategy | null {
+): ReplyStrategyBundle | null {
   if (!ref.current.anyTenantHasChat) return null;
 
   for (const [tenantId, perPurpose] of ref.current.byTenant) {
@@ -213,14 +224,17 @@ export function makeReplyStrategy(
   // hot-reload с появлением embed — restart нужен. (Acceptable trade-off:
   // chat/embed добавление редкое, токены/каналы — частое.)
   if (!ref.current.anyTenantHasEmbed) {
-    return new LlmReplyStrategy(
-      {
-        template,
-        resolveChat: (tenantId: number) => ref.router.resolveChat(tenantId, "chat"),
-        resolveIsSupport: makeSupportModeResolver(db),
-      },
-      (tenantId: number) => new MessagesRepo({ db, tenantId }),
-    );
+    return {
+      strategy: new LlmReplyStrategy(
+        {
+          template,
+          resolveChat: (tenantId: number) => ref.router.resolveChat(tenantId, "chat"),
+          resolveIsSupport: makeSupportModeResolver(db),
+        },
+        (tenantId: number) => new MessagesRepo({ db, tenantId }),
+      ),
+      invalidateToolsFor: () => {}, // LlmReplyStrategy has no tools cache
+    };
   }
 
   // resolveStyle: priority chain (см. предыдущую версию для деталей).
@@ -321,7 +335,32 @@ export function makeReplyStrategy(
     return rows;
   }
 
-  return new RagReplyStrategy(
+  // resolveTools: builds the list of agentic tools enabled for the tenant.
+  // Results are cached per-tenant and invalidated via toolsCache.delete(tenantId)
+  // when the admin UI updates tool config (onReload hook in admin-tools route).
+  const toolsCache = new Map<number, AnyRagTool[]>();
+  async function resolveTools(input: {
+    tenantId: number;
+    conversationId: number;
+  }): Promise<AnyRagTool[]> {
+    const cached = toolsCache.get(input.tenantId);
+    if (cached !== undefined) return cached;
+
+    const bookingUrl = await getDecryptedSecret({
+      db,
+      tenantId: input.tenantId,
+      key: "tool_booking_url",
+      masterKeyHex: cfg.masterKeyHex,
+    });
+
+    const tools: AnyRagTool[] = [];
+    if (bookingUrl) tools.push(makeBookingLinkTool(bookingUrl));
+
+    toolsCache.set(input.tenantId, tools);
+    return tools;
+  }
+
+  const strategy = new RagReplyStrategy(
     {
       template,
       resolveChat: (tenantId: number) => {
@@ -360,9 +399,15 @@ export function makeReplyStrategy(
       resolveIsSupport: makeSupportModeResolver(db),
       resolveSkills,
       resolveDirectorHooks,
+      resolveTools,
     },
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
   );
+
+  return {
+    strategy,
+    invalidateToolsFor: (tenantId: number) => toolsCache.delete(tenantId),
+  };
 }
 
 /**

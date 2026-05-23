@@ -6,6 +6,7 @@ import type {
 } from "@chatman-media/llm-router";
 import {
   answerWithRag,
+  type AnyRagTool,
   type DirectorHookForPrompt,
   type IKbStore,
   type SkillForPrompt,
@@ -97,6 +98,24 @@ export interface RagReplyStrategyOpts {
   resolveDirectorHooks?: (input: {
     tenantId: number;
   }) => Promise<readonly DirectorHookForPrompt[]>;
+  /**
+   * Загрузить активные agentic tools для тенанта.
+   * Вызывается один раз на каждый входящий message.
+   * Если не задан или возвращает пустой массив — tool-loop не запускается
+   * (поведение как раньше: один LLM-вызов без инструментов).
+   *
+   * @example
+   * ```ts
+   * resolveTools: async ({ tenantId }) => {
+   *   const url = await getBookingUrl(tenantId);
+   *   return url ? [makeBookingLinkTool(url)] : [];
+   * }
+   * ```
+   */
+  resolveTools?: (input: {
+    tenantId: number;
+    conversationId: number;
+  }) => Promise<AnyRagTool[]> | AnyRagTool[];
 }
 
 function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
@@ -169,13 +188,16 @@ export class RagReplyStrategy implements ReplyStrategy {
         })
       : null;
 
-    // Load persuasion skills and director hooks in parallel.
-    // Both are optional — if resolvers not configured, arrays stay empty
-    // and composeSystemPrompt silently skips those blocks.
-    const [skills, directorHooks] = await Promise.all([
+    // Load persuasion skills, director hooks, and agentic tools in parallel.
+    // All are optional — if resolvers not configured, arrays stay empty
+    // and the pipeline silently skips those blocks.
+    const [skills, directorHooks, tools] = await Promise.all([
       this.opts.resolveSkills ? this.opts.resolveSkills({ tenantId }) : Promise.resolve([]),
       this.opts.resolveDirectorHooks
         ? this.opts.resolveDirectorHooks({ tenantId })
+        : Promise.resolve([]),
+      this.opts.resolveTools
+        ? this.opts.resolveTools({ tenantId, conversationId: input.conversationId })
         : Promise.resolve([]),
     ]);
 
@@ -200,6 +222,7 @@ export class RagReplyStrategy implements ReplyStrategy {
       ...(style ? { style } : {}),
       ...(skills.length > 0 ? { skills } : {}),
       ...(directorHooks.length > 0 ? { directorHooks } : {}),
+      ...(tools.length > 0 ? { tools } : {}),
     });
 
     if (!result.text || result.text.trim().length === 0) return null;

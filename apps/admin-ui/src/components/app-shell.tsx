@@ -10,6 +10,7 @@ import {
   GitBranchIcon,
   LinkIcon,
   LogOutIcon,
+  WrenchIcon,
   type LucideIcon,
   MenuIcon,
   MessagesSquareIcon,
@@ -76,6 +77,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Система",
     items: [
       { to: "/channels", label: "Каналы", icon: CableIcon },
+      { to: "/tools", label: "Инструменты", icon: WrenchIcon },
       { to: "/referral", label: "Партнёры", icon: LinkIcon },
       { to: "/team", label: "Команда", icon: UsersIcon },
       { to: "/billing", label: "LLM-использование", icon: BarChart2Icon },
