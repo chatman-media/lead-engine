@@ -578,6 +578,92 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       fields: [],
     },
   ],
+
+  // Универсальный шаблон найма — подходит для любого HR-агентства без
+  // специфики ОАЭ/артистов. Используется при продажах через партнёрскую сеть.
+  recruitment_generic: [
+    {
+      slug: "new_lead",
+      displayName: "Новый лид",
+      kind: "intake",
+      stageType: "form_fill",
+      position: 0,
+      color: "#3b82f6",
+      nextStages: ["qualifying", "rejected"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "full_name", displayName: "Имя и фамилия", fieldType: "text", required: true, aiExtractable: true, position: 0 },
+        { slug: "phone", displayName: "Телефон / Telegram", fieldType: "text", required: true, aiExtractable: true, position: 1 },
+        { slug: "position_interest", displayName: "Интересующая должность", fieldType: "text", required: true, aiExtractable: true, position: 2 },
+      ],
+    },
+    {
+      slug: "qualifying",
+      displayName: "Квалификация",
+      kind: "active",
+      stageType: "form_fill",
+      position: 1,
+      color: "#f59e0b",
+      nextStages: ["interview_scheduled", "rejected"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "experience_years", displayName: "Опыт работы (лет)", fieldType: "number", required: true, aiExtractable: true, position: 0 },
+        { slug: "current_salary", displayName: "Текущая зарплата", fieldType: "text", required: false, aiExtractable: true, hint: "укажите валюту", position: 1 },
+        { slug: "expected_salary", displayName: "Ожидаемая зарплата", fieldType: "text", required: true, aiExtractable: true, hint: "укажите валюту", position: 2 },
+        { slug: "availability", displayName: "Когда готов выйти", fieldType: "text", required: true, aiExtractable: true, hint: "например: сразу / через 2 недели / после 1 июня", position: 3 },
+        { slug: "relocation", displayName: "Готов к релокации", fieldType: "boolean", required: false, aiExtractable: true, position: 4 },
+        { slug: "notes", displayName: "Дополнительно", fieldType: "textarea", required: false, aiExtractable: true, position: 5 },
+      ],
+    },
+    {
+      slug: "interview_scheduled",
+      displayName: "Интервью назначено",
+      kind: "active",
+      stageType: "milestone",
+      position: 2,
+      color: "#8b5cf6",
+      nextStages: ["offer_sent", "rejected"],
+      fields: [
+        { slug: "interview_date", displayName: "Дата и время интервью", fieldType: "date", required: true, aiExtractable: false, position: 0 },
+        { slug: "interview_format", displayName: "Формат", fieldType: "select", required: false, aiExtractable: true, position: 1,
+          optionsJson: '[{"value":"online","label":"Онлайн"},{"value":"office","label":"Офис"},{"value":"phone","label":"Телефон"}]' },
+      ],
+    },
+    {
+      slug: "offer_sent",
+      displayName: "Оффер отправлен",
+      kind: "active",
+      stageType: "milestone",
+      position: 3,
+      color: "#ec4899",
+      staleTimeoutDays: 7,
+      nextStages: ["hired", "rejected"],
+      fields: [
+        { slug: "salary_offered", displayName: "Предложенная зарплата", fieldType: "text", required: true, aiExtractable: false, position: 0 },
+        { slug: "start_date", displayName: "Дата выхода", fieldType: "date", required: false, aiExtractable: false, position: 1 },
+      ],
+    },
+    {
+      slug: "hired",
+      displayName: "Принят",
+      kind: "terminal_won",
+      stageType: "milestone",
+      position: 4,
+      color: "#22c55e",
+      nextStages: [],
+      fields: [],
+    },
+    {
+      slug: "rejected",
+      displayName: "Отказ",
+      kind: "terminal_lost",
+      stageType: "milestone",
+      position: 5,
+      color: "#ef4444",
+      nextStages: [],
+      fields: [],
+    },
+  ],
 };
 
 /**

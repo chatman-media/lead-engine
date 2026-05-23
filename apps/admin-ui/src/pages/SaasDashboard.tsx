@@ -266,11 +266,19 @@ export function SaasDashboard() {
       {onboarding && <OnboardingChecklist status={onboarding} />}
 
       {stats && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           <Card>
             <CardContent className="pt-4 pb-3">
               <p className="text-2xl font-bold">{stats.leads.total}</p>
               <p className="text-xs text-muted-foreground mt-0.5">Лидов всего</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <p className="text-2xl font-bold text-green-500">
+                {stats.leads.byStage.filter((s) => s.kind === "terminal_won").reduce((sum, s) => sum + s.count, 0)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">Закрыто ботом</p>
             </CardContent>
           </Card>
           <Card>
@@ -292,7 +300,7 @@ export function SaasDashboard() {
             </CardContent>
           </Card>
           {stats.leads.byStage.length > 0 && (
-            <div className="col-span-2 sm:col-span-4">
+            <div className="col-span-2 sm:col-span-5">
               <Card>
                 <CardContent className="pt-4 pb-3">
                   <p className="text-xs font-medium text-muted-foreground mb-2">Лиды по стадиям</p>
