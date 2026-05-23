@@ -41,6 +41,8 @@ import { makeAdminKbRoutes } from "./routes/admin-kb.ts";
 import { makeAdminLlmConfigsRoutes } from "./routes/admin-llm-configs.ts";
 import { makeAdminOnboardingRoutes } from "./routes/admin-onboarding.ts";
 import { makeAdminTenantRoutes } from "./routes/admin-tenant.ts";
+import { makeAdminLeadsRoutes } from "./routes/admin-leads.ts";
+import { makeAdminFunnelRoutes } from "./routes/admin-funnel.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
@@ -276,6 +278,14 @@ async function main() {
   // Tenant info + pause/resume.
   app.route("/", makeAdminTenantRoutes({ db, onStatusChange: reloader.reloadChannels }));
   log.info("admin-tenant routes enabled (pause/resume)");
+
+  // Leads pipeline (list, create, stage transition, field values).
+  app.route("/", makeAdminLeadsRoutes({ db }));
+  log.info("admin-leads routes enabled");
+
+  // Funnel builder (stage_definitions, stage_fields) + skills list.
+  app.route("/", makeAdminFunnelRoutes({ db }));
+  log.info("admin-funnel routes enabled");
 
   // Diagnostics — health-check для tenant setup'а.
   // resolveChat передаём для ?live=1 LLM smoke-test (стоит ~1 токен).

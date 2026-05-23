@@ -10,10 +10,16 @@ import { SaasChannels } from "./pages/SaasChannels.tsx";
 import { SaasConversations } from "./pages/SaasConversations.tsx";
 import { SaasDashboard } from "./pages/SaasDashboard.tsx";
 import { SaasDiagnostics } from "./pages/SaasDiagnostics.tsx";
+import { SaasExperiments } from "./pages/SaasExperiments.tsx";
+import { SaasFunnel } from "./pages/SaasFunnel.tsx";
+import { SaasLeadDetail } from "./pages/SaasLeadDetail.tsx";
+import { SaasLeads } from "./pages/SaasLeads.tsx";
 import { SaasLogin } from "./pages/SaasLogin.tsx";
 import { SaasOnboarding } from "./pages/SaasOnboarding.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
 import { SaasSignup } from "./pages/SaasSignup.tsx";
+import { SaasSkills } from "./pages/SaasSkills.tsx";
+import { SaasStyles } from "./pages/SaasStyles.tsx";
 import { SaasTeam } from "./pages/SaasTeam.tsx";
 
 /**
@@ -148,6 +154,30 @@ export function App() {
                 <SaasTeam />
               </Shell>
             }
+          />
+          <Route
+            path="/leads"
+            element={<Shell><SaasLeads /></Shell>}
+          />
+          <Route
+            path="/leads/:id"
+            element={<Shell><SaasLeadDetail /></Shell>}
+          />
+          <Route
+            path="/funnel"
+            element={<Shell><SaasFunnel /></Shell>}
+          />
+          <Route
+            path="/skills"
+            element={<Shell><SaasSkills /></Shell>}
+          />
+          <Route
+            path="/styles"
+            element={<Shell><SaasStyles /></Shell>}
+          />
+          <Route
+            path="/experiments"
+            element={<Shell><SaasExperiments /></Shell>}
           />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
