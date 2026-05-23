@@ -1,6 +1,6 @@
 # Roadmap
 
-Последнее обновление: 2026-05-23 (GTM-стратегия $1M ARR + партнёрская модель).
+Последнее обновление: 2026-05-24 (GTM-инфра Phase 1 complete: рефкоды + sales-бот + agentic booking tool).
 
 Стратегический контекст — см. [`COMPETITORS.md`](COMPETITORS.md), [`POSITIONING.md`](POSITIONING.md).
 
@@ -160,7 +160,7 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
 - ✅ **Recruitment skills (Phase 1)** — 3 новых skill: `qualify-budget-via-spin`,
   `objection-visa-cost`, `close-soft-deposit`; style `recruiter-empathetic-v1`
 
-### GTM-инфраструктура (PR #87, май 2026)
+### GTM-инфраструктура (PR #87 + PR #90, май 2026)
 
 - ✅ **Партнёрские реферальные коды** — `referral_codes` таблица; `POST/GET/DELETE
   /api/admin/referral-codes`; signup принимает `referralCode` (best-effort tracking);
@@ -171,6 +171,14 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
   Сид через `POST /api/admin/funnel/seed { template: "recruitment_generic" }`
 - ✅ **«Закрыто ботом» метрика** — новая карточка на дашборде: сумма лидов в
   `terminal_won` стадиях. Ключевой ROI-показатель для удержания клиентов и YouTube-кейсов
+- ✅ **Sales-бот (meta-демо)** — `leadengine_sales_v1` NEPQ-воронка для продажи
+  lead-engine рекрутёрам через Telegram. Полный KB-комплект: обзор продукта,
+  кейс UAE, возражения/FAQ, сравнение конкурентов. System prompt «Алекс» с
+  Cialdini-элементами. `docs/sales-bot/` — готово к деплою за 15 минут.
+- ✅ **Agentic booking tool** — `makeBookingLinkTool` (RagTool): LLM сам
+  вызывает инструмент когда лид просит записаться → отдаёт ссылку Calendly/Cal.com.
+  Wired в `RagReplyStrategy` через `resolveTools()` с hot-invalidation кеша.
+  UI `/settings/tools` для настройки booking URL. Хранится в `tenant_secrets`.
 
 ### UX + Telegram userbot (май 2026)
 
@@ -273,14 +281,15 @@ critical channel coverage.
 Сейчас bot только READS КБ + replies. Чтобы конкурировать с Sierra /
 Decagon — agent должен ДЕЛАТЬ. MVP toolset:
 
-- [ ] `calendar.book_slot(date, slotId)` — встроенный slot-store
+- ✅ `booking.get_link()` — `makeBookingLinkTool` wired в RagReplyStrategy (PR #90)
 - [ ] `crm.create_lead(name, phone, notes)` — internal leads table или
   outbound HTTP POST к Bitrix24 / AmoCRM
+- [ ] `calendar.book_slot(date, slotId)` — native slot-store (сейчас: pass-through ссылка)
 - [ ] `payment.create_invoice(amount, currency)` — Stripe / YooKassa
 - [ ] `notify.alert_operator(reason)` — escalation в Telegram-чат админов
 
-Tool-loop infra в `@chatman-media/kb` уже есть (PR #18). Расширить под
-general-purpose.
+Tool-loop infra в `@chatman-media/kb` уже есть + wired (PR #90). Расширять
+по следующему инструменту: AmoCRM/Bitrix24 create-lead (нужен для Phase 2 CIS).
 
 ### M8. Russia/CIS payments + CRM
 
@@ -489,7 +498,7 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
 
 ## Краткий summary
 
-**Где мы сейчас (PR #87, май 2026):**
+**Где мы сейчас (PR #90, май 2026):**
 
 - Self-service onboarding end-to-end без env vars / рестартов
 - Channels: TG bot + TG userbot + WhatsApp + web widget — все через UI
@@ -497,7 +506,8 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
 - KB: file/text upload + RAG, dedup по content_hash
 - **Stripe billing wired** — 14-day trial, customer portal, 402 quota enforcement
 - Operator inbox: auto-poll 5s, mode-toggle takeover, audit log, pause/resume
-- **GTM-инфра:** партнёрские коды, `recruitment_generic` шаблон, метрика «закрыто ботом»
+- **GTM-инфра:** партнёрские коды, `recruitment_generic` + `leadengine_sales_v1` шаблоны, метрика «закрыто ботом», sales-бот KB
+- **Agentic tool calls:** booking link wired, tool-loop engine готов к расширению
 - 741 tests, multi-tenant RLS, encrypted secrets, observability
 - 1 живой prod tenant (recruitment UAE), Stripe-ready
 
