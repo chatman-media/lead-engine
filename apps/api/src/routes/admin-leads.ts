@@ -31,7 +31,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
   /**
    * GET /api/admin/leads
-   * Query: ?stageId=<id> | ?state=<slug> | ?limit=N | ?offset=N
+   * Query: ?stageId=<id> | ?state=<slug> | ?contactId=<id> | ?limit=N | ?offset=N
    */
   app.get("/api/admin/leads", async (c) => {
     const tenantId = c.var.tenantId;
@@ -39,6 +39,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     const offset = Math.max(Number(c.req.query("offset") ?? "0"), 0);
     const stageIdParam = c.req.query("stageId");
     const stateParam = c.req.query("state");
+    const contactIdParam = c.req.query("contactId");
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
       const conditions = [eq(leads.tenantId, tenantId)];
@@ -47,6 +48,9 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       }
       if (stateParam) {
         conditions.push(eq(leads.state, stateParam));
+      }
+      if (contactIdParam) {
+        conditions.push(eq(leads.userId, Number(contactIdParam)));
       }
 
       return tx

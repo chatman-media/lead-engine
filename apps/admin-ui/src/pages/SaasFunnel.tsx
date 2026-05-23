@@ -199,6 +199,7 @@ export function SaasFunnel() {
             { id: "visa", label: "Виза / иммиграция", icon: "🛂" },
             { id: "real_estate", label: "Недвижимость", icon: "🏠" },
             { id: "modeling", label: "Модельное агентство", icon: "✨" },
+            { id: "recruitment", label: "Рекрутинг (UAE)", icon: "👔" },
           ].map((tpl) => (
             <Button
               key={tpl.id}

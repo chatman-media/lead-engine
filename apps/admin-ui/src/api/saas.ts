@@ -623,10 +623,11 @@ export const saas = {
   },
 
   // ── Conversations (read-only) ────────────────────────────────────────
-  listConversations(opts: { limit?: number; cursor?: number } = {}) {
+  listConversations(opts: { limit?: number; cursor?: number; contactId?: number } = {}) {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.cursor) params.set("cursor", String(opts.cursor));
+    if (opts.contactId) params.set("contactId", String(opts.contactId));
     const qs = params.toString();
     return request<{
       items: ConversationListItem[];
@@ -751,10 +752,11 @@ export const saas = {
   },
 
   // ── Lead pipeline ────────────────────────────────────────────────────
-  listLeads(opts: { stageId?: number; state?: string; limit?: number; offset?: number } = {}) {
+  listLeads(opts: { stageId?: number; state?: string; contactId?: number; limit?: number; offset?: number } = {}) {
     const p = new URLSearchParams();
     if (opts.stageId) p.set("stageId", String(opts.stageId));
     if (opts.state) p.set("state", opts.state);
+    if (opts.contactId) p.set("contactId", String(opts.contactId));
     if (opts.limit) p.set("limit", String(opts.limit));
     if (opts.offset) p.set("offset", String(opts.offset));
     const qs = p.toString();

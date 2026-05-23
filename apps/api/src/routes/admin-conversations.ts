@@ -47,6 +47,8 @@ export function makeAdminConversationsRoutes(
     const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 30, 1), 100);
     const cursorRaw = c.req.query("cursor");
     const cursor = cursorRaw ? Number.parseInt(cursorRaw, 10) : null;
+    const contactIdRaw = c.req.query("contactId");
+    const contactIdFilter = contactIdRaw ? Number.parseInt(contactIdRaw, 10) : null;
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
       // Correlated subquery для last message preview: берём последний non-system
@@ -82,8 +84,11 @@ export function makeAdminConversationsRoutes(
             ? and(
                 eq(conversations.tenantId, tenantId),
                 lt(conversations.lastMessageAt, cursor),
+                ...(contactIdFilter !== null ? [eq(conversations.userId, contactIdFilter)] : []),
               )
-            : eq(conversations.tenantId, tenantId),
+            : contactIdFilter !== null
+              ? and(eq(conversations.tenantId, tenantId), eq(conversations.userId, contactIdFilter))
+              : eq(conversations.tenantId, tenantId),
         )
         .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
         .limit(limit + 1);

@@ -191,6 +191,7 @@ export function SaasLeadDetail() {
   const navigate = useNavigate();
   const [data, setData] = useState<LeadDetail | null>(null);
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
+  const [conversationId, setConversationId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [noteText, setNoteText] = useState("");
@@ -231,6 +232,13 @@ export function SaasLeadDetail() {
     reload();
     saas.getFunnel().then(setFunnel).catch(() => {});
   }, [id]);
+
+  useEffect(() => {
+    if (!data?.contact) return;
+    saas.listConversations({ contactId: data.contact.id, limit: 1 })
+      .then((r) => setConversationId(r.items[0]?.id ?? null))
+      .catch(() => {});
+  }, [data?.contact?.id]);
 
   async function handleAddNote() {
     if (!id || !noteText.trim()) return;
@@ -547,6 +555,17 @@ export function SaasLeadDetail() {
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Контакт</span>
                   <span>{contact.displayName}</span>
+                </div>
+              )}
+              {conversationId !== null && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Диалог</span>
+                  <Link
+                    to={`/conversations/${conversationId}`}
+                    className="text-primary underline text-sm"
+                  >
+                    Открыть →
+                  </Link>
                 </div>
               )}
             </CardContent>
