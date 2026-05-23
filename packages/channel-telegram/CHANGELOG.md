@@ -1,0 +1,14 @@
+# @chatman-media/channel-telegram-v1.0.0 (2026-05-23)
+
+
+### Bug Fixes
+
+* **release:** publish via bun instead of @semantic-release/npm (workspace: protocol) ([#66](https://github.com/chatman-media/lead-engine/issues/66)) ([942c3f9](https://github.com/chatman-media/lead-engine/commit/942c3f9a9f46f00b5cdb416d26303375bc20a7d6))
+
+
+### Features
+
+* **channel-telegram:** full MTProto userbot — health events + downloadMedia + signalTyping (Issue [#3](https://github.com/chatman-media/lead-engine/issues/3) / G) ([dc307af](https://github.com/chatman-media/lead-engine/commit/dc307af5ca0365bf0867a4527ed9617a05d4d41d))
+* **channel-telegram:** MTProto userbot adapter — connect/receive/send (Этап 2b-cont) ([b24f9d9](https://github.com/chatman-media/lead-engine/commit/b24f9d948cb5d2137f3adbf6c1e82653e01830d8))
+* **channel-telegram:** TelegramBotAdapter поверх ChannelAdapter (Этап 2b, часть 1) ([7c02207](https://github.com/chatman-media/lead-engine/commit/7c022071fa0316471c485584a1175624a413047e)), closes [#3](https://github.com/chatman-media/lead-engine/issues/3)
+* онбординг-мастер + Telegram userbot (личный аккаунт) ([#67](https://github.com/chatman-media/lead-engine/issues/67)) ([b6d70de](https://github.com/chatman-media/lead-engine/commit/b6d70ded4d91c791c526eb17eaeedb68c5d1a2d6))
