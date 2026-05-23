@@ -53,10 +53,10 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
 ];
 
 const KIND_COLORS: Record<string, string> = {
-  intake: "bg-blue-50 border-blue-200",
-  active: "bg-white border-gray-200",
-  terminal_won: "bg-emerald-50 border-emerald-200",
-  terminal_lost: "bg-red-50 border-red-200",
+  intake: "bg-blue-500/10 border-blue-500/30",
+  active: "bg-card border-border",
+  terminal_won: "bg-emerald-500/10 border-emerald-500/30",
+  terminal_lost: "bg-red-500/10 border-red-500/30",
 };
 
 export function SaasFunnel() {

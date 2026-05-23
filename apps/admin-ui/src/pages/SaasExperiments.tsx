@@ -6,10 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const STATUS_BADGE: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-800",
-  running: "bg-green-100 text-green-800",
-  paused: "bg-yellow-100 text-yellow-800",
-  done: "bg-blue-100 text-blue-800",
+  draft: "bg-secondary text-secondary-foreground",
+  running: "bg-green-500/10 text-green-600 dark:text-green-400",
+  paused: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
+  done: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -73,7 +73,7 @@ export function SaasExperiments() {
                 <CardTitle className="flex items-center justify-between text-sm">
                   <span className="font-mono">{exp.slug}</span>
                   <Badge
-                    className={STATUS_BADGE[exp.status] ?? "bg-gray-100 text-gray-800"}
+                    className={STATUS_BADGE[exp.status] ?? "bg-secondary text-secondary-foreground"}
                     variant="outline"
                   >
                     {STATUS_LABEL[exp.status] ?? exp.status}
