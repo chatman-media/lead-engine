@@ -141,6 +141,112 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
   });
 
   /**
+   * GET /api/admin/leads/export.csv
+   * Возвращает всех лидов тенанта в виде CSV-файла
+   */
+  app.get("/api/admin/leads/export.csv", async (c) => {
+    const tenantId = c.var.tenantId;
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select({
+          id: leads.id,
+          state: leads.state,
+          contactName: contacts.displayName,
+          stageName: stageDefinitions.displayName,
+          createdAt: leads.createdAt,
+          updatedAt: leads.updatedAt,
+          rejectedReason: leads.rejectedReason,
+        })
+        .from(leads)
+        .leftJoin(contacts, eq(leads.userId, contacts.id))
+        .leftJoin(stageDefinitions, eq(leads.stageDefinitionId, stageDefinitions.id))
+        .orderBy(desc(leads.updatedAt)),
+    );
+
+    // Fetch field values for all leads
+    const leadIds = rows.map((r) => r.id);
+    const fieldMap = new Map<number, Record<string, string>>();
+
+    if (leadIds.length > 0) {
+      const fieldVals = await withTenant(opts.db, tenantId, async (tx) =>
+        tx
+          .select({
+            leadId: leadFieldValues.leadId,
+            fieldSlug: stageFields.slug,
+            valueJson: leadFieldValues.valueJson,
+          })
+          .from(leadFieldValues)
+          .innerJoin(stageFields, eq(leadFieldValues.fieldId, stageFields.id))
+          .where(inArray(leadFieldValues.leadId, leadIds)),
+      );
+
+      for (const fv of fieldVals) {
+        if (!fieldMap.has(fv.leadId)) fieldMap.set(fv.leadId, {});
+        let val = "";
+        try {
+          const parsed = JSON.parse(fv.valueJson ?? "null");
+          val = parsed === null || parsed === undefined ? "" : String(parsed);
+        } catch {
+          val = fv.valueJson ?? "";
+        }
+        // biome-ignore lint/style/noNonNullAssertion: just set above
+        fieldMap.get(fv.leadId)![fv.fieldSlug] = val;
+      }
+    }
+
+    // Collect unique field slugs across all leads
+    const allSlugs = new Set<string>();
+    for (const fields of fieldMap.values()) {
+      for (const slug of Object.keys(fields)) allSlugs.add(slug);
+    }
+    const slugCols = [...allSlugs].sort();
+
+    function csvCell(val: unknown): string {
+      const s = val === null || val === undefined ? "" : String(val);
+      if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    }
+
+    const headers = [
+      "id",
+      "contactName",
+      "state",
+      "stageName",
+      "createdAt",
+      "updatedAt",
+      "rejectedReason",
+      ...slugCols,
+    ];
+    const lines: string[] = [headers.map(csvCell).join(",")];
+
+    for (const row of rows) {
+      const fields = fieldMap.get(row.id) ?? {};
+      const cells = [
+        row.id,
+        row.contactName,
+        row.state,
+        row.stageName,
+        row.createdAt ? new Date(row.createdAt * 1000).toISOString() : "",
+        row.updatedAt ? new Date(row.updatedAt * 1000).toISOString() : "",
+        row.rejectedReason,
+        ...slugCols.map((s) => fields[s] ?? ""),
+      ].map(csvCell);
+      lines.push(cells.join(","));
+    }
+
+    const csv = `﻿${lines.join("\r\n")}`;
+    return new Response(csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="leads.csv"',
+      },
+    });
+  });
+
+  /**
    * GET /api/admin/leads/:id
    * Возвращает лид + stage definition + field values + recent events + notes
    */

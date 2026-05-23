@@ -801,6 +801,20 @@ export const saas = {
   deleteLead(id: number) {
     return request<{ ok: boolean }>(`/api/admin/leads/${id}`, { method: "DELETE" });
   },
+  async exportLeadsCsv(): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/admin/leads/export.csv`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "leads.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
   getLead(id: number) {
     return request<LeadDetail>(`/api/admin/leads/${id}`);
   },
