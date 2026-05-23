@@ -28,6 +28,8 @@ import {
   makeReplyStrategy,
   makeStageClassifier,
 } from "./llm-bootstrap.ts";
+import { makeFieldExtractor } from "./lib/field-extractor.ts";
+import { makePhotoProcessor } from "./lib/photo-processor.ts";
 import { makeRequireAuth } from "./middleware/require-auth.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
 import { makeAdminRoutes } from "./routes/admin.ts";
@@ -352,6 +354,12 @@ async function main() {
     log.info("stage classifier enabled", { kind: cfg.stageClassifier });
   }
 
+  const photoProcessor = makePhotoProcessor(loadedRef);
+  log.info("photo processor enabled (activates per-tenant when vision LLM is configured)");
+
+  const fieldExtractor = makeFieldExtractor(loadedRef);
+  log.info("field extractor enabled (activates per-tenant when chat LLM is configured)");
+
   const sink = makeMetricsSink(metrics);
 
   // Per-tenant inbound rate-limit. Disabled если оба значения = 0.
@@ -381,6 +389,8 @@ async function main() {
       resolveTemplate,
       memoryExtractor,
       stageClassifier,
+      photoProcessor,
+      fieldExtractor,
       sink,
       metrics,
       ...(rateLimiter ? { rateLimiter } : {}),
@@ -414,6 +424,8 @@ async function main() {
         resolveTemplate,
         memoryExtractor,
         stageClassifier,
+        photoProcessor,
+        fieldExtractor,
         sink,
         metrics,
         ...(rateLimiter ? { rateLimiter } : {}),
@@ -498,6 +510,8 @@ async function main() {
         resolveTemplate,
         memoryExtractor,
         stageClassifier,
+        photoProcessor,
+        fieldExtractor,
         sink,
         metrics,
         log,

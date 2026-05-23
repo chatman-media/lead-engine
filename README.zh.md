@@ -108,7 +108,7 @@ ARPU 99–199 美元/月。[Phase 2：房地产。Phase 3：横向扩展。]
 |---|---|---|
 | `apps/api` | HTTP 服务器：webhook 处理器（telegram/whatsapp/stripe）、`/ws/:slug`（web）、admin API（auth + KB + LLM 配置 + 渠道 + 对话 + 审计 + 诊断 + 租户暂停）、`/metrics`、`/healthz` | Fly app / Node 托管 |
 | `apps/worker` | 出站调度器（`SKIP LOCKED` 队列）、轮询渠道重载、定时任务 | Fly app 进程组 |
-| `apps/admin-ui` | React 19 + Vite SPA——完整 SaaS UI（signup → channels → settings → conversations → audit → diagnostics） | 静态 / CDN |
+| `apps/admin-ui` | React 19 + Vite SPA——完整 SaaS UI（signup → channels → settings → leads → funnel builder → skills → styles → experiments → conversations → audit → diagnostics） | 静态 / CDN |
 | `apps/vertical-recruitment-uae` | 垂直模板（KB 种子 + 漏斗阶段 + 风格提示）——不部署，通过 `packages/verticals` 加载 | — |
 
 ### Packages（领域模块）
@@ -121,7 +121,7 @@ ARPU 99–199 美元/月。[Phase 2：房地产。Phase 3：横向扩展。]
 @chatman-media/channel-whatsapp    — Meta Graph API
 @chatman-media/channel-web         — 基于 WebSocket 的聊天挂件渠道
 @chatman-media/llm-router          — LLM I/O（chat/embed/providers/router）。按租户配置
-@chatman-media/kb                  — RAG（ingest、answer、混合检索、ABRouter）
+@chatman-media/kb                  — RAG（ingest、answer、混合检索、ABRouter、图片分类、护照 OCR）
 @chatman-media/sales               — 销售领域（CoachAnalyzer、StageClassifier、ELO）
 @chatman-media/conversation-engine — pipeline 契约 + DAL + 持久化
 @chatman-media/verticals           — VerticalTemplate 注册表（recruitment_uae_v1）
@@ -268,8 +268,12 @@ secret_token=<TELEGRAM_WEBHOOK_SECRET>)`。渠道立即可用，无需手动 cur
 7. Phase 2（不在 tx 内）：reply.generate(...) — ~1-2s LLM。连接池连接
    已释放。
 8. Phase 3（tx2，withTenant）：将 OutboundEnvelope[] 入队 outbound_queue。
-9. Webhook → 200 ack（通常 < 100ms）。
-10. apps/worker（TG/WA/userbot）或 apps/api（web）通过 SKIP LOCKED
+9. Phase 4（异步，不在 tx 内）：如 inbound 含图片且租户配置了
+   purpose='vision' LLM → classifyPhoto() → 如为 "passport" →
+   extractPassportIdentity()（OCR MRZ）→ 合并到 contact.attributes_json。
+   Fire-and-forget——不阻塞 webhook 响应。
+10. Webhook → 200 ack（通常 < 100ms）。
+11. apps/worker（TG/WA/userbot）或 apps/api（web）通过 SKIP LOCKED
     抽干 outbound_queue → adapter.send → 标记已发送。
 ```
 
@@ -340,7 +344,7 @@ POST   /api/admin/billing/portal                 — Stripe Customer Portal URL
 DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 ```
 
-**741 个测试**，分布在 13 个包中（apps/api: 305；kb: 156；sales: 116；conversation-engine: 59；
+**791 个测试**，分布在 13 个包中。
 worker: 15；storage: 15；channel-whatsapp: 17；observability: 16；channel-telegram: 11；
 channel-web: 11；llm-router: 9；verticals: 6；vertical-recruitment-uae: 5）。重点：
 

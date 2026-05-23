@@ -53,6 +53,9 @@ hot-reload, secrets. Для high-level introduction — см.
        │  apps/admin-ui (React)   │
        │  signup / login          │
        │  /channels  /settings    │
+       │  /leads  /funnel         │
+       │  /skills  /styles        │
+       │  /experiments            │
        │  /conversations  /audit  │
        │  /diagnostics            │
        └──────────────────────────┘
@@ -135,6 +138,18 @@ ALTER TABLE conversations FORCE ROW LEVEL SECURITY;
    ┌─ Phase 3: withTenant tx2 (enqueue) ──────────────────────┐
    │  - outbound_queue INSERT (status=pending, scheduled=now)  │
    │  - idempotencyKey предотвращает дубли                     │
+   └──────────────────────────────────────────────────────────┘
+
+   ┌─ Phase 4: async, NO tx (photo classification) ───────────┐
+   │  Если inbound содержит photo-части И tenant настроил     │
+   │  LLM purpose='vision':                                   │
+   │  - adapter.downloadMedia(mediaRef) → bytes               │
+   │  - classifyPhoto() → "passport"|"full_body"|"portrait"|  │
+   │                        "other"                           │
+   │  - Если "passport" → extractPassportIdentity() (OCR MRZ) │
+   │    → family_name, given_name, passport_number, expiry     │
+   │  - withTenant tx3: mergeAttributes в contact.attrs_json  │
+   │  Fire-and-forget — НЕ блокирует webhook response.        │
    └──────────────────────────────────────────────────────────┘
 
 4. apps/api → 200 OK (typical < 100ms если LLM skipped + < 2s с LLM).
@@ -243,7 +258,8 @@ getDecryptedSecret({ db, tenantId, key, masterKeyHex })
 - `channel_whatsapp_<phone_id>` — WhatsApp access token (TBD UI)
 - `llm_chat_apikey` — OpenAI/Anthropic chat key
 - `llm_embed_apikey` — embedding API key
-- `llm_vision_apikey` / `llm_judge_apikey` — пока не используются
+- `llm_vision_apikey` — vision LLM key (используется photo-processor'ом для классификации фото и OCR паспортов)
+- `llm_judge_apikey` — judge LLM key (используется для ELO-grading skills)
 
 ---
 
@@ -488,6 +504,7 @@ lead_engine_llm_errors_total{provider, purpose, kind} — error rates
 | LLM config loader | `apps/api/src/lib/llm-config-loader.ts` |
 | Tenant reloader (hot-reload bus) | `apps/api/src/lib/tenant-reloader.ts` |
 | Audit helper | `apps/api/src/lib/audit.ts` |
+| Photo classifier + passport OCR | `apps/api/src/lib/photo-processor.ts` |
 | Rate limiter | `apps/api/src/lib/rate-limiter.ts` |
 | Plan tiers (PlanLimits) | `apps/api/src/lib/plans.ts` |
 | Quota helpers | `apps/api/src/lib/quota.ts` |
@@ -500,6 +517,48 @@ lead_engine_llm_errors_total{provider, purpose, kind} — error rates
 | Reply strategies | `packages/conversation-engine/src/{llm,rag}-reply-strategy.ts` |
 | RAG core | `packages/kb/src/answer.ts` + `hybrid-search.ts` |
 | Drizzle schema | `packages/storage/src/schema.ts` |
+
+---
+
+## Universal lead pipeline
+
+Стадии лида хранятся в БД (`stage_definitions` / `stage_fields`) и
+настраиваются из admin-UI без деплоя. Каждый тенант создаёт свою воронку
+с произвольным набором стадий.
+
+### Ключевые таблицы
+
+| Таблица | Назначение |
+|---|---|
+| `stage_definitions` | Стадии воронки: slug, тип (`form_fill`, `document_upload`, `external_approval`, `payment`, `waiting`, `interaction`, `assessment`, `milestone`), позиция, timeout |
+| `stage_fields` | Поля данных на стадии: тип (`text`, `number`, `date`, `select`, `multiselect`, `boolean`, `phone`, `email`, `file`, `photo`), `required`, `ai_extractable` |
+| `lead_field_values` | Значения полей для конкретного лида (upsert по `(lead_id, field_id)`) |
+| `leads` | Лид с `stage_definition_id` FK; `state` text-колонка сохранена для backward compatibility с вертикалью recruitment-UAE |
+
+### Типы стадий
+
+| Тип | Что происходит |
+|---|---|
+| `form_fill` | Бот/оператор собирает данные через `stage_fields` |
+| `document_upload` | Кандидат присылает файлы |
+| `document_signature` | Подписание договора |
+| `external_approval` | Ждём решения третьей стороны (webhook) |
+| `payment` | Оплата |
+| `waiting` | Ждём по таймауту |
+| `interaction` | Встреча/звонок/просмотр |
+| `assessment` | Оценка/квалификация |
+| `milestone` | Контрольная точка |
+
+### Photo + passport fields
+
+Поля с `fieldType='photo'` и `aiExtractable=true` предназначены для
+автоматического заполнения через vision-pipeline (Phase 4 в pipeline выше).
+Когда кандидат присылает фото паспорта — `classifyPhoto()` + `extractPassportIdentity()`
+OCR'ят MRZ и заполняют `contact.attributes_json` с ключами
+`passport_family_name`, `passport_given_name`, `passport_number`, `passport_expiry`.
+
+**Активация**: добавить LLM config с `purpose='vision'` (openai или openrouter,
+любая vision-capable модель — `gpt-4o`, `google/gemini-2.5-flash`).
 
 ---
 

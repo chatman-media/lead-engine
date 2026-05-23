@@ -23,6 +23,8 @@ import type { VerticalTemplate } from "@chatman-media/verticals";
 import { Hono } from "hono";
 import type { ChannelRegistry } from "../channel-registry.ts";
 import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
+import type { FieldExtractor } from "../lib/field-extractor.ts";
+import type { PhotoProcessor } from "../lib/photo-processor.ts";
 import {
   verifyWhatsAppSignature,
   WhatsAppSignatureError,
@@ -62,6 +64,8 @@ export function makeWhatsAppWebhookRoutes(opts: {
   sink?: PipelineSink;
   metrics?: PlatformMetrics;
   rateLimiter?: InboundRateLimiter;
+  photoProcessor?: PhotoProcessor;
+  fieldExtractor?: FieldExtractor;
 }): Hono {
   const app = new Hono();
 
@@ -207,6 +211,29 @@ export function makeWhatsAppWebhookRoutes(opts: {
           ...(opts.sink ? { sink: opts.sink } : {}),
         });
         result = { ...result, outboundEnqueued: gen.outboundEnqueued };
+      }
+      if (result.persisted && opts.photoProcessor) {
+        void opts.photoProcessor
+          .process({
+            tenantId: entry.tenantId,
+            inbound,
+            adapter,
+            contactId: result.contactId,
+            db: opts.db,
+          })
+          .catch(() => {});
+      }
+      if (result.persisted && opts.fieldExtractor) {
+        const text = inbound.parts
+          .filter((p) => p.kind === "text")
+          .map((p) => (p as { kind: "text"; text: string }).text)
+          .join(" ")
+          .trim();
+        if (text.length > 0) {
+          void opts.fieldExtractor
+            .extract({ tenantId: entry.tenantId, contactId: result.contactId, text, db: opts.db })
+            .catch(() => {});
+        }
       }
       if (!result.persisted) {
         opts.metrics?.inboundDeduped.inc(1, { tenant: String(entry.tenantId) });

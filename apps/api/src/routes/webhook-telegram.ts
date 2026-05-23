@@ -19,6 +19,8 @@ import type { VerticalTemplate } from "@chatman-media/verticals";
 import { Hono } from "hono";
 import type { ChannelRegistry } from "../channel-registry.ts";
 import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
+import type { FieldExtractor } from "../lib/field-extractor.ts";
+import type { PhotoProcessor } from "../lib/photo-processor.ts";
 
 /**
  * Telegram webhook handler. Telegram постит JSON на /webhook/telegram/:slug
@@ -84,6 +86,8 @@ export function makeTelegramWebhookRoutes(opts: {
    * Retry-After header (Telegram уважает 429 и replay'нёт позже).
    */
   rateLimiter?: InboundRateLimiter;
+  photoProcessor?: PhotoProcessor;
+  fieldExtractor?: FieldExtractor;
 }): Hono {
   const app = new Hono();
 
@@ -216,6 +220,36 @@ export function makeTelegramWebhookRoutes(opts: {
         ...(opts.sink ? { sink: opts.sink } : {}),
       });
       result = { ...result, outboundEnqueued: gen.outboundEnqueued };
+    }
+
+    // Photo classification + passport OCR (outside tx — LLM + download).
+    // Skipped for deduped inbounds and when no vision config is set for tenant.
+    if (result.persisted && opts.photoProcessor) {
+      void opts.photoProcessor
+        .process({
+          tenantId: entry.tenantId,
+          inbound,
+          adapter,
+          contactId: result.contactId,
+          db: opts.db,
+        })
+        .catch(() => {});
+    }
+
+    // AI field extraction for universal lead pipeline (outside tx — LLM call).
+    // Finds contact's lead stage fields, extracts values from text, writes to
+    // lead_field_values, and checks auto-advance condition.
+    if (result.persisted && opts.fieldExtractor) {
+      const text = inbound.parts
+        .filter((p) => p.kind === "text")
+        .map((p) => (p as { kind: "text"; text: string }).text)
+        .join(" ")
+        .trim();
+      if (text.length > 0) {
+        void opts.fieldExtractor
+          .extract({ tenantId: entry.tenantId, contactId: result.contactId, text, db: opts.db })
+          .catch(() => {});
+      }
     }
 
     // Inbound deduped path: persisted=false означает что messages.id

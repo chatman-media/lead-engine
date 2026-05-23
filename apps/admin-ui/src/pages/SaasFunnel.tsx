@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { ChevronDownIcon, ChevronUpIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, LayersIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "form_fill", label: "Сбор данных" },
@@ -66,6 +66,7 @@ export function SaasFunnel() {
   const [error, setError] = useState("");
   const [expandedStage, setExpandedStage] = useState<number | null>(null);
   const [addingStage, setAddingStage] = useState(false);
+  const [seeding, setSeeding] = useState(false);
   const [newStage, setNewStage] = useState({
     slug: "",
     displayName: "",
@@ -154,6 +155,21 @@ export function SaasFunnel() {
     }
   }
 
+  async function handleSeed(template: string) {
+    if (funnel?.stages && funnel.stages.length > 0) {
+      if (!confirm(`Это заменит все ${funnel.stages.length} стадий воронки на шаблон «${template}». Продолжить?`)) return;
+    }
+    setSeeding(true);
+    try {
+      await saas.seedFunnel(template);
+      reload();
+    } catch (err) {
+      onAuthError(err);
+    } finally {
+      setSeeding(false);
+    }
+  }
+
   if (loading) return <p className="p-6 text-muted-foreground text-sm">Загрузка…</p>;
   if (error) return <p className="p-6 text-destructive text-sm">{error}</p>;
 
@@ -169,9 +185,37 @@ export function SaasFunnel() {
         </Button>
       </div>
 
+      {/* Шаблоны воронки */}
+      <div className="rounded-md border p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <LayersIcon className="size-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Загрузить шаблон воронки</span>
+          {funnel?.stages && funnel.stages.length > 0 && (
+            <span className="text-xs text-muted-foreground">(заменит текущие стадии)</span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { id: "visa", label: "Виза / иммиграция", icon: "🛂" },
+            { id: "real_estate", label: "Недвижимость", icon: "🏠" },
+            { id: "modeling", label: "Модельное агентство", icon: "✨" },
+          ].map((tpl) => (
+            <Button
+              key={tpl.id}
+              variant="outline"
+              size="sm"
+              disabled={seeding}
+              onClick={() => handleSeed(tpl.id)}
+            >
+              {tpl.icon} {tpl.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+
       {!funnel?.funnel && (
         <div className="rounded-md border border-dashed p-6 text-center text-muted-foreground text-sm">
-          Воронка не найдена. Создайте тенанта с шаблоном или создайте воронку через API.
+          Выберите шаблон выше или воронка будет создана при загрузке шаблона.
         </div>
       )}
 

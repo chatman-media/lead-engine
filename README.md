@@ -113,7 +113,7 @@ Changes apply **live** through an in-process bus (`apps/api`) plus a
 |---|---|---|
 | `apps/api` | HTTP server: webhook handlers (telegram/whatsapp/stripe), `/ws/:slug` (web), admin API (auth + KB + LLM config + channels + conversations + audit + diagnostics + tenant pause), `/metrics`, `/healthz` | Fly app / Node hosting |
 | `apps/worker` | Outbound dispatcher (`SKIP LOCKED` queue), polling channel-reload, cron jobs | Fly app process group |
-| `apps/admin-ui` | React 19 + Vite SPA on **Tailwind v4 + shadcn/ui** (Linear theme, left sidebar, light/dark) — full SaaS UI: guided onboarding wizard + dashboard / channels / settings / conversations / team / audit / diagnostics | Static / CDN |
+| `apps/admin-ui` | React 19 + Vite SPA on **Tailwind v4 + shadcn/ui** (Linear theme, left sidebar, light/dark) — full SaaS UI: guided onboarding wizard + dashboard / channels / settings / conversations / leads / funnel builder / skills / styles / experiments / team / audit / diagnostics | Static / CDN |
 | `apps/vertical-recruitment-uae` | Vertical template (KB seed + funnel stages + style prompts) — NOT deployed, loaded via `packages/verticals` | — |
 
 ### Packages (domain modules)
@@ -126,7 +126,7 @@ Changes apply **live** through an in-process bus (`apps/api`) plus a
 @chatman-media/channel-whatsapp    — Meta Graph API
 @chatman-media/channel-web         — WebSocket-based chat-widget channel
 @chatman-media/llm-router          — LLM I/O (chat/embed/providers/router). Per-tenant config
-@chatman-media/kb                  — RAG (ingest, answer, hybrid search, ABRouter)
+@chatman-media/kb                  — RAG (ingest, answer, hybrid search, ABRouter, photo classification + passport OCR)
 @chatman-media/sales               — sales domain (CoachAnalyzer, StageClassifier, ELO)
 @chatman-media/conversation-engine — pipeline contracts + DAL + persistence
 @chatman-media/verticals           — VerticalTemplate registry (recruitment_uae_v1)
@@ -275,8 +275,12 @@ no manual curl command.
 7. Phase 2 (NOT in tx): reply.generate(...) — ~1-2s LLM. Pool connection
    released.
 8. Phase 3 (tx2, withTenant): enqueue OutboundEnvelope[] into outbound_queue.
-9. Webhook → 200 ack (< 100ms typical).
-10. apps/worker (TG-bot / WA) or apps/api (web / TG userbot) drain
+9. Phase 4 (async, NOT in tx): if inbound has photo parts and tenant has a
+   `vision` LLM configured → classifyPhoto() → if "passport" →
+   extractPassportIdentity() → merge into contact.attributes_json.
+   Fire-and-forget; never blocks the webhook response.
+10. Webhook → 200 ack (< 100ms typical).
+11. apps/worker (TG-bot / WA) or apps/api (web / TG userbot) drain
     outbound_queue via SKIP LOCKED → adapter.send → mark sent.
 ```
 
@@ -339,6 +343,24 @@ GET    /api/admin/conversations/:id              — thread + messages
 POST   /api/admin/conversations/:id/reply        — operator reply (mode=human)
 PUT    /api/admin/conversations/:id/mode         — { mode: 'ai'|'human' } toggle takeover
 
+GET    /api/admin/leads                          — list leads (kanban data, fill-rate stats)
+POST   /api/admin/leads                          — create lead
+GET    /api/admin/leads/:id                      — lead detail (stage, fields, events, notes, contact)
+PATCH  /api/admin/leads/:id/stage               — move lead to a different stage
+PUT    /api/admin/leads/:id/field-values         — bulk upsert stage field values
+POST   /api/admin/leads/:id/notes               — add operator note
+
+GET    /api/admin/funnel                         — funnel + stage_definitions + stage_fields
+POST   /api/admin/funnel/stages                  — create stage
+PATCH  /api/admin/funnel/stages/:id              — update stage config
+DELETE /api/admin/funnel/stages/:id              — delete stage
+PATCH  /api/admin/funnel/stages/reorder          — bulk position update
+POST   /api/admin/funnel/stages/:id/fields       — add field to stage
+PATCH  /api/admin/funnel/stages/:id/fields/:fid  — update field
+DELETE /api/admin/funnel/stages/:id/fields/:fid  — delete field
+
+GET    /api/admin/skills                         — list skills with ELO scores
+
 GET    /api/admin/audit-log                      — cursor-paginated audit history
 
 GET    /api/admin/billing/plan                   — current plan + usage + status
@@ -355,9 +377,7 @@ POST   /api/admin/billing/portal                 — Stripe Customer Portal URL
 DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 ```
 
-**741 tests** across 13 packages (apps/api: 305; kb: 156; sales: 116; conversation-engine: 59;
-worker: 15; storage: 15; channel-whatsapp: 17; observability: 16; channel-telegram: 11;
-channel-web: 11; llm-router: 9; verticals: 6; vertical-recruitment-uae: 5). Highlights:
+**791 tests** across 13 packages. Highlights:
 
 - **Multi-tenant E2E** (`apps/api/src/multi-tenant.integration.test.ts`): tenant isolation through the real webhook handler + admin API
 - **RLS contract** (`packages/storage/src/rls.integration.test.ts`): non-bypass role validation

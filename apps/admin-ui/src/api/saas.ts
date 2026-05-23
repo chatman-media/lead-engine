@@ -767,7 +767,7 @@ export const saas = {
     });
   },
   upsertLeadFieldValues(id: number, values: Array<{ fieldId: number; value: unknown }>) {
-    return request<{ ok: boolean }>(`/api/admin/leads/${id}/field-values`, {
+    return request<{ ok: boolean; advanced: boolean; newStageSlug: string | null }>(`/api/admin/leads/${id}/field-values`, {
       method: "PUT",
       body: JSON.stringify({ values }),
     });
@@ -844,6 +844,12 @@ export const saas = {
   deleteStageField(stageId: number, fieldId: number) {
     return request<{ ok: boolean }>(`/api/admin/funnel/stages/${stageId}/fields/${fieldId}`, {
       method: "DELETE",
+    });
+  },
+  seedFunnel(template: string) {
+    return request<{ ok: boolean; funnelId: number; stagesCreated: number }>("/api/admin/funnel/seed", {
+      method: "POST",
+      body: JSON.stringify({ template }),
     });
   },
 

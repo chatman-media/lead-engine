@@ -9,6 +9,318 @@ import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 
+// ── Seed templates ──────────────────────────────────────────────────────────
+
+type SeedStage = {
+  slug: string;
+  displayName: string;
+  kind: "intake" | "active" | "terminal_won" | "terminal_lost";
+  stageType: string;
+  position: number;
+  color?: string;
+  staleTimeoutDays?: number;
+  nextStages: string[];
+  autoAdvanceCondition?: string;
+  fields: Array<{
+    slug: string;
+    displayName: string;
+    fieldType: string;
+    required: boolean;
+    aiExtractable: boolean;
+    hint?: string;
+    optionsJson?: string;
+    position: number;
+  }>;
+};
+
+const SEED_TEMPLATES: Record<string, SeedStage[]> = {
+  visa: [
+    {
+      slug: "qualification",
+      displayName: "Квалификация",
+      kind: "intake",
+      stageType: "form_fill",
+      position: 0,
+      color: "#3b82f6",
+      nextStages: ["documents_collection"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "citizenship", displayName: "Гражданство", fieldType: "text", required: true, aiExtractable: true, hint: "Страна гражданства", position: 0 },
+        { slug: "visa_type", displayName: "Тип визы", fieldType: "select", required: true, aiExtractable: true, hint: "Рабочая, туристическая, студенческая...", position: 1,
+          optionsJson: '[{"value":"work","label":"Рабочая"},{"value":"tourist","label":"Туристическая"},{"value":"student","label":"Студенческая"},{"value":"family","label":"По воссоединению семьи"}]' },
+        { slug: "experience_years", displayName: "Опыт работы (лет)", fieldType: "number", required: false, aiExtractable: true, position: 2 },
+        { slug: "english_level", displayName: "Уровень английского", fieldType: "select", required: true, aiExtractable: true, position: 3,
+          optionsJson: '[{"value":"a1","label":"A1 — Начальный"},{"value":"a2","label":"A2"},{"value":"b1","label":"B1 — Средний"},{"value":"b2","label":"B2"},{"value":"c1","label":"C1 — Продвинутый"},{"value":"c2","label":"C2"}]' },
+      ],
+    },
+    {
+      slug: "documents_collection",
+      displayName: "Сбор документов",
+      kind: "active",
+      stageType: "document_upload",
+      position: 1,
+      color: "#f59e0b",
+      nextStages: ["financial_verification"],
+      fields: [
+        { slug: "passport_photo", displayName: "Фото паспорта", fieldType: "photo", required: true, aiExtractable: true, hint: "Первый разворот паспорта", position: 0 },
+        { slug: "diploma_uploaded", displayName: "Диплом загружен", fieldType: "boolean", required: false, aiExtractable: false, position: 1 },
+        { slug: "employment_history", displayName: "История трудоустройства", fieldType: "textarea", required: false, aiExtractable: true, position: 2 },
+      ],
+    },
+    {
+      slug: "financial_verification",
+      displayName: "Финансовая проверка",
+      kind: "active",
+      stageType: "external_approval",
+      position: 2,
+      color: "#8b5cf6",
+      nextStages: ["application_submission"],
+      fields: [
+        { slug: "bank_statement_uploaded", displayName: "Выписка из банка загружена", fieldType: "boolean", required: true, aiExtractable: false, position: 0 },
+        { slug: "funds_amount_usd", displayName: "Сумма средств (USD)", fieldType: "number", required: true, aiExtractable: true, position: 1 },
+      ],
+    },
+    {
+      slug: "application_submission",
+      displayName: "Подача заявки",
+      kind: "active",
+      stageType: "form_fill",
+      position: 3,
+      color: "#ec4899",
+      nextStages: ["processing"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "application_date", displayName: "Дата подачи", fieldType: "date", required: true, aiExtractable: false, position: 0 },
+        { slug: "application_number", displayName: "Номер заявки", fieldType: "text", required: false, aiExtractable: false, position: 1 },
+        { slug: "payment_confirmed", displayName: "Оплата консульского сбора подтверждена", fieldType: "boolean", required: true, aiExtractable: false, position: 2 },
+      ],
+    },
+    {
+      slug: "processing",
+      displayName: "Рассмотрение",
+      kind: "active",
+      stageType: "waiting",
+      position: 4,
+      color: "#6b7280",
+      staleTimeoutDays: 90,
+      nextStages: ["visa_issued", "rejected"],
+      fields: [
+        { slug: "expected_decision_date", displayName: "Ожидаемая дата решения", fieldType: "date", required: false, aiExtractable: false, position: 0 },
+        { slug: "processing_notes", displayName: "Заметки по рассмотрению", fieldType: "textarea", required: false, aiExtractable: false, position: 1 },
+      ],
+    },
+    {
+      slug: "visa_issued",
+      displayName: "Виза выдана",
+      kind: "terminal_won",
+      stageType: "milestone",
+      position: 5,
+      color: "#10b981",
+      nextStages: [],
+      fields: [
+        { slug: "visa_number", displayName: "Номер визы", fieldType: "text", required: false, aiExtractable: false, position: 0 },
+        { slug: "visa_expiry", displayName: "Срок действия визы", fieldType: "date", required: false, aiExtractable: false, position: 1 },
+      ],
+    },
+    {
+      slug: "rejected",
+      displayName: "Отказ",
+      kind: "terminal_lost",
+      stageType: "milestone",
+      position: 6,
+      color: "#ef4444",
+      nextStages: [],
+      fields: [
+        { slug: "rejection_reason", displayName: "Причина отказа", fieldType: "textarea", required: false, aiExtractable: false, position: 0 },
+      ],
+    },
+  ],
+
+  real_estate: [
+    {
+      slug: "qualification",
+      displayName: "Квалификация покупателя",
+      kind: "intake",
+      stageType: "form_fill",
+      position: 0,
+      color: "#3b82f6",
+      nextStages: ["pre_approval"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "budget_usd", displayName: "Бюджет (USD)", fieldType: "number", required: true, aiExtractable: true, hint: "Бюджет на покупку", position: 0 },
+        { slug: "property_type", displayName: "Тип недвижимости", fieldType: "select", required: true, aiExtractable: true, position: 1,
+          optionsJson: '[{"value":"apartment","label":"Квартира"},{"value":"villa","label":"Вилла"},{"value":"townhouse","label":"Таунхаус"},{"value":"studio","label":"Студия"},{"value":"commercial","label":"Коммерческая"}]' },
+        { slug: "locations", displayName: "Интересующие районы", fieldType: "multiselect", required: false, aiExtractable: true, position: 2,
+          optionsJson: '[{"value":"downtown","label":"Центр"},{"value":"marina","label":"Марина"},{"value":"suburbs","label":"Пригород"},{"value":"beachfront","label":"Первая линия"}]' },
+        { slug: "payment_method", displayName: "Способ оплаты", fieldType: "select", required: true, aiExtractable: true, position: 3,
+          optionsJson: '[{"value":"cash","label":"Наличные"},{"value":"mortgage","label":"Ипотека"},{"value":"installment","label":"Рассрочка"}]' },
+        { slug: "timeline_months", displayName: "Срок покупки (месяцев)", fieldType: "number", required: false, aiExtractable: true, position: 4 },
+      ],
+    },
+    {
+      slug: "pre_approval",
+      displayName: "Предварительное одобрение",
+      kind: "active",
+      stageType: "external_approval",
+      position: 1,
+      color: "#f59e0b",
+      nextStages: ["viewings"],
+      fields: [
+        { slug: "bank_name", displayName: "Банк", fieldType: "text", required: false, aiExtractable: false, position: 0 },
+        { slug: "approved_amount_usd", displayName: "Одобренная сумма (USD)", fieldType: "number", required: false, aiExtractable: false, position: 1 },
+        { slug: "pre_approval_date", displayName: "Дата одобрения", fieldType: "date", required: false, aiExtractable: false, position: 2 },
+      ],
+    },
+    {
+      slug: "viewings",
+      displayName: "Просмотры",
+      kind: "active",
+      stageType: "interaction",
+      position: 2,
+      color: "#8b5cf6",
+      staleTimeoutDays: 30,
+      nextStages: ["offer"],
+      fields: [
+        { slug: "properties_viewed", displayName: "Количество просмотров", fieldType: "number", required: false, aiExtractable: false, position: 0 },
+        { slug: "preferred_property_ref", displayName: "Понравившийся объект (референс)", fieldType: "text", required: false, aiExtractable: false, position: 1 },
+        { slug: "viewing_feedback", displayName: "Фидбек по просмотрам", fieldType: "textarea", required: false, aiExtractable: true, position: 2 },
+      ],
+    },
+    {
+      slug: "offer",
+      displayName: "Предложение",
+      kind: "active",
+      stageType: "form_fill",
+      position: 3,
+      color: "#ec4899",
+      nextStages: ["closing", "deal_lost"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "offer_amount_usd", displayName: "Сумма предложения (USD)", fieldType: "number", required: true, aiExtractable: false, position: 0 },
+        { slug: "offer_date", displayName: "Дата предложения", fieldType: "date", required: true, aiExtractable: false, position: 1 },
+        { slug: "offer_conditions", displayName: "Условия сделки", fieldType: "textarea", required: false, aiExtractable: false, position: 2 },
+      ],
+    },
+    {
+      slug: "closing",
+      displayName: "Закрытие сделки",
+      kind: "terminal_won",
+      stageType: "document_signature",
+      position: 4,
+      color: "#10b981",
+      nextStages: [],
+      fields: [
+        { slug: "closing_date", displayName: "Дата закрытия", fieldType: "date", required: false, aiExtractable: false, position: 0 },
+        { slug: "final_price_usd", displayName: "Итоговая цена (USD)", fieldType: "number", required: false, aiExtractable: false, position: 1 },
+      ],
+    },
+    {
+      slug: "deal_lost",
+      displayName: "Сделка не состоялась",
+      kind: "terminal_lost",
+      stageType: "milestone",
+      position: 5,
+      color: "#ef4444",
+      nextStages: [],
+      fields: [
+        { slug: "loss_reason", displayName: "Причина потери", fieldType: "select", required: false, aiExtractable: false, position: 0,
+          optionsJson: '[{"value":"budget","label":"Бюджет не подошёл"},{"value":"competitor","label":"Выбрал другого агента"},{"value":"not_ready","label":"Не готов покупать"},{"value":"found_himself","label":"Нашёл сам"},{"value":"other","label":"Другое"}]' },
+      ],
+    },
+  ],
+
+  modeling: [
+    {
+      slug: "intake",
+      displayName: "Первичный контакт",
+      kind: "intake",
+      stageType: "form_fill",
+      position: 0,
+      color: "#3b82f6",
+      nextStages: ["portfolio_review"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "full_name", displayName: "Полное имя", fieldType: "text", required: true, aiExtractable: true, position: 0 },
+        { slug: "age", displayName: "Возраст", fieldType: "number", required: true, aiExtractable: true, position: 1 },
+        { slug: "height_cm", displayName: "Рост (см)", fieldType: "number", required: true, aiExtractable: true, position: 2 },
+        { slug: "bust_waist_hips", displayName: "Параметры (ОГ/ОТ/ОБ)", fieldType: "text", required: false, aiExtractable: true, hint: "например: 88/60/90", position: 3 },
+        { slug: "experience", displayName: "Опыт в модельной сфере", fieldType: "multiselect", required: false, aiExtractable: true, position: 4,
+          optionsJson: '[{"value":"runway","label":"Подиум"},{"value":"commercial","label":"Коммерческая съёмка"},{"value":"editorial","label":"Editorial"},{"value":"acting","label":"Актёрское мастерство"},{"value":"none","label":"Нет опыта"}]' },
+        { slug: "instagram_url", displayName: "Instagram / соцсети", fieldType: "text", required: false, aiExtractable: true, position: 5 },
+      ],
+    },
+    {
+      slug: "portfolio_review",
+      displayName: "Ревью портфолио",
+      kind: "active",
+      stageType: "document_upload",
+      position: 1,
+      color: "#f59e0b",
+      staleTimeoutDays: 14,
+      nextStages: ["go_see"],
+      fields: [
+        { slug: "portfolio_photos_uploaded", displayName: "Фото портфолио загружены", fieldType: "boolean", required: true, aiExtractable: false, position: 0 },
+        { slug: "comp_card_uploaded", displayName: "Комп-карта загружена", fieldType: "boolean", required: false, aiExtractable: false, position: 1 },
+        { slug: "portfolio_notes", displayName: "Заметки по портфолио", fieldType: "textarea", required: false, aiExtractable: false, position: 2 },
+      ],
+    },
+    {
+      slug: "go_see",
+      displayName: "Go-See / Кастинг",
+      kind: "active",
+      stageType: "interaction",
+      position: 2,
+      color: "#8b5cf6",
+      nextStages: ["contract", "not_suitable"],
+      fields: [
+        { slug: "go_see_date", displayName: "Дата кастинга", fieldType: "date", required: false, aiExtractable: false, position: 0 },
+        { slug: "casting_result", displayName: "Результат кастинга", fieldType: "select", required: false, aiExtractable: false, position: 1,
+          optionsJson: '[{"value":"approved","label":"Одобрен"},{"value":"pending","label":"На рассмотрении"},{"value":"rejected","label":"Не подошёл"}]' },
+        { slug: "casting_notes", displayName: "Заметки кастинг-директора", fieldType: "textarea", required: false, aiExtractable: false, position: 2 },
+      ],
+    },
+    {
+      slug: "contract",
+      displayName: "Заключение контракта",
+      kind: "active",
+      stageType: "document_signature",
+      position: 3,
+      color: "#ec4899",
+      nextStages: ["active_representation"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "contract_signed", displayName: "Контракт подписан", fieldType: "boolean", required: true, aiExtractable: false, position: 0 },
+        { slug: "contract_date", displayName: "Дата подписания", fieldType: "date", required: true, aiExtractable: false, position: 1 },
+        { slug: "commission_pct", displayName: "Комиссия агентства (%)", fieldType: "number", required: false, aiExtractable: false, position: 2 },
+      ],
+    },
+    {
+      slug: "active_representation",
+      displayName: "Активное представление",
+      kind: "terminal_won",
+      stageType: "milestone",
+      position: 4,
+      color: "#10b981",
+      nextStages: [],
+      fields: [
+        { slug: "agency_profile_url", displayName: "Профиль на сайте агентства", fieldType: "text", required: false, aiExtractable: false, position: 0 },
+      ],
+    },
+    {
+      slug: "not_suitable",
+      displayName: "Не подошёл",
+      kind: "terminal_lost",
+      stageType: "milestone",
+      position: 5,
+      color: "#ef4444",
+      nextStages: [],
+      fields: [
+        { slug: "rejection_notes", displayName: "Причина отказа", fieldType: "textarea", required: false, aiExtractable: false, position: 0 },
+      ],
+    },
+  ],
+};
+
 /**
  * Funnel builder + skills list API.
  *
@@ -367,6 +679,115 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
     );
 
     return c.json({ ok: true });
+  });
+
+  // ── Seed templates ───────────────────────────────────────────────────────
+
+  /**
+   * POST /api/admin/funnel/seed
+   * Body: { template: "visa" | "real_estate" | "modeling" }
+   * Создаёт или заменяет воронку из предустановленного шаблона.
+   * Если у тенанта уже есть активная воронка — добавляет стадии/поля к ней;
+   * если нет — создаёт новую воронку со slug = template.
+   */
+  app.post("/api/admin/funnel/seed", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+
+    const body = await c.req.json<{ template: string }>();
+    const stages = SEED_TEMPLATES[body.template];
+    if (!stages) {
+      return c.json({ error: `Unknown template. Available: ${Object.keys(SEED_TEMPLATES).join(", ")}` }, 400);
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      // Найти или создать активную воронку
+      let [funnel] = await tx
+        .select()
+        .from(funnels)
+        .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
+        .limit(1);
+
+      if (!funnel) {
+        const [created] = await tx
+          .insert(funnels)
+          .values({ tenantId, slug: body.template, isActive: true, createdAt: now, updatedAt: now })
+          .returning();
+        funnel = created!;
+      }
+
+      // Удалить существующие стадии этой воронки (полная замена)
+      const existingStages = await tx
+        .select({ id: stageDefinitions.id })
+        .from(stageDefinitions)
+        .where(eq(stageDefinitions.funnelId, funnel.id));
+
+      for (const s of existingStages) {
+        await tx.delete(stageFields).where(eq(stageFields.stageId, s.id));
+      }
+      if (existingStages.length > 0) {
+        await tx.delete(stageDefinitions).where(eq(stageDefinitions.funnelId, funnel.id));
+      }
+
+      // Вставить стадии и поля из шаблона
+      const createdStages: Array<{ id: number; slug: string }> = [];
+      for (const stageTpl of stages) {
+        const { fields, ...stageData } = stageTpl;
+        const [stage] = await tx
+          .insert(stageDefinitions)
+          .values({
+            tenantId,
+            funnelId: funnel.id,
+            slug: stageData.slug,
+            displayName: stageData.displayName,
+            kind: stageData.kind,
+            stageType: stageData.stageType,
+            position: stageData.position,
+            color: stageData.color ?? null,
+            staleTimeoutDays: stageData.staleTimeoutDays ?? null,
+            nextStages: stageData.nextStages,
+            autoAdvanceCondition: stageData.autoAdvanceCondition ?? null,
+            supportMode: false,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning({ id: stageDefinitions.id, slug: stageDefinitions.slug });
+
+        if (!stage) continue;
+        createdStages.push(stage);
+
+        for (const fieldTpl of fields) {
+          await tx.insert(stageFields).values({
+            stageId: stage.id,
+            tenantId,
+            slug: fieldTpl.slug,
+            displayName: fieldTpl.displayName,
+            fieldType: fieldTpl.fieldType,
+            required: fieldTpl.required,
+            aiExtractable: fieldTpl.aiExtractable,
+            hint: fieldTpl.hint ?? null,
+            ...(fieldTpl.optionsJson ? { optionsJson: fieldTpl.optionsJson } : {}),
+            position: fieldTpl.position,
+            createdAt: now,
+          });
+        }
+      }
+
+      return { funnelId: funnel.id, stagesCreated: createdStages.length };
+    });
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "funnel.seed",
+      targetKind: "funnel",
+      targetId: String(result.funnelId),
+      details: { template: body.template, stagesCreated: result.stagesCreated },
+    });
+
+    return c.json({ ok: true, ...result });
   });
 
   // ── Skills ────────────────────────────────────────────────────────────────

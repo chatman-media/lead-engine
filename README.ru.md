@@ -108,7 +108,7 @@ response (`{ reason, limit, current, plan, upgradeHint }`) — UI показыв
 |---|---|---|
 | `apps/api` | HTTP-сервер: webhook handlers (telegram/whatsapp/stripe), `/ws/:slug` (web), admin-API (auth + KB + LLM-config + channels + conversations + audit + diagnostics + tenant pause), `/metrics`, `/healthz` | Fly app / Node-hosting |
 | `apps/worker` | Outbound dispatcher (`SKIP LOCKED` очередь), polling channel-reload, cron jobs | Fly app process group |
-| `apps/admin-ui` | React 19 + Vite SPA — full SaaS UI (signup → channels → settings → conversations → audit → diagnostics) | Static / CDN |
+| `apps/admin-ui` | React 19 + Vite SPA — full SaaS UI (signup → channels → settings → leads → funnel builder → skills → styles → experiments → conversations → audit → diagnostics) | Static / CDN |
 | `apps/vertical-recruitment-uae` | Vertical template (KB seed + funnel stages + style prompts) — НЕ деплоится, грузится через `packages/verticals` | — |
 
 ### Packages (доменные модули)
@@ -121,7 +121,7 @@ response (`{ reason, limit, current, plan, upgradeHint }`) — UI показыв
 @chatman-media/channel-whatsapp   — Meta Graph API
 @chatman-media/channel-web        — WebSocket-based chat-widget channel
 @chatman-media/llm-router         — LLM I/O (chat/embed/providers/router). Per-tenant config
-@chatman-media/kb                 — RAG (ingest, answer, hybrid search, ABRouter)
+@chatman-media/kb                 — RAG (ingest, answer, hybrid search, ABRouter, классификация фото, OCR паспортов)
 @chatman-media/sales              — sales-domain (CoachAnalyzer, StageClassifier, ELO)
 @chatman-media/conversation-engine — Pipeline contracts + DAL + persistence
 @chatman-media/verticals          — VerticalTemplate registry (recruitment_uae_v1)
@@ -270,8 +270,12 @@ secret_token=<TELEGRAM_WEBHOOK_SECRET>)`. Канал работает сразу
 7. Phase 2 (НЕ в tx): reply.generate(...) — ~1-2s LLM. Pool connection
    освобождён.
 8. Phase 3 (tx2, withTenant): enqueue OutboundEnvelope[] в outbound_queue.
-9. Webhook → 200 ack (< 100ms typical).
-10. apps/worker (TG/WA/userbot) или apps/api (web) дренируют outbound_queue
+9. Phase 4 (async, НЕ в tx): если inbound содержит фото И у тенанта
+   настроен LLM с purpose='vision' → classifyPhoto() → если "passport" →
+   extractPassportIdentity() (OCR MRZ) → merge в contact.attributes_json.
+   Fire-and-forget — НЕ блокирует webhook-ответ.
+10. Webhook → 200 ack (< 100ms typical).
+11. apps/worker (TG/WA/userbot) или apps/api (web) дренируют outbound_queue
     через SKIP LOCKED → adapter.send → mark sent.
 ```
 
@@ -342,9 +346,7 @@ POST   /api/admin/billing/portal                 — Stripe Customer Portal URL
 DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 ```
 
-**741 tests** в 13 пакетах (apps/api: 305; kb: 156; sales: 116; conversation-engine: 59;
-worker: 15; storage: 15; channel-whatsapp: 17; observability: 16; channel-telegram: 11;
-channel-web: 11; llm-router: 9; verticals: 6; vertical-recruitment-uae: 5). Highlights:
+**791 tests** в 13 пакетах. Highlights:
 
 - **Multi-tenant E2E** (`apps/api/src/multi-tenant.integration.test.ts`): tenant isolation через real webhook handler + admin API
 - **RLS contract** (`packages/storage/src/rls.integration.test.ts`): non-bypass role validation

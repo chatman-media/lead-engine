@@ -142,11 +142,14 @@ function inboundText(inbound: Inbound): { text: string; mediaOnly: boolean } {
  *
  * Реализовано: vertical-hooks.extractFields (шаг 5), LLM-memory extraction
  * (шаг 5b), stage classifier (шаг 5a-bis), RAG + LLM reply через
- * ReplyStrategy (шаг 6). Оставшиеся Phase 2 TODO:
+ * ReplyStrategy (шаг 6). Оставшиеся TODO:
  *   - conversation summarization при длинных диалогах (context overflow)
- *   - photo-classification + dispatch в lead-hooks (passport OCR, etc.)
  *   - escalation rules (не отвечать N часов → перевод в queued)
  *   - A/B routing (styleId → experiment allocation через ExperimentsRepo)
+ *
+ * Photo classification + passport OCR реализованы в apps/api/src/lib/
+ * photo-processor.ts — выполняется ПОСЛЕ pipeline'а (Phase 4, async,
+ * без tx) через PhotoProcessor.process().
  */
 export async function processInbound(
   inbound: Inbound,
