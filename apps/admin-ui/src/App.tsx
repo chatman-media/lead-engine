@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
@@ -25,177 +25,72 @@ import { SaasTeam } from "./pages/SaasTeam.tsx";
 import { SaasVacancies } from "./pages/SaasVacancies.tsx";
 import { SaasHooks } from "./pages/SaasHooks.tsx";
 
-/**
- * SaaS routing. Token в localStorage (api/saas.ts). AuthGate проверяет
- * /api/auth/me на mount; 401 → /login. Authed-страницы рендерятся внутри
- * AppShell (левый сайдбар + шапка). Onboarding — full-screen без шелла.
- */
-function AuthGate({ children }: { children: React.ReactNode }) {
-  const [status, setStatus] = useState<"checking" | "auth" | "anon">("checking");
-  const navigate = useNavigate();
+function RequireAuth() {
+  const [status, setStatus] = useState<"checking" | "auth" | "anon">(() =>
+    getToken() ? "checking" : "anon",
+  );
 
   useEffect(() => {
+    if (status !== "checking") return;
     let cancelled = false;
-    const token = getToken();
-    if (!token) {
-      setStatus("anon");
-      navigate("/login", { replace: true });
-      return;
-    }
     saas
       .me()
-      .then(() => {
-        if (!cancelled) setStatus("auth");
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setStatus("anon");
-          navigate("/login", { replace: true });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [navigate]);
+      .then(() => { if (!cancelled) setStatus("auth"); })
+      .catch(() => { if (!cancelled) setStatus("anon"); });
+    return () => { cancelled = true; };
+  }, []);
 
-  if (status === "checking") {
-    return (
-      <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">
-        Проверяем сессию…
-      </div>
-    );
-  }
-  if (status === "anon") return null;
-  return <>{children}</>;
+  if (status === "checking") return null;
+  if (status === "anon") return <Navigate to="/login" replace />;
+  return <Outlet />;
 }
 
-/** Authed-страница в шелле (сайдбар + шапка). */
-function Shell({ children }: { children: React.ReactNode }) {
+function ShellLayout() {
   return (
-    <AuthGate>
-      <AppShell>{children}</AppShell>
-    </AuthGate>
+    <AppShell>
+      <Outlet />
+    </AppShell>
   );
 }
 
 export function App() {
   return (
     <ThemeProvider>
-      <BrowserRouter>
+      <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "") || "/"}>
         <Routes>
+          {/* Публичные */}
           <Route path="/login" element={<SaasLogin />} />
           <Route path="/signup" element={<SaasSignup />} />
           <Route path="/accept-invite" element={<SaasAcceptInvite />} />
-          <Route
-            path="/onboarding"
-            element={
-              <AuthGate>
-                <SaasOnboarding />
-              </AuthGate>
-            }
-          />
-          <Route
-            path="/dashboard"
-            element={
-              <Shell>
-                <SaasDashboard />
-              </Shell>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <Shell>
-                <SaasSettings />
-              </Shell>
-            }
-          />
-          <Route
-            path="/channels"
-            element={
-              <Shell>
-                <SaasChannels />
-              </Shell>
-            }
-          />
-          <Route
-            path="/conversations"
-            element={
-              <Shell>
-                <SaasConversations />
-              </Shell>
-            }
-          />
-          <Route
-            path="/conversations/:id"
-            element={
-              <Shell>
-                <SaasConversations />
-              </Shell>
-            }
-          />
-          <Route
-            path="/audit"
-            element={
-              <Shell>
-                <SaasAudit />
-              </Shell>
-            }
-          />
-          <Route
-            path="/diagnostics"
-            element={
-              <Shell>
-                <SaasDiagnostics />
-              </Shell>
-            }
-          />
-          <Route
-            path="/team"
-            element={
-              <Shell>
-                <SaasTeam />
-              </Shell>
-            }
-          />
-          <Route
-            path="/leads"
-            element={<Shell><SaasLeads /></Shell>}
-          />
-          <Route
-            path="/leads/:id"
-            element={<Shell><SaasLeadDetail /></Shell>}
-          />
-          <Route
-            path="/funnel"
-            element={<Shell><SaasFunnel /></Shell>}
-          />
-          <Route
-            path="/skills"
-            element={<Shell><SaasSkills /></Shell>}
-          />
-          <Route
-            path="/styles"
-            element={<Shell><SaasStyles /></Shell>}
-          />
-          <Route
-            path="/experiments"
-            element={<Shell><SaasExperiments /></Shell>}
-          />
-          <Route
-            path="/vacancies"
-            element={<Shell><SaasVacancies /></Shell>}
-          />
-          <Route
-            path="/hooks"
-            element={<Shell><SaasHooks /></Shell>}
-          />
-          <Route
-            path="/billing"
-            element={<Shell><SaasBilling /></Shell>}
-          />
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+
+          {/* Только для авторизованных */}
+          <Route element={<RequireAuth />}>
+            <Route path="/onboarding" element={<SaasOnboarding />} />
+
+            {/* С сайдбаром */}
+            <Route element={<ShellLayout />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<SaasDashboard />} />
+              <Route path="/leads" element={<SaasLeads />} />
+              <Route path="/leads/:id" element={<SaasLeadDetail />} />
+              <Route path="/conversations" element={<SaasConversations />} />
+              <Route path="/conversations/:id" element={<SaasConversations />} />
+              <Route path="/funnel" element={<SaasFunnel />} />
+              <Route path="/vacancies" element={<SaasVacancies />} />
+              <Route path="/skills" element={<SaasSkills />} />
+              <Route path="/hooks" element={<SaasHooks />} />
+              <Route path="/styles" element={<SaasStyles />} />
+              <Route path="/experiments" element={<SaasExperiments />} />
+              <Route path="/channels" element={<SaasChannels />} />
+              <Route path="/billing" element={<SaasBilling />} />
+              <Route path="/settings" element={<SaasSettings />} />
+              <Route path="/team" element={<SaasTeam />} />
+              <Route path="/audit" element={<SaasAudit />} />
+              <Route path="/diagnostics" element={<SaasDiagnostics />} />
+            </Route>
+          </Route>
+
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
       <Toaster />
