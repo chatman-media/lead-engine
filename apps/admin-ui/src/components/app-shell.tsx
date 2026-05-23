@@ -1,5 +1,6 @@
 import {
   ActivityIcon,
+  BarChart2Icon,
   CableIcon,
   DatabaseIcon,
   FlaskConicalIcon,
@@ -48,6 +49,7 @@ const NAV: NavItem[] = [
   { to: "/styles", label: "Стили", icon: SparklesIcon },
   { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon },
   { to: "/channels", label: "Каналы", icon: CableIcon },
+  { to: "/billing", label: "LLM-использование", icon: BarChart2Icon },
   { to: "/settings", label: "Настройки LLM", icon: SlidersHorizontalIcon },
   { to: "/team", label: "Команда", icon: UsersIcon },
   { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
