@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PlusIcon, SettingsIcon } from "lucide-react";
+import { PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 
 const KIND_COLOR: Record<string, string> = {
   intake: "border-blue-300",
@@ -45,6 +45,9 @@ export function SaasLeads() {
   // Drag-and-drop state
   const [draggedLeadId, setDraggedLeadId] = useState<number | null>(null);
   const [dragOverStageId, setDragOverStageId] = useState<number | null>(null);
+
+  // Lead search
+  const [leadSearch, setLeadSearch] = useState("");
 
   // Create lead dialog
   const [creating, setCreating] = useState(false);
@@ -133,15 +136,20 @@ export function SaasLeads() {
   const stages = funnel?.stages ?? [];
   const leadsByStage = new Map<string, LeadListItem[]>();
 
+  const q = leadSearch.trim().toLowerCase();
+  const filteredLeads = q
+    ? leads.filter((l) => (l.contactName ?? "").toLowerCase().includes(q))
+    : leads;
+
   // legacy leads (no stageDefinitionId) → group by state
-  const legacyLeads = leads.filter((l) => !l.stageDefinitionId);
+  const legacyLeads = filteredLeads.filter((l) => !l.stageDefinitionId);
   for (const lead of legacyLeads) {
     const key = `state:${lead.state}`;
     (leadsByStage.get(key) ?? leadsByStage.set(key, []).get(key))!.push(lead);
   }
 
   // dynamic leads → group by stageDefinitionId
-  for (const lead of leads.filter((l) => l.stageDefinitionId)) {
+  for (const lead of filteredLeads.filter((l) => l.stageDefinitionId)) {
     const key = `stage:${lead.stageDefinitionId}`;
     (leadsByStage.get(key) ?? leadsByStage.set(key, []).get(key))!.push(lead);
   }
@@ -154,9 +162,18 @@ export function SaasLeads() {
       <div className="flex items-center justify-between">
         <PageHeader
           title="Лиды"
-          description={`${leads.length} лидов · ${stages.length} стадий в воронке`}
+          description={`${filteredLeads.length}${q ? ` из ${leads.length}` : ""} лидов · ${stages.length} стадий`}
         />
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Поиск по имени…"
+              value={leadSearch}
+              onChange={(e) => setLeadSearch(e.target.value)}
+              className="h-8 pl-8 text-sm w-48"
+            />
+          </div>
           <Button size="sm" onClick={() => { setCreating(true); setContacts([]); setContactSearch(""); }}>
             <PlusIcon className="mr-1.5 size-3.5" />
             Новый лид

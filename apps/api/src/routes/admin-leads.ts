@@ -19,6 +19,7 @@ import { recordAudit } from "../lib/audit.ts";
  * POST /api/admin/leads                — создать лида вручную
  * GET  /api/admin/leads/:id            — карточка лида с полями и историей
  * PATCH /api/admin/leads/:id/stage     — переместить в стадию
+ * DELETE /api/admin/leads/:id          — удалить лида
  * GET  /api/admin/leads/:id/field-values — значения полей
  * PUT  /api/admin/leads/:id/field-values — bulk upsert значений полей
  */
@@ -31,7 +32,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
   /**
    * GET /api/admin/leads
-   * Query: ?stageId=<id> | ?state=<slug> | ?contactId=<id> | ?limit=N | ?offset=N
+   * Query: ?stageId=<id> | ?state=<slug> | ?contactId=<id> | ?q=<text> | ?limit=N | ?offset=N
    */
   app.get("/api/admin/leads", async (c) => {
     const tenantId = c.var.tenantId;
@@ -40,6 +41,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     const stageIdParam = c.req.query("stageId");
     const stateParam = c.req.query("state");
     const contactIdParam = c.req.query("contactId");
+    const qParam = c.req.query("q")?.trim();
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
       const conditions = [eq(leads.tenantId, tenantId)];
@@ -51,6 +53,9 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       }
       if (contactIdParam) {
         conditions.push(eq(leads.userId, Number(contactIdParam)));
+      }
+      if (qParam) {
+        conditions.push(ilike(contacts.displayName, `%${qParam}%`));
       }
 
       return tx
@@ -278,6 +283,41 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       targetKind: "lead",
       targetId: String(id),
       details: { stageDefinitionId, force },
+    });
+
+    return c.json({ ok: true });
+  });
+
+  /**
+   * DELETE /api/admin/leads/:id
+   * Удаляет лида вместе с field_values, events и notes.
+   */
+  app.delete("/api/admin/leads/:id", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+
+    await withTenant(opts.db, tenantId, async (tx) => {
+      const [lead] = await tx
+        .select({ id: leads.id })
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+      if (!lead) return;
+
+      await tx.delete(leadFieldValues).where(eq(leadFieldValues.leadId, id));
+      await tx.delete(leadEvents).where(eq(leadEvents.leadId, id));
+      await tx.delete(leadNotes).where(eq(leadNotes.leadId, id));
+      await tx.delete(leads).where(eq(leads.id, id));
+    });
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "lead.deleted",
+      targetKind: "lead",
+      targetId: String(id),
+      details: {},
     });
 
     return c.json({ ok: true });
