@@ -111,7 +111,7 @@ Changes apply **live** through an in-process bus (`apps/api`) plus a
 
 | App | What it is | Deploy |
 |---|---|---|
-| `apps/api` | HTTP server: webhook handlers (telegram/whatsapp/stripe), `/ws/:slug` (web), admin API (auth + KB + LLM config + channels + conversations + audit + diagnostics + tenant pause), `/metrics`, `/healthz` | Fly app / Node hosting |
+| `apps/api` | HTTP server: webhook handlers (telegram/whatsapp/stripe), `/ws/:slug` (web), admin API (auth + KB + LLM config + channels + conversations + leads + funnel builder + skills + styles + experiments + audit + diagnostics + tenant pause), `/metrics`, `/healthz` | Fly app / Node hosting |
 | `apps/worker` | Outbound dispatcher (`SKIP LOCKED` queue), polling channel-reload, cron jobs | Fly app process group |
 | `apps/admin-ui` | React 19 + Vite SPA on **Tailwind v4 + shadcn/ui** (Linear theme, left sidebar, light/dark) — full SaaS UI: guided onboarding wizard + dashboard / channels / settings / conversations / leads / funnel builder / skills / styles / experiments / team / audit / diagnostics | Static / CDN |
 | `apps/vertical-recruitment-uae` | Vertical template (KB seed + funnel stages + style prompts) — NOT deployed, loaded via `packages/verticals` | — |
@@ -351,8 +351,9 @@ PUT    /api/admin/leads/:id/field-values         — bulk upsert stage field val
 POST   /api/admin/leads/:id/notes               — add operator note
 
 GET    /api/admin/funnel                         — funnel + stage_definitions + stage_fields
+POST   /api/admin/funnel/seed                    — seed from template (visa/real_estate/modeling/recruitment)
 POST   /api/admin/funnel/stages                  — create stage
-PATCH  /api/admin/funnel/stages/:id              — update stage config
+PATCH  /api/admin/funnel/stages/:id              — update stage config (incl. supportMode)
 DELETE /api/admin/funnel/stages/:id              — delete stage
 PATCH  /api/admin/funnel/stages/reorder          — bulk position update
 POST   /api/admin/funnel/stages/:id/fields       — add field to stage
@@ -360,6 +361,8 @@ PATCH  /api/admin/funnel/stages/:id/fields/:fid  — update field
 DELETE /api/admin/funnel/stages/:id/fields/:fid  — delete field
 
 GET    /api/admin/skills                         — list skills with ELO scores
+GET    /api/admin/styles                         — list styles (versions, deletedAt filter)
+GET    /api/admin/experiments                    — list A/B experiments
 
 GET    /api/admin/audit-log                      — cursor-paginated audit history
 
@@ -377,7 +380,7 @@ POST   /api/admin/billing/portal                 — Stripe Customer Portal URL
 DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 ```
 
-**791 tests** across 13 packages. Highlights:
+**850+ tests** across 13 packages. Highlights:
 
 - **Multi-tenant E2E** (`apps/api/src/multi-tenant.integration.test.ts`): tenant isolation through the real webhook handler + admin API
 - **RLS contract** (`packages/storage/src/rls.integration.test.ts`): non-bypass role validation
