@@ -447,6 +447,24 @@ export interface DashboardStats {
   };
 }
 
+// ── Funnel analytics ─────────────────────────────────────────────────────
+
+export interface FunnelAnalyticsStage {
+  id: number;
+  slug: string;
+  displayName: string;
+  kind: string;
+  color: string | null;
+  position: number;
+  leadsCurrent: number;
+  leadsEntered: number;
+  avgDaysInStage: number | null;
+}
+
+export interface FunnelAnalytics {
+  stages: FunnelAnalyticsStage[];
+}
+
 // ── Audit entry (for audit log page) ────────────────────────────────────
 
 const TOKEN_KEY = "lead_engine_token";
@@ -922,6 +940,10 @@ export const saas = {
       method: "POST",
       body: JSON.stringify({ template }),
     });
+  },
+
+  getFunnelAnalytics() {
+    return request<FunnelAnalytics>("/api/admin/funnel/analytics");
   },
 
   // ── Skills / Styles / Experiments ────────────────────────────────────

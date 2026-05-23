@@ -5,6 +5,7 @@ import {
   clearToken,
   saas,
   type FieldType,
+  type FunnelAnalytics,
   type FunnelData,
   type StageDefinition,
   type StageField,
@@ -24,7 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { GripVerticalIcon, LayersIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { BarChart2Icon, GripVerticalIcon, LayersIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "form_fill", label: "Сбор данных" },
@@ -69,6 +70,8 @@ export function SaasFunnel() {
   const [seeding, setSeeding] = useState(false);
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const [analytics, setAnalytics] = useState<FunnelAnalytics | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [newStage, setNewStage] = useState({
     slug: "",
     displayName: "",
@@ -350,6 +353,91 @@ export function SaasFunnel() {
                 </div>
               </CardContent>
             </Card>
+          )}
+        </div>
+      )}
+
+      {/* Аналитика воронки */}
+      {funnel?.funnel && (
+        <div className="rounded-md border p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <BarChart2Icon className="size-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Аналитика воронки</span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={analyticsLoading}
+              onClick={async () => {
+                setAnalyticsLoading(true);
+                try {
+                  setAnalytics(await saas.getFunnelAnalytics());
+                } catch {
+                  // ignore
+                } finally {
+                  setAnalyticsLoading(false);
+                }
+              }}
+            >
+              {analyticsLoading ? "Загрузка…" : analytics ? "Обновить" : "Загрузить"}
+            </Button>
+          </div>
+          {analytics && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-xs text-muted-foreground">
+                    <th className="text-left py-2 pr-4 font-medium">Стадия</th>
+                    <th className="text-right py-2 px-3 font-medium">Сейчас</th>
+                    <th className="text-right py-2 px-3 font-medium">Всего вошло</th>
+                    <th className="text-right py-2 pl-3 font-medium">Ср. дней</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analytics.stages.map((s) => (
+                    <tr key={s.id} className="border-b last:border-0">
+                      <td className="py-2 pr-4">
+                        <div className="flex items-center gap-2">
+                          {s.color && (
+                            <span
+                              className="size-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: s.color }}
+                            />
+                          )}
+                          <span className="font-medium">{s.displayName}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {s.kind === "terminal_won"
+                              ? "✓"
+                              : s.kind === "terminal_lost"
+                                ? "✗"
+                                : ""}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="text-right py-2 px-3 tabular-nums">
+                        {s.leadsCurrent > 0 ? (
+                          <span className="font-semibold">{s.leadsCurrent}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="text-right py-2 px-3 tabular-nums text-muted-foreground">
+                        {s.leadsEntered || "—"}
+                      </td>
+                      <td className="text-right py-2 pl-3 tabular-nums text-muted-foreground">
+                        {s.avgDaysInStage !== null ? `${s.avgDaysInStage} д` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!analytics && !analyticsLoading && (
+            <p className="text-xs text-muted-foreground">
+              Нажмите «Загрузить» чтобы увидеть конверсию по стадиям.
+            </p>
           )}
         </div>
       )}
