@@ -35,6 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_stage_def_funnel_pos ON stage_definitions(funnel_
 
 -- RLS
 ALTER TABLE stage_definitions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON stage_definitions;
 CREATE POLICY tenant_isolation ON stage_definitions
   USING (tenant_id = NULLIF(current_setting('app.tenant_id', TRUE), '')::INTEGER);
 
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS stage_fields (
 CREATE INDEX IF NOT EXISTS idx_stage_fields_stage_pos ON stage_fields(stage_id, position);
 
 ALTER TABLE stage_fields ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON stage_fields;
 CREATE POLICY tenant_isolation ON stage_fields
   USING (tenant_id = NULLIF(current_setting('app.tenant_id', TRUE), '')::INTEGER);
 
@@ -92,5 +94,6 @@ CREATE TABLE IF NOT EXISTS lead_field_values (
 CREATE INDEX IF NOT EXISTS idx_lead_field_values_lead ON lead_field_values(lead_id);
 
 ALTER TABLE lead_field_values ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON lead_field_values;
 CREATE POLICY tenant_isolation ON lead_field_values
   USING (tenant_id = NULLIF(current_setting('app.tenant_id', TRUE), '')::INTEGER);
