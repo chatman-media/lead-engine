@@ -11,6 +11,7 @@ import {
 import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
+import { canAddLead } from "../lib/quota.ts";
 
 /**
  * Lead pipeline API.
@@ -112,6 +113,16 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     }>();
 
     if (!body.contactId) return c.json({ error: "contactId required" }, 400);
+
+    const quota = await canAddLead({ db: opts.db, tenantId });
+    if (!quota.allowed) {
+      return c.json({
+        error: "leads_limit_reached",
+        upgradeHint: `Лимит лидов на плане ${quota.planLabel}: ${quota.limit}. Повысьте план для продолжения.`,
+        current: quota.current,
+        limit: quota.limit,
+      }, 402);
+    }
 
     const now = Math.floor(Date.now() / 1000);
     const row = await withTenant(opts.db, tenantId, async (tx) => {

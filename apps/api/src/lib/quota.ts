@@ -8,7 +8,7 @@
  */
 
 import { type Db } from "@chatman-media/conversation-engine";
-import { channels, kbDocuments, tenants } from "@chatman-media/storage";
+import { admins, channels, kbDocuments, leads, tenants } from "@chatman-media/storage";
 import { count, eq } from "drizzle-orm";
 import { type PlanKind, type PlanLimits, resolvePlan } from "./plans.ts";
 
@@ -18,7 +18,7 @@ export interface QuotaCheckResult {
   current: number;
   plan: PlanKind;
   planLabel: string;
-  reason?: "max_channels" | "max_kb_documents";
+  reason?: "max_channels" | "max_kb_documents" | "max_admins" | "max_leads";
 }
 
 interface QuotaCheckOpts {
@@ -56,6 +56,68 @@ export async function canAddKbDocument(opts: QuotaCheckOpts): Promise<QuotaCheck
     plan,
     planLabel: limits.label,
     ...(allowed ? {} : { reason: "max_kb_documents" as const }),
+  };
+}
+
+/**
+ * Можно ли пригласить ещё одного admin?
+ */
+export async function canAddAdmin(opts: QuotaCheckOpts): Promise<QuotaCheckResult> {
+  const [tenant] = await opts.db
+    .select({ plan: tenants.plan })
+    .from(tenants)
+    .where(eq(tenants.id, opts.tenantId));
+  const planStr = tenant?.plan ?? "free";
+  const limits = resolvePlan(planStr);
+
+  if (limits.maxAdmins === -1) {
+    return { allowed: true, limit: -1, current: 0, plan: planStr as PlanKind, planLabel: limits.label };
+  }
+
+  const rows = await opts.db
+    .select({ value: count() })
+    .from(admins)
+    .where(eq(admins.tenantId, opts.tenantId));
+  const currentCount = Number(rows[0]?.value ?? 0);
+  const allowed = currentCount < limits.maxAdmins;
+  return {
+    allowed,
+    limit: limits.maxAdmins,
+    current: currentCount,
+    plan: planStr as PlanKind,
+    planLabel: limits.label,
+    ...(allowed ? {} : { reason: "max_admins" as const }),
+  };
+}
+
+/**
+ * Можно ли создать ещё один лид?
+ */
+export async function canAddLead(opts: QuotaCheckOpts): Promise<QuotaCheckResult> {
+  const [tenant] = await opts.db
+    .select({ plan: tenants.plan })
+    .from(tenants)
+    .where(eq(tenants.id, opts.tenantId));
+  const planStr = tenant?.plan ?? "free";
+  const limits = resolvePlan(planStr);
+
+  if (limits.maxLeads === -1) {
+    return { allowed: true, limit: -1, current: 0, plan: planStr as PlanKind, planLabel: limits.label };
+  }
+
+  const rows = await opts.db
+    .select({ value: count() })
+    .from(leads)
+    .where(eq(leads.tenantId, opts.tenantId));
+  const currentCount = Number(rows[0]?.value ?? 0);
+  const allowed = currentCount < limits.maxLeads;
+  return {
+    allowed,
+    limit: limits.maxLeads,
+    current: currentCount,
+    plan: planStr as PlanKind,
+    planLabel: limits.label,
+    ...(allowed ? {} : { reason: "max_leads" as const }),
   };
 }
 

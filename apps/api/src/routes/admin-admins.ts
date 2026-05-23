@@ -3,6 +3,7 @@ import { adminInvites, admins } from "@chatman-media/storage";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
+import { canAddAdmin } from "../lib/quota.ts";
 
 /**
  * Multi-admin management per tenant (Q3'26 M4). Только superadmin role
@@ -106,6 +107,17 @@ export function makeAdminAdminsRoutes(opts: AdminAdminsRoutesOpts): Hono {
       return c.json({ error: "valid email required" }, 400);
     }
     const role = body.role === "superadmin" ? "superadmin" : "manager";
+
+    // Quota: сколько admin'ов разрешено на плане?
+    const quota = await canAddAdmin({ db: opts.db, tenantId });
+    if (!quota.allowed) {
+      return c.json({
+        error: "admins_limit_reached",
+        upgradeHint: `Лимит участников команды на плане ${quota.planLabel}: ${quota.limit}. Повысьте план для продолжения.`,
+        current: quota.current,
+        limit: quota.limit,
+      }, 402);
+    }
 
     // Check existing admin с этим email в tenant'е.
     const [existing] = await opts.db
