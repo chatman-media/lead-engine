@@ -15,6 +15,7 @@ import {
   ApiError,
   type BillingPlan,
   clearToken,
+  type DashboardStats,
   type KbDoc,
   type OnboardingStatus,
   saas,
@@ -31,6 +32,7 @@ export function SaasDashboard() {
   const [billing, setBilling] = useState<BillingPlan | null>(null);
   const [stripeEnabled, setStripeEnabled] = useState(false);
   const [tenantInfo, setTenantInfo] = useState<TenantInfo | null>(null);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
   const [togglingPause, setTogglingPause] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -114,6 +116,7 @@ export function SaasDashboard() {
           refreshOnboarding(),
           refreshTenantInfo(),
           refreshBilling(),
+          saas.getDashboardStats().then(setStats).catch(() => {}),
         ]);
       } catch (err) {
         if (cancelled) return;
@@ -224,6 +227,61 @@ export function SaasDashboard() {
       )}
 
       {onboarding && <OnboardingChecklist status={onboarding} />}
+
+      {stats && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <p className="text-2xl font-bold">{stats.leads.total}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Лидов всего</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <p className="text-2xl font-bold">{stats.conversations.open}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Активных диалогов</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <p className="text-2xl font-bold text-amber-500">{stats.conversations.escalated}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Ждут оператора</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3">
+              <p className="text-2xl font-bold">{stats.messages.last7days}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Сообщений за 7 дней</p>
+            </CardContent>
+          </Card>
+          {stats.leads.byStage.length > 0 && (
+            <div className="col-span-2 sm:col-span-4">
+              <Card>
+                <CardContent className="pt-4 pb-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Лиды по стадиям</p>
+                  <div className="flex flex-wrap gap-2">
+                    {stats.leads.byStage.map((s) => (
+                      <div
+                        key={s.slug}
+                        className="flex items-center gap-1.5 rounded-md border px-2.5 py-1"
+                      >
+                        {s.color && (
+                          <span
+                            className="size-2 rounded-full shrink-0"
+                            style={{ backgroundColor: s.color }}
+                          />
+                        )}
+                        <span className="text-xs text-muted-foreground">{s.displayName}</span>
+                        <span className="text-xs font-semibold">{s.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <div className="space-y-6">

@@ -414,6 +414,39 @@ export interface ExperimentItem {
   createdAt: number;
 }
 
+export interface VacancyItem {
+  id: number;
+  tenantId: number;
+  title: string;
+  body: string;
+  url: string | null;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DashboardStats {
+  leads: {
+    total: number;
+    byStage: Array<{
+      slug: string;
+      displayName: string;
+      kind: string;
+      color: string | null;
+      position: number;
+      count: number;
+    }>;
+  };
+  conversations: {
+    open: number;
+    escalated: number;
+    today: number;
+  };
+  messages: {
+    last7days: number;
+  };
+}
+
 // ── Audit entry (for audit log page) ────────────────────────────────────
 
 const TOKEN_KEY = "lead_engine_token";
@@ -886,5 +919,30 @@ export const saas = {
   },
   listExperiments() {
     return request<{ items: ExperimentItem[] }>("/api/admin/experiments");
+  },
+
+  // ── Dashboard ────────────────────────────────────────────────────────
+  getDashboardStats() {
+    return request<DashboardStats>("/api/admin/dashboard");
+  },
+
+  // ── Vacancies ────────────────────────────────────────────────────────
+  listVacancies() {
+    return request<{ items: VacancyItem[] }>("/api/admin/vacancies");
+  },
+  createVacancy(data: { title: string; body: string; url?: string; isActive?: boolean }) {
+    return request<VacancyItem>("/api/admin/vacancies", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateVacancy(id: number, data: { title?: string; body?: string; url?: string | null; isActive?: boolean }) {
+    return request<VacancyItem>(`/api/admin/vacancies/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  deleteVacancy(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/vacancies/${id}`, { method: "DELETE" });
   },
 };

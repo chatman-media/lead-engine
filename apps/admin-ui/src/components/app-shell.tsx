@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   BarChart2Icon,
+  BriefcaseIcon,
   CableIcon,
   DatabaseIcon,
   FlaskConicalIcon,
@@ -44,6 +45,7 @@ const NAV: NavItem[] = [
   { to: "/leads", label: "Лиды", icon: UserCircleIcon },
   { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
   { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
+  { to: "/vacancies", label: "Вакансии", icon: BriefcaseIcon },
   { to: "/dashboard", label: "База знаний", icon: DatabaseIcon },
   { to: "/skills", label: "Навыки", icon: ZapIcon },
   { to: "/styles", label: "Стили", icon: SparklesIcon },

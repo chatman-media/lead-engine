@@ -22,6 +22,7 @@ import { SaasSignup } from "./pages/SaasSignup.tsx";
 import { SaasSkills } from "./pages/SaasSkills.tsx";
 import { SaasStyles } from "./pages/SaasStyles.tsx";
 import { SaasTeam } from "./pages/SaasTeam.tsx";
+import { SaasVacancies } from "./pages/SaasVacancies.tsx";
 
 /**
  * SaaS routing. Token в localStorage (api/saas.ts). AuthGate проверяет
@@ -179,6 +180,10 @@ export function App() {
           <Route
             path="/experiments"
             element={<Shell><SaasExperiments /></Shell>}
+          />
+          <Route
+            path="/vacancies"
+            element={<Shell><SaasVacancies /></Shell>}
           />
           <Route
             path="/billing"
