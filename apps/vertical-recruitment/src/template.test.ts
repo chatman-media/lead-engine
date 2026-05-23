@@ -3,15 +3,15 @@ import { defaultRegistry } from "@chatman-media/verticals";
 // Side-effect import регистрирует template в defaultRegistry.
 import "./index.ts";
 
-describe("recruitment_uae_v1 template", () => {
+describe("recruitment_v1 template", () => {
   it("регистрируется в defaultRegistry при import", () => {
-    const t = defaultRegistry.load("recruitment_uae_v1");
+    const t = defaultRegistry.load("recruitment_v1");
     expect(t.displayName).toBe("Найм (рекрутинг артисток) — v1");
     expect(t.version).toBe(1);
   });
 
   it("funnel-stages образуют валидную state machine", () => {
-    const t = defaultRegistry.load("recruitment_uae_v1");
+    const t = defaultRegistry.load("recruitment_v1");
     const slugs = new Set(t.funnelStages.map((s) => s.slug));
     // Каждый next[] ссылается на существующий slug.
     for (const stage of t.funnelStages) {
@@ -28,14 +28,14 @@ describe("recruitment_uae_v1 template", () => {
   });
 
   it("intake stage существует в funnel и совпадает со ссылкой в questionnaire", () => {
-    const t = defaultRegistry.load("recruitment_uae_v1");
+    const t = defaultRegistry.load("recruitment_v1");
     const intakeStage = t.funnelStages.find((s) => s.kind === "intake");
     expect(intakeStage).toBeDefined();
     expect(t.questionnaire?.stageSlug).toBe(intakeStage?.slug);
   });
 
   it("все required intake поля имеют непустое question", () => {
-    const t = defaultRegistry.load("recruitment_uae_v1");
+    const t = defaultRegistry.load("recruitment_v1");
     for (const f of t.questionnaire?.fields ?? []) {
       if (f.required) {
         expect(f.question.length).toBeGreaterThan(0);
@@ -44,7 +44,7 @@ describe("recruitment_uae_v1 template", () => {
   });
 
   it("enum-поля имеют непустые options", () => {
-    const t = defaultRegistry.load("recruitment_uae_v1");
+    const t = defaultRegistry.load("recruitment_v1");
     for (const f of t.questionnaire?.fields ?? []) {
       if (f.kind === "enum") {
         expect(f.options).toBeDefined();
