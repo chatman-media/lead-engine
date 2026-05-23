@@ -8,6 +8,7 @@ import {
   DatabaseIcon,
   FlaskConicalIcon,
   GitBranchIcon,
+  LinkIcon,
   LogOutIcon,
   type LucideIcon,
   MenuIcon,
@@ -75,6 +76,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Система",
     items: [
       { to: "/channels", label: "Каналы", icon: CableIcon },
+      { to: "/referral", label: "Партнёры", icon: LinkIcon },
       { to: "/team", label: "Команда", icon: UsersIcon },
       { to: "/billing", label: "LLM-использование", icon: BarChart2Icon },
       { to: "/settings", label: "Настройки LLM", icon: SlidersHorizontalIcon },

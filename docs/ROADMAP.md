@@ -1,16 +1,63 @@
 # Roadmap
 
-Последнее обновление: 2026-05-23 (переоценка конкурентов + стратегия).
+Последнее обновление: 2026-05-23 (GTM-стратегия $1M ARR + партнёрская модель).
 
-Стратегический контекст — см. [`COMPETITORS.md`](COMPETITORS.md).
+Стратегический контекст — см. [`COMPETITORS.md`](COMPETITORS.md), [`POSITIONING.md`](POSITIONING.md).
 
 **TL;DR позиционирование (Phase 1):** Первый AI рекрутер с **Persuasion Engine**
 для Telegram. Отвечает на входящих кандидатов за 30 секунд, ведёт по NEPQ-
 методологии, не теряет лидов — передаёт рекрутеру только горячие анкеты.
 BYOK, RU/CIS/MENA рынок, flat-fee $99/мес.
 
-> **Позиционирование Phase 2 (месяц 4+):** Расширение на real estate +
-> dental/clinic + agency-tier SKU. **Phase 3:** horizontal CX, OSS, voice.
+---
+
+## Цель: $1M ARR к декабрю 2026
+
+Математика: $1M ARR = **$83K MRR**. При $99–$199/мес напрямую нужно 420–840
+клиентов — solo нереально за 7 месяцев. **Ключевой инсайт: мультипликаторы.**
+Один партнёр-агрегатор = 50–100 клиентов одной сделкой.
+
+### Три параллельных трека
+
+| Трек | Механика | MRR-вклад к дек'26 |
+|------|----------|---------------------|
+| **Direct SMB** | Cold DM в Telegram (500/мес) + YouTube-воронка | ~$20K |
+| **Agency/партнёры** | 5–10 рекрутинговых сетей × $2–5K/мес | ~$40K |
+| **Pre-seed раунд** | $150–300K → 2 сейлза | разблокирует ×3 скорость |
+
+### GTM-шкала по месяцам
+
+| Месяц | Фокус | MRR |
+|-------|-------|-----|
+| Июнь | Deploy + демо-бот. 500 DM. 5 клиентов. 4 YouTube-видео | $2K |
+| Июль | Партнёрская программа (рефкоды). 20 клиентов | $5K |
+| Август | Первый агрегатор-партнёр (50+ клиентов). Питч инвесторам | $15K |
+| Сентябрь | Закрытие раунда. Найм 1-го сейлза | $30K |
+| Октябрь | Сейлз × 3 к скорости. 3 партнёра | $50K |
+| Ноябрь | Real estate вертикаль. Расширение | $70K |
+| Декабрь | 5 партнёров + 200 прямых | **$85K → $1M ARR** |
+
+### YouTube-стратегия (0-бюджет)
+
+Не "обзор инструмента" — контент, который продаёт сам:
+- **Формат А (вирусный):** Живой разрез диалога — бот ведёт кандидата по воронке,
+  закрывает без оператора. Комментарий поверх: «здесь применяется NEPQ».
+- **Формат Б (ROI-кейс):** «UAE-агентство закрывает 300 кандидатов/мес без
+  операторов» — цифры из реального тенанта.
+- **Формат В (конкурент-провокация):** «Почему ManyChat — это не продажи» +
+  прямое сравнение. SEO + алгоритм.
+- **Темп:** 2 видео/нед первые 2 мес. YouTube = доверие перед DM (конверсия ×3).
+
+### Telegram-питч инвесторам
+
+```
+Telegram-первый AI-сейлз агент для рекрутинговых агентств.
+$99/мес, BYOK, без кода. Кейс: UAE-агентство закрывает
+300 кандидатов/мес без операторов. Ищем $200K на найм
+двух сейлзов для захвата СНГ+MENA.
+```
+
+Целевые фонды: Fort Ross, Impulse VC, Cabra VC, 500 Global MENA.
 
 ---
 
@@ -18,27 +65,30 @@ BYOK, RU/CIS/MENA рынок, flat-fee $99/мес.
 
 | Фаза | Период | ICP | MRR target | Trigger |
 |------|--------|-----|------------|---------|
-| **Phase 1** | месяцы 1–3 | Recruitment agencies RU/CIS/MENA | $1–1.5K | launch |
-| **Phase 2** | месяцы 4–9 | + Real estate + Dental/Clinic | $5–10K | $1K MRR + 10 customers + case study |
-| **Phase 3** | месяцы 10–15 | Horizontal: coaching, B2B SaaS, edtech | $50K+ | $10K MRR + 50 customers |
+| **Phase 1** | июнь–август 2026 | Recruitment agencies RU/CIS/MENA + партнёры | $15–30K | deploy live |
+| **Phase 2** | сент–ноябрь 2026 | + Real estate + Dental/Clinic + раунд закрыт | $50–85K | $15K MRR + 3 партнёра |
+| **Phase 3** | дек'26–март'27 | Horizontal expansion + voice | $100K+ | $83K MRR = $1M ARR |
 
 ### Phase 1 metrics (tracking)
 
-| Метрика | Месяц 1 | Месяц 2 | Месяц 3 |
+| Метрика | Июнь | Июль | Август |
 |---|---|---|---|
-| Cumulative outreach DMs | 60 | 200 | 350 |
-| Demos | 5 | 15 | 30 |
-| Paying customers | 1 | 5 | 10–15 |
-| MRR | $99 | $500–1K | $1–1.5K |
-| Case studies live | 0 | 0–1 | 1–2 |
+| Cold DMs | 500 | 500 | 500 |
+| Demos | 10 | 20 | 30 |
+| Paying customers (direct) | 5 | 20 | 50 |
+| Partner deals | 0 | 1 | 3 |
+| MRR | $2K | $5K | $15K |
+| YouTube videos | 4 | 8 | 12 |
+| Investor pitches | 5 | 15 | 25 |
 
 ### Phase 1 приоритетные moat'ы
 
-1. **Recruitment-vertical expertise** — `recruitment_uae_v1` pack в проде
+1. **Recruitment-vertical expertise** — `recruitment_uae_v1` (прод) + `recruitment_generic` (новый)
 2. **Sales-engine (SPIN + NEPQ + Cialdini)** — `@chatman-media/sales` + 3 Phase 1 skills
 3. **Telegram-first** — RU/CIS/MENA доминирующий канал
 4. **BYOK** — ARPU-sensitive агентства используют свой OpenAI ключ
 5. **Operator handoff** — built-in inbox, не $300/мес add-on
+6. **Partner/agency model** — реферальные коды + white-label plan (Phase 2)
 
 ---
 
@@ -109,6 +159,18 @@ BYOK, RU/CIS/MENA рынок, flat-fee $99/мес.
   PlanWidget показывает calls/errors/latency за 30 дней
 - ✅ **Recruitment skills (Phase 1)** — 3 новых skill: `qualify-budget-via-spin`,
   `objection-visa-cost`, `close-soft-deposit`; style `recruiter-empathetic-v1`
+
+### GTM-инфраструктура (PR #87, май 2026)
+
+- ✅ **Партнёрские реферальные коды** — `referral_codes` таблица; `POST/GET/DELETE
+  /api/admin/referral-codes`; signup принимает `referralCode` (best-effort tracking);
+  страница «Партнёры» в admin-UI с генератором, копированием и счётчиком
+- ✅ **Generic recruitment шаблон** — `recruitment_generic` в `SEED_TEMPLATES`:
+  6 стадий (new_lead → qualifying → interview_scheduled → offer_sent → hired/rejected),
+  без UAE/артистской специфики. Подходит для любого HR-агентства RU/CIS/MENA.
+  Сид через `POST /api/admin/funnel/seed { template: "recruitment_generic" }`
+- ✅ **«Закрыто ботом» метрика** — новая карточка на дашборде: сумма лидов в
+  `terminal_won` стадиях. Ключевой ROI-показатель для удержания клиентов и YouTube-кейсов
 
 ### UX + Telegram userbot (май 2026)
 
@@ -384,22 +446,26 @@ Vision purpose уже в schema (`llm_provider_configs.purpose='vision'`):
 
 ## Метрики прогресса
 
-| Метрика | Сейчас | Q3 target | Q4 target | Q1'27 target |
+| Метрика | Сейчас (май'26) | Авг'26 | Ноябрь'26 | Дек'26 |
 |---|---|---|---|---|
 | Signup → first bot reply | < 5 мин self-serve ✅ | < 5 мин | < 3 мин | < 2 мин |
-| Active tenants | 1 (recruitment-uae) | 5–10 | 25–50 | 100+ |
-| MRR | $0 | $1K | $10K | $50K |
-| Channel coverage | TG + WA + web + **TG userbot** (UI) | + widget | ✅ TG userbot UI | + voice |
-| Vertical templates | 1 (UAE) | 1 | 5 | 8 |
+| Active tenants (direct) | 1 (recruitment-uae) | 50 | 200 | 350 |
+| Partner deals | 0 | 3 | 8 | 10 |
+| MRR | ~$99 | $15K | $70K | **$85K** |
+| ARR | ~$1.2K | $180K | $840K | **$1M+** |
+| Channel coverage | TG + WA + web + TG userbot | ✅ | + RE vertical | + voice prep |
+| Vertical templates | 2 (UAE + generic) | 2 | 5 | 7 |
+| YouTube videos | 0 | 12 | 30 | 50 |
 | Tests | 741 | 1K+ | 1.5K+ | 2K+ |
-| Compliance | none | none | none | SOC 2 Type I in flight |
-| Monetization | Stripe-ready ✅ | first paying #1 | $10K MRR | $50K MRR |
+| Compliance | none | none | none | SOC 2 in flight |
+| Funding | bootstrap | pitch | raise closed | post-seed |
 
-**Q3 status:** M1 ✅, M2 ✅, M3 ✅, M4 ✅, M5 ✅. Phase 1 pricing pivot ✅.
-Recruitment skills seeds + `recruiter-empathetic-v1` style ✅.
+**Q3 status (июнь–август):** M1–M5 ✅ (billing, channels, widget, team, operator).
+Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboard metrics).
+**Приоритет:** деплой + демо-бот + первые 50 прямых клиентов + 3 партнёра.
 
-**Q4 status:** M9 (Telegram userbot UI + runtime) ✅. Guided onboarding wizard ✅.
-Admin-UI редизайн (Tailwind v4 + shadcn, dark/light) ✅. M6–M8 — впереди.
+**Q4 status (сент–ноябрь):** M9 ✅ (TG userbot). Admin-UI редизайн ✅.
+**Приоритет:** закрыть раунд → найм сейлза → real estate вертикаль → 200 клиентов.
 
 ---
 
@@ -423,31 +489,35 @@ Admin-UI редизайн (Tailwind v4 + shadcn, dark/light) ✅. M6–M8 — в
 
 ## Краткий summary
 
-**Где мы сейчас (после 17 PR'ов май 2026):**
+**Где мы сейчас (PR #87, май 2026):**
 
-- Self-service onboarding работает end-to-end без env vars / рестартов
-- Channels: **Telegram + WhatsApp** через UI с auto-validate + encrypt + hot-reload
-- LLM: BYOK для OpenAI / Anthropic / OpenRouter / Ollama, hot-reload
-- KB: file/text upload + RAG retrieval, dedup по content_hash
-- **Stripe billing wired** — checkout с 14-day trial, customer portal, webhook
-  sync `tenants.plan`. 402 quota enforcement
-- Operator: inbox с auto-poll 5s, reply через UI, mode-toggle для takeover,
-  audit log всех действий, diagnostics, pause/resume bot
-- 741 tests, multi-tenant RLS, encrypted secrets, rate-limit, observability
+- Self-service onboarding end-to-end без env vars / рестартов
+- Channels: TG bot + TG userbot + WhatsApp + web widget — все через UI
+- LLM: BYOK OpenAI/Anthropic/OpenRouter/Ollama, hot-reload
+- KB: file/text upload + RAG, dedup по content_hash
+- **Stripe billing wired** — 14-day trial, customer portal, 402 quota enforcement
+- Operator inbox: auto-poll 5s, mode-toggle takeover, audit log, pause/resume
+- **GTM-инфра:** партнёрские коды, `recruitment_generic` шаблон, метрика «закрыто ботом»
+- 741 tests, multi-tenant RLS, encrypted secrets, observability
 - 1 живой prod tenant (recruitment UAE), Stripe-ready
 
-**Куда движемся (Phase 1, ближайшие 3 мес):** cold outreach 60→350 DMs,
-первые платящие клиенты ($1–1.5K MRR), landing page для recruitment ICP.
-Код: только customer-driven (AmoCRM/Bitrix24 если prospect просит).
+**Что не сделано и блокирует продажи:** деплой на домен. Одна неделя работы.
 
-**Q4'26 (Phase 2 trigger):** real-estate vertical pack, `vertical-realestate-v1`,
-agency SKU, Stripe live mode → авто-billing вместо ручного инвойсинга.
+**Ближайшие 30 дней (июнь 2026):**
+1. Задеплоить на Railway/Render + домен → первая публичная ссылка
+2. Запустить демо-бот в Telegram (recruitment_generic шаблон)
+3. 500 холодных DM рекрутинговым агентствам в Telegram
+4. 4 YouTube-видео (демо живых разрезов, UAE-кейс)
+5. 10 питчей инвесторам в Telegram
 
-**Q4'26 также:** 5 vertical packs (e-commerce / real-estate / clinic / edtech /
-recruitment v2), agentic tool-loop (calendar/CRM/payment), AmoCRM/Bitrix24
-для CIS, TG userbot UI.
+**$1M ARR путь:** прямые клиенты ($99-199) + партнёры-агрегаторы ($2-5K/сделка)
++ pre-seed раунд → сейлзы. Цель: 3 партнёра к августу, 10 к декабрю.
+Один партнёр с 50 клиентами = $7K MRR за одну сделку.
 
-**Q1'27:** SOC 2 Type I, voice channel (Vapi), self-host AGPL dual edition.
+**Q4'26:** real-estate вертикаль, agentic tool-loop, AmoCRM/Bitrix24 для CIS.
 
-**Где наш moat:** BYOK + Telegram-native + multi-tenant agency + operator
-handoff first-class + OSS-ready. См. [`COMPETITORS.md`](COMPETITORS.md) §5.
+**Q1'27:** SOC 2 Type I, voice (Vapi), self-host AGPL dual edition.
+
+**Moat:** BYOK + Telegram-first + multi-tenant agency + NEPQ/Cialdini engine +
+operator handoff. Ни один конкурент не шипает все пять вместе.
+См. [`COMPETITORS.md`](COMPETITORS.md).

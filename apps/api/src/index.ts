@@ -46,6 +46,7 @@ import { makeAdminTenantRoutes } from "./routes/admin-tenant.ts";
 import { makeAdminLeadsRoutes } from "./routes/admin-leads.ts";
 import { makeAdminFunnelRoutes } from "./routes/admin-funnel.ts";
 import { makeAdminDashboardRoutes } from "./routes/admin-dashboard.ts";
+import { makeAdminReferralRoutes } from "./routes/admin-referral.ts";
 import { makeAdminVacanciesRoutes } from "./routes/admin-vacancies.ts";
 import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
@@ -308,6 +309,7 @@ async function main() {
 
   // Funnel builder (stage_definitions, stage_fields) + skills list.
   app.route("/", makeAdminFunnelRoutes({ db }));
+  app.route("/", makeAdminReferralRoutes({ db }));
   log.info("admin-funnel routes enabled");
 
   // Dashboard aggregate stats.

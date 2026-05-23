@@ -12,6 +12,7 @@ export function SaasSignup() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [tenantSlug, setTenantSlug] = useState("");
+  const [referralCode, setReferralCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -28,7 +29,7 @@ export function SaasSignup() {
     }
     setLoading(true);
     try {
-      const res = await saas.signup(email, password, tenantSlug || undefined);
+      const res = await saas.signup(email, password, tenantSlug || undefined, referralCode.trim() || undefined);
       setToken(res.token);
       navigate("/onboarding", { replace: true });
     } catch (err) {
@@ -97,6 +98,19 @@ export function SaasSignup() {
             placeholder="сгенерим из email"
             pattern="[a-z0-9][a-z0-9-]{1,30}[a-z0-9]"
             title="Lowercase a-z 0-9 -, 3-32 символа"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="referral">
+            Реферальный код <span className="text-muted-foreground">(если есть)</span>
+          </Label>
+          <Input
+            id="referral"
+            type="text"
+            value={referralCode}
+            onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+            placeholder="ABCD-1234"
+            className="font-mono"
           />
         </div>
         {error && (

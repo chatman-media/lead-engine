@@ -1,6 +1,6 @@
 import { withTenant } from "@chatman-media/conversation-engine";
-import { adminInvites, admins, tenants } from "@chatman-media/storage";
-import { and, eq } from "drizzle-orm";
+import { adminInvites, admins, referralCodes, tenants } from "@chatman-media/storage";
+import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import {
@@ -43,6 +43,8 @@ interface SignupBody {
   password: unknown;
   /** Опциональный custom slug. Если пусто — derive из email + random suffix. */
   tenantSlug?: unknown;
+  /** Реферальный код партнёра (опционально). Трекает attribution. */
+  referralCode?: unknown;
 }
 
 interface LoginBody {
@@ -75,6 +77,10 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
     const customSlug =
       typeof body.tenantSlug === "string" && body.tenantSlug.length > 0
         ? body.tenantSlug.trim().toLowerCase()
+        : undefined;
+    const referralCode =
+      typeof body.referralCode === "string" && body.referralCode.trim().length > 0
+        ? body.referralCode.trim().toUpperCase()
         : undefined;
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -133,6 +139,28 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
     }
     if (!tenantRow) {
       return c.json({ error: "could not allocate tenant slug after 5 attempts" }, 500);
+    }
+
+    // 3a. Если передан referralCode — ищем и трекаем (best-effort, не блокирует signup).
+    if (referralCode) {
+      try {
+        const [codeRow] = await opts.db
+          .select({ id: referralCodes.id })
+          .from(referralCodes)
+          .where(eq(referralCodes.code, referralCode));
+        if (codeRow) {
+          await opts.db
+            .update(referralCodes)
+            .set({ usesCount: sql`${referralCodes.usesCount} + 1` })
+            .where(eq(referralCodes.id, codeRow.id));
+          await opts.db
+            .update(tenants)
+            .set({ referredByCode: referralCode })
+            .where(eq(tenants.id, tenantRow.id));
+        }
+      } catch {
+        // best-effort — не ломаем регистрацию если трекинг упал
+      }
     }
 
     // 3. Hash password + insert admin (linked to new tenant).

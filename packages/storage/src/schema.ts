@@ -746,6 +746,8 @@ export const tenants = pgTable("tenants", {
   status: text("status").notNull().default("active"),
   // BYOK = клиент приносит свои LLM-ключи; managed = платформа держит аккаунт.
   llmBillingMode: text("llm_billing_mode").notNull().default("byok"),
+  // Реферальный код, использованный при регистрации (NULL если не было).
+  referredByCode: text("referred_by_code"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
@@ -946,6 +948,23 @@ export const stripeSubscriptions = pgTable("stripe_subscriptions", {
   uniqueIndex("stripe_subscriptions_external_unique").on(t.stripeSubscriptionId),
   index("idx_stripe_subscriptions_tenant").on(t.tenantId),
   index("idx_stripe_subscriptions_status").on(t.status),
+]);
+
+// ---- Реферальные/партнёрские коды ----------------------------------------
+//
+// Тенант генерирует коды и раздаёт партнёрам. Партнёры передают код новым
+// клиентам при регистрации → tenants.referred_by_code заполняется, uses_count++.
+// Таблица БЕЗ RLS — при регистрации нет контекста tenant_id и нужен
+// cross-tenant lookup по code (аналогично таблице tenants).
+export const referralCodes = pgTable("referral_codes", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  code: text("code").notNull(),
+  usesCount: integer("uses_count").notNull().default(0),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_referral_codes_code").on(t.code),
+  index("idx_referral_codes_tenant").on(t.tenantId),
 ]);
 
 // Idempotency для webhook'ов — Stripe at-least-once delivers, иногда

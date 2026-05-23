@@ -24,6 +24,7 @@ import { SaasStyles } from "./pages/SaasStyles.tsx";
 import { SaasTeam } from "./pages/SaasTeam.tsx";
 import { SaasVacancies } from "./pages/SaasVacancies.tsx";
 import { SaasHooks } from "./pages/SaasHooks.tsx";
+import { SaasReferral } from "./pages/SaasReferral.tsx";
 
 function RequireAuth() {
   const [status, setStatus] = useState<"checking" | "auth" | "anon">(() =>
@@ -84,6 +85,7 @@ export function App() {
               <Route path="/channels" element={<SaasChannels />} />
               <Route path="/billing" element={<SaasBilling />} />
               <Route path="/settings" element={<SaasSettings />} />
+              <Route path="/referral" element={<SaasReferral />} />
               <Route path="/team" element={<SaasTeam />} />
               <Route path="/audit" element={<SaasAudit />} />
               <Route path="/diagnostics" element={<SaasDiagnostics />} />

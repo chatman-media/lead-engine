@@ -509,6 +509,13 @@ export interface UpdateDirectorHookInput {
   isActive?: boolean;
 }
 
+export interface ReferralCode {
+  id: number;
+  code: string;
+  usesCount: number;
+  createdAt: number;
+}
+
 // ── Audit entry (for audit log page) ────────────────────────────────────
 
 const TOKEN_KEY = "lead_engine_token";
@@ -583,12 +590,17 @@ async function uploadMultipart<T>(path: string, form: FormData): Promise<T> {
 
 export const saas = {
   // ── Auth ────────────────────────────────────────────────────────────
-  signup(email: string, password: string, tenantSlug?: string) {
+  signup(email: string, password: string, tenantSlug?: string, referralCode?: string) {
     return request<{ token: string; admin: Admin; tenant: Tenant }>(
       "/api/auth/signup",
       {
         method: "POST",
-        body: JSON.stringify({ email, password, ...(tenantSlug ? { tenantSlug } : {}) }),
+        body: JSON.stringify({
+          email,
+          password,
+          ...(tenantSlug ? { tenantSlug } : {}),
+          ...(referralCode ? { referralCode } : {}),
+        }),
       },
       false,
     );
@@ -1083,5 +1095,19 @@ export const saas = {
       method: "PATCH",
       body: JSON.stringify({ ids }),
     });
+  },
+
+  // ── Referral codes ────────────────────────────────────────────────────
+  listReferralCodes() {
+    return request<{ items: ReferralCode[] }>("/api/admin/referral-codes");
+  },
+  createReferralCode(code?: string) {
+    return request<{ item: ReferralCode }>("/api/admin/referral-codes", {
+      method: "POST",
+      body: JSON.stringify(code ? { code } : {}),
+    });
+  },
+  deleteReferralCode(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/referral-codes/${id}`, { method: "DELETE" });
   },
 };
