@@ -30,6 +30,7 @@ import {
   makeStageClassifier,
 } from "./llm-bootstrap.ts";
 import { makeFieldExtractor } from "./lib/field-extractor.ts";
+import { Mailer } from "./lib/mailer.ts";
 import { makePhotoProcessor } from "./lib/photo-processor.ts";
 import { makeRequireAuth } from "./middleware/require-auth.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
@@ -163,6 +164,13 @@ async function main() {
   // — widget script загружается с customer-домена.
   app.route("/", makeWidgetStaticRoutes());
 
+  // Mailer (Resend) — dry-run если RESEND_API_KEY не задан.
+  const mailer = new Mailer({
+    apiKey: cfg.mailer.apiKey || undefined,
+    fromAddress: cfg.mailer.fromAddress,
+  });
+  log.info("mailer initialized", { dryRun: !cfg.mailer.apiKey });
+
   // Auth routes — public (POST /api/auth/signup, /login, /logout, GET /me).
   // НЕ wrap'аются в tenant-middleware: signup создаёт tenant, login
   // резолвит его из email.
@@ -172,6 +180,8 @@ async function main() {
       // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
       db: db as any,
       secret: cfg.authSecret,
+      mailer,
+      appUrl: cfg.mailer.appUrl,
     }),
   );
   log.info("auth routes enabled", {
@@ -509,6 +519,8 @@ async function main() {
         db: db as any,
         webhookSecret: cfg.stripeWebhookSecret,
         priceToPlan,
+        mailer,
+        appUrl: cfg.mailer.appUrl,
       }),
     );
     log.info("stripe webhook enabled", {

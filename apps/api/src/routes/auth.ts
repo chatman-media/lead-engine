@@ -12,6 +12,7 @@ import {
   verifyAuthToken,
   verifyPassword,
 } from "../lib/auth.ts";
+import { type Mailer, welcomeEmailHtml } from "../lib/mailer.ts";
 
 /**
  * Auth-endpoints для SaaS-flow:
@@ -36,6 +37,10 @@ export interface AuthRoutesOpts {
   db: PostgresJsDatabase<any>;
   /** Secret для HMAC sign/verify. PLATFORM_AUTH_SECRET или fallback. */
   secret: string;
+  /** Опциональный mailer для welcome email после signup. */
+  mailer?: Mailer;
+  /** Base URL admin-UI — для ссылки в письме. */
+  appUrl?: string;
 }
 
 interface SignupBody {
@@ -196,6 +201,19 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
       },
       opts.secret,
     );
+
+    // 5. Welcome email — best-effort, не блокирует ответ.
+    if (opts.mailer) {
+      opts.mailer.send({
+        to: email,
+        subject: "Добро пожаловать в lead-engine 🎉",
+        html: welcomeEmailHtml({
+          email,
+          slug: tenantRow.slug,
+          appUrl: opts.appUrl ?? "https://app.leadengine.app",
+        }),
+      }).catch((e) => console.warn("[mailer] welcome send failed:", e));
+    }
 
     return c.json({
       token,

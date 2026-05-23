@@ -152,6 +152,19 @@ export interface ApiConfig {
    *    slug подставляется как `{TENANT}` placeholder, например
    *    "https://acme.leadengine.app/dashboard?upgrade=success"
    */
+  /**
+   * Email (Resend) — опционально. Если apiKey пуст — письма логируются в консоль
+   * (dry-run), не отправляются. Нужен для: welcome, trial-ending, payment-failed.
+   *
+   *  - apiKey: env RESEND_API_KEY (re_...)
+   *  - fromAddress: env PLATFORM_FROM_EMAIL (default "lead-engine <noreply@leadengine.app>")
+   *  - appUrl: base URL admin-UI (env PLATFORM_APP_URL, default PLATFORM_PUBLIC_URL)
+   */
+  mailer: {
+    apiKey: string;
+    fromAddress: string;
+    appUrl: string;
+  };
   stripe: {
     secretKey: string;
     priceStarter: string;
@@ -247,6 +260,11 @@ export function loadApiConfig(): ApiConfig {
     rateLimit: {
       perMinute: Number.parseInt(process.env.RATE_LIMIT_PER_MIN ?? "60", 10),
       perHour: Number.parseInt(process.env.RATE_LIMIT_PER_HOUR ?? "600", 10),
+    },
+    mailer: {
+      apiKey: process.env.RESEND_API_KEY ?? "",
+      fromAddress: process.env.PLATFORM_FROM_EMAIL ?? "lead-engine <noreply@leadengine.app>",
+      appUrl: (process.env.PLATFORM_APP_URL ?? process.env.PLATFORM_PUBLIC_URL ?? "https://app.leadengine.app").replace(/\/$/, ""),
     },
     stripe: {
       secretKey: process.env.STRIPE_SECRET_KEY ?? "",
