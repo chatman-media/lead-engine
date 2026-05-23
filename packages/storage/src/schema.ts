@@ -316,18 +316,104 @@ export const vacancies = pgTable("vacancies", {
     .where(sql`is_active = TRUE`),
 ]);
 
+// ---- Universal pipeline: stage definitions & fields --------------------
+
+// Тип стадии определяет её поведение в UI и движке.
+export const STAGE_TYPES = [
+  "form_fill",        // сбор данных через поля
+  "document_upload",  // загрузка файлов/документов
+  "document_signature", // подписание договора
+  "external_approval",  // ждём решения третьей стороны
+  "payment",          // оплата
+  "waiting",          // ожидание (по времени)
+  "interaction",      // встреча/звонок/просмотр
+  "assessment",       // оценка/квалификация
+  "milestone",        // контрольная точка
+] as const;
+
+export const STAGE_KINDS = [
+  "intake",           // первая стадия — заявка
+  "active",           // рабочая стадия
+  "terminal_won",     // финал — успех
+  "terminal_lost",    // финал — отказ
+] as const;
+
+export const FIELD_TYPES = [
+  "text", "textarea", "number", "date",
+  "select", "multiselect", "boolean",
+  "phone", "email", "file", "photo",
+] as const;
+
+// Стадии воронки — хранятся в БД, не в коде.
+// Заменяет hardcoded FunnelStageDef из vertical-recruitment-uae.
+export const stageDefinitions = pgTable("stage_definitions", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  funnelId: integer("funnel_id").notNull().references((): import("drizzle-orm/pg-core").AnyPgColumn => funnels.id, { onDelete: "cascade" }),
+  slug: text("slug").notNull(),
+  displayName: text("display_name").notNull(),
+  description: text("description"),
+  position: integer("position").notNull().default(0),
+  kind: text("kind").notNull().default("active"),
+  stageType: text("stage_type").notNull().default("form_fill"),
+  // тип-специфичные параметры: ai_collect, max_files, expected_days и т.п.
+  configJson: text("config_json").notNull().default("{}"),
+  // slugs стадий, в которые разрешён переход из этой
+  nextStages: text("next_stages").array().notNull().default(sql`'{}'`),
+  // jsonb условие для авто-перехода: { type: "all_required_fields_filled" } и т.п.
+  autoAdvanceCondition: text("auto_advance_condition"),
+  staleTimeoutDays: integer("stale_timeout_days"),
+  checkinIntervalDays: integer("checkin_interval_days"),
+  // если true — бот переходит в режим поддержки (не продаёт)
+  supportMode: boolean("support_mode").notNull().default(false),
+  color: text("color"),
+  icon: text("icon"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("stage_definitions_kind_check", sql`${t.kind} IN ('intake','active','terminal_won','terminal_lost')`),
+  check("stage_definitions_type_check", sql`${t.stageType} IN ('form_fill','document_upload','document_signature','external_approval','payment','waiting','interaction','assessment','milestone')`),
+  uniqueIndex("uniq_stage_def_funnel_slug").on(t.funnelId, t.slug),
+  index("idx_stage_def_funnel_pos").on(t.funnelId, t.position),
+]);
+
+// Поля данных, собираемых на стадии.
+// Заменяет intake_json / visa_docs_json — теперь любая стадия имеет произвольные поля.
+export const stageFields = pgTable("stage_fields", {
+  id: serial("id").primaryKey(),
+  stageId: integer("stage_id").notNull().references(() => stageDefinitions.id, { onDelete: "cascade" }),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  slug: text("slug").notNull(),
+  displayName: text("display_name").notNull(),
+  fieldType: text("field_type").notNull().default("text"),
+  required: boolean("required").notNull().default(false),
+  position: integer("position").notNull().default(0),
+  // для select/multiselect: [{value, label}]
+  optionsJson: text("options_json").notNull().default("[]"),
+  // regex, min, max, allowed_mime_types и т.п.
+  validationJson: text("validation_json").notNull().default("{}"),
+  hint: text("hint"),
+  // может ли LLM автоматически извлекать это поле из диалога
+  aiExtractable: boolean("ai_extractable").notNull().default(false),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  check("stage_fields_type_check", sql`${t.fieldType} IN ('text','textarea','number','date','select','multiselect','boolean','phone','email','file','photo')`),
+  uniqueIndex("uniq_stage_fields_stage_slug").on(t.stageId, t.slug),
+  index("idx_stage_fields_stage_pos").on(t.stageId, t.position),
+]);
+
 // ---- Leads & lead lifecycle --------------------------------------------
 
 export const leads = pgTable("leads", {
   id: serial("id").primaryKey(),
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   userId: integer("user_id").notNull().unique().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
-  // TODO Phase 2 (multi-vertical): `state` default должен браться из
-  // первого funnelStage vertical-template'а конкретного tenant'а (не хардкод).
+  // Текстовый slug стадии — legacy для recruitment-UAE и новый для динамических воронок.
+  // CHECK constraint убран в migration 0011 — валидация на уровне приложения (funnel-machine).
   state: text("state").notNull().default("intake_pending"),
+  // Ссылка на динамически созданную стадию. NULL = legacy recruitment-UAE lead.
+  stageDefinitionId: integer("stage_definition_id").references(() => stageDefinitions.id, { onDelete: "set null" }),
   intakeJson: text("intake_json"),
-  // TODO Phase 2: rename visa_docs_json → custom_data_json (generic JSONB
-  // blob для любого vertical, не только UAE). Потребует migration 0011+.
   visaDocsJson: text("visa_docs_json"),
   applicationId: text("application_id").unique(),
   opsChatId: bigint("ops_chat_id", { mode: "number" }),
@@ -335,25 +421,29 @@ export const leads = pgTable("leads", {
   rejectedReason: text("rejected_reason"),
   decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
   decidedAt: integer("decided_at"),
-  // Эпоха последнего проактивного check-in DM, отправленного пока лид ждал
-  // в docs_pending / visa_waiting стадии.
   lastCheckinAt: integer("last_checkin_at"),
-  // Step-by-step visa-anketa interview: ключ VisaFields, на ответ по которому
-  // бот сейчас ждёт. NULL = интервью не идёт.
-  // TODO Phase 2: rename visa_interview_field → questionnaire_field (generic).
   visaInterviewField: text("visa_interview_field"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
-  // TODO Phase 2 (multi-vertical): убрать hardcoded UAE stage slugs.
-  // Заменить на dynamic check per-tenant vertical template либо убрать вовсе
-  // (application-level validation через funnel-machine достаточна).
-  // Пока Phase 1 = recruitment-only, этот constraint не блокирует.
-  check(
-    "leads_state_check",
-    sql`${t.state} IN ('intake_pending','intake_complete','approved','partner_review','rejected','docs_pending','docs_complete','visa_form','visa_filing','visa_waiting','ready_to_work','closed')`,
-  ),
   index("idx_leads_state_recency").on(t.state, sql`${t.updatedAt} DESC`),
+  index("idx_leads_stage_def").on(t.stageDefinitionId),
+]);
+
+// Значения полей лида — заменяет intake_json/visa_docs_json для динамических воронок.
+export const leadFieldValues = pgTable("lead_field_values", {
+  id: serial("id").primaryKey(),
+  leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
+  fieldId: integer("field_id").notNull().references(() => stageFields.id, { onDelete: "cascade" }),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  // строка, число, boolean, массив файлов — зависит от field_type
+  valueJson: text("value_json").notNull().default("null"),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+  // null если значение установлено AI
+  updatedByAdminId: integer("updated_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+}, (t) => [
+  uniqueIndex("uniq_lead_field_values").on(t.leadId, t.fieldId),
+  index("idx_lead_field_values_lead").on(t.leadId),
 ]);
 
 export const leadEvents = pgTable("lead_events", {

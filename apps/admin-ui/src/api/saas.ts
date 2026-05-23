@@ -292,6 +292,125 @@ export interface OnboardingStatus {
   done: boolean;
 }
 
+// ── Lead pipeline types ──────────────────────────────────────────────────
+
+export type StageKind = "intake" | "active" | "terminal_won" | "terminal_lost";
+export type StageType =
+  | "form_fill" | "document_upload" | "document_signature"
+  | "external_approval" | "payment" | "waiting"
+  | "interaction" | "assessment" | "milestone";
+export type FieldType =
+  | "text" | "textarea" | "number" | "date"
+  | "select" | "multiselect" | "boolean"
+  | "phone" | "email" | "file" | "photo";
+
+export interface StageField {
+  id: number;
+  stageId: number;
+  slug: string;
+  displayName: string;
+  fieldType: FieldType;
+  required: boolean;
+  position: number;
+  optionsJson: string;
+  validationJson: string;
+  hint: string | null;
+  aiExtractable: boolean;
+}
+
+export interface StageDefinition {
+  id: number;
+  funnelId: number;
+  slug: string;
+  displayName: string;
+  description: string | null;
+  position: number;
+  kind: StageKind;
+  stageType: StageType;
+  configJson: string;
+  nextStages: string[];
+  staleTimeoutDays: number | null;
+  checkinIntervalDays: number | null;
+  supportMode: boolean;
+  color: string | null;
+  icon: string | null;
+  fields: StageField[];
+}
+
+export interface FunnelData {
+  funnel: { id: number; slug: string; isActive: boolean } | null;
+  stages: StageDefinition[];
+}
+
+export interface LeadListItem {
+  id: number;
+  state: string;
+  stageDefinitionId: number | null;
+  applicationId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  rejectedReason: string | null;
+  contactId: number;
+  contactName: string | null;
+  requiredFieldsTotal: number;
+  requiredFieldsFilled: number;
+}
+
+export interface LeadDetail {
+  lead: {
+    id: number;
+    state: string;
+    stageDefinitionId: number | null;
+    applicationId: string | null;
+    rejectedReason: string | null;
+    createdAt: number;
+    updatedAt: number;
+  };
+  stageDef: Omit<StageDefinition, "fields"> | null;
+  fields: StageField[];
+  fieldValues: Array<{ id: number; fieldId: number; valueJson: string; updatedAt: number }>;
+  events: Array<{ id: number; fromState: string | null; toState: string; byAdminId: number | null; notes: string | null; createdAt: number }>;
+  notes: Array<{ id: number; byAdminId: number | null; body: string; source: string | null; createdAt: number }>;
+  contact: { id: number; displayName: string | null; attributesJson: string | null } | undefined;
+}
+
+export interface SkillItem {
+  id: number;
+  slug: string;
+  family: string;
+  displayName: string;
+  description: string;
+  promptFragment: string;
+  applicableStagesJson: string;
+  intent: string;
+  isEnabled: boolean;
+  createdAt: number;
+}
+
+export interface StyleItem {
+  id: number;
+  slug: string;
+  displayName: string;
+  configJson: string;
+  isActive: boolean;
+  version: number;
+  parentId: number | null;
+  createdAt: number;
+}
+
+export interface ExperimentItem {
+  id: number;
+  slug: string;
+  status: "draft" | "running" | "paused" | "done";
+  allocationJson: string;
+  successMetric: string;
+  startedAt: number | null;
+  endedAt: number | null;
+  createdAt: number;
+}
+
+// ── Audit entry (for audit log page) ────────────────────────────────────
+
 const TOKEN_KEY = "lead_engine_token";
 
 export function getToken(): string | null {
@@ -624,5 +743,118 @@ export const saas = {
       items: AuditEntry[];
       nextCursor?: number;
     }>(`/api/admin/audit-log${qs ? `?${qs}` : ""}`);
+  },
+
+  // ── Lead pipeline ────────────────────────────────────────────────────
+  listLeads(opts: { stageId?: number; state?: string; limit?: number; offset?: number } = {}) {
+    const p = new URLSearchParams();
+    if (opts.stageId) p.set("stageId", String(opts.stageId));
+    if (opts.state) p.set("state", opts.state);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    if (opts.offset) p.set("offset", String(opts.offset));
+    const qs = p.toString();
+    return request<{ items: LeadListItem[]; limit: number; offset: number }>(
+      `/api/admin/leads${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getLead(id: number) {
+    return request<LeadDetail>(`/api/admin/leads/${id}`);
+  },
+  moveLeadStage(id: number, stageDefinitionId: number) {
+    return request<{ ok: boolean }>(`/api/admin/leads/${id}/stage`, {
+      method: "PATCH",
+      body: JSON.stringify({ stageDefinitionId }),
+    });
+  },
+  upsertLeadFieldValues(id: number, values: Array<{ fieldId: number; value: unknown }>) {
+    return request<{ ok: boolean }>(`/api/admin/leads/${id}/field-values`, {
+      method: "PUT",
+      body: JSON.stringify({ values }),
+    });
+  },
+  addLeadNote(id: number, body: string) {
+    return request<{ id: number }>(`/api/admin/leads/${id}/notes`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    });
+  },
+
+  // ── Funnel builder ───────────────────────────────────────────────────
+  getFunnel() {
+    return request<FunnelData>("/api/admin/funnel");
+  },
+  createStage(data: {
+    funnelId: number;
+    slug: string;
+    displayName: string;
+    kind?: StageKind;
+    stageType?: StageType;
+    position?: number;
+    color?: string;
+    icon?: string;
+    description?: string;
+    staleTimeoutDays?: number;
+    checkinIntervalDays?: number;
+    supportMode?: boolean;
+    nextStages?: string[];
+  }) {
+    return request<StageDefinition>("/api/admin/funnel/stages", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateStage(stageId: number, patch: Partial<Omit<StageDefinition, "id" | "funnelId" | "fields">>) {
+    return request<{ ok: boolean }>(`/api/admin/funnel/stages/${stageId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  },
+  deleteStage(stageId: number) {
+    return request<{ ok: boolean }>(`/api/admin/funnel/stages/${stageId}`, {
+      method: "DELETE",
+    });
+  },
+  reorderStages(order: Array<{ id: number; position: number }>) {
+    return request<{ ok: boolean }>("/api/admin/funnel/stages/reorder", {
+      method: "PATCH",
+      body: JSON.stringify({ order }),
+    });
+  },
+  createStageField(stageId: number, data: {
+    slug: string;
+    displayName: string;
+    fieldType?: FieldType;
+    required?: boolean;
+    position?: number;
+    hint?: string;
+    aiExtractable?: boolean;
+    optionsJson?: string;
+  }) {
+    return request<StageField>(`/api/admin/funnel/stages/${stageId}/fields`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateStageField(stageId: number, fieldId: number, patch: Partial<StageField>) {
+    return request<{ ok: boolean }>(`/api/admin/funnel/stages/${stageId}/fields/${fieldId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  },
+  deleteStageField(stageId: number, fieldId: number) {
+    return request<{ ok: boolean }>(`/api/admin/funnel/stages/${stageId}/fields/${fieldId}`, {
+      method: "DELETE",
+    });
+  },
+
+  // ── Skills / Styles / Experiments ────────────────────────────────────
+  listSkills() {
+    return request<{ items: SkillItem[] }>("/api/admin/skills");
+  },
+  listStyles() {
+    return request<{ items: StyleItem[] }>("/api/admin/styles");
+  },
+  listExperiments() {
+    return request<{ items: ExperimentItem[] }>("/api/admin/experiments");
   },
 };

@@ -2,6 +2,8 @@ import {
   ActivityIcon,
   CableIcon,
   DatabaseIcon,
+  FlaskConicalIcon,
+  GitBranchIcon,
   LogOutIcon,
   type LucideIcon,
   MenuIcon,
@@ -9,7 +11,10 @@ import {
   RocketIcon,
   ScrollTextIcon,
   SlidersHorizontalIcon,
+  SparklesIcon,
   UsersIcon,
+  UserCircleIcon,
+  ZapIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
@@ -35,8 +40,13 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: "/dashboard", label: "База знаний", icon: DatabaseIcon },
+  { to: "/leads", label: "Лиды", icon: UserCircleIcon },
   { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
+  { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
+  { to: "/dashboard", label: "База знаний", icon: DatabaseIcon },
+  { to: "/skills", label: "Навыки", icon: ZapIcon },
+  { to: "/styles", label: "Стили", icon: SparklesIcon },
+  { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon },
   { to: "/channels", label: "Каналы", icon: CableIcon },
   { to: "/settings", label: "Настройки LLM", icon: SlidersHorizontalIcon },
   { to: "/team", label: "Команда", icon: UsersIcon },
