@@ -26,6 +26,7 @@ import {
   makeEmbedderResolver,
   makeMemoryExtractor,
   makeReplyStrategy,
+  type ReplyStrategyBundle,
   makeStageClassifier,
 } from "./llm-bootstrap.ts";
 import { makeFieldExtractor } from "./lib/field-extractor.ts";
@@ -49,6 +50,7 @@ import { makeAdminDashboardRoutes } from "./routes/admin-dashboard.ts";
 import { makeAdminReferralRoutes } from "./routes/admin-referral.ts";
 import { makeAdminVacanciesRoutes } from "./routes/admin-vacancies.ts";
 import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
+import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
@@ -324,6 +326,19 @@ async function main() {
   app.route("/", makeAdminDirectorHooksRoutes({ db }));
   log.info("admin-director-hooks routes enabled");
 
+  // Agentic tool configuration (booking link, etc.).
+  app.route(
+    "/",
+    makeAdminToolsRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      onReload: strategyBundle
+        ? (tenantId) => strategyBundle.invalidateToolsFor(tenantId)
+        : undefined,
+    }),
+  );
+  log.info("admin-tools routes enabled");
+
   // Diagnostics — health-check для tenant setup'а.
   // resolveChat передаём для ?live=1 LLM smoke-test (стоит ~1 токен).
   app.route(
@@ -369,7 +384,14 @@ async function main() {
       timeoutMs: cfg.healthCheckTimeoutMs,
     }),
   );
-  const replyStrategy = makeReplyStrategy(loadedRef, cfg, db, metrics, recordUsage);
+  const strategyBundle: ReplyStrategyBundle | null = makeReplyStrategy(
+    loadedRef,
+    cfg,
+    db,
+    metrics,
+    recordUsage,
+  );
+  const replyStrategy = strategyBundle?.strategy ?? null;
   if (replyStrategy) {
     log.info("reply strategy configured", {
       kind: loadedRef.current.anyTenantHasEmbed ? "RAG" : "LLM-only",

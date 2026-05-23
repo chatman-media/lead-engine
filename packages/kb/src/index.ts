@@ -153,6 +153,8 @@ export {
 } from "./text-style-rules.ts";
 // ── Tool calling ──────────────────────────────────────────────────────────────
 export type { AnyRagTool, CompleteWithToolsResult, RagTool } from "./tools.ts";
+// ── Built-in tools (ready-made RagTool factories) ────────────────────────────
+export { makeBookingLinkTool } from "./built-in-tools/calendly.ts";
 // ── Agentic tool-calling loop (multi-cycle, used internally by answerWithRag) ─
 export {
   buildToolTelemetry,
