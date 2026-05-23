@@ -1,0 +1,623 @@
+// Integration tests for admin-leads endpoints. Two tenants, contacts, leads,
+// stages, field values — pagination, contactId filter, stage move, field upsert,
+// cross-tenant isolation, contact search.
+
+import {
+  applyAllMigrations,
+  contacts,
+  createIsolatedDb,
+  funnels,
+  leads,
+  schema,
+  stageDefinitions,
+  tenants,
+  tryConnectToPg,
+} from "@chatman-media/storage";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { Hono } from "hono";
+import { resolve } from "node:path";
+import postgres, { type Sql } from "postgres";
+import { makeRequireAuth } from "../middleware/require-auth.ts";
+import { makeAdminLeadsRoutes } from "./admin-leads.ts";
+import { makeAuthRoutes } from "./auth.ts";
+
+const ownerUrl = process.env.DATABASE_URL;
+const dbName = `lead_engine_leads_${Math.random().toString(36).slice(2, 10)}`;
+const migrationsDir = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "storage",
+  "migrations",
+);
+const SECRET = "test-secret-leads-flow-12345";
+
+let sql: Sql | null = null;
+let db: PostgresJsDatabase<typeof schema>;
+let app: Hono;
+let tokenA = "";
+let tenantA = 0;
+let tokenB = "";
+let tenantB = 0;
+
+let contactIdA = 0;
+let contactIdA2 = 0;
+let funnelIdA = 0;
+let stageIdA = 0;
+let stageIdA2 = 0;
+let leadIdA = 0;
+let leadIdA2 = 0;
+
+beforeAll(
+  async () => {
+    if (!ownerUrl) return;
+    const probe = await tryConnectToPg(ownerUrl);
+    if (!probe) return;
+    await probe.end({ timeout: 0 });
+    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+    await applyAllMigrations(sql, migrationsDir);
+    db = drizzle(sql, { schema });
+
+    app = new Hono();
+    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+    app.route("/", makeAdminLeadsRoutes({ db }));
+
+    // Tenant A
+    const sa = await app.request("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "leads-a@demo.io", password: "strong-pwd-12345" }),
+    });
+    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+    tokenA = sba.token;
+    tenantA = sba.admin.tenantId;
+
+    // Tenant B
+    const sb = await app.request("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "leads-b@demo.io", password: "strong-pwd-12345" }),
+    });
+    const sbb = (await sb.json()) as { token: string; admin: { tenantId: number } };
+    tokenB = sbb.token;
+    tenantB = sbb.admin.tenantId;
+
+    const now = Math.floor(Date.now() / 1000);
+
+    // Create contacts for tenant A
+    const [c1] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Alice Wonderland" })
+      .returning({ id: contacts.id });
+    contactIdA = c1!.id;
+
+    const [c2] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Bob Builder" })
+      .returning({ id: contacts.id });
+    contactIdA2 = c2!.id;
+
+    // Create a contact for tenant B (to verify isolation)
+    await db
+      .insert(contacts)
+      .values({ tenantId: tenantB, displayName: "Charlie Chaplin" })
+      .returning({ id: contacts.id });
+
+    // Create funnel + stages for tenant A
+    const [funnel] = await db
+      .insert(funnels)
+      .values({ tenantId: tenantA, slug: "main", isActive: true, createdAt: now, updatedAt: now })
+      .returning({ id: funnels.id });
+    funnelIdA = funnel!.id;
+
+    const [stage1] = await db
+      .insert(stageDefinitions)
+      .values({
+        tenantId: tenantA,
+        funnelId: funnelIdA,
+        slug: "intake_pending",
+        displayName: "Intake",
+        kind: "intake",
+        stageType: "form_fill",
+        position: 0,
+        nextStages: ["review"],
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: stageDefinitions.id });
+    stageIdA = stage1!.id;
+
+    const [stage2] = await db
+      .insert(stageDefinitions)
+      .values({
+        tenantId: tenantA,
+        funnelId: funnelIdA,
+        slug: "review",
+        displayName: "Review",
+        kind: "active",
+        stageType: "form_fill",
+        position: 1,
+        nextStages: [],
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: stageDefinitions.id });
+    stageIdA2 = stage2!.id;
+
+    // Create two leads for tenant A
+    const [lead1] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: contactIdA,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    leadIdA = lead1!.id;
+
+    const [lead2] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: contactIdA2,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now - 100,
+        updatedAt: now - 100,
+      })
+      .returning({ id: leads.id });
+    leadIdA2 = lead2!.id;
+  },
+  30_000,
+);
+
+afterAll(async () => {
+  if (sql) {
+    await sql.end({ timeout: 0 }).catch(() => {});
+    sql = null;
+  }
+}, 10_000);
+
+async function authReq(
+  token: string,
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  return await app.request(path, {
+    ...init,
+    headers: {
+      ...(init.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+describe("GET /api/admin/leads", () => {
+  it("without auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request("/api/admin/leads");
+    expect(res.status).toBe(401);
+  });
+
+  it("empty list for fresh tenant B (no leads)", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/leads");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[] };
+    expect(body.items).toHaveLength(0);
+  });
+
+  it("returns leads for tenant A ordered DESC by updatedAt", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: Array<{ id: number; contactId: number; contactName: string; state: string }>;
+      limit: number;
+      offset: number;
+    };
+    expect(body.items).toHaveLength(2);
+    expect(body.limit).toBe(50);
+    expect(body.offset).toBe(0);
+    // First lead should be more recent (leadIdA)
+    expect(body.items[0]!.id).toBe(leadIdA);
+    expect(body.items[0]!.contactName).toBe("Alice Wonderland");
+    expect(body.items[0]!.state).toBe("intake_pending");
+  });
+
+  it("?contactId= filter returns only that contact's leads", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, `/api/admin/leads?contactId=${contactIdA}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: Array<{ id: number; contactId: number }> };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]!.id).toBe(leadIdA);
+    expect(body.items[0]!.contactId).toBe(contactIdA);
+  });
+
+  it("?contactId= for contact with no leads → empty list", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads?contactId=999999");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[] };
+    expect(body.items).toHaveLength(0);
+  });
+
+  it("cross-tenant isolation: tenant B sees no tenant A leads", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/leads");
+    const body = (await res.json()) as { items: Array<{ id: number }> };
+    const ids = body.items.map((i) => i.id);
+    expect(ids).not.toContain(leadIdA);
+    expect(ids).not.toContain(leadIdA2);
+    expect(tenantA).not.toBe(tenantB);
+  });
+});
+
+describe("POST /api/admin/leads", () => {
+  it("without auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request("/api/admin/leads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contactId: contactIdA }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("missing contactId → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("creates lead for existing contact, returns lead row with id", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+
+    // Create a fresh contact for this test
+    const [c] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "New Lead Contact" })
+      .returning({ id: contacts.id });
+    const freshContactId = c!.id;
+
+    const res = await authReq(tokenA, "/api/admin/leads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contactId: freshContactId, stageDefinitionId: stageIdA }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      id: number;
+      tenantId: number;
+      userId: number;
+      state: string;
+      stageDefinitionId: number;
+    };
+    expect(body.id).toBeGreaterThan(0);
+    expect(body.tenantId).toBe(tenantA);
+    expect(body.userId).toBe(freshContactId);
+    expect(body.state).toBe("intake_pending");
+    expect(body.stageDefinitionId).toBe(stageIdA);
+    expect(body.id).toBeGreaterThan(0);
+    // Verify lead actually landed in the list
+    const listRes = await authReq(tokenA, `/api/admin/leads?contactId=${freshContactId}`);
+    const listBody = (await listRes.json()) as { items: Array<{ id: number }> };
+    expect(listBody.items.some((i) => i.id === body.id)).toBe(true);
+  });
+
+  it("creates lead with default state when no state provided", async () => {
+    if (!sql) return;
+    const [c] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "State Default Contact" })
+      .returning({ id: contacts.id });
+
+    const res = await authReq(tokenA, "/api/admin/leads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contactId: c!.id }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { state: string };
+    expect(body.state).toBe("intake_pending");
+  });
+});
+
+describe("GET /api/admin/leads/:id", () => {
+  it("returns full lead detail with contact, fields, events, notes", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, `/api/admin/leads/${leadIdA}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      lead: { id: number; state: string; tenantId: number };
+      contact: { id: number; displayName: string };
+      stageDef: { id: number; slug: string } | null;
+      fields: unknown[];
+      fieldValues: unknown[];
+      events: unknown[];
+      notes: unknown[];
+    };
+    expect(body.lead.id).toBe(leadIdA);
+    expect(body.lead.state).toBe("intake_pending");
+    expect(body.lead.tenantId).toBe(tenantA);
+    expect(body.contact.id).toBe(contactIdA);
+    expect(body.contact.displayName).toBe("Alice Wonderland");
+    expect(body.stageDef).not.toBeNull();
+    expect(body.stageDef!.slug).toBe("intake_pending");
+    expect(Array.isArray(body.fields)).toBe(true);
+    expect(Array.isArray(body.fieldValues)).toBe(true);
+    expect(Array.isArray(body.events)).toBe(true);
+    expect(Array.isArray(body.notes)).toBe(true);
+  });
+
+  it("non-existent lead → 404", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads/999999");
+    expect(res.status).toBe(404);
+  });
+
+  it("invalid id → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads/not-a-number");
+    expect(res.status).toBe(400);
+  });
+
+  it("cross-tenant: tenant B cannot access tenant A's lead → 404", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, `/api/admin/leads/${leadIdA}`);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("PATCH /api/admin/leads/:id/stage", () => {
+  it("without auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request(`/api/admin/leads/${leadIdA}/stage`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stageDefinitionId: stageIdA2 }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("missing stageDefinitionId → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, `/api/admin/leads/${leadIdA}/stage`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("non-existent lead → throws (500 from route)", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads/999999/stage", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stageDefinitionId: stageIdA2 }),
+    });
+    // Route throws Error("lead not found") which Hono turns into 500
+    expect(res.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it("moves lead to a different stage, returns { ok: true }", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, `/api/admin/leads/${leadIdA2}/stage`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stageDefinitionId: stageIdA2 }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+
+    // Verify the lead moved in the detail view
+    const detailRes = await authReq(tokenA, `/api/admin/leads/${leadIdA2}`);
+    const detail = (await detailRes.json()) as {
+      lead: { stageDefinitionId: number; state: string };
+      events: Array<{ fromState: string; toState: string }>;
+    };
+    expect(detail.lead.stageDefinitionId).toBe(stageIdA2);
+    expect(detail.lead.state).toBe("review");
+    expect(detail.events).toHaveLength(1);
+    expect(detail.events[0]!.fromState).toBe("intake_pending");
+    expect(detail.events[0]!.toState).toBe("review");
+  });
+
+  it("cross-tenant: tenant B cannot move tenant A's lead", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, `/api/admin/leads/${leadIdA}/stage`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stageDefinitionId: stageIdA2 }),
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe("PUT /api/admin/leads/:id/field-values", () => {
+  it("without auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request(`/api/admin/leads/${leadIdA}/field-values`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [{ fieldId: 1, value: "test" }] }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("empty values array → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, `/api/admin/leads/${leadIdA}/field-values`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [] }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("upserts field values, returns { ok, advanced }", async () => {
+    if (!sql) return;
+    // We need a real stage field to reference. Use the stageIdA (intake_pending).
+    // Insert a field directly so we have a valid fieldId.
+    const { stageFields } = await import("@chatman-media/storage");
+    const now = Math.floor(Date.now() / 1000);
+    const [field] = await db
+      .insert(stageFields)
+      .values({
+        stageId: stageIdA,
+        tenantId: tenantA,
+        slug: "test_field",
+        displayName: "Test Field",
+        fieldType: "text",
+        required: false,
+        aiExtractable: false,
+        position: 0,
+        createdAt: now,
+      })
+      .returning({ id: stageFields.id });
+    const fieldId = field!.id;
+
+    const res = await authReq(tokenA, `/api/admin/leads/${leadIdA}/field-values`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [{ fieldId, value: "hello world" }] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; advanced: boolean; newStageSlug: string | null };
+    expect(body.ok).toBe(true);
+    expect(typeof body.advanced).toBe("boolean");
+
+    // Verify the field value appears in the lead detail
+    const detailRes = await authReq(tokenA, `/api/admin/leads/${leadIdA}`);
+    const detail = (await detailRes.json()) as {
+      fieldValues: Array<{ fieldId: number; valueJson: string }>;
+    };
+    const savedVal = detail.fieldValues.find((fv) => fv.fieldId === fieldId);
+    expect(savedVal).toBeDefined();
+    expect(savedVal!.valueJson).toBe('"hello world"');
+  });
+
+  it("upsert same field twice → value updated (idempotent)", async () => {
+    if (!sql) return;
+    const { stageFields, leadFieldValues } = await import("@chatman-media/storage");
+    const { eq, and } = await import("drizzle-orm");
+    const now = Math.floor(Date.now() / 1000);
+    const [field] = await db
+      .insert(stageFields)
+      .values({
+        stageId: stageIdA,
+        tenantId: tenantA,
+        slug: "upsert_field",
+        displayName: "Upsert Field",
+        fieldType: "text",
+        required: false,
+        aiExtractable: false,
+        position: 99,
+        createdAt: now,
+      })
+      .returning({ id: stageFields.id });
+    const fieldId = field!.id;
+
+    // First upsert
+    await authReq(tokenA, `/api/admin/leads/${leadIdA}/field-values`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [{ fieldId, value: "original" }] }),
+    });
+
+    // Second upsert with new value
+    const res = await authReq(tokenA, `/api/admin/leads/${leadIdA}/field-values`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [{ fieldId, value: "updated" }] }),
+    });
+    expect(res.status).toBe(200);
+
+    const [stored] = await db
+      .select({ valueJson: leadFieldValues.valueJson })
+      .from(leadFieldValues)
+      .where(and(eq(leadFieldValues.leadId, leadIdA), eq(leadFieldValues.fieldId, fieldId)));
+    expect(stored!.valueJson).toBe('"updated"');
+  });
+});
+
+describe("GET /api/admin/contacts", () => {
+  it("without auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request("/api/admin/contacts");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns contacts for tenant A", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/contacts");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: Array<{ id: number; displayName: string }>;
+    };
+    expect(body.items.length).toBeGreaterThan(0);
+    // All items should be tenant A contacts
+    const names = body.items.map((i) => i.displayName);
+    // Bob Builder and Alice Wonderland should be present
+    expect(names.some((n) => n.includes("Alice"))).toBe(true);
+    expect(names.some((n) => n.includes("Bob"))).toBe(true);
+    // Tenant B's contact should not appear
+    expect(names).not.toContain("Charlie Chaplin");
+  });
+
+  it("?q= search returns matching contacts only", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/contacts?q=Alice");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: Array<{ id: number; displayName: string }>;
+    };
+    expect(body.items.length).toBeGreaterThan(0);
+    for (const item of body.items) {
+      expect(item.displayName.toLowerCase()).toContain("alice");
+    }
+  });
+
+  it("?q= with no match → empty items", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/contacts?q=zzznomatch");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[] };
+    expect(body.items).toHaveLength(0);
+  });
+
+  it("cross-tenant: tenant B sees only its own contacts", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/contacts");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: Array<{ id: number; displayName: string }>;
+    };
+    // Only Charlie Chaplin (tenant B's contact)
+    for (const item of body.items) {
+      expect(item.displayName).not.toContain("Alice");
+      expect(item.displayName).not.toContain("Bob");
+    }
+  });
+});
+
+// Referenced only to suppress unused-import warning
+void tenants;
