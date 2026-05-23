@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.0.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.0.0...@chatman-media/storage-v1.0.1) (2026-05-23)
+
+
+### Bug Fixes
+
+* **migrations:** add DROP POLICY IF EXISTS before CREATE POLICY ([#85](https://github.com/chatman-media/lead-engine/issues/85)) ([29a4d59](https://github.com/chatman-media/lead-engine/commit/29a4d59d4674c134d837a511dc709f3afd48a243))
+
 # @chatman-media/storage-v1.0.0 (2026-05-23)
 
 
