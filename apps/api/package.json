@@ -27,7 +27,7 @@
     "@chatman-media/kb": "workspace:*",
     "@chatman-media/sales": "workspace:*",
     "@chatman-media/storage": "workspace:*",
-    "@chatman-media/vertical-recruitment-uae": "workspace:*",
+    "@chatman-media/vertical-recruitment": "workspace:*",
     "@chatman-media/verticals": "workspace:*",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.0",

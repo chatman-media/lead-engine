@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
  * Seed production sales-styles в `styles` таблицу. Использует
- * RECRUITMENT_UAE_STYLES из @chatman-media/vertical-recruitment-uae —
- * 4 production-curated стиля для recruitment-UAE vertical.
+ * RECRUITMENT_STYLES из @chatman-media/vertical-recruitment —
+ * 4 production-curated стиля для recruitment vertical.
  *
  * Usage:
  *   bun run apps/api/scripts/seed-styles.ts --tenant=legacy
@@ -15,7 +15,7 @@
  *   DATABASE_URL
  */
 
-import { RECRUITMENT_UAE_STYLES } from "@chatman-media/vertical-recruitment-uae";
+import { RECRUITMENT_STYLES } from "@chatman-media/vertical-recruitment";
 import * as schema from "@chatman-media/storage";
 import { styles, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
@@ -44,12 +44,12 @@ async function main() {
     if (!tenant) throw new Error(`tenant slug=${tenantSlug} not found`);
 
     console.log(
-      `[seed-styles] tenant=${tenant.slug} (id=${tenant.id}), styles=${RECRUITMENT_UAE_STYLES.length}`,
+      `[seed-styles] tenant=${tenant.slug} (id=${tenant.id}), styles=${RECRUITMENT_STYLES.length}`,
     );
 
     let inserted = 0;
     let updated = 0;
-    for (const style of RECRUITMENT_UAE_STYLES) {
+    for (const style of RECRUITMENT_STYLES) {
       const configJson = JSON.stringify(style);
       const displayName = style.displayName;
 

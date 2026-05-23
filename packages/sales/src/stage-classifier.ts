@@ -7,7 +7,7 @@ import type { StageClassifier } from "@chatman-media/conversation-engine";
 /**
  * Regex-based стратегия классификации sales-stage'а. Быстрая (без LLM
  * call), но узкая — годится для smoke-классификации в одной вертикали.
- * Покрывает русскоязычные паттерны recruitment-uae.
+ * Покрывает русскоязычные паттерны recruitment.
  *
  * Приоритет правил (если несколько match'ятся):
  *   close > objection > qualify > pitch > opener

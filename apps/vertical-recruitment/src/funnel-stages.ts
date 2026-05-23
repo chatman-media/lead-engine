@@ -1,7 +1,7 @@
 import type { FunnelStageDef } from "@chatman-media/verticals";
 
 /**
- * Жизненный цикл лида в UAE-recruitment воронке. Список stage'ов
+ * Жизненный цикл лида в recruitment воронке. Список stage'ов
  * соответствует CHECK constraint leads_state_check в storage-schema —
  * conversation-engine при попытке смены state валидирует переход по
  * этой машине.
@@ -11,7 +11,7 @@ import type { FunnelStageDef } from "@chatman-media/verticals";
  * визовое интервью. В этом template'е visa_form — единственный stage
  * с активным взаимодействием бот↔кандидат во время визовой анкеты.
  */
-export const RECRUITMENT_UAE_FUNNEL_STAGES: readonly FunnelStageDef[] = [
+export const RECRUITMENT_FUNNEL_STAGES: readonly FunnelStageDef[] = [
   {
     slug: "intake_pending",
     kind: "intake",

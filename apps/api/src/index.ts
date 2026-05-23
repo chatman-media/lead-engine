@@ -2,7 +2,7 @@ import { checkRlsEnforcement } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { funnels, tenants } from "@chatman-media/storage";
-import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
+import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -56,7 +56,7 @@ import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
 /** Known vertical templates by slug. */
 const KNOWN_TEMPLATES: Record<string, VerticalTemplate> = {
-  recruitment_uae_v1: RECRUITMENT_UAE_V1,
+  recruitment_v1: RECRUITMENT_V1,
 };
 
 async function main() {
@@ -116,7 +116,7 @@ async function main() {
   }
   // Hardcoded fallback for the legacy tenant if not already covered.
   if (!templateByTenantSlug.legacy) {
-    templateByTenantSlug.legacy = RECRUITMENT_UAE_V1;
+    templateByTenantSlug.legacy = RECRUITMENT_V1;
   }
   const resolveTemplate = (tenantSlug: string): VerticalTemplate | undefined =>
     templateByTenantSlug[tenantSlug];

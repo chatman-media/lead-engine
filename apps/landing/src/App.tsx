@@ -61,12 +61,12 @@ const CONTENT: Record<
   ru: {
     nav: { cta: "Попробовать бесплатно" },
     hero: {
-      badge: "Production · UAE / Москва / Алматы",
+      badge: "Production · Москва / Алматы / Дубай",
       headline: ["AI-ассистент для ", "рекрутингового агентства", ", который не теряет лидов"],
       sub: "Отвечает на входящие в Telegram за 30 секунд. Ведёт кандидата от «хочу узнать» до сданной анкеты. Передаёт горячих лидов рекрутеру — с полным контекстом.",
       ctaPrimary: "Попробовать бесплатно",
       ctaSecondary: "Смотреть демо (15 мин)",
-      trust: "Используется рекрутинговыми агентствами в UAE, Москве и Алматы",
+      trust: "Используется рекрутинговыми агентствами в Москве, Алматы и Дубае",
     },
     tg: {
       messages: [
@@ -215,12 +215,12 @@ const CONTENT: Record<
   en: {
     nav: { cta: "Try Free" },
     hero: {
-      badge: "Production · UAE / Moscow / Almaty",
+      badge: "Production · Moscow / Almaty / Dubai",
       headline: ["AI Sales Assistant for ", "Recruitment Agencies", " That Never Misses a Lead"],
       sub: "Responds to Telegram inquiries in 30 seconds. Guides candidates from first message to completed intake form. Hands off hot leads to your recruiter — with full conversation context.",
       ctaPrimary: "Try Free",
       ctaSecondary: "Watch Demo (15 min)",
-      trust: "Used by recruitment agencies in UAE, Moscow and Almaty",
+      trust: "Used by recruitment agencies in Moscow, Almaty and Dubai",
     },
     tg: {
       messages: [

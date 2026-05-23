@@ -1,7 +1,7 @@
 {
-  "name": "@chatman-media/vertical-recruitment-uae",
+  "name": "@chatman-media/vertical-recruitment",
   "version": "0.1.0",
-  "description": "Vertical template для найма (UAE/КНР визы, dance-video проверка). Data-only пакет — потребляется через @chatman-media/verticals registry.",
+  "description": "Vertical template для найма артисток (рекрутинг, dance-video, визовая анкета). Data-only пакет — потребляется через @chatman-media/verticals registry.",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",

@@ -125,7 +125,7 @@ export interface ApiConfig {
   experimentSlug: string;
   /**
    * Стратегия классификации sales-stage'а реплики:
-   *   - "regex" — быстрый regex-classifier (русские паттерны recruitment-uae)
+   *   - "regex" — быстрый regex-classifier (русские паттерны recruitment)
    *   - "llm" — LLM-based (использует chat-config), точнее но дороже
    *   - "" (по умолчанию) — выключен, conversation.current_stage не пишется
    */

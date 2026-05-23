@@ -23,7 +23,7 @@ import type { PlatformMetrics } from "@chatman-media/observability";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
 import { leads, stageDefinitions } from "@chatman-media/storage";
 import { and, eq, isNotNull } from "drizzle-orm";
-import { RECRUITMENT_UAE_V1 } from "@chatman-media/vertical-recruitment-uae";
+import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
 import type { ApiConfig } from "./config.ts";
 import { type OnUsage, wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
 
@@ -205,7 +205,7 @@ export function makeReplyStrategy(
     if (embed) ref.router.setConfig(toRouterConfig(tenantId, "embed", embed));
   }
 
-  const template = RECRUITMENT_UAE_V1;
+  const template = RECRUITMENT_V1;
 
   // Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
   // NB: проверка против initial snapshot'а; если tenant позже добавит embed,

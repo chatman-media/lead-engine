@@ -54,7 +54,7 @@ export function makeTelegramWebhookRoutes(opts: {
    * и валидирует transitions через funnel state machine.
    *
    * После Этапа 8 будет lookup через funnels.vertical_template_id из БД.
-   * Сейчас — env-mapped (apps/api index.ts передаёт RECRUITMENT_UAE_V1 для
+   * Сейчас — env-mapped (apps/api index.ts передаёт RECRUITMENT_V1 для
    * legacy tenant'а).
    */
   resolveTemplate?: (tenantSlug: string) => VerticalTemplate | undefined;

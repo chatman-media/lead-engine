@@ -7,7 +7,7 @@
     "apps/admin-ui",
     "apps/api",
     "apps/landing",
-    "apps/vertical-recruitment-uae",
+    "apps/vertical-recruitment",
     "apps/widget",
     "apps/worker",
     "packages/*"
