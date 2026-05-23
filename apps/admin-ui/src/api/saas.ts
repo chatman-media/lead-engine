@@ -23,6 +23,22 @@ export interface KbDoc {
   createdAt: number;
 }
 
+export interface KbSuggestion {
+  id: number;
+  tenantId: number;
+  questionText: string;
+  answerDraft: string | null;
+  status: "pending" | "ingested" | "rejected";
+  sourceConversationId: number | null;
+  sourceMessageId: number | null;
+  decidedByAdminId: number | null;
+  decidedAt: number | null;
+  kbDocumentId: number | null;
+  rejectedReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface KbUploadResult {
   documentId: number;
   source: string;
@@ -595,6 +611,27 @@ export const saas = {
   deleteDoc(id: number) {
     return request<{ ok: boolean; deleted: number }>(`/api/admin/kb/documents/${id}`, {
       method: "DELETE",
+    });
+  },
+
+  // ── KB suggestions ───────────────────────────────────────────────────
+  listKbSuggestions(opts: { status?: "pending" | "ingested" | "rejected"; limit?: number; offset?: number } = {}) {
+    const p = new URLSearchParams();
+    if (opts.status) p.set("status", opts.status);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    if (opts.offset) p.set("offset", String(opts.offset));
+    return request<{ items: KbSuggestion[]; pendingCount: number; limit: number; offset: number }>(
+      `/api/admin/kb/suggestions?${p}`,
+    );
+  },
+  decideKbSuggestion(
+    id: number,
+    action: "approve" | "reject",
+    opts: { answerDraft?: string; rejectedReason?: string } = {},
+  ) {
+    return request<{ ok: boolean; kbDocumentId?: number }>(`/api/admin/kb/suggestions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ action, ...opts }),
     });
   },
 

@@ -1,8 +1,8 @@
 import { type Db, DrizzleKbStore, withTenant } from "@chatman-media/conversation-engine";
 import { ingestText, parsePdfBuffer } from "@chatman-media/kb";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
-import { kbDocuments } from "@chatman-media/storage";
-import { and, desc, eq } from "drizzle-orm";
+import { kbDocuments, kbSuggestions } from "@chatman-media/storage";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { canAddKbDocument } from "../lib/quota.ts";
 
@@ -206,6 +206,121 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
     });
     if (deleted === 0) return c.json({ error: "document not found" }, 404);
     return c.json({ ok: true, deleted });
+  });
+
+  /**
+   * GET /api/admin/kb/suggestions
+   * Query: ?status=pending|ingested|rejected (default: pending) | ?limit | ?offset
+   */
+  app.get("/api/admin/kb/suggestions", async (c) => {
+    const tenantId = c.var.tenantId;
+    const status = c.req.query("status") ?? "pending";
+    const limit = Math.min(Number(c.req.query("limit") ?? "50"), 200);
+    const offset = Math.max(Number(c.req.query("offset") ?? "0"), 0);
+
+    const items = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select()
+        .from(kbSuggestions)
+        .where(and(eq(kbSuggestions.tenantId, tenantId), eq(kbSuggestions.status, status)))
+        .orderBy(desc(kbSuggestions.createdAt))
+        .limit(limit)
+        .offset(offset),
+    );
+
+    const pendingRows = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(kbSuggestions)
+        .where(and(eq(kbSuggestions.tenantId, tenantId), eq(kbSuggestions.status, "pending"))),
+    );
+
+    return c.json({ items, pendingCount: pendingRows[0]?.n ?? 0, limit, offset });
+  });
+
+  /**
+   * PATCH /api/admin/kb/suggestions/:id
+   * Body: { action: "approve" | "reject", answerDraft?: string, rejectedReason?: string }
+   * approve → ingests answerDraft as KB doc, sets status=ingested
+   * reject  → sets status=rejected
+   */
+  app.patch("/api/admin/kb/suggestions/:id", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+
+    const body = await c.req.json<{
+      action: "approve" | "reject";
+      answerDraft?: string;
+      rejectedReason?: string;
+    }>();
+    const now = Math.floor(Date.now() / 1000);
+
+    const [suggestion] = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select()
+        .from(kbSuggestions)
+        .where(and(eq(kbSuggestions.id, id), eq(kbSuggestions.tenantId, tenantId))),
+    );
+    if (!suggestion) return c.json({ error: "suggestion not found" }, 404);
+    if (suggestion.status !== "pending") return c.json({ error: "already decided" }, 409);
+
+    if (body.action === "reject") {
+      await withTenant(opts.db, tenantId, async (tx) =>
+        tx
+          .update(kbSuggestions)
+          .set({
+            status: "rejected",
+            rejectedReason: body.rejectedReason ?? null,
+            decidedByAdminId: adminId ?? null,
+            decidedAt: now,
+            updatedAt: now,
+          })
+          .where(eq(kbSuggestions.id, id)),
+      );
+      return c.json({ ok: true });
+    }
+
+    // approve: ingest answer as KB document
+    const title = suggestion.questionText.slice(0, 100);
+    const bodyText = body.answerDraft ?? suggestion.answerDraft ?? "";
+    if (!bodyText.trim()) return c.json({ error: "answerDraft required to approve" }, 400);
+
+    let embedder: EmbeddingClient;
+    try {
+      embedder = opts.resolveEmbedder(tenantId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: `embedder not configured: ${msg}` }, 503);
+    }
+
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      const kb = new DrizzleKbStore({ db: tx, tenantId });
+      return ingestText(
+        { title, body: bodyText },
+        {
+          kb,
+          embedder: embedder as unknown as Parameters<typeof ingestText>[1]["embedder"],
+        },
+      );
+    });
+
+    await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .update(kbSuggestions)
+        .set({
+          status: "ingested",
+          answerDraft: bodyText,
+          kbDocumentId: result.documentId,
+          decidedByAdminId: adminId ?? null,
+          decidedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(kbSuggestions.id, id)),
+    );
+
+    return c.json({ ok: true, kbDocumentId: result.documentId });
   });
 
   return app;
