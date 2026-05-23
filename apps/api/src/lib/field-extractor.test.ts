@@ -9,7 +9,7 @@ import type { LoadedRef } from "../llm-bootstrap.ts";
 import { makeFieldExtractor } from "./field-extractor.ts";
 
 function makeRef(overrides: {
-  resolveChatImpl?: (tenantId: number) => ChatClient | null;
+  resolveChatImpl?: (tenantId: number) => unknown | null;
   shouldThrow?: boolean;
 }): LoadedRef {
   return {
