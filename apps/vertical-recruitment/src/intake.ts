@@ -33,7 +33,7 @@ export const INTAKE_COMPLETION = "Спасибо, анкета принята! �
  * required-поля переводят кандидата обратно в intake_pending (или просьба
  * допослать конкретного пункта).
  */
-export const RECRUITMENT_UAE_INTAKE: QuestionnaireSchema = {
+export const RECRUITMENT_INTAKE: QuestionnaireSchema = {
   stageSlug: "intake_pending",
   introMessage: INTAKE_INTRO_RU,
   completionMessage: INTAKE_COMPLETION,

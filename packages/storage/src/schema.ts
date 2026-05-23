@@ -345,7 +345,7 @@ export const FIELD_TYPES = [
 ] as const;
 
 // Стадии воронки — хранятся в БД, не в коде.
-// Заменяет hardcoded FunnelStageDef из vertical-recruitment-uae.
+// Заменяет hardcoded FunnelStageDef из vertical-recruitment.
 export const stageDefinitions = pgTable("stage_definitions", {
   id: serial("id").primaryKey(),
   tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
@@ -408,10 +408,10 @@ export const leads = pgTable("leads", {
   id: serial("id").primaryKey(),
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   userId: integer("user_id").notNull().unique().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
-  // Текстовый slug стадии — legacy для recruitment-UAE и новый для динамических воронок.
+  // Текстовый slug стадии — legacy для recruitment и новый для динамических воронок.
   // CHECK constraint убран в migration 0011 — валидация на уровне приложения (funnel-machine).
   state: text("state").notNull().default("intake_pending"),
-  // Ссылка на динамически созданную стадию. NULL = legacy recruitment-UAE lead.
+  // Ссылка на динамически созданную стадию. NULL = legacy recruitment lead.
   stageDefinitionId: integer("stage_definition_id").references(() => stageDefinitions.id, { onDelete: "set null" }),
   intakeJson: text("intake_json"),
   visaDocsJson: text("visa_docs_json"),

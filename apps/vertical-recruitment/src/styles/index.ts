@@ -4,7 +4,7 @@ import { empatheticNepq } from "./empathetic-nepq.ts";
 import { flirtyBelfort } from "./flirty-belfort.ts";
 
 /**
- * Built-in sales-styles вертикали recruitment-uae. 3 production-curated стиля:
+ * Built-in sales-styles вертикали recruitment. 3 production-curated стиля:
  *   - flirtyBelfort: молодёжный, прямолинейный сейл-флоу (Belfort/SPIN)
  *   - empatheticNepq: NEPQ (Neuro-Emotional Persuasion Questions) фреймворк
  *   - coldDirectPas: PAS (Problem-Agitate-Solve), сухой, без воды
@@ -15,7 +15,7 @@ import { flirtyBelfort } from "./flirty-belfort.ts";
  * Seed-script читает этот массив и пишет каждый стиль в styles таблицу
  * как config_json: JSON.stringify(style).
  */
-export const RECRUITMENT_UAE_STYLES: readonly Style[] = [
+export const RECRUITMENT_STYLES: readonly Style[] = [
   flirtyBelfort,
   empatheticNepq,
   coldDirectPas,

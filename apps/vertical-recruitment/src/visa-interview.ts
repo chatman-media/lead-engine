@@ -1,5 +1,5 @@
 /**
- * Step-by-step visa interview для UAE-recruitment воронки. После
+ * Step-by-step visa interview для recruitment воронки. После
  * intake_complete → approved → docs_complete → visa_form кандидата ведут
  * по этим вопросам последовательно. Ответы пишутся в leads.visa_docs_json.
  *
@@ -15,7 +15,7 @@ export const VISA_INTERVIEW_INTRO = `Отлично! Теперь оформля
 
 export const VISA_INTERVIEW_DONE = "Спасибо, данные анкеты собрали! 🌷";
 
-export const RECRUITMENT_UAE_VISA_INTERVIEW: readonly QuestionnaireField[] = [
+export const RECRUITMENT_VISA_INTERVIEW: readonly QuestionnaireField[] = [
   {
     slug: "visa_application_city",
     question:
