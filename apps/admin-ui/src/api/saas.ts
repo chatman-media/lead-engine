@@ -374,6 +374,11 @@ export interface LeadDetail {
   contact: { id: number; displayName: string | null; attributesJson: string | null } | undefined;
 }
 
+export interface ContactItem {
+  id: number;
+  displayName: string | null;
+}
+
 export interface SkillItem {
   id: number;
   slug: string;
@@ -618,10 +623,11 @@ export const saas = {
   },
 
   // ── Conversations (read-only) ────────────────────────────────────────
-  listConversations(opts: { limit?: number; cursor?: number } = {}) {
+  listConversations(opts: { limit?: number; cursor?: number; contactId?: number } = {}) {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.cursor) params.set("cursor", String(opts.cursor));
+    if (opts.contactId) params.set("contactId", String(opts.contactId));
     const qs = params.toString();
     return request<{
       items: ConversationListItem[];
@@ -746,10 +752,11 @@ export const saas = {
   },
 
   // ── Lead pipeline ────────────────────────────────────────────────────
-  listLeads(opts: { stageId?: number; state?: string; limit?: number; offset?: number } = {}) {
+  listLeads(opts: { stageId?: number; state?: string; contactId?: number; limit?: number; offset?: number } = {}) {
     const p = new URLSearchParams();
     if (opts.stageId) p.set("stageId", String(opts.stageId));
     if (opts.state) p.set("state", opts.state);
+    if (opts.contactId) p.set("contactId", String(opts.contactId));
     if (opts.limit) p.set("limit", String(opts.limit));
     if (opts.offset) p.set("offset", String(opts.offset));
     const qs = p.toString();
@@ -767,7 +774,7 @@ export const saas = {
     });
   },
   upsertLeadFieldValues(id: number, values: Array<{ fieldId: number; value: unknown }>) {
-    return request<{ ok: boolean }>(`/api/admin/leads/${id}/field-values`, {
+    return request<{ ok: boolean; advanced: boolean; newStageSlug: string | null }>(`/api/admin/leads/${id}/field-values`, {
       method: "PUT",
       body: JSON.stringify({ values }),
     });
@@ -777,6 +784,19 @@ export const saas = {
       method: "POST",
       body: JSON.stringify({ body }),
     });
+  },
+  createLead(contactId: number, stageDefinitionId?: number) {
+    return request<{ id: number }>("/api/admin/leads", {
+      method: "POST",
+      body: JSON.stringify({ contactId, stageDefinitionId }),
+    });
+  },
+  listContacts(opts: { q?: string; limit?: number } = {}) {
+    const p = new URLSearchParams();
+    if (opts.q) p.set("q", opts.q);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    const qs = p.toString();
+    return request<{ items: ContactItem[] }>(`/api/admin/contacts${qs ? `?${qs}` : ""}`);
   },
 
   // ── Funnel builder ───────────────────────────────────────────────────
@@ -844,6 +864,12 @@ export const saas = {
   deleteStageField(stageId: number, fieldId: number) {
     return request<{ ok: boolean }>(`/api/admin/funnel/stages/${stageId}/fields/${fieldId}`, {
       method: "DELETE",
+    });
+  },
+  seedFunnel(template: string) {
+    return request<{ ok: boolean; funnelId: number; stagesCreated: number }>("/api/admin/funnel/seed", {
+      method: "POST",
+      body: JSON.stringify({ template }),
     });
   },
 

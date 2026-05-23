@@ -18,6 +18,8 @@ import { channels } from "@chatman-media/storage";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { and, eq } from "drizzle-orm";
 import { recordAudit } from "./audit.ts";
+import type { FieldExtractor } from "./field-extractor.ts";
+import type { PhotoProcessor } from "./photo-processor.ts";
 import type { UserbotChannelEntry } from "./userbot-channel-registry.ts";
 
 /**
@@ -38,6 +40,8 @@ export function startUserbotInboundRunner(opts: {
   resolveTemplate?: (tenantSlug: string) => VerticalTemplate | undefined;
   memoryExtractor?: MemoryExtractor | null;
   stageClassifier?: StageClassifier | null;
+  photoProcessor?: PhotoProcessor;
+  fieldExtractor?: FieldExtractor;
   sink?: PipelineSink;
   metrics?: PlatformMetrics;
   log: JsonLogger;
@@ -94,6 +98,29 @@ export function startUserbotInboundRunner(opts: {
               ...(opts.sink ? { sink: opts.sink } : {}),
             });
             result = { ...result, outboundEnqueued: gen.outboundEnqueued };
+          }
+          if (result.persisted && opts.photoProcessor) {
+            void opts.photoProcessor
+              .process({
+                tenantId: entry.tenantId,
+                inbound,
+                adapter: entry.adapter,
+                contactId: result.contactId,
+                db,
+              })
+              .catch(() => {});
+          }
+          if (result.persisted && opts.fieldExtractor) {
+            const text = inbound.parts
+              .filter((p) => p.kind === "text")
+              .map((p) => (p as { kind: "text"; text: string }).text)
+              .join(" ")
+              .trim();
+            if (text.length > 0) {
+              void opts.fieldExtractor
+                .extract({ tenantId: entry.tenantId, contactId: result.contactId, text, db })
+                .catch(() => {});
+            }
           }
           if (!result.persisted) {
             opts.metrics?.inboundDeduped.inc(1, {

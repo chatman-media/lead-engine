@@ -20,6 +20,11 @@ export interface WorkerConfig {
    * боты. Default 30000 (30 сек). 0 — отключить (только при boot).
    */
   channelReloadIntervalMs: number;
+  /**
+   * Период stale-lead sweep, ms. Default 3600000 (раз в час). 0 — отключить.
+   * Sweep закрывает лиды, зависшие на стадии дольше stale_timeout_days.
+   */
+  staleSweepIntervalMs: number;
 }
 
 function required(name: string): string {
@@ -40,6 +45,10 @@ export function loadWorkerConfig(): WorkerConfig {
     metricsPort: Number.parseInt(process.env.METRICS_PORT ?? "0", 10),
     channelReloadIntervalMs: Number.parseInt(
       process.env.WORKER_CHANNEL_RELOAD_MS ?? "30000",
+      10,
+    ),
+    staleSweepIntervalMs: Number.parseInt(
+      process.env.WORKER_STALE_SWEEP_MS ?? "3600000",
       10,
     ),
   };

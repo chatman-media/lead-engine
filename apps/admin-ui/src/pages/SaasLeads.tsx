@@ -1,11 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ApiError, clearToken, saas, type FunnelData, type LeadListItem } from "@/api/saas";
+import { ApiError, clearToken, saas, type ContactItem, type FunnelData, type LeadListItem } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { SettingsIcon } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { PlusIcon, SettingsIcon } from "lucide-react";
 
 const KIND_COLOR: Record<string, string> = {
   intake: "border-blue-300",
@@ -33,6 +42,15 @@ export function SaasLeads() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Create lead dialog
+  const [creating, setCreating] = useState(false);
+  const [contactSearch, setContactSearch] = useState("");
+  const [contacts, setContacts] = useState<ContactItem[]>([]);
+  const [selectedContactId, setSelectedContactId] = useState<string>("");
+  const [selectedStageId, setSelectedStageId] = useState<string>("");
+  const [creatingLead, setCreatingLead] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   function onAuthError(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
       clearToken();
@@ -42,7 +60,7 @@ export function SaasLeads() {
     return false;
   }
 
-  useEffect(() => {
+  function reload() {
     Promise.all([saas.getFunnel(), saas.listLeads({ limit: 200 })])
       .then(([f, l]) => {
         setFunnel(f);
@@ -52,7 +70,41 @@ export function SaasLeads() {
         if (!onAuthError(err)) setError("Не удалось загрузить данные");
       })
       .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    reload();
   }, []);
+
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      saas.listContacts({ q: contactSearch, limit: 20 })
+        .then((r) => setContacts(r.items))
+        .catch(() => {});
+    }, 250);
+  }, [contactSearch]);
+
+  async function handleCreateLead() {
+    if (!selectedContactId) return;
+    setCreatingLead(true);
+    try {
+      const result = await saas.createLead(
+        Number(selectedContactId),
+        selectedStageId ? Number(selectedStageId) : undefined,
+      );
+      setCreating(false);
+      setContactSearch("");
+      setSelectedContactId("");
+      setSelectedStageId("");
+      reload();
+      navigate(`/leads/${result.id}`);
+    } catch (err) {
+      onAuthError(err);
+    } finally {
+      setCreatingLead(false);
+    }
+  }
 
   if (loading) return <p className="p-6 text-muted-foreground text-sm">Загрузка…</p>;
   if (error) return <p className="p-6 text-destructive text-sm">{error}</p>;
@@ -84,13 +136,87 @@ export function SaasLeads() {
           title="Лиды"
           description={`${leads.length} лидов · ${stages.length} стадий в воронке`}
         />
-        <Button variant="outline" size="sm" asChild>
-          <Link to="/funnel">
-            <SettingsIcon className="mr-1.5 size-3.5" />
-            Воронка
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => { setCreating(true); setContacts([]); setContactSearch(""); }}>
+            <PlusIcon className="mr-1.5 size-3.5" />
+            Новый лид
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/funnel">
+              <SettingsIcon className="mr-1.5 size-3.5" />
+              Воронка
+            </Link>
+          </Button>
+        </div>
       </div>
+
+      {/* Создать лида */}
+      {creating && (
+        <Card className="border-primary/30">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Новый лид</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Контакт</Label>
+              <Input
+                placeholder="Поиск по имени…"
+                value={contactSearch}
+                onChange={(e) => { setContactSearch(e.target.value); setSelectedContactId(""); }}
+                className="text-sm"
+              />
+              {contacts.length > 0 && (
+                <div className="rounded-md border bg-popover p-1 shadow-sm">
+                  {contacts.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={`w-full rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent ${selectedContactId === String(c.id) ? "bg-accent font-medium" : ""}`}
+                      onClick={() => { setSelectedContactId(String(c.id)); setContactSearch(c.displayName ?? `#${c.id}`); }}
+                    >
+                      {c.displayName ?? `Контакт #${c.id}`}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {stages.length > 0 && (
+              <div className="space-y-1">
+                <Label className="text-xs">Начальная стадия (опционально)</Label>
+                <Select value={selectedStageId} onValueChange={setSelectedStageId}>
+                  <SelectTrigger className="text-sm">
+                    <SelectValue placeholder="Первая стадия воронки" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {stages.map((s) => (
+                      <SelectItem key={s.id} value={String(s.id)}>
+                        {s.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="flex gap-2 pt-1">
+              <Button
+                size="sm"
+                disabled={!selectedContactId || creatingLead}
+                onClick={handleCreateLead}
+              >
+                {creatingLead ? "Создание…" : "Создать"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setCreating(false)}
+                disabled={creatingLead}
+              >
+                Отмена
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {!hasStages && legacyLeads.length > 0 && (
         <div className="rounded-md border p-4 text-sm text-muted-foreground">

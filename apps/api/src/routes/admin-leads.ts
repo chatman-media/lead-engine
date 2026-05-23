@@ -8,7 +8,7 @@ import {
   stageDefinitions,
   stageFields,
 } from "@chatman-media/storage";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 
@@ -31,7 +31,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
   /**
    * GET /api/admin/leads
-   * Query: ?stageId=<id> | ?state=<slug> | ?limit=N | ?offset=N
+   * Query: ?stageId=<id> | ?state=<slug> | ?contactId=<id> | ?limit=N | ?offset=N
    */
   app.get("/api/admin/leads", async (c) => {
     const tenantId = c.var.tenantId;
@@ -39,6 +39,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     const offset = Math.max(Number(c.req.query("offset") ?? "0"), 0);
     const stageIdParam = c.req.query("stageId");
     const stateParam = c.req.query("state");
+    const contactIdParam = c.req.query("contactId");
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
       const conditions = [eq(leads.tenantId, tenantId)];
@@ -47,6 +48,9 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       }
       if (stateParam) {
         conditions.push(eq(leads.state, stateParam));
+      }
+      if (contactIdParam) {
+        conditions.push(eq(leads.userId, Number(contactIdParam)));
       }
 
       return tx
@@ -248,6 +252,11 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
   /**
    * PUT /api/admin/leads/:id/field-values
    * Body: { values: Array<{ fieldId: number, value: unknown }> }
+   *
+   * После upsert проверяет auto-advance: если стадия имеет
+   * autoAdvanceCondition = '{"type":"all_required_fields_filled"}' и все
+   * required-поля заполнены — лид автоматически переходит в первую стадию
+   * из nextStages. Возвращает { ok, advanced: true|false, newStageSlug? }.
    */
   app.put("/api/admin/leads/:id/field-values", async (c) => {
     const tenantId = c.var.tenantId;
@@ -263,7 +272,8 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     }
 
     const now = Math.floor(Date.now() / 1000);
-    await withTenant(opts.db, tenantId, async (tx) => {
+    const advanced = await withTenant(opts.db, tenantId, async (tx) => {
+      // 1. Upsert field values
       for (const { fieldId, value } of values) {
         await tx
           .insert(leadFieldValues)
@@ -284,9 +294,114 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
             },
           });
       }
+
+      // 2. Check auto-advance condition
+      const [lead] = await tx
+        .select({ id: leads.id, state: leads.state, stageDefinitionId: leads.stageDefinitionId })
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+      if (!lead?.stageDefinitionId) return null;
+
+      const [stage] = await tx
+        .select({
+          id: stageDefinitions.id,
+          autoAdvanceCondition: stageDefinitions.autoAdvanceCondition,
+          nextStages: stageDefinitions.nextStages,
+          kind: stageDefinitions.kind,
+        })
+        .from(stageDefinitions)
+        .where(and(eq(stageDefinitions.id, lead.stageDefinitionId), eq(stageDefinitions.tenantId, tenantId)));
+      if (!stage) return null;
+
+      // Only advance non-terminal stages
+      if (stage.kind === "terminal_won" || stage.kind === "terminal_lost") return null;
+      if (!stage.nextStages.length) return null;
+
+      let condition: { type: string } | null = null;
+      try {
+        condition = stage.autoAdvanceCondition
+          ? (JSON.parse(stage.autoAdvanceCondition) as { type: string })
+          : null;
+      } catch {
+        return null;
+      }
+      if (condition?.type !== "all_required_fields_filled") return null;
+
+      // Count required fields vs filled values
+      const allRequired = await tx
+        .select({ id: stageFields.id })
+        .from(stageFields)
+        .where(and(eq(stageFields.stageId, stage.id), eq(stageFields.required, true)));
+      if (allRequired.length === 0) return null;
+
+      const filledRequired = await tx
+        .select({ id: leadFieldValues.fieldId })
+        .from(leadFieldValues)
+        .where(
+          and(
+            eq(leadFieldValues.leadId, id),
+            inArray(leadFieldValues.fieldId, allRequired.map((f) => f.id)),
+            sql`${leadFieldValues.valueJson} != 'null' AND ${leadFieldValues.valueJson} != '""' AND ${leadFieldValues.valueJson} != ''`,
+          ),
+        );
+      if (filledRequired.length < allRequired.length) return null;
+
+      // All required fields filled → advance to first allowed next stage
+      const nextSlug = stage.nextStages[0]!;
+      const [nextStageDef] = await tx
+        .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
+        .from(stageDefinitions)
+        .where(and(eq(stageDefinitions.slug, nextSlug), eq(stageDefinitions.tenantId, tenantId)));
+      if (!nextStageDef) return null;
+
+      await tx
+        .update(leads)
+        .set({ stageDefinitionId: nextStageDef.id, state: nextStageDef.slug, updatedAt: now })
+        .where(eq(leads.id, id));
+
+      await tx.insert(leadEvents).values({
+        tenantId,
+        leadId: id,
+        fromState: lead.state,
+        toState: nextStageDef.slug,
+        byAdminId: undefined,
+        createdAt: now,
+      });
+
+      return nextStageDef.slug;
     });
 
-    return c.json({ ok: true });
+    return c.json({ ok: true, advanced: advanced !== null, newStageSlug: advanced });
+  });
+
+  /**
+   * GET /api/admin/contacts
+   * Query: ?q=<search> | ?limit=N | ?offset=N
+   * Список контактов для поиска при создании лида.
+   */
+  app.get("/api/admin/contacts", async (c) => {
+    const tenantId = c.var.tenantId;
+    const limit = Math.min(Number(c.req.query("limit") ?? "50"), 200);
+    const offset = Math.max(Number(c.req.query("offset") ?? "0"), 0);
+    const q = c.req.query("q")?.trim() ?? "";
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) => {
+      const conditions = [eq(contacts.tenantId, tenantId)];
+      if (q.length > 0) {
+        conditions.push(
+          ilike(contacts.displayName, `%${q}%`) as ReturnType<typeof eq>,
+        );
+      }
+      return tx
+        .select({ id: contacts.id, displayName: contacts.displayName })
+        .from(contacts)
+        .where(and(...conditions))
+        .orderBy(desc(contacts.id))
+        .limit(limit)
+        .offset(offset);
+    });
+
+    return c.json({ items: rows, limit, offset });
   });
 
   /**

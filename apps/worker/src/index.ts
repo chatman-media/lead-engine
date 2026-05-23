@@ -5,6 +5,7 @@ import { loadWorkerConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
 import { OutboundDispatcher } from "./dispatcher.ts";
 import { type MetricsServer, startMetricsServer } from "./metrics-server.ts";
+import { StaleleadSweeper } from "./stale-lead-sweep.ts";
 
 async function main() {
   const cfg = loadWorkerConfig();
@@ -67,6 +68,16 @@ async function main() {
     log.error("dispatcher fatal", { err: err instanceof Error ? err : new Error(String(err)) });
   });
 
+  // Stale-lead sweep: закрывает лиды, просроченные по stale_timeout_days.
+  let staleSweeperPromise: Promise<void> = Promise.resolve();
+  if (cfg.staleSweepIntervalMs > 0) {
+    const sweeper = new StaleleadSweeper(db, { intervalMs: cfg.staleSweepIntervalMs });
+    staleSweeperPromise = sweeper.run(abort.signal).catch((err) => {
+      log.error("stale-sweep fatal", { err: err instanceof Error ? err : new Error(String(err)) });
+    });
+    log.info("stale-lead sweep enabled", { intervalMs: cfg.staleSweepIntervalMs });
+  }
+
   // Periodic channel reload — подхватывает newly-onboarded боты которые
   // tenant добавил через apps/api UI после worker boot. apps/api делает
   // in-process hot-reload, worker — отдельный процесс, polling.
@@ -95,7 +106,7 @@ async function main() {
     abort.abort();
     dispatcher.stop();
     metricsServer?.stop();
-    await dispatcherPromise;
+    await Promise.all([dispatcherPromise, staleSweeperPromise]);
     channels.closeAll();
     await close();
     process.exit(0);

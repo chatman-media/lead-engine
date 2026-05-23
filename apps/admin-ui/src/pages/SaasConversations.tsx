@@ -1,4 +1,4 @@
-import { SendHorizontalIcon } from "lucide-react";
+import { ExternalLinkIcon, SendHorizontalIcon } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -13,6 +13,7 @@ import {
   type ConversationDetail,
   type ConversationListItem,
   clearToken,
+  type LeadListItem,
   type MessageRow,
   saas,
 } from "../api/saas.ts";
@@ -52,6 +53,7 @@ export function SaasConversations() {
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
   const [togglingMode, setTogglingMode] = useState(false);
+  const [contactLead, setContactLead] = useState<LeadListItem | null>(null);
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
@@ -135,6 +137,16 @@ export function SaasConversations() {
     };
     // biome-ignore lint/correctness/useExhaustiveDependencies: selectedId only
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!detail) {
+      setContactLead(null);
+      return;
+    }
+    saas.listLeads({ contactId: detail.conversation.contactId, limit: 1 })
+      .then((r) => setContactLead(r.items[0] ?? null))
+      .catch(() => setContactLead(null));
+  }, [detail?.conversation.contactId]);
 
   async function handleToggleMode() {
     if (!detail || !selectedId) return;
@@ -295,6 +307,15 @@ export function SaasConversations() {
                     )}
                     {detail.conversation.escalatedAt && (
                       <Badge variant="destructive">эскалация</Badge>
+                    )}
+                    {contactLead && (
+                      <Link
+                        to={`/leads/${contactLead.id}`}
+                        className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        <ExternalLinkIcon className="size-3" />
+                        Лид · {contactLead.state}
+                      </Link>
                     )}
                   </div>
                 </div>
