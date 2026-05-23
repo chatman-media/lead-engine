@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type DragEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError, clearToken, saas, type ContactItem, type FunnelData, type LeadListItem } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
@@ -41,6 +41,10 @@ export function SaasLeads() {
   const [leads, setLeads] = useState<LeadListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Drag-and-drop state
+  const [draggedLeadId, setDraggedLeadId] = useState<number | null>(null);
+  const [dragOverStageId, setDragOverStageId] = useState<number | null>(null);
 
   // Create lead dialog
   const [creating, setCreating] = useState(false);
@@ -104,6 +108,22 @@ export function SaasLeads() {
     } finally {
       setCreatingLead(false);
     }
+  }
+
+  function handleLeadDrop(e: DragEvent, targetStageId: number) {
+    e.preventDefault();
+    if (!draggedLeadId) return;
+    const lead = leads.find((l) => l.id === draggedLeadId);
+    if (!lead || lead.stageDefinitionId === targetStageId) return;
+
+    // Optimistic update
+    setLeads((prev) =>
+      prev.map((l) => l.id === draggedLeadId ? { ...l, stageDefinitionId: targetStageId } : l),
+    );
+    setDraggedLeadId(null);
+    setDragOverStageId(null);
+
+    saas.moveLeadStage(draggedLeadId, targetStageId).catch(() => reload());
   }
 
   if (loading) return <p className="p-6 text-muted-foreground text-sm">Загрузка…</p>;
@@ -232,13 +252,17 @@ export function SaasLeads() {
         <div className="flex gap-4 overflow-x-auto pb-4">
           {stages.map((stage) => {
             const stageLeads = leadsByStage.get(`stage:${stage.id}`) ?? [];
+            const isOver = dragOverStageId === stage.id;
             return (
               <div
                 key={stage.id}
                 className="flex w-72 shrink-0 flex-col gap-2"
+                onDragOver={(e) => { e.preventDefault(); setDragOverStageId(stage.id); }}
+                onDragLeave={() => setDragOverStageId(null)}
+                onDrop={(e) => handleLeadDrop(e, stage.id)}
               >
                 <div
-                  className={`flex items-center justify-between rounded-lg border-l-4 bg-card px-3 py-2 shadow-sm ${KIND_COLOR[stage.kind] ?? "border-gray-300"}`}
+                  className={`flex items-center justify-between rounded-lg border-l-4 bg-card px-3 py-2 shadow-sm transition-colors ${KIND_COLOR[stage.kind] ?? "border-gray-300"} ${isOver ? "bg-accent" : ""}`}
                 >
                   <div>
                     <p className="text-sm font-semibold">{stage.displayName}</p>
@@ -249,13 +273,19 @@ export function SaasLeads() {
                   </Badge>
                 </div>
 
-                <div className="flex flex-col gap-2">
+                <div className={`flex flex-col gap-2 rounded-lg transition-colors ${isOver ? "bg-accent/30 p-1" : ""}`}>
                   {stageLeads.map((lead) => (
-                    <LeadCard key={lead.id} lead={lead} />
+                    <LeadCard
+                      key={lead.id}
+                      lead={lead}
+                      isDragging={draggedLeadId === lead.id}
+                      onDragStart={() => setDraggedLeadId(lead.id)}
+                      onDragEnd={() => { setDraggedLeadId(null); setDragOverStageId(null); }}
+                    />
                   ))}
                   {stageLeads.length === 0 && (
-                    <p className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
-                      Нет лидов
+                    <p className={`rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground ${isOver ? "border-primary" : ""}`}>
+                      {isOver ? "Перетащить сюда" : "Нет лидов"}
                     </p>
                   )}
                 </div>
@@ -280,10 +310,26 @@ export function SaasLeads() {
   );
 }
 
-function LeadCard({ lead }: { lead: LeadListItem }) {
+function LeadCard({
+  lead,
+  isDragging,
+  onDragStart,
+  onDragEnd,
+}: {
+  lead: LeadListItem;
+  isDragging?: boolean;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+}) {
   const pct = progressPct(lead.requiredFieldsFilled, lead.requiredFieldsTotal);
 
   return (
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      className={isDragging ? "opacity-40" : ""}
+    >
     <Link to={`/leads/${lead.id}`}>
       <Card className="cursor-pointer transition-colors hover:bg-accent/30">
         <CardHeader className="pb-1 pt-3">
@@ -319,5 +365,6 @@ function LeadCard({ lead }: { lead: LeadListItem }) {
         </CardContent>
       </Card>
     </Link>
+    </div>
   );
 }

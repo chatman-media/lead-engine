@@ -25,6 +25,12 @@ export interface WorkerConfig {
    * Sweep закрывает лиды, зависшие на стадии дольше stale_timeout_days.
    */
   staleSweepIntervalMs: number;
+  /**
+   * Период check-in sweep, ms. Default 3600000 (раз в час). 0 — отключить.
+   * Sweep отправляет проактивный пинг лидам, у которых нет активности
+   * дольше stage_definitions.checkin_interval_days.
+   */
+  checkinSweepIntervalMs: number;
 }
 
 function required(name: string): string {
@@ -49,6 +55,10 @@ export function loadWorkerConfig(): WorkerConfig {
     ),
     staleSweepIntervalMs: Number.parseInt(
       process.env.WORKER_STALE_SWEEP_MS ?? "3600000",
+      10,
+    ),
+    checkinSweepIntervalMs: Number.parseInt(
+      process.env.WORKER_CHECKIN_SWEEP_MS ?? "3600000",
       10,
     ),
   };

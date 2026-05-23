@@ -49,8 +49,10 @@ let contactIdA2 = 0;
 let funnelIdA = 0;
 let stageIdA = 0;
 let stageIdA2 = 0;
+let stageIdA3 = 0; // slug "blocked_stage" — NOT in stageIdA.nextStages
 let leadIdA = 0;
 let leadIdA2 = 0;
+let leadIdA3 = 0; // fresh lead on stageIdA for transition validation tests
 
 beforeAll(
   async () => {
@@ -151,6 +153,24 @@ beforeAll(
       .returning({ id: stageDefinitions.id });
     stageIdA2 = stage2!.id;
 
+    // Third stage — slug "blocked_stage", NOT listed in stageIdA.nextStages
+    const [stage3] = await db
+      .insert(stageDefinitions)
+      .values({
+        tenantId: tenantA,
+        funnelId: funnelIdA,
+        slug: "blocked_stage",
+        displayName: "Blocked Stage",
+        kind: "active",
+        stageType: "form_fill",
+        position: 2,
+        nextStages: [],
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: stageDefinitions.id });
+    stageIdA3 = stage3!.id;
+
     // Create two leads for tenant A
     const [lead1] = await db
       .insert(leads)
@@ -177,6 +197,24 @@ beforeAll(
       })
       .returning({ id: leads.id });
     leadIdA2 = lead2!.id;
+
+    // Third contact + lead for transition validation tests
+    const [c3] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Dave Validation" })
+      .returning({ id: contacts.id });
+    const [lead3] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: c3!.id,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now - 200,
+        updatedAt: now - 200,
+      })
+      .returning({ id: leads.id });
+    leadIdA3 = lead3!.id;
   },
   30_000,
 );
@@ -616,6 +654,75 @@ describe("GET /api/admin/contacts", () => {
       expect(item.displayName).not.toContain("Alice");
       expect(item.displayName).not.toContain("Bob");
     }
+  });
+});
+
+describe("PATCH /api/admin/leads/:id/stage — transition validation", () => {
+  it("allowed transition (slug in nextStages) → 200", async () => {
+    if (!sql) return;
+    // leadIdA3 is on stageIdA (nextStages: ["review"]); moving to stageIdA2 (slug:"review") is allowed
+    const res = await authReq(tokenA, `/api/admin/leads/${leadIdA3}/stage`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stageDefinitionId: stageIdA2 }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+  });
+
+  it("disallowed transition (slug not in nextStages) → 422", async () => {
+    if (!sql) return;
+    // leadIdA is on stageIdA (nextStages: ["review"]); "blocked_stage" is NOT in the list
+    const res = await authReq(tokenA, `/api/admin/leads/${leadIdA}/stage`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stageDefinitionId: stageIdA3 }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("transition_not_allowed");
+  });
+
+  it("disallowed transition with force:true → 200 (admin override)", async () => {
+    if (!sql) return;
+    // Same disallowed move, but force:true bypasses the check
+    const res = await authReq(tokenA, `/api/admin/leads/${leadIdA}/stage`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stageDefinitionId: stageIdA3, force: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+  });
+
+  it("lead with no stageDefinitionId (legacy) → skip validation → 200", async () => {
+    if (!sql) return;
+    // Create a legacy lead without a stage
+    const [c] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Legacy Lead Contact" })
+      .returning({ id: contacts.id });
+    const now = Math.floor(Date.now() / 1000);
+    const [legacyLead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: c!.id,
+        state: "intake_pending",
+        stageDefinitionId: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+
+    const res = await authReq(tokenA, `/api/admin/leads/${legacyLead!.id}/stage`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stageDefinitionId: stageIdA3 }),
+    });
+    expect(res.status).toBe(200);
   });
 });
 

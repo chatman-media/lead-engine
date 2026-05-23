@@ -5,6 +5,7 @@ import { loadWorkerConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
 import { OutboundDispatcher } from "./dispatcher.ts";
 import { type MetricsServer, startMetricsServer } from "./metrics-server.ts";
+import { CheckinSweeper } from "./checkin-sweep.ts";
 import { StaleleadSweeper } from "./stale-lead-sweep.ts";
 
 async function main() {
@@ -78,6 +79,16 @@ async function main() {
     log.info("stale-lead sweep enabled", { intervalMs: cfg.staleSweepIntervalMs });
   }
 
+  // Check-in sweep: проактивный пинг лидам без активности дольше checkin_interval_days.
+  let checkinSweeperPromise: Promise<void> = Promise.resolve();
+  if (cfg.checkinSweepIntervalMs > 0) {
+    const checkinSweeper = new CheckinSweeper(db, { intervalMs: cfg.checkinSweepIntervalMs });
+    checkinSweeperPromise = checkinSweeper.run(abort.signal).catch((err) => {
+      log.error("checkin-sweep fatal", { err: err instanceof Error ? err : new Error(String(err)) });
+    });
+    log.info("check-in sweep enabled", { intervalMs: cfg.checkinSweepIntervalMs });
+  }
+
   // Periodic channel reload — подхватывает newly-onboarded боты которые
   // tenant добавил через apps/api UI после worker boot. apps/api делает
   // in-process hot-reload, worker — отдельный процесс, polling.
@@ -106,7 +117,7 @@ async function main() {
     abort.abort();
     dispatcher.stop();
     metricsServer?.stop();
-    await Promise.all([dispatcherPromise, staleSweeperPromise]);
+    await Promise.all([dispatcherPromise, staleSweeperPromise, checkinSweeperPromise]);
     channels.closeAll();
     await close();
     process.exit(0);

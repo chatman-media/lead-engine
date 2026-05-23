@@ -205,13 +205,19 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     const id = Number(c.req.param("id"));
     if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
 
-    const { stageDefinitionId } = await c.req.json<{ stageDefinitionId: number }>();
+    const body = await c.req.json<{ stageDefinitionId: number; force?: boolean }>();
+    const { stageDefinitionId, force = false } = body;
     if (!stageDefinitionId) return c.json({ error: "stageDefinitionId required" }, 400);
 
     const now = Math.floor(Date.now() / 1000);
+    let transitionBlocked = false;
     await withTenant(opts.db, tenantId, async (tx) => {
       const [lead] = await tx
-        .select({ id: leads.id, state: leads.state, stageDefinitionId: leads.stageDefinitionId })
+        .select({
+          id: leads.id,
+          state: leads.state,
+          stageDefinitionId: leads.stageDefinitionId,
+        })
         .from(leads)
         .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
       if (!lead) throw new Error("lead not found");
@@ -221,6 +227,27 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         .from(stageDefinitions)
         .where(and(eq(stageDefinitions.id, stageDefinitionId), eq(stageDefinitions.tenantId, tenantId)));
       if (!newStage) throw new Error("stage not found");
+
+      // Validate transition against current stage's nextStages whitelist.
+      // Skip if: no current stage (legacy lead), force override, or same stage.
+      if (lead.stageDefinitionId && lead.stageDefinitionId !== stageDefinitionId && !force) {
+        const [currentStage] = await tx
+          .select({ nextStages: stageDefinitions.nextStages })
+          .from(stageDefinitions)
+          .where(
+            and(
+              eq(stageDefinitions.id, lead.stageDefinitionId),
+              eq(stageDefinitions.tenantId, tenantId),
+            ),
+          );
+        // If nextStages is non-empty, enforce whitelist.
+        if (currentStage && currentStage.nextStages.length > 0) {
+          if (!currentStage.nextStages.includes(newStage.slug)) {
+            transitionBlocked = true;
+            return;
+          }
+        }
+      }
 
       await tx
         .update(leads)
@@ -237,13 +264,20 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       });
     });
 
+    if (transitionBlocked) {
+      return c.json(
+        { error: "transition_not_allowed", hint: "pass force:true to override" },
+        422,
+      );
+    }
+
     await recordAudit(opts.db, {
       tenantId,
       adminId,
       action: "lead.stage_change",
       targetKind: "lead",
       targetId: String(id),
-      details: { stageDefinitionId },
+      details: { stageDefinitionId, force },
     });
 
     return c.json({ ok: true });
