@@ -4,6 +4,7 @@ import type { EmbeddingClient } from "@chatman-media/llm-router";
 import type { DirectorHookForPrompt, FunnelStage, SkillForPrompt, Style } from "./styles.ts";
 import type { AnyRagTool } from "./tools.ts";
 import type { IKbStore, KbSearchHit } from "./types.ts";
+import type { Reranker } from "./reranker.ts";
 
 export const NO_CONTEXT_MARKER = "__NO_CONTEXT__";
 
@@ -79,6 +80,13 @@ export interface AnswerInput {
    */
   maxToolCycles?: number;
   /**
+   * Optional cross-encoder reranker applied after initial vector/hybrid
+   * retrieval. When set, hits are re-scored and re-ordered before being
+   * injected into the prompt context. Adds one external API call per turn.
+   * Build from per-tenant `llm_provider_configs` with purpose='reranker'.
+   */
+  reranker?: Reranker;
+  /**
    * When provided, the LLM is instructed to return a JSON object matching this
    * Zod schema. The parsed and validated value is available as `result.output`.
    * Uses OpenAI's native `response_format` when available; falls back to prompt
@@ -112,6 +120,8 @@ export interface AnswerTelemetry {
   original_query?: string;
   rewritten_query?: string;
   factCheck?: { grounded: boolean; vacancyOk: boolean; reason?: string };
+  /** True when a cross-encoder reranker was applied after initial retrieval. */
+  reranked?: boolean;
   /**
    * @deprecated Use `toolCalls`. Retained for backward compatibility — set to
    * the first tool call when any tools ran during answer generation.

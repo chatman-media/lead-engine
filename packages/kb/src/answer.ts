@@ -374,6 +374,9 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
   if (!input.hybridSearch && maxDist !== undefined) {
     hits = hits.filter((h) => h.distance <= maxDist);
   }
+  if (input.reranker && hits.length > 0) {
+    hits = await input.reranker.rerank(searchQuery, hits, topK);
+  }
   const retrievalMs = Date.now() - retrievalStart;
 
   if (hits.length === 0 && !(input.vacanciesBlock ?? "").trim() && !input.style) {
@@ -452,6 +455,7 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
     generation_ms: generationMs,
     top_distances: hits.map((h) => Math.round(h.distance * 10000) / 10000),
     ...(input.hybridSearch ? { hybrid: true } : {}),
+    ...(input.reranker ? { reranked: true } : {}),
     ...(searchQuery !== input.question
       ? { original_query: input.question, rewritten_query: searchQuery }
       : {}),
@@ -539,16 +543,20 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       vectorOnly: !input.hybridSearch,
     });
     const maxDist = input.maxDistance;
-    const hits =
+    let hits =
       input.hybridSearch || maxDist === undefined
         ? allHits
         : allHits.filter((h) => h.distance <= maxDist);
+    if (input.reranker && hits.length > 0) {
+      hits = await input.reranker.rerank(searchQuery, hits, topK);
+    }
     const retrievalMs = Date.now() - retrievalStart;
     const baseTelemetry: AnswerTelemetry = {
       path: "ok",
       retrieval_ms: retrievalMs,
       top_distances: hits.map((h) => Math.round(h.distance * 10000) / 10000),
       ...(input.hybridSearch ? { hybrid: true } : {}),
+      ...(input.reranker ? { reranked: true } : {}),
       ...(searchQuery !== input.question
         ? { original_query: input.question, rewritten_query: searchQuery }
         : {}),
@@ -577,10 +585,13 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     usedTopic = null;
   }
   const maxDist = input.maxDistance;
-  const hits =
+  let hits =
     input.hybridSearch || maxDist === undefined
       ? allHits
       : allHits.filter((h) => h.distance <= maxDist);
+  if (input.reranker && hits.length > 0) {
+    hits = await input.reranker.rerank(searchQuery, hits, topK);
+  }
   const retrievalMs = Date.now() - retrievalStart;
 
   const baseTelemetry: AnswerTelemetry = {
@@ -588,6 +599,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     retrieval_ms: retrievalMs,
     top_distances: hits.map((h) => Math.round(h.distance * 10000) / 10000),
     ...(input.hybridSearch ? { hybrid: true } : {}),
+    ...(input.reranker ? { reranked: true } : {}),
     ...(input.topicRouting && topic !== null ? { topic: usedTopic } : {}),
     ...(searchQuery !== input.question
       ? { original_query: input.question, rewritten_query: searchQuery }

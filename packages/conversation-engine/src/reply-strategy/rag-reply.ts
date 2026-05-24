@@ -9,6 +9,7 @@ import {
   type AnyRagTool,
   type DirectorHookForPrompt,
   type IKbStore,
+  type Reranker,
   type SkillForPrompt,
   type Style,
   StyleSchema,
@@ -116,6 +117,16 @@ export interface RagReplyStrategyOpts {
     tenantId: number;
     conversationId: number;
   }) => Promise<AnyRagTool[]> | AnyRagTool[];
+  /**
+   * Optional cross-encoder reranker resolver. Called once per turn — should
+   * return a `Reranker` instance (Jina or Cohere) configured for the tenant,
+   * or null/undefined if no reranker is configured. Results are expected to be
+   * cached by the caller (building a reranker per-call is cheap — the API key
+   * lookup is the expensive part, which the caller should cache).
+   */
+  resolveReranker?: (input: {
+    tenantId: number;
+  }) => Promise<Reranker | null> | Reranker | null;
 }
 
 function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
@@ -188,10 +199,10 @@ export class RagReplyStrategy implements ReplyStrategy {
         })
       : null;
 
-    // Load persuasion skills, director hooks, and agentic tools in parallel.
-    // All are optional — if resolvers not configured, arrays stay empty
+    // Load persuasion skills, director hooks, agentic tools, and reranker in parallel.
+    // All are optional — if resolvers not configured, values stay empty/null
     // and the pipeline silently skips those blocks.
-    const [skills, directorHooks, tools] = await Promise.all([
+    const [skills, directorHooks, tools, reranker] = await Promise.all([
       this.opts.resolveSkills ? this.opts.resolveSkills({ tenantId }) : Promise.resolve([]),
       this.opts.resolveDirectorHooks
         ? this.opts.resolveDirectorHooks({ tenantId })
@@ -199,6 +210,9 @@ export class RagReplyStrategy implements ReplyStrategy {
       this.opts.resolveTools
         ? this.opts.resolveTools({ tenantId, conversationId: input.conversationId })
         : Promise.resolve([]),
+      this.opts.resolveReranker
+        ? this.opts.resolveReranker({ tenantId })
+        : Promise.resolve(null),
     ]);
 
     // answerWithRag принимает rag's ChatClient/EmbeddingClient. Структурно
@@ -223,6 +237,7 @@ export class RagReplyStrategy implements ReplyStrategy {
       ...(skills.length > 0 ? { skills } : {}),
       ...(directorHooks.length > 0 ? { directorHooks } : {}),
       ...(tools.length > 0 ? { tools } : {}),
+      ...(reranker ? { reranker } : {}),
     });
 
     if (!result.text || result.text.trim().length === 0) return null;
