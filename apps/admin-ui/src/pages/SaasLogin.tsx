@@ -68,7 +68,12 @@ export function SaasLogin() {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="password">Пароль</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password">Пароль</Label>
+            <Link to="/forgot-password" className="text-xs text-muted-foreground hover:text-primary hover:underline">
+              Забыли пароль?
+            </Link>
+          </div>
           <PasswordInput
             id="password"
             autoComplete="current-password"

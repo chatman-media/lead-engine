@@ -52,8 +52,10 @@ export function makeAdminMessageTemplatesRoutes(opts: { db: Db }): Hono {
     try { body = await c.req.json() as typeof body; } catch { return c.json({ error: "invalid json" }, 400); }
 
     const updates: { name?: string; body?: string; updatedAt: number } = { updatedAt: Math.floor(Date.now() / 1000) };
-    if (typeof body.name === "string" && body.name.trim()) updates.name = body.name.trim();
-    if (typeof body.body === "string" && body.body.trim()) updates.body = body.body.trim();
+    let hasField = false;
+    if (typeof body.name === "string" && body.name.trim()) { updates.name = body.name.trim(); hasField = true; }
+    if (typeof body.body === "string" && body.body.trim()) { updates.body = body.body.trim(); hasField = true; }
+    if (!hasField) return c.json({ error: "nothing to update" }, 400);
 
     const [row] = await withTenant(opts.db, tenantId, async (tx) =>
       tx.update(messageTemplates).set(updates)

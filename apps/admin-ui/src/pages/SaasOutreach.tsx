@@ -111,14 +111,20 @@ export function SaasOutreach() {
       const tpl = await saas.createMessageTemplate({ name: newTplName.trim(), body: text.trim() });
       setTemplates((prev) => [...prev, tpl]);
       setNewTplName("");
+    } catch (err) {
+      if (!onAuthError(err)) toast.error("Не удалось сохранить шаблон");
     } finally {
       setSavingTpl(false);
     }
   }
 
   async function handleDeleteTemplate(id: number) {
-    await saas.deleteMessageTemplate(id);
-    setTemplates((prev) => prev.filter((t) => t.id !== id));
+    try {
+      await saas.deleteMessageTemplate(id);
+      setTemplates((prev) => prev.filter((t) => t.id !== id));
+    } catch (err) {
+      if (!onAuthError(err)) toast.error("Не удалось удалить шаблон");
+    }
   }
 
   async function handleSend() {
@@ -279,6 +285,8 @@ export function SaasOutreach() {
                     <button
                       type="button"
                       onClick={() => handleDeleteTemplate(t.id)}
+                      aria-label={`Удалить шаблон ${t.name}`}
+                      title={`Удалить шаблон ${t.name}`}
                       className="text-muted-foreground/60 hover:text-destructive ml-1"
                     >
                       <Trash2Icon className="size-3" />

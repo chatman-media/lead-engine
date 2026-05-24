@@ -139,6 +139,43 @@ export function trialEndingEmailHtml(opts: {
   `);
 }
 
+function escHtml(v: string): string {
+  return v
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+/** Письмо для сброса пароля. */
+export function forgotPasswordEmailHtml(opts: { email: string; resetUrl: string }): string {
+  const email = escHtml(opts.email);
+  const resetUrl = escHtml(opts.resetUrl);
+  return baseLayout(`
+    <h1>Сброс пароля</h1>
+    <p>Мы получили запрос на сброс пароля для аккаунта <strong>${email}</strong>.</p>
+    <p>Нажмите кнопку ниже, чтобы задать новый пароль. Ссылка действует <strong>1 час</strong>.</p>
+    <a href="${resetUrl}" class="btn">Сбросить пароль →</a>
+    <p>Если вы не запрашивали сброс — просто проигнорируйте это письмо. Ваш пароль останется прежним.</p>
+    <p style="margin-bottom:0;font-size:13px;color:#a1a1aa;">Ссылка: ${resetUrl}</p>
+  `);
+}
+
+/** Письмо с приглашением в команду. */
+export function inviteEmailHtml(opts: { email: string; inviteUrl: string; tenantSlug: string; role: string }): string {
+  const roleLabel = opts.role === "superadmin" ? "Администратор" : "Менеджер";
+  const tenantSlug = escHtml(opts.tenantSlug);
+  const inviteUrl = escHtml(opts.inviteUrl);
+  return baseLayout(`
+    <h1>Приглашение в команду</h1>
+    <p>Вас пригласили в рабочее пространство <strong>${tenantSlug}</strong> как <strong>${roleLabel}</strong>.</p>
+    <p>Нажмите кнопку ниже, чтобы принять приглашение и создать пароль. Ссылка действует <strong>7 дней</strong>.</p>
+    <a href="${inviteUrl}" class="btn">Принять приглашение →</a>
+    <p style="margin-bottom:0;font-size:13px;color:#a1a1aa;">Ссылка: ${inviteUrl}</p>
+  `);
+}
+
 /** Письмо при неудачной оплате. */
 export function paymentFailedEmailHtml(opts: {
   email: string;

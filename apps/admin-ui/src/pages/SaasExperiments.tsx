@@ -30,10 +30,6 @@ function formatDate(epoch: number) {
   return new Date(epoch * 1000).toLocaleDateString("ru-RU", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function toSlug(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40);
-}
-
 interface AllocEntry { styleSlug: string; weight: number }
 
 function parseAlloc(json: string): AllocEntry[] {
