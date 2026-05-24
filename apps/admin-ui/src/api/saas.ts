@@ -1047,6 +1047,19 @@ export const saas = {
   listStyles() {
     return request<{ items: StyleItem[] }>("/api/admin/styles");
   },
+  generateStyle(samples: string) {
+    return request<{
+      displayName: string;
+      slug: string;
+      personaName: string;
+      personaRole: string;
+      personaCompany: string;
+      framework: string;
+    }>("/api/admin/styles/generate", {
+      method: "POST",
+      body: JSON.stringify({ samples }),
+    });
+  },
   createStyle(data: { displayName: string; slug: string; configJson: string; isActive: boolean }) {
     return request<StyleItem>("/api/admin/styles", {
       method: "POST",

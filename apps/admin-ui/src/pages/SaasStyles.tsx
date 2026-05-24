@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangleIcon, EditIcon, PlusIcon, SaveIcon, Trash2Icon, XIcon } from "lucide-react";
+import { AlertTriangleIcon, EditIcon, PlusIcon, SaveIcon, SparklesIcon, Trash2Icon, UploadIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 
 interface StyleFormState {
@@ -34,6 +34,8 @@ const EMPTY_FORM: StyleFormState = {
 };
 
 const FRAMEWORKS = ["SPIN", "AIDA", "Challenger", "Sandler", "Consultative"];
+
+type GeneratorTab = "text" | "file";
 
 function toSlug(s: string) {
   return s
@@ -87,6 +89,12 @@ export function SaasStyles() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+
+  // Generator
+  const [genTab, setGenTab] = useState<GeneratorTab>("text");
+  const [genText, setGenText] = useState("");
+  const [genFileName, setGenFileName] = useState("");
+  const [generating, setGenerating] = useState(false);
 
   function load() {
     setLoading(true);
@@ -198,6 +206,68 @@ export function SaasStyles() {
     }
   }
 
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setGenFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const raw = ev.target?.result as string;
+      try {
+        if (file.name.endsWith(".json")) {
+          // Telegram Desktop export: result.json
+          const data = JSON.parse(raw) as {
+            messages?: Array<{ type?: string; text?: string | Array<{text?: string}> }>;
+          };
+          const msgs = (data.messages ?? [])
+            .filter((m) => m.type === "message")
+            .map((m) => {
+              if (typeof m.text === "string") return m.text;
+              if (Array.isArray(m.text)) return m.text.map((t) => (typeof t === "string" ? t : t.text ?? "")).join("");
+              return "";
+            })
+            .filter((t) => t.trim().length > 0);
+          setGenText(msgs.join("\n"));
+        } else {
+          // CSV or plain text: just use raw
+          setGenText(raw);
+        }
+      } catch {
+        toast.error("Не удалось разобрать файл");
+      }
+    };
+    reader.readAsText(file, "utf-8");
+    // Reset so same file can be re-uploaded
+    e.target.value = "";
+  }
+
+  async function handleGenerate() {
+    const samples = genText.trim();
+    if (!samples) {
+      toast.error("Нет текста для анализа");
+      return;
+    }
+    setGenerating(true);
+    try {
+      const result = await saas.generateStyle(samples);
+      setForm((f) => ({
+        ...f,
+        displayName: result.displayName || f.displayName,
+        slug: result.slug || f.slug,
+        personaName: result.personaName || f.personaName,
+        personaRole: result.personaRole || f.personaRole,
+        personaCompany: result.personaCompany || f.personaCompany,
+        framework: result.framework || f.framework,
+      }));
+      toast.success("Стиль сгенерирован — проверь и сохрани");
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Ошибка генерации";
+      toast.error(msg);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -221,6 +291,57 @@ export function SaasStyles() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* AI Generator */}
+            <div className="rounded-md border border-dashed border-primary/40 bg-primary/5 p-3 space-y-3">
+              <p className="text-xs font-medium text-primary flex items-center gap-1.5">
+                <SparklesIcon className="size-3.5" />
+                Сгенерировать из примеров
+              </p>
+              <div className="flex gap-1 rounded-md border p-0.5 w-fit bg-background">
+                {(["text", "file"] as GeneratorTab[]).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setGenTab(tab)}
+                    className={`rounded px-2.5 py-1 text-xs transition-colors cursor-pointer ${
+                      genTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {tab === "text" ? "Вставить текст" : "Загрузить файл"}
+                  </button>
+                ))}
+              </div>
+
+              {genTab === "text" ? (
+                <Textarea
+                  rows={5}
+                  placeholder={"Вставь 5-15 своих сообщений клиентам — бот проанализирует тон и стиль…"}
+                  value={genText}
+                  onChange={(e) => setGenText(e.target.value)}
+                  className="text-xs resize-none"
+                />
+              ) : (
+                <label className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border bg-background py-6 cursor-pointer hover:border-primary/50 transition-colors">
+                  <UploadIcon className="size-5 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">
+                    {genFileName ? genFileName : "Telegram result.json или CSV"}
+                  </span>
+                  <input type="file" accept=".json,.csv,.txt" className="hidden" onChange={handleFileUpload} />
+                </label>
+              )}
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleGenerate}
+                disabled={generating || (!genText.trim())}
+                className="border-primary/50 text-primary hover:bg-primary/10"
+              >
+                <SparklesIcon className="mr-1.5 h-3.5 w-3.5" />
+                {generating ? "Анализируем…" : "Сгенерировать"}
+              </Button>
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1">
                 <Label htmlFor="style-name">Название</Label>
