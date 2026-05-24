@@ -402,5 +402,36 @@ export function makeAdminConversationsRoutes(
     return c.json({ ok: true, mode: newMode });
   });
 
+  /**
+   * DELETE /api/admin/conversations/:id/messages/:msgId
+   * Soft-delete оператор сообщения (role='human'). Только свои сообщения.
+   */
+  app.delete("/api/admin/conversations/:id/messages/:msgId", async (c) => {
+    const tenantId = c.var.tenantId;
+    const conversationId = Number.parseInt(c.req.param("id"), 10);
+    const messageId = Number.parseInt(c.req.param("msgId"), 10);
+    if (!Number.isFinite(conversationId) || !Number.isFinite(messageId)) {
+      return c.json({ error: "invalid id" }, 400);
+    }
+
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const updated = await opts.db
+      .update(messages)
+      .set({ deletedAt: nowEpoch })
+      .where(
+        and(
+          eq(messages.tenantId, tenantId),
+          eq(messages.id, messageId),
+          eq(messages.conversationId, conversationId),
+          eq(messages.role, "human"),
+          sql`${messages.deletedAt} IS NULL`,
+        ),
+      )
+      .returning({ id: messages.id });
+
+    if (updated.length === 0) return c.json({ error: "message not found or not deletable" }, 404);
+    return c.json({ ok: true });
+  });
+
   return app;
 }

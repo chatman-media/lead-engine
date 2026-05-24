@@ -65,4 +65,74 @@ export class StylesRepo {
       );
     return rows as StyleRow[];
   }
+
+  /** Все не-soft-deleted стили tenant'а (включая неактивные). */
+  async listAll(): Promise<StyleRow[]> {
+    const rows = await this.ctx.db
+      .select()
+      .from(stylesTable)
+      .where(
+        and(
+          eq(stylesTable.tenantId, this.ctx.tenantId),
+          sql`deleted_at IS NULL`,
+        ),
+      );
+    return rows as StyleRow[];
+  }
+
+  async create(data: {
+    slug: string;
+    displayName: string;
+    configJson: string;
+    isActive: boolean;
+  }): Promise<StyleRow> {
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const [row] = await this.ctx.db
+      .insert(stylesTable)
+      .values({
+        tenantId: this.ctx.tenantId,
+        slug: data.slug,
+        displayName: data.displayName,
+        configJson: data.configJson,
+        isActive: data.isActive,
+        version: 1,
+        createdAt: nowEpoch,
+      })
+      .returning();
+    return row as StyleRow;
+  }
+
+  async update(
+    id: number,
+    data: Partial<{ displayName: string; configJson: string; isActive: boolean }>,
+  ): Promise<StyleRow | null> {
+    const [row] = await this.ctx.db
+      .update(stylesTable)
+      .set(data)
+      .where(
+        and(
+          eq(stylesTable.id, id),
+          eq(stylesTable.tenantId, this.ctx.tenantId),
+          sql`deleted_at IS NULL`,
+        ),
+      )
+      .returning();
+    return (row as StyleRow) ?? null;
+  }
+
+  async softDelete(id: number): Promise<boolean> {
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const rows = await this.ctx.db
+      .update(stylesTable)
+      .set({ deletedAt: nowEpoch, isActive: false })
+      .where(
+        and(
+          eq(stylesTable.id, id),
+          eq(stylesTable.tenantId, this.ctx.tenantId),
+          sql`deleted_at IS NULL`,
+        ),
+      )
+      .returning({ id: stylesTable.id });
+    return rows.length > 0;
+  }
 }
