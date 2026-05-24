@@ -1,3 +1,4 @@
+import { ChevronDownIcon } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -5,6 +6,8 @@ import { AuthLayout } from "@/components/auth-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
+import { cn } from "@/lib/utils";
 import { ApiError, saas, setToken } from "../api/saas.ts";
 
 export function SaasSignup() {
@@ -13,6 +16,7 @@ export function SaasSignup() {
   const [password, setPassword] = useState("");
   const [tenantSlug, setTenantSlug] = useState("");
   const [referralCode, setReferralCode] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -75,9 +79,8 @@ export function SaasSignup() {
         </div>
         <div className="space-y-2">
           <Label htmlFor="password">Пароль (≥ 8 символов)</Label>
-          <Input
+          <PasswordInput
             id="password"
-            type="password"
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -86,32 +89,50 @@ export function SaasSignup() {
             required
           />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="slug">
-            Slug аккаунта <span className="text-muted-foreground">(опционально)</span>
-          </Label>
-          <Input
-            id="slug"
-            type="text"
-            value={tenantSlug}
-            onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
-            placeholder="сгенерим из email"
-            pattern="[a-z0-9][a-z0-9-]{1,30}[a-z0-9]"
-            title="Lowercase a-z 0-9 -, 3-32 символа"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="referral">
-            Реферальный код <span className="text-muted-foreground">(если есть)</span>
-          </Label>
-          <Input
-            id="referral"
-            type="text"
-            value={referralCode}
-            onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
-            placeholder="ABCD-1234"
-            className="font-mono"
-          />
+
+        {/* Дополнительные поля — скрыты по умолчанию */}
+        <div>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => setShowAdvanced((v) => !v)}
+          >
+            <ChevronDownIcon
+              className={cn("size-3.5 transition-transform", showAdvanced && "rotate-180")}
+            />
+            Дополнительно
+          </button>
+          {showAdvanced && (
+            <div className="mt-3 space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="slug">
+                  Slug аккаунта <span className="text-muted-foreground">(опционально)</span>
+                </Label>
+                <Input
+                  id="slug"
+                  type="text"
+                  value={tenantSlug}
+                  onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
+                  placeholder="сгенерим из email"
+                  pattern="[a-z0-9][a-z0-9-]{1,30}[a-z0-9]"
+                  title="Lowercase a-z 0-9 -, 3-32 символа"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="referral">
+                  Реферальный код <span className="text-muted-foreground">(если есть)</span>
+                </Label>
+                <Input
+                  id="referral"
+                  type="text"
+                  value={referralCode}
+                  onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                  placeholder="ABCD-1234"
+                  className="font-mono"
+                />
+              </div>
+            </div>
+          )}
         </div>
         {error && (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">

@@ -1,4 +1,5 @@
 import {
+  admins,
   stripeCustomers,
   stripeSubscriptions,
   stripeWebhookEvents,
@@ -7,6 +8,11 @@ import {
 import { eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
+import {
+  type Mailer,
+  paymentFailedEmailHtml,
+  trialEndingEmailHtml,
+} from "../lib/mailer.ts";
 import {
   StripeSignatureError,
   verifyStripeSignature,
@@ -23,6 +29,7 @@ const HANDLED_EVENTS = new Set([
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
+  "customer.subscription.trial_will_end",
   "invoice.payment_succeeded",
   "invoice.payment_failed",
 ]);
@@ -66,6 +73,10 @@ export function makeStripeWebhookRoutes(opts: {
    * Если pricing unknown — plan не меняется (warning в log'е).
    */
   priceToPlan?: Record<string, "starter" | "pro">;
+  /** Опциональный mailer для email-нотификаций (trial_will_end, payment_failed). */
+  mailer?: Mailer;
+  /** Base URL admin-UI (для ссылок в письмах). */
+  appUrl?: string;
 }): Hono {
   const priceMap = opts.priceToPlan ?? {};
   const app = new Hono();
@@ -105,7 +116,7 @@ export function makeStripeWebhookRoutes(opts: {
 
     let tenantId: number | null = null;
     try {
-      tenantId = await applyEvent(opts.db, event, priceMap);
+      tenantId = await applyEvent(opts.db, event, priceMap, opts.mailer, opts.appUrl ?? "https://app.leadengine.app");
     } catch (err) {
       console.warn(`[stripe webhook] event ${event.id} (${event.type}) failed:`, err);
       // Не записываем в processed — Stripe ретриит, и при retry'е попытаемся
@@ -141,6 +152,8 @@ async function applyEvent(
   db: any,
   event: StripeEventBase,
   priceMap: Record<string, "starter" | "pro">,
+  mailer?: Mailer,
+  appUrl?: string,
 ): Promise<number | null> {
   if (!HANDLED_EVENTS.has(event.type)) return null;
 
@@ -151,17 +164,84 @@ async function applyEvent(
 
   if (event.type.startsWith("customer.subscription.")) {
     const sub = event.data.object as unknown as StripeSubscription;
-    return applySubscription(
+    const tenantId = await applySubscription(
       db,
       sub,
       event.type === "customer.subscription.deleted",
       priceMap,
     );
+
+    // Email: trial закончится через 3 дня (Stripe шлёт за 3 дня до trial_end).
+    if (event.type === "customer.subscription.trial_will_end" && mailer && tenantId) {
+      const trialEnd = (sub as unknown as { trial_end?: number }).trial_end;
+      const daysLeft = trialEnd
+        ? Math.max(1, Math.round((trialEnd * 1000 - Date.now()) / 86400000))
+        : 3;
+      const info = await getTenantEmailInfo(db, tenantId);
+      if (info) {
+        await mailer.send({
+          to: info.email,
+          subject: `Ваш триал lead-engine заканчивается через ${daysLeft} ${daysLeft === 1 ? "день" : "дня"}`,
+          html: trialEndingEmailHtml({
+            email: info.email,
+            slug: info.slug,
+            daysLeft,
+            appUrl: appUrl ?? "https://app.leadengine.app",
+            billingUrl: `${appUrl ?? "https://app.leadengine.app"}/billing`,
+          }),
+        }).catch((e) => console.warn("[mailer] trial_will_end send failed:", e));
+      }
+    }
+
+    return tenantId;
   }
 
-  // invoice.payment_succeeded / failed — пока no-op (только audit-log).
-  // В production мы бы здесь обновляли tenant.plan или slot'ы / quota.
+  // invoice.payment_failed — отправляем email.
+  if (event.type === "invoice.payment_failed" && mailer) {
+    const invoice = event.data.object as { customer?: string };
+    const stripeCustomerId = typeof invoice.customer === "string" ? invoice.customer : null;
+    if (stripeCustomerId) {
+      const [cust] = await db
+        .select({ tenantId: stripeCustomers.tenantId })
+        .from(stripeCustomers)
+        .where(eq(stripeCustomers.stripeCustomerId, stripeCustomerId));
+      if (cust?.tenantId) {
+        const info = await getTenantEmailInfo(db, cust.tenantId);
+        if (info) {
+          await mailer.send({
+            to: info.email,
+            subject: "Не удалось списать оплату lead-engine",
+            html: paymentFailedEmailHtml({
+              email: info.email,
+              slug: info.slug,
+              appUrl: appUrl ?? "https://app.leadengine.app",
+              billingUrl: `${appUrl ?? "https://app.leadengine.app"}/billing`,
+            }),
+          }).catch((e) => console.warn("[mailer] payment_failed send failed:", e));
+          return cust.tenantId;
+        }
+      }
+    }
+  }
+
+  // invoice.payment_succeeded — no-op (только audit-log).
   return null;
+}
+
+/** Возвращает email + slug владельца (superadmin) тенанта. */
+async function getTenantEmailInfo(
+  // biome-ignore lint/suspicious/noExplicitAny: PostgresJsDatabase generic
+  db: any,
+  tenantId: number,
+): Promise<{ email: string; slug: string } | null> {
+  const [row] = await db
+    .select({ email: admins.email, slug: tenants.slug })
+    .from(admins)
+    .innerJoin(tenants, eq(tenants.id, admins.tenantId))
+    .where(eq(admins.tenantId, tenantId))
+    .orderBy(admins.id) // первый зарегистрированный = owner
+    .limit(1);
+  return row ?? null;
 }
 
 async function applyCustomer(
