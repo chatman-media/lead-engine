@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.0.0...@chatman-media/conversation-engine-v1.1.0) (2026-05-24)
+
+
+### Features
+
+* retrieval refactor, per-plan rate limits, soft fallback, conversation compaction ([#125](https://github.com/chatman-media/lead-engine/issues/125)) ([4276dec](https://github.com/chatman-media/lead-engine/commit/4276decd27ae6ba323d1ad05d937612ff4acd13d)), closes [#118-123](https://github.com/chatman-media/lead-engine/issues/118-123)
+
 # @chatman-media/conversation-engine-v1.0.0 (2026-05-24)
 
 
