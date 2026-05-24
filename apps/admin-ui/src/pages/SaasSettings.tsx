@@ -1,4 +1,4 @@
-import { AlertTriangleIcon, CheckCircle2Icon, KeyRoundIcon, Trash2Icon } from "lucide-react";
+import { AlertTriangleIcon, Trash2Icon } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PasswordInput } from "@/components/ui/password-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -72,11 +71,6 @@ export function SaasSettings() {
   const [error, setError] = useState("");
   const [savingPurpose, setSavingPurpose] = useState<LlmPurpose | null>(null);
 
-  const [currentPwd, setCurrentPwd] = useState("");
-  const [newPwd, setNewPwd] = useState("");
-  const [pwdSaving, setPwdSaving] = useState(false);
-  const [pwdError, setPwdError] = useState("");
-  const [pwdSuccess, setPwdSuccess] = useState(false);
   const [confirmDeletePurpose, setConfirmDeletePurpose] = useState<LlmPurpose | null>(null);
   const [forms, setForms] = useState<Record<LlmPurpose, FormState>>({
     chat: { ...EMPTY_FORM },
@@ -179,35 +173,6 @@ export function SaasSettings() {
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function handleChangePassword(e: FormEvent) {
-    e.preventDefault();
-    setPwdError("");
-    setPwdSuccess(false);
-    if (!currentPwd || !newPwd) {
-      setPwdError("Заполните оба поля");
-      return;
-    }
-    if (newPwd.length < 8) {
-      setPwdError("Новый пароль должен быть не менее 8 символов");
-      return;
-    }
-    setPwdSaving(true);
-    try {
-      await saas.changePassword(currentPwd, newPwd);
-      setCurrentPwd("");
-      setNewPwd("");
-      setPwdSuccess(true);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        setPwdError("Неверный текущий пароль");
-        return;
-      }
-      setPwdError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setPwdSaving(false);
     }
   }
 
@@ -380,50 +345,6 @@ export function SaasSettings() {
         })}
       </div>
 
-      <Card className="max-w-md">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <KeyRoundIcon className="size-4 text-muted-foreground" /> Смена пароля
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {pwdError && (
-            <p className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {pwdError}
-            </p>
-          )}
-          {pwdSuccess && (
-            <p className="mb-3 flex items-center gap-2 rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
-              <CheckCircle2Icon className="size-4" /> Пароль успешно изменён.
-            </p>
-          )}
-          <form onSubmit={handleChangePassword} className="space-y-3">
-            <div className="space-y-1.5">
-              <Label>Текущий пароль</Label>
-              <PasswordInput
-                autoComplete="current-password"
-                value={currentPwd}
-                onChange={(e) => setCurrentPwd(e.target.value)}
-                placeholder="••••••••"
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Новый пароль (≥ 8 символов)</Label>
-              <PasswordInput
-                autoComplete="new-password"
-                value={newPwd}
-                onChange={(e) => setNewPwd(e.target.value)}
-                placeholder="••••••••"
-                required
-              />
-            </div>
-            <Button type="submit" disabled={pwdSaving}>
-              {pwdSaving ? "Сохраняем…" : "Изменить пароль"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
     </div>
   );
 }

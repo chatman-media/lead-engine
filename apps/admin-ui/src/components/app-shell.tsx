@@ -8,6 +8,7 @@ import {
   DatabaseIcon,
   FlaskConicalIcon,
   GitBranchIcon,
+  KeyRoundIcon,
   LinkIcon,
   LogOutIcon,
   MonitorIcon,
@@ -26,14 +27,21 @@ import {
   UserCircleIcon,
   ZapIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { type Admin, clearToken, saas, type Tenant } from "@/api/saas";
+import { type Admin, ApiError, clearToken, saas, type Tenant } from "@/api/saas";
 import { useTheme } from "@/components/theme-provider";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +54,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -255,6 +265,76 @@ const THEME_LABEL: Record<string, string> = {
   system: "Системная",
 };
 
+function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [currentPwd, setCurrentPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    if (newPwd.length < 8) { setError("Новый пароль — не менее 8 символов"); return; }
+    setSaving(true);
+    try {
+      await saas.changePassword(currentPwd, newPwd);
+      toast.success("Пароль изменён");
+      setCurrentPwd(""); setNewPwd("");
+      onClose();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) { setError("Неверный текущий пароль"); return; }
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Сменить пароль</DialogTitle>
+        </DialogHeader>
+        {error && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Текущий пароль</Label>
+            <Input
+              type="password"
+              autoComplete="current-password"
+              value={currentPwd}
+              onChange={(e) => setCurrentPwd(e.target.value)}
+              placeholder="••••••••"
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Новый пароль (≥ 8 символов)</Label>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={newPwd}
+              onChange={(e) => setNewPwd(e.target.value)}
+              placeholder="••••••••"
+              required
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={onClose}>Отмена</Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? "Сохраняем…" : "Изменить"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function AccountDropdown({
   admin,
   tenant,
@@ -267,6 +347,7 @@ function AccountDropdown({
   collapsed: boolean;
 }) {
   const { theme, setTheme } = useTheme();
+  const [pwdOpen, setPwdOpen] = useState(false);
   const initials = (admin?.email ?? "?").slice(0, 2).toUpperCase();
 
   const menuContent = (
@@ -333,6 +414,10 @@ function AccountDropdown({
         </DropdownMenuSubContent>
       </DropdownMenuSub>
       <DropdownMenuSeparator />
+      <DropdownMenuItem onClick={() => setPwdOpen(true)}>
+        <KeyRoundIcon /> Сменить пароль
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
       <DropdownMenuItem variant="destructive" onClick={onLogout}>
         <LogOutIcon /> Выйти
       </DropdownMenuItem>
@@ -341,7 +426,9 @@ function AccountDropdown({
 
   if (collapsed) {
     return (
-      <DropdownMenu>
+      <>
+        <ChangePasswordDialog open={pwdOpen} onClose={() => setPwdOpen(false)} />
+        <DropdownMenu>
         <Tooltip>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
@@ -363,31 +450,35 @@ function AccountDropdown({
         </Tooltip>
         {menuContent}
       </DropdownMenu>
+      </>
     );
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent/60 cursor-pointer"
-        >
-          <Avatar className="size-8 rounded-lg">
-            <AvatarFallback className="rounded-lg bg-primary/15 text-primary">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{admin?.email ?? "—"}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {tenant?.slug ?? "—"} · {tenant?.plan ?? "free"}
-            </p>
-          </div>
-        </button>
-      </DropdownMenuTrigger>
-      {menuContent}
-    </DropdownMenu>
+    <>
+      <ChangePasswordDialog open={pwdOpen} onClose={() => setPwdOpen(false)} />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent/60 cursor-pointer"
+          >
+            <Avatar className="size-8 rounded-lg">
+              <AvatarFallback className="rounded-lg bg-primary/15 text-primary">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{admin?.email ?? "—"}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {tenant?.slug ?? "—"} · {tenant?.plan ?? "free"}
+              </p>
+            </div>
+          </button>
+        </DropdownMenuTrigger>
+        {menuContent}
+      </DropdownMenu>
+    </>
   );
 }
 
