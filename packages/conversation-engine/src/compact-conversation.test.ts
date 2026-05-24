@@ -1,15 +1,15 @@
 // Unit-tests for conversation compaction.
 // Validates: summary generation, empty input, LLM call signature.
 
-import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
+import type { ChatClient, ChatCompletionOpts, ChatMessage } from "@chatman-media/llm-router";
 import { describe, expect, it } from "bun:test";
 import { compactConversation } from "./compact-conversation.ts";
 
 function makeChatClient(reply: string): ChatClient {
   return {
-    async complete(messages, _opts) {
+    async complete(messages: ChatMessage[], _opts?: ChatCompletionOpts) {
       // Verify the transcript is present in the user message.
-      const userMsg = messages.find((m) => m.role === "user");
+      const userMsg = messages.find((m: ChatMessage) => m.role === "user");
       expect(typeof userMsg?.content).toBe("string");
       return reply;
     },
@@ -45,8 +45,8 @@ describe("compactConversation", () => {
   it("includes both user and assistant messages in transcript", async () => {
     let capturedContent = "";
     const chat: ChatClient = {
-      async complete(messages, _opts) {
-        const userMsg = messages.find((m) => m.role === "user");
+      async complete(messages: ChatMessage[], _opts?: ChatCompletionOpts) {
+        const userMsg = messages.find((m: ChatMessage) => m.role === "user");
         capturedContent = String(userMsg?.content ?? "");
         return "summary";
       },
@@ -67,8 +67,8 @@ describe("compactConversation", () => {
   it("uses temperature=0 and numPredict for deterministic output", async () => {
     let calledOpts: Record<string, unknown> = {};
     const chat: ChatClient = {
-      async complete(_messages, opts) {
-        calledOpts = opts ?? {};
+      async complete(_messages: ChatMessage[], opts?: ChatCompletionOpts) {
+        calledOpts = (opts ?? {}) as Record<string, unknown>;
         return "summary";
       },
     } as unknown as ChatClient;
