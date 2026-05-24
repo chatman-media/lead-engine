@@ -1143,6 +1143,14 @@ export const saas = {
     return request<{ ok: boolean }>(`/api/admin/vacancies/${id}`, { method: "DELETE" });
   },
 
+  // ── Outreach campaigns ────────────────────────────────────────────────
+  sendOutreach(body: { text: string; leadIds?: number[]; stageSlug?: string }) {
+    return request<{ enqueued: number; skipped: number }>("/api/admin/outreach", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
   // ── Director hooks ────────────────────────────────────────────────────
   listDirectorHooks() {
     return request<{ items: DirectorHook[] }>("/api/admin/director-hooks");

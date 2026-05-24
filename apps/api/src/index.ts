@@ -53,6 +53,7 @@ import { makeAdminReferralRoutes } from "./routes/admin-referral.ts";
 import { makeAdminVacanciesRoutes } from "./routes/admin-vacancies.ts";
 import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
 import { makeAdminExperimentsRoutes } from "./routes/admin-experiments.ts";
+import { makeAdminOutreachRoutes } from "./routes/admin-outreach.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
@@ -347,6 +348,10 @@ async function main() {
     resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
   }));
   log.info("admin-styles routes enabled");
+
+  // Outreach campaigns — batch message sending to leads.
+  app.route("/", makeAdminOutreachRoutes({ db }));
+  log.info("admin-outreach routes enabled");
 
   // Vertical plugin install.
   app.route("/", makeAdminVerticalsRoutes({ db, resolveEmbedder: embedderResolver ?? undefined }));

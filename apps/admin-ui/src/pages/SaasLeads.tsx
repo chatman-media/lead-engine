@@ -14,7 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DownloadIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DownloadIcon, PlusIcon, SearchIcon, SendIcon, SettingsIcon } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const STATE_RU: Record<string, string> = {
@@ -71,6 +72,14 @@ export function SaasLeads() {
   // Lead search
   const [leadSearch, setLeadSearch] = useState("");
   const [exporting, setExporting] = useState(false);
+
+  // Outreach state
+  const [outreachOpen, setOutreachOpen] = useState(false);
+  const [outreachText, setOutreachText] = useState("");
+  const [outreachTarget, setOutreachTarget] = useState<"all" | "stage">("all");
+  const [outreachStageSlug, setOutreachStageSlug] = useState("");
+  const [outreachSending, setOutreachSending] = useState(false);
+  const [outreachResult, setOutreachResult] = useState<{ enqueued: number; skipped: number } | null>(null);
 
   // Create lead dialog
   const [creating, setCreating] = useState(false);
@@ -133,6 +142,26 @@ export function SaasLeads() {
       onAuthError(err);
     } finally {
       setCreatingLead(false);
+    }
+  }
+
+  async function handleSendOutreach() {
+    const text = outreachText.trim();
+    if (!text) return;
+    setOutreachSending(true);
+    setOutreachResult(null);
+    try {
+      const body: Parameters<typeof saas.sendOutreach>[0] =
+        outreachTarget === "stage" && outreachStageSlug
+          ? { text, stageSlug: outreachStageSlug }
+          : { text, leadIds: leads.map((l) => l.id) };
+      const result = await saas.sendOutreach(body);
+      setOutreachResult(result);
+      setOutreachText("");
+    } catch (err) {
+      onAuthError(err);
+    } finally {
+      setOutreachSending(false);
     }
   }
 
@@ -236,6 +265,14 @@ export function SaasLeads() {
             <DownloadIcon className="mr-1.5 size-3.5" />
             {exporting ? "Экспорт…" : "CSV"}
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => { setOutreachOpen(true); setOutreachResult(null); }}
+          >
+            <SendIcon className="mr-1.5 size-3.5" />
+            Рассылка
+          </Button>
           <Button size="sm" onClick={() => { setCreating(true); setContacts([]); setContactSearch(""); }}>
             <PlusIcon className="mr-1.5 size-3.5" />
             Новый лид
@@ -248,6 +285,92 @@ export function SaasLeads() {
           </Button>
         </div>
       </div>
+
+      {/* Outreach — рассылка сообщений */}
+      {outreachOpen && (
+        <Card className="border-primary/30">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <SendIcon className="size-4" />
+              Массовая рассылка
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Кому отправить</Label>
+              <Select
+                value={outreachTarget}
+                onValueChange={(v) => setOutreachTarget(v as "all" | "stage")}
+              >
+                <SelectTrigger className="text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Всем загруженным лидам ({leads.length})</SelectItem>
+                  <SelectItem value="stage">По стадии воронки</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {outreachTarget === "stage" && stages.length > 0 && (
+              <div className="space-y-1">
+                <Label className="text-xs">Стадия</Label>
+                <Select value={outreachStageSlug} onValueChange={setOutreachStageSlug}>
+                  <SelectTrigger className="text-sm">
+                    <SelectValue placeholder="Выберите стадию…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {stages.map((s) => (
+                      <SelectItem key={s.id} value={s.slug}>
+                        {s.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-1">
+              <Label className="text-xs">Текст сообщения</Label>
+              <Textarea
+                placeholder="Введите текст сообщения…"
+                value={outreachText}
+                onChange={(e) => setOutreachText(e.target.value)}
+                rows={4}
+                className="text-sm resize-none"
+              />
+              <p className="text-xs text-muted-foreground text-right">{outreachText.length}/4000</p>
+            </div>
+            {outreachResult && (
+              <div className="rounded-md bg-muted px-3 py-2 text-sm">
+                Отправлено: <span className="font-medium text-green-600">{outreachResult.enqueued}</span>
+                {" · "}
+                Пропущено (нет канала): <span className="font-medium text-muted-foreground">{outreachResult.skipped}</span>
+              </div>
+            )}
+            <div className="flex gap-2 pt-1">
+              <Button
+                size="sm"
+                disabled={
+                  !outreachText.trim() ||
+                  outreachText.length > 4000 ||
+                  (outreachTarget === "stage" && !outreachStageSlug) ||
+                  outreachSending
+                }
+                onClick={handleSendOutreach}
+              >
+                {outreachSending ? "Отправка…" : "Отправить"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setOutreachOpen(false); setOutreachResult(null); setOutreachText(""); }}
+                disabled={outreachSending}
+              >
+                Закрыть
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Создать лида */}
       {creating && (
