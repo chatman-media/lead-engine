@@ -2,6 +2,7 @@ import type { z } from "zod";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
 import type { DirectorHookForPrompt, FunnelStage, SkillForPrompt, Style } from "./styles.ts";
+import type { Reranker } from "./reranker.ts";
 import type { AnyRagTool } from "./tools.ts";
 import type { IKbStore, KbSearchHit } from "./types.ts";
 
@@ -102,6 +103,31 @@ export interface AnswerInput {
    * Default: 0.45.
    */
   autoTrimThreshold?: number;
+  /**
+   * Enable multi-query expansion: generate `multiQueryCount` rephrased variants
+   * of the question with a fast LLM call, search with each in parallel, and
+   * merge all result lists via Reciprocal Rank Fusion (RRF). Improves recall
+   * for synonym gaps and differently-phrased concepts.
+   * Default: false.
+   */
+  multiQuery?: boolean;
+  /**
+   * Number of ADDITIONAL query variants to generate (not counting the original).
+   * Only has effect when `multiQuery` is true. Default: 2.
+   */
+  multiQueryCount?: number;
+  /**
+   * Optional cross-encoder reranker applied after vector/hybrid retrieval.
+   * Retrieves `topK * 3` candidates, passes them to the reranker, then keeps
+   * the top `topK`. Use `JinaReranker` or `CohereReranker` from this package.
+   *
+   * @example
+   * ```ts
+   * import { JinaReranker } from "@chatman-media/kb";
+   * await answerWithRag({ ..., reranker: new JinaReranker({ apiKey: process.env.JINA_API_KEY! }) });
+   * ```
+   */
+  reranker?: Reranker;
   /**
    * When provided, the LLM is instructed to return a JSON object matching this
    * Zod schema. The parsed and validated value is available as `result.output`.

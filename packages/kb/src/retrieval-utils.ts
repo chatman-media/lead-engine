@@ -1,8 +1,11 @@
 /**
  * Post-retrieval utilities for the RAG pipeline.
  *
- * Two independent transforms, applied in order after the initial vector/hybrid
- * search returns its hits:
+ * Three independent transforms, applied in order:
+ *
+ * 0. **`rrfMerge`** — merge multiple hit-lists (from multi-query expansion) via
+ *    Reciprocal Rank Fusion. Deduplicates by chunk_id, boosts chunks that rank
+ *    high across multiple queries.
  *
  * 1. **`applyDynamicThreshold`** — trim hits that are "too far" from the query.
  *    Prevents hallucination-inducing weak matches from polluting the context.
@@ -11,11 +14,69 @@
  *    final context window covers diverse sub-topics rather than repeating the
  *    same dense cluster of near-duplicate chunks.
  *
- * Both functions are pure (no I/O) and operate on the {@link KbSearchHit} array
+ * All functions are pure (no I/O) and operate on the {@link KbSearchHit} array
  * that comes back from `IKbStore.search` / `IKbStore.hybridSearch`.
  */
 
 import type { KbSearchHit } from "./types.ts";
+
+// ── RRF merge ────────────────────────────────────────────────────────────────
+
+export interface RrfMergeOpts {
+  /**
+   * RRF smoothing constant. Higher = more weight to lower-ranked items.
+   * Standard value: 60.
+   */
+  k?: number;
+  /**
+   * Maximum number of hits to return. Defaults to all unique hits.
+   */
+  topN?: number;
+}
+
+/**
+ * Reciprocal Rank Fusion — merge multiple retrieval result lists into one.
+ *
+ * Each hit's score is the sum of `1 / (k + rank)` across all lists where it
+ * appears (1-based rank). Hits that appear in multiple lists get boosted.
+ * Deduplication is by `chunk_id`.
+ *
+ * The output uses the distance convention (lower = better):
+ * `distance = 1 / (1 + rrf_score)` so values stay in (0, 1].
+ *
+ * @param hitLists  One list per query, each sorted best-first.
+ */
+export function rrfMerge(hitLists: KbSearchHit[][], opts: RrfMergeOpts = {}): KbSearchHit[] {
+  const { k = 60, topN } = opts;
+  if (hitLists.length === 0) return [];
+  if (hitLists.length === 1) return topN ? hitLists[0]!.slice(0, topN) : hitLists[0]!;
+
+  // chunk_id → { hit, rrf_score }
+  const scores = new Map<number, { hit: KbSearchHit; score: number }>();
+
+  for (const list of hitLists) {
+    for (let i = 0; i < list.length; i++) {
+      const hit = list[i]!;
+      const rank = i + 1; // 1-based
+      const contribution = 1 / (k + rank);
+      const existing = scores.get(hit.chunk_id);
+      if (existing) {
+        existing.score += contribution;
+      } else {
+        scores.set(hit.chunk_id, { hit, score: contribution });
+      }
+    }
+  }
+
+  const sorted = [...scores.values()].sort((a, b) => b.score - a.score);
+  const result = sorted.map(({ hit, score }) => ({
+    ...hit,
+    // Map to distance: higher RRF score → lower distance
+    distance: 1 / (1 + score),
+  }));
+
+  return topN ? result.slice(0, topN) : result;
+}
 
 // ── Dynamic threshold ────────────────────────────────────────────────────────
 
