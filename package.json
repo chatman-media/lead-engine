@@ -9,6 +9,8 @@
     "apps/landing",
     "apps/vertical-real-estate",
     "apps/vertical-recruitment",
+    "apps/vertical-saas",
+    "apps/vertical-video",
     "apps/widget",
     "apps/worker",
     "packages/*"

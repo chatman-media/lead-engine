@@ -29,6 +29,8 @@
     "@chatman-media/storage": "workspace:*",
     "@chatman-media/vertical-real-estate": "workspace:*",
     "@chatman-media/vertical-recruitment": "workspace:*",
+    "@chatman-media/vertical-saas": "workspace:*",
+    "@chatman-media/vertical-video": "workspace:*",
     "@chatman-media/verticals": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "drizzle-orm": "^0.36.0",

@@ -4,6 +4,8 @@ import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observabi
 import { funnels, tenants } from "@chatman-media/storage";
 import { REAL_ESTATE_V1 } from "@chatman-media/vertical-real-estate";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
+import { SAAS_V1 } from "@chatman-media/vertical-saas";
+import { VIDEO_V1 } from "@chatman-media/vertical-video";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -70,6 +72,8 @@ import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 const KNOWN_TEMPLATES: Record<string, VerticalTemplate> = {
   real_estate_v1: REAL_ESTATE_V1,
   recruitment_v1: RECRUITMENT_V1,
+  saas_v1: SAAS_V1,
+  video_v1: VIDEO_V1,
 };
 
 async function main() {
