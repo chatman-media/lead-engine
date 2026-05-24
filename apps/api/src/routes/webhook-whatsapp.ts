@@ -26,6 +26,7 @@ import type { ChannelRegistry } from "../channel-registry.ts";
 import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
 import type { FieldExtractor } from "../lib/field-extractor.ts";
 import type { PhotoProcessor } from "../lib/photo-processor.ts";
+import { adminEventBus } from "../lib/admin-event-bus.ts";
 import {
   verifyWhatsAppSignature,
   WhatsAppSignatureError,
@@ -249,7 +250,16 @@ export function makeWhatsAppWebhookRoutes(opts: {
             .catch(() => {});
         }
       }
-      if (!result.persisted) {
+      if (result.persisted) {
+        const preview = inbound.parts.find((p) => p.kind === "text") as { kind: "text"; text: string } | undefined;
+        adminEventBus.emit({
+          type: "new_message",
+          tenantId: entry.tenantId,
+          conversationId: result.conversationId,
+          contactId: result.contactId,
+          preview: preview?.text.slice(0, 80) ?? null,
+        });
+      } else {
         opts.metrics?.inboundDeduped.inc(1, { tenant: String(entry.tenantId) });
       }
       results.push(result);

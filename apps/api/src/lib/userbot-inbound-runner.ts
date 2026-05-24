@@ -19,6 +19,7 @@ import { channels } from "@chatman-media/storage";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { and, eq } from "drizzle-orm";
 import { recordAudit } from "./audit.ts";
+import { adminEventBus } from "./admin-event-bus.ts";
 import type { FieldExtractor } from "./field-extractor.ts";
 import type { PhotoProcessor } from "./photo-processor.ts";
 import type { UserbotChannelEntry } from "./userbot-channel-registry.ts";
@@ -136,7 +137,17 @@ export function startUserbotInboundRunner(opts: {
                 .catch(() => {});
             }
           }
-          if (!result.persisted) {
+          if (result.persisted) {
+            const inboundParts = inbound.parts as Array<{ kind: string; text?: string }>;
+            const preview = inboundParts.find((p) => p.kind === "text");
+            adminEventBus.emit({
+              type: "new_message",
+              tenantId: entry.tenantId,
+              conversationId: result.conversationId,
+              contactId: result.contactId,
+              preview: preview?.text?.slice(0, 80) ?? null,
+            });
+          } else {
             opts.metrics?.inboundDeduped.inc(1, {
               tenant: String(entry.tenantId),
             });
