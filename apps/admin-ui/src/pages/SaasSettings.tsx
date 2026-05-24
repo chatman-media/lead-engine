@@ -33,6 +33,11 @@ const PURPOSES: { value: LlmPurpose; label: string; hint: string }[] = [
     label: "Embeddings — поиск по базе",
     hint: "Модель для векторизации документов и запросов",
   },
+  {
+    value: "vision",
+    label: "Зрение — анализ документов",
+    hint: "Модель для OCR, анализа фото и сканов (vision API). Нужна для загрузки документов.",
+  },
 ];
 
 const PROVIDERS: { value: LlmProvider; label: string }[] = [
@@ -310,7 +315,13 @@ export function SaasSettings() {
                     <Input
                       value={f.model}
                       onChange={(e) => updateForm(purpose, { model: e.target.value })}
-                      placeholder={purpose === "embed" ? "text-embedding-3-small" : "gpt-4o-mini"}
+                      placeholder={
+                        purpose === "embed"
+                          ? "text-embedding-3-small"
+                          : purpose === "vision"
+                            ? "gpt-4o"
+                            : "gpt-4o-mini"
+                      }
                     />
                   </div>
                   {f.provider !== "ollama" && (

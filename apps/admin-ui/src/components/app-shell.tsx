@@ -97,7 +97,13 @@ const SISTEMA_ALWAYS_VISIBLE = ["/channels"];
 
 function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
-    <Link to="/dashboard" className="flex items-center gap-2.5 px-2 py-1 min-w-0">
+    <Link
+      to="/dashboard"
+      className={cn(
+        "flex items-center gap-2.5 py-1 min-w-0",
+        collapsed ? "justify-center px-0" : "px-2",
+      )}
+    >
       <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-primary to-chart-5 text-primary-foreground shadow-[0_4px_16px_-4px_var(--primary)]">
         <RocketIcon className="size-4" />
       </span>
@@ -404,23 +410,51 @@ function SidebarBody({
 }) {
   return (
     <div className="flex h-full flex-col gap-1">
-      <div className="flex h-14 items-center border-b border-sidebar-border px-3 gap-2">
-        <div className="flex-1 min-w-0">
-          <Brand collapsed={collapsed} />
-        </div>
-        {onToggleCollapse && (
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className="shrink-0 grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground cursor-pointer"
-            aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
-          >
-            {collapsed ? <ChevronRightIcon className="size-4" /> : <ChevronLeftIcon className="size-4" />}
-          </button>
+      {/* Header: collapsed = centered icon only; expanded = logo + collapse button */}
+      <div
+        className={cn(
+          "flex h-14 items-center border-b border-sidebar-border",
+          collapsed ? "justify-center px-2" : "px-3 gap-2",
+        )}
+      >
+        {collapsed ? (
+          <Brand collapsed />
+        ) : (
+          <>
+            <div className="flex-1 min-w-0">
+              <Brand />
+            </div>
+            {onToggleCollapse && (
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="shrink-0 grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground cursor-pointer"
+                aria-label="Свернуть меню"
+              >
+                <ChevronLeftIcon className="size-4" />
+              </button>
+            )}
+          </>
         )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-4">
+        {/* Expand button at top of nav when collapsed */}
+        {collapsed && onToggleCollapse && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="mb-3 flex w-full justify-center rounded-md p-2 text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground cursor-pointer"
+                aria-label="Развернуть меню"
+              >
+                <ChevronRightIcon className="size-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="text-xs">Развернуть</TooltipContent>
+          </Tooltip>
+        )}
         <NavLinks onNavigate={onNavigate} escalatedCount={escalatedCount} collapsed={collapsed} />
       </div>
 
