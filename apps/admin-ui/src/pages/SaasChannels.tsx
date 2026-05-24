@@ -679,7 +679,7 @@ export function SaasChannels() {
                       <p className="truncate text-sm font-medium">{title}</p>
                       <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                         <Badge variant={ch.status === "error" ? "warning" : "secondary"}>
-                          {ch.status === "active" ? "активен" : ch.status === "inactive" ? "неактивен" : ch.status === "error" ? "ошибка" : ch.status}
+                          {ch.status === "active" ? "активен" : ch.status === "paused" ? "на паузе" : ch.status === "error" ? "ошибка" : ch.status}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
                           {new Date(ch.createdAt * 1000).toLocaleDateString("ru")}
