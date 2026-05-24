@@ -261,8 +261,7 @@ export function SaasConversations() {
         {/* Список */}
         <Card className="flex max-h-[72vh] flex-col gap-0 overflow-hidden py-0">
           <div className="border-b px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Список {list.length}
-            {nextCursor ? "+" : ""}
+            {list.length}{nextCursor ? "+" : ""} диалог{list.length === 1 ? "" : list.length < 5 ? "а" : "ов"}
           </div>
           <div className="flex-1 overflow-y-auto p-2">
             {listLoading ? (
