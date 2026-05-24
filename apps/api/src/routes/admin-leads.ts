@@ -311,7 +311,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     const rows = parseCsv(csvText.trim());
     if (rows.length < 2) return c.json({ error: "CSV must have header + at least one data row" }, 400);
 
-    const header = rows[0].map((h) => h.trim().toLowerCase());
+    const header = (rows[0] ?? []).map((h) => h.trim().toLowerCase());
     const colName = header.indexOf("name");
     const colPhone = header.indexOf("phone");
     const colEmail = header.indexOf("email");
@@ -341,11 +341,13 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
     for (let i = 0; i < dataRows.length; i++) {
       const cells = dataRows[i];
+      if (!cells) { skipped++; continue; }
+
       const name = colName >= 0 ? (cells[colName] ?? "").trim() : "";
       if (!name) { skipped++; continue; }
 
-      const phone = (cells[colPhone] ?? "").trim() || null;
-      const email = (cells[colEmail] ?? "").trim() || null;
+      const phone = colPhone >= 0 ? (cells[colPhone] ?? "").trim() || null : null;
+      const email = colEmail >= 0 ? (cells[colEmail] ?? "").trim() || null : null;
       const stageSlug = colStage >= 0 ? (cells[colStage] ?? "").trim() || null : null;
       const stageId = stageSlug ? (stageBySlug.get(stageSlug) ?? defaultStageId) : defaultStageId;
 
