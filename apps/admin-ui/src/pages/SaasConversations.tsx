@@ -464,8 +464,18 @@ export function SaasConversations() {
                             m.deletedAt && "line-through",
                           )}
                         >
-                          {m.text}
-                        </div>
+                          {m.text || (() => {
+                            try {
+                              const meta = m.metaJson ? JSON.parse(m.metaJson) as { parts?: Array<{ kind: string; durationSec?: number }> } : null;
+                              const voice = meta?.parts?.find((p) => p.kind === "voice");
+                              if (voice) return (
+                                <span className="italic text-muted-foreground">
+                                  🎤 Голосовое{voice.durationSec ? ` (${voice.durationSec}с)` : ""}
+                                </span>
+                              );
+                            } catch { /* ignore */ }
+                            return <span className="italic text-muted-foreground">—</span>;
+                          })()}</div>
                       </div>
                     );
                   })

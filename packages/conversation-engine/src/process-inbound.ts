@@ -109,8 +109,8 @@ export interface ProcessInboundDeps {
    * downloadVoice должен быть задан вместе с transcriber.
    */
   transcriber?: ITranscriber | null;
-  /** Загружает аудиофайл по mediaRef.externalRef. Нужен для transcriber. */
-  downloadVoice?: ((mediaRef: string) => Promise<Response>) | null;
+  /** Загружает аудиофайл. Нужен для transcriber. externalUserId нужен userbot-адаптеру. */
+  downloadVoice?: ((mediaRef: import("@chatman-media/channel-core").MediaRef, externalUserId: string) => Promise<Response>) | null;
 }
 
 /**
@@ -204,7 +204,7 @@ export async function processInbound(
     for (const part of inbound.parts) {
       if (part.kind === "voice") {
         try {
-          const res = await deps.downloadVoice(part.mediaRef.externalRef);
+          const res = await deps.downloadVoice(part.mediaRef, inbound.externalUserId);
           if (res.ok) {
             const buf = await res.arrayBuffer();
             const transcript = await deps.transcriber.transcribe(
