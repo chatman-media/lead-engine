@@ -7,6 +7,7 @@
     "apps/admin-ui",
     "apps/api",
     "apps/landing",
+    "apps/vertical-real-estate",
     "apps/vertical-recruitment",
     "apps/widget",
     "apps/worker",

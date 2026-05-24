@@ -2,6 +2,7 @@ import { checkRlsEnforcement } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { funnels, tenants } from "@chatman-media/storage";
+import { REAL_ESTATE_V1 } from "@chatman-media/vertical-real-estate";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { eq } from "drizzle-orm";
@@ -67,6 +68,7 @@ import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
 /** Known vertical templates by slug. */
 const KNOWN_TEMPLATES: Record<string, VerticalTemplate> = {
+  real_estate_v1: REAL_ESTATE_V1,
   recruitment_v1: RECRUITMENT_V1,
 };
 

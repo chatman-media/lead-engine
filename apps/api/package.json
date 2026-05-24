@@ -27,6 +27,7 @@
     "@chatman-media/observability": "workspace:*",
     "@chatman-media/sales": "workspace:*",
     "@chatman-media/storage": "workspace:*",
+    "@chatman-media/vertical-real-estate": "workspace:*",
     "@chatman-media/vertical-recruitment": "workspace:*",
     "@chatman-media/verticals": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
