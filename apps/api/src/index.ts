@@ -56,6 +56,7 @@ import { makeAdminReferralRoutes } from "./routes/admin-referral.ts";
 import { makeAdminVacanciesRoutes } from "./routes/admin-vacancies.ts";
 import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
 import { makeAdminExperimentsRoutes } from "./routes/admin-experiments.ts";
+import { makeAdminEventsRoutes } from "./routes/admin-events.ts";
 import { makeAdminOutreachRoutes } from "./routes/admin-outreach.ts";
 import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
@@ -355,6 +356,10 @@ async function main() {
     resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
   }));
   log.info("admin-styles routes enabled");
+
+  // Real-time SSE push for admin UI.
+  app.route("/", makeAdminEventsRoutes());
+  log.info("admin SSE events enabled at GET /api/admin/events");
 
   // Outreach campaigns — batch message sending to leads.
   app.route("/", makeAdminOutreachRoutes({ db }));

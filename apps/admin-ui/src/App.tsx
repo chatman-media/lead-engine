@@ -4,6 +4,8 @@ import { AppShell } from "@/components/app-shell";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { getToken, saas } from "./api/saas.ts";
+import { useAdminEvents } from "./hooks/useAdminEvents.ts";
+import { toast } from "sonner";
 import { SaasAcceptInvite } from "./pages/SaasAcceptInvite.tsx";
 import { SaasAudit } from "./pages/SaasAudit.tsx";
 import { SaasBilling } from "./pages/SaasBilling.tsx";
@@ -50,6 +52,17 @@ function RequireAuth() {
 }
 
 function ShellLayout() {
+  useAdminEvents((event) => {
+    if (event.type === "new_message") {
+      toast.info("Новое сообщение", {
+        description: event.preview ?? undefined,
+        duration: 4000,
+      });
+    } else if (event.type === "stage_changed") {
+      toast.info(`Стадия изменена → ${event.toStageDisplayName}`, { duration: 3000 });
+    }
+  });
+
   return (
     <AppShell>
       <Outlet />

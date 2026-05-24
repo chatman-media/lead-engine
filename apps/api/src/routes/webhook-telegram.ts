@@ -22,6 +22,7 @@ import type { ChannelRegistry } from "../channel-registry.ts";
 import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
 import type { FieldExtractor } from "../lib/field-extractor.ts";
 import type { PhotoProcessor } from "../lib/photo-processor.ts";
+import { adminEventBus } from "../lib/admin-event-bus.ts";
 
 /**
  * Telegram webhook handler. Telegram постит JSON на /webhook/telegram/:slug
@@ -261,6 +262,17 @@ export function makeTelegramWebhookRoutes(opts: {
           .extract({ tenantId: entry.tenantId, contactId: result.contactId, text, db: opts.db })
           .catch(() => {});
       }
+    }
+
+    if (result.persisted) {
+      const preview = inbound.parts.find((p) => p.kind === "text") as { kind: "text"; text: string } | undefined;
+      adminEventBus.emit({
+        type: "new_message",
+        tenantId: entry.tenantId,
+        conversationId: result.conversationId,
+        contactId: result.contactId,
+        preview: preview?.text.slice(0, 80) ?? null,
+      });
     }
 
     // Inbound deduped path: persisted=false означает что messages.id

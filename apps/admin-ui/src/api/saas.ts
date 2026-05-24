@@ -1227,29 +1227,4 @@ export const saas = {
     return request<{ ok: boolean }>(`/api/admin/referral-codes/${id}`, { method: "DELETE" });
   },
 
-  // ── Stage-change webhooks ─────────────────────────────────────────────
-  listStageWebhooks() {
-    return request<{ items: StageWebhook[] }>("/api/admin/stage-webhooks");
-  },
-  createStageWebhook(data: { url: string; secret?: string; isActive?: boolean }) {
-    return request<StageWebhook>("/api/admin/stage-webhooks", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  },
-  updateStageWebhook(id: number, data: { url?: string; secret?: string | null; isActive?: boolean }) {
-    return request<StageWebhook>(`/api/admin/stage-webhooks/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    });
-  },
-  deleteStageWebhook(id: number) {
-    return request<{ ok: boolean }>(`/api/admin/stage-webhooks/${id}`, { method: "DELETE" });
-  },
-  testStageWebhook(id: number) {
-    return request<{ ok: boolean; status?: number; body?: string; error?: string }>(
-      `/api/admin/stage-webhooks/${id}/test`,
-      { method: "POST" },
-    );
-  },
 };

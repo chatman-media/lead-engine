@@ -13,6 +13,7 @@ import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { canAddLead } from "../lib/quota.ts";
 import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webhooks.ts";
+import { adminEventBus } from "../lib/admin-event-bus.ts";
 
 /**
  * Lead pipeline API.
@@ -334,7 +335,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
     const now = Math.floor(Date.now() / 1000);
     let transitionBlocked = false;
-    let webhookPayload: StageChangedPayload | null = null;
+    let webhookPayload: StageChangedPayload | null = null as StageChangedPayload | null;
 
     await withTenant(opts.db, tenantId, async (tx) => {
       const [lead] = await tx
@@ -432,7 +433,17 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       details: { stageDefinitionId, force },
     });
 
-    if (webhookPayload) void fireStageWebhooks(opts.db, tenantId, webhookPayload);
+    if (webhookPayload) {
+      const wp = webhookPayload;
+      void fireStageWebhooks(opts.db, tenantId, wp);
+      adminEventBus.emit({
+        type: "stage_changed",
+        tenantId,
+        leadId: id,
+        toStage: wp.to.slug,
+        toStageDisplayName: wp.to.displayName,
+      });
+    }
 
     return c.json({ ok: true });
   });

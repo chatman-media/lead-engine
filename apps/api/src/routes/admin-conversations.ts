@@ -10,6 +10,7 @@ import {
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
+import { adminEventBus } from "../lib/admin-event-bus.ts";
 
 /**
  * Per-tenant read-only conversations API под /api/admin/conversations/*.
@@ -326,6 +327,14 @@ export function makeAdminConversationsRoutes(
         channelKind: outcome.channelKind,
         textLength: text.length,
       },
+    });
+
+    adminEventBus.emit({
+      type: "new_message",
+      tenantId,
+      conversationId,
+      contactId: 0,
+      preview: text.slice(0, 80),
     });
 
     return c.json({
