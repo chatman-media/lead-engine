@@ -66,7 +66,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "AI & Бот",
     items: [
-      { to: "/dashboard", label: "База знаний", icon: DatabaseIcon },
+      { to: "/dashboard", label: "Дашборд", icon: DatabaseIcon },
       { to: "/skills", label: "Навыки", icon: ZapIcon },
       { to: "/hooks", label: "Хуки", icon: SparklesIcon },
       { to: "/styles", label: "Стили", icon: PaletteIcon },

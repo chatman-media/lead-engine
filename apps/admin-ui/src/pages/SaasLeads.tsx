@@ -24,6 +24,18 @@ const KIND_COLOR: Record<string, string> = {
   terminal_lost: "border-red-300",
 };
 
+const STAGE_TYPE_RU: Record<string, string> = {
+  form_fill: "Сбор данных",
+  document_upload: "Загрузка документов",
+  document_signature: "Подписание",
+  external_approval: "Внешнее одобрение",
+  payment: "Оплата",
+  waiting: "Ожидание",
+  interaction: "Встреча / звонок",
+  assessment: "Оценка",
+  milestone: "Контрольная точка",
+};
+
 function progressPct(filled: number, total: number) {
   if (total === 0) return null;
   return Math.round((filled / total) * 100);
@@ -324,7 +336,7 @@ export function SaasLeads() {
                 >
                   <div>
                     <p className="text-sm font-semibold">{stage.displayName}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{stage.stageType.replace("_", " ")}</p>
+                    <p className="text-xs text-muted-foreground">{STAGE_TYPE_RU[stage.stageType] ?? stage.stageType}</p>
                   </div>
                   <Badge variant="secondary" className="text-xs">
                     {stageLeads.length}
