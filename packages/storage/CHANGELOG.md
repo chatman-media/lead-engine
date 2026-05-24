@@ -1,3 +1,12 @@
+# [@chatman-media/storage-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.1.0...@chatman-media/storage-v1.2.0) (2026-05-24)
+
+
+### Features
+
+* **auth:** forgot-password flow + team invite email ([#118](https://github.com/chatman-media/lead-engine/issues/118)) ([14f918f](https://github.com/chatman-media/lead-engine/commit/14f918f603593bfd59a84ddb3b3df73670cae801))
+* **outreach:** batch message campaigns ([#108](https://github.com/chatman-media/lead-engine/issues/108)) ([48f9406](https://github.com/chatman-media/lead-engine/commit/48f94068cc41154a6a4b6cb7e63dd0202cbda90b))
+* **templates:** message templates for outreach campaigns ([#116](https://github.com/chatman-media/lead-engine/issues/116)) ([489f15d](https://github.com/chatman-media/lead-engine/commit/489f15d43f2365fc2dc5d6c88dc2b5bf03cd14b3))
+
 # [@chatman-media/storage-v1.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.0.1...@chatman-media/storage-v1.1.0) (2026-05-23)
 
 
