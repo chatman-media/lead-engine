@@ -1,17 +1,7 @@
-// Admin-API routes — поверхность для apps/admin-ui (React SPA). Tenant-
-// scoped по subdomain через makeTenantContextMiddleware (P из Issue #3).
-// Все endpoints'ы под /admin/* требуют resolved tenant; apex-routes (login,
-// landing) живут отдельно.
-//
-// Auth (отложен): сейчас все endpoint'ы публичны. Полноценный JWT/session
-// flow добавляется когда apps/admin-ui начнёт wire-up'аться:
-//   - POST /admin/login (apex) — email+password → JWT с tenantId+adminId
-//   - middleware requireAdminSession — проверяет JWT на каждом /admin/*
-//   - JWT включает tenantId — verify'им что matches resolved tenantSlug
-//
-// Сейчас этот файл — skeleton: возвращает stub-данные с прикреплённым
-// tenant.slug. Когда auth'а добавится, добавится adminId в response'ы
-// и UI получит whoami из /admin/me.
+// Admin-API routes — поверхность для apps/admin-ui (React SPA).
+// Auth: JWT/Bearer через makeRequireAuth middleware (apps/api/src/index.ts).
+// Все endpoint'ы под /api/admin/* требуют valid Bearer token;
+// token payload содержит { adminId, tenantId, role }.
 
 import {
   ContactsRepo,
