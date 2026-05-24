@@ -54,6 +54,8 @@ import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
 import { makeAdminExperimentsRoutes } from "./routes/admin-experiments.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
+import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
+import { makeMcpRoutes } from "./routes/mcp.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
@@ -344,6 +346,18 @@ async function main() {
     resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
   }));
   log.info("admin-styles routes enabled");
+
+  // Vertical plugin install.
+  app.route("/", makeAdminVerticalsRoutes({ db, resolveEmbedder: embedderResolver ?? undefined }));
+  log.info("admin-verticals routes enabled");
+
+  // MCP (Model Context Protocol) endpoint — для Claude Desktop / Cursor / агентов.
+  app.route("/", makeMcpRoutes({
+    db,
+    authSecret: cfg.authSecret,
+    resolveEmbedder: embedderResolver ?? undefined,
+  }));
+  log.info("MCP endpoint enabled at POST /mcp");
 
   const strategyBundle: ReplyStrategyBundle | null = makeReplyStrategy(
     loadedRef,

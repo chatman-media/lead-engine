@@ -22,16 +22,18 @@
     "@chatman-media/channel-web": "workspace:*",
     "@chatman-media/channel-whatsapp": "workspace:*",
     "@chatman-media/conversation-engine": "workspace:*",
+    "@chatman-media/kb": "workspace:*",
     "@chatman-media/llm-router": "workspace:*",
     "@chatman-media/observability": "workspace:*",
-    "@chatman-media/kb": "workspace:*",
     "@chatman-media/sales": "workspace:*",
     "@chatman-media/storage": "workspace:*",
     "@chatman-media/vertical-recruitment": "workspace:*",
     "@chatman-media/verticals": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.0",
-    "postgres": "^3.4.5"
+    "postgres": "^3.4.5",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.14",

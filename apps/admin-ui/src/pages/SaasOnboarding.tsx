@@ -25,6 +25,7 @@ import {
   type LlmConfig,
   type LlmProvider,
   type LlmPurpose,
+  type VerticalInfo,
   saas,
 } from "../api/saas.ts";
 
@@ -40,16 +41,22 @@ const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: "ollama", label: "Ollama (local)" },
 ];
 
-const STEP_LABELS = ["Канал", "API-ключи", "База знаний", "Готово"];
+const STEP_LABELS = ["Канал", "Провайдер", "База знаний", "Готово"];
 
 interface KeyForm {
   provider: LlmProvider;
   model: string;
   apiKey: string;
+  baseUrl: string;
   embedDim: string;
 }
 
-const EMPTY_KEY_FORM: KeyForm = { provider: "openai", model: "", apiKey: "", embedDim: "" };
+const EMPTY_KEY_FORM: KeyForm = { provider: "openai", model: "", apiKey: "", baseUrl: "", embedDim: "" };
+
+const OLLAMA_PRESETS: Record<"chat" | "embed", { model: string; embedDim?: string }> = {
+  chat: { model: "llama3.2" },
+  embed: { model: "nomic-embed-text", embedDim: "768" },
+};
 
 function configReady(cfg: LlmConfig | undefined): boolean {
   if (!cfg) return false;
@@ -81,6 +88,10 @@ export function SaasOnboarding() {
   const [uploading, setUploading] = useState(false);
   const [lastIndexed, setLastIndexed] = useState<number | null>(null);
 
+  const [verticals, setVerticals] = useState<VerticalInfo[]>([]);
+  const [installingVertical, setInstallingVertical] = useState<string | null>(null);
+  const [installedVertical, setInstalledVertical] = useState<string | null>(null);
+
   const chatCfg = configs.find((c) => c.purpose === "chat");
   const embedCfg = configs.find((c) => c.purpose === "embed");
 
@@ -105,7 +116,12 @@ export function SaasOnboarding() {
   }
 
   async function loadState() {
-    const [ch, cfg] = await Promise.all([saas.listChannels(), saas.listLlmConfigs()]);
+    const [ch, cfg, verts] = await Promise.all([
+      saas.listChannels(),
+      saas.listLlmConfigs(),
+      saas.listVerticals().catch(() => ({ items: [] as VerticalInfo[] })),
+    ]);
+    setVerticals(verts.items);
     let docItems: KbDoc[] = [];
     try {
       docItems = (await saas.listDocs()).items;
@@ -123,6 +139,7 @@ export function SaasOnboarding() {
             provider: c.provider,
             model: c.model,
             apiKey: "",
+            baseUrl: c.baseUrl ?? "",
             embedDim: c.embedDim?.toString() ?? "",
           },
         }));
@@ -218,6 +235,7 @@ export function SaasOnboarding() {
         provider: f.provider,
         model: f.model.trim(),
         ...(f.apiKey ? { apiKey: f.apiKey } : {}),
+        ...(f.baseUrl.trim() ? { baseUrl: f.baseUrl.trim() } : {}),
         ...(purpose === "embed" && f.embedDim ? { embedDim: Number.parseInt(f.embedDim, 10) } : {}),
       });
       updateKeyForm(purpose, { apiKey: "" });
@@ -380,6 +398,42 @@ export function SaasOnboarding() {
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
+              {verticals.length > 0 && (
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">Шаблон воронки (опционально)</p>
+                    {installedVertical && <Badge variant="success">установлен</Badge>}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Автоматически настроит этапы воронки, навыки и стили продаж.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {verticals.map((v) => (
+                      <Button
+                        key={v.slug}
+                        type="button"
+                        variant={installedVertical === v.slug ? "default" : "outline"}
+                        size="sm"
+                        disabled={installingVertical !== null}
+                        onClick={async () => {
+                          setInstallingVertical(v.slug);
+                          setError("");
+                          try {
+                            await saas.installVertical(v.slug);
+                            setInstalledVertical(v.slug);
+                          } catch (err) {
+                            setError(err instanceof Error ? err.message : String(err));
+                          } finally {
+                            setInstallingVertical(null);
+                          }
+                        }}
+                      >
+                        {installingVertical === v.slug ? "Устанавливаем…" : v.displayName}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {channelDone && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                   Подключено каналов: <code className="font-mono">{channels.length}</code>
@@ -409,7 +463,7 @@ export function SaasOnboarding() {
               </p>
               {channelDone && (
                 <Button onClick={() => setStep(1)}>
-                  Далее: API-ключи <ArrowRightIcon />
+                  Далее: LLM-провайдер <ArrowRightIcon />
                 </Button>
               )}
             </CardContent>
@@ -419,9 +473,9 @@ export function SaasOnboarding() {
         {step === 1 && (
           <Card>
             <CardHeader>
-              <CardTitle>Шаг 2. API-ключи</CardTitle>
+              <CardTitle>Шаг 2. LLM-провайдер</CardTitle>
               <p className="text-sm text-muted-foreground">
-                BYOK — ключи для ответов (chat) и поиска по базе (embed). Хранятся зашифрованными.
+                Выберите AI-провайдер. Если Ollama уже запущена локально — API-ключ не нужен.
               </p>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -440,9 +494,9 @@ export function SaasOnboarding() {
                       </h3>
                       {cfg &&
                         (configReady(cfg) ? (
-                          <Badge variant="success">ключ есть</Badge>
+                          <Badge variant="success">настроено</Badge>
                         ) : (
-                          <Badge variant="warning">без ключа</Badge>
+                          <Badge variant="warning">не настроено</Badge>
                         ))}
                     </div>
                     <form
@@ -489,6 +543,16 @@ export function SaasOnboarding() {
                           />
                         </div>
                       )}
+                      {f.provider === "ollama" && (
+                        <div className="space-y-1.5">
+                          <Label>URL Ollama</Label>
+                          <Input
+                            value={f.baseUrl}
+                            onChange={(e) => updateKeyForm(purpose, { baseUrl: e.target.value })}
+                            placeholder="http://localhost:11434"
+                          />
+                        </div>
+                      )}
                       {!isChat && (
                         <div className="space-y-1.5">
                           <Label>Размерность embed</Label>
@@ -500,17 +564,44 @@ export function SaasOnboarding() {
                           />
                         </div>
                       )}
-                      <div className="sm:col-span-2">
+                      {f.provider === "ollama" && (
+                        <p className="sm:col-span-2 text-xs text-muted-foreground rounded-md bg-muted/50 px-3 py-2">
+                          Ollama работает локально — API-ключ не нужен. Убедитесь, что{" "}
+                          <code className="font-mono">ollama serve</code> запущен и модель загружена:{" "}
+                          <code className="font-mono">ollama pull {OLLAMA_PRESETS[purpose].model}</code>
+                        </p>
+                      )}
+                      <div className="sm:col-span-2 flex items-center gap-2">
                         <Button type="submit" disabled={savingPurpose !== null}>
                           {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
                         </Button>
+                        {f.provider !== "ollama" && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              updateKeyForm(purpose, {
+                                provider: "ollama",
+                                model: OLLAMA_PRESETS[purpose].model,
+                                baseUrl: "http://localhost:11434",
+                                apiKey: "",
+                                ...(OLLAMA_PRESETS[purpose].embedDim
+                                  ? { embedDim: OLLAMA_PRESETS[purpose].embedDim }
+                                  : {}),
+                              })
+                            }
+                          >
+                            Использовать Ollama
+                          </Button>
+                        )}
                       </div>
                     </form>
                   </div>
                 );
               })}
               <p className="text-sm text-muted-foreground">
-                Base URL, timeout и др. —{" "}
+                Timeout и другие параметры —{" "}
                 <Link to="/settings" className="text-primary hover:underline">
                   расширенные настройки →
                 </Link>
@@ -608,7 +699,7 @@ export function SaasOnboarding() {
                   },
                   {
                     done: keysDone,
-                    title: "API-ключи",
+                    title: "LLM-провайдер",
                     hint: keysDone ? "chat + embed настроены" : "Не настроены",
                   },
                   {

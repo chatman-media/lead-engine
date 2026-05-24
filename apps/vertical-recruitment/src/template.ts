@@ -1,6 +1,7 @@
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { RECRUITMENT_FUNNEL_STAGES } from "./funnel-stages.ts";
 import { RECRUITMENT_INTAKE } from "./intake.ts";
+import { RECRUITMENT_STYLES } from "./styles/index.ts";
 
 /**
  * Recruitment vertical. Воронка: кандидатки на работу артисток (хостес, танцовщицы)
@@ -35,7 +36,11 @@ export const RECRUITMENT_V1: VerticalTemplate = {
     "документы → визовая анкета → отъезд) ты прозрачно объясняешь, что " +
     "будет дальше. Никогда не обещай конкретный заработок до подписания " +
     "контракта — это решает партнёр.",
-  // KB-seed файлы будут добавляться отдельной data-migration в Этапе 8;
-  // пока что Knowledge Base seedится оператором вручную через admin-UI.
   kbSeedFiles: [],
+  funnelSeedKey: "recruitment",
+  styles: RECRUITMENT_STYLES.map((s) => ({
+    displayName: s.displayName,
+    slug: s.slug,
+    configJson: JSON.stringify(s),
+  })),
 };

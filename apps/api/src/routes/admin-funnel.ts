@@ -769,6 +769,144 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
  *
  * GET  /api/admin/skills                       — полный список скилов
  */
+/**
+ * Программный seed воронки по ключу из SEED_TEMPLATES.
+ * Используется install-endpoint'ом вертикалей.
+ */
+export async function seedFunnelByKey(
+  db: Db,
+  tenantId: number,
+  templateKey: string,
+  adminId?: number,
+): Promise<{ funnelId: number; stagesCreated: number } | { error: string }> {
+  const stages = SEED_TEMPLATES[templateKey];
+  if (!stages) return { error: `unknown template key: ${templateKey}` };
+
+  const now = Math.floor(Date.now() / 1000);
+  return withTenant(db, tenantId, async (tx) => {
+    let [funnel] = await tx
+      .select()
+      .from(funnels)
+      .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
+      .limit(1);
+
+    if (!funnel) {
+      const [created] = await tx
+        .insert(funnels)
+        .values({ tenantId, slug: templateKey, isActive: true, createdAt: now, updatedAt: now })
+        .returning();
+      funnel = created!;
+    }
+
+    const existingStages = await tx
+      .select({ id: stageDefinitions.id })
+      .from(stageDefinitions)
+      .where(eq(stageDefinitions.funnelId, funnel.id));
+
+    for (const s of existingStages) {
+      await tx.delete(stageFields).where(eq(stageFields.stageId, s.id));
+    }
+    if (existingStages.length > 0) {
+      await tx.delete(stageDefinitions).where(eq(stageDefinitions.funnelId, funnel.id));
+    }
+
+    let stagesCreated = 0;
+    for (const stageTpl of stages) {
+      const { fields, ...stageData } = stageTpl;
+      const [stage] = await tx
+        .insert(stageDefinitions)
+        .values({
+          tenantId,
+          funnelId: funnel.id,
+          slug: stageData.slug,
+          displayName: stageData.displayName,
+          kind: stageData.kind,
+          stageType: stageData.stageType,
+          position: stageData.position,
+          color: stageData.color ?? null,
+          staleTimeoutDays: stageData.staleTimeoutDays ?? null,
+          nextStages: stageData.nextStages,
+          autoAdvanceCondition: stageData.autoAdvanceCondition ?? null,
+          supportMode: false,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: stageDefinitions.id, slug: stageDefinitions.slug });
+
+      if (!stage) continue;
+      stagesCreated++;
+
+      for (const fieldTpl of fields) {
+        await tx.insert(stageFields).values({
+          stageId: stage.id,
+          tenantId,
+          slug: fieldTpl.slug,
+          displayName: fieldTpl.displayName,
+          fieldType: fieldTpl.fieldType,
+          required: fieldTpl.required,
+          aiExtractable: fieldTpl.aiExtractable,
+          hint: fieldTpl.hint ?? null,
+          ...(fieldTpl.optionsJson ? { optionsJson: fieldTpl.optionsJson } : {}),
+          position: fieldTpl.position,
+          createdAt: now,
+        });
+      }
+    }
+
+    return { funnelId: funnel.id, stagesCreated };
+  });
+}
+
+/**
+ * Программный seed навыков из SKILLS_CATALOGUE.
+ * Используется install-endpoint'ом вертикалей.
+ */
+export async function seedSkillsCatalogue(
+  db: Db,
+  tenantId: number,
+): Promise<{ seeded: number; updated: number; skipped: number }> {
+  const nowEpoch = Math.floor(Date.now() / 1000);
+  let seeded = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  await withTenant(db, tenantId, async (tx) => {
+    for (const entry of SKILLS_CATALOGUE) {
+      const [existing] = await tx
+        .select({ id: skills.id, promptFragment: skills.promptFragment })
+        .from(skills)
+        .where(and(eq(skills.tenantId, tenantId), eq(skills.slug, entry.slug)));
+
+      if (!existing) {
+        await tx.insert(skills).values({
+          tenantId,
+          slug: entry.slug,
+          family: entry.family,
+          displayName: entry.displayName,
+          description: entry.description,
+          promptFragment: entry.promptFragment,
+          applicableStagesJson: JSON.stringify(entry.applicableStageKinds),
+          intent: entry.intent,
+          isEnabled: entry.isEnabled,
+          createdAt: nowEpoch,
+          updatedAt: nowEpoch,
+        });
+        seeded++;
+      } else if (existing.promptFragment !== entry.promptFragment) {
+        await tx
+          .update(skills)
+          .set({ promptFragment: entry.promptFragment, updatedAt: nowEpoch })
+          .where(eq(skills.id, existing.id));
+        updated++;
+      } else {
+        skipped++;
+      }
+    }
+  });
+
+  return { seeded, updated, skipped };
+}
+
 export interface AdminFunnelRoutesOpts {
   db: Db;
 }

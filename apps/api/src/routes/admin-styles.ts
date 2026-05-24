@@ -69,11 +69,10 @@ ${samples}`;
 
     let raw: string;
     try {
-      const result = await client.complete(
+      raw = await client.complete(
         [{ role: "user", content: prompt }],
         { numPredict: 300 },
       );
-      raw = result.content ?? "";
     } catch (err) {
       return c.json(
         { error: `LLM error: ${err instanceof Error ? err.message : String(err)}` },
