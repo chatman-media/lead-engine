@@ -19,6 +19,25 @@ import {
 import { AlertTriangleIcon, ArrowLeftIcon, CheckIcon, EditIcon, RefreshCwIcon, SendIcon, Trash2Icon, XIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
+const STAGE_TYPE_RU: Record<string, string> = {
+  form_fill: "Сбор данных",
+  document_upload: "Загрузка документов",
+  document_signature: "Подписание",
+  external_approval: "Внешнее одобрение",
+  payment: "Оплата",
+  waiting: "Ожидание",
+  interaction: "Встреча / звонок",
+  assessment: "Оценка",
+  milestone: "Контрольная точка",
+};
+
+const KIND_RU: Record<string, string> = {
+  intake: "входящий",
+  active: "активный",
+  terminal_won: "закрыт ✓",
+  terminal_lost: "закрыт ✗",
+};
+
 function formatDate(epoch: number) {
   return new Date(epoch * 1000).toLocaleString("ru-RU", {
     day: "2-digit",
@@ -448,11 +467,11 @@ export function SaasLeadDetail() {
             <CardContent>
               <div className="flex items-center gap-3">
                 <Badge variant="secondary" className="text-sm">
-                  {stageDef?.displayName ?? lead.state}
+                  {stageDef?.displayName ?? (KIND_RU[lead.state] ?? lead.state)}
                 </Badge>
                 {stageDef && (
-                  <span className="text-xs text-muted-foreground capitalize">
-                    {stageDef.stageType.replace("_", " ")}
+                  <span className="text-xs text-muted-foreground">
+                    {STAGE_TYPE_RU[stageDef.stageType] ?? stageDef.stageType}
                   </span>
                 )}
               </div>
@@ -471,7 +490,7 @@ export function SaasLeadDetail() {
                       {funnel.stages.map((s) => (
                         <SelectItem key={s.id} value={String(s.id)}>
                           {s.displayName}
-                          <span className="ml-1 text-xs text-muted-foreground">({s.kind})</span>
+                          <span className="ml-1 text-xs text-muted-foreground">({KIND_RU[s.kind] ?? s.kind})</span>
                         </SelectItem>
                       ))}
                     </SelectContent>
