@@ -31,6 +31,7 @@ import { SaasWebhooks } from "./pages/SaasWebhooks.tsx";
 import { SaasOutreach } from "./pages/SaasOutreach.tsx";
 import { SaasForgotPassword } from "./pages/SaasForgotPassword.tsx";
 import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
+import { SaasSuperadmin } from "./pages/SaasSuperadmin.tsx";
 import { ToolsSettings } from "./pages/ToolsSettings.tsx";
 
 function RequireAuth() {
@@ -113,6 +114,7 @@ export function App() {
               <Route path="/team" element={<SaasTeam />} />
               <Route path="/audit" element={<SaasAudit />} />
               <Route path="/diagnostics" element={<SaasDiagnostics />} />
+              <Route path="/superadmin" element={<SaasSuperadmin />} />
             </Route>
           </Route>
 

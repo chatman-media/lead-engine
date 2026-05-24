@@ -65,6 +65,7 @@ import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeMcpRoutes } from "./routes/mcp.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
+import { makeSuperadminRoutes } from "./routes/superadmin.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
@@ -211,6 +212,9 @@ async function main() {
   // не сконфигурирован: /api/admin/llm-configs позволяет настроить LLM
   // через UI без env-vars.
   app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
+  app.use("/api/superadmin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
+  app.route("/", makeSuperadminRoutes({ db }));
+  log.info("superadmin routes enabled");
 
   // Web channel registry — early init чтобы reloader мог его перестраивать
   // при POST /api/admin/channels/web. WS-runner / dispatcher поднимутся ниже.

@@ -15,6 +15,17 @@ export interface Tenant {
   plan: string;
 }
 
+export interface TenantRow {
+  id: number;
+  slug: string;
+  plan: string;
+  status: string;
+  createdAt: number;
+  ownerEmail: string | null;
+  leadCount: number;
+  conversationCount: number;
+}
+
 export interface KbDoc {
   id: number;
   source: string;
@@ -1286,6 +1297,17 @@ export const saas = {
   },
   deleteReferralCode(id: number) {
     return request<{ ok: boolean }>(`/api/admin/referral-codes/${id}`, { method: "DELETE" });
+  },
+
+  // ── Superadmin ────────────────────────────────────────────────────────
+  listAllTenants() {
+    return request<{ items: TenantRow[] }>("/api/superadmin/tenants");
+  },
+  updateTenantPlan(id: number, plan: string) {
+    return request<{ id: number; slug: string; plan: string }>(`/api/superadmin/tenants/${id}/plan`, {
+      method: "PATCH",
+      body: JSON.stringify({ plan }),
+    });
   },
 
 };
