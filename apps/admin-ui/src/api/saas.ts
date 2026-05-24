@@ -60,6 +60,15 @@ export interface LlmConfig {
   updatedAt: number;
 }
 
+export interface VerticalInfo {
+  slug: string;
+  displayName: string;
+  version: number;
+  hasStyles: boolean;
+  hasKbDocuments: boolean;
+  hasFunnel: boolean;
+}
+
 export interface UpsertLlmConfigInput {
   provider: LlmProvider;
   model: string;
@@ -688,6 +697,17 @@ export const saas = {
   deleteLlmConfig(purpose: LlmPurpose) {
     return request<{ ok: boolean; deleted: number }>(`/api/admin/llm-configs/${purpose}`, {
       method: "DELETE",
+    });
+  },
+
+  // ── Verticals ────────────────────────────────────────────────────────
+  listVerticals() {
+    return request<{ items: VerticalInfo[] }>("/api/admin/verticals");
+  },
+  installVertical(slug: string) {
+    return request<{ ok: boolean; slug: string }>(`/api/admin/verticals/${slug}/install`, {
+      method: "POST",
+      body: JSON.stringify({}),
     });
   },
 

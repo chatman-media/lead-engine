@@ -81,6 +81,19 @@ export interface VerticalHooks<TCtx = unknown> {
   extractFields?: (ctx: TCtx, text: string) => Promise<Record<string, unknown>> | Record<string, unknown>;
 }
 
+export interface VerticalStyleSeed {
+  displayName: string;
+  slug: string;
+  /** JSON-сериализованный Style (z.infer<typeof StyleSchema>). */
+  configJson: string;
+}
+
+export interface VerticalKbDocSeed {
+  title: string;
+  body: string;
+  topic?: string;
+}
+
 export interface VerticalTemplate<TCtx = unknown> {
   /** Stable slug, например 'recruitment_uae_v1'. Используется в funnels.vertical_template_id. */
   slug: string;
@@ -98,4 +111,13 @@ export interface VerticalTemplate<TCtx = unknown> {
    * приложения template'а (apps/vertical-<slug>/kb/).
    */
   kbSeedFiles?: readonly string[];
+  /** Inline seed-стили (sales personas) для установки при install. */
+  styles?: readonly VerticalStyleSeed[];
+  /** Inline seed-документы для KB при install. */
+  kbDocuments?: readonly VerticalKbDocSeed[];
+  /**
+   * Ключ в SEED_TEMPLATES воронки (admin-funnel). Если задан — install-endpoint
+   * сидит воронку из этого шаблона. Если не задан — воронка не сидится.
+   */
+  funnelSeedKey?: string;
 }

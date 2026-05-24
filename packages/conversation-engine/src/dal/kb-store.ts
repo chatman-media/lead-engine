@@ -111,6 +111,11 @@ export class DrizzleKbStore implements IKbStore {
     }
   }
 
+  /** BM25-only text search (без vector embeddings). Используется MCP-сервером. */
+  async textSearch(query: string, k = 5, topic?: string | null): Promise<KbSearchHit[]> {
+    return this.searchBm25(query, k, topic);
+  }
+
   async hybridSearch(input: {
     embedding: number[];
     query: string;

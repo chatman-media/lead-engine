@@ -6,5 +6,7 @@ export type {
   QuestionnaireFieldKind,
   QuestionnaireSchema,
   VerticalHooks,
+  VerticalKbDocSeed,
+  VerticalStyleSeed,
   VerticalTemplate,
 } from "./types.ts";
