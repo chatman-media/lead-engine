@@ -234,7 +234,7 @@ export function SaasTeam() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle>Администраторы</CardTitle>
             <Badge variant="secondary">{admins.length}</Badge>
           </CardHeader>
@@ -265,7 +265,7 @@ export function SaasTeam() {
         </Card>
 
         <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle>Приглашения</CardTitle>
             <Badge variant="secondary">{invites.length}</Badge>
           </CardHeader>

@@ -601,7 +601,7 @@ export function SaasChannels() {
               <form onSubmit={handleWebSubmit} className="space-y-3">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label>Brand name (опц.)</Label>
+                    <Label>Название бренда (опц.)</Label>
                     <Input
                       value={webBrand}
                       onChange={(e) => setWebBrand(e.target.value)}
@@ -626,7 +626,7 @@ export function SaasChannels() {
 
               {webResult?.snippet && (
                 <div className="space-y-2 rounded-lg border bg-muted/40 p-4">
-                  <p className="text-sm font-medium">Embed snippet</p>
+                  <p className="text-sm font-medium">Код для вставки</p>
                   <pre className="overflow-x-auto rounded-md bg-background p-3 font-mono text-xs">
                     {webResult.snippet.html}
                   </pre>
@@ -646,7 +646,7 @@ export function SaasChannels() {
       </Tabs>
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle>Подключённые каналы</CardTitle>
           <Badge variant="secondary">{channels.length}</Badge>
         </CardHeader>

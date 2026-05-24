@@ -17,6 +17,15 @@ import {
 import { DownloadIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
+const STATE_RU: Record<string, string> = {
+  active: "активен",
+  won: "выигран",
+  lost: "проигран",
+  intake: "входящий",
+  terminal_won: "закрыт ✓",
+  terminal_lost: "закрыт ✗",
+};
+
 const KIND_COLOR: Record<string, string> = {
   intake: "border-blue-300",
   active: "border-green-300",
@@ -413,7 +422,7 @@ function LeadCard({
         <CardContent className="pb-3">
           <div className="flex items-center justify-between">
             <Badge variant="outline" className="text-xs">
-              {lead.state}
+              {STATE_RU[lead.state] ?? lead.state}
             </Badge>
             <span className="text-xs text-muted-foreground">{formatDate(lead.updatedAt)}</span>
           </div>

@@ -46,7 +46,7 @@ export function OnboardingChecklist({ status, alwaysShow = false }: OnboardingCh
 
   return (
     <Card className="border-primary/30 bg-gradient-to-b from-primary/[0.06] to-transparent">
-      <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
+      <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
         <div className="space-y-1">
           <CardTitle>Начало работы</CardTitle>
           <p className="text-sm text-muted-foreground">

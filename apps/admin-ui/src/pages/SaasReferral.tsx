@@ -128,7 +128,7 @@ export function SaasReferral() {
       </Card>
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle>Ваши коды</CardTitle>
           <Badge variant="secondary">{codes.length}</Badge>
         </CardHeader>

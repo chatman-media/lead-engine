@@ -784,6 +784,11 @@ export const saas = {
       body: JSON.stringify({ mode }),
     });
   },
+  deleteMessage(conversationId: number, messageId: number) {
+    return request<{ ok: boolean }>(`/api/admin/conversations/${conversationId}/messages/${messageId}`, {
+      method: "DELETE",
+    });
+  },
 
   // ── Diagnostics ──────────────────────────────────────────────────────
   /**
@@ -1042,8 +1047,54 @@ export const saas = {
   listStyles() {
     return request<{ items: StyleItem[] }>("/api/admin/styles");
   },
+  generateStyle(samples: string) {
+    return request<{
+      displayName: string;
+      slug: string;
+      personaName: string;
+      personaRole: string;
+      personaCompany: string;
+      framework: string;
+    }>("/api/admin/styles/generate", {
+      method: "POST",
+      body: JSON.stringify({ samples }),
+    });
+  },
+  createStyle(data: { displayName: string; slug: string; configJson: string; isActive: boolean }) {
+    return request<StyleItem>("/api/admin/styles", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateStyle(id: number, data: Partial<{ displayName: string; configJson: string; isActive: boolean }>) {
+    return request<StyleItem>(`/api/admin/styles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  deleteStyle(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/styles/${id}`, { method: "DELETE" });
+  },
   listExperiments() {
     return request<{ items: ExperimentItem[] }>("/api/admin/experiments");
+  },
+  createExperiment(data: { slug: string; allocationJson: string; successMetric: string }) {
+    return request<ExperimentItem>("/api/admin/experiments", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateExperiment(id: number, data: Partial<{ allocationJson: string; successMetric: string }>) {
+    return request<ExperimentItem>(`/api/admin/experiments/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  setExperimentStatus(id: number, status: "running" | "paused" | "done") {
+    return request<ExperimentItem>(`/api/admin/experiments/${id}/status`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    });
   },
 
   // ── Dashboard ────────────────────────────────────────────────────────

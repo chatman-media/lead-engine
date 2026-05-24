@@ -439,7 +439,7 @@ export function SaasDashboard() {
           </Card>
 
           <Card>
-            <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle>Документы</CardTitle>
               <Badge variant="secondary">{docs.length}</Badge>
             </CardHeader>
@@ -481,7 +481,7 @@ export function SaasDashboard() {
           {/* KB Suggestions */}
           {suggestions.length > 0 && (
             <Card>
-              <CardHeader className="flex-row items-center justify-between space-y-0">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <CardTitle className="flex items-center gap-2">
                   <LightbulbIcon className="size-4 text-amber-500" />
                   Предложения в базу знаний

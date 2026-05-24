@@ -1,4 +1,4 @@
-import { ExternalLinkIcon, SendHorizontalIcon } from "lucide-react";
+import { ExternalLinkIcon, SendHorizontalIcon, Trash2Icon } from "lucide-react";
 import React, { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -28,6 +28,20 @@ const SOURCE_RU: Record<string, string> = {
   web: "Web",
 };
 const MODE_RU: Record<string, string> = { ai: "AI", human: "Оператор" };
+const ROLE_RU: Record<string, string> = {
+  user: "клиент",
+  assistant: "AI",
+  human: "оператор",
+  system: "система",
+};
+const STATE_RU: Record<string, string> = {
+  active: "активен",
+  won: "выигран",
+  lost: "проигран",
+  intake: "входящий",
+  terminal_won: "закрыт ✓",
+  terminal_lost: "закрыт ✗",
+};
 
 function fmtTime(epoch: number | null): string {
   if (!epoch) return "—";
@@ -205,6 +219,16 @@ export function SaasConversations() {
     }
   }
 
+  async function handleDeleteMessage(messageId: number) {
+    if (!selectedId) return;
+    try {
+      await saas.deleteMessage(selectedId, messageId);
+      await refreshDetail(selectedId);
+    } catch (err) {
+      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [detail?.messages]);
@@ -237,8 +261,7 @@ export function SaasConversations() {
         {/* Список */}
         <Card className="flex max-h-[72vh] flex-col gap-0 overflow-hidden py-0">
           <div className="border-b px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Список {list.length}
-            {nextCursor ? "+" : ""}
+            {list.length}{nextCursor ? "+" : ""} диалог{list.length === 1 ? "" : list.length < 5 ? "а" : "ов"}
           </div>
           <div className="flex-1 overflow-y-auto p-2">
             {listLoading ? (
@@ -361,7 +384,7 @@ export function SaasConversations() {
                         className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                       >
                         <ExternalLinkIcon className="size-3" />
-                        Лид · {contactLead.state}
+                        Лид · {STATE_RU[contactLead.state] ?? contactLead.state}
                       </Link>
                     )}
                   </div>
@@ -399,11 +422,16 @@ export function SaasConversations() {
                   detail.messages.map((m) => {
                     const mine = m.role === "assistant" || m.role === "human";
                     const system = m.role === "system";
+                    const showLabel = m.role !== "user";
+                    const labelColor =
+                      m.role === "assistant" ? "text-primary" :
+                      m.role === "human" ? "text-[var(--success)]" :
+                      "text-muted-foreground";
                     return (
                       <div
                         key={m.id}
                         className={cn(
-                          "max-w-[78%] rounded-2xl border px-3.5 py-2 text-sm",
+                          "group max-w-[78%] rounded-2xl border px-3.5 py-2 text-sm",
                           system &&
                             "max-w-[92%] self-center border-dashed bg-transparent text-xs text-muted-foreground",
                           !system && !mine && "self-start bg-muted",
@@ -413,9 +441,22 @@ export function SaasConversations() {
                           m.deletedAt && "opacity-50",
                         )}
                       >
-                        <div className="mb-0.5 flex items-center justify-between gap-3 text-[10px] uppercase tracking-wide text-muted-foreground">
-                          <span>{m.role}</span>
-                          <span className="font-mono">{fmtShortTime(m.createdAt)}</span>
+                        <div className="mb-1 flex items-center justify-between gap-3">
+                          <span className={cn("text-[11px] font-semibold", showLabel ? labelColor : "text-muted-foreground/50")}>
+                            {showLabel ? (ROLE_RU[m.role] ?? m.role) : ""}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {m.role === "human" && !m.deletedAt && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteMessage(m.id)}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/60 hover:text-destructive"
+                              >
+                                <Trash2Icon className="size-3" />
+                              </button>
+                            )}
+                            <span className="font-mono text-[10px] text-muted-foreground">{fmtShortTime(m.createdAt)}</span>
+                          </div>
                         </div>
                         <div
                           className={cn(
