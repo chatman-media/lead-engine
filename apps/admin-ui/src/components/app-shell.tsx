@@ -87,17 +87,13 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/channels", label: "Каналы", icon: CableIcon },
       { to: "/tools", label: "Инструменты", icon: WrenchIcon },
       { to: "/referral", label: "Партнёры", icon: LinkIcon },
-      { to: "/team", label: "Команда", icon: UsersIcon },
-      { to: "/billing", label: "LLM-использование", icon: BarChart2Icon },
-      { to: "/settings", label: "Настройки LLM", icon: SlidersHorizontalIcon },
       { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
-      { to: "/diagnostics", label: "Диагностика", icon: ActivityIcon },
     ],
   },
 ];
 
 // Items shown in Система by default; the rest are behind "Ещё"
-const SISTEMA_ALWAYS_VISIBLE = ["/channels", "/team"];
+const SISTEMA_ALWAYS_VISIBLE = ["/channels"];
 
 function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
