@@ -283,6 +283,21 @@ export interface BillingPlan {
   status: "ok" | "over_limit_channels" | "over_limit_kb";
 }
 
+export interface StripeInvoice {
+  id: string;
+  number: string | null;
+  status: string;
+  amount_due: number;
+  amount_paid: number;
+  currency: string;
+  created: number;
+  period_start: number;
+  period_end: number;
+  hosted_invoice_url: string | null;
+  invoice_pdf: string | null;
+  description: string | null;
+}
+
 export interface TenantInfo {
   id: number;
   slug: string;
@@ -863,6 +878,9 @@ export const saas = {
       method: "POST",
       body: JSON.stringify(returnUrl ? { returnUrl } : {}),
     });
+  },
+  listInvoices() {
+    return request<{ invoices: StripeInvoice[] }>("/api/admin/billing/invoices");
   },
 
   // ── Tenant management ────────────────────────────────────────────────

@@ -11,7 +11,7 @@ import { and, count, eq, gte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { allPlans, type PlanKind, resolvePlan } from "../lib/plans.ts";
-import { StripeApi, StripeApiError, type StripeFetchLike } from "../lib/stripe-api.ts";
+import { StripeApi, StripeApiError, type StripeInvoice, type StripeFetchLike } from "../lib/stripe-api.ts";
 
 /**
  * Per-tenant billing & plan endpoints (M1a — без Stripe).
@@ -417,6 +417,61 @@ export function makeAdminBillingRoutes(opts: AdminBillingRoutesOpts): Hono {
     } catch (err) {
       if (err instanceof StripeApiError) {
         return c.json({ error: "stripe_portal_failed", detail: err.message }, 502);
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * GET /api/admin/billing/invoices
+   * Returns: { invoices: StripeInvoice[] }
+   *
+   * Последние 12 инвойсов из Stripe. Требует:
+   *  - Stripe secretKey (иначе 503)
+   *  - Существующий stripeCustomers row (иначе пустой список — tenant ещё
+   *    не проходил checkout, это нормально)
+   */
+  app.get("/api/admin/billing/invoices", async (c) => {
+    if (!opts.stripe?.secretKey) {
+      return c.json({ error: "stripe_not_configured" }, 503);
+    }
+    const tenantId = c.var.tenantId;
+
+    const [cust] = await opts.db
+      .select({ stripeCustomerId: stripeCustomers.stripeCustomerId })
+      .from(stripeCustomers)
+      .where(eq(stripeCustomers.tenantId, tenantId));
+
+    if (!cust) {
+      // Tenant ещё не проходил checkout — инвойсов нет, не ошибка.
+      return c.json({ invoices: [] });
+    }
+
+    const stripe = new StripeApi({
+      secretKey: opts.stripe.secretKey,
+      ...(opts.fetchImpl ? { fetch: opts.fetchImpl } : {}),
+    });
+
+    try {
+      const result = await stripe.listInvoices({ customerId: cust.stripeCustomerId, limit: 12 });
+      const invoices: StripeInvoice[] = result.data.map((inv) => ({
+        id: inv.id,
+        number: inv.number,
+        status: inv.status,
+        amount_due: inv.amount_due,
+        amount_paid: inv.amount_paid,
+        currency: inv.currency,
+        created: inv.created,
+        period_start: inv.period_start,
+        period_end: inv.period_end,
+        hosted_invoice_url: inv.hosted_invoice_url,
+        invoice_pdf: inv.invoice_pdf,
+        description: inv.description,
+      }));
+      return c.json({ invoices });
+    } catch (err) {
+      if (err instanceof StripeApiError) {
+        return c.json({ error: "stripe_invoices_failed", detail: err.message }, 502);
       }
       throw err;
     }

@@ -141,4 +141,30 @@ export class StripeApi {
       return_url: input.returnUrl,
     });
   }
+
+  async listInvoices(input: {
+    customerId: string;
+    limit?: number;
+  }): Promise<{ data: StripeInvoice[] }> {
+    const params = new URLSearchParams({
+      customer: input.customerId,
+      limit: String(input.limit ?? 12),
+    });
+    return this.call("GET", `/v1/invoices?${params.toString()}`);
+  }
+}
+
+export interface StripeInvoice {
+  id: string;
+  number: string | null;
+  status: string;
+  amount_due: number;
+  amount_paid: number;
+  currency: string;
+  created: number;
+  period_start: number;
+  period_end: number;
+  hosted_invoice_url: string | null;
+  invoice_pdf: string | null;
+  description: string | null;
 }

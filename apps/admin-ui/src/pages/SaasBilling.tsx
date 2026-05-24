@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiError, clearToken, saas, type UsageReport } from "@/api/saas";
+import { ApiError, clearToken, saas, type StripeInvoice, type UsageReport } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,12 +36,34 @@ function fmtPct(n: number): string {
   return `${(n * 100).toFixed(1)}%`;
 }
 
+function fmtAmount(cents: number, currency: string): string {
+  return new Intl.NumberFormat("ru-RU", {
+    style: "currency",
+    currency: currency.toUpperCase(),
+    minimumFractionDigits: 0,
+  }).format(cents / 100);
+}
+
+function fmtInvoiceDate(epoch: number): string {
+  return new Date(epoch * 1000).toLocaleDateString("ru", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+const INVOICE_STATUS_LABELS: Record<string, string> = {
+  paid: "Оплачен",
+  open: "К оплате",
+  void: "Аннулирован",
+  uncollectible: "Безнадёжный",
+  draft: "Черновик",
+};
+
 export function SaasBilling() {
   const navigate = useNavigate();
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [days, setDays] = useState(30);
+  const [invoices, setInvoices] = useState<StripeInvoice[]>([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
 
   function onAuthError(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
@@ -63,6 +85,14 @@ export function SaasBilling() {
       })
       .finally(() => setLoading(false));
   }, [days]);
+
+  useEffect(() => {
+    setInvoicesLoading(true);
+    saas.listInvoices()
+      .then((res) => setInvoices(res.invoices))
+      .catch(() => {/* Stripe не настроен — тихо игнорируем */})
+      .finally(() => setInvoicesLoading(false));
+  }, []);
 
   return (
     <div className="flex flex-col gap-6">
@@ -193,6 +223,66 @@ export function SaasBilling() {
             </Card>
           </div>
         </>
+      )}
+
+      {/* Invoice history */}
+      {(invoicesLoading || invoices.length > 0) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">История платежей</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {invoicesLoading ? (
+              <div className="p-4 space-y-2">
+                {[0, 1, 2].map((i) => <Skeleton key={i} className="h-10 w-full rounded" />)}
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-muted-foreground text-xs">
+                    <th className="px-4 py-2 text-left font-medium">Номер</th>
+                    <th className="px-4 py-2 text-left font-medium">Период</th>
+                    <th className="px-4 py-2 text-left font-medium">Сумма</th>
+                    <th className="px-4 py-2 text-left font-medium">Статус</th>
+                    <th className="px-4 py-2 text-left font-medium" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((inv) => (
+                    <tr key={inv.id} className="border-b last:border-0 hover:bg-muted/30">
+                      <td className="px-4 py-2 font-mono text-xs text-muted-foreground">
+                        {inv.number ?? inv.id.slice(0, 12)}
+                      </td>
+                      <td className="px-4 py-2 text-xs">
+                        {fmtInvoiceDate(inv.period_start)} — {fmtInvoiceDate(inv.period_end)}
+                      </td>
+                      <td className="px-4 py-2 font-medium">
+                        {fmtAmount(inv.amount_paid || inv.amount_due, inv.currency)}
+                      </td>
+                      <td className="px-4 py-2">
+                        <Badge variant={inv.status === "paid" ? "default" : "destructive"} className="text-xs">
+                          {INVOICE_STATUS_LABELS[inv.status] ?? inv.status}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {inv.hosted_invoice_url && (
+                          <a
+                            href={inv.hosted_invoice_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-primary hover:underline"
+                          >
+                            Открыть →
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   );
