@@ -58,6 +58,7 @@ import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
 import { makeAdminExperimentsRoutes } from "./routes/admin-experiments.ts";
 import { makeAdminEventsRoutes } from "./routes/admin-events.ts";
 import { makeAdminOutreachRoutes } from "./routes/admin-outreach.ts";
+import { makeAdminMessageTemplatesRoutes } from "./routes/admin-message-templates.ts";
 import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
@@ -364,6 +365,10 @@ async function main() {
   // Outreach campaigns — batch message sending to leads.
   app.route("/", makeAdminOutreachRoutes({ db }));
   log.info("admin-outreach routes enabled");
+
+  // Message templates for outreach.
+  app.route("/", makeAdminMessageTemplatesRoutes({ db }));
+  log.info("admin-message-templates routes enabled");
 
   // Stage-change webhooks CRUD.
   app.route("/", makeAdminStageWebhooksRoutes({ db }));

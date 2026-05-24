@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiError, clearToken, saas, type AuditEntry, type FunnelData } from "@/api/saas";
+import { ApiError, clearToken, saas, type AuditEntry, type FunnelData, type MessageTemplate } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { CalendarClockIcon, SendIcon } from "lucide-react";
+import { CalendarClockIcon, PlusIcon, SendIcon, Trash2Icon } from "lucide-react";
 
 function fmtDateTime(epoch: number) {
   return new Date(epoch * 1000).toLocaleString("ru-RU", {
@@ -76,6 +76,11 @@ export function SaasOutreach() {
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ enqueued: number; skipped: number; scheduledAt: number | null } | null>(null);
 
+  // Templates state
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [newTplName, setNewTplName] = useState("");
+  const [savingTpl, setSavingTpl] = useState(false);
+
   // History state
   const [history, setHistory] = useState<AuditEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -91,12 +96,30 @@ export function SaasOutreach() {
 
   useEffect(() => {
     saas.getFunnel().then(setFunnel).catch((err) => { onAuthError(err); });
+    saas.listMessageTemplates().then((r) => setTemplates(r.items)).catch(() => {});
     saas
       .listAuditLog({ limit: 200 })
       .then((res) => setHistory(res.items.filter((e) => e.action === "outreach.send")))
       .catch((err) => { onAuthError(err); })
       .finally(() => setHistoryLoading(false));
   }, []);
+
+  async function handleSaveTemplate() {
+    if (!text.trim() || !newTplName.trim()) return;
+    setSavingTpl(true);
+    try {
+      const tpl = await saas.createMessageTemplate({ name: newTplName.trim(), body: text.trim() });
+      setTemplates((prev) => [...prev, tpl]);
+      setNewTplName("");
+    } finally {
+      setSavingTpl(false);
+    }
+  }
+
+  async function handleDeleteTemplate(id: number) {
+    await saas.deleteMessageTemplate(id);
+    setTemplates((prev) => prev.filter((t) => t.id !== id));
+  }
 
   async function handleSend() {
     if (!text.trim()) return;
@@ -186,7 +209,26 @@ export function SaasOutreach() {
           )}
 
           <div className="space-y-1.5">
-            <Label>Текст сообщения</Label>
+            <div className="flex items-center justify-between gap-3">
+              <Label>Текст сообщения</Label>
+              {templates.length > 0 && (
+                <Select onValueChange={(id) => {
+                  const tpl = templates.find((t) => String(t.id) === id);
+                  if (tpl) setText(tpl.body);
+                }}>
+                  <SelectTrigger className="h-7 w-auto max-w-[200px] text-xs">
+                    <SelectValue placeholder="Загрузить шаблон…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.map((t) => (
+                      <SelectItem key={t.id} value={String(t.id)}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
             <Textarea
               placeholder="Введите текст сообщения…"
               value={text}
@@ -194,8 +236,58 @@ export function SaasOutreach() {
               rows={5}
               className="resize-none"
             />
-            <p className="text-xs text-muted-foreground text-right">{text.length}/4000</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">{text.length}/4000</p>
+              {text.trim() && (
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    placeholder="Название шаблона…"
+                    value={newTplName}
+                    onChange={(e) => setNewTplName(e.target.value)}
+                    className="h-7 text-xs w-40"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    disabled={!newTplName.trim() || savingTpl}
+                    onClick={handleSaveTemplate}
+                  >
+                    <PlusIcon className="size-3 mr-1" />
+                    Сохранить
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
+
+          {/* Saved templates list */}
+          {templates.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground font-medium">Шаблоны</p>
+              <div className="flex flex-wrap gap-1.5">
+                {templates.map((t) => (
+                  <div key={t.id} className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs">
+                    <button
+                      type="button"
+                      className="hover:underline cursor-pointer"
+                      onClick={() => setText(t.body)}
+                    >
+                      {t.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTemplate(t.id)}
+                      className="text-muted-foreground/60 hover:text-destructive ml-1"
+                    >
+                      <Trash2Icon className="size-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label className="flex items-center gap-1.5">
