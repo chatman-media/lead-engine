@@ -81,7 +81,7 @@ export function SaasSettings() {
   const [forms, setForms] = useState<Record<LlmPurpose, FormState>>({
     chat: { ...EMPTY_FORM },
     embed: { ...EMPTY_FORM },
-    vision: { ...EMPTY_FORM },
+    vision: { ...EMPTY_FORM, provider: "openrouter", model: "google/gemini-2.5-flash" },
     judge: { ...EMPTY_FORM },
   });
 
@@ -319,7 +319,7 @@ export function SaasSettings() {
                         purpose === "embed"
                           ? "text-embedding-3-small"
                           : purpose === "vision"
-                            ? "gpt-4o"
+                            ? "google/gemini-2.5-flash"
                             : "gpt-4o-mini"
                       }
                     />
