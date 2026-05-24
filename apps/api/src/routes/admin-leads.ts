@@ -260,6 +260,140 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
   });
 
   /**
+   * POST /api/admin/leads/import
+   * Body: text/csv или multipart field "file"
+   * Columns (header row required): name, phone, email, stage_slug
+   *   - name: отображаемое имя контакта (обязательно)
+   *   - phone, email: опционально
+   *   - stage_slug: slug стадии воронки (опционально, дефолт — первая стадия)
+   * Returns: { imported, skipped, errors: string[] }
+   */
+  app.post("/api/admin/leads/import", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+
+    // Accept either text/csv body or multipart form field "file"
+    const ct = c.req.header("content-type") ?? "";
+    let csvText: string;
+    if (ct.includes("multipart/form-data")) {
+      const form = await c.req.formData();
+      const file = form.get("file");
+      if (!file || typeof file === "string") return c.json({ error: "file field required" }, 400);
+      csvText = await (file as File).text();
+    } else {
+      csvText = await c.req.text();
+    }
+
+    // Minimal CSV parser: handles quoted fields with commas/newlines inside.
+    function parseCsv(raw: string): string[][] {
+      const result: string[][] = [];
+      let row: string[] = [];
+      let field = "";
+      let inQuote = false;
+      for (let i = 0; i < raw.length; i++) {
+        const ch = raw[i];
+        if (inQuote) {
+          if (ch === '"' && raw[i + 1] === '"') { field += '"'; i++; }
+          else if (ch === '"') { inQuote = false; }
+          else { field += ch; }
+        } else {
+          if (ch === '"') { inQuote = true; }
+          else if (ch === ',') { row.push(field); field = ""; }
+          else if (ch === '\r' && raw[i + 1] === '\n') { row.push(field); field = ""; result.push(row); row = []; i++; }
+          else if (ch === '\n') { row.push(field); field = ""; result.push(row); row = []; }
+          else { field += ch; }
+        }
+      }
+      if (field || row.length) { row.push(field); result.push(row); }
+      return result.filter((r) => r.some((c) => c.trim()));
+    }
+
+    const rows = parseCsv(csvText.trim());
+    if (rows.length < 2) return c.json({ error: "CSV must have header + at least one data row" }, 400);
+
+    const header = rows[0].map((h) => h.trim().toLowerCase());
+    const colName = header.indexOf("name");
+    const colPhone = header.indexOf("phone");
+    const colEmail = header.indexOf("email");
+    const colStage = header.indexOf("stage_slug");
+
+    if (colName === -1) return c.json({ error: "CSV header must include 'name' column" }, 400);
+
+    // Pre-load stage definitions for slug → id lookup
+    const stageDefs = await withTenant(opts.db, tenantId, async (tx) =>
+      tx.select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
+        .from(stageDefinitions)
+        .where(eq(stageDefinitions.tenantId, tenantId)),
+    );
+    const stageBySlug = new Map(stageDefs.map((s) => [s.slug, s.id]));
+    const defaultStageId = stageDefs[0]?.id ?? null;
+
+    const quota = await canAddLead({ db: opts.db, tenantId });
+    if (!quota.allowed) {
+      return c.json({ error: "leads_limit_reached", limit: quota.limit, current: quota.current }, 402);
+    }
+
+    const dataRows = rows.slice(1);
+    let imported = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    const now = Math.floor(Date.now() / 1000);
+
+    for (let i = 0; i < dataRows.length; i++) {
+      const cells = dataRows[i];
+      const name = colName >= 0 ? (cells[colName] ?? "").trim() : "";
+      if (!name) { skipped++; continue; }
+
+      const phone = (cells[colPhone] ?? "").trim() || null;
+      const email = (cells[colEmail] ?? "").trim() || null;
+      const stageSlug = colStage >= 0 ? (cells[colStage] ?? "").trim() || null : null;
+      const stageId = stageSlug ? (stageBySlug.get(stageSlug) ?? defaultStageId) : defaultStageId;
+
+      try {
+        await withTenant(opts.db, tenantId, async (tx) => {
+          const attrs: Record<string, string> = {};
+          if (phone) attrs.phone = phone;
+          if (email) attrs.email = email;
+          const [contact] = await tx
+            .insert(contacts)
+            .values({
+              tenantId,
+              displayName: name,
+              attributesJson: Object.keys(attrs).length ? JSON.stringify(attrs) : null,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning({ id: contacts.id });
+          if (!contact) throw new Error("contact insert failed");
+
+          await tx.insert(leads).values({
+            tenantId,
+            userId: contact.id,
+            state: "intake_pending",
+            stageDefinitionId: stageId,
+            createdAt: now,
+            updatedAt: now,
+          });
+        });
+        imported++;
+      } catch (err) {
+        errors.push(`Row ${i + 2}: ${(err as Error).message}`);
+        skipped++;
+      }
+    }
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "lead.import",
+      targetKind: "lead",
+      details: { imported, skipped, total: dataRows.length },
+    });
+
+    return c.json({ imported, skipped, errors }, 200);
+  });
+
+  /**
    * GET /api/admin/leads/:id
    * Возвращает лид + stage definition + field values + recent events + notes
    */

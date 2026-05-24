@@ -34,7 +34,7 @@ export function makeAdminOutreachRoutes(opts: { db: Db }): Hono {
     const tenantId = c.var.tenantId;
     const adminId = c.var.adminId as number | undefined;
 
-    let body: { text?: unknown; leadIds?: unknown; stageSlug?: unknown };
+    let body: { text?: unknown; leadIds?: unknown; stageSlug?: unknown; scheduledAt?: unknown };
     try {
       body = (await c.req.json()) as typeof body;
     } catch {
@@ -44,6 +44,13 @@ export function makeAdminOutreachRoutes(opts: { db: Db }): Hono {
     const text = typeof body.text === "string" ? body.text.trim() : "";
     if (!text) return c.json({ error: "text required" }, 400);
 
+    const nowEpochOuter = Math.floor(Date.now() / 1000);
+    const scheduledAtRaw = typeof body.scheduledAt === "number" ? body.scheduledAt : null;
+    const scheduledAt =
+      scheduledAtRaw !== null && scheduledAtRaw > nowEpochOuter
+        ? scheduledAtRaw
+        : null;
+
     const hasLeadIds = Array.isArray(body.leadIds) && body.leadIds.length > 0;
     const hasStageSlug = typeof body.stageSlug === "string" && body.stageSlug.trim().length > 0;
     if (!hasLeadIds && !hasStageSlug) {
@@ -52,6 +59,7 @@ export function makeAdminOutreachRoutes(opts: { db: Db }): Hono {
 
     const result = await withTenant(opts.db, tenantId, async (tx) => {
       const nowEpoch = Math.floor(Date.now() / 1000);
+      const sendAt = scheduledAt ?? nowEpoch;
 
       // 1. Resolve target lead rows → { id, userId }
       let targetLeads: Array<{ id: number; userId: number }>;
@@ -180,14 +188,14 @@ export function makeAdminOutreachRoutes(opts: { db: Db }): Hono {
           conversationId,
           payloadJson: JSON.stringify(envelope),
           idempotencyKey: `outreach-${msg.id}`,
-          scheduledAt: nowEpoch,
+          scheduledAt: sendAt,
           createdAt: nowEpoch,
         });
 
         enqueued++;
       }
 
-      return { enqueued, skipped };
+      return { enqueued, skipped, scheduledAt: scheduledAt ?? null };
     });
 
     await recordAudit(opts.db, {

@@ -782,11 +782,15 @@ export const saas = {
   },
 
   // ── Conversations (read-only) ────────────────────────────────────────
-  listConversations(opts: { limit?: number; cursor?: number; contactId?: number } = {}) {
+  listConversations(opts: { limit?: number; cursor?: number; contactId?: number; source?: string; mode?: string; escalated?: boolean; q?: string } = {}) {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.cursor) params.set("cursor", String(opts.cursor));
     if (opts.contactId) params.set("contactId", String(opts.contactId));
+    if (opts.source) params.set("source", opts.source);
+    if (opts.mode) params.set("mode", opts.mode);
+    if (opts.escalated) params.set("escalated", "1");
+    if (opts.q) params.set("q", opts.q);
     const qs = params.toString();
     return request<{
       items: ConversationListItem[];
@@ -1180,11 +1184,27 @@ export const saas = {
   },
 
   // ── Outreach campaigns ────────────────────────────────────────────────
-  sendOutreach(body: { text: string; leadIds?: number[]; stageSlug?: string }) {
-    return request<{ enqueued: number; skipped: number }>("/api/admin/outreach", {
+  sendOutreach(body: { text: string; leadIds?: number[]; stageSlug?: string; scheduledAt?: number }) {
+    return request<{ enqueued: number; skipped: number; scheduledAt: number | null }>("/api/admin/outreach", {
       method: "POST",
       body: JSON.stringify(body),
     });
+  },
+
+  async importLeadsCsv(file: File): Promise<{ imported: number; skipped: number; errors: string[] }> {
+    const token = getToken();
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/api/admin/leads/import`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      throw new ApiError(res.status, err.error ?? "import_failed");
+    }
+    return res.json() as Promise<{ imported: number; skipped: number; errors: string[] }>;
   },
 
   // ── Director hooks ────────────────────────────────────────────────────

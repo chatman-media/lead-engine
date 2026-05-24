@@ -7,7 +7,7 @@ import {
   messages,
   outboundQueue,
 } from "@chatman-media/storage";
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
@@ -50,11 +50,12 @@ export function makeAdminConversationsRoutes(
     const cursor = cursorRaw ? Number.parseInt(cursorRaw, 10) : null;
     const contactIdRaw = c.req.query("contactId");
     const contactIdFilter = contactIdRaw ? Number.parseInt(contactIdRaw, 10) : null;
+    const sourceFilter = c.req.query("source") || null;
+    const modeFilter = c.req.query("mode") || null;
+    const escalatedOnly = c.req.query("escalated") === "1";
+    const qFilter = c.req.query("q")?.trim() || null;
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
-      // Correlated subquery для last message preview: берём последний non-system
-      // текст (role IN ('user','assistant','human')) — до 120 символов.
-      // Выполняется один раз per-row (indexed by conversation_id + created_at DESC).
       const lastMsgPreview = sql<string | null>`(
         SELECT left(text, 120)
         FROM messages
@@ -64,6 +65,16 @@ export function makeAdminConversationsRoutes(
         ORDER BY created_at DESC, id DESC
         LIMIT 1
       )`;
+
+      const conditions = [
+        eq(conversations.tenantId, tenantId),
+        ...(cursor !== null && Number.isFinite(cursor) ? [lt(conversations.lastMessageAt, cursor)] : []),
+        ...(contactIdFilter !== null ? [eq(conversations.userId, contactIdFilter)] : []),
+        ...(sourceFilter ? [eq(conversations.source, sourceFilter)] : []),
+        ...(modeFilter ? [eq(conversations.mode, modeFilter)] : []),
+        ...(escalatedOnly ? [isNotNull(conversations.escalatedAt)] : []),
+        ...(qFilter ? [ilike(contacts.displayName, `%${qFilter}%`)] : []),
+      ];
 
       return tx
         .select({
@@ -80,17 +91,7 @@ export function makeAdminConversationsRoutes(
         })
         .from(conversations)
         .leftJoin(contacts, eq(contacts.id, conversations.userId))
-        .where(
-          cursor !== null && Number.isFinite(cursor)
-            ? and(
-                eq(conversations.tenantId, tenantId),
-                lt(conversations.lastMessageAt, cursor),
-                ...(contactIdFilter !== null ? [eq(conversations.userId, contactIdFilter)] : []),
-              )
-            : contactIdFilter !== null
-              ? and(eq(conversations.tenantId, tenantId), eq(conversations.userId, contactIdFilter))
-              : eq(conversations.tenantId, tenantId),
-        )
+        .where(and(...conditions))
         .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
         .limit(limit + 1);
     });
