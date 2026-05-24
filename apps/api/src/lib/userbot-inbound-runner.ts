@@ -4,6 +4,7 @@ import {
   ConversationsRepo,
   type Db,
   generateReplyAndEnqueue,
+  type ITranscriber,
   type MemoryExtractor,
   MessagesRepo,
   OutboundQueueRepo,
@@ -42,6 +43,7 @@ export function startUserbotInboundRunner(opts: {
   stageClassifier?: StageClassifier | null;
   photoProcessor?: PhotoProcessor;
   fieldExtractor?: FieldExtractor;
+  resolveTranscriber?: ((tenantId: number) => ITranscriber | null) | null;
   sink?: PipelineSink;
   metrics?: PlatformMetrics;
   log: JsonLogger;
@@ -84,6 +86,18 @@ export function startUserbotInboundRunner(opts: {
               ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
               ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
               ...(opts.sink ? { sink: opts.sink } : {}),
+              ...(opts.resolveTranscriber
+                ? (() => {
+                    const t = opts.resolveTranscriber(entry.tenantId);
+                    return t
+                      ? {
+                          transcriber: t,
+                          downloadVoice: (mediaRef: import("@chatman-media/channel-core").MediaRef, externalUserId: string) =>
+                            entry.adapter.downloadMedia(mediaRef, { externalUserId }),
+                        }
+                      : {};
+                  })()
+                : {}),
             });
           });
           if (result.replyDeferred && opts.replyStrategy) {

@@ -209,7 +209,7 @@ export function makeTelegramWebhookRoutes(opts: {
           ? (() => {
               const t = opts.resolveTranscriber(entry.tenantId);
               return t
-                ? { transcriber: t, downloadVoice: (ref: string) => adapter.rawClient.downloadFile(ref) }
+                ? { transcriber: t, downloadVoice: (mediaRef: import("@chatman-media/channel-core").MediaRef) => adapter.rawClient.downloadFile(mediaRef.externalRef) }
                 : {};
             })()
           : {}),

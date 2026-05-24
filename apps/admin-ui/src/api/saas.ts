@@ -220,6 +220,7 @@ export interface MessageRow {
   id: number;
   role: "user" | "assistant" | "human" | "system";
   text: string;
+  metaJson: string | null;
   createdAt: number;
   stage: string | null;
   deletedAt: number | null;

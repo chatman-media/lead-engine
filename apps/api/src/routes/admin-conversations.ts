@@ -163,6 +163,7 @@ export function makeAdminConversationsRoutes(
           id: messages.id,
           role: messages.role,
           text: messages.text,
+          metaJson: messages.metaJson,
           createdAt: messages.createdAt,
           stage: messages.stage,
           deletedAt: messages.deletedAt,

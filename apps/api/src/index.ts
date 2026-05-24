@@ -528,6 +528,7 @@ async function main() {
         sink,
         metrics,
         ...(rateLimiter ? { rateLimiter } : {}),
+        ...(resolveTranscriber ? { resolveTranscriber } : {}),
       }),
     );
     if (!cfg.whatsappAppSecret) {
@@ -616,6 +617,7 @@ async function main() {
         sink,
         metrics,
         log,
+        ...(resolveTranscriber ? { resolveTranscriber } : {}),
       }),
     );
     // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic signature

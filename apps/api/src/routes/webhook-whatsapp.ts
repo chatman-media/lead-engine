@@ -4,6 +4,7 @@ import {
   ConversationsRepo,
   type Db,
   generateReplyAndEnqueue,
+  type ITranscriber,
   type MemoryExtractor,
   MessagesRepo,
   OutboundQueueRepo,
@@ -66,6 +67,7 @@ export function makeWhatsAppWebhookRoutes(opts: {
   rateLimiter?: InboundRateLimiter;
   photoProcessor?: PhotoProcessor;
   fieldExtractor?: FieldExtractor;
+  resolveTranscriber?: ((tenantId: number) => ITranscriber | null) | null;
 }): Hono {
   const app = new Hono();
 
@@ -196,6 +198,18 @@ export function makeWhatsAppWebhookRoutes(opts: {
           ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
           ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
           ...(opts.sink ? { sink: opts.sink } : {}),
+          ...(opts.resolveTranscriber
+            ? (() => {
+                const t = opts.resolveTranscriber(entry.tenantId);
+                return t
+                  ? {
+                      transcriber: t,
+                      downloadVoice: (mediaRef: import("@chatman-media/channel-core").MediaRef) =>
+                        entry.adapter.downloadMedia(mediaRef),
+                    }
+                  : {};
+              })()
+            : {}),
         });
       });
       // ── Phase 2: reply.generate (LLM) ВНЕ tx + enqueue новой короткой tx ──
