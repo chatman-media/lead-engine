@@ -7,6 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
+const PROVIDER_LABEL: Record<string, string> = {
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+  anthropic: "Anthropic",
+  ollama: "Ollama",
+};
+
 const PURPOSE_LABEL: Record<string, string> = {
   chat: "Диалог",
   embed: "Эмбеддинги (RAG)",
@@ -166,7 +173,7 @@ export function SaasBilling() {
                       return (
                         <div key={row.provider} className="py-2">
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-sm font-medium capitalize">{row.provider}</span>
+                            <span className="text-sm font-medium">{PROVIDER_LABEL[row.provider] ?? row.provider}</span>
                             <span className="text-xs text-muted-foreground font-mono">
                               {fmtNum(row.calls)} · {pct}%
                             </span>
@@ -206,7 +213,7 @@ function StatCard({
     accent === "destructive"
       ? "text-destructive"
       : accent === "warning"
-        ? "text-yellow-600"
+        ? "text-[var(--warning)]"
         : "";
   return (
     <Card>
