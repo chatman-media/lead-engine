@@ -4,7 +4,7 @@
 
 # lead-engine
 
-**AI Sales Closer for recruitment agencies on Telegram**
+**Multichannel AI Sales Closer — Telegram · WhatsApp · Web Widget**
 
 [![CI](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -27,11 +27,11 @@ Multi-tenant SaaS · BYOK LLM · per-tenant RAG · sales methodologies (SPIN / N
 
 ---
 
-**AI Sales Closer for recruitment agencies on Telegram.**
-A multi-tenant SaaS platform. Replies to inbound leads in 30 seconds,
-walks a candidate from "just curious" to a submitted application, and
-hands hot leads off to a recruiter. Driven by sales methodologies
-(SPIN, NEPQ, AIDA) — not a FAQ bot.
+**Multichannel AI Sales Closer for recruitment agencies.**
+A multi-tenant SaaS platform. Replies to inbound leads in 30 seconds
+across Telegram, WhatsApp, and a web widget — walks a candidate from
+"just curious" to a submitted application, and hands hot leads off to a
+recruiter. Driven by sales methodologies (SPIN, NEPQ, AIDA) — not a FAQ bot.
 
 **Phase 1 ICP:** recruitment agencies in RU/CIS/MENA, Telegram-first,
 ARPU $99–199/mo. [Phase 2: real estate. Phase 3: horizontal.]
@@ -58,6 +58,21 @@ PRs (see `docs/ROADMAP.md` and the git log).
 - [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — a new tenant's path (UI + curl)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — what's done, in progress, and next
 - [`docs/COMPETITORS.md`](docs/COMPETITORS.md) — competitor analysis and positioning
+
+---
+
+## Features at a glance
+
+| Channels | AI Engine | Operator Tools |
+|---|---|---|
+| Telegram Bot | RAG (pgvector + BM25) | Inbox + conversation takeover |
+| Telegram Userbot | BYOK LLM (OpenAI / Anthropic / Ollama) | Lead pipeline (Kanban) |
+| WhatsApp Cloud API | SPIN / NEPQ / AIDA methodologies | Drag-and-drop funnel builder |
+| Web Widget (WebSocket) | Passport OCR + photo vision | A/B experiments + ELO ranking |
+| Auto-setWebhook (60s) | Hallucination guard | Audit log + diagnostics |
+| Per-tenant RLS isolation | Per-purpose LLM routing | Admin invite flow + roles |
+
+> **Screenshot / GIF coming soon** — admin UI preview (inbox · lead pipeline · funnel builder)
 
 ---
 
@@ -258,6 +273,35 @@ no manual curl command.
 
 ## Pipeline (inbound → outbound)
 
+```mermaid
+flowchart LR
+  W([Webhook]) --> S{Signature OK?}
+  S -- ❌ --> E1([401])
+  S -- ✅ --> R{Rate limit OK?}
+  R -- ❌ --> E2([429])
+  R -- ✅ --> TX1
+
+  subgraph TX1 [tx1 — persist]
+    C[resolveContact] --> CV[resolveConversation]
+    CV --> M[persist Message]
+    M --> SC[stageClassifier ~300ms]
+    SC --> ME[memoryExtractor ~500ms]
+  end
+
+  TX1 --> LLM[RAG · reply.generate ~1-2s]
+  LLM --> TX2[tx2 — enqueue outbound]
+  TX2 --> ACK([200 ack < 100ms])
+
+  TX2 --> W2[apps/worker]
+  W2 --> Out1[Telegram Bot API]
+  W2 --> Out2[WhatsApp Graph API]
+  TX2 --> Out3[WebSocket / Userbot in-process]
+
+  M -.->|async fire-forget| OCR[passport OCR · vision]
+```
+
+**Detailed steps:**
+
 ```
 1. Webhook handler receives the HTTP POST                       (apps/api)
 2. Validate signature → 401 if bad
@@ -283,6 +327,7 @@ no manual curl command.
 11. apps/worker (TG-bot / WA) or apps/api (web / TG userbot) drain
     outbound_queue via SKIP LOCKED → adapter.send → mark sent.
 ```
+
 
 ---
 
@@ -457,6 +502,25 @@ resolve. Requires an `NPM_TOKEN` repository secret with publish rights to the
 
 ---
 
+## Positioning
+
+| | **lead-engine** | Intercom Fin | Chatbase | CustomGPT | Decagon |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Telegram-native | ✅ | ❌ | ❌ | ❌ | ❌ |
+| WhatsApp | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Web Widget | ✅ | ✅ | ✅ | ✅ | ✅ |
+| BYOK LLM | ✅ | ❌ | partial | ❌ | ❌ |
+| Operator takeover | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Lead pipeline (Kanban) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Funnel builder | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Multi-tenant SaaS | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Self-host | ✅ enterprise | ❌ | ❌ | ❌ | ❌ |
+| Open source | ✅ MIT | ❌ | ❌ | ❌ | ❌ |
+
+Full competitive analysis: [`docs/COMPETITORS.md`](docs/COMPETITORS.md)
+
+---
+
 ## Roadmap & competitors
 
 - **Done / in progress / next** — see [`docs/ROADMAP.md`](docs/ROADMAP.md)
@@ -468,6 +532,18 @@ Decagon are enterprise + web-chat-first. Chatbase / CustomGPT are simple
 knowledge bots without operator takeover or channels-as-a-service. Our
 position: open architecture + BYOK + Telegram-first + a full operator
 workflow (inbox + reply + audit + diagnostics).
+
+---
+
+## Contributing
+
+PRs are welcome. A few guidelines:
+
+- **Branches**: `feat/<name>` for features, `fix/<name>` for bug fixes
+- **Commits**: follow [Conventional Commits](https://www.conventionalcommits.org/) — `feat:`, `fix:`, `chore:`, etc. Semantic-release derives versions and changelogs from them
+- **Before submitting**: run `bun run typecheck && bun test` across the monorepo. CI is the same check
+- **Architecture context**: read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before touching `apps/api` or the packages — the RLS / withTenant contract and the split-tx pipeline are critical invariants
+- **New packages**: add to `packages/`, export from `@chatman-media/<name>`, wire up `bun.lockb` + tsconfig paths
 
 ---
 
