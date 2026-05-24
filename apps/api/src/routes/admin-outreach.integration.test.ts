@@ -78,8 +78,8 @@ beforeAll(
     tenantId = signup.admin.tenantId;
 
     // Создаём telegram_bot channel (status=active).
-    // Используем telegram_bot (→ source="bot"), т.к. conversations.source
-    // принимает только 'bot'|'userbot'|'self_play'.
+    // source="bot" — единственное значение для bot-initiated каналов.
+    // "web" и "whatsapp" тоже маппятся на "bot" (см. admin-outreach.ts).
     const [channel] = await db.insert(channels).values({
       tenantId,
       kind: "telegram_bot",
@@ -256,6 +256,43 @@ describe("POST /api/admin/outreach — by stageSlug", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { enqueued: number; skipped: number };
     expect(body.enqueued).toBe(0);
+    expect(body.skipped).toBe(0);
+  });
+});
+
+describe("POST /api/admin/outreach — web channel kind", () => {
+  it("web channel identity → enqueued=1 (маппится на source='bot')", async () => {
+    if (!sql) return;
+    const [webChannel] = await db.insert(channels).values({
+      tenantId,
+      kind: "web",
+      externalId: "web-test-99999",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    }).returning({ id: channels.id });
+    const [webContact] = await db.insert(contacts).values({ tenantId, createdAt: now, updatedAt: now }).returning({ id: contacts.id });
+    await db.insert(channelIdentities).values({
+      contactId: webContact!.id,
+      channelId: webChannel!.id,
+      externalUserId: "web-user-999",
+      createdAt: now,
+    });
+    const [webLead] = await db.insert(leads).values({
+      tenantId,
+      userId: webContact!.id,
+      state: "new",
+      createdAt: now,
+      updatedAt: now,
+    }).returning({ id: leads.id });
+
+    const res = await post("/api/admin/outreach", {
+      text: "Привет из web-канала!",
+      leadIds: [webLead!.id],
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { enqueued: number; skipped: number };
+    expect(body.enqueued).toBe(1);
     expect(body.skipped).toBe(0);
   });
 });

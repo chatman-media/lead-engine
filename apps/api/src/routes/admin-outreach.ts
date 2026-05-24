@@ -121,10 +121,7 @@ export function makeAdminOutreachRoutes(opts: { db: Db }): Hono {
         }
 
         // 3. Find or create conversation.
-        const source = identity.channelKind === "telegram_userbot" ? "userbot"
-          : identity.channelKind === "whatsapp" ? "whatsapp"
-          : identity.channelKind === "web" ? "web"
-          : "bot";
+        const source = identity.channelKind === "telegram_userbot" ? "userbot" : "bot";
 
         let conversationId: number;
         const [existingConv] = await tx
