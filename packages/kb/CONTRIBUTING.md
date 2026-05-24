@@ -19,7 +19,7 @@ bun run format
 ```
 
 No test runner is bundled in this package — integration tests live in the host
-lead-engine project which has a
+Lead Engine project which has a
 real PostgreSQL + pgvector setup.
 
 ## Project structure

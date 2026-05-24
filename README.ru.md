@@ -2,7 +2,7 @@
 
 <a name="top"></a>
 
-# lead-engine
+# Lead Engine
 
 **AI Sales Closer для рекрутинговых агентств в Telegram**
 

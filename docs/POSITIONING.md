@@ -1,4 +1,4 @@
-# Positioning — lead-engine
+# Positioning — Lead Engine
 
 Последнее обновление: 2026-05-24.
 

@@ -172,7 +172,7 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
 - ✅ **«Закрыто ботом» метрика** — новая карточка на дашборде: сумма лидов в
   `terminal_won` стадиях. Ключевой ROI-показатель для удержания клиентов и YouTube-кейсов
 - ✅ **Sales-бот (meta-демо)** — `leadengine_sales_v1` NEPQ-воронка для продажи
-  lead-engine рекрутёрам через Telegram. Полный KB-комплект: обзор продукта,
+  Lead Engine рекрутёрам через Telegram. Полный KB-комплект: обзор продукта,
   кейс UAE, возражения/FAQ, сравнение конкурентов. System prompt «Алекс» с
   Cialdini-элементами. `docs/sales-bot/` — готово к деплою за 15 минут.
 - ✅ **Agentic booking tool** — `makeBookingLinkTool` (RagTool): LLM сам
@@ -487,7 +487,7 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
 3. **Primary persona для маркетинга** — recruitment agencies UAE/CIS
    (текущий tenant), expand к dental clinics RU + edtech SEA. Каждый
    vertical pack (M6) = отдельная посадочная.
-4. **Web widget brand** — нужно ли rebrand'ить от lead-engine? Engineering-
+4. **Web widget brand** — нужно ли rebrand'ить от Lead Engine? Engineering-
    frontale название, продажникам может не зайти. Re-name к Q4'26 после
    первых 5 paying customers.
 5. **Voice partner** — Vapi vs Retell vs Bland.ai. Решение через 6 месяцев.

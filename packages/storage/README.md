@@ -9,7 +9,7 @@
 
 **PostgreSQL storage adapters for [@chatman-media/sales](https://github.com/chatman-media/lead-engine/tree/main/packages/sales).** Drizzle ORM implementations of all engine repository interfaces — users, conversations, leads, skills, ELO ratings, self-play matches, pairwise comparisons, and shadow evaluations.
 
-Built from the production persistence layer of the lead-engine platform — multi-tenant SaaS with Postgres RLS.
+Built from the production persistence layer of the Lead Engine platform — multi-tenant SaaS with Postgres RLS.
 
 ---
 

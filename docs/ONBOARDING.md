@@ -142,7 +142,7 @@ UI показывает эти три значения в banner для copy-pas
 - **Verify Token** = `webhookSetupHint.verifyToken`
 - Подписаться на `messages` events
 
-После этого Meta отправит GET с challenge, lead-engine ответит plaintext
+После этого Meta отправит GET с challenge, Lead Engine ответит plaintext
 challenge (см. `verifyWebhookSubscription` в `packages/channel-whatsapp`).
 
 curl:

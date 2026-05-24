@@ -1,4 +1,4 @@
-# Анализ конкурентов — lead-engine
+# Анализ конкурентов — Lead Engine
 
 Последнее обновление: 2026-05-23. Источники приведены инлайн; цены —
 публичный прайс на момент исследования и могут меняться ежеквартально —
@@ -63,7 +63,7 @@ passport-OCR, dance-video, 12-state funnel, `recruitment_uae_v1` в проде).
 
 ## 1. Контекст
 
-Мы строим **lead-engine** — multi-tenant SaaS, где бизнес:
+Мы строим **Lead Engine** — multi-tenant SaaS, где бизнес:
 
 1. Регается, подключает **свой** OpenAI / Anthropic API ключ (BYOK).
 2. Подключает каналы: **Telegram first**, потом WhatsApp, web-виджет,
@@ -87,7 +87,7 @@ Telegram доминирует, а западные инструменты его
 - **Низ** ($0–$50/мес): ManyChat, Botpress free tier, OSS Rasa —
   flow-builder'ы, любители, маленькие маркетинговые команды.
 
-lead-engine целится в средний сегмент с moat'ом, которого у него нет:
+Lead Engine целится в средний сегмент с moat'ом, которого у него нет:
 BYOK + Telegram-native + multi-tenant + operator-handoff + готовность
 к open-source.
 
@@ -135,7 +135,7 @@ BYOK + Telegram-native + multi-tenant + operator-handoff + готовность
                               │ ● Cognigy
               Intercom Fin ● ─┤← Fin for Sales (окт 2025, ближе к нам)
               for Sales        │
-                              │   ● lead-engine ← МЫ ЗДЕСЬ
+                              │   ● Lead Engine ← МЫ ЗДЕСЬ
                   CustomGPT ● │   (NEPQ+Cialdini+TG-native, CIS/MENA)
                   Lyro/Tidio ●│ ● Crisp MagicReply
                               │ ● Sendbird AI
@@ -155,14 +155,14 @@ BYOK + Telegram-native + multi-tenant + operator-handoff + готовность
 - 1mind появился в enterprise tier как Drift-преемник ($100K+/yr)
 - Telegram сам запустил Managed Bots (апр 2026) — платформенный игрок рядом с нами
 
-**В чём lead-engine по-прежнему выигрывает:**
+**В чём Lead Engine по-прежнему выигрывает:**
 - Telegram-native (все новые конкуренты web-first)
 - NEPQ/Cialdini/SPIN как первоклассные фичи (никто так не делает)
 - CIS/MENA/RU рынок (все — EN-ориентированы)
 - BYOK (все новые конкуренты включают inference в цену)
 - $99/мес вход (1mind $100K+/yr, Sense/Humanly $25K+/yr)
 
-**В чём lead-engine выигрывает**
+**В чём Lead Engine выигрывает**
 
 - Telegram-native (Sierra, Decagon, Ada, Lyro, Helpshift не считают
   Telegram first-class каналом).
@@ -177,7 +177,7 @@ BYOK + Telegram-native + multi-tenant + operator-handoff + готовность
   гос) — только Rasa и Botpress OSS на этом уровне, но им нужна ML-
   команда.
 
-**В чём lead-engine проигрывает (сегодня)**
+**В чём Lead Engine проигрывает (сегодня)**
 
 - Нет voice-канала (Sierra, Decagon, Cognigy, Forethought все шлют
   voice; voice — 19% объёма контакт-центров в 2026).
@@ -193,7 +193,7 @@ BYOK + Telegram-native + multi-tenant + operator-handoff + готовность
 
 ## 4. Pricing benchmarks (для нашего бизнес-плана)
 
-| Тир | Якоря рынка | Типичный ACV / месяц | Что lead-engine должен брать |
+| Тир | Якоря рынка | Типичный ACV / месяц | Что Lead Engine должен брать |
 |-----|-------------|----------------------|------------------------------|
 | **Free / hobby** | Chatbase Free, Botpress Free, ManyChat Free | $0, ограничение ~100–1K msgs | Free: 1 tenant, 100 LLM-ответов/мес, только BYOK — funnel hook |
 | **SMB Starter** | Chatbase Hobby $40, Tidio $24+, Lyro $39, Threado $49, Helpshift $150 | $30–$150/мес | **$49/мес**: 1 tenant, Telegram + 1 канал, 2K msgs, 1 оператор, BYOK |
@@ -218,7 +218,7 @@ flat-msg cap с BYOK — чёткий positioning-wedge.
 
 ## 5. Матрица покрытия каналов
 
-| Канал | lead-engine | Chatbase | Sierra | Decagon | Intercom Fin | Tidio Lyro | Crisp | ManyChat | Voiceflow | Botpress | CustomGPT | Forethought | Ada | Cognigy |
+| Канал | Lead Engine | Chatbase | Sierra | Decagon | Intercom Fin | Tidio Lyro | Crisp | ManyChat | Voiceflow | Botpress | CustomGPT | Forethought | Ada | Cognigy |
 |-------|:-----------:|:--------:|:------:|:-------:|:------------:|:----------:|:-----:|:--------:|:---------:|:--------:|:---------:|:-----------:|:---:|:-------:|
 | **Telegram** | ✅ first | partial | ❌ | ❌ | ❌ | **❌ (только через Zapier)** | ✅ | ✅ | через API | ✅ | ❌ | partial | ❌ | partial |
 | Web widget | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -247,13 +247,13 @@ VK / Avito / OK — бонусный moat; ни один не-российски
    CustomGPT, Tidio все *включают* LLM-inference в seat/resolution
    тарифы с 30–80% маржой сверху. CX-команда за $20K/мес в Тбилиси или
    Эр-Рияде, у которой уже есть enterprise-контракт с Anthropic, не
-   может его использовать на Intercom Fin. lead-engine позволяет — и
+   может его использовать на Intercom Fin. Lead Engine позволяет — и
    это прямое сокращение ACV для клиента (часто 40–60% против $0.99
    за resolution у Fin).
 
 2. **Data sovereignty / on-prem.** Sierra и Decagon — SaaS-only на AWS
    US/EU. Rasa Pro и Botpress OSS позволяют self-host, но требуют ML-
-   команду. lead-engine как single-binary Docker-compose deployment для
+   команду. Lead Engine как single-binary Docker-compose deployment для
    регулируемых вертикалей (частные клиники, банки, defense-подрядчики,
    госзакупки в не-US юрисдикциях) — реальный wedge.
 
@@ -265,7 +265,7 @@ VK / Avito / OK — бонусный moat; ни один не-российски
 4. **Multi-tenant из коробки.** Большинство платформ берут плату per
    workspace / per bot, что делает agency-перепродажу дорогой. У
    Botpress и ManyChat есть agency-тиры, но они marketing-flow-
-   ориентированы. lead-engine может выпустить "marketing agency" план
+   ориентированы. Lead Engine может выпустить "marketing agency" план
    с 10–50 sub-tenant'ами под одним billing entity — рекрутинг-сети,
    edtech-франшизы, телеком-ритейл будут за это платить.
 
@@ -284,7 +284,7 @@ VK / Avito / OK — бонусный moat; ни один не-российски
 
 7. **Воронка лидов + sales-персоны встроены.** Sierra / Decagon
    фокусируются на *support*. Chatbase / CustomGPT — на *FAQ*. ManyChat
-   — на *broadcast marketing*. lead-engine сидит на оси *inbound лид →
+   — на *broadcast marketing*. Lead Engine сидит на оси *inbound лид →
    квалификация → handoff* с persona-скриптами (recruitment intake,
    real-estate qualifier, edtech consultant) — vertical templates
    отгружаются в день 1. Ни один горизонтальный конкурент этого не
@@ -303,7 +303,7 @@ VK / Avito / OK — бонусный moat; ни один не-российски
    растёт на 36.5% CAGR против 18.9% для горизонтальных тулов (Google
    Cloud AI Agent Trends 2026). Vertical templates (recruitment intake,
    стоматологическая клиника, real-estate viewing, телеком SIM-swap
-   support) будут ценнее, чем yet-another-builder. lead-engine должен
+   support) будут ценнее, чем yet-another-builder. Lead Engine должен
    отгрузить 5–8 vertical-пакетов в 2026.
 
 3. **Voice идёт с niche на baseline.** 19% входящего трафика
@@ -322,7 +322,7 @@ VK / Avito / OK — бонусный moat; ни один не-российски
 5. **Автономные workflow'ы / agentic actions.** У Chatbase есть "AI
    Actions" (Stripe, Calendly), у Forethought — Browser Agents, у Sierra
    — tool-use. Чтение и запись в CRM клиента (AmoCRM, Bitrix24 в RU;
-   HubSpot, Salesforce в остальных) — следующая ось. lead-engine должен
+   HubSpot, Salesforce в остальных) — следующая ось. Lead Engine должен
    отгрузить небольшой "Actions" SDK в 2026 — Telegram-native бизнесы
    живут на AmoCRM / Bitrix24, и эти интеграции не оспариваются
    западными вендорами.
@@ -341,7 +341,7 @@ VK / Avito / OK — бонусный moat; ни один не-российски
    + LLM-плагины, Flowise, Typebot — слой "RAG + chat UI" быстро идёт
    к нулю. Защищённость уходит выше по стеку: vertical templates,
    channel-native UX, operator workflows, billing, compliance — везде,
-   куда lead-engine должен ставить флаги.
+   куда Lead Engine должен ставить флаги.
 
 9. **Persuasion Engine — white space подтверждён (май 2026).** Ни один
    mainstream конкурент не шипает NEPQ, Cialdini, Belfort или SPIN как
@@ -361,7 +361,7 @@ VK / Avito / OK — бонусный moat; ни один не-российски
     - **Риск:** Telegram commoditizes Telegram API-интеграцию. Наш moat —
       не умение работать с API, а **вертикальный контент** (persona, persuasion,
       vertical packs) и operator UX.
-    - **Возможность:** lead-engine как Managed Bot внутри экосистемы Telegram.
+    - **Возможность:** Lead Engine как Managed Bot внутри экосистемы Telegram.
       Официальный Business Bot API как primary channel (вместо MTProto userbot).
 
 ---
