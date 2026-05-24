@@ -1,3 +1,10 @@
+# [@chatman-media/verticals-v1.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/verticals-v1.0.0...@chatman-media/verticals-v1.1.0) (2026-05-24)
+
+
+### Features
+
+* MCP server, Ollama onboarding, vertical plugin install ([#104](https://github.com/chatman-media/lead-engine/issues/104)) ([563e930](https://github.com/chatman-media/lead-engine/commit/563e9306dedfd781cf74cd6fc5a7c6cf579fa165))
+
 # @chatman-media/verticals-v1.0.0 (2026-05-23)
 
 
