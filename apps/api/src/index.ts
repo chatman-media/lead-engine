@@ -14,6 +14,7 @@ import { loadApiConfig } from "./config.ts";
 import { makeDb } from "./db.ts";
 import { loadTenantLlmConfigs } from "./lib/llm-config-loader.ts";
 import { LlmUsageWriter } from "./lib/llm-usage-writer.ts";
+import { checkUsageAlerts } from "./lib/usage-alerts.ts";
 import { makeMetricsSink } from "./lib/metrics-sink.ts";
 import { InboundRateLimiter } from "./lib/rate-limiter.ts";
 import { makeTenantReloader } from "./lib/tenant-reloader.ts";
@@ -710,6 +711,8 @@ async function main() {
   // Graceful shutdown: дренируем channels, закрываем DB-пул.
   const shutdown = async () => {
     log.info("shutting down");
+    clearInterval(usageAlertInterval);
+    clearTimeout(usageAlertFirstRun);
     server.stop();
     webAbort.abort();
     webDispatcher.stop();
@@ -724,6 +727,20 @@ async function main() {
     await close();
     process.exit(0);
   };
+  // Usage alerts — проверяем каждый час все активные тенанты.
+  // Отправляет email при 80% / 100% LLM-квоты (дедупликация in-memory по месяцу).
+  const usageAlertInterval = setInterval(() => {
+    checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
+      log.warn("usage-alerts check failed", { err: e }),
+    );
+  }, 60 * 60 * 1000); // каждый час
+  // Первый запуск через 5 минут после старта (не сразу — дать DB прогреться).
+  const usageAlertFirstRun = setTimeout(() => {
+    checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
+      log.warn("usage-alerts initial check failed", { err: e }),
+    );
+  }, 5 * 60 * 1000);
+
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
 }
