@@ -578,11 +578,11 @@ function StageCard({
               <p className="text-xs text-muted-foreground font-mono">{stage.slug}</p>
             </div>
             <div className="ml-auto flex items-center gap-2">
-              <Badge variant="secondary" className="text-xs capitalize">
+              <Badge variant="secondary" className="text-xs">
                 {STAGE_TYPES.find((t) => t.value === stage.stageType)?.label ?? stage.stageType}
               </Badge>
               {stage.supportMode && (
-                <Badge variant="outline" className="text-xs text-muted-foreground">support</Badge>
+                <Badge variant="outline" className="text-xs text-muted-foreground">поддержка</Badge>
               )}
               <Badge variant="outline" className="text-xs">
                 {stage.fields.length} полей
