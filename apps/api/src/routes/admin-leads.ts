@@ -397,7 +397,6 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         createdAt: now,
       });
 
-      // Resolve contact name for webhook payload.
       const [contact] = await tx
         .select({ displayName: contacts.displayName })
         .from(contacts)
@@ -433,10 +432,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       details: { stageDefinitionId, force },
     });
 
-    // Fire webhooks non-blocking — errors are swallowed (fire-and-forget).
-    if (webhookPayload) {
-      void fireStageWebhooks(opts.db, tenantId, webhookPayload);
-    }
+    if (webhookPayload) void fireStageWebhooks(opts.db, tenantId, webhookPayload);
 
     return c.json({ ok: true });
   });
