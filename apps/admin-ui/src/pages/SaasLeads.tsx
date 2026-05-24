@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DownloadIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const KIND_COLOR: Record<string, string> = {
   intake: "border-blue-300",
@@ -130,7 +131,34 @@ export function SaasLeads() {
     saas.moveLeadStage(draggedLeadId, targetStageId).catch(() => reload());
   }
 
-  if (loading) return <p className="p-6 text-muted-foreground text-sm">Загрузка…</p>;
+  if (loading) return (
+    <div className="space-y-4 p-6">
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <Skeleton className="h-6 w-24" />
+          <Skeleton className="h-4 w-48" />
+        </div>
+        <Skeleton className="h-9 w-28" />
+      </div>
+      <div className="flex gap-2">
+        <Skeleton className="h-9 flex-1 max-w-xs" />
+        <Skeleton className="h-9 w-28" />
+      </div>
+      <div className="flex gap-4 overflow-x-auto pb-2">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="min-w-[220px] space-y-2 rounded-lg border p-3">
+            <Skeleton className="h-4 w-32" />
+            {[0, 1, 2].map((j) => (
+              <div key={j} className="rounded-md border p-2.5 space-y-1">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-3 w-16" />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
   if (error) return <p className="p-6 text-destructive text-sm">{error}</p>;
 
   // Группируем лидов по stageDefinitionId или state
