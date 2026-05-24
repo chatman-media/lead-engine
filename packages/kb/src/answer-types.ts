@@ -79,6 +79,30 @@ export interface AnswerInput {
    */
   maxToolCycles?: number;
   /**
+   * Enable Maximal Marginal Relevance re-ranking after retrieval.
+   * Selects a diverse set of chunks so that repeated near-duplicate passages
+   * do not crowd out different sub-topics. Default: false.
+   */
+  mmr?: boolean;
+  /**
+   * λ (lambda) for MMR: trade-off between relevance and diversity.
+   * 1.0 = pure relevance, 0.0 = pure diversity. Default: 0.6.
+   * Only has effect when `mmr` is true.
+   */
+  mmrLambda?: number;
+  /**
+   * Trim retrieved hits that exceed a cosine-distance threshold before passing
+   * them to the LLM. Reduces hallucinations caused by weak/unrelated matches.
+   * Default: false (no trimming).
+   */
+  autoTrimDistance?: boolean;
+  /**
+   * Distance threshold used when `autoTrimDistance` is true.
+   * Cosine distance in [0, 2]; typical useful range is ≤ 0.4.
+   * Default: 0.45.
+   */
+  autoTrimThreshold?: number;
+  /**
    * When provided, the LLM is instructed to return a JSON object matching this
    * Zod schema. The parsed and validated value is available as `result.output`.
    * Uses OpenAI's native `response_format` when available; falls back to prompt

@@ -18,6 +18,7 @@ import {
 } from "./persona-shortcuts.ts";
 import { composeSystemPrompt } from "./prompt.ts";
 import { rewriteQuery } from "./rewrite-query.ts";
+import { applyDynamicThreshold, mmrDiversify } from "./retrieval-utils.ts";
 import { sanitizeLlmOutput } from "./sanitize.ts";
 import {
   injectJsonInstruction,
@@ -374,6 +375,12 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
   if (!input.hybridSearch && maxDist !== undefined) {
     hits = hits.filter((h) => h.distance <= maxDist);
   }
+  if (input.autoTrimDistance) {
+    hits = applyDynamicThreshold(hits, { threshold: input.autoTrimThreshold });
+  }
+  if (input.mmr) {
+    hits = mmrDiversify(hits, { lambda: input.mmrLambda, topK: topK });
+  }
   const retrievalMs = Date.now() - retrievalStart;
 
   if (hits.length === 0 && !(input.vacanciesBlock ?? "").trim() && !input.style) {
@@ -539,10 +546,16 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       vectorOnly: !input.hybridSearch,
     });
     const maxDist = input.maxDistance;
-    const hits =
+    let hits =
       input.hybridSearch || maxDist === undefined
         ? allHits
         : allHits.filter((h) => h.distance <= maxDist);
+    if (input.autoTrimDistance) {
+      hits = applyDynamicThreshold(hits, { threshold: input.autoTrimThreshold });
+    }
+    if (input.mmr) {
+      hits = mmrDiversify(hits, { lambda: input.mmrLambda, topK: topK });
+    }
     const retrievalMs = Date.now() - retrievalStart;
     const baseTelemetry: AnswerTelemetry = {
       path: "ok",
@@ -577,10 +590,16 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     usedTopic = null;
   }
   const maxDist = input.maxDistance;
-  const hits =
+  let hits =
     input.hybridSearch || maxDist === undefined
       ? allHits
       : allHits.filter((h) => h.distance <= maxDist);
+  if (input.autoTrimDistance) {
+    hits = applyDynamicThreshold(hits, { threshold: input.autoTrimThreshold });
+  }
+  if (input.mmr) {
+    hits = mmrDiversify(hits, { lambda: input.mmrLambda, topK: topK });
+  }
   const retrievalMs = Date.now() - retrievalStart;
 
   const baseTelemetry: AnswerTelemetry = {
