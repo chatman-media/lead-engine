@@ -30,6 +30,7 @@ import { SaasReferral } from "./pages/SaasReferral.tsx";
 import { SaasWebhooks } from "./pages/SaasWebhooks.tsx";
 import { SaasOutreach } from "./pages/SaasOutreach.tsx";
 import { ToolsSettings } from "./pages/ToolsSettings.tsx";
+import { SaasSuperadmin } from "./pages/SaasSuperadmin.tsx";
 
 function RequireAuth() {
   const [status, setStatus] = useState<"checking" | "auth" | "anon">(() =>
@@ -111,6 +112,9 @@ export function App() {
               <Route path="/diagnostics" element={<SaasDiagnostics />} />
             </Route>
           </Route>
+
+          {/* Платформенный superadmin — публичный роут, авторизация через sa_token */}
+          <Route path="/superadmin" element={<SaasSuperadmin />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

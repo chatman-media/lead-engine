@@ -65,6 +65,7 @@ import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeMcpRoutes } from "./routes/mcp.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
+import { makeSuperadminRoutes } from "./routes/superadmin.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
@@ -201,6 +202,14 @@ async function main() {
   log.info("auth routes enabled", {
     tokenSecret: cfg.authSecret ? "configured" : "missing!",
   });
+
+  // Superadmin API — платформенный операторский интерфейс.
+  // Защита: Bearer PLATFORM_SUPERADMIN_TOKEN (отдельный от tenant-сессии).
+  // Если токен не задан — роуты не регистрируются.
+  if (cfg.superadminToken) {
+    app.route("/", makeSuperadminRoutes({ db: db as never, token: cfg.superadminToken }));
+    log.info("superadmin routes enabled");
+  }
 
   // Authenticated admin-API под /api/admin/*. Middleware requireAuth
   // extract'ит Bearer token из Authorization header → выставляет
