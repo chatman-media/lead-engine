@@ -165,10 +165,9 @@ export function makeAdminAdminsRoutes(opts: AdminAdminsRoutesOpts): Hono {
 
     // Отправить email с приглашением (best-effort).
     if (opts.mailer && shareUrl) {
-      const [tenantRow] = await opts.db
-        .select({ slug: tenants.slug })
-        .from(tenants)
-        .where(eq(tenants.id, tenantId));
+      const [tenantRow] = await withTenant(opts.db, tenantId, async (tx) =>
+        tx.select({ slug: tenants.slug }).from(tenants).where(eq(tenants.id, tenantId)),
+      );
       opts.mailer.send({
         to: email,
         subject: `Приглашение в команду ${tenantRow?.slug ?? tenantId} — lead-engine`,

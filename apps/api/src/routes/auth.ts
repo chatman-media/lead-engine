@@ -477,16 +477,18 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
 
       const buf = new Uint8Array(32);
       globalThis.crypto.getRandomValues(buf);
-      const token = Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
+      const rawToken = Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
+      const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rawToken));
+      const tokenHash = Array.from(new Uint8Array(hashBuf), (b) => b.toString(16).padStart(2, "0")).join("");
 
       await opts.db.insert(passwordResets).values({
         adminId: adminRow.id,
-        token,
+        tokenHash,
         expiresAt,
         createdAt: nowEpoch,
       });
 
-      const resetUrl = `${opts.appUrl ?? "https://app.leadengine.app"}/reset-password?token=${token}`;
+      const resetUrl = `${opts.appUrl ?? "https://app.leadengine.app"}/reset-password?token=${rawToken}`;
       if (opts.mailer) {
         opts.mailer.send({
           to: email,
@@ -520,24 +522,28 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
     }
 
     const nowEpoch = Math.floor(Date.now() / 1000);
-    const [resetRow] = await opts.db
-      .select({
-        id: passwordResets.id,
-        adminId: passwordResets.adminId,
-        expiresAt: passwordResets.expiresAt,
-        usedAt: passwordResets.usedAt,
-      })
-      .from(passwordResets)
-      .where(eq(passwordResets.token, token));
-
-    if (!resetRow) return c.json({ error: "invalid token" }, 401);
-    if (resetRow.usedAt !== null) return c.json({ error: "token already used" }, 401);
-    if (resetRow.expiresAt < nowEpoch) return c.json({ error: "token expired" }, 401);
+    const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+    const tokenHash = Array.from(new Uint8Array(hashBuf), (b) => b.toString(16).padStart(2, "0")).join("");
 
     const newHash = await hashPassword(password);
-    await opts.db.update(admins).set({ passwordHash: newHash }).where(eq(admins.id, resetRow.adminId));
-    await opts.db.update(passwordResets).set({ usedAt: nowEpoch }).where(eq(passwordResets.id, resetRow.id));
+    const ok = await opts.db.transaction(async (tx) => {
+      const [claimed] = await tx
+        .update(passwordResets)
+        .set({ usedAt: nowEpoch })
+        .where(
+          and(
+            eq(passwordResets.tokenHash, tokenHash),
+            isNull(passwordResets.usedAt),
+            sql`${passwordResets.expiresAt} >= ${nowEpoch}`,
+          ),
+        )
+        .returning({ adminId: passwordResets.adminId });
+      if (!claimed) return false;
+      await tx.update(admins).set({ passwordHash: newHash }).where(eq(admins.id, claimed.adminId));
+      return true;
+    });
 
+    if (!ok) return c.json({ error: "invalid or expired token" }, 401);
     return c.json({ ok: true });
   });
 

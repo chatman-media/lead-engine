@@ -924,7 +924,7 @@ export const saas = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
-    });
+    }, false);
   },
 
   resetPassword(token: string, password: string) {
@@ -932,7 +932,7 @@ export const saas = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, password }),
-    });
+    }, false);
   },
 
   listAuditLog(opts: { limit?: number; cursor?: number } = {}) {

@@ -998,13 +998,14 @@ export const messageTemplates = pgTable("message_templates", {
 export const passwordResets = pgTable("password_resets", {
   id: serial("id").primaryKey(),
   adminId: integer("admin_id").notNull().references(() => admins.id, { onDelete: "cascade" }),
-  token: text("token").notNull().unique(),
+  tokenHash: text("token_hash").notNull().unique(),
   expiresAt: integer("expires_at").notNull(),
   usedAt: integer("used_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
 }, (t) => [
-  index("idx_password_resets_token").on(t.token),
+  index("idx_password_resets_token_hash").on(t.tokenHash),
   index("idx_password_resets_admin").on(t.adminId),
+  uniqueIndex("uniq_password_resets_admin_active").on(t.adminId).where(sql`used_at IS NULL`),
 ]);
 
 // Idempotency для webhook'ов — Stripe at-least-once delivers, иногда
