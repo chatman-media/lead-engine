@@ -1,6 +1,6 @@
 # Roadmap
 
-Последнее обновление: 2026-05-24 (GTM-инфра Phase 1 complete: рефкоды + sales-бот + agentic booking tool).
+Последнее обновление: 2026-05-25 (RAG v2: multi-query expansion + reranker + MMR + threshold; auth/superadmin/outreach/templates integration tests).
 
 Стратегический контекст — см. [`COMPETITORS.md`](COMPETITORS.md), [`POSITIONING.md`](POSITIONING.md).
 
@@ -141,10 +141,10 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
 - ✅ Signature verification (Telegram secret-token, WhatsApp HMAC, Stripe HMAC)
 - ✅ Anti-enumeration в whatsapp-webhook (signature check до tenant lookup)
 - ✅ Observability — `PlatformMetrics` + `JsonLogger` + `makeMetricsSink`
-- ✅ **741 tests** across 13 packages (apps/api: 305; kb: 156; sales: 116;
+- ✅ **950+ tests** across 15 packages (kb: 180; apps/api: 330+; sales: 116;
   conversation-engine: 59; channel-whatsapp: 17; observability: 16; worker: 15;
-  storage: 15; channel-telegram: 11; channel-web: 11; llm-router: 9;
-  verticals: 6; vertical-recruitment-uae: 5). 0 fail.
+  storage: 15; channel-telegram: 11; channel-web: 11; llm-router: 9; verticals: 9;
+  vertical-real-estate/saas/video: 3+3+3). 0 fail.
 
 ### Phase 1 prep (PR #39–44, май 2026)
 
@@ -160,7 +160,7 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
 - ✅ **Recruitment skills (Phase 1)** — 3 новых skill: `qualify-budget-via-spin`,
   `objection-visa-cost`, `close-soft-deposit`; style `recruiter-empathetic-v1`
 
-### GTM-инфраструктура (PR #87 + PR #90, май 2026)
+### GTM-инфраструктура (PR #87, #90, май 2026)
 
 - ✅ **Партнёрские реферальные коды** — `referral_codes` таблица; `POST/GET/DELETE
   /api/admin/referral-codes`; signup принимает `referralCode` (best-effort tracking);
@@ -179,6 +179,48 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
   вызывает инструмент когда лид просит записаться → отдаёт ссылку Calendly/Cal.com.
   Wired в `RagReplyStrategy` через `resolveTools()` с hot-invalidation кеша.
   UI `/settings/tools` для настройки booking URL. Хранится в `tenant_secrets`.
+
+### GTM → production-ready (PR #118–123, май 2026)
+
+- ✅ **Forgot-password / reset-password flow** — `password_resets` migration;
+  `POST /api/auth/forgot-password` генерирует 64-hex токен + email через Resend;
+  `POST /api/auth/reset-password` принимает токен, инвалидирует после использования;
+  `POST /api/auth/change-password` (authenticated). UI: `/forgot-password` + `/reset-password?token=...`
+- ✅ **Team invite email delivery** — `POST /api/admin/admins/invite` теперь
+  отправляет magic-link email через Resend (было: URL возвращался в JSON без отправки)
+- ✅ **Superadmin panel** — `GET /api/superadmin/tenants` (список всех тенантов со slug, plan,
+  status, leadCount, conversationCount); `PATCH /api/superadmin/tenants/:id/plan`
+  (ручная смена плана — скидки, trial extension). Role guard: 403 для manager.
+  UI: `/superadmin` страница в admin-ui (только для superadmin)
+- ✅ **KB quota enforcement** — `POST /api/admin/kb/documents` проверяет
+  `count(kb_documents) ≥ PLAN_LIMITS[plan].kbDocs` → 402 с upgradeHint (было без проверки)
+- ✅ **Message templates** — `GET/POST /api/admin/message-templates`,
+  `PATCH/DELETE /api/admin/message-templates/:id`. CRUD с валидацией (пустое name/body → 400),
+  cross-tenant isolation через RLS. UI на странице Outreach
+- ✅ **Outreach broadcasts** — `POST /api/admin/outreach { text, leadIds|stageSlug, scheduledAt? }`.
+  Для каждого лида ищет channel identity → enqueues в `outbound_queue`.
+  Возвращает `{ enqueued, skipped, scheduledAt }`. UI на `/outreach`
+- ✅ **Vertical templates x3** — `real_estate`, `saas`, `video` зарегистрированы
+  в `SEED_TEMPLATES` и `defaultRegistry`. Каждый с funnel-стадиями, intake-анкетой, 2–3 стилями.
+  Тесты: state-machine validity, intake stage linkage, required fields
+- ✅ **950+ тестов** — auth forgot/reset, superadmin role guards, message-templates CRUD,
+  outreach enqueued/skipped/stageSlug/scheduledAt — все integration tests против реального PG
+
+### RAG v2 — retrieval quality (PR #122–123, май 2026)
+
+- ✅ **MMR diversification** — `mmrDiversify()`: Maximal Marginal Relevance re-ranking
+  после retrieval. Jaccard trigram similarity как прокси inter-chunk distance.
+  `AnswerInput.mmr`, `mmrLambda`. Применяется в `answerWithRag` и `answerWithRagStream`
+- ✅ **Dynamic distance threshold** — `applyDynamicThreshold()`: обрезает чанки с
+  cosine distance > threshold (default 0.45). `AnswerInput.autoTrimDistance`, `autoTrimThreshold`
+- ✅ **Multi-query expansion** — `expandQueries()`: LLM генерирует N перефразировок запроса,
+  все эмбедятся в одном batch-вызове, поиск параллельно, результаты сливаются через RRF.
+  `AnswerInput.multiQuery`, `multiQueryCount`. Покрывает синонимы и разные формулировки
+- ✅ **RRF merge** — `rrfMerge()`: Reciprocal Rank Fusion для слияния N result lists.
+  score = Σ 1/(k+rank), дедупликация по chunk_id, distance = 1/(1+score)
+- ✅ **Jina / Cohere reranker** — `JinaReranker` + `CohereReranker` (cross-encoder)
+  подключены в `AnswerInput.reranker`. Fetch candidateK=topK×3 → rerank → topK.
+  Применяется во всех трёх retrieval-путях. Jina multilingual — работает с русским
 
 ### UX + Telegram userbot (май 2026)
 
@@ -465,7 +507,7 @@ Vision purpose уже в schema (`llm_provider_configs.purpose='vision'`):
 | Channel coverage | TG + WA + web + TG userbot | ✅ | + RE vertical | + voice prep |
 | Vertical templates | 2 (UAE + generic) | 2 | 5 | 7 |
 | YouTube videos | 0 | 12 | 30 | 50 |
-| Tests | 741 | 1K+ | 1.5K+ | 2K+ |
+| Tests | 950+ | 1.2K+ | 1.8K+ | 2.5K+ |
 | Compliance | none | none | none | SOC 2 in flight |
 | Funding | bootstrap | pitch | raise closed | post-seed |
 
@@ -498,17 +540,22 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
 
 ## Краткий summary
 
-**Где мы сейчас (PR #90, май 2026):**
+**Где мы сейчас (PR #123, май 2026):**
 
 - Self-service onboarding end-to-end без env vars / рестартов
 - Channels: TG bot + TG userbot + WhatsApp + web widget — все через UI
 - LLM: BYOK OpenAI/Anthropic/OpenRouter/Ollama, hot-reload
-- KB: file/text upload + RAG, dedup по content_hash
+- KB: file/text upload + RAG, dedup по content_hash, **quota enforcement**
 - **Stripe billing wired** — 14-day trial, customer portal, 402 quota enforcement
 - Operator inbox: auto-poll 5s, mode-toggle takeover, audit log, pause/resume
-- **GTM-инфра:** партнёрские коды, `recruitment_generic` + `leadengine_sales_v1` шаблоны, метрика «закрыто ботом», sales-бот KB
+- **Auth**: forgot-password/reset-password flow с email, change-password, team invite email
+- **Superadmin panel**: список всех тенантов, ручная смена плана
+- **Outreach broadcasts**: массовая рассылка по leadIds / stageSlug, scheduledAt
+- **Message templates**: CRUD шаблонов сообщений
+- **GTM-инфра:** партнёрские коды, `recruitment_generic` + `leadengine_sales_v1` + `real_estate` + `saas` + `video` шаблоны, метрика «закрыто ботом», sales-бот KB
 - **Agentic tool calls:** booking link wired, tool-loop engine готов к расширению
-- 741 tests, multi-tenant RLS, encrypted secrets, observability
+- **RAG v2:** multi-query expansion (RRF merge) + MMR diversification + dynamic threshold + Jina/Cohere reranker
+- **950+ tests**, multi-tenant RLS, encrypted secrets, observability
 - 1 живой prod tenant (recruitment UAE), Stripe-ready
 
 **Что не сделано и блокирует продажи:** деплой на домен. Одна неделя работы.
@@ -524,10 +571,12 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
 + pre-seed раунд → сейлзы. Цель: 3 партнёра к августу, 10 к декабрю.
 Один партнёр с 50 клиентами = $7K MRR за одну сделку.
 
-**Q4'26:** real-estate вертикаль, agentic tool-loop, AmoCRM/Bitrix24 для CIS.
+**Q3'26:** деплой → первые клиенты → real-estate вертикаль activate.
+
+**Q4'26:** agentic tool-loop (AmoCRM/Bitrix24), Telegram Business Bot API.
 
 **Q1'27:** SOC 2 Type I, voice (Vapi), self-host AGPL dual edition.
 
 **Moat:** BYOK + Telegram-first + multi-tenant agency + NEPQ/Cialdini engine +
-operator handoff. Ни один конкурент не шипает все пять вместе.
-См. [`COMPETITORS.md`](COMPETITORS.md).
+operator handoff + RAG v2 (multi-query + reranker). Ни один конкурент не шипает
+всё это вместе. См. [`COMPETITORS.md`](COMPETITORS.md).
