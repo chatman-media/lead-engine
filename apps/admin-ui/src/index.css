@@ -150,6 +150,10 @@
     outline-color: color-mix(in oklch, var(--ring) 50%, transparent);
   }
 
+  button:not([disabled]) {
+    cursor: pointer;
+  }
+
   html {
     color-scheme: light dark;
   }

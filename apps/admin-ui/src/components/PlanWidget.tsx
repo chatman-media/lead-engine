@@ -97,7 +97,7 @@ export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWi
 
   return (
     <Card>
-      <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
+      <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
         <div className="space-y-0.5">
           <p className="text-xs uppercase tracking-wider text-muted-foreground">Тариф</p>
           <p className="text-lg font-semibold">{plan.label}</p>
