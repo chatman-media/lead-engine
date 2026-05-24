@@ -491,6 +491,17 @@ export interface FunnelAnalytics {
   stages: FunnelAnalyticsStage[];
 }
 
+// ── Message templates ───────────────────────────────────────────────────
+
+export interface MessageTemplate {
+  id: number;
+  tenantId: number;
+  name: string;
+  body: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // ── Director hooks ────────────────────────────────────────────────────────
 
 export interface DirectorHook {
@@ -1205,6 +1216,20 @@ export const saas = {
       throw new ApiError(res.status, err.error ?? "import_failed");
     }
     return res.json() as Promise<{ imported: number; skipped: number; errors: string[] }>;
+  },
+
+  // ── Message templates ────────────────────────────────────────────────
+  listMessageTemplates() {
+    return request<{ items: MessageTemplate[] }>("/api/admin/message-templates");
+  },
+  createMessageTemplate(data: { name: string; body: string }) {
+    return request<MessageTemplate>("/api/admin/message-templates", { method: "POST", body: JSON.stringify(data) });
+  },
+  updateMessageTemplate(id: number, data: { name?: string; body?: string }) {
+    return request<MessageTemplate>(`/api/admin/message-templates/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  },
+  deleteMessageTemplate(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/message-templates/${id}`, { method: "DELETE" });
   },
 
   // ── Director hooks ────────────────────────────────────────────────────

@@ -983,6 +983,18 @@ export const stageWebhooks = pgTable("stage_webhooks", {
   index("idx_stage_webhooks_active").on(t.tenantId).where(sql`is_active = TRUE`),
 ]);
 
+// Шаблоны сообщений для рассылок. Шарятся между всеми менеджерами тенанта.
+export const messageTemplates = pgTable("message_templates", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  body: text("body").notNull(),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  index("idx_message_templates_tenant").on(t.tenantId),
+]);
+
 // Idempotency для webhook'ов — Stripe at-least-once delivers, иногда
 // дублирует на retry. Перед обработкой смотрим есть ли event.id —
 // если есть, skip с 200.
