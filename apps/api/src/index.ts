@@ -2,6 +2,7 @@ import { checkRlsEnforcement } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { funnels, tenants } from "@chatman-media/storage";
+import { REAL_ESTATE_V1 } from "@chatman-media/vertical-real-estate";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { eq } from "drizzle-orm";
@@ -53,6 +54,8 @@ import { makeAdminReferralRoutes } from "./routes/admin-referral.ts";
 import { makeAdminVacanciesRoutes } from "./routes/admin-vacancies.ts";
 import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
 import { makeAdminExperimentsRoutes } from "./routes/admin-experiments.ts";
+import { makeAdminOutreachRoutes } from "./routes/admin-outreach.ts";
+import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
@@ -68,6 +71,7 @@ import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
 /** Known vertical templates by slug. */
 const KNOWN_TEMPLATES: Record<string, VerticalTemplate> = {
+  real_estate_v1: REAL_ESTATE_V1,
   recruitment_v1: RECRUITMENT_V1,
 };
 
@@ -347,6 +351,14 @@ async function main() {
     resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
   }));
   log.info("admin-styles routes enabled");
+
+  // Outreach campaigns — batch message sending to leads.
+  app.route("/", makeAdminOutreachRoutes({ db }));
+  log.info("admin-outreach routes enabled");
+
+  // Stage-change webhooks CRUD.
+  app.route("/", makeAdminStageWebhooksRoutes({ db }));
+  log.info("admin-stage-webhooks routes enabled");
 
   // Vertical plugin install.
   app.route("/", makeAdminVerticalsRoutes({ db, resolveEmbedder: embedderResolver ?? undefined }));

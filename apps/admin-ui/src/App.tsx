@@ -25,6 +25,7 @@ import { SaasTeam } from "./pages/SaasTeam.tsx";
 import { SaasVacancies } from "./pages/SaasVacancies.tsx";
 import { SaasHooks } from "./pages/SaasHooks.tsx";
 import { SaasReferral } from "./pages/SaasReferral.tsx";
+import { SaasWebhooks } from "./pages/SaasWebhooks.tsx";
 import { ToolsSettings } from "./pages/ToolsSettings.tsx";
 
 function RequireAuth() {
@@ -81,6 +82,7 @@ export function App() {
               <Route path="/vacancies" element={<SaasVacancies />} />
               <Route path="/skills" element={<SaasSkills />} />
               <Route path="/hooks" element={<SaasHooks />} />
+              <Route path="/webhooks" element={<SaasWebhooks />} />
               <Route path="/styles" element={<SaasStyles />} />
               <Route path="/experiments" element={<SaasExperiments />} />
               <Route path="/channels" element={<SaasChannels />} />

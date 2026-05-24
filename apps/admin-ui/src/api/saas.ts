@@ -526,6 +526,16 @@ export interface ReferralCode {
   createdAt: number;
 }
 
+export interface StageWebhook {
+  id: number;
+  tenantId: number;
+  url: string;
+  hasSecret: boolean;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // ── Audit entry (for audit log page) ────────────────────────────────────
 
 const TOKEN_KEY = "lead_engine_token";
@@ -1141,6 +1151,40 @@ export const saas = {
   },
   deleteVacancy(id: number) {
     return request<{ ok: boolean }>(`/api/admin/vacancies/${id}`, { method: "DELETE" });
+  },
+
+  // ── Stage-change webhooks ─────────────────────────────────────────────
+  listStageWebhooks() {
+    return request<{ items: StageWebhook[] }>("/api/admin/stage-webhooks");
+  },
+  createStageWebhook(data: { url: string; secret?: string; isActive?: boolean }) {
+    return request<StageWebhook>("/api/admin/stage-webhooks", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateStageWebhook(id: number, data: { url?: string; secret?: string | null; isActive?: boolean }) {
+    return request<StageWebhook>(`/api/admin/stage-webhooks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  deleteStageWebhook(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/stage-webhooks/${id}`, { method: "DELETE" });
+  },
+  testStageWebhook(id: number) {
+    return request<{ ok: boolean; status?: number; body?: string; error?: string }>(
+      `/api/admin/stage-webhooks/${id}/test`,
+      { method: "POST" },
+    );
+  },
+
+  // ── Outreach campaigns ────────────────────────────────────────────────
+  sendOutreach(body: { text: string; leadIds?: number[]; stageSlug?: string }) {
+    return request<{ enqueued: number; skipped: number }>("/api/admin/outreach", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   },
 
   // ── Director hooks ────────────────────────────────────────────────────
