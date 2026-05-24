@@ -95,7 +95,7 @@ const CONTENT: Record<
         desc: "SPIN/NEPQ вопросы, сбор 15-полевой анкеты, эскалация горячих лидов на оператора.",
       },
     ],
-    whyLabel: "Почему CloserBot",
+    whyLabel: "Почему Lead Engine",
     whyTitle: "Не FAQ-бот. Sales-engine для рекрутинга.",
     moats: [
       {
@@ -208,7 +208,7 @@ const CONTENT: Record<
     footer: {
       privacy: "Политика конфиденциальности",
       terms: "Условия использования",
-      copy: "© 2026 CloserBot",
+      copy: "© 2026 Lead Engine",
     },
   },
 
@@ -249,7 +249,7 @@ const CONTENT: Record<
         desc: "SPIN/NEPQ questions, 15-field intake collection, hot lead escalation to your operator.",
       },
     ],
-    whyLabel: "Why CloserBot",
+    whyLabel: "Why Lead Engine",
     whyTitle: "Not an FAQ bot. A sales engine for recruitment.",
     moats: [
       {
@@ -362,7 +362,7 @@ const CONTENT: Record<
     footer: {
       privacy: "Privacy Policy",
       terms: "Terms of Use",
-      copy: "© 2026 CloserBot",
+      copy: "© 2026 Lead Engine",
     },
   },
 };
@@ -379,7 +379,7 @@ function TelegramMockup({ data }: { data: (typeof CONTENT)["ru"]["tg"] }) {
       <div className="tg-header">
         <div className="tg-avatar">🤖</div>
         <div>
-          <div className="tg-name">CloserBot</div>
+          <div className="tg-name">Lead Engine</div>
           <div className="tg-status">online</div>
         </div>
       </div>
@@ -438,7 +438,7 @@ export default function App() {
         <div className="container">
           <div className="nav-inner">
             <a href="/" className="nav-logo">
-              Closer<span>Bot</span>
+              Lead<span>Engine</span>
             </a>
             <div className="nav-right">
               <div className="lang-toggle">
@@ -579,7 +579,7 @@ export default function App() {
         <div className="container">
           <div className="footer-inner">
             <div className="footer-logo">
-              Closer<span>Bot</span>
+              Lead<span>Engine</span>
             </div>
             <div className="footer-links">
               <a href="/privacy">{c.footer.privacy}</a>
