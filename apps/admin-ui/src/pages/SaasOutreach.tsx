@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -15,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { SendIcon } from "lucide-react";
+import { CalendarClockIcon, SendIcon } from "lucide-react";
 
 function fmtDateTime(epoch: number) {
   return new Date(epoch * 1000).toLocaleString("ru-RU", {
@@ -71,8 +72,9 @@ export function SaasOutreach() {
   const [target, setTarget] = useState<"all" | "stage">("all");
   const [stageSlug, setStageSlug] = useState("");
   const [text, setText] = useState("");
+  const [scheduledAt, setScheduledAt] = useState(""); // datetime-local string
   const [sending, setSending] = useState(false);
-  const [sendResult, setSendResult] = useState<{ enqueued: number; skipped: number } | null>(null);
+  const [sendResult, setSendResult] = useState<{ enqueued: number; skipped: number; scheduledAt: number | null } | null>(null);
 
   // History state
   const [history, setHistory] = useState<AuditEntry[]>([]);
@@ -111,11 +113,15 @@ export function SaasOutreach() {
         (body as { stageSlug?: string }).stageSlug = undefined;
       }
 
-      const res = await saas.sendOutreach(
-        target === "stage" && stageSlug
-          ? { text: text.trim(), stageSlug }
-          : { text: text.trim() },
-      );
+      const scheduledAtEpoch = scheduledAt
+        ? Math.floor(new Date(scheduledAt).getTime() / 1000)
+        : undefined;
+
+      const res = await saas.sendOutreach({
+        text: text.trim(),
+        ...(target === "stage" && stageSlug ? { stageSlug } : {}),
+        ...(scheduledAtEpoch && scheduledAtEpoch > Math.floor(Date.now() / 1000) ? { scheduledAt: scheduledAtEpoch } : {}),
+      });
       setSendResult(res);
       // Refresh history
       const updated = await saas.listAuditLog({ limit: 200 });
@@ -191,23 +197,53 @@ export function SaasOutreach() {
             <p className="text-xs text-muted-foreground text-right">{text.length}/4000</p>
           </div>
 
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5">
+              <CalendarClockIcon className="size-3.5" />
+              Отложенная отправка
+              <span className="text-muted-foreground font-normal">(опционально)</span>
+            </Label>
+            <Input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={(e) => setScheduledAt(e.target.value)}
+              min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+              className="w-auto"
+            />
+            {scheduledAt && (
+              <p className="text-xs text-muted-foreground">
+                Сообщения будут поставлены в очередь и отправлены в {new Date(scheduledAt).toLocaleString("ru-RU")}
+              </p>
+            )}
+          </div>
+
           {sendResult && (
             <div className="rounded-md bg-muted px-4 py-3 text-sm flex items-center gap-4">
               <span>
-                Отправлено:{" "}
-                <span className="font-semibold text-green-600">{sendResult.enqueued}</span>
+                {sendResult.scheduledAt
+                  ? <>Запланировано: <span className="font-semibold text-blue-600">{sendResult.enqueued}</span></>
+                  : <>Отправлено: <span className="font-semibold text-green-600">{sendResult.enqueued}</span></>
+                }
               </span>
               <span className="text-muted-foreground">·</span>
               <span>
-                Пропущено (нет канала):{" "}
+                Пропущено:{" "}
                 <span className="font-semibold text-muted-foreground">{sendResult.skipped}</span>
               </span>
+              {sendResult.scheduledAt && (
+                <>
+                  <span className="text-muted-foreground">·</span>
+                  <span className="text-xs text-muted-foreground">
+                    Отправка в {fmtDateTime(sendResult.scheduledAt)}
+                  </span>
+                </>
+              )}
             </div>
           )}
 
           <Button disabled={!canSend} onClick={handleSend} className="gap-2">
-            <SendIcon className="size-4" />
-            {sending ? "Отправка…" : "Отправить"}
+            {scheduledAt ? <CalendarClockIcon className="size-4" /> : <SendIcon className="size-4" />}
+            {sending ? "Сохраняем…" : scheduledAt ? "Запланировать" : "Отправить"}
           </Button>
         </CardContent>
       </Card>
