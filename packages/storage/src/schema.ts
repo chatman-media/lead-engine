@@ -967,6 +967,22 @@ export const referralCodes = pgTable("referral_codes", {
   index("idx_referral_codes_tenant").on(t.tenantId),
 ]);
 
+// Webhook-уведомления при смене стадии лида. Tenant настраивает URL;
+// при каждом lead.stage_changed мы шлём POST с JSON-payload и опциональной
+// HMAC-подписью (X-Signature: sha256=<hex>).
+export const stageWebhooks = pgTable("stage_webhooks", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  url: text("url").notNull(),
+  secret: text("secret"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  index("idx_stage_webhooks_tenant").on(t.tenantId),
+  index("idx_stage_webhooks_active").on(t.tenantId).where(sql`is_active = TRUE`),
+]);
+
 // Idempotency для webhook'ов — Stripe at-least-once delivers, иногда
 // дублирует на retry. Перед обработкой смотрим есть ли event.id —
 // если есть, skip с 200.

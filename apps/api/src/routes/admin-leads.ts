@@ -12,6 +12,7 @@ import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { canAddLead } from "../lib/quota.ts";
+import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webhooks.ts";
 
 /**
  * Lead pipeline API.
@@ -333,10 +334,13 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
     const now = Math.floor(Date.now() / 1000);
     let transitionBlocked = false;
+    let webhookPayload: StageChangedPayload | null = null;
+
     await withTenant(opts.db, tenantId, async (tx) => {
       const [lead] = await tx
         .select({
           id: leads.id,
+          userId: leads.userId,
           state: leads.state,
           stageDefinitionId: leads.stageDefinitionId,
         })
@@ -345,16 +349,17 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       if (!lead) throw new Error("lead not found");
 
       const [newStage] = await tx
-        .select({ slug: stageDefinitions.slug })
+        .select({ slug: stageDefinitions.slug, displayName: stageDefinitions.displayName })
         .from(stageDefinitions)
         .where(and(eq(stageDefinitions.id, stageDefinitionId), eq(stageDefinitions.tenantId, tenantId)));
       if (!newStage) throw new Error("stage not found");
 
       // Validate transition against current stage's nextStages whitelist.
       // Skip if: no current stage (legacy lead), force override, or same stage.
+      let prevStage: { id: number; slug: string; displayName: string } | null = null;
       if (lead.stageDefinitionId && lead.stageDefinitionId !== stageDefinitionId && !force) {
         const [currentStage] = await tx
-          .select({ nextStages: stageDefinitions.nextStages })
+          .select({ nextStages: stageDefinitions.nextStages, slug: stageDefinitions.slug, displayName: stageDefinitions.displayName })
           .from(stageDefinitions)
           .where(
             and(
@@ -362,13 +367,20 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
               eq(stageDefinitions.tenantId, tenantId),
             ),
           );
-        // If nextStages is non-empty, enforce whitelist.
-        if (currentStage && currentStage.nextStages.length > 0) {
-          if (!currentStage.nextStages.includes(newStage.slug)) {
+        if (currentStage) {
+          prevStage = { id: lead.stageDefinitionId, slug: currentStage.slug, displayName: currentStage.displayName };
+          // If nextStages is non-empty, enforce whitelist.
+          if (currentStage.nextStages.length > 0 && !currentStage.nextStages.includes(newStage.slug)) {
             transitionBlocked = true;
             return;
           }
         }
+      } else if (lead.stageDefinitionId) {
+        const [cs] = await tx
+          .select({ slug: stageDefinitions.slug, displayName: stageDefinitions.displayName })
+          .from(stageDefinitions)
+          .where(eq(stageDefinitions.id, lead.stageDefinitionId));
+        if (cs) prevStage = { id: lead.stageDefinitionId, slug: cs.slug, displayName: cs.displayName };
       }
 
       await tx
@@ -384,6 +396,25 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         byAdminId: adminId,
         createdAt: now,
       });
+
+      // Resolve contact name for webhook payload.
+      const [contact] = await tx
+        .select({ displayName: contacts.displayName })
+        .from(contacts)
+        .where(eq(contacts.id, lead.userId));
+
+      webhookPayload = {
+        event: "lead.stage_changed",
+        tenantId,
+        leadId: id,
+        contactId: lead.userId,
+        contactName: contact?.displayName ?? null,
+        from: prevStage
+          ? { stageId: prevStage.id, slug: prevStage.slug, displayName: prevStage.displayName }
+          : null,
+        to: { stageId: stageDefinitionId, slug: newStage.slug, displayName: newStage.displayName },
+        timestamp: now,
+      };
     });
 
     if (transitionBlocked) {
@@ -401,6 +432,11 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       targetId: String(id),
       details: { stageDefinitionId, force },
     });
+
+    // Fire webhooks non-blocking — errors are swallowed (fire-and-forget).
+    if (webhookPayload) {
+      void fireStageWebhooks(opts.db, tenantId, webhookPayload);
+    }
 
     return c.json({ ok: true });
   });

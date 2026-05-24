@@ -13,6 +13,7 @@ import {
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
+  WebhookIcon,
   WrenchIcon,
   type LucideIcon,
   MenuIcon,
@@ -95,6 +96,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Система",
     items: [
       { to: "/channels", label: "Каналы", icon: CableIcon },
+      { to: "/webhooks", label: "Вебхуки", icon: WebhookIcon },
       { to: "/tools", label: "Инструменты", icon: WrenchIcon },
       { to: "/referral", label: "Партнёры", icon: LinkIcon },
       { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
