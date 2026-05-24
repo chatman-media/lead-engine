@@ -919,6 +919,22 @@ export const saas = {
     });
   },
 
+  forgotPassword(email: string) {
+    return request<{ ok: true }>("/api/auth/forgot-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  resetPassword(token: string, password: string) {
+    return request<{ ok: true }>("/api/auth/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, password }),
+    });
+  },
+
   listAuditLog(opts: { limit?: number; cursor?: number } = {}) {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));

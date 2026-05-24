@@ -316,11 +316,12 @@ async function main() {
   app.route("/", makeAdminAuditRoutes({ db }));
   log.info("admin-audit routes enabled (read-only)");
 
-  // Multi-admin invite (Q3'26 M4) — token-link flow без email-infrastructure.
+  // Multi-admin invite — token-link flow + email-delivery через Resend.
   app.route(
     "/",
     makeAdminAdminsRoutes({
       db,
+      mailer,
       ...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
     }),
   );

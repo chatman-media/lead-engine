@@ -995,6 +995,18 @@ export const messageTemplates = pgTable("message_templates", {
   index("idx_message_templates_tenant").on(t.tenantId),
 ]);
 
+export const passwordResets = pgTable("password_resets", {
+  id: serial("id").primaryKey(),
+  adminId: integer("admin_id").notNull().references(() => admins.id, { onDelete: "cascade" }),
+  token: text("token").notNull().unique(),
+  expiresAt: integer("expires_at").notNull(),
+  usedAt: integer("used_at"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  index("idx_password_resets_token").on(t.token),
+  index("idx_password_resets_admin").on(t.adminId),
+]);
+
 // Idempotency для webhook'ов — Stripe at-least-once delivers, иногда
 // дублирует на retry. Перед обработкой смотрим есть ли event.id —
 // если есть, skip с 200.

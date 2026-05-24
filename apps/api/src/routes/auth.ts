@@ -1,6 +1,6 @@
 import { withTenant } from "@chatman-media/conversation-engine";
-import { adminInvites, admins, referralCodes, tenants } from "@chatman-media/storage";
-import { and, eq, sql } from "drizzle-orm";
+import { adminInvites, admins, passwordResets, referralCodes, tenants } from "@chatman-media/storage";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import {
@@ -12,7 +12,7 @@ import {
   verifyAuthToken,
   verifyPassword,
 } from "../lib/auth.ts";
-import { type Mailer, welcomeEmailHtml } from "../lib/mailer.ts";
+import { forgotPasswordEmailHtml, type Mailer, welcomeEmailHtml } from "../lib/mailer.ts";
 
 /**
  * Auth-endpoints для SaaS-flow:
@@ -437,6 +437,106 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
       .update(admins)
       .set({ passwordHash: newHash })
       .where(eq(admins.id, adminRow.id));
+
+    return c.json({ ok: true });
+  });
+
+  /**
+   * POST /api/auth/forgot-password
+   * Body: { email }
+   * Returns: { ok: true } — всегда, чтобы не раскрывать существование email.
+   *
+   * Генерирует одноразовый токен (1 час), сохраняет в password_resets,
+   * отправляет письмо со ссылкой для сброса. Если mailer не настроен —
+   * dry-run (лог без отправки). Предыдущие неиспользованные токены для
+   * этого admin'а инвалидируются (ставится usedAt=now) при создании нового.
+   */
+  app.post("/api/auth/forgot-password", async (c) => {
+    let body: { email?: unknown };
+    try { body = (await c.req.json()) as typeof body; } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    if (!email) return c.json({ error: "email required" }, 400);
+
+    // Всегда 200 — не раскрываем существование email.
+    const [adminRow] = await opts.db
+      .select({ id: admins.id })
+      .from(admins)
+      .where(eq(admins.email, email));
+
+    if (adminRow) {
+      const nowEpoch = Math.floor(Date.now() / 1000);
+      const expiresAt = nowEpoch + 3600; // 1 час
+
+      // Инвалидировать старые неиспользованные токены для этого admin'а.
+      await opts.db
+        .update(passwordResets)
+        .set({ usedAt: nowEpoch })
+        .where(and(eq(passwordResets.adminId, adminRow.id), isNull(passwordResets.usedAt)));
+
+      const buf = new Uint8Array(32);
+      globalThis.crypto.getRandomValues(buf);
+      const token = Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
+
+      await opts.db.insert(passwordResets).values({
+        adminId: adminRow.id,
+        token,
+        expiresAt,
+        createdAt: nowEpoch,
+      });
+
+      const resetUrl = `${opts.appUrl ?? "https://app.leadengine.app"}/reset-password?token=${token}`;
+      if (opts.mailer) {
+        opts.mailer.send({
+          to: email,
+          subject: "Сброс пароля — lead-engine",
+          html: forgotPasswordEmailHtml({ email, resetUrl }),
+        }).catch((e) => console.warn("[mailer] forgot-password send failed:", e));
+      }
+    }
+
+    return c.json({ ok: true });
+  });
+
+  /**
+   * POST /api/auth/reset-password
+   * Body: { token, password }
+   * Returns: { ok: true } | 400 | 401
+   *
+   * Проверяет токен: не просрочен, не использован. Обновляет passwordHash,
+   * помечает токен usedAt=now.
+   */
+  app.post("/api/auth/reset-password", async (c) => {
+    let body: { token?: unknown; password?: unknown };
+    try { body = (await c.req.json()) as typeof body; } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const token = typeof body.token === "string" ? body.token.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!token) return c.json({ error: "token required" }, 400);
+    if (!password || password.length < 8) {
+      return c.json({ error: "password must be at least 8 characters" }, 400);
+    }
+
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const [resetRow] = await opts.db
+      .select({
+        id: passwordResets.id,
+        adminId: passwordResets.adminId,
+        expiresAt: passwordResets.expiresAt,
+        usedAt: passwordResets.usedAt,
+      })
+      .from(passwordResets)
+      .where(eq(passwordResets.token, token));
+
+    if (!resetRow) return c.json({ error: "invalid token" }, 401);
+    if (resetRow.usedAt !== null) return c.json({ error: "token already used" }, 401);
+    if (resetRow.expiresAt < nowEpoch) return c.json({ error: "token expired" }, 401);
+
+    const newHash = await hashPassword(password);
+    await opts.db.update(admins).set({ passwordHash: newHash }).where(eq(admins.id, resetRow.adminId));
+    await opts.db.update(passwordResets).set({ usedAt: nowEpoch }).where(eq(passwordResets.id, resetRow.id));
 
     return c.json({ ok: true });
   });

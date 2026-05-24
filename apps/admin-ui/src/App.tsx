@@ -29,6 +29,8 @@ import { SaasHooks } from "./pages/SaasHooks.tsx";
 import { SaasReferral } from "./pages/SaasReferral.tsx";
 import { SaasWebhooks } from "./pages/SaasWebhooks.tsx";
 import { SaasOutreach } from "./pages/SaasOutreach.tsx";
+import { SaasForgotPassword } from "./pages/SaasForgotPassword.tsx";
+import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
 import { ToolsSettings } from "./pages/ToolsSettings.tsx";
 
 function RequireAuth() {
@@ -79,6 +81,8 @@ export function App() {
           <Route path="/login" element={<SaasLogin />} />
           <Route path="/signup" element={<SaasSignup />} />
           <Route path="/accept-invite" element={<SaasAcceptInvite />} />
+          <Route path="/forgot-password" element={<SaasForgotPassword />} />
+          <Route path="/reset-password" element={<SaasResetPassword />} />
 
           {/* Только для авторизованных */}
           <Route element={<RequireAuth />}>
