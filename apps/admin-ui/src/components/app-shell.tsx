@@ -81,7 +81,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
       { to: "/outreach", label: "Рассылка", icon: SendIcon },
       { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
-      { to: "/vacancies", label: "Вакансии", icon: BriefcaseIcon },
+      { to: "/vacancies", label: "Каталог", icon: BriefcaseIcon },
     ],
   },
   {

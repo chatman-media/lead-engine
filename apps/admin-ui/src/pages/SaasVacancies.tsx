@@ -50,7 +50,7 @@ export function SaasVacancies() {
       const data = await saas.listVacancies();
       setItems(data.items);
     } catch (err) {
-      if (!onAuthError(err)) setError("Не удалось загрузить вакансии");
+      if (!onAuthError(err)) setError("Не удалось загрузить записи");
     } finally {
       setLoading(false);
     }
@@ -82,8 +82,8 @@ export function SaasVacancies() {
   }
 
   async function handleSave() {
-    if (!formTitle.trim()) { setFormError("Введите название вакансии"); return; }
-    if (!formBody.trim()) { setFormError("Введите описание вакансии"); return; }
+    if (!formTitle.trim()) { setFormError("Введите название"); return; }
+    if (!formBody.trim()) { setFormError("Введите описание"); return; }
     setSaving(true);
     setFormError("");
     try {
@@ -137,12 +137,12 @@ export function SaasVacancies() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <PageHeader
-          title="Вакансии"
+          title="Каталог"
           description={`${active.length} активных · ${inactive.length} архивных`}
         />
         <Button size="sm" onClick={openNew}>
           <PlusIcon className="mr-1.5 size-3.5" />
-          Новая вакансия
+          Новая запись
         </Button>
       </div>
 
@@ -158,7 +158,7 @@ export function SaasVacancies() {
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">
-                {editing === "new" ? "Новая вакансия" : `Редактировать: ${(editing as VacancyItem).title}`}
+                {editing === "new" ? "Новая запись" : `Редактировать: ${(editing as VacancyItem).title}`}
               </CardTitle>
               <Button variant="ghost" size="icon" className="size-6" onClick={closeForm}>
                 <XIcon className="size-3.5" />
@@ -169,16 +169,16 @@ export function SaasVacancies() {
             <div className="space-y-1">
               <Label className="text-xs">Название *</Label>
               <Input
-                placeholder="например: Танцовщица в ночной клуб Дубай"
+                placeholder="например: Апартаменты 2BR, Dubai Marina"
                 value={formTitle}
                 onChange={(e) => setFormTitle(e.target.value)}
                 className="text-sm"
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Описание / требования *</Label>
+              <Label className="text-xs">Описание *</Label>
               <Textarea
-                placeholder="Требования, условия, оплата…"
+                placeholder="Подробное описание, условия, характеристики…"
                 rows={5}
                 value={formBody}
                 onChange={(e) => setFormBody(e.target.value)}
@@ -201,7 +201,7 @@ export function SaasVacancies() {
                 onCheckedChange={setFormActive}
               />
               <Label htmlFor="vacancy-active" className="text-xs cursor-pointer">
-                Активная (показывать боту)
+                Активна (бот использует при поиске)
               </Label>
             </div>
             {formError && (
@@ -241,7 +241,7 @@ export function SaasVacancies() {
         </div>
       ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Вакансий пока нет. Создайте первую — бот будет ссылаться на неё при квалификации.
+          Каталог пуст. Создайте первую запись — бот будет использовать её при ответах.
         </p>
       ) : (
         <div className="flex flex-col gap-3">
