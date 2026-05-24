@@ -16,7 +16,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeftIcon, CheckIcon, EditIcon, RefreshCwIcon, SendIcon, Trash2Icon, XIcon } from "lucide-react";
+import { AlertTriangleIcon, ArrowLeftIcon, CheckIcon, EditIcon, RefreshCwIcon, SendIcon, Trash2Icon, XIcon } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function formatDate(epoch: number) {
   return new Date(epoch * 1000).toLocaleString("ru-RU", {
@@ -210,6 +211,7 @@ export function SaasLeadDetail() {
 
   // Delete state
   const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   function onAuthError(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
@@ -296,7 +298,7 @@ export function SaasLeadDetail() {
 
   async function handleDelete() {
     if (!id) return;
-    if (!window.confirm("Удалить лида? Это действие необратимо.")) return;
+    setConfirmDelete(false);
     setDeleting(true);
     try {
       await saas.deleteLead(Number(id));
@@ -331,7 +333,45 @@ export function SaasLeadDetail() {
     }
   }
 
-  if (loading) return <p className="p-6 text-muted-foreground text-sm">Загрузка…</p>;
+  if (loading) return (
+    <div className="flex flex-col gap-6 p-6">
+      <div className="flex items-center gap-3">
+        <Skeleton className="h-8 w-8" />
+        <div className="space-y-1">
+          <Skeleton className="h-6 w-40" />
+          <Skeleton className="h-4 w-24" />
+        </div>
+      </div>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2 space-y-4">
+          <div className="rounded-lg border p-4 space-y-3">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-6 w-32" />
+          </div>
+          <div className="rounded-lg border p-4 space-y-3">
+            <Skeleton className="h-4 w-24" />
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="py-2 space-y-1">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-4 w-40" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-4">
+          <div className="rounded-lg border p-4 space-y-2">
+            <Skeleton className="h-4 w-24" />
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex justify-between">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-28" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
   if (error) return <p className="p-6 text-destructive text-sm">{error}</p>;
   if (!data) return null;
 
@@ -356,15 +396,28 @@ export function SaasLeadDetail() {
           description={lead.applicationId ? `ID: ${lead.applicationId}` : undefined}
         />
         <div className="ml-auto">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            disabled={deleting}
-            onClick={handleDelete}
-          >
-            <Trash2Icon className="size-3.5" />
-          </Button>
+          {confirmDelete ? (
+            <div className="flex items-center gap-1 text-sm">
+              <AlertTriangleIcon className="size-3.5 text-destructive shrink-0" />
+              <span className="text-destructive text-xs">Удалить лида?</span>
+              <Button size="sm" variant="destructive" onClick={handleDelete} disabled={deleting}>
+                Да
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+                Нет
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={deleting}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2Icon className="size-3.5" />
+            </Button>
+          )}
         </div>
       </div>
 

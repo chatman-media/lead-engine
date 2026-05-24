@@ -1,4 +1,4 @@
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { AlertTriangleIcon, CheckIcon, CopyIcon } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -37,6 +38,7 @@ export function SaasTeam() {
   const [lastCreated, setLastCreated] = useState<CreateInviteResult | null>(null);
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [confirmRevokeId, setConfirmRevokeId] = useState<number | null>(null);
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
@@ -98,8 +100,8 @@ export function SaasTeam() {
     }
   }
 
-  async function handleRevoke(id: number, mail: string) {
-    if (!confirm(`Отозвать приглашение для ${mail}?`)) return;
+  async function handleRevoke(id: number) {
+    setConfirmRevokeId(null);
     try {
       await saas.revokeInvite(id);
       await refresh();
@@ -120,7 +122,38 @@ export function SaasTeam() {
     }
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground">Загрузка…</p>;
+  if (loading) return (
+    <div className="space-y-6">
+      <div className="space-y-1">
+        <Skeleton className="h-6 w-32" />
+        <Skeleton className="h-4 w-64" />
+      </div>
+      <div className="rounded-lg border p-6 space-y-3">
+        <Skeleton className="h-5 w-40" />
+        <div className="flex gap-3">
+          <Skeleton className="h-9 flex-1" />
+          <Skeleton className="h-9 w-40" />
+          <Skeleton className="h-9 w-28" />
+        </div>
+      </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        {[0, 1].map((i) => (
+          <div key={i} className="rounded-lg border p-4 space-y-3">
+            <Skeleton className="h-5 w-32" />
+            {[0, 1, 2].map((j) => (
+              <div key={j} className="flex justify-between items-center py-2">
+                <div className="space-y-1">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+                <Skeleton className="h-5 w-16" />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -256,13 +289,25 @@ export function SaasTeam() {
                       </div>
                     </div>
                     {inv.status === "pending" && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRevoke(inv.id, inv.email)}
-                      >
-                        Отозвать
-                      </Button>
+                      confirmRevokeId === inv.id ? (
+                        <div className="flex items-center gap-1 text-sm">
+                          <AlertTriangleIcon className="size-3.5 text-warning" />
+                          <Button size="sm" variant="destructive" onClick={() => handleRevoke(inv.id)}>
+                            Да
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setConfirmRevokeId(null)}>
+                            Нет
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setConfirmRevokeId(inv.id)}
+                        >
+                          Отозвать
+                        </Button>
+                      )
                     )}
                   </li>
                 ))}

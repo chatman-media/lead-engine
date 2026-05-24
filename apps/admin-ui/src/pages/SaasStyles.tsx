@@ -4,6 +4,7 @@ import { ApiError, clearToken, saas, type StyleItem } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export function SaasStyles() {
   const navigate = useNavigate();
@@ -33,7 +34,17 @@ export function SaasStyles() {
         description="Персоны и продажные фреймворки — единица A/B тестирования"
       />
 
-      {loading && <p className="text-muted-foreground text-sm">Загрузка…</p>}
+      {loading && (
+        <div className="grid gap-4 md:grid-cols-2">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="rounded-lg border p-4 space-y-3">
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-8 w-24" />
+            </div>
+          ))}
+        </div>
+      )}
       {error && <p className="text-destructive text-sm">{error}</p>}
 
       <div className="grid gap-4 md:grid-cols-2">

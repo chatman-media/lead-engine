@@ -7,8 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ExternalLinkIcon, PencilIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import { AlertTriangleIcon, ExternalLinkIcon, PencilIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 
 function formatDate(epoch: number) {
   return new Date(epoch * 1000).toLocaleDateString("ru-RU", {
@@ -32,6 +34,7 @@ export function SaasVacancies() {
   const [formActive, setFormActive] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [confirmDeleteVacancyId, setConfirmDeleteVacancyId] = useState<number | null>(null);
 
   function onAuthError(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
@@ -118,7 +121,7 @@ export function SaasVacancies() {
   }
 
   async function handleDelete(v: VacancyItem) {
-    if (!confirm(`Удалить вакансию «${v.title}»?`)) return;
+    setConfirmDeleteVacancyId(null);
     try {
       await saas.deleteVacancy(v.id);
       await reload();
@@ -192,12 +195,10 @@ export function SaasVacancies() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
+              <Switch
                 id="vacancy-active"
                 checked={formActive}
-                onChange={(e) => setFormActive(e.target.checked)}
-                className="size-4 rounded border"
+                onCheckedChange={setFormActive}
               />
               <Label htmlFor="vacancy-active" className="text-xs cursor-pointer">
                 Активная (показывать боту)
@@ -219,7 +220,25 @@ export function SaasVacancies() {
       )}
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Загрузка…</p>
+        <div className="flex flex-col gap-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="rounded-lg border p-4 space-y-2">
+              <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                  <Skeleton className="h-5 w-48" />
+                  <Skeleton className="h-3 w-32" />
+                </div>
+                <div className="flex gap-1">
+                  <Skeleton className="h-7 w-16" />
+                  <Skeleton className="h-7 w-7" />
+                  <Skeleton className="h-7 w-7" />
+                </div>
+              </div>
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-3/4" />
+            </div>
+          ))}
+        </div>
       ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           Вакансий пока нет. Создайте первую — бот будет ссылаться на неё при квалификации.
@@ -272,14 +291,26 @@ export function SaasVacancies() {
                     >
                       <PencilIcon className="size-3.5" />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => handleDelete(v)}
-                    >
-                      <Trash2Icon className="size-3.5" />
-                    </Button>
+                    {confirmDeleteVacancyId === v.id ? (
+                      <div className="flex items-center gap-1">
+                        <AlertTriangleIcon className="size-3.5 text-destructive shrink-0" />
+                        <Button size="sm" variant="destructive" onClick={() => handleDelete(v)}>
+                          Да
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteVacancyId(null)}>
+                          Нет
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => setConfirmDeleteVacancyId(v.id)}
+                      >
+                        <Trash2Icon className="size-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardHeader>

@@ -4,6 +4,7 @@ import { ApiError, clearToken, saas, type ExperimentItem } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const STATUS_BADGE: Record<string, string> = {
   draft: "bg-secondary text-secondary-foreground",
@@ -55,7 +56,19 @@ export function SaasExperiments() {
         description="Сравнение стилей общения по исходу лидов"
       />
 
-      {loading && <p className="text-muted-foreground text-sm">Загрузка…</p>}
+      {loading && (
+        <div className="flex flex-col gap-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="rounded-lg border p-4 space-y-2">
+              <div className="flex justify-between">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-5 w-16" />
+              </div>
+              <Skeleton className="h-3 w-56" />
+            </div>
+          ))}
+        </div>
+      )}
       {error && <p className="text-destructive text-sm">{error}</p>}
 
       <div className="flex flex-col gap-3">

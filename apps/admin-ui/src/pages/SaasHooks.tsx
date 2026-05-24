@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { EditIcon, GripVerticalIcon, PlusIcon, SaveIcon, Trash2Icon, XIcon } from "lucide-react";
+import { AlertTriangleIcon, EditIcon, GripVerticalIcon, PlusIcon, SaveIcon, Trash2Icon, XIcon } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
 interface HookFormState {
@@ -31,6 +32,7 @@ export function SaasHooks() {
   const [form, setForm] = useState<HookFormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmDeleteHookId, setConfirmDeleteHookId] = useState<number | null>(null);
 
   // drag-to-reorder state
   const [draggingId, setDraggingId] = useState<number | null>(null);
@@ -110,7 +112,7 @@ export function SaasHooks() {
   }
 
   async function handleDelete(id: number) {
-    if (!confirm("Удалить хук?")) return;
+    setConfirmDeleteHookId(null);
     setDeletingId(id);
     try {
       await saas.deleteDirectorHook(id);
@@ -237,7 +239,19 @@ export function SaasHooks() {
         </Card>
       )}
 
-      {loading && <p className="text-muted-foreground text-sm">Загрузка…</p>}
+      {loading && (
+        <div className="flex flex-col gap-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="rounded-lg border p-4 space-y-2">
+              <div className="flex justify-between">
+                <Skeleton className="h-4 w-40" />
+                <div className="flex gap-1"><Skeleton className="h-7 w-7" /><Skeleton className="h-7 w-7" /></div>
+              </div>
+              <Skeleton className="h-3 w-64" />
+            </div>
+          ))}
+        </div>
+      )}
       {error && <p className="text-destructive text-sm">{error}</p>}
 
       {/* Hooks list */}
@@ -278,15 +292,27 @@ export function SaasHooks() {
                         >
                           <EditIcon className="h-3.5 w-3.5" />
                         </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => handleDelete(hook.id)}
-                          disabled={deletingId === hook.id}
-                        >
-                          <Trash2Icon className="h-3.5 w-3.5" />
-                        </Button>
+                        {confirmDeleteHookId === hook.id ? (
+                          <div className="flex items-center gap-1">
+                            <AlertTriangleIcon className="size-3.5 text-destructive shrink-0" />
+                            <Button size="sm" variant="destructive" onClick={() => handleDelete(hook.id)} disabled={deletingId === hook.id}>
+                              Да
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteHookId(null)}>
+                              Нет
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            onClick={() => setConfirmDeleteHookId(hook.id)}
+                            disabled={deletingId === hook.id}
+                          >
+                            <Trash2Icon className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </CardTitle>
                     {hook.triggerHint && (

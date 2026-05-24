@@ -279,7 +279,10 @@ function SidebarBody({
         <NavLinks onNavigate={onNavigate} escalatedCount={escalatedCount} collapsed={collapsed} />
       </div>
 
-      <div className="border-t border-sidebar-border p-3">
+      <div className="border-t border-sidebar-border p-3 space-y-1">
+        <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-end px-1")}>
+          <ModeToggle />
+        </div>
         {collapsed ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -439,10 +442,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="bg-background/70 sticky top-0 z-30 flex h-14 items-center gap-2 border-b px-4 backdrop-blur-xl md:px-8">
+          <header className="bg-background/70 sticky top-0 z-30 flex h-14 items-center gap-2 border-b px-4 backdrop-blur-xl md:hidden">
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
               <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="md:hidden" aria-label="Меню">
+                <Button variant="ghost" size="icon" aria-label="Меню">
                   <MenuIcon className="size-5" />
                 </Button>
               </SheetTrigger>
@@ -459,11 +462,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </SheetContent>
             </Sheet>
 
-            <div className="md:hidden">
-              <Brand collapsed={false} />
-            </div>
+            <Brand collapsed={false} />
 
-            <div className="ml-auto flex items-center gap-1">
+            <div className="ml-auto">
               <ModeToggle />
             </div>
           </header>

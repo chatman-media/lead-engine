@@ -1,4 +1,4 @@
-import { CheckCircle2Icon, KeyRoundIcon, Trash2Icon } from "lucide-react";
+import { AlertTriangleIcon, CheckCircle2Icon, KeyRoundIcon, Trash2Icon } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -70,6 +72,7 @@ export function SaasSettings() {
   const [pwdSaving, setPwdSaving] = useState(false);
   const [pwdError, setPwdError] = useState("");
   const [pwdSuccess, setPwdSuccess] = useState(false);
+  const [confirmDeletePurpose, setConfirmDeletePurpose] = useState<LlmPurpose | null>(null);
   const [forms, setForms] = useState<Record<LlmPurpose, FormState>>({
     chat: { ...EMPTY_FORM },
     embed: { ...EMPTY_FORM },
@@ -164,7 +167,7 @@ export function SaasSettings() {
   }
 
   async function handleDelete(purpose: LlmPurpose) {
-    if (!confirm(`Удалить конфиг ${purpose}? API key в tenant_secrets останется.`)) return;
+    setConfirmDeletePurpose(null);
     try {
       await saas.deleteLlmConfig(purpose);
       setForms((prev) => ({ ...prev, [purpose]: { ...EMPTY_FORM } }));
@@ -203,7 +206,25 @@ export function SaasSettings() {
     }
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground">Загрузка…</p>;
+  if (loading) return (
+    <div className="space-y-6">
+      <div className="space-y-1">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-4 w-80" />
+      </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        {[0, 1].map((i) => (
+          <div key={i} className="rounded-lg border p-5 space-y-4">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-24" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -230,14 +251,26 @@ export function SaasSettings() {
                   <p className="text-sm text-muted-foreground">{hint}</p>
                 </div>
                 {cfg && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-destructive"
-                    onClick={() => handleDelete(purpose)}
-                  >
-                    <Trash2Icon className="size-4" />
-                  </Button>
+                  confirmDeletePurpose === purpose ? (
+                    <div className="flex items-center gap-1 text-sm">
+                      <AlertTriangleIcon className="size-3.5 text-warning shrink-0" />
+                      <Button size="sm" variant="destructive" onClick={() => handleDelete(purpose)}>
+                        Да
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setConfirmDeletePurpose(null)}>
+                        Нет
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => setConfirmDeletePurpose(purpose)}
+                    >
+                      <Trash2Icon className="size-4" />
+                    </Button>
+                  )
                 )}
               </CardHeader>
               <CardContent>
@@ -356,8 +389,7 @@ export function SaasSettings() {
           <form onSubmit={handleChangePassword} className="space-y-3">
             <div className="space-y-1.5">
               <Label>Текущий пароль</Label>
-              <Input
-                type="password"
+              <PasswordInput
                 autoComplete="current-password"
                 value={currentPwd}
                 onChange={(e) => setCurrentPwd(e.target.value)}
@@ -367,8 +399,7 @@ export function SaasSettings() {
             </div>
             <div className="space-y-1.5">
               <Label>Новый пароль (≥ 8 символов)</Label>
-              <Input
-                type="password"
+              <PasswordInput
                 autoComplete="new-password"
                 value={newPwd}
                 onChange={(e) => setNewPwd(e.target.value)}

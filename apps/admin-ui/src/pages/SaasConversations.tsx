@@ -309,7 +309,26 @@ export function SaasConversations() {
               Выберите диалог слева
             </div>
           ) : detailLoading && !detail ? (
-            <p className="p-4 text-sm text-muted-foreground">Загрузка…</p>
+            <div className="flex flex-1 flex-col gap-3 p-4">
+              <div className="flex items-center justify-between gap-3 border-b pb-3">
+                <div className="space-y-1.5">
+                  <Skeleton className="h-5 w-36" />
+                  <div className="flex gap-1">
+                    <Skeleton className="h-5 w-16" />
+                    <Skeleton className="h-5 w-10" />
+                  </div>
+                </div>
+                <Skeleton className="h-8 w-24" />
+              </div>
+              <div className="flex flex-col gap-3 flex-1">
+                {[0, 1, 2, 3].map((i) => (
+                  <Skeleton
+                    key={i}
+                    className={`h-14 max-w-[70%] rounded-2xl ${i % 2 === 0 ? "self-start" : "self-end"}`}
+                  />
+                ))}
+              </div>
+            </div>
           ) : detail ? (
             <>
               <div className="flex items-center justify-between gap-3 border-b px-4 py-3">

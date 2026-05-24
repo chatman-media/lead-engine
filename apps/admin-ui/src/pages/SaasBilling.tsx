@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const PURPOSE_LABEL: Record<string, string> = {
   chat: "Диалог (chat)",
@@ -76,7 +77,17 @@ export function SaasBilling() {
         </div>
       </div>
 
-      {loading && <p className="text-muted-foreground text-sm">Загрузка…</p>}
+      {loading && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="rounded-lg border p-4 space-y-2">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-7 w-20" />
+              <Skeleton className="h-3 w-24" />
+            </div>
+          ))}
+        </div>
+      )}
       {error && <p className="text-destructive text-sm">{error}</p>}
 
       {report && (
