@@ -33,3 +33,4 @@ coverage/
 # 5MB+ JSON dump it was generated from doesn't need to live in git.
 apps/bot/kb/result.json
 .claude/
+TODO.md

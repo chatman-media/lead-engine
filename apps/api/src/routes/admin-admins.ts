@@ -3,6 +3,7 @@ import { adminInvites, admins } from "@chatman-media/storage";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
+import { type Mailer, inviteEmailHtml } from "../lib/mailer.ts";
 import { canAddAdmin } from "../lib/quota.ts";
 
 /**
@@ -36,6 +37,8 @@ export interface AdminAdminsRoutesOpts {
   publicUrl?: string;
   /** Срок жизни invite token в секундах. Default 7 days. */
   inviteExpiresSec?: number;
+  /** Опциональный mailer — если задан, invite-email отправляется автоматически. */
+  mailer?: Mailer;
 }
 
 interface InviteBody {
@@ -159,6 +162,15 @@ export function makeAdminAdminsRoutes(opts: AdminAdminsRoutesOpts): Hono {
     const shareUrl = opts.publicUrl
       ? `${opts.publicUrl}/accept-invite?token=${token}`
       : undefined;
+
+    // Email-доставка — best-effort, не блокирует ответ.
+    if (opts.mailer && shareUrl) {
+      opts.mailer.send({
+        to: email,
+        subject: "Вас приглашают в lead-engine",
+        html: inviteEmailHtml({ inviteUrl: shareUrl }),
+      }).catch((e) => console.warn("[mailer] invite send failed:", e));
+    }
 
     return c.json({
       ok: true,

@@ -139,6 +139,19 @@ export function trialEndingEmailHtml(opts: {
   `);
 }
 
+/** Письмо с приглашением в команду. */
+export function inviteEmailHtml(opts: { inviteUrl: string }): string {
+  return baseLayout(`
+    <h1>Вас приглашают в lead-engine</h1>
+    <p>Вы получили приглашение в рабочее пространство lead-engine.</p>
+    <a href="${opts.inviteUrl}" class="btn">Принять приглашение →</a>
+    <div class="highlight">
+      ⏰ Ссылка действует 7 дней. Если вы не ожидали этого приглашения — просто проигнорируйте письмо.
+    </div>
+    <p style="margin-bottom:0">Если кнопка не работает, скопируйте ссылку:<br/><a href="${opts.inviteUrl}" style="color:#4f46e5;font-size:13px;word-break:break-all">${opts.inviteUrl}</a></p>
+  `);
+}
+
 /** Письмо при неудачной оплате. */
 export function paymentFailedEmailHtml(opts: {
   email: string;

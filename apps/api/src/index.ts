@@ -320,6 +320,7 @@ async function main() {
     "/",
     makeAdminAdminsRoutes({
       db,
+      mailer,
       ...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
     }),
   );
