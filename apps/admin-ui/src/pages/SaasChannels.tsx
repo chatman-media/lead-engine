@@ -646,7 +646,7 @@ export function SaasChannels() {
       </Tabs>
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle>Подключённые каналы</CardTitle>
           <Badge variant="secondary">{channels.length}</Badge>
         </CardHeader>

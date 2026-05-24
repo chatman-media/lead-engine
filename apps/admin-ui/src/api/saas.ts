@@ -1047,6 +1047,21 @@ export const saas = {
   listStyles() {
     return request<{ items: StyleItem[] }>("/api/admin/styles");
   },
+  createStyle(data: { displayName: string; slug: string; configJson: string; isActive: boolean }) {
+    return request<StyleItem>("/api/admin/styles", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateStyle(id: number, data: Partial<{ displayName: string; configJson: string; isActive: boolean }>) {
+    return request<StyleItem>(`/api/admin/styles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  deleteStyle(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/styles/${id}`, { method: "DELETE" });
+  },
   listExperiments() {
     return request<{ items: ExperimentItem[] }>("/api/admin/experiments");
   },
