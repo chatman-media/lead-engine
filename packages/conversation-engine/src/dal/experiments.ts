@@ -61,6 +61,54 @@ export class ExperimentsRepo {
       .orderBy(desc(experimentsTable.createdAt));
     return rows as ExperimentRow[];
   }
+
+  async create(data: {
+    slug: string;
+    allocationJson: string;
+    successMetric: string;
+  }): Promise<ExperimentRow> {
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const [row] = await this.ctx.db
+      .insert(experimentsTable)
+      .values({
+        tenantId: this.ctx.tenantId,
+        slug: data.slug,
+        status: "draft",
+        allocationJson: data.allocationJson,
+        successMetric: data.successMetric,
+        createdAt: nowEpoch,
+      })
+      .returning();
+    return row as ExperimentRow;
+  }
+
+  async update(
+    id: number,
+    data: Partial<{ allocationJson: string; successMetric: string }>,
+  ): Promise<ExperimentRow | null> {
+    const [row] = await this.ctx.db
+      .update(experimentsTable)
+      .set(data)
+      .where(and(eq(experimentsTable.id, id), eq(experimentsTable.tenantId, this.ctx.tenantId)))
+      .returning();
+    return (row as ExperimentRow) ?? null;
+  }
+
+  async setStatus(
+    id: number,
+    status: "running" | "paused" | "done",
+  ): Promise<ExperimentRow | null> {
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const extra: Record<string, unknown> = {};
+    if (status === "running") extra.startedAt = nowEpoch;
+    if (status === "done") extra.endedAt = nowEpoch;
+    const [row] = await this.ctx.db
+      .update(experimentsTable)
+      .set({ status, ...extra })
+      .where(and(eq(experimentsTable.id, id), eq(experimentsTable.tenantId, this.ctx.tenantId)))
+      .returning();
+    return (row as ExperimentRow) ?? null;
+  }
 }
 
 /**

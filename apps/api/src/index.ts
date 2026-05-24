@@ -51,6 +51,7 @@ import { makeAdminDashboardRoutes } from "./routes/admin-dashboard.ts";
 import { makeAdminReferralRoutes } from "./routes/admin-referral.ts";
 import { makeAdminVacanciesRoutes } from "./routes/admin-vacancies.ts";
 import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
+import { makeAdminExperimentsRoutes } from "./routes/admin-experiments.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
@@ -336,6 +337,8 @@ async function main() {
   // Director hooks (tenant-specific persuasion scripts).
   app.route("/", makeAdminDirectorHooksRoutes({ db }));
   log.info("admin-director-hooks routes enabled");
+  app.route("/", makeAdminExperimentsRoutes({ db }));
+  log.info("admin-experiments routes enabled");
   app.route("/", makeAdminStylesRoutes({
     db,
     resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
