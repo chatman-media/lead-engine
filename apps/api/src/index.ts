@@ -336,6 +336,14 @@ async function main() {
   app.route("/", makeAdminDirectorHooksRoutes({ db }));
   log.info("admin-director-hooks routes enabled");
 
+  const strategyBundle: ReplyStrategyBundle | null = makeReplyStrategy(
+    loadedRef,
+    cfg,
+    db,
+    metrics,
+    recordUsage,
+  );
+
   // Agentic tool configuration (booking link, etc.).
   app.route(
     "/",
@@ -393,13 +401,6 @@ async function main() {
       db: db as any,
       timeoutMs: cfg.healthCheckTimeoutMs,
     }),
-  );
-  const strategyBundle: ReplyStrategyBundle | null = makeReplyStrategy(
-    loadedRef,
-    cfg,
-    db,
-    metrics,
-    recordUsage,
   );
   const replyStrategy = strategyBundle?.strategy ?? null;
   if (replyStrategy) {
