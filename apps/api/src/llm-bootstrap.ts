@@ -40,6 +40,7 @@ import {
   type LoadedLlmConfigs,
   type ResolvedLlmConfig,
 } from "./lib/llm-config-loader.ts";
+import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
 
 /**
  * Bootstrap LlmRouter + ReplyStrategy. Per-tenant configs приходят из
@@ -407,6 +408,27 @@ export function makeReplyStrategy(
   return {
     strategy,
     invalidateToolsFor: (tenantId: number) => toolsCache.delete(tenantId),
+  };
+}
+
+/**
+ * Resolver для STT-транскрибера голосовых сообщений (Whisper).
+ * Использует API-ключ chat-конфига тенанта — тот же ключ, что в admin-UI.
+ * Работает только для провайдеров с apiKey (openai, openrouter, custom).
+ * Возвращает null если ни у одного тенанта нет подходящего ключа.
+ */
+export function makeTranscriberResolver(
+  ref: LoadedRef,
+): ((tenantId: number) => WhisperTranscriber | null) | null {
+  const hasAnyKey = [...ref.current.byTenant.values()].some((m) => m.get("chat")?.apiKey);
+  if (!hasAnyKey) return null;
+  return (tenantId: number) => {
+    const cfg = getConfig(ref.current, tenantId, "chat");
+    if (!cfg?.apiKey) return null;
+    return new WhisperTranscriber({
+      apiKey: cfg.apiKey,
+      ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
+    });
   };
 }
 
