@@ -12,6 +12,7 @@ import type {
 import { type MemoryExtractor, runMemoryExtraction } from "./memory-extractor.ts";
 import { dispatchOutbound } from "./outbound-dispatch.ts";
 import { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
+import type { ITranscriber } from "./transcriber.ts";
 import {
   type ChannelContext,
   type Clock,
@@ -101,6 +102,15 @@ export interface ProcessInboundDeps {
   deferReply?: boolean;
   sink?: PipelineSink;
   clock?: Clock;
+  /**
+   * Опциональный STT-транскрибер. Если задан и inbound содержит voice-part —
+   * pipeline транскрибирует аудио перед persist'ом. Транскрипт становится
+   * текстом сообщения; остальной pipeline работает без изменений.
+   * downloadVoice должен быть задан вместе с transcriber.
+   */
+  transcriber?: ITranscriber | null;
+  /** Загружает аудиофайл по mediaRef.externalRef. Нужен для transcriber. */
+  downloadVoice?: ((mediaRef: string) => Promise<Response>) | null;
 }
 
 /**
@@ -189,6 +199,36 @@ export async function processInbound(
   });
 
   // 3. Persist message (с дедупом по external_message_id).
+  //    Если есть голосовые части и задан transcriber — транскрибируем сначала.
+  if (deps.transcriber && deps.downloadVoice) {
+    for (const part of inbound.parts) {
+      if (part.kind === "voice") {
+        try {
+          const res = await deps.downloadVoice(part.mediaRef.externalRef);
+          if (res.ok) {
+            const buf = await res.arrayBuffer();
+            const transcript = await deps.transcriber.transcribe(
+              new Uint8Array(buf),
+              "voice.ogg",
+            );
+            if (transcript) {
+              // Заменяем voice-part текстовым транскриптом в inbound.parts
+              const idx = inbound.parts.indexOf(part);
+              (inbound.parts as Array<(typeof inbound.parts)[number]>)[idx] = {
+                kind: "text",
+                text: transcript,
+              };
+            }
+          }
+        } catch (err) {
+          deps.sink?.log?.("warn", "voice transcription failed", {
+            tenantId: deps.tenant.tenantId,
+            error: (err as Error).message,
+          });
+        }
+      }
+    }
+  }
   const { text, mediaOnly } = inboundText(inbound);
 
   // Skip persist для callback_query — это не сообщение в диалоге,

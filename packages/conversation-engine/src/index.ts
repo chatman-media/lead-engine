@@ -70,6 +70,7 @@ export {
   type ProcessInboundDeps,
   type ReplyStrategy,
 } from "./process-inbound.ts";
+export type { ITranscriber } from "./transcriber.ts";
 export {
   LlmReplyStrategy,
   type LlmReplyStrategyOpts,

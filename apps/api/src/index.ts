@@ -28,6 +28,7 @@ import {
   makeReplyStrategy,
   type ReplyStrategyBundle,
   makeStageClassifier,
+  makeTranscriberResolver,
 } from "./llm-bootstrap.ts";
 import { makeFieldExtractor } from "./lib/field-extractor.ts";
 import { Mailer } from "./lib/mailer.ts";
@@ -452,6 +453,11 @@ async function main() {
   const fieldExtractor = makeFieldExtractor(loadedRef);
   log.info("field extractor enabled (activates per-tenant when chat LLM is configured)");
 
+  const resolveTranscriber = makeTranscriberResolver(loadedRef);
+  if (resolveTranscriber) {
+    log.info("voice transcription enabled (Whisper) — uses per-tenant chat API key");
+  }
+
   const sink = makeMetricsSink(metrics);
 
   // Per-tenant inbound rate-limit. Disabled если оба значения = 0.
@@ -486,6 +492,7 @@ async function main() {
       sink,
       metrics,
       ...(rateLimiter ? { rateLimiter } : {}),
+      ...(resolveTranscriber ? { resolveTranscriber } : {}),
     }),
   );
 

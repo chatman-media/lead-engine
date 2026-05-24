@@ -5,6 +5,7 @@ import {
   ConversationsRepo,
   type Db,
   generateReplyAndEnqueue,
+  type ITranscriber,
   type MemoryExtractor,
   MessagesRepo,
   OutboundQueueRepo,
@@ -88,6 +89,8 @@ export function makeTelegramWebhookRoutes(opts: {
   rateLimiter?: InboundRateLimiter;
   photoProcessor?: PhotoProcessor;
   fieldExtractor?: FieldExtractor;
+  /** Per-tenant STT factory. Вызывается с tenantId на каждый webhook-запрос. */
+  resolveTranscriber?: ((tenantId: number) => ITranscriber | null) | null;
 }): Hono {
   const app = new Hono();
 
@@ -202,6 +205,14 @@ export function makeTelegramWebhookRoutes(opts: {
         ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
         ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
         ...(opts.sink ? { sink: opts.sink } : {}),
+        ...(opts.resolveTranscriber
+          ? (() => {
+              const t = opts.resolveTranscriber(entry.tenantId);
+              return t
+                ? { transcriber: t, downloadVoice: (ref: string) => adapter.rawClient.downloadFile(ref) }
+                : {};
+            })()
+          : {}),
       });
     });
 
