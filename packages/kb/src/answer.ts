@@ -18,7 +18,8 @@ import {
 } from "./persona-shortcuts.ts";
 import { composeSystemPrompt } from "./prompt.ts";
 import { rewriteQuery } from "./rewrite-query.ts";
-import { applyDynamicThreshold, mmrDiversify } from "./retrieval-utils.ts";
+import { applyDynamicThreshold, mmrDiversify, rrfMerge } from "./retrieval-utils.ts";
+import { expandQueries } from "./multi-query.ts";
 import { sanitizeLlmOutput } from "./sanitize.ts";
 import {
   injectJsonInstruction,
@@ -334,8 +335,9 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
     }
   }
 
-  // ── Retrieval (same logic as answerWithRag) ──────────────────────────────
+  // ── Retrieval (mirrors answerWithRag) ────────────────────────────────────
   const topK = input.topK ?? 5;
+  const candidateK = input.reranker ? topK * 3 : topK;
   const searchQuery = input.rewriteQueryBeforeRetrieval
     ? await rewriteQuery({
         question: input.question,
@@ -344,8 +346,18 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
       })
     : input.question;
 
+  const queries = input.multiQuery
+    ? await expandQueries({
+        question: searchQuery,
+        history: input.history,
+        chat: input.chat,
+        count: input.multiQueryCount ?? 2,
+      })
+    : [searchQuery];
+
   const retrievalStart = Date.now();
-  const [questionVec] = await input.embedder.embed([searchQuery]);
+  const vecs = await input.embedder.embed(queries);
+  const questionVec = vecs[0];
   if (!questionVec) throw new Error("Embedder returned no vector for question");
 
   let hits: KbSearchHit[];
@@ -353,22 +365,39 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
     hits = await input.kb.prioritySearch({
       embedding: questionVec,
       query: searchQuery,
-      k: topK,
+      k: candidateK,
       vectorOnly: !input.hybridSearch,
     });
   } else {
     const topic = input.topicRouting ? classifyTopic(input.question) : null;
-    const runSearch = (filterTopic: string | null) =>
-      input.hybridSearch
-        ? input.kb.hybridSearch({
-            embedding: questionVec,
-            query: searchQuery,
-            k: topK,
-            ...(filterTopic !== null ? { topic: filterTopic } : {}),
-          })
-        : input.kb.search(questionVec, topK, filterTopic);
-    hits = await runSearch(topic);
-    if (topic !== null && hits.length === 0) hits = await runSearch(null);
+    if (queries.length > 1) {
+      const hitLists = await Promise.all(
+        queries.map((q, i) => {
+          const vec = vecs[i] ?? questionVec;
+          return input.hybridSearch
+            ? input.kb.hybridSearch({
+                embedding: vec,
+                query: q,
+                k: candidateK,
+                ...(topic !== null ? { topic } : {}),
+              })
+            : input.kb.search(vec, candidateK, topic);
+        }),
+      );
+      hits = rrfMerge(hitLists, { topN: candidateK });
+    } else {
+      const runSearch = (filterTopic: string | null) =>
+        input.hybridSearch
+          ? input.kb.hybridSearch({
+              embedding: questionVec,
+              query: searchQuery,
+              k: candidateK,
+              ...(filterTopic !== null ? { topic: filterTopic } : {}),
+            })
+          : input.kb.search(questionVec, candidateK, filterTopic);
+      hits = await runSearch(topic);
+      if (topic !== null && hits.length === 0) hits = await runSearch(null);
+    }
   }
 
   const maxDist = input.maxDistance;
@@ -381,6 +410,10 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
   if (input.mmr) {
     hits = mmrDiversify(hits, { lambda: input.mmrLambda, topK: topK });
   }
+  if (input.reranker && hits.length > 0) {
+    hits = await input.reranker.rerank(searchQuery, hits, topK);
+  }
+  hits = hits.slice(0, topK);
   const retrievalMs = Date.now() - retrievalStart;
 
   if (hits.length === 0 && !(input.vacanciesBlock ?? "").trim() && !input.style) {
@@ -525,6 +558,8 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   }
 
   const topK = input.topK ?? 5;
+  // Fetch more candidates when a reranker will do a second pass.
+  const candidateK = input.reranker ? topK * 3 : topK;
 
   const searchQuery = input.rewriteQueryBeforeRetrieval
     ? await rewriteQuery({
@@ -534,15 +569,27 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
       })
     : input.question;
 
+  // ── Expand queries (multi-query) & embed in one batch ───────────────────
+  const queries = input.multiQuery
+    ? await expandQueries({
+        question: searchQuery,
+        history: input.history,
+        chat: input.chat,
+        count: input.multiQueryCount ?? 2,
+      })
+    : [searchQuery];
+
   const retrievalStart = Date.now();
-  const [questionVec] = await input.embedder.embed([searchQuery]);
+  const vecs = await input.embedder.embed(queries);
+  const questionVec = vecs[0];
   if (!questionVec) throw new Error("Embedder returned no vector for question");
 
+  // ── booksPriority path (always single-query) ─────────────────────────────
   if (input.booksPriority) {
     const allHits = await input.kb.prioritySearch({
       embedding: questionVec,
       query: searchQuery,
-      k: topK,
+      k: candidateK,
       vectorOnly: !input.hybridSearch,
     });
     const maxDist = input.maxDistance;
@@ -556,6 +603,10 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     if (input.mmr) {
       hits = mmrDiversify(hits, { lambda: input.mmrLambda, topK: topK });
     }
+    if (input.reranker && hits.length > 0) {
+      hits = await input.reranker.rerank(searchQuery, hits, topK);
+    }
+    hits = hits.slice(0, topK);
     const retrievalMs = Date.now() - retrievalStart;
     const baseTelemetry: AnswerTelemetry = {
       path: "ok",
@@ -571,24 +622,46 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     return result;
   }
 
+  // ── Normal path ───────────────────────────────────────────────────────────
   const topic = input.topicRouting ? classifyTopic(input.question) : null;
-
-  const runSearch = (filterTopic: string | null) =>
-    input.hybridSearch
-      ? input.kb.hybridSearch({
-          embedding: questionVec,
-          query: searchQuery,
-          k: topK,
-          ...(filterTopic !== null ? { topic: filterTopic } : {}),
-        })
-      : input.kb.search(questionVec, topK, filterTopic);
-
-  let allHits = await runSearch(topic);
   let usedTopic: string | null = topic;
-  if (topic !== null && allHits.length === 0) {
-    allHits = await runSearch(null);
-    usedTopic = null;
+  let allHits: KbSearchHit[];
+
+  if (queries.length > 1) {
+    // Multi-query: search for each query in parallel, merge via RRF.
+    const hitLists = await Promise.all(
+      queries.map((q, i) => {
+        const vec = vecs[i] ?? questionVec;
+        return input.hybridSearch
+          ? input.kb.hybridSearch({
+              embedding: vec,
+              query: q,
+              k: candidateK,
+              ...(topic !== null ? { topic } : {}),
+            })
+          : input.kb.search(vec, candidateK, topic);
+      }),
+    );
+    allHits = rrfMerge(hitLists, { topN: candidateK });
+  } else {
+    // Single-query path (original behaviour).
+    const runSearch = (filterTopic: string | null) =>
+      input.hybridSearch
+        ? input.kb.hybridSearch({
+            embedding: questionVec,
+            query: searchQuery,
+            k: candidateK,
+            ...(filterTopic !== null ? { topic: filterTopic } : {}),
+          })
+        : input.kb.search(questionVec, candidateK, filterTopic);
+
+    allHits = await runSearch(topic);
+    if (topic !== null && allHits.length === 0) {
+      allHits = await runSearch(null);
+      usedTopic = null;
+    }
   }
+
   const maxDist = input.maxDistance;
   let hits =
     input.hybridSearch || maxDist === undefined
@@ -600,6 +673,10 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   if (input.mmr) {
     hits = mmrDiversify(hits, { lambda: input.mmrLambda, topK: topK });
   }
+  if (input.reranker && hits.length > 0) {
+    hits = await input.reranker.rerank(searchQuery, hits, topK);
+  }
+  hits = hits.slice(0, topK);
   const retrievalMs = Date.now() - retrievalStart;
 
   const baseTelemetry: AnswerTelemetry = {
@@ -614,7 +691,7 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   };
 
   console.log(
-    `[rag] retrieval hits=${hits.length} topic=${usedTopic ?? "global"} ms=${Date.now() - retrievalStart}`,
+    `[rag] retrieval hits=${hits.length} queries=${queries.length} topic=${usedTopic ?? "global"} ms=${Date.now() - retrievalStart}`,
   );
   const result = await answerFromHits({ hits, baseTelemetry, startedAt, input, activePersona });
   input.onTelemetry?.(result.telemetry);

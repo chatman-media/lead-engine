@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { applyDynamicThreshold, mmrDiversify } from "../src/retrieval-utils.ts";
+import { applyDynamicThreshold, mmrDiversify, rrfMerge } from "../src/retrieval-utils.ts";
 import type { KbSearchHit } from "../src/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -89,5 +89,60 @@ describe("mmrDiversify", () => {
     ];
     const result = mmrDiversify(hits, { lambda: 0.6 });
     expect(result[0]!.chunk_id).toBe(1);
+  });
+});
+
+// ── rrfMerge ─────────────────────────────────────────────────────────────────
+
+describe("rrfMerge", () => {
+  it("single list → returns it unchanged", () => {
+    const list = [hit(1, 0.1, "a"), hit(2, 0.2, "b")];
+    const result = rrfMerge([list]);
+    expect(result.map((h) => h.chunk_id)).toEqual([1, 2]);
+  });
+
+  it("empty input → empty output", () => {
+    expect(rrfMerge([])).toEqual([]);
+  });
+
+  it("deduplicates by chunk_id across lists", () => {
+    const listA = [hit(1, 0.1, "a"), hit(2, 0.2, "b")];
+    const listB = [hit(2, 0.15, "b"), hit(3, 0.3, "c")];
+    const result = rrfMerge([listA, listB]);
+    const ids = result.map((h) => h.chunk_id);
+    // no duplicates
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toHaveLength(3);
+  });
+
+  it("chunk appearing in multiple lists ranks higher", () => {
+    // chunk_id=2: rank-2 in listA + rank-1 in listB → score 1/62 + 1/61 ≈ 0.0325
+    // chunk_id=1: rank-1 in listA only              → score 1/61 ≈ 0.0164
+    // So chunk_id=2 (multi-list boost) should outrank chunk_id=1 (single-list top)
+    const listA = [hit(1, 0.05, "a"), hit(2, 0.1, "b")];
+    const listB = [hit(2, 0.08, "b2"), hit(3, 0.2, "c")];
+    const result = rrfMerge([listA, listB]);
+    const ids = result.map((h) => h.chunk_id);
+    expect(ids[0]).toBe(2); // boosted by appearing in both lists
+    expect(ids[1]).toBe(1); // only in listA at rank-1
+  });
+
+  it("respects topN", () => {
+    const listA = [hit(1, 0.1, "a"), hit(2, 0.2, "b"), hit(3, 0.3, "c")];
+    const listB = [hit(4, 0.1, "d"), hit(5, 0.2, "e")];
+    const result = rrfMerge([listA, listB], { topN: 2 });
+    expect(result).toHaveLength(2);
+  });
+
+  it("distance output is in (0, 1] — lower for higher-ranked chunks", () => {
+    const listA = [hit(1, 0.1, "a"), hit(2, 0.5, "b")];
+    const listB = [hit(3, 0.2, "c"), hit(4, 0.6, "d")];
+    const result = rrfMerge([listA, listB]);
+    for (const h of result) {
+      expect(h.distance).toBeGreaterThan(0);
+      expect(h.distance).toBeLessThanOrEqual(1);
+    }
+    // best ranked chunk has lowest distance
+    expect(result[0]!.distance).toBeLessThan(result[result.length - 1]!.distance);
   });
 });
