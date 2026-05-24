@@ -10,6 +10,8 @@ import {
   GitBranchIcon,
   LinkIcon,
   LogOutIcon,
+  MonitorIcon,
+  MoonIcon,
   WrenchIcon,
   type LucideIcon,
   MenuIcon,
@@ -19,6 +21,7 @@ import {
   ScrollTextIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
+  SunIcon,
   UsersIcon,
   UserCircleIcon,
   ZapIcon,
@@ -27,15 +30,20 @@ import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { type Admin, clearToken, saas, type Tenant } from "@/api/saas";
+import { useTheme } from "@/components/theme-provider";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -239,6 +247,148 @@ function NavLinks({
   );
 }
 
+const THEME_LABEL: Record<string, string> = {
+  light: "Светлая",
+  dark: "Тёмная",
+  system: "Системная",
+};
+
+function AccountDropdown({
+  admin,
+  tenant,
+  onLogout,
+  collapsed,
+}: {
+  admin: Admin | null;
+  tenant: Tenant | null;
+  onLogout: () => void;
+  collapsed: boolean;
+}) {
+  const { theme, setTheme } = useTheme();
+  const initials = (admin?.email ?? "?").slice(0, 2).toUpperCase();
+
+  const menuContent = (
+    <DropdownMenuContent
+      align="start"
+      side={collapsed ? "right" : "top"}
+      className="w-56"
+    >
+      <DropdownMenuLabel className="font-normal">
+        <p className="text-sm font-medium truncate">{admin?.email ?? "—"}</p>
+        <p className="text-xs text-muted-foreground">
+          {admin?.role === "superadmin" ? "Суперадмин" : "Менеджер"} · {tenant?.slug ?? "—"}
+        </p>
+      </DropdownMenuLabel>
+      <DropdownMenuSeparator />
+      <DropdownMenuGroup>
+        <DropdownMenuItem asChild>
+          <Link to="/settings">
+            <SlidersHorizontalIcon /> Настройки LLM
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/team">
+            <UsersIcon /> Команда
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/billing">
+            <BarChart2Icon /> LLM-использование
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/diagnostics">
+            <ActivityIcon /> Диагностика
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuGroup>
+      <DropdownMenuSeparator />
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          {theme === "dark" ? (
+            <MoonIcon />
+          ) : theme === "light" ? (
+            <SunIcon />
+          ) : (
+            <MonitorIcon />
+          )}
+          Тема
+          <span className="ml-auto text-xs text-muted-foreground">{THEME_LABEL[theme]}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          <DropdownMenuItem onClick={() => setTheme("light")}>
+            <SunIcon /> Светлая
+            {theme === "light" && <span className="ml-auto text-primary">•</span>}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setTheme("dark")}>
+            <MoonIcon /> Тёмная
+            {theme === "dark" && <span className="ml-auto text-primary">•</span>}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setTheme("system")}>
+            <MonitorIcon /> Системная
+            {theme === "system" && <span className="ml-auto text-primary">•</span>}
+          </DropdownMenuItem>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem variant="destructive" onClick={onLogout}>
+        <LogOutIcon /> Выйти
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
+
+  if (collapsed) {
+    return (
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground cursor-pointer"
+              >
+                <Avatar className="size-7 rounded-lg">
+                  <AvatarFallback className="rounded-lg bg-primary/15 text-primary text-[10px]">
+                    {initials}
+                  </AvatarFallback>
+                </Avatar>
+              </button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="right" className="text-xs">
+            {admin?.email}
+          </TooltipContent>
+        </Tooltip>
+        {menuContent}
+      </DropdownMenu>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent/60 cursor-pointer"
+        >
+          <Avatar className="size-8 rounded-lg">
+            <AvatarFallback className="rounded-lg bg-primary/15 text-primary">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{admin?.email ?? "—"}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {tenant?.slug ?? "—"} · {tenant?.plan ?? "free"}
+            </p>
+          </div>
+        </button>
+      </DropdownMenuTrigger>
+      {menuContent}
+    </DropdownMenu>
+  );
+}
+
 function SidebarBody({
   admin,
   tenant,
@@ -256,7 +406,6 @@ function SidebarBody({
   collapsed: boolean;
   onToggleCollapse?: () => void;
 }) {
-  const initials = (admin?.email ?? "?").slice(0, 2).toUpperCase();
   return (
     <div className="flex h-full flex-col gap-1">
       <div className="flex h-14 items-center border-b border-sidebar-border px-3 gap-2">
@@ -279,63 +428,13 @@ function SidebarBody({
         <NavLinks onNavigate={onNavigate} escalatedCount={escalatedCount} collapsed={collapsed} />
       </div>
 
-      <div className="border-t border-sidebar-border p-3 space-y-1">
-        <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-end px-1")}>
-          <ModeToggle />
-        </div>
-        {collapsed ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={onLogout}
-                className="flex w-full justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground cursor-pointer"
-              >
-                <Avatar className="size-7 rounded-lg">
-                  <AvatarFallback className="rounded-lg bg-primary/15 text-primary text-[10px]">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="text-xs">
-              {admin?.email}
-            </TooltipContent>
-          </Tooltip>
-        ) : (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent/60 cursor-pointer"
-              >
-                <Avatar className="size-8 rounded-lg">
-                  <AvatarFallback className="rounded-lg bg-primary/15 text-primary">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{admin?.email ?? "—"}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {tenant?.slug ?? "—"} · {tenant?.plan ?? "free"}
-                  </p>
-                </div>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" side="top" className="w-56">
-              <DropdownMenuLabel className="font-normal">
-                <p className="text-sm font-medium">{admin?.email}</p>
-                <p className="text-xs text-muted-foreground">
-                  {admin?.role === "superadmin" ? "Суперадмин" : "Менеджер"} · {tenant?.slug}
-                </p>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={onLogout}>
-                <LogOutIcon /> Выйти
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+      <div className="border-t border-sidebar-border p-3">
+        <AccountDropdown
+          admin={admin}
+          tenant={tenant}
+          onLogout={onLogout}
+          collapsed={collapsed}
+        />
       </div>
     </div>
   );

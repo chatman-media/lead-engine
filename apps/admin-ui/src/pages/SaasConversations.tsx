@@ -28,6 +28,14 @@ const SOURCE_RU: Record<string, string> = {
   web: "Web",
 };
 const MODE_RU: Record<string, string> = { ai: "AI", human: "Оператор" };
+const STATE_RU: Record<string, string> = {
+  active: "активен",
+  won: "выигран",
+  lost: "проигран",
+  intake: "входящий",
+  terminal_won: "закрыт ✓",
+  terminal_lost: "закрыт ✗",
+};
 
 function fmtTime(epoch: number | null): string {
   if (!epoch) return "—";
@@ -361,7 +369,7 @@ export function SaasConversations() {
                         className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                       >
                         <ExternalLinkIcon className="size-3" />
-                        Лид · {contactLead.state}
+                        Лид · {STATE_RU[contactLead.state] ?? contactLead.state}
                       </Link>
                     )}
                   </div>
