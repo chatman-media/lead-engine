@@ -464,18 +464,29 @@ export function SaasConversations() {
                             m.deletedAt && "line-through",
                           )}
                         >
-                          {m.text || (() => {
+                          {(() => {
+                            let voiceDuration: number | undefined;
                             try {
                               const meta = m.metaJson ? JSON.parse(m.metaJson) as { parts?: Array<{ kind: string; durationSec?: number }> } : null;
                               const voice = meta?.parts?.find((p) => p.kind === "voice");
-                              if (voice) return (
-                                <span className="italic text-muted-foreground">
-                                  🎤 Голосовое{voice.durationSec ? ` (${voice.durationSec}с)` : ""}
+                              if (voice) voiceDuration = voice.durationSec;
+                            } catch { /* ignore */ }
+
+                            if (voiceDuration !== undefined || (!m.text && m.metaJson?.includes('"voice"'))) {
+                              return (
+                                <span className="flex flex-col gap-1">
+                                  <span className="text-xs text-muted-foreground italic">
+                                    🎤 Голосовое{voiceDuration ? ` (${voiceDuration}с)` : ""}
+                                  </span>
+                                  {m.text && <span>{m.text}</span>}
                                 </span>
                               );
-                            } catch { /* ignore */ }
-                            return <span className="italic text-muted-foreground">—</span>;
-                          })()}</div>
+                            }
+                            return m.text
+                              ? <span>{m.text}</span>
+                              : <span className="italic text-muted-foreground">—</span>;
+                          })()}
+                        </div>
                       </div>
                     );
                   })
