@@ -2,7 +2,7 @@
 
 <a name="top"></a>
 
-# lead-engine
+# Lead Engine
 
 **Multichannel AI Sales Closer — Telegram · WhatsApp · Web Widget**
 
@@ -504,7 +504,7 @@ resolve. Requires an `NPM_TOKEN` repository secret with publish rights to the
 
 ## Positioning
 
-| | **lead-engine** | Intercom Fin | Chatbase | CustomGPT | Decagon |
+| | **Lead Engine** | Intercom Fin | Chatbase | CustomGPT | Decagon |
 |---|:---:|:---:|:---:|:---:|:---:|
 | Telegram-native | ✅ | ❌ | ❌ | ❌ | ❌ |
 | WhatsApp | ✅ | ✅ | ❌ | ❌ | ❌ |

@@ -9,7 +9,7 @@
 
 **LLM-powered sales funnel engine for conversational bots.** Persona composition, funnel stage routing, A/B testing with ELO ratings, self-play evaluation, and a coach LLM that iterates on failing styles.
 
-Built from the production sales layer of the lead-engine platform — battle-tested in production qualifying inbound candidates for foreign work contracts.
+Built from the production sales layer of the Lead Engine platform — battle-tested in production qualifying inbound candidates for foreign work contracts.
 
 ---
 
