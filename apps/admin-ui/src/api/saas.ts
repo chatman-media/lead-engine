@@ -784,6 +784,11 @@ export const saas = {
       body: JSON.stringify({ mode }),
     });
   },
+  deleteMessage(conversationId: number, messageId: number) {
+    return request<{ ok: boolean }>(`/api/admin/conversations/${conversationId}/messages/${messageId}`, {
+      method: "DELETE",
+    });
+  },
 
   // ── Diagnostics ──────────────────────────────────────────────────────
   /**

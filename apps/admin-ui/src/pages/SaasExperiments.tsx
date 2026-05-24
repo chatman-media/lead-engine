@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 const STATUS_BADGE: Record<string, string> = {
   draft: "bg-secondary text-secondary-foreground",
   running: "bg-green-500/10 text-green-600 dark:text-green-400",
-  paused: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
+  paused: "bg-[color-mix(in_oklch,var(--warning)_12%,transparent)] text-[var(--warning)]",
   done: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
 };
 
