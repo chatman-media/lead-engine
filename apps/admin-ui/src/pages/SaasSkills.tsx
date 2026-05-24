@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
 import { DatabaseZapIcon, SaveIcon } from "lucide-react";
 import { toast } from "sonner";
 
@@ -132,7 +133,20 @@ export function SaasSkills() {
         )}
       </div>
 
-      {loading && <p className="text-muted-foreground text-sm">Загрузка…</p>}
+      {loading && (
+        <div className="grid gap-4 md:grid-cols-2">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="rounded-lg border p-4 space-y-3">
+              <div className="flex justify-between items-center">
+                <Skeleton className="h-5 w-32" />
+                <Skeleton className="h-5 w-10" />
+              </div>
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-3/4" />
+            </div>
+          ))}
+        </div>
+      )}
       {error && <p className="text-destructive text-sm">{error}</p>}
 
       {families.map((family) => (

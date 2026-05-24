@@ -25,7 +25,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { BarChart2Icon, GripVerticalIcon, LayersIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { AlertTriangleIcon, BarChart2Icon, GripVerticalIcon, LayersIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "form_fill", label: "Сбор данных" },
@@ -72,6 +73,7 @@ export function SaasFunnel() {
   const [dragOverId, setDragOverId] = useState<number | null>(null);
   const [analytics, setAnalytics] = useState<FunnelAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [confirmSeedTemplate, setConfirmSeedTemplate] = useState<string | null>(null);
   const [newStage, setNewStage] = useState({
     slug: "",
     displayName: "",
@@ -122,7 +124,6 @@ export function SaasFunnel() {
   }
 
   async function handleDeleteStage(stageId: number) {
-    if (!confirm("Удалить стадию? Все лиды на этой стадии потеряют привязку.")) return;
     try {
       await saas.deleteStage(stageId);
       reload();
@@ -173,9 +174,11 @@ export function SaasFunnel() {
   }
 
   async function handleSeed(template: string) {
-    if (funnel?.stages && funnel.stages.length > 0) {
-      if (!confirm(`Это заменит все ${funnel.stages.length} стадий воронки на шаблон «${template}». Продолжить?`)) return;
+    if (funnel?.stages && funnel.stages.length > 0 && confirmSeedTemplate !== template) {
+      setConfirmSeedTemplate(template);
+      return;
     }
+    setConfirmSeedTemplate(null);
     setSeeding(true);
     try {
       await saas.seedFunnel(template);
@@ -187,7 +190,34 @@ export function SaasFunnel() {
     }
   }
 
-  if (loading) return <p className="p-6 text-muted-foreground text-sm">Загрузка…</p>;
+  if (loading) return (
+    <div className="flex flex-col gap-6 p-6">
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <Skeleton className="h-6 w-24" />
+          <Skeleton className="h-4 w-52" />
+        </div>
+      </div>
+      <div className="rounded-md border p-4 space-y-3">
+        <Skeleton className="h-4 w-40" />
+        <div className="flex gap-2">
+          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-32" />)}
+        </div>
+      </div>
+      <div className="flex flex-col gap-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="rounded-lg border p-4 space-y-2">
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-4 w-4" />
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-4 w-20 ml-auto" />
+              <Skeleton className="h-4 w-16" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
   if (error) return <p className="p-6 text-destructive text-sm">{error}</p>;
 
   return (
@@ -220,7 +250,7 @@ export function SaasFunnel() {
           ].map((tpl) => (
             <Button
               key={tpl.id}
-              variant="outline"
+              variant={confirmSeedTemplate === tpl.id ? "destructive" : "outline"}
               size="sm"
               disabled={seeding}
               onClick={() => handleSeed(tpl.id)}
@@ -229,6 +259,20 @@ export function SaasFunnel() {
             </Button>
           ))}
         </div>
+        {confirmSeedTemplate && (
+          <div className="mt-3 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <AlertTriangleIcon className="size-4 shrink-0" />
+            <span className="flex-1">
+              Заменит {funnel?.stages?.length ?? 0} стадий на шаблон. Продолжить?
+            </span>
+            <Button size="sm" variant="destructive" onClick={() => handleSeed(confirmSeedTemplate)} disabled={seeding}>
+              Да
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirmSeedTemplate(null)}>
+              Нет
+            </Button>
+          </div>
+        )}
       </div>
 
       {!funnel?.funnel && (
@@ -472,6 +516,7 @@ function StageCard({
   onUpdate: (patch: Partial<StageDefinition>) => void;
   onReload: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [addingField, setAddingField] = useState(false);
   const [newField, setNewField] = useState({
     slug: "",
@@ -545,13 +590,24 @@ function StageCard({
             </div>
           </button>
 
-          <button
-            type="button"
-            onClick={onDelete}
-            className="text-muted-foreground hover:text-destructive"
-          >
-            <Trash2Icon className="size-4" />
-          </button>
+          {confirmDelete ? (
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant="destructive" onClick={() => { setConfirmDelete(false); onDelete(); }}>
+                Да
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+                Нет
+              </Button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              className="text-muted-foreground hover:text-destructive"
+            >
+              <Trash2Icon className="size-4" />
+            </button>
+          )}
         </div>
       </CardHeader>
 

@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, type AuditEntry, clearToken, saas } from "../api/saas.ts";
 
 function fmtTime(epoch: number): string {
@@ -78,7 +79,24 @@ export function SaasAudit() {
     // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
 
-  if (loading) return <p className="text-sm text-muted-foreground">Загрузка…</p>;
+  if (loading) return (
+    <div className="space-y-6">
+      <div className="space-y-1">
+        <Skeleton className="h-6 w-28" />
+        <Skeleton className="h-4 w-72" />
+      </div>
+      <div className="rounded-lg border overflow-hidden">
+        {Array.from({ length: 8 }).map((_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: skeleton
+          <div key={i} className="flex items-center gap-4 border-b last:border-0 px-4 py-3">
+            <Skeleton className="h-3 w-32 shrink-0" />
+            <Skeleton className="h-5 w-20" />
+            <Skeleton className="h-4 flex-1 max-w-xs" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6">

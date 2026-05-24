@@ -85,6 +85,7 @@ export function SaasChannels() {
   const [webSubmitting, setWebSubmitting] = useState(false);
   const [webResult, setWebResult] = useState<CreateWebChannelResult | null>(null);
   const [copied, setCopied] = useState(false);
+  const [confirmDeleteChannelId, setConfirmDeleteChannelId] = useState<number | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function refresh() {
@@ -155,8 +156,8 @@ export function SaasChannels() {
     }
   }
 
-  async function handleDelete(id: number, externalId: string) {
-    if (!confirm(`Отключить канал ${externalId}? Креды в tenant_secrets останутся.`)) return;
+  async function handleDelete(id: number) {
+    setConfirmDeleteChannelId(null);
     try {
       await saas.deleteChannel(id);
       await refresh();
@@ -698,14 +699,26 @@ export function SaasChannels() {
                         Авторизовать заново
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-muted-foreground hover:text-destructive"
-                      onClick={() => handleDelete(ch.id, ch.externalId)}
-                    >
-                      <Trash2Icon className="size-4" />
-                    </Button>
+                    {confirmDeleteChannelId === ch.id ? (
+                      <div className="flex items-center gap-1">
+                        <TriangleAlertIcon className="size-3.5 text-destructive shrink-0" />
+                        <Button size="sm" variant="destructive" onClick={() => handleDelete(ch.id)}>
+                          Да
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteChannelId(null)}>
+                          Нет
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setConfirmDeleteChannelId(ch.id)}
+                      >
+                        <Trash2Icon className="size-4" />
+                      </Button>
+                    )}
                   </li>
                 );
               })}
