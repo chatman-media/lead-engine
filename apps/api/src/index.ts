@@ -336,7 +336,10 @@ async function main() {
   // Director hooks (tenant-specific persuasion scripts).
   app.route("/", makeAdminDirectorHooksRoutes({ db }));
   log.info("admin-director-hooks routes enabled");
-  app.route("/", makeAdminStylesRoutes({ db }));
+  app.route("/", makeAdminStylesRoutes({
+    db,
+    resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+  }));
   log.info("admin-styles routes enabled");
 
   const strategyBundle: ReplyStrategyBundle | null = makeReplyStrategy(
