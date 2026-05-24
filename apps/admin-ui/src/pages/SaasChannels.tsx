@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ApiError,
@@ -336,7 +337,25 @@ export function SaasChannels() {
     }
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground">Загрузка…</p>;
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-7 w-24" />
+        </div>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: skeleton
+              <Skeleton key={i} className="h-9 w-24 rounded-md" />
+            ))}
+          </div>
+          <Skeleton className="h-40 rounded-xl" />
+        </div>
+        <Skeleton className="h-32 rounded-xl" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

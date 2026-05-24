@@ -1,11 +1,12 @@
 import { ExternalLinkIcon, SendHorizontalIcon } from "lucide-react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import React, { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
@@ -53,6 +54,7 @@ export function SaasConversations() {
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
   const [togglingMode, setTogglingMode] = useState(false);
+  const [confirmingTakeover, setConfirmingTakeover] = useState(false);
   const [contactLead, setContactLead] = useState<LeadListItem | null>(null);
 
   function handleAuthError(err: unknown): boolean {
@@ -151,7 +153,12 @@ export function SaasConversations() {
   async function handleToggleMode() {
     if (!detail || !selectedId) return;
     const next = detail.conversation.mode === "human" ? "ai" : "human";
-    if (next === "human" && !confirm("Перехватить диалог? AI перестанет отвечать.")) return;
+    // Перехват — inline-подтверждение вместо confirm()
+    if (next === "human" && !confirmingTakeover) {
+      setConfirmingTakeover(true);
+      return;
+    }
+    setConfirmingTakeover(false);
     setTogglingMode(true);
     setError("");
     try {
@@ -196,6 +203,8 @@ export function SaasConversations() {
 
   useEffect(() => {
     const t = setInterval(() => {
+      // Не поллим когда вкладка скрыта — экономим запросы
+      if (document.visibilityState === "hidden") return;
       void refreshList(Math.max(30, loadedCountRef.current));
       if (selectedId) void refreshDetail(selectedId);
     }, POLL_INTERVAL_MS);
@@ -225,7 +234,18 @@ export function SaasConversations() {
           </div>
           <div className="flex-1 overflow-y-auto p-2">
             {listLoading ? (
-              <p className="p-4 text-sm text-muted-foreground">Загрузка…</p>
+              <div className="space-y-1.5 p-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: skeleton
+                  <div key={i} className="rounded-lg border px-3 py-2.5 space-y-1.5">
+                    <div className="flex justify-between">
+                      <Skeleton className="h-4 w-28" />
+                      <Skeleton className="h-3 w-10" />
+                    </div>
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                ))}
+              </div>
             ) : list.length === 0 ? (
               <p className="p-4 text-center text-sm text-muted-foreground">Пока нет диалогов</p>
             ) : (
@@ -319,18 +339,30 @@ export function SaasConversations() {
                     )}
                   </div>
                 </div>
-                <Button
-                  variant={detail.conversation.mode === "human" ? "outline" : "default"}
-                  size="sm"
-                  onClick={handleToggleMode}
-                  disabled={togglingMode}
-                >
-                  {togglingMode
-                    ? "…"
-                    : detail.conversation.mode === "human"
-                      ? "Вернуть AI"
-                      : "Перехватить"}
-                </Button>
+                {confirmingTakeover ? (
+                  <div className="flex items-center gap-1.5 text-sm">
+                    <span className="text-muted-foreground">AI замолчит?</span>
+                    <Button size="sm" variant="destructive" onClick={handleToggleMode} disabled={togglingMode}>
+                      Да
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setConfirmingTakeover(false)}>
+                      Нет
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant={detail.conversation.mode === "human" ? "outline" : "default"}
+                    size="sm"
+                    onClick={handleToggleMode}
+                    disabled={togglingMode}
+                  >
+                    {togglingMode
+                      ? "…"
+                      : detail.conversation.mode === "human"
+                        ? "Вернуть AI"
+                        : "Перехватить"}
+                  </Button>
+                )}
               </div>
 
               <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
@@ -377,11 +409,17 @@ export function SaasConversations() {
                 <Textarea
                   placeholder={
                     detail.conversation.mode === "human"
-                      ? "Сообщение от имени оператора…"
+                      ? "Сообщение от имени оператора… (Ctrl+Enter — отправить)"
                       : "Отправить от оператора — бот перестанет отвечать (mode → human)."
                   }
                   value={replyText}
                   onChange={(e) => setReplyText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      void handleReply(e as unknown as React.FormEvent);
+                    }
+                  }}
                   rows={2}
                   maxLength={4000}
                   disabled={sending}

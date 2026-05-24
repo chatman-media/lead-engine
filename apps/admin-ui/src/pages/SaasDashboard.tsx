@@ -1,4 +1,4 @@
-import { CheckIcon, FileTextIcon, LightbulbIcon, PauseIcon, PlayIcon, Trash2Icon, UploadIcon, XIcon } from "lucide-react";
+import { AlertTriangleIcon, CheckIcon, FileTextIcon, LightbulbIcon, PauseIcon, PlayIcon, Trash2Icon, UploadIcon, XIcon } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import {
   type Admin,
@@ -35,6 +36,7 @@ export function SaasDashboard() {
   const [tenantInfo, setTenantInfo] = useState<TenantInfo | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [togglingPause, setTogglingPause] = useState(false);
+  const [confirmingPause, setConfirmingPause] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -126,7 +128,12 @@ export function SaasDashboard() {
   async function handleTogglePause() {
     if (!tenantInfo) return;
     const newPaused = tenantInfo.status === "active";
-    if (newPaused && !confirm("Бот перестанет принимать сообщения. Продолжить?")) return;
+    // Пауза — показываем inline-подтверждение вместо confirm()
+    if (newPaused && !confirmingPause) {
+      setConfirmingPause(true);
+      return;
+    }
+    setConfirmingPause(false);
     setTogglingPause(true);
     setError("");
     try {
@@ -225,7 +232,32 @@ export function SaasDashboard() {
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Загрузка…</p>;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1.5">
+            <Skeleton className="h-7 w-32" />
+            <Skeleton className="h-4 w-56" />
+          </div>
+          <Skeleton className="h-9 w-24" />
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: skeleton
+            <Card key={i}>
+              <CardContent className="pt-4 pb-3 space-y-2">
+                <Skeleton className="h-8 w-12" />
+                <Skeleton className="h-3 w-24" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+          <Skeleton className="h-64 rounded-xl" />
+          <Skeleton className="h-40 rounded-xl" />
+        </div>
+      </div>
+    );
   }
 
   const paused = tenantInfo?.status === "suspended";
@@ -233,19 +265,37 @@ export function SaasDashboard() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="База знаний"
+        title="Дашборд"
         description={`${admin?.email ?? ""} · ${tenant?.slug ?? "—"} · ${tenant?.plan ?? "free"}`}
         actions={
           tenantInfo && (
-            <Button
-              variant={paused ? "default" : "outline"}
-              size="sm"
-              onClick={handleTogglePause}
-              disabled={togglingPause}
-            >
-              {paused ? <PlayIcon /> : <PauseIcon />}
-              {paused ? "Возобновить бота" : "Пауза"}
-            </Button>
+            <div className="flex items-center gap-2">
+              {confirmingPause && (
+                <>
+                  <span className="flex items-center gap-1.5 text-sm text-[var(--warning)]">
+                    <AlertTriangleIcon className="size-3.5" />
+                    Бот замолчит — точно?
+                  </span>
+                  <Button size="sm" variant="destructive" onClick={handleTogglePause} disabled={togglingPause}>
+                    Да, пауза
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmingPause(false)}>
+                    Отмена
+                  </Button>
+                </>
+              )}
+              {!confirmingPause && (
+                <Button
+                  variant={paused ? "default" : "outline"}
+                  size="sm"
+                  onClick={handleTogglePause}
+                  disabled={togglingPause}
+                >
+                  {paused ? <PlayIcon /> : <PauseIcon />}
+                  {paused ? "Возобновить бота" : "Пауза"}
+                </Button>
+              )}
+            </div>
           )
         }
       />
