@@ -100,4 +100,31 @@ export class ConversationsRepo {
         ),
       );
   }
+
+  /** Сохранить сжатое резюме диалога (conversation compaction). */
+  async setSummaryJson(conversationId: number, summaryJson: string): Promise<void> {
+    await this.ctx.db
+      .update(conversationsTable)
+      .set({ summaryJson })
+      .where(
+        and(
+          eq(conversationsTable.id, conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      );
+  }
+
+  /** Загрузить conversation по ID. Null если не найдена (или другой tenant). */
+  async findById(conversationId: number): Promise<ConversationRow | null> {
+    const [row] = await this.ctx.db
+      .select()
+      .from(conversationsTable)
+      .where(
+        and(
+          eq(conversationsTable.id, conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      );
+    return (row as ConversationRow) ?? null;
+  }
 }

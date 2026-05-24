@@ -192,6 +192,7 @@ beforeAll(
         channelDbId: ch.id,
         tenantId: t.id,
         tenantSlug: slug,
+        tenantPlan: "free",
         kind: "telegram_bot",
         externalId: `${slug}-bot`,
         // FakeTelegramAdapter удовлетворяет channel-core ChannelAdapter

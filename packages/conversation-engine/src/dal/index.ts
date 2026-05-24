@@ -1,4 +1,5 @@
 export { ChannelIdentitiesRepo, type ChannelIdentityRow } from "./channel-identities.ts";
+export { KbSuggestionsRepo } from "./kb-suggestions.ts";
 export { ContactsRepo, type ContactRow } from "./contacts.ts";
 export { ConversationsRepo, type ConversationRow } from "./conversations.ts";
 export { DrizzleKbStore } from "./kb-store.ts";

@@ -27,6 +27,8 @@ export interface ChannelEntry {
   channelDbId: number;
   tenantId: number;
   tenantSlug: string;
+  /** Plan tier строки из tenants.plan — используется для per-plan rate limits. */
+  tenantPlan: string;
   kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "web";
   externalId: string;
   /** Конкретный adapter в зависимости от kind. */
@@ -127,6 +129,7 @@ export class ChannelRegistry {
         credentialsRef: channels.credentialsRef,
         tenantId: tenants.id,
         tenantSlug: tenants.slug,
+        tenantPlan: tenants.plan,
       })
       .from(channels)
       .innerJoin(tenants, eq(tenants.id, channels.tenantId))
@@ -170,6 +173,7 @@ export class ChannelRegistry {
         channelDbId: row.channelId,
         tenantId: row.tenantId,
         tenantSlug: row.tenantSlug,
+        tenantPlan: row.tenantPlan,
         kind: row.kind as ChannelEntry["kind"],
         externalId: row.externalId,
         adapter,
@@ -213,6 +217,7 @@ export class ChannelRegistry {
         credentialsRef: channels.credentialsRef,
         tenantId: tenants.id,
         tenantSlug: tenants.slug,
+        tenantPlan: tenants.plan,
       })
       .from(channels)
       .innerJoin(tenants, eq(tenants.id, channels.tenantId))
@@ -259,6 +264,7 @@ export class ChannelRegistry {
         channelDbId: row.channelId,
         tenantId: row.tenantId,
         tenantSlug: row.tenantSlug,
+        tenantPlan: row.tenantPlan,
         kind: row.kind as ChannelEntry["kind"],
         externalId: row.externalId,
         adapter,

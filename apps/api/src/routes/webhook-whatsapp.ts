@@ -24,6 +24,7 @@ import type { VerticalTemplate } from "@chatman-media/verticals";
 import { Hono } from "hono";
 import type { ChannelRegistry } from "../channel-registry.ts";
 import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
+import { resolvePlan } from "../lib/plans.ts";
 import type { FieldExtractor } from "../lib/field-extractor.ts";
 import type { PhotoProcessor } from "../lib/photo-processor.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
@@ -121,9 +122,13 @@ export function makeWhatsAppWebhookRoutes(opts: {
     }
     const entry = entries[0]!;
 
-    // Rate-limit check (см. webhook-telegram).
+    // Rate-limit check (см. webhook-telegram). Per-plan limits override global cfg.
     if (opts.rateLimiter) {
-      const decision = opts.rateLimiter.check(entry.tenantId);
+      const planLimits = resolvePlan(entry.tenantPlan);
+      const decision = opts.rateLimiter.check(entry.tenantId, {
+        perMinute: planLimits.rateLimitPerMinute,
+        perHour: planLimits.rateLimitPerHour,
+      });
       if (!decision.allowed) {
         opts.metrics?.webhookRequests.inc(1, { channel: "whatsapp", status: "429" });
         c.header("Retry-After", String(decision.retryAfterSec ?? 60));

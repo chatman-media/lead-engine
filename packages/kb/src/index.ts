@@ -20,7 +20,13 @@
 export type { ABRouterOptions, ABVariant } from "./ab-router.ts";
 export { ABRouter } from "./ab-router.ts";
 // ── Core answer pipeline ─────────────────────────────────────────────────────
-export { answerWithRag, answerWithRagStream, generateSoftFallback } from "./answer.ts";
+export {
+  answerWithRag,
+  answerWithRagStream,
+  generateSoftFallback,
+  retrieveHits,
+  type RetrievalResult,
+} from "./answer.ts";
 export type { AnswerInput, AnswerResult, AnswerTelemetry, Persona } from "./answer-types.ts";
 export { NO_CONTEXT_MARKER } from "./answer-types.ts";
 // ── LLM clients (re-exports из @chatman-media/llm-router для backwards-compat) ─

@@ -96,4 +96,23 @@ export class MessagesRepo {
       .limit(limit);
     return (rows as MessageRow[]).reverse();
   }
+
+  /**
+   * Подсчитать общее кол-во non-deleted, non-system сообщений в диалоге.
+   * Используется для compaction threshold check.
+   */
+  async countByConversation(conversationId: number): Promise<number> {
+    const [row] = await this.ctx.db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(messagesTable)
+      .where(
+        and(
+          eq(messagesTable.tenantId, this.ctx.tenantId),
+          eq(messagesTable.conversationId, conversationId),
+          isNull(messagesTable.deletedAt),
+          sql`role <> 'system'`,
+        ),
+      );
+    return row?.count ?? 0;
+  }
 }

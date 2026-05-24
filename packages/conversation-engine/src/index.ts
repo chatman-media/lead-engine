@@ -9,6 +9,7 @@ export {
   type ConversationRow,
   type Db,
   DrizzleKbStore,
+  KbSuggestionsRepo,
   type ExperimentAllocationEntry,
   ExperimentsRepo,
   type ExperimentRow,
@@ -43,6 +44,7 @@ export {
   transitionLeadState,
 } from "./lead-lifecycle.ts";
 export { loadExperimentVariants } from "./experiment-router.ts";
+export { compactConversation } from "./compact-conversation.ts";
 export {
   LlmMemoryExtractor,
   type MemoryExtractor,
