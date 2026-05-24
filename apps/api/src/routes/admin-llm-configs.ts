@@ -40,11 +40,11 @@ export interface AdminLlmConfigsRoutesOpts {
   onReload?: (tenantId: number) => Promise<void>;
 }
 
-type Purpose = "chat" | "embed" | "vision" | "judge";
-type Provider = "openai" | "openrouter" | "ollama" | "anthropic";
+type Purpose = "chat" | "embed" | "vision" | "judge" | "reranker";
+type Provider = "openai" | "openrouter" | "ollama" | "anthropic" | "jina" | "cohere";
 
-const PURPOSES: readonly Purpose[] = ["chat", "embed", "vision", "judge"];
-const PROVIDERS: readonly Provider[] = ["openai", "openrouter", "ollama", "anthropic"];
+const PURPOSES: readonly Purpose[] = ["chat", "embed", "vision", "judge", "reranker"];
+const PROVIDERS: readonly Provider[] = ["openai", "openrouter", "ollama", "anthropic", "jina", "cohere"];
 
 interface UpsertBody {
   provider: unknown;

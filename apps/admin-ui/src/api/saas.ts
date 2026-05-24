@@ -46,8 +46,8 @@ export interface KbUploadResult {
   created: boolean;
 }
 
-export type LlmPurpose = "chat" | "embed" | "vision" | "judge";
-export type LlmProvider = "openai" | "openrouter" | "ollama" | "anthropic";
+export type LlmPurpose = "chat" | "embed" | "vision" | "judge" | "reranker";
+export type LlmProvider = "openai" | "openrouter" | "ollama" | "anthropic" | "jina" | "cohere";
 
 export interface LlmConfig {
   purpose: LlmPurpose;

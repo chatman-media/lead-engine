@@ -26,16 +26,18 @@ import {
 } from "../api/saas.ts";
 
 // Провайдеры, у которых нужен API-ключ
-const KEYED_PROVIDERS: LlmProvider[] = ["openai", "openrouter", "anthropic"];
+const KEYED_PROVIDERS: LlmProvider[] = ["openai", "openrouter", "anthropic", "jina", "cohere"];
 
 const PROVIDER_LABEL: Record<LlmProvider, string> = {
   openai: "OpenAI",
   openrouter: "OpenRouter",
   anthropic: "Anthropic",
   ollama: "Ollama (local)",
+  jina: "Jina AI",
+  cohere: "Cohere",
 };
 
-const ALL_PROVIDERS: LlmProvider[] = ["openai", "openrouter", "anthropic", "ollama"];
+const ALL_PROVIDERS: LlmProvider[] = ["openai", "openrouter", "anthropic", "ollama", "jina", "cohere"];
 
 const PURPOSES: {
   value: LlmPurpose;
@@ -65,6 +67,13 @@ const PURPOSES: {
     defaultProvider: "openrouter",
     defaultModel: "google/gemini-2.5-flash",
   },
+  {
+    value: "reranker",
+    label: "Reranker — переранжирование KB",
+    hint: "Jina или Cohere reranker: повышает точность RAG-ответов. Необязательно.",
+    defaultProvider: "jina",
+    defaultModel: "jina-reranker-v2-base-multilingual",
+  },
 ];
 
 interface PurposeForm {
@@ -83,7 +92,7 @@ export function SaasSettings() {
 
   // Ключи по провайдерам (вводятся один раз)
   const [providerKeys, setProviderKeys] = useState<Record<LlmProvider, string>>({
-    openai: "", openrouter: "", anthropic: "", ollama: "",
+    openai: "", openrouter: "", anthropic: "", ollama: "", jina: "", cohere: "",
   });
   const [savingProvider, setSavingProvider] = useState<LlmProvider | null>(null);
 

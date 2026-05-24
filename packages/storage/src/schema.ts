@@ -898,11 +898,11 @@ export const llmProviderConfigs = pgTable("llm_provider_configs", {
 }, (t) => [
   check(
     "llm_configs_purpose_check",
-    sql`${t.purpose} IN ('chat','embed','vision','judge')`,
+    sql`${t.purpose} IN ('chat','embed','vision','judge','reranker')`,
   ),
   check(
     "llm_configs_provider_check",
-    sql`${t.provider} IN ('openai','openrouter','ollama','anthropic')`,
+    sql`${t.provider} IN ('openai','openrouter','ollama','anthropic','jina','cohere')`,
   ),
   uniqueIndex("uniq_llm_configs_tenant_purpose").on(t.tenantId, t.purpose),
 ]);
