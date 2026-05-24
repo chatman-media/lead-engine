@@ -288,7 +288,7 @@ export function SaasSettings() {
                 )}
                 <form onSubmit={(e) => handleSubmit(e, purpose)} className="space-y-3">
                   <div className="space-y-1.5">
-                    <Label>Provider</Label>
+                    <Label>Провайдер</Label>
                     <Select
                       value={f.provider}
                       onValueChange={(v) => updateForm(purpose, { provider: v as LlmProvider })}
@@ -306,7 +306,7 @@ export function SaasSettings() {
                     </Select>
                   </div>
                   <div className="space-y-1.5">
-                    <Label>Model</Label>
+                    <Label>Модель</Label>
                     <Input
                       value={f.model}
                       onChange={(e) => updateForm(purpose, { model: e.target.value })}
@@ -315,7 +315,7 @@ export function SaasSettings() {
                   </div>
                   {f.provider !== "ollama" && (
                     <div className="space-y-1.5">
-                      <Label>API key {cfg?.hasSecret ? "(пусто — не менять)" : ""}</Label>
+                      <Label>API-ключ {cfg?.hasSecret ? "(пусто — не менять)" : ""}</Label>
                       <Input
                         type="password"
                         autoComplete="new-password"
@@ -328,7 +328,7 @@ export function SaasSettings() {
                   <div className="grid grid-cols-2 gap-3">
                     {purpose === "embed" && (
                       <div className="space-y-1.5">
-                        <Label>Embed dim</Label>
+                        <Label>Размер вектора</Label>
                         <Input
                           type="number"
                           value={f.embedDim}
@@ -338,7 +338,7 @@ export function SaasSettings() {
                       </div>
                     )}
                     <div className="space-y-1.5">
-                      <Label>Timeout (ms)</Label>
+                      <Label>Таймаут (мс)</Label>
                       <Input
                         type="number"
                         value={f.timeoutMs}
@@ -348,7 +348,7 @@ export function SaasSettings() {
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label>Base URL (опционально)</Label>
+                    <Label>Базовый URL (опционально)</Label>
                     <Input
                       value={f.baseUrl}
                       onChange={(e) => updateForm(purpose, { baseUrl: e.target.value })}

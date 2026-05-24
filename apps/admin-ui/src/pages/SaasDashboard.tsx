@@ -265,7 +265,7 @@ export function SaasDashboard() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Дашборд"
+        title="Главная"
         description={`${admin?.email ?? ""} · ${tenant?.slug ?? "—"} · ${tenant?.plan ?? "free"}`}
         actions={
           tenantInfo && (

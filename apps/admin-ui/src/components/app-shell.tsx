@@ -66,7 +66,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "AI & Бот",
     items: [
-      { to: "/dashboard", label: "База знаний", icon: DatabaseIcon },
+      { to: "/dashboard", label: "Главная", icon: DatabaseIcon },
       { to: "/skills", label: "Навыки", icon: ZapIcon },
       { to: "/hooks", label: "Хуки", icon: SparklesIcon },
       { to: "/styles", label: "Стили", icon: PaletteIcon },
@@ -219,7 +219,7 @@ function NavLinks({
               <button
                 type="button"
                 onClick={() => setSistemaExpanded((v) => !v)}
-                className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground/70 transition-colors hover:text-muted-foreground"
+                className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground/70 transition-colors hover:text-muted-foreground cursor-pointer"
               >
                 {sistemaExpanded ? (
                   <>
@@ -267,7 +267,7 @@ function SidebarBody({
           <button
             type="button"
             onClick={onToggleCollapse}
-            className="shrink-0 grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground"
+            className="shrink-0 grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground cursor-pointer"
             aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
           >
             {collapsed ? <ChevronRightIcon className="size-4" /> : <ChevronLeftIcon className="size-4" />}
@@ -289,7 +289,7 @@ function SidebarBody({
               <button
                 type="button"
                 onClick={onLogout}
-                className="flex w-full justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground"
+                className="flex w-full justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground cursor-pointer"
               >
                 <Avatar className="size-7 rounded-lg">
                   <AvatarFallback className="rounded-lg bg-primary/15 text-primary text-[10px]">
@@ -307,7 +307,7 @@ function SidebarBody({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent/60"
+                className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent/60 cursor-pointer"
               >
                 <Avatar className="size-8 rounded-lg">
                   <AvatarFallback className="rounded-lg bg-primary/15 text-primary">

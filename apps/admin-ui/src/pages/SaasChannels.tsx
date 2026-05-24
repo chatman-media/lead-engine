@@ -412,7 +412,7 @@ export function SaasChannels() {
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label>Bot token</Label>
+                  <Label>Токен бота</Label>
                   <Input
                     type="password"
                     autoComplete="off"
@@ -679,7 +679,7 @@ export function SaasChannels() {
                       <p className="truncate text-sm font-medium">{title}</p>
                       <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                         <Badge variant={ch.status === "error" ? "warning" : "secondary"}>
-                          {ch.status}
+                          {ch.status === "active" ? "активен" : ch.status === "inactive" ? "неактивен" : ch.status === "error" ? "ошибка" : ch.status}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
                           {new Date(ch.createdAt * 1000).toLocaleDateString("ru")}

@@ -21,6 +21,14 @@ import {
 
 const POLL_INTERVAL_MS = 5000;
 
+const SOURCE_RU: Record<string, string> = {
+  bot: "Telegram-бот",
+  userbot: "Telegram",
+  whatsapp: "WhatsApp",
+  web: "Web",
+};
+const MODE_RU: Record<string, string> = { ai: "AI", human: "Оператор" };
+
 function fmtTime(epoch: number | null): string {
   if (!epoch) return "—";
   return new Date(epoch * 1000).toLocaleString("ru", {
@@ -271,9 +279,9 @@ export function SaasConversations() {
                           </span>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-1">
-                          <Badge variant="secondary">{c.source}</Badge>
+                          <Badge variant="secondary">{SOURCE_RU[c.source] ?? c.source}</Badge>
                           <Badge variant={c.mode === "human" ? "warning" : "outline"}>
-                            {c.mode}
+                            {MODE_RU[c.mode] ?? c.mode}
                           </Badge>
                           {c.escalatedAt && <Badge variant="destructive">эскалация</Badge>}
                         </div>
@@ -337,7 +345,7 @@ export function SaasConversations() {
                     {detail.conversation.contactName ?? `Контакт #${detail.conversation.contactId}`}
                   </p>
                   <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                    <Badge variant="secondary">{detail.conversation.source}</Badge>
+                    <Badge variant="secondary">{SOURCE_RU[detail.conversation.source] ?? detail.conversation.source}</Badge>
                     <Badge variant={detail.conversation.mode === "human" ? "warning" : "outline"}>
                       {detail.conversation.mode === "human" ? "оператор" : "AI"}
                     </Badge>

@@ -8,10 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const PURPOSE_LABEL: Record<string, string> = {
-  chat: "Диалог (chat)",
+  chat: "Диалог",
   embed: "Эмбеддинги (RAG)",
   vision: "Зрение (OCR / фото)",
-  judge: "Судья (judge)",
+  judge: "Оценка",
+  memory: "Память",
 };
 
 const PERIOD_OPTIONS = [

@@ -155,7 +155,7 @@ export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWi
                 {llmUsage.byProvider
                   .map((p) => `${p.provider}: ${p.calls.toLocaleString("ru")}`)
                   .join(" · ")}{" "}
-                · avg {llmUsage.totals.avgLatencyMs}ms ·{" "}
+                · ср. {llmUsage.totals.avgLatencyMs}мс ·{" "}
                 {Math.round(llmUsage.totals.successRate * 100)}%
               </p>
             )}
@@ -165,7 +165,7 @@ export function PlanWidget({ billing, stripeEnabled = false, onRefresh }: PlanWi
         {status !== "ok" && (
           <p className="flex items-center gap-2 rounded-md border border-[var(--warning)]/40 bg-[color-mix(in_oklch,var(--warning)_12%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
             <AlertTriangleIcon className="size-4 shrink-0" />
-            Лимит превышен ({status === "over_limit_channels" ? "каналы" : "KB документы"}).
+            Лимит превышен ({status === "over_limit_channels" ? "каналы" : "документы базы знаний"}).
           </p>
         )}
       </CardContent>
