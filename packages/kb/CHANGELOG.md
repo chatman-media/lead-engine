@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.0.0...@chatman-media/kb-v1.1.0) (2026-05-24)
+
+
+### Features
+
+* **kb:** MMR diversification + dynamic distance threshold for RAG retrieval ([#122](https://github.com/chatman-media/lead-engine/issues/122)) ([384a9ff](https://github.com/chatman-media/lead-engine/commit/384a9ff89f5b3f5676b2ac9225cfeb8dd8ddf2be))
+
 # @chatman-media/kb-v1.0.0 (2026-05-24)
 
 
