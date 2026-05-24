@@ -120,7 +120,7 @@ export function SaasDiagnostics() {
                       </div>
                       {c.latencyMs !== undefined && (
                         <span className="font-mono text-xs text-muted-foreground">
-                          {c.latencyMs}ms
+                          {c.latencyMs}мс
                         </span>
                       )}
                       <span className={cn("text-xs font-semibold", s.cls)}>{s.label}</span>

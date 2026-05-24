@@ -450,7 +450,7 @@ export function SaasOnboarding() {
                       className="grid gap-3 sm:grid-cols-2"
                     >
                       <div className="space-y-1.5">
-                        <Label>Provider</Label>
+                        <Label>Провайдер</Label>
                         <Select
                           value={f.provider}
                           onValueChange={(v) =>
@@ -470,7 +470,7 @@ export function SaasOnboarding() {
                         </Select>
                       </div>
                       <div className="space-y-1.5">
-                        <Label>Model</Label>
+                        <Label>Модель</Label>
                         <Input
                           value={f.model}
                           onChange={(e) => updateKeyForm(purpose, { model: e.target.value })}
@@ -479,7 +479,7 @@ export function SaasOnboarding() {
                       </div>
                       {f.provider !== "ollama" && (
                         <div className="space-y-1.5">
-                          <Label>API key {cfg?.hasSecret ? "(пусто — не менять)" : ""}</Label>
+                          <Label>API-ключ {cfg?.hasSecret ? "(пусто — не менять)" : ""}</Label>
                           <Input
                             type="password"
                             autoComplete="new-password"
