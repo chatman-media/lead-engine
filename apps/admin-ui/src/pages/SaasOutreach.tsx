@@ -112,7 +112,7 @@ export function SaasOutreach() {
       setTemplates((prev) => [...prev, tpl]);
       setNewTplName("");
     } catch (err) {
-      onAuthError(err);
+      if (!onAuthError(err)) toast.error("Не удалось сохранить шаблон");
     } finally {
       setSavingTpl(false);
     }
@@ -123,7 +123,7 @@ export function SaasOutreach() {
       await saas.deleteMessageTemplate(id);
       setTemplates((prev) => prev.filter((t) => t.id !== id));
     } catch (err) {
-      onAuthError(err);
+      if (!onAuthError(err)) toast.error("Не удалось удалить шаблон");
     }
   }
 

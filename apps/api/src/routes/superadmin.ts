@@ -1,4 +1,4 @@
-import { admins, conversations, leads, tenants } from "@chatman-media/storage";
+import { tenants } from "@chatman-media/storage";
 import { count, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";

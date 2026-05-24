@@ -54,14 +54,14 @@ export function SaasSuperadmin() {
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
             <tr>
-              <th className="text-left px-4 py-2 font-medium">Слаг</th>
-              <th className="text-left px-4 py-2 font-medium">Email владельца</th>
-              <th className="text-left px-4 py-2 font-medium">План</th>
-              <th className="text-left px-4 py-2 font-medium">Статус</th>
-              <th className="text-right px-4 py-2 font-medium">Лиды</th>
-              <th className="text-right px-4 py-2 font-medium">Диалоги</th>
-              <th className="text-left px-4 py-2 font-medium">Создан</th>
-              <th className="px-4 py-2" />
+              <th scope="col" className="text-left px-4 py-2 font-medium">Слаг</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium">Email владельца</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium">План</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium">Статус</th>
+              <th scope="col" className="text-right px-4 py-2 font-medium">Лиды</th>
+              <th scope="col" className="text-right px-4 py-2 font-medium">Диалоги</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium">Создан</th>
+              <th scope="col" className="px-4 py-2" />
             </tr>
           </thead>
           <tbody>
