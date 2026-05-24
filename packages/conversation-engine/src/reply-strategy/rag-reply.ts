@@ -7,13 +7,20 @@ import type {
 import {
   answerWithRag,
   type AnyRagTool,
+  DEFAULT_PERSONA,
   type DirectorHookForPrompt,
+  generateSoftFallback,
   type IKbStore,
+  NO_CONTEXT_MARKER,
+  type Persona,
   type SkillForPrompt,
   type Style,
   StyleSchema,
 } from "@chatman-media/kb";
 import type { VerticalTemplate } from "@chatman-media/verticals";
+import { compactConversation } from "../compact-conversation.ts";
+import type { ConversationsRepo } from "../dal/conversations.ts";
+import type { KbSuggestionsRepo } from "../dal/kb-suggestions.ts";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
 
@@ -116,6 +123,33 @@ export interface RagReplyStrategyOpts {
     tenantId: number;
     conversationId: number;
   }) => Promise<AnyRagTool[]> | AnyRagTool[];
+  /**
+   * Если true — когда RAG не находит контекста (NO_CONTEXT_MARKER) бот всё
+   * равно отвечает через `generateSoftFallback` (честное «уточню и вернусь»
+   * без выдумывания конкретики). Вопрос при этом логируется в kb_suggestions.
+   *
+   * Если false (по умолчанию) — бот молчит (возвращает null), как раньше.
+   */
+  softFallback?: boolean;
+  /**
+   * Фабрика KbSuggestionsRepo для fire-and-forget логирования незакрытых вопросов.
+   * Используется только если softFallback=true.
+   */
+  resolveSuggestions?: (tenantId: number) => KbSuggestionsRepo;
+  /**
+   * Conversation compaction: если кол-во сообщений в диалоге достигает порога —
+   * pipeline генерирует резюме и сохраняет его в conversations.summary_json.
+   * Резюме передаётся в answerWithRag как conversationSummary, сокращая effective
+   * history window и предотвращая overflow LLM context.
+   *
+   * Default: 20. Отключить: 0 или Infinity.
+   */
+  compactAfterMessages?: number;
+  /**
+   * Фабрика ConversationsRepo для сохранения compaction summary.
+   * Если не задан — compaction происходит в памяти (summary не сохраняется).
+   */
+  resolveConversations?: (tenantId: number) => ConversationsRepo;
 }
 
 function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
@@ -169,15 +203,62 @@ export class RagReplyStrategy implements ReplyStrategy {
       if (isSupport) return null;
     }
 
-    const messages = this.messagesRepoFor(tenantId);
+    const messagesRepo = this.messagesRepoFor(tenantId);
+    const chat = this.opts.resolveChat(tenantId);
+
+    // ── Conversation compaction ───────────────────────────────────────────────
+    // When the conversation grows past the configured threshold, generate a
+    // compressed summary and persist it so future turns can trim the raw history.
+    const compactThreshold = this.opts.compactAfterMessages ?? 20;
+    let conversationSummary: string | undefined;
+
+    // Load conversation summary + message count in parallel.
+    const [allRecent, totalCount] = await Promise.all([
+      messagesRepo.recent(input.conversationId, (this.opts.historyLimit ?? 12) + 1),
+      compactThreshold > 0 ? messagesRepo.countByConversation(input.conversationId) : Promise.resolve(0),
+    ]);
+
+    if (compactThreshold > 0 && totalCount >= compactThreshold) {
+      // Try loading a stored summary first (avoid re-compacting every turn).
+      const convsRepo = this.opts.resolveConversations?.(tenantId);
+      const convo = convsRepo ? await convsRepo.findById(input.conversationId) : null;
+
+      if (convo?.summaryJson) {
+        // Parse previously stored summary.
+        try {
+          conversationSummary = JSON.parse(convo.summaryJson) as string;
+        } catch {
+          conversationSummary = convo.summaryJson;
+        }
+      }
+
+      // Re-compact every `compactThreshold` messages to keep summary fresh.
+      const shouldRecompact = !conversationSummary || totalCount % compactThreshold === 0;
+      if (shouldRecompact) {
+        const chatHistory = messagesToChatHistory(allRecent);
+        const freshSummary = await compactConversation(
+          chatHistory,
+          chat as unknown as Parameters<typeof compactConversation>[1],
+        ).catch((err) => {
+          console.warn("[rag-reply] compaction failed:", err);
+          return null;
+        });
+
+        if (freshSummary) {
+          conversationSummary = freshSummary;
+          // Persist async — don't block the reply.
+          convsRepo
+            ?.setSummaryJson(input.conversationId, JSON.stringify(freshSummary))
+            .catch((err) => console.warn("[rag-reply] failed to save summary:", err));
+        }
+      }
+    }
 
     // Грузим history БЕЗ текущего user message (answerWithRag сам добавит
     // его как `question`). Берём + 1 чтобы исключить если оно уже persisted.
-    const allRecent = await messages.recent(input.conversationId, (this.opts.historyLimit ?? 12) + 1);
     const historyWithoutCurrent = allRecent.filter((m) => m.text !== input.userMessageText);
     const history = messagesToChatHistory(historyWithoutCurrent);
 
-    const chat = this.opts.resolveChat(tenantId);
     const embedder = this.opts.resolveEmbed(tenantId);
     const kb = this.opts.resolveKb(tenantId);
     const style = this.opts.resolveStyle
@@ -223,9 +304,55 @@ export class RagReplyStrategy implements ReplyStrategy {
       ...(skills.length > 0 ? { skills } : {}),
       ...(directorHooks.length > 0 ? { directorHooks } : {}),
       ...(tools.length > 0 ? { tools } : {}),
+      ...(conversationSummary ? { conversationSummary } : {}),
     });
 
-    if (!result.text || result.text.trim().length === 0) return null;
+    // ── Soft fallback when RAG has no context ────────────────────────────────
+    if (result.text === NO_CONTEXT_MARKER || !result.text || result.text.trim().length === 0) {
+      // Fire-and-forget: log unanswered question for the KB suggestions queue.
+      if (this.opts.resolveSuggestions) {
+        const suggestionsRepo = this.opts.resolveSuggestions(tenantId);
+        const nowEpoch = Math.floor(Date.now() / 1000);
+        suggestionsRepo
+          .log({
+            questionText: input.userMessageText,
+            sourceConversationId: input.conversationId,
+            nowEpoch,
+          })
+          .catch((err) => {
+            console.warn("[rag-reply] failed to log kb_suggestion:", err);
+          });
+      }
+
+      if (!this.opts.softFallback) return null;
+
+      // Derive persona: from style (if set) or DEFAULT_PERSONA.
+      const persona: Persona = style
+        ? {
+            name: style.persona.name,
+            role: style.persona.role,
+            ...(style.persona.company?.trim() ? { company: style.persona.company.trim() } : {}),
+          }
+        : DEFAULT_PERSONA;
+
+      const fallbackText = await generateSoftFallback({
+        question: input.userMessageText,
+        chat: chat as unknown as Parameters<typeof generateSoftFallback>[0]["chat"],
+        persona,
+        history: history as unknown as Parameters<typeof generateSoftFallback>[0]["history"],
+      });
+
+      if (!fallbackText || fallbackText.trim().length === 0) return null;
+
+      return [
+        {
+          channelId: String(input.channel.channelId),
+          externalUserId: input.inbound.externalUserId,
+          parts: [{ kind: "text", text: fallbackText }],
+        },
+      ];
+    }
+
     return [
       {
         channelId: String(input.channel.channelId),

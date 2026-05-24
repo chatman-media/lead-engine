@@ -39,6 +39,7 @@ function buildEntry(tenantId: number, slug: string): ChannelEntry {
     channelDbId: 1,
     tenantId,
     tenantSlug: slug,
+    tenantPlan: "free",
     kind: "telegram_bot",
     externalId: "testbot",
     adapter: fakeAdapter,

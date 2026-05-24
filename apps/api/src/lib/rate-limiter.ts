@@ -57,8 +57,21 @@ export class InboundRateLimiter {
    * Если allowed=false — webhook handler возвращает 429.
    * Idempotent в случае allowed=false: НЕ инкрементит counter (мы не
    * "потребляем" rejected попытку).
+   *
+   * `limits` позволяет задать per-tenant override (например из PLAN_LIMITS) —
+   * используется вместо глобального cfg. Если не задан — применяются
+   * глобальные opts из конструктора.
    */
-  check(tenantId: number): RateLimitDecision {
+  check(tenantId: number, limits?: { perMinute?: number; perHour?: number }): RateLimitDecision {
+    // Effective limit = the stricter of global opts and per-tenant plan limits.
+    // Global opts act as a hard platform cap; plan limits apply per-tenant.
+    // When global opts are 0 (disabled) — plan limits apply exclusively.
+    const planMin = limits?.perMinute ?? this.opts.perMinute;
+    const planHour = limits?.perHour ?? this.opts.perHour;
+    const perMinute =
+      this.opts.perMinute > 0 ? Math.min(planMin, this.opts.perMinute) : planMin;
+    const perHour =
+      this.opts.perHour > 0 ? Math.min(planHour, this.opts.perHour) : planHour;
     const now = Date.now();
     let win = this.byTenant.get(tenantId);
     if (!win) {
@@ -74,7 +87,7 @@ export class InboundRateLimiter {
     const minuteCount = win.timestamps.filter((t) => t >= minuteCutoff).length;
     const hourCount = win.timestamps.length;
 
-    if (minuteCount >= this.opts.perMinute) {
+    if (minuteCount >= perMinute) {
       const oldestInMinute = win.timestamps.find((t) => t >= minuteCutoff) ?? now;
       const retry = Math.max(1, Math.ceil((oldestInMinute + MINUTE_MS - now) / 1000));
       return {
@@ -85,7 +98,7 @@ export class InboundRateLimiter {
         currentHour: hourCount,
       };
     }
-    if (hourCount >= this.opts.perHour) {
+    if (hourCount >= perHour) {
       const oldestInHour = win.timestamps[0] ?? now;
       const retry = Math.max(1, Math.ceil((oldestInHour + HOUR_MS - now) / 1000));
       return {
