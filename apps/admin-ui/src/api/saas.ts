@@ -1078,6 +1078,24 @@ export const saas = {
   listExperiments() {
     return request<{ items: ExperimentItem[] }>("/api/admin/experiments");
   },
+  createExperiment(data: { slug: string; allocationJson: string; successMetric: string }) {
+    return request<ExperimentItem>("/api/admin/experiments", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateExperiment(id: number, data: Partial<{ allocationJson: string; successMetric: string }>) {
+    return request<ExperimentItem>(`/api/admin/experiments/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  setExperimentStatus(id: number, status: "running" | "paused" | "done") {
+    return request<ExperimentItem>(`/api/admin/experiments/${id}/status`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    });
+  },
 
   // ── Dashboard ────────────────────────────────────────────────────────
   getDashboardStats() {
