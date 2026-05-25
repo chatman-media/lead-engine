@@ -1,3 +1,33 @@
+# [@chatman-media/kb-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.1.0...@chatman-media/kb-v1.2.0) (2026-05-24)
+
+
+### Features
+
+* retrieval refactor, per-plan rate limits, soft fallback, conversation compaction ([#125](https://github.com/chatman-media/lead-engine/issues/125)) ([4276dec](https://github.com/chatman-media/lead-engine/commit/4276decd27ae6ba323d1ad05d937612ff4acd13d)), closes [#118-123](https://github.com/chatman-media/lead-engine/issues/118-123)
+
+# [@chatman-media/kb-v1.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.0.0...@chatman-media/kb-v1.1.0) (2026-05-24)
+
+
+### Features
+
+* **kb:** MMR diversification + dynamic distance threshold for RAG retrieval ([#122](https://github.com/chatman-media/lead-engine/issues/122)) ([384a9ff](https://github.com/chatman-media/lead-engine/commit/384a9ff89f5b3f5676b2ac9225cfeb8dd8ddf2be))
+
+# @chatman-media/kb-v1.0.0 (2026-05-24)
+
+
+### Bug Fixes
+
+* **api,kb:** PDF upload, coach-batch styleSlug, LLM live ping ([a4fc0ab](https://github.com/chatman-media/lead-engine/commit/a4fc0ab5ee82a8e5951ca3bc90b60ba935e597cc))
+* **release:** publish via bun instead of @semantic-release/npm (workspace: protocol) ([#66](https://github.com/chatman-media/lead-engine/issues/66)) ([942c3f9](https://github.com/chatman-media/lead-engine/commit/942c3f9a9f46f00b5cdb416d26303375bc20a7d6))
+
+
+### Features
+
+* AI field extraction, funnel seed templates, lead UI, billing dashboard ([#73](https://github.com/chatman-media/lead-engine/issues/73)) ([8bb7187](https://github.com/chatman-media/lead-engine/commit/8bb71876d2e90224be029c87d4dd859a2b5671ad))
+* GTM phase 1 — referral codes, sales bot, agentic booking tool ([#90](https://github.com/chatman-media/lead-engine/issues/90)) ([1bf8e4f](https://github.com/chatman-media/lead-engine/commit/1bf8e4f5ca2ca6cb70cf3de133aab4d8e523d7b4))
+* **kb:** agentic tool-calling loop (cherry-pick from upstream rag@1.4.0) ([97358f1](https://github.com/chatman-media/lead-engine/commit/97358f15df92370664ad3b153d5e0ece41e66e9a)), closes [#12](https://github.com/chatman-media/lead-engine/issues/12)
+* Persuasion Engine + bot wiring + roadmap features ([#83](https://github.com/chatman-media/lead-engine/issues/83)) ([c0ba642](https://github.com/chatman-media/lead-engine/commit/c0ba642d659ac8f0c09683b3980f089f509235c0))
+
 ## [1.2.1](https://github.com/chatman-media/rag/compare/v1.2.0...v1.2.1) (2026-05-17)
 
 

@@ -15,6 +15,17 @@ export interface Tenant {
   plan: string;
 }
 
+export interface TenantRow {
+  id: number;
+  slug: string;
+  plan: string;
+  status: string;
+  createdAt: number;
+  ownerEmail: string | null;
+  leadCount: number;
+  conversationCount: number;
+}
+
 export interface KbDoc {
   id: number;
   source: string;
@@ -506,6 +517,17 @@ export interface FunnelAnalytics {
   stages: FunnelAnalyticsStage[];
 }
 
+// ── Message templates ───────────────────────────────────────────────────
+
+export interface MessageTemplate {
+  id: number;
+  tenantId: number;
+  name: string;
+  body: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // ── Director hooks ────────────────────────────────────────────────────────
 
 export interface DirectorHook {
@@ -797,11 +819,15 @@ export const saas = {
   },
 
   // ── Conversations (read-only) ────────────────────────────────────────
-  listConversations(opts: { limit?: number; cursor?: number; contactId?: number } = {}) {
+  listConversations(opts: { limit?: number; cursor?: number; contactId?: number; source?: string; mode?: string; escalated?: boolean; q?: string } = {}) {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.cursor) params.set("cursor", String(opts.cursor));
     if (opts.contactId) params.set("contactId", String(opts.contactId));
+    if (opts.source) params.set("source", opts.source);
+    if (opts.mode) params.set("mode", opts.mode);
+    if (opts.escalated) params.set("escalated", "1");
+    if (opts.q) params.set("q", opts.q);
     const qs = params.toString();
     return request<{
       items: ConversationListItem[];
@@ -920,6 +946,22 @@ export const saas = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ currentPassword, newPassword }),
     });
+  },
+
+  forgotPassword(email: string) {
+    return request<{ ok: true }>("/api/auth/forgot-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    }, false);
+  },
+
+  resetPassword(token: string, password: string) {
+    return request<{ ok: true }>("/api/auth/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, password }),
+    }, false);
   },
 
   listAuditLog(opts: { limit?: number; cursor?: number } = {}) {
@@ -1198,11 +1240,41 @@ export const saas = {
   },
 
   // ── Outreach campaigns ────────────────────────────────────────────────
-  sendOutreach(body: { text: string; leadIds?: number[]; stageSlug?: string }) {
-    return request<{ enqueued: number; skipped: number }>("/api/admin/outreach", {
+  sendOutreach(body: { text: string; leadIds?: number[]; stageSlug?: string; scheduledAt?: number }) {
+    return request<{ enqueued: number; skipped: number; scheduledAt: number | null }>("/api/admin/outreach", {
       method: "POST",
       body: JSON.stringify(body),
     });
+  },
+
+  async importLeadsCsv(file: File): Promise<{ imported: number; skipped: number; errors: string[] }> {
+    const token = getToken();
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/api/admin/leads/import`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      throw new ApiError(res.status, err.error ?? "import_failed");
+    }
+    return res.json() as Promise<{ imported: number; skipped: number; errors: string[] }>;
+  },
+
+  // ── Message templates ────────────────────────────────────────────────
+  listMessageTemplates() {
+    return request<{ items: MessageTemplate[] }>("/api/admin/message-templates");
+  },
+  createMessageTemplate(data: { name: string; body: string }) {
+    return request<MessageTemplate>("/api/admin/message-templates", { method: "POST", body: JSON.stringify(data) });
+  },
+  updateMessageTemplate(id: number, data: { name?: string; body?: string }) {
+    return request<MessageTemplate>(`/api/admin/message-templates/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  },
+  deleteMessageTemplate(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/message-templates/${id}`, { method: "DELETE" });
   },
 
   // ── Director hooks ────────────────────────────────────────────────────
@@ -1243,6 +1315,17 @@ export const saas = {
   },
   deleteReferralCode(id: number) {
     return request<{ ok: boolean }>(`/api/admin/referral-codes/${id}`, { method: "DELETE" });
+  },
+
+  // ── Superadmin ────────────────────────────────────────────────────────
+  listAllTenants() {
+    return request<{ items: TenantRow[] }>("/api/superadmin/tenants");
+  },
+  updateTenantPlan(id: number, plan: string) {
+    return request<{ id: number; slug: string; plan: string }>(`/api/superadmin/tenants/${id}/plan`, {
+      method: "PATCH",
+      body: JSON.stringify({ plan }),
+    });
   },
 
 };

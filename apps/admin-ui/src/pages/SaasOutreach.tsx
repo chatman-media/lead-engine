@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiError, clearToken, saas, type AuditEntry, type FunnelData } from "@/api/saas";
+import { ApiError, clearToken, saas, type AuditEntry, type FunnelData, type MessageTemplate } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -15,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { SendIcon } from "lucide-react";
+import { CalendarClockIcon, PlusIcon, SendIcon, Trash2Icon } from "lucide-react";
 
 function fmtDateTime(epoch: number) {
   return new Date(epoch * 1000).toLocaleString("ru-RU", {
@@ -71,8 +72,14 @@ export function SaasOutreach() {
   const [target, setTarget] = useState<"all" | "stage">("all");
   const [stageSlug, setStageSlug] = useState("");
   const [text, setText] = useState("");
+  const [scheduledAt, setScheduledAt] = useState(""); // datetime-local string
   const [sending, setSending] = useState(false);
-  const [sendResult, setSendResult] = useState<{ enqueued: number; skipped: number } | null>(null);
+  const [sendResult, setSendResult] = useState<{ enqueued: number; skipped: number; scheduledAt: number | null } | null>(null);
+
+  // Templates state
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [newTplName, setNewTplName] = useState("");
+  const [savingTpl, setSavingTpl] = useState(false);
 
   // History state
   const [history, setHistory] = useState<AuditEntry[]>([]);
@@ -89,12 +96,36 @@ export function SaasOutreach() {
 
   useEffect(() => {
     saas.getFunnel().then(setFunnel).catch((err) => { onAuthError(err); });
+    saas.listMessageTemplates().then((r) => setTemplates(r.items)).catch(() => {});
     saas
       .listAuditLog({ limit: 200 })
       .then((res) => setHistory(res.items.filter((e) => e.action === "outreach.send")))
       .catch((err) => { onAuthError(err); })
       .finally(() => setHistoryLoading(false));
   }, []);
+
+  async function handleSaveTemplate() {
+    if (!text.trim() || !newTplName.trim()) return;
+    setSavingTpl(true);
+    try {
+      const tpl = await saas.createMessageTemplate({ name: newTplName.trim(), body: text.trim() });
+      setTemplates((prev) => [...prev, tpl]);
+      setNewTplName("");
+    } catch (err) {
+      if (!onAuthError(err)) toast.error("Не удалось сохранить шаблон");
+    } finally {
+      setSavingTpl(false);
+    }
+  }
+
+  async function handleDeleteTemplate(id: number) {
+    try {
+      await saas.deleteMessageTemplate(id);
+      setTemplates((prev) => prev.filter((t) => t.id !== id));
+    } catch (err) {
+      if (!onAuthError(err)) toast.error("Не удалось удалить шаблон");
+    }
+  }
 
   async function handleSend() {
     if (!text.trim()) return;
@@ -111,11 +142,15 @@ export function SaasOutreach() {
         (body as { stageSlug?: string }).stageSlug = undefined;
       }
 
-      const res = await saas.sendOutreach(
-        target === "stage" && stageSlug
-          ? { text: text.trim(), stageSlug }
-          : { text: text.trim() },
-      );
+      const scheduledAtEpoch = scheduledAt
+        ? Math.floor(new Date(scheduledAt).getTime() / 1000)
+        : undefined;
+
+      const res = await saas.sendOutreach({
+        text: text.trim(),
+        ...(target === "stage" && stageSlug ? { stageSlug } : {}),
+        ...(scheduledAtEpoch && scheduledAtEpoch > Math.floor(Date.now() / 1000) ? { scheduledAt: scheduledAtEpoch } : {}),
+      });
       setSendResult(res);
       // Refresh history
       const updated = await saas.listAuditLog({ limit: 200 });
@@ -180,7 +215,26 @@ export function SaasOutreach() {
           )}
 
           <div className="space-y-1.5">
-            <Label>Текст сообщения</Label>
+            <div className="flex items-center justify-between gap-3">
+              <Label>Текст сообщения</Label>
+              {templates.length > 0 && (
+                <Select onValueChange={(id) => {
+                  const tpl = templates.find((t) => String(t.id) === id);
+                  if (tpl) setText(tpl.body);
+                }}>
+                  <SelectTrigger className="h-7 w-auto max-w-[200px] text-xs">
+                    <SelectValue placeholder="Загрузить шаблон…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.map((t) => (
+                      <SelectItem key={t.id} value={String(t.id)}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
             <Textarea
               placeholder="Введите текст сообщения…"
               value={text}
@@ -188,26 +242,108 @@ export function SaasOutreach() {
               rows={5}
               className="resize-none"
             />
-            <p className="text-xs text-muted-foreground text-right">{text.length}/4000</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">{text.length}/4000</p>
+              {text.trim() && (
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    placeholder="Название шаблона…"
+                    value={newTplName}
+                    onChange={(e) => setNewTplName(e.target.value)}
+                    className="h-7 text-xs w-40"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    disabled={!newTplName.trim() || savingTpl}
+                    onClick={handleSaveTemplate}
+                  >
+                    <PlusIcon className="size-3 mr-1" />
+                    Сохранить
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Saved templates list */}
+          {templates.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground font-medium">Шаблоны</p>
+              <div className="flex flex-wrap gap-1.5">
+                {templates.map((t) => (
+                  <div key={t.id} className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs">
+                    <button
+                      type="button"
+                      className="hover:underline cursor-pointer"
+                      onClick={() => setText(t.body)}
+                    >
+                      {t.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTemplate(t.id)}
+                      aria-label={`Удалить шаблон ${t.name}`}
+                      title={`Удалить шаблон ${t.name}`}
+                      className="text-muted-foreground/60 hover:text-destructive ml-1"
+                    >
+                      <Trash2Icon className="size-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5">
+              <CalendarClockIcon className="size-3.5" />
+              Отложенная отправка
+              <span className="text-muted-foreground font-normal">(опционально)</span>
+            </Label>
+            <Input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={(e) => setScheduledAt(e.target.value)}
+              min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+              className="w-auto"
+            />
+            {scheduledAt && (
+              <p className="text-xs text-muted-foreground">
+                Сообщения будут поставлены в очередь и отправлены в {new Date(scheduledAt).toLocaleString("ru-RU")}
+              </p>
+            )}
           </div>
 
           {sendResult && (
             <div className="rounded-md bg-muted px-4 py-3 text-sm flex items-center gap-4">
               <span>
-                Отправлено:{" "}
-                <span className="font-semibold text-green-600">{sendResult.enqueued}</span>
+                {sendResult.scheduledAt
+                  ? <>Запланировано: <span className="font-semibold text-blue-600">{sendResult.enqueued}</span></>
+                  : <>Отправлено: <span className="font-semibold text-green-600">{sendResult.enqueued}</span></>
+                }
               </span>
               <span className="text-muted-foreground">·</span>
               <span>
-                Пропущено (нет канала):{" "}
+                Пропущено:{" "}
                 <span className="font-semibold text-muted-foreground">{sendResult.skipped}</span>
               </span>
+              {sendResult.scheduledAt && (
+                <>
+                  <span className="text-muted-foreground">·</span>
+                  <span className="text-xs text-muted-foreground">
+                    Отправка в {fmtDateTime(sendResult.scheduledAt)}
+                  </span>
+                </>
+              )}
             </div>
           )}
 
           <Button disabled={!canSend} onClick={handleSend} className="gap-2">
-            <SendIcon className="size-4" />
-            {sending ? "Отправка…" : "Отправить"}
+            {scheduledAt ? <CalendarClockIcon className="size-4" /> : <SendIcon className="size-4" />}
+            {sending ? "Сохраняем…" : scheduledAt ? "Запланировать" : "Отправить"}
           </Button>
         </CardContent>
       </Card>

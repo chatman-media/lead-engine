@@ -1,5 +1,5 @@
-import { ExternalLinkIcon, SendHorizontalIcon, Trash2Icon } from "lucide-react";
-import React, { type FormEvent, useEffect, useRef, useState } from "react";
+import { ExternalLinkIcon, SearchIcon, SendHorizontalIcon, Trash2Icon } from "lucide-react";
+import React, { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { PageHeader } from "@/components/page-header";
@@ -9,6 +9,14 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   ApiError,
   type ConversationDetail,
@@ -66,6 +74,14 @@ export function SaasConversations() {
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const loadedCountRef = useRef(30);
+
+  // Filters
+  const [filterSource, setFilterSource] = useState("");
+  const [filterMode, setFilterMode] = useState("");
+  const [filterEscalated, setFilterEscalated] = useState(false);
+  const [filterQ, setFilterQ] = useState("");
+  const [filterQDebounced, setFilterQDebounced] = useState("");
+  const filterQTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [detail, setDetail] = useState<{
     conversation: ConversationDetail;
@@ -88,9 +104,16 @@ export function SaasConversations() {
     return false;
   }
 
-  async function refreshList(limit = 30) {
+  const buildFilters = useCallback(() => ({
+    ...(filterSource ? { source: filterSource } : {}),
+    ...(filterMode ? { mode: filterMode } : {}),
+    ...(filterEscalated ? { escalated: true } : {}),
+    ...(filterQDebounced ? { q: filterQDebounced } : {}),
+  }), [filterSource, filterMode, filterEscalated, filterQDebounced]);
+
+  async function refreshList(limit = 30, filters = buildFilters()) {
     try {
-      const res = await saas.listConversations({ limit });
+      const res = await saas.listConversations({ limit, ...filters });
       setList(res.items);
       setNextCursor(res.nextCursor ?? null);
       loadedCountRef.current = res.items.length;
@@ -104,7 +127,7 @@ export function SaasConversations() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const res = await saas.listConversations({ limit: 30, cursor: nextCursor });
+      const res = await saas.listConversations({ limit: 30, cursor: nextCursor, ...buildFilters() });
       setList((prev) => {
         const merged = [...prev, ...res.items];
         loadedCountRef.current = merged.length;
@@ -134,18 +157,6 @@ export function SaasConversations() {
   }
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      await refreshList();
-      if (!cancelled) setListLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: run once
-  }, []);
-
-  useEffect(() => {
     if (!selectedId) {
       setDetail(null);
       return;
@@ -171,6 +182,26 @@ export function SaasConversations() {
       .then((r) => setContactLead(r.items[0] ?? null))
       .catch(() => setContactLead(null));
   }, [detail?.conversation.contactId]);
+
+  // Debounce search query
+  useEffect(() => {
+    if (filterQTimerRef.current) clearTimeout(filterQTimerRef.current);
+    filterQTimerRef.current = setTimeout(() => setFilterQDebounced(filterQ), 350);
+    return () => { if (filterQTimerRef.current) clearTimeout(filterQTimerRef.current); };
+  }, [filterQ]);
+
+  // Re-fetch when filters change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional
+  useEffect(() => {
+    setListLoading(true);
+    const filters = {
+      ...(filterSource ? { source: filterSource } : {}),
+      ...(filterMode ? { mode: filterMode } : {}),
+      ...(filterEscalated ? { escalated: true } : {}),
+      ...(filterQDebounced ? { q: filterQDebounced } : {}),
+    };
+    refreshList(30, filters).finally(() => setListLoading(false));
+  }, [filterSource, filterMode, filterEscalated, filterQDebounced]);
 
   async function handleToggleMode() {
     if (!detail || !selectedId) return;
@@ -260,8 +291,51 @@ export function SaasConversations() {
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
         {/* Список */}
         <Card className="flex max-h-[72vh] flex-col gap-0 overflow-hidden py-0">
-          <div className="border-b px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            {list.length}{nextCursor ? "+" : ""} диалог{list.length === 1 ? "" : list.length < 5 ? "а" : "ов"}
+          <div className="border-b px-3 py-2 space-y-2">
+            <div className="relative">
+              <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Поиск по имени…"
+                value={filterQ}
+                onChange={(e) => setFilterQ(e.target.value)}
+                className="h-8 pl-8 text-sm"
+              />
+            </div>
+            <div className="flex gap-1.5">
+              <Select value={filterSource || "all"} onValueChange={(v) => setFilterSource(v === "all" ? "" : v)}>
+                <SelectTrigger className="h-7 text-xs flex-1">
+                  <SelectValue placeholder="Канал" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все каналы</SelectItem>
+                  <SelectItem value="userbot">Telegram</SelectItem>
+                  <SelectItem value="bot">TG-бот</SelectItem>
+                  <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                  <SelectItem value="web">Web</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={filterMode || "all"} onValueChange={(v) => setFilterMode(v === "all" ? "" : v)}>
+                <SelectTrigger className="h-7 text-xs flex-1">
+                  <SelectValue placeholder="Режим" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все режимы</SelectItem>
+                  <SelectItem value="ai">AI</SelectItem>
+                  <SelectItem value="human">Оператор</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant={filterEscalated ? "destructive" : "outline"}
+                size="sm"
+                className="h-7 px-2 text-xs shrink-0"
+                onClick={() => setFilterEscalated((v) => !v)}
+              >
+                🔴
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground px-0.5">
+              {list.length}{nextCursor ? "+" : ""} диалог{list.length === 1 ? "" : list.length < 5 ? "а" : "ов"}
+            </p>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
             {listLoading ? (

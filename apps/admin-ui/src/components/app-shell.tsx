@@ -14,6 +14,7 @@ import {
   MonitorIcon,
   MoonIcon,
   SendIcon,
+  ShieldIcon,
   WebhookIcon,
   WrenchIcon,
   type LucideIcon,
@@ -81,7 +82,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
       { to: "/outreach", label: "Рассылка", icon: SendIcon },
       { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
-      { to: "/vacancies", label: "Вакансии", icon: BriefcaseIcon },
+      { to: "/vacancies", label: "Каталог", icon: BriefcaseIcon },
     ],
   },
   {
@@ -194,10 +195,12 @@ function NavLinks({
   onNavigate,
   escalatedCount,
   collapsed,
+  isSuperadmin,
 }: {
   onNavigate?: () => void;
   escalatedCount?: number;
   collapsed: boolean;
+  isSuperadmin?: boolean;
 }) {
   const [sistemaExpanded, setSistemaExpanded] = useState(false);
   const { pathname } = useLocation();
@@ -259,6 +262,20 @@ function NavLinks({
           </div>
         );
       })}
+      {isSuperadmin && (
+        <div className="flex flex-col gap-0.5">
+          {!collapsed && (
+            <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+              Платформа
+            </p>
+          )}
+          <NavItemLink
+            item={{ to: "/superadmin", label: "Тенанты", icon: ShieldIcon }}
+            collapsed={collapsed}
+            onNavigate={onNavigate}
+          />
+        </div>
+      )}
     </nav>
   );
 }
@@ -550,7 +567,7 @@ function SidebarBody({
             <TooltipContent side="right" className="text-xs">Развернуть</TooltipContent>
           </Tooltip>
         )}
-        <NavLinks onNavigate={onNavigate} escalatedCount={escalatedCount} collapsed={collapsed} />
+        <NavLinks onNavigate={onNavigate} escalatedCount={escalatedCount} collapsed={collapsed} isSuperadmin={admin?.role === "superadmin"} />
       </div>
 
       <div className="border-t border-sidebar-border p-3">

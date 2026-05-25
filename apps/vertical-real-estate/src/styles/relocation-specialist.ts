@@ -21,7 +21,7 @@ export const relocationSpecialist: Style = StyleSchema.parse({
   },
   framework: "NEPQ",
   hooks: [
-    { kind: "empathy", text: "переезд — это стресс, я помогу сделать его простым" },
+    { kind: "liking", text: "переезд — это стресс, я помогу сделать его простым" },
     { kind: "authority", text: "помогла 200+ семьям найти дом в Дубае" },
   ],
   stages: {

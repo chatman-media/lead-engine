@@ -264,8 +264,11 @@ export function loadApiConfig(): ApiConfig {
       dispatcherBatchSize: Number.parseInt(process.env.USERBOT_DISPATCHER_BATCH ?? "16", 10),
     },
     rateLimit: {
-      perMinute: Number.parseInt(process.env.RATE_LIMIT_PER_MIN ?? "60", 10),
-      perHour: Number.parseInt(process.env.RATE_LIMIT_PER_HOUR ?? "600", 10),
+      // Global defaults set high (enterprise-level) so they don't cap real
+      // plans — per-tenant plan limits enforced separately in check().
+      // Override with env only to set a global hard cap across all tenants.
+      perMinute: Number.parseInt(process.env.RATE_LIMIT_PER_MIN ?? "600", 10),
+      perHour: Number.parseInt(process.env.RATE_LIMIT_PER_HOUR ?? "60000", 10),
     },
     mailer: {
       apiKey: process.env.RESEND_API_KEY ?? "",

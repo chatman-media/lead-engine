@@ -3,7 +3,9 @@
 //   2. возвращают объект когда any tenant имеет нужный purpose
 //   3. resolveChat/resolveEmbed работают для tenants с config'ами
 
+import { LlmMemoryExtractor, LlmReplyStrategy, RagReplyStrategy } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
+import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
 import { describe, expect, it } from "bun:test";
 import type { ApiConfig } from "./config.ts";
 import type { LoadedLlmConfigs } from "./lib/llm-config-loader.ts";
@@ -84,9 +86,9 @@ describe("makeReplyStrategy", () => {
 
   it("chat only → LlmReplyStrategy", () => {
     const loaded = refWith({ chat: { tenantIds: [1] } });
-    const strat = makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB);
-    expect(strat).not.toBeNull();
-    expect(strat?.constructor.name).toBe("LlmReplyStrategy");
+    const bundle = makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB);
+    expect(bundle).not.toBeNull();
+    expect(bundle?.strategy instanceof LlmReplyStrategy).toBe(true);
   });
 
   it("chat + embed → RagReplyStrategy", () => {
@@ -94,8 +96,8 @@ describe("makeReplyStrategy", () => {
       chat: { tenantIds: [1] },
       embed: { tenantIds: [1] },
     });
-    const strat = makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB);
-    expect(strat?.constructor.name).toBe("RagReplyStrategy");
+    const bundle = makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB);
+    expect(bundle?.strategy instanceof RagReplyStrategy).toBe(true);
   });
 
   it("multi-tenant: tenant 2 имеет chat, tenant 1 — embed → RagReplyStrategy", () => {
@@ -103,9 +105,7 @@ describe("makeReplyStrategy", () => {
       chat: { tenantIds: [2] },
       embed: { tenantIds: [1] },
     });
-    expect(makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB)?.constructor.name).toBe(
-      "RagReplyStrategy",
-    );
+    expect(makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB)?.strategy instanceof RagReplyStrategy).toBe(true);
   });
 });
 
@@ -115,7 +115,7 @@ describe("makeMemoryExtractor", () => {
   });
   it("chat → LlmMemoryExtractor", () => {
     const ext = makeMemoryExtractor(refWith({ chat: { tenantIds: [1] } }), FAKE_DB);
-    expect(ext?.constructor.name).toBe("LlmMemoryExtractor");
+    expect(ext instanceof LlmMemoryExtractor).toBe(true);
   });
 });
 
@@ -123,7 +123,7 @@ describe("makeStageClassifier", () => {
   it("cfg.stageClassifier=regex → RegexStageClassifier (no LLM needed)", () => {
     const cfg = { ...FAKE_CFG, stageClassifier: "regex" } as unknown as ApiConfig;
     const cls = makeStageClassifier(refWith({}), cfg, FAKE_DB);
-    expect(cls?.constructor.name).toBe("RegexStageClassifier");
+    expect(cls instanceof RegexStageClassifier).toBe(true);
   });
   it("cfg.stageClassifier=llm + no chat → null", () => {
     const cfg = { ...FAKE_CFG, stageClassifier: "llm" } as unknown as ApiConfig;
@@ -132,7 +132,7 @@ describe("makeStageClassifier", () => {
   it("cfg.stageClassifier=llm + chat config → LlmStageClassifier", () => {
     const cfg = { ...FAKE_CFG, stageClassifier: "llm" } as unknown as ApiConfig;
     const cls = makeStageClassifier(refWith({ chat: { tenantIds: [1] } }), cfg, FAKE_DB);
-    expect(cls?.constructor.name).toBe("LlmStageClassifier");
+    expect(cls instanceof LlmStageClassifier).toBe(true);
   });
   it("cfg.stageClassifier=off → null", () => {
     expect(makeStageClassifier(refWith({ chat: { tenantIds: [1] } }), FAKE_CFG, FAKE_DB)).toBeNull();

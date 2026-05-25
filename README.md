@@ -65,12 +65,15 @@ PRs (see `docs/ROADMAP.md` and the git log).
 
 | Channels | AI Engine | Operator Tools |
 |---|---|---|
-| Telegram Bot | RAG (pgvector + BM25) | Inbox + conversation takeover |
-| Telegram Userbot | BYOK LLM (OpenAI / Anthropic / Ollama) | Lead pipeline (Kanban) |
-| WhatsApp Cloud API | SPIN / NEPQ / AIDA methodologies | Drag-and-drop funnel builder |
-| Web Widget (WebSocket) | Passport OCR + photo vision | A/B experiments + ELO ranking |
-| Auto-setWebhook (60s) | Hallucination guard | Audit log + diagnostics |
-| Per-tenant RLS isolation | Per-purpose LLM routing | Admin invite flow + roles |
+| Telegram Bot | RAG: pgvector + BM25 + RRF fusion | Inbox + conversation takeover |
+| Telegram Userbot | Multi-query expansion (parallel search) | Lead pipeline (Kanban) |
+| WhatsApp Cloud API | MMR diversification + distance threshold | Drag-and-drop funnel builder |
+| Web Widget (WebSocket) | Jina / Cohere cross-encoder reranking | A/B experiments + ELO ranking |
+| Auto-setWebhook (60s) | BYOK LLM (OpenAI / Anthropic / Ollama) | Outreach broadcasts (bulk message) |
+| Per-tenant RLS isolation | SPIN / NEPQ / AIDA methodologies | Message templates CRUD |
+| — | Passport OCR + photo vision | Superadmin panel (tenant list + plan mgmt) |
+| — | Hallucination guard + semantic cache | Forgot/reset password flow |
+| — | Per-purpose LLM routing | Admin invite flow + roles |
 
 > **Screenshot / GIF coming soon** — admin UI preview (inbox · lead pipeline · funnel builder)
 
@@ -356,6 +359,10 @@ GET    /api/auth/me                              — admin + tenant info
 POST   /api/auth/signup                          — create tenant + admin
 POST   /api/auth/login                           — issue JWT
 POST   /api/auth/logout                          — invalidate (client-side)
+POST   /api/auth/forgot-password                 — send reset email (Resend)
+POST   /api/auth/reset-password                  — consume token + set new password
+POST   /api/auth/change-password                 — change password (authenticated)
+POST   /api/auth/accept-invite                   — accept team invite token
 
 GET    /api/admin/onboarding-status              — checklist (channel/llm/kb)
 GET    /api/admin/tenant                         — { id, slug, plan, status, ... }
@@ -415,6 +422,16 @@ GET    /api/admin/billing/plan                   — current plan + usage + stat
 GET    /api/admin/billing/plans                  — list 4 tiers + stripeEnabled bool
 POST   /api/admin/billing/checkout               — { plan: 'starter'|'pro' } → Stripe Checkout URL
 POST   /api/admin/billing/portal                 — Stripe Customer Portal URL
+
+GET    /api/admin/message-templates              — list message templates
+POST   /api/admin/message-templates              — create template { name, body }
+PATCH  /api/admin/message-templates/:id          — update name and/or body
+DELETE /api/admin/message-templates/:id          — delete template
+
+POST   /api/admin/outreach                       — bulk message: { text, leadIds|stageSlug, scheduledAt? }
+
+GET    /api/superadmin/tenants                   — list all tenants with stats (superadmin only)
+PATCH  /api/superadmin/tenants/:id/plan          — change tenant plan (superadmin only)
 ```
 
 ---
@@ -425,13 +442,16 @@ POST   /api/admin/billing/portal                 — Stripe Customer Portal URL
 DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 ```
 
-**850+ tests** across 13 packages. Highlights:
+**950+ tests** across 15 packages. Highlights:
 
 - **Multi-tenant E2E** (`apps/api/src/multi-tenant.integration.test.ts`): tenant isolation through the real webhook handler + admin API
 - **RLS contract** (`packages/storage/src/rls.integration.test.ts`): non-bypass role validation
-- **withTenant wiring** regression oracles in apps/api + apps/worker
-- **Split processInbound invariant**: `events.indexOf("llm-call") < events.indexOf("tx-open")`
-- **SaaS routes** (auth, KB, LLM configs, channels, conversations, onboarding, audit, diagnostics, tenant pause): ~250 integration tests
+- **Auth integration** (`auth.integration.test.ts`): signup/login/me + forgot-password/reset-password + change-password (mock mailer)
+- **Superadmin integration** (`superadmin.integration.test.ts`): tenant list + plan change, role guards (403 for manager)
+- **Message templates** (`admin-message-templates.integration.test.ts`): CRUD + cross-tenant isolation
+- **Outreach** (`admin-outreach.integration.test.ts`): by leadIds + by stageSlug, enqueued vs skipped, scheduledAt
+- **RAG pipeline** (`packages/kb/test/`): 180 tests — MMR, RRF merge, dynamic threshold, multi-query expansion, reranker, semantic cache, topic classifier, rewrite-query, tool-loop, structured output
+- **SaaS routes** (KB, LLM configs, channels, conversations, onboarding, audit, diagnostics, tenant pause): ~250 integration tests
 - **Rate limiter**: 6 unit + 3 webhook integration tests
 - **Hot-reload**: 6 tenant-reloader tests (LLM + channels)
 

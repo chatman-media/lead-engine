@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Outlet, Route, Routes, useNavigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
@@ -29,6 +29,9 @@ import { SaasHooks } from "./pages/SaasHooks.tsx";
 import { SaasReferral } from "./pages/SaasReferral.tsx";
 import { SaasWebhooks } from "./pages/SaasWebhooks.tsx";
 import { SaasOutreach } from "./pages/SaasOutreach.tsx";
+import { SaasForgotPassword } from "./pages/SaasForgotPassword.tsx";
+import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
+import { SaasSuperadmin } from "./pages/SaasSuperadmin.tsx";
 import { ToolsSettings } from "./pages/ToolsSettings.tsx";
 import { SaasSuperadmin } from "./pages/SaasSuperadmin.tsx";
 
@@ -80,6 +83,8 @@ export function App() {
           <Route path="/login" element={<SaasLogin />} />
           <Route path="/signup" element={<SaasSignup />} />
           <Route path="/accept-invite" element={<SaasAcceptInvite />} />
+          <Route path="/forgot-password" element={<SaasForgotPassword />} />
+          <Route path="/reset-password" element={<SaasResetPassword />} />
 
           {/* Только для авторизованных */}
           <Route element={<RequireAuth />}>
@@ -102,7 +107,6 @@ export function App() {
               <Route path="/styles" element={<SaasStyles />} />
               <Route path="/experiments" element={<SaasExperiments />} />
               <Route path="/channels" element={<SaasChannels />} />
-              <Route path="/webhooks" element={<SaasWebhooks />} />
               <Route path="/billing" element={<SaasBilling />} />
               <Route path="/settings" element={<SaasSettings />} />
               <Route path="/referral" element={<SaasReferral />} />
@@ -110,6 +114,7 @@ export function App() {
               <Route path="/team" element={<SaasTeam />} />
               <Route path="/audit" element={<SaasAudit />} />
               <Route path="/diagnostics" element={<SaasDiagnostics />} />
+              <Route path="/superadmin" element={<SaasSuperadmin />} />
             </Route>
           </Route>
 

@@ -59,14 +59,15 @@ import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
 import { makeAdminExperimentsRoutes } from "./routes/admin-experiments.ts";
 import { makeAdminEventsRoutes } from "./routes/admin-events.ts";
 import { makeAdminOutreachRoutes } from "./routes/admin-outreach.ts";
+import { makeAdminMessageTemplatesRoutes } from "./routes/admin-message-templates.ts";
 import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeMcpRoutes } from "./routes/mcp.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
-import { makeHealthRoutes } from "./routes/health.ts";
 import { makeSuperadminRoutes } from "./routes/superadmin.ts";
+import { makeHealthRoutes } from "./routes/health.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
@@ -204,14 +205,6 @@ async function main() {
     tokenSecret: cfg.authSecret ? "configured" : "missing!",
   });
 
-  // Superadmin API — платформенный операторский интерфейс.
-  // Защита: Bearer PLATFORM_SUPERADMIN_TOKEN (отдельный от tenant-сессии).
-  // Если токен не задан — роуты не регистрируются.
-  if (cfg.superadminToken) {
-    app.route("/", makeSuperadminRoutes({ db: db as never, token: cfg.superadminToken }));
-    log.info("superadmin routes enabled");
-  }
-
   // Authenticated admin-API под /api/admin/*. Middleware requireAuth
   // extract'ит Bearer token из Authorization header → выставляет
   // c.var.{adminId, tenantId, role, adminEmail}. Все routes сами
@@ -220,6 +213,9 @@ async function main() {
   // не сконфигурирован: /api/admin/llm-configs позволяет настроить LLM
   // через UI без env-vars.
   app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
+  app.use("/api/superadmin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
+  app.route("/", makeSuperadminRoutes({ db }));
+  log.info("superadmin routes enabled");
 
   // Web channel registry — early init чтобы reloader мог его перестраивать
   // при POST /api/admin/channels/web. WS-runner / dispatcher поднимутся ниже.
@@ -325,7 +321,7 @@ async function main() {
   app.route("/", makeAdminAuditRoutes({ db }));
   log.info("admin-audit routes enabled (read-only)");
 
-  // Multi-admin invite (Q3'26 M4) — token-link flow без email-infrastructure.
+  // Multi-admin invite — token-link flow + email-delivery через Resend.
   app.route(
     "/",
     makeAdminAdminsRoutes({
@@ -375,6 +371,10 @@ async function main() {
   // Outreach campaigns — batch message sending to leads.
   app.route("/", makeAdminOutreachRoutes({ db }));
   log.info("admin-outreach routes enabled");
+
+  // Message templates for outreach.
+  app.route("/", makeAdminMessageTemplatesRoutes({ db }));
+  log.info("admin-message-templates routes enabled");
 
   // Stage-change webhooks CRUD.
   app.route("/", makeAdminStageWebhooksRoutes({ db }));

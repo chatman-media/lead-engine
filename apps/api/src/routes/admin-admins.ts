@@ -1,9 +1,9 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
-import { adminInvites, admins } from "@chatman-media/storage";
+import { adminInvites, admins, tenants } from "@chatman-media/storage";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
-import { type Mailer, inviteEmailHtml } from "../lib/mailer.ts";
+import { inviteEmailHtml, type Mailer } from "../lib/mailer.ts";
 import { canAddAdmin } from "../lib/quota.ts";
 
 /**
@@ -35,7 +35,7 @@ export interface AdminAdminsRoutesOpts {
   publicUrl?: string;
   /** Срок жизни invite token в секундах. Default 7 days. */
   inviteExpiresSec?: number;
-  /** Опциональный mailer — если задан, invite-email отправляется автоматически. */
+  /** Mailer для email-доставки приглашений. Если не задан — только share-url. */
   mailer?: Mailer;
 }
 
@@ -161,12 +161,20 @@ export function makeAdminAdminsRoutes(opts: AdminAdminsRoutesOpts): Hono {
       ? `${opts.publicUrl}/accept-invite?token=${token}`
       : undefined;
 
-    // Email-доставка — best-effort, не блокирует ответ.
+    // Отправить email с приглашением (best-effort).
     if (opts.mailer && shareUrl) {
+      const [tenantRow] = await withTenant(opts.db, tenantId, async (tx) =>
+        tx.select({ slug: tenants.slug }).from(tenants).where(eq(tenants.id, tenantId)),
+      );
       opts.mailer.send({
         to: email,
-        subject: "Вас приглашают в lead-engine",
-        html: inviteEmailHtml({ inviteUrl: shareUrl }),
+        subject: `Приглашение в команду ${tenantRow?.slug ?? tenantId} — lead-engine`,
+        html: inviteEmailHtml({
+          email,
+          inviteUrl: shareUrl,
+          tenantSlug: tenantRow?.slug ?? String(tenantId),
+          role,
+        }),
       }).catch((e) => console.warn("[mailer] invite send failed:", e));
     }
 

@@ -2,9 +2,9 @@ import type { z } from "zod";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
 import type { DirectorHookForPrompt, FunnelStage, SkillForPrompt, Style } from "./styles.ts";
+import type { Reranker } from "./reranker.ts";
 import type { AnyRagTool } from "./tools.ts";
 import type { IKbStore, KbSearchHit } from "./types.ts";
-import type { Reranker } from "./reranker.ts";
 
 export const NO_CONTEXT_MARKER = "__NO_CONTEXT__";
 
@@ -80,10 +80,52 @@ export interface AnswerInput {
    */
   maxToolCycles?: number;
   /**
-   * Optional cross-encoder reranker applied after initial vector/hybrid
-   * retrieval. When set, hits are re-scored and re-ordered before being
-   * injected into the prompt context. Adds one external API call per turn.
-   * Build from per-tenant `llm_provider_configs` with purpose='reranker'.
+   * Enable Maximal Marginal Relevance re-ranking after retrieval.
+   * Selects a diverse set of chunks so that repeated near-duplicate passages
+   * do not crowd out different sub-topics. Default: false.
+   */
+  mmr?: boolean;
+  /**
+   * λ (lambda) for MMR: trade-off between relevance and diversity.
+   * 1.0 = pure relevance, 0.0 = pure diversity. Default: 0.6.
+   * Only has effect when `mmr` is true.
+   */
+  mmrLambda?: number;
+  /**
+   * Trim retrieved hits that exceed a cosine-distance threshold before passing
+   * them to the LLM. Reduces hallucinations caused by weak/unrelated matches.
+   * Default: false (no trimming).
+   */
+  autoTrimDistance?: boolean;
+  /**
+   * Distance threshold used when `autoTrimDistance` is true.
+   * Cosine distance in [0, 2]; typical useful range is ≤ 0.4.
+   * Default: 0.45.
+   */
+  autoTrimThreshold?: number;
+  /**
+   * Enable multi-query expansion: generate `multiQueryCount` rephrased variants
+   * of the question with a fast LLM call, search with each in parallel, and
+   * merge all result lists via Reciprocal Rank Fusion (RRF). Improves recall
+   * for synonym gaps and differently-phrased concepts.
+   * Default: false.
+   */
+  multiQuery?: boolean;
+  /**
+   * Number of ADDITIONAL query variants to generate (not counting the original).
+   * Only has effect when `multiQuery` is true. Default: 2.
+   */
+  multiQueryCount?: number;
+  /**
+   * Optional cross-encoder reranker applied after vector/hybrid retrieval.
+   * Retrieves `topK * 3` candidates, passes them to the reranker, then keeps
+   * the top `topK`. Use `JinaReranker` or `CohereReranker` from this package.
+   *
+   * @example
+   * ```ts
+   * import { JinaReranker } from "@chatman-media/kb";
+   * await answerWithRag({ ..., reranker: new JinaReranker({ apiKey: process.env.JINA_API_KEY! }) });
+   * ```
    */
   reranker?: Reranker;
   /**
@@ -120,8 +162,6 @@ export interface AnswerTelemetry {
   original_query?: string;
   rewritten_query?: string;
   factCheck?: { grounded: boolean; vacancyOk: boolean; reason?: string };
-  /** True when a cross-encoder reranker was applied after initial retrieval. */
-  reranked?: boolean;
   /**
    * @deprecated Use `toolCalls`. Retained for backward compatibility — set to
    * the first tool call when any tools ran during answer generation.

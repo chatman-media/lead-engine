@@ -18,6 +18,8 @@ import {
 } from "./persona-shortcuts.ts";
 import { composeSystemPrompt } from "./prompt.ts";
 import { rewriteQuery } from "./rewrite-query.ts";
+import { applyDynamicThreshold, mmrDiversify, rrfMerge } from "./retrieval-utils.ts";
+import { expandQueries } from "./multi-query.ts";
 import { sanitizeLlmOutput } from "./sanitize.ts";
 import {
   injectJsonInstruction,
@@ -59,6 +61,126 @@ export {
   renderSummaryBlock,
   renderUserFactsBlock,
 } from "./system-prompt.ts";
+
+// ── Shared retrieval ─────────────────────────────────────────────────────────
+
+export interface RetrievalResult {
+  hits: KbSearchHit[];
+  retrievalMs: number;
+  searchQuery: string;
+  queries: string[];
+  /** null when topicRouting is off or booksPriority path was used. */
+  usedTopic: string | null;
+}
+
+/**
+ * Shared retrieval logic for both `answerWithRag` and `answerWithRagStream`.
+ *
+ * Steps:
+ *  1. Optional query rewrite (LLM resolves pronouns/ellipsis via history).
+ *  2. Optional multi-query expansion (LLM generates N variants).
+ *  3. Embed all queries in one batch.
+ *  4. booksPriority path OR normal path (multi-query → RRF | single → topic fallback).
+ *  5. maxDistance filter → applyDynamicThreshold → mmrDiversify → reranker.
+ *  6. Slice to topK.
+ */
+export async function retrieveHits(input: AnswerInput): Promise<RetrievalResult> {
+  const topK = input.topK ?? 5;
+  const candidateK = input.reranker ? topK * 3 : topK;
+
+  const searchQuery = input.rewriteQueryBeforeRetrieval
+    ? await rewriteQuery({
+        question: input.question,
+        ...(input.history ? { history: input.history } : {}),
+        chat: input.chat,
+      })
+    : input.question;
+
+  const queries = input.multiQuery
+    ? await expandQueries({
+        question: searchQuery,
+        history: input.history,
+        chat: input.chat,
+        count: input.multiQueryCount ?? 2,
+      })
+    : [searchQuery];
+
+  const retrievalStart = Date.now();
+  const vecs = await input.embedder.embed(queries);
+  const questionVec = vecs[0];
+  if (!questionVec) throw new Error("Embedder returned no vector for question");
+
+  let hits: KbSearchHit[];
+  let usedTopic: string | null = null;
+
+  if (input.booksPriority) {
+    hits = await input.kb.prioritySearch({
+      embedding: questionVec,
+      query: searchQuery,
+      k: candidateK,
+      vectorOnly: !input.hybridSearch,
+    });
+  } else {
+    const topic = input.topicRouting ? classifyTopic(input.question) : null;
+    usedTopic = topic;
+
+    if (queries.length > 1) {
+      const hitLists = await Promise.all(
+        queries.map((q, i) => {
+          const vec = vecs[i] ?? questionVec;
+          return input.hybridSearch
+            ? input.kb.hybridSearch({
+                embedding: vec,
+                query: q,
+                k: candidateK,
+                ...(topic !== null ? { topic } : {}),
+              })
+            : input.kb.search(vec, candidateK, topic);
+        }),
+      );
+      hits = rrfMerge(hitLists, { topN: candidateK });
+    } else {
+      const runSearch = (filterTopic: string | null) =>
+        input.hybridSearch
+          ? input.kb.hybridSearch({
+              embedding: questionVec,
+              query: searchQuery,
+              k: candidateK,
+              ...(filterTopic !== null ? { topic: filterTopic } : {}),
+            })
+          : input.kb.search(questionVec, candidateK, filterTopic);
+
+      hits = await runSearch(topic);
+      if (topic !== null && hits.length === 0) {
+        hits = await runSearch(null);
+        usedTopic = null;
+      }
+    }
+  }
+
+  const maxDist = input.maxDistance;
+  if (!input.hybridSearch && maxDist !== undefined) {
+    hits = hits.filter((h) => h.distance <= maxDist);
+  }
+  if (input.autoTrimDistance) {
+    hits = applyDynamicThreshold(hits, { threshold: input.autoTrimThreshold });
+  }
+  if (input.mmr) {
+    hits = mmrDiversify(hits, { lambda: input.mmrLambda, topK });
+  }
+  if (input.reranker && hits.length > 0) {
+    hits = await input.reranker.rerank(searchQuery, hits, topK);
+  }
+  hits = hits.slice(0, topK);
+
+  return {
+    hits,
+    retrievalMs: Date.now() - retrievalStart,
+    searchQuery,
+    queries,
+    usedTopic,
+  };
+}
 
 async function answerFromHits(opts: {
   hits: KbSearchHit[];
@@ -333,51 +455,10 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
     }
   }
 
-  // ── Retrieval (same logic as answerWithRag) ──────────────────────────────
+  // ── Retrieval ────────────────────────────────────────────────────────────
   const topK = input.topK ?? 5;
-  const searchQuery = input.rewriteQueryBeforeRetrieval
-    ? await rewriteQuery({
-        question: input.question,
-        ...(input.history ? { history: input.history } : {}),
-        chat: input.chat,
-      })
-    : input.question;
-
-  const retrievalStart = Date.now();
-  const [questionVec] = await input.embedder.embed([searchQuery]);
-  if (!questionVec) throw new Error("Embedder returned no vector for question");
-
-  let hits: KbSearchHit[];
-  if (input.booksPriority) {
-    hits = await input.kb.prioritySearch({
-      embedding: questionVec,
-      query: searchQuery,
-      k: topK,
-      vectorOnly: !input.hybridSearch,
-    });
-  } else {
-    const topic = input.topicRouting ? classifyTopic(input.question) : null;
-    const runSearch = (filterTopic: string | null) =>
-      input.hybridSearch
-        ? input.kb.hybridSearch({
-            embedding: questionVec,
-            query: searchQuery,
-            k: topK,
-            ...(filterTopic !== null ? { topic: filterTopic } : {}),
-          })
-        : input.kb.search(questionVec, topK, filterTopic);
-    hits = await runSearch(topic);
-    if (topic !== null && hits.length === 0) hits = await runSearch(null);
-  }
-
-  const maxDist = input.maxDistance;
-  if (!input.hybridSearch && maxDist !== undefined) {
-    hits = hits.filter((h) => h.distance <= maxDist);
-  }
-  if (input.reranker && hits.length > 0) {
-    hits = await input.reranker.rerank(searchQuery, hits, topK);
-  }
-  const retrievalMs = Date.now() - retrievalStart;
+  const { hits: retrievedHits, retrievalMs, searchQuery, queries } = await retrieveHits(input);
+  let hits = retrievedHits;
 
   if (hits.length === 0 && !(input.vacanciesBlock ?? "").trim() && !input.style) {
     input.onTelemetry?.({
@@ -455,7 +536,6 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
     generation_ms: generationMs,
     top_distances: hits.map((h) => Math.round(h.distance * 10000) / 10000),
     ...(input.hybridSearch ? { hybrid: true } : {}),
-    ...(input.reranker ? { reranked: true } : {}),
     ...(searchQuery !== input.question
       ? { original_query: input.question, rewritten_query: searchQuery }
       : {}),
@@ -522,92 +602,21 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   }
 
   const topK = input.topK ?? 5;
-
-  const searchQuery = input.rewriteQueryBeforeRetrieval
-    ? await rewriteQuery({
-        question: input.question,
-        ...(input.history ? { history: input.history } : {}),
-        chat: input.chat,
-      })
-    : input.question;
-
-  const retrievalStart = Date.now();
-  const [questionVec] = await input.embedder.embed([searchQuery]);
-  if (!questionVec) throw new Error("Embedder returned no vector for question");
-
-  if (input.booksPriority) {
-    const allHits = await input.kb.prioritySearch({
-      embedding: questionVec,
-      query: searchQuery,
-      k: topK,
-      vectorOnly: !input.hybridSearch,
-    });
-    const maxDist = input.maxDistance;
-    let hits =
-      input.hybridSearch || maxDist === undefined
-        ? allHits
-        : allHits.filter((h) => h.distance <= maxDist);
-    if (input.reranker && hits.length > 0) {
-      hits = await input.reranker.rerank(searchQuery, hits, topK);
-    }
-    const retrievalMs = Date.now() - retrievalStart;
-    const baseTelemetry: AnswerTelemetry = {
-      path: "ok",
-      retrieval_ms: retrievalMs,
-      top_distances: hits.map((h) => Math.round(h.distance * 10000) / 10000),
-      ...(input.hybridSearch ? { hybrid: true } : {}),
-      ...(input.reranker ? { reranked: true } : {}),
-      ...(searchQuery !== input.question
-        ? { original_query: input.question, rewritten_query: searchQuery }
-        : {}),
-    };
-    const result = await answerFromHits({ hits, baseTelemetry, startedAt, input, activePersona });
-    input.onTelemetry?.(result.telemetry);
-    return result;
-  }
-
-  const topic = input.topicRouting ? classifyTopic(input.question) : null;
-
-  const runSearch = (filterTopic: string | null) =>
-    input.hybridSearch
-      ? input.kb.hybridSearch({
-          embedding: questionVec,
-          query: searchQuery,
-          k: topK,
-          ...(filterTopic !== null ? { topic: filterTopic } : {}),
-        })
-      : input.kb.search(questionVec, topK, filterTopic);
-
-  let allHits = await runSearch(topic);
-  let usedTopic: string | null = topic;
-  if (topic !== null && allHits.length === 0) {
-    allHits = await runSearch(null);
-    usedTopic = null;
-  }
-  const maxDist = input.maxDistance;
-  let hits =
-    input.hybridSearch || maxDist === undefined
-      ? allHits
-      : allHits.filter((h) => h.distance <= maxDist);
-  if (input.reranker && hits.length > 0) {
-    hits = await input.reranker.rerank(searchQuery, hits, topK);
-  }
-  const retrievalMs = Date.now() - retrievalStart;
+  const { hits, retrievalMs, searchQuery, queries, usedTopic } = await retrieveHits(input);
 
   const baseTelemetry: AnswerTelemetry = {
     path: "ok",
     retrieval_ms: retrievalMs,
     top_distances: hits.map((h) => Math.round(h.distance * 10000) / 10000),
     ...(input.hybridSearch ? { hybrid: true } : {}),
-    ...(input.reranker ? { reranked: true } : {}),
-    ...(input.topicRouting && topic !== null ? { topic: usedTopic } : {}),
+    ...(input.topicRouting && usedTopic !== null ? { topic: usedTopic } : {}),
     ...(searchQuery !== input.question
       ? { original_query: input.question, rewritten_query: searchQuery }
       : {}),
   };
 
   console.log(
-    `[rag] retrieval hits=${hits.length} topic=${usedTopic ?? "global"} ms=${Date.now() - retrievalStart}`,
+    `[rag] retrieval hits=${hits.length} queries=${queries.length} topic=${usedTopic ?? "global"} ms=${retrievalMs}`,
   );
   const result = await answerFromHits({ hits, baseTelemetry, startedAt, input, activePersona });
   input.onTelemetry?.(result.telemetry);

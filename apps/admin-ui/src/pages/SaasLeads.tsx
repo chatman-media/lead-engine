@@ -1,4 +1,4 @@
-import { type DragEvent, useEffect, useRef, useState } from "react";
+import React, { type DragEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError, clearToken, saas, type ContactItem, type FunnelData, type LeadListItem } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
@@ -14,7 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DownloadIcon, PlusIcon, SearchIcon, SendIcon, SettingsIcon } from "lucide-react";
+import { DownloadIcon, PlusIcon, SearchIcon, SendIcon, SettingsIcon, UploadIcon } from "lucide-react";
+import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -72,6 +73,9 @@ export function SaasLeads() {
   // Lead search
   const [leadSearch, setLeadSearch] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   // Outreach state
   const [outreachOpen, setOutreachOpen] = useState(false);
@@ -162,6 +166,24 @@ export function SaasLeads() {
       onAuthError(err);
     } finally {
       setOutreachSending(false);
+    }
+  }
+
+  async function handleImportCsv(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const res = await saas.importLeadsCsv(file);
+      setImportResult(res);
+      toast.success(`Импорт завершён: ${res.imported} лидов добавлено`);
+      reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Ошибка импорта");
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -263,8 +285,24 @@ export function SaasLeads() {
             }}
           >
             <DownloadIcon className="mr-1.5 size-3.5" />
-            {exporting ? "Экспорт…" : "CSV"}
+            {exporting ? "Экспорт…" : "CSV ↓"}
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+          >
+            <UploadIcon className="mr-1.5 size-3.5" />
+            {importing ? "Импорт…" : "CSV ↑"}
+          </Button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={handleImportCsv}
+          />
           <Button
             size="sm"
             variant="outline"
@@ -285,6 +323,22 @@ export function SaasLeads() {
           </Button>
         </div>
       </div>
+
+      {/* CSV import result */}
+      {importResult && (
+        <div className="rounded-md border bg-muted px-4 py-3 text-sm flex items-center gap-4">
+          <span>Импортировано: <span className="font-semibold text-green-600">{importResult.imported}</span></span>
+          <span className="text-muted-foreground">·</span>
+          <span>Пропущено: <span className="font-semibold text-muted-foreground">{importResult.skipped}</span></span>
+          {importResult.errors.length > 0 && (
+            <>
+              <span className="text-muted-foreground">·</span>
+              <span className="text-destructive text-xs">{importResult.errors.slice(0, 3).join("; ")}</span>
+            </>
+          )}
+          <button type="button" className="ml-auto text-muted-foreground hover:text-foreground text-xs" onClick={() => setImportResult(null)}>✕</button>
+        </div>
+      )}
 
       {/* Outreach — рассылка сообщений */}
       {outreachOpen && (
