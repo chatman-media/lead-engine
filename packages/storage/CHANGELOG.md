@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.3.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.2.0...@chatman-media/storage-v1.3.0) (2026-05-25)
+
+
+### Features
+
+* GTM — billing auto-suspend, superadmin panel, usage alerts, reranker pipeline ([#128](https://github.com/chatman-media/lead-engine/issues/128)) ([cd5ee44](https://github.com/chatman-media/lead-engine/commit/cd5ee440a336eb9f29e7988935f6b352b558759d))
+
 # [@chatman-media/storage-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.1.0...@chatman-media/storage-v1.2.0) (2026-05-24)
 
 
