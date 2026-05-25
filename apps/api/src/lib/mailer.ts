@@ -176,6 +176,34 @@ export function inviteEmailHtml(opts: { email: string; inviteUrl: string; tenant
   `);
 }
 
+/** Письмо при достижении порога квоты LLM (80% или 100%). */
+export function usageAlertEmailHtml(opts: {
+  email: string;
+  slug: string;
+  current: number;
+  limit: number;
+  pct: number;
+  appUrl: string;
+  billingUrl: string;
+}): string {
+  const isOver = opts.pct >= 100;
+  return baseLayout(`
+    <h1>${isOver ? "Квота LLM исчерпана ❌" : "80% квоты LLM использовано ⚠️"}</h1>
+    <div class="highlight">
+      ${isOver
+        ? `❌ Лимит ${opts.limit.toLocaleString("ru")} ответов/мес исчерпан. Бот может перестать отвечать.`
+        : `⚠️ Использовано <strong>${opts.current.toLocaleString("ru")}</strong> из <strong>${opts.limit.toLocaleString("ru")}</strong> ответов (${opts.pct}%).`
+      }
+    </div>
+    <p>${isOver
+      ? "Апгрейд плана восстановит работу бота немедленно."
+      : "Если текущий темп сохранится, квота закончится до конца месяца."
+    }</p>
+    <a href="${opts.billingUrl}" class="btn">Обновить план →</a>
+    <p style="margin-bottom:0">Квота сбрасывается в начале каждого календарного месяца. Если у вас вопросы — ответьте на это письмо.</p>
+  `);
+}
+
 /** Письмо при неудачной оплате. */
 export function paymentFailedEmailHtml(opts: {
   email: string;

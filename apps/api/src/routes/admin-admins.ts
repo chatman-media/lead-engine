@@ -11,16 +11,14 @@ import { canAddAdmin } from "../lib/quota.ts";
  * может приглашать новых admin'ов / revoke invite'ы. Manager role видит
  * GET list для UX, но не может писать.
  *
- * Token-link flow (без email-infrastructure):
+ * Token-link flow с email-доставкой:
  *   1. POST /api/admin/admins/invite { email, role } → возвращает opaque
  *      token + share-url (`<PUBLIC_URL>/accept-invite?token=...`).
- *   2. Superadmin шарит share-url out-of-band (TG / WhatsApp / SMS / email
- *      руками — пока без built-in delivery).
+ *   2. Если mailer настроен (RESEND_API_KEY) — приглашение отправляется
+ *      на email автоматически через inviteEmailHtml.
  *   3. Приглашённый открывает share-url → UI /accept-invite → POST
  *      /api/auth/accept-invite { token, password } → создаёт admin row +
  *      session token. См. auth.ts.
- *
- * Email-доставка приглашений — Phase 3+ (нужна SES/Resend/SendGrid setup).
  *
  * Endpoints:
  *   POST   /api/admin/admins/invite   — { email, role } → { token, url, ... }

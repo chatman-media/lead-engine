@@ -33,6 +33,7 @@ import { SaasForgotPassword } from "./pages/SaasForgotPassword.tsx";
 import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
 import { SaasSuperadmin } from "./pages/SaasSuperadmin.tsx";
 import { ToolsSettings } from "./pages/ToolsSettings.tsx";
+import { SaasSuperadmin } from "./pages/SaasSuperadmin.tsx";
 
 function RequireAuth() {
   const [status, setStatus] = useState<"checking" | "auth" | "anon">(() =>
@@ -116,6 +117,9 @@ export function App() {
               <Route path="/superadmin" element={<SaasSuperadmin />} />
             </Route>
           </Route>
+
+          {/* Платформенный superadmin — публичный роут, авторизация через sa_token */}
+          <Route path="/superadmin" element={<SaasSuperadmin />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

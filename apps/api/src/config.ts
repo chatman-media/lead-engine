@@ -198,6 +198,12 @@ export interface ApiConfig {
    *    UserbotOutboundDispatcher (claim'ит kind='telegram_userbot' rows,
    *    отправка через pinned MTProto-соединение в этом процессе).
    */
+  /**
+   * Платформенный Bearer-токен для superadmin API (/api/superadmin/*).
+   * env PLATFORM_SUPERADMIN_TOKEN. Если пуст — /api/superadmin/* отключён.
+   * Генерировать: openssl rand -hex 32
+   */
+  superadminToken: string;
   telegramUserbot: {
     apiId: number;
     apiHash: string;
@@ -276,5 +282,6 @@ export function loadApiConfig(): ApiConfig {
       successUrl: process.env.STRIPE_CHECKOUT_SUCCESS_URL ?? "",
       cancelUrl: process.env.STRIPE_CHECKOUT_CANCEL_URL ?? "",
     },
+    superadminToken: process.env.PLATFORM_SUPERADMIN_TOKEN ?? "",
   };
 }

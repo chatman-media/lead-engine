@@ -337,12 +337,18 @@ async function applySubscription(
       },
     });
 
-  // Sync tenants.plan based on subscription status + priceId.
-  // - isDeleted → 'free' (canceled, no entitlement).
-  // - status='active' | 'trialing' → map priceId → plan.
-  // - status='past_due' | 'unpaid' → keep current plan (Stripe grace);
-  //   downgrade on .deleted.
-  // - unknown priceId → no plan change, warning логируется.
+  // Sync tenants.plan + tenants.status based on subscription status.
+  //
+  // Plan:
+  //   - isDeleted → 'free' (canceled, no entitlement).
+  //   - status='active' | 'trialing' → map priceId → plan.
+  //   - status='past_due' | 'unpaid' → keep current plan (Stripe retries).
+  //   - unknown priceId → no plan change.
+  //
+  // Status (auto-suspend):
+  //   - 'unpaid' → suspended (Stripe exhausted all retry attempts).
+  //   - 'active' | 'trialing' → active (восстанавливаем если был suspended).
+  //   - 'past_due' | 'canceled' | deleted → не меняем (grace / intentional).
   let newPlan: "free" | "starter" | "pro" | null = null;
   if (isDeleted) {
     newPlan = "free";
@@ -351,10 +357,24 @@ async function applySubscription(
     if (mapped) newPlan = mapped;
     else console.warn(`[stripe] unknown priceId ${priceId} — tenant.plan не меняется`);
   }
-  if (newPlan) {
+
+  let newTenantStatus: "active" | "suspended" | null = null;
+  if (status === "unpaid") {
+    newTenantStatus = "suspended";
+    console.warn(`[stripe] tenant ${customer.tenantId} suspended — subscription unpaid`);
+  } else if (status === "active" || status === "trialing") {
+    // Восстанавливаем если был suspended по billing-причине.
+    newTenantStatus = "active";
+  }
+
+  if (newPlan || newTenantStatus) {
     await db
       .update(tenants)
-      .set({ plan: newPlan, updatedAt: sql`EXTRACT(EPOCH FROM NOW())::INTEGER` })
+      .set({
+        ...(newPlan ? { plan: newPlan } : {}),
+        ...(newTenantStatus ? { status: newTenantStatus } : {}),
+        updatedAt: sql`EXTRACT(EPOCH FROM NOW())::INTEGER`,
+      })
       .where(eq(tenants.id, customer.tenantId));
   }
 

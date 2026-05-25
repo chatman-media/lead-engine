@@ -115,7 +115,7 @@ function generateWebWidgetSnippet(opts: {
 
   const scriptSrc = opts.webWidgetScriptUrl
     ? opts.webWidgetScriptUrl
-    : `${opts.publicUrl}/widget.js`; // placeholder — M3b shipped bundle
+    : `${opts.publicUrl}/widget.js`; // fallback: /widget.js served from same origin
 
   const html = [
     "<!-- lead-engine chat widget — вставить перед </body> -->",

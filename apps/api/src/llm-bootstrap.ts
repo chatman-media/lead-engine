@@ -14,7 +14,7 @@ import {
   type StageClassifier,
   StylesRepo,
 } from "@chatman-media/conversation-engine";
-import { ABRouter, type AnyRagTool, type DirectorHookForPrompt, makeBookingLinkTool, type SkillForPrompt, type Style } from "@chatman-media/kb";
+import { ABRouter, type AnyRagTool, CohereReranker, type DirectorHookForPrompt, JinaReranker, makeBookingLinkTool, type Reranker, type SkillForPrompt, type Style } from "@chatman-media/kb";
 import {
   type EmbeddingClient as RagEmbeddingClient,
   InMemoryLlmRouter,
@@ -22,7 +22,7 @@ import {
 } from "@chatman-media/llm-router";
 import type { PlatformMetrics } from "@chatman-media/observability";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
-import { directorHooks, leads, skills, stageDefinitions } from "@chatman-media/storage";
+import { directorHooks, leads, llmProviderConfigs, skills, stageDefinitions } from "@chatman-media/storage";
 import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
 import type { ApiConfig } from "./config.ts";
@@ -361,6 +361,80 @@ export function makeReplyStrategy(
     return tools;
   }
 
+  // resolveReranker: reads per-tenant llm_provider_configs with purpose='reranker'.
+  // Results are cached per-tenant (Reranker objects are stateless wrappers —
+  // they hold only the API key and model, so caching per-tenant is safe).
+  // Cache is never invalidated at runtime — requires restart if the admin
+  // changes the reranker config. Acceptable trade-off: reranker changes rarely.
+  const rerankerCache = new Map<number, Reranker | null>();
+  async function resolveReranker(input: { tenantId: number }): Promise<Reranker | null> {
+    if (rerankerCache.has(input.tenantId)) {
+      return rerankerCache.get(input.tenantId) ?? null;
+    }
+    const [row] = await db
+      .select({
+        provider: llmProviderConfigs.provider,
+        model: llmProviderConfigs.model,
+        secretRef: llmProviderConfigs.secretRef,
+        baseUrl: llmProviderConfigs.baseUrl,
+        timeoutMs: llmProviderConfigs.timeoutMs,
+      })
+      .from(llmProviderConfigs)
+      .where(
+        and(
+          eq(llmProviderConfigs.tenantId, input.tenantId),
+          eq(llmProviderConfigs.purpose, "reranker"),
+        ),
+      )
+      .limit(1);
+
+    if (!row || !row.secretRef) {
+      rerankerCache.set(input.tenantId, null);
+      return null;
+    }
+
+    let apiKey: string | null = null;
+    try {
+      apiKey = await getDecryptedSecret({
+        db,
+        tenantId: input.tenantId,
+        key: row.secretRef,
+        masterKeyHex: cfg.masterKeyHex,
+      });
+    } catch (err) {
+      console.warn(`[reranker] failed to decrypt API key for tenant ${input.tenantId}:`, err);
+      rerankerCache.set(input.tenantId, null);
+      return null;
+    }
+
+    if (!apiKey) {
+      rerankerCache.set(input.tenantId, null);
+      return null;
+    }
+
+    let reranker: Reranker | null = null;
+    if (row.provider === "cohere") {
+      reranker = new CohereReranker({
+        apiKey,
+        ...(row.model ? { model: row.model } : {}),
+        ...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
+        ...(row.timeoutMs !== null ? { timeoutMs: row.timeoutMs } : {}),
+      });
+    } else if (row.provider === "jina") {
+      reranker = new JinaReranker({
+        apiKey,
+        ...(row.model ? { model: row.model } : {}),
+        ...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
+        ...(row.timeoutMs !== null ? { timeoutMs: row.timeoutMs } : {}),
+      });
+    } else {
+      console.warn(`[reranker] unsupported provider "${row.provider}" for tenant ${input.tenantId}`);
+    }
+
+    rerankerCache.set(input.tenantId, reranker);
+    return reranker;
+  }
+
   const strategy = new RagReplyStrategy(
     {
       template,
@@ -401,6 +475,7 @@ export function makeReplyStrategy(
       resolveSkills,
       resolveDirectorHooks,
       resolveTools,
+      resolveReranker,
     },
     (tenantId: number) => new MessagesRepo({ db, tenantId }),
   );

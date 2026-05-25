@@ -21,6 +21,8 @@ export interface PlanLimits {
   maxAdmins: number;
   /** Maximum active leads. -1 = unlimited. */
   maxLeads: number;
+  /** Maximum LLM chat calls per calendar month. -1 = unlimited. */
+  maxLlmCallsPerMonth: number;
   /** Inbound rate limit per minute (overrides env default if задан). */
   rateLimitPerMinute: number;
   /** Inbound rate limit per hour. */
@@ -49,6 +51,7 @@ const FREE: PlanLimits = {
   maxKbDocuments: 50,
   maxAdmins: 3,
   maxLeads: 100,
+  maxLlmCallsPerMonth: 100,
   rateLimitPerMinute: 20,
   rateLimitPerHour: 200,
   label: "Free",
@@ -61,6 +64,7 @@ const STARTER: PlanLimits = {
   maxKbDocuments: 500,
   maxAdmins: 3,
   maxLeads: 1000,
+  maxLlmCallsPerMonth: 2000,
   rateLimitPerMinute: 60,
   rateLimitPerHour: 600,
   label: "Starter",
@@ -73,6 +77,7 @@ const PRO: PlanLimits = {
   maxKbDocuments: 10000,
   maxAdmins: 10,
   maxLeads: -1, // unlimited
+  maxLlmCallsPerMonth: -1, // unlimited
   rateLimitPerMinute: 120,
   rateLimitPerHour: 2400,
   label: "Pro",
@@ -86,6 +91,7 @@ const ENTERPRISE: PlanLimits = {
   maxKbDocuments: 100000,
   maxAdmins: -1,
   maxLeads: -1,
+  maxLlmCallsPerMonth: -1,
   rateLimitPerMinute: 600,
   rateLimitPerHour: 60000,
   label: "Enterprise",

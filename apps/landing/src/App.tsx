@@ -368,8 +368,8 @@ const CONTENT: Record<
 };
 
 // ─── Signup URL ───────────────────────────────────────────────────
-const SIGNUP_URL = "https://app.TODO_DOMAIN.com/signup";
-const DEMO_URL = "#demo";
+const SIGNUP_URL = (import.meta.env.VITE_APP_URL ?? "https://app.leadengine.pro") + "/signup";
+const DEMO_URL = (import.meta.env.VITE_DEMO_URL as string | undefined) ?? "https://calendly.com/leadengine/demo";
 
 // ─── Components ───────────────────────────────────────────────────
 
