@@ -632,6 +632,33 @@ export interface StageWebhook {
   updatedAt: number;
 }
 
+// ── Bot Tester ─────────────────────────────────────────────────────────────
+
+export interface TestScenarioStep {
+  text: string;
+  hint?: string;
+}
+
+export interface TestScenario {
+  id: string;
+  name: string;
+  vertical: string;
+  steps: TestScenarioStep[];
+}
+
+export interface TestOutboundPart {
+  kind: "text" | "photo" | "video" | "document" | "audio";
+  text?: string;
+  mediaRef?: { channelId: string; externalRef: string };
+  caption?: string;
+}
+
+export interface TestSendResult {
+  parts: TestOutboundPart[];
+  conversationId?: number;
+  error?: string;
+}
+
 // ── Audit entry (for audit log page) ────────────────────────────────────
 
 const TOKEN_KEY = "lead_engine_token";
@@ -1442,6 +1469,27 @@ export const saas = {
     return request<{ id: number; slug: string; plan: string }>(`/api/superadmin/tenants/${id}/plan`, {
       method: "PATCH",
       body: JSON.stringify({ plan }),
+    });
+  },
+
+  // ── Bot Tester ────────────────────────────────────────────────────────
+  getTestScenarios() {
+    return request<{ scenarios: TestScenario[] }>("/api/admin/test/scenarios");
+  },
+  testSend(body: {
+    text?: string;
+    mediaUrl?: string;
+    mediaType?: "photo" | "video";
+    caption?: string;
+  }) {
+    return request<TestSendResult>("/api/admin/test/send", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+  testResetSession() {
+    return request<{ ok: boolean; note?: string }>("/api/admin/test/session", {
+      method: "DELETE",
     });
   },
 
