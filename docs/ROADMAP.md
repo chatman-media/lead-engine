@@ -1,6 +1,6 @@
 # Roadmap
 
-Последнее обновление: 2026-05-25 (RAG v2: multi-query expansion + reranker + MMR + threshold; auth/superadmin/outreach/templates integration tests).
+Последнее обновление: 2026-05-26 (AI Workflow Builder + Exchange (Phuket) вертикаль + QR-delivery из admin-UI).
 
 Стратегический контекст — см. [`COMPETITORS.md`](COMPETITORS.md), [`POSITIONING.md`](POSITIONING.md).
 
@@ -221,6 +221,35 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
 - ✅ **Jina / Cohere reranker** — `JinaReranker` + `CohereReranker` (cross-encoder)
   подключены в `AnswerInput.reranker`. Fetch candidateK=topK×3 → rerank → topK.
   Применяется во всех трёх retrieval-путях. Jina multilingual — работает с русским
+
+### AI Workflow Builder + Exchange vertical (май 2026, PR #130)
+
+- ✅ **AI Workflow Builder** — многоходовой диалог оператора с AI прямо в admin-UI.
+  `POST /api/admin/workflows/ai-chat` ведёт диалог (до 60 ходов), AI задаёт уточняющие
+  вопросы и генерирует preview воронки (стадии + поля). `POST /api/admin/workflows/apply`
+  применяет к тенанту через `applyFunnelStages()`. Prompt caching на Anthropic API.
+  Frontend: `AiWorkflowPanel` — Sheet-панель с историей чата, preview и "Применить".
+  Кнопка "Настроить с AI" добавлена в `/funnel`.
+
+- ✅ **Exchange вертикаль (`exchange_v1`)** — шаблон для обменных пунктов Пхукета:
+  крипта (USDT/BTC/ETH) и переводы в рублях → THB наличные через cardless ATM.
+  Стадии: `quote_request` → `rate_confirmation` → `kyc_collection` →
+  `awaiting_payment` (supportMode) → `qr_delivery` (supportMode) → `completed`.
+  Поля: asset_from (select), payment_method (crypto/rub_transfer/cash),
+  network для USDT (TRC20/ERC20/BEP20), amount_from, KYC (имя + фото паспорта),
+  payment_proof (tx hash или скрин перевода), payout_qr.
+  Двуязычный system prompt (RU/EN). Пакет `apps/vertical-exchange`,
+  зарегистрирован в `KNOWN_TEMPLATES` и `SEED_TEMPLATES["exchange"]`.
+
+- ✅ **QR/photo delivery из admin-UI (путь Б)** — `POST /api/admin/leads/:id/send-photo`
+  принимает Telegram file_id или HTTPS URL, ставит outbound photo в очередь к клиенту.
+  UI-блок "Отправить QR / фото клиенту" на странице лида. Основной кейс: оператор
+  обменника генерирует cardless-withdrawal QR в банковском приложении (KBank/BBL)
+  и отправляет клиенту через admin-UI без перехвата чата.
+
+- ✅ **`applyFunnelStages()` рефакторинг** — извлечена из `seedFunnelByKey` как
+  shared helper; экспортированы `STAGE_KINDS`, `STAGE_TYPES`, `FIELD_TYPES`, `SeedStage`
+  для использования в роутере AI workflow.
 
 ### UX + Telegram userbot (май 2026)
 
@@ -505,7 +534,7 @@ Vision purpose уже в schema (`llm_provider_configs.purpose='vision'`):
 | MRR | ~$99 | $15K | $70K | **$85K** |
 | ARR | ~$1.2K | $180K | $840K | **$1M+** |
 | Channel coverage | TG + WA + web + TG userbot | ✅ | + RE vertical | + voice prep |
-| Vertical templates | 2 (UAE + generic) | 2 | 5 | 7 |
+| Vertical templates | 6 (UAE + generic + RE + SaaS + video + exchange) | 6 | 8 | 10 |
 | YouTube videos | 0 | 12 | 30 | 50 |
 | Tests | 950+ | 1.2K+ | 1.8K+ | 2.5K+ |
 | Compliance | none | none | none | SOC 2 in flight |
@@ -555,6 +584,10 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
 - **GTM-инфра:** партнёрские коды, `recruitment_generic` + `leadengine_sales_v1` + `real_estate` + `saas` + `video` шаблоны, метрика «закрыто ботом», sales-бот KB
 - **Agentic tool calls:** booking link wired, tool-loop engine готов к расширению
 - **RAG v2:** multi-query expansion (RRF merge) + MMR diversification + dynamic threshold + Jina/Cohere reranker
+- **AI Workflow Builder:** многоходовой диалог с AI → генерация воронки за 5 минут без технических знаний
+- **Exchange vertical (`exchange_v1`):** крипто/RUB → THB для обменников Пхукета
+- **QR/photo delivery:** оператор отправляет cardless-withdrawal QR клиенту через admin-UI
+- **6 вертикальных шаблонов:** UAE + generic + RE + SaaS + video + exchange
 - **950+ tests**, multi-tenant RLS, encrypted secrets, observability
 - 1 живой prod tenant (recruitment UAE), Stripe-ready
 

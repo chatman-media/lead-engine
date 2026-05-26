@@ -58,6 +58,7 @@ hot-reload, secrets. Для high-level introduction — см.
        │  /experiments            │
        │  /conversations  /audit  │
        │  /diagnostics            │
+       │  /superadmin             │
        └──────────────────────────┘
 ```
 
@@ -410,6 +411,7 @@ conversation.mode.return_to_ai    — mode 'human' → 'ai'
 tenant.pause                      — tenant.status 'active' → 'suspended'
 tenant.resume                     — tenant.status 'suspended' → 'active'
 billing.checkout_started          — POST /checkout, details: { plan, priceId, customerId }
+lead.send_photo                   — оператор отправил фото/QR клиенту через admin-UI
 ```
 
 Raw secrets / tokens / apiKey НИКОГДА не попадают в `details` — verified
@@ -504,6 +506,7 @@ lead_engine_llm_errors_total{provider, purpose, kind} — error rates
 | LLM config loader | `apps/api/src/lib/llm-config-loader.ts` |
 | Tenant reloader (hot-reload bus) | `apps/api/src/lib/tenant-reloader.ts` |
 | Audit helper | `apps/api/src/lib/audit.ts` |
+| AI Workflow Builder (ai-chat + apply) | `apps/api/src/routes/admin-workflow.ts` |
 | Photo classifier + passport OCR | `apps/api/src/lib/photo-processor.ts` |
 | Rate limiter | `apps/api/src/lib/rate-limiter.ts` |
 | Plan tiers (PlanLimits) | `apps/api/src/lib/plans.ts` |
@@ -542,9 +545,11 @@ lead_engine_llm_errors_total{provider, purpose, kind} — error rates
 | `form_fill` | Бот/оператор собирает данные через `stage_fields` |
 | `document_upload` | Кандидат присылает файлы |
 | `document_signature` | Подписание договора |
+| `rate_confirmation` | Бот показывает курс/цену, ждёт подтверждения |
 | `external_approval` | Ждём решения третьей стороны (webhook) |
 | `payment` | Оплата |
 | `waiting` | Ждём по таймауту |
+| `awaiting_operator` | `supportMode=true` — бот замолкает, оператор действует вручную |
 | `interaction` | Встреча/звонок/просмотр |
 | `assessment` | Оценка/квалификация |
 | `milestone` | Контрольная точка |
@@ -559,6 +564,28 @@ OCR'ят MRZ и заполняют `contact.attributes_json` с ключами
 
 **Активация**: добавить LLM config с `purpose='vision'` (openai или openrouter,
 любая vision-capable модель — `gpt-4o`, `google/gemini-2.5-flash`).
+
+### AI Workflow Builder
+
+`POST /api/admin/workflows/ai-chat` — многоходовой диалог оператора с AI
+(до 60 ходов). AI задаёт уточняющие вопросы и когда собрал достаточно —
+возвращает `readyToGenerate: true` + `preview` (список стадий с полями) + `stages` (raw).
+Выбирает только из каталога `STAGE_TYPES` / `FIELD_TYPES` (экспортируются из `admin-funnel.ts`).
+
+`POST /api/admin/workflows/apply` — применяет `stages` к тенанту:
+удаляет текущие стадии → создаёт новые через `applyFunnelStages()`.
+Использует tenant's LLM client (`resolveChat(tenantId, "chat")`).
+
+Системный промпт кэшируется на Anthropic API (prompt caching) — длинный диалог
+экономит токены. Frontend: `AiWorkflowPanel` — Sheet с чатом, preview и кнопкой "Применить".
+
+### QR / photo delivery (send-photo endpoint)
+
+`POST /api/admin/leads/:id/send-photo { photoRef, caption? }` — оператор
+отправляет фото клиенту лида в его активный канал. `photoRef` — Telegram file_id
+или публичный HTTPS URL. Ставит `outbound_queue` запись с `kind="photo"`.
+Основной кейс: оператор обменника загружает cardless-withdrawal QR и пересылает
+его клиенту через admin-UI (путь Б доставки QR).
 
 ---
 

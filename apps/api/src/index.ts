@@ -2,6 +2,7 @@ import { checkRlsEnforcement } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { funnels, tenants } from "@chatman-media/storage";
+import { EXCHANGE_V1 } from "@chatman-media/vertical-exchange";
 import { REAL_ESTATE_V1 } from "@chatman-media/vertical-real-estate";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
 import { SAAS_V1 } from "@chatman-media/vertical-saas";
@@ -64,6 +65,7 @@ import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
+import { makeAdminWorkflowRoutes } from "./routes/admin-workflow.ts";
 import { makeMcpRoutes } from "./routes/mcp.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeSuperadminRoutes } from "./routes/superadmin.ts";
@@ -77,6 +79,7 @@ import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
 /** Known vertical templates by slug. */
 const KNOWN_TEMPLATES: Record<string, VerticalTemplate> = {
+  exchange_v1: EXCHANGE_V1,
   real_estate_v1: REAL_ESTATE_V1,
   recruitment_v1: RECRUITMENT_V1,
   saas_v1: SAAS_V1,
@@ -344,6 +347,16 @@ async function main() {
   app.route("/", makeAdminFunnelRoutes({ db }));
   app.route("/", makeAdminReferralRoutes({ db }));
   log.info("admin-funnel routes enabled");
+
+  // AI Workflow Builder — диалог с AI для генерации воронки.
+  app.route(
+    "/",
+    makeAdminWorkflowRoutes({
+      db,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    }),
+  );
+  log.info("admin-workflow routes enabled (AI funnel builder)");
 
   // Dashboard aggregate stats.
   app.route("/", makeAdminDashboardRoutes({ db }));

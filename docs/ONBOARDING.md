@@ -212,7 +212,47 @@ curl -X PUT http://localhost:3000/api/admin/llm-configs/embed \
 
 ---
 
-## Шаг 4. Загрузить документы
+## Шаг 4. Настроить воронку
+
+```
+http://localhost:5173/funnel
+```
+
+### A. Загрузить готовый шаблон
+
+Нажать "Загрузить шаблон" → выбрать нужный:
+
+| Шаблон | Описание |
+|--------|---------|
+| `recruitment_generic` | Найм — новый лид → квалификация → интервью → оффер |
+| `recruitment_uae_v1` | Специализированный шаблон для UAE/CIS-найма |
+| `real_estate` | Заявки на недвижимость, запись на просмотры |
+| `saas` | SaaS-продукт — demo request, квалификация |
+| `video` | Видеопроизводство — бриф, KV, смета |
+| `exchange` | Обменный пункт — крипта/RUB → THB наличные |
+
+```sh
+curl -X POST http://localhost:3000/api/admin/funnel/seed \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"template":"recruitment_generic"}'
+```
+
+### B. Настроить с AI (рекомендовано)
+
+Нажать "Настроить с AI" → откроется чат-панель. Описать бизнес в свободной
+форме — AI задаёт уточняющие вопросы и генерирует воронку под конкретный бизнес.
+Когда AI готов — показывает preview стадий и полей. Нажать "Применить воронку"
+→ стадии устанавливаются мгновенно.
+
+### C. Создать вручную (drag-drop)
+
+Добавить стадии и поля через drag-drop редактор на `/funnel`. Поддерживаемые
+типы стадий: `form_fill`, `document_upload`, `rate_confirmation`, `awaiting_operator`,
+`payment`, `waiting`, `interaction`, `assessment`, `milestone`.
+
+---
+
+## Шаг 5. Загрузить документы
 
 ```
 http://localhost:5173/dashboard
@@ -258,7 +298,7 @@ Backend:
 
 ---
 
-## Шаг 5. Проверить что работает
+## Шаг 6. Проверить что работает
 
 ### A. Onboarding checklist (на /dashboard)
 
@@ -323,7 +363,7 @@ Use-case: оператор взял диалог, разрулил вручну�
 
 ---
 
-## Шаг 6. Операционные действия
+## Шаг 7. Операционные действия
 
 ### Pause / resume бота
 
@@ -348,11 +388,11 @@ re-encrypts + updates row + reload. Старый ciphertext остаётся в
 ### Upgrade plan (Stripe Checkout)
 
 Дашборд показывает `PlanWidget` — текущий план, usage bars (каналы /
-KB docs / rate), кнопки "Starter $49" / "Pro $149" если на `free`.
+KB docs / rate), кнопки "Starter $99" / "Pro $199" если на `free`.
 
 Flow:
 
-1. Клик "Starter $49" → `POST /api/admin/billing/checkout { plan: 'starter' }`
+1. Клик "Starter $99" → `POST /api/admin/billing/checkout { plan: 'starter' }`
 2. Backend: `createCustomer` (если нет) + `createCheckoutSession`
    (14-day trial) → возвращает `url`
 3. UI: `window.location.href = url` — Stripe Checkout
@@ -395,7 +435,7 @@ Quota errors (402 Payment Required):
   "reason": "max_channels",
   "limit": 1, "current": 1,
   "plan": "free", "planLabel": "Free",
-  "upgradeHint": "Перейдите на план Starter ($49/мес) для большего числа каналов"
+  "upgradeHint": "Перейдите на план Starter ($99/мес) для большего числа каналов"
 }
 ```
 
@@ -404,6 +444,21 @@ UI ловит этот response и показывает Upgrade CTA.
 ### Rotate LLM key
 
 То же самое в `/settings` — paste новый key, save. Hot-reload.
+
+### Отправить QR / фото клиенту из admin-UI
+
+На странице лида (`/leads/:id`) — блок "Отправить QR / фото клиенту".
+Вставить Telegram `file_id` или публичный HTTPS URL изображения, нажать "Отправить".
+Бот мгновенно пересылает картинку клиенту в Telegram (без перехвата чата).
+
+Основной кейс: оператор обменника сгенерировал cardless-withdrawal QR в банковском
+приложении → сохранил как фото → отправляет клиенту через admin-UI.
+
+```sh
+curl -X POST http://localhost:3000/api/admin/leads/42/send-photo \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"photoRef":"https://example.com/qr.png","caption":"Ваш QR для ATM"}'
+```
 
 ---
 

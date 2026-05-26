@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "lib": ["ES2022"],
+    "types": ["bun"],
+    "skipLibCheck": true,
+    "paths": {
+      "@chatman-media/llm-router": ["../../packages/llm-router/src/index.ts"],
+      "@chatman-media/kb": ["../../packages/kb/src/index.ts"],
+      "@chatman-media/verticals": ["../../packages/verticals/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}
