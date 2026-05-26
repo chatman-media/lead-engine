@@ -26,7 +26,12 @@ export {
   SkillOutcomesRepo,
   StylesRepo,
   type StyleRow,
+  NotificationsRepo,
+  type NotificationRule,
+  type OperatorSettings,
 } from "./dal/index.ts";
+export { NotificationService, type NotificationEvent } from "./notifications.ts";
+export { OperatorBotHandler } from "./operator-bot-handler.ts";
 // CoachAnalyzer переехал в @chatman-media/sales (sales-domain code).
 // Back-compat re-export невозможен — создал бы circular dep (sales импортит
 // conv-engine для DAL-типов). Consumer'ы должны импортировать напрямую
