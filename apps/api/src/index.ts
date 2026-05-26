@@ -67,6 +67,7 @@ import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeAdminWorkflowRoutes } from "./routes/admin-workflow.ts";
 import { makeAdminNotificationsRoutes } from "./routes/admin-notifications.ts";
+import { makeAdminTestRoutes } from "./routes/admin-test.ts";
 import { makeMcpRoutes } from "./routes/mcp.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
 import { makeSuperadminRoutes } from "./routes/superadmin.ts";
@@ -371,6 +372,16 @@ async function main() {
     }),
   );
   log.info("admin-workflow routes enabled (AI funnel builder)");
+
+  // Bot Tester — simulate inbound messages through the full pipeline.
+  app.route(
+    "/",
+    makeAdminTestRoutes({
+      db,
+      replyStrategy: replyStrategy ?? null,
+    }),
+  );
+  log.info("admin-test routes enabled (bot tester)");
 
   // Dashboard aggregate stats.
   app.route("/", makeAdminDashboardRoutes({ db }));
