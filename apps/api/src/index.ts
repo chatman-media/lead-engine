@@ -1,4 +1,4 @@
-import { checkRlsEnforcement } from "@chatman-media/conversation-engine";
+import { checkRlsEnforcement, NotificationsRepo, NotificationService, OperatorBotHandler } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { funnels, tenants } from "@chatman-media/storage";
@@ -66,6 +66,7 @@ import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeAdminWorkflowRoutes } from "./routes/admin-workflow.ts";
+import { makeAdminNotificationsRoutes } from "./routes/admin-notifications.ts";
 import { makeAdminTestRoutes } from "./routes/admin-test.ts";
 import { makeMcpRoutes } from "./routes/mcp.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
@@ -75,6 +76,7 @@ import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 import { makeWhatsAppWebhookRoutes } from "./routes/webhook-whatsapp.ts";
+import { makeOperatorBotWebhookRoutes } from "./routes/webhook-operator-bot.ts";
 import { makeWidgetStaticRoutes } from "./routes/widget-static.ts";
 import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
@@ -267,6 +269,17 @@ async function main() {
   const recordUsage = (tenantId: number, ev: Parameters<typeof usageWriter.record>[1]) =>
     usageWriter.record(tenantId, ev);
 
+  const notificationsRepo = new NotificationsRepo(db as any);
+  const notificationService = new NotificationService(
+    notificationsRepo,
+    cfg.operatorBotToken,
+    cfg.mailer.appUrl,
+  );
+  const operatorBotHandler = new OperatorBotHandler(notificationsRepo, cfg.operatorBotToken);
+  if (cfg.operatorBotToken) {
+    log.info("operator notification bot enabled");
+  }
+
   const embedderResolver = makeEmbedderResolver(loadedRef);
   if (embedderResolver) {
     app.route("/", makeAdminKbRoutes({ db, resolveEmbedder: embedderResolver }));
@@ -341,7 +354,8 @@ async function main() {
   log.info("admin-tenant routes enabled (pause/resume)");
 
   // Leads pipeline (list, create, stage transition, field values).
-  app.route("/", makeAdminLeadsRoutes({ db }));
+  app.route("/", makeAdminLeadsRoutes({ db, notificationService }));
+  app.route("/api/admin/notifications", makeAdminNotificationsRoutes({ repo: notificationsRepo }));
   log.info("admin-leads routes enabled");
 
   // Funnel builder (stage_definitions, stage_fields) + skills list.
@@ -543,12 +557,21 @@ async function main() {
       resolveTemplate,
       memoryExtractor,
       stageClassifier,
+      notificationService,
       photoProcessor,
       fieldExtractor,
       sink,
       metrics,
       ...(rateLimiter ? { rateLimiter } : {}),
       ...(resolveTranscriber ? { resolveTranscriber } : {}),
+    }),
+  );
+
+  app.route(
+    "/",
+    makeOperatorBotWebhookRoutes({
+      handler: operatorBotHandler,
+      webhookSecret: cfg.telegramWebhookSecret,
     }),
   );
 
@@ -579,6 +602,7 @@ async function main() {
         resolveTemplate,
         memoryExtractor,
         stageClassifier,
+        notificationService,
         photoProcessor,
         fieldExtractor,
         sink,
@@ -634,6 +658,7 @@ async function main() {
       resolveTemplate,
       memoryExtractor,
       stageClassifier,
+      notificationService,
       sink,
       metrics,
       log,
@@ -668,6 +693,7 @@ async function main() {
         resolveTemplate,
         memoryExtractor,
         stageClassifier,
+        notificationService,
         photoProcessor,
         fieldExtractor,
         sink,

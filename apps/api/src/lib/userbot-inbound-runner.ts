@@ -12,6 +12,7 @@ import {
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
+  type NotificationService,
   withTenant,
 } from "@chatman-media/conversation-engine";
 import type { JsonLogger, PlatformMetrics } from "@chatman-media/observability";
@@ -42,6 +43,7 @@ export function startUserbotInboundRunner(opts: {
   resolveTemplate?: (tenantSlug: string) => VerticalTemplate | undefined;
   memoryExtractor?: MemoryExtractor | null;
   stageClassifier?: StageClassifier | null;
+  notifications?: NotificationService;
   photoProcessor?: PhotoProcessor;
   fieldExtractor?: FieldExtractor;
   resolveTranscriber?: ((tenantId: number) => ITranscriber | null) | null;
@@ -81,6 +83,7 @@ export function startUserbotInboundRunner(opts: {
               conversations: new ConversationsRepo(repoCtx),
               messages: new MessagesRepo(repoCtx),
               outbound: new OutboundQueueRepo(repoCtx),
+              notifications: opts.notifications,
               reply: opts.replyStrategy ?? null,
               deferReply: true,
               ...(template ? { template } : {}),

@@ -13,6 +13,7 @@ import {
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
+  type NotificationService,
   withTenant,
 } from "@chatman-media/conversation-engine";
 import type { PlatformMetrics } from "@chatman-media/observability";
@@ -89,6 +90,7 @@ export function makeTelegramWebhookRoutes(opts: {
    * Retry-After header (Telegram уважает 429 и replay'нёт позже).
    */
   rateLimiter?: InboundRateLimiter;
+  notificationService?: NotificationService;
   photoProcessor?: PhotoProcessor;
   fieldExtractor?: FieldExtractor;
   /** Per-tenant STT factory. Вызывается с tenantId на каждый webhook-запрос. */
@@ -204,6 +206,7 @@ export function makeTelegramWebhookRoutes(opts: {
         conversations: new ConversationsRepo(repoCtx),
         messages: new MessagesRepo(repoCtx),
         outbound: new OutboundQueueRepo(repoCtx),
+        notifications: opts.notificationService,
         // reply остаётся для conv-engine'а как gate — но НЕ вызывается
         // при deferReply, processInbound вернётся раньше.
         reply: opts.replyStrategy ?? null,

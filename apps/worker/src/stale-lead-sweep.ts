@@ -16,8 +16,9 @@
  * credentials — только читает/пишет через withTenant (RLS-safe).
  */
 
-import { withTenant } from "@chatman-media/conversation-engine";
+import { withTenant, type NotificationService } from "@chatman-media/conversation-engine";
 import {
+  contacts,
   leadEvents,
   leads,
   stageDefinitions,
@@ -33,6 +34,7 @@ export class StaleleadSweeper {
     private readonly db: Db,
     private readonly opts: {
       intervalMs: number;
+      notifications?: NotificationService;
     },
   ) {}
 
@@ -136,6 +138,26 @@ export class StaleleadSweeper {
           toState: terminalLost.slug,
           createdAt: now,
         });
+
+        if (this.opts.notifications) {
+          const [contact] = await tx
+            .select({ displayName: contacts.displayName })
+            .from(contacts)
+            // lead.id is correct here as leads and contacts are 1:1 in this context?
+            // No, leads.userId references contacts.id.
+            .where(eq(contacts.id, sql`(SELECT user_id FROM leads WHERE id = ${lead.id})`));
+
+          void this.opts.notifications.notify({
+            tenantId,
+            eventType: "lead_stale",
+            leadId: lead.id,
+            data: {
+              displayName: contact?.displayName || "Без имени",
+              fromStage: lead.state,
+              toStage: terminalLost.slug,
+            },
+          });
+        }
       }
 
       if (staleLeads.length > 0) {

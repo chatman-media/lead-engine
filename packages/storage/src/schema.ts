@@ -218,7 +218,7 @@ export const llmUsageEvents = pgTable("llm_usage_events", {
   purpose: text("purpose").notNull(),
   /** openai | openrouter | ollama | anthropic — какой provider. */
   provider: text("provider").notNull(),
-  /** Конкретная model (gpt-4o-mini / text-embedding-3-small / llama3 / ...). */
+  /** Конкретная model (gpt-4o-mini / text-embedding-3-small / ...). */
   model: text("model"),
   /** Latency call'а в миллисекундах. */
   latencyMs: integer("latency_ms").notNull(),
@@ -1019,4 +1019,62 @@ export const stripeWebhookEvents = pgTable("stripe_webhook_events", {
   rawPayload: text("raw_payload").notNull(),
 }, (t) => [
   index("idx_stripe_webhook_events_type").on(t.type, sql`${t.processedAt} DESC`),
+]);
+
+// ---- Notifications (Operator Companion Bot) ----------------------------
+
+// Правила уведомлений: КОГДА и КОГО уведомлять.
+// Позволяет гибко настраивать алерты (например, "только VIP-сделки в группу #Sales").
+export const notificationRules = pgTable("notification_rules", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  // lead_intake_complete | stage_changed | human_takeover | document_uploaded | high_value_deal | lead_stale
+  eventType: text("event_type").notNull(),
+  // JSON-фильтры: { toStage: 'awaiting_payment', minAmount: 1000, asset: 'usdt' }
+  conditionJson: text("condition_json").notNull().default("{}"),
+  // telegram_group | telegram_personal | slack (future)
+  channelType: text("channel_type").notNull().default("telegram_group"),
+  // ID чата, группы или канала
+  targetId: text("target_id").notNull(),
+  // low | normal | high (определяет звук уведомления или приоритет в UI)
+  priority: text("priority").notNull().default("normal"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  index("idx_notif_rules_tenant").on(t.tenantId, t.isActive),
+  index("idx_notif_rules_event").on(t.tenantId, t.eventType),
+]);
+
+// Шаблоны уведомлений для операторов.
+// Позволяют менять текст алертов (например, перевести на другой язык или добавить специфику).
+export const notificationTemplates = pgTable("notification_templates", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  // slug соответствует eventType в notification_rules (stage_changed, human_takeover, etc.)
+  slug: text("slug").notNull(),
+  // Текст с плейсхолдерами {{displayName}}, {{fromStage}}, {{toStage}}, etc.
+  body: text("body").notNull(),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_notif_tpl_tenant_slug").on(t.tenantId, t.slug),
+]);
+
+// Персональные настройки оператора для уведомлений.
+export const operatorSettings = pgTable("operator_settings", {
+  id: serial("id").primaryKey(),
+  adminId: integer("admin_id").notNull().references(() => admins.id, { onDelete: "cascade" }),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  // Личный Telegram ID (привязывается через /start у бота)
+  telegramChatId: text("telegram_chat_id"),
+  // Токен для привязки (генерируется в UI, передаётся в /start)
+  linkToken: text("link_token").unique(),
+  linkTokenExpiresAt: integer("link_token_expires_at"),
+  // Уведомлять только о лидах, назначенных на этого админа
+  notifyOnAssignedOnly: boolean("notify_on_assigned_only").notNull().default(true),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_op_settings_admin").on(t.adminId),
+  index("idx_op_settings_tenant").on(t.tenantId),
+  index("idx_op_settings_link_token").on(t.linkToken),
 ]);

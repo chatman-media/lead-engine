@@ -18,4 +18,5 @@ export {
   SkillOutcomesRepo,
 } from "./skill-outcomes.ts";
 export { StylesRepo, type StyleRow } from "./styles.ts";
+export { NotificationsRepo, type NotificationRule, type OperatorSettings } from "./notifications.ts";
 export type { Db, RepoCtx } from "./types.ts";
