@@ -33,7 +33,6 @@ import { SaasForgotPassword } from "./pages/SaasForgotPassword.tsx";
 import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
 import { SaasSuperadmin } from "./pages/SaasSuperadmin.tsx";
 import { ToolsSettings } from "./pages/ToolsSettings.tsx";
-import { SaasSuperadmin } from "./pages/SaasSuperadmin.tsx";
 
 function RequireAuth() {
   const [status, setStatus] = useState<"checking" | "auth" | "anon">(() =>
