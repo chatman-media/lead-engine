@@ -248,6 +248,7 @@
       "version": "1.1.0",
       "dependencies": {
         "@chatman-media/channel-core": "workspace:*",
+        "@chatman-media/channel-telegram": "workspace:*",
         "@chatman-media/kb": "workspace:*",
         "@chatman-media/llm-router": "workspace:*",
         "@chatman-media/storage": "workspace:*",
