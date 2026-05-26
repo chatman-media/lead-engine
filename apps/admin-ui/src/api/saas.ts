@@ -1508,6 +1508,12 @@ export const saas = {
   generateNotificationLinkToken() {
     return request<{ token: string }>("/api/admin/notifications/settings/link", { method: "POST" });
   },
+  generateGroupLinkToken(eventType = "stage_changed") {
+    return request<{ token: string }>("/api/admin/notifications/group-link", {
+      method: "POST",
+      body: JSON.stringify({ eventType }),
+    });
+  },
   getNotificationRules() {
     return request<{ items: NotificationRule[] }>("/api/admin/notifications/rules");
   },

@@ -1060,6 +1060,20 @@ export const notificationTemplates = pgTable("notification_templates", {
   uniqueIndex("uniq_notif_tpl_tenant_slug").on(t.tenantId, t.slug),
 ]);
 
+// Одноразовые токены для привязки Telegram-группы к правилу уведомлений.
+// Генерируются в Admin UI, передаются боту через /setup <token> в группе.
+export const notificationGroupTokens = pgTable("notification_group_tokens", {
+  id: serial("id").primaryKey(),
+  token: text("token").notNull().unique(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  adminId: integer("admin_id").notNull().references(() => admins.id, { onDelete: "cascade" }),
+  eventType: text("event_type").notNull().default("stage_changed"),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  index("idx_group_tokens_token").on(t.token),
+]);
+
 // Персональные настройки оператора для уведомлений.
 export const operatorSettings = pgTable("operator_settings", {
   id: serial("id").primaryKey(),

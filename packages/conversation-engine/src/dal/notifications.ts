@@ -1,6 +1,6 @@
 import { eq, and, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { notificationRules, operatorSettings, notificationTemplates, type notificationRules as nrTable, type operatorSettings as osTable, type notificationTemplates as ntTable } from "@chatman-media/storage";
+import { notificationRules, operatorSettings, notificationTemplates, notificationGroupTokens, type notificationRules as nrTable, type operatorSettings as osTable, type notificationTemplates as ntTable } from "@chatman-media/storage";
 
 export type NotificationRule = typeof nrTable.$inferSelect;
 export type OperatorSettings = typeof osTable.$inferSelect;
@@ -174,5 +174,33 @@ export class NotificationsRepo {
     await this.db
       .delete(notificationTemplates)
       .where(and(eq(notificationTemplates.tenantId, tenantId), eq(notificationTemplates.slug, slug)));
+  }
+
+  async generateGroupLinkToken(tenantId: number, adminId: number, eventType: string): Promise<string> {
+    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+    await this.db.insert(notificationGroupTokens).values({
+      token,
+      tenantId,
+      adminId,
+      eventType,
+      expiresAt,
+      createdAt: Math.floor(Date.now() / 1000),
+    });
+    return token;
+  }
+
+  async findGroupLinkToken(token: string): Promise<{ tenantId: number; adminId: number; eventType: string } | undefined> {
+    const now = Math.floor(Date.now() / 1000);
+    const rows = await this.db
+      .select()
+      .from(notificationGroupTokens)
+      .where(and(eq(notificationGroupTokens.token, token), sql`${notificationGroupTokens.expiresAt} > ${now}`))
+      .limit(1);
+    return rows[0];
+  }
+
+  async deleteGroupLinkToken(token: string): Promise<void> {
+    await this.db.delete(notificationGroupTokens).where(eq(notificationGroupTokens.token, token));
   }
 }

@@ -58,6 +58,10 @@ export function SaasNotifications() {
   const [newRuleTarget, setNewRuleTarget] = useState("");
   const [savingRule, setSavingRule] = useState(false);
   const [testingRuleId, setTestingRuleId] = useState<number | null>(null);
+  const [groupLinkToken, setGroupLinkToken] = useState<string | null>(null);
+  const [groupLinkEvent, setGroupLinkEvent] = useState("stage_changed");
+  const [generatingGroupToken, setGeneratingGroupToken] = useState(false);
+  const [addMode, setAddMode] = useState<"bot" | "manual" | null>(null);
 
   // ── Templates ─────────────────────────────────────────────────────────
   const [templates, setTemplates] = useState<NotificationTemplate[]>([]);
@@ -157,14 +161,32 @@ export function SaasNotifications() {
 
   // ── Rules ──────────────────────────────────────────────────────────────
 
+  async function handleGenerateGroupToken() {
+    setGeneratingGroupToken(true);
+    try {
+      const { token } = await saas.generateGroupLinkToken(groupLinkEvent);
+      setGroupLinkToken(token);
+    } catch (err) {
+      if (!onAuthError(err)) toast.error("Не удалось создать токен");
+    } finally {
+      setGeneratingGroupToken(false);
+    }
+  }
+
+  function closeAddRule() {
+    setAddMode(null);
+    setShowAddRule(false);
+    setGroupLinkToken(null);
+    setNewRuleTarget("");
+  }
+
   async function handleAddRule(e: React.FormEvent) {
     e.preventDefault();
     if (!newRuleTarget.trim()) return;
     setSavingRule(true);
     try {
       await saas.createNotificationRule({ eventType: newRuleEvent, targetId: newRuleTarget.trim() });
-      setNewRuleTarget("");
-      setShowAddRule(false);
+      closeAddRule();
       await reloadRules();
       toast.success("Правило добавлено");
     } catch (err) {
@@ -392,10 +414,12 @@ export function SaasNotifications() {
                 </CardDescription>
               </div>
             </div>
-            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowAddRule((v) => !v)}>
-              <PlusIcon className="size-3.5" />
-              Добавить
-            </Button>
+            {addMode === null && (
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAddMode("bot")}>
+                <PlusIcon className="size-3.5" />
+                Добавить
+              </Button>
+            )}
           </div>
         </CardHeader>
 
@@ -440,41 +464,118 @@ export function SaasNotifications() {
             </div>
           )}
 
-          {showAddRule && (
-            <form onSubmit={handleAddRule} className="space-y-3 rounded-md border p-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Событие</Label>
-                <select
-                  value={newRuleEvent}
-                  onChange={(e) => setNewRuleEvent(e.target.value)}
-                  className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+          {addMode !== null && (
+            <div className="rounded-md border p-3 space-y-3">
+              {/* Переключатель режима */}
+              <div className="flex gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => { setAddMode("bot"); setGroupLinkToken(null); }}
+                  className={`px-2 py-1 rounded ${addMode === "bot" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
                 >
-                  {Object.entries(EVENT_TYPES).map(([val, label]) => (
-                    <option key={val} value={val}>{label}</option>
-                  ))}
-                </select>
+                  🤖 Через бота
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAddMode("manual")}
+                  className={`px-2 py-1 rounded ${addMode === "manual" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  ⌨️ Вручную
+                </button>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">ID чата / группы Telegram</Label>
-                <Input
-                  value={newRuleTarget}
-                  onChange={(e) => setNewRuleTarget(e.target.value)}
-                  placeholder="-100123456789"
-                  className="font-mono text-sm"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Добавьте бота в группу и отправьте там <code>/setup</code> — бот ответит ID группы.
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <Button type="submit" size="sm" disabled={savingRule || !newRuleTarget.trim()}>
-                  Сохранить
-                </Button>
-                <Button type="button" size="sm" variant="outline" onClick={() => setShowAddRule(false)}>
-                  Отмена
-                </Button>
-              </div>
-            </form>
+
+              {/* Bot flow */}
+              {addMode === "bot" && (
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Событие</Label>
+                    <select
+                      value={groupLinkEvent}
+                      onChange={(e) => { setGroupLinkEvent(e.target.value); setGroupLinkToken(null); }}
+                      className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                    >
+                      {Object.entries(EVENT_TYPES).map(([val, label]) => (
+                        <option key={val} value={val}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {!groupLinkToken ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Добавьте бота в Telegram-группу, получите токен и отправьте его туда — бот сам создаст правило.
+                      </p>
+                      <Button size="sm" onClick={handleGenerateGroupToken} disabled={generatingGroupToken} className="gap-1.5">
+                        <SendIcon className="size-3.5" />
+                        {generatingGroupToken ? "Генерируем…" : "Получить токен"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Отправьте эту команду в нужную Telegram-группу (токен действует 1 час):
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono break-all">
+                          /setup {groupLinkToken}
+                        </code>
+                        <Button
+                          variant="ghost" size="icon" className="shrink-0 h-7 w-7"
+                          onClick={() => copyToClipboard(`/setup ${groupLinkToken}`)}
+                        >
+                          <ClipboardCopyIcon className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" onClick={async () => { await reloadRules(); closeAddRule(); toast.success("Обновлено"); }}>
+                          Готово — проверить
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={handleGenerateGroupToken} disabled={generatingGroupToken}>
+                          Новый токен
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Manual flow */}
+              {addMode === "manual" && (
+                <form onSubmit={handleAddRule} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Событие</Label>
+                    <select
+                      value={newRuleEvent}
+                      onChange={(e) => setNewRuleEvent(e.target.value)}
+                      className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                    >
+                      {Object.entries(EVENT_TYPES).map(([val, label]) => (
+                        <option key={val} value={val}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">ID чата / группы Telegram</Label>
+                    <Input
+                      value={newRuleTarget}
+                      onChange={(e) => setNewRuleTarget(e.target.value)}
+                      placeholder="-100123456789"
+                      className="font-mono text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Отправьте <code>/setup</code> боту в группе — он ответит её ID.
+                    </p>
+                  </div>
+                  <Button type="submit" size="sm" disabled={savingRule || !newRuleTarget.trim()}>
+                    Сохранить
+                  </Button>
+                </form>
+              )}
+
+              <Button type="button" size="sm" variant="ghost" className="text-muted-foreground" onClick={closeAddRule}>
+                Отмена
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

@@ -29,8 +29,17 @@ export class OperatorBotHandler {
       }
     }
 
-    // 2. Настройка группы по /setup
-    if (text === "/setup" || text === "/setup@operator_bot") { // Заменить на реальный username если нужно
+    // 2. Привязка группы по /setup <token>
+    if (text.startsWith("/setup ")) {
+      const token = text.split(" ")[1];
+      if (token) {
+        await this.handleGroupLinkToken(token, message.chat.id, message.chat.title || "группа");
+        return;
+      }
+    }
+
+    // 2b. /setup без токена — показать ID группы
+    if (text === "/setup" || text.startsWith("/setup@")) {
       await this.handleSetupGroup(message.chat.id, message.chat.title || "эту группу");
       return;
     }
@@ -61,6 +70,41 @@ export class OperatorBotHandler {
     await this.client.sendMessage({
       chat_id: chatId,
       text: "✅ Аккаунт успешно привязан! Теперь вы будете получать важные уведомления здесь.",
+    });
+  }
+
+  private async handleGroupLinkToken(token: string, chatId: number, title: string): Promise<void> {
+    if (!this.client) return;
+    const isGroup = chatId < 0;
+    if (!isGroup) {
+      await this.client.sendMessage({
+        chat_id: String(chatId),
+        text: "❌ /setup с токеном работает только в группах. Добавьте бота в группу и отправьте там эту команду.",
+      });
+      return;
+    }
+    const groupToken = await this.repo.findGroupLinkToken(token);
+    if (!groupToken) {
+      await this.client.sendMessage({
+        chat_id: String(chatId),
+        text: "❌ Токен недействителен или истёк. Сгенерируйте новый в Админке → Уведомления.",
+      });
+      return;
+    }
+    await this.repo.createRule({
+      tenantId: groupToken.tenantId,
+      eventType: groupToken.eventType,
+      conditionJson: "{}",
+      channelType: "telegram_group",
+      targetId: String(chatId),
+      priority: "normal",
+      isActive: true,
+    });
+    await this.repo.deleteGroupLinkToken(token);
+    await this.client.sendMessage({
+      chat_id: String(chatId),
+      text: `✅ Группа <b>${title}</b> подключена к Lead Engine!\n\nОтсюда вы будете получать уведомления о событиях: <b>${groupToken.eventType}</b>.`,
+      parse_mode: "HTML",
     });
   }
 

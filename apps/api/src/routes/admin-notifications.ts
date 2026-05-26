@@ -81,6 +81,16 @@ export function makeAdminNotificationsRoutes(opts: {
     return c.json({ token });
   });
 
+  // POST /api/admin/notifications/group-link — токен для привязки группы через бота
+  app.post("/group-link", async (c) => {
+    const adminId = c.var.adminId;
+    const tenantId = c.var.tenantId;
+    const body = await c.req.json().catch(() => ({}));
+    const eventType: string = body.eventType || "stage_changed";
+    const token = await opts.repo.generateGroupLinkToken(tenantId, adminId, eventType);
+    return c.json({ token });
+  });
+
   // ---- Templates ----
 
   // GET /api/admin/notifications/templates — список шаблонов
