@@ -31,6 +31,16 @@ export interface WorkerConfig {
    * дольше stage_definitions.checkin_interval_days.
    */
   checkinSweepIntervalMs: number;
+  /**
+   * Платформенный токен для бота уведомлений операторов.
+   * env PLATFORM_OPERATOR_BOT_TOKEN.
+   */
+  operatorBotToken: string;
+  /**
+   * Базовый URL админки для глубоких ссылок.
+   * env PLATFORM_APP_URL.
+   */
+  appUrl: string;
 }
 
 function required(name: string): string {
@@ -61,5 +71,7 @@ export function loadWorkerConfig(): WorkerConfig {
       process.env.WORKER_CHECKIN_SWEEP_MS ?? "3600000",
       10,
     ),
+    operatorBotToken: process.env.PLATFORM_OPERATOR_BOT_TOKEN ?? "",
+    appUrl: process.env.PLATFORM_APP_URL ?? "https://app.leadengine.app",
   };
 }

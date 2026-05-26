@@ -1,4 +1,4 @@
-import { checkRlsEnforcement } from "@chatman-media/conversation-engine";
+import { checkRlsEnforcement, NotificationsRepo, NotificationService } from "@chatman-media/conversation-engine";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { WorkerChannelRegistry } from "./channel-registry.ts";
 import { loadWorkerConfig } from "./config.ts";
@@ -36,6 +36,16 @@ async function main() {
     onWarn: (msg, ctx) => log.warn(`worker-channel-registry: ${msg}`, ctx),
   });
 
+  const notificationsRepo = new NotificationsRepo(db as any);
+  const notifications = new NotificationService(
+    notificationsRepo,
+    cfg.operatorBotToken,
+    cfg.appUrl,
+  );
+  if (cfg.operatorBotToken) {
+    log.info("operator notification bot enabled");
+  }
+
   const abort = new AbortController();
   const dispatcher = new OutboundDispatcher(db, channels, {
     pollMs: cfg.dispatcherPollMs,
@@ -72,7 +82,10 @@ async function main() {
   // Stale-lead sweep: закрывает лиды, просроченные по stale_timeout_days.
   let staleSweeperPromise: Promise<void> = Promise.resolve();
   if (cfg.staleSweepIntervalMs > 0) {
-    const sweeper = new StaleleadSweeper(db, { intervalMs: cfg.staleSweepIntervalMs });
+    const sweeper = new StaleleadSweeper(db, {
+      intervalMs: cfg.staleSweepIntervalMs,
+      notifications,
+    });
     staleSweeperPromise = sweeper.run(abort.signal).catch((err) => {
       log.error("stale-sweep fatal", { err: err instanceof Error ? err : new Error(String(err)) });
     });
