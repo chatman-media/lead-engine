@@ -199,12 +199,13 @@ export interface ApiConfig {
    *    отправка через pinned MTProto-соединение в этом процессе).
    */
   /**
-   * Платформенный Bearer-токен для superadmin API (/api/superadmin/*).
-   * env PLATFORM_SUPERADMIN_TOKEN. Если пуст — /api/superadmin/* отключён.
-   * Генерировать: openssl rand -hex 32
+   * Платформенный токен для бота уведомлений операторов (Operator Companion Bot).
+   * env PLATFORM_OPERATOR_BOT_TOKEN.
    */
+  operatorBotToken: string;
   superadminToken: string;
   telegramUserbot: {
+
     apiId: number;
     apiHash: string;
     dispatcherPollMs: number;
@@ -282,6 +283,7 @@ export function loadApiConfig(): ApiConfig {
       successUrl: process.env.STRIPE_CHECKOUT_SUCCESS_URL ?? "",
       cancelUrl: process.env.STRIPE_CHECKOUT_CANCEL_URL ?? "",
     },
+    operatorBotToken: process.env.PLATFORM_OPERATOR_BOT_TOKEN ?? "",
     superadminToken: process.env.PLATFORM_SUPERADMIN_TOKEN ?? "",
   };
 }
