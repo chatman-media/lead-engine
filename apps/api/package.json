@@ -27,6 +27,7 @@
     "@chatman-media/observability": "workspace:*",
     "@chatman-media/sales": "workspace:*",
     "@chatman-media/storage": "workspace:*",
+    "@chatman-media/vertical-exchange": "workspace:*",
     "@chatman-media/vertical-real-estate": "workspace:*",
     "@chatman-media/vertical-recruitment": "workspace:*",
     "@chatman-media/vertical-saas": "workspace:*",

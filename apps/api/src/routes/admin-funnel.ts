@@ -25,6 +25,7 @@ type SeedStage = {
   color?: string;
   staleTimeoutDays?: number;
   checkinIntervalDays?: number;
+  supportMode?: boolean;
   nextStages: string[];
   autoAdvanceCondition?: string;
   fields: Array<{
@@ -40,6 +41,112 @@ type SeedStage = {
 };
 
 const SEED_TEMPLATES: Record<string, SeedStage[]> = {
+  // Обменный пункт (Пхукет): крипта / RUB-перевод / наличные → THB.
+  // Slugs совпадают с EXCHANGE_FUNNEL_STAGES в @chatman-media/vertical-exchange.
+  exchange: [
+    {
+      slug: "quote_request",
+      displayName: "Запрос обмена",
+      kind: "intake",
+      stageType: "form_fill",
+      position: 0,
+      color: "#3b82f6",
+      nextStages: ["rate_confirmation", "cancelled"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "asset_from", displayName: "Что отдаёт клиент", fieldType: "select", required: true, aiExtractable: true, hint: "Актив-источник: крипта, рубли или фиат", position: 0,
+          optionsJson: '[{"value":"usdt","label":"USDT"},{"value":"btc","label":"BTC"},{"value":"eth","label":"ETH"},{"value":"rub","label":"Рубли (RUB)"},{"value":"eur","label":"EUR"},{"value":"usd","label":"USD"}]' },
+        { slug: "payment_method", displayName: "Способ оплаты", fieldType: "select", required: true, aiExtractable: true, hint: "Как клиент платит", position: 1,
+          optionsJson: '[{"value":"crypto","label":"Крипта (перевод на кошелёк)"},{"value":"rub_transfer","label":"Перевод в рублях на карту"},{"value":"cash","label":"Наличные"}]' },
+        { slug: "network", displayName: "Сеть (для крипты)", fieldType: "select", required: false, aiExtractable: true, hint: "Обязательно для USDT", position: 2,
+          optionsJson: '[{"value":"trc20","label":"TRC20"},{"value":"erc20","label":"ERC20"},{"value":"bep20","label":"BEP20"}]' },
+        { slug: "amount_from", displayName: "Сумма (в активе-источнике)", fieldType: "number", required: true, aiExtractable: true, hint: "Например 500 для 500 USDT", position: 3 },
+      ],
+    },
+    {
+      slug: "rate_confirmation",
+      displayName: "Подтверждение курса",
+      kind: "active",
+      stageType: "form_fill",
+      position: 1,
+      color: "#f59e0b",
+      staleTimeoutDays: 1,
+      nextStages: ["kyc_collection", "cancelled"],
+      fields: [
+        { slug: "exchange_rate", displayName: "Курс (задаёт оператор)", fieldType: "number", required: false, aiExtractable: false, hint: "Курс актив→THB", position: 0 },
+        { slug: "thb_amount", displayName: "Итоговая сумма THB", fieldType: "number", required: false, aiExtractable: false, position: 1 },
+        { slug: "rate_confirmed", displayName: "Клиент подтвердил курс", fieldType: "boolean", required: true, aiExtractable: true, position: 2 },
+      ],
+    },
+    {
+      slug: "kyc_collection",
+      displayName: "KYC / документы",
+      kind: "active",
+      stageType: "document_upload",
+      position: 2,
+      color: "#8b5cf6",
+      nextStages: ["awaiting_payment", "cancelled"],
+      fields: [
+        { slug: "customer_name", displayName: "Имя клиента", fieldType: "text", required: true, aiExtractable: true, position: 0 },
+        { slug: "passport_photo", displayName: "Фото паспорта", fieldType: "photo", required: false, aiExtractable: true, hint: "Для крупных сумм — KYC/AML", position: 1 },
+        { slug: "passport_number", displayName: "Номер паспорта", fieldType: "text", required: false, aiExtractable: true, position: 2 },
+      ],
+    },
+    {
+      slug: "awaiting_payment",
+      displayName: "Ожидание оплаты",
+      kind: "active",
+      stageType: "external_approval",
+      position: 3,
+      color: "#0ea5e9",
+      staleTimeoutDays: 1,
+      supportMode: true,
+      nextStages: ["qr_delivery", "cancelled"],
+      fields: [
+        { slug: "payment_proof_text", displayName: "Пруф оплаты (tx hash)", fieldType: "text", required: false, aiExtractable: true, hint: "Хеш транзакции для крипты", position: 0 },
+        { slug: "payment_proof_image", displayName: "Скрин перевода", fieldType: "photo", required: false, aiExtractable: true, hint: "Скриншот перевода для RUB/фиата", position: 1 },
+        { slug: "payment_confirmed", displayName: "Оплата подтверждена оператором", fieldType: "boolean", required: true, aiExtractable: false, position: 2 },
+      ],
+    },
+    {
+      slug: "qr_delivery",
+      displayName: "Выдача QR",
+      kind: "active",
+      stageType: "milestone",
+      position: 4,
+      color: "#ec4899",
+      supportMode: true,
+      nextStages: ["completed", "cancelled"],
+      fields: [
+        { slug: "payout_qr", displayName: "QR для снятия THB", fieldType: "photo", required: false, aiExtractable: false, hint: "Cardless-withdrawal QR — загружает оператор, бот отправит клиенту", position: 0 },
+      ],
+    },
+    {
+      slug: "completed",
+      displayName: "Сделка закрыта",
+      kind: "terminal_won",
+      stageType: "milestone",
+      position: 5,
+      color: "#10b981",
+      nextStages: [],
+      fields: [
+        { slug: "final_thb_paid", displayName: "Выдано THB", fieldType: "number", required: false, aiExtractable: false, position: 0 },
+      ],
+    },
+    {
+      slug: "cancelled",
+      displayName: "Отменено",
+      kind: "terminal_lost",
+      stageType: "milestone",
+      position: 6,
+      color: "#6b7280",
+      nextStages: [],
+      fields: [
+        { slug: "cancel_reason", displayName: "Причина отмены", fieldType: "select", required: false, aiExtractable: false, position: 0,
+          optionsJson: '[{"value":"rate","label":"Не устроил курс"},{"value":"no_payment","label":"Не оплатил"},{"value":"suspicious","label":"Подозрительный запрос"},{"value":"other","label":"Другое"}]' },
+      ],
+    },
+  ],
   visa: [
     {
       slug: "qualification",
@@ -1031,7 +1138,47 @@ export async function seedFunnelByKey(
 ): Promise<{ funnelId: number; stagesCreated: number } | { error: string }> {
   const stages = SEED_TEMPLATES[templateKey];
   if (!stages) return { error: `unknown template key: ${templateKey}` };
+  return applyFunnelStages(db, tenantId, stages, templateKey);
+}
 
+/** Каталог допустимых значений — shared с AI workflow builder для валидации. */
+export const STAGE_KINDS = ["intake", "active", "terminal_won", "terminal_lost"] as const;
+export const STAGE_TYPES = [
+  "form_fill",
+  "document_upload",
+  "document_signature",
+  "external_approval",
+  "interaction",
+  "assessment",
+  "waiting",
+  "milestone",
+] as const;
+export const FIELD_TYPES = [
+  "text",
+  "textarea",
+  "number",
+  "date",
+  "select",
+  "multiselect",
+  "boolean",
+  "phone",
+  "email",
+  "photo",
+  "file",
+] as const;
+
+export type { SeedStage };
+
+/**
+ * Создаёт воронку из набора стадий (заменяя текущую активную воронку тенанта).
+ * Используется и seed-шаблонами вертикалей, и AI workflow builder'ом.
+ */
+export async function applyFunnelStages(
+  db: Db,
+  tenantId: number,
+  stages: SeedStage[],
+  funnelSlug: string,
+): Promise<{ funnelId: number; stagesCreated: number }> {
   const now = Math.floor(Date.now() / 1000);
   return withTenant(db, tenantId, async (tx) => {
     let [funnel] = await tx
@@ -1043,7 +1190,7 @@ export async function seedFunnelByKey(
     if (!funnel) {
       const [created] = await tx
         .insert(funnels)
-        .values({ tenantId, slug: templateKey, isActive: true, createdAt: now, updatedAt: now })
+        .values({ tenantId, slug: funnelSlug, isActive: true, createdAt: now, updatedAt: now })
         .returning();
       funnel = created!;
     }
@@ -1077,7 +1224,7 @@ export async function seedFunnelByKey(
           staleTimeoutDays: stageData.staleTimeoutDays ?? null,
           nextStages: stageData.nextStages,
           autoAdvanceCondition: stageData.autoAdvanceCondition ?? null,
-          supportMode: false,
+          supportMode: stageData.supportMode ?? false,
           createdAt: now,
           updatedAt: now,
         })
