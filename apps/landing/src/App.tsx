@@ -1,63 +1,22 @@
 import { useState } from "react";
+import { Route, Routes } from "react-router-dom";
+import LandingExchange from "./LandingExchange.tsx";
+import LandingRealEstate from "./LandingRealEstate.tsx";
+import {
+  DEMO_URL,
+  FaqAccordion,
+  Footer,
+  Nav,
+  PLANS_EN,
+  PLANS_RU,
+  PricingSection,
+  SIGNUP_URL,
+  TelegramMockup,
+  type Lang,
+} from "./shared.tsx";
 
-// ─── Types ────────────────────────────────────────────────────────
-type Lang = "ru" | "en";
-
-interface Step {
-  title: string;
-  desc: string;
-}
-interface Moat {
-  icon: string;
-  title: string;
-  desc: string;
-}
-interface Plan {
-  name: string;
-  price: string;
-  priceUnit?: string;
-  isCustom?: boolean;
-  features: string[];
-  cta: string;
-  popular?: boolean;
-}
-interface FaqItem {
-  q: string;
-  a: string;
-  hasDemo?: boolean;
-}
-
-// ─── Copy ─────────────────────────────────────────────────────────
-const CONTENT: Record<
-  Lang,
-  {
-    nav: { cta: string };
-    hero: {
-      badge: string;
-      headline: [string, string, string]; // parts for color split
-      sub: string;
-      ctaPrimary: string;
-      ctaSecondary: string;
-      trust: string;
-    };
-    tg: { messages: { from: "user" | "bot"; text: string; cta?: boolean }[]; notify: string };
-    howTitle: string;
-    howLabel: string;
-    steps: Step[];
-    whyTitle: string;
-    whyLabel: string;
-    moats: Moat[];
-    pricingTitle: string;
-    pricingLabel: string;
-    plans: Plan[];
-    pricingNote: string;
-    faqTitle: string;
-    faqLabel: string;
-    faq: FaqItem[];
-    faqDemoBtn: string;
-    footer: { privacy: string; terms: string; copy: string };
-  }
-> = {
+// ─── Recruitment landing content ──────────────────────────────────
+const CONTENT = {
   ru: {
     nav: { cta: "Попробовать бесплатно" },
     hero: {
@@ -70,12 +29,12 @@ const CONTENT: Record<
     },
     tg: {
       messages: [
-        { from: "user", text: "Здравствуйте, интересует работа в Дубае" },
-        { from: "bot", text: "Привет! Расскажите — какую специальность рассматриваете?" },
-        { from: "user", text: "Строитель, есть 5 лет опыта" },
-        { from: "bot", text: "Отлично! Зарплата от $1 200/мес. Готовы к переезду в течение 2 месяцев?" },
-        { from: "user", text: "Да, готов" },
-        { from: "bot", text: "Заполните анкету — займёт 5 минут 👇", cta: true },
+        { from: "user" as const, text: "Здравствуйте, интересует работа в Дубае" },
+        { from: "bot" as const, text: "Привет! Расскажите — какую специальность рассматриваете?" },
+        { from: "user" as const, text: "Строитель, есть 5 лет опыта" },
+        { from: "bot" as const, text: "Отлично! Зарплата от $1 200/мес. Готовы к переезду в течение 2 месяцев?" },
+        { from: "user" as const, text: "Да, готов" },
+        { from: "bot" as const, text: "Заполните анкету — займёт 5 минут 👇", cta: true },
       ],
       notify: "🔔 Горячий лид передан рекрутеру",
     },
@@ -126,59 +85,7 @@ const CONTENT: Record<
     ],
     pricingLabel: "Тарифы",
     pricingTitle: "Прозрачные цены без скрытых платежей",
-    plans: [
-      {
-        name: "Free",
-        price: "$0",
-        priceUnit: "/мес",
-        features: [
-          "100 LLM ответов в месяц",
-          "1 канал (Telegram)",
-          "1 база знаний",
-          "Базовая аналитика",
-        ],
-        cta: "Начать бесплатно",
-      },
-      {
-        name: "Starter",
-        price: "$99",
-        priceUnit: "/мес",
-        features: [
-          "2 000 LLM ответов в месяц",
-          "3 канала (TG + WA + Web)",
-          "5 баз знаний",
-          "Аналитика + история",
-        ],
-        cta: "Выбрать Starter",
-      },
-      {
-        name: "Pro",
-        price: "$199",
-        priceUnit: "/мес",
-        features: [
-          "Безлимит LLM ответов",
-          "Все каналы",
-          "Безлимит баз знаний",
-          "A/B стили · Приоритетная поддержка",
-        ],
-        cta: "Выбрать Pro",
-        popular: true,
-      },
-      {
-        name: "Enterprise",
-        price: "По запросу",
-        isCustom: true,
-        features: [
-          "Безлимит всего",
-          "SLA соглашение",
-          "Dedicated onboarding",
-          "Custom integrations (AmoCRM, Bitrix24)",
-        ],
-        cta: "Написать нам",
-      },
-    ],
-    pricingNote:
-      "Все тарифы включают: BYOK (ваш OpenAI ключ) · Operator handoff · Telegram + WhatsApp + Web chat",
+    pricingNote: "Все тарифы включают: BYOK (ваш OpenAI ключ) · Operator handoff · Telegram + WhatsApp + Web chat",
     faqLabel: "Частые вопросы",
     faqTitle: "Ответы на главные вопросы",
     faq: [
@@ -205,13 +112,8 @@ const CONTENT: Record<
       },
     ],
     faqDemoBtn: "Записаться на демо →",
-    footer: {
-      privacy: "Политика конфиденциальности",
-      terms: "Условия использования",
-      copy: "© 2026 Lead Engine",
-    },
+    footer: { privacy: "Политика конфиденциальности", terms: "Условия использования", copy: "© 2026 Lead Engine" },
   },
-
   en: {
     nav: { cta: "Try Free" },
     hero: {
@@ -224,12 +126,12 @@ const CONTENT: Record<
     },
     tg: {
       messages: [
-        { from: "user", text: "Hi, I'm interested in work in Dubai" },
-        { from: "bot", text: "Hello! What position are you considering?" },
-        { from: "user", text: "Construction worker, 5 years experience" },
-        { from: "bot", text: "Great! Salary from $1,200/mo. Can you relocate within 2 months?" },
-        { from: "user", text: "Yes, I can" },
-        { from: "bot", text: "Fill in the intake form — takes 5 minutes 👇", cta: true },
+        { from: "user" as const, text: "Hi, I'm interested in work in Dubai" },
+        { from: "bot" as const, text: "Hello! What position are you considering?" },
+        { from: "user" as const, text: "Construction worker, 5 years experience" },
+        { from: "bot" as const, text: "Great! Salary from $1,200/mo. Can you relocate within 2 months?" },
+        { from: "user" as const, text: "Yes, I can" },
+        { from: "bot" as const, text: "Fill in the intake form — takes 5 minutes 👇", cta: true },
       ],
       notify: "🔔 Hot lead handed off to recruiter",
     },
@@ -280,59 +182,7 @@ const CONTENT: Record<
     ],
     pricingLabel: "Pricing",
     pricingTitle: "Transparent pricing, no hidden fees",
-    plans: [
-      {
-        name: "Free",
-        price: "$0",
-        priceUnit: "/mo",
-        features: [
-          "100 LLM responses/month",
-          "1 channel (Telegram)",
-          "1 knowledge base",
-          "Basic analytics",
-        ],
-        cta: "Start Free",
-      },
-      {
-        name: "Starter",
-        price: "$99",
-        priceUnit: "/mo",
-        features: [
-          "2,000 LLM responses/month",
-          "3 channels (TG + WA + Web)",
-          "5 knowledge bases",
-          "Analytics + history",
-        ],
-        cta: "Choose Starter",
-      },
-      {
-        name: "Pro",
-        price: "$199",
-        priceUnit: "/mo",
-        features: [
-          "Unlimited LLM responses",
-          "All channels",
-          "Unlimited knowledge bases",
-          "A/B styles · Priority support",
-        ],
-        cta: "Choose Pro",
-        popular: true,
-      },
-      {
-        name: "Enterprise",
-        price: "Custom",
-        isCustom: true,
-        features: [
-          "Everything unlimited",
-          "SLA agreement",
-          "Dedicated onboarding",
-          "Custom integrations (AmoCRM, Bitrix24)",
-        ],
-        cta: "Contact Us",
-      },
-    ],
-    pricingNote:
-      "All plans include: BYOK (your OpenAI key) · Operator handoff · Telegram + WhatsApp + Web chat",
+    pricingNote: "All plans include: BYOK (your OpenAI key) · Operator handoff · Telegram + WhatsApp + Web chat",
     faqLabel: "FAQ",
     faqTitle: "Common questions, straight answers",
     faq: [
@@ -359,111 +209,19 @@ const CONTENT: Record<
       },
     ],
     faqDemoBtn: "Book a demo →",
-    footer: {
-      privacy: "Privacy Policy",
-      terms: "Terms of Use",
-      copy: "© 2026 Lead Engine",
-    },
+    footer: { privacy: "Privacy Policy", terms: "Terms of Use", copy: "© 2026 Lead Engine" },
   },
 };
 
-// ─── Signup URL ───────────────────────────────────────────────────
-const SIGNUP_URL = (import.meta.env.VITE_APP_URL ?? "https://app.leadengine.pro") + "/signup";
-const DEMO_URL = (import.meta.env.VITE_DEMO_URL as string | undefined) ?? "https://calendly.com/leadengine/demo";
-
-// ─── Components ───────────────────────────────────────────────────
-
-function TelegramMockup({ data }: { data: (typeof CONTENT)["ru"]["tg"] }) {
-  return (
-    <div className="tg-mockup">
-      <div className="tg-header">
-        <div className="tg-avatar">🤖</div>
-        <div>
-          <div className="tg-name">Lead Engine</div>
-          <div className="tg-status">online</div>
-        </div>
-      </div>
-      <div className="tg-body">
-        {data.messages.map((msg, i) => (
-          <div key={i} className={`tg-msg from-${msg.from}`}>
-            <div className="tg-bubble">{msg.text}</div>
-            {msg.cta && (
-              <div className="tg-cta-bubble">📋 Заполнить анкету →</div>
-            )}
-            <div className="tg-time">
-              {String(10 + i).padStart(2, "0")}:4{i}
-            </div>
-          </div>
-        ))}
-        <div className="tg-notify">{data.notify}</div>
-      </div>
-    </div>
-  );
-}
-
-function FaqAccordion({ items, demoBtn }: { items: FaqItem[]; demoBtn: string }) {
-  const [open, setOpen] = useState<number | null>(null);
-  return (
-    <div className="faq-list">
-      {items.map((item, i) => (
-        <div key={i} className={`faq-item${open === i ? " open" : ""}`}>
-          <button className="faq-q" onClick={() => setOpen(open === i ? null : i)}>
-            {item.q}
-            <span className="faq-chevron">⌄</span>
-          </button>
-          <div className="faq-a">
-            <p>{item.a}</p>
-            {item.hasDemo && (
-              <a href={DEMO_URL} className="btn btn-outline">
-                {demoBtn}
-              </a>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── Main App ─────────────────────────────────────────────────────
-
-export default function App() {
+function LandingRecruit() {
   const [lang, setLang] = useState<Lang>("ru");
   const c = CONTENT[lang];
+  const plans = lang === "ru" ? PLANS_RU : PLANS_EN;
 
   return (
     <>
-      {/* ── Nav ── */}
-      <nav className="nav">
-        <div className="container">
-          <div className="nav-inner">
-            <a href="/" className="nav-logo">
-              Lead<span>Engine</span>
-            </a>
-            <div className="nav-right">
-              <div className="lang-toggle">
-                <button
-                  className={`lang-btn${lang === "ru" ? " active" : ""}`}
-                  onClick={() => setLang("ru")}
-                >
-                  RU
-                </button>
-                <button
-                  className={`lang-btn${lang === "en" ? " active" : ""}`}
-                  onClick={() => setLang("en")}
-                >
-                  EN
-                </button>
-              </div>
-              <a href={SIGNUP_URL} className="btn btn-primary">
-                {c.nav.cta}
-              </a>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Nav lang={lang} setLang={setLang} cta={c.nav.cta} />
 
-      {/* ── Hero ── */}
       <section className="hero">
         <div className="container">
           <div className="hero-inner">
@@ -476,21 +234,16 @@ export default function App() {
               </h1>
               <p className="hero-sub">{c.hero.sub}</p>
               <div className="hero-actions">
-                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">
-                  {c.hero.ctaPrimary}
-                </a>
-                <a href={DEMO_URL} className="btn btn-secondary btn-lg">
-                  {c.hero.ctaSecondary}
-                </a>
+                <a href={SIGNUP_URL} className="btn btn-primary btn-lg">{c.hero.ctaPrimary}</a>
+                <a href={DEMO_URL} className="btn btn-secondary btn-lg">{c.hero.ctaSecondary}</a>
               </div>
               <div className="hero-trust">{c.hero.trust}</div>
             </div>
-            <TelegramMockup data={c.tg} />
+            <TelegramMockup messages={c.tg.messages} notify={c.tg.notify} />
           </div>
         </div>
       </section>
 
-      {/* ── How It Works ── */}
       <section className="section section-alt" id="how">
         <div className="container">
           <div className="section-label">{c.howLabel}</div>
@@ -507,7 +260,6 @@ export default function App() {
         </div>
       </section>
 
-      {/* ── Why Us ── */}
       <section className="section" id="why">
         <div className="container">
           <div className="section-label">{c.whyLabel}</div>
@@ -524,48 +276,13 @@ export default function App() {
         </div>
       </section>
 
-      {/* ── Pricing ── */}
-      <section className="section section-alt" id="pricing">
-        <div className="container">
-          <div className="section-label">{c.pricingLabel}</div>
-          <h2 className="section-title">{c.pricingTitle}</h2>
-          <div className="plans">
-            {c.plans.map((plan, i) => (
-              <div key={i} className={`plan${plan.popular ? " popular" : ""}`}>
-                {plan.popular && (
-                  <div className="plan-badge">★ Popular</div>
-                )}
-                <div className="plan-name">{plan.name}</div>
-                {plan.isCustom ? (
-                  <div className="plan-price-custom">{plan.price}</div>
-                ) : (
-                  <div className="plan-price">
-                    {plan.price}
-                    {plan.priceUnit && <span>{plan.priceUnit}</span>}
-                  </div>
-                )}
-                <ul className="plan-features">
-                  {plan.features.map((f, j) => (
-                    <li key={j}>{f}</li>
-                  ))}
-                </ul>
-                <a
-                  href={plan.isCustom ? DEMO_URL : SIGNUP_URL}
-                  className={`btn ${plan.popular ? "btn-primary" : "btn-secondary"}`}
-                  style={{ textAlign: "center", justifyContent: "center" }}
-                >
-                  {plan.cta}
-                </a>
-              </div>
-            ))}
-          </div>
-          <p className="plan-note">
-            <strong>{c.pricingNote}</strong>
-          </p>
-        </div>
-      </section>
+      <PricingSection
+        label={c.pricingLabel}
+        title={c.pricingTitle}
+        plans={plans}
+        note={c.pricingNote}
+      />
 
-      {/* ── FAQ ── */}
       <section className="section" id="faq">
         <div className="container">
           <div className="section-label">{c.faqLabel}</div>
@@ -574,21 +291,17 @@ export default function App() {
         </div>
       </section>
 
-      {/* ── Footer ── */}
-      <footer className="footer">
-        <div className="container">
-          <div className="footer-inner">
-            <div className="footer-logo">
-              Lead<span>Engine</span>
-            </div>
-            <div className="footer-links">
-              <a href="/privacy">{c.footer.privacy}</a>
-              <a href="/terms">{c.footer.terms}</a>
-            </div>
-            <div className="footer-copy">{c.footer.copy}</div>
-          </div>
-        </div>
-      </footer>
+      <Footer {...c.footer} />
     </>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<LandingRecruit />} />
+      <Route path="/exchange" element={<LandingExchange />} />
+      <Route path="/real-estate" element={<LandingRealEstate />} />
+    </Routes>
   );
 }
