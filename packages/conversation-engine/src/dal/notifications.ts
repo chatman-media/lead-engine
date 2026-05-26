@@ -89,6 +89,21 @@ export class NotificationsRepo {
       .where(eq(operatorSettings.tenantId, tenantId));
   }
 
+  async partialUpdateSettings(
+    adminId: number,
+    tenantId: number,
+    fields: Partial<Pick<OperatorSettings, "telegramChatId" | "notifyOnAssignedOnly">>,
+  ): Promise<void> {
+    if (Object.keys(fields).length === 0) return;
+    await this.db
+      .insert(operatorSettings)
+      .values({ adminId, tenantId, ...fields })
+      .onConflictDoUpdate({
+        target: [operatorSettings.adminId],
+        set: { ...fields, updatedAt: Math.floor(Date.now() / 1000) },
+      });
+  }
+
   async upsertOperatorSettings(settings: Omit<OperatorSettings, "id" | "updatedAt">): Promise<void> {
     await this.db
       .insert(operatorSettings)

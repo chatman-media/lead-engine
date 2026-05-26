@@ -15,6 +15,7 @@ interface Settings {
   adminId: number;
   telegramChatId: string | null;
   notifyOnAssignedOnly: boolean;
+  botUsername: string | null;
 }
 
 export function SaasNotifications() {
@@ -102,7 +103,8 @@ export function SaasNotifications() {
   }
 
   const connected = !!settings?.telegramChatId;
-  const deepLink = linkToken ? `https://t.me/your_bot?start=${linkToken}` : null;
+  const botUsername = settings?.botUsername;
+  const deepLink = linkToken && botUsername ? `https://t.me/${botUsername}?start=${linkToken}` : null;
 
   return (
     <div className="space-y-6">
@@ -188,26 +190,44 @@ export function SaasNotifications() {
               ) : (
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    Ссылка действует 1 час. Откройте её в Telegram и нажмите{" "}
-                    <strong>Start</strong>. После этого перезагрузите эту страницу.
+                    Ссылка действует 1 час.{" "}
+                    {deepLink ? (
+                      <>Нажмите кнопку ниже — откроется бот в Telegram, нажмите <strong>Start</strong>.</>
+                    ) : (
+                      <>Отправьте команду ниже боту оператора и нажмите <strong>Start</strong>.</>
+                    )}
+                    {" "}После этого нажмите «Проверить подключение».
                   </p>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all">
-                      /start {linkToken}
-                    </code>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0 h-8 w-8"
-                      onClick={() => copyToClipboard(linkToken)}
-                    >
-                      <ClipboardCopyIcon className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Отправьте эту команду боту-оператору вашего проекта, либо используйте
-                    прямую ссылку если знаете username бота.
-                  </p>
+
+                  {deepLink ? (
+                    <a href={deepLink} target="_blank" rel="noopener noreferrer">
+                      <Button className="gap-2 w-full sm:w-auto">
+                        <SendIcon className="size-4" />
+                        Открыть бота в Telegram
+                      </Button>
+                    </a>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all">
+                        /start {linkToken}
+                      </code>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 h-8 w-8"
+                        onClick={() => copyToClipboard(`/start ${linkToken}`)}
+                      >
+                        <ClipboardCopyIcon className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
+
+                  {!botUsername && (
+                    <p className="text-xs text-muted-foreground">
+                      Задайте <code>PLATFORM_OPERATOR_BOT_USERNAME</code> в конфиге API, чтобы здесь появилась прямая ссылка на бота.
+                    </p>
+                  )}
+
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" onClick={handleGenerateLink} disabled={generating}>
                       Обновить токен

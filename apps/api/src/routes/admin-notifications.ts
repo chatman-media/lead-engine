@@ -1,7 +1,7 @@
 import { withTenant, type NotificationsRepo } from "@chatman-media/conversation-engine";
 import { Hono } from "hono";
 
-export function makeAdminNotificationsRoutes(opts: { repo: NotificationsRepo }): Hono {
+export function makeAdminNotificationsRoutes(opts: { repo: NotificationsRepo; botUsername?: string }): Hono {
   const app = new Hono();
 
   // GET /api/admin/notifications/rules — список правил
@@ -39,21 +39,20 @@ export function makeAdminNotificationsRoutes(opts: { repo: NotificationsRepo }):
   app.get("/settings", async (c) => {
     const adminId = c.var.adminId;
     const settings = await opts.repo.findOperatorSettings(adminId);
-    return c.json(settings || { adminId, telegramChatId: null, notifyOnAssignedOnly: true });
+    return c.json({
+      ...(settings || { adminId, telegramChatId: null, notifyOnAssignedOnly: true }),
+      botUsername: opts.botUsername || null,
+    });
   });
 
-  // PUT /api/admin/notifications/settings — обновить личные настройки
+  // PUT /api/admin/notifications/settings — частичное обновление личных настроек
   app.put("/settings", async (c) => {
     const adminId = c.var.adminId;
     const tenantId = c.var.tenantId;
     const body = await c.req.json();
-    await opts.repo.upsertOperatorSettings({
-      adminId,
-      tenantId,
-      telegramChatId: body.telegramChatId,
-      notifyOnAssignedOnly: body.notifyOnAssignedOnly ?? true,
-      linkToken: null,
-      linkTokenExpiresAt: null,
+    await opts.repo.partialUpdateSettings(adminId, tenantId, {
+      ...("telegramChatId" in body ? { telegramChatId: body.telegramChatId } : {}),
+      ...("notifyOnAssignedOnly" in body ? { notifyOnAssignedOnly: body.notifyOnAssignedOnly } : {}),
     });
     return c.json({ ok: true });
   });

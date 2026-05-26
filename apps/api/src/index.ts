@@ -355,7 +355,7 @@ async function main() {
 
   // Leads pipeline (list, create, stage transition, field values).
   app.route("/", makeAdminLeadsRoutes({ db, notificationService }));
-  app.route("/api/admin/notifications", makeAdminNotificationsRoutes({ repo: notificationsRepo }));
+  app.route("/api/admin/notifications", makeAdminNotificationsRoutes({ repo: notificationsRepo, botUsername: cfg.operatorBotUsername }));
   log.info("admin-leads routes enabled");
 
   // Funnel builder (stage_definitions, stage_fields) + skills list.

@@ -203,6 +203,7 @@ export interface ApiConfig {
    * env PLATFORM_OPERATOR_BOT_TOKEN.
    */
   operatorBotToken: string;
+  operatorBotUsername: string;
   superadminToken: string;
   telegramUserbot: {
 
@@ -284,6 +285,7 @@ export function loadApiConfig(): ApiConfig {
       cancelUrl: process.env.STRIPE_CHECKOUT_CANCEL_URL ?? "",
     },
     operatorBotToken: process.env.PLATFORM_OPERATOR_BOT_TOKEN ?? "",
+    operatorBotUsername: process.env.PLATFORM_OPERATOR_BOT_USERNAME ?? "",
     superadminToken: process.env.PLATFORM_SUPERADMIN_TOKEN ?? "",
   };
 }
