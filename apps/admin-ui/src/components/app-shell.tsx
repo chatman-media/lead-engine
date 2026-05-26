@@ -15,6 +15,7 @@ import {
   MoonIcon,
   SendIcon,
   ShieldIcon,
+  TestTube2Icon,
   WebhookIcon,
   WrenchIcon,
   type LucideIcon,
@@ -93,6 +94,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/hooks", label: "Хуки", icon: SparklesIcon },
       { to: "/styles", label: "Стили", icon: PaletteIcon },
       { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon },
+      { to: "/test", label: "Тест бота", icon: TestTube2Icon },
     ],
   },
   {
