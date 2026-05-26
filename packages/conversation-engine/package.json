@@ -35,6 +35,7 @@
   "license": "MIT",
   "dependencies": {
     "@chatman-media/channel-core": "workspace:*",
+    "@chatman-media/channel-telegram": "workspace:*",
     "@chatman-media/llm-router": "workspace:*",
     "@chatman-media/kb": "workspace:*",
     "@chatman-media/storage": "workspace:*",

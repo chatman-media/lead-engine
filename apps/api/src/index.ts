@@ -373,16 +373,6 @@ async function main() {
   );
   log.info("admin-workflow routes enabled (AI funnel builder)");
 
-  // Bot Tester — simulate inbound messages through the full pipeline.
-  app.route(
-    "/",
-    makeAdminTestRoutes({
-      db,
-      replyStrategy: replyStrategy ?? null,
-    }),
-  );
-  log.info("admin-test routes enabled (bot tester)");
-
   // Dashboard aggregate stats.
   app.route("/", makeAdminDashboardRoutes({ db }));
   log.info("admin-dashboard route enabled");
@@ -508,6 +498,16 @@ async function main() {
   } else {
     log.info("LLM not configured for any tenant — bot will persist messages but stay silent");
   }
+
+  // Bot Tester — simulate inbound messages through the full pipeline.
+  app.route(
+    "/",
+    makeAdminTestRoutes({
+      db,
+      replyStrategy: replyStrategy ?? null,
+    }),
+  );
+  log.info("admin-test routes enabled (bot tester)");
 
   const memoryExtractor = makeMemoryExtractor(loadedRef, db, metrics, recordUsage);
   if (memoryExtractor) log.info("memory extractor enabled");
