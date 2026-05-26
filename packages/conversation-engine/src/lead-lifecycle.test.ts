@@ -2,6 +2,7 @@ import type { VerticalTemplate } from "@chatman-media/verticals";
 import { describe, expect, it } from "bun:test";
 import type { LeadRow, LeadsRepo } from "./dal/leads.ts";
 import { ensureLead, transitionLeadState } from "./lead-lifecycle.ts";
+import type { NotificationService, NotificationEvent } from "./notifications.ts";
 
 const TEMPLATE: VerticalTemplate = {
   slug: "test_v1",
@@ -29,6 +30,7 @@ class FakeLeadsRepo {
       tenantId: this.tenantId,
       userId: opts.contactId,
       state: opts.state,
+      assignedAdminId: null,
       intakeJson: null,
       visaDocsJson: null,
       applicationId: null,
@@ -55,6 +57,11 @@ class FakeLeadsRepo {
   all(): LeadRow[] {
     return [...this.rows];
   }
+}
+
+class FakeNotificationService {
+  events: NotificationEvent[] = [];
+  async notify(event: NotificationEvent) { this.events.push(event); }
 }
 
 describe("ensureLead", () => {
@@ -132,6 +139,42 @@ describe("transitionLeadState", () => {
     expect(hookCalled).toBe(false);
     // updatedAt не обновился потому что no-op.
     expect(repo.all()[0]?.updatedAt).toBe(1);
+  });
+
+  it("вызывает notifications.notify при переходе", async () => {
+    const repo = new FakeLeadsRepo(1);
+    const lead = await repo.create({ contactId: 5, state: "intake", nowEpoch: 1 });
+    const notif = new FakeNotificationService();
+    await transitionLeadState({
+      lead: { ...lead, assignedAdminId: 7 },
+      toState: "qualified",
+      template: TEMPLATE,
+      leads: repo as unknown as LeadsRepo,
+      notifications: notif as unknown as NotificationService,
+      nowEpoch: 2,
+    });
+    expect(notif.events).toHaveLength(1);
+    const ev = notif.events[0]!;
+    expect(ev.eventType).toBe("stage_changed");
+    expect(ev.leadId).toBe(lead.id);
+    expect(ev.assignedAdminId).toBe(7);
+    expect(ev.data.fromStage).toBe("intake");
+    expect(ev.data.toStage).toBe("qualified");
+  });
+
+  it("не зовёт notifications.notify при no-op переходе", async () => {
+    const repo = new FakeLeadsRepo(1);
+    const lead = await repo.create({ contactId: 5, state: "intake", nowEpoch: 1 });
+    const notif = new FakeNotificationService();
+    await transitionLeadState({
+      lead,
+      toState: "intake",
+      template: TEMPLATE,
+      leads: repo as unknown as LeadsRepo,
+      notifications: notif as unknown as NotificationService,
+      nowEpoch: 2,
+    });
+    expect(notif.events).toHaveLength(0);
   });
 
   it("невалидный переход бросает FunnelTransitionError, БД не трогается", async () => {

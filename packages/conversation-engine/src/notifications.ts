@@ -1,5 +1,5 @@
 import { TelegramClient } from "@chatman-media/channel-telegram";
-import type { NotificationsRepo, NotificationRule } from "./dal/notifications.ts";
+import type { NotificationRule, NotificationsRepo } from "./dal/notifications.ts";
 
 export interface NotificationEvent {
   tenantId: number;
@@ -7,7 +7,9 @@ export interface NotificationEvent {
   leadId?: number;
   conversationId?: number;
   contactId?: number;
-  data: Record<string, any>;
+  /** assignedAdminId — если задан, проверяется notifyOnAssignedOnly */
+  assignedAdminId?: number;
+  data: Record<string, unknown>;
 }
 
 export class NotificationService {
@@ -16,7 +18,7 @@ export class NotificationService {
   constructor(
     private readonly repo: NotificationsRepo,
     private readonly botToken: string,
-    private readonly appUrl: string
+    private readonly appUrl: string,
   ) {
     if (botToken) {
       this.client = new TelegramClient({ token: botToken });
@@ -26,22 +28,61 @@ export class NotificationService {
   async notify(event: NotificationEvent): Promise<void> {
     if (!this.client) return;
 
-    const rules = await this.repo.findRulesByEvent(event.tenantId, event.eventType);
-    const filteredRules = rules.filter((rule) => this.matchesCondition(rule, event));
+    const [rules, operatorSettingsList] = await Promise.all([
+      this.repo.findRulesByEvent(event.tenantId, event.eventType),
+      this.repo.findOperatorSettingsByTenant(event.tenantId),
+    ]);
 
-    for (const rule of filteredRules) {
+    const template = await this.repo.findTemplate(event.tenantId, event.eventType);
+    const text = template ? this.renderTemplate(template.body, event) : this.formatMessage(event);
+    const buttons = this.formatButtons(event);
+
+    // 1. Групповые/канальные правила
+    const matchedRules = rules.filter((rule) => this.matchesCondition(rule, event));
+    for (const rule of matchedRules) {
       try {
-        await this.sendNotification(rule, event);
+        await this.sendMessage(rule.targetId, text, buttons);
       } catch (err) {
-        console.error(`Failed to send notification for rule ${rule.id}:`, err);
+        console.error(`[NotificationService] rule ${rule.id} send failed:`, err);
+      }
+    }
+
+    // 2. Личные уведомления операторам через operator_settings
+    for (const settings of operatorSettingsList) {
+      if (!settings.telegramChatId) continue;
+      // Фильтр по назначению: пропускаем если флаг включён, а лид назначен другому
+      if (
+        settings.notifyOnAssignedOnly &&
+        event.assignedAdminId !== undefined &&
+        event.assignedAdminId !== settings.adminId
+      ) {
+        continue;
+      }
+      try {
+        await this.sendMessage(settings.telegramChatId, text, buttons);
+      } catch (err) {
+        console.error(`[NotificationService] personal send to admin ${settings.adminId} failed:`, err);
       }
     }
   }
 
-  private matchesCondition(rule: NotificationRule, event: NotificationEvent): boolean {
-    if (!rule.conditionJson) return true;
+  private async sendMessage(
+    chatId: string,
+    text: string,
+    buttons: Array<{ text: string; url: string }> | null,
+  ): Promise<void> {
+    await this.client!.sendMessage({
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+      reply_markup: buttons ? { inline_keyboard: [buttons] } : undefined,
+    });
+  }
+
+  matchesCondition(rule: NotificationRule, event: NotificationEvent): boolean {
+    if (!rule.conditionJson || rule.conditionJson === "{}") return true;
     try {
-      const condition = JSON.parse(rule.conditionJson);
+      const condition = JSON.parse(rule.conditionJson) as Record<string, unknown>;
       for (const [key, value] of Object.entries(condition)) {
         if (event.data[key] !== value) return false;
       }
@@ -51,45 +92,21 @@ export class NotificationService {
     }
   }
 
-  private async sendNotification(rule: NotificationRule, event: NotificationEvent): Promise<void> {
-    if (!this.client) return;
-
-    const template = await this.repo.findTemplate(event.tenantId, event.eventType);
-    const text = template 
-      ? this.renderTemplate(template.body, event)
-      : this.formatMessage(event);
-
-    const buttons = this.formatButtons(event);
-
-    await this.client.sendMessage({
-      chat_id: rule.targetId,
-      text,
-      parse_mode: "HTML",
-      reply_markup: buttons ? { inline_keyboard: [buttons] } : undefined,
-    });
-  }
-
-  private renderTemplate(body: string, event: NotificationEvent): string {
-    let result = body;
-    const vars = {
+  renderTemplate(body: string, event: NotificationEvent): string {
+    const vars: Record<string, unknown> = {
       ...event.data,
       leadId: event.leadId,
       conversationId: event.conversationId,
       tenantId: event.tenantId,
     };
-
+    let result = body;
     for (const [key, value] of Object.entries(vars)) {
-      const placeholder = new RegExp(`\\{\\{${key}\\}\\}`, "g");
-      result = result.replace(placeholder, String(value ?? ""));
+      result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), String(value ?? ""));
     }
-    
-    // Очистка неиспользованных плейсхолдеров
-    result = result.replace(/\{\{.*?\}\}/g, "");
-    
-    return result;
+    return result.replace(/\{\{.*?\}\}/g, "");
   }
 
-  private formatMessage(event: NotificationEvent): string {
+  formatMessage(event: NotificationEvent): string {
     const emoji = this.getEventEmoji(event.eventType);
     let msg = `${emoji} <b>${this.getEventTitle(event.eventType)}</b>\n\n`;
 
@@ -111,42 +128,38 @@ export class NotificationService {
     return msg;
   }
 
-  private formatButtons(event: NotificationEvent): any[] | null {
-    const buttons = [];
-
+  private formatButtons(event: NotificationEvent): Array<{ text: string; url: string }> | null {
     if (event.leadId) {
-      const url = `${this.appUrl}/admin/leads/${event.leadId}`;
-      buttons.push({ text: "👁 Посмотреть", url });
-    } else if (event.conversationId) {
-      const url = `${this.appUrl}/admin/conversations/${event.conversationId}`;
-      buttons.push({ text: "👁 Чат", url });
+      return [{ text: "👁 Посмотреть", url: `${this.appUrl}/leads/${event.leadId}` }];
     }
-
-    return buttons.length > 0 ? buttons : null;
+    if (event.conversationId) {
+      return [{ text: "👁 Чат", url: `${this.appUrl}/conversations/${event.conversationId}` }];
+    }
+    return null;
   }
 
   private getEventEmoji(type: string): string {
-    switch (type) {
-      case "lead_intake_complete": return "🆕";
-      case "stage_changed": return "🔄";
-      case "human_takeover": return "🆘";
-      case "document_uploaded": return "📸";
-      case "high_value_deal": return "💎";
-      case "lead_stale": return "⏰";
-      default: return "🔔";
-    }
+    const map: Record<string, string> = {
+      lead_intake_complete: "🆕",
+      stage_changed: "🔄",
+      human_takeover: "🆘",
+      document_uploaded: "📸",
+      high_value_deal: "💎",
+      lead_stale: "⏰",
+    };
+    return map[type] ?? "🔔";
   }
 
   private getEventTitle(type: string): string {
-    switch (type) {
-      case "lead_intake_complete": return "Новый лид";
-      case "stage_changed": return "Смена стадии";
-      case "human_takeover": return "Нужна помощь оператора";
-      case "document_uploaded": return "Загружен документ";
-      case "high_value_deal": return "Крупная сделка";
-      case "lead_stale": return "Лид завис";
-      default: return "Уведомление";
-    }
+    const map: Record<string, string> = {
+      lead_intake_complete: "Новый лид",
+      stage_changed: "Смена стадии",
+      human_takeover: "Нужна помощь оператора",
+      document_uploaded: "Загружен документ",
+      high_value_deal: "Крупная сделка",
+      lead_stale: "Лид завис",
+    };
+    return map[type] ?? "Уведомление";
   }
 
   private formatKey(key: string): string {
@@ -157,6 +170,6 @@ export class NotificationService {
       phone: "Телефон",
       email: "Email",
     };
-    return map[key] || key;
+    return map[key] ?? key;
   }
 }

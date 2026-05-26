@@ -70,6 +70,7 @@ export async function transitionLeadState(opts: {
       eventType: "stage_changed",
       leadId: opts.lead.id,
       contactId: opts.lead.userId,
+      assignedAdminId: opts.lead.assignedAdminId ?? undefined,
       data: {
         fromStage: fromState,
         toStage: opts.toState,
