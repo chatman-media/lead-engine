@@ -1,16 +1,26 @@
+import {
+  AlertTriangleIcon,
+  BarChart2Icon,
+  GripVerticalIcon,
+  LayersIcon,
+  PlusIcon,
+  SparklesIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { type DragEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ApiError,
   clearToken,
-  saas,
   type FieldType,
   type FunnelAnalytics,
   type FunnelData,
   type StageDefinition,
   type StageField,
   type StageType,
+  saas,
 } from "@/api/saas";
+import { AiWorkflowPanel } from "@/components/AiWorkflowPanel";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,9 +34,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { AlertTriangleIcon, BarChart2Icon, GripVerticalIcon, LayersIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 
 const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "form_fill", label: "Сбор данных" },
@@ -74,6 +83,7 @@ export function SaasFunnel() {
   const [analytics, setAnalytics] = useState<FunnelAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [confirmSeedTemplate, setConfirmSeedTemplate] = useState<string | null>(null);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [newStage, setNewStage] = useState({
     slug: "",
     displayName: "",
@@ -101,7 +111,9 @@ export function SaasFunnel() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    reload();
+  }, []);
 
   async function handleCreateStage() {
     if (!funnel?.funnel || !newStage.slug || !newStage.displayName) return;
@@ -113,9 +125,15 @@ export function SaasFunnel() {
         stageType: newStage.stageType,
         kind: newStage.kind,
         supportMode: newStage.supportMode,
-        position: (funnel.stages.length) * 10,
+        position: funnel.stages.length * 10,
       });
-      setNewStage({ slug: "", displayName: "", stageType: "form_fill", kind: "active", supportMode: false });
+      setNewStage({
+        slug: "",
+        displayName: "",
+        stageType: "form_fill",
+        kind: "active",
+        supportMode: false,
+      });
       setAddingStage(false);
       reload();
     } catch (err) {
@@ -155,7 +173,9 @@ export function SaasFunnel() {
 
     setDraggedId(null);
     setDragOverId(null);
-    setFunnel((f) => f ? { ...f, stages: stages.map((s, i) => ({ ...s, position: i * 10 })) } : f);
+    setFunnel((f) =>
+      f ? { ...f, stages: stages.map((s, i) => ({ ...s, position: i * 10 })) } : f,
+    );
     saas.reorderStages(order).catch(() => reload());
   }
 
@@ -190,47 +210,55 @@ export function SaasFunnel() {
     }
   }
 
-  if (loading) return (
-    <div className="flex flex-col gap-6 p-6">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <Skeleton className="h-6 w-24" />
-          <Skeleton className="h-4 w-52" />
-        </div>
-      </div>
-      <div className="rounded-md border p-4 space-y-3">
-        <Skeleton className="h-4 w-40" />
-        <div className="flex gap-2">
-          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-32" />)}
-        </div>
-      </div>
-      <div className="flex flex-col gap-3">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="rounded-lg border p-4 space-y-2">
-            <div className="flex items-center gap-3">
-              <Skeleton className="h-4 w-4" />
-              <Skeleton className="h-5 w-40" />
-              <Skeleton className="h-4 w-20 ml-auto" />
-              <Skeleton className="h-4 w-16" />
-            </div>
+  if (loading)
+    return (
+      <div className="flex flex-col gap-6 p-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <Skeleton className="h-6 w-24" />
+            <Skeleton className="h-4 w-52" />
           </div>
-        ))}
+        </div>
+        <div className="rounded-md border p-4 space-y-3">
+          <Skeleton className="h-4 w-40" />
+          <div className="flex gap-2">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-8 w-32" />
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="rounded-lg border p-4 space-y-2">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-4 w-4" />
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-4 w-20 ml-auto" />
+                <Skeleton className="h-4 w-16" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
-  );
+    );
   if (error) return <p className="p-6 text-destructive text-sm">{error}</p>;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <PageHeader
-          title="Воронка"
-          description="Настройка стадий и полей данных"
-        />
-        <Button variant="outline" size="sm" asChild>
-          <Link to="/leads">← Лиды</Link>
-        </Button>
+        <PageHeader title="Воронка" description="Настройка стадий и полей данных" />
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => setAiPanelOpen(true)}>
+            <SparklesIcon className="mr-1.5 size-4" />
+            Настроить с AI
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/leads">← Лиды</Link>
+          </Button>
+        </div>
       </div>
+
+      <AiWorkflowPanel open={aiPanelOpen} onOpenChange={setAiPanelOpen} onApplied={reload} />
 
       {/* Шаблоны воронки */}
       <div className="rounded-md border p-4">
@@ -243,6 +271,7 @@ export function SaasFunnel() {
         </div>
         <div className="flex flex-wrap gap-2">
           {[
+            { id: "exchange", label: "Обменный пункт", icon: "💱" },
             { id: "visa", label: "Виза / иммиграция", icon: "🛂" },
             { id: "real_estate", label: "Недвижимость", icon: "🏠" },
             { id: "modeling", label: "Модельное агентство", icon: "✨" },
@@ -265,7 +294,12 @@ export function SaasFunnel() {
             <span className="flex-1">
               Заменит {funnel?.stages?.length ?? 0} стадий на шаблон. Продолжить?
             </span>
-            <Button size="sm" variant="destructive" onClick={() => handleSeed(confirmSeedTemplate)} disabled={seeding}>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => handleSeed(confirmSeedTemplate)}
+              disabled={seeding}
+            >
               Да
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setConfirmSeedTemplate(null)}>
@@ -345,7 +379,9 @@ export function SaasFunnel() {
                     <Label className="text-xs">Тип стадии</Label>
                     <Select
                       value={newStage.stageType}
-                      onValueChange={(v) => setNewStage((p) => ({ ...p, stageType: v as StageType }))}
+                      onValueChange={(v) =>
+                        setNewStage((p) => ({ ...p, stageType: v as StageType }))
+                      }
                     >
                       <SelectTrigger className="text-sm">
                         <SelectValue />
@@ -363,7 +399,9 @@ export function SaasFunnel() {
                     <Label className="text-xs">Вид</Label>
                     <Select
                       value={newStage.kind}
-                      onValueChange={(v) => setNewStage((p) => ({ ...p, kind: v as typeof p.kind }))}
+                      onValueChange={(v) =>
+                        setNewStage((p) => ({ ...p, kind: v as typeof p.kind }))
+                      }
                     >
                       <SelectTrigger className="text-sm">
                         <SelectValue />
@@ -388,7 +426,11 @@ export function SaasFunnel() {
                   </Label>
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={handleCreateStage} disabled={!newStage.slug || !newStage.displayName}>
+                  <Button
+                    size="sm"
+                    onClick={handleCreateStage}
+                    disabled={!newStage.slug || !newStage.displayName}
+                  >
                     Создать
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setAddingStage(false)}>
@@ -533,7 +575,13 @@ function StageCard({
         ...newField,
         position: stage.fields.length * 10,
       });
-      setNewField({ slug: "", displayName: "", fieldType: "text", required: false, aiExtractable: false });
+      setNewField({
+        slug: "",
+        displayName: "",
+        fieldType: "text",
+        required: false,
+        aiExtractable: false,
+      });
       setAddingField(false);
       onReload();
     } catch {
@@ -582,7 +630,9 @@ function StageCard({
                 {STAGE_TYPES.find((t) => t.value === stage.stageType)?.label ?? stage.stageType}
               </Badge>
               {stage.supportMode && (
-                <Badge variant="outline" className="text-xs text-muted-foreground">поддержка</Badge>
+                <Badge variant="outline" className="text-xs text-muted-foreground">
+                  поддержка
+                </Badge>
               )}
               <Badge variant="outline" className="text-xs">
                 {stage.fields.length} полей
@@ -592,7 +642,14 @@ function StageCard({
 
           {confirmDelete ? (
             <div className="flex items-center gap-1">
-              <Button size="sm" variant="destructive" onClick={() => { setConfirmDelete(false); onDelete(); }}>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => {
+                  setConfirmDelete(false);
+                  onDelete();
+                }}
+              >
                 Да
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
@@ -644,7 +701,12 @@ function StageCard({
 
           {/* Add field */}
           {!addingField ? (
-            <Button variant="outline" size="sm" className="border-dashed" onClick={() => setAddingField(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-dashed"
+              onClick={() => setAddingField(true)}
+            >
               <PlusIcon className="mr-1 size-3.5" />
               Добавить поле
             </Button>
@@ -656,7 +718,12 @@ function StageCard({
                   <Label className="text-xs">Slug</Label>
                   <Input
                     value={newField.slug}
-                    onChange={(e) => setNewField((p) => ({ ...p, slug: e.target.value.toLowerCase().replace(/\s+/g, "_") }))}
+                    onChange={(e) =>
+                      setNewField((p) => ({
+                        ...p,
+                        slug: e.target.value.toLowerCase().replace(/\s+/g, "_"),
+                      }))
+                    }
                     placeholder="full_name"
                     className="text-sm h-8"
                   />
@@ -681,7 +748,9 @@ function StageCard({
                     </SelectTrigger>
                     <SelectContent>
                       {FIELD_TYPES.map((t) => (
-                        <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                        <SelectItem key={t.value} value={t.value}>
+                          {t.label}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -694,7 +763,9 @@ function StageCard({
                     checked={newField.required}
                     onCheckedChange={(v) => setNewField((p) => ({ ...p, required: v }))}
                   />
-                  <Label htmlFor={`req-${stage.id}`} className="text-xs">Обязательное</Label>
+                  <Label htmlFor={`req-${stage.id}`} className="text-xs">
+                    Обязательное
+                  </Label>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Switch
@@ -702,11 +773,17 @@ function StageCard({
                     checked={newField.aiExtractable}
                     onCheckedChange={(v) => setNewField((p) => ({ ...p, aiExtractable: v }))}
                   />
-                  <Label htmlFor={`ai-${stage.id}`} className="text-xs">AI извлечение</Label>
+                  <Label htmlFor={`ai-${stage.id}`} className="text-xs">
+                    AI извлечение
+                  </Label>
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button size="sm" onClick={handleCreateField} disabled={!newField.slug || !newField.displayName}>
+                <Button
+                  size="sm"
+                  onClick={handleCreateField}
+                  disabled={!newField.slug || !newField.displayName}
+                >
                   Добавить
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setAddingField(false)}>
@@ -726,13 +803,23 @@ function FieldRow({ field, onDelete }: { field: StageField; onDelete: () => void
     <div className="flex items-center justify-between rounded-md border px-3 py-1.5 text-sm">
       <div className="flex items-center gap-2">
         <span className="font-medium">{field.displayName}</span>
-        <Badge variant="outline" className="text-xs capitalize">{field.fieldType}</Badge>
+        <Badge variant="outline" className="text-xs capitalize">
+          {field.fieldType}
+        </Badge>
         {field.required && <span className="text-xs text-destructive">*</span>}
-        {field.aiExtractable && <Badge variant="secondary" className="text-xs">AI</Badge>}
+        {field.aiExtractable && (
+          <Badge variant="secondary" className="text-xs">
+            AI
+          </Badge>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <span className="text-xs text-muted-foreground font-mono">{field.slug}</span>
-        <button type="button" onClick={onDelete} className="text-muted-foreground hover:text-destructive">
+        <button
+          type="button"
+          onClick={onDelete}
+          className="text-muted-foreground hover:text-destructive"
+        >
           <Trash2Icon className="size-3.5" />
         </button>
       </div>

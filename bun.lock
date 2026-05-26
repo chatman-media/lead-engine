@@ -63,6 +63,7 @@
         "@chatman-media/observability": "workspace:*",
         "@chatman-media/sales": "workspace:*",
         "@chatman-media/storage": "workspace:*",
+        "@chatman-media/vertical-exchange": "workspace:*",
         "@chatman-media/vertical-real-estate": "workspace:*",
         "@chatman-media/vertical-recruitment": "workspace:*",
         "@chatman-media/vertical-saas": "workspace:*",
@@ -93,6 +94,19 @@
         "@vitejs/plugin-react": "^4.4.1",
         "typescript": "^6.0.3",
         "vite": "^6.3.4",
+      },
+    },
+    "apps/vertical-exchange": {
+      "name": "@chatman-media/vertical-exchange",
+      "version": "0.1.0",
+      "dependencies": {
+        "@chatman-media/kb": "workspace:*",
+        "@chatman-media/verticals": "workspace:*",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "^2.4.14",
+        "@types/bun": "1.3.14",
+        "typescript": "^6.0.3",
       },
     },
     "apps/vertical-real-estate": {
@@ -417,6 +431,8 @@
     "@chatman-media/sales": ["@chatman-media/sales@workspace:packages/sales"],
 
     "@chatman-media/storage": ["@chatman-media/storage@workspace:packages/storage"],
+
+    "@chatman-media/vertical-exchange": ["@chatman-media/vertical-exchange@workspace:apps/vertical-exchange"],
 
     "@chatman-media/vertical-real-estate": ["@chatman-media/vertical-real-estate@workspace:apps/vertical-real-estate"],
 

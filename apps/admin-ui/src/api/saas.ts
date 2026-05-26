@@ -348,13 +348,27 @@ export interface OnboardingStatus {
 
 export type StageKind = "intake" | "active" | "terminal_won" | "terminal_lost";
 export type StageType =
-  | "form_fill" | "document_upload" | "document_signature"
-  | "external_approval" | "payment" | "waiting"
-  | "interaction" | "assessment" | "milestone";
+  | "form_fill"
+  | "document_upload"
+  | "document_signature"
+  | "external_approval"
+  | "payment"
+  | "waiting"
+  | "interaction"
+  | "assessment"
+  | "milestone";
 export type FieldType =
-  | "text" | "textarea" | "number" | "date"
-  | "select" | "multiselect" | "boolean"
-  | "phone" | "email" | "file" | "photo";
+  | "text"
+  | "textarea"
+  | "number"
+  | "date"
+  | "select"
+  | "multiselect"
+  | "boolean"
+  | "phone"
+  | "email"
+  | "file"
+  | "photo";
 
 export interface StageField {
   id: number;
@@ -394,6 +408,38 @@ export interface FunnelData {
   stages: StageDefinition[];
 }
 
+export interface WorkflowChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface WorkflowPreviewField {
+  slug: string;
+  displayName: string;
+  fieldType: string;
+  required: boolean;
+  aiExtractable: boolean;
+}
+
+export interface WorkflowPreviewStage {
+  slug: string;
+  displayName: string;
+  kind: string;
+  stageType: string;
+  supportMode: boolean;
+  nextStages: string[];
+  fields: WorkflowPreviewField[];
+}
+
+export interface WorkflowChatResponse {
+  reply: string;
+  readyToGenerate: boolean;
+  /** Полные стадии для передачи в applyWorkflow (server-shape). */
+  stages?: unknown[];
+  /** Компактный preview для отображения. */
+  preview?: WorkflowPreviewStage[];
+}
+
 export interface LeadListItem {
   id: number;
   state: string;
@@ -421,8 +467,21 @@ export interface LeadDetail {
   stageDef: Omit<StageDefinition, "fields"> | null;
   fields: StageField[];
   fieldValues: Array<{ id: number; fieldId: number; valueJson: string; updatedAt: number }>;
-  events: Array<{ id: number; fromState: string | null; toState: string; byAdminId: number | null; notes: string | null; createdAt: number }>;
-  notes: Array<{ id: number; byAdminId: number | null; body: string; source: string | null; createdAt: number }>;
+  events: Array<{
+    id: number;
+    fromState: string | null;
+    toState: string;
+    byAdminId: number | null;
+    notes: string | null;
+    createdAt: number;
+  }>;
+  notes: Array<{
+    id: number;
+    byAdminId: number | null;
+    body: string;
+    source: string | null;
+    createdAt: number;
+  }>;
   contact: { id: number; displayName: string | null; attributesJson: string | null } | undefined;
 }
 
@@ -712,7 +771,9 @@ export const saas = {
   },
 
   // ── KB suggestions ───────────────────────────────────────────────────
-  listKbSuggestions(opts: { status?: "pending" | "ingested" | "rejected"; limit?: number; offset?: number } = {}) {
+  listKbSuggestions(
+    opts: { status?: "pending" | "ingested" | "rejected"; limit?: number; offset?: number } = {},
+  ) {
     const p = new URLSearchParams();
     if (opts.status) p.set("status", opts.status);
     if (opts.limit) p.set("limit", String(opts.limit));
@@ -857,9 +918,12 @@ export const saas = {
     });
   },
   deleteMessage(conversationId: number, messageId: number) {
-    return request<{ ok: boolean }>(`/api/admin/conversations/${conversationId}/messages/${messageId}`, {
-      method: "DELETE",
-    });
+    return request<{ ok: boolean }>(
+      `/api/admin/conversations/${conversationId}/messages/${messageId}`,
+      {
+        method: "DELETE",
+      },
+    );
   },
 
   // ── Diagnostics ──────────────────────────────────────────────────────
@@ -976,7 +1040,16 @@ export const saas = {
   },
 
   // ── Lead pipeline ────────────────────────────────────────────────────
-  listLeads(opts: { stageId?: number; state?: string; contactId?: number; q?: string; limit?: number; offset?: number } = {}) {
+  listLeads(
+    opts: {
+      stageId?: number;
+      state?: string;
+      contactId?: number;
+      q?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) {
     const p = new URLSearchParams();
     if (opts.stageId) p.set("stageId", String(opts.stageId));
     if (opts.state) p.set("state", opts.state);
@@ -1016,15 +1089,24 @@ export const saas = {
     });
   },
   upsertLeadFieldValues(id: number, values: Array<{ fieldId: number; value: unknown }>) {
-    return request<{ ok: boolean; advanced: boolean; newStageSlug: string | null }>(`/api/admin/leads/${id}/field-values`, {
-      method: "PUT",
-      body: JSON.stringify({ values }),
-    });
+    return request<{ ok: boolean; advanced: boolean; newStageSlug: string | null }>(
+      `/api/admin/leads/${id}/field-values`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ values }),
+      },
+    );
   },
   addLeadNote(id: number, body: string) {
     return request<{ id: number }>(`/api/admin/leads/${id}/notes`, {
       method: "POST",
       body: JSON.stringify({ body }),
+    });
+  },
+  sendLeadPhoto(id: number, photoRef: string, caption?: string) {
+    return request<{ ok: boolean; channelKind: string }>(`/api/admin/leads/${id}/send-photo`, {
+      method: "POST",
+      body: JSON.stringify({ photoRef, caption }),
     });
   },
   createLead(contactId: number, stageDefinitionId?: number) {
@@ -1065,7 +1147,10 @@ export const saas = {
       body: JSON.stringify(data),
     });
   },
-  updateStage(stageId: number, patch: Partial<Omit<StageDefinition, "id" | "funnelId" | "fields">>) {
+  updateStage(
+    stageId: number,
+    patch: Partial<Omit<StageDefinition, "id" | "funnelId" | "fields">>,
+  ) {
     return request<{ ok: boolean }>(`/api/admin/funnel/stages/${stageId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
@@ -1082,16 +1167,19 @@ export const saas = {
       body: JSON.stringify({ order }),
     });
   },
-  createStageField(stageId: number, data: {
-    slug: string;
-    displayName: string;
-    fieldType?: FieldType;
-    required?: boolean;
-    position?: number;
-    hint?: string;
-    aiExtractable?: boolean;
-    optionsJson?: string;
-  }) {
+  createStageField(
+    stageId: number,
+    data: {
+      slug: string;
+      displayName: string;
+      fieldType?: FieldType;
+      required?: boolean;
+      position?: number;
+      hint?: string;
+      aiExtractable?: boolean;
+      optionsJson?: string;
+    },
+  ) {
     return request<StageField>(`/api/admin/funnel/stages/${stageId}/fields`, {
       method: "POST",
       body: JSON.stringify(data),
@@ -1109,9 +1197,26 @@ export const saas = {
     });
   },
   seedFunnel(template: string) {
-    return request<{ ok: boolean; funnelId: number; stagesCreated: number }>("/api/admin/funnel/seed", {
+    return request<{ ok: boolean; funnelId: number; stagesCreated: number }>(
+      "/api/admin/funnel/seed",
+      {
+        method: "POST",
+        body: JSON.stringify({ template }),
+      },
+    );
+  },
+
+  // ── AI Workflow Builder ──────────────────────────────────────────────
+  aiWorkflowChat(messages: WorkflowChatMessage[]) {
+    return request<WorkflowChatResponse>("/api/admin/workflows/ai-chat", {
       method: "POST",
-      body: JSON.stringify({ template }),
+      body: JSON.stringify({ messages }),
+    });
+  },
+  applyWorkflow(stages: unknown[]) {
+    return request<{ ok: boolean; stageCount: number }>("/api/admin/workflows/apply", {
+      method: "POST",
+      body: JSON.stringify({ stages }),
     });
   },
 
@@ -1124,10 +1229,13 @@ export const saas = {
     return request<{ items: SkillItem[] }>("/api/admin/skills");
   },
   seedSkills() {
-    return request<{ ok: boolean; seeded: number; updated: number; skipped: number; total: number }>(
-      "/api/admin/skills/seed",
-      { method: "POST" },
-    );
+    return request<{
+      ok: boolean;
+      seeded: number;
+      updated: number;
+      skipped: number;
+      total: number;
+    }>("/api/admin/skills/seed", { method: "POST" });
   },
   updateSkill(slug: string, data: { isEnabled?: boolean; promptFragment?: string }) {
     return request<{ ok: boolean }>(`/api/admin/skills/${slug}`, {
@@ -1157,7 +1265,10 @@ export const saas = {
       body: JSON.stringify(data),
     });
   },
-  updateStyle(id: number, data: Partial<{ displayName: string; configJson: string; isActive: boolean }>) {
+  updateStyle(
+    id: number,
+    data: Partial<{ displayName: string; configJson: string; isActive: boolean }>,
+  ) {
     return request<StyleItem>(`/api/admin/styles/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -1203,7 +1314,10 @@ export const saas = {
       body: JSON.stringify(data),
     });
   },
-  updateVacancy(id: number, data: { title?: string; body?: string; url?: string | null; isActive?: boolean }) {
+  updateVacancy(
+    id: number,
+    data: { title?: string; body?: string; url?: string | null; isActive?: boolean },
+  ) {
     return request<VacancyItem>(`/api/admin/vacancies/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -1223,7 +1337,10 @@ export const saas = {
       body: JSON.stringify(data),
     });
   },
-  updateStageWebhook(id: number, data: { url?: string; secret?: string | null; isActive?: boolean }) {
+  updateStageWebhook(
+    id: number,
+    data: { url?: string; secret?: string | null; isActive?: boolean },
+  ) {
     return request<StageWebhook>(`/api/admin/stage-webhooks/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),

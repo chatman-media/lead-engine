@@ -1,14 +1,29 @@
+import {
+  AlertTriangleIcon,
+  ArrowLeftIcon,
+  CheckIcon,
+  EditIcon,
+  RefreshCwIcon,
+  SendIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ApiError, clearToken, saas, type FunnelData, type LeadDetail, type StageField } from "@/api/saas";
+import {
+  ApiError,
+  clearToken,
+  type FunnelData,
+  type LeadDetail,
+  type StageField,
+  saas,
+} from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -16,8 +31,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AlertTriangleIcon, ArrowLeftIcon, CheckIcon, EditIcon, RefreshCwIcon, SendIcon, Trash2Icon, XIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 
 const STAGE_TYPE_RU: Record<string, string> = {
   form_fill: "Сбор данных",
@@ -84,12 +100,7 @@ function FieldEditor({ field, initialJson, onChange }: FieldEditorProps) {
   }
 
   if (field.fieldType === "boolean") {
-    return (
-      <Switch
-        checked={Boolean(val)}
-        onCheckedChange={(checked) => update(checked)}
-      />
-    );
+    return <Switch checked={Boolean(val)} onCheckedChange={(checked) => update(checked)} />;
   }
 
   if (field.fieldType === "select") {
@@ -173,9 +184,7 @@ function FieldEditor({ field, initialJson, onChange }: FieldEditorProps) {
   }
 
   if (field.fieldType === "date") {
-    const dateStr = val
-      ? new Date(String(val)).toISOString().slice(0, 10)
-      : "";
+    const dateStr = val ? new Date(String(val)).toISOString().slice(0, 10) : "";
     return (
       <Input
         type="date"
@@ -232,6 +241,12 @@ export function SaasLeadDetail() {
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // Send-photo (QR) state
+  const [photoRef, setPhotoRef] = useState("");
+  const [photoCaption, setPhotoCaption] = useState("");
+  const [sendingPhoto, setSendingPhoto] = useState(false);
+  const [photoMsg, setPhotoMsg] = useState("");
+
   function onAuthError(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
       clearToken();
@@ -254,12 +269,16 @@ export function SaasLeadDetail() {
 
   useEffect(() => {
     reload();
-    saas.getFunnel().then(setFunnel).catch(() => {});
+    saas
+      .getFunnel()
+      .then(setFunnel)
+      .catch(() => {});
   }, [id]);
 
   useEffect(() => {
     if (!data?.contact) return;
-    saas.listConversations({ contactId: data.contact.id, limit: 1 })
+    saas
+      .listConversations({ contactId: data.contact.id, limit: 1 })
       .then((r) => setConversationId(r.items[0]?.id ?? null))
       .catch(() => {});
   }, [data?.contact?.id]);
@@ -275,6 +294,24 @@ export function SaasLeadDetail() {
       onAuthError(err);
     } finally {
       setAddingNote(false);
+    }
+  }
+
+  async function handleSendPhoto() {
+    if (!id || !photoRef.trim()) return;
+    setSendingPhoto(true);
+    setPhotoMsg("");
+    try {
+      await saas.sendLeadPhoto(Number(id), photoRef.trim(), photoCaption.trim() || undefined);
+      setPhotoRef("");
+      setPhotoCaption("");
+      setPhotoMsg("Отправлено клиенту ✓");
+    } catch (err) {
+      if (!onAuthError(err)) {
+        setPhotoMsg(err instanceof Error ? err.message : "Не удалось отправить");
+      }
+    } finally {
+      setSendingPhoto(false);
     }
   }
 
@@ -352,45 +389,46 @@ export function SaasLeadDetail() {
     }
   }
 
-  if (loading) return (
-    <div className="flex flex-col gap-6 p-6">
-      <div className="flex items-center gap-3">
-        <Skeleton className="h-8 w-8" />
-        <div className="space-y-1">
-          <Skeleton className="h-6 w-40" />
-          <Skeleton className="h-4 w-24" />
+  if (loading)
+    return (
+      <div className="flex flex-col gap-6 p-6">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-8 w-8" />
+          <div className="space-y-1">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-4 w-24" />
+          </div>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-2 space-y-4">
+            <div className="rounded-lg border p-4 space-y-3">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-6 w-32" />
+            </div>
+            <div className="rounded-lg border p-4 space-y-3">
+              <Skeleton className="h-4 w-24" />
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="py-2 space-y-1">
+                  <Skeleton className="h-3 w-20" />
+                  <Skeleton className="h-4 w-40" />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-4">
+            <div className="rounded-lg border p-4 space-y-2">
+              <Skeleton className="h-4 w-24" />
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex justify-between">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-4 w-28" />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-lg border p-4 space-y-3">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-6 w-32" />
-          </div>
-          <div className="rounded-lg border p-4 space-y-3">
-            <Skeleton className="h-4 w-24" />
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="py-2 space-y-1">
-                <Skeleton className="h-3 w-20" />
-                <Skeleton className="h-4 w-40" />
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-4">
-          <div className="rounded-lg border p-4 space-y-2">
-            <Skeleton className="h-4 w-24" />
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="flex justify-between">
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-4 w-28" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+    );
   if (error) return <p className="p-6 text-destructive text-sm">{error}</p>;
   if (!data) return null;
 
@@ -398,9 +436,7 @@ export function SaasLeadDetail() {
 
   const valueMap = new Map(fieldValues.map((v) => [v.fieldId, v.valueJson]));
 
-  const editableFields = fields.filter(
-    (f) => f.fieldType !== "file" && f.fieldType !== "photo",
-  );
+  const editableFields = fields.filter((f) => f.fieldType !== "file" && f.fieldType !== "photo");
 
   return (
     <div className="flex flex-col gap-6">
@@ -467,7 +503,7 @@ export function SaasLeadDetail() {
             <CardContent>
               <div className="flex items-center gap-3">
                 <Badge variant="secondary" className="text-sm">
-                  {stageDef?.displayName ?? (KIND_RU[lead.state] ?? lead.state)}
+                  {stageDef?.displayName ?? KIND_RU[lead.state] ?? lead.state}
                 </Badge>
                 {stageDef && (
                   <span className="text-xs text-muted-foreground">
@@ -490,7 +526,9 @@ export function SaasLeadDetail() {
                       {funnel.stages.map((s) => (
                         <SelectItem key={s.id} value={String(s.id)}>
                           {s.displayName}
-                          <span className="ml-1 text-xs text-muted-foreground">({KIND_RU[s.kind] ?? s.kind})</span>
+                          <span className="ml-1 text-xs text-muted-foreground">
+                            ({KIND_RU[s.kind] ?? s.kind})
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -517,18 +555,51 @@ export function SaasLeadDetail() {
             </CardContent>
           </Card>
 
+          {/* Отправить QR / фото клиенту */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Отправить QR / фото клиенту</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Input
+                value={photoRef}
+                onChange={(e) => setPhotoRef(e.target.value)}
+                placeholder="Ссылка на изображение (https://…) или Telegram file_id"
+                className="h-8 text-sm"
+              />
+              <Input
+                value={photoCaption}
+                onChange={(e) => setPhotoCaption(e.target.value)}
+                placeholder="Подпись (необязательно)"
+                className="h-8 text-sm"
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-8"
+                  disabled={!photoRef.trim() || sendingPhoto}
+                  onClick={handleSendPhoto}
+                >
+                  <SendIcon className="size-3.5 mr-1" />
+                  {sendingPhoto ? "Отправка…" : "Отправить клиенту"}
+                </Button>
+                {photoMsg && <span className="text-xs text-muted-foreground">{photoMsg}</span>}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Бот отправит изображение клиенту в его канал. Для обменок — cardless-withdrawal QR
+                для снятия THB.
+              </p>
+            </CardContent>
+          </Card>
+
           {/* Поля стадии */}
           {fields.length > 0 && (
             <Card>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm">
-                    Данные · {stageDef?.displayName}
-                  </CardTitle>
+                  <CardTitle className="text-sm">Данные · {stageDef?.displayName}</CardTitle>
                   <div className="flex items-center gap-2">
-                    {saveMsg && (
-                      <span className="text-xs text-muted-foreground">{saveMsg}</span>
-                    )}
+                    {saveMsg && <span className="text-xs text-muted-foreground">{saveMsg}</span>}
                     {editing ? (
                       <>
                         <Button
@@ -572,25 +643,15 @@ export function SaasLeadDetail() {
                   {fields.map((field) => (
                     <div key={field.id} className="flex flex-col gap-1.5 py-2.5">
                       <div className="flex items-center gap-1">
-                        <Label className="text-xs text-muted-foreground">
-                          {field.displayName}
-                        </Label>
-                        {field.required && (
-                          <span className="text-destructive text-xs">*</span>
-                        )}
-                        {field.aiExtractable && (
-                          <span className="text-xs text-primary/60">✦</span>
-                        )}
+                        <Label className="text-xs text-muted-foreground">{field.displayName}</Label>
+                        {field.required && <span className="text-destructive text-xs">*</span>}
+                        {field.aiExtractable && <span className="text-xs text-primary/60">✦</span>}
                       </div>
-                      {editing &&
-                      field.fieldType !== "file" &&
-                      field.fieldType !== "photo" ? (
+                      {editing && field.fieldType !== "file" && field.fieldType !== "photo" ? (
                         <FieldEditor
                           field={field}
                           initialJson={valueMap.get(field.id) ?? "null"}
-                          onChange={(v) =>
-                            setFieldEdits((prev) => ({ ...prev, [field.id]: v }))
-                          }
+                          onChange={(v) => setFieldEdits((prev) => ({ ...prev, [field.id]: v }))}
                         />
                       ) : (
                         <span className="text-sm font-medium">
@@ -620,11 +681,15 @@ export function SaasLeadDetail() {
                       <div className="flex items-center gap-1.5">
                         {ev.fromState && (
                           <>
-                            <Badge variant="outline" className="text-xs">{ev.fromState}</Badge>
+                            <Badge variant="outline" className="text-xs">
+                              {ev.fromState}
+                            </Badge>
                             <span className="text-muted-foreground">→</span>
                           </>
                         )}
-                        <Badge variant="secondary" className="text-xs">{ev.toState}</Badge>
+                        <Badge variant="secondary" className="text-xs">
+                          {ev.toState}
+                        </Badge>
                       </div>
                     </div>
                   ))}

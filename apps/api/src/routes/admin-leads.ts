@@ -1,10 +1,15 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import {
+  channelIdentities,
+  channels,
   contacts,
+  conversations,
   leadEvents,
   leadFieldValues,
   leadNotes,
   leads,
+  messages,
+  outboundQueue,
   stageDefinitions,
   stageFields,
 } from "@chatman-media/storage";
@@ -796,6 +801,122 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     );
 
     return c.json(note, 201);
+  });
+
+  /**
+   * POST /api/admin/leads/:id/send-photo
+   * Body: { photoRef: string, caption?: string }
+   *
+   * Отправляет фото клиенту лида в его активный канал. photoRef — это
+   * Telegram file_id ИЛИ публичный HTTPS-URL изображения (Telegram sendPhoto
+   * принимает оба варианта в поле photo). Основной кейс: оператор обменки
+   * отправляет cardless-withdrawal QR клиенту ("в админку → дальше в чат").
+   */
+  app.post("/api/admin/leads/:id/send-photo", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+
+    let body: { photoRef?: unknown; caption?: unknown };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const photoRef = typeof body.photoRef === "string" ? body.photoRef.trim() : "";
+    const caption =
+      typeof body.caption === "string" ? body.caption.trim().slice(0, 1024) : "";
+    if (!photoRef)
+      return c.json({ error: "photoRef required (file_id or https URL)" }, 400);
+
+    const now = Math.floor(Date.now() / 1000);
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      const [lead] = await tx
+        .select({ id: leads.id, userId: leads.userId })
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+      if (!lead) return { kind: "not_found" } as const;
+
+      const [identity] = await tx
+        .select({
+          channelDbId: channels.id,
+          channelKind: channels.kind,
+          externalUserId: channelIdentities.externalUserId,
+        })
+        .from(channelIdentities)
+        .innerJoin(channels, eq(channels.id, channelIdentities.channelId))
+        .where(
+          and(
+            eq(channelIdentities.contactId, lead.userId),
+            eq(channels.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!identity) return { kind: "no_channel" } as const;
+
+      const [conv] = await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.tenantId, tenantId),
+            eq(conversations.userId, lead.userId),
+          ),
+        )
+        .orderBy(desc(conversations.lastMessageAt))
+        .limit(1);
+
+      if (conv?.id) {
+        await tx.insert(messages).values({
+          tenantId,
+          conversationId: conv.id,
+          role: "human",
+          text: caption || "[photo]",
+          metaJson: JSON.stringify({ adminId, sentVia: "admin-send-photo", photo: true }),
+          createdAt: now,
+        });
+      }
+
+      const envelope = {
+        channelId: String(identity.channelDbId),
+        externalUserId: identity.externalUserId,
+        parts: [
+          {
+            kind: "photo",
+            mediaRef: { channelId: String(identity.channelDbId), externalRef: photoRef },
+            ...(caption ? { caption } : {}),
+          },
+        ],
+      };
+      await tx.insert(outboundQueue).values({
+        tenantId,
+        channelId: identity.channelDbId,
+        conversationId: conv?.id ?? null,
+        payloadJson: JSON.stringify(envelope),
+        idempotencyKey: `admin-photo-${id}-${now}`,
+        scheduledAt: now,
+        createdAt: now,
+      });
+
+      return { kind: "sent", channelKind: identity.channelKind } as const;
+    });
+
+    if (outcome.kind === "not_found") return c.json({ error: "lead not found" }, 404);
+    if (outcome.kind === "no_channel") {
+      return c.json({ error: "no active channel for this contact — cannot deliver" }, 409);
+    }
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "lead.send_photo",
+      targetKind: "lead",
+      targetId: String(id),
+      details: { channelKind: outcome.channelKind },
+    });
+
+    return c.json({ ok: true, channelKind: outcome.channelKind });
   });
 
   return app;
