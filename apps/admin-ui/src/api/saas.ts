@@ -659,6 +659,27 @@ export interface TestSendResult {
   error?: string;
 }
 
+export interface NotificationRule {
+  id: number;
+  tenantId: number;
+  eventType: string;
+  conditionJson: string;
+  channelType: string;
+  targetId: string;
+  priority: string;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface NotificationTemplate {
+  id: number;
+  tenantId: number;
+  slug: string;
+  body: string;
+  updatedAt: number;
+}
+
 // ── Audit entry (for audit log page) ────────────────────────────────────
 
 const TOKEN_KEY = "lead_engine_token";
@@ -1486,6 +1507,35 @@ export const saas = {
   },
   generateNotificationLinkToken() {
     return request<{ token: string }>("/api/admin/notifications/settings/link", { method: "POST" });
+  },
+  getNotificationRules() {
+    return request<{ items: NotificationRule[] }>("/api/admin/notifications/rules");
+  },
+  createNotificationRule(body: { eventType: string; targetId: string; conditionJson?: string }) {
+    return request<NotificationRule>("/api/admin/notifications/rules", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+  deleteNotificationRule(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/notifications/rules/${id}`, { method: "DELETE" });
+  },
+  testNotificationRule(id: number) {
+    return request<{ ok: boolean; error?: string }>(`/api/admin/notifications/rules/${id}/test`, { method: "POST" });
+  },
+  getNotificationTemplates() {
+    return request<{ items: NotificationTemplate[] }>("/api/admin/notifications/templates");
+  },
+  upsertNotificationTemplate(slug: string, body: string) {
+    return request<{ ok: boolean }>(`/api/admin/notifications/templates/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify({ body }),
+    });
+  },
+  deleteNotificationTemplate(slug: string) {
+    return request<{ ok: boolean }>(`/api/admin/notifications/templates/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+    });
   },
 
   // ── Bot Tester ────────────────────────────────────────────────────────

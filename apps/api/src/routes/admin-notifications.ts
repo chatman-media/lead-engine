@@ -1,7 +1,11 @@
-import { withTenant, type NotificationsRepo } from "@chatman-media/conversation-engine";
+import { type NotificationService, type NotificationsRepo } from "@chatman-media/conversation-engine";
 import { Hono } from "hono";
 
-export function makeAdminNotificationsRoutes(opts: { repo: NotificationsRepo; botUsername?: string }): Hono {
+export function makeAdminNotificationsRoutes(opts: {
+  repo: NotificationsRepo;
+  botUsername?: string;
+  notificationService?: NotificationService;
+}): Hono {
   const app = new Hono();
 
   // GET /api/admin/notifications/rules — список правил
@@ -33,6 +37,18 @@ export function makeAdminNotificationsRoutes(opts: { repo: NotificationsRepo; bo
     const id = Number(c.req.param("id"));
     await opts.repo.deleteRule(tenantId, id);
     return c.json({ ok: true });
+  });
+
+  // POST /api/admin/notifications/rules/:id/test — тестовое сообщение
+  app.post("/rules/:id/test", async (c) => {
+    const tenantId = c.var.tenantId;
+    const id = Number(c.req.param("id"));
+    const rules = await opts.repo.listRules(tenantId);
+    const rule = rules.find((r) => r.id === id);
+    if (!rule) return c.json({ ok: false, error: "Правило не найдено" }, 404);
+    if (!opts.notificationService) return c.json({ ok: false, error: "Сервис уведомлений не настроен" });
+    const result = await opts.notificationService.sendTestMessage(rule.targetId);
+    return c.json(result);
   });
 
   // GET /api/admin/notifications/settings — личные настройки

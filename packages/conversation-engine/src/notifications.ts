@@ -66,6 +66,20 @@ export class NotificationService {
     }
   }
 
+  async sendTestMessage(chatId: string): Promise<{ ok: boolean; error?: string }> {
+    if (!this.client) return { ok: false, error: "Бот не настроен (нет токена)" };
+    try {
+      await this.client.sendMessage({
+        chat_id: chatId,
+        text: "🧪 <b>Тестовое уведомление</b>\n\nПравило активно — сообщения доходят корректно.",
+        parse_mode: "HTML",
+      });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   private async sendMessage(
     chatId: string,
     text: string,

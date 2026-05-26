@@ -1,4 +1,13 @@
-import { BellIcon, CheckIcon, ClipboardCopyIcon, SendIcon, Trash2Icon } from "lucide-react";
+import {
+  BellIcon,
+  CheckIcon,
+  ClipboardCopyIcon,
+  FlaskConicalIcon,
+  PencilIcon,
+  PlusIcon,
+  SendIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -6,10 +15,12 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { ApiError, clearToken, saas } from "@/api/saas";
+import { Textarea } from "@/components/ui/textarea";
+import { ApiError, clearToken, saas, type NotificationRule, type NotificationTemplate } from "@/api/saas";
 
 interface Settings {
   adminId: number;
@@ -18,14 +29,43 @@ interface Settings {
   botUsername: string | null;
 }
 
+const EVENT_TYPES: Record<string, string> = {
+  stage_changed: "Смена стадии",
+  lead_intake_complete: "Анкета заполнена",
+  human_takeover: "Запрос оператора",
+  document_uploaded: "Документ загружен",
+  high_value_deal: "Сделка VIP",
+  lead_stale: "Лид без активности",
+};
+
+const PLACEHOLDERS = "{{leadId}}, {{fromStage}}, {{toStage}}, {{displayName}}";
+
 export function SaasNotifications() {
   const navigate = useNavigate();
+
+  // ── Personal settings ──────────────────────────────────────────────────
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadingSettings, setLoadingSettings] = useState(true);
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [savingToggle, setSavingToggle] = useState(false);
-  const [error, setError] = useState("");
+
+  // ── Rules ──────────────────────────────────────────────────────────────
+  const [rules, setRules] = useState<NotificationRule[]>([]);
+  const [loadingRules, setLoadingRules] = useState(true);
+  const [showAddRule, setShowAddRule] = useState(false);
+  const [newRuleEvent, setNewRuleEvent] = useState("stage_changed");
+  const [newRuleTarget, setNewRuleTarget] = useState("");
+  const [savingRule, setSavingRule] = useState(false);
+  const [testingRuleId, setTestingRuleId] = useState<number | null>(null);
+
+  // ── Templates ─────────────────────────────────────────────────────────
+  const [templates, setTemplates] = useState<NotificationTemplate[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(true);
+  const [editingSlug, setEditingSlug] = useState<string | null>(null);
+  const [editBody, setEditBody] = useState("");
+  const [newTplSlug, setNewTplSlug] = useState("stage_changed");
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   function onAuthError(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
@@ -36,27 +76,54 @@ export function SaasNotifications() {
     return false;
   }
 
-  async function reload() {
+  async function reloadSettings() {
     try {
       const s = await saas.getNotificationSettings();
-      setSettings(s);
+      setSettings(s as Settings);
     } catch (err) {
-      if (!onAuthError(err)) setError("Не удалось загрузить настройки");
+      if (!onAuthError(err)) toast.error("Не удалось загрузить настройки");
     } finally {
-      setLoading(false);
+      setLoadingSettings(false);
     }
   }
 
-  useEffect(() => { reload(); }, []);
+  async function reloadRules() {
+    try {
+      const { items } = await saas.getNotificationRules();
+      setRules(items);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingRules(false);
+    }
+  }
+
+  async function reloadTemplates() {
+    try {
+      const { items } = await saas.getNotificationTemplates();
+      setTemplates(items);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingTemplates(false);
+    }
+  }
+
+  useEffect(() => {
+    reloadSettings();
+    reloadRules();
+    reloadTemplates();
+  }, []);
+
+  // ── Personal ───────────────────────────────────────────────────────────
 
   async function handleGenerateLink() {
     setGenerating(true);
-    setError("");
     try {
       const { token } = await saas.generateNotificationLinkToken();
       setLinkToken(token);
     } catch (err) {
-      if (!onAuthError(err)) setError("Не удалось создать ссылку");
+      if (!onAuthError(err)) toast.error("Не удалось создать ссылку");
     } finally {
       setGenerating(false);
     }
@@ -68,7 +135,7 @@ export function SaasNotifications() {
       await saas.updateNotificationSettings({ telegramChatId: null });
       toast.success("Telegram отключён");
       setLinkToken(null);
-      await reload();
+      await reloadSettings();
     } catch (err) {
       if (!onAuthError(err)) toast.error("Не удалось отключить");
     } finally {
@@ -80,7 +147,7 @@ export function SaasNotifications() {
     setSavingToggle(true);
     try {
       await saas.updateNotificationSettings({ notifyOnAssignedOnly: checked });
-      setSettings((s) => s ? { ...s, notifyOnAssignedOnly: checked } : s);
+      setSettings((s) => (s ? { ...s, notifyOnAssignedOnly: checked } : s));
     } catch (err) {
       if (!onAuthError(err)) toast.error("Не удалось сохранить");
     } finally {
@@ -88,18 +155,95 @@ export function SaasNotifications() {
     }
   }
 
-  function copyToClipboard(text: string) {
-    navigator.clipboard.writeText(text).then(() => toast.success("Скопировано"));
+  // ── Rules ──────────────────────────────────────────────────────────────
+
+  async function handleAddRule(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newRuleTarget.trim()) return;
+    setSavingRule(true);
+    try {
+      await saas.createNotificationRule({ eventType: newRuleEvent, targetId: newRuleTarget.trim() });
+      setNewRuleTarget("");
+      setShowAddRule(false);
+      await reloadRules();
+      toast.success("Правило добавлено");
+    } catch (err) {
+      if (!onAuthError(err)) toast.error("Не удалось добавить правило");
+    } finally {
+      setSavingRule(false);
+    }
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-6 w-48" />
-        <Skeleton className="h-40 rounded-lg" />
-        <Skeleton className="h-32 rounded-lg" />
-      </div>
-    );
+  async function handleDeleteRule(id: number) {
+    try {
+      await saas.deleteNotificationRule(id);
+      setRules((r) => r.filter((x) => x.id !== id));
+      toast.success("Правило удалено");
+    } catch {
+      toast.error("Не удалось удалить");
+    }
+  }
+
+  async function handleTestRule(id: number) {
+    setTestingRuleId(id);
+    try {
+      const result = await saas.testNotificationRule(id);
+      if (result.ok) {
+        toast.success("Тестовое сообщение отправлено");
+      } else {
+        toast.error(result.error ?? "Ошибка отправки");
+      }
+    } catch {
+      toast.error("Ошибка при тесте");
+    } finally {
+      setTestingRuleId(null);
+    }
+  }
+
+  // ── Templates ─────────────────────────────────────────────────────────
+
+  function startEditTemplate(tpl: NotificationTemplate) {
+    setEditingSlug(tpl.slug);
+    setEditBody(tpl.body);
+  }
+
+  function startNewTemplate() {
+    setEditingSlug("__new__");
+    setEditBody("");
+    setNewTplSlug("stage_changed");
+  }
+
+  async function handleSaveTemplate(e: React.FormEvent) {
+    e.preventDefault();
+    const slug = editingSlug === "__new__" ? newTplSlug : editingSlug!;
+    if (!slug || !editBody.trim()) return;
+    setSavingTemplate(true);
+    try {
+      await saas.upsertNotificationTemplate(slug, editBody.trim());
+      setEditingSlug(null);
+      await reloadTemplates();
+      toast.success("Шаблон сохранён");
+    } catch {
+      toast.error("Не удалось сохранить шаблон");
+    } finally {
+      setSavingTemplate(false);
+    }
+  }
+
+  async function handleDeleteTemplate(slug: string) {
+    try {
+      await saas.deleteNotificationTemplate(slug);
+      setTemplates((t) => t.filter((x) => x.slug !== slug));
+      toast.success("Шаблон удалён");
+    } catch {
+      toast.error("Не удалось удалить");
+    }
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────
+
+  function copyToClipboard(text: string) {
+    navigator.clipboard.writeText(text).then(() => toast.success("Скопировано"));
   }
 
   const connected = !!settings?.telegramChatId;
@@ -110,14 +254,8 @@ export function SaasNotifications() {
     <div className="space-y-6">
       <PageHeader
         title="Уведомления"
-        description="Получайте алерты о новых лидах и изменениях прямо в Telegram."
+        description="Алерты о новых лидах и изменениях прямо в Telegram."
       />
-
-      {error && (
-        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </p>
-      )}
 
       {/* ── Telegram личный аккаунт ── */}
       <Card>
@@ -125,9 +263,9 @@ export function SaasNotifications() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <SendIcon className="h-5 w-5 text-primary" />
-              <CardTitle className="text-base">Telegram — личные уведомления</CardTitle>
+              <CardTitle className="text-base">Личные уведомления</CardTitle>
             </div>
-            {connected ? (
+            {loadingSettings ? null : connected ? (
               <Badge variant="success" className="gap-1">
                 <CheckIcon className="size-3" /> Подключено
               </Badge>
@@ -136,13 +274,14 @@ export function SaasNotifications() {
             )}
           </div>
           <CardDescription>
-            Привяжите свой Telegram-аккаунт чтобы получать уведомления о новых сообщениях и
-            смене стадии лида.
+            Привяжите свой Telegram — получайте уведомления о новых сообщениях и сменах стадии.
           </CardDescription>
         </CardHeader>
 
         <CardContent className="space-y-4">
-          {connected ? (
+          {loadingSettings ? (
+            <Skeleton className="h-10 w-full" />
+          ) : connected ? (
             <div className="space-y-4">
               <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-sm">
                 <span className="text-muted-foreground">Chat ID:</span>
@@ -179,8 +318,7 @@ export function SaasNotifications() {
               {!linkToken ? (
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    Нажмите кнопку ниже — получите ссылку для привязки, откройте её в Telegram
-                    и нажмите Start.
+                    Нажмите кнопку — получите ссылку для привязки, откройте её в Telegram и нажмите Start.
                   </p>
                   <Button onClick={handleGenerateLink} disabled={generating} className="gap-2">
                     <BellIcon className="size-4" />
@@ -191,17 +329,15 @@ export function SaasNotifications() {
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">
                     Ссылка действует 1 час.{" "}
-                    {deepLink ? (
-                      <>Нажмите кнопку ниже — откроется бот в Telegram, нажмите <strong>Start</strong>.</>
-                    ) : (
-                      <>Отправьте команду ниже боту оператора и нажмите <strong>Start</strong>.</>
-                    )}
-                    {" "}После этого нажмите «Проверить подключение».
+                    {deepLink
+                      ? <>Нажмите кнопку — откроется бот, нажмите <strong>Start</strong>.</>
+                      : <>Отправьте команду ниже боту-оператору и нажмите <strong>Start</strong>.</>}
+                    {" "}После этого нажмите «Проверить».
                   </p>
 
                   {deepLink ? (
                     <a href={deepLink} target="_blank" rel="noopener noreferrer">
-                      <Button className="gap-2 w-full sm:w-auto">
+                      <Button className="gap-2">
                         <SendIcon className="size-4" />
                         Открыть бота в Telegram
                       </Button>
@@ -224,7 +360,7 @@ export function SaasNotifications() {
 
                   {!botUsername && (
                     <p className="text-xs text-muted-foreground">
-                      Задайте <code>PLATFORM_OPERATOR_BOT_USERNAME</code> в конфиге API, чтобы здесь появилась прямая ссылка на бота.
+                      Задайте <code>PLATFORM_OPERATOR_BOT_USERNAME</code> в конфиге API для прямой ссылки на бота.
                     </p>
                   )}
 
@@ -232,13 +368,220 @@ export function SaasNotifications() {
                     <Button variant="outline" size="sm" onClick={handleGenerateLink} disabled={generating}>
                       Обновить токен
                     </Button>
-                    <Button variant="outline" size="sm" onClick={reload}>
-                      Проверить подключение
+                    <Button variant="outline" size="sm" onClick={reloadSettings}>
+                      Проверить
                     </Button>
                   </div>
                 </div>
               )}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Правила для групп ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <BellIcon className="h-5 w-5 text-primary" />
+              <div>
+                <CardTitle className="text-base">Правила для групп</CardTitle>
+                <CardDescription className="mt-0.5">
+                  Отправлять уведомления в Telegram-группы по событиям
+                </CardDescription>
+              </div>
+            </div>
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowAddRule((v) => !v)}>
+              <PlusIcon className="size-3.5" />
+              Добавить
+            </Button>
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-3">
+          {loadingRules ? (
+            <Skeleton className="h-10 w-full" />
+          ) : rules.length === 0 && !showAddRule ? (
+            <p className="text-sm text-muted-foreground">Нет правил. Добавьте первое.</p>
+          ) : (
+            <div className="space-y-2">
+              {rules.map((rule) => (
+                <div
+                  key={rule.id}
+                  className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm"
+                >
+                  <Badge variant="secondary" className="shrink-0 text-xs">
+                    {EVENT_TYPES[rule.eventType] ?? rule.eventType}
+                  </Badge>
+                  <code className="flex-1 truncate text-xs font-mono text-muted-foreground">
+                    {rule.targetId}
+                  </code>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 h-7 text-xs shrink-0"
+                    disabled={testingRuleId === rule.id}
+                    onClick={() => handleTestRule(rule.id)}
+                  >
+                    <FlaskConicalIcon className="size-3" />
+                    {testingRuleId === rule.id ? "…" : "Тест"}
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDeleteRule(rule.id)}
+                  >
+                    <Trash2Icon className="size-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {showAddRule && (
+            <form onSubmit={handleAddRule} className="space-y-3 rounded-md border p-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Событие</Label>
+                <select
+                  value={newRuleEvent}
+                  onChange={(e) => setNewRuleEvent(e.target.value)}
+                  className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                >
+                  {Object.entries(EVENT_TYPES).map(([val, label]) => (
+                    <option key={val} value={val}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">ID чата / группы Telegram</Label>
+                <Input
+                  value={newRuleTarget}
+                  onChange={(e) => setNewRuleTarget(e.target.value)}
+                  placeholder="-100123456789"
+                  className="font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Добавьте бота в группу и отправьте там <code>/setup</code> — бот ответит ID группы.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" disabled={savingRule || !newRuleTarget.trim()}>
+                  Сохранить
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setShowAddRule(false)}>
+                  Отмена
+                </Button>
+              </div>
+            </form>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Шаблоны сообщений ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <PencilIcon className="h-5 w-5 text-primary" />
+              <div>
+                <CardTitle className="text-base">Шаблоны сообщений</CardTitle>
+                <CardDescription className="mt-0.5">
+                  Кастомный текст уведомлений вместо стандартного. Переменные: <code className="text-xs">{PLACEHOLDERS}</code>
+                </CardDescription>
+              </div>
+            </div>
+            {editingSlug === null && (
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={startNewTemplate}>
+                <PlusIcon className="size-3.5" />
+                Добавить
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-3">
+          {loadingTemplates ? (
+            <Skeleton className="h-10 w-full" />
+          ) : (
+            <>
+              {templates.length === 0 && editingSlug === null && (
+                <p className="text-sm text-muted-foreground">
+                  Шаблонов нет — используются сообщения по умолчанию.
+                </p>
+              )}
+              <div className="space-y-2">
+                {templates.map((tpl) => (
+                  editingSlug === tpl.slug ? null : (
+                    <div key={tpl.slug} className="flex items-start gap-3 rounded-md border px-3 py-2 text-sm">
+                      <Badge variant="secondary" className="mt-0.5 shrink-0 text-xs">
+                        {EVENT_TYPES[tpl.slug] ?? tpl.slug}
+                      </Badge>
+                      <p className="flex-1 text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                        {tpl.body}
+                      </p>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 shrink-0"
+                        onClick={() => startEditTemplate(tpl)}
+                      >
+                        <PencilIcon className="size-3.5" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDeleteTemplate(tpl.slug)}
+                      >
+                        <Trash2Icon className="size-3.5" />
+                      </Button>
+                    </div>
+                  )
+                ))}
+              </div>
+            </>
+          )}
+
+          {editingSlug !== null && (
+            <form onSubmit={handleSaveTemplate} className="space-y-3 rounded-md border p-3">
+              {editingSlug === "__new__" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Событие</Label>
+                  <select
+                    value={newTplSlug}
+                    onChange={(e) => setNewTplSlug(e.target.value)}
+                    className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                  >
+                    {Object.entries(EVENT_TYPES).map(([val, label]) => (
+                      <option key={val} value={val}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Текст сообщения</Label>
+                <Textarea
+                  value={editBody}
+                  onChange={(e) => setEditBody(e.target.value)}
+                  rows={4}
+                  placeholder={`Новая заявка #{{leadId}}: стадия {{toStage}}`}
+                  className="font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;code&gt;</code>
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" disabled={savingTemplate || !editBody.trim()}>
+                  Сохранить
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setEditingSlug(null)}>
+                  Отмена
+                </Button>
+              </div>
+            </form>
           )}
         </CardContent>
       </Card>
