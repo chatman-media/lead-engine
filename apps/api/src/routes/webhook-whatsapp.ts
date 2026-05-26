@@ -12,6 +12,7 @@ import {
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
+  type NotificationService,
   withTenant,
 } from "@chatman-media/conversation-engine";
 import {
@@ -67,6 +68,7 @@ export function makeWhatsAppWebhookRoutes(opts: {
   sink?: PipelineSink;
   metrics?: PlatformMetrics;
   rateLimiter?: InboundRateLimiter;
+  notificationService?: NotificationService;
   photoProcessor?: PhotoProcessor;
   fieldExtractor?: FieldExtractor;
   resolveTranscriber?: ((tenantId: number) => ITranscriber | null) | null;
@@ -198,6 +200,7 @@ export function makeWhatsAppWebhookRoutes(opts: {
           conversations: new ConversationsRepo(repoCtx),
           messages: new MessagesRepo(repoCtx),
           outbound: new OutboundQueueRepo(repoCtx),
+          notifications: opts.notificationService,
           reply: opts.replyStrategy ?? null,
           deferReply: true,
           ...(template ? { template } : {}),

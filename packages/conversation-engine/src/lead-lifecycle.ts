@@ -1,6 +1,7 @@
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { LeadRow, LeadsRepo } from "./dal/leads.ts";
 import { getInitialStage, validateTransition } from "./funnel-machine.ts";
+import type { NotificationService } from "./notifications.ts";
 
 /**
  * Find-or-create Lead на (tenant, contact). При создании stage берётся
@@ -48,6 +49,7 @@ export async function transitionLeadState(opts: {
   toState: string;
   template: VerticalTemplate;
   leads: LeadsRepo;
+  notifications?: NotificationService;
   nowEpoch: number;
   hookContext?: Partial<LeadHookContext>;
 }): Promise<LeadRow> {
@@ -61,6 +63,19 @@ export async function transitionLeadState(opts: {
   const fromState = opts.lead.state;
   await opts.leads.updateState(opts.lead.id, opts.toState, opts.nowEpoch);
   const updated: LeadRow = { ...opts.lead, state: opts.toState, updatedAt: opts.nowEpoch };
+
+  if (opts.notifications) {
+    await opts.notifications.notify({
+      tenantId: opts.lead.tenantId,
+      eventType: "stage_changed",
+      leadId: opts.lead.id,
+      contactId: opts.lead.userId,
+      data: {
+        fromStage: fromState,
+        toStage: opts.toState,
+      },
+    });
+  }
 
   const hook = opts.template.hooks?.onLeadStageChange;
   if (hook) {

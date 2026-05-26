@@ -13,8 +13,10 @@ import { type MemoryExtractor, runMemoryExtraction } from "./memory-extractor.ts
 import { dispatchOutbound } from "./outbound-dispatch.ts";
 import { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
 import type { ITranscriber } from "./transcriber.ts";
-import {
-  type ChannelContext,
+import type { NotificationService } from "./notifications.ts";
+import type {
+  ChannelContext,
+
   type Clock,
   type PipelineSink,
   type ProcessInboundResult,
@@ -102,6 +104,7 @@ export interface ProcessInboundDeps {
   deferReply?: boolean;
   sink?: PipelineSink;
   clock?: Clock;
+  notifications?: NotificationService;
   /**
    * Опциональный STT-транскрибер. Если задан и inbound содержит voice-part —
    * pipeline транскрибирует аудио перед persist'ом. Транскрипт становится
@@ -278,6 +281,33 @@ export async function processInbound(
   // 4. Touch last_message_at если это not-a-dup и не fresh-created.
   if (!conversationCreated && !existingMsg) {
     await deps.conversations.touchLastMessageAt(conversation.id, now);
+  }
+
+  // 4b. Notifications (Human takeover / Document upload).
+  const hasMedia = inbound.parts.some((p) => p.kind !== "text" && p.kind !== "callback_query");
+  if (deps.notifications && !existingMsg) {
+    if (conversation.mode === "human" || conversation.mode === "queued") {
+      await deps.notifications.notify({
+        tenantId: deps.tenant.tenantId,
+        eventType: "human_takeover",
+        conversationId: conversation.id,
+        contactId: contact.id,
+        data: {
+          displayName: contact.displayName || "Без имени",
+          text: text || "(Медиа)",
+        },
+      });
+    } else if (hasMedia) {
+      await deps.notifications.notify({
+        tenantId: deps.tenant.tenantId,
+        eventType: "document_uploaded",
+        conversationId: conversation.id,
+        contactId: contact.id,
+        data: {
+          displayName: contact.displayName || "Без имени",
+        },
+      });
+    }
   }
 
   // 5. Vertical extractFields hook (если задан и не дублирующийся inbound).

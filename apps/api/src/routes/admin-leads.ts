@@ -1,4 +1,4 @@
-import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import { type Db, withTenant, type NotificationService } from "@chatman-media/conversation-engine";
 import {
   channelIdentities,
   channels,
@@ -33,6 +33,7 @@ import { adminEventBus } from "../lib/admin-event-bus.ts";
  */
 export interface AdminLeadsRoutesOpts {
   db: Db;
+  notificationService?: NotificationService;
 }
 
 export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
@@ -584,6 +585,20 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         toStage: wp.to.slug,
         toStageDisplayName: wp.to.displayName,
       });
+
+      if (opts.notificationService) {
+        void opts.notificationService.notify({
+          tenantId,
+          eventType: "stage_changed",
+          leadId: id,
+          contactId: wp.contactId,
+          data: {
+            fromStage: wp.from?.displayName ?? "Unknown",
+            toStage: wp.to.displayName,
+            displayName: wp.contactName || "Без имени",
+          },
+        });
+      }
     }
 
     return c.json({ ok: true });
