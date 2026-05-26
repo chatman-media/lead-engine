@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   BarChart2Icon,
+  BellIcon,
   BriefcaseIcon,
   CableIcon,
   ChevronLeftIcon,
@@ -101,6 +102,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Система",
     items: [
       { to: "/channels", label: "Каналы", icon: CableIcon },
+      { to: "/notifications", label: "Уведомления", icon: BellIcon },
       { to: "/webhooks", label: "Вебхуки", icon: WebhookIcon },
       { to: "/tools", label: "Инструменты", icon: WrenchIcon },
       { to: "/referral", label: "Партнёры", icon: LinkIcon },

@@ -1472,6 +1472,22 @@ export const saas = {
     });
   },
 
+  // ── Notifications ─────────────────────────────────────────────────────
+  getNotificationSettings() {
+    return request<{ adminId: number; telegramChatId: string | null; notifyOnAssignedOnly: boolean }>(
+      "/api/admin/notifications/settings",
+    );
+  },
+  updateNotificationSettings(body: { telegramChatId?: string | null; notifyOnAssignedOnly?: boolean }) {
+    return request<{ ok: boolean }>("/api/admin/notifications/settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+  generateNotificationLinkToken() {
+    return request<{ token: string }>("/api/admin/notifications/settings/link", { method: "POST" });
+  },
+
   // ── Bot Tester ────────────────────────────────────────────────────────
   getTestScenarios() {
     return request<{ scenarios: TestScenario[] }>("/api/admin/test/scenarios");
