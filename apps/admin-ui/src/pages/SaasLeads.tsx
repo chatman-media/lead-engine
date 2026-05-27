@@ -1,6 +1,24 @@
+import {
+  DownloadIcon,
+  KanbanIcon,
+  ListIcon,
+  PlusIcon,
+  SearchIcon,
+  SendIcon,
+  SettingsIcon,
+  UploadIcon,
+} from "lucide-react";
 import React, { type DragEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ApiError, clearToken, saas, type ContactItem, type FunnelData, type LeadListItem } from "@/api/saas";
+import { toast } from "sonner";
+import {
+  ApiError,
+  type ContactItem,
+  clearToken,
+  type FunnelData,
+  type LeadListItem,
+  saas,
+} from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,10 +32,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DownloadIcon, PlusIcon, SearchIcon, SendIcon, SettingsIcon, UploadIcon } from "lucide-react";
-import { toast } from "sonner";
-import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 
 const STATE_RU: Record<string, string> = {
   active: "активен",
@@ -70,11 +86,19 @@ export function SaasLeads() {
   const [draggedLeadId, setDraggedLeadId] = useState<number | null>(null);
   const [dragOverStageId, setDragOverStageId] = useState<number | null>(null);
 
+  // View mode
+  const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
+  const [listStageId, setListStageId] = useState<number | null>(null);
+
   // Lead search
   const [leadSearch, setLeadSearch] = useState("");
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
+  const [importResult, setImportResult] = useState<{
+    imported: number;
+    skipped: number;
+    errors: string[];
+  } | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   // Outreach state
@@ -83,7 +107,10 @@ export function SaasLeads() {
   const [outreachTarget, setOutreachTarget] = useState<"all" | "stage">("all");
   const [outreachStageSlug, setOutreachStageSlug] = useState("");
   const [outreachSending, setOutreachSending] = useState(false);
-  const [outreachResult, setOutreachResult] = useState<{ enqueued: number; skipped: number } | null>(null);
+  const [outreachResult, setOutreachResult] = useState<{
+    enqueued: number;
+    skipped: number;
+  } | null>(null);
 
   // Create lead dialog
   const [creating, setCreating] = useState(false);
@@ -108,6 +135,9 @@ export function SaasLeads() {
       .then(([f, l]) => {
         setFunnel(f);
         setLeads(l.items);
+        // auto-switch to list if many stages
+        if (f.stages.length > 6) setViewMode("list");
+        if (f.stages.length > 0 && listStageId === null) setListStageId(f.stages[0].id);
       })
       .catch((err) => {
         if (!onAuthError(err)) setError("Не удалось загрузить данные");
@@ -122,7 +152,8 @@ export function SaasLeads() {
   useEffect(() => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
-      saas.listContacts({ q: contactSearch, limit: 20 })
+      saas
+        .listContacts({ q: contactSearch, limit: 20 })
         .then((r) => setContacts(r.items))
         .catch(() => {});
     }, 250);
@@ -195,7 +226,7 @@ export function SaasLeads() {
 
     // Optimistic update
     setLeads((prev) =>
-      prev.map((l) => l.id === draggedLeadId ? { ...l, stageDefinitionId: targetStageId } : l),
+      prev.map((l) => (l.id === draggedLeadId ? { ...l, stageDefinitionId: targetStageId } : l)),
     );
     setDraggedLeadId(null);
     setDragOverStageId(null);
@@ -203,34 +234,35 @@ export function SaasLeads() {
     saas.moveLeadStage(draggedLeadId, targetStageId).catch(() => reload());
   }
 
-  if (loading) return (
-    <div className="space-y-4 p-6">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <Skeleton className="h-6 w-24" />
-          <Skeleton className="h-4 w-48" />
-        </div>
-        <Skeleton className="h-9 w-28" />
-      </div>
-      <div className="flex gap-2">
-        <Skeleton className="h-9 flex-1 max-w-xs" />
-        <Skeleton className="h-9 w-28" />
-      </div>
-      <div className="flex gap-4 overflow-x-auto pb-2">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="min-w-[220px] space-y-2 rounded-lg border p-3">
-            <Skeleton className="h-4 w-32" />
-            {[0, 1, 2].map((j) => (
-              <div key={j} className="rounded-md border p-2.5 space-y-1">
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-3 w-16" />
-              </div>
-            ))}
+  if (loading)
+    return (
+      <div className="space-y-4 p-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <Skeleton className="h-6 w-24" />
+            <Skeleton className="h-4 w-48" />
           </div>
-        ))}
+          <Skeleton className="h-9 w-28" />
+        </div>
+        <div className="flex gap-2">
+          <Skeleton className="h-9 flex-1 max-w-xs" />
+          <Skeleton className="h-9 w-28" />
+        </div>
+        <div className="flex gap-4 overflow-x-auto pb-2">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="min-w-[220px] space-y-2 rounded-lg border p-3">
+              <Skeleton className="h-4 w-32" />
+              {[0, 1, 2].map((j) => (
+                <div key={j} className="rounded-md border p-2.5 space-y-1">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
-  );
+    );
   if (error) return <p className="p-6 text-destructive text-sm">{error}</p>;
 
   // Группируем лидов по stageDefinitionId или state
@@ -281,7 +313,13 @@ export function SaasLeads() {
             disabled={exporting || leads.length === 0}
             onClick={async () => {
               setExporting(true);
-              try { await saas.exportLeadsCsv(); } catch { /* ignore */ } finally { setExporting(false); }
+              try {
+                await saas.exportLeadsCsv();
+              } catch {
+                /* ignore */
+              } finally {
+                setExporting(false);
+              }
             }}
           >
             <DownloadIcon className="mr-1.5 size-3.5" />
@@ -306,15 +344,45 @@ export function SaasLeads() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => { setOutreachOpen(true); setOutreachResult(null); }}
+            onClick={() => {
+              setOutreachOpen(true);
+              setOutreachResult(null);
+            }}
           >
             <SendIcon className="mr-1.5 size-3.5" />
             Рассылка
           </Button>
-          <Button size="sm" onClick={() => { setCreating(true); setContacts([]); setContactSearch(""); }}>
+          <Button
+            size="sm"
+            onClick={() => {
+              setCreating(true);
+              setContacts([]);
+              setContactSearch("");
+            }}
+          >
             <PlusIcon className="mr-1.5 size-3.5" />
             Новый лид
           </Button>
+          {hasStages && (
+            <div className="flex rounded-md border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                className={`px-2 py-1.5 text-xs flex items-center gap-1 transition-colors ${viewMode === "list" ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"}`}
+                title="Список"
+              >
+                <ListIcon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("kanban")}
+                className={`px-2 py-1.5 text-xs flex items-center gap-1 transition-colors border-l ${viewMode === "kanban" ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground"}`}
+                title="Канбан"
+              >
+                <KanbanIcon className="size-3.5" />
+              </button>
+            </div>
+          )}
           <Button variant="outline" size="sm" asChild>
             <Link to="/funnel">
               <SettingsIcon className="mr-1.5 size-3.5" />
@@ -327,16 +395,30 @@ export function SaasLeads() {
       {/* CSV import result */}
       {importResult && (
         <div className="rounded-md border bg-muted px-4 py-3 text-sm flex items-center gap-4">
-          <span>Импортировано: <span className="font-semibold text-green-600">{importResult.imported}</span></span>
+          <span>
+            Импортировано:{" "}
+            <span className="font-semibold text-green-600">{importResult.imported}</span>
+          </span>
           <span className="text-muted-foreground">·</span>
-          <span>Пропущено: <span className="font-semibold text-muted-foreground">{importResult.skipped}</span></span>
+          <span>
+            Пропущено:{" "}
+            <span className="font-semibold text-muted-foreground">{importResult.skipped}</span>
+          </span>
           {importResult.errors.length > 0 && (
             <>
               <span className="text-muted-foreground">·</span>
-              <span className="text-destructive text-xs">{importResult.errors.slice(0, 3).join("; ")}</span>
+              <span className="text-destructive text-xs">
+                {importResult.errors.slice(0, 3).join("; ")}
+              </span>
             </>
           )}
-          <button type="button" className="ml-auto text-muted-foreground hover:text-foreground text-xs" onClick={() => setImportResult(null)}>✕</button>
+          <button
+            type="button"
+            className="ml-auto text-muted-foreground hover:text-foreground text-xs"
+            onClick={() => setImportResult(null)}
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -395,9 +477,11 @@ export function SaasLeads() {
             </div>
             {outreachResult && (
               <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                Отправлено: <span className="font-medium text-green-600">{outreachResult.enqueued}</span>
+                Отправлено:{" "}
+                <span className="font-medium text-green-600">{outreachResult.enqueued}</span>
                 {" · "}
-                Пропущено (нет канала): <span className="font-medium text-muted-foreground">{outreachResult.skipped}</span>
+                Пропущено (нет канала):{" "}
+                <span className="font-medium text-muted-foreground">{outreachResult.skipped}</span>
               </div>
             )}
             <div className="flex gap-2 pt-1">
@@ -416,7 +500,11 @@ export function SaasLeads() {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => { setOutreachOpen(false); setOutreachResult(null); setOutreachText(""); }}
+                onClick={() => {
+                  setOutreachOpen(false);
+                  setOutreachResult(null);
+                  setOutreachText("");
+                }}
                 disabled={outreachSending}
               >
                 Закрыть
@@ -438,7 +526,10 @@ export function SaasLeads() {
               <Input
                 placeholder="Поиск по имени…"
                 value={contactSearch}
-                onChange={(e) => { setContactSearch(e.target.value); setSelectedContactId(""); }}
+                onChange={(e) => {
+                  setContactSearch(e.target.value);
+                  setSelectedContactId("");
+                }}
                 className="text-sm"
               />
               {contacts.length > 0 && (
@@ -448,7 +539,10 @@ export function SaasLeads() {
                       key={c.id}
                       type="button"
                       className={`w-full rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent ${selectedContactId === String(c.id) ? "bg-accent font-medium" : ""}`}
-                      onClick={() => { setSelectedContactId(String(c.id)); setContactSearch(c.displayName ?? `#${c.id}`); }}
+                      onClick={() => {
+                        setSelectedContactId(String(c.id));
+                        setContactSearch(c.displayName ?? `#${c.id}`);
+                      }}
                     >
                       {c.displayName ?? `Контакт #${c.id}`}
                     </button>
@@ -503,8 +597,74 @@ export function SaasLeads() {
         </div>
       )}
 
+      {/* List view — вкладки стадий + вертикальный список */}
+      {hasStages &&
+        viewMode === "list" &&
+        (() => {
+          const activeStage = stages.find((s) => s.id === listStageId) ?? stages[0];
+          const activeLeads = leadsByStage.get(`stage:${activeStage?.id}`) ?? [];
+          return (
+            <div className="flex flex-col gap-3">
+              {/* Stage tabs */}
+              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                {stages.map((stage) => {
+                  const count = (leadsByStage.get(`stage:${stage.id}`) ?? []).length;
+                  const isActive = stage.id === (listStageId ?? stages[0]?.id);
+                  return (
+                    <button
+                      key={stage.id}
+                      type="button"
+                      onClick={() => setListStageId(stage.id)}
+                      className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
+                        isActive
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-transparent bg-muted text-muted-foreground hover:border-border hover:text-foreground"
+                      }`}
+                    >
+                      <span
+                        className={`size-1.5 rounded-full ${KIND_COLOR[stage.kind]?.replace("border-", "bg-") ?? "bg-gray-300"}`}
+                      />
+                      {stage.displayName}
+                      {count > 0 && (
+                        <span
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] leading-none ${isActive ? "bg-primary text-primary-foreground" : "bg-muted-foreground/20"}`}
+                        >
+                          {count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Stage info bar */}
+              {activeStage && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{activeStage.displayName}</span>
+                  <span>·</span>
+                  <span>{STAGE_TYPE_RU[activeStage.stageType] ?? activeStage.stageType}</span>
+                  <span>·</span>
+                  <span>{activeLeads.length} лидов</span>
+                </div>
+              )}
+
+              {/* Leads list */}
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {activeLeads.map((lead) => (
+                  <LeadCard key={lead.id} lead={lead} />
+                ))}
+                {activeLeads.length === 0 && (
+                  <p className="col-span-full rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    Нет лидов в этой стадии
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
       {/* Kanban — горизонтальный скролл по стадиям */}
-      {hasStages && (
+      {hasStages && viewMode === "kanban" && (
         <div className="flex gap-4 overflow-x-auto pb-4">
           {stages.map((stage) => {
             const stageLeads = leadsByStage.get(`stage:${stage.id}`) ?? [];
@@ -513,7 +673,10 @@ export function SaasLeads() {
               <div
                 key={stage.id}
                 className="flex w-72 shrink-0 flex-col gap-2"
-                onDragOver={(e) => { e.preventDefault(); setDragOverStageId(stage.id); }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOverStageId(stage.id);
+                }}
                 onDragLeave={() => setDragOverStageId(null)}
                 onDrop={(e) => handleLeadDrop(e, stage.id)}
               >
@@ -522,25 +685,34 @@ export function SaasLeads() {
                 >
                   <div>
                     <p className="text-sm font-semibold">{stage.displayName}</p>
-                    <p className="text-xs text-muted-foreground">{STAGE_TYPE_RU[stage.stageType] ?? stage.stageType}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {STAGE_TYPE_RU[stage.stageType] ?? stage.stageType}
+                    </p>
                   </div>
                   <Badge variant="secondary" className="text-xs">
                     {stageLeads.length}
                   </Badge>
                 </div>
 
-                <div className={`flex flex-col gap-2 rounded-lg transition-colors ${isOver ? "bg-accent/30 p-1" : ""}`}>
+                <div
+                  className={`flex flex-col gap-2 rounded-lg transition-colors ${isOver ? "bg-accent/30 p-1" : ""}`}
+                >
                   {stageLeads.map((lead) => (
                     <LeadCard
                       key={lead.id}
                       lead={lead}
                       isDragging={draggedLeadId === lead.id}
                       onDragStart={() => setDraggedLeadId(lead.id)}
-                      onDragEnd={() => { setDraggedLeadId(null); setDragOverStageId(null); }}
+                      onDragEnd={() => {
+                        setDraggedLeadId(null);
+                        setDragOverStageId(null);
+                      }}
                     />
                   ))}
                   {stageLeads.length === 0 && (
-                    <p className={`rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground ${isOver ? "border-primary" : ""}`}>
+                    <p
+                      className={`rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground ${isOver ? "border-primary" : ""}`}
+                    >
                       {isOver ? "Перетащить сюда" : "Нет лидов"}
                     </p>
                   )}
@@ -557,9 +729,7 @@ export function SaasLeads() {
           {leads.map((lead) => (
             <LeadCard key={lead.id} lead={lead} />
           ))}
-          {leads.length === 0 && (
-            <p className="text-muted-foreground text-sm">Лидов пока нет.</p>
-          )}
+          {leads.length === 0 && <p className="text-muted-foreground text-sm">Лидов пока нет.</p>}
         </div>
       )}
     </div>
@@ -586,41 +756,41 @@ function LeadCard({
       onDragEnd={onDragEnd}
       className={isDragging ? "opacity-40" : ""}
     >
-    <Link to={`/leads/${lead.id}`}>
-      <Card className="cursor-pointer transition-colors hover:bg-accent/30">
-        <CardHeader className="pb-1 pt-3">
-          <CardTitle className="text-sm font-medium">
-            {lead.contactName ?? `Контакт #${lead.contactId}`}
-          </CardTitle>
-          {lead.applicationId && (
-            <p className="text-xs text-muted-foreground font-mono">{lead.applicationId}</p>
-          )}
-        </CardHeader>
-        <CardContent className="pb-3">
-          <div className="flex items-center justify-between">
-            <Badge variant="outline" className="text-xs">
-              {STATE_RU[lead.state] ?? lead.state}
-            </Badge>
-            <span className="text-xs text-muted-foreground">{formatDate(lead.updatedAt)}</span>
-          </div>
-
-          {pct !== null && (
-            <div className="mt-2">
-              <div className="flex items-center justify-between text-xs text-muted-foreground mb-0.5">
-                <span>Заполнено</span>
-                <span>{pct}%</span>
-              </div>
-              <div className="h-1 w-full rounded-full bg-secondary">
-                <div
-                  className="h-1 rounded-full bg-primary transition-all"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
+      <Link to={`/leads/${lead.id}`}>
+        <Card className="cursor-pointer transition-colors hover:bg-accent/30">
+          <CardHeader className="pb-1 pt-3">
+            <CardTitle className="text-sm font-medium">
+              {lead.contactName ?? `Контакт #${lead.contactId}`}
+            </CardTitle>
+            {lead.applicationId && (
+              <p className="text-xs text-muted-foreground font-mono">{lead.applicationId}</p>
+            )}
+          </CardHeader>
+          <CardContent className="pb-3">
+            <div className="flex items-center justify-between">
+              <Badge variant="outline" className="text-xs">
+                {STATE_RU[lead.state] ?? lead.state}
+              </Badge>
+              <span className="text-xs text-muted-foreground">{formatDate(lead.updatedAt)}</span>
             </div>
-          )}
-        </CardContent>
-      </Card>
-    </Link>
+
+            {pct !== null && (
+              <div className="mt-2">
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-0.5">
+                  <span>Заполнено</span>
+                  <span>{pct}%</span>
+                </div>
+                <div className="h-1 w-full rounded-full bg-secondary">
+                  <div
+                    className="h-1 rounded-full bg-primary transition-all"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </Link>
     </div>
   );
 }
