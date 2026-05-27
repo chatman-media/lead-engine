@@ -434,8 +434,8 @@ export function SaasChannels() {
             <CardHeader>
               <CardTitle>Подключить личный Telegram-аккаунт</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Для случаев, когда лиды пишут в личку (а не боту). Подключается через MTProto.
-                Только для superadmin.
+                Для случаев, когда лиды пишут вам в личку (а не боту). Подключается через MTProto:
+                ассистент анализирует входящие и отвечает от вашего имени.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
