@@ -6,10 +6,10 @@ import {
   CableIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  DatabaseIcon,
   FlaskConicalIcon,
   GitBranchIcon,
   KeyRoundIcon,
+  LayoutDashboardIcon,
   LinkIcon,
   LogOutIcon,
   MonitorIcon,
@@ -76,6 +76,8 @@ interface NavGroup {
   items: NavItem[];
 }
 
+const TOP_NAV_ITEM: NavItem = { to: "/dashboard", label: "Главная", icon: LayoutDashboardIcon };
+
 const NAV_GROUPS: NavGroup[] = [
   {
     label: "Работа",
@@ -90,7 +92,6 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "AI & Бот",
     items: [
-      { to: "/dashboard", label: "Главная", icon: DatabaseIcon },
       { to: "/skills", label: "Навыки", icon: ZapIcon },
       { to: "/hooks", label: "Хуки", icon: SparklesIcon },
       { to: "/styles", label: "Стили", icon: PaletteIcon },
@@ -110,9 +111,6 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
 ];
-
-// Items shown in Система by default; the rest are behind "Ещё"
-const SISTEMA_ALWAYS_VISIBLE = ["/channels"];
 
 function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
@@ -206,66 +204,38 @@ function NavLinks({
   collapsed: boolean;
   isSuperadmin?: boolean;
 }) {
-  const [sistemaExpanded, setSistemaExpanded] = useState(false);
-  const { pathname } = useLocation();
-
-  // Auto-expand Система if current route is one of the hidden items
-  useEffect(() => {
-    const sistemaGroup = NAV_GROUPS.find((g) => g.label === "Система");
-    const hiddenItems = sistemaGroup?.items.filter((i) => !SISTEMA_ALWAYS_VISIBLE.includes(i.to));
-    if (hiddenItems?.some((i) => pathname === i.to || pathname.startsWith(`${i.to}/`))) {
-      setSistemaExpanded(true);
-    }
-  }, [pathname]);
-
   return (
     <nav className="flex flex-col gap-4">
-      {NAV_GROUPS.map((group) => {
-        const isSistema = group.label === "Система";
-        const visibleItems = isSistema && !sistemaExpanded
-          ? group.items.filter((i) => SISTEMA_ALWAYS_VISIBLE.includes(i.to))
-          : group.items;
-        const hiddenCount = isSistema ? group.items.length - SISTEMA_ALWAYS_VISIBLE.length : 0;
+      <div className="flex flex-col gap-0.5">
+        {collapsed && <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />}
+        <NavItemLink
+          item={TOP_NAV_ITEM}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+        />
+      </div>
 
-        return (
-          <div key={group.label} className="flex flex-col gap-0.5">
-            {!collapsed && (
-              <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-                {group.label}
-              </p>
-            )}
-            {collapsed && <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />}
+      {NAV_GROUPS.map((group) => (
+        <div key={group.label} className="flex flex-col gap-0.5">
+          {!collapsed && (
+            <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+              {group.label}
+            </p>
+          )}
+          {collapsed && <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />}
 
-            {visibleItems.map((item) => (
-              <NavItemLink
-                key={item.to}
-                item={item}
-                collapsed={collapsed}
-                badge={item.to === "/conversations" ? escalatedCount : null}
-                onNavigate={onNavigate}
-              />
-            ))}
+          {group.items.map((item) => (
+            <NavItemLink
+              key={item.to}
+              item={item}
+              collapsed={collapsed}
+              badge={item.to === "/conversations" ? escalatedCount : null}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
+      ))}
 
-            {isSistema && !collapsed && (
-              <button
-                type="button"
-                onClick={() => setSistemaExpanded((v) => !v)}
-                className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground/70 transition-colors hover:text-muted-foreground cursor-pointer"
-              >
-                {sistemaExpanded ? (
-                  <>
-                    <ChevronLeftIcon className="size-3" /> Скрыть
-                  </>
-                ) : (
-                  <>
-                    <ChevronRightIcon className="size-3" /> Ещё {hiddenCount}
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-        );
-      })}
       {isSuperadmin && (
         <div className="flex flex-col gap-0.5">
           {!collapsed && (
@@ -273,8 +243,9 @@ function NavLinks({
               Платформа
             </p>
           )}
+          {collapsed && <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />}
           <NavItemLink
-            item={{ to: "/superadmin", label: "Тенанты", icon: ShieldIcon }}
+            item={{ to: "/superadmin", label: "Аккаунты", icon: ShieldIcon }}
             collapsed={collapsed}
             onNavigate={onNavigate}
           />
