@@ -1287,7 +1287,7 @@ export async function seedSkillsCatalogue(
           isEnabled: entry.isEnabled,
           createdAt: nowEpoch,
           updatedAt: nowEpoch,
-        });
+        }).onConflictDoNothing();
         seeded++;
       } else if (existing.promptFragment !== entry.promptFragment) {
         await tx
@@ -1904,7 +1904,7 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
             isEnabled: entry.isEnabled,
             createdAt: nowEpoch,
             updatedAt: nowEpoch,
-          });
+          }).onConflictDoNothing();
           seeded++;
         } else if (existing.promptFragment !== entry.promptFragment) {
           await tx
