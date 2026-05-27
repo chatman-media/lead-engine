@@ -1,4 +1,12 @@
-import { ArrowRightIcon, CheckIcon, RocketIcon, UploadIcon } from "lucide-react";
+import {
+  ArrowRightIcon,
+  CheckIcon,
+  RocketIcon,
+  SendIcon,
+  TriangleAlertIcon,
+  UploadIcon,
+  UserIcon,
+} from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -73,8 +81,17 @@ export function SaasOnboarding() {
   const [configs, setConfigs] = useState<LlmConfig[]>([]);
   const [docs, setDocs] = useState<KbDoc[]>([]);
 
+  const [channelMode, setChannelMode] = useState<"userbot" | "bot">("userbot");
   const [botToken, setBotToken] = useState("");
   const [tgSubmitting, setTgSubmitting] = useState(false);
+
+  const [ubStep, setUbStep] = useState<"phone" | "code" | "2fa">("phone");
+  const [ubPhone, setUbPhone] = useState("");
+  const [ubCode, setUbCode] = useState("");
+  const [ubPassword, setUbPassword] = useState("");
+  const [ubLoginId, setUbLoginId] = useState("");
+  const [ubSubmitting, setUbSubmitting] = useState(false);
+  const [ubError, setUbError] = useState("");
 
   const [keyForms, setKeyForms] = useState<Record<"chat" | "embed", KeyForm>>({
     chat: { ...EMPTY_KEY_FORM },
@@ -209,6 +226,85 @@ export function SaasOnboarding() {
       }
     } finally {
       setTgSubmitting(false);
+    }
+  }
+
+  function userbotErrMessage(err: unknown): string {
+    if (err instanceof ApiError) {
+      if (handleAuthError(err)) return "";
+      if (err.status === 503) return "Userbot отключён на сервере (нет TELEGRAM_API_ID/HASH)";
+      const msg = err.extra?.message as string | undefined;
+      const retry = err.extra?.retryAfterSec as number | undefined;
+      if (err.errorCode === "flood_wait") {
+        return `Слишком много попыток — подождите ${retry ?? "?"} сек`;
+      }
+      return msg ?? `Ошибка: ${err.errorCode}`;
+    }
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  function resetUserbot() {
+    setUbStep("phone");
+    setUbPhone("");
+    setUbCode("");
+    setUbPassword("");
+    setUbLoginId("");
+    setUbError("");
+  }
+
+  async function handleUbPhone(e: FormEvent) {
+    e.preventDefault();
+    setUbError("");
+    const phone = ubPhone.trim();
+    if (!/^\+?\d{7,15}$/.test(phone)) {
+      setUbError("Укажите номер в формате +79991234567");
+      return;
+    }
+    setUbSubmitting(true);
+    try {
+      const res = await saas.startUserbotLogin(phone);
+      setUbLoginId(res.loginId);
+      setUbStep("code");
+    } catch (err) {
+      setUbError(userbotErrMessage(err));
+    } finally {
+      setUbSubmitting(false);
+    }
+  }
+
+  async function handleUbCode(e: FormEvent) {
+    e.preventDefault();
+    setUbError("");
+    setUbSubmitting(true);
+    try {
+      const res = await saas.verifyUserbotCode(ubLoginId, ubCode.trim());
+      if ("awaiting" in res) {
+        setUbStep("2fa");
+        return;
+      }
+      resetUserbot();
+      const { ch } = await loadState();
+      if (ch.length > 0) setStep(1);
+    } catch (err) {
+      setUbError(userbotErrMessage(err));
+    } finally {
+      setUbSubmitting(false);
+    }
+  }
+
+  async function handleUb2fa(e: FormEvent) {
+    e.preventDefault();
+    setUbError("");
+    setUbSubmitting(true);
+    try {
+      await saas.submitUserbot2fa(ubLoginId, ubPassword);
+      resetUserbot();
+      const { ch } = await loadState();
+      if (ch.length > 0) setStep(1);
+    } catch (err) {
+      setUbError(userbotErrMessage(err));
+    } finally {
+      setUbSubmitting(false);
     }
   }
 
@@ -385,16 +481,8 @@ export function SaasOnboarding() {
             <CardHeader>
               <CardTitle>Шаг 1. Подключите канал</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Создайте бота в{" "}
-                <a
-                  href="https://t.me/BotFather"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline"
-                >
-                  @BotFather
-                </a>{" "}
-                и вставьте токен. Webhook настроится автоматически.
+                Откуда приходят лиды? Подключите свой личный Telegram, чтобы ассистент отвечал в
+                вашей личке, или отдельного бота.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -440,21 +528,157 @@ export function SaasOnboarding() {
                   <Badge variant="success">готово</Badge>
                 </p>
               )}
-              <form onSubmit={handleTelegram} className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label>Telegram bot token</Label>
-                  <Input
-                    type="text"
-                    autoComplete="off"
-                    value={botToken}
-                    onChange={(e) => setBotToken(e.target.value)}
-                    placeholder="123456789:AAEhBP…"
-                  />
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setChannelMode("userbot")}
+                  className={cn(
+                    "flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                    channelMode === "userbot"
+                      ? "border-primary/50 bg-accent"
+                      : "text-muted-foreground hover:bg-muted/60",
+                  )}
+                >
+                  <UserIcon className="mt-0.5 size-4 shrink-0" />
+                  <span>
+                    <span className="block text-sm font-medium text-foreground">Личный аккаунт</span>
+                    <span className="block text-xs">Лиды пишут вам в личку</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChannelMode("bot")}
+                  className={cn(
+                    "flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                    channelMode === "bot"
+                      ? "border-primary/50 bg-accent"
+                      : "text-muted-foreground hover:bg-muted/60",
+                  )}
+                >
+                  <SendIcon className="mt-0.5 size-4 shrink-0" />
+                  <span>
+                    <span className="block text-sm font-medium text-foreground">Telegram-бот</span>
+                    <span className="block text-xs">Отдельный бот из @BotFather</span>
+                  </span>
+                </button>
+              </div>
+
+              {channelMode === "userbot" ? (
+                <div className="space-y-3">
+                  <p className="flex items-start gap-2 rounded-md border border-[var(--warning)]/40 bg-[color-mix(in_oklch,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
+                    <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+                    Подключайте только свой аккаунт и для ответов своим лидам — массовая рассылка
+                    нарушает правила Telegram.
+                  </p>
+                  {ubError && (
+                    <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                      {ubError}
+                    </p>
+                  )}
+
+                  {ubStep === "phone" && (
+                    <form onSubmit={handleUbPhone} className="space-y-3">
+                      <div className="space-y-1.5">
+                        <Label>Номер телефона аккаунта</Label>
+                        <Input
+                          type="tel"
+                          autoComplete="off"
+                          value={ubPhone}
+                          onChange={(e) => setUbPhone(e.target.value)}
+                          placeholder="+79991234567"
+                        />
+                      </div>
+                      <Button type="submit" disabled={ubSubmitting || !ubPhone.trim()}>
+                        {ubSubmitting ? "Отправляем код…" : "Получить код"}
+                      </Button>
+                    </form>
+                  )}
+
+                  {ubStep === "code" && (
+                    <form onSubmit={handleUbCode} className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Telegram отправил код на {ubPhone}. Введите его.
+                      </p>
+                      <div className="space-y-1.5">
+                        <Label>Код подтверждения</Label>
+                        <Input
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          value={ubCode}
+                          onChange={(e) => setUbCode(e.target.value)}
+                          placeholder="12345"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button type="submit" disabled={ubSubmitting || !ubCode.trim()}>
+                          {ubSubmitting ? "Проверяем…" : "Подтвердить"}
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={resetUserbot}>
+                          Изменить номер
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+
+                  {ubStep === "2fa" && (
+                    <form onSubmit={handleUb2fa} className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        У аккаунта включён облачный пароль (2FA). Введите его.
+                      </p>
+                      <div className="space-y-1.5">
+                        <Label>Пароль 2FA</Label>
+                        <Input
+                          type="password"
+                          autoComplete="off"
+                          value={ubPassword}
+                          onChange={(e) => setUbPassword(e.target.value)}
+                          placeholder="••••••••"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button type="submit" disabled={ubSubmitting || !ubPassword}>
+                          {ubSubmitting ? "Проверяем…" : "Войти"}
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={resetUserbot}>
+                          Начать заново
+                        </Button>
+                      </div>
+                    </form>
+                  )}
                 </div>
-                <Button type="submit" disabled={tgSubmitting || !botToken.trim()}>
-                  {tgSubmitting ? "Проверяем…" : "Подключить"}
-                </Button>
-              </form>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    Создайте бота в{" "}
+                    <a
+                      href="https://t.me/BotFather"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      @BotFather
+                    </a>{" "}
+                    и вставьте токен. Webhook настроится автоматически.
+                  </p>
+                  <form onSubmit={handleTelegram} className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label>Telegram bot token</Label>
+                      <Input
+                        type="text"
+                        autoComplete="off"
+                        value={botToken}
+                        onChange={(e) => setBotToken(e.target.value)}
+                        placeholder="123456789:AAEhBP…"
+                      />
+                    </div>
+                    <Button type="submit" disabled={tgSubmitting || !botToken.trim()}>
+                      {tgSubmitting ? "Проверяем…" : "Подключить"}
+                    </Button>
+                  </form>
+                </div>
+              )}
+
               <p className="text-sm text-muted-foreground">
                 Нужен WhatsApp или web-виджет?{" "}
                 <Link to="/channels" className="text-primary hover:underline">

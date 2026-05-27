@@ -914,7 +914,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
   // в userbotLoginStore между запросами. По завершении session шифруется в
   // tenant_secrets, создаётся channels row, reloader поднимает adapter.
   //
-  // Только superadmin: подключается личный аккаунт организации.
+  // Доступно любому тенанту: каждый подключает свой личный аккаунт (скоуп по tenantId).
 
   const userbotEnabled = () =>
     !!opts.userbotLoginStore && !!opts.telegramApiId && !!opts.telegramApiHash;
@@ -1064,9 +1064,6 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
   }
 
   app.post("/api/admin/channels/userbot/start", async (c) => {
-    if (c.var.role !== "superadmin") {
-      return c.json({ error: "forbidden", message: "Только superadmin" }, 403);
-    }
     if (!userbotEnabled()) {
       return c.json(
         {
@@ -1114,9 +1111,6 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
   });
 
   app.post("/api/admin/channels/userbot/verify", async (c) => {
-    if (c.var.role !== "superadmin") {
-      return c.json({ error: "forbidden" }, 403);
-    }
     if (!userbotEnabled()) return c.json({ error: "userbot_disabled" }, 503);
     let body: { loginId?: unknown; code?: unknown };
     try {
@@ -1156,9 +1150,6 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
   });
 
   app.post("/api/admin/channels/userbot/2fa", async (c) => {
-    if (c.var.role !== "superadmin") {
-      return c.json({ error: "forbidden" }, 403);
-    }
     if (!userbotEnabled()) return c.json({ error: "userbot_disabled" }, 503);
     let body: { loginId?: unknown; password?: unknown };
     try {
