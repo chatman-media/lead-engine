@@ -734,6 +734,10 @@ async function main() {
 
   const server = Bun.serve({
     port: cfg.port,
+    // idleTimeout: 0 — отключаем закрытие idle-соединений.
+    // По умолчанию Bun закрывает idle TCP через 10 с, что рвёт SSE-стримы
+    // (GET /api/admin/events) до первого пинга.
+    idleTimeout: 0,
     // Кастомный fetch: сначала пытаемся upgrade'нуть WS, иначе — Hono app.
     // Bun.serve.upgrade требует `server` reference, поэтому Hono mount'нуть
     // как простой `fetch: app.fetch` нельзя.

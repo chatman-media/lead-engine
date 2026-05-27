@@ -29,7 +29,7 @@ export function makeAdminEventsRoutes(): Hono {
 
       const ping = setInterval(() => {
         stream.writeSSE({ event: "ping", data: "" }).catch(() => {});
-      }, 25_000);
+      }, 15_000);
 
       await stream.onAbort(() => {
         unsub();
