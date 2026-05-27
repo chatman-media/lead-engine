@@ -498,7 +498,7 @@ export const kbSuggestions = pgTable("kb_suggestions", {
 export const skills = pgTable("skills", {
   id: serial("id").primaryKey(),
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  slug: text("slug").notNull().unique(),
+  slug: text("slug").notNull(),
   family: text("family").notNull(),
   displayName: text("display_name").notNull(),
   description: text("description").notNull(),
@@ -509,6 +509,7 @@ export const skills = pgTable("skills", {
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
+  uniqueIndex("skills_tenant_slug_unique").on(t.tenantId, t.slug),
   index("idx_skills_family").on(t.family),
   index("idx_skills_enabled").on(t.isEnabled).where(sql`is_enabled = TRUE`),
 ]);

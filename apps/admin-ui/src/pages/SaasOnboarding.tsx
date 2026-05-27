@@ -444,7 +444,7 @@ export function SaasOnboarding() {
                 <div className="space-y-1.5">
                   <Label>Telegram bot token</Label>
                   <Input
-                    type="password"
+                    type="text"
                     autoComplete="off"
                     value={botToken}
                     onChange={(e) => setBotToken(e.target.value)}
