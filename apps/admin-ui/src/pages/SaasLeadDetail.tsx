@@ -2,8 +2,8 @@ import {
   AlertTriangleIcon,
   ArrowLeftIcon,
   CheckIcon,
+  ChevronRightIcon,
   EditIcon,
-  RefreshCwIcon,
   SendIcon,
   Trash2Icon,
   XIcon,
@@ -226,9 +226,7 @@ export function SaasLeadDetail() {
   const [noteText, setNoteText] = useState("");
   const [addingNote, setAddingNote] = useState(false);
 
-  // Stage change state
-  const [stageChanging, setStageChanging] = useState(false);
-  const [selectedStageId, setSelectedStageId] = useState<string>("");
+  // Stage move state
   const [movingStage, setMovingStage] = useState(false);
 
   // Field editing state
@@ -312,21 +310,6 @@ export function SaasLeadDetail() {
       }
     } finally {
       setSendingPhoto(false);
-    }
-  }
-
-  async function handleMoveStage() {
-    if (!id || !selectedStageId) return;
-    setMovingStage(true);
-    try {
-      await saas.moveLeadStage(Number(id), Number(selectedStageId));
-      setStageChanging(false);
-      setSelectedStageId("");
-      reload();
-    } catch (err) {
-      onAuthError(err);
-    } finally {
-      setMovingStage(false);
     }
   }
 
@@ -476,84 +459,51 @@ export function SaasLeadDetail() {
         </div>
       </div>
 
+      {/* Pipeline stepper */}
+      {funnel?.stages && funnel.stages.length > 0 && (
+        <PipelineStepper
+          stages={funnel.stages}
+          currentStageId={lead.stageDefinitionId ?? null}
+          movingStage={movingStage}
+          onMove={async (stageId) => {
+            setMovingStage(true);
+            try {
+              await saas.moveLeadStage(Number(id), stageId);
+              reload();
+            } catch (err) {
+              onAuthError(err);
+            } finally {
+              setMovingStage(false);
+            }
+          }}
+        />
+      )}
+
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Основная колонка */}
         <div className="lg:col-span-2 flex flex-col gap-4">
-          {/* Текущая стадия */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Текущая стадия</CardTitle>
-                {funnel?.stages && funnel.stages.length > 0 && !stageChanging && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => {
-                      setSelectedStageId(String(lead.stageDefinitionId ?? ""));
-                      setStageChanging(true);
-                    }}
-                  >
-                    <RefreshCwIcon className="size-3 mr-1" />
-                    Сменить стадию
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-3">
-                <Badge variant="secondary" className="text-sm">
-                  {stageDef?.displayName ?? KIND_RU[lead.state] ?? lead.state}
-                </Badge>
-                {stageDef && (
-                  <span className="text-xs text-muted-foreground">
-                    {STAGE_TYPE_RU[stageDef.stageType] ?? stageDef.stageType}
-                  </span>
-                )}
-              </div>
-              {lead.rejectedReason && (
-                <p className="mt-2 text-sm text-destructive">
-                  Причина отказа: {lead.rejectedReason}
-                </p>
-              )}
-              {stageChanging && funnel?.stages && (
-                <div className="mt-3 flex items-center gap-2">
-                  <Select value={selectedStageId} onValueChange={setSelectedStageId}>
-                    <SelectTrigger className="h-8 text-sm flex-1">
-                      <SelectValue placeholder="Выбрать стадию…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {funnel.stages.map((s) => (
-                        <SelectItem key={s.id} value={String(s.id)}>
-                          {s.displayName}
-                          <span className="ml-1 text-xs text-muted-foreground">
-                            ({KIND_RU[s.kind] ?? s.kind})
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    size="sm"
-                    className="h-8 px-2"
-                    disabled={!selectedStageId || movingStage}
-                    onClick={handleMoveStage}
-                  >
-                    <CheckIcon className="size-3" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 px-2"
-                    onClick={() => setStageChanging(false)}
-                    disabled={movingStage}
-                  >
-                    <XIcon className="size-3" />
-                  </Button>
+          {/* Текущая стадия — инфо */}
+          {(stageDef || lead.rejectedReason) && (
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <div className="flex items-center gap-3">
+                  <Badge variant="secondary" className="text-sm">
+                    {stageDef?.displayName ?? KIND_RU[lead.state] ?? lead.state}
+                  </Badge>
+                  {stageDef && (
+                    <span className="text-xs text-muted-foreground">
+                      {STAGE_TYPE_RU[stageDef.stageType] ?? stageDef.stageType}
+                    </span>
+                  )}
                 </div>
-              )}
-            </CardContent>
-          </Card>
+                {lead.rejectedReason && (
+                  <p className="mt-2 text-sm text-destructive">
+                    Причина отказа: {lead.rejectedReason}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Отправить QR / фото клиенту */}
           <Card>
@@ -776,6 +726,93 @@ export function SaasLeadDetail() {
             </CardContent>
           </Card>
         </div>
+      </div>
+    </div>
+  );
+}
+
+const KIND_COLOR_STEP: Record<string, string> = {
+  intake: "border-blue-400 text-blue-600",
+  active: "border-green-400 text-green-600",
+  terminal_won: "border-emerald-500 text-emerald-600",
+  terminal_lost: "border-red-400 text-red-500",
+};
+
+function PipelineStepper({
+  stages,
+  currentStageId,
+  movingStage,
+  onMove,
+}: {
+  stages: { id: number; displayName: string; kind: string; stageType: string }[];
+  currentStageId: number | null;
+  movingStage: boolean;
+  onMove: (stageId: number) => Promise<void>;
+}) {
+  const [pendingId, setPendingId] = useState<number | null>(null);
+  const currentIdx = stages.findIndex((s) => s.id === currentStageId);
+
+  async function handleClick(stageId: number) {
+    if (stageId === currentStageId || movingStage) return;
+    setPendingId(stageId);
+    await onMove(stageId);
+    setPendingId(null);
+  }
+
+  return (
+    <div className="rounded-lg border bg-card px-4 py-3">
+      <p className="text-xs text-muted-foreground mb-2.5">
+        Пайплайн · нажмите на стадию чтобы перевести лида
+      </p>
+      <div className="flex items-center gap-0 overflow-x-auto pb-1 scrollbar-none">
+        {stages.map((stage, idx) => {
+          const isCurrent = stage.id === currentStageId;
+          const isPast = currentIdx >= 0 && idx < currentIdx;
+          const isPending = pendingId === stage.id;
+          const colorClass = KIND_COLOR_STEP[stage.kind] ?? "border-gray-300 text-gray-500";
+
+          return (
+            <div key={stage.id} className="flex items-center shrink-0">
+              <button
+                type="button"
+                disabled={movingStage}
+                onClick={() => handleClick(stage.id)}
+                className={`flex flex-col items-center gap-1 px-2 py-1 rounded-md transition-colors group ${
+                  isCurrent
+                    ? "cursor-default"
+                    : movingStage
+                      ? "opacity-50 cursor-not-allowed"
+                      : "cursor-pointer hover:bg-accent"
+                }`}
+                title={stage.displayName}
+              >
+                <div
+                  className={`flex size-7 items-center justify-center rounded-full border-2 text-xs font-semibold transition-colors ${
+                    isCurrent
+                      ? `${colorClass} bg-primary/5`
+                      : isPast
+                        ? "border-muted-foreground/40 bg-muted-foreground/10 text-muted-foreground"
+                        : isPending
+                          ? "border-primary bg-primary/10 text-primary animate-pulse"
+                          : "border-muted-foreground/20 text-muted-foreground/50 group-hover:border-muted-foreground/60 group-hover:text-muted-foreground"
+                  }`}
+                >
+                  {isPast ? <CheckIcon className="size-3" /> : idx + 1}
+                </div>
+                <span
+                  className={`max-w-[72px] text-center text-[10px] leading-tight whitespace-nowrap overflow-hidden text-ellipsis ${
+                    isCurrent ? "font-semibold text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  {stage.displayName}
+                </span>
+              </button>
+              {idx < stages.length - 1 && (
+                <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/30" />
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
