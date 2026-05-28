@@ -34,6 +34,7 @@ import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
 import { SaasSuperadmin } from "./pages/SaasSuperadmin.tsx";
 import { SaasNotifications } from "./pages/SaasNotifications.tsx";
 import { SaasTestBot } from "./pages/SaasTestBot.tsx";
+import { SaasExchange } from "./pages/SaasExchange.tsx";
 import { ToolsSettings } from "./pages/ToolsSettings.tsx";
 
 function RequireAuth() {
@@ -101,6 +102,7 @@ export function App() {
               <Route path="/conversations" element={<SaasConversations />} />
               <Route path="/conversations/:id" element={<SaasConversations />} />
               <Route path="/funnel" element={<SaasFunnel />} />
+              <Route path="/exchange" element={<SaasExchange />} />
               <Route path="/vacancies" element={<SaasVacancies />} />
               <Route path="/skills" element={<SaasSkills />} />
               <Route path="/hooks" element={<SaasHooks />} />

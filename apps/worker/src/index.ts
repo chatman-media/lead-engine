@@ -6,6 +6,7 @@ import { makeDb } from "./db.ts";
 import { OutboundDispatcher } from "./dispatcher.ts";
 import { type MetricsServer, startMetricsServer } from "./metrics-server.ts";
 import { CheckinSweeper } from "./checkin-sweep.ts";
+import { ExchangePaymentSweeper } from "./exchange-payment-sweep.ts";
 import { StaleleadSweeper } from "./stale-lead-sweep.ts";
 
 async function main() {
@@ -102,6 +103,20 @@ async function main() {
     log.info("check-in sweep enabled", { intervalMs: cfg.checkinSweepIntervalMs });
   }
 
+  // Exchange payment-TTL sweep: напоминает/expire'ит заявки с истёкшим TTL котировки.
+  let exchangePaymentSweeperPromise: Promise<void> = Promise.resolve();
+  if (cfg.exchangePaymentSweepMs > 0) {
+    const exchangeSweeper = new ExchangePaymentSweeper(db, {
+      intervalMs: cfg.exchangePaymentSweepMs,
+    });
+    exchangePaymentSweeperPromise = exchangeSweeper.run(abort.signal).catch((err) => {
+      log.error("exchange-payment-sweep fatal", {
+        err: err instanceof Error ? err : new Error(String(err)),
+      });
+    });
+    log.info("exchange payment-TTL sweep enabled", { intervalMs: cfg.exchangePaymentSweepMs });
+  }
+
   // Periodic channel reload — подхватывает newly-onboarded боты которые
   // tenant добавил через apps/api UI после worker boot. apps/api делает
   // in-process hot-reload, worker — отдельный процесс, polling.
@@ -130,7 +145,12 @@ async function main() {
     abort.abort();
     dispatcher.stop();
     metricsServer?.stop();
-    await Promise.all([dispatcherPromise, staleSweeperPromise, checkinSweeperPromise]);
+    await Promise.all([
+      dispatcherPromise,
+      staleSweeperPromise,
+      checkinSweeperPromise,
+      exchangePaymentSweeperPromise,
+    ]);
     channels.closeAll();
     await close();
     process.exit(0);

@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   BarChart2Icon,
+  ArrowLeftRightIcon,
   BellIcon,
   BriefcaseIcon,
   CableIcon,
@@ -86,6 +87,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
       { to: "/outreach", label: "Рассылка", icon: SendIcon },
       { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
+      { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon },
       { to: "/vacancies", label: "Каталог", icon: BriefcaseIcon },
     ],
   },

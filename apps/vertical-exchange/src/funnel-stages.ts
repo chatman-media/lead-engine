@@ -6,8 +6,17 @@ import type { FunnelStageDef } from "@chatman-media/verticals";
  * здесь машина состояний (валидируется conversation-engine'ом), там —
  * DB-определения стадий с полями.
  *
- * quote_request (intake) → rate_confirmation → kyc_collection →
- * awaiting_payment → qr_delivery → completed (won) | cancelled (lost).
+ * Реальный воркфлоу (по образцу ARBI Exchange):
+ *   quote_request (intake) → rate_confirmation → [kyc_collection?] →
+ *   awaiting_payment → payout → completed (won) | cancelled (lost).
+ *
+ * kyc_collection — ОПЦИОНАЛЬНАЯ стадия (верификация по желанию клиента,
+ * видео-кружок → оператор). Поэтому из rate_confirmation разрешён переход
+ * как в kyc_collection, так и сразу в awaiting_payment.
+ *
+ * payout — выдача: код для получения в офисе (Amount + Code) или cardless
+ * код для снятия в банкомате (телефон + код). Код приходит от провайдера/
+ * оператора — бот его не выдумывает.
  */
 export const EXCHANGE_FUNNEL_STAGES: readonly FunnelStageDef[] = [
   {
@@ -20,24 +29,25 @@ export const EXCHANGE_FUNNEL_STAGES: readonly FunnelStageDef[] = [
     slug: "rate_confirmation",
     kind: "lead",
     displayName: "Подтверждение курса",
-    next: ["kyc_collection", "cancelled"],
+    // KYC опционален → разрешаем сразу в awaiting_payment.
+    next: ["kyc_collection", "awaiting_payment", "cancelled"],
   },
   {
     slug: "kyc_collection",
     kind: "lead",
-    displayName: "KYC / документы",
+    displayName: "Верификация (опц.)",
     next: ["awaiting_payment", "cancelled"],
   },
   {
     slug: "awaiting_payment",
     kind: "lead",
     displayName: "Ожидание оплаты",
-    next: ["qr_delivery", "cancelled"],
+    next: ["payout", "cancelled"],
   },
   {
-    slug: "qr_delivery",
+    slug: "payout",
     kind: "lead",
-    displayName: "Выдача QR",
+    displayName: "Выдача",
     next: ["completed", "cancelled"],
   },
   { slug: "completed", kind: "terminal", displayName: "Сделка закрыта" },

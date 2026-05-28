@@ -64,6 +64,8 @@ import { makeAdminMessageTemplatesRoutes } from "./routes/admin-message-template
 import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
+import { makeAdminExchangeRoutes } from "./routes/admin-exchange.ts";
+import { refreshAllActiveTenants } from "./lib/exchange/rate-feed.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeAdminWorkflowRoutes } from "./routes/admin-workflow.ts";
 import { makeAdminNotificationsRoutes } from "./routes/admin-notifications.ts";
@@ -442,6 +444,19 @@ async function main() {
   );
   log.info("admin-tools routes enabled");
 
+  // Exchange (обменный пункт): курсы/формулы, CRM заявок, оборот, реквизиты.
+  app.route(
+    "/",
+    makeAdminExchangeRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      onReload: strategyBundle
+        ? (tenantId) => strategyBundle.invalidateToolsFor(tenantId)
+        : undefined,
+    }),
+  );
+  log.info("admin-exchange routes enabled");
+
   // Diagnostics — health-check для tenant setup'а.
   // resolveChat передаём для ?live=1 LLM smoke-test (стоит ~1 токен).
   app.route(
@@ -767,6 +782,7 @@ async function main() {
     log.info("shutting down");
     clearInterval(usageAlertInterval);
     clearTimeout(usageAlertFirstRun);
+    if (rateFeedInterval) clearInterval(rateFeedInterval);
     server.stop();
     webAbort.abort();
     webDispatcher.stop();
@@ -794,6 +810,21 @@ async function main() {
       log.warn("usage-alerts initial check failed", { err: e }),
     );
   }, 5 * 60 * 1000);
+
+  // Exchange rate-feed: периодически тянет рыночный base_rate для auto-курсов.
+  // RATE_FEED_MS (default 180000 = 3 мин). 0 — отключить.
+  const rateFeedMs = Number.parseInt(process.env.RATE_FEED_MS ?? "180000", 10);
+  let rateFeedInterval: ReturnType<typeof setInterval> | null = null;
+  if (rateFeedMs > 0) {
+    const runFeed = () =>
+      refreshAllActiveTenants(db, {
+        warn: (m) => log.warn(m),
+        info: (m) => log.info(m),
+      }).catch((e) => log.warn("rate-feed run failed", { err: e }));
+    rateFeedInterval = setInterval(runFeed, rateFeedMs);
+    setTimeout(runFeed, 15_000); // первый прогон через 15с после старта
+    log.info("exchange rate-feed enabled", { intervalMs: rateFeedMs });
+  }
 
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());

@@ -26,6 +26,7 @@ import { directorHooks, leads, llmProviderConfigs, skills, stageDefinitions } fr
 import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
 import type { ApiConfig } from "./config.ts";
+import { hasActiveExchangeRates, makeExchangeTools } from "./lib/exchange/tools.ts";
 import { type OnUsage, wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
 
 /**
@@ -337,28 +338,48 @@ export function makeReplyStrategy(
   }
 
   // resolveTools: builds the list of agentic tools enabled for the tenant.
-  // Results are cached per-tenant and invalidated via toolsCache.delete(tenantId)
-  // when the admin UI updates tool config (onReload hook in admin-tools route).
+  //
+  // Два класса tools:
+  //   - tenant-bound (booking_link): зависят только от tenantId → кешируются.
+  //   - conversation-bound (exchange): зависят от conversationId → строятся
+  //     СВЕЖИМИ на каждый ответ (нельзя кешировать по тенанту, иначе захватят
+  //     первый conversationId). Гейт «включён ли обмен» (наличие активных
+  //     курсов) кешируется отдельным boolean.
+  // Оба кеша сбрасываются через invalidateToolsFor(tenantId) (admin-tools /
+  // admin-exchange onReload).
   const toolsCache = new Map<number, AnyRagTool[]>();
+  const exchangeEnabledCache = new Map<number, boolean>();
   async function resolveTools(input: {
     tenantId: number;
     conversationId: number;
   }): Promise<AnyRagTool[]> {
-    const cached = toolsCache.get(input.tenantId);
-    if (cached !== undefined) return cached;
+    let base = toolsCache.get(input.tenantId);
+    if (base === undefined) {
+      const bookingUrl = await getDecryptedSecret({
+        db,
+        tenantId: input.tenantId,
+        key: "tool_booking_url",
+        masterKeyHex: cfg.masterKeyHex,
+      });
+      base = [];
+      if (bookingUrl) base.push(makeBookingLinkTool(bookingUrl));
+      toolsCache.set(input.tenantId, base);
+    }
 
-    const bookingUrl = await getDecryptedSecret({
+    let exchangeEnabled = exchangeEnabledCache.get(input.tenantId);
+    if (exchangeEnabled === undefined) {
+      exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(() => false);
+      exchangeEnabledCache.set(input.tenantId, exchangeEnabled);
+    }
+    if (!exchangeEnabled) return base;
+
+    const exchangeTools = makeExchangeTools({
       db,
       tenantId: input.tenantId,
-      key: "tool_booking_url",
+      conversationId: input.conversationId,
       masterKeyHex: cfg.masterKeyHex,
     });
-
-    const tools: AnyRagTool[] = [];
-    if (bookingUrl) tools.push(makeBookingLinkTool(bookingUrl));
-
-    toolsCache.set(input.tenantId, tools);
-    return tools;
+    return [...base, ...exchangeTools];
   }
 
   // resolveReranker: reads per-tenant llm_provider_configs with purpose='reranker'.
@@ -482,7 +503,10 @@ export function makeReplyStrategy(
 
   return {
     strategy,
-    invalidateToolsFor: (tenantId: number) => toolsCache.delete(tenantId),
+    invalidateToolsFor: (tenantId: number) => {
+      toolsCache.delete(tenantId);
+      exchangeEnabledCache.delete(tenantId);
+    },
   };
 }
 
