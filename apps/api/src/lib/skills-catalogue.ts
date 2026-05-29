@@ -308,4 +308,17 @@ export const SKILLS_CATALOGUE: SkillCatalogueEntry[] = [
     intent: "raise_trust",
     isEnabled: true,
   },
+
+  // ── Custom Exchange (1) ───────────────────────────────────────────────────
+  {
+    slug: "exchange-vip-upsell",
+    family: "custom",
+    displayName: "Обменник — апселл VIP-услуг (Трансфер/Коридор)",
+    description: "Детекция даты прилёта и предложение трансфера или Зелёного коридора.",
+    promptFragment:
+      "Если клиент упоминает дату прилёта или говорит, что только собирается на Пхукет — обязательно предложи доп. услуги: «Вижу, вы скоро прилетаете! Можем организовать комфортный трансфер из аэропорта или Зелёный коридор (VIP-проход границы) — подсказать детали?»",
+    applicableStageKinds: ["intake"],
+    intent: "advance_deal",
+    isEnabled: true,
+  },
 ];
