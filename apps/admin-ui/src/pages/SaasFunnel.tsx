@@ -41,9 +41,11 @@ const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "form_fill", label: "Сбор данных" },
   { value: "document_upload", label: "Загрузка документов" },
   { value: "document_signature", label: "Подписание" },
+  { value: "rate_confirmation", label: "Подтверждение курса" },
   { value: "external_approval", label: "Внешнее одобрение" },
   { value: "payment", label: "Оплата" },
   { value: "waiting", label: "Ожидание" },
+  { value: "awaiting_operator", label: "Ожидание оператора" },
   { value: "interaction", label: "Встреча / звонок" },
   { value: "assessment", label: "Оценка" },
   { value: "milestone", label: "Контрольная точка" },
@@ -61,6 +63,7 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "email", label: "Email" },
   { value: "file", label: "Файл" },
   { value: "photo", label: "Фото" },
+  { value: "video", label: "Видео" },
 ];
 
 const KIND_COLORS: Record<string, string> = {

@@ -283,8 +283,11 @@ export async function processInbound(
     await deps.conversations.touchLastMessageAt(conversation.id, now);
   }
 
-  // 4b. Notifications (Human takeover / Document upload).
+  // 4b. Notifications (Human takeover / Verification video / Document upload).
   const hasMedia = inbound.parts.some((p) => p.kind !== "text" && p.kind !== "callback_query");
+  // «Кружок» (video_note) — опциональная видео-верификация: уходит оператору
+  // на визуальную проверку личности (см. обменник). Поток не блокируется.
+  const hasVideoNote = inbound.parts.some((p) => p.kind === "video_note");
   if (deps.notifications && !existingMsg) {
     if (conversation.mode === "human" || conversation.mode === "queued") {
       await deps.notifications.notify({
@@ -295,6 +298,17 @@ export async function processInbound(
         data: {
           displayName: contact.displayName || "Без имени",
           text: text || "(Медиа)",
+        },
+      });
+    } else if (hasVideoNote) {
+      await deps.notifications.notify({
+        tenantId: deps.tenant.tenantId,
+        eventType: "verification_requested",
+        conversationId: conversation.id,
+        contactId: contact.id,
+        data: {
+          displayName: contact.displayName || "Без имени",
+          text: text || "(Видео-кружок для верификации)",
         },
       });
     } else if (hasMedia) {

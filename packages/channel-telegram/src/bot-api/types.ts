@@ -61,6 +61,15 @@ export interface TgVoice {
   file_size?: number;
 }
 
+/** «Кружок» — видео-сообщение Telegram (квадратное короткое видео). */
+export interface TgVideoNote {
+  file_id: string;
+  file_unique_id: string;
+  length: number;
+  duration: number;
+  file_size?: number;
+}
+
 export interface TgDocument {
   file_id: string;
   file_unique_id: string;
@@ -83,6 +92,8 @@ export interface TgMessage {
   photo?: TgPhotoSize[];
   video?: TgVideo;
   voice?: TgVoice;
+  /** «Кружок» — видео-сообщение (video note). Для видео-верификации. */
+  video_note?: TgVideoNote;
   document?: TgDocument;
   /** When this message is a reply to another, Telegram inlines the
    *  parent message here. We use it to detect operator replies to lead

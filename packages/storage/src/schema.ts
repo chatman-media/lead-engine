@@ -323,9 +323,11 @@ export const STAGE_TYPES = [
   "form_fill",        // сбор данных через поля
   "document_upload",  // загрузка файлов/документов
   "document_signature", // подписание договора
+  "rate_confirmation", // подтверждение курса/цены
   "external_approval",  // ждём решения третьей стороны
   "payment",          // оплата
   "waiting",          // ожидание (по времени)
+  "awaiting_operator", // ждём ручного действия оператора
   "interaction",      // встреча/звонок/просмотр
   "assessment",       // оценка/квалификация
   "milestone",        // контрольная точка
@@ -341,7 +343,7 @@ export const STAGE_KINDS = [
 export const FIELD_TYPES = [
   "text", "textarea", "number", "date",
   "select", "multiselect", "boolean",
-  "phone", "email", "file", "photo",
+  "phone", "email", "file", "photo", "video",
 ] as const;
 
 // Стадии воронки — хранятся в БД, не в коде.
@@ -372,7 +374,7 @@ export const stageDefinitions = pgTable("stage_definitions", {
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
   check("stage_definitions_kind_check", sql`${t.kind} IN ('intake','active','terminal_won','terminal_lost')`),
-  check("stage_definitions_type_check", sql`${t.stageType} IN ('form_fill','document_upload','document_signature','external_approval','payment','waiting','interaction','assessment','milestone')`),
+  check("stage_definitions_type_check", sql`${t.stageType} IN ('form_fill','document_upload','document_signature','rate_confirmation','external_approval','payment','waiting','awaiting_operator','interaction','assessment','milestone')`),
   uniqueIndex("uniq_stage_def_funnel_slug").on(t.funnelId, t.slug),
   index("idx_stage_def_funnel_pos").on(t.funnelId, t.position),
 ]);
@@ -397,7 +399,7 @@ export const stageFields = pgTable("stage_fields", {
   aiExtractable: boolean("ai_extractable").notNull().default(false),
   createdAt: integer("created_at").notNull().default(epochNow()),
 }, (t) => [
-  check("stage_fields_type_check", sql`${t.fieldType} IN ('text','textarea','number','date','select','multiselect','boolean','phone','email','file','photo')`),
+  check("stage_fields_type_check", sql`${t.fieldType} IN ('text','textarea','number','date','select','multiselect','boolean','phone','email','file','photo','video')`),
   uniqueIndex("uniq_stage_fields_stage_slug").on(t.stageId, t.slug),
   index("idx_stage_fields_stage_pos").on(t.stageId, t.position),
 ]);
@@ -1092,4 +1094,69 @@ export const operatorSettings = pgTable("operator_settings", {
   uniqueIndex("uniq_op_settings_admin").on(t.adminId),
   index("idx_op_settings_tenant").on(t.tenantId),
   index("idx_op_settings_link_token").on(t.linkToken),
+]);
+
+// ---- Exchange (обменный пункт) ----------------------------------------
+// Курсы + формула. Итоговый курс = base_rate * (1 - margin_pct/100), минус
+// fee_fixed_thb из итога. Один активный ряд на (tenant, asset, quote, network).
+export const exchangeRates = pgTable("exchange_rates", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  asset: text("asset").notNull(),
+  quoteAsset: text("quote_asset").notNull().default("THB"),
+  network: text("network").notNull().default(""),
+  baseRate: doublePrecision("base_rate").notNull(),
+  // 'multiply' (крипта: thb=amount*rate) | 'divide' (RUB: thb=amount/rate)
+  quoteMode: text("quote_mode").notNull().default("multiply"),
+  marginPct: doublePrecision("margin_pct").notNull().default(0),
+  feeFixedThb: doublePrecision("fee_fixed_thb").notNull().default(0),
+  minAmountFrom: doublePrecision("min_amount_from"),
+  maxAmountFrom: doublePrecision("max_amount_from"),
+  isActive: boolean("is_active").notNull().default(true),
+  // base_rate тянется рыночным фидом (worker), маржа/комиссия — ручные.
+  autoUpdate: boolean("auto_update").notNull().default(false),
+  updatedByAdminId: integer("updated_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_exchange_rates_dir").on(t.tenantId, t.asset, t.quoteAsset, t.network),
+  index("idx_exchange_rates_tenant_active").on(t.tenantId, t.isActive),
+]);
+
+// Заявка на обмен. rate/amount_to_thb — снапшот на момент создания заявки.
+// Оборот считается агрегатом SUM(amount_to_thb) по completed.
+export const exchangeOrders = pgTable("exchange_orders", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  contactId: integer("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+  conversationId: integer("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
+  leadId: integer("lead_id").references(() => leads.id, { onDelete: "set null" }),
+  telegramId: text("telegram_id"),
+  verificationId: text("verification_id"),
+  direction: text("direction").notNull(),
+  assetFrom: text("asset_from").notNull(),
+  network: text("network").notNull().default(""),
+  amountFrom: doublePrecision("amount_from").notNull(),
+  rate: doublePrecision("rate").notNull(),
+  amountToThb: doublePrecision("amount_to_thb").notNull(),
+  payoutMethod: text("payout_method"),
+  payoutLocation: text("payout_location"),
+  payoutCode: text("payout_code"),
+  status: text("status").notNull().default("quote"),
+  requisitesJson: text("requisites_json"),
+  proofJson: text("proof_json"),
+  riskJson: text("risk_json"),
+  rateExpiresAt: integer("rate_expires_at"),
+  idempotencyKey: text("idempotency_key"),
+  lastReminderAt: integer("last_reminder_at"),
+  completedAt: integer("completed_at"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("exchange_orders_status_check", sql`${t.status} IN ('quote','awaiting_payment','paid','payout','completed','cancelled','expired')`),
+  uniqueIndex("uniq_exchange_orders_idem").on(t.idempotencyKey),
+  index("idx_exchange_orders_tenant_status").on(t.tenantId, t.status),
+  index("idx_exchange_orders_tenant_contact").on(t.tenantId, t.contactId),
+  index("idx_exchange_orders_tenant_created").on(t.tenantId, t.createdAt),
+  index("idx_exchange_orders_awaiting_ttl").on(t.status, t.rateExpiresAt).where(sql`status = 'awaiting_payment'`),
 ]);

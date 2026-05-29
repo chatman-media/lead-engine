@@ -32,6 +32,11 @@ export interface WorkerConfig {
    */
   checkinSweepIntervalMs: number;
   /**
+   * Период payment-TTL sweep обменника, ms. Default 60000 (раз в минуту). 0 — отключить.
+   * Напоминает/expire'ит заявки exchange_orders с истёкшим TTL котировки.
+   */
+  exchangePaymentSweepMs: number;
+  /**
    * Платформенный токен для бота уведомлений операторов.
    * env PLATFORM_OPERATOR_BOT_TOKEN.
    */
@@ -69,6 +74,10 @@ export function loadWorkerConfig(): WorkerConfig {
     ),
     checkinSweepIntervalMs: Number.parseInt(
       process.env.WORKER_CHECKIN_SWEEP_MS ?? "3600000",
+      10,
+    ),
+    exchangePaymentSweepMs: Number.parseInt(
+      process.env.WORKER_EXCHANGE_PAYMENT_SWEEP_MS ?? "60000",
       10,
     ),
     operatorBotToken: process.env.PLATFORM_OPERATOR_BOT_TOKEN ?? "",

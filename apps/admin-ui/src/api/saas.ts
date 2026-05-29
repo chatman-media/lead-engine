@@ -351,9 +351,11 @@ export type StageType =
   | "form_fill"
   | "document_upload"
   | "document_signature"
+  | "rate_confirmation"
   | "external_approval"
   | "payment"
   | "waiting"
+  | "awaiting_operator"
   | "interaction"
   | "assessment"
   | "milestone";
@@ -368,7 +370,8 @@ export type FieldType =
   | "phone"
   | "email"
   | "file"
-  | "photo";
+  | "photo"
+  | "video";
 
 export interface StageField {
   id: number;
@@ -750,6 +753,71 @@ async function uploadMultipart<T>(path: string, form: FormData): Promise<T> {
     throw new ApiError(res.status, errorCode, Object.keys(extra).length > 0 ? extra : undefined);
   }
   return res.json() as Promise<T>;
+}
+
+export interface ExchangeRate {
+  id: number;
+  tenantId: number;
+  asset: string;
+  quoteAsset: string;
+  network: string;
+  baseRate: number;
+  quoteMode: "multiply" | "divide";
+  marginPct: number;
+  feeFixedThb: number;
+  minAmountFrom: number | null;
+  maxAmountFrom: number | null;
+  isActive: boolean;
+  autoUpdate: boolean;
+  updatedAt: number;
+}
+
+export interface ExchangeRateInput {
+  asset: string;
+  quoteAsset?: string;
+  network?: string;
+  baseRate: number;
+  quoteMode?: "multiply" | "divide";
+  marginPct?: number;
+  feeFixedThb?: number;
+  minAmountFrom?: number | null;
+  maxAmountFrom?: number | null;
+  isActive?: boolean;
+  autoUpdate?: boolean;
+}
+
+export interface ExchangeOrder {
+  id: number;
+  contactId: number | null;
+  conversationId: number | null;
+  telegramId: string | null;
+  verificationId: string | null;
+  direction: string;
+  assetFrom: string;
+  network: string;
+  amountFrom: number;
+  rate: number;
+  amountToThb: number;
+  payoutMethod: string | null;
+  payoutLocation: string | null;
+  payoutCode: string | null;
+  status: string;
+  requisitesJson: string | null;
+  proofJson: string | null;
+  riskJson: string | null;
+  rateExpiresAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ExchangeTurnover {
+  totals: { completedCount: number; openCount: number; totalThb: number };
+  byContact: Array<{
+    contactId: number | null;
+    telegramId: string | null;
+    orders: number;
+    totalThb: number;
+  }>;
 }
 
 export const saas = {
@@ -1565,4 +1633,51 @@ export const saas = {
     });
   },
 
+  // ── Exchange (обменный пункт) ─────────────────────────────────────────
+  exchangeRates() {
+    return request<{ rates: ExchangeRate[] }>("/api/admin/exchange/rates");
+  },
+  saveExchangeRate(input: ExchangeRateInput) {
+    return request<{ ok: boolean; rate: ExchangeRate }>("/api/admin/exchange/rates", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  deleteExchangeRate(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/exchange/rates/${id}`, { method: "DELETE" });
+  },
+  refreshExchangeRates() {
+    return request<{ ok: boolean; updated: number; skipped: number; failed: number }>(
+      "/api/admin/exchange/rates/refresh",
+      { method: "POST" },
+    );
+  },
+  saveExchangeRequisite(key: string, value: string) {
+    return request<{ ok: boolean }>("/api/admin/exchange/requisites", {
+      method: "POST",
+      body: JSON.stringify({ key, value }),
+    });
+  },
+  exchangeOrders(status?: string) {
+    const q = status ? `?status=${encodeURIComponent(status)}` : "";
+    return request<{ orders: ExchangeOrder[] }>(`/api/admin/exchange/orders${q}`);
+  },
+  updateExchangeOrder(
+    id: number,
+    patch: Partial<{
+      payoutCode: string;
+      payoutLocation: string;
+      payoutMethod: string;
+      verificationId: string;
+      status: string;
+    }>,
+  ) {
+    return request<{ ok: boolean; order: ExchangeOrder }>(`/api/admin/exchange/orders/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  },
+  exchangeTurnover() {
+    return request<ExchangeTurnover>("/api/admin/exchange/turnover");
+  },
 };

@@ -47,6 +47,9 @@ export type InboundPart =
   | { kind: "photo"; mediaRef: MediaRef; caption?: string }
   | { kind: "video"; mediaRef: MediaRef; caption?: string }
   | { kind: "voice"; mediaRef: MediaRef; durationSec?: number }
+  // Telegram «кружок» (видео-сообщение). Используется для опциональной
+  // видео-верификации личности в обменнике (уходит оператору).
+  | { kind: "video_note"; mediaRef: MediaRef; durationSec?: number }
   | { kind: "document"; mediaRef: MediaRef; mimeType?: string; fileName?: string }
   | { kind: "callback_query"; data: string; originalMessageId: string };
 

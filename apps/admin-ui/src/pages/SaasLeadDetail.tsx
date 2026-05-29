@@ -39,9 +39,11 @@ const STAGE_TYPE_RU: Record<string, string> = {
   form_fill: "Сбор данных",
   document_upload: "Загрузка документов",
   document_signature: "Подписание",
+  rate_confirmation: "Подтверждение курса",
   external_approval: "Внешнее одобрение",
   payment: "Оплата",
   waiting: "Ожидание",
+  awaiting_operator: "Ожидание оператора",
   interaction: "Встреча / звонок",
   assessment: "Оценка",
   milestone: "Контрольная точка",
@@ -195,7 +197,7 @@ function FieldEditor({ field, initialJson, onChange }: FieldEditorProps) {
     );
   }
 
-  if (field.fieldType === "file" || field.fieldType === "photo") {
+  if (field.fieldType === "file" || field.fieldType === "photo" || field.fieldType === "video") {
     return (
       <span className="text-xs text-muted-foreground italic">
         {renderFieldValue(field, JSON.stringify(val))}

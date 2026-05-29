@@ -48,6 +48,13 @@ function partsFromMessage(channelId: string, msg: TgMessage): InboundPart[] {
       mediaRef: ref(channelId, msg.voice.file_id),
       durationSec: msg.voice.duration,
     });
+  } else if (msg.video_note) {
+    // «Кружок» — видео-сообщение Telegram. Используется для видео-верификации.
+    parts.push({
+      kind: "video_note",
+      mediaRef: ref(channelId, msg.video_note.file_id),
+      ...(msg.video_note.duration ? { durationSec: msg.video_note.duration } : {}),
+    });
   } else if (msg.document) {
     parts.push({
       kind: "document",
