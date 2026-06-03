@@ -136,7 +136,9 @@ export function SaasOnboarding() {
 
   const [keyForms, setKeyForms] = useState<Record<"chat" | "embed", KeyForm>>({
     chat: { ...EMPTY_KEY_FORM },
-    embed: { ...EMPTY_KEY_FORM },
+    // Размерность фиксирована под колонку базы знаний (vector(1536)); вектор
+    // любой модели приводится к ней автоматически (см. openai-embed.fitDim).
+    embed: { ...EMPTY_KEY_FORM, embedDim: "1536" },
   });
   const [savingPurpose, setSavingPurpose] = useState<LlmPurpose | null>(null);
 
@@ -191,7 +193,8 @@ export function SaasOnboarding() {
 
   // Completion-предикаты (зеркалят серверный `done`).
   const verticalDone = !!installedVertical || !!status?.funnelInstalled;
-  const channelDone = channels.length > 0;
+  // Только активные каналы — зеркалит серверный onboarding-status (paused не считается).
+  const channelDone = channels.some((c) => c.status === "active");
   const chatDone = configReady(chatCfg); // chat обязателен; embed — опционально
   const ratesDone = rates.some((r) => r.isActive);
   const requisitesDone = (status?.requisiteCount ?? 0) >= 1;
@@ -298,7 +301,13 @@ export function SaasOnboarding() {
         const list = (
           [
           { id: "vertical", label: "", required: true, done: !!res.status?.funnelInstalled, visible: true },
-          { id: "channel", label: "", required: true, done: res.ch.length > 0, visible: true },
+          {
+            id: "channel",
+            label: "",
+            required: true,
+            done: res.ch.some((c) => c.status === "active"),
+            visible: true,
+          },
           {
             id: "llm",
             label: "",
@@ -1086,6 +1095,13 @@ export function SaasOnboarding() {
                             placeholder="1536"
                           />
                         </div>
+                      )}
+                      {!isChat && (
+                        <p className="sm:col-span-2 text-xs text-muted-foreground rounded-md bg-muted/50 px-3 py-2">
+                          Оставьте <code className="font-mono">1536</code> — под базу знаний.
+                          Вектор любой современной модели (OpenAI v3, Gemini embedding и др.)
+                          приводится к 1536 автоматически. Нужна модель с размерностью ≥ 1536.
+                        </p>
                       )}
                       {f.provider === "ollama" && (
                         <p className="sm:col-span-2 text-xs text-muted-foreground rounded-md bg-muted/50 px-3 py-2">
