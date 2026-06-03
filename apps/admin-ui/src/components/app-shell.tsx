@@ -70,6 +70,10 @@ interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
+  /** Показывать только для обменных тенантов (вертикаль exchange). */
+  exchangeOnly?: boolean;
+  /** Скрывать для обменных тенантов (нерелевантно обменнику). */
+  hideForExchange?: boolean;
 }
 
 interface NavGroup {
@@ -87,17 +91,17 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
       { to: "/outreach", label: "Рассылка", icon: SendIcon },
       { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
-      { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon },
-      { to: "/vacancies", label: "Каталог", icon: BriefcaseIcon },
+      { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon, exchangeOnly: true },
+      { to: "/vacancies", label: "Каталог", icon: BriefcaseIcon, hideForExchange: true },
     ],
   },
   {
     label: "AI & Бот",
     items: [
-      { to: "/skills", label: "Навыки", icon: ZapIcon },
-      { to: "/hooks", label: "Хуки", icon: SparklesIcon },
+      { to: "/skills", label: "Навыки", icon: ZapIcon, hideForExchange: true },
+      { to: "/hooks", label: "Хуки", icon: SparklesIcon, hideForExchange: true },
       { to: "/styles", label: "Стили", icon: PaletteIcon },
-      { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon },
+      { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon, hideForExchange: true },
       { to: "/test", label: "Тест бота", icon: TestTube2Icon },
     ],
   },
@@ -108,11 +112,20 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/notifications", label: "Уведомления", icon: BellIcon },
       { to: "/webhooks", label: "Вебхуки", icon: WebhookIcon },
       { to: "/tools", label: "Инструменты", icon: WrenchIcon },
-      { to: "/referral", label: "Партнёры", icon: LinkIcon },
+      { to: "/referral", label: "Партнёры", icon: LinkIcon, hideForExchange: true },
       { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
     ],
   },
 ];
+
+/** Фильтр пунктов по вертикали: exchangeOnly показываем только обменке, hideForExchange — скрываем у обменки. */
+function visibleNavItems(items: NavItem[], isExchange: boolean): NavItem[] {
+  return items.filter((it) => {
+    if (it.exchangeOnly && !isExchange) return false;
+    if (it.hideForExchange && isExchange) return false;
+    return true;
+  });
+}
 
 function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
@@ -200,12 +213,18 @@ function NavLinks({
   escalatedCount,
   collapsed,
   isSuperadmin,
+  isExchange,
 }: {
   onNavigate?: () => void;
   escalatedCount?: number;
   collapsed: boolean;
   isSuperadmin?: boolean;
+  isExchange?: boolean;
 }) {
+  const groups = NAV_GROUPS.map((g) => ({
+    ...g,
+    items: visibleNavItems(g.items, isExchange ?? false),
+  })).filter((g) => g.items.length > 0);
   return (
     <nav className="flex flex-col gap-4">
       <div className="flex flex-col gap-0.5">
@@ -217,7 +236,7 @@ function NavLinks({
         />
       </div>
 
-      {NAV_GROUPS.map((group) => (
+      {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-0.5">
           {!collapsed && (
             <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
@@ -488,6 +507,7 @@ function SidebarBody({
   escalatedCount,
   collapsed,
   onToggleCollapse,
+  isExchange,
 }: {
   admin: Admin | null;
   tenant: Tenant | null;
@@ -496,6 +516,7 @@ function SidebarBody({
   escalatedCount?: number;
   collapsed: boolean;
   onToggleCollapse?: () => void;
+  isExchange?: boolean;
 }) {
   return (
     <div className="flex h-full flex-col gap-1">
@@ -544,7 +565,7 @@ function SidebarBody({
             <TooltipContent side="right" className="text-xs">Развернуть</TooltipContent>
           </Tooltip>
         )}
-        <NavLinks onNavigate={onNavigate} escalatedCount={escalatedCount} collapsed={collapsed} isSuperadmin={admin?.role === "superadmin"} />
+        <NavLinks onNavigate={onNavigate} escalatedCount={escalatedCount} collapsed={collapsed} isSuperadmin={admin?.role === "superadmin"} isExchange={isExchange} />
       </div>
 
       <div className="border-t border-sidebar-border p-3">
@@ -565,6 +586,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const [admin, setAdmin] = useState<Admin | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
+  const [isExchange, setIsExchange] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [escalatedCount, setEscalatedCount] = useState(0);
   const [collapsed, setCollapsed] = useState(
@@ -586,6 +608,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         setAdmin(res.admin);
         setTenant(res.tenant);
+      })
+      .catch(() => {});
+    // Вертикаль тенанта (для скрытия нерелевантных пунктов меню у обменки).
+    saas
+      .onboardingStatus()
+      .then((s) => {
+        if (!cancelled) setIsExchange(s.isExchange === true);
       })
       .catch(() => {});
     return () => {
@@ -656,6 +685,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             escalatedCount={escalatedCount}
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
+            isExchange={isExchange}
           />
         </aside>
 
@@ -676,6 +706,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   onNavigate={() => setMobileOpen(false)}
                   escalatedCount={escalatedCount}
                   collapsed={false}
+                  isExchange={isExchange}
                 />
               </SheetContent>
             </Sheet>
