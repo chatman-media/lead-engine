@@ -1,3 +1,19 @@
+# [@chatman-media/storage-v1.4.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.3.0...@chatman-media/storage-v1.4.0) (2026-06-03)
+
+
+### Bug Fixes
+
+* **notifications:** migration, personal delivery, notifyOnAssignedOnly, tests ([63c53f9](https://github.com/chatman-media/lead-engine/commit/63c53f9fa328f31bc526eed9fcd2431118616730))
+* **storage:** заменить глобальный unique(slug) на unique(tenant_id, slug) в skills ([#138](https://github.com/chatman-media/lead-engine/issues/138)) ([6191ada](https://github.com/chatman-media/lead-engine/commit/6191adad29e2021dc64c0813b331a8d33a00fadc))
+
+
+### Features
+
+* **conversations:** add operator inbox state ([1c608f6](https://github.com/chatman-media/lead-engine/commit/1c608f6c30c31b1d86e447ad7cd44d3915db1158))
+* **exchange:** add approved rate tiers and payment rails ([e1fe071](https://github.com/chatman-media/lead-engine/commit/e1fe0711f58542925e987929cf975f5a01a39773))
+* **exchange:** core infrastructure (models, tools, providers, migrations) ([75f84d7](https://github.com/chatman-media/lead-engine/commit/75f84d74b4a95d1ce486eb2428862d52d81c3ebc))
+* **notifications:** group onboarding via /setup <token> (п.1) ([a186929](https://github.com/chatman-media/lead-engine/commit/a18692905d1aef1078465c9434acabd5e9f77c48))
+
 # [@chatman-media/storage-v1.3.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.2.0...@chatman-media/storage-v1.3.0) (2026-05-25)
 
 
