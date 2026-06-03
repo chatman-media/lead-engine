@@ -47,7 +47,7 @@ export class OperatorBotHandler {
     // 3. Базовый /start без параметров
     if (text === "/start") {
       await this.client.sendMessage({
-        chat_id: chatId,
+        chatId,
         text: "👋 Привет! Я бот-уведомитель для Lead Engine.\n\nЧтобы привязать свой аккаунт, перейдите в Админку -> Настройки уведомлений и нажмите 'Подключить Telegram'.",
       });
     }
@@ -59,7 +59,7 @@ export class OperatorBotHandler {
     const settings = await this.repo.findByLinkToken(token);
     if (!settings) {
       await this.client.sendMessage({
-        chat_id: chatId,
+        chatId,
         text: "❌ Ссылка недействительна или истекла. Пожалуйста, сгенерируйте новую в Админке.",
       });
       return;
@@ -68,7 +68,7 @@ export class OperatorBotHandler {
     await this.repo.linkChat(settings.adminId, chatId);
 
     await this.client.sendMessage({
-      chat_id: chatId,
+      chatId,
       text: "✅ Аккаунт успешно привязан! Теперь вы будете получать важные уведомления здесь.",
     });
   }
@@ -78,7 +78,7 @@ export class OperatorBotHandler {
     const isGroup = chatId < 0;
     if (!isGroup) {
       await this.client.sendMessage({
-        chat_id: String(chatId),
+        chatId: String(chatId),
         text: "❌ /setup с токеном работает только в группах. Добавьте бота в группу и отправьте там эту команду.",
       });
       return;
@@ -86,7 +86,7 @@ export class OperatorBotHandler {
     const groupToken = await this.repo.findGroupLinkToken(token);
     if (!groupToken) {
       await this.client.sendMessage({
-        chat_id: String(chatId),
+        chatId: String(chatId),
         text: "❌ Токен недействителен или истёк. Сгенерируйте новый в Админке → Уведомления.",
       });
       return;
@@ -102,9 +102,9 @@ export class OperatorBotHandler {
     });
     await this.repo.deleteGroupLinkToken(token);
     await this.client.sendMessage({
-      chat_id: String(chatId),
+      chatId: String(chatId),
       text: `✅ Группа <b>${title}</b> подключена к Lead Engine!\n\nОтсюда вы будете получать уведомления о событиях: <b>${groupToken.eventType}</b>.`,
-      parse_mode: "HTML",
+      parseMode: "HTML",
     });
   }
 
@@ -114,16 +114,16 @@ export class OperatorBotHandler {
     const isGroup = chatId < 0;
     if (!isGroup) {
       await this.client.sendMessage({
-        chat_id: String(chatId),
+        chatId: String(chatId),
         text: "команда /setup работает только в группах. Добавьте меня в группу и напишите там /setup.",
       });
       return;
     }
 
     await this.client.sendMessage({
-      chat_id: String(chatId),
+      chatId: String(chatId),
       text: `🏗 <b>Настройка группы "${title}"</b>\n\nID этой группы: <code>${chatId}</code>\n\nСкопируйте этот ID и вставьте его в настройки уведомлений в Админке, чтобы бот мог присылать сюда алерты.`,
-      parse_mode: "HTML",
+      parseMode: "HTML",
     });
   }
 }

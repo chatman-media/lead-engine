@@ -8,6 +8,9 @@ export interface ConversationRow {
   userId: number;
   source: string;
   mode: "ai" | "queued" | "human";
+  status: "open" | "pending" | "resolved";
+  unreadCount: number;
+  lastMessageText: string | null;
   escalatedAt: number | null;
   assignedAdminId: number | null;
   lastMessageAt: number | null;
@@ -93,6 +96,60 @@ export class ConversationsRepo {
     await this.ctx.db
       .update(conversationsTable)
       .set({ lastMessageAt: nowEpoch })
+      .where(
+        and(
+          eq(conversationsTable.id, conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      );
+  }
+
+  async updateInboxMetadata(
+    conversationId: number,
+    opts: {
+      lastMessageText?: string;
+      lastMessageAt?: number;
+      incrementUnread?: boolean;
+      status?: "open" | "pending" | "resolved";
+    },
+  ): Promise<void> {
+    const updates: Partial<typeof conversationsTable.$inferInsert> = {};
+    if (opts.lastMessageText !== undefined) updates.lastMessageText = opts.lastMessageText;
+    if (opts.lastMessageAt !== undefined) updates.lastMessageAt = opts.lastMessageAt;
+    if (opts.status !== undefined) updates.status = opts.status;
+
+    await this.ctx.db
+      .update(conversationsTable)
+      .set({
+        ...updates,
+        ...(opts.incrementUnread
+          ? { unreadCount: sql`${conversationsTable.unreadCount} + 1` }
+          : {}),
+      })
+      .where(
+        and(
+          eq(conversationsTable.id, conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      );
+  }
+
+  async markAsRead(conversationId: number): Promise<void> {
+    await this.ctx.db
+      .update(conversationsTable)
+      .set({ unreadCount: 0 })
+      .where(
+        and(
+          eq(conversationsTable.id, conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      );
+  }
+
+  async setAssignee(conversationId: number, adminId: number | null): Promise<void> {
+    await this.ctx.db
+      .update(conversationsTable)
+      .set({ assignedAdminId: adminId })
       .where(
         and(
           eq(conversationsTable.id, conversationId),

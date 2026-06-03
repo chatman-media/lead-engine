@@ -104,6 +104,9 @@ export class FakeConversationsRepo {
       userId: opts.contactId,
       source: opts.source,
       mode: opts.mode ?? "ai",
+      status: "open",
+      unreadCount: 0,
+      lastMessageText: null,
       escalatedAt: null,
       assignedAdminId: null,
       lastMessageAt: opts.nowEpoch,
@@ -120,6 +123,30 @@ export class FakeConversationsRepo {
   async touchLastMessageAt(conversationId: number, nowEpoch: number): Promise<void> {
     const row = this.rows.find((r) => r.id === conversationId);
     if (row) row.lastMessageAt = nowEpoch;
+  }
+  async updateInboxMetadata(
+    conversationId: number,
+    opts: {
+      lastMessageText?: string;
+      lastMessageAt?: number;
+      incrementUnread?: boolean;
+      status?: "open" | "pending" | "resolved";
+    },
+  ): Promise<void> {
+    const row = this.rows.find((r) => r.id === conversationId);
+    if (!row) return;
+    if (opts.lastMessageText !== undefined) row.lastMessageText = opts.lastMessageText;
+    if (opts.lastMessageAt !== undefined) row.lastMessageAt = opts.lastMessageAt;
+    if (opts.status !== undefined) row.status = opts.status;
+    if (opts.incrementUnread) row.unreadCount += 1;
+  }
+  async markAsRead(conversationId: number): Promise<void> {
+    const row = this.rows.find((r) => r.id === conversationId);
+    if (row) row.unreadCount = 0;
+  }
+  async setAssignee(conversationId: number, adminId: number | null): Promise<void> {
+    const row = this.rows.find((r) => r.id === conversationId);
+    if (row) row.assignedAdminId = adminId;
   }
   all(): ConversationRow[] {
     return [...this.rows];

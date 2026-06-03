@@ -148,7 +148,7 @@ describe("NotificationService.notify", () => {
     const sent: string[] = [];
     const svc = new NotificationService(makeRepo([makeRule()]), "fake-token", "http://app");
     // @ts-expect-error patch private client
-    svc.client = { sendMessage: async ({ chat_id }: { chat_id: string }) => { sent.push(chat_id); } };
+    svc.client = { sendMessage: async ({ chatId }: { chatId: string }) => { sent.push(chatId); } };
     await svc.notify(BASE_EVENT);
     expect(sent).toEqual(["group-100"]);
   });
@@ -158,7 +158,7 @@ describe("NotificationService.notify", () => {
     const rule = makeRule({ conditionJson: JSON.stringify({ toStage: "won" }) });
     const svc = new NotificationService(makeRepo([rule]), "fake-token", "http://app");
     // @ts-expect-error patch private client
-    svc.client = { sendMessage: async ({ chat_id }: { chat_id: string }) => { sent.push(chat_id); } };
+    svc.client = { sendMessage: async ({ chatId }: { chatId: string }) => { sent.push(chatId); } };
     await svc.notify(BASE_EVENT);
     expect(sent).toEqual([]);
   });
@@ -168,7 +168,7 @@ describe("NotificationService.notify", () => {
     const settings = makeOperatorSettings({ notifyOnAssignedOnly: false });
     const svc = new NotificationService(makeRepo([], [settings]), "fake-token", "http://app");
     // @ts-expect-error patch private client
-    svc.client = { sendMessage: async ({ chat_id }: { chat_id: string }) => { sent.push(chat_id); } };
+    svc.client = { sendMessage: async ({ chatId }: { chatId: string }) => { sent.push(chatId); } };
     await svc.notify(BASE_EVENT);
     expect(sent).toContain("chat-10");
   });
@@ -178,7 +178,7 @@ describe("NotificationService.notify", () => {
     const settings = makeOperatorSettings({ adminId: 10, notifyOnAssignedOnly: true });
     const svc = new NotificationService(makeRepo([], [settings]), "fake-token", "http://app");
     // @ts-expect-error patch private client
-    svc.client = { sendMessage: async ({ chat_id }: { chat_id: string }) => { sent.push(chat_id); } };
+    svc.client = { sendMessage: async ({ chatId }: { chatId: string }) => { sent.push(chatId); } };
     await svc.notify({ ...BASE_EVENT, assignedAdminId: 10 });
     expect(sent).toContain("chat-10");
   });
@@ -188,7 +188,7 @@ describe("NotificationService.notify", () => {
     const settings = makeOperatorSettings({ adminId: 10, notifyOnAssignedOnly: true });
     const svc = new NotificationService(makeRepo([], [settings]), "fake-token", "http://app");
     // @ts-expect-error patch private client
-    svc.client = { sendMessage: async ({ chat_id }: { chat_id: string }) => { sent.push(chat_id); } };
+    svc.client = { sendMessage: async ({ chatId }: { chatId: string }) => { sent.push(chatId); } };
     await svc.notify({ ...BASE_EVENT, assignedAdminId: 99 });
     expect(sent).toEqual([]);
   });
@@ -198,7 +198,7 @@ describe("NotificationService.notify", () => {
     const settings = makeOperatorSettings({ adminId: 10, notifyOnAssignedOnly: true });
     const svc = new NotificationService(makeRepo([], [settings]), "fake-token", "http://app");
     // @ts-expect-error patch private client
-    svc.client = { sendMessage: async ({ chat_id }: { chat_id: string }) => { sent.push(chat_id); } };
+    svc.client = { sendMessage: async ({ chatId }: { chatId: string }) => { sent.push(chatId); } };
     await svc.notify({ ...BASE_EVENT, assignedAdminId: undefined });
     expect(sent).toContain("chat-10");
   });
@@ -208,7 +208,7 @@ describe("NotificationService.notify", () => {
     const settings = makeOperatorSettings({ telegramChatId: null });
     const svc = new NotificationService(makeRepo([], [settings]), "fake-token", "http://app");
     // @ts-expect-error patch private client
-    svc.client = { sendMessage: async ({ chat_id }: { chat_id: string }) => { sent.push(chat_id); } };
+    svc.client = { sendMessage: async ({ chatId }: { chatId: string }) => { sent.push(chatId); } };
     await svc.notify(BASE_EVENT);
     expect(sent).toEqual([]);
   });

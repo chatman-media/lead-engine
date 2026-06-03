@@ -70,9 +70,9 @@ export class NotificationService {
     if (!this.client) return { ok: false, error: "Бот не настроен (нет токена)" };
     try {
       await this.client.sendMessage({
-        chat_id: chatId,
+        chatId,
         text: "🧪 <b>Тестовое уведомление</b>\n\nПравило активно — сообщения доходят корректно.",
-        parse_mode: "HTML",
+        parseMode: "HTML",
       });
       return { ok: true };
     } catch (err) {
@@ -86,10 +86,10 @@ export class NotificationService {
     buttons: Array<{ text: string; url: string }> | null,
   ): Promise<void> {
     await this.client!.sendMessage({
-      chat_id: chatId,
+      chatId,
       text,
-      parse_mode: "HTML",
-      reply_markup: buttons ? { inline_keyboard: [buttons] } : undefined,
+      parseMode: "HTML",
+      replyMarkup: buttons ? { inline_keyboard: [buttons] } : undefined,
     });
   }
 

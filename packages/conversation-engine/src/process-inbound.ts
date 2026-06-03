@@ -14,9 +14,8 @@ import { dispatchOutbound } from "./outbound-dispatch.ts";
 import { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
 import type { ITranscriber } from "./transcriber.ts";
 import type { NotificationService } from "./notifications.ts";
-import type {
+import {
   ChannelContext,
-
   type Clock,
   type PipelineSink,
   type ProcessInboundResult,
@@ -278,9 +277,15 @@ export async function processInbound(
     });
   }
 
-  // 4. Touch last_message_at если это not-a-dup и не fresh-created.
-  if (!conversationCreated && !existingMsg) {
-    await deps.conversations.touchLastMessageAt(conversation.id, now);
+  // 4. Update inbox state (touch TS, set preview, inc unread).
+  if (!existingMsg) {
+    await deps.conversations.updateInboxMetadata(conversation.id, {
+      lastMessageAt: now,
+      lastMessageText: text.slice(0, 200) || "(Медиа)",
+      incrementUnread: true,
+      // Если диалог был закрыт — переоткрываем.
+      ...(conversation.status === "resolved" ? { status: "open" } : {}),
+    });
   }
 
   // 4b. Notifications (Human takeover / Verification video / Document upload).
@@ -440,6 +445,17 @@ export async function processInbound(
       userMessageText: text,
     });
     if (envelopes && envelopes.length > 0) {
+      // 6b. Update lastMessageText to AI reply for the inbox list.
+      const lastEnv = envelopes[envelopes.length - 1];
+      if (lastEnv) {
+        const aiText = lastEnv.parts.find((p) => p.kind === "text")?.text;
+        if (aiText) {
+          await deps.conversations.updateInboxMetadata(conversation.id, {
+            lastMessageText: aiText.slice(0, 200),
+          });
+        }
+      }
+
       for (const env of envelopes) {
         const queued = await dispatchOutbound({
           channelDbId: deps.channelDbId,

@@ -29,8 +29,8 @@ class FakeRepo implements Partial<NotificationsRepo> {
 }
 
 class FakeClient {
-  sent: Array<{ chat_id: string; text: string }> = [];
-  async sendMessage(opts: { chat_id: string; text: string }) {
+  sent: Array<{ chatId: string; text: string }> = [];
+  async sendMessage(opts: { chatId: string; text: string }) {
     this.sent.push(opts);
   }
 }

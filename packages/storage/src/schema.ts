@@ -117,6 +117,9 @@ export const conversations = pgTable("conversations", {
   // userbot, получает два независимых conversation.
   source: text("source").notNull().default("bot"),
   mode: text("mode").notNull().default("ai"),
+  status: text("status").notNull().default("open"),
+  unreadCount: integer("unread_count").notNull().default(0),
+  lastMessageText: text("last_message_text"),
   escalatedAt: integer("escalated_at"),
   assignedAdminId: integer("assigned_admin_id"),
   lastMessageAt: integer("last_message_at"),
@@ -129,8 +132,11 @@ export const conversations = pgTable("conversations", {
 }, (t) => [
   check("conversations_source_check", sql`${t.source} IN ('bot', 'userbot', 'self_play')`),
   check("conversations_mode_check", sql`${t.mode} IN ('ai', 'queued', 'human')`),
+  check("conversations_status_check", sql`${t.status} IN ('open', 'pending', 'resolved')`),
   uniqueIndex("uniq_conversations_user_source").on(t.userId, t.source),
   index("idx_conv_mode_last").on(t.mode, sql`${t.lastMessageAt} DESC NULLS LAST`),
+  index("idx_conv_status_last").on(t.status, sql`${t.lastMessageAt} DESC NULLS LAST`),
+  index("idx_conv_assignee_last").on(t.assignedAdminId, sql`${t.lastMessageAt} DESC NULLS LAST`),
   index("idx_conv_style").on(t.styleId),
   index("idx_conv_experiment").on(t.experimentId),
 ]);

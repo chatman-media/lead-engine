@@ -123,6 +123,7 @@ export class NotificationsRepo {
       .insert(notificationRules)
       .values(rule)
       .returning();
+    if (!inserted) throw new Error("notification rule insert returned no row");
     return inserted;
   }
 
