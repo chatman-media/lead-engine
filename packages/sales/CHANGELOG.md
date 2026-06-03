@@ -1,3 +1,10 @@
+# [@chatman-media/sales-v1.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/sales-v1.0.0...@chatman-media/sales-v1.1.0) (2026-06-03)
+
+
+### Features
+
+* **conversations:** add operator inbox state ([1c608f6](https://github.com/chatman-media/lead-engine/commit/1c608f6c30c31b1d86e447ad7cd44d3915db1158))
+
 # @chatman-media/sales-v1.0.0 (2026-05-24)
 
 
