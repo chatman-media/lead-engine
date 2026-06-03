@@ -1,5 +1,11 @@
 import { withTenant } from "@chatman-media/conversation-engine";
-import { adminInvites, admins, passwordResets, referralCodes, tenants } from "@chatman-media/storage";
+import {
+  adminInvites,
+  admins,
+  passwordResets,
+  referralCodes,
+  tenants,
+} from "@chatman-media/storage";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
@@ -41,6 +47,13 @@ export interface AuthRoutesOpts {
   mailer?: Mailer;
   /** Base URL admin-UI — для ссылки в письме. */
   appUrl?: string;
+  /**
+   * Разрешена ли публичная самостоятельная регистрация. Закрывается ТОЛЬКО при
+   * явном `false` (так prod-callsite в index.ts передаёт
+   * `ALLOW_PUBLIC_SIGNUP === "1"` → по умолчанию false → закрыто). Если не
+   * передано (undefined) — signup открыт (дефолт для тестов/локалки).
+   */
+  allowSignup?: boolean;
 }
 
 interface SignupBody {
@@ -71,6 +84,10 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
    * (отдельный endpoint, не в этом PR).
    */
   app.post("/api/auth/signup", async (c) => {
+    // Закрыто только при явном allowSignup:false (prod через ALLOW_PUBLIC_SIGNUP).
+    if (opts.allowSignup === false) {
+      return c.json({ error: "signup_disabled" }, 403);
+    }
     let body: SignupBody;
     try {
       body = (await c.req.json()) as SignupBody;
@@ -204,15 +221,17 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
 
     // 5. Welcome email — best-effort, не блокирует ответ.
     if (opts.mailer) {
-      opts.mailer.send({
-        to: email,
-        subject: "Добро пожаловать в lead-engine 🎉",
-        html: welcomeEmailHtml({
-          email,
-          slug: tenantRow.slug,
-          appUrl: opts.appUrl ?? "https://app.leadengine.app",
-        }),
-      }).catch((e) => console.warn("[mailer] welcome send failed:", e));
+      opts.mailer
+        .send({
+          to: email,
+          subject: "Добро пожаловать в lead-engine 🎉",
+          html: welcomeEmailHtml({
+            email,
+            slug: tenantRow.slug,
+            appUrl: opts.appUrl ?? "https://app.leadengine.app",
+          }),
+        })
+        .catch((e) => console.warn("[mailer] welcome send failed:", e));
     }
 
     return c.json({
@@ -240,10 +259,7 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
       return c.json({ error: "email and password required" }, 400);
     }
 
-    const [adminRow] = await opts.db
-      .select()
-      .from(admins)
-      .where(eq(admins.email, email));
+    const [adminRow] = await opts.db.select().from(admins).where(eq(admins.email, email));
     if (!adminRow) {
       // Generic 401 — не выдаём что email не существует (user enum prevention).
       return c.json({ error: "invalid credentials" }, 401);
@@ -253,8 +269,7 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
       return c.json({ error: "invalid credentials" }, 401);
     }
 
-    const role: "superadmin" | "manager" =
-      adminRow.role === "manager" ? "manager" : "superadmin";
+    const role: "superadmin" | "manager" = adminRow.role === "manager" ? "manager" : "superadmin";
     const nowEpoch = Math.floor(Date.now() / 1000);
     const token = signAuthToken(
       {
@@ -327,14 +342,9 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
     const [existingAdmin] = await opts.db
       .select({ id: admins.id })
       .from(admins)
-      .where(
-        and(eq(admins.tenantId, invite.tenantId), eq(admins.email, invite.email)),
-      );
+      .where(and(eq(admins.tenantId, invite.tenantId), eq(admins.email, invite.email)));
     if (existingAdmin) {
-      return c.json(
-        { error: "admin with this email already exists in tenant" },
-        409,
-      );
+      return c.json({ error: "admin with this email already exists in tenant" }, 409);
     }
 
     const passwordHash = await hashPassword(password);
@@ -433,10 +443,7 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
     if (!ok) return c.json({ error: "current password is incorrect" }, 401);
 
     const newHash = await hashPassword(newPassword);
-    await opts.db
-      .update(admins)
-      .set({ passwordHash: newHash })
-      .where(eq(admins.id, adminRow.id));
+    await opts.db.update(admins).set({ passwordHash: newHash }).where(eq(admins.id, adminRow.id));
 
     return c.json({ ok: true });
   });
@@ -453,7 +460,9 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
    */
   app.post("/api/auth/forgot-password", async (c) => {
     let body: { email?: unknown };
-    try { body = (await c.req.json()) as typeof body; } catch {
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
       return c.json({ error: "invalid json" }, 400);
     }
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
@@ -479,7 +488,9 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
       globalThis.crypto.getRandomValues(buf);
       const rawToken = Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
       const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rawToken));
-      const tokenHash = Array.from(new Uint8Array(hashBuf), (b) => b.toString(16).padStart(2, "0")).join("");
+      const tokenHash = Array.from(new Uint8Array(hashBuf), (b) =>
+        b.toString(16).padStart(2, "0"),
+      ).join("");
 
       await opts.db.insert(passwordResets).values({
         adminId: adminRow.id,
@@ -490,11 +501,13 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
 
       const resetUrl = `${opts.appUrl ?? "https://app.leadengine.app"}/reset-password?token=${rawToken}`;
       if (opts.mailer) {
-        opts.mailer.send({
-          to: email,
-          subject: "Сброс пароля — lead-engine",
-          html: forgotPasswordEmailHtml({ email, resetUrl }),
-        }).catch((e) => console.warn("[mailer] forgot-password send failed:", e));
+        opts.mailer
+          .send({
+            to: email,
+            subject: "Сброс пароля — lead-engine",
+            html: forgotPasswordEmailHtml({ email, resetUrl }),
+          })
+          .catch((e) => console.warn("[mailer] forgot-password send failed:", e));
       }
     }
 
@@ -511,7 +524,9 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
    */
   app.post("/api/auth/reset-password", async (c) => {
     let body: { token?: unknown; password?: unknown };
-    try { body = (await c.req.json()) as typeof body; } catch {
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
       return c.json({ error: "invalid json" }, 400);
     }
     const token = typeof body.token === "string" ? body.token.trim() : "";
@@ -523,7 +538,9 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
 
     const nowEpoch = Math.floor(Date.now() / 1000);
     const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-    const tokenHash = Array.from(new Uint8Array(hashBuf), (b) => b.toString(16).padStart(2, "0")).join("");
+    const tokenHash = Array.from(new Uint8Array(hashBuf), (b) =>
+      b.toString(16).padStart(2, "0"),
+    ).join("");
 
     const newHash = await hashPassword(password);
     const ok = await opts.db.transaction(async (tx) => {
@@ -590,10 +607,11 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
         role: adminRow.role,
         tenantId: adminRow.tenantId,
       },
-      tenant: tenantRow ? { id: claims.tenantId, slug: tenantRow.slug, plan: tenantRow.plan } : null,
+      tenant: tenantRow
+        ? { id: claims.tenantId, slug: tenantRow.slug, plan: tenantRow.plan }
+        : null,
     });
   });
 
   return app;
 }
-

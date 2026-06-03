@@ -20,7 +20,6 @@ import { SaasLeads } from "./pages/SaasLeads.tsx";
 import { SaasLogin } from "./pages/SaasLogin.tsx";
 import { SaasOnboarding } from "./pages/SaasOnboarding.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
-import { SaasSignup } from "./pages/SaasSignup.tsx";
 import { SaasSkills } from "./pages/SaasSkills.tsx";
 import { SaasStyles } from "./pages/SaasStyles.tsx";
 import { SaasTeam } from "./pages/SaasTeam.tsx";
@@ -57,6 +56,43 @@ function RequireAuth() {
   return <Outlet />;
 }
 
+/**
+ * Гейт онбординга. Читает один флаг `done` из onboarding-status и редиректит:
+ *  - require="done": кабинет — если !done, шлёт на /onboarding.
+ *  - require="not-done": /onboarding — если done, шлёт на /dashboard.
+ * Оба гейта читают ОДИН флаг с противоположной логикой → петли нет.
+ * При ошибке статуса fail-open (считаем done), чтобы не запереть пользователя.
+ */
+function OnboardingGate({ require }: { require: "done" | "not-done" }) {
+  const [state, setState] = useState<"checking" | "done" | "not-done">("checking");
+
+  useEffect(() => {
+    let cancelled = false;
+    saas
+      .onboardingStatus()
+      .then((s) => {
+        if (!cancelled) setState(s.done ? "done" : "not-done");
+      })
+      .catch(() => {
+        if (!cancelled) setState("done"); // fail-open
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (state === "checking") {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
+      </div>
+    );
+  }
+  if (require === "done" && state === "not-done") return <Navigate to="/onboarding" replace />;
+  if (require === "not-done" && state === "done") return <Navigate to="/dashboard" replace />;
+  return <Outlet />;
+}
+
 function ShellLayout() {
   useAdminEvents((event) => {
     if (event.type === "new_message") {
@@ -81,19 +117,22 @@ export function App() {
     <ThemeProvider>
       <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "") || "/"}>
         <Routes>
-          {/* Публичные */}
+          {/* Публичные (регистрация закрыта — только login + invite) */}
           <Route path="/login" element={<SaasLogin />} />
-          <Route path="/signup" element={<SaasSignup />} />
           <Route path="/accept-invite" element={<SaasAcceptInvite />} />
           <Route path="/forgot-password" element={<SaasForgotPassword />} />
           <Route path="/reset-password" element={<SaasResetPassword />} />
 
           {/* Только для авторизованных */}
           <Route element={<RequireAuth />}>
-            <Route path="/onboarding" element={<SaasOnboarding />} />
+            {/* Онбординг: доступен пока НЕ завершён; иначе → /dashboard */}
+            <Route element={<OnboardingGate require="not-done" />}>
+              <Route path="/onboarding" element={<SaasOnboarding />} />
+            </Route>
 
-            {/* С сайдбаром */}
-            <Route element={<ShellLayout />}>
+            {/* Кабинет: доступен только когда онбординг завершён; иначе → /onboarding */}
+            <Route element={<OnboardingGate require="done" />}>
+              <Route element={<ShellLayout />}>
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<SaasDashboard />} />
               <Route path="/leads" element={<SaasLeads />} />
@@ -120,6 +159,7 @@ export function App() {
               <Route path="/test" element={<SaasTestBot />} />
               <Route path="/notifications" element={<SaasNotifications />} />
               <Route path="/superadmin" element={<SaasSuperadmin />} />
+              </Route>
             </Route>
           </Route>
 

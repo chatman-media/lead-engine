@@ -1,4 +1,9 @@
-import { checkRlsEnforcement, NotificationsRepo, NotificationService, OperatorBotHandler } from "@chatman-media/conversation-engine";
+import {
+  checkRlsEnforcement,
+  NotificationsRepo,
+  NotificationService,
+  OperatorBotHandler,
+} from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { funnels, tenants } from "@chatman-media/storage";
@@ -209,6 +214,7 @@ async function main() {
       secret: cfg.authSecret,
       mailer,
       appUrl: cfg.mailer.appUrl,
+      allowSignup: process.env.ALLOW_PUBLIC_SIGNUP === "1",
     }),
   );
   log.info("auth routes enabled", {
@@ -362,7 +368,14 @@ async function main() {
 
   // Leads pipeline (list, create, stage transition, field values).
   app.route("/", makeAdminLeadsRoutes({ db, notificationService }));
-  app.route("/api/admin/notifications", makeAdminNotificationsRoutes({ repo: notificationsRepo, botUsername: cfg.operatorBotUsername, notificationService }));
+  app.route(
+    "/api/admin/notifications",
+    makeAdminNotificationsRoutes({
+      repo: notificationsRepo,
+      botUsername: cfg.operatorBotUsername,
+      notificationService,
+    }),
+  );
   log.info("admin-leads routes enabled");
 
   // Funnel builder (stage_definitions, stage_fields) + skills list.
@@ -393,10 +406,13 @@ async function main() {
   log.info("admin-director-hooks routes enabled");
   app.route("/", makeAdminExperimentsRoutes({ db }));
   log.info("admin-experiments routes enabled");
-  app.route("/", makeAdminStylesRoutes({
-    db,
-    resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
-  }));
+  app.route(
+    "/",
+    makeAdminStylesRoutes({
+      db,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    }),
+  );
   log.info("admin-styles routes enabled");
 
   // Real-time SSE push for admin UI.
@@ -420,11 +436,14 @@ async function main() {
   log.info("admin-verticals routes enabled");
 
   // MCP (Model Context Protocol) endpoint — для Claude Desktop / Cursor / агентов.
-  app.route("/", makeMcpRoutes({
-    db,
-    authSecret: cfg.authSecret,
-    resolveEmbedder: embedderResolver ?? undefined,
-  }));
+  app.route(
+    "/",
+    makeMcpRoutes({
+      db,
+      authSecret: cfg.authSecret,
+      resolveEmbedder: embedderResolver ?? undefined,
+    }),
+  );
   log.info("MCP endpoint enabled at POST /mcp");
 
   const strategyBundle: ReplyStrategyBundle | null = makeReplyStrategy(
@@ -434,7 +453,6 @@ async function main() {
     metrics,
     recordUsage,
   );
-
 
   // Agentic tool configuration (booking link, etc.).
   app.route(
@@ -805,17 +823,23 @@ async function main() {
   };
   // Usage alerts — проверяем каждый час все активные тенанты.
   // Отправляет email при 80% / 100% LLM-квоты (дедупликация in-memory по месяцу).
-  const usageAlertInterval = setInterval(() => {
-    checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
-      log.warn("usage-alerts check failed", { err: e }),
-    );
-  }, 60 * 60 * 1000); // каждый час
+  const usageAlertInterval = setInterval(
+    () => {
+      checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
+        log.warn("usage-alerts check failed", { err: e }),
+      );
+    },
+    60 * 60 * 1000,
+  ); // каждый час
   // Первый запуск через 5 минут после старта (не сразу — дать DB прогреться).
-  const usageAlertFirstRun = setTimeout(() => {
-    checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
-      log.warn("usage-alerts initial check failed", { err: e }),
-    );
-  }, 5 * 60 * 1000);
+  const usageAlertFirstRun = setTimeout(
+    () => {
+      checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
+        log.warn("usage-alerts initial check failed", { err: e }),
+      );
+    },
+    5 * 60 * 1000,
+  );
 
   // Exchange rate-feed: периодически тянет рыночный base_rate для auto-курсов.
   // RATE_FEED_MS (default 180000 = 3 мин). 0 — отключить.

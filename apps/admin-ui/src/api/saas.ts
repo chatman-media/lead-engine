@@ -347,6 +347,12 @@ export interface OnboardingStatus {
   embedProvider?: string;
   embedModel?: string;
   hasKbDocuments: boolean;
+  /** Активная вертикаль тенанта (funnels.vertical_template_id), напр. "exchange". */
+  vertical?: string | null;
+  isExchange?: boolean;
+  funnelInstalled?: boolean;
+  activeRateCount?: number;
+  requisiteCount?: number;
   done: boolean;
 }
 
