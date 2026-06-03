@@ -208,6 +208,9 @@ export interface ConversationListItem {
   contactName: string | null;
   source: string;
   mode: string;
+  status: string;
+  unreadCount: number;
+  assignedAdminId: number | null;
   currentStage: string | null;
   lastMessageAt: number | null;
   createdAt: number;
@@ -221,6 +224,9 @@ export interface ConversationDetail {
   contactName: string | null;
   source: string;
   mode: string;
+  status: string;
+  unreadCount: number;
+  assignedAdminId: number | null;
   currentStage: string | null;
   lastMessageAt: number | null;
   createdAt: number;
@@ -786,6 +792,21 @@ export interface ExchangeRateInput {
   autoUpdate?: boolean;
 }
 
+export interface ExchangeRateCardProposal {
+  asset: string;
+  network: string;
+  quoteMode: "multiply" | "divide";
+  marketRate: number;
+  message: string;
+  tiers: Array<{
+    minThb: number;
+    maxThb: number | null;
+    displayRate: number;
+    deviationPct: number;
+    formula: string;
+  }>;
+}
+
 export interface ExchangeOrder {
   id: number;
   contactId: number | null;
@@ -795,11 +816,19 @@ export interface ExchangeOrder {
   direction: string;
   assetFrom: string;
   network: string;
+  amountMode: string;
+  requestedAmount: number | null;
   amountFrom: number;
   rate: number;
   amountToThb: number;
+  paymentMethod: string | null;
+  paymentRail: string | null;
+  sourceBank: string | null;
+  payerName: string | null;
+  thirdPartyApproved: boolean;
   payoutMethod: string | null;
   payoutLocation: string | null;
+  payoutDestinationJson: string | null;
   payoutCode: string | null;
   status: string;
   requisitesJson: string | null;
@@ -1016,6 +1045,12 @@ export const saas = {
       conversation: ConversationDetail;
       messages: MessageRow[];
     }>(`/api/admin/conversations/${id}`);
+  },
+  updateConversation(id: number, patch: { status?: string; assignedAdminId?: number | null }) {
+    return request<{ ok: boolean; conversation: ConversationDetail }>(`/api/admin/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
   },
   replyToConversation(id: number, text: string) {
     return request<{
@@ -1652,6 +1687,18 @@ export const saas = {
       { method: "POST" },
     );
   },
+  previewExchangeRateCard() {
+    return request<{ ok: boolean; proposals: ExchangeRateCardProposal[]; message: string }>(
+      "/api/admin/exchange/rate-card/preview",
+      { method: "POST" },
+    );
+  },
+  approveExchangeRateCard(proposals: ExchangeRateCardProposal[]) {
+    return request<{ ok: boolean; message: string }>("/api/admin/exchange/rate-card/approve", {
+      method: "POST",
+      body: JSON.stringify({ proposals }),
+    });
+  },
   saveExchangeRequisite(key: string, value: string) {
     return request<{ ok: boolean }>("/api/admin/exchange/requisites", {
       method: "POST",
@@ -1666,8 +1713,14 @@ export const saas = {
     id: number,
     patch: Partial<{
       payoutCode: string;
-      payoutLocation: string;
-      payoutMethod: string;
+      payoutLocation: string | null;
+      payoutMethod: string | null;
+      payoutDestinationJson: string | null;
+      paymentMethod: string | null;
+      paymentRail: string | null;
+      sourceBank: string | null;
+      payerName: string | null;
+      thirdPartyApproved: boolean;
       verificationId: string;
       status: string;
     }>,

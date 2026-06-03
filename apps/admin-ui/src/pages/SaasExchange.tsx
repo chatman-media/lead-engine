@@ -4,6 +4,7 @@ import {
   ApiError,
   clearToken,
   type ExchangeOrder,
+  type ExchangeRateCardProposal,
   type ExchangeRate,
   type ExchangeRateInput,
   type ExchangeTurnover,
@@ -60,6 +61,36 @@ const EMPTY_RATE: ExchangeRateInput = {
   autoUpdate: false,
 };
 
+function formatRate(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function renderRange(min: number, max: number | null): string {
+  const fmt = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+  if (max === null) return `от${fmt(min)} бат`;
+  return `от${fmt(min)} до${fmt(max)} бат`;
+}
+
+function renderRateCardMessage(proposals: ExchangeRateCardProposal[]): string {
+  const rub = proposals.find((p) => p.asset === "RUB");
+  const usdt = proposals.find((p) => p.asset === "USDT");
+  const lines = ["🙏 АКТУАЛЬНЫЙ КУРС НА СЕГОДНЯ 🙏", ""];
+  if (rub) {
+    rub.tiers.forEach((tier, idx) => {
+      const marker = idx === 0 ? ">" : idx === 1 ? "-" : "<";
+      lines.push(`🇷🇺RUB // Баты - ${formatRate(tier.displayRate)} ${marker} (${renderRange(tier.minThb, tier.maxThb)}🇹🇭`);
+    });
+    lines.push("***", "", "🏪💲———💳💳 💰 💳💳———💲🏪", "");
+  }
+  if (usdt) {
+    usdt.tiers.forEach((tier) => {
+      lines.push(`💲USDT // Баты < ${formatRate(tier.displayRate)} - (${renderRange(tier.minThb, tier.maxThb)})🇹🇭`);
+    });
+    lines.push("", "💲💲💲💲💲💲без карты(Инструкция)", "", "📞 LINE", "📞 WhatsApp", "📞 WeChat", "", "💬Отзывы о Нашей Работе 📨");
+  }
+  return lines.join("\n");
+}
+
 export function SaasExchange() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -68,12 +99,18 @@ export function SaasExchange() {
   const [turnover, setTurnover] = useState<ExchangeTurnover | null>(null);
   const [form, setForm] = useState<ExchangeRateInput>(EMPTY_RATE);
   const [saving, setSaving] = useState(false);
+  const [rateCardLoading, setRateCardLoading] = useState(false);
+  const [rateCardApproving, setRateCardApproving] = useState(false);
+  const [rateCardProposals, setRateCardProposals] = useState<ExchangeRateCardProposal[]>([]);
+  const [rateCardMessage, setRateCardMessage] = useState("");
 
   // requisites
   const [reqAsset, setReqAsset] = useState("usdt");
   const [reqNetwork, setReqNetwork] = useState("trc20");
   const [reqWallet, setReqWallet] = useState("");
   const [fiatUrl, setFiatUrl] = useState("");
+  const [binanceId, setBinanceId] = useState("");
+  const [rubCardReq, setRubCardReq] = useState("");
 
   function handle401(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
@@ -142,6 +179,61 @@ export function SaasExchange() {
     }
   }
 
+  async function previewRateCard() {
+    setRateCardLoading(true);
+    try {
+      const result = await saas.previewExchangeRateCard();
+      setRateCardProposals(result.proposals);
+      setRateCardMessage(result.message);
+      toast.success("Карточка курсов рассчитана");
+    } catch (err) {
+      if (!handle401(err)) toast.error("Не удалось рассчитать карточку курсов");
+    } finally {
+      setRateCardLoading(false);
+    }
+  }
+
+  async function approveRateCard() {
+    if (rateCardProposals.length === 0) {
+      toast.error("Сначала сформируйте карточку");
+      return;
+    }
+    setRateCardApproving(true);
+    try {
+      const result = await saas.approveExchangeRateCard(rateCardProposals);
+      setRateCardMessage(result.message);
+      toast.success("Карточка одобрена и сохранена");
+      load();
+    } catch (err) {
+      if (!handle401(err)) toast.error("Не удалось одобрить карточку");
+    } finally {
+      setRateCardApproving(false);
+    }
+  }
+
+  function updateTierDisplayRate(asset: string, minThb: number, displayRate: number) {
+    setRateCardProposals((prev) => {
+      const next = prev.map((proposal) => {
+        if (proposal.asset !== asset) return proposal;
+        return {
+          ...proposal,
+          tiers: proposal.tiers.map((tier) => {
+            if (tier.minThb !== minThb) return tier;
+            const deviationPct = Number((((displayRate - proposal.marketRate) / proposal.marketRate) * 100).toFixed(4));
+            return {
+              ...tier,
+              displayRate,
+              deviationPct,
+              formula: `${formatRate(proposal.marketRate)} ${deviationPct >= 0 ? "+" : "-"} ${formatRate(Math.abs(deviationPct))}% = ${formatRate(displayRate)}`,
+            };
+          }),
+        };
+      });
+      setRateCardMessage(renderRateCardMessage(next));
+      return next;
+    });
+  }
+
   async function saveWallet() {
     if (!reqWallet.trim()) return;
     const key = `exchange_wallet_${reqAsset}_${reqNetwork || "default"}`;
@@ -162,6 +254,28 @@ export function SaasExchange() {
       setFiatUrl("");
     } catch (err) {
       if (!handle401(err)) toast.error("Не удалось сохранить ссылку");
+    }
+  }
+
+  async function saveBinanceId() {
+    if (!binanceId.trim()) return;
+    try {
+      await saas.saveExchangeRequisite("exchange_binance_id", binanceId.trim());
+      toast.success("Binance ID сохранён");
+      setBinanceId("");
+    } catch (err) {
+      if (!handle401(err)) toast.error("Не удалось сохранить Binance ID");
+    }
+  }
+
+  async function saveRubCardReq() {
+    if (!rubCardReq.trim()) return;
+    try {
+      await saas.saveExchangeRequisite("exchange_rub_card_requisites", rubCardReq.trim());
+      toast.success("RUB-реквизиты карты сохранены");
+      setRubCardReq("");
+    } catch (err) {
+      if (!handle401(err)) toast.error("Не удалось сохранить RUB-реквизиты");
     }
   }
 
@@ -228,6 +342,78 @@ export function SaasExchange() {
 
         {/* ── Курсы ─────────────────────────────────────────────── */}
         <TabsContent value="rates" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Карточка курсов на сегодня</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={previewRateCard} disabled={rateCardLoading}>
+                  <RefreshCwIcon className="size-4" /> Рассчитать от рынка
+                </Button>
+                <Button onClick={approveRateCard} disabled={rateCardApproving || rateCardProposals.length === 0}>
+                  <SaveIcon className="size-4" /> Одобрить карточку
+                </Button>
+              </div>
+
+              {rateCardProposals.length > 0 && (
+                <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Актив</TableHead>
+                          <TableHead>Диапазон THB</TableHead>
+                          <TableHead>Рынок</TableHead>
+                          <TableHead>Публичный курс</TableHead>
+                          <TableHead>Отклонение</TableHead>
+                          <TableHead>Формула</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {rateCardProposals.flatMap((proposal) =>
+                          proposal.tiers.map((tier) => (
+                            <TableRow key={`${proposal.asset}-${tier.minThb}`}>
+                              <TableCell className="font-medium">{proposal.asset}</TableCell>
+                              <TableCell>
+                                {tier.minThb.toLocaleString("ru-RU")}–{tier.maxThb ? tier.maxThb.toLocaleString("ru-RU") : "∞"}
+                              </TableCell>
+                              <TableCell>{proposal.marketRate}</TableCell>
+                              <TableCell>
+                                <Input
+                                  className="h-8 w-24"
+                                  type="number"
+                                  step="any"
+                                  value={tier.displayRate}
+                                  onChange={(e) =>
+                                    updateTierDisplayRate(
+                                      proposal.asset,
+                                      tier.minThb,
+                                      Number(e.target.value),
+                                    )
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={tier.deviationPct >= 0 ? "warning" : "success"}>
+                                  {tier.deviationPct > 0 ? "+" : ""}{tier.deviationPct}%
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">{tier.formula}</TableCell>
+                            </TableRow>
+                          )),
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs">
+                    {rateCardMessage}
+                  </pre>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Добавить / обновить курс</CardTitle>
@@ -398,13 +584,14 @@ export function SaasExchange() {
                     <TableHead>THB</TableHead>
                     <TableHead>Статус</TableHead>
                     <TableHead>TG / Верификация</TableHead>
+                    <TableHead>Оплата</TableHead>
                     <TableHead>Выдача</TableHead>
                     <TableHead>Действия</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {orders.length === 0 && (
-                    <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">Заявок нет</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground">Заявок нет</TableCell></TableRow>
                   )}
                   {orders.map((o) => (
                     <OrderRow key={o.id} order={o} onPatch={patchOrder} />
@@ -457,6 +644,26 @@ export function SaasExchange() {
               <Button onClick={saveFiatUrl}><SaveIcon className="size-4" /> Сохранить</Button>
             </CardContent>
           </Card>
+          <Card>
+            <CardHeader><CardTitle className="text-base">Binance ID</CardTitle></CardHeader>
+            <CardContent className="flex items-end gap-3">
+              <div className="flex-1 space-y-1">
+                <Label>ID</Label>
+                <Input value={binanceId} onChange={(e) => setBinanceId(e.target.value)} placeholder="66775963" />
+              </div>
+              <Button onClick={saveBinanceId}><SaveIcon className="size-4" /> Сохранить</Button>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle className="text-base">RUB-реквизиты карты</CardTitle></CardHeader>
+            <CardContent className="flex items-end gap-3">
+              <div className="flex-1 space-y-1">
+                <Label>Текст реквизитов</Label>
+                <Input value={rubCardReq} onChange={(e) => setRubCardReq(e.target.value)} placeholder="💳 СБЕРБАНК ... / операторский шаблон" />
+              </div>
+              <Button onClick={saveRubCardReq}><SaveIcon className="size-4" /> Сохранить</Button>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>
@@ -472,11 +679,17 @@ function OrderRow({
 }) {
   const [code, setCode] = useState(order.payoutCode ?? "");
   const [verif, setVerif] = useState(order.verificationId ?? "");
+  const [sourceBank, setSourceBank] = useState(order.sourceBank ?? "");
   return (
     <TableRow>
       <TableCell>{order.id}</TableCell>
       <TableCell className="font-medium">{order.direction}{order.network ? ` (${order.network})` : ""}</TableCell>
-      <TableCell>{order.amountFrom} {order.assetFrom}</TableCell>
+      <TableCell>
+        <div>{order.amountFrom} {order.assetFrom}</div>
+        {order.amountMode === "target_thb" && (
+          <div className="text-[10px] text-muted-foreground">запрошено {order.requestedAmount} THB</div>
+        )}
+      </TableCell>
       <TableCell>{order.amountToThb}</TableCell>
       <TableCell><Badge variant={STATUS_VARIANT[order.status] ?? "secondary"}>{order.status}</Badge></TableCell>
       <TableCell className="text-xs">
@@ -490,7 +703,43 @@ function OrderRow({
         />
       </TableCell>
       <TableCell className="text-xs">
-        <div>{order.payoutMethod ?? "—"} {order.payoutLocation ?? ""}</div>
+        <Select
+          value={order.paymentMethod ?? "none"}
+          onValueChange={(v) => onPatch(order.id, { paymentMethod: v === "none" ? null : v })}
+        >
+          <SelectTrigger className="h-7 w-36"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">оплата —</SelectItem>
+            <SelectItem value="crypto_transfer">crypto</SelectItem>
+            <SelectItem value="sbp_qr">SBP QR</SelectItem>
+            <SelectItem value="card_transfer">карта</SelectItem>
+            <SelectItem value="bank_transfer">банк</SelectItem>
+            <SelectItem value="cash">нал</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input
+          className="mt-1 h-7 w-36"
+          value={sourceBank}
+          onChange={(e) => setSourceBank(e.target.value)}
+          onBlur={() => sourceBank !== (order.sourceBank ?? "") && onPatch(order.id, { sourceBank: sourceBank || null })}
+          placeholder="банк-источник"
+        />
+      </TableCell>
+      <TableCell className="text-xs">
+        <Select
+          value={order.payoutMethod ?? "none"}
+          onValueChange={(v) => onPatch(order.id, { payoutMethod: v === "none" ? null : v })}
+        >
+          <SelectTrigger className="h-7 w-36"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">выдача —</SelectItem>
+            <SelectItem value="courier_cash">курьер</SelectItem>
+            <SelectItem value="cardless_atm">cardless ATM</SelectItem>
+            <SelectItem value="thai_bank_transfer">Thai bank</SelectItem>
+            <SelectItem value="office_cash">офис</SelectItem>
+            <SelectItem value="atm">ATM legacy</SelectItem>
+          </SelectContent>
+        </Select>
         <Input
           className="mt-1 h-7 w-28"
           value={code}

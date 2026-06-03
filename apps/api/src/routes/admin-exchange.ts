@@ -7,10 +7,15 @@
  */
 
 import { type Db, setEncryptedSecret, withTenant } from "@chatman-media/conversation-engine";
-import { exchangeOrders, exchangeRates } from "@chatman-media/storage";
+import { exchangeOrders, exchangeRates, exchangeRateTiers } from "@chatman-media/storage";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { refreshTenantRates } from "../lib/exchange/rate-feed.ts";
+import {
+  buildDefaultRateCardProposal,
+  refreshTenantRates,
+  renderRateCardMessage,
+  type RateCardProposal,
+} from "../lib/exchange/rate-feed.ts";
 
 export interface AdminExchangeRoutesOpts {
   db: Db;
@@ -125,6 +130,141 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
     }
   });
 
+  app.post("/api/admin/exchange/rate-card/preview", async (c) => {
+    try {
+      const proposals = await buildDefaultRateCardProposal();
+      return c.json({
+        ok: true,
+        proposals,
+        message: renderRateCardMessage(proposals),
+      });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "rate-card preview failed" }, 502);
+    }
+  });
+
+  app.post("/api/admin/exchange/rate-card/approve", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const body = await c.req.json().catch(() => ({}));
+    const proposals = Array.isArray(body?.proposals)
+      ? (body.proposals as RateCardProposal[])
+      : await buildDefaultRateCardProposal();
+    const now = Math.floor(Date.now() / 1000);
+
+    await withTenant(opts.db, tenantId, async (tx) => {
+      for (const proposal of proposals) {
+        const asset = proposal.asset.trim().toUpperCase();
+        const quoteMode = proposal.quoteMode === "divide" ? "divide" : "multiply";
+        const network = typeof proposal.network === "string" ? proposal.network.trim().toLowerCase() : "";
+        const marketRate = Number(proposal.marketRate);
+        if (!asset || !(marketRate > 0) || !Array.isArray(proposal.tiers)) continue;
+
+        await tx
+          .insert(exchangeRates)
+          .values({
+            tenantId,
+            asset,
+            quoteAsset: "THB",
+            network,
+            baseRate: marketRate,
+            quoteMode,
+            marginPct: 0,
+            feeFixedThb: 0,
+            minAmountFrom: null,
+            maxAmountFrom: null,
+            isActive: true,
+            autoUpdate: true,
+            updatedByAdminId: adminId ?? null,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: [
+              exchangeRates.tenantId,
+              exchangeRates.asset,
+              exchangeRates.quoteAsset,
+              exchangeRates.network,
+            ],
+            set: {
+              baseRate: marketRate,
+              quoteMode,
+              isActive: true,
+              autoUpdate: true,
+              updatedByAdminId: adminId ?? null,
+              updatedAt: now,
+            },
+          });
+
+        for (const tier of proposal.tiers) {
+          const minAmount = Number(tier.minThb);
+          const maxAmount = tier.maxThb === null ? null : Number(tier.maxThb);
+          const displayRate = Number(tier.displayRate);
+          const deviationPct = Number(tier.deviationPct);
+          if (!(minAmount >= 0) || !(displayRate > 0) || !Number.isFinite(deviationPct)) continue;
+          await tx
+            .insert(exchangeRateTiers)
+            .values({
+              tenantId,
+              asset,
+              quoteAsset: "THB",
+              network,
+              rangeBasis: "target_thb",
+              minAmount,
+              maxAmount,
+              marketRate,
+              displayRate,
+              deviationPct,
+              formulaJson: JSON.stringify({
+                source: "market_deviation",
+                quoteMode,
+                marketRate,
+                displayRate,
+                deviationPct,
+                formula: tier.formula,
+              }),
+              isActive: true,
+              approvedByAdminId: adminId ?? null,
+              approvedAt: now,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .onConflictDoUpdate({
+              target: [
+                exchangeRateTiers.tenantId,
+                exchangeRateTiers.asset,
+                exchangeRateTiers.quoteAsset,
+                exchangeRateTiers.network,
+                exchangeRateTiers.rangeBasis,
+                exchangeRateTiers.minAmount,
+              ],
+              set: {
+                maxAmount,
+                marketRate,
+                displayRate,
+                deviationPct,
+                formulaJson: JSON.stringify({
+                  source: "market_deviation",
+                  quoteMode,
+                  marketRate,
+                  displayRate,
+                  deviationPct,
+                  formula: tier.formula,
+                }),
+                isActive: true,
+                approvedByAdminId: adminId ?? null,
+                approvedAt: now,
+                updatedAt: now,
+              },
+            });
+        }
+      }
+    });
+
+    opts.onReload?.(tenantId);
+    return c.json({ ok: true, message: renderRateCardMessage(proposals) });
+  });
+
   app.delete("/api/admin/exchange/rates/:id", async (c) => {
     const tenantId = c.var.tenantId;
     const id = Number(c.req.param("id"));
@@ -138,15 +278,21 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
     return c.json({ ok: true });
   });
 
-  // ── Реквизиты (секреты): кошельки и платёжная ссылка ────────────────────────
-  // Body: { key: 'exchange_wallet_usdt_trc20' | 'exchange_fiat_payment_url', value }
+  // ── Реквизиты (секреты): кошельки, Binance ID, QR/карта ────────────────────
+  // Body: { key: 'exchange_wallet_*' | 'exchange_fiat_payment_url' |
+  //         'exchange_binance_id' | 'exchange_rub_card_requisites', value }
   app.post("/api/admin/exchange/requisites", async (c) => {
     const tenantId = c.var.tenantId;
     const body = await c.req.json().catch(() => ({}));
     const key = typeof body?.key === "string" ? body.key.trim() : "";
     const value = typeof body?.value === "string" ? body.value.trim() : "";
-    if (!key.startsWith("exchange_wallet_") && key !== "exchange_fiat_payment_url") {
-      return c.json({ error: "key must be exchange_wallet_* or exchange_fiat_payment_url" }, 400);
+    const allowedKeys = new Set([
+      "exchange_fiat_payment_url",
+      "exchange_binance_id",
+      "exchange_rub_card_requisites",
+    ]);
+    if (!key.startsWith("exchange_wallet_") && !allowedKeys.has(key)) {
+      return c.json({ error: "bad requisites key" }, 400);
     }
     if (!value) return c.json({ error: "value required" }, 400);
     await setEncryptedSecret({
@@ -205,8 +351,14 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
     const patch: Record<string, unknown> = { updatedAt: now };
     if (typeof body?.payoutCode === "string") patch.payoutCode = body.payoutCode.trim();
     if (typeof body?.payoutLocation === "string") patch.payoutLocation = body.payoutLocation.trim();
-    if (typeof body?.payoutMethod === "string") patch.payoutMethod = body.payoutMethod.trim();
+    if (typeof body?.payoutMethod === "string" || body?.payoutMethod === null) patch.payoutMethod = body.payoutMethod === null ? null : body.payoutMethod.trim();
+    if (typeof body?.payoutDestinationJson === "string") patch.payoutDestinationJson = body.payoutDestinationJson.trim();
     if (typeof body?.verificationId === "string") patch.verificationId = body.verificationId.trim();
+    if (typeof body?.paymentMethod === "string" || body?.paymentMethod === null) patch.paymentMethod = body.paymentMethod === null ? null : body.paymentMethod.trim();
+    if (typeof body?.paymentRail === "string" || body?.paymentRail === null) patch.paymentRail = body.paymentRail === null ? null : body.paymentRail.trim();
+    if (typeof body?.sourceBank === "string" || body?.sourceBank === null) patch.sourceBank = body.sourceBank === null ? null : body.sourceBank.trim();
+    if (typeof body?.payerName === "string" || body?.payerName === null) patch.payerName = body.payerName === null ? null : body.payerName.trim();
+    if (typeof body?.thirdPartyApproved === "boolean") patch.thirdPartyApproved = body.thirdPartyApproved;
     if (typeof body?.status === "string") {
       const allowed = ["quote", "awaiting_payment", "paid", "payout", "completed", "cancelled", "expired"];
       if (!allowed.includes(body.status)) return c.json({ error: "bad status" }, 400);
