@@ -448,7 +448,7 @@ async function makeConversation(fixture: FixtureCase, verified: boolean) {
 		await tx.insert(channelIdentities).values({
 			contactId,
 			channelId,
-			externalUserId: `tg-${fixture.id}`,
+			externalUserId: `tg-${fixture.id}-${verified ? "verified" : "initial"}`,
 			createdAt: now,
 		});
 		return { contactId, conversationId };
