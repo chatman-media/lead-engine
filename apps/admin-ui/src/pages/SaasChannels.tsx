@@ -67,6 +67,8 @@ export function SaasChannels() {
 
   const [ubStep, setUbStep] = useState<UserbotStep>("phone");
   const [ubPhone, setUbPhone] = useState("");
+  const [ubApiId, setUbApiId] = useState("");
+  const [ubApiHash, setUbApiHash] = useState("");
   const [ubCode, setUbCode] = useState("");
   const [ubPassword, setUbPassword] = useState("");
   const [ubLoginId, setUbLoginId] = useState("");
@@ -77,6 +79,8 @@ export function SaasChannels() {
   const [waPhoneId, setWaPhoneId] = useState("");
   const [waAccessToken, setWaAccessToken] = useState("");
   const [waBizId, setWaBizId] = useState("");
+  const [waVerifyToken, setWaVerifyToken] = useState("");
+  const [waAppSecret, setWaAppSecret] = useState("");
   const [waSubmitting, setWaSubmitting] = useState(false);
   const [waResult, setWaResult] = useState<CreateWhatsAppChannelResult | null>(null);
 
@@ -224,6 +228,8 @@ export function SaasChannels() {
         phoneNumberId,
         accessToken,
         ...(waBizId.trim() ? { businessAccountId: waBizId.trim() } : {}),
+        ...(waVerifyToken.trim() ? { verifyToken: waVerifyToken.trim() } : {}),
+        ...(waAppSecret.trim() ? { appSecret: waAppSecret.trim() } : {}),
       });
       setWaResult(res);
       setWaAccessToken("");
@@ -260,7 +266,13 @@ export function SaasChannels() {
         navigate("/login", { replace: true });
         return "";
       }
-      if (err.status === 503) return "Userbot отключён на сервере (нет TELEGRAM_API_ID/HASH)";
+      if (err.errorCode === "userbot_creds_required" || err.errorCode === "userbot_creds_invalid") {
+        return (
+          (err.extra?.message as string | undefined) ??
+          "Укажите API ID и API Hash (my.telegram.org → API development tools)"
+        );
+      }
+      if (err.status === 503) return "Userbot временно недоступен — попробуйте позже";
       if (err.status === 403) return "Доступно только для superadmin";
       const msg = err.extra?.message as string | undefined;
       const retry = err.extra?.retryAfterSec as number | undefined;
@@ -275,6 +287,8 @@ export function SaasChannels() {
   function resetUserbot() {
     setUbStep("phone");
     setUbPhone("");
+    setUbApiId("");
+    setUbApiHash("");
     setUbCode("");
     setUbPassword("");
     setUbLoginId("");
@@ -292,7 +306,7 @@ export function SaasChannels() {
     }
     setUbSubmitting(true);
     try {
-      const res = await saas.startUserbotLogin(phone);
+      const res = await saas.startUserbotLogin(phone, ubApiId, ubApiHash);
       setUbLoginId(res.loginId);
       setUbStep("code");
     } catch (err) {
@@ -448,6 +462,39 @@ export function SaasChannels() {
 
               {ubStep === "phone" && (
                 <form onSubmit={handleUbPhone} className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label>API ID</Label>
+                      <Input
+                        inputMode="numeric"
+                        autoComplete="off"
+                        value={ubApiId}
+                        onChange={(e) => setUbApiId(e.target.value)}
+                        placeholder="1234567"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>API Hash</Label>
+                      <Input
+                        autoComplete="off"
+                        value={ubApiHash}
+                        onChange={(e) => setUbApiHash(e.target.value)}
+                        placeholder="abcd1234ef…"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Получите на{" "}
+                    <a
+                      href="https://my.telegram.org/apps"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline"
+                    >
+                      my.telegram.org → API development tools
+                    </a>
+                    . Можно оставить пустым, если платформа предоставляет общие ключи.
+                  </p>
                   <div className="space-y-1.5">
                     <Label>Номер телефона аккаунта</Label>
                     <Input
@@ -566,6 +613,32 @@ export function SaasChannels() {
                     placeholder="123456789012345"
                   />
                 </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Verify Token (опц.)</Label>
+                    <Input
+                      autoComplete="off"
+                      value={waVerifyToken}
+                      onChange={(e) => setWaVerifyToken(e.target.value)}
+                      placeholder="любая строка для Meta webhook"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>App Secret (опц.)</Label>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={waAppSecret}
+                      onChange={(e) => setWaAppSecret(e.target.value)}
+                      placeholder="Meta → App settings → Basic"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Verify Token — придумайте строку и впишите её же в Meta dashboard при
+                  настройке webhook. App Secret включает проверку подписи входящих вебхуков.
+                  Оставьте пустыми для общих ключей платформы.
+                </p>
                 <Button
                   type="submit"
                   disabled={waSubmitting || !waPhoneId.trim() || !waAccessToken.trim()}

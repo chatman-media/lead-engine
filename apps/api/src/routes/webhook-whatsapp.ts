@@ -77,11 +77,16 @@ export function makeWhatsAppWebhookRoutes(opts: {
 
   // GET — verify handshake. Один раз при setup'е webhook'а в Meta dashboard.
   app.get("/webhook/whatsapp/:slug", (c) => {
+    // Per-tenant verify_token (резолвнут в entry при загрузке канала) с
+    // фолбэком на глобальный env-токен.
+    const slug = c.req.param("slug");
+    const entry = opts.channels.getWhatsAppByTenant(slug)[0];
+    const expectedVerifyToken = entry?.whatsappVerifyToken ?? opts.verifyToken;
     const result = verifyWebhookSubscription({
       mode: c.req.query("hub.mode") ?? null,
       token: c.req.query("hub.verify_token") ?? null,
       challenge: c.req.query("hub.challenge") ?? null,
-      expectedVerifyToken: opts.verifyToken,
+      expectedVerifyToken,
     });
     // text/plain (не json) — Meta ждёт plaintext challenge.
     if (result.ok) return c.text(result.body, 200);
@@ -91,18 +96,30 @@ export function makeWhatsAppWebhookRoutes(opts: {
   app.post("/webhook/whatsapp/:slug", async (c) => {
     const startedAt = performance.now();
 
-    // ── Signature verification ДО любых других проверок ──────────────
-    // 1. Без appSecret — bypass (dev mode); warning'ом в boot-логе.
-    // 2. HMAC считается от RAW request body (c.req.text), не от
-    //    re-сериализованного JSON — иначе любая нормализация (whitespace
-    //    / key order / unicode escape) даст другой digest.
-    // 3. Расположение ПЕРЕД tenant lookup — anti-enumeration: 404 vs 401
-    //    раскрыло бы attacker'у какие slug'и есть в платформе.
+    // HMAC считается от RAW request body (c.req.text), не от re-сериализованного
+    // JSON — иначе любая нормализация (whitespace / key order / unicode escape)
+    // даст другой digest.
     const rawBody = await c.req.text();
-    if (opts.appSecret) {
+
+    // Per-tenant app_secret требует резолва тенанта по slug ДО проверки подписи.
+    // Это слегка ослабляет анти-энумерацию (404 для неизвестного slug приходит
+    // раньше 401 за плохую подпись), но slug и так публичен — он в URL вебхука,
+    // который тенант сам прописывает в Meta dashboard. Глобальный env-secret
+    // остаётся фолбэком, если у тенанта свой не задан.
+    const slug = c.req.param("slug");
+    const entries = opts.channels.getWhatsAppByTenant(slug);
+    if (entries.length === 0) {
+      opts.metrics?.webhookRequests.inc(1, { channel: "whatsapp", status: "404" });
+      return c.json({ error: "no active whatsapp channel for tenant" }, 404);
+    }
+    const entry = entries[0]!;
+
+    // Без appSecret (ни per-tenant, ни env) — bypass (dev mode).
+    const appSecret = entry.whatsappAppSecret ?? opts.appSecret;
+    if (appSecret) {
       try {
         verifyWhatsAppSignature({
-          secret: opts.appSecret,
+          secret: appSecret,
           payload: rawBody,
           header: c.req.header("X-Hub-Signature-256"),
         });
@@ -115,14 +132,6 @@ export function makeWhatsAppWebhookRoutes(opts: {
         return c.json({ error: "invalid signature" }, 401);
       }
     }
-
-    const slug = c.req.param("slug");
-    const entries = opts.channels.getWhatsAppByTenant(slug);
-    if (entries.length === 0) {
-      opts.metrics?.webhookRequests.inc(1, { channel: "whatsapp", status: "404" });
-      return c.json({ error: "no active whatsapp channel for tenant" }, 404);
-    }
-    const entry = entries[0]!;
 
     // Rate-limit check (см. webhook-telegram). Per-plan limits override global cfg.
     if (opts.rateLimiter) {

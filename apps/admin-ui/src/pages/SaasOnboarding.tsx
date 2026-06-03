@@ -87,6 +87,8 @@ export function SaasOnboarding() {
 
   const [ubStep, setUbStep] = useState<"phone" | "code" | "2fa">("phone");
   const [ubPhone, setUbPhone] = useState("");
+  const [ubApiId, setUbApiId] = useState("");
+  const [ubApiHash, setUbApiHash] = useState("");
   const [ubCode, setUbCode] = useState("");
   const [ubPassword, setUbPassword] = useState("");
   const [ubLoginId, setUbLoginId] = useState("");
@@ -232,7 +234,13 @@ export function SaasOnboarding() {
   function userbotErrMessage(err: unknown): string {
     if (err instanceof ApiError) {
       if (handleAuthError(err)) return "";
-      if (err.status === 503) return "Userbot отключён на сервере (нет TELEGRAM_API_ID/HASH)";
+      if (err.errorCode === "userbot_creds_required" || err.errorCode === "userbot_creds_invalid") {
+        return (
+          (err.extra?.message as string | undefined) ??
+          "Укажите API ID и API Hash (my.telegram.org → API development tools)"
+        );
+      }
+      if (err.status === 503) return "Userbot временно недоступен — попробуйте позже";
       const msg = err.extra?.message as string | undefined;
       const retry = err.extra?.retryAfterSec as number | undefined;
       if (err.errorCode === "flood_wait") {
@@ -246,6 +254,8 @@ export function SaasOnboarding() {
   function resetUserbot() {
     setUbStep("phone");
     setUbPhone("");
+    setUbApiId("");
+    setUbApiHash("");
     setUbCode("");
     setUbPassword("");
     setUbLoginId("");
@@ -262,7 +272,7 @@ export function SaasOnboarding() {
     }
     setUbSubmitting(true);
     try {
-      const res = await saas.startUserbotLogin(phone);
+      const res = await saas.startUserbotLogin(phone, ubApiId, ubApiHash);
       setUbLoginId(res.loginId);
       setUbStep("code");
     } catch (err) {
@@ -579,6 +589,39 @@ export function SaasOnboarding() {
 
                   {ubStep === "phone" && (
                     <form onSubmit={handleUbPhone} className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label>API ID</Label>
+                          <Input
+                            inputMode="numeric"
+                            autoComplete="off"
+                            value={ubApiId}
+                            onChange={(e) => setUbApiId(e.target.value)}
+                            placeholder="1234567"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>API Hash</Label>
+                          <Input
+                            autoComplete="off"
+                            value={ubApiHash}
+                            onChange={(e) => setUbApiHash(e.target.value)}
+                            placeholder="abcd1234ef…"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Получите на{" "}
+                        <a
+                          href="https://my.telegram.org/apps"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline"
+                        >
+                          my.telegram.org → API development tools
+                        </a>
+                        . Можно оставить пустым, если платформа предоставляет общие ключи.
+                      </p>
                       <div className="space-y-1.5">
                         <Label>Номер телефона аккаунта</Label>
                         <Input

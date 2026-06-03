@@ -984,6 +984,8 @@ export const saas = {
     phoneNumberId: string;
     accessToken: string;
     businessAccountId?: string;
+    verifyToken?: string;
+    appSecret?: string;
   }) {
     return request<CreateWhatsAppChannelResult>("/api/admin/channels/whatsapp", {
       method: "POST",
@@ -1000,10 +1002,14 @@ export const saas = {
     return request<WebSnippet>("/api/admin/channels/web/snippet");
   },
   // ── Telegram userbot (личный аккаунт, MTProto) — пошаговый логин ──────
-  startUserbotLogin(phone: string) {
+  startUserbotLogin(phone: string, apiId?: string, apiHash?: string) {
     return request<UserbotLoginStartResult>("/api/admin/channels/userbot/start", {
       method: "POST",
-      body: JSON.stringify({ phone }),
+      body: JSON.stringify({
+        phone,
+        ...(apiId?.trim() ? { apiId: apiId.trim() } : {}),
+        ...(apiHash?.trim() ? { apiHash: apiHash.trim() } : {}),
+      }),
     });
   },
   verifyUserbotCode(loginId: string, code: string) {

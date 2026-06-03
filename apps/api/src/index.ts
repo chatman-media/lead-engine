@@ -179,6 +179,8 @@ async function main() {
   await channels.loadFromDb(db as any, {
     masterKeyHex: cfg.masterKeyHex,
     onWarn: (msg, ctx) => log.warn(`channel-registry: ${msg}`, ctx),
+    ...(cfg.whatsappVerifyToken ? { whatsappVerifyTokenFallback: cfg.whatsappVerifyToken } : {}),
+    ...(cfg.whatsappAppSecret ? { whatsappAppSecretFallback: cfg.whatsappAppSecret } : {}),
   });
 
   const app = new Hono();
@@ -240,8 +242,11 @@ async function main() {
     masterKeyHex: cfg.masterKeyHex,
     log,
   });
-  const userbotEnabled = cfg.telegramUserbot.apiId > 0 && !!cfg.telegramUserbot.apiHash;
-  const userbotLoginStore = userbotEnabled ? new UserbotLoginStore() : undefined;
+  // Userbot-сабсистем включён всегда: api_id/api_hash резолвятся per-tenant из
+  // tenant_secrets (env TELEGRAM_API_ID/HASH — лишь общий фолбэк). Тенант вводит
+  // свои креды в кабинете → онбординг работает без env на сервере.
+  const userbotEnvFallback = cfg.telegramUserbot.apiId > 0 && !!cfg.telegramUserbot.apiHash;
+  const userbotLoginStore = new UserbotLoginStore();
 
   // Hot-reload bus: admin routes вызывают reloadLlm/reloadChannels(tenantId)
   // после изменения, live применяя в текущем процессе. apps/worker — отдельный
@@ -318,9 +323,9 @@ async function main() {
       webhookSecret: cfg.telegramWebhookSecret,
       ...(cfg.whatsappVerifyToken ? { whatsappVerifyToken: cfg.whatsappVerifyToken } : {}),
       ...(cfg.webWidgetScriptUrl ? { webWidgetScriptUrl: cfg.webWidgetScriptUrl } : {}),
-      ...(userbotEnabled ? { telegramApiId: cfg.telegramUserbot.apiId } : {}),
-      ...(userbotEnabled ? { telegramApiHash: cfg.telegramUserbot.apiHash } : {}),
-      ...(userbotLoginStore ? { userbotLoginStore } : {}),
+      telegramApiId: cfg.telegramUserbot.apiId,
+      telegramApiHash: cfg.telegramUserbot.apiHash,
+      userbotLoginStore,
       onReload: reloader.reloadChannels,
     }),
   );
@@ -698,7 +703,7 @@ async function main() {
   // соединений; runner-factory инжектит pipeline-deps (replyStrategy и т.д.).
   const userbotAbort = new AbortController();
   let userbotDispatcherPromise: Promise<void> = Promise.resolve();
-  if (userbotEnabled) {
+  {
     userbotRegistry.setRunnerFactory((entry, signal) =>
       startUserbotInboundRunner({
         entry,
@@ -730,9 +735,10 @@ async function main() {
         err: err instanceof Error ? err : new Error(String(err)),
       });
     });
-    log.info("channel-userbot enabled", { connected: userbotRegistry.size() });
-  } else {
-    log.info("channel-userbot disabled — TELEGRAM_API_ID/HASH not set");
+    log.info("channel-userbot enabled (per-tenant MTProto creds)", {
+      connected: userbotRegistry.size(),
+      envFallback: userbotEnvFallback,
+    });
   }
   const wsRoutes = makeWebSocketRoutes({
     registry: webRegistry,

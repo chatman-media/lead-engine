@@ -8,6 +8,7 @@ import {
 import type { JsonLogger } from "@chatman-media/observability";
 import { channels, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
+import { resolveUserbotCreds } from "./userbot-creds.ts";
 
 /**
  * Registry для in-process `TelegramUserbotAdapter`'ов в apps/api. Один adapter
@@ -45,7 +46,9 @@ interface ManagedEntry {
 }
 
 export interface UserbotChannelRegistryOpts {
+  /** Env-фолбэк api_id (TELEGRAM_API_ID). Может быть 0 — тогда нужны per-tenant креды. */
   apiId: number;
+  /** Env-фолбэк api_hash (TELEGRAM_API_HASH). Может быть пуст. */
   apiHash: string;
   masterKeyHex: string;
   log: JsonLogger;
@@ -107,7 +110,6 @@ export class UserbotChannelRegistry {
     tenantId: number;
     tenantSlug: string;
   }): Promise<void> {
-    if (this.opts.apiId === 0 || !this.opts.apiHash) return;
     if (!row.credentialsRef) {
       this.opts.log.warn("userbot channel has no credentialsRef — skipping", {
         channelId: row.channelId,
@@ -140,11 +142,29 @@ export class UserbotChannelRegistry {
       return;
     }
 
+    // api_id/api_hash резолвятся per-tenant (tenant_secrets) с env-фолбэком.
+    const creds = await resolveUserbotCreds({
+      db: this.dbRef as Db,
+      tenantId: row.tenantId,
+      masterKeyHex: this.opts.masterKeyHex,
+      fallbackApiId: this.opts.apiId,
+      fallbackApiHash: this.opts.apiHash,
+      onWarn: (msg, ctx) => this.opts.log.warn(msg, ctx),
+    });
+    if (!creds) {
+      this.opts.log.warn("userbot api creds missing — needs config", {
+        channelId: row.channelId,
+        tenantId: row.tenantId,
+      });
+      await this.markChannelError(row.tenantId, row.channelId);
+      return;
+    }
+
     const credentialsRef = row.credentialsRef;
     const adapter = new TelegramUserbotAdapter({
       id: String(row.channelId),
-      apiId: this.opts.apiId,
-      apiHash: this.opts.apiHash,
+      apiId: creds.apiId,
+      apiHash: creds.apiHash,
       sessionString,
       // gramjs может выдать обновлённую session на reconnect — пере-шифруем.
       onSessionUpdated: async (updated) => {
