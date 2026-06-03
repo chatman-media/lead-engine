@@ -1,3 +1,10 @@
+# [@chatman-media/channel-core-v1.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.0.0...@chatman-media/channel-core-v1.1.0) (2026-06-03)
+
+
+### Features
+
+* **exchange:** core infrastructure (models, tools, providers, migrations) ([75f84d7](https://github.com/chatman-media/lead-engine/commit/75f84d74b4a95d1ce486eb2428862d52d81c3ebc))
+
 # @chatman-media/channel-core-v1.0.0 (2026-05-22)
 
 
