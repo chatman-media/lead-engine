@@ -36,6 +36,11 @@ const SOURCE_RU: Record<string, string> = {
   web: "Web",
 };
 const MODE_RU: Record<string, string> = { ai: "AI", human: "Оператор" };
+const STATUS_RU: Record<string, string> = {
+  open: "Открыт",
+  pending: "Ожидание",
+  resolved: "Решен",
+};
 const ROLE_RU: Record<string, string> = {
   user: "клиент",
   assistant: "AI",
@@ -76,6 +81,7 @@ export function SaasConversations() {
   const loadedCountRef = useRef(30);
 
   // Filters
+  const [filterStatus, setFilterStatus] = useState("open");
   const [filterSource, setFilterSource] = useState("");
   const [filterMode, setFilterMode] = useState("");
   const [filterEscalated, setFilterEscalated] = useState(false);
@@ -94,6 +100,7 @@ export function SaasConversations() {
   const [togglingMode, setTogglingMode] = useState(false);
   const [confirmingTakeover, setConfirmingTakeover] = useState(false);
   const [contactLead, setContactLead] = useState<LeadListItem | null>(null);
+  const [admins, setAdmins] = useState<import("../api/saas.ts").AdminRow[]>([]);
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
@@ -104,12 +111,17 @@ export function SaasConversations() {
     return false;
   }
 
+  useEffect(() => {
+    saas.listAdmins().then((r) => setAdmins(r.items)).catch(() => {});
+  }, []);
+
   const buildFilters = useCallback(() => ({
+    status: filterStatus,
     ...(filterSource ? { source: filterSource } : {}),
     ...(filterMode ? { mode: filterMode } : {}),
     ...(filterEscalated ? { escalated: true } : {}),
     ...(filterQDebounced ? { q: filterQDebounced } : {}),
-  }), [filterSource, filterMode, filterEscalated, filterQDebounced]);
+  }), [filterStatus, filterSource, filterMode, filterEscalated, filterQDebounced]);
 
   async function refreshList(limit = 30, filters = buildFilters()) {
     try {
@@ -195,13 +207,14 @@ export function SaasConversations() {
   useEffect(() => {
     setListLoading(true);
     const filters = {
+      status: filterStatus,
       ...(filterSource ? { source: filterSource } : {}),
       ...(filterMode ? { mode: filterMode } : {}),
       ...(filterEscalated ? { escalated: true } : {}),
       ...(filterQDebounced ? { q: filterQDebounced } : {}),
     };
     refreshList(30, filters).finally(() => setListLoading(false));
-  }, [filterSource, filterMode, filterEscalated, filterQDebounced]);
+  }, [filterStatus, filterSource, filterMode, filterEscalated, filterQDebounced]);
 
   async function handleToggleMode() {
     if (!detail || !selectedId) return;
@@ -260,6 +273,17 @@ export function SaasConversations() {
     }
   }
 
+  async function handleUpdateConversation(patch: { status?: string; assignedAdminId?: number | null }) {
+    if (!selectedId) return;
+    try {
+      await saas.updateConversation(selectedId, patch);
+      await refreshDetail(selectedId);
+      void refreshList(Math.max(30, loadedCountRef.current));
+    } catch (err) {
+      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [detail?.messages]);
@@ -288,9 +312,28 @@ export function SaasConversations() {
         </p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[300px_1fr_300px]">
         {/* Список */}
         <Card className="flex max-h-[72vh] flex-col gap-0 overflow-hidden py-0">
+          <div className="border-b">
+            <div className="flex">
+              {["open", "pending", "resolved"].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setFilterStatus(s)}
+                  className={cn(
+                    "flex-1 px-2 py-2.5 text-xs font-medium border-b-2 transition-colors",
+                    filterStatus === s
+                      ? "border-primary text-primary bg-primary/5"
+                      : "border-transparent text-muted-foreground hover:bg-muted/40",
+                  )}
+                >
+                  {STATUS_RU[s]}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="border-b px-3 py-2 space-y-2">
             <div className="relative">
               <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
@@ -371,9 +414,16 @@ export function SaasConversations() {
                           <span className="truncate text-sm font-medium">
                             {c.contactName ?? `Контакт #${c.contactId}`}
                           </span>
-                          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                            {fmtTime(c.lastMessageAt)}
-                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {c.unreadCount > 0 && (
+                              <span className="flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                                {c.unreadCount}
+                              </span>
+                            )}
+                            <span className="font-mono text-[11px] text-muted-foreground">
+                              {fmtTime(c.lastMessageAt)}
+                            </span>
+                          </div>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-1">
                           <Badge variant="secondary">{SOURCE_RU[c.source] ?? c.source}</Badge>
@@ -595,6 +645,100 @@ export function SaasConversations() {
             </>
           ) : (
             <p className="p-4 text-sm text-muted-foreground">Диалог не загружен</p>
+          )}
+        </Card>
+
+        {/* Инфо-панель (Right Sidebar) */}
+        <Card className="flex max-h-[72vh] flex-col gap-0 overflow-hidden py-0">
+          {!detail ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">
+              Выберите диалог
+            </div>
+          ) : (
+            <div className="flex flex-col h-full overflow-y-auto p-4 space-y-6">
+              {/* Статус и Назначение */}
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold uppercase text-muted-foreground">Статус</label>
+                  <Select
+                    value={detail.conversation.status}
+                    onValueChange={(v) => handleUpdateConversation({ status: v })}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="open">Открыт</SelectItem>
+                      <SelectItem value="pending">Ожидание</SelectItem>
+                      <SelectItem value="resolved">Решен</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold uppercase text-muted-foreground">Назначен на</label>
+                  <Select
+                    value={String(detail.conversation.assignedAdminId ?? "none")}
+                    onValueChange={(v) => handleUpdateConversation({ assignedAdminId: v === "none" ? null : Number.parseInt(v, 10) })}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Без оператора</SelectItem>
+                      {admins.map((a) => (
+                        <SelectItem key={a.id} value={String(a.id)}>
+                          {a.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Контакт и Лид */}
+              <div className="space-y-3 border-t pt-4">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold uppercase text-muted-foreground">Контакт</label>
+                  <p className="text-sm font-medium">{detail.conversation.contactName || "Без имени"}</p>
+                  <p className="text-[11px] text-muted-foreground">ID: {detail.conversation.contactId}</p>
+                </div>
+
+                {contactLead ? (
+                  <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold">Лид</span>
+                      <Link to={`/leads/${contactLead.id}`} className="text-primary">
+                        <ExternalLinkIcon className="size-3.5" />
+                      </Link>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[11px] text-muted-foreground">Стадия</p>
+                      <Badge variant="outline" className="text-[10px]">{STATE_RU[contactLead.state] ?? contactLead.state}</Badge>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed p-3 text-center">
+                    <p className="text-xs text-muted-foreground">Лид не создан</p>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0 text-xs"
+                      onClick={async () => {
+                        try {
+                          await saas.createLead(detail.conversation.contactId);
+                          await refreshDetail(selectedId!);
+                        } catch (err) {
+                          if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+                        }
+                      }}
+                    >
+                      Создать лид
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </Card>
       </div>

@@ -1,5 +1,6 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import {
+  admins,
   channelIdentities,
   channels,
   contacts,
@@ -52,26 +53,20 @@ export function makeAdminConversationsRoutes(
     const contactIdFilter = contactIdRaw ? Number.parseInt(contactIdRaw, 10) : null;
     const sourceFilter = c.req.query("source") || null;
     const modeFilter = c.req.query("mode") || null;
+    const statusFilter = c.req.query("status") || null;
+    const assigneeFilter = c.req.query("assigneeId") ? Number.parseInt(c.req.query("assigneeId")!, 10) : null;
     const escalatedOnly = c.req.query("escalated") === "1";
     const qFilter = c.req.query("q")?.trim() || null;
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
-      const lastMsgPreview = sql<string | null>`(
-        SELECT left(text, 120)
-        FROM messages
-        WHERE tenant_id = ${tenantId}
-          AND conversation_id = conversations.id
-          AND role IN ('user', 'assistant', 'human')
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
-      )`;
-
       const conditions = [
         eq(conversations.tenantId, tenantId),
         ...(cursor !== null && Number.isFinite(cursor) ? [lt(conversations.lastMessageAt, cursor)] : []),
         ...(contactIdFilter !== null ? [eq(conversations.userId, contactIdFilter)] : []),
         ...(sourceFilter ? [eq(conversations.source, sourceFilter)] : []),
         ...(modeFilter ? [eq(conversations.mode, modeFilter)] : []),
+        ...(statusFilter ? [eq(conversations.status, statusFilter)] : []),
+        ...(assigneeFilter !== null ? [eq(conversations.assignedAdminId, assigneeFilter)] : []),
         ...(escalatedOnly ? [isNotNull(conversations.escalatedAt)] : []),
         ...(qFilter ? [ilike(contacts.displayName, `%${qFilter}%`)] : []),
       ];
@@ -83,11 +78,14 @@ export function makeAdminConversationsRoutes(
           contactName: contacts.displayName,
           source: conversations.source,
           mode: conversations.mode,
+          status: conversations.status,
+          unreadCount: conversations.unreadCount,
+          assignedAdminId: conversations.assignedAdminId,
           currentStage: conversations.currentStage,
           lastMessageAt: conversations.lastMessageAt,
           createdAt: conversations.createdAt,
           escalatedAt: conversations.escalatedAt,
-          lastMessagePreview: lastMsgPreview,
+          lastMessagePreview: conversations.lastMessageText,
         })
         .from(conversations)
         .leftJoin(contacts, eq(contacts.id, conversations.userId))
@@ -110,6 +108,9 @@ export function makeAdminConversationsRoutes(
         contactName: r.contactName,
         source: r.source,
         mode: r.mode,
+        status: r.status,
+        unreadCount: r.unreadCount,
+        assignedAdminId: r.assignedAdminId,
         currentStage: r.currentStage,
         lastMessageAt: r.lastMessageAt,
         createdAt: r.createdAt,
@@ -139,6 +140,14 @@ export function makeAdminConversationsRoutes(
     }
 
     const result = await withTenant(opts.db, tenantId, async (tx) => {
+      // Reset unread count when conversation is opened by admin.
+      await tx
+        .update(conversations)
+        .set({ unreadCount: 0 })
+        .where(
+          and(eq(conversations.tenantId, tenantId), eq(conversations.id, id)),
+        );
+
       const [conv] = await tx
         .select({
           id: conversations.id,
@@ -146,6 +155,9 @@ export function makeAdminConversationsRoutes(
           contactName: contacts.displayName,
           source: conversations.source,
           mode: conversations.mode,
+          status: conversations.status,
+          unreadCount: conversations.unreadCount,
+          assignedAdminId: conversations.assignedAdminId,
           currentStage: conversations.currentStage,
           lastMessageAt: conversations.lastMessageAt,
           createdAt: conversations.createdAt,
@@ -294,10 +306,15 @@ export function makeAdminConversationsRoutes(
         createdAt: nowEpoch,
       });
 
-      // 5. Conversation mode → human, lastMessageAt → now.
+      // 5. Conversation mode → human, lastMessageAt → now, set preview.
       await tx
         .update(conversations)
-        .set({ mode: "human", lastMessageAt: nowEpoch })
+        .set({
+          mode: "human",
+          lastMessageAt: nowEpoch,
+          lastMessageText: text.slice(0, 200),
+          unreadCount: 0, // Оператор сам ответил — значит всё прочитано.
+        })
         .where(eq(conversations.id, conversationId));
 
       return {
@@ -442,6 +459,76 @@ export function makeAdminConversationsRoutes(
 
     if (updated.length === 0) return c.json({ error: "message not found or not deletable" }, 404);
     return c.json({ ok: true });
+  });
+
+  /**
+   * PATCH /api/admin/conversations/:id
+   * Body: { status?: 'open'|'pending'|'resolved', assignedAdminId?: number|null }
+   */
+  app.patch("/api/admin/conversations/:id", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId;
+    const id = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isFinite(id)) return c.json({ error: "invalid id" }, 400);
+
+    let body: { status?: string; assignedAdminId?: number | null };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+
+    const updates: Partial<typeof conversations.$inferInsert> = {};
+    if (body.status !== undefined) {
+      if (!["open", "pending", "resolved"].includes(body.status)) {
+        return c.json({ error: "invalid status" }, 400);
+      }
+      updates.status = body.status;
+    }
+    if (body.assignedAdminId !== undefined) {
+      if (
+        body.assignedAdminId !== null
+        && (!Number.isInteger(body.assignedAdminId) || body.assignedAdminId <= 0)
+      ) {
+        return c.json({ error: "invalid assignedAdminId" }, 400);
+      }
+      updates.assignedAdminId = body.assignedAdminId;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return c.json({ error: "no updates provided" }, 400);
+    }
+
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      if (body.assignedAdminId !== undefined && body.assignedAdminId !== null) {
+        const [assignee] = await tx
+          .select({ id: admins.id })
+          .from(admins)
+          .where(and(eq(admins.id, body.assignedAdminId), eq(admins.tenantId, tenantId)));
+        if (!assignee) return { error: "assignee not found" as const };
+      }
+
+      const [updated] = await tx
+        .update(conversations)
+        .set(updates)
+        .where(and(eq(conversations.id, id), eq(conversations.tenantId, tenantId)))
+        .returning();
+      return { conversation: updated ?? null };
+    });
+
+    if ("error" in outcome) return c.json({ error: outcome.error }, 404);
+    if (!outcome.conversation) return c.json({ error: "conversation not found" }, 404);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "conversation.update",
+      targetKind: "conversation",
+      targetId: id,
+      details: updates,
+    });
+
+    return c.json({ ok: true, conversation: outcome.conversation });
   });
 
   return app;

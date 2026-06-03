@@ -102,6 +102,8 @@ beforeAll(
           userId: contact!.id,
           source: "bot",
           mode: "ai",
+          status: "open",
+          lastMessageText: `Msg 4 in conv ${i}`,
           lastMessageAt: now - i * 100, // i=0 — newest, i=2 — oldest
           createdAt: now - i * 100,
         })
@@ -132,6 +134,8 @@ beforeAll(
         userId: contactB!.id,
         source: "bot",
         mode: "ai",
+        status: "open",
+        lastMessageText: "Msg B",
         lastMessageAt: now,
         createdAt: now,
       })
@@ -553,6 +557,73 @@ describe("PUT /api/admin/conversations/:id/mode", () => {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: "not-json",
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("PATCH /api/admin/conversations/:id", () => {
+  it("PATCH status → 200 and updated in DB", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "pending" }),
+    });
+    expect(res.status).toBe(200);
+    const [conv] = await db
+      .select({ status: conversations.status })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(conv!.status).toBe("pending");
+  });
+
+  it("PATCH assignedAdminId → 200 and updated in DB", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[1]!;
+    // Находим ID админа A
+    const [admin] = await db
+      .select({ id: schema.admins.id })
+      .from(schema.admins)
+      .where(eq(schema.admins.email, "conv-a@demo.io"));
+
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignedAdminId: admin!.id }),
+    });
+    expect(res.status).toBe(200);
+    const [conv] = await db
+      .select({ assignedAdminId: conversations.assignedAdminId })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(conv!.assignedAdminId).toBe(admin!.id);
+  });
+
+  it("PATCH assignedAdminId from another tenant → 404", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[1]!;
+    const [adminB] = await db
+      .select({ id: schema.admins.id })
+      .from(schema.admins)
+      .where(eq(schema.admins.email, "conv-b@demo.io"));
+
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignedAdminId: adminB!.id }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("PATCH invalid status → 400", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "invalid-status" }),
     });
     expect(res.status).toBe(400);
   });
