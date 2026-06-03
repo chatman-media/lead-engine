@@ -34,3 +34,6 @@ coverage/
 apps/bot/kb/result.json
 .claude/
 TODO.md
+
+# Local raw Telegram exports used only to derive redacted eval fixtures.
+forsanya/
