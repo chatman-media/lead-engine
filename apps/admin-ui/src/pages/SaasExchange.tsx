@@ -583,6 +583,7 @@ export function SaasExchange() {
                     <TableHead>Сумма</TableHead>
                     <TableHead>THB</TableHead>
                     <TableHead>Статус</TableHead>
+                    <TableHead>Шаг</TableHead>
                     <TableHead>TG / Верификация</TableHead>
                     <TableHead>Оплата</TableHead>
                     <TableHead>Выдача</TableHead>
@@ -591,7 +592,7 @@ export function SaasExchange() {
                 </TableHeader>
                 <TableBody>
                   {orders.length === 0 && (
-                    <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground">Заявок нет</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground">Заявок нет</TableCell></TableRow>
                   )}
                   {orders.map((o) => (
                     <OrderRow key={o.id} order={o} onPatch={patchOrder} />
@@ -692,6 +693,12 @@ function OrderRow({
       </TableCell>
       <TableCell>{order.amountToThb}</TableCell>
       <TableCell><Badge variant={STATUS_VARIANT[order.status] ?? "secondary"}>{order.status}</Badge></TableCell>
+      <TableCell className="max-w-36 text-xs">
+        <Badge variant="outline">{order.workflowStage?.label ?? "—"}</Badge>
+        {order.workflowStage?.slug && (
+          <div className="mt-1 text-[10px] text-muted-foreground">{order.workflowStage.slug}</div>
+        )}
+      </TableCell>
       <TableCell className="text-xs">
         <div>{order.telegramId ?? "—"}</div>
         <Input

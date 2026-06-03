@@ -811,6 +811,7 @@ export interface ExchangeOrder {
   id: number;
   contactId: number | null;
   conversationId: number | null;
+  leadId: number | null;
   telegramId: string | null;
   verificationId: string | null;
   direction: string;
@@ -835,6 +836,10 @@ export interface ExchangeOrder {
   proofJson: string | null;
   riskJson: string | null;
   rateExpiresAt: number | null;
+  workflowStage?: {
+    slug: string;
+    label: string;
+  };
   createdAt: number;
   updatedAt: number;
 }

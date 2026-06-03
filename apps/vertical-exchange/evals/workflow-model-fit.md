@@ -26,6 +26,14 @@ Current universal funnel:
 10. `payment_verified` — `assessment`: source bank and matched amount.
 11. `payout_or_completion` — `terminal_won`: final THB and payout code.
 
+Important split:
+
+- `exchange_orders.status` is a compact money lifecycle:
+  `quote`, `awaiting_payment`, `paid`, `payout`, `completed`, `cancelled`, `expired`.
+- Universal funnel stages above are the full business workflow visible to the
+  operator. Admin exchange CRM now returns a computed `workflowStage` so the UI
+  can show both layers instead of collapsing the process to seven order statuses.
+
 Current deterministic tools:
 
 - `compute_exchange_quote(asset, amount, network?)`

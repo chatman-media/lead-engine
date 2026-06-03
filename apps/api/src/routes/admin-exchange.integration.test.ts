@@ -390,6 +390,7 @@ describe("admin-exchange routes", () => {
 				paymentMethod: string;
 				payoutMethod: string;
 				proofJson: string | null;
+				workflowStage: { slug: string; label: string };
 			}>;
 		};
 		expect(listBody.orders).toHaveLength(1);
@@ -398,6 +399,10 @@ describe("admin-exchange routes", () => {
 		expect(listBody.orders[0]?.paymentMethod).toBe("sbp_qr");
 		expect(listBody.orders[0]?.payoutMethod).toBe("cardless_atm");
 		expect(listBody.orders[0]?.proofJson).toContain("fiat_receipt");
+		expect(listBody.orders[0]?.workflowStage).toEqual({
+			slug: "payment_verified",
+			label: "Проверка чека",
+		});
 	});
 
 	it("patches operator fields and counts completed turnover", async () => {
@@ -429,12 +434,17 @@ describe("admin-exchange routes", () => {
 				payoutCode: string;
 				completedAt: number | null;
 				thirdPartyApproved: boolean;
+				workflowStage: { slug: string; label: string };
 			};
 		};
 		expect(patchBody.order.status).toBe("completed");
 		expect(patchBody.order.payoutCode).toBe("ATM-CODE-123");
 		expect(patchBody.order.completedAt).toBeGreaterThan(0);
 		expect(patchBody.order.thirdPartyApproved).toBe(true);
+		expect(patchBody.order.workflowStage).toEqual({
+			slug: "payout_or_completion",
+			label: "Выдача / Завершено",
+		});
 
 		const turnoverRes = await authReq(tokenA, "/api/admin/exchange/turnover");
 		const turnover = (await turnoverRes.json()) as {

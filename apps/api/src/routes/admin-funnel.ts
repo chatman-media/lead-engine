@@ -1787,7 +1787,7 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
             staleTimeoutDays: stageData.staleTimeoutDays ?? null,
             nextStages: stageData.nextStages,
             autoAdvanceCondition: stageData.autoAdvanceCondition ?? null,
-            supportMode: false,
+            supportMode: stageData.supportMode ?? false,
             createdAt: now,
             updatedAt: now,
           })

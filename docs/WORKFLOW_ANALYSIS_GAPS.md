@@ -243,7 +243,12 @@ PR #140 подтянут в рабочее дерево: отдельные `exc
 
 Текущая exchange-воронка в `main`:
 
-`quote_request -> rate_confirmation -> kyc_collection -> awaiting_payment -> qr_delivery -> completed/cancelled`
+`intent_detected -> exchange_request -> quote_calculated -> verification_check -> kyc_collection -> risk_review -> order_created -> requisites_sent -> payment_proof_waiting -> payment_verified -> payout_or_completion/cancelled`
+
+Важно: 7 значений `exchange_orders.status` — это короткий денежный lifecycle
+заявки (`quote`, `awaiting_payment`, `paid`, `payout`, `completed`,
+`cancelled`, `expired`), а не полная бизнес-воронка. В exchange CRM нужно
+показывать оба слоя: технический статус заявки и универсальный шаг процесса.
 
 ### 3.1 Quote request
 

@@ -232,12 +232,14 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
   Кнопка "Настроить с AI" добавлена в `/funnel`.
 
 - ✅ **Exchange вертикаль (`exchange_v1`)** — шаблон для обменных пунктов Пхукета:
-  крипта (USDT/BTC/ETH) и переводы в рублях → THB наличные через cardless ATM.
-  Стадии: `quote_request` → `rate_confirmation` → `kyc_collection` →
-  `awaiting_payment` (supportMode) → `qr_delivery` (supportMode) → `completed`.
-  Поля: asset_from (select), payment_method (crypto/rub_transfer/cash),
-  network для USDT (TRC20/ERC20/BEP20), amount_from, KYC (имя + фото паспорта),
-  payment_proof (tx hash или скрин перевода), payout_qr.
+  крипта (USDT/BTC/ETH) и RUB/EUR/USD → THB через офис, cardless ATM, курьера
+  или перевод на тайский банк. Стадии: `intent_detected` → `exchange_request`
+  → `quote_calculated` → `verification_check` → `kyc_collection` →
+  `risk_review` → `order_created` → `requisites_sent` →
+  `payment_proof_waiting` → `payment_verified` → `payout_or_completion`.
+  Поля: intent/arrival_date, asset/network/amount/payout_method, курс и THB,
+  verification CRM id, risk decision, order id, реквизиты/TTL, чек или tx hash,
+  source bank, final payout code/artifact.
   Двуязычный system prompt (RU/EN). Пакет `apps/vertical-exchange`,
   зарегистрирован в `KNOWN_TEMPLATES` и `SEED_TEMPLATES["exchange"]`.
 
