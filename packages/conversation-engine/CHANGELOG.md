@@ -1,3 +1,22 @@
+# [@chatman-media/conversation-engine-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.1.0...@chatman-media/conversation-engine-v1.2.0) (2026-06-03)
+
+
+### Bug Fixes
+
+* **conversation-engine:** allow missing lead assignee ([729144e](https://github.com/chatman-media/lead-engine/commit/729144e09edf1eb2c80457a45cad81100045f7e5))
+* **notifications:** migration, personal delivery, notifyOnAssignedOnly, tests ([63c53f9](https://github.com/chatman-media/lead-engine/commit/63c53f9fa328f31bc526eed9fcd2431118616730))
+* **notifications:** show bot deep link, fix partial settings update ([9a6d7ec](https://github.com/chatman-media/lead-engine/commit/9a6d7ec6a089d531a5392affbd688d3222b1da80))
+* resolve channel-telegram TDZ crash on API startup ([d1390b4](https://github.com/chatman-media/lead-engine/commit/d1390b46b69858100d0a44acfc61c4a805186224))
+
+
+### Features
+
+* **conversations:** add operator inbox state ([1c608f6](https://github.com/chatman-media/lead-engine/commit/1c608f6c30c31b1d86e447ad7cd44d3915db1158))
+* **exchange:** core infrastructure (models, tools, providers, migrations) ([75f84d7](https://github.com/chatman-media/lead-engine/commit/75f84d74b4a95d1ce486eb2428862d52d81c3ebc))
+* GTM — billing auto-suspend, superadmin panel, usage alerts, reranker pipeline ([#128](https://github.com/chatman-media/lead-engine/issues/128)) ([cd5ee44](https://github.com/chatman-media/lead-engine/commit/cd5ee440a336eb9f29e7988935f6b352b558759d))
+* **notifications:** group onboarding via /setup <token> (п.1) ([a186929](https://github.com/chatman-media/lead-engine/commit/a18692905d1aef1078465c9434acabd5e9f77c48))
+* **notifications:** test button per rule + message templates UI (п.3 + п.4) ([1bff32d](https://github.com/chatman-media/lead-engine/commit/1bff32dc7f89bd7d955b192f29394f4c02478d04))
+
 # [@chatman-media/conversation-engine-v1.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.0.0...@chatman-media/conversation-engine-v1.1.0) (2026-05-24)
 
 
