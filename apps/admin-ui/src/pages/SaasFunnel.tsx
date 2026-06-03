@@ -51,6 +51,14 @@ const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "milestone", label: "Контрольная точка" },
 ];
 
+const FUNNEL_TEMPLATES = [
+  { id: "exchange", label: "Обменный пункт", icon: "💱", stages: 12 },
+  { id: "visa", label: "Виза / иммиграция", icon: "🛂", stages: 7 },
+  { id: "real_estate", label: "Недвижимость", icon: "🏠", stages: null },
+  { id: "modeling", label: "Модельное агентство", icon: "✨", stages: null },
+  { id: "recruitment", label: "Рекрутинг", icon: "👔", stages: null },
+] as const;
+
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "text", label: "Текст" },
   { value: "textarea", label: "Длинный текст" },
@@ -273,13 +281,7 @@ export function SaasFunnel() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          {[
-            { id: "exchange", label: "Обменный пункт", icon: "💱" },
-            { id: "visa", label: "Виза / иммиграция", icon: "🛂" },
-            { id: "real_estate", label: "Недвижимость", icon: "🏠" },
-            { id: "modeling", label: "Модельное агентство", icon: "✨" },
-            { id: "recruitment", label: "Рекрутинг", icon: "👔" },
-          ].map((tpl) => (
+          {FUNNEL_TEMPLATES.map((tpl) => (
             <Button
               key={tpl.id}
               variant={confirmSeedTemplate === tpl.id ? "destructive" : "outline"}
@@ -288,6 +290,7 @@ export function SaasFunnel() {
               onClick={() => handleSeed(tpl.id)}
             >
               {tpl.icon} {tpl.label}
+              {tpl.stages ? ` · ${tpl.stages}` : ""}
             </Button>
           ))}
         </div>
@@ -295,7 +298,11 @@ export function SaasFunnel() {
           <div className="mt-3 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertTriangleIcon className="size-4 shrink-0" />
             <span className="flex-1">
-              Заменит {funnel?.stages?.length ?? 0} стадий на шаблон. Продолжить?
+              Заменит {funnel?.stages?.length ?? 0} стадий на{" "}
+              {FUNNEL_TEMPLATES.find((tpl) => tpl.id === confirmSeedTemplate)?.stages
+                ? `${FUNNEL_TEMPLATES.find((tpl) => tpl.id === confirmSeedTemplate)?.stages} стадий`
+                : "стадии"}{" "}
+              выбранного шаблона. Продолжить?
             </span>
             <Button
               size="sm"

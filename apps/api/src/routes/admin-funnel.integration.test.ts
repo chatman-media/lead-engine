@@ -236,6 +236,50 @@ describe("POST /api/admin/funnel/seed", () => {
     const getBody = (await getRes.json()) as { stages: unknown[] };
     expect(getBody.stages).toHaveLength(7);
   });
+
+  it("seed with template 'exchange' replaces 7-stage visa funnel with 12 exchange stages", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/funnel/seed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template: "exchange" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stagesCreated: number; funnelId: number };
+    expect(body.funnelId).toBe(funnelId);
+    expect(body.stagesCreated).toBe(12);
+
+    const getRes = await authReq(tokenA, "/api/admin/funnel");
+    const getBody = (await getRes.json()) as {
+      stages: Array<{ slug: string; supportMode: boolean }>;
+    };
+    expect(getBody.stages.map((stage) => stage.slug)).toEqual([
+      "intent_detected",
+      "exchange_request",
+      "quote_calculated",
+      "verification_check",
+      "kyc_collection",
+      "risk_review",
+      "order_created",
+      "requisites_sent",
+      "payment_proof_waiting",
+      "payment_verified",
+      "payout_or_completion",
+      "cancelled",
+    ]);
+    expect(
+      getBody.stages.find((stage) => stage.slug === "payment_proof_waiting")
+        ?.supportMode,
+    ).toBe(true);
+
+    const reset = await authReq(tokenA, "/api/admin/funnel/seed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template: "visa" }),
+    });
+    const resetBody = (await reset.json()) as { stagesCreated: number };
+    expect(resetBody.stagesCreated).toBe(7);
+  });
 });
 
 describe("POST /api/admin/funnel/stages — add custom stage", () => {
