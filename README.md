@@ -197,6 +197,8 @@ cd apps/admin-ui && bun run dev   # admin-ui on http://localhost:5173
 Open `http://localhost:5173/signup` → create a tenant → guided onboarding
 wizard (`/onboarding`): channel → API keys → knowledge base → done.
 
+Server update / production runbook: [docs/SERVER_RUNBOOK.md](docs/SERVER_RUNBOOK.md).
+
 ### Bun shortcuts
 
 ```bash
