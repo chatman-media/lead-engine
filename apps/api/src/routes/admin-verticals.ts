@@ -7,7 +7,7 @@ import {
 import { ingestText } from "@chatman-media/kb";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
 import { defaultRegistry } from "@chatman-media/verticals";
-import { styles as stylesTable } from "@chatman-media/storage";
+import { funnels, styles as stylesTable } from "@chatman-media/storage";
 import { and, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
@@ -77,7 +77,19 @@ export function makeAdminVerticalsRoutes(opts: AdminVerticalsRoutesOpts): Hono {
       if ("error" in result) {
         return c.json({ error: `funnel seed failed: ${result.error}` }, 500);
       }
-      report.funnel = result;
+      // Привязываем воронку к vertical template, чтобы runtime (index.ts →
+      // resolveTemplate) и onboarding-детекция нашли её по
+      // funnels.vertical_template_id. seedFunnelByKey переиспользует
+      // существующую активную воронку, поэтому UPDATE по funnelId покрывает и
+      // insert-, и existing-funnel случаи. Пишем registry slug (tpl.slug,
+      // напр. "exchange_v1") — это ключ KNOWN_TEMPLATES.
+      await withTenant(opts.db, tenantId, async (tx) => {
+        await tx
+          .update(funnels)
+          .set({ verticalTemplateId: tpl.slug, updatedAt: Math.floor(Date.now() / 1000) })
+          .where(eq(funnels.id, result.funnelId));
+      });
+      report.funnel = { ...result, verticalTemplateId: tpl.slug };
     }
 
     // 2. Skills seed
