@@ -29,17 +29,27 @@ import {
   ApiError,
   type ChannelItem,
   clearToken,
+  type ExchangeRate,
   type KbDoc,
   type LlmConfig,
   type LlmProvider,
   type LlmPurpose,
+  type OnboardingStatus,
   type VerticalInfo,
   saas,
 } from "../api/saas.ts";
 
 /**
- * Пошаговый мастер первичной настройки: канал → API-ключи → база знаний →
- * готово. Порядок не случаен: эмбеддинги базы требуют ключ embed-провайдера.
+ * Обязательный пошаговый мастер первичной настройки. Заполняется ВНАЧАЛЕ —
+ * только после завершения (server `onboarding-status.done`) гейт пускает в
+ * кабинет (см. App.tsx OnboardingGate).
+ *
+ * Шаги динамические и зависят от вертикали:
+ *   generic:  Бизнес → Канал → LLM → База знаний(opt) → Готово
+ *   exchange: Бизнес → Канал → LLM → Курсы → Реквизиты → Тир-карта(opt)
+ *             → База знаний(opt) → Бизнес-данные(opt) → Готово
+ *
+ * Required-шаги гейтят завершение и зеркалят серверный расчёт `done`.
  */
 
 const PROVIDERS: { value: LlmProvider; label: string }[] = [
@@ -49,7 +59,24 @@ const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: "ollama", label: "Ollama (local)" },
 ];
 
-const STEP_LABELS = ["Канал", "Провайдер", "База знаний", "Готово"];
+type StepId =
+  | "vertical"
+  | "channel"
+  | "llm"
+  | "ex_rates"
+  | "ex_requisites"
+  | "ex_ratecard"
+  | "kb"
+  | "ex_business"
+  | "done";
+
+interface StepDef {
+  id: StepId;
+  label: string;
+  required: boolean;
+  done: boolean;
+  visible: boolean;
+}
 
 interface KeyForm {
   provider: LlmProvider;
@@ -66,6 +93,17 @@ const OLLAMA_PRESETS: Record<"chat" | "embed", { model: string; embedDim?: strin
   embed: { model: "nomic-embed-text", embedDim: "768" },
 };
 
+/** Типы реквизитов приёма для шага «Реквизиты» (ключи tenant_secrets). */
+const REQUISITE_TYPES: { key: string; label: string; placeholder: string }[] = [
+  { key: "exchange_wallet_usdt_trc20", label: "USDT TRC20 — адрес кошелька", placeholder: "T..." },
+  { key: "exchange_wallet_usdt_erc20", label: "USDT ERC20 — адрес", placeholder: "0x..." },
+  { key: "exchange_wallet_btc_default", label: "BTC — адрес", placeholder: "bc1..." },
+  { key: "exchange_wallet_eth_erc20", label: "ETH ERC20 — адрес", placeholder: "0x..." },
+  { key: "exchange_binance_id", label: "Binance ID (P2P)", placeholder: "123456789" },
+  { key: "exchange_fiat_payment_url", label: "СБП / платёжная ссылка (RUB)", placeholder: "https://..." },
+  { key: "exchange_rub_card_requisites", label: "Карта / телефон для RUB", placeholder: "2200… / +7…" },
+];
+
 function configReady(cfg: LlmConfig | undefined): boolean {
   if (!cfg) return false;
   return cfg.provider === "ollama" || cfg.hasSecret;
@@ -80,6 +118,7 @@ export function SaasOnboarding() {
   const [channels, setChannels] = useState<ChannelItem[]>([]);
   const [configs, setConfigs] = useState<LlmConfig[]>([]);
   const [docs, setDocs] = useState<KbDoc[]>([]);
+  const [status, setStatus] = useState<OnboardingStatus | null>(null);
 
   const [channelMode, setChannelMode] = useState<"userbot" | "bot">("userbot");
   const [botToken, setBotToken] = useState("");
@@ -111,18 +150,89 @@ export function SaasOnboarding() {
   const [installingVertical, setInstallingVertical] = useState<string | null>(null);
   const [installedVertical, setInstalledVertical] = useState<string | null>(null);
 
+  // Exchange — курсы
+  const [rates, setRates] = useState<ExchangeRate[]>([]);
+  const [rateForm, setRateForm] = useState({
+    asset: "USDT",
+    network: "trc20",
+    baseRate: "",
+    quoteMode: "multiply" as "multiply" | "divide",
+    marginPct: "",
+    feeFixedThb: "",
+    minAmountFrom: "",
+    maxAmountFrom: "",
+  });
+  const [savingRate, setSavingRate] = useState(false);
+
+  // Exchange — реквизиты
+  const [reqType, setReqType] = useState(REQUISITE_TYPES[0]!.key);
+  const [reqValue, setReqValue] = useState("");
+  const [savingReq, setSavingReq] = useState(false);
+
+  // Exchange — тир-карта
+  const [cardLoading, setCardLoading] = useState(false);
+  const [cardApproved, setCardApproved] = useState(false);
+
+  // Exchange — бизнес-данные (информационные)
+  const [bizForm, setBizForm] = useState({
+    operatorContact: "",
+    payoutMethods: "",
+    kycPolicy: "",
+    workingHours: "",
+    officeAddress: "",
+  });
+  const [savingBiz, setSavingBiz] = useState(false);
+  const [bizSaved, setBizSaved] = useState(false);
+
   const chatCfg = configs.find((c) => c.purpose === "chat");
   const embedCfg = configs.find((c) => c.purpose === "embed");
 
-  const channelDone = channels.length > 0;
-  const keysDone = configReady(chatCfg) && configReady(embedCfg);
-  const kbDone = docs.length > 0;
-  const stepDone = [channelDone, keysDone, kbDone, false];
+  const isExchange = installedVertical === "exchange_v1" || status?.isExchange === true;
 
+  // Completion-предикаты (зеркалят серверный `done`).
+  const verticalDone = !!installedVertical || !!status?.funnelInstalled;
+  const channelDone = channels.length > 0;
+  const chatDone = configReady(chatCfg); // chat обязателен; embed — опционально
+  const ratesDone = rates.some((r) => r.isActive);
+  const requisitesDone = (status?.requisiteCount ?? 0) >= 1;
+  const kbDone = docs.length > 0;
+
+  const allSteps: StepDef[] = [
+    { id: "vertical", label: "Бизнес", required: true, done: verticalDone, visible: true },
+    { id: "channel", label: "Канал", required: true, done: channelDone, visible: true },
+    { id: "llm", label: "LLM", required: true, done: chatDone, visible: true },
+    { id: "ex_rates", label: "Курсы", required: true, done: ratesDone, visible: isExchange },
+    { id: "ex_requisites", label: "Реквизиты", required: true, done: requisitesDone, visible: isExchange },
+    { id: "ex_ratecard", label: "Тир-карта", required: false, done: cardApproved, visible: isExchange },
+    { id: "kb", label: "База знаний", required: false, done: kbDone, visible: true },
+    { id: "ex_business", label: "Данные", required: false, done: bizSaved, visible: isExchange },
+    { id: "done", label: "Готово", required: false, done: false, visible: true },
+  ];
+  const steps = allSteps.filter((s) => s.visible);
+  const currentId: StepId = steps[Math.min(step, steps.length - 1)]?.id ?? "vertical";
+
+  /** Шаг достижим, если все предыдущие REQUIRED-шаги выполнены. */
   function reachable(target: number): boolean {
-    if (target <= 0) return true;
-    if (target === 1) return channelDone;
-    return channelDone && keysDone;
+    for (let i = 0; i < target; i++) {
+      const s = steps[i];
+      if (s?.required && !s.done) return false;
+    }
+    return true;
+  }
+
+  /** Все ли required-шаги выполнены (можно завершить онбординг). */
+  const allRequiredDone = steps.every((s) => !s.required || s.done);
+
+  /** Перейти к шагу по id (после успешного сохранения). */
+  function goToStep(id: StepId) {
+    const idx = steps.findIndex((s) => s.id === id);
+    if (idx >= 0) setStep(idx);
+  }
+
+  /** Перейти к первому незавершённому required-шагу (или к Готово). */
+  function resumeStep(list: StepDef[]) {
+    const idx = list.findIndex((s) => s.required && !s.done);
+    setStep(idx >= 0 ? idx : list.length - 1);
   }
 
   function handleAuthError(err: unknown): boolean {
@@ -135,21 +245,31 @@ export function SaasOnboarding() {
   }
 
   async function loadState() {
-    const [ch, cfg, verts] = await Promise.all([
+    const [ch, cfg, verts, st] = await Promise.all([
       saas.listChannels(),
       saas.listLlmConfigs(),
       saas.listVerticals().catch(() => ({ items: [] as VerticalInfo[] })),
+      saas.onboardingStatus().catch(() => null),
     ]);
     setVerticals(verts.items);
+    setStatus(st);
+    if (st?.funnelInstalled && st.vertical) setInstalledVertical((prev) => prev ?? st.vertical ?? null);
     let docItems: KbDoc[] = [];
     try {
       docItems = (await saas.listDocs()).items;
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) throw err;
     }
+    let rateItems: ExchangeRate[] = [];
+    try {
+      rateItems = (await saas.exchangeRates()).rates;
+    } catch {
+      // не-обменный тенант / нет доступа — игнорируем
+    }
     setChannels(ch.items);
     setConfigs(cfg.items);
     setDocs(docItems);
+    setRates(rateItems);
     for (const c of cfg.items) {
       if (c.purpose === "chat" || c.purpose === "embed") {
         setKeyForms((prev) => ({
@@ -164,21 +284,49 @@ export function SaasOnboarding() {
         }));
       }
     }
-    return { ch: ch.items, cfg: cfg.items, kb: docItems };
+    return { ch: ch.items, cfg: cfg.items, kb: docItems, rates: rateItems, status: st };
   }
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const { ch, cfg, kb } = await loadState();
+        const res = await loadState();
         if (cancelled) return;
-        const cDone = ch.length > 0;
-        const kDone =
-          configReady(cfg.find((c) => c.purpose === "chat")) &&
-          configReady(cfg.find((c) => c.purpose === "embed"));
-        const dDone = kb.length > 0;
-        setStep(!cDone ? 0 : !kDone ? 1 : !dDone ? 2 : 3);
+        // Пересобираем шаги под загруженное состояние и резюмим с первого незавершённого.
+        const exch = res.status?.isExchange === true;
+        const list = (
+          [
+          { id: "vertical", label: "", required: true, done: !!res.status?.funnelInstalled, visible: true },
+          { id: "channel", label: "", required: true, done: res.ch.length > 0, visible: true },
+          {
+            id: "llm",
+            label: "",
+            required: true,
+            done: configReady(res.cfg.find((c) => c.purpose === "chat")),
+            visible: true,
+          },
+          {
+            id: "ex_rates",
+            label: "",
+            required: true,
+            done: res.rates.some((r) => r.isActive),
+            visible: exch,
+          },
+          {
+            id: "ex_requisites",
+            label: "",
+            required: true,
+            done: (res.status?.requisiteCount ?? 0) >= 1,
+            visible: exch,
+          },
+          { id: "ex_ratecard", label: "", required: false, done: false, visible: exch },
+          { id: "kb", label: "", required: false, done: res.kb.length > 0, visible: true },
+          { id: "ex_business", label: "", required: false, done: false, visible: exch },
+          { id: "done", label: "", required: false, done: false, visible: true },
+          ] satisfies StepDef[]
+        ).filter((s) => s.visible);
+        resumeStep(list);
       } catch (err) {
         if (cancelled) return;
         if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
@@ -208,8 +356,8 @@ export function SaasOnboarding() {
     try {
       await saas.createTelegramChannel(token);
       setBotToken("");
-      const { ch } = await loadState();
-      if (ch.length > 0) setStep(1);
+      await loadState();
+      goToStep("llm");
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 401 && err.errorCode.toLowerCase().includes("telegram")) {
@@ -293,8 +441,8 @@ export function SaasOnboarding() {
         return;
       }
       resetUserbot();
-      const { ch } = await loadState();
-      if (ch.length > 0) setStep(1);
+      await loadState();
+      goToStep("llm");
     } catch (err) {
       setUbError(userbotErrMessage(err));
     } finally {
@@ -309,8 +457,8 @@ export function SaasOnboarding() {
     try {
       await saas.submitUserbot2fa(ubLoginId, ubPassword);
       resetUserbot();
-      const { ch } = await loadState();
-      if (ch.length > 0) setStep(1);
+      await loadState();
+      goToStep("llm");
     } catch (err) {
       setUbError(userbotErrMessage(err));
     } finally {
@@ -345,15 +493,101 @@ export function SaasOnboarding() {
         ...(purpose === "embed" && f.embedDim ? { embedDim: Number.parseInt(f.embedDim, 10) } : {}),
       });
       updateKeyForm(purpose, { apiKey: "" });
-      const { cfg } = await loadState();
-      const ready =
-        configReady(cfg.find((c) => c.purpose === "chat")) &&
-        configReady(cfg.find((c) => c.purpose === "embed"));
-      if (ready) setStep(2);
+      await loadState();
     } catch (err) {
       if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSavingPurpose(null);
+    }
+  }
+
+  async function handleSaveRate(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    const base = Number.parseFloat(rateForm.baseRate);
+    if (!rateForm.asset.trim() || !(base > 0)) {
+      setError("Курсы: укажите актив и положительный базовый курс");
+      return;
+    }
+    setSavingRate(true);
+    try {
+      await saas.saveExchangeRate({
+        asset: rateForm.asset.trim().toUpperCase(),
+        network: rateForm.network.trim(),
+        baseRate: base,
+        quoteMode: rateForm.quoteMode,
+        ...(rateForm.marginPct ? { marginPct: Number.parseFloat(rateForm.marginPct) } : {}),
+        ...(rateForm.feeFixedThb ? { feeFixedThb: Number.parseFloat(rateForm.feeFixedThb) } : {}),
+        ...(rateForm.minAmountFrom ? { minAmountFrom: Number.parseFloat(rateForm.minAmountFrom) } : {}),
+        ...(rateForm.maxAmountFrom ? { maxAmountFrom: Number.parseFloat(rateForm.maxAmountFrom) } : {}),
+        isActive: true,
+      });
+      setRateForm((p) => ({ ...p, baseRate: "", marginPct: "", feeFixedThb: "" }));
+      await loadState();
+    } catch (err) {
+      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingRate(false);
+    }
+  }
+
+  async function handleSaveRequisite(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    if (!reqValue.trim()) {
+      setError("Реквизиты: укажите значение");
+      return;
+    }
+    setSavingReq(true);
+    try {
+      await saas.saveExchangeRequisite(reqType, reqValue.trim());
+      setReqValue("");
+      await loadState();
+    } catch (err) {
+      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingReq(false);
+    }
+  }
+
+  async function handleApproveRateCard() {
+    setError("");
+    setCardLoading(true);
+    try {
+      const preview = await saas.previewExchangeRateCard();
+      if (preview.proposals.length === 0) {
+        setError("Тир-карта: сначала добавьте хотя бы один активный курс");
+        return;
+      }
+      await saas.approveExchangeRateCard(preview.proposals);
+      setCardApproved(true);
+    } catch (err) {
+      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCardLoading(false);
+    }
+  }
+
+  async function handleSaveBusiness(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setSavingBiz(true);
+    try {
+      const entries: [string, string][] = [
+        ["exchange_operator_contact", bizForm.operatorContact],
+        ["exchange_payout_methods", bizForm.payoutMethods],
+        ["exchange_kyc_policy", bizForm.kycPolicy],
+        ["exchange_working_hours", bizForm.workingHours],
+        ["exchange_office_address", bizForm.officeAddress],
+      ];
+      for (const [key, value] of entries) {
+        if (value.trim()) await saas.saveExchangeRequisite(key, value.trim());
+      }
+      setBizSaved(true);
+    } catch (err) {
+      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingBiz(false);
     }
   }
 
@@ -407,6 +641,15 @@ export function SaasOnboarding() {
     }
   }
 
+  /** Кнопка «Далее» — к следующему видимому шагу. */
+  function NextButton({ label }: { label: string }) {
+    return (
+      <Button onClick={() => setStep((s) => Math.min(s + 1, steps.length - 1))}>
+        {label} <ArrowRightIcon />
+      </Button>
+    );
+  }
+
   if (loading) {
     return (
       <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">
@@ -418,44 +661,39 @@ export function SaasOnboarding() {
   return (
     <div className="min-h-screen">
       <header className="flex h-14 items-center justify-between border-b px-4 md:px-8">
-        <Link to="/dashboard" className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5">
           <span className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-primary to-chart-5 text-primary-foreground">
             <RocketIcon className="size-4" />
           </span>
           <span className="text-[15px] font-semibold tracking-tight">
             lead<span className="text-primary">·</span>engine
           </span>
-        </Link>
-        <div className="flex items-center gap-1">
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/dashboard">Пропустить →</Link>
-          </Button>
-          <ModeToggle />
         </div>
+        <ModeToggle />
       </header>
 
       <div className="mx-auto w-full max-w-2xl px-4 py-10">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">Настройка кабинета</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Несколько шагов — и бот начнёт отвечать вашим клиентам.
+            Заполните настройки — и бот начнёт отвечать вашим клиентам. Необязательные шаги
+            можно пропустить.
           </p>
         </div>
 
         {/* Stepper */}
-        <ol className="mb-8 flex items-center gap-2">
-          {STEP_LABELS.map((label, i) => {
-            const done = stepDone[i];
-            const active = step === i;
+        <ol className="mb-8 flex flex-wrap items-center gap-2">
+          {steps.map((s, i) => {
+            const active = i === step;
             const canGo = reachable(i);
             return (
-              <li key={label} className="flex flex-1 items-center gap-2">
+              <li key={s.id} className="flex items-center gap-2">
                 <button
                   type="button"
                   disabled={!canGo}
                   onClick={() => canGo && setStep(i)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+                    "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
                     active && "border-primary/50 bg-accent text-foreground",
                     !active && canGo && "text-muted-foreground hover:bg-muted/60",
                     !canGo && "cursor-not-allowed opacity-50",
@@ -464,16 +702,19 @@ export function SaasOnboarding() {
                   <span
                     className={cn(
                       "grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-semibold",
-                      done
+                      s.done
                         ? "bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
                         : active
                           ? "bg-primary text-primary-foreground"
                           : "bg-muted text-muted-foreground",
                     )}
                   >
-                    {done ? <CheckIcon className="size-3" /> : i + 1}
+                    {s.done ? <CheckIcon className="size-3" /> : i + 1}
                   </span>
-                  <span className="hidden font-medium sm:inline">{label}</span>
+                  <span className="hidden font-medium sm:inline">
+                    {s.label}
+                    {!s.required && <span className="text-muted-foreground"> ·опц</span>}
+                  </span>
                 </button>
               </li>
             );
@@ -486,52 +727,68 @@ export function SaasOnboarding() {
           </p>
         )}
 
-        {step === 0 && (
+        {currentId === "vertical" && (
           <Card>
             <CardHeader>
-              <CardTitle>Шаг 1. Подключите канал</CardTitle>
+              <CardTitle>Тип бизнеса</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Откуда приходят лиды? Подключите свой личный Telegram, чтобы ассистент отвечал в
-                вашей личке, или отдельного бота.
+                Выберите шаблон — он настроит этапы воронки, навыки, стили продаж и стартовую
+                базу знаний. Для обменного пункта выберите «Обменник».
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              {verticals.length > 0 && (
-                <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium">Шаблон воронки (опционально)</p>
-                    {installedVertical && <Badge variant="success">установлен</Badge>}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Автоматически настроит этапы воронки, навыки и стили продаж.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {verticals.map((v) => (
-                      <Button
-                        key={v.slug}
-                        type="button"
-                        variant={installedVertical === v.slug ? "default" : "outline"}
-                        size="sm"
-                        disabled={installingVertical !== null}
-                        onClick={async () => {
-                          setInstallingVertical(v.slug);
-                          setError("");
-                          try {
-                            await saas.installVertical(v.slug);
-                            setInstalledVertical(v.slug);
-                          } catch (err) {
-                            setError(err instanceof Error ? err.message : String(err));
-                          } finally {
-                            setInstallingVertical(null);
-                          }
-                        }}
-                      >
-                        {installingVertical === v.slug ? "Устанавливаем…" : v.displayName}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
+              {verticals.length === 0 && (
+                <p className="text-sm text-muted-foreground">Список шаблонов недоступен.</p>
               )}
+              <div className="flex flex-wrap gap-2">
+                {verticals.map((v) => (
+                  <Button
+                    key={v.slug}
+                    type="button"
+                    variant={installedVertical === v.slug ? "default" : "outline"}
+                    size="sm"
+                    disabled={installingVertical !== null}
+                    onClick={async () => {
+                      setInstallingVertical(v.slug);
+                      setError("");
+                      try {
+                        await saas.installVertical(v.slug);
+                        setInstalledVertical(v.slug);
+                        await loadState();
+                      } catch (err) {
+                        if (!handleAuthError(err)) {
+                          setError(err instanceof Error ? err.message : String(err));
+                        }
+                      } finally {
+                        setInstallingVertical(null);
+                      }
+                    }}
+                  >
+                    {installingVertical === v.slug ? "Устанавливаем…" : v.displayName}
+                    {installedVertical === v.slug && <CheckIcon className="size-3.5" />}
+                  </Button>
+                ))}
+              </div>
+              {verticalDone && (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  Шаблон установлен <Badge variant="success">готово</Badge>
+                </p>
+              )}
+              {verticalDone && <NextButton label="Далее: канал" />}
+            </CardContent>
+          </Card>
+        )}
+
+        {currentId === "channel" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Подключите канал</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Откуда приходят лиды? Достаточно одного мессенджера — личный Telegram или
+                отдельный бот.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
               {channelDone && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                   Подключено каналов: <code className="font-mono">{channels.length}</code>
@@ -728,21 +985,18 @@ export function SaasOnboarding() {
                   Все типы каналов →
                 </Link>
               </p>
-              {channelDone && (
-                <Button onClick={() => setStep(1)}>
-                  Далее: LLM-провайдер <ArrowRightIcon />
-                </Button>
-              )}
+              {channelDone && <NextButton label="Далее: LLM-провайдер" />}
             </CardContent>
           </Card>
         )}
 
-        {step === 1 && (
+        {currentId === "llm" && (
           <Card>
             <CardHeader>
-              <CardTitle>Шаг 2. LLM-провайдер</CardTitle>
+              <CardTitle>LLM-провайдер</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Выберите AI-провайдер. Если Ollama уже запущена локально — API-ключ не нужен.
+                Chat обязателен (ответы ассистента). Embeddings — опционально, нужны для поиска
+                по базе знаний (RAG). Для Ollama API-ключ не требуется.
               </p>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -757,7 +1011,9 @@ export function SaasOnboarding() {
                   >
                     <div className="flex items-center justify-between">
                       <h3 className="text-sm font-semibold">
-                        {isChat ? "Chat — ответы ассистента" : "Embeddings — поиск по базе"}
+                        {isChat
+                          ? "Chat — ответы ассистента (обязательно)"
+                          : "Embeddings — поиск по базе (опционально)"}
                       </h3>
                       {cfg &&
                         (configReady(cfg) ? (
@@ -873,19 +1129,213 @@ export function SaasOnboarding() {
                   расширенные настройки →
                 </Link>
               </p>
-              {keysDone && (
-                <Button onClick={() => setStep(2)}>
-                  Далее: база знаний <ArrowRightIcon />
-                </Button>
-              )}
+              {chatDone && <NextButton label="Далее" />}
             </CardContent>
           </Card>
         )}
 
-        {step === 2 && (
+        {currentId === "ex_rates" && (
           <Card>
             <CardHeader>
-              <CardTitle>Шаг 3. База знаний (опционально)</CardTitle>
+              <CardTitle>Курсы обмена</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Добавьте хотя бы один курс. Бот считает выдачу в THB по формуле:
+                multiply (крипта: thb = сумма × курс) или divide (RUB: thb = сумма ÷ курс),
+                минус комиссия. Курс сам бот никогда не выдумывает.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {rates.length > 0 && (
+                <ul className="space-y-1.5 text-sm">
+                  {rates.map((r) => (
+                    <li key={r.id} className="flex items-center gap-2 rounded-md border px-3 py-2">
+                      <Badge variant={r.isActive ? "success" : "secondary"}>
+                        {r.asset}
+                        {r.network ? `/${r.network}` : ""}→{r.quoteAsset}
+                      </Badge>
+                      <span className="text-muted-foreground">
+                        курс {r.baseRate}, маржа {r.marginPct}%, fee {r.feeFixedThb} THB
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <form onSubmit={handleSaveRate} className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Актив</Label>
+                  <Input
+                    value={rateForm.asset}
+                    onChange={(e) => setRateForm((p) => ({ ...p, asset: e.target.value }))}
+                    placeholder="USDT"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Сеть (для крипты)</Label>
+                  <Input
+                    value={rateForm.network}
+                    onChange={(e) => setRateForm((p) => ({ ...p, network: e.target.value }))}
+                    placeholder="trc20 (пусто для фиата)"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Базовый курс (THB)</Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    value={rateForm.baseRate}
+                    onChange={(e) => setRateForm((p) => ({ ...p, baseRate: e.target.value }))}
+                    placeholder="36.5"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Режим</Label>
+                  <Select
+                    value={rateForm.quoteMode}
+                    onValueChange={(v) =>
+                      setRateForm((p) => ({ ...p, quoteMode: v as "multiply" | "divide" }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="multiply">multiply (крипта)</SelectItem>
+                      <SelectItem value="divide">divide (RUB)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Маржа %</Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    value={rateForm.marginPct}
+                    onChange={(e) => setRateForm((p) => ({ ...p, marginPct: e.target.value }))}
+                    placeholder="2"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Фикс. комиссия THB</Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    value={rateForm.feeFixedThb}
+                    onChange={(e) => setRateForm((p) => ({ ...p, feeFixedThb: e.target.value }))}
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Мин. сумма</Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    value={rateForm.minAmountFrom}
+                    onChange={(e) => setRateForm((p) => ({ ...p, minAmountFrom: e.target.value }))}
+                    placeholder="—"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Макс. сумма</Label>
+                  <Input
+                    type="number"
+                    step="any"
+                    value={rateForm.maxAmountFrom}
+                    onChange={(e) => setRateForm((p) => ({ ...p, maxAmountFrom: e.target.value }))}
+                    placeholder="—"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <Button type="submit" disabled={savingRate}>
+                    {savingRate ? "Сохраняем…" : "Добавить курс"}
+                  </Button>
+                </div>
+              </form>
+              {ratesDone && <NextButton label="Далее: реквизиты" />}
+            </CardContent>
+          </Card>
+        )}
+
+        {currentId === "ex_requisites" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Реквизиты приёма</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Куда клиент отправляет средства. Добавьте минимум один реквизит — бот выдаёт их
+                клиенту автоматически (иначе — передача оператору). Значения шифруются.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Сохранено реквизитов: <code className="font-mono">{status?.requisiteCount ?? 0}</code>
+                {requisitesDone && <Badge variant="success" className="ml-2">готово</Badge>}
+              </p>
+              <form onSubmit={handleSaveRequisite} className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Тип реквизита</Label>
+                  <Select value={reqType} onValueChange={setReqType}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REQUISITE_TYPES.map((t) => (
+                        <SelectItem key={t.key} value={t.key}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Значение</Label>
+                  <Input
+                    autoComplete="off"
+                    value={reqValue}
+                    onChange={(e) => setReqValue(e.target.value)}
+                    placeholder={
+                      REQUISITE_TYPES.find((t) => t.key === reqType)?.placeholder ?? "значение"
+                    }
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <Button type="submit" disabled={savingReq || !reqValue.trim()}>
+                    {savingReq ? "Сохраняем…" : "Добавить реквизит"}
+                  </Button>
+                </div>
+              </form>
+              {requisitesDone && <NextButton label="Далее" />}
+            </CardContent>
+          </Card>
+        )}
+
+        {currentId === "ex_ratecard" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Тир-карта курсов (опционально)</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Публичная карта курсов с диапазонами сумм. Сгенерируем предложение из ваших
+                базовых курсов и сохраним одобренные тиры. Можно пропустить и настроить позже.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {cardApproved && (
+                <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
+                  ✓ Тир-карта одобрена и сохранена.
+                </p>
+              )}
+              <div className="flex gap-2">
+                <Button type="button" onClick={handleApproveRateCard} disabled={cardLoading}>
+                  {cardLoading ? "Генерируем…" : "Сгенерировать и одобрить"}
+                </Button>
+                <NextButton label={cardApproved ? "Далее" : "Пропустить"} />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {currentId === "kb" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>База знаний (опционально)</CardTitle>
               <p className="text-sm text-muted-foreground">
                 Загрузите документы — бот будет отвечать по вашей базе (RAG). Шаг можно пропустить.
               </p>
@@ -943,60 +1393,125 @@ export function SaasOnboarding() {
                 </p>
               )}
 
-              <Button onClick={() => setStep(3)}>
-                {kbDone ? "Далее" : "Пропустить"} <ArrowRightIcon />
-              </Button>
+              <NextButton label={kbDone ? "Далее" : "Пропустить"} />
             </CardContent>
           </Card>
         )}
 
-        {step === 3 && (
+        {currentId === "ex_business" && (
           <Card>
             <CardHeader>
-              <CardTitle>Готово!</CardTitle>
-              <p className="text-sm text-muted-foreground">Можно переходить к работе.</p>
+              <CardTitle>Данные обменника (опционально)</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Эти данные сохраняются для оператора. Автоматизация (подстановка в ответы бота,
+                расписание, KYC-гейтинг) — в следующем релизе.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {bizSaved && (
+                <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
+                  ✓ Данные сохранены.
+                </p>
+              )}
+              <form onSubmit={handleSaveBusiness} className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Контакт оператора (для эскалаций)</Label>
+                  <Input
+                    value={bizForm.operatorContact}
+                    onChange={(e) => setBizForm((p) => ({ ...p, operatorContact: e.target.value }))}
+                    placeholder="@operator / +66…"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Методы выдачи</Label>
+                  <Input
+                    value={bizForm.payoutMethods}
+                    onChange={(e) => setBizForm((p) => ({ ...p, payoutMethods: e.target.value }))}
+                    placeholder="офис, безкарточный ATM, курьер, тайский банк"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Политика KYC</Label>
+                  <Input
+                    value={bizForm.kycPolicy}
+                    onChange={(e) => setBizForm((p) => ({ ...p, kycPolicy: e.target.value }))}
+                    placeholder="напр. обязательна свыше 50 000 THB"
+                  />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Часы работы</Label>
+                    <Input
+                      value={bizForm.workingHours}
+                      onChange={(e) => setBizForm((p) => ({ ...p, workingHours: e.target.value }))}
+                      placeholder="10:00–20:00, Пхукет"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Адрес офиса</Label>
+                    <Input
+                      value={bizForm.officeAddress}
+                      onChange={(e) => setBizForm((p) => ({ ...p, officeAddress: e.target.value }))}
+                      placeholder="—"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button type="submit" disabled={savingBiz}>
+                    {savingBiz ? "Сохраняем…" : "Сохранить"}
+                  </Button>
+                  <NextButton label="Далее" />
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {currentId === "done" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>{allRequiredDone ? "Готово!" : "Почти готово"}</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                {allRequiredDone
+                  ? "Всё настроено — можно переходить к работе."
+                  : "Завершите обязательные шаги (отмечены без «·опц»), чтобы открыть кабинет."}
+              </p>
             </CardHeader>
             <CardContent className="space-y-4">
               <ul className="space-y-2">
-                {[
-                  {
-                    done: channelDone,
-                    title: "Канал",
-                    hint: channelDone ? `Подключено: ${channels.length}` : "Не подключён",
-                  },
-                  {
-                    done: keysDone,
-                    title: "LLM-провайдер",
-                    hint: keysDone ? "chat + embed настроены" : "Не настроены",
-                  },
-                  {
-                    done: kbDone,
-                    title: "База знаний",
-                    hint: kbDone ? `Документов: ${docs.length}` : "Пропущено (опционально)",
-                  },
-                ].map((s) => (
-                  <li
-                    key={s.title}
-                    className="flex items-center gap-3 rounded-lg border px-3 py-2.5"
-                  >
-                    <span
-                      className={cn(
-                        "grid size-6 shrink-0 place-items-center rounded-full text-xs",
-                        s.done
-                          ? "bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
-                          : "border text-muted-foreground",
-                      )}
+                {steps
+                  .filter((s) => s.id !== "done")
+                  .map((s) => (
+                    <li
+                      key={s.id}
+                      className="flex items-center gap-3 rounded-lg border px-3 py-2.5"
                     >
-                      {s.done ? <CheckIcon className="size-3.5" /> : "○"}
-                    </span>
-                    <div>
-                      <p className="text-sm font-medium leading-tight">{s.title}</p>
-                      <p className="text-xs text-muted-foreground">{s.hint}</p>
-                    </div>
-                  </li>
-                ))}
+                      <span
+                        className={cn(
+                          "grid size-6 shrink-0 place-items-center rounded-full text-xs",
+                          s.done
+                            ? "bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
+                            : "border text-muted-foreground",
+                        )}
+                      >
+                        {s.done ? <CheckIcon className="size-3.5" /> : "○"}
+                      </span>
+                      <div>
+                        <p className="text-sm font-medium leading-tight">
+                          {s.label}
+                          {!s.required && (
+                            <span className="text-muted-foreground"> (опционально)</span>
+                          )}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
               </ul>
-              <Button className="w-full" onClick={() => navigate("/dashboard", { replace: true })}>
+              <Button
+                className="w-full"
+                disabled={!allRequiredDone}
+                onClick={() => navigate("/dashboard", { replace: true })}
+              >
                 Перейти в кабинет <ArrowRightIcon />
               </Button>
             </CardContent>
