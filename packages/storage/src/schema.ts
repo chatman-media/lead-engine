@@ -1129,6 +1129,32 @@ export const exchangeRates = pgTable("exchange_rates", {
   index("idx_exchange_rates_tenant_active").on(t.tenantId, t.isActive),
 ]);
 
+// Одобренные диапазоны публичной rate-card. Это слой поверх базового рыночного
+// курса: система предлагает display_rate по формуле отклонения, админ одобряет.
+export const exchangeRateTiers = pgTable("exchange_rate_tiers", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  asset: text("asset").notNull(),
+  quoteAsset: text("quote_asset").notNull().default("THB"),
+  network: text("network").notNull().default(""),
+  rangeBasis: text("range_basis").notNull().default("target_thb"),
+  minAmount: doublePrecision("min_amount").notNull(),
+  maxAmount: doublePrecision("max_amount"),
+  marketRate: doublePrecision("market_rate").notNull(),
+  displayRate: doublePrecision("display_rate").notNull(),
+  deviationPct: doublePrecision("deviation_pct").notNull(),
+  formulaJson: text("formula_json"),
+  isActive: boolean("is_active").notNull().default(true),
+  approvedByAdminId: integer("approved_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+  approvedAt: integer("approved_at"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("exchange_rate_tiers_range_basis_check", sql`${t.rangeBasis} IN ('target_thb','source_amount')`),
+  uniqueIndex("uniq_exchange_rate_tier").on(t.tenantId, t.asset, t.quoteAsset, t.network, t.rangeBasis, t.minAmount),
+  index("idx_exchange_rate_tiers_active").on(t.tenantId, t.asset, t.isActive),
+]);
+
 // Заявка на обмен. rate/amount_to_thb — снапшот на момент создания заявки.
 // Оборот считается агрегатом SUM(amount_to_thb) по completed.
 export const exchangeOrders = pgTable("exchange_orders", {
@@ -1142,11 +1168,19 @@ export const exchangeOrders = pgTable("exchange_orders", {
   direction: text("direction").notNull(),
   assetFrom: text("asset_from").notNull(),
   network: text("network").notNull().default(""),
+  amountMode: text("amount_mode").notNull().default("source_amount"),
+  requestedAmount: doublePrecision("requested_amount"),
   amountFrom: doublePrecision("amount_from").notNull(),
   rate: doublePrecision("rate").notNull(),
   amountToThb: doublePrecision("amount_to_thb").notNull(),
+  paymentMethod: text("payment_method"),
+  paymentRail: text("payment_rail"),
+  sourceBank: text("source_bank"),
+  payerName: text("payer_name"),
+  thirdPartyApproved: boolean("third_party_approved").notNull().default(false),
   payoutMethod: text("payout_method"),
   payoutLocation: text("payout_location"),
+  payoutDestinationJson: text("payout_destination_json"),
   payoutCode: text("payout_code"),
   status: text("status").notNull().default("quote"),
   requisitesJson: text("requisites_json"),
@@ -1160,6 +1194,9 @@ export const exchangeOrders = pgTable("exchange_orders", {
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
   check("exchange_orders_status_check", sql`${t.status} IN ('quote','awaiting_payment','paid','payout','completed','cancelled','expired')`),
+  check("exchange_orders_amount_mode_check", sql`${t.amountMode} IN ('source_amount','target_thb')`),
+  check("exchange_orders_payment_method_check", sql`${t.paymentMethod} IS NULL OR ${t.paymentMethod} IN ('crypto_transfer','sbp_qr','card_transfer','bank_transfer','cash')`),
+  check("exchange_orders_payout_method_check", sql`${t.payoutMethod} IS NULL OR ${t.payoutMethod} IN ('office_cash','cardless_atm','courier_cash','thai_bank_transfer','atm')`),
   uniqueIndex("uniq_exchange_orders_idem").on(t.idempotencyKey),
   index("idx_exchange_orders_tenant_status").on(t.tenantId, t.status),
   index("idx_exchange_orders_tenant_contact").on(t.tenantId, t.contactId),

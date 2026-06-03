@@ -124,6 +124,122 @@ export interface RefreshResult {
   failed: number;
 }
 
+export interface RateCardTierSpec {
+  minThb: number;
+  maxThb: number | null;
+  /** Absolute public rate to show, e.g. RUB per THB or THB per USDT. */
+  displayRate?: number;
+  /** Relative adjustment from market rate. RUB: positive worsens for client; USDT: negative worsens. */
+  deviationPct?: number;
+}
+
+export interface RateCardProposal {
+  asset: string;
+  network: string;
+  quoteMode: QuoteMode;
+  marketRate: number;
+  tiers: Array<{
+    minThb: number;
+    maxThb: number | null;
+    displayRate: number;
+    deviationPct: number;
+    formula: string;
+  }>;
+  message: string;
+}
+
+const DEFAULT_RATE_CARD: Record<string, RateCardTierSpec[]> = {
+  RUB: [
+    { minThb: 2_000, maxThb: 3_000, displayRate: 2.64 },
+    { minThb: 3_000, maxThb: 7_000, displayRate: 2.59 },
+    { minThb: 7_000, maxThb: 20_000, displayRate: 2.52 },
+    { minThb: 20_000, maxThb: 50_000, displayRate: 2.48 },
+    { minThb: 50_000, maxThb: null, displayRate: 2.39 },
+  ],
+  USDT: [
+    { minThb: 2_000, maxThb: 10_000, displayRate: 31.35 },
+    { minThb: 10_000, maxThb: 100_000, displayRate: 31.45 },
+    { minThb: 100_000, maxThb: null, displayRate: 31.7 },
+  ],
+};
+
+function formatThbRange(min: number, max: number | null): string {
+  const fmt = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+  if (max === null) return `от${fmt(min)} бат`;
+  if (min <= 0) return `до ${fmt(max)} бат`;
+  return `от${fmt(min)} до${fmt(max)} бат`;
+}
+
+function formatRate(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function deviationPct(marketRate: number, displayRate: number): number {
+  return round(((displayRate - marketRate) / marketRate) * 100, 4);
+}
+
+export function renderRateCardMessage(proposals: RateCardProposal[]): string {
+  const rub = proposals.find((p) => p.asset === "RUB");
+  const usdt = proposals.find((p) => p.asset === "USDT");
+  const lines = ["🙏 АКТУАЛЬНЫЙ КУРС НА СЕГОДНЯ 🙏", ""];
+
+  if (rub) {
+    rub.tiers.forEach((tier, idx) => {
+      const marker = idx === 0 ? ">" : idx === 1 ? "-" : "<";
+      lines.push(`🇷🇺RUB // Баты - ${formatRate(tier.displayRate)} ${marker} (${formatThbRange(tier.minThb, tier.maxThb)}🇹🇭`);
+    });
+    lines.push("***", "", "🏪💲———💳💳 💰 💳💳———💲🏪", "");
+  }
+
+  if (usdt) {
+    usdt.tiers.forEach((tier) => {
+      lines.push(`💲USDT // Баты < ${formatRate(tier.displayRate)} - (${formatThbRange(tier.minThb, tier.maxThb)})🇹🇭`);
+    });
+    lines.push("", "💲💲💲💲💲💲без карты(Инструкция)", "", "📞 LINE", "📞 WhatsApp", "📞 WeChat", "", "💬Отзывы о Нашей Работе 📨");
+  }
+
+  return lines.join("\n");
+}
+
+export async function buildDefaultRateCardProposal(): Promise<RateCardProposal[]> {
+  const assets: Array<{ asset: "RUB" | "USDT"; quoteMode: QuoteMode; network: string }> = [
+    { asset: "RUB", quoteMode: "divide", network: "" },
+    { asset: "USDT", quoteMode: "multiply", network: "trc20" },
+  ];
+
+  const proposals: RateCardProposal[] = [];
+  for (const item of assets) {
+    const marketRateRaw = await fetchMarketBaseRate(item.asset, item.quoteMode);
+    if (marketRateRaw === null) continue;
+    const marketRate = round(marketRateRaw, 6);
+    const spec = DEFAULT_RATE_CARD[item.asset] ?? [];
+    const tiers = spec.map((tier) => {
+      const displayRate = round(
+        tier.displayRate ?? marketRate * (1 + (tier.deviationPct ?? 0) / 100),
+        6,
+      );
+      const deviation = deviationPct(marketRate, displayRate);
+      return {
+        minThb: tier.minThb,
+        maxThb: tier.maxThb,
+        displayRate,
+        deviationPct: deviation,
+        formula: `${formatRate(marketRate)} ${deviation >= 0 ? "+" : "-"} ${formatRate(Math.abs(deviation))}% = ${formatRate(displayRate)}`,
+      };
+    });
+    proposals.push({
+      asset: item.asset,
+      network: item.network,
+      quoteMode: item.quoteMode,
+      marketRate,
+      tiers,
+      message: "",
+    });
+  }
+  const message = renderRateCardMessage(proposals);
+  return proposals.map((p) => ({ ...p, message }));
+}
+
 /**
  * Обновляет base_rate всех auto-строк тенанта рыночным курсом. HTTP-фетчи делаются
  * ВНЕ транзакции (FX кэшируется), запись — короткой транзакцией. margin/fee не трогаем.

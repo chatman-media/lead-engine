@@ -15,11 +15,19 @@ export interface OrderRow {
   direction: string;
   assetFrom: string;
   network: string;
+  amountMode: string;
+  requestedAmount: number | null;
   amountFrom: number;
   rate: number;
   amountToThb: number;
+  paymentMethod: string | null;
+  paymentRail: string | null;
+  sourceBank: string | null;
+  payerName: string | null;
+  thirdPartyApproved: boolean;
   payoutMethod: string | null;
   payoutLocation: string | null;
+  payoutDestinationJson: string | null;
   payoutCode: string | null;
   requisitesJson: string | null;
   proofJson: string | null;
@@ -34,11 +42,19 @@ const ORDER_COLS = {
   direction: exchangeOrders.direction,
   assetFrom: exchangeOrders.assetFrom,
   network: exchangeOrders.network,
+  amountMode: exchangeOrders.amountMode,
+  requestedAmount: exchangeOrders.requestedAmount,
   amountFrom: exchangeOrders.amountFrom,
   rate: exchangeOrders.rate,
   amountToThb: exchangeOrders.amountToThb,
+  paymentMethod: exchangeOrders.paymentMethod,
+  paymentRail: exchangeOrders.paymentRail,
+  sourceBank: exchangeOrders.sourceBank,
+  payerName: exchangeOrders.payerName,
+  thirdPartyApproved: exchangeOrders.thirdPartyApproved,
   payoutMethod: exchangeOrders.payoutMethod,
   payoutLocation: exchangeOrders.payoutLocation,
+  payoutDestinationJson: exchangeOrders.payoutDestinationJson,
   payoutCode: exchangeOrders.payoutCode,
   requisitesJson: exchangeOrders.requisitesJson,
   proofJson: exchangeOrders.proofJson,
@@ -54,11 +70,19 @@ function coerce(row: Record<string, unknown>): OrderRow {
     direction: row.direction as string,
     assetFrom: row.assetFrom as string,
     network: row.network as string,
+    amountMode: (row.amountMode as string | null) ?? "source_amount",
+    requestedAmount: row.requestedAmount === null ? null : Number(row.requestedAmount),
     amountFrom: Number(row.amountFrom),
     rate: Number(row.rate),
     amountToThb: Number(row.amountToThb),
+    paymentMethod: (row.paymentMethod as string | null) ?? null,
+    paymentRail: (row.paymentRail as string | null) ?? null,
+    sourceBank: (row.sourceBank as string | null) ?? null,
+    payerName: (row.payerName as string | null) ?? null,
+    thirdPartyApproved: Boolean(row.thirdPartyApproved),
     payoutMethod: (row.payoutMethod as string | null) ?? null,
     payoutLocation: (row.payoutLocation as string | null) ?? null,
+    payoutDestinationJson: (row.payoutDestinationJson as string | null) ?? null,
     payoutCode: (row.payoutCode as string | null) ?? null,
     requisitesJson: (row.requisitesJson as string | null) ?? null,
     proofJson: (row.proofJson as string | null) ?? null,
@@ -148,13 +172,23 @@ export interface CreateOrderInput {
   conversationId: number;
   contactId: number | null;
   telegramId: string | null;
+  verificationId?: string | null;
   direction: string;
   assetFrom: string;
   network: string;
+  amountMode?: string;
+  requestedAmount?: number | null;
   amountFrom: number;
   rate: number;
   amountToThb: number;
+  paymentMethod?: string | null;
+  paymentRail?: string | null;
+  sourceBank?: string | null;
+  payerName?: string | null;
+  thirdPartyApproved?: boolean;
   payoutMethod?: string | null;
+  payoutLocation?: string | null;
+  payoutDestinationJson?: string | null;
   riskJson?: string | null;
   rateExpiresAt: number;
   idempotencyKey: string;
@@ -178,13 +212,23 @@ export async function createOrderIdempotent(
         conversationId: input.conversationId,
         contactId: input.contactId,
         telegramId: input.telegramId,
+        verificationId: input.verificationId ?? null,
         direction: input.direction,
         assetFrom: input.assetFrom,
         network: input.network,
+        amountMode: input.amountMode ?? "source_amount",
+        requestedAmount: input.requestedAmount ?? input.amountFrom,
         amountFrom: input.amountFrom,
         rate: input.rate,
         amountToThb: input.amountToThb,
+        paymentMethod: input.paymentMethod ?? null,
+        paymentRail: input.paymentRail ?? null,
+        sourceBank: input.sourceBank ?? null,
+        payerName: input.payerName ?? null,
+        thirdPartyApproved: input.thirdPartyApproved ?? false,
         payoutMethod: input.payoutMethod ?? null,
+        payoutLocation: input.payoutLocation ?? null,
+        payoutDestinationJson: input.payoutDestinationJson ?? null,
         status: "awaiting_payment",
         riskJson: input.riskJson ?? null,
         rateExpiresAt: input.rateExpiresAt,
@@ -224,8 +268,14 @@ export async function updateOrder(
     riskJson: string | null;
     payoutMethod: string | null;
     payoutLocation: string | null;
+    payoutDestinationJson: string | null;
     payoutCode: string | null;
     verificationId: string | null;
+    paymentMethod: string | null;
+    paymentRail: string | null;
+    sourceBank: string | null;
+    payerName: string | null;
+    thirdPartyApproved: boolean;
     rateExpiresAt: number | null;
     completedAt: number | null;
     lastReminderAt: number | null;

@@ -77,31 +77,30 @@ describe("migrations integration", () => {
     expect(migrationFiles).toEqual(sorted);
   });
 
-  it("создаёт ровно 38 таблиц (28 existing − 1 users (dropped 0008) + 8 multi-tenant + 3 stripe)", async () => {
+  it("создаёт все ожидаемые таблицы, включая exchange rate tiers", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_tables WHERE schemaname = 'public'
     `;
-    // 28 existing − 1 dropped (users) + 8 multi-tenant + 3 stripe = 38.
-    expect(rows[0]?.count).toBeGreaterThanOrEqual(38);
+    expect(rows[0]?.count).toBeGreaterThanOrEqual(39);
   });
 
-  it("RLS-policies включены на 42 таблицах (40 + exchange_rates/exchange_orders)", async () => {
+  it("RLS-policies включены на 43 таблицах (exchange_rates/orders/tiers)", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_tables
       WHERE schemaname = 'public' AND rowsecurity = true
     `;
-    expect(rows[0]?.count).toBe(42);
+    expect(rows[0]?.count).toBe(43);
   });
 
-  it("tenant_isolation policies = 42 (по одной на каждую RLS-таблицу)", async () => {
+  it("tenant_isolation policies = 43 (по одной на каждую RLS-таблицу)", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_policies
       WHERE schemaname = 'public' AND policyname = 'tenant_isolation'
     `;
-    expect(rows[0]?.count).toBe(42);
+    expect(rows[0]?.count).toBe(43);
   });
 
   it("legacy tenant (id=1) сидится из 0001", async () => {

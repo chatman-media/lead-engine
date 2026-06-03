@@ -27,6 +27,7 @@ import {
 import { getPaymentProvider } from "./providers.ts";
 import { computeQuote, isCryptoAsset, normAsset, resolveNetwork } from "./rates.ts";
 import { assessOrderRisk } from "./risk.ts";
+import { getExchangeVerificationStatus } from "./verification.ts";
 
 export interface ExchangeToolsDeps {
   db: Db;
@@ -38,6 +39,18 @@ export interface ExchangeToolsDeps {
 const AssetEnum = z
   .string()
   .describe("Актив, который отдаёт клиент: USDT, BTC, ETH, RUB, EUR или USD");
+const AmountModeEnum = z
+  .enum(["source_amount", "target_thb"])
+  .optional()
+  .describe("source_amount — клиент назвал сумму, которую отдаёт; target_thb — клиент назвал сумму, которую хочет получить в батах");
+const PaymentMethodEnum = z
+  .enum(["crypto_transfer", "sbp_qr", "card_transfer", "bank_transfer", "cash"])
+  .optional()
+  .describe("Как клиент платит: crypto_transfer, sbp_qr, card_transfer, bank_transfer, cash");
+const PayoutMethodEnum = z
+  .enum(["office_cash", "cardless_atm", "courier_cash", "thai_bank_transfer", "atm"])
+  .optional()
+  .describe("Как клиент получает THB: courier_cash, cardless_atm, thai_bank_transfer, office_cash");
 
 export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
   const { db, tenantId, conversationId, masterKeyHex } = deps;
@@ -51,7 +64,8 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     ].join(" "),
     parameters: z.object({
       asset: AssetEnum,
-      amount: z.number().positive().describe("Сумма в активе-источнике (например 335)"),
+      amount: z.number().positive().describe("Сумма. По умолчанию в активе-источнике; если клиент сказал 'нужно 10000 бат', передай amountMode=target_thb и amount=10000."),
+      amountMode: AmountModeEnum,
       network: z
         .string()
         .optional()
@@ -61,6 +75,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       const q = await computeQuote(db, tenantId, {
         asset: args.asset,
         amount: args.amount,
+        amountMode: args.amountMode,
         network: args.network,
       });
       if (!q.ok) return { error: q.error };
@@ -68,12 +83,23 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         direction: q.direction,
         asset: q.asset,
         network: q.network || undefined,
+        amountMode: q.amountMode,
         amountFrom: q.amountFrom,
         rate: q.rate,
         amountToThb: q.amountToThb,
         display: `Обмен ${q.asset} — THB\nКурс: ${q.rate}\n\nОтдаёте: ${q.amountFrom} ${q.asset}\nПолучаете: ${q.amountToThb} THB`,
       };
     },
+  };
+
+  const checkVerificationTool: AnyRagTool = {
+    name: "check_exchange_verification",
+    description: [
+      "Проверить, прошёл ли клиент верификацию для обмена.",
+      "Вызывай перед create_exchange_order. Если needsVerification=true — объясни KYC и попроси документ/видео.",
+    ].join(" "),
+    parameters: z.object({}),
+    execute: async () => getExchangeVerificationStatus(db, tenantId, conversationId),
   };
 
   const createOrderTool: AnyRagTool = {
@@ -85,24 +111,45 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     ].join(" "),
     parameters: z.object({
       asset: AssetEnum,
-      amount: z.number().positive(),
+      amount: z.number().positive().describe("Сумма: source asset или целевые THB, если amountMode=target_thb."),
+      amountMode: AmountModeEnum,
       network: z.string().optional(),
-      payoutMethod: z
-        .enum(["office", "atm"])
+      paymentMethod: PaymentMethodEnum,
+      paymentRail: z.string().optional().describe("Конкретный rail: trc20, binance_id, sber, tinkoff, sbp, etc."),
+      sourceBank: z.string().optional().describe("Банк/источник отправителя, если клиент назвал: Сбер, Тинькофф/T-Bank и т.д."),
+      payerName: z.string().optional().describe("Имя плательщика, если известно."),
+      thirdPartyApproved: z.boolean().optional().describe("true только если оператор явно разрешил перевод от третьего лица."),
+      payoutMethod: PayoutMethodEnum,
+      payoutLocation: z.string().optional().describe("Локация/банк выдачи: отель, Bangkok Bank, SCB, KBank, офис и т.д."),
+      payoutDestination: z
+        .record(z.string(), z.unknown())
         .optional()
-        .describe("Способ получения: office (код в офисе) или atm (cardless в банкомате)"),
+        .describe("Структурированные данные выдачи: hotel/location, atmBank, thaiBankName, thaiAccountLast4 и т.д."),
     }),
     execute: async (args) => {
       const q = await computeQuote(db, tenantId, {
         asset: args.asset,
         amount: args.amount,
+        amountMode: args.amountMode,
         network: args.network,
       });
       if (!q.ok) return { error: q.error };
 
+      const verification = await getExchangeVerificationStatus(db, tenantId, conversationId);
+      if (!verification.verified) {
+        return {
+          ok: false,
+          needsVerification: true,
+          status: verification.status,
+          instructions:
+            "Для обмена нужно пройти верификацию: пришлите документ, удостоверяющий личность, и короткое видео/кружок с ФИО и фразой о направлении обмена.",
+        };
+      }
+
       const asset = normAsset(args.asset);
       const network = resolveNetwork(asset, args.network);
-      const idempotencyKey = `conv:${conversationId}:${asset}:${network}:${args.amount}`;
+      const amountMode = args.amountMode === "target_thb" ? "target_thb" : "source_amount";
+      const idempotencyKey = `conv:${conversationId}:${asset}:${network}:${amountMode}:${args.amount}`;
 
       const existing = await getOrderByIdempotencyKey(db, tenantId, idempotencyKey);
       if (existing) {
@@ -134,9 +181,19 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         assetFrom: asset,
         network,
         amountFrom: q.amountFrom,
+        amountMode,
+        requestedAmount: args.amount,
         rate: q.rate,
         amountToThb: q.amountToThb,
+        paymentMethod: args.paymentMethod ?? (isCryptoAsset(asset) ? "crypto_transfer" : null),
+        paymentRail: args.paymentRail ?? (isCryptoAsset(asset) ? network : null),
+        sourceBank: args.sourceBank ?? null,
+        payerName: args.payerName ?? null,
+        thirdPartyApproved: args.thirdPartyApproved ?? false,
         payoutMethod: args.payoutMethod ?? null,
+        payoutLocation: args.payoutLocation ?? null,
+        payoutDestinationJson: args.payoutDestination ? JSON.stringify(args.payoutDestination) : null,
+        verificationId: verification.verificationId,
         riskJson: JSON.stringify({ ok: true, reasons: risk.reasons }),
         rateExpiresAt,
         idempotencyKey,
@@ -146,7 +203,10 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         status: order.status,
         direction: order.direction,
         amountFrom: order.amountFrom,
+        amountMode,
         amountToThb: order.amountToThb,
+        paymentMethod: order.paymentMethod,
+        payoutMethod: order.payoutMethod,
         rate: order.rate,
         ttlMin,
       };
@@ -166,7 +226,14 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       if (!order) return { error: "Нет активной заявки. Сначала создай заявку." };
 
       const provider = getPaymentProvider({ db, tenantId, masterKeyHex });
-      const req = await provider.getRequisites({ asset: order.assetFrom, network: order.network });
+      const req = await provider.getRequisites({
+        asset: order.assetFrom,
+        network: order.network,
+        amountFrom: order.amountFrom,
+        amountToThb: order.amountToThb,
+        paymentMethod: order.paymentMethod,
+        paymentRail: order.paymentRail,
+      });
 
       const ttlMin = req.ttlMin;
       const rateExpiresAt = Math.floor(Date.now() / 1000) + ttlMin * 60;
@@ -183,6 +250,16 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         };
       }
       if (req.kind === "crypto") {
+        if (req.exchangeId) {
+          return {
+            orderId: order.id,
+            kind: "crypto",
+            paymentRail: "binance_id",
+            exchangeId: req.exchangeId,
+            ttlMin,
+            instructions: `Binance ID для перевода: ${req.exchangeId}\nРеквизиты актуальны ${ttlMin} минут. После оплаты пришлите подтверждение перевода.`,
+          };
+        }
         return {
           orderId: order.id,
           kind: "crypto",
@@ -191,6 +268,16 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
           ttlMin,
           amlNote: true,
           instructions: `Адрес для ${order.assetFrom} (${req.network}): ${req.address}\nАдрес актуален ${ttlMin} минут. Все входящие транзакции проходят AML-проверку. Переведите точную сумму с учётом сетевой комиссии. После оплаты пришлите tx hash или ссылку на транзакцию.`,
+        };
+      }
+      if (req.detailsText) {
+        return {
+          orderId: order.id,
+          kind: "fiat",
+          paymentMethod: order.paymentMethod,
+          detailsText: req.detailsText,
+          ttlMin,
+          instructions: `${req.detailsText}\nРеквизиты актуальны ${ttlMin} минут. После оплаты пришлите развёрнутый чек.`,
         };
       }
       return {
@@ -216,18 +303,38 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         .string()
         .optional()
         .describe("tx hash или ссылка на транзакцию (для крипты)"),
+      sourceBank: z.string().optional().describe("Банк отправителя из чека: Сбер, Тинькофф/T-Bank и т.д."),
+      receiptAmount: z.number().positive().optional().describe("Сумма оплаты из чека в валюте оплаты, если удалось прочитать."),
+      payerName: z.string().optional().describe("Имя плательщика из чека, если видно."),
+      paymentReference: z.string().optional().describe("Номер/референс платежа из чека."),
     }),
     execute: async (args) => {
       const order = await findActiveOrder(db, tenantId, conversationId);
       if (!order) return { error: "Нет активной заявки." };
 
-      // Фиат — без автопроверки.
+      // Фиат — сохраняем данные чека, но НЕ подтверждаем автоматически.
       if (!isCryptoAsset(order.assetFrom)) {
+        await updateOrder(db, tenantId, order.id, {
+          proofJson: JSON.stringify({
+            kind: "fiat_receipt",
+            proof: args.proof ?? null,
+            sourceBank: args.sourceBank ?? null,
+            receiptAmount: args.receiptAmount ?? null,
+            payerName: args.payerName ?? null,
+            paymentReference: args.paymentReference ?? null,
+            verifiedOk: false,
+            needsOperator: true,
+          }),
+          sourceBank: args.sourceBank ?? order.sourceBank,
+          payerName: args.payerName ?? order.payerName,
+        });
         return {
           orderId: order.id,
           ok: false,
           needsOperator: true,
-          note: "Проверку фиатной оплаты выполняет оператор по чеку.",
+          sourceBank: args.sourceBank ?? order.sourceBank,
+          receiptAmount: args.receiptAmount ?? null,
+          note: "Данные чека сохранены. Проверку фиатной оплаты выполняет оператор.",
         };
       }
 
@@ -308,8 +415,9 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       "вернётся needsOperator: попроси оператора подготовить код.",
     ].join(" "),
     parameters: z.object({
-      payoutMethod: z.enum(["office", "atm"]),
+      payoutMethod: z.enum(["office_cash", "cardless_atm", "courier_cash", "thai_bank_transfer", "atm"]),
       location: z.string().describe("Офис (Бангтао) или банк банкомата (Kbank/Bangkok Bank/SCB)"),
+      destination: z.record(z.string(), z.unknown()).optional().describe("Структурированные детали выдачи: банк, отель, адрес, последние цифры счёта."),
     }),
     execute: async (args) => {
       const order = await findActiveOrder(db, tenantId, conversationId);
@@ -322,6 +430,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         status: "payout",
         payoutMethod: args.payoutMethod,
         payoutLocation: args.location,
+        payoutDestinationJson: args.destination ? JSON.stringify(args.destination) : order.payoutDestinationJson,
       });
 
       // Код выдачи не генерируется ботом. Если оператор уже проставил payout_code —
@@ -348,6 +457,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
 
   return [
     computeQuoteTool,
+    checkVerificationTool,
     createOrderTool,
     fetchRequisitesTool,
     verifyPaymentTool,

@@ -45,7 +45,13 @@ async function main() {
   const convId = await withTenant(db, TENANT, async (tx) => {
     const [ct] = await tx
       .insert(contacts)
-      .values({ tenantId: TENANT, displayName: "SMOKE Exchange", createdAt: now, updatedAt: now })
+      .values({
+        tenantId: TENANT,
+        displayName: "SMOKE Exchange",
+        attributesJson: JSON.stringify({ exchangeKyc: { status: "verified", verificationId: "smoke-kyc" } }),
+        createdAt: now,
+        updatedAt: now,
+      })
       .returning({ id: contacts.id });
     const [cv] = await tx
       .insert(conversations)
@@ -60,6 +66,13 @@ async function main() {
   // 1. quote
   const q = (await byName.compute_exchange_quote!.execute({ asset: "USDT", amount: 335 })) as Record<string, unknown>;
   check("quote 335 USDT → 10400 THB", q.amountToThb === 10400, q.display);
+
+  const rq = (await byName.compute_exchange_quote!.execute({
+    asset: "USDT",
+    amount: 10400,
+    amountMode: "target_thb",
+  })) as Record<string, unknown>;
+  check("reverse quote 10400 THB → 335 USDT", rq.amountFrom === 335, rq);
 
   // 2. create order
   const o1 = (await byName.create_exchange_order!.execute({ asset: "USDT", amount: 335, payoutMethod: "office" })) as Record<string, unknown>;

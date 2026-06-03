@@ -24,6 +24,10 @@ export interface RequisitesResult {
   network?: string;
   /** платёжная ссылка (фиат) */
   paymentUrl?: string;
+  /** Binance/internal exchange id */
+  exchangeId?: string;
+  /** Карточные реквизиты/телефон/банк — показывать как текст, не парсить моделью. */
+  detailsText?: string;
   ttlMin: number;
   /** показать AML-предупреждение про входящие переводы */
   amlNote?: boolean;
@@ -37,6 +41,10 @@ export interface RequisitesResult {
 export interface RequisitesInput {
   asset: string; // нормализованный (USDT/RUB/...)
   network: string; // нормализованный lowercase или ''
+  amountFrom?: number;
+  amountToThb?: number;
+  paymentMethod?: string | null;
+  paymentRail?: string | null;
 }
 
 export interface PaymentProvider {
@@ -57,6 +65,31 @@ export class ConfigPaymentProvider implements PaymentProvider {
 
     if (isCryptoAsset(asset)) {
       const net = asset === "USDT" && !network ? "trc20" : network;
+      if (input.paymentRail === "binance_id") {
+        const exchangeId = await getDecryptedSecret({
+          db: this.deps.db,
+          tenantId: this.deps.tenantId,
+          key: "exchange_binance_id",
+          masterKeyHex: this.deps.masterKeyHex,
+        });
+        if (!exchangeId) {
+          return {
+            kind: "crypto",
+            network: "BINANCE",
+            ttlMin: CRYPTO_TTL_MIN,
+            needsOperator: true,
+            provider: this.name,
+            note: "Binance ID не настроен — выдаёт оператор.",
+          };
+        }
+        return {
+          kind: "crypto",
+          exchangeId,
+          network: "BINANCE",
+          ttlMin: CRYPTO_TTL_MIN,
+          provider: this.name,
+        };
+      }
       const key = `exchange_wallet_${asset.toLowerCase()}_${net || "default"}`;
       const address = await getDecryptedSecret({
         db: this.deps.db,
@@ -85,7 +118,26 @@ export class ConfigPaymentProvider implements PaymentProvider {
       };
     }
 
-    // Фиат (RUB/EUR/USD): статическая ссылка СБП либо оператор.
+    if (input.paymentMethod === "card_transfer") {
+      const detailsText = await getDecryptedSecret({
+        db: this.deps.db,
+        tenantId: this.deps.tenantId,
+        key: "exchange_rub_card_requisites",
+        masterKeyHex: this.deps.masterKeyHex,
+      });
+      if (!detailsText) {
+        return {
+          kind: "fiat",
+          ttlMin: FIAT_TTL_MIN,
+          needsOperator: true,
+          provider: this.name,
+          note: "Карточные RUB-реквизиты не настроены — выдаёт оператор.",
+        };
+      }
+      return { kind: "fiat", detailsText, ttlMin: FIAT_TTL_MIN, provider: this.name };
+    }
+
+    // Фиат (RUB/EUR/USD): динамический QR пока представлен ссылкой/оператором.
     const paymentUrl = await getDecryptedSecret({
       db: this.deps.db,
       tenantId: this.deps.tenantId,
@@ -98,7 +150,7 @@ export class ConfigPaymentProvider implements PaymentProvider {
         ttlMin: FIAT_TTL_MIN,
         needsOperator: true,
         provider: this.name,
-        note: "Платёжная ссылка не настроена — выдаёт оператор / партнёрский API.",
+        note: "Платёжная ссылка/QR не настроены — выдаёт оператор / партнёрский API.",
       };
     }
     return { kind: "fiat", paymentUrl, ttlMin: FIAT_TTL_MIN, provider: this.name };
