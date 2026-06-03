@@ -120,6 +120,9 @@ jobs:
       issues: write
       pull-requests: write
       id-token: write
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -133,6 +136,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          registry-url: https://registry.npmjs.org
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -142,12 +146,18 @@ jobs:
       - name: Install deps (workspace)
         run: bun install --frozen-lockfile
 
+      - name: Skip npm release when token is not configured
+        if: env.NPM_TOKEN == ''
+        run: echo "::notice::NPM_TOKEN is not configured; skipping npm publish release job."
+
       - name: Configure npm auth for bun publish
-        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        if: env.NPM_TOKEN != ''
+        run: |
+          printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
+          printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > .npmrc
 
       - name: Build all packages (topological)
+        if: env.NPM_TOKEN != ''
         # Гарантируем, что dist/*.d.ts каждого пакета существует ДО
         # semantic-release: dependent может выпускаться, даже если его
         # workspace-зависимость в этом прогоне без релиза (и потому её
@@ -155,9 +165,9 @@ jobs:
         run: bun run build:packages
 
       - name: Release each package (dependency order)
+        if: env.NPM_TOKEN != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           # Топологический порядок: пакет публикуется только после своих
