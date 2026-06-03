@@ -7,7 +7,7 @@ export interface LeadRow {
   tenantId: number;
   userId: number;
   state: string;
-  assignedAdminId: number | null;
+  assignedAdminId?: number | null;
   intakeJson: string | null;
   visaDocsJson: string | null;
   applicationId: string | null;
