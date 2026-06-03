@@ -574,6 +574,13 @@ export function SaasExchange() {
         {/* ── Заявки ─────────────────────────────────────────────── */}
         <TabsContent value="orders">
           <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Заявки обмена</CardTitle>
+              <p className="text-muted-foreground text-xs">
+                Статус — короткий денежный lifecycle заявки. Шаг — бизнес-стадия
+                полной 12-step exchange funnel.
+              </p>
+            </CardHeader>
             <CardContent className="p-0">
               <Table>
                 <TableHeader>

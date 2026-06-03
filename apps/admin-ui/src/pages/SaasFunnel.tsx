@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
 
 const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "form_fill", label: "Сбор данных" },
@@ -212,7 +213,8 @@ export function SaasFunnel() {
     setConfirmSeedTemplate(null);
     setSeeding(true);
     try {
-      await saas.seedFunnel(template);
+      const result = await saas.seedFunnel(template);
+      toast.success(`Шаблон применён: ${result.stagesCreated} стадий`);
       reload();
     } catch (err) {
       onAuthError(err);
@@ -259,6 +261,7 @@ export function SaasFunnel() {
       <div className="flex items-center justify-between">
         <PageHeader title="Воронка" description="Настройка стадий и полей данных" />
         <div className="flex items-center gap-2">
+          <Badge variant="outline">{funnel?.stages?.length ?? 0} стадий</Badge>
           <Button size="sm" onClick={() => setAiPanelOpen(true)}>
             <SparklesIcon className="mr-1.5 size-4" />
             Настроить с AI
@@ -277,7 +280,9 @@ export function SaasFunnel() {
           <LayersIcon className="size-4 text-muted-foreground" />
           <span className="text-sm font-medium">Загрузить шаблон воронки</span>
           {funnel?.stages && funnel.stages.length > 0 && (
-            <span className="text-xs text-muted-foreground">(заменит текущие стадии)</span>
+            <span className="text-xs text-muted-foreground">
+              Сейчас {funnel.stages.length} стадий · заменит текущую воронку
+            </span>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
