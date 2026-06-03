@@ -24,6 +24,7 @@ import {
 	refreshTenantRates,
 	renderRateCardMessage,
 } from "../lib/exchange/rate-feed.ts";
+import { isAllowedExchangeSecretKey } from "../lib/exchange/requisite-keys.ts";
 
 export interface AdminExchangeRoutesOpts {
 	db: Db;
@@ -374,12 +375,8 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		const body = await c.req.json().catch(() => ({}));
 		const key = typeof body?.key === "string" ? body.key.trim() : "";
 		const value = typeof body?.value === "string" ? body.value.trim() : "";
-		const allowedKeys = new Set([
-			"exchange_fiat_payment_url",
-			"exchange_binance_id",
-			"exchange_rub_card_requisites",
-		]);
-		if (!key.startsWith("exchange_wallet_") && !allowedKeys.has(key)) {
+		// Реквизиты приёма + бизнес-настройки (общий allowlist — см. requisite-keys.ts).
+		if (!isAllowedExchangeSecretKey(key)) {
 			return c.json({ error: "bad requisites key" }, 400);
 		}
 		if (!value) return c.json({ error: "value required" }, 400);
