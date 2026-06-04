@@ -31,6 +31,7 @@ import {
   type ChannelItem,
   clearToken,
   type ExchangeRate,
+  type ExchangeRateCardProposal,
   type KbDoc,
   type LlmConfig,
   type LlmProvider,
@@ -126,13 +127,20 @@ function modelPlaceholder(provider: LlmProvider, purpose: LlmPurpose): string {
   return MODEL_PLACEHOLDER[provider]?.[purpose] ?? "model-id";
 }
 
+/** Подпись диапазона суммы тира: «2k–3k», «от 50k», «до 3k». */
+function tierRangeLabel(min: number, max: number | null): string {
+  const k = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+  if (max === null) return `от ${k(min)}`;
+  if (min <= 0) return `до ${k(max)}`;
+  return `${k(min)}–${k(max)}`;
+}
+
 type StepId =
   | "vertical"
   | "channel"
   | "llm"
   | "ex_rates"
   | "ex_requisites"
-  | "ex_ratecard"
   | "kb"
   | "ex_business"
   | "done";
@@ -231,28 +239,17 @@ export function SaasOnboarding() {
   const [installingVertical, setInstallingVertical] = useState<string | null>(null);
   const [installedVertical, setInstalledVertical] = useState<string | null>(null);
 
-  // Exchange — курсы
+  // Exchange — курсы (тир-карта от рыночного фида: RUB + USDT)
   const [rates, setRates] = useState<ExchangeRate[]>([]);
-  const [rateForm, setRateForm] = useState({
-    asset: "USDT",
-    network: "trc20",
-    baseRate: "",
-    quoteMode: "multiply" as "multiply" | "divide",
-    marginPct: "",
-    feeFixedThb: "",
-    minAmountFrom: "",
-    maxAmountFrom: "",
-  });
-  const [savingRate, setSavingRate] = useState(false);
+  const [cardProposals, setCardProposals] = useState<ExchangeRateCardProposal[]>([]);
+  const [cardLoading, setCardLoading] = useState(false);
+  const [cardSaving, setCardSaving] = useState(false);
+  const [cardError, setCardError] = useState("");
 
   // Exchange — реквизиты
   const [reqType, setReqType] = useState(REQUISITE_TYPES[0]!.key);
   const [reqValue, setReqValue] = useState("");
   const [savingReq, setSavingReq] = useState(false);
-
-  // Exchange — тир-карта
-  const [cardLoading, setCardLoading] = useState(false);
-  const [cardApproved, setCardApproved] = useState(false);
 
   // Exchange — бизнес-данные (информационные)
   const [bizForm, setBizForm] = useState({
@@ -288,7 +285,6 @@ export function SaasOnboarding() {
     { id: "llm", label: "LLM", required: true, done: chatDone, visible: true },
     { id: "ex_rates", label: "Курсы", required: true, done: ratesDone, visible: isExchange },
     { id: "ex_requisites", label: "Реквизиты", required: true, done: requisitesDone, visible: isExchange },
-    { id: "ex_ratecard", label: "Тир-карта", required: false, done: cardApproved, visible: isExchange },
     { id: "kb", label: "База знаний", required: false, done: kbDone, visible: true },
     { id: "ex_business", label: "Данные", required: false, done: bizSaved, visible: isExchange },
     { id: "done", label: "Готово", required: false, done: false, visible: true },
@@ -424,7 +420,6 @@ export function SaasOnboarding() {
             done: (res.status?.requisiteCount ?? 0) >= 1,
             visible: exch,
           },
-          { id: "ex_ratecard", label: "", required: false, done: false, visible: exch },
           { id: "kb", label: "", required: false, done: res.kb.length > 0, visible: true },
           { id: "ex_business", label: "", required: false, done: false, visible: exch },
           { id: "done", label: "", required: false, done: false, visible: true },
@@ -443,6 +438,14 @@ export function SaasOnboarding() {
     };
     // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
+
+  // Авто-подтягиваем курс с рынка при входе на шаг «Курсы» (если ещё не настроен).
+  useEffect(() => {
+    if (currentId === "ex_rates" && !ratesDone && cardProposals.length === 0 && !cardLoading) {
+      void loadRateCard();
+    }
+    // biome-ignore lint/correctness/useExhaustiveDependencies: реагируем на смену шага
+  }, [currentId]);
 
   function updateKeyForm(purpose: LlmPurpose, patch: Partial<KeyForm>) {
     setKeyForms((prev) => ({ ...prev, [purpose]: { ...prev[purpose], ...patch } }));
@@ -616,33 +619,55 @@ export function SaasOnboarding() {
     }
   }
 
-  async function handleSaveRate(e: FormEvent) {
-    e.preventDefault();
-    setError("");
-    const base = Number.parseFloat(rateForm.baseRate);
-    if (!rateForm.asset.trim() || !(base > 0)) {
-      setError("Курсы: укажите актив и положительный базовый курс");
+  // Курсы = тир-карта от рыночного фида (Binance + ЦБ). Превью тянет актуальный
+  // рынок и строит дефолтные тиры RUB+USDT; пользователь правит курсы; сохранение
+  // (approve) создаёт активные базовые курсы + тиры. Авто-обновление рынка — да.
+  async function loadRateCard() {
+    setCardError("");
+    setCardLoading(true);
+    try {
+      const res = await saas.previewExchangeRateCard();
+      setCardProposals(res.proposals);
+    } catch (err) {
+      if (!handleAuthError(err)) {
+        setCardError(err instanceof Error ? err.message : "Не удалось получить курс с рынка");
+      }
+    } finally {
+      setCardLoading(false);
+    }
+  }
+
+  /** Правка курса тира: пересчитывает отклонение от рынка на лету. */
+  function updateTierRate(pIdx: number, tIdx: number, value: string) {
+    setCardProposals((prev) =>
+      prev.map((p, i) => {
+        if (i !== pIdx) return p;
+        const tiers = p.tiers.map((t, j) => {
+          if (j !== tIdx) return t;
+          const displayRate = Number.parseFloat(value);
+          if (!Number.isFinite(displayRate)) return { ...t, displayRate: Number.NaN };
+          const dev = p.marketRate > 0 ? ((displayRate - p.marketRate) / p.marketRate) * 100 : 0;
+          return { ...t, displayRate, deviationPct: Math.round(dev * 100) / 100 };
+        });
+        return { ...p, tiers };
+      }),
+    );
+  }
+
+  async function saveRateCard() {
+    if (cardProposals.length === 0) {
+      setCardError("Сначала получите курс с рынка");
       return;
     }
-    setSavingRate(true);
+    setCardError("");
+    setCardSaving(true);
     try {
-      await saas.saveExchangeRate({
-        asset: rateForm.asset.trim().toUpperCase(),
-        network: rateForm.network.trim(),
-        baseRate: base,
-        quoteMode: rateForm.quoteMode,
-        ...(rateForm.marginPct ? { marginPct: Number.parseFloat(rateForm.marginPct) } : {}),
-        ...(rateForm.feeFixedThb ? { feeFixedThb: Number.parseFloat(rateForm.feeFixedThb) } : {}),
-        ...(rateForm.minAmountFrom ? { minAmountFrom: Number.parseFloat(rateForm.minAmountFrom) } : {}),
-        ...(rateForm.maxAmountFrom ? { maxAmountFrom: Number.parseFloat(rateForm.maxAmountFrom) } : {}),
-        isActive: true,
-      });
-      setRateForm((p) => ({ ...p, baseRate: "", marginPct: "", feeFixedThb: "" }));
+      await saas.approveExchangeRateCard(cardProposals);
       await loadState();
     } catch (err) {
-      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+      if (!handleAuthError(err)) setCardError(err instanceof Error ? err.message : String(err));
     } finally {
-      setSavingRate(false);
+      setCardSaving(false);
     }
   }
 
@@ -662,24 +687,6 @@ export function SaasOnboarding() {
       if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSavingReq(false);
-    }
-  }
-
-  async function handleApproveRateCard() {
-    setError("");
-    setCardLoading(true);
-    try {
-      const preview = await saas.previewExchangeRateCard();
-      if (preview.proposals.length === 0) {
-        setError("Тир-карта: сначала добавьте хотя бы один активный курс");
-        return;
-      }
-      await saas.approveExchangeRateCard(preview.proposals);
-      setCardApproved(true);
-    } catch (err) {
-      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCardLoading(false);
     }
   }
 
@@ -1296,117 +1303,86 @@ export function SaasOnboarding() {
             <CardHeader>
               <CardTitle>Курсы обмена</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Добавьте хотя бы один курс. Бот считает выдачу в THB по формуле:
-                multiply (крипта: thb = сумма × курс) или divide (RUB: thb = сумма ÷ курс),
-                минус комиссия. Курс сам бот никогда не выдумывает.
+                Актуальный курс берём с рынка (Binance + ЦБ) и авто-обновляем. Вы задаёте свои
+                курсы по диапазонам сумм — отдельно для рублей и USDT (как на табло). Бот
+                выдаёт клиенту ровно эти значения.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              {rates.length > 0 && (
-                <ul className="space-y-1.5 text-sm">
-                  {rates.map((r) => (
-                    <li key={r.id} className="flex items-center gap-2 rounded-md border px-3 py-2">
-                      <Badge variant={r.isActive ? "success" : "secondary"}>
-                        {r.asset}
-                        {r.network ? `/${r.network}` : ""}→{r.quoteAsset}
-                      </Badge>
-                      <span className="text-muted-foreground">
-                        курс {r.baseRate}, маржа {r.marginPct}%, fee {r.feeFixedThb} THB
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+              {cardError && (
+                <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {cardError}
+                </p>
               )}
-              <form onSubmit={handleSaveRate} className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label>Актив</Label>
-                  <Input
-                    value={rateForm.asset}
-                    onChange={(e) => setRateForm((p) => ({ ...p, asset: e.target.value }))}
-                    placeholder="USDT"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Сеть (для крипты)</Label>
-                  <Input
-                    value={rateForm.network}
-                    onChange={(e) => setRateForm((p) => ({ ...p, network: e.target.value }))}
-                    placeholder="trc20 (пусто для фиата)"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Базовый курс (THB)</Label>
-                  <Input
-                    type="number"
-                    step="any"
-                    value={rateForm.baseRate}
-                    onChange={(e) => setRateForm((p) => ({ ...p, baseRate: e.target.value }))}
-                    placeholder="36.5"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Режим</Label>
-                  <Select
-                    value={rateForm.quoteMode}
-                    onValueChange={(v) =>
-                      setRateForm((p) => ({ ...p, quoteMode: v as "multiply" | "divide" }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="multiply">multiply (крипта)</SelectItem>
-                      <SelectItem value="divide">divide (RUB)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Маржа %</Label>
-                  <Input
-                    type="number"
-                    step="any"
-                    value={rateForm.marginPct}
-                    onChange={(e) => setRateForm((p) => ({ ...p, marginPct: e.target.value }))}
-                    placeholder="2"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Фикс. комиссия THB</Label>
-                  <Input
-                    type="number"
-                    step="any"
-                    value={rateForm.feeFixedThb}
-                    onChange={(e) => setRateForm((p) => ({ ...p, feeFixedThb: e.target.value }))}
-                    placeholder="0"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Мин. сумма</Label>
-                  <Input
-                    type="number"
-                    step="any"
-                    value={rateForm.minAmountFrom}
-                    onChange={(e) => setRateForm((p) => ({ ...p, minAmountFrom: e.target.value }))}
-                    placeholder="—"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Макс. сумма</Label>
-                  <Input
-                    type="number"
-                    step="any"
-                    value={rateForm.maxAmountFrom}
-                    onChange={(e) => setRateForm((p) => ({ ...p, maxAmountFrom: e.target.value }))}
-                    placeholder="—"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <Button type="submit" disabled={savingRate}>
-                    {savingRate ? "Сохраняем…" : "Добавить курс"}
-                  </Button>
-                </div>
-              </form>
+
+              {cardProposals.length === 0 ? (
+                <Button type="button" onClick={loadRateCard} disabled={cardLoading}>
+                  {cardLoading ? "Получаем курс…" : "Получить актуальный курс с рынка"}
+                </Button>
+              ) : (
+                <>
+                  {cardProposals.map((p, pIdx) => (
+                    <div key={p.asset} className="rounded-lg border">
+                      <div className="flex items-center justify-between border-b px-3 py-2">
+                        <span className="text-sm font-medium">
+                          {p.asset === "RUB"
+                            ? "🇷🇺 RUB → THB"
+                            : p.asset === "USDT"
+                              ? "💲 USDT → THB"
+                              : `${p.asset} → THB`}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          рынок: {p.marketRate}{" "}
+                          {p.quoteMode === "divide" ? `${p.asset}/THB` : `THB/${p.asset}`}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-[1fr_7rem_3.5rem] gap-2 px-3 py-1.5 text-xs text-muted-foreground">
+                        <span>Сумма (THB)</span>
+                        <span>Ваш курс</span>
+                        <span className="text-right">Откл.</span>
+                      </div>
+                      {p.tiers.map((t, tIdx) => (
+                        <div
+                          key={`${p.asset}-${t.minThb}`}
+                          className="grid grid-cols-[1fr_7rem_3.5rem] items-center gap-2 border-t px-3 py-1.5"
+                        >
+                          <span className="text-sm">{tierRangeLabel(t.minThb, t.maxThb)}</span>
+                          <Input
+                            className="h-8"
+                            type="number"
+                            step="any"
+                            value={Number.isFinite(t.displayRate) ? t.displayRate : ""}
+                            onChange={(e) => updateTierRate(pIdx, tIdx, e.target.value)}
+                          />
+                          <span className="text-right text-xs text-muted-foreground">
+                            {t.deviationPct > 0 ? "+" : ""}
+                            {t.deviationPct}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" onClick={saveRateCard} disabled={cardSaving}>
+                      {cardSaving ? "Сохраняем…" : ratesDone ? "Обновить курсы" : "Сохранить курсы"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={loadRateCard}
+                      disabled={cardLoading}
+                    >
+                      {cardLoading ? "Обновляем…" : "Сбросить к рынку"}
+                    </Button>
+                  </div>
+                </>
+              )}
+
+              {ratesDone && (
+                <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
+                  ✓ Курсы сохранены и активны. Авто-обновление рынка включено.
+                </p>
+              )}
               {ratesDone && <NextButton label="Далее: реквизиты" />}
             </CardContent>
           </Card>
@@ -1464,30 +1440,6 @@ export function SaasOnboarding() {
           </Card>
         )}
 
-        {currentId === "ex_ratecard" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Тир-карта курсов (опционально)</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Публичная карта курсов с диапазонами сумм. Сгенерируем предложение из ваших
-                базовых курсов и сохраним одобренные тиры. Можно пропустить и настроить позже.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {cardApproved && (
-                <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
-                  ✓ Тир-карта одобрена и сохранена.
-                </p>
-              )}
-              <div className="flex gap-2">
-                <Button type="button" onClick={handleApproveRateCard} disabled={cardLoading}>
-                  {cardLoading ? "Генерируем…" : "Сгенерировать и одобрить"}
-                </Button>
-                <NextButton label={cardApproved ? "Далее" : "Пропустить"} />
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {currentId === "kb" && (
           <Card>
