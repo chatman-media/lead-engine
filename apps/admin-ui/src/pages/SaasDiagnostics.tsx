@@ -29,7 +29,7 @@ function explainFailure(message: string | undefined): string | null {
   if (!message) return null;
   const m = message.toLowerCase();
   if (/config not set|не настро|not configured/.test(m))
-    return "Конфиг есть в базе, но работающий бот его ещё не подхватил. Если только что меняли LLM — подождите минуту и перепроверьте (или перезапустите бота).";
+    return "Конфиг есть в базе, но работающий бот его не загрузил. Чаще всего — бот на паузе (рантайм грузит LLM только для активных): снимите паузу на «Главной». Если только что меняли LLM — подождите минуту и перепроверьте.";
   if (/quota|insufficient|402|balance|недостат|credit|out of/.test(m))
     return "Недостаточно средств или превышена квота у LLM-провайдера. Пополните баланс или смените ключ в «Настройки LLM».";
   if (/401|unauthor|invalid api key|invalid_api_key|incorrect api key|forbidden|403/.test(m))
