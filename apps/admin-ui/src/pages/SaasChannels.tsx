@@ -54,6 +54,68 @@ function OkNote({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Карточка «канал уже подключён»: статус + Переподключить/Отключить. */
+function ConnectedChannelCard({
+  title,
+  statusText,
+  reconnectLabel,
+  onReconnect,
+  confirmDelete,
+  onAskDelete,
+  onConfirmDelete,
+  onCancelDelete,
+}: {
+  title: string;
+  statusText: string;
+  reconnectLabel: string;
+  onReconnect: () => void;
+  confirmDelete: boolean;
+  onAskDelete: () => void;
+  onConfirmDelete: () => void;
+  onCancelDelete: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+        <div className="flex items-center gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[color-mix(in_oklch,var(--success)_15%,transparent)] text-[var(--success)]">
+            <CheckIcon className="size-5" />
+          </span>
+          <div>
+            <p className="text-sm font-medium">{title}</p>
+            <p className="text-xs text-muted-foreground">{statusText}</p>
+          </div>
+        </div>
+        <span className="text-xs font-semibold text-[var(--success)]">активен</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={onReconnect}>
+          {reconnectLabel}
+        </Button>
+        {confirmDelete ? (
+          <>
+            <span className="self-center text-sm text-muted-foreground">Отключить?</span>
+            <Button variant="destructive" onClick={onConfirmDelete}>
+              Да, отключить
+            </Button>
+            <Button variant="ghost" onClick={onCancelDelete}>
+              Отмена
+            </Button>
+          </>
+        ) : (
+          <Button
+            variant="ghost"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={onAskDelete}
+          >
+            Отключить
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function SaasChannels() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<ChannelTab>("telegram");
@@ -78,6 +140,9 @@ export function SaasChannels() {
   // Если личный аккаунт уже подключён — показываем статус, а не мастер заново.
   // ubReconnect=true принудительно открывает мастер для переподключения.
   const [ubReconnect, setUbReconnect] = useState(false);
+  // Для bot/whatsapp/web: какая вкладка принудительно показывает форму
+  // (переподключение / добавить), несмотря на уже подключённый канал.
+  const [reconnectKind, setReconnectKind] = useState<ChannelTab | null>(null);
 
   const [waPhoneId, setWaPhoneId] = useState("");
   const [waAccessToken, setWaAccessToken] = useState("");
@@ -135,6 +200,7 @@ export function SaasChannels() {
       const res = await saas.createTelegramChannel(trimmed);
       setLastCreated({ username: res.username });
       setBotToken("");
+      setReconnectKind(null);
       await refresh();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -184,6 +250,7 @@ export function SaasChannels() {
         ...(/^#[0-9a-fA-F]{3,8}$/.test(webColor) ? { primaryColor: webColor } : {}),
       });
       setWebResult(res);
+      setReconnectKind(null);
       await refresh();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -236,6 +303,7 @@ export function SaasChannels() {
       });
       setWaResult(res);
       setWaAccessToken("");
+      setReconnectKind(null);
       await refresh();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -378,6 +446,9 @@ export function SaasChannels() {
   }
 
   const existingUserbot = channels.find((c) => c.kind === "telegram_userbot");
+  const existingBot = channels.find((c) => c.kind === "telegram_bot");
+  const existingWa = channels.find((c) => c.kind === "whatsapp");
+  const existingWeb = channels.find((c) => c.kind === "web");
 
   return (
     <div className="space-y-6">
@@ -416,7 +487,11 @@ export function SaasChannels() {
         <TabsContent value="telegram">
           <Card>
             <CardHeader>
-              <CardTitle>Подключить Telegram-бота</CardTitle>
+              <CardTitle>
+                {existingBot && reconnectKind !== "telegram"
+                  ? "Telegram-бот"
+                  : "Подключить Telegram-бота"}
+              </CardTitle>
               <p className="text-sm text-muted-foreground">
                 Создайте бота в{" "}
                 <a
@@ -431,21 +506,55 @@ export function SaasChannels() {
               </p>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label>Токен бота</Label>
-                  <Input
-                    type="password"
-                    autoComplete="off"
-                    value={botToken}
-                    onChange={(e) => setBotToken(e.target.value)}
-                    placeholder="123456789:AAEhBP…"
-                  />
-                </div>
-                <Button type="submit" disabled={submitting || !botToken.trim()}>
-                  {submitting ? "Проверяем…" : "Подключить"}
-                </Button>
-              </form>
+              {existingBot && reconnectKind !== "telegram" ? (
+                <ConnectedChannelCard
+                  title={
+                    existingBot.username
+                      ? `@${existingBot.username}`
+                      : `Бот ${existingBot.externalId}`
+                  }
+                  statusText="Бот подключён — webhook активен"
+                  reconnectLabel="Заменить токен"
+                  onReconnect={() => {
+                    setReconnectKind("telegram");
+                    setBotToken("");
+                    setLastCreated(null);
+                  }}
+                  confirmDelete={confirmDeleteChannelId === existingBot.id}
+                  onAskDelete={() => setConfirmDeleteChannelId(existingBot.id)}
+                  onConfirmDelete={() => handleDelete(existingBot.id)}
+                  onCancelDelete={() => setConfirmDeleteChannelId(null)}
+                />
+              ) : (
+                <form onSubmit={handleSubmit} className="space-y-3">
+                  {existingBot && reconnectKind === "telegram" && (
+                    <p className="text-xs text-muted-foreground">
+                      Новый токен заменит текущего бота{" "}
+                      {existingBot.username ? `@${existingBot.username}` : ""}.
+                    </p>
+                  )}
+                  <div className="space-y-1.5">
+                    <Label>Токен бота</Label>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={botToken}
+                      onChange={(e) => setBotToken(e.target.value)}
+                      placeholder="123456789:AAEhBP…"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={submitting || !botToken.trim()}>
+                      {submitting ? "Проверяем…" : "Подключить"}
+                    </Button>
+                    {existingBot && reconnectKind === "telegram" && (
+                      <Button type="button" variant="ghost" onClick={() => setReconnectKind(null)}>
+                        Отмена
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -664,7 +773,11 @@ export function SaasChannels() {
         <TabsContent value="whatsapp">
           <Card>
             <CardHeader>
-              <CardTitle>Подключить WhatsApp Business</CardTitle>
+              <CardTitle>
+                {existingWa && reconnectKind !== "whatsapp"
+                  ? "WhatsApp Business"
+                  : "Подключить WhatsApp Business"}
+              </CardTitle>
               <p className="text-sm text-muted-foreground">
                 Из{" "}
                 <a
@@ -680,67 +793,90 @@ export function SaasChannels() {
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form onSubmit={handleWhatsAppSubmit} className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label>Phone number ID</Label>
-                  <Input
-                    value={waPhoneId}
-                    onChange={(e) => setWaPhoneId(e.target.value)}
-                    placeholder="123456789012345"
-                    pattern="\d{10,20}"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Access token</Label>
-                  <Input
-                    type="password"
-                    autoComplete="off"
-                    value={waAccessToken}
-                    onChange={(e) => setWaAccessToken(e.target.value)}
-                    placeholder="EAAJZBxxxxxxx…"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Business account ID (опционально)</Label>
-                  <Input
-                    value={waBizId}
-                    onChange={(e) => setWaBizId(e.target.value)}
-                    placeholder="123456789012345"
-                  />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
+              {existingWa && reconnectKind !== "whatsapp" ? (
+                <ConnectedChannelCard
+                  title={`WhatsApp #${existingWa.externalId}`}
+                  statusText="Подключён — входящие обрабатывает ассистент"
+                  reconnectLabel="Переподключить"
+                  onReconnect={() => {
+                    setReconnectKind("whatsapp");
+                    setWaResult(null);
+                  }}
+                  confirmDelete={confirmDeleteChannelId === existingWa.id}
+                  onAskDelete={() => setConfirmDeleteChannelId(existingWa.id)}
+                  onConfirmDelete={() => handleDelete(existingWa.id)}
+                  onCancelDelete={() => setConfirmDeleteChannelId(null)}
+                />
+              ) : (
+                <form onSubmit={handleWhatsAppSubmit} className="space-y-3">
                   <div className="space-y-1.5">
-                    <Label>Verify Token (опц.)</Label>
+                    <Label>Phone number ID</Label>
                     <Input
-                      autoComplete="off"
-                      value={waVerifyToken}
-                      onChange={(e) => setWaVerifyToken(e.target.value)}
-                      placeholder="любая строка для Meta webhook"
+                      value={waPhoneId}
+                      onChange={(e) => setWaPhoneId(e.target.value)}
+                      placeholder="123456789012345"
+                      pattern="\d{10,20}"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label>App Secret (опц.)</Label>
+                    <Label>Access token</Label>
                     <Input
                       type="password"
                       autoComplete="off"
-                      value={waAppSecret}
-                      onChange={(e) => setWaAppSecret(e.target.value)}
-                      placeholder="Meta → App settings → Basic"
+                      value={waAccessToken}
+                      onChange={(e) => setWaAccessToken(e.target.value)}
+                      placeholder="EAAJZBxxxxxxx…"
                     />
                   </div>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Verify Token — придумайте строку и впишите её же в Meta dashboard при настройке
-                  webhook. App Secret включает проверку подписи входящих вебхуков. Оставьте пустыми
-                  для общих ключей платформы.
-                </p>
-                <Button
-                  type="submit"
-                  disabled={waSubmitting || !waPhoneId.trim() || !waAccessToken.trim()}
-                >
-                  {waSubmitting ? "Проверяем у Meta…" : "Подключить"}
-                </Button>
-              </form>
+                  <div className="space-y-1.5">
+                    <Label>Business account ID (опционально)</Label>
+                    <Input
+                      value={waBizId}
+                      onChange={(e) => setWaBizId(e.target.value)}
+                      placeholder="123456789012345"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Verify Token (опц.)</Label>
+                      <Input
+                        autoComplete="off"
+                        value={waVerifyToken}
+                        onChange={(e) => setWaVerifyToken(e.target.value)}
+                        placeholder="любая строка для Meta webhook"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>App Secret (опц.)</Label>
+                      <Input
+                        type="password"
+                        autoComplete="off"
+                        value={waAppSecret}
+                        onChange={(e) => setWaAppSecret(e.target.value)}
+                        placeholder="Meta → App settings → Basic"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Verify Token — придумайте строку и впишите её же в Meta dashboard при настройке
+                    webhook. App Secret включает проверку подписи входящих вебхуков. Оставьте
+                    пустыми для общих ключей платформы.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="submit"
+                      disabled={waSubmitting || !waPhoneId.trim() || !waAccessToken.trim()}
+                    >
+                      {waSubmitting ? "Проверяем у Meta…" : "Подключить"}
+                    </Button>
+                    {existingWa && reconnectKind === "whatsapp" && (
+                      <Button type="button" variant="ghost" onClick={() => setReconnectKind(null)}>
+                        Отмена
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              )}
               {waResult && (
                 <OkNote>
                   ✓ WhatsApp {waResult.displayPhoneNumber ?? waResult.phoneNumberId} подключён.
@@ -760,37 +896,66 @@ export function SaasChannels() {
         <TabsContent value="web">
           <Card>
             <CardHeader>
-              <CardTitle>Web-виджет на сайт</CardTitle>
+              <CardTitle>
+                {existingWeb && reconnectKind !== "web" ? "Web-виджет" : "Web-виджет на сайт"}
+              </CardTitle>
               <p className="text-sm text-muted-foreground">
                 Плавающий чат для вашего сайта. После включения покажем готовый snippet.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form onSubmit={handleWebSubmit} className="space-y-3">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label>Название бренда (опц.)</Label>
-                    <Input
-                      value={webBrand}
-                      onChange={(e) => setWebBrand(e.target.value)}
-                      placeholder="Acme Support"
-                      maxLength={64}
-                    />
+              {existingWeb && reconnectKind !== "web" && !webResult ? (
+                <ConnectedChannelCard
+                  title={`Web (${existingWeb.externalId})`}
+                  statusText="Виджет включён — встроен на сайт"
+                  reconnectLabel="Настроить заново"
+                  onReconnect={() => setReconnectKind("web")}
+                  confirmDelete={confirmDeleteChannelId === existingWeb.id}
+                  onAskDelete={() => setConfirmDeleteChannelId(existingWeb.id)}
+                  onConfirmDelete={() => handleDelete(existingWeb.id)}
+                  onCancelDelete={() => setConfirmDeleteChannelId(null)}
+                />
+              ) : (
+                <form onSubmit={handleWebSubmit} className="space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Название бренда (опц.)</Label>
+                      <Input
+                        value={webBrand}
+                        onChange={(e) => setWebBrand(e.target.value)}
+                        placeholder="Acme Support"
+                        maxLength={64}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Цвет акцента (hex)</Label>
+                      <Input
+                        value={webColor}
+                        onChange={(e) => setWebColor(e.target.value)}
+                        placeholder="#6aa6ff"
+                        pattern="#[0-9a-fA-F]{3,8}"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label>Цвет акцента (hex)</Label>
-                    <Input
-                      value={webColor}
-                      onChange={(e) => setWebColor(e.target.value)}
-                      placeholder="#6aa6ff"
-                      pattern="#[0-9a-fA-F]{3,8}"
-                    />
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={webSubmitting}>
+                      {webSubmitting ? "Создаём…" : webResult ? "Обновить" : "Включить виджет"}
+                    </Button>
+                    {existingWeb && reconnectKind === "web" && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => {
+                          setReconnectKind(null);
+                          setWebResult(null);
+                        }}
+                      >
+                        Отмена
+                      </Button>
+                    )}
                   </div>
-                </div>
-                <Button type="submit" disabled={webSubmitting}>
-                  {webSubmitting ? "Создаём…" : webResult ? "Обновить" : "Включить виджет"}
-                </Button>
-              </form>
+                </form>
+              )}
 
               {webResult?.snippet && (
                 <div className="space-y-2 rounded-lg border bg-muted/40 p-4">
