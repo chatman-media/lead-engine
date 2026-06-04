@@ -1,6 +1,7 @@
 import {
   ArrowRightIcon,
   CheckIcon,
+  ChevronDownIcon,
   RocketIcon,
   SendIcon,
   TriangleAlertIcon,
@@ -52,12 +53,78 @@ import {
  * Required-шаги гейтят завершение и зеркалят серверный расчёт `done`.
  */
 
-const PROVIDERS: { value: LlmProvider; label: string }[] = [
-  { value: "openai", label: "OpenAI" },
-  { value: "openrouter", label: "OpenRouter" },
-  { value: "anthropic", label: "Anthropic" },
-  { value: "ollama", label: "Ollama (local)" },
-];
+const PROVIDER_LABEL: Record<LlmProvider, string> = {
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+  anthropic: "Anthropic",
+  ollama: "Ollama (local)",
+  jina: "Jina",
+  cohere: "Cohere",
+};
+
+/** Назначения LLM (purpose) — chat обязателен, остальные опциональны. */
+const ALL_PURPOSES: LlmPurpose[] = ["chat", "embed", "vision", "judge", "reranker"];
+
+interface PurposeMeta {
+  label: string;
+  desc: string;
+  required: boolean;
+  providers: LlmProvider[];
+}
+const PURPOSE_META: Record<LlmPurpose, PurposeMeta> = {
+  chat: {
+    label: "Chat — ответы ассистента",
+    desc: "Основные ответы бота клиентам",
+    required: true,
+    providers: ["openai", "openrouter", "anthropic", "ollama"],
+  },
+  embed: {
+    label: "Embeddings — поиск по базе",
+    desc: "Нужны для базы знаний (RAG)",
+    required: false,
+    providers: ["openai", "openrouter", "ollama", "jina", "cohere"],
+  },
+  vision: {
+    label: "Vision — анализ изображений",
+    desc: "Фото и документы: чеки, KYC",
+    required: false,
+    providers: ["openai", "openrouter", "anthropic", "ollama"],
+  },
+  judge: {
+    label: "Judge — оценка ответов",
+    desc: "Оценка качества и сравнение моделей",
+    required: false,
+    providers: ["openai", "openrouter", "anthropic"],
+  },
+  reranker: {
+    label: "Reranker — точность поиска",
+    desc: "Переранжирование результатов RAG",
+    required: false,
+    providers: ["jina", "cohere"],
+  },
+};
+
+/** Пример модели под (провайдер × назначение) — для placeholder поля «Модель». */
+const MODEL_PLACEHOLDER: Partial<Record<LlmProvider, Partial<Record<LlmPurpose, string>>>> = {
+  openai: { chat: "gpt-4o-mini", embed: "text-embedding-3-small", vision: "gpt-4o", judge: "gpt-4o" },
+  openrouter: {
+    chat: "google/gemini-2.5-flash",
+    embed: "google/gemini-embedding-2",
+    vision: "google/gemini-2.5-flash",
+    judge: "google/gemini-2.5-flash",
+  },
+  anthropic: {
+    chat: "claude-3-5-sonnet-latest",
+    vision: "claude-3-5-sonnet-latest",
+    judge: "claude-3-5-sonnet-latest",
+  },
+  ollama: { chat: "llama3.2", embed: "nomic-embed-text", vision: "llama3.2-vision" },
+  jina: { embed: "jina-embeddings-v3", reranker: "jina-reranker-v2-base-multilingual" },
+  cohere: { embed: "embed-multilingual-v3.0", reranker: "rerank-multilingual-v3.0" },
+};
+function modelPlaceholder(provider: LlmProvider, purpose: LlmPurpose): string {
+  return MODEL_PLACEHOLDER[provider]?.[purpose] ?? "model-id";
+}
 
 type StepId =
   | "vertical"
@@ -88,9 +155,10 @@ interface KeyForm {
 
 const EMPTY_KEY_FORM: KeyForm = { provider: "openai", model: "", apiKey: "", baseUrl: "", embedDim: "" };
 
-const OLLAMA_PRESETS: Record<"chat" | "embed", { model: string; embedDim?: string }> = {
+const OLLAMA_PRESETS: Partial<Record<LlmPurpose, { model: string; embedDim?: string }>> = {
   chat: { model: "llama3.2" },
-  embed: { model: "nomic-embed-text", embedDim: "768" },
+  embed: { model: "nomic-embed-text" },
+  vision: { model: "llama3.2-vision" },
 };
 
 /** Типы реквизитов приёма для шага «Реквизиты» (ключи tenant_secrets). */
@@ -134,13 +202,24 @@ export function SaasOnboarding() {
   const [ubSubmitting, setUbSubmitting] = useState(false);
   const [ubError, setUbError] = useState("");
 
-  const [keyForms, setKeyForms] = useState<Record<"chat" | "embed", KeyForm>>({
-    chat: { ...EMPTY_KEY_FORM },
-    // Размерность фиксирована под колонку базы знаний (vector(1536)); вектор
-    // любой модели приводится к ней автоматически (см. openai-embed.fitDim).
-    embed: { ...EMPTY_KEY_FORM, embedDim: "1536" },
+  const [keyForms, setKeyForms] = useState<Record<LlmPurpose, KeyForm>>(() => {
+    const init = {} as Record<LlmPurpose, KeyForm>;
+    for (const p of ALL_PURPOSES) {
+      init[p] = {
+        ...EMPTY_KEY_FORM,
+        provider: PURPOSE_META[p].providers[0] ?? "openai",
+        // Размерность embed фиксирована под колонку БЗ (vector(1536)); вектор
+        // любой модели приводится к ней автоматически (openai-embed.fitDim).
+        ...(p === "embed" ? { embedDim: "1536" } : {}),
+      };
+    }
+    return init;
   });
   const [savingPurpose, setSavingPurpose] = useState<LlmPurpose | null>(null);
+  // Какие назначения раскрыты в аккордеоне (chat — по умолчанию).
+  const [expandedPurpose, setExpandedPurpose] = useState<Set<LlmPurpose>>(
+    () => new Set<LlmPurpose>(["chat"]),
+  );
 
   const [pasteTitle, setPasteTitle] = useState("");
   const [pasteTopic, setPasteTopic] = useState("");
@@ -187,7 +266,6 @@ export function SaasOnboarding() {
   const [bizSaved, setBizSaved] = useState(false);
 
   const chatCfg = configs.find((c) => c.purpose === "chat");
-  const embedCfg = configs.find((c) => c.purpose === "embed");
 
   const isExchange = installedVertical === "exchange_v1" || status?.isExchange === true;
 
@@ -274,7 +352,7 @@ export function SaasOnboarding() {
     setDocs(docItems);
     setRates(rateItems);
     for (const c of cfg.items) {
-      if (c.purpose === "chat" || c.purpose === "embed") {
+      if ((ALL_PURPOSES as string[]).includes(c.purpose)) {
         setKeyForms((prev) => ({
           ...prev,
           [c.purpose]: {
@@ -282,7 +360,7 @@ export function SaasOnboarding() {
             model: c.model,
             apiKey: "",
             baseUrl: c.baseUrl ?? "",
-            embedDim: c.embedDim?.toString() ?? "",
+            embedDim: c.embedDim?.toString() ?? (c.purpose === "embed" ? "1536" : ""),
           },
         }));
       }
@@ -349,8 +427,17 @@ export function SaasOnboarding() {
     // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
 
-  function updateKeyForm(purpose: "chat" | "embed", patch: Partial<KeyForm>) {
+  function updateKeyForm(purpose: LlmPurpose, patch: Partial<KeyForm>) {
     setKeyForms((prev) => ({ ...prev, [purpose]: { ...prev[purpose], ...patch } }));
+  }
+
+  function togglePurpose(purpose: LlmPurpose) {
+    setExpandedPurpose((prev) => {
+      const next = new Set(prev);
+      if (next.has(purpose)) next.delete(purpose);
+      else next.add(purpose);
+      return next;
+    });
   }
 
   async function handleTelegram(e: FormEvent) {
@@ -475,7 +562,7 @@ export function SaasOnboarding() {
     }
   }
 
-  async function handleSaveKey(e: FormEvent, purpose: "chat" | "embed") {
+  async function handleSaveKey(e: FormEvent, purpose: LlmPurpose) {
     e.preventDefault();
     setError("");
     const f = keyForms[purpose];
@@ -1002,147 +1089,166 @@ export function SaasOnboarding() {
         {currentId === "llm" && (
           <Card>
             <CardHeader>
-              <CardTitle>LLM-провайдер</CardTitle>
+              <CardTitle>LLM-провайдеры</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Chat обязателен (ответы ассистента). Embeddings — опционально, нужны для поиска
-                по базе знаний (RAG). Для Ollama API-ключ не требуется.
+                Chat обязателен — ответы бота. Остальное по желанию: embeddings (база знаний),
+                vision (фото/документы), judge (оценка/сравнение), reranker (точность поиска).
+                Для Ollama API-ключ не нужен.
               </p>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {(["chat", "embed"] as const).map((purpose) => {
-                const cfg = purpose === "chat" ? chatCfg : embedCfg;
+            <CardContent className="space-y-2">
+              {ALL_PURPOSES.map((purpose) => {
+                const meta = PURPOSE_META[purpose];
+                const cfg = configs.find((c) => c.purpose === purpose);
                 const f = keyForms[purpose];
-                const isChat = purpose === "chat";
+                const open = expandedPurpose.has(purpose);
+                const ready = configReady(cfg);
+                const hasOllama = meta.providers.includes("ollama");
                 return (
-                  <div
-                    key={purpose}
-                    className="space-y-3 border-t pt-5 first:border-t-0 first:pt-0"
-                  >
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold">
-                        {isChat
-                          ? "Chat — ответы ассистента (обязательно)"
-                          : "Embeddings — поиск по базе (опционально)"}
-                      </h3>
-                      {cfg &&
-                        (configReady(cfg) ? (
-                          <Badge variant="success">настроено</Badge>
-                        ) : (
-                          <Badge variant="warning">не настроено</Badge>
-                        ))}
-                    </div>
-                    <form
-                      onSubmit={(e) => handleSaveKey(e, purpose)}
-                      className="grid gap-3 sm:grid-cols-2"
+                  <div key={purpose} className="rounded-lg border">
+                    <button
+                      type="button"
+                      onClick={() => togglePurpose(purpose)}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
                     >
-                      <div className="space-y-1.5">
-                        <Label>Провайдер</Label>
-                        <Select
-                          value={f.provider}
-                          onValueChange={(v) =>
-                            updateKeyForm(purpose, { provider: v as LlmProvider })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {PROVIDERS.map((p) => (
-                              <SelectItem key={p.value} value={p.value}>
-                                {p.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Модель</Label>
-                        <Input
-                          value={f.model}
-                          onChange={(e) => updateKeyForm(purpose, { model: e.target.value })}
-                          placeholder={isChat ? "gpt-4o-mini" : "text-embedding-3-small"}
+                      <span className="min-w-0">
+                        <span className="text-sm font-medium">
+                          {meta.label}
+                          {meta.required && <span className="text-destructive"> *</span>}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {meta.desc}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        {ready ? (
+                          <Badge variant="success">настроено</Badge>
+                        ) : meta.required ? (
+                          <Badge variant="warning">нужно</Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">опц.</span>
+                        )}
+                        <ChevronDownIcon
+                          className={cn(
+                            "size-4 text-muted-foreground transition-transform",
+                            open && "rotate-180",
+                          )}
                         />
-                      </div>
-                      {f.provider !== "ollama" && (
+                      </span>
+                    </button>
+                    {open && (
+                      <form
+                        onSubmit={(e) => handleSaveKey(e, purpose)}
+                        className="grid gap-3 border-t px-3 py-3 sm:grid-cols-2"
+                      >
                         <div className="space-y-1.5">
-                          <Label>API-ключ {cfg?.hasSecret ? "(пусто — не менять)" : ""}</Label>
-                          <Input
-                            type="password"
-                            autoComplete="new-password"
-                            value={f.apiKey}
-                            onChange={(e) => updateKeyForm(purpose, { apiKey: e.target.value })}
-                            placeholder={cfg?.hasSecret ? "•••••••• (сохранён)" : "sk-…"}
-                          />
-                        </div>
-                      )}
-                      {f.provider === "ollama" && (
-                        <div className="space-y-1.5">
-                          <Label>URL Ollama</Label>
-                          <Input
-                            value={f.baseUrl}
-                            onChange={(e) => updateKeyForm(purpose, { baseUrl: e.target.value })}
-                            placeholder="http://localhost:11434"
-                          />
-                        </div>
-                      )}
-                      {!isChat && (
-                        <div className="space-y-1.5">
-                          <Label>Размерность embed</Label>
-                          <Input
-                            type="number"
-                            value={f.embedDim}
-                            onChange={(e) => updateKeyForm(purpose, { embedDim: e.target.value })}
-                            placeholder="1536"
-                          />
-                        </div>
-                      )}
-                      {!isChat && (
-                        <p className="sm:col-span-2 text-xs text-muted-foreground rounded-md bg-muted/50 px-3 py-2">
-                          Оставьте <code className="font-mono">1536</code> — под базу знаний.
-                          Вектор любой современной модели (OpenAI v3, Gemini embedding и др.)
-                          приводится к 1536 автоматически. Нужна модель с размерностью ≥ 1536.
-                        </p>
-                      )}
-                      {f.provider === "ollama" && (
-                        <p className="sm:col-span-2 text-xs text-muted-foreground rounded-md bg-muted/50 px-3 py-2">
-                          Ollama работает локально — API-ключ не нужен. Убедитесь, что{" "}
-                          <code className="font-mono">ollama serve</code> запущен и модель загружена:{" "}
-                          <code className="font-mono">ollama pull {OLLAMA_PRESETS[purpose].model}</code>
-                        </p>
-                      )}
-                      <div className="sm:col-span-2 flex items-center gap-2">
-                        <Button type="submit" disabled={savingPurpose !== null}>
-                          {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
-                        </Button>
-                        {f.provider !== "ollama" && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              updateKeyForm(purpose, {
-                                provider: "ollama",
-                                model: OLLAMA_PRESETS[purpose].model,
-                                baseUrl: "http://localhost:11434",
-                                apiKey: "",
-                                ...(OLLAMA_PRESETS[purpose].embedDim
-                                  ? { embedDim: OLLAMA_PRESETS[purpose].embedDim }
-                                  : {}),
-                              })
+                          <Label>Провайдер</Label>
+                          <Select
+                            value={f.provider}
+                            onValueChange={(v) =>
+                              updateKeyForm(purpose, { provider: v as LlmProvider })
                             }
                           >
-                            Использовать Ollama
-                          </Button>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {meta.providers.map((pv) => (
+                                <SelectItem key={pv} value={pv}>
+                                  {PROVIDER_LABEL[pv]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Модель</Label>
+                          <Input
+                            value={f.model}
+                            onChange={(e) => updateKeyForm(purpose, { model: e.target.value })}
+                            placeholder={modelPlaceholder(f.provider, purpose)}
+                          />
+                        </div>
+                        {f.provider !== "ollama" && (
+                          <div className="space-y-1.5">
+                            <Label>API-ключ {cfg?.hasSecret ? "(пусто — не менять)" : ""}</Label>
+                            <Input
+                              type="password"
+                              autoComplete="new-password"
+                              value={f.apiKey}
+                              onChange={(e) => updateKeyForm(purpose, { apiKey: e.target.value })}
+                              placeholder={cfg?.hasSecret ? "•••••••• (сохранён)" : "sk-…"}
+                            />
+                          </div>
                         )}
-                      </div>
-                    </form>
+                        {f.provider === "ollama" && (
+                          <div className="space-y-1.5">
+                            <Label>URL Ollama</Label>
+                            <Input
+                              value={f.baseUrl}
+                              onChange={(e) => updateKeyForm(purpose, { baseUrl: e.target.value })}
+                              placeholder="http://localhost:11434"
+                            />
+                          </div>
+                        )}
+                        {purpose === "embed" && (
+                          <div className="space-y-1.5">
+                            <Label>Размерность</Label>
+                            <Input
+                              type="number"
+                              value={f.embedDim}
+                              onChange={(e) => updateKeyForm(purpose, { embedDim: e.target.value })}
+                              placeholder="1536"
+                            />
+                          </div>
+                        )}
+                        {purpose === "embed" && (
+                          <p className="sm:col-span-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                            Оставьте <code className="font-mono">1536</code> — под базу знаний.
+                            Вектор любой современной модели приводится к 1536 автоматически
+                            (нужна модель с размерностью ≥ 1536).
+                          </p>
+                        )}
+                        {f.provider === "ollama" && OLLAMA_PRESETS[purpose] && (
+                          <p className="sm:col-span-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                            Ollama локальный — ключ не нужен. Запустите{" "}
+                            <code className="font-mono">ollama serve</code> и{" "}
+                            <code className="font-mono">
+                              ollama pull {OLLAMA_PRESETS[purpose]?.model}
+                            </code>
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 sm:col-span-2">
+                          <Button type="submit" disabled={savingPurpose !== null}>
+                            {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
+                          </Button>
+                          {hasOllama && f.provider !== "ollama" && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                updateKeyForm(purpose, {
+                                  provider: "ollama",
+                                  model: OLLAMA_PRESETS[purpose]?.model ?? "",
+                                  baseUrl: "http://localhost:11434",
+                                  apiKey: "",
+                                })
+                              }
+                            >
+                              Использовать Ollama
+                            </Button>
+                          )}
+                        </div>
+                      </form>
+                    )}
                   </div>
                 );
               })}
               <p className="text-sm text-muted-foreground">
-                Timeout и другие параметры —{" "}
+                Расширенные параметры (timeout и т.д.) —{" "}
                 <Link to="/settings" className="text-primary hover:underline">
-                  расширенные настройки →
+                  настройки →
                 </Link>
               </p>
               {chatDone && <NextButton label="Далее" />}
