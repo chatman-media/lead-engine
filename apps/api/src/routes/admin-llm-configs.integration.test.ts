@@ -45,48 +45,42 @@ let tenantIdA = 0;
 let tokenB = "";
 let tenantIdB = 0;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route(
-      "/",
-      makeAdminLlmConfigsRoutes({ db, masterKeyHex: MASTER_KEY_HEX }),
-    );
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminLlmConfigsRoutes({ db, masterKeyHex: MASTER_KEY_HEX }));
 
-    // Tenant A
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "llm-a@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
-    tokenA = sba.token;
-    tenantIdA = sba.admin.tenantId;
+  // Tenant A
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "llm-a@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  tokenA = sba.token;
+  tenantIdA = sba.admin.tenantId;
 
-    // Tenant B (cross-tenant isolation test)
-    const sb = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "llm-b@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sbb = (await sb.json()) as { token: string; admin: { tenantId: number } };
-    tokenB = sbb.token;
-    tenantIdB = sbb.admin.tenantId;
-  },
-  30_000,
-);
+  // Tenant B (cross-tenant isolation test)
+  const sb = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "llm-b@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sbb = (await sb.json()) as { token: string; admin: { tenantId: number } };
+  tokenB = sbb.token;
+  tenantIdB = sbb.admin.tenantId;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -95,11 +89,7 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function authReq(
-  token: string,
-  path: string,
-  init: RequestInit = {},
-): Promise<Response> {
+async function authReq(token: string, path: string, init: RequestInit = {}): Promise<Response> {
   return await app.request(path, {
     ...init,
     headers: {
@@ -146,10 +136,7 @@ describe("admin-llm-configs CRUD", () => {
       .select()
       .from(llmProviderConfigs)
       .where(
-        and(
-          eq(llmProviderConfigs.tenantId, tenantIdA),
-          eq(llmProviderConfigs.purpose, "chat"),
-        ),
+        and(eq(llmProviderConfigs.tenantId, tenantIdA), eq(llmProviderConfigs.purpose, "chat")),
       );
     expect(cfg).toBeDefined();
     expect(cfg!.provider).toBe("openai");
@@ -160,12 +147,7 @@ describe("admin-llm-configs CRUD", () => {
     const [secret] = await db
       .select()
       .from(tenantSecrets)
-      .where(
-        and(
-          eq(tenantSecrets.tenantId, tenantIdA),
-          eq(tenantSecrets.key, "llm_chat_apikey"),
-        ),
-      );
+      .where(and(eq(tenantSecrets.tenantId, tenantIdA), eq(tenantSecrets.key, "llm_chat_apikey")));
     expect(secret).toBeDefined();
     expect(secret!.encryptedValue).not.toBe("sk-test-secret-key-xyz"); // encrypted
     expect(secret!.encryptedValue.length).toBeGreaterThan(20); // non-trivial ciphertext
@@ -210,10 +192,7 @@ describe("admin-llm-configs CRUD", () => {
       .select()
       .from(llmProviderConfigs)
       .where(
-        and(
-          eq(llmProviderConfigs.tenantId, tenantIdA),
-          eq(llmProviderConfigs.purpose, "chat"),
-        ),
+        and(eq(llmProviderConfigs.tenantId, tenantIdA), eq(llmProviderConfigs.purpose, "chat")),
       );
     expect(cfg!.model).toBe("gpt-4o");
     expect(cfg!.secretRef).toBe("llm_chat_apikey"); // preserved
@@ -262,17 +241,35 @@ describe("admin-llm-configs CRUD", () => {
     expect(res.status).toBe(200);
   });
 
-  it("PUT openai без apiKey (новый config) → 500 (нет secret)", async () => {
+  it("PUT anthropic без apiKey (нет ключа этого провайдера) → 500", async () => {
     if (!sql) return;
+    // У tokenA нет ни одного anthropic-конфига с ключом → переиспользовать нечего.
     const res = await authReq(tokenA, "/api/admin/llm-configs/judge", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        provider: "openai",
-        model: "gpt-4o-mini",
+        provider: "anthropic",
+        model: "claude-3-5-sonnet-latest",
       }),
     });
     expect(res.status).toBe(500);
+  });
+
+  it("PUT judge openai без apiKey → переиспользует ключ chat-openai (200, hasSecret)", async () => {
+    if (!sql) return;
+    // chat уже сконфигурен с openai+ключ ранее в этом suite → ключ переиспользуется.
+    const res = await authReq(tokenA, "/api/admin/llm-configs/judge", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "openai", model: "gpt-4o-mini" }),
+    });
+    expect(res.status).toBe(200);
+    const list = (await (await authReq(tokenA, "/api/admin/llm-configs")).json()) as {
+      items: Array<{ purpose: string; provider: string; hasSecret: boolean }>;
+    };
+    const judge = list.items.find((i) => i.purpose === "judge");
+    expect(judge?.provider).toBe("openai");
+    expect(judge?.hasSecret).toBe(true);
   });
 
   it("PUT invalid purpose → 400", async () => {
@@ -330,10 +327,7 @@ describe("admin-llm-configs CRUD", () => {
       .select()
       .from(llmProviderConfigs)
       .where(
-        and(
-          eq(llmProviderConfigs.tenantId, tenantIdA),
-          eq(llmProviderConfigs.purpose, "chat"),
-        ),
+        and(eq(llmProviderConfigs.tenantId, tenantIdA), eq(llmProviderConfigs.purpose, "chat")),
       );
     expect(cfgRows).toHaveLength(0);
 
@@ -341,12 +335,7 @@ describe("admin-llm-configs CRUD", () => {
     const [secret] = await db
       .select()
       .from(tenantSecrets)
-      .where(
-        and(
-          eq(tenantSecrets.tenantId, tenantIdA),
-          eq(tenantSecrets.key, "llm_chat_apikey"),
-        ),
-      );
+      .where(and(eq(tenantSecrets.tenantId, tenantIdA), eq(tenantSecrets.key, "llm_chat_apikey")));
     expect(secret).toBeDefined();
   });
 

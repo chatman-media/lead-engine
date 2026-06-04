@@ -267,6 +267,10 @@ export function SaasOnboarding() {
 
   const chatCfg = configs.find((c) => c.purpose === "chat");
 
+  /** Есть ли уже сохранённый ключ у какого-либо назначения с этим провайдером. */
+  const providerHasKey = (provider: LlmProvider): boolean =>
+    configs.some((c) => c.provider === provider && c.hasSecret);
+
   const isExchange = installedVertical === "exchange_v1" || status?.isExchange === true;
 
   // Completion-предикаты (зеркалят серверный `done`).
@@ -575,7 +579,9 @@ export function SaasOnboarding() {
       return;
     }
     const existing = configs.find((c) => c.purpose === purpose);
-    if (f.provider !== "ollama" && !f.apiKey && !existing?.hasSecret) {
+    // Ключ обязателен, только если у этого назначения его нет И нет сохранённого
+    // ключа того же провайдера в другом назначении (бэкенд переиспользует его).
+    if (f.provider !== "ollama" && !f.apiKey && !existing?.hasSecret && !providerHasKey(f.provider)) {
       setError(`${purpose}: укажите API key`);
       return;
     }
@@ -1104,6 +1110,9 @@ export function SaasOnboarding() {
                 const open = expandedPurpose.has(purpose);
                 const ready = configReady(cfg);
                 const hasOllama = meta.providers.includes("ollama");
+                // Ключ этого провайдера уже сохранён в другом назначении → можно не вводить.
+                const reuseKey =
+                  !cfg?.hasSecret && f.provider !== "ollama" && providerHasKey(f.provider);
                 return (
                   <div key={purpose} className="rounded-lg border">
                     <button
@@ -1171,13 +1180,26 @@ export function SaasOnboarding() {
                         </div>
                         {f.provider !== "ollama" && (
                           <div className="space-y-1.5">
-                            <Label>API-ключ {cfg?.hasSecret ? "(пусто — не менять)" : ""}</Label>
+                            <Label>
+                              API-ключ{" "}
+                              {cfg?.hasSecret
+                                ? "(пусто — не менять)"
+                                : reuseKey
+                                  ? "(можно не вводить)"
+                                  : ""}
+                            </Label>
                             <Input
                               type="password"
                               autoComplete="new-password"
                               value={f.apiKey}
                               onChange={(e) => updateKeyForm(purpose, { apiKey: e.target.value })}
-                              placeholder={cfg?.hasSecret ? "•••••••• (сохранён)" : "sk-…"}
+                              placeholder={
+                                cfg?.hasSecret
+                                  ? "•••••••• (сохранён)"
+                                  : reuseKey
+                                    ? `ключ ${PROVIDER_LABEL[f.provider]} уже сохранён — переиспользуем`
+                                    : "sk-…"
+                              }
                             />
                           </div>
                         )}

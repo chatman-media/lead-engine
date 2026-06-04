@@ -1,8 +1,4 @@
-import {
-  type Db,
-  setEncryptedSecret,
-  withTenant,
-} from "@chatman-media/conversation-engine";
+import { type Db, setEncryptedSecret, withTenant } from "@chatman-media/conversation-engine";
 import { llmProviderConfigs } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -44,7 +40,14 @@ type Purpose = "chat" | "embed" | "vision" | "judge" | "reranker";
 type Provider = "openai" | "openrouter" | "ollama" | "anthropic" | "jina" | "cohere";
 
 const PURPOSES: readonly Purpose[] = ["chat", "embed", "vision", "judge", "reranker"];
-const PROVIDERS: readonly Provider[] = ["openai", "openrouter", "ollama", "anthropic", "jina", "cohere"];
+const PROVIDERS: readonly Provider[] = [
+  "openai",
+  "openrouter",
+  "ollama",
+  "anthropic",
+  "jina",
+  "cohere",
+];
 
 interface UpsertBody {
   provider: unknown;
@@ -118,20 +121,13 @@ export function makeAdminLlmConfigsRoutes(opts: AdminLlmConfigsRoutesOpts): Hono
     }
     const provider = typeof body.provider === "string" ? body.provider : "";
     const model = typeof body.model === "string" ? body.model.trim() : "";
-    const apiKey =
-      typeof body.apiKey === "string" && body.apiKey.length > 0 ? body.apiKey : null;
+    const apiKey = typeof body.apiKey === "string" && body.apiKey.length > 0 ? body.apiKey : null;
     const baseUrl =
-      typeof body.baseUrl === "string" && body.baseUrl.length > 0
-        ? body.baseUrl.trim()
-        : null;
+      typeof body.baseUrl === "string" && body.baseUrl.length > 0 ? body.baseUrl.trim() : null;
     const embedDim =
-      typeof body.embedDim === "number" && Number.isFinite(body.embedDim)
-        ? body.embedDim
-        : null;
+      typeof body.embedDim === "number" && Number.isFinite(body.embedDim) ? body.embedDim : null;
     const timeoutMs =
-      typeof body.timeoutMs === "number" && Number.isFinite(body.timeoutMs)
-        ? body.timeoutMs
-        : null;
+      typeof body.timeoutMs === "number" && Number.isFinite(body.timeoutMs) ? body.timeoutMs : null;
 
     if (!PROVIDERS.includes(provider as Provider)) {
       return c.json({ error: `invalid provider (must be one of ${PROVIDERS.join(",")})` }, 400);
@@ -156,10 +152,7 @@ export function makeAdminLlmConfigsRoutes(opts: AdminLlmConfigsRoutesOpts): Hono
         .select()
         .from(llmProviderConfigs)
         .where(
-          and(
-            eq(llmProviderConfigs.tenantId, tenantId),
-            eq(llmProviderConfigs.purpose, purpose),
-          ),
+          and(eq(llmProviderConfigs.tenantId, tenantId), eq(llmProviderConfigs.purpose, purpose)),
         );
 
       // Если apiKey задан — store encrypted.
@@ -175,8 +168,23 @@ export function makeAdminLlmConfigsRoutes(opts: AdminLlmConfigsRoutesOpts): Hono
         });
         secretRef = secretKey;
       }
+      // Переиспользование ключа: если своего секрета нет и новый не передан —
+      // берём secret_ref от другого назначения с ТЕМ ЖЕ провайдером (один и тот
+      // же API-ключ работает для chat/embed/vision у одного провайдера). Так
+      // пользователю не нужно вводить ключ повторно.
+      if (!secretRef && provider !== "ollama") {
+        const siblings = await tx
+          .select({
+            provider: llmProviderConfigs.provider,
+            secretRef: llmProviderConfigs.secretRef,
+          })
+          .from(llmProviderConfigs)
+          .where(eq(llmProviderConfigs.tenantId, tenantId));
+        const shared = siblings.find((s) => s.provider === provider && s.secretRef);
+        if (shared?.secretRef) secretRef = shared.secretRef;
+      }
       // Provider validation против apiKey-required: только если ни existing
-      // secret_ref ни новый apiKey не заданы для не-Ollama provider'а.
+      // secret_ref ни новый apiKey ни sibling-секрет не заданы для не-Ollama.
       if (provider !== "ollama" && !secretRef) {
         throw new Error(`provider ${provider} requires apiKey (or pre-existing secret)`);
       }
@@ -194,10 +202,7 @@ export function makeAdminLlmConfigsRoutes(opts: AdminLlmConfigsRoutesOpts): Hono
             updatedAt: nowEpoch,
           })
           .where(
-            and(
-              eq(llmProviderConfigs.tenantId, tenantId),
-              eq(llmProviderConfigs.purpose, purpose),
-            ),
+            and(eq(llmProviderConfigs.tenantId, tenantId), eq(llmProviderConfigs.purpose, purpose)),
           );
         return { updated: true, id: existing.id };
       }
@@ -269,10 +274,7 @@ export function makeAdminLlmConfigsRoutes(opts: AdminLlmConfigsRoutesOpts): Hono
       const result = await tx
         .delete(llmProviderConfigs)
         .where(
-          and(
-            eq(llmProviderConfigs.tenantId, tenantId),
-            eq(llmProviderConfigs.purpose, purpose),
-          ),
+          and(eq(llmProviderConfigs.tenantId, tenantId), eq(llmProviderConfigs.purpose, purpose)),
         )
         .returning({ id: llmProviderConfigs.id });
       return result.length;
