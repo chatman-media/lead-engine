@@ -563,7 +563,9 @@ async function main() {
 
   const resolveTranscriber = makeTranscriberResolver(loadedRef);
   if (resolveTranscriber) {
-    log.info("voice transcription enabled (Whisper) — uses per-tenant chat API key");
+    log.info(
+      "voice transcription enabled (Whisper) — uses per-tenant OpenAI key (chat/embed/vision)",
+    );
   }
 
   const sink = makeMetricsSink(metrics);
