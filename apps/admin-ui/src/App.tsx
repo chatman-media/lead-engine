@@ -30,7 +30,6 @@ import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
 import { SaasSkills } from "./pages/SaasSkills.tsx";
 import { SaasStyles } from "./pages/SaasStyles.tsx";
-import { SaasSuperadmin } from "./pages/SaasSuperadmin.tsx";
 import { SaasTeam } from "./pages/SaasTeam.tsx";
 import { SaasTestBot } from "./pages/SaasTestBot.tsx";
 import { SaasVacancies } from "./pages/SaasVacancies.tsx";
@@ -166,13 +165,9 @@ export function App() {
                 <Route path="/diagnostics" element={<SaasDiagnostics />} />
                 <Route path="/test" element={<SaasTestBot />} />
                 <Route path="/notifications" element={<SaasNotifications />} />
-                <Route path="/superadmin" element={<SaasSuperadmin />} />
               </Route>
             </Route>
           </Route>
-
-          {/* Платформенный superadmin — публичный роут, авторизация через sa_token */}
-          <Route path="/superadmin" element={<SaasSuperadmin />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

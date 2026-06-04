@@ -21,7 +21,6 @@ import {
   RocketIcon,
   ScrollTextIcon,
   SendIcon,
-  ShieldIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
   SunIcon,
@@ -202,13 +201,11 @@ function NavLinks({
   onNavigate,
   escalatedCount,
   collapsed,
-  isSuperadmin,
   isExchange,
 }: {
   onNavigate?: () => void;
   escalatedCount?: number;
   collapsed: boolean;
-  isSuperadmin?: boolean;
   isExchange?: boolean;
 }) {
   const groups = NAV_GROUPS.map((g) => ({
@@ -242,24 +239,6 @@ function NavLinks({
           ))}
         </div>
       ))}
-
-      {/* Платформенный раздел (управление всеми тенантами/тарифами) — только для
-          оператора платформы. У кастомной обменки скрыт (роут доступен по URL). */}
-      {isSuperadmin && !isExchange && (
-        <div className="flex flex-col gap-0.5">
-          {!collapsed && (
-            <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-              Платформа
-            </p>
-          )}
-          {collapsed && <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />}
-          <NavItemLink
-            item={{ to: "/superadmin", label: "Аккаунты", icon: ShieldIcon }}
-            collapsed={collapsed}
-            onNavigate={onNavigate}
-          />
-        </div>
-      )}
     </nav>
   );
 }
@@ -475,7 +454,6 @@ function SidebarBody({
           onNavigate={onNavigate}
           escalatedCount={escalatedCount}
           collapsed={collapsed}
-          isSuperadmin={admin?.role === "superadmin"}
           isExchange={isExchange}
         />
       </div>
