@@ -1,7 +1,7 @@
 import {
   ActivityIcon,
-  BarChart2Icon,
   ArrowLeftRightIcon,
+  BarChart2Icon,
   BellIcon,
   BriefcaseIcon,
   CableIcon,
@@ -13,32 +13,32 @@ import {
   LayoutDashboardIcon,
   LinkIcon,
   LogOutIcon,
-  MonitorIcon,
-  MoonIcon,
-  SendIcon,
-  ShieldIcon,
-  TestTube2Icon,
-  WebhookIcon,
-  WrenchIcon,
   type LucideIcon,
   MenuIcon,
   MessagesSquareIcon,
+  MonitorIcon,
+  MoonIcon,
   PaletteIcon,
   RocketIcon,
   ScrollTextIcon,
+  SendIcon,
+  ShieldIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
   SunIcon,
-  UsersIcon,
+  TestTube2Icon,
   UserCircleIcon,
+  UsersIcon,
+  WebhookIcon,
+  WrenchIcon,
   ZapIcon,
 } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { type Admin, ApiError, clearToken, saas, type Tenant } from "@/api/saas";
-import { useTheme } from "@/components/theme-provider";
 import { ModeToggle } from "@/components/mode-toggle";
+import { useTheme } from "@/components/theme-provider";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -229,11 +229,7 @@ function NavLinks({
     <nav className="flex flex-col gap-4">
       <div className="flex flex-col gap-0.5">
         {collapsed && <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />}
-        <NavItemLink
-          item={TOP_NAV_ITEM}
-          collapsed={collapsed}
-          onNavigate={onNavigate}
-        />
+        <NavItemLink item={TOP_NAV_ITEM} collapsed={collapsed} onNavigate={onNavigate} />
       </div>
 
       {groups.map((group) => (
@@ -291,15 +287,22 @@ function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose: () =>
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
-    if (newPwd.length < 8) { setError("Новый пароль — не менее 8 символов"); return; }
+    if (newPwd.length < 8) {
+      setError("Новый пароль — не менее 8 символов");
+      return;
+    }
     setSaving(true);
     try {
       await saas.changePassword(currentPwd, newPwd);
       toast.success("Пароль изменён");
-      setCurrentPwd(""); setNewPwd("");
+      setCurrentPwd("");
+      setNewPwd("");
       onClose();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) { setError("Неверный текущий пароль"); return; }
+      if (err instanceof ApiError && err.status === 401) {
+        setError("Неверный текущий пароль");
+        return;
+      }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
@@ -307,7 +310,12 @@ function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose: () =>
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Сменить пароль</DialogTitle>
@@ -341,7 +349,9 @@ function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose: () =>
             />
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={onClose}>Отмена</Button>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Отмена
+            </Button>
             <Button type="submit" disabled={saving}>
               {saving ? "Сохраняем…" : "Изменить"}
             </Button>
@@ -368,19 +378,20 @@ function AccountDropdown({
   const initials = (admin?.email ?? "?").slice(0, 2).toUpperCase();
 
   const menuContent = (
-    <DropdownMenuContent
-      align="start"
-      side={collapsed ? "right" : "top"}
-      className="w-56"
-    >
+    <DropdownMenuContent align="start" side={collapsed ? "right" : "top"} className="w-56">
       <DropdownMenuLabel className="font-normal">
-        <p className="text-sm font-medium truncate">{admin?.email ?? "—"}</p>
+        <p className="text-sm font-medium truncate">{admin?.name || admin?.email || "—"}</p>
         <p className="text-xs text-muted-foreground">
           {admin?.role === "superadmin" ? "Суперадмин" : "Менеджер"} · {tenant?.slug ?? "—"}
         </p>
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
       <DropdownMenuGroup>
+        <DropdownMenuItem asChild>
+          <Link to="/profile">
+            <UserCircleIcon /> Профиль
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link to="/settings">
             <SlidersHorizontalIcon /> Настройки LLM
@@ -405,13 +416,7 @@ function AccountDropdown({
       <DropdownMenuSeparator />
       <DropdownMenuSub>
         <DropdownMenuSubTrigger>
-          {theme === "dark" ? (
-            <MoonIcon />
-          ) : theme === "light" ? (
-            <SunIcon />
-          ) : (
-            <MonitorIcon />
-          )}
+          {theme === "dark" ? <MoonIcon /> : theme === "light" ? <SunIcon /> : <MonitorIcon />}
           Тема
           <span className="ml-auto text-xs text-muted-foreground">{THEME_LABEL[theme]}</span>
         </DropdownMenuSubTrigger>
@@ -446,27 +451,27 @@ function AccountDropdown({
       <>
         <ChangePasswordDialog open={pwdOpen} onClose={() => setPwdOpen(false)} />
         <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex w-full justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground cursor-pointer"
-              >
-                <Avatar className="size-7 rounded-lg">
-                  <AvatarFallback className="rounded-lg bg-primary/15 text-primary text-[10px]">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
-              </button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="right" className="text-xs">
-            {admin?.email}
-          </TooltipContent>
-        </Tooltip>
-        {menuContent}
-      </DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground cursor-pointer"
+                >
+                  <Avatar className="size-7 rounded-lg">
+                    <AvatarFallback className="rounded-lg bg-primary/15 text-primary text-[10px]">
+                      {initials}
+                    </AvatarFallback>
+                  </Avatar>
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="text-xs">
+              {admin?.email}
+            </TooltipContent>
+          </Tooltip>
+          {menuContent}
+        </DropdownMenu>
       </>
     );
   }
@@ -560,19 +565,22 @@ function SidebarBody({
                 <ChevronRightIcon className="size-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right" className="text-xs">Развернуть</TooltipContent>
+            <TooltipContent side="right" className="text-xs">
+              Развернуть
+            </TooltipContent>
           </Tooltip>
         )}
-        <NavLinks onNavigate={onNavigate} escalatedCount={escalatedCount} collapsed={collapsed} isSuperadmin={admin?.role === "superadmin"} isExchange={isExchange} />
+        <NavLinks
+          onNavigate={onNavigate}
+          escalatedCount={escalatedCount}
+          collapsed={collapsed}
+          isSuperadmin={admin?.role === "superadmin"}
+          isExchange={isExchange}
+        />
       </div>
 
       <div className="border-t border-sidebar-border p-3">
-        <AccountDropdown
-          admin={admin}
-          tenant={tenant}
-          onLogout={onLogout}
-          collapsed={collapsed}
-        />
+        <AccountDropdown admin={admin} tenant={tenant} onLogout={onLogout} collapsed={collapsed} />
       </div>
     </div>
   );
@@ -587,9 +595,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [isExchange, setIsExchange] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [escalatedCount, setEscalatedCount] = useState(0);
-  const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem(COLLAPSED_KEY) === "true",
-  );
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === "true");
 
   function toggleCollapse() {
     setCollapsed((v) => {
@@ -633,9 +639,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         if (prevEscalatedRef.current !== null && n > prevEscalatedRef.current) {
           const delta = n - prevEscalatedRef.current;
           toast.warning(
-            delta === 1
-              ? "Новый диалог ждёт оператора"
-              : `${delta} новых диалога ждут оператора`,
+            delta === 1 ? "Новый диалог ждёт оператора" : `${delta} новых диалога ждут оператора`,
             {
               description: "Перейдите в Диалоги чтобы ответить",
               action: { label: "Перейти", onClick: () => navigate("/conversations") },

@@ -203,6 +203,8 @@ export const admins = pgTable("admins", {
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  // Опциональное отображаемое имя (профиль / приветствия в UI).
+  name: text("name"),
   // 'superadmin' (полный доступ — деструктивные операции, system settings)
   // или 'manager' (повседневное — лиды, чаты, KB).
   role: text("role").notNull().default("superadmin"),

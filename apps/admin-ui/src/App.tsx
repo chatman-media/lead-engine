@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { getToken, saas } from "./api/saas.ts";
 import { useAdminEvents } from "./hooks/useAdminEvents.ts";
-import { toast } from "sonner";
 import { SaasAcceptInvite } from "./pages/SaasAcceptInvite.tsx";
 import { SaasAudit } from "./pages/SaasAudit.tsx";
 import { SaasBilling } from "./pages/SaasBilling.tsx";
@@ -13,27 +13,28 @@ import { SaasChannels } from "./pages/SaasChannels.tsx";
 import { SaasConversations } from "./pages/SaasConversations.tsx";
 import { SaasDashboard } from "./pages/SaasDashboard.tsx";
 import { SaasDiagnostics } from "./pages/SaasDiagnostics.tsx";
+import { SaasExchange } from "./pages/SaasExchange.tsx";
 import { SaasExperiments } from "./pages/SaasExperiments.tsx";
+import { SaasForgotPassword } from "./pages/SaasForgotPassword.tsx";
 import { SaasFunnel } from "./pages/SaasFunnel.tsx";
+import { SaasHooks } from "./pages/SaasHooks.tsx";
 import { SaasLeadDetail } from "./pages/SaasLeadDetail.tsx";
 import { SaasLeads } from "./pages/SaasLeads.tsx";
 import { SaasLogin } from "./pages/SaasLogin.tsx";
+import { SaasNotifications } from "./pages/SaasNotifications.tsx";
 import { SaasOnboarding } from "./pages/SaasOnboarding.tsx";
+import { SaasOutreach } from "./pages/SaasOutreach.tsx";
+import SaasProfile from "./pages/SaasProfile.tsx";
+import { SaasReferral } from "./pages/SaasReferral.tsx";
+import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
 import { SaasSkills } from "./pages/SaasSkills.tsx";
 import { SaasStyles } from "./pages/SaasStyles.tsx";
-import { SaasTeam } from "./pages/SaasTeam.tsx";
-import { SaasVacancies } from "./pages/SaasVacancies.tsx";
-import { SaasHooks } from "./pages/SaasHooks.tsx";
-import { SaasReferral } from "./pages/SaasReferral.tsx";
-import { SaasWebhooks } from "./pages/SaasWebhooks.tsx";
-import { SaasOutreach } from "./pages/SaasOutreach.tsx";
-import { SaasForgotPassword } from "./pages/SaasForgotPassword.tsx";
-import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
 import { SaasSuperadmin } from "./pages/SaasSuperadmin.tsx";
-import { SaasNotifications } from "./pages/SaasNotifications.tsx";
+import { SaasTeam } from "./pages/SaasTeam.tsx";
 import { SaasTestBot } from "./pages/SaasTestBot.tsx";
-import { SaasExchange } from "./pages/SaasExchange.tsx";
+import { SaasVacancies } from "./pages/SaasVacancies.tsx";
+import { SaasWebhooks } from "./pages/SaasWebhooks.tsx";
 import { ToolsSettings } from "./pages/ToolsSettings.tsx";
 
 function RequireAuth() {
@@ -46,9 +47,15 @@ function RequireAuth() {
     let cancelled = false;
     saas
       .me()
-      .then(() => { if (!cancelled) setStatus("auth"); })
-      .catch(() => { if (!cancelled) setStatus("anon"); });
-    return () => { cancelled = true; };
+      .then(() => {
+        if (!cancelled) setStatus("auth");
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("anon");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (status === "checking") return null;
@@ -133,32 +140,33 @@ export function App() {
             {/* Кабинет: доступен только когда онбординг завершён; иначе → /onboarding */}
             <Route element={<OnboardingGate require="done" />}>
               <Route element={<ShellLayout />}>
-              <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<SaasDashboard />} />
-              <Route path="/leads" element={<SaasLeads />} />
-              <Route path="/leads/:id" element={<SaasLeadDetail />} />
-              <Route path="/outreach" element={<SaasOutreach />} />
-              <Route path="/conversations" element={<SaasConversations />} />
-              <Route path="/conversations/:id" element={<SaasConversations />} />
-              <Route path="/funnel" element={<SaasFunnel />} />
-              <Route path="/exchange" element={<SaasExchange />} />
-              <Route path="/vacancies" element={<SaasVacancies />} />
-              <Route path="/skills" element={<SaasSkills />} />
-              <Route path="/hooks" element={<SaasHooks />} />
-              <Route path="/webhooks" element={<SaasWebhooks />} />
-              <Route path="/styles" element={<SaasStyles />} />
-              <Route path="/experiments" element={<SaasExperiments />} />
-              <Route path="/channels" element={<SaasChannels />} />
-              <Route path="/billing" element={<SaasBilling />} />
-              <Route path="/settings" element={<SaasSettings />} />
-              <Route path="/referral" element={<SaasReferral />} />
-              <Route path="/tools" element={<ToolsSettings />} />
-              <Route path="/team" element={<SaasTeam />} />
-              <Route path="/audit" element={<SaasAudit />} />
-              <Route path="/diagnostics" element={<SaasDiagnostics />} />
-              <Route path="/test" element={<SaasTestBot />} />
-              <Route path="/notifications" element={<SaasNotifications />} />
-              <Route path="/superadmin" element={<SaasSuperadmin />} />
+                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<SaasDashboard />} />
+                <Route path="/leads" element={<SaasLeads />} />
+                <Route path="/leads/:id" element={<SaasLeadDetail />} />
+                <Route path="/outreach" element={<SaasOutreach />} />
+                <Route path="/conversations" element={<SaasConversations />} />
+                <Route path="/conversations/:id" element={<SaasConversations />} />
+                <Route path="/funnel" element={<SaasFunnel />} />
+                <Route path="/exchange" element={<SaasExchange />} />
+                <Route path="/vacancies" element={<SaasVacancies />} />
+                <Route path="/skills" element={<SaasSkills />} />
+                <Route path="/hooks" element={<SaasHooks />} />
+                <Route path="/webhooks" element={<SaasWebhooks />} />
+                <Route path="/styles" element={<SaasStyles />} />
+                <Route path="/experiments" element={<SaasExperiments />} />
+                <Route path="/channels" element={<SaasChannels />} />
+                <Route path="/billing" element={<SaasBilling />} />
+                <Route path="/settings" element={<SaasSettings />} />
+                <Route path="/profile" element={<SaasProfile />} />
+                <Route path="/referral" element={<SaasReferral />} />
+                <Route path="/tools" element={<ToolsSettings />} />
+                <Route path="/team" element={<SaasTeam />} />
+                <Route path="/audit" element={<SaasAudit />} />
+                <Route path="/diagnostics" element={<SaasDiagnostics />} />
+                <Route path="/test" element={<SaasTestBot />} />
+                <Route path="/notifications" element={<SaasNotifications />} />
+                <Route path="/superadmin" element={<SaasSuperadmin />} />
               </Route>
             </Route>
           </Route>
