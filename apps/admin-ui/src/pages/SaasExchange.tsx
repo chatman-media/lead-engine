@@ -1,4 +1,4 @@
-import { CheckIcon, RefreshCwIcon, SaveIcon, Trash2Icon } from "lucide-react";
+import { CheckIcon, PlusIcon, RefreshCwIcon, SaveIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import {
   type ExchangeOrder,
   type ExchangeRate,
   type ExchangeRateCardProposal,
+  type ExchangeRateInput,
   type ExchangeTurnover,
   saas,
 } from "@/api/saas";
@@ -25,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -34,6 +36,21 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+// Активы и сети для произвольных направлений обмена (не только табло RUB/USDT→THB).
+const ASSETS = ["USDT", "USDC", "BTC", "ETH", "TON", "RUB", "EUR", "USD", "THB"];
+const NETWORKS = ["", "trc20", "erc20", "bep20", "ton"];
+
+const EMPTY_RATE: ExchangeRateInput = {
+  asset: "USDT",
+  quoteAsset: "RUB",
+  network: "trc20",
+  baseRate: 0,
+  quoteMode: "multiply",
+  marginPct: 0,
+  isActive: true,
+  autoUpdate: false,
+};
 
 const STATUS_VARIANT: Record<
   string,
@@ -150,6 +167,11 @@ export function SaasExchange() {
   const [rateCardMessage, setRateCardMessage] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
+  // Произвольное направление обмена (помимо табло RUB/USDT→THB)
+  const [addingRate, setAddingRate] = useState(false);
+  const [rateForm, setRateForm] = useState<ExchangeRateInput>(EMPTY_RATE);
+  const [savingRate, setSavingRate] = useState(false);
+
   // Реквизиты
   const [savedRequisites, setSavedRequisites] = useState<Array<{ key: string; value: string }>>([]);
   const [reqType, setReqType] = useState(REQUISITE_TYPES[0]!.key);
@@ -199,6 +221,25 @@ export function SaasExchange() {
       load();
     } catch (err) {
       if (!handle401(err)) toast.error("Не удалось удалить курс");
+    }
+  }
+
+  async function saveRate() {
+    if (!rateForm.asset || (!rateForm.autoUpdate && !(rateForm.baseRate > 0))) {
+      toast.error("Укажите актив и положительный курс (или включите авто-курс с рынка)");
+      return;
+    }
+    setSavingRate(true);
+    try {
+      await saas.saveExchangeRate(rateForm);
+      toast.success("Направление сохранено");
+      setRateForm(EMPTY_RATE);
+      setAddingRate(false);
+      load();
+    } catch (err) {
+      if (!handle401(err)) toast.error("Не удалось сохранить курс");
+    } finally {
+      setSavingRate(false);
     }
   }
 
@@ -529,6 +570,179 @@ export function SaasExchange() {
                 </div>
               )}
             </CardContent>
+          </Card>
+
+          {/* Другие направления обмена (произвольные пары/сети) */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <div>
+                <CardTitle className="text-base">Другие направления обмена</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Любая пара помимо табло: USDT→RUB, BTC→THB, EUR→THB и т.д.
+                </p>
+              </div>
+              {!addingRate && (
+                <Button size="sm" onClick={() => setAddingRate(true)}>
+                  <PlusIcon className="size-4" /> Добавить направление
+                </Button>
+              )}
+            </CardHeader>
+            {addingRate && (
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Отдаёт клиент</Label>
+                    <Select
+                      value={rateForm.asset}
+                      onValueChange={(v) => setRateForm({ ...rateForm, asset: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ASSETS.map((a) => (
+                          <SelectItem key={a} value={a}>
+                            {a}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Получает клиент</Label>
+                    <Select
+                      value={rateForm.quoteAsset || "THB"}
+                      onValueChange={(v) => setRateForm({ ...rateForm, quoteAsset: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ASSETS.map((a) => (
+                          <SelectItem key={a} value={a}>
+                            {a}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Сеть</Label>
+                    <Select
+                      value={rateForm.network || "none"}
+                      onValueChange={(v) =>
+                        setRateForm({ ...rateForm, network: v === "none" ? "" : v })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="—" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {NETWORKS.map((n) => (
+                          <SelectItem key={n || "none"} value={n || "none"}>
+                            {n || "(нет)"}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Режим</Label>
+                    <Select
+                      value={rateForm.quoteMode ?? "multiply"}
+                      onValueChange={(v) =>
+                        setRateForm({ ...rateForm, quoteMode: v as "multiply" | "divide" })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="multiply">× умножение</SelectItem>
+                        <SelectItem value="divide">÷ деление</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">
+                      Курс {rateForm.autoUpdate ? "(стартовый)" : ""}
+                    </Label>
+                    <Input
+                      type="number"
+                      step="any"
+                      value={rateForm.baseRate || ""}
+                      placeholder={rateForm.autoUpdate ? "заполнит рынок" : "напр. 31.5"}
+                      onChange={(e) =>
+                        setRateForm({ ...rateForm, baseRate: Number(e.target.value) })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Маржа, %</Label>
+                    <Input
+                      type="number"
+                      step="any"
+                      value={rateForm.marginPct ?? 0}
+                      onChange={(e) =>
+                        setRateForm({ ...rateForm, marginPct: Number(e.target.value) })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Мин. сумма</Label>
+                    <Input
+                      type="number"
+                      step="any"
+                      value={rateForm.minAmountFrom ?? ""}
+                      onChange={(e) =>
+                        setRateForm({
+                          ...rateForm,
+                          minAmountFrom: e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Макс. сумма</Label>
+                    <Input
+                      type="number"
+                      step="any"
+                      value={rateForm.maxAmountFrom ?? ""}
+                      onChange={(e) =>
+                        setRateForm({
+                          ...rateForm,
+                          maxAmountFrom: e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="rate-auto"
+                    checked={!!rateForm.autoUpdate}
+                    onCheckedChange={(v) => setRateForm({ ...rateForm, autoUpdate: v })}
+                  />
+                  <Label htmlFor="rate-auto" className="cursor-pointer text-sm">
+                    Авто-курс с рынка (если пара торгуется на Binance/ЦБ)
+                  </Label>
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={saveRate} disabled={savingRate}>
+                    <SaveIcon className="size-4" /> {savingRate ? "Сохраняем…" : "Сохранить"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setAddingRate(false);
+                      setRateForm(EMPTY_RATE);
+                    }}
+                  >
+                    Отмена
+                  </Button>
+                </div>
+              </CardContent>
+            )}
           </Card>
 
           {/* Активные курсы (справочно) */}
