@@ -127,14 +127,6 @@ function modelPlaceholder(provider: LlmProvider, purpose: LlmPurpose): string {
   return MODEL_PLACEHOLDER[provider]?.[purpose] ?? "model-id";
 }
 
-/** Подпись диапазона суммы тира: «2k–3k», «от 50k», «до 3k». */
-function tierRangeLabel(min: number, max: number | null): string {
-  const k = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
-  if (max === null) return `от ${k(min)}`;
-  if (min <= 0) return `до ${k(max)}`;
-  return `${k(min)}–${k(max)}`;
-}
-
 type StepId =
   | "vertical"
   | "channel"
@@ -637,20 +629,54 @@ export function SaasOnboarding() {
     }
   }
 
-  /** Правка курса тира: пересчитывает отклонение от рынка на лету. */
-  function updateTierRate(pIdx: number, tIdx: number, value: string) {
+  /** Патч одного тира (курс/мин/макс). При смене курса пересчитывает отклонение. */
+  function patchTier(
+    pIdx: number,
+    tIdx: number,
+    patch: Partial<{ minThb: number; maxThb: number | null; displayRate: number }>,
+  ) {
     setCardProposals((prev) =>
       prev.map((p, i) => {
         if (i !== pIdx) return p;
         const tiers = p.tiers.map((t, j) => {
           if (j !== tIdx) return t;
-          const displayRate = Number.parseFloat(value);
-          if (!Number.isFinite(displayRate)) return { ...t, displayRate: Number.NaN };
-          const dev = p.marketRate > 0 ? ((displayRate - p.marketRate) / p.marketRate) * 100 : 0;
-          return { ...t, displayRate, deviationPct: Math.round(dev * 100) / 100 };
+          const next = { ...t, ...patch };
+          if (patch.displayRate !== undefined) {
+            next.deviationPct =
+              p.marketRate > 0 && Number.isFinite(next.displayRate)
+                ? Math.round(((next.displayRate - p.marketRate) / p.marketRate) * 10000) / 100
+                : t.deviationPct;
+          }
+          return next;
         });
         return { ...p, tiers };
       }),
+    );
+  }
+
+  /** Добавить строку диапазона снизу (своя шкала). */
+  function addTier(pIdx: number) {
+    setCardProposals((prev) =>
+      prev.map((p, i) => {
+        if (i !== pIdx) return p;
+        const last = p.tiers[p.tiers.length - 1];
+        const minThb = last ? (last.maxThb ?? last.minThb + 1000) : 0;
+        const displayRate = last ? last.displayRate : p.marketRate;
+        const dev =
+          p.marketRate > 0 && Number.isFinite(displayRate)
+            ? Math.round(((displayRate - p.marketRate) / p.marketRate) * 10000) / 100
+            : 0;
+        return {
+          ...p,
+          tiers: [...p.tiers, { minThb, maxThb: null, displayRate, deviationPct: dev, formula: "" }],
+        };
+      }),
+    );
+  }
+
+  function removeTier(pIdx: number, tIdx: number) {
+    setCardProposals((prev) =>
+      prev.map((p, i) => (i === pIdx ? { ...p, tiers: p.tiers.filter((_, j) => j !== tIdx) } : p)),
     );
   }
 
@@ -1336,30 +1362,72 @@ export function SaasOnboarding() {
                           {p.quoteMode === "divide" ? `${p.asset}/THB` : `THB/${p.asset}`}
                         </span>
                       </div>
-                      <div className="grid grid-cols-[1fr_7rem_3.5rem] gap-2 px-3 py-1.5 text-xs text-muted-foreground">
-                        <span>Сумма (THB)</span>
-                        <span>Ваш курс</span>
-                        <span className="text-right">Откл.</span>
+                      <div className="grid grid-cols-[1fr_1fr_5rem_3rem_1.5rem] gap-2 px-3 py-1.5 text-xs text-muted-foreground">
+                        <span>от (THB)</span>
+                        <span>до (THB)</span>
+                        <span>курс</span>
+                        <span className="text-right">откл.</span>
+                        <span />
                       </div>
                       {p.tiers.map((t, tIdx) => (
                         <div
-                          key={`${p.asset}-${t.minThb}`}
-                          className="grid grid-cols-[1fr_7rem_3.5rem] items-center gap-2 border-t px-3 py-1.5"
+                          // biome-ignore lint/suspicious/noArrayIndexKey: строки переупорядочиваемы пользователем
+                          key={`${p.asset}-${tIdx}`}
+                          className="grid grid-cols-[1fr_1fr_5rem_3rem_1.5rem] items-center gap-2 border-t px-3 py-1.5"
                         >
-                          <span className="text-sm">{tierRangeLabel(t.minThb, t.maxThb)}</span>
+                          <Input
+                            className="h-8"
+                            type="number"
+                            step="any"
+                            value={Number.isFinite(t.minThb) ? t.minThb : ""}
+                            onChange={(e) =>
+                              patchTier(pIdx, tIdx, { minThb: Number.parseFloat(e.target.value) })
+                            }
+                          />
+                          <Input
+                            className="h-8"
+                            type="number"
+                            step="any"
+                            placeholder="∞"
+                            value={t.maxThb ?? ""}
+                            onChange={(e) =>
+                              patchTier(pIdx, tIdx, {
+                                maxThb: e.target.value.trim() === "" ? null : Number.parseFloat(e.target.value),
+                              })
+                            }
+                          />
                           <Input
                             className="h-8"
                             type="number"
                             step="any"
                             value={Number.isFinite(t.displayRate) ? t.displayRate : ""}
-                            onChange={(e) => updateTierRate(pIdx, tIdx, e.target.value)}
+                            onChange={(e) =>
+                              patchTier(pIdx, tIdx, { displayRate: Number.parseFloat(e.target.value) })
+                            }
                           />
                           <span className="text-right text-xs text-muted-foreground">
                             {t.deviationPct > 0 ? "+" : ""}
                             {t.deviationPct}%
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => removeTier(pIdx, tIdx)}
+                            aria-label="Удалить строку"
+                            className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          >
+                            ✕
+                          </button>
                         </div>
                       ))}
+                      <div className="border-t px-3 py-1.5">
+                        <button
+                          type="button"
+                          onClick={() => addTier(pIdx)}
+                          className="text-sm text-primary hover:underline"
+                        >
+                          + Добавить диапазон
+                        </button>
+                      </div>
                     </div>
                   ))}
                   <div className="flex flex-wrap gap-2">
