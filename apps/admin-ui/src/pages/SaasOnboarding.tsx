@@ -369,6 +369,19 @@ export function SaasOnboarding() {
         }));
       }
     }
+    // Для ещё НЕ настроенных назначений по умолчанию подставляем уже выбранного
+    // провайдера (chat) — если он валиден для этого назначения. Тогда ключ
+    // переиспользуется (один провайдер) и не нужно вводить повторно / ловить
+    // ошибку «укажите ключ» из-за дефолтного openai.
+    const primary = cfg.items.find((c) => c.purpose === "chat")?.provider ?? cfg.items[0]?.provider;
+    if (primary) {
+      const configured = new Set(cfg.items.map((c) => c.purpose));
+      for (const p of ALL_PURPOSES) {
+        if (!configured.has(p) && PURPOSE_META[p].providers.includes(primary as LlmProvider)) {
+          setKeyForms((prev) => ({ ...prev, [p]: { ...prev[p], provider: primary as LlmProvider } }));
+        }
+      }
+    }
     return { ch: ch.items, cfg: cfg.items, kb: docItems, rates: rateItems, status: st };
   }
 
