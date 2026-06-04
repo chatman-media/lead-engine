@@ -487,9 +487,7 @@ function AccountDropdown({
             </Avatar>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{admin?.email ?? "—"}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {tenant?.slug ?? "—"} · {tenant?.plan ?? "free"}
-              </p>
+              <p className="truncate text-xs text-muted-foreground">{tenant?.slug ?? "—"}</p>
             </div>
           </button>
         </DropdownMenuTrigger>

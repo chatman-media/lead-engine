@@ -25,6 +25,10 @@ import {
   type TenantInfo,
 } from "../api/saas.ts";
 
+// Тариф/биллинг скрыт в кастомной версии для обменки (без SaaS-подписок).
+// Включить — поставить true (вернёт виджет плана на дашборд).
+const SHOW_PLAN_WIDGET = false;
+
 export function SaasDashboard() {
   const navigate = useNavigate();
   const [admin, setAdmin] = useState<Admin | null>(null);
@@ -529,15 +533,12 @@ export function SaasDashboard() {
           )}
         </div>
 
-        <div className="space-y-6">
-          {billing && (
-            <PlanWidget
-              billing={billing}
-              stripeEnabled={stripeEnabled}
-              onRefresh={refreshBilling}
-            />
-          )}
-        </div>
+        {/* Тариф скрыт — кастомная версия для обменки (без SaaS-биллинга). */}
+        {SHOW_PLAN_WIDGET && billing && (
+          <div className="space-y-6">
+            <PlanWidget billing={billing} stripeEnabled={stripeEnabled} onRefresh={refreshBilling} />
+          </div>
+        )}
       </div>
     </div>
   );

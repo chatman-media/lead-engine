@@ -1,9 +1,6 @@
 import {
-  AlertTriangleIcon,
   BarChart2Icon,
-  ChevronDownIcon,
   GripVerticalIcon,
-  LayersIcon,
   PlusIcon,
   SparklesIcon,
   Trash2Icon,
@@ -37,7 +34,6 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { toast } from "sonner";
 
 const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "form_fill", label: "Сбор данных" },
@@ -52,14 +48,6 @@ const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "assessment", label: "Оценка" },
   { value: "milestone", label: "Контрольная точка" },
 ];
-
-const FUNNEL_TEMPLATES = [
-  { id: "exchange", label: "Обменный пункт", icon: "💱", stages: 12 },
-  { id: "visa", label: "Виза / иммиграция", icon: "🛂", stages: 7 },
-  { id: "real_estate", label: "Недвижимость", icon: "🏠", stages: null },
-  { id: "modeling", label: "Модельное агентство", icon: "✨", stages: null },
-  { id: "recruitment", label: "Рекрутинг", icon: "👔", stages: null },
-] as const;
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "text", label: "Текст" },
@@ -90,14 +78,10 @@ export function SaasFunnel() {
   const [error, setError] = useState("");
   const [expandedStage, setExpandedStage] = useState<number | null>(null);
   const [addingStage, setAddingStage] = useState(false);
-  const [seeding, setSeeding] = useState(false);
-  // Загрузчик шаблонов скрыт по умолчанию — он затирает текущую воронку.
-  const [showTemplates, setShowTemplates] = useState(false);
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dragOverId, setDragOverId] = useState<number | null>(null);
   const [analytics, setAnalytics] = useState<FunnelAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [confirmSeedTemplate, setConfirmSeedTemplate] = useState<string | null>(null);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [newStage, setNewStage] = useState({
     slug: "",
@@ -208,24 +192,6 @@ export function SaasFunnel() {
     }
   }
 
-  async function handleSeed(template: string) {
-    if (funnel?.stages && funnel.stages.length > 0 && confirmSeedTemplate !== template) {
-      setConfirmSeedTemplate(template);
-      return;
-    }
-    setConfirmSeedTemplate(null);
-    setSeeding(true);
-    try {
-      const result = await saas.seedFunnel(template);
-      toast.success(`Шаблон применён: ${result.stagesCreated} стадий`);
-      reload();
-    } catch (err) {
-      onAuthError(err);
-    } finally {
-      setSeeding(false);
-    }
-  }
-
   if (loading)
     return (
       <div className="flex flex-col gap-6 p-6">
@@ -277,75 +243,6 @@ export function SaasFunnel() {
 
       <AiWorkflowPanel open={aiPanelOpen} onOpenChange={setAiPanelOpen} onApplied={reload} />
 
-      {/* Шаблоны воронки — скрыты по умолчанию (затирают текущую воронку) */}
-      <div className="rounded-md border p-4">
-        <button
-          type="button"
-          onClick={() => setShowTemplates((v) => !v)}
-          className="flex w-full items-center gap-2 text-left"
-        >
-          <LayersIcon className="size-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Сменить шаблон воронки</span>
-          <span className="text-xs text-muted-foreground">опционально · заменит воронку</span>
-          <ChevronDownIcon
-            className={`ml-auto size-4 text-muted-foreground transition-transform ${
-              showTemplates ? "rotate-180" : ""
-            }`}
-          />
-        </button>
-        {showTemplates && (
-          <div className="mt-3 space-y-3">
-            {funnel?.stages && funnel.stages.length > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Сейчас {funnel.stages.length} стадий · выбор шаблона заменит текущую воронку.
-              </p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              {FUNNEL_TEMPLATES.map((tpl) => (
-                <Button
-                  key={tpl.id}
-                  variant={confirmSeedTemplate === tpl.id ? "destructive" : "outline"}
-                  size="sm"
-                  disabled={seeding}
-                  onClick={() => handleSeed(tpl.id)}
-                >
-                  {tpl.icon} {tpl.label}
-                  {tpl.stages ? ` · ${tpl.stages}` : ""}
-                </Button>
-              ))}
-            </div>
-            {confirmSeedTemplate && (
-          <div className="mt-3 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <AlertTriangleIcon className="size-4 shrink-0" />
-            <span className="flex-1">
-              Заменит {funnel?.stages?.length ?? 0} стадий на{" "}
-              {FUNNEL_TEMPLATES.find((tpl) => tpl.id === confirmSeedTemplate)?.stages
-                ? `${FUNNEL_TEMPLATES.find((tpl) => tpl.id === confirmSeedTemplate)?.stages} стадий`
-                : "стадии"}{" "}
-              выбранного шаблона. Продолжить?
-            </span>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => handleSeed(confirmSeedTemplate)}
-              disabled={seeding}
-            >
-              Да
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setConfirmSeedTemplate(null)}>
-              Нет
-            </Button>
-          </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {!funnel?.funnel && (
-        <div className="rounded-md border border-dashed p-6 text-center text-muted-foreground text-sm">
-          Откройте «Сменить шаблон воронки» выше, чтобы создать воронку из шаблона.
-        </div>
-      )}
 
       {funnel?.funnel && (
         <div className="flex flex-col gap-3">
