@@ -192,7 +192,12 @@ async function answerFromHits(opts: {
   const { hits, baseTelemetry, startedAt, input, activePersona } = opts;
   const vacBlock = (input.vacanciesBlock ?? "").trim();
 
-  if (hits.length === 0 && !vacBlock && !input.style) {
+  // Ранний выход «нет контекста» — только если ОТВЕЧАТЬ реально нечем: нет
+  // KB-хитов, нет блока вакансий, нет стиля И нет инструментов. Если есть
+  // инструменты (напр. обменник: computeQuote/createOrder/fetchRequisites),
+  // вызываем LLM с ними — ответ строится на инструментах, а не на базе знаний.
+  const hasTools = !!(input.tools && input.tools.length > 0);
+  if (hits.length === 0 && !vacBlock && !input.style && !hasTools) {
     return {
       text: NO_CONTEXT_MARKER,
       usedChunkIds: [],
