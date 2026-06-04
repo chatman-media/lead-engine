@@ -27,6 +27,9 @@ import {
   type BillingPlan,
   clearToken,
   type DashboardStats,
+  type ExchangeOrder,
+  type ExchangeRate,
+  type ExchangeTurnover,
   type KbDoc,
   type KbSuggestion,
   type OnboardingStatus,
@@ -46,6 +49,27 @@ function greeting(name: string): string {
   return name ? `${part}, ${name}!` : `${part}!`;
 }
 
+const ORDER_STATUS: Record<
+  string,
+  { label: string; variant: "default" | "secondary" | "success" | "warning" | "destructive" }
+> = {
+  quote: { label: "котировка", variant: "secondary" },
+  awaiting_payment: { label: "ждёт оплату", variant: "warning" },
+  paid: { label: "оплачено", variant: "default" },
+  payout: { label: "выдача", variant: "default" },
+  completed: { label: "завершено", variant: "success" },
+  cancelled: { label: "отменено", variant: "destructive" },
+  expired: { label: "истекло", variant: "destructive" },
+};
+
+function fmtMoney(n: number): string {
+  return Math.round(n || 0).toLocaleString("ru-RU");
+}
+
+function fmtRate(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
 export function SaasDashboard() {
   const navigate = useNavigate();
   const [admin, setAdmin] = useState<Admin | null>(null);
@@ -55,6 +79,10 @@ export function SaasDashboard() {
   const [stripeEnabled, setStripeEnabled] = useState(false);
   const [tenantInfo, setTenantInfo] = useState<TenantInfo | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  // Обменник: операционная сводка для главной
+  const [turnover, setTurnover] = useState<ExchangeTurnover | null>(null);
+  const [orders, setOrders] = useState<ExchangeOrder[]>([]);
+  const [rates, setRates] = useState<ExchangeRate[]>([]);
   const [togglingPause, setTogglingPause] = useState(false);
   const [confirmingPause, setConfirmingPause] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -144,6 +172,22 @@ export function SaasDashboard() {
       onAuthError(err);
     }
   }
+  // Операционная сводка обменника (эндпоинты включены только у обменных тенантов —
+  // у остальных вернут 404, поэтому ошибки молча игнорируем).
+  async function refreshExchange() {
+    try {
+      const [t, o, r] = await Promise.all([
+        saas.exchangeTurnover(),
+        saas.exchangeOrders(),
+        saas.exchangeRates(),
+      ]);
+      setTurnover(t);
+      setOrders(o.orders);
+      setRates(r.rates);
+    } catch {
+      // не обменный тенант / нет доступа — секция просто не покажется
+    }
+  }
 
   async function handleTogglePause() {
     if (!tenantInfo) return;
@@ -179,6 +223,7 @@ export function SaasDashboard() {
           refreshOnboarding(),
           refreshTenantInfo(),
           refreshBilling(),
+          refreshExchange(),
           saas
             .getDashboardStats()
             .then(setStats)
@@ -283,6 +328,10 @@ export function SaasDashboard() {
   }
 
   const paused = tenantInfo?.status === "suspended";
+  const isExchange = onboarding?.isExchange === true || turnover !== null;
+  const escalated = stats?.conversations.escalated ?? 0;
+  const activeRates = rates.filter((r) => r.isActive);
+  const recentOrders = orders.slice(0, 6);
 
   return (
     <div className="space-y-6">
@@ -342,7 +391,148 @@ export function SaasDashboard() {
 
       {onboarding && <OnboardingChecklist status={onboarding} />}
 
-      {stats && (
+      {/* ── Операционная сводка обменника ────────────────────────── */}
+      {isExchange && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <p className="text-2xl font-bold tabular-nums">
+                  {fmtMoney(turnover?.totals.totalThb ?? 0)}{" "}
+                  <span className="text-sm font-normal text-muted-foreground">฿</span>
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Оборот, THB</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <p className="text-2xl font-bold tabular-nums text-green-500">
+                  {turnover?.totals.completedCount ?? 0}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Завершено сделок</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <p className="text-2xl font-bold tabular-nums">{turnover?.totals.openCount ?? 0}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Активные заявки</p>
+              </CardContent>
+            </Card>
+            <button type="button" onClick={() => navigate("/conversations")} className="text-left">
+              <Card
+                className={
+                  escalated > 0
+                    ? "border-amber-500/40 transition-colors hover:bg-accent/40"
+                    : "transition-colors hover:bg-accent/40"
+                }
+              >
+                <CardContent className="pt-4 pb-3">
+                  <p
+                    className={`text-2xl font-bold tabular-nums ${escalated > 0 ? "text-amber-500" : ""}`}
+                  >
+                    {escalated}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Ждут оператора →</p>
+                </CardContent>
+              </Card>
+            </button>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Текущие курсы */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-base">Текущие курсы</CardTitle>
+                <Button size="sm" variant="outline" onClick={() => navigate("/exchange")}>
+                  Изменить курсы
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {activeRates.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    Курсы ещё не настроены —{" "}
+                    <button
+                      type="button"
+                      className="text-primary hover:underline"
+                      onClick={() => navigate("/exchange")}
+                    >
+                      задать
+                    </button>
+                  </p>
+                ) : (
+                  <ul className="divide-y">
+                    {activeRates.map((r) => (
+                      <li
+                        key={r.id}
+                        className="flex items-center justify-between py-2 text-sm first:pt-0 last:pb-0"
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className="font-medium">
+                            {r.asset}
+                            <span className="text-muted-foreground"> → </span>
+                            {r.quoteAsset}
+                          </span>
+                          {r.network && (
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {r.network}
+                            </span>
+                          )}
+                          {r.autoUpdate && <Badge variant="success">рынок</Badge>}
+                        </span>
+                        <span className="tabular-nums font-semibold">{fmtRate(r.baseRate)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Последние заявки */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-base">Последние заявки</CardTitle>
+                <Button size="sm" variant="outline" onClick={() => navigate("/exchange")}>
+                  Все заявки
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {recentOrders.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">Заявок пока нет</p>
+                ) : (
+                  <ul className="divide-y">
+                    {recentOrders.map((o) => {
+                      const st = ORDER_STATUS[o.status] ?? {
+                        label: o.status,
+                        variant: "secondary" as const,
+                      };
+                      return (
+                        <li
+                          key={o.id}
+                          className="flex items-center justify-between gap-3 py-2 text-sm first:pt-0 last:pb-0"
+                        >
+                          <span className="min-w-0">
+                            <span className="text-muted-foreground">#{o.id}</span>{" "}
+                            <span className="font-medium">
+                              {fmtMoney(o.amountFrom)} {o.assetFrom}
+                            </span>
+                            <span className="text-muted-foreground"> → </span>
+                            <span className="tabular-nums">{fmtMoney(o.amountToThb)} ฿</span>
+                          </span>
+                          <Badge variant={st.variant} className="shrink-0">
+                            {st.label}
+                          </Badge>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {!isExchange && stats && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           <Card>
             <CardContent className="pt-4 pb-3">
@@ -404,6 +594,15 @@ export function SaasDashboard() {
               </Card>
             </div>
           )}
+        </div>
+      )}
+
+      {isExchange && (
+        <div className="flex items-center gap-3 pt-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            База знаний бота
+          </span>
+          <span className="h-px flex-1 bg-border" />
         </div>
       )}
 
