@@ -1,6 +1,7 @@
 import {
   AlertTriangleIcon,
   BarChart2Icon,
+  ChevronDownIcon,
   GripVerticalIcon,
   LayersIcon,
   PlusIcon,
@@ -90,6 +91,8 @@ export function SaasFunnel() {
   const [expandedStage, setExpandedStage] = useState<number | null>(null);
   const [addingStage, setAddingStage] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  // Загрузчик шаблонов скрыт по умолчанию — он затирает текущую воронку.
+  const [showTemplates, setShowTemplates] = useState(false);
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dragOverId, setDragOverId] = useState<number | null>(null);
   const [analytics, setAnalytics] = useState<FunnelAnalytics | null>(null);
@@ -274,32 +277,44 @@ export function SaasFunnel() {
 
       <AiWorkflowPanel open={aiPanelOpen} onOpenChange={setAiPanelOpen} onApplied={reload} />
 
-      {/* Шаблоны воронки */}
+      {/* Шаблоны воронки — скрыты по умолчанию (затирают текущую воронку) */}
       <div className="rounded-md border p-4">
-        <div className="flex items-center gap-2 mb-3">
+        <button
+          type="button"
+          onClick={() => setShowTemplates((v) => !v)}
+          className="flex w-full items-center gap-2 text-left"
+        >
           <LayersIcon className="size-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Загрузить шаблон воронки</span>
-          {funnel?.stages && funnel.stages.length > 0 && (
-            <span className="text-xs text-muted-foreground">
-              Сейчас {funnel.stages.length} стадий · заменит текущую воронку
-            </span>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {FUNNEL_TEMPLATES.map((tpl) => (
-            <Button
-              key={tpl.id}
-              variant={confirmSeedTemplate === tpl.id ? "destructive" : "outline"}
-              size="sm"
-              disabled={seeding}
-              onClick={() => handleSeed(tpl.id)}
-            >
-              {tpl.icon} {tpl.label}
-              {tpl.stages ? ` · ${tpl.stages}` : ""}
-            </Button>
-          ))}
-        </div>
-        {confirmSeedTemplate && (
+          <span className="text-sm font-medium">Сменить шаблон воронки</span>
+          <span className="text-xs text-muted-foreground">опционально · заменит воронку</span>
+          <ChevronDownIcon
+            className={`ml-auto size-4 text-muted-foreground transition-transform ${
+              showTemplates ? "rotate-180" : ""
+            }`}
+          />
+        </button>
+        {showTemplates && (
+          <div className="mt-3 space-y-3">
+            {funnel?.stages && funnel.stages.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Сейчас {funnel.stages.length} стадий · выбор шаблона заменит текущую воронку.
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {FUNNEL_TEMPLATES.map((tpl) => (
+                <Button
+                  key={tpl.id}
+                  variant={confirmSeedTemplate === tpl.id ? "destructive" : "outline"}
+                  size="sm"
+                  disabled={seeding}
+                  onClick={() => handleSeed(tpl.id)}
+                >
+                  {tpl.icon} {tpl.label}
+                  {tpl.stages ? ` · ${tpl.stages}` : ""}
+                </Button>
+              ))}
+            </div>
+            {confirmSeedTemplate && (
           <div className="mt-3 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertTriangleIcon className="size-4 shrink-0" />
             <span className="flex-1">
@@ -321,12 +336,14 @@ export function SaasFunnel() {
               Нет
             </Button>
           </div>
+            )}
+          </div>
         )}
       </div>
 
       {!funnel?.funnel && (
         <div className="rounded-md border border-dashed p-6 text-center text-muted-foreground text-sm">
-          Выберите шаблон выше или воронка будет создана при загрузке шаблона.
+          Откройте «Сменить шаблон воронки» выше, чтобы создать воронку из шаблона.
         </div>
       )}
 
