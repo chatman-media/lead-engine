@@ -560,6 +560,9 @@ export function makeReplyStrategy(
 			resolveDirectorHooks,
 			resolveTools,
 			resolveReranker,
+			// Если основной ответ пуст (модель «промолчала», нет KB-контекста) —
+			// генерируем мягкий ответ в персоне, а не молчим.
+			softFallback: true,
 		},
 		(tenantId: number) => new MessagesRepo({ db, tenantId }),
 	);
