@@ -185,8 +185,13 @@ export function SaasExchange() {
       .finally(() => setLoading(false));
   }
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => load(), []);
+  useEffect(() => {
+    load();
+    // Сразу показываем редактор курсов (а не прячем за кнопкой) — чтобы было
+    // очевидно, где менять и добавлять курсы.
+    loadRateCard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function removeRate(id: number) {
     try {
@@ -400,10 +405,17 @@ export function SaasExchange() {
             </CardHeader>
             <CardContent className="space-y-4">
               {cardProposals.length === 0 ? (
-                <Button type="button" onClick={loadRateCard} disabled={cardLoading}>
-                  <RefreshCwIcon className="size-4" />
-                  {cardLoading ? "Получаем курс…" : "Получить актуальный курс с рынка"}
-                </Button>
+                <div className="flex flex-col items-start gap-2">
+                  <p className="text-sm text-muted-foreground">
+                    {cardLoading
+                      ? "Загружаем актуальный курс с рынка…"
+                      : "Не удалось получить курс с рынка. Попробуйте ещё раз."}
+                  </p>
+                  <Button type="button" onClick={loadRateCard} disabled={cardLoading}>
+                    <RefreshCwIcon className="size-4" />
+                    {cardLoading ? "Загрузка…" : "Загрузить курс с рынка"}
+                  </Button>
+                </div>
               ) : (
                 <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
                   <div className="space-y-4">
