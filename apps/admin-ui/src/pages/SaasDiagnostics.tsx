@@ -53,23 +53,36 @@ export function SaasDiagnostics() {
     <div className="space-y-6">
       <PageHeader
         title="Диагностика"
-        description="Проверка, что бот настроен: канал + LLM + база знаний. Без отправки сообщений."
+        description="Проверка, что бот настроен и готов: канал, LLM, шифрование. Клиентам ничего не отправляется."
         actions={
           <>
             <Button onClick={() => run(false)} disabled={running}>
-              {running ? "Проверяем…" : result ? "Перепроверить" : "Запустить проверку"}
+              {running ? "Проверяем…" : result ? "Перепроверить" : "Проверить настройки"}
             </Button>
             <Button
               variant="outline"
               onClick={() => run(true)}
               disabled={running}
-              title="Реальный LLM-вызов (~1 токен)"
+              title="Делает реальный мини-запрос к LLM (~1 токен), чтобы убедиться, что ключ рабочий"
             >
-              <ZapIcon /> Live ping
+              <ZapIcon /> Проверить вживую
             </Button>
           </>
         }
       />
+
+      <div className="rounded-lg border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+        <p>
+          <span className="font-medium text-foreground">Проверить настройки</span> — быстро и
+          бесплатно: смотрит, что всё заполнено (канал подключён, LLM и ключи заданы). Реальные
+          запросы к LLM не делает.
+        </p>
+        <p className="mt-1">
+          <span className="font-medium text-foreground">Проверить вживую</span> — дополнительно
+          делает один реальный мини-запрос к LLM (~1 токен), чтобы убедиться, что ключ действительно
+          рабочий, а не просто введён.
+        </p>
+      </div>
 
       {error && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">

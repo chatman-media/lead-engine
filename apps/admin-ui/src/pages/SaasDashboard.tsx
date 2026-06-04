@@ -238,6 +238,48 @@ export function SaasDashboard() {
     return raw * (1 - (estRate.marginPct || 0) / 100);
   })();
 
+  // Временной ряд оборота: сегодня — по часам, иначе — по дням за период.
+  const completedAll = orders.filter(
+    (o) => o.status === "completed" && (currency === "all" || o.assetFrom === currency),
+  );
+  const chartSeries: { label: string; value: number }[] = (() => {
+    if (period === "today") {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const startSec = Math.floor(start.getTime() / 1000);
+      const buckets = Array.from({ length: 24 }, (_, h) => ({ label: `${h}:00`, value: 0 }));
+      for (const o of completedAll) {
+        if (o.createdAt >= startSec) {
+          const h = new Date(o.createdAt * 1000).getHours();
+          buckets[h]!.value += o.amountToThb || 0;
+        }
+      }
+      return buckets;
+    }
+    const days = period === "7" ? 7 : 30;
+    const buckets: { key: number; label: string; value: number }[] = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      buckets.push({
+        key: Math.floor(d.getTime() / 1000),
+        label: d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }),
+        value: 0,
+      });
+    }
+    for (const o of completedAll) {
+      const d = new Date(o.createdAt * 1000);
+      d.setHours(0, 0, 0, 0);
+      const k = Math.floor(d.getTime() / 1000);
+      const b = buckets.find((x) => x.key === k);
+      if (b) b.value += o.amountToThb || 0;
+    }
+    return buckets.map(({ label, value }) => ({ label, value }));
+  })();
+  const chartMax = Math.max(1, ...chartSeries.map((b) => b.value));
+  const chartEmpty = chartSeries.every((b) => b.value === 0);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -384,6 +426,41 @@ export function SaasDashboard() {
               </Card>
             </button>
           </div>
+
+          {/* График оборота за период */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">
+                {period === "today" ? "Оборот по часам (сегодня)" : "Оборот по дням"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {chartEmpty ? (
+                <p className="py-10 text-center text-sm text-muted-foreground">
+                  Нет завершённых сделок за период
+                </p>
+              ) : (
+                <>
+                  <div className="flex h-36 items-end gap-px">
+                    {chartSeries.map((b, i) => (
+                      <div
+                        // biome-ignore lint/suspicious/noArrayIndexKey: фиксированные бакеты периода
+                        key={i}
+                        className="flex-1 rounded-t bg-primary/70 transition-colors hover:bg-primary"
+                        style={{ height: `${Math.max(2, (b.value / chartMax) * 100)}%` }}
+                        title={`${b.label}: ${fmtMoney(b.value)} ฿`}
+                      />
+                    ))}
+                  </div>
+                  <div className="mt-1.5 flex justify-between text-[10px] text-muted-foreground">
+                    <span>{chartSeries[0]?.label}</span>
+                    <span>пик: {fmtMoney(chartMax)} ฿</span>
+                    <span>{chartSeries[chartSeries.length - 1]?.label}</span>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
 
           <div className="grid gap-6 lg:grid-cols-2">
             {/* Текущие курсы */}
