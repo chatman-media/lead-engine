@@ -3,6 +3,7 @@ import {
   ArrowLeftRightIcon,
   BarChart2Icon,
   BellIcon,
+  BlocksIcon,
   BriefcaseIcon,
   CableIcon,
   ChevronLeftIcon,
@@ -27,8 +28,6 @@ import {
   TestTube2Icon,
   UserCircleIcon,
   UsersIcon,
-  WebhookIcon,
-  WrenchIcon,
   ZapIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -72,35 +71,42 @@ interface NavGroup {
 
 const TOP_NAV_ITEM: NavItem = { to: "/dashboard", label: "Главная", icon: LayoutDashboardIcon };
 
+// Компоновка «Обмен во главе»: ядро бизнеса (Обменник/Воронка) сверху, затем
+// клиенты, бот/каналы, система. Пункты с hideForExchange скрываются у обменки,
+// exchangeOnly — показываются только ей.
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: "Работа",
+    label: "Обмен",
+    items: [
+      { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon, exchangeOnly: true },
+      { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
+    ],
+  },
+  {
+    label: "Клиенты",
     items: [
       { to: "/leads", label: "Лиды", icon: UserCircleIcon },
       { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
       { to: "/outreach", label: "Рассылка", icon: SendIcon },
-      { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
-      { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon, exchangeOnly: true },
       { to: "/vacancies", label: "Каталог", icon: BriefcaseIcon, hideForExchange: true },
     ],
   },
   {
-    label: "AI & Бот",
+    label: "Бот и каналы",
     items: [
+      { to: "/channels", label: "Каналы", icon: CableIcon },
+      { to: "/test", label: "Тест бота", icon: TestTube2Icon },
       { to: "/skills", label: "Навыки", icon: ZapIcon, hideForExchange: true },
       { to: "/hooks", label: "Хуки", icon: SparklesIcon, hideForExchange: true },
       { to: "/styles", label: "Стили", icon: PaletteIcon, hideForExchange: true },
       { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon, hideForExchange: true },
-      { to: "/test", label: "Тест бота", icon: TestTube2Icon },
+      { to: "/integrations", label: "Интеграции", icon: BlocksIcon },
     ],
   },
   {
     label: "Система",
     items: [
-      { to: "/channels", label: "Каналы", icon: CableIcon },
       { to: "/notifications", label: "Уведомления", icon: BellIcon },
-      { to: "/webhooks", label: "Вебхуки", icon: WebhookIcon },
-      { to: "/tools", label: "Инструменты", icon: WrenchIcon },
       { to: "/referral", label: "Партнёры", icon: LinkIcon, hideForExchange: true },
       { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
     ],

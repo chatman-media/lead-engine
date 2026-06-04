@@ -18,6 +18,7 @@ import { SaasExperiments } from "./pages/SaasExperiments.tsx";
 import { SaasForgotPassword } from "./pages/SaasForgotPassword.tsx";
 import { SaasFunnel } from "./pages/SaasFunnel.tsx";
 import { SaasHooks } from "./pages/SaasHooks.tsx";
+import { SaasIntegrations } from "./pages/SaasIntegrations.tsx";
 import { SaasLeadDetail } from "./pages/SaasLeadDetail.tsx";
 import { SaasLeads } from "./pages/SaasLeads.tsx";
 import { SaasLogin } from "./pages/SaasLogin.tsx";
@@ -33,8 +34,6 @@ import { SaasStyles } from "./pages/SaasStyles.tsx";
 import { SaasTeam } from "./pages/SaasTeam.tsx";
 import { SaasTestBot } from "./pages/SaasTestBot.tsx";
 import { SaasVacancies } from "./pages/SaasVacancies.tsx";
-import { SaasWebhooks } from "./pages/SaasWebhooks.tsx";
-import { ToolsSettings } from "./pages/ToolsSettings.tsx";
 
 function RequireAuth() {
   const [status, setStatus] = useState<"checking" | "auth" | "anon">(() =>
@@ -151,7 +150,6 @@ export function App() {
                 <Route path="/vacancies" element={<SaasVacancies />} />
                 <Route path="/skills" element={<SaasSkills />} />
                 <Route path="/hooks" element={<SaasHooks />} />
-                <Route path="/webhooks" element={<SaasWebhooks />} />
                 <Route path="/styles" element={<SaasStyles />} />
                 <Route path="/experiments" element={<SaasExperiments />} />
                 <Route path="/channels" element={<SaasChannels />} />
@@ -159,7 +157,7 @@ export function App() {
                 <Route path="/settings" element={<SaasSettings />} />
                 <Route path="/profile" element={<SaasProfile />} />
                 <Route path="/referral" element={<SaasReferral />} />
-                <Route path="/tools" element={<ToolsSettings />} />
+                <Route path="/integrations" element={<SaasIntegrations />} />
                 <Route path="/team" element={<SaasTeam />} />
                 <Route path="/audit" element={<SaasAudit />} />
                 <Route path="/diagnostics" element={<SaasDiagnostics />} />

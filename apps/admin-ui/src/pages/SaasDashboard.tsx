@@ -1,4 +1,14 @@
-import { AlertTriangleIcon, CheckIcon, FileTextIcon, LightbulbIcon, PauseIcon, PlayIcon, Trash2Icon, UploadIcon, XIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  FileTextIcon,
+  LightbulbIcon,
+  PauseIcon,
+  PlayIcon,
+  Trash2Icon,
+  UploadIcon,
+  XIcon,
+} from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -21,7 +31,6 @@ import {
   type KbSuggestion,
   type OnboardingStatus,
   saas,
-  type Tenant,
   type TenantInfo,
 } from "../api/saas.ts";
 
@@ -29,10 +38,17 @@ import {
 // Включить — поставить true (вернёт виджет плана на дашборд).
 const SHOW_PLAN_WIDGET = false;
 
+/** Приветствие по времени суток. */
+function greeting(name: string): string {
+  const h = new Date().getHours();
+  const part =
+    h < 6 ? "Доброй ночи" : h < 12 ? "Доброе утро" : h < 18 ? "Добрый день" : "Добрый вечер";
+  return name ? `${part}, ${name}!` : `${part}!`;
+}
+
 export function SaasDashboard() {
   const navigate = useNavigate();
   const [admin, setAdmin] = useState<Admin | null>(null);
-  const [tenant, setTenant] = useState<Tenant | null>(null);
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
   const [billing, setBilling] = useState<BillingPlan | null>(null);
@@ -157,14 +173,16 @@ export function SaasDashboard() {
         const me = await saas.me();
         if (cancelled) return;
         setAdmin(me.admin);
-        setTenant(me.tenant);
         await Promise.all([
           refreshDocs(),
           refreshSuggestions(),
           refreshOnboarding(),
           refreshTenantInfo(),
           refreshBilling(),
-          saas.getDashboardStats().then(setStats).catch(() => {}),
+          saas
+            .getDashboardStats()
+            .then(setStats)
+            .catch(() => {}),
         ]);
       } catch (err) {
         if (cancelled) return;
@@ -269,8 +287,8 @@ export function SaasDashboard() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Главная"
-        description={`${admin?.email ?? ""} · ${tenant?.slug ?? "—"} · ${tenant?.plan ?? "free"}`}
+        title={greeting(admin?.name?.trim() || admin?.email?.split("@")[0] || "")}
+        description="Обзор обменника: заявки, диалоги и оборот за сегодня"
         actions={
           tenantInfo && (
             <div className="flex items-center gap-2">
@@ -280,7 +298,12 @@ export function SaasDashboard() {
                     <AlertTriangleIcon className="size-3.5" />
                     Бот замолчит — точно?
                   </span>
-                  <Button size="sm" variant="destructive" onClick={handleTogglePause} disabled={togglingPause}>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={handleTogglePause}
+                    disabled={togglingPause}
+                  >
                     Да, пауза
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setConfirmingPause(false)}>
@@ -330,7 +353,9 @@ export function SaasDashboard() {
           <Card>
             <CardContent className="pt-4 pb-3">
               <p className="text-2xl font-bold text-green-500">
-                {stats.leads.byStage.filter((s) => s.kind === "terminal_won").reduce((sum, s) => sum + s.count, 0)}
+                {stats.leads.byStage
+                  .filter((s) => s.kind === "terminal_won")
+                  .reduce((sum, s) => sum + s.count, 0)}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">Закрыто ботом</p>
             </CardContent>
@@ -536,7 +561,11 @@ export function SaasDashboard() {
         {/* Тариф скрыт — кастомная версия для обменки (без SaaS-биллинга). */}
         {SHOW_PLAN_WIDGET && billing && (
           <div className="space-y-6">
-            <PlanWidget billing={billing} stripeEnabled={stripeEnabled} onRefresh={refreshBilling} />
+            <PlanWidget
+              billing={billing}
+              stripeEnabled={stripeEnabled}
+              onRefresh={refreshBilling}
+            />
           </div>
         )}
       </div>

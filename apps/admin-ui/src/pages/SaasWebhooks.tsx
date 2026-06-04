@@ -1,23 +1,25 @@
+import { CheckCircleIcon, PlusIcon, Trash2Icon, ZapIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiError, clearToken, saas, type StageWebhook } from "@/api/saas";
+import { ApiError, clearToken, type StageWebhook, saas } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { CheckCircleIcon, PlusIcon, Trash2Icon, ZapIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 
 function formatDate(epoch: number) {
   return new Date(epoch * 1000).toLocaleDateString("ru-RU", {
-    day: "2-digit", month: "short", year: "numeric",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
   });
 }
 
-export function SaasWebhooks() {
+export function SaasWebhooks({ embedded = false }: { embedded?: boolean } = {}) {
   const navigate = useNavigate();
   const [items, setItems] = useState<StageWebhook[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,7 +32,9 @@ export function SaasWebhooks() {
   const [saving, setSaving] = useState(false);
 
   // Test results per webhook id
-  const [testResults, setTestResults] = useState<Record<number, { ok: boolean; status?: number; error?: string }>>({});
+  const [testResults, setTestResults] = useState<
+    Record<number, { ok: boolean; status?: number; error?: string }>
+  >({});
   const [testing, setTesting] = useState<number | null>(null);
 
   function onAuthError(err: unknown) {
@@ -43,13 +47,18 @@ export function SaasWebhooks() {
   }
 
   function reload() {
-    saas.listStageWebhooks()
+    saas
+      .listStageWebhooks()
       .then((r) => setItems(r.items))
-      .catch((err) => { if (!onAuthError(err)) setError("Не удалось загрузить вебхуки"); })
+      .catch((err) => {
+        if (!onAuthError(err)) setError("Не удалось загрузить вебхуки");
+      })
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    reload();
+  }, []);
 
   async function handleCreate() {
     if (!newUrl.trim()) return;
@@ -73,7 +82,9 @@ export function SaasWebhooks() {
   async function handleToggle(hook: StageWebhook) {
     try {
       await saas.updateStageWebhook(hook.id, { isActive: !hook.isActive });
-      setItems((prev) => prev.map((h) => h.id === hook.id ? { ...h, isActive: !hook.isActive } : h));
+      setItems((prev) =>
+        prev.map((h) => (h.id === hook.id ? { ...h, isActive: !hook.isActive } : h)),
+      );
     } catch (err) {
       onAuthError(err);
     }
@@ -101,22 +112,36 @@ export function SaasWebhooks() {
     }
   }
 
-  if (loading) return (
-    <div className="space-y-4 p-6">
-      <Skeleton className="h-6 w-40" />
-      <Skeleton className="h-24 w-full" />
-      <Skeleton className="h-24 w-full" />
-    </div>
-  );
+  if (loading)
+    return (
+      <div className="space-y-4 p-6">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-24 w-full" />
+      </div>
+    );
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <PageHeader
-          title="Вебхуки"
-          description="Уведомления при смене стадии лида — интеграция с CRM, n8n, Zapier и др."
-        />
-        <Button size="sm" onClick={() => { setCreating(true); setNewUrl(""); setNewSecret(""); }}>
+        {embedded ? (
+          <p className="text-sm text-muted-foreground">
+            Уведомления при смене стадии лида — интеграция с CRM, n8n, Zapier и др.
+          </p>
+        ) : (
+          <PageHeader
+            title="Вебхуки"
+            description="Уведомления при смене стадии лида — интеграция с CRM, n8n, Zapier и др."
+          />
+        )}
+        <Button
+          size="sm"
+          onClick={() => {
+            setCreating(true);
+            setNewUrl("");
+            setNewSecret("");
+          }}
+        >
           <PlusIcon className="mr-1.5 size-3.5" />
           Добавить
         </Button>
@@ -131,7 +156,9 @@ export function SaasWebhooks() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-1">
-              <Label className="text-xs">URL <span className="text-muted-foreground">(POST, JSON)</span></Label>
+              <Label className="text-xs">
+                URL <span className="text-muted-foreground">(POST, JSON)</span>
+              </Label>
               <Input
                 placeholder="https://example.com/webhook"
                 value={newUrl}
@@ -140,7 +167,9 @@ export function SaasWebhooks() {
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Секрет для подписи <span className="text-muted-foreground">(опционально)</span></Label>
+              <Label className="text-xs">
+                Секрет для подписи <span className="text-muted-foreground">(опционально)</span>
+              </Label>
               <Input
                 type="password"
                 placeholder="HMAC-secret — заголовок X-Signature: sha256=…"
@@ -153,7 +182,12 @@ export function SaasWebhooks() {
               <Button size="sm" disabled={!newUrl.trim() || saving} onClick={handleCreate}>
                 {saving ? "Сохранение…" : "Сохранить"}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setCreating(false)} disabled={saving}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setCreating(false)}
+                disabled={saving}
+              >
                 Отмена
               </Button>
             </div>
@@ -178,9 +212,13 @@ export function SaasWebhooks() {
                   <p className="text-sm font-mono truncate">{hook.url}</p>
                   <div className="mt-1 flex items-center gap-2 flex-wrap">
                     {hook.hasSecret && (
-                      <Badge variant="secondary" className="text-xs">подписан</Badge>
+                      <Badge variant="secondary" className="text-xs">
+                        подписан
+                      </Badge>
                     )}
-                    <span className="text-xs text-muted-foreground">создан {formatDate(hook.createdAt)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      создан {formatDate(hook.createdAt)}
+                    </span>
                     {testResult && (
                       <Badge
                         variant={testResult.ok ? "secondary" : "destructive"}
@@ -188,16 +226,13 @@ export function SaasWebhooks() {
                       >
                         {testResult.ok
                           ? `✓ ${testResult.status}`
-                          : testResult.error ?? `✗ ${testResult.status}`}
+                          : (testResult.error ?? `✗ ${testResult.status}`)}
                       </Badge>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <Switch
-                    checked={hook.isActive}
-                    onCheckedChange={() => handleToggle(hook)}
-                  />
+                  <Switch checked={hook.isActive} onCheckedChange={() => handleToggle(hook)} />
                   <Button
                     size="sm"
                     variant="ghost"
@@ -225,16 +260,22 @@ export function SaasWebhooks() {
 
       <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
         <p className="font-medium">Payload примера:</p>
-        <pre className="overflow-x-auto">{JSON.stringify({
-          event: "lead.stage_changed",
-          tenantId: 1,
-          leadId: 42,
-          contactId: 10,
-          contactName: "Иван Иванов",
-          from: { stageId: 1, slug: "initial", displayName: "Входящий" },
-          to: { stageId: 2, slug: "qualified", displayName: "Квалифицирован" },
-          timestamp: 1748000000,
-        }, null, 2)}</pre>
+        <pre className="overflow-x-auto">
+          {JSON.stringify(
+            {
+              event: "lead.stage_changed",
+              tenantId: 1,
+              leadId: 42,
+              contactId: 10,
+              contactName: "Иван Иванов",
+              from: { stageId: 1, slug: "initial", displayName: "Входящий" },
+              to: { stageId: 2, slug: "qualified", displayName: "Квалифицирован" },
+              timestamp: 1748000000,
+            },
+            null,
+            2,
+          )}
+        </pre>
       </div>
     </div>
   );
