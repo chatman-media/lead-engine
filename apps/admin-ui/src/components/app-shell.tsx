@@ -375,7 +375,9 @@ function AccountDropdown({
 }) {
   const { theme, setTheme } = useTheme();
   const [pwdOpen, setPwdOpen] = useState(false);
-  const initials = (admin?.email ?? "?").slice(0, 2).toUpperCase();
+  // Показываем имя (если задано), иначе email.
+  const displayName = admin?.name?.trim() || admin?.email || "—";
+  const initials = (admin?.name?.trim() || admin?.email || "?").slice(0, 2).toUpperCase();
 
   const menuContent = (
     <DropdownMenuContent align="start" side={collapsed ? "right" : "top"} className="w-56">
@@ -467,7 +469,7 @@ function AccountDropdown({
               </DropdownMenuTrigger>
             </TooltipTrigger>
             <TooltipContent side="right" className="text-xs">
-              {admin?.email}
+              {displayName}
             </TooltipContent>
           </Tooltip>
           {menuContent}
@@ -491,8 +493,10 @@ function AccountDropdown({
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{admin?.email ?? "—"}</p>
-              <p className="truncate text-xs text-muted-foreground">{tenant?.slug ?? "—"}</p>
+              <p className="truncate text-sm font-medium">{displayName}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {admin?.name ? admin.email : (tenant?.slug ?? "—")}
+              </p>
             </div>
           </button>
         </DropdownMenuTrigger>
@@ -621,8 +625,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         if (!cancelled) setIsExchange(s.isExchange === true);
       })
       .catch(() => {});
+    // Профиль обновился (имя) — обновляем сразу, без перезагрузки.
+    const onProfileUpdated = (e: Event) => {
+      const next = (e as CustomEvent<Admin>).detail;
+      if (next) setAdmin((prev) => (prev ? { ...prev, ...next } : next));
+    };
+    window.addEventListener("admin-profile-updated", onProfileUpdated);
     return () => {
       cancelled = true;
+      window.removeEventListener("admin-profile-updated", onProfileUpdated);
     };
   }, []);
 

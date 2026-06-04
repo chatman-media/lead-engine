@@ -54,6 +54,8 @@ export default function SaasProfile() {
       const res = await saas.updateProfile(name.trim());
       setAdmin(res.admin);
       setName(res.admin.name ?? "");
+      // Сообщаем app-shell, чтобы имя в сайдбаре обновилось сразу.
+      window.dispatchEvent(new CustomEvent("admin-profile-updated", { detail: res.admin }));
       toast.success("Профиль сохранён");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
