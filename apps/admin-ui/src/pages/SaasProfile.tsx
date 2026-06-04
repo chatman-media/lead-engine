@@ -100,7 +100,7 @@ export default function SaasProfile() {
     );
   }
 
-  const roleLabel = admin?.role === "superadmin" ? "Менеджер" : "Оператор";
+  const roleLabel = admin?.role === "superadmin" ? "Суперадмин" : "Оператор";
   const nameUnchanged = name.trim() === (admin?.name ?? "");
 
   return (

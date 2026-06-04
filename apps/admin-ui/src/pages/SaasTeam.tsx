@@ -197,7 +197,7 @@ export function SaasTeam() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="manager">Оператор — лиды, чаты, заявки</SelectItem>
-                  <SelectItem value="superadmin">Менеджер — полный доступ</SelectItem>
+                  <SelectItem value="superadmin">Суперадмин — полный доступ</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -255,7 +255,7 @@ export function SaasTeam() {
                       </p>
                     </div>
                     <Badge variant={a.role === "superadmin" ? "default" : "secondary"}>
-                      {a.role === "superadmin" ? "менеджер" : "оператор"}
+                      {a.role === "superadmin" ? "суперадмин" : "оператор"}
                     </Badge>
                   </li>
                 ))}
@@ -282,7 +282,7 @@ export function SaasTeam() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{inv.email}</p>
                       <div className="mt-0.5 flex items-center gap-1.5">
-                        <Badge variant="outline">{inv.role === "superadmin" ? "менеджер" : "оператор"}</Badge>
+                        <Badge variant="outline">{inv.role === "superadmin" ? "суперадмин" : "оператор"}</Badge>
                         {inv.status === "pending" && <Badge variant="warning">ожидает</Badge>}
                         {inv.status === "accepted" && <Badge variant="success">принято</Badge>}
                         {inv.status === "expired" && <Badge variant="secondary">истёк</Badge>}

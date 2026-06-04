@@ -278,7 +278,7 @@ function AccountDropdown({
       <DropdownMenuLabel className="font-normal">
         <p className="text-sm font-medium truncate">{admin?.name || admin?.email || "—"}</p>
         <p className="text-xs text-muted-foreground">
-          {admin?.role === "superadmin" ? "Менеджер" : "Оператор"} · {tenant?.slug ?? "—"}
+          {admin?.role === "superadmin" ? "Суперадмин" : "Оператор"} · {tenant?.slug ?? "—"}
         </p>
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
