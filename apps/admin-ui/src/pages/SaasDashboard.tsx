@@ -1,45 +1,33 @@
-import {
-  AlertTriangleIcon,
-  CheckIcon,
-  FileTextIcon,
-  LightbulbIcon,
-  PauseIcon,
-  PlayIcon,
-  Trash2Icon,
-  UploadIcon,
-  XIcon,
-} from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { AlertTriangleIcon, PauseIcon, PlayIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { OnboardingChecklist } from "@/components/OnboardingChecklist";
-import { PlanWidget } from "@/components/PlanWidget";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
 import {
   type Admin,
   ApiError,
-  type BillingPlan,
   clearToken,
   type DashboardStats,
   type ExchangeOrder,
   type ExchangeRate,
   type ExchangeTurnover,
-  type KbDoc,
-  type KbSuggestion,
   type OnboardingStatus,
   saas,
   type TenantInfo,
 } from "../api/saas.ts";
-
-// Тариф/биллинг скрыт в кастомной версии для обменки (без SaaS-подписок).
-// Включить — поставить true (вернёт виджет плана на дашборд).
-const SHOW_PLAN_WIDGET = false;
 
 /** Приветствие по времени суток. */
 function greeting(name: string): string {
@@ -73,10 +61,7 @@ function fmtRate(n: number): string {
 export function SaasDashboard() {
   const navigate = useNavigate();
   const [admin, setAdmin] = useState<Admin | null>(null);
-  const [docs, setDocs] = useState<KbDoc[]>([]);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
-  const [billing, setBilling] = useState<BillingPlan | null>(null);
-  const [stripeEnabled, setStripeEnabled] = useState(false);
   const [tenantInfo, setTenantInfo] = useState<TenantInfo | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   // Обменник: операционная сводка для главной
@@ -87,16 +72,11 @@ export function SaasDashboard() {
   const [confirmingPause, setConfirmingPause] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  const [pasteTitle, setPasteTitle] = useState("");
-  const [pasteBody, setPasteBody] = useState("");
-  const [pasteTopic, setPasteTopic] = useState("");
-  const [uploading, setUploading] = useState(false);
-
-  // KB suggestions
-  const [suggestions, setSuggestions] = useState<KbSuggestion[]>([]);
-  const [suggestionDrafts, setSuggestionDrafts] = useState<Record<number, string>>({});
-  const [decidingId, setDecidingId] = useState<number | null>(null);
+  // Фильтры операционной сводки + быстрый расчёт
+  const [period, setPeriod] = useState<"today" | "7" | "30" | "all">("today");
+  const [currency, setCurrency] = useState("all");
+  const [estAsset, setEstAsset] = useState("");
+  const [estAmount, setEstAmount] = useState("");
 
   function onAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
@@ -107,59 +87,9 @@ export function SaasDashboard() {
     return false;
   }
 
-  async function refreshSuggestions() {
-    try {
-      const res = await saas.listKbSuggestions({ status: "pending", limit: 20 });
-      setSuggestions(res.items);
-      setSuggestionDrafts((prev) => {
-        const next = { ...prev };
-        for (const s of res.items) {
-          if (!(s.id in next)) next[s.id] = s.answerDraft ?? "";
-        }
-        return next;
-      });
-    } catch {
-      // ignore — suggestions might not exist yet
-    }
-  }
-
-  async function handleDecide(id: number, action: "approve" | "reject") {
-    setDecidingId(id);
-    try {
-      await saas.decideKbSuggestion(id, action, {
-        answerDraft: action === "approve" ? suggestionDrafts[id] : undefined,
-      });
-      await Promise.all([refreshSuggestions(), refreshDocs(), refreshOnboarding()]);
-    } catch {
-      // ignore
-    } finally {
-      setDecidingId(null);
-    }
-  }
-
-  async function refreshDocs() {
-    try {
-      const list = await saas.listDocs();
-      setDocs(list.items);
-    } catch (err) {
-      // KB-роуты на бэкенде включаются только если у какого-то тенанта есть
-      // embed-конфиг (boot-gate) — иначе listDocs отдаёт 404. Это не ошибка
-      // дашборда: считаем, что документов пока нет, и не пугаем баннером.
-      if (!onAuthError(err)) setDocs([]);
-    }
-  }
   async function refreshOnboarding() {
     try {
       setOnboarding(await saas.onboardingStatus());
-    } catch (err) {
-      onAuthError(err);
-    }
-  }
-  async function refreshBilling() {
-    try {
-      const [b, p] = await Promise.all([saas.getBillingPlan(), saas.listPlans()]);
-      setBilling(b);
-      setStripeEnabled(p.stripeEnabled);
     } catch (err) {
       onAuthError(err);
     }
@@ -218,11 +148,8 @@ export function SaasDashboard() {
         if (cancelled) return;
         setAdmin(me.admin);
         await Promise.all([
-          refreshDocs(),
-          refreshSuggestions(),
           refreshOnboarding(),
           refreshTenantInfo(),
-          refreshBilling(),
           refreshExchange(),
           saas
             .getDashboardStats()
@@ -241,62 +168,6 @@ export function SaasDashboard() {
     };
     // biome-ignore lint/correctness/useExhaustiveDependencies: run once on mount
   }, []);
-
-  async function handlePaste(e: FormEvent) {
-    e.preventDefault();
-    if (!pasteBody.trim()) return;
-    setUploading(true);
-    setError("");
-    try {
-      await saas.uploadJson({
-        title: pasteTitle.trim() || "untitled",
-        body: pasteBody,
-        ...(pasteTopic.trim() ? { topic: pasteTopic.trim() } : {}),
-      });
-      setPasteTitle("");
-      setPasteBody("");
-      setPasteTopic("");
-      await Promise.all([refreshDocs(), refreshOnboarding()]);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 402) {
-        setError((err.extra?.upgradeHint as string) ?? "Лимит документов исчерпан — повысьте план");
-      } else if (!onAuthError(err)) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    setError("");
-    try {
-      await saas.uploadFile(file);
-      await Promise.all([refreshDocs(), refreshOnboarding()]);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 402) {
-        setError((err.extra?.upgradeHint as string) ?? "Лимит документов исчерпан — повысьте план");
-      } else if (!onAuthError(err)) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    } finally {
-      setUploading(false);
-      e.target.value = "";
-    }
-  }
-
-  async function handleDelete(id: number) {
-    if (!confirm("Удалить документ?")) return;
-    try {
-      await saas.deleteDoc(id);
-      await Promise.all([refreshDocs(), refreshOnboarding()]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
 
   if (loading) {
     return (
@@ -331,7 +202,41 @@ export function SaasDashboard() {
   const isExchange = onboarding?.isExchange === true || turnover !== null;
   const escalated = stats?.conversations.escalated ?? 0;
   const activeRates = rates.filter((r) => r.isActive);
-  const recentOrders = orders.slice(0, 6);
+
+  // Валюты для фильтра (активы из курсов + заявок)
+  const currencyOptions = Array.from(
+    new Set([...rates.map((r) => r.asset), ...orders.map((o) => o.assetFrom)]),
+  ).filter(Boolean);
+
+  // Граница периода (unix-сек); "today" — с начала суток.
+  const periodCutoff = (() => {
+    if (period === "all") return 0;
+    if (period === "today") {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      return Math.floor(d.getTime() / 1000);
+    }
+    return Math.floor(Date.now() / 1000) - Number(period) * 86400;
+  })();
+
+  const byCurrency = orders.filter((o) => currency === "all" || o.assetFrom === currency);
+  const completedInPeriod = byCurrency.filter(
+    (o) => o.status === "completed" && o.createdAt >= periodCutoff,
+  );
+  const periodTurnover = completedInPeriod.reduce((s, o) => s + (o.amountToThb || 0), 0);
+  const openOrders = byCurrency.filter((o) =>
+    ["quote", "awaiting_payment", "paid", "payout"].includes(o.status),
+  );
+  const recentOrders = byCurrency.slice(0, 6);
+
+  // Быстрый расчёт ≈ по базовому курсу выбранного актива
+  const estRate = activeRates.find((r) => r.asset === (estAsset || activeRates[0]?.asset));
+  const estResult = (() => {
+    const amt = Number(estAmount);
+    if (!estRate || !(amt > 0)) return null;
+    const raw = estRate.quoteMode === "divide" ? amt / estRate.baseRate : amt * estRate.baseRate;
+    return raw * (1 - (estRate.marginPct || 0) / 100);
+  })();
 
   return (
     <div className="space-y-6">
@@ -394,27 +299,69 @@ export function SaasDashboard() {
       {/* ── Операционная сводка обменника ────────────────────────── */}
       {isExchange && (
         <div className="space-y-6">
+          {/* Фильтры: период оборота + валюта */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-lg border p-0.5">
+              {(
+                [
+                  ["today", "Сегодня"],
+                  ["7", "7 дней"],
+                  ["30", "30 дней"],
+                  ["all", "Всё время"],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setPeriod(v)}
+                  className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                    period === v
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {currencyOptions.length > 0 && (
+              <Select value={currency} onValueChange={setCurrency}>
+                <SelectTrigger className="h-8 w-36 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все валюты</SelectItem>
+                  {currencyOptions.map((a) => (
+                    <SelectItem key={a} value={a}>
+                      {a}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Card>
               <CardContent className="pt-4 pb-3">
                 <p className="text-2xl font-bold tabular-nums">
-                  {fmtMoney(turnover?.totals.totalThb ?? 0)}{" "}
+                  {fmtMoney(periodTurnover)}{" "}
                   <span className="text-sm font-normal text-muted-foreground">฿</span>
                 </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">Оборот, THB</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Оборот за период</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-4 pb-3">
                 <p className="text-2xl font-bold tabular-nums text-green-500">
-                  {turnover?.totals.completedCount ?? 0}
+                  {completedInPeriod.length}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">Завершено сделок</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-4 pb-3">
-                <p className="text-2xl font-bold tabular-nums">{turnover?.totals.openCount ?? 0}</p>
+                <p className="text-2xl font-bold tabular-nums">{openOrders.length}</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">Активные заявки</p>
               </CardContent>
             </Card>
@@ -487,8 +434,72 @@ export function SaasDashboard() {
               </CardContent>
             </Card>
 
-            {/* Последние заявки */}
+            {/* Быстрый расчёт (мини-обменник) */}
             <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-base">Быстрый расчёт</CardTitle>
+                <Button size="sm" variant="outline" onClick={() => navigate("/exchange")}>
+                  Обменник
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {activeRates.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    Сначала настройте курсы
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1 space-y-1">
+                        <span className="text-xs text-muted-foreground">Отдаёт клиент</span>
+                        <Select
+                          value={estAsset || activeRates[0]?.asset || ""}
+                          onValueChange={setEstAsset}
+                        >
+                          <SelectTrigger className="h-9">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {activeRates.map((r) => (
+                              <SelectItem key={r.id} value={r.asset}>
+                                {r.asset} → {r.quoteAsset}
+                                {r.network ? ` (${r.network})` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex-1 space-y-1">
+                        <span className="text-xs text-muted-foreground">Сумма</span>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          placeholder="0"
+                          value={estAmount}
+                          onChange={(e) => setEstAmount(e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+                    </div>
+                    <div className="rounded-md bg-muted/40 px-3 py-2.5">
+                      <p className="text-xs text-muted-foreground">Клиент получит ≈</p>
+                      <p className="text-xl font-bold tabular-nums">
+                        {estResult !== null ? `${fmtMoney(estResult)} ${estRate?.quoteAsset}` : "—"}
+                      </p>
+                      {estRate && (
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          ориентировочно по базовому курсу {fmtRate(estRate.baseRate)}
+                          {estRate.marginPct ? ` − ${estRate.marginPct}% маржа` : ""}
+                        </p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Последние заявки */}
+            <Card className="lg:col-span-2">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                 <CardTitle className="text-base">Последние заявки</CardTitle>
                 <Button size="sm" variant="outline" onClick={() => navigate("/exchange")}>
@@ -596,178 +607,6 @@ export function SaasDashboard() {
           )}
         </div>
       )}
-
-      {isExchange && (
-        <div className="flex items-center gap-3 pt-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            База знаний бота
-          </span>
-          <span className="h-px flex-1 bg-border" />
-        </div>
-      )}
-
-      <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Добавить документ</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/30 px-4 py-8 text-center transition-colors hover:border-primary/50 hover:bg-muted/50">
-                <span className="grid size-10 place-items-center rounded-full bg-primary/15 text-primary">
-                  <UploadIcon className="size-5" />
-                </span>
-                <span className="text-sm font-medium">Загрузить файл</span>
-                <span className="text-xs text-muted-foreground">.txt, .md, .json, .pdf</span>
-                <input
-                  type="file"
-                  accept=".txt,.md,.json,.pdf"
-                  onChange={handleFileUpload}
-                  disabled={uploading}
-                  className="sr-only"
-                />
-              </label>
-
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t" />
-                </div>
-                <div className="relative flex justify-center">
-                  <span className="bg-card px-2 text-xs uppercase tracking-wider text-muted-foreground">
-                    или вставить текст
-                  </span>
-                </div>
-              </div>
-
-              <form onSubmit={handlePaste} className="space-y-3">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Input
-                    placeholder="Заголовок"
-                    value={pasteTitle}
-                    onChange={(e) => setPasteTitle(e.target.value)}
-                  />
-                  <Input
-                    placeholder="Тема (опционально)"
-                    value={pasteTopic}
-                    onChange={(e) => setPasteTopic(e.target.value)}
-                  />
-                </div>
-                <Textarea
-                  placeholder="Текст документа…"
-                  rows={6}
-                  className="font-mono text-xs"
-                  value={pasteBody}
-                  onChange={(e) => setPasteBody(e.target.value)}
-                />
-                <Button type="submit" disabled={uploading || !pasteBody.trim()}>
-                  {uploading ? "Загружаем…" : "Добавить документ"}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <CardTitle>Документы</CardTitle>
-              <Badge variant="secondary">{docs.length}</Badge>
-            </CardHeader>
-            <CardContent>
-              {docs.length === 0 ? (
-                <p className="py-8 text-center text-sm text-muted-foreground">
-                  Документов пока нет. Загрузите первый ↑
-                </p>
-              ) : (
-                <ul className="divide-y">
-                  {docs.map((d) => (
-                    <li key={d.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-                      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
-                        <FileTextIcon className="size-4" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{d.title}</p>
-                        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                          {d.topic && <Badge variant="outline">{d.topic}</Badge>}
-                          <span className="font-mono">{d.source}</span>
-                          <span>· {new Date(d.createdAt * 1000).toLocaleDateString("ru")}</span>
-                        </p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-muted-foreground hover:text-destructive"
-                        onClick={() => handleDelete(d.id)}
-                      >
-                        <Trash2Icon className="size-4" />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* KB Suggestions */}
-          {suggestions.length > 0 && (
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="flex items-center gap-2">
-                  <LightbulbIcon className="size-4 text-amber-500" />
-                  Предложения в базу знаний
-                </CardTitle>
-                <Badge variant="secondary">{suggestions.length}</Badge>
-              </CardHeader>
-              <CardContent>
-                <ul className="divide-y">
-                  {suggestions.map((s) => (
-                    <li key={s.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
-                      <p className="text-sm font-medium">{s.questionText}</p>
-                      <textarea
-                        className="min-h-[80px] w-full rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-                        placeholder="Ответ для добавления в базу знаний…"
-                        value={suggestionDrafts[s.id] ?? ""}
-                        onChange={(e) =>
-                          setSuggestionDrafts((prev) => ({ ...prev, [s.id]: e.target.value }))
-                        }
-                      />
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          disabled={decidingId === s.id || !(suggestionDrafts[s.id] ?? "").trim()}
-                          onClick={() => handleDecide(s.id, "approve")}
-                        >
-                          <CheckIcon className="mr-1.5 size-3.5" />
-                          Добавить в КБ
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-muted-foreground hover:text-destructive"
-                          disabled={decidingId === s.id}
-                          onClick={() => handleDecide(s.id, "reject")}
-                        >
-                          <XIcon className="mr-1.5 size-3.5" />
-                          Отклонить
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {/* Тариф скрыт — кастомная версия для обменки (без SaaS-биллинга). */}
-        {SHOW_PLAN_WIDGET && billing && (
-          <div className="space-y-6">
-            <PlanWidget
-              billing={billing}
-              stripeEnabled={stripeEnabled}
-              onRefresh={refreshBilling}
-            />
-          </div>
-        )}
-      </div>
     </div>
   );
 }

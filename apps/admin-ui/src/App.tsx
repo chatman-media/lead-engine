@@ -15,6 +15,7 @@ import { SaasDashboard } from "./pages/SaasDashboard.tsx";
 import { SaasDiagnostics } from "./pages/SaasDiagnostics.tsx";
 import { SaasExchange } from "./pages/SaasExchange.tsx";
 import { SaasExperiments } from "./pages/SaasExperiments.tsx";
+import { SaasFaq } from "./pages/SaasFaq.tsx";
 import { SaasForgotPassword } from "./pages/SaasForgotPassword.tsx";
 import { SaasFunnel } from "./pages/SaasFunnel.tsx";
 import { SaasHooks } from "./pages/SaasHooks.tsx";
@@ -158,6 +159,7 @@ export function App() {
                 <Route path="/profile" element={<SaasProfile />} />
                 <Route path="/referral" element={<SaasReferral />} />
                 <Route path="/integrations" element={<SaasIntegrations />} />
+                <Route path="/faq" element={<SaasFaq />} />
                 <Route path="/team" element={<SaasTeam />} />
                 <Route path="/audit" element={<SaasAudit />} />
                 <Route path="/diagnostics" element={<SaasDiagnostics />} />
