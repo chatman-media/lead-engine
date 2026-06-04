@@ -3,6 +3,7 @@ import {
 	DrizzleKbStore,
 	ExperimentsRepo,
 	getDecryptedSecret,
+	type ITranscriber,
 	LlmMemoryExtractor,
 	LlmReplyStrategy,
 	loadExperimentVariants,
@@ -68,6 +69,7 @@ import {
 	type LoadedLlmConfigs,
 	type ResolvedLlmConfig,
 } from "./lib/llm-config-loader.ts";
+import { OpenRouterTranscriber } from "./lib/openrouter-transcriber.ts";
 import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
 
 /**
@@ -577,21 +579,22 @@ export function makeReplyStrategy(
  * Работает только для провайдеров с apiKey (openai, openrouter, custom).
  * Возвращает null если ни у одного тенанта нет подходящего ключа.
  */
-// Whisper требует endpoint /audio/transcriptions — его даёт OpenAI (и Groq,
-// openai-совместимо), но НЕ OpenRouter (там только chat). Поэтому ключ берём
-// от любого openai-назначения тенанта (chat → embed → vision), а не от chat
-// вслепую — иначе с OpenRouter-чатом транскрипция голосовых всегда падала.
-const AUDIO_CAPABLE_PROVIDERS = new Set(["openai"]);
+// STT-эндпоинт /audio/transcriptions дают OpenAI (multipart, + Groq openai-
+// совместимо) и OpenRouter (JSON+base64, модели whisper/chirp). НЕ-аудио
+// провайдеры (ollama/anthropic/jina/cohere) тут не подходят.
+const AUDIO_CAPABLE_PROVIDERS = new Set(["openai", "openrouter"]);
 
 function pickTranscriberConfig(
 	ref: LoadedRef,
 	tenantId: number,
 ): { cfg: ResolvedLlmConfig; dedicated: boolean } | null {
 	// 1) Явный purpose 'transcribe' (любой провайдер с ключом — пользователь сам
-	//    выбрал endpoint; для Groq: provider=openai + baseUrl Groq) — приоритет.
+	//    выбрал модель/endpoint: OpenAI whisper-1, Groq, OpenRouter chirp-3) — приоритет.
 	const dedicated = getConfig(ref.current, tenantId, "transcribe");
 	if (dedicated?.apiKey) return { cfg: dedicated, dedicated: true };
-	// 2) Фолбэк: ключ от любого openai-назначения (chat → embed → vision).
+	// 2) Фолбэк: ключ от любого аудио-способного назначения (chat → embed → vision).
+	//    Так голос расшифровывается даже без отдельного ключа — на существующем
+	//    OpenRouter- или OpenAI-ключе чата.
 	for (const purpose of ["chat", "embed", "vision"] as const) {
 		const cfg = getConfig(ref.current, tenantId, purpose);
 		if (cfg?.apiKey && AUDIO_CAPABLE_PROVIDERS.has(cfg.provider)) {
@@ -601,9 +604,32 @@ function pickTranscriberConfig(
 	return null;
 }
 
+/** Строит транскрайбер под провайдера. Модель берётся только для выделенного
+ *  transcribe-конфига; в фолбэке — дефолтная STT-модель провайдера. */
+function buildTranscriber(
+	provider: string,
+	apiKey: string,
+	baseUrl: string | undefined,
+	model: string | undefined,
+): ITranscriber {
+	if (provider === "openrouter") {
+		return new OpenRouterTranscriber({
+			apiKey,
+			...(baseUrl ? { baseUrl } : {}),
+			...(model ? { model } : {}),
+		});
+	}
+	// openai (+ Groq через baseUrl) — multipart Whisper API.
+	return new WhisperTranscriber({
+		apiKey,
+		...(baseUrl ? { baseUrl } : {}),
+		...(model ? { model } : {}),
+	});
+}
+
 export function makeTranscriberResolver(
 	ref: LoadedRef,
-): ((tenantId: number) => WhisperTranscriber | null) | null {
+): ((tenantId: number) => ITranscriber | null) | null {
 	const anyAudioKey = [...ref.current.byTenant.keys()].some(
 		(tenantId) => pickTranscriberConfig(ref, tenantId) !== null,
 	);
@@ -613,13 +639,14 @@ export function makeTranscriberResolver(
 		const apiKey = picked?.cfg.apiKey;
 		if (!apiKey) return null;
 		const { cfg, dedicated } = picked;
-		return new WhisperTranscriber({
+		// Модель берём только из выделенного transcribe-конфига — у chat/embed/
+		// vision модель не для аудио, поэтому в фолбэке используем дефолтную STT.
+		return buildTranscriber(
+			cfg.provider,
 			apiKey,
-			...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
-			// Модель Whisper берём только из выделенного transcribe-конфига —
-			// у chat/embed/vision модель не для аудио (whisper-1 по умолчанию).
-			...(dedicated && cfg.model ? { model: cfg.model } : {}),
-		});
+			cfg.baseUrl,
+			dedicated ? cfg.model : undefined,
+		);
 	};
 }
 

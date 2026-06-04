@@ -104,10 +104,10 @@ const PURPOSE_META: Record<LlmPurpose, PurposeMeta> = {
     providers: ["jina", "cohere"],
   },
   transcribe: {
-    label: "Расшифровка голоса (Whisper)",
-    desc: "Распознавание голосовых (OpenAI / Groq)",
+    label: "Расшифровка голоса",
+    desc: "Распознавание голосовых (OpenRouter / OpenAI / Groq)",
     required: false,
-    providers: ["openai"],
+    providers: ["openrouter", "openai"],
   },
 };
 

@@ -94,10 +94,10 @@ const PURPOSES: {
   },
   {
     value: "transcribe",
-    label: "Расшифровка голоса (Whisper)",
-    hint: "Распознавание голосовых сообщений. OpenAI (whisper-1) или Groq (whisper-large-v3 — выберите OpenAI и впишите Base URL https://api.groq.com/openai/v1). С OpenRouter не работает.",
-    defaultProvider: "openai",
-    defaultModel: "whisper-1",
+    label: "Расшифровка голоса",
+    hint: "Распознавание голосовых. OpenRouter: модель google/chirp-3 или openai/whisper-1 (тем же ключом, что чат). OpenAI: whisper-1. Groq: выберите OpenAI + Base URL https://api.groq.com/openai/v1, модель whisper-large-v3. Если не задать — возьмётся ключ чата/эмбеддингов (если это OpenAI/OpenRouter).",
+    defaultProvider: "openrouter",
+    defaultModel: "google/chirp-3",
   },
 ];
 
