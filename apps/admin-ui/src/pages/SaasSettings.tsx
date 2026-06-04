@@ -92,6 +92,13 @@ const PURPOSES: {
     defaultProvider: "jina",
     defaultModel: "jina-reranker-v2-base-multilingual",
   },
+  {
+    value: "transcribe",
+    label: "Расшифровка голоса (Whisper)",
+    hint: "Распознавание голосовых сообщений. OpenAI (whisper-1) или Groq (whisper-large-v3 — выберите OpenAI и впишите Base URL https://api.groq.com/openai/v1). С OpenRouter не работает.",
+    defaultProvider: "openai",
+    defaultModel: "whisper-1",
+  },
 ];
 
 interface PurposeForm {

@@ -586,10 +586,17 @@ const AUDIO_CAPABLE_PROVIDERS = new Set(["openai"]);
 function pickTranscriberConfig(
 	ref: LoadedRef,
 	tenantId: number,
-): ResolvedLlmConfig | null {
+): { cfg: ResolvedLlmConfig; dedicated: boolean } | null {
+	// 1) Явный purpose 'transcribe' (любой провайдер с ключом — пользователь сам
+	//    выбрал endpoint; для Groq: provider=openai + baseUrl Groq) — приоритет.
+	const dedicated = getConfig(ref.current, tenantId, "transcribe");
+	if (dedicated?.apiKey) return { cfg: dedicated, dedicated: true };
+	// 2) Фолбэк: ключ от любого openai-назначения (chat → embed → vision).
 	for (const purpose of ["chat", "embed", "vision"] as const) {
 		const cfg = getConfig(ref.current, tenantId, purpose);
-		if (cfg?.apiKey && AUDIO_CAPABLE_PROVIDERS.has(cfg.provider)) return cfg;
+		if (cfg?.apiKey && AUDIO_CAPABLE_PROVIDERS.has(cfg.provider)) {
+			return { cfg, dedicated: false };
+		}
 	}
 	return null;
 }
@@ -602,11 +609,16 @@ export function makeTranscriberResolver(
 	);
 	if (!anyAudioKey) return null;
 	return (tenantId: number) => {
-		const cfg = pickTranscriberConfig(ref, tenantId);
-		if (!cfg?.apiKey) return null;
+		const picked = pickTranscriberConfig(ref, tenantId);
+		const apiKey = picked?.cfg.apiKey;
+		if (!apiKey) return null;
+		const { cfg, dedicated } = picked;
 		return new WhisperTranscriber({
-			apiKey: cfg.apiKey,
+			apiKey,
 			...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
+			// Модель Whisper берём только из выделенного transcribe-конфига —
+			// у chat/embed/vision модель не для аудио (whisper-1 по умолчанию).
+			...(dedicated && cfg.model ? { model: cfg.model } : {}),
 		});
 	};
 }

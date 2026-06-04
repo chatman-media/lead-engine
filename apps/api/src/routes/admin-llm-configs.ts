@@ -36,10 +36,17 @@ export interface AdminLlmConfigsRoutesOpts {
   onReload?: (tenantId: number) => Promise<void>;
 }
 
-type Purpose = "chat" | "embed" | "vision" | "judge" | "reranker";
+type Purpose = "chat" | "embed" | "vision" | "judge" | "reranker" | "transcribe";
 type Provider = "openai" | "openrouter" | "ollama" | "anthropic" | "jina" | "cohere";
 
-const PURPOSES: readonly Purpose[] = ["chat", "embed", "vision", "judge", "reranker"];
+const PURPOSES: readonly Purpose[] = [
+  "chat",
+  "embed",
+  "vision",
+  "judge",
+  "reranker",
+  "transcribe",
+];
 const PROVIDERS: readonly Provider[] = [
   "openai",
   "openrouter",

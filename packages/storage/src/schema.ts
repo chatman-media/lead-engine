@@ -909,7 +909,7 @@ export const llmProviderConfigs = pgTable("llm_provider_configs", {
 }, (t) => [
   check(
     "llm_configs_purpose_check",
-    sql`${t.purpose} IN ('chat','embed','vision','judge','reranker')`,
+    sql`${t.purpose} IN ('chat','embed','vision','judge','reranker','transcribe')`,
   ),
   check(
     "llm_configs_provider_check",

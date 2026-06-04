@@ -37,8 +37,8 @@ import {
   type LlmProvider,
   type LlmPurpose,
   type OnboardingStatus,
-  type VerticalInfo,
   saas,
+  type VerticalInfo,
 } from "../api/saas.ts";
 
 /**
@@ -103,11 +103,22 @@ const PURPOSE_META: Record<LlmPurpose, PurposeMeta> = {
     required: false,
     providers: ["jina", "cohere"],
   },
+  transcribe: {
+    label: "Расшифровка голоса (Whisper)",
+    desc: "Распознавание голосовых (OpenAI / Groq)",
+    required: false,
+    providers: ["openai"],
+  },
 };
 
 /** Пример модели под (провайдер × назначение) — для placeholder поля «Модель». */
 const MODEL_PLACEHOLDER: Partial<Record<LlmProvider, Partial<Record<LlmPurpose, string>>>> = {
-  openai: { chat: "gpt-4o-mini", embed: "text-embedding-3-small", vision: "gpt-4o", judge: "gpt-4o" },
+  openai: {
+    chat: "gpt-4o-mini",
+    embed: "text-embedding-3-small",
+    vision: "gpt-4o",
+    judge: "gpt-4o",
+  },
   openrouter: {
     chat: "google/gemini-2.5-flash",
     embed: "google/gemini-embedding-2",
@@ -153,7 +164,13 @@ interface KeyForm {
   embedDim: string;
 }
 
-const EMPTY_KEY_FORM: KeyForm = { provider: "openai", model: "", apiKey: "", baseUrl: "", embedDim: "" };
+const EMPTY_KEY_FORM: KeyForm = {
+  provider: "openai",
+  model: "",
+  apiKey: "",
+  baseUrl: "",
+  embedDim: "",
+};
 
 const OLLAMA_PRESETS: Partial<Record<LlmPurpose, { model: string; embedDim?: string }>> = {
   chat: { model: "llama3.2" },
@@ -168,8 +185,16 @@ const REQUISITE_TYPES: { key: string; label: string; placeholder: string }[] = [
   { key: "exchange_wallet_btc_default", label: "BTC — адрес", placeholder: "bc1..." },
   { key: "exchange_wallet_eth_erc20", label: "ETH ERC20 — адрес", placeholder: "0x..." },
   { key: "exchange_binance_id", label: "Binance ID (P2P)", placeholder: "123456789" },
-  { key: "exchange_fiat_payment_url", label: "СБП / платёжная ссылка (RUB)", placeholder: "https://..." },
-  { key: "exchange_rub_card_requisites", label: "Карта / телефон для RUB", placeholder: "2200… / +7…" },
+  {
+    key: "exchange_fiat_payment_url",
+    label: "СБП / платёжная ссылка (RUB)",
+    placeholder: "https://...",
+  },
+  {
+    key: "exchange_rub_card_requisites",
+    label: "Карта / телефон для RUB",
+    placeholder: "2200… / +7…",
+  },
 ];
 
 /** Только ключи-реквизиты приёма (кошельки + фиксированные платёжные). */
@@ -296,7 +321,13 @@ export function SaasOnboarding() {
     { id: "channel", label: "Канал", required: true, done: channelDone, visible: true },
     { id: "llm", label: "LLM", required: true, done: chatDone, visible: true },
     { id: "ex_rates", label: "Курсы", required: true, done: ratesDone, visible: isExchange },
-    { id: "ex_requisites", label: "Реквизиты", required: true, done: requisitesDone, visible: isExchange },
+    {
+      id: "ex_requisites",
+      label: "Реквизиты",
+      required: true,
+      done: requisitesDone,
+      visible: isExchange,
+    },
     { id: "kb", label: "База знаний", required: false, done: kbDone, visible: true },
     { id: "ex_business", label: "Данные", required: false, done: bizSaved, visible: isExchange },
     { id: "done", label: "Готово", required: false, done: false, visible: true },
@@ -346,7 +377,8 @@ export function SaasOnboarding() {
     ]);
     setVerticals(verts.items);
     setStatus(st);
-    if (st?.funnelInstalled && st.vertical) setInstalledVertical((prev) => prev ?? st.vertical ?? null);
+    if (st?.funnelInstalled && st.vertical)
+      setInstalledVertical((prev) => prev ?? st.vertical ?? null);
     let docItems: KbDoc[] = [];
     try {
       docItems = (await saas.listDocs()).items;
@@ -393,7 +425,10 @@ export function SaasOnboarding() {
       const configured = new Set(cfg.items.map((c) => c.purpose));
       for (const p of ALL_PURPOSES) {
         if (!configured.has(p) && PURPOSE_META[p].providers.includes(primary as LlmProvider)) {
-          setKeyForms((prev) => ({ ...prev, [p]: { ...prev[p], provider: primary as LlmProvider } }));
+          setKeyForms((prev) => ({
+            ...prev,
+            [p]: { ...prev[p], provider: primary as LlmProvider },
+          }));
         }
       }
     }
@@ -410,38 +445,44 @@ export function SaasOnboarding() {
         const exch = res.status?.isExchange === true;
         const list = (
           [
-          { id: "vertical", label: "", required: true, done: !!res.status?.funnelInstalled, visible: true },
-          {
-            id: "channel",
-            label: "",
-            required: true,
-            done: res.ch.some((c) => c.status === "active"),
-            visible: true,
-          },
-          {
-            id: "llm",
-            label: "",
-            required: true,
-            done: configReady(res.cfg.find((c) => c.purpose === "chat")),
-            visible: true,
-          },
-          {
-            id: "ex_rates",
-            label: "",
-            required: true,
-            done: res.rates.some((r) => r.isActive),
-            visible: exch,
-          },
-          {
-            id: "ex_requisites",
-            label: "",
-            required: true,
-            done: (res.status?.requisiteCount ?? 0) >= 1,
-            visible: exch,
-          },
-          { id: "kb", label: "", required: false, done: res.kb.length > 0, visible: true },
-          { id: "ex_business", label: "", required: false, done: false, visible: exch },
-          { id: "done", label: "", required: false, done: false, visible: true },
+            {
+              id: "vertical",
+              label: "",
+              required: true,
+              done: !!res.status?.funnelInstalled,
+              visible: true,
+            },
+            {
+              id: "channel",
+              label: "",
+              required: true,
+              done: res.ch.some((c) => c.status === "active"),
+              visible: true,
+            },
+            {
+              id: "llm",
+              label: "",
+              required: true,
+              done: configReady(res.cfg.find((c) => c.purpose === "chat")),
+              visible: true,
+            },
+            {
+              id: "ex_rates",
+              label: "",
+              required: true,
+              done: res.rates.some((r) => r.isActive),
+              visible: exch,
+            },
+            {
+              id: "ex_requisites",
+              label: "",
+              required: true,
+              done: (res.status?.requisiteCount ?? 0) >= 1,
+              visible: exch,
+            },
+            { id: "kb", label: "", required: false, done: res.kb.length > 0, visible: true },
+            { id: "ex_business", label: "", required: false, done: false, visible: exch },
+            { id: "done", label: "", required: false, done: false, visible: true },
           ] satisfies StepDef[]
         ).filter((s) => s.visible);
         resumeStep(list);
@@ -616,7 +657,12 @@ export function SaasOnboarding() {
     const existing = configs.find((c) => c.purpose === purpose);
     // Ключ обязателен, только если у этого назначения его нет И нет сохранённого
     // ключа того же провайдера в другом назначении (бэкенд переиспользует его).
-    if (f.provider !== "ollama" && !f.apiKey && !existing?.hasSecret && !providerHasKey(f.provider)) {
+    if (
+      f.provider !== "ollama" &&
+      !f.apiKey &&
+      !existing?.hasSecret &&
+      !providerHasKey(f.provider)
+    ) {
       setError(`${purpose}: укажите API key`);
       return;
     }
@@ -695,7 +741,10 @@ export function SaasOnboarding() {
             : 0;
         return {
           ...p,
-          tiers: [...p.tiers, { minThb, maxThb: null, displayRate, deviationPct: dev, formula: "" }],
+          tiers: [
+            ...p.tiers,
+            { minThb, maxThb: null, displayRate, deviationPct: dev, formula: "" },
+          ],
         };
       }),
     );
@@ -851,8 +900,8 @@ export function SaasOnboarding() {
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">Настройка кабинета</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Заполните настройки — и бот начнёт отвечать вашим клиентам. Необязательные шаги
-            можно пропустить.
+            Заполните настройки — и бот начнёт отвечать вашим клиентам. Необязательные шаги можно
+            пропустить.
           </p>
         </div>
 
@@ -907,8 +956,8 @@ export function SaasOnboarding() {
             <CardHeader>
               <CardTitle>Тип бизнеса</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Выберите шаблон — он настроит этапы воронки, навыки, стили продаж и стартовую
-                базу знаний. Для обменного пункта выберите «Обменник».
+                Выберите шаблон — он настроит этапы воронки, навыки, стили продаж и стартовую базу
+                знаний. Для обменного пункта выберите «Обменник».
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -959,8 +1008,8 @@ export function SaasOnboarding() {
             <CardHeader>
               <CardTitle>Подключите канал</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Откуда приходят лиды? Достаточно одного мессенджера — личный Telegram или
-                отдельный бот.
+                Откуда приходят лиды? Достаточно одного мессенджера — личный Telegram или отдельный
+                бот.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -984,7 +1033,9 @@ export function SaasOnboarding() {
                 >
                   <UserIcon className="mt-0.5 size-4 shrink-0" />
                   <span>
-                    <span className="block text-sm font-medium text-foreground">Личный аккаунт</span>
+                    <span className="block text-sm font-medium text-foreground">
+                      Личный аккаунт
+                    </span>
                     <span className="block text-xs">Лиды пишут вам в личку</span>
                   </span>
                 </button>
@@ -1171,8 +1222,8 @@ export function SaasOnboarding() {
               <CardTitle>LLM-провайдеры</CardTitle>
               <p className="text-sm text-muted-foreground">
                 Chat обязателен — ответы бота. Остальное по желанию: embeddings (база знаний),
-                vision (фото/документы), judge (оценка/сравнение), reranker (точность поиска).
-                Для Ollama API-ключ не нужен.
+                vision (фото/документы), judge (оценка/сравнение), reranker (точность поиска). Для
+                Ollama API-ключ не нужен.
               </p>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -1300,8 +1351,8 @@ export function SaasOnboarding() {
                         {purpose === "embed" && (
                           <p className="sm:col-span-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
                             Оставьте <code className="font-mono">1536</code> — под базу знаний.
-                            Вектор любой современной модели приводится к 1536 автоматически
-                            (нужна модель с размерностью ≥ 1536).
+                            Вектор любой современной модели приводится к 1536 автоматически (нужна
+                            модель с размерностью ≥ 1536).
                           </p>
                         )}
                         {f.provider === "ollama" && OLLAMA_PRESETS[purpose] && (
@@ -1356,9 +1407,9 @@ export function SaasOnboarding() {
             <CardHeader>
               <CardTitle>Курсы обмена</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Актуальный курс берём с рынка (Binance + ЦБ) и авто-обновляем. Вы задаёте свои
-                курсы по диапазонам сумм — отдельно для рублей и USDT (как на табло). Бот
-                выдаёт клиенту ровно эти значения.
+                Актуальный курс берём с рынка (Binance + ЦБ) и авто-обновляем. Вы задаёте свои курсы
+                по диапазонам сумм — отдельно для рублей и USDT (как на табло). Бот выдаёт клиенту
+                ровно эти значения.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1419,7 +1470,10 @@ export function SaasOnboarding() {
                             value={t.maxThb ?? ""}
                             onChange={(e) =>
                               patchTier(pIdx, tIdx, {
-                                maxThb: e.target.value.trim() === "" ? null : Number.parseFloat(e.target.value),
+                                maxThb:
+                                  e.target.value.trim() === ""
+                                    ? null
+                                    : Number.parseFloat(e.target.value),
                               })
                             }
                           />
@@ -1429,7 +1483,9 @@ export function SaasOnboarding() {
                             step="any"
                             value={Number.isFinite(t.displayRate) ? t.displayRate : ""}
                             onChange={(e) =>
-                              patchTier(pIdx, tIdx, { displayRate: Number.parseFloat(e.target.value) })
+                              patchTier(pIdx, tIdx, {
+                                displayRate: Number.parseFloat(e.target.value),
+                              })
                             }
                           />
                           <span className="text-right text-xs text-muted-foreground">
@@ -1494,8 +1550,13 @@ export function SaasOnboarding() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Сохранено реквизитов: <code className="font-mono">{status?.requisiteCount ?? 0}</code>
-                {requisitesDone && <Badge variant="success" className="ml-2">готово</Badge>}
+                Сохранено реквизитов:{" "}
+                <code className="font-mono">{status?.requisiteCount ?? 0}</code>
+                {requisitesDone && (
+                  <Badge variant="success" className="ml-2">
+                    готово
+                  </Badge>
+                )}
               </p>
 
               {savedRequisites.filter((r) => isRequisiteKey(r.key)).length > 0 && (
@@ -1557,7 +1618,6 @@ export function SaasOnboarding() {
             </CardContent>
           </Card>
         )}
-
 
         {currentId === "kb" && (
           <Card>
