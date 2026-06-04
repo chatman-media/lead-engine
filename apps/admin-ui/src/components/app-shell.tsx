@@ -108,6 +108,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Система",
     items: [
       { to: "/notifications", label: "Уведомления", icon: BellIcon },
+      { to: "/billing", label: "LLM-использование", icon: BarChart2Icon },
       { to: "/referral", label: "Партнёры", icon: LinkIcon, hideForExchange: true },
       { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
     ],
@@ -295,11 +296,6 @@ function AccountDropdown({
         <DropdownMenuItem asChild>
           <Link to="/team">
             <UsersIcon /> Команда
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/billing">
-            <BarChart2Icon /> LLM-использование
           </Link>
         </DropdownMenuItem>
       </DropdownMenuGroup>
