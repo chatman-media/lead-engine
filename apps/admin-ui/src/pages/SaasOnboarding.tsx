@@ -172,6 +172,25 @@ const REQUISITE_TYPES: { key: string; label: string; placeholder: string }[] = [
   { key: "exchange_rub_card_requisites", label: "Карта / телефон для RUB", placeholder: "2200… / +7…" },
 ];
 
+/** Только ключи-реквизиты приёма (кошельки + фиксированные платёжные). */
+function isRequisiteKey(key: string): boolean {
+  return (
+    key.startsWith("exchange_wallet_") ||
+    ["exchange_binance_id", "exchange_fiat_payment_url", "exchange_rub_card_requisites"].includes(
+      key,
+    )
+  );
+}
+
+/** Человекочитаемая подпись реквизита по ключу. */
+function requisiteLabel(key: string): string {
+  const known = REQUISITE_TYPES.find((t) => t.key === key);
+  if (known) return known.label;
+  const m = /^exchange_wallet_(.+)$/.exec(key);
+  if (m) return `Кошелёк ${m[1].replace(/_/g, " ").toUpperCase()}`;
+  return key;
+}
+
 function configReady(cfg: LlmConfig | undefined): boolean {
   if (!cfg) return false;
   return cfg.provider === "ollama" || cfg.hasSecret;
@@ -242,6 +261,7 @@ export function SaasOnboarding() {
   const [reqType, setReqType] = useState(REQUISITE_TYPES[0]!.key);
   const [reqValue, setReqValue] = useState("");
   const [savingReq, setSavingReq] = useState(false);
+  const [savedRequisites, setSavedRequisites] = useState<Array<{ key: string; value: string }>>([]);
 
   // Exchange — бизнес-данные (информационные)
   const [bizForm, setBizForm] = useState({
@@ -339,10 +359,17 @@ export function SaasOnboarding() {
     } catch {
       // не-обменный тенант / нет доступа — игнорируем
     }
+    let reqItems: Array<{ key: string; value: string }> = [];
+    try {
+      reqItems = (await saas.exchangeRequisites()).items;
+    } catch {
+      // нет доступа / не-обменный — игнорируем
+    }
     setChannels(ch.items);
     setConfigs(cfg.items);
     setDocs(docItems);
     setRates(rateItems);
+    setSavedRequisites(reqItems);
     for (const c of cfg.items) {
       if ((ALL_PURPOSES as string[]).includes(c.purpose)) {
         setKeyForms((prev) => ({
@@ -1470,6 +1497,29 @@ export function SaasOnboarding() {
                 Сохранено реквизитов: <code className="font-mono">{status?.requisiteCount ?? 0}</code>
                 {requisitesDone && <Badge variant="success" className="ml-2">готово</Badge>}
               </p>
+
+              {savedRequisites.filter((r) => isRequisiteKey(r.key)).length > 0 && (
+                <ul className="space-y-1.5">
+                  {savedRequisites
+                    .filter((r) => isRequisiteKey(r.key))
+                    .map((r) => (
+                      <li
+                        key={r.key}
+                        className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                      >
+                        <CheckIcon className="size-4 shrink-0 text-[var(--success)]" />
+                        <span className="shrink-0 font-medium">{requisiteLabel(r.key)}:</span>
+                        <span
+                          className="truncate font-mono text-xs text-muted-foreground"
+                          title={r.value}
+                        >
+                          {r.value}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              )}
+
               <form onSubmit={handleSaveRequisite} className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>Тип реквизита</Label>

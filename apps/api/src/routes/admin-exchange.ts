@@ -8,6 +8,7 @@
 
 import {
 	type Db,
+	getDecryptedSecret,
 	setEncryptedSecret,
 	withTenant,
 } from "@chatman-media/conversation-engine";
@@ -15,8 +16,9 @@ import {
 	exchangeOrders,
 	exchangeRates,
 	exchangeRateTiers,
+	tenantSecrets,
 } from "@chatman-media/storage";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, like, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import {
 	buildDefaultRateCardProposal,
@@ -368,6 +370,38 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 	});
 
 	// ── Реквизиты (секреты): кошельки, Binance ID, QR/карта ────────────────────
+	// GET — список сохранённых exchange_*-реквизитов с расшифрованными значениями
+	// (это не секреты в строгом смысле — бот всё равно отдаёт их клиентам; нужны
+	// владельцу для просмотра/проверки). Под withTenant (RLS).
+	app.get("/api/admin/exchange/requisites", async (c) => {
+		const tenantId = c.var.tenantId;
+		const items = await withTenant(opts.db, tenantId, async (tx) => {
+			const rows = await tx
+				.select({ key: tenantSecrets.key })
+				.from(tenantSecrets)
+				.where(and(eq(tenantSecrets.tenantId, tenantId), like(tenantSecrets.key, "exchange_%")));
+			const out: Array<{ key: string; value: string }> = [];
+			for (const row of rows) {
+				if (!isAllowedExchangeSecretKey(row.key)) continue;
+				let value = "";
+				try {
+					value =
+						(await getDecryptedSecret({
+							db: tx,
+							tenantId,
+							key: row.key,
+							masterKeyHex: opts.masterKeyHex,
+						})) ?? "";
+				} catch {
+					value = "";
+				}
+				out.push({ key: row.key, value });
+			}
+			return out;
+		});
+		return c.json({ items });
+	});
+
 	// Body: { key: 'exchange_wallet_*' | 'exchange_fiat_payment_url' |
 	//         'exchange_binance_id' | 'exchange_rub_card_requisites', value }
 	app.post("/api/admin/exchange/requisites", async (c) => {

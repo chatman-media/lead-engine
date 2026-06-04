@@ -1722,6 +1722,11 @@ export const saas = {
       body: JSON.stringify({ key, value }),
     });
   },
+  exchangeRequisites() {
+    return request<{ items: Array<{ key: string; value: string }> }>(
+      "/api/admin/exchange/requisites",
+    );
+  },
   exchangeOrders(status?: string) {
     const q = status ? `?status=${encodeURIComponent(status)}` : "";
     return request<{ orders: ExchangeOrder[] }>(`/api/admin/exchange/orders${q}`);
