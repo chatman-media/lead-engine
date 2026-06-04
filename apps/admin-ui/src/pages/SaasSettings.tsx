@@ -243,8 +243,11 @@ export function SaasSettings() {
     }
     const existing = configs.find((c) => c.purpose === purpose);
     const apiKey = providerKeys[f.provider].trim();
-    if (f.provider !== "ollama" && !apiKey && !existing?.hasSecret) {
-      setError(`Введите API-ключ для ${PROVIDER_LABEL[f.provider]} в разделе «Ключи провайдеров»`);
+    // Ключ нужен, только если: провайдер требует его (не ollama) И его ещё нигде
+    // нет — ни в этом назначении (existing.hasSecret), ни в другом с тем же
+    // провайдером (providerHasKey, ключ переиспользуется на бэкенде).
+    if (f.provider !== "ollama" && !apiKey && !existing?.hasSecret && !providerHasKey(f.provider)) {
+      setError(`Введите API-ключ ${PROVIDER_LABEL[f.provider]} в поле на этой карточке.`);
       return;
     }
     setSavingPurpose(purpose);
