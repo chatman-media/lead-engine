@@ -24,6 +24,25 @@ const STATUS_STYLE: Record<string, { label: string; cls: string; icon: typeof Ch
     skip: { label: "—", cls: "text-muted-foreground", icon: MinusCircleIcon },
   };
 
+/** Человеческая расшифровка причины сбоя по тексту ошибки провайдера. */
+function explainFailure(message: string | undefined): string | null {
+  if (!message) return null;
+  const m = message.toLowerCase();
+  if (/config not set|не настро|not configured/.test(m))
+    return "Конфиг есть в базе, но работающий бот его ещё не подхватил. Если только что меняли LLM — подождите минуту и перепроверьте (или перезапустите бота).";
+  if (/quota|insufficient|402|balance|недостат|credit|out of/.test(m))
+    return "Недостаточно средств или превышена квота у LLM-провайдера. Пополните баланс или смените ключ в «Настройки LLM».";
+  if (/401|unauthor|invalid api key|invalid_api_key|incorrect api key|forbidden|403/.test(m))
+    return "Неверный или отозванный API-ключ. Обновите ключ в «Настройки LLM».";
+  if (/429|rate.?limit|too many/.test(m))
+    return "Слишком много запросов к провайдеру (rate limit). Подождите и повторите.";
+  if (/timeout|timed out|etimedout|econnreset|fetch failed|network/.test(m))
+    return "Провайдер не ответил (таймаут/сеть). Проверьте Base URL и повторите.";
+  if (/404|model|not found/.test(m))
+    return "Провайдер не нашёл модель — проверьте название модели в «Настройки LLM».";
+  return null;
+}
+
 export function SaasDiagnostics() {
   const navigate = useNavigate();
   const [result, setResult] = useState<DiagnosticsResult | null>(null);
@@ -122,21 +141,29 @@ export function SaasDiagnostics() {
                 {result.checks.map((c) => {
                   const s = STATUS_STYLE[c.status] ?? STATUS_STYLE.skip!;
                   const Icon = s.icon;
+                  const hint = c.status === "fail" ? explainFailure(c.message) : null;
                   return (
-                    <li key={c.name} className="flex items-center gap-3 px-4 py-3">
-                      <Icon className={cn("size-5 shrink-0", s.cls)} />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium">{CHECK_LABELS[c.name] ?? c.name}</p>
+                    <li key={c.name} className="flex items-start gap-3 px-4 py-3">
+                      <Icon className={cn("mt-0.5 size-5 shrink-0", s.cls)} />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium">{CHECK_LABELS[c.name] ?? c.name}</p>
+                          {c.latencyMs !== undefined && (
+                            <span className="font-mono text-[11px] text-muted-foreground">
+                              {c.latencyMs}мс
+                            </span>
+                          )}
+                        </div>
+                        {hint && <p className="text-xs text-foreground">{hint}</p>}
                         {c.message && (
-                          <p className="truncate text-xs text-muted-foreground">{c.message}</p>
+                          <p className="break-words font-mono text-[11px] text-muted-foreground">
+                            {c.message}
+                          </p>
                         )}
                       </div>
-                      {c.latencyMs !== undefined && (
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {c.latencyMs}мс
-                        </span>
-                      )}
-                      <span className={cn("text-xs font-semibold", s.cls)}>{s.label}</span>
+                      <span className={cn("mt-0.5 shrink-0 text-xs font-semibold", s.cls)}>
+                        {s.label}
+                      </span>
                     </li>
                   );
                 })}
