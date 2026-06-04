@@ -101,6 +101,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/styles", label: "Стили", icon: PaletteIcon, hideForExchange: true },
       { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon, hideForExchange: true },
       { to: "/integrations", label: "Интеграции", icon: BlocksIcon },
+      { to: "/diagnostics", label: "Диагностика", icon: ActivityIcon },
     ],
   },
   {
@@ -299,11 +300,6 @@ function AccountDropdown({
         <DropdownMenuItem asChild>
           <Link to="/billing">
             <BarChart2Icon /> LLM-использование
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/diagnostics">
-            <ActivityIcon /> Диагностика
           </Link>
         </DropdownMenuItem>
       </DropdownMenuGroup>
