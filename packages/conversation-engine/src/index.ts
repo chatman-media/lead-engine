@@ -26,9 +26,13 @@ export {
   SkillOutcomesRepo,
   StylesRepo,
   type StyleRow,
+  type AdminNotificationRow,
+  type InformerPrefs,
+  type NewAdminNotification,
   NotificationsRepo,
   type NotificationRule,
   type OperatorSettings,
+  type OwnerSettings,
 } from "./dal/index.ts";
 export { NotificationService, type NotificationEvent } from "./notifications.ts";
 export {
@@ -44,6 +48,20 @@ export {
   ResendEmailSender,
   resolveOwnerContacts,
 } from "./ops-alerts.ts";
+export {
+  AdminInformer,
+  type AdminInformerDeps,
+  type InformerEvent,
+  type InformerLevel,
+  type InformerSeverity,
+  type InformerTopic,
+  INFORMER_TOPICS,
+  isMuted,
+  notificationEventToInformer,
+  opsAlertToInformer,
+  passesThreshold,
+  topicEnabled,
+} from "./admin-informer.ts";
 export { OperatorBotHandler } from "./operator-bot-handler.ts";
 // CoachAnalyzer переехал в @chatman-media/sales (sales-domain code).
 // Back-compat re-export невозможен — создал бы circular dep (sales импортит

@@ -22,6 +22,7 @@
 import { TelegramClient } from "@chatman-media/channel-telegram";
 import { admins, operatorSettings, tenants } from "@chatman-media/storage";
 import { and, eq, isNotNull } from "drizzle-orm";
+import type { AdminInformer } from "./admin-informer.ts";
 import type { Db } from "./dal/types.ts";
 import { withTenant } from "./with-tenant.ts";
 
@@ -75,6 +76,13 @@ export interface OpsAlertRouterDeps {
   telegram?: OpsTelegramSender | null;
   /** Анти-шторм: не повторять один (tenant, dedupKey) чаще, мс. Default 30 мин. */
   cooldownMs?: number;
+  /**
+   * Если задан — emit() делегирует доставку информеру владельца (уровни +
+   * дайджест + лента), а собственный Telegram/email-роутинг НЕ выполняется
+   * (чтобы не было дублей). ops-watch-sweep не трогаем: он по-прежнему зовёт
+   * sink.emit(). Без informer — standalone-поведение (back-compat для тестов).
+   */
+  informer?: AdminInformer;
   log?: { warn?: (msg: string, ctx?: unknown) => void; info?: (msg: string, ctx?: unknown) => void };
 }
 
@@ -145,6 +153,12 @@ export class OpsAlertRouter implements OpsAlertSink {
   }
 
   async emit(alert: OpsAlert): Promise<void> {
+    // Делегируем информеру (уровни/дайджест/лента) — единый путь доставки владельцу.
+    if (this.deps.informer) {
+      await this.deps.informer.emitOpsAlert(alert);
+      return;
+    }
+
     if (this.suppressed(alert, Date.now())) return;
 
     const owner = await resolveOwnerContacts(this.deps.db, alert.tenantId).catch((err) => {

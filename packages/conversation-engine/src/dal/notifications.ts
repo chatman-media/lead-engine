@@ -1,10 +1,33 @@
-import { eq, and, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { notificationRules, operatorSettings, notificationTemplates, notificationGroupTokens, type notificationRules as nrTable, type operatorSettings as osTable, type notificationTemplates as ntTable } from "@chatman-media/storage";
+import { admins, adminNotifications, notificationRules, operatorSettings, notificationTemplates, notificationGroupTokens, type adminNotifications as anTable, type notificationRules as nrTable, type operatorSettings as osTable, type notificationTemplates as ntTable } from "@chatman-media/storage";
 
 export type NotificationRule = typeof nrTable.$inferSelect;
 export type OperatorSettings = typeof osTable.$inferSelect;
 export type NotificationTemplate = typeof ntTable.$inferSelect;
+export type AdminNotificationRow = typeof anTable.$inferSelect;
+export type NewAdminNotification = typeof anTable.$inferInsert;
+
+/** Частичный апдейт informer-настроек владельца (см. миграцию 0032). */
+export type InformerPrefs = Partial<
+  Pick<
+    OperatorSettings,
+    | "informerLevel"
+    | "informerTopics"
+    | "informerDigest"
+    | "informerDigestHour"
+    | "informerTz"
+    | "informerMutedUntil"
+    | "informerLastDigestAt"
+  >
+>;
+
+/** Владелец тенанта (superadmin) + его operator_settings. */
+export interface OwnerSettings {
+  adminId: number;
+  email: string;
+  settings: OperatorSettings | undefined;
+}
 
 export class NotificationsRepo {
   constructor(private readonly db: PostgresJsDatabase) {}
@@ -203,5 +226,146 @@ export class NotificationsRepo {
 
   async deleteGroupLinkToken(token: string): Promise<void> {
     await this.db.delete(notificationGroupTokens).where(eq(notificationGroupTokens.token, token));
+  }
+
+  // ── Informer: владелец + настройки ────────────────────────────────────
+
+  /**
+   * Владелец тенанта (superadmin) + его operator_settings. admins под RLS —
+   * звать ВНУТРИ withTenant(tenantId), иначе вернёт 0 строк.
+   */
+  async resolveOwnerSettings(tenantId: number): Promise<OwnerSettings | null> {
+    const [owner] = await this.db
+      .select({ adminId: admins.id, email: admins.email })
+      .from(admins)
+      .where(and(eq(admins.tenantId, tenantId), eq(admins.role, "superadmin")))
+      .orderBy(admins.id)
+      .limit(1);
+    if (!owner) return null;
+    const settings = await this.findOperatorSettings(owner.adminId);
+    return { adminId: owner.adminId, email: owner.email, settings };
+  }
+
+  /** Резолв operator_settings по личному Telegram chat_id (для бот-команд). */
+  async findOperatorSettingsByChatId(chatId: string): Promise<OperatorSettings | undefined> {
+    const rows = await this.db
+      .select()
+      .from(operatorSettings)
+      .where(eq(operatorSettings.telegramChatId, chatId))
+      .limit(1);
+    return rows[0];
+  }
+
+  /**
+   * Частичное обновление informer-настроек владельца по adminId. С tenantId —
+   * upsert (создаёт строку, если её ещё нет — путь из UI до привязки Telegram);
+   * без tenantId — plain update (путь из бота, где строка уже есть).
+   */
+  async updateInformerPrefs(
+    adminId: number,
+    prefs: InformerPrefs,
+    tenantId?: number,
+  ): Promise<void> {
+    if (Object.keys(prefs).length === 0) return;
+    const now = Math.floor(Date.now() / 1000);
+    if (tenantId !== undefined) {
+      await this.db
+        .insert(operatorSettings)
+        .values({ adminId, tenantId, ...prefs })
+        .onConflictDoUpdate({
+          target: [operatorSettings.adminId],
+          set: { ...prefs, updatedAt: now },
+        });
+      return;
+    }
+    await this.db
+      .update(operatorSettings)
+      .set({ ...prefs, updatedAt: now })
+      .where(eq(operatorSettings.adminId, adminId));
+  }
+
+  // ── Informer: лента (admin_notifications) ─────────────────────────────
+
+  /** Пишет строку ленты, возвращает id. */
+  async insertAdminNotification(row: NewAdminNotification): Promise<number> {
+    const [ins] = await this.db
+      .insert(adminNotifications)
+      .values(row)
+      .returning({ id: adminNotifications.id });
+    if (!ins) throw new Error("admin_notifications insert returned no row");
+    return ins.id;
+  }
+
+  /** Помечает строку доставленной в реалтайме (исключает из дайджеста). */
+  async markNotificationDelivered(id: number, deliveredAt: number): Promise<void> {
+    await this.db
+      .update(adminNotifications)
+      .set({ deliveredAt })
+      .where(eq(adminNotifications.id, id));
+  }
+
+  /**
+   * Последняя строка по (tenant, dedupKey) не старше sinceEpoch — persisted-дедуп
+   * (переживает рестарт процесса, в отличие от in-memory cooldown).
+   */
+  async findRecentByDedup(
+    tenantId: number,
+    dedupKey: string,
+    sinceEpoch: number,
+  ): Promise<AdminNotificationRow | undefined> {
+    const rows = await this.db
+      .select()
+      .from(adminNotifications)
+      .where(
+        and(
+          eq(adminNotifications.tenantId, tenantId),
+          eq(adminNotifications.dedupKey, dedupKey),
+          gte(adminNotifications.createdAt, sinceEpoch),
+        ),
+      )
+      .orderBy(desc(adminNotifications.createdAt))
+      .limit(1);
+    return rows[0];
+  }
+
+  /** Последние N уведомлений владельца — для «/last». */
+  async listRecentNotifications(
+    tenantId: number,
+    adminId: number,
+    limit = 10,
+  ): Promise<AdminNotificationRow[]> {
+    return this.db
+      .select()
+      .from(adminNotifications)
+      .where(
+        and(eq(adminNotifications.tenantId, tenantId), eq(adminNotifications.adminId, adminId)),
+      )
+      .orderBy(desc(adminNotifications.createdAt))
+      .limit(limit);
+  }
+
+  /** Очередь дайджеста: принято, в реалтайм не доставлено, ещё не сведено. */
+  async listPendingDigest(tenantId: number, adminId: number): Promise<AdminNotificationRow[]> {
+    return this.db
+      .select()
+      .from(adminNotifications)
+      .where(
+        and(
+          eq(adminNotifications.tenantId, tenantId),
+          eq(adminNotifications.adminId, adminId),
+          isNull(adminNotifications.deliveredAt),
+          isNull(adminNotifications.digestBatchId),
+        ),
+      )
+      .orderBy(adminNotifications.createdAt);
+  }
+
+  /** Помечает строки вошедшими в батч дайджеста. */
+  async markDigested(ids: number[], batchId: number): Promise<void> {
+    if (ids.length === 0) return;
+    await this.db
+      .update(adminNotifications)
+      .set({ digestBatchId: batchId })
+      .where(inArray(adminNotifications.id, ids));
   }
 }

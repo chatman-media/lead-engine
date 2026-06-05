@@ -51,6 +51,12 @@ export interface WorkerConfig {
   /** Не повторять алерт одного типа чаще N минут. Default 60. */
   opsAlertCooldownMin: number;
   /**
+   * Период informer-digest-sweep (сводка владельцу по накопленной ленте), ms.
+   * Default 900000 (15 мин — чтобы надёжно попадать в окно digest-часа).
+   * 0 — отключить. env WORKER_INFORMER_DIGEST_MS.
+   */
+  informerDigestMs: number;
+  /**
    * Платформенный токен для бота уведомлений операторов.
    * env PLATFORM_OPERATOR_BOT_TOKEN.
    */
@@ -103,6 +109,7 @@ export function loadWorkerConfig(): WorkerConfig {
     opsStuckOrderMin: Number.parseInt(process.env.OPS_STUCK_ORDER_MIN ?? "45", 10),
     opsVolumeSpikeThb: Number.parseInt(process.env.OPS_VOLUME_SPIKE_THB ?? "0", 10),
     opsAlertCooldownMin: Number.parseInt(process.env.OPS_ALERT_COOLDOWN_MIN ?? "60", 10),
+    informerDigestMs: Number.parseInt(process.env.WORKER_INFORMER_DIGEST_MS ?? "900000", 10),
     operatorBotToken: process.env.PLATFORM_OPERATOR_BOT_TOKEN ?? "",
     appUrl: process.env.PLATFORM_APP_URL ?? "https://app.leadengine.app",
     resendApiKey: process.env.RESEND_API_KEY ?? "",

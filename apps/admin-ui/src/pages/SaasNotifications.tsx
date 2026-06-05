@@ -1,11 +1,14 @@
 import {
   ActivityIcon,
   BellIcon,
+  BellOffIcon,
   CheckIcon,
   ClipboardCopyIcon,
   FlaskConicalIcon,
+  GaugeIcon,
   PencilIcon,
   PlusIcon,
+  RefreshCwIcon,
   SendIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -21,13 +24,26 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, clearToken, saas, type NotificationRule, type NotificationTemplate } from "@/api/saas";
+import {
+  ApiError,
+  clearToken,
+  type InformerNotification,
+  type NotificationRule,
+  type NotificationTemplate,
+  saas,
+} from "@/api/saas";
 
 interface Settings {
   adminId: number;
   telegramChatId: string | null;
   notifyOnAssignedOnly: boolean;
   botUsername: string | null;
+  informerLevel?: string;
+  informerTopics?: string | null;
+  informerDigest?: string;
+  informerDigestHour?: number;
+  informerTz?: string;
+  informerMutedUntil?: number | null;
 }
 
 const EVENT_TYPES: Record<string, string> = {
@@ -41,6 +57,44 @@ const EVENT_TYPES: Record<string, string> = {
 
 const PLACEHOLDERS = "{{leadId}}, {{fromStage}}, {{toStage}}, {{displayName}}";
 
+// ── Informer справочники ────────────────────────────────────────────────
+const INFORMER_LEVELS: Array<{ v: string; label: string; hint: string }> = [
+  { v: "silent", label: "🔕 Тихо", hint: "ничего в реалтайме" },
+  { v: "critical", label: "🔴 Критичное", hint: "только то, что горит" },
+  { v: "important", label: "🟡 Важное", hint: "критичное + важное" },
+  { v: "all", label: "📢 Всё", hint: "каждое событие" },
+];
+const INFORMER_TOPICS: Array<{ v: string; label: string }> = [
+  { v: "leads", label: "🆕 Лиды" },
+  { v: "escalation", label: "🆘 Эскалации" },
+  { v: "orders", label: "💱 Заявки" },
+  { v: "system", label: "🛠 Система" },
+];
+const INFORMER_DIGESTS: Array<{ v: string; label: string }> = [
+  { v: "off", label: "Выкл" },
+  { v: "daily", label: "Раз в день" },
+  { v: "shift", label: "2×/день" },
+];
+const SEV_DOT: Record<string, string> = { critical: "🔴", important: "🟡", info: "ℹ️" };
+
+function parseTopics(raw: string | null | undefined): Record<string, boolean> {
+  const base: Record<string, boolean> = { leads: true, escalation: true, orders: true, system: true };
+  if (!raw) return base;
+  try {
+    const m = JSON.parse(raw) as Record<string, boolean>;
+    for (const k of Object.keys(base)) if (m[k] === false) base[k] = false;
+  } catch {
+    // fail-safe: всё включено
+  }
+  return base;
+}
+
+function fmtWhen(epoch: number): string {
+  const d = new Date(epoch * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export function SaasNotifications() {
   const navigate = useNavigate();
 
@@ -50,6 +104,11 @@ export function SaasNotifications() {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [savingToggle, setSavingToggle] = useState(false);
+
+  // ── Informer (уровни + дайджест + лента) ────────────────────────────────
+  const [savingInformer, setSavingInformer] = useState(false);
+  const [feed, setFeed] = useState<InformerNotification[]>([]);
+  const [loadingFeed, setLoadingFeed] = useState(true);
 
   // ── Rules ──────────────────────────────────────────────────────────────
   const [rules, setRules] = useState<NotificationRule[]>([]);
@@ -131,12 +190,54 @@ export function SaasNotifications() {
     }
   }
 
+  async function reloadFeed() {
+    try {
+      const { items } = await saas.getInformerFeed(15);
+      setFeed(items);
+    } catch {
+      // ignore — лента просто не покажется
+    } finally {
+      setLoadingFeed(false);
+    }
+  }
+
   useEffect(() => {
     reloadSettings();
     reloadRules();
     reloadTemplates();
     reloadOpsStatus();
+    reloadFeed();
   }, []);
+
+  // ── Informer ─────────────────────────────────────────────────────────────
+
+  async function saveInformer(
+    patch: Parameters<typeof saas.updateInformerSettings>[0],
+    optimistic: Partial<Settings>,
+  ) {
+    setSavingInformer(true);
+    setSettings((s) => (s ? { ...s, ...optimistic } : s));
+    try {
+      await saas.updateInformerSettings(patch);
+    } catch (err) {
+      if (!onAuthError(err)) toast.error("Не удалось сохранить");
+      await reloadSettings();
+    } finally {
+      setSavingInformer(false);
+    }
+  }
+
+  function handleToggleTopic(topic: string) {
+    const map = parseTopics(settings?.informerTopics);
+    map[topic] = !map[topic];
+    saveInformer({ informerTopics: map }, { informerTopics: JSON.stringify(map) });
+  }
+
+  function handleMute(seconds: number | null) {
+    const until = seconds === null ? null : Math.floor(Date.now() / 1000) + seconds;
+    saveInformer({ informerMutedUntil: until }, { informerMutedUntil: until });
+    toast.success(until ? "Заглушено" : "Мут снят");
+  }
 
   async function handleTestOps() {
     setTestingOps(true);
@@ -304,6 +405,15 @@ export function SaasNotifications() {
   const botUsername = settings?.botUsername;
   const deepLink = linkToken && botUsername ? `https://t.me/${botUsername}?start=${linkToken}` : null;
 
+  // Informer derived
+  const level = settings?.informerLevel ?? "important";
+  const topics = parseTopics(settings?.informerTopics);
+  const digest = settings?.informerDigest ?? "daily";
+  const digestHour = settings?.informerDigestHour ?? 9;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const muted = !!settings?.informerMutedUntil && settings.informerMutedUntil > nowSec;
+  const muteLeftMin = muted ? Math.ceil((settings!.informerMutedUntil! - nowSec) / 60) : 0;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -429,6 +539,192 @@ export function SaasNotifications() {
                 </div>
               )}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Информер: уровни + дайджест + лента ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <GaugeIcon className="h-5 w-5 text-primary" />
+              <div>
+                <CardTitle className="text-base">Информер</CardTitle>
+                <CardDescription className="mt-0.5">
+                  Громкость уведомлений в Telegram: что и как часто присылать. То же можно
+                  настроить командами бота (/level, /topics, /digest, /mute).
+                </CardDescription>
+              </div>
+            </div>
+            {muted && (
+              <Badge variant="warning" className="gap-1">
+                <BellOffIcon className="size-3" /> Заглушено
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-5">
+          {loadingSettings ? (
+            <Skeleton className="h-10 w-full" />
+          ) : (
+            <>
+              {/* Порог важности */}
+              <div className="space-y-2">
+                <Label className="text-sm">Порог важности</Label>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {INFORMER_LEVELS.map((l) => (
+                    <button
+                      key={l.v}
+                      type="button"
+                      disabled={savingInformer}
+                      onClick={() => saveInformer({ informerLevel: l.v }, { informerLevel: l.v })}
+                      className={`rounded-md border px-2 py-2 text-left text-xs transition-colors ${
+                        level === l.v
+                          ? "border-primary bg-primary/10 text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <div className="font-medium">{l.label}</div>
+                      <div className="mt-0.5 text-[10px] opacity-70">{l.hint}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Темы */}
+              <div className="space-y-2">
+                <Label className="text-sm">Темы</Label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {INFORMER_TOPICS.map((t) => (
+                    <div
+                      key={t.v}
+                      className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+                    >
+                      <span>{t.label}</span>
+                      <Switch
+                        checked={topics[t.v]}
+                        disabled={savingInformer}
+                        onCheckedChange={() => handleToggleTopic(t.v)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Дайджест + мут */}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label className="text-sm">Дайджест</Label>
+                  <div className="flex gap-2">
+                    <select
+                      value={digest}
+                      disabled={savingInformer}
+                      onChange={(e) =>
+                        saveInformer({ informerDigest: e.target.value }, { informerDigest: e.target.value })
+                      }
+                      className="flex-1 rounded-md border bg-background px-3 py-1.5 text-sm"
+                    >
+                      {INFORMER_DIGESTS.map((d) => (
+                        <option key={d.v} value={d.v}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </select>
+                    {digest !== "off" && (
+                      <Input
+                        type="number"
+                        min={0}
+                        max={23}
+                        value={digestHour}
+                        disabled={savingInformer}
+                        title="Час отправки (локальный)"
+                        onChange={(e) => {
+                          const h = Math.min(Math.max(Number(e.target.value) || 0, 0), 23);
+                          saveInformer({ informerDigestHour: h }, { informerDigestHour: h });
+                        }}
+                        className="w-20"
+                      />
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Что не ушло сразу — придёт сводкой{digest !== "off" ? ` в ${digestHour}:00` : ""}.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm">Заглушить реалтайм</Label>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" disabled={savingInformer} onClick={() => handleMute(30 * 60)}>
+                      30 мин
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={savingInformer} onClick={() => handleMute(2 * 3600)}>
+                      2 часа
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={savingInformer || !muted}
+                      onClick={() => handleMute(null)}
+                    >
+                      Снять
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {muted
+                      ? `Заглушено ещё ~${muteLeftMin} мин — события копятся в дайджест.`
+                      : "Реалтайм активен."}
+                  </p>
+                </div>
+              </div>
+
+              {/* Лента последних событий */}
+              <div className="space-y-2 border-t pt-4">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm">Последние события</Label>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    title="Обновить"
+                    onClick={reloadFeed}
+                  >
+                    <RefreshCwIcon className="size-3.5" />
+                  </Button>
+                </div>
+                {loadingFeed ? (
+                  <Skeleton className="h-10 w-full" />
+                ) : feed.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Пока пусто — событий ещё не было.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {feed.map((n) => (
+                      <div
+                        key={n.id}
+                        className="flex items-start gap-2 rounded-md border px-3 py-2 text-xs"
+                      >
+                        <span className="shrink-0">{SEV_DOT[n.severity] ?? "•"}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate font-medium">{n.title}</span>
+                            {!n.deliveredAt && (
+                              <Badge variant="secondary" className="text-[10px]">
+                                в дайджест
+                              </Badge>
+                            )}
+                          </div>
+                          {n.body && <p className="truncate text-muted-foreground">{n.body}</p>}
+                        </div>
+                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                          {fmtWhen(n.createdAt)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

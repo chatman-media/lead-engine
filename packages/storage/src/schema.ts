@@ -1112,11 +1112,68 @@ export const operatorSettings = pgTable("operator_settings", {
   linkTokenExpiresAt: integer("link_token_expires_at"),
   // Уведомлять только о лидах, назначенных на этого админа
   notifyOnAssignedOnly: boolean("notify_on_assigned_only").notNull().default(true),
+  // ── Бот-информер владельца (миграция 0032) ──────────────────────────────
+  // Порог важности: silent | critical | important | all (см. admin-informer.ts).
+  informerLevel: text("informer_level").notNull().default("important"),
+  // JSON-карта тоглов тем {"leads":true,...}; NULL = все темы включены.
+  informerTopics: text("informer_topics"),
+  // Расписание дайджеста: off | daily | shift (2×/день).
+  informerDigest: text("informer_digest").notNull().default("daily"),
+  // Локальный час отправки дайджеста (0..23) в informerTz.
+  informerDigestHour: integer("informer_digest_hour").notNull().default(9),
+  informerTz: text("informer_tz").notNull().default("UTC"),
+  // epoch; пока now() < muted_until — реалтайм гасится (дайджест копится).
+  informerMutedUntil: integer("informer_muted_until"),
+  // epoch последней отправленной сводки (анти-повтор дайджеста).
+  informerLastDigestAt: integer("informer_last_digest_at"),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
   uniqueIndex("uniq_op_settings_admin").on(t.adminId),
   index("idx_op_settings_tenant").on(t.tenantId),
   index("idx_op_settings_link_token").on(t.linkToken),
+  check(
+    "operator_settings_informer_level_check",
+    sql`${t.informerLevel} IN ('silent','critical','important','all')`,
+  ),
+  check(
+    "operator_settings_informer_digest_check",
+    sql`${t.informerDigest} IN ('off','daily','shift')`,
+  ),
+]);
+
+// Лента уведомлений владельца (миграция 0032). Источник дайджеста + scrollback
+// для бот-команды «/last» + persisted-дедуп. БЕЗ RLS (как operator_settings):
+// читается из operator-bot webhook без tenant-контекста — изоляция явным
+// tenant_id-фильтром в репозитории.
+export const adminNotifications = pgTable("admin_notifications", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  // SET NULL при удалении админа — строку истории сохраняем.
+  adminId: integer("admin_id").references(() => admins.id, { onDelete: "set null" }),
+  topic: text("topic").notNull(), // leads | escalation | orders | system
+  severity: text("severity").notNull(), // critical | important | info
+  kind: text("kind").notNull(), // исходный тип события (order_stuck, stage_changed, ...)
+  title: text("title").notNull(),
+  body: text("body").notNull().default(""),
+  dedupKey: text("dedup_key").notNull(),
+  targetChatId: text("target_chat_id"),
+  // epoch реалтайм-доставки; NULL = в реалтайм не слали (ждёт дайджеста).
+  deliveredAt: integer("delivered_at"),
+  // epoch батча дайджеста, в который вошло; NULL = ещё не сведено.
+  digestBatchId: integer("digest_batch_id"),
+  readAt: integer("read_at"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  index("idx_admin_notif_tenant_admin_created").on(t.tenantId, t.adminId, t.createdAt),
+  index("idx_admin_notif_dedup").on(t.tenantId, t.dedupKey, t.createdAt),
+  check(
+    "admin_notifications_topic_check",
+    sql`${t.topic} IN ('leads','escalation','orders','system')`,
+  ),
+  check(
+    "admin_notifications_severity_check",
+    sql`${t.severity} IN ('critical','important','info')`,
+  ),
 ]);
 
 // ---- Exchange (обменный пункт) ----------------------------------------

@@ -734,6 +734,17 @@ export interface NotificationTemplate {
   updatedAt: number;
 }
 
+export interface InformerNotification {
+  id: number;
+  topic: string;
+  severity: string;
+  kind: string;
+  title: string;
+  body: string;
+  deliveredAt: number | null;
+  createdAt: number;
+}
+
 // ── Audit entry (for audit log page) ────────────────────────────────────
 
 const TOKEN_KEY = "lead_engine_token";
@@ -1720,7 +1731,31 @@ export const saas = {
       adminId: number;
       telegramChatId: string | null;
       notifyOnAssignedOnly: boolean;
+      informerLevel?: string;
+      informerTopics?: string | null;
+      informerDigest?: string;
+      informerDigestHour?: number;
+      informerTz?: string;
+      informerMutedUntil?: number | null;
     }>("/api/admin/notifications/settings");
+  },
+  updateInformerSettings(body: {
+    informerLevel?: string;
+    informerTopics?: Record<string, boolean>;
+    informerDigest?: string;
+    informerDigestHour?: number;
+    informerTz?: string;
+    informerMutedUntil?: number | null;
+  }) {
+    return request<{ ok: boolean }>("/api/admin/notifications/informer", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+  getInformerFeed(limit = 20) {
+    return request<{ items: InformerNotification[] }>(
+      `/api/admin/notifications/informer/feed?limit=${limit}`,
+    );
   },
   updateNotificationSettings(body: {
     telegramChatId?: string | null;
