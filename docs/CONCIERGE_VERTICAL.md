@@ -4,13 +4,15 @@ _Создано: 2026-06-05. Внутренний дизайн-документ.
 
 Цель документа — **снять архитектурную развилку** и зафиксировать контракт до написания кода. Всё ниже заземлено на реальные места в коде (`file:line`), проверенные при аудите.
 
+> **⚠️ Обновление (Фаза 1, реализация — 2026-06-05).** При реализации модель **упрощена**: вместо «N воронок на тенанта» выбрана **одна воронка с ветвлением по `request_type`** — общий intake → ветки `{exchange|transfer|food}` (`qualify→offer→fulfill`) → общие `completed`/`cancelled`. Это валидная воронка костяка (1 intake, монотонные фазы, 1 won + 1 lost), поэтому она **не требует** правок `applyFunnelStages` / boot-резолвинга / install и не конфликтует с «одной активной воронкой на тенанта». Реализовано: slice 1 (migration `0032`, `leads.request_type`), slice 2 (`@chatman-media/vertical-concierge`, `SEED_TEMPLATES['concierge']`). Секции 1 и 3 обновлены под это решение; формулировки про «N funnels» ниже — отвергнутая ранняя версия.
+
 ---
 
 ## 1. TL;DR — принятые решения
 
-1. **Модель воронок: «одна короткая воронка на `request_type`».** Тенант-консьерж держит **N активных `funnels`** (обмен / трансфер / еда / …), каждая — чистая монотонная цепочка `capture→…→won/lost`. Отвергнут вариант «много stage-set в одной воронке»: он ломает `validateBackbone()` (требует ровно 1 intake) и операторский борд (группировка по `position`).
-2. **Один гость = N параллельных `leads`** (по одному на активный запрос), но **один `conversation`-тред** на канал. Лид уже знает свою воронку через `stageDefinitionId → stage_definitions.funnel_id`, поэтому реестр шаблонов и резолвинг шаблона остаются **1:1** (тенант → `concierge_v1`).
-3. **Главная новая работа — три точки**: (а) снять `UNIQUE(leads.user_id)` + миграция; (б) маршрутизация входящего сообщения в нужный из открытых запросов; (в) install сидит N воронок вместо одной. `validateBackbone`, RLS и реестр вертикалей — **не трогаем**.
+1. **Модель воронок: одна воронка с ветвлением по `request_type`.** Общий intake `request_received` ветвится по типу (обмен / трансфер / еда / …) в короткие ветки `qualify → offer → fulfill`, сходящиеся в общие терминалы `completed`/`cancelled`. Это **одна** валидная воронка костяка (ровно 1 intake, монотонные фазы по `position`, 1 won + 1 lost) → проходит `validateBackbone()` и операторский борд (колонки = фазы, бейдж = `request_type`) **без правок**. _(Ранняя версия «N воронок на тенанта» отвергнута: ветвление в одной воронке проще и не конфликтует с «одной активной воронкой на тенанта».)_
+2. **Один гость = N параллельных `leads`** (по одному на активный запрос), но **один `conversation`-тред** на канал. Реестр шаблонов и резолвинг шаблона остаются **1:1** (тенант → `concierge_v1`); ветку лида помечает `leads.request_type`.
+3. **Главная новая работа — две точки**: (а) снять `UNIQUE(leads.user_id)` + миграция (✅ slice 1, `0032`); (б) маршрутизация входящего: на intake классифицировать `request_type` → проставить `leads.request_type` и перейти в `<type>_request` (slice 3). `validateBackbone`, RLS, реестр вертикалей, `applyFunnelStages`/boot/install — **не трогаем**.
 
 ---
 
@@ -34,10 +36,12 @@ _Создано: 2026-06-05. Внутренний дизайн-документ.
 ```
 tenant (concierge)
   └── vertical template: concierge_v1            (1 шт., реестр без изменений)
-        ├── funnel: exchange      (capture→offer→[clear:KYC]→fulfill→won/lost)
-        ├── funnel: transfer      (capture→offer→fulfill→won/lost)
-        ├── funnel: food          (capture→offer→fulfill→won/lost)
-        └── funnel: <request_type> …
+        └── funnel: concierge   (ОДНА воронка с ветвлением)
+              request_received (intake / capture)
+                 ├─ exchange_request → exchange_offer → exchange_fulfill ┐
+                 ├─ transfer_request → transfer_offer → transfer_fulfill ┼─→ completed (won)
+                 └─ food_request     → food_offer     → food_fulfill     ┘   cancelled (lost)
+              фазы по position: capture → qualify×3 → offer×3 → fulfill×3 → won / lost
 
 guest (contact)
   └── conversation (1 на канал)                  ← единый чат-тред
@@ -46,17 +50,15 @@ guest (contact)
         └── lead #C  request_type=food       (done)   ← завершённые не мешают
 ```
 
-- **`request_type`** — новая ось (slug: `exchange | transfer | food | housekeeping | tour | custom …`). Хранится на `leads.request_type` и на `funnels.slug` (воронка = тип).
-- **Каждая воронка** — отдельный набор `stage_definitions` с собственными intake/won/lost → проходит `validateBackbone()` **без правок**.
-- **Лид знает свою воронку** через `stage_definition_id`, так что после старта запроса всё работает как у обычной вертикали.
+- **`request_type`** — ось (`exchange | transfer | food | housekeeping | tour | …`) на `leads.request_type` (migration `0032`). На intake задаётся и выбирает ветку (переход в `<type>_request`).
+- **Одна воронка**: общий intake + общие терминалы, ветки разложены по фазам костяка → `validateBackbone()` проходит без правок (проверено `funnel-backbone.test.ts`).
+- **Лид знает свою стадию** через `stage_definition_id`; операторский борд группирует по фазе, `request_type` — бейджем.
 
 ---
 
 ## 4. Контракт короткого воркфлоу
 
-- Каждая воронка `request_type` — это `buildSkeletonFunnel()` (`phases.ts:246`) с опциями:
-  - `includeClear: false` по умолчанию (для бытовых услуг гейтов нет), `true` для `exchange` (KYC).
-  - `includeFulfill: true` почти всегда (выдача/доставка).
+- Каждая **ветка** `request_type` — короткий путь `<type>_request (qualify) → <type>_offer (offer) → <type>_fulfill (fulfill)`, сходящийся в общие `completed`/`cancelled`. Все ветки разложены по фазам костяка (qualify-блок → offer-блок → fulfill-блок), что сохраняет монотонность `position`. Для `exchange` при необходимости добавляется `clear`/KYC — фаза опциональна.
 - `qualify`/`offer` могут быть «тонкими» (одно поле): `REQUIRED_ACTIVE_PHASES` — это **warnings**, не errors (`phases.ts:181`), так что короткие цепочки легальны.
 - Инвариант на воронку остаётся жёстким и **желанным**: ровно 1 intake, ≥1 won, ≥1 lost (`phases.ts:147-153`). Поскольку воронок несколько, каждая выполняет его сама по себе.
 
