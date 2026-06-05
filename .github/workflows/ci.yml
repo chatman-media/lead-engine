@@ -88,6 +88,15 @@ jobs:
             --coverage-reporter=text \
             --coverage-reporter=lcov 2>&1 | tee coverage.txt
 
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          # v5 CLI сам находит packages/*/coverage/lcov.info.
+          # apps/* гоняются без --coverage, поэтому грузятся только пакеты.
+          fail_ci_if_error: false # codecov-флейк не должен ронять CI
+
       - name: Coverage summary
         if: always()
         run: |

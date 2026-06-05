@@ -1,0 +1,26 @@
+# https://docs.codecov.com/docs/codecovyml-reference
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        informational: true # на старте не блокируем мерж по покрытию
+    patch:
+      default:
+        target: auto
+        threshold: 1%
+        informational: true
+
+comment:
+  layout: "reach, diff, flags, files"
+  require_changes: false
+
+# Покрытие меряем только по packages/* (publishable либы): apps/* в CI
+# гоняются без --coverage, поэтому их сюда не тянем.
+ignore:
+  - "apps/**"
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/dist/**"
+  - "**/*.config.ts"
