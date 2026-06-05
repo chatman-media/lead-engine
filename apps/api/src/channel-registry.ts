@@ -23,6 +23,10 @@ import { and, eq } from "drizzle-orm";
  * Hot-reload не поддерживается — добавление channel через UI требует
  * рестарта apps/api. См. todo в admin-channels.ts.
  */
+/** tenant_secrets ключи для per-tenant Meta webhook creds. */
+export const WHATSAPP_VERIFY_TOKEN_KEY = "whatsapp_verify_token";
+export const WHATSAPP_APP_SECRET_KEY = "whatsapp_app_secret";
+
 export interface ChannelEntry {
   channelDbId: number;
   tenantId: number;
@@ -33,6 +37,10 @@ export interface ChannelEntry {
   externalId: string;
   /** Конкретный adapter в зависимости от kind. */
   adapter: TelegramBotAdapter | WhatsAppCloudAdapter;
+  /** WhatsApp: per-tenant verify_token (резолвится при загрузке, фолбэк env). */
+  whatsappVerifyToken?: string;
+  /** WhatsApp: per-tenant app secret для X-Hub-Signature-256 (фолбэк env). */
+  whatsappAppSecret?: string;
 }
 
 export interface LoadFromDbOpts {
@@ -40,6 +48,10 @@ export interface LoadFromDbOpts {
   masterKeyHex?: string;
   /** Logger hook для warning'ов о decrypt-ошибках. */
   onWarn?: (msg: string, ctx: Record<string, unknown>) => void;
+  /** Env-фолбэк WhatsApp verify_token (WHATSAPP_VERIFY_TOKEN). */
+  whatsappVerifyTokenFallback?: string;
+  /** Env-фолбэк WhatsApp app secret (WHATSAPP_APP_SECRET). */
+  whatsappAppSecretFallback?: string;
 }
 
 export class ChannelRegistry {
@@ -114,6 +126,45 @@ export class ChannelRegistry {
     return process.env[envKey] ?? process.env.WA_ACCESS_TOKEN ?? null;
   }
 
+  /**
+   * Резолв per-tenant Meta webhook creds (verify_token + app_secret) при
+   * загрузке канала. Сначала tenant_secrets, потом env-фолбэк из loadOpts.
+   * Кешируется в ChannelEntry — webhook не дешифрует на каждый POST.
+   */
+  private async resolveWhatsAppWebhookCreds(
+    db: Db,
+    tenantId: number,
+  ): Promise<{ verifyToken: string | undefined; appSecret: string | undefined }> {
+    const read = async (key: string): Promise<string | undefined> => {
+      if (!this.loadOpts.masterKeyHex) return undefined;
+      try {
+        return (
+          (await getDecryptedSecret({
+            db,
+            tenantId,
+            key,
+            masterKeyHex: this.loadOpts.masterKeyHex,
+          })) ?? undefined
+        );
+      } catch (err) {
+        this.loadOpts.onWarn?.("failed to decrypt whatsapp webhook creds", {
+          tenantId,
+          key,
+          err: err instanceof Error ? err.message : String(err),
+        });
+        return undefined;
+      }
+    };
+    const [verify, secret] = await Promise.all([
+      read(WHATSAPP_VERIFY_TOKEN_KEY),
+      read(WHATSAPP_APP_SECRET_KEY),
+    ]);
+    return {
+      verifyToken: verify || this.loadOpts.whatsappVerifyTokenFallback || undefined,
+      appSecret: secret || this.loadOpts.whatsappAppSecretFallback || undefined,
+    };
+  }
+
   /** Кеш opts чтобы reloadTenant использовал тот же masterKey + onWarn. */
   private loadOpts: LoadFromDbOpts = {};
   private dbRef: Db | null = null;
@@ -137,6 +188,10 @@ export class ChannelRegistry {
 
     for (const row of rows) {
       let adapter: TelegramBotAdapter | WhatsAppCloudAdapter | null = null;
+      let waWebhookCreds: { verifyToken: string | undefined; appSecret: string | undefined } = {
+        verifyToken: undefined,
+        appSecret: undefined,
+      };
       if (row.kind === "telegram_bot") {
         const token = await this.resolveBotToken(
           db,
@@ -164,6 +219,7 @@ export class ChannelRegistry {
           phoneNumberId: row.externalId,
           accessToken: token,
         });
+        waWebhookCreds = await this.resolveWhatsAppWebhookCreds(db, row.tenantId);
       } else {
         // telegram_userbot и web в apps/api НЕ загружаются — userbot живёт
         // в apps/worker, web обрабатывается через отдельный WS-endpoint.
@@ -177,6 +233,8 @@ export class ChannelRegistry {
         kind: row.kind as ChannelEntry["kind"],
         externalId: row.externalId,
         adapter,
+        ...(waWebhookCreds.verifyToken ? { whatsappVerifyToken: waWebhookCreds.verifyToken } : {}),
+        ...(waWebhookCreds.appSecret ? { whatsappAppSecret: waWebhookCreds.appSecret } : {}),
       };
       const list = this.byTenantSlug.get(row.tenantSlug) ?? [];
       list.push(entry);
@@ -231,6 +289,10 @@ export class ChannelRegistry {
 
     for (const row of rows) {
       let adapter: TelegramBotAdapter | WhatsAppCloudAdapter | null = null;
+      let waWebhookCreds: { verifyToken: string | undefined; appSecret: string | undefined } = {
+        verifyToken: undefined,
+        appSecret: undefined,
+      };
       if (row.kind === "telegram_bot") {
         const token = await this.resolveBotToken(
           this.dbRef,
@@ -257,6 +319,7 @@ export class ChannelRegistry {
           phoneNumberId: row.externalId,
           accessToken: token,
         });
+        waWebhookCreds = await this.resolveWhatsAppWebhookCreds(this.dbRef, row.tenantId);
       } else {
         continue;
       }
@@ -268,6 +331,8 @@ export class ChannelRegistry {
         kind: row.kind as ChannelEntry["kind"],
         externalId: row.externalId,
         adapter,
+        ...(waWebhookCreds.verifyToken ? { whatsappVerifyToken: waWebhookCreds.verifyToken } : {}),
+        ...(waWebhookCreds.appSecret ? { whatsappAppSecret: waWebhookCreds.appSecret } : {}),
       };
       const list = this.byTenantSlug.get(row.tenantSlug) ?? [];
       list.push(entry);

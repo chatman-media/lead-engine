@@ -1,54 +1,45 @@
 import {
   ActivityIcon,
-  BarChart2Icon,
   ArrowLeftRightIcon,
+  BarChart2Icon,
   BellIcon,
+  BlocksIcon,
+  BookOpenIcon,
   BriefcaseIcon,
   CableIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   FlaskConicalIcon,
   GitBranchIcon,
-  KeyRoundIcon,
   LayoutDashboardIcon,
   LinkIcon,
   LogOutIcon,
-  MonitorIcon,
-  MoonIcon,
-  SendIcon,
-  ShieldIcon,
-  TestTube2Icon,
-  WebhookIcon,
-  WrenchIcon,
   type LucideIcon,
   MenuIcon,
   MessagesSquareIcon,
+  MonitorIcon,
+  MoonIcon,
   PaletteIcon,
   RocketIcon,
   ScrollTextIcon,
+  SendIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
   SunIcon,
-  UsersIcon,
+  TestTube2Icon,
   UserCircleIcon,
+  UsersIcon,
   ZapIcon,
 } from "lucide-react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { type Admin, ApiError, clearToken, saas, type Tenant } from "@/api/saas";
-import { useTheme } from "@/components/theme-provider";
+import { type Admin, clearToken, saas, type Tenant } from "@/api/saas";
 import { ModeToggle } from "@/components/mode-toggle";
 import { CopilotDock } from "@/components/copilot";
+import { useTheme } from "@/components/theme-provider";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,8 +52,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -71,6 +60,10 @@ interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
+  /** Показывать только для обменных тенантов (вертикаль exchange). */
+  exchangeOnly?: boolean;
+  /** Скрывать для обменных тенантов (нерелевантно обменнику). */
+  hideForExchange?: boolean;
 }
 
 interface NavGroup {
@@ -80,40 +73,59 @@ interface NavGroup {
 
 const TOP_NAV_ITEM: NavItem = { to: "/dashboard", label: "Главная", icon: LayoutDashboardIcon };
 
+// Компоновка «Обмен во главе»: ядро бизнеса (Обменник/Воронка) сверху, затем
+// клиенты, бот/каналы, система. Пункты с hideForExchange скрываются у обменки,
+// exchangeOnly — показываются только ей.
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: "Работа",
+    label: "Обмен",
+    items: [
+      { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon, exchangeOnly: true },
+      { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
+    ],
+  },
+  {
+    label: "Клиенты",
     items: [
       { to: "/leads", label: "Лиды", icon: UserCircleIcon },
       { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
       { to: "/outreach", label: "Рассылка", icon: SendIcon },
-      { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
-      { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon },
-      { to: "/vacancies", label: "Каталог", icon: BriefcaseIcon },
+      { to: "/vacancies", label: "Каталог", icon: BriefcaseIcon, hideForExchange: true },
     ],
   },
   {
-    label: "AI & Бот",
+    label: "Бот и каналы",
     items: [
-      { to: "/skills", label: "Навыки", icon: ZapIcon },
-      { to: "/hooks", label: "Хуки", icon: SparklesIcon },
-      { to: "/styles", label: "Стили", icon: PaletteIcon },
-      { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon },
+      { to: "/channels", label: "Каналы", icon: CableIcon },
       { to: "/test", label: "Тест бота", icon: TestTube2Icon },
+      { to: "/skills", label: "Навыки", icon: ZapIcon, hideForExchange: true },
+      { to: "/hooks", label: "Хуки", icon: SparklesIcon, hideForExchange: true },
+      { to: "/styles", label: "Стили", icon: PaletteIcon, hideForExchange: true },
+      { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon, hideForExchange: true },
+      { to: "/integrations", label: "Интеграции", icon: BlocksIcon },
+      { to: "/faq", label: "FAQ-справочник", icon: BookOpenIcon },
+      { to: "/diagnostics", label: "Диагностика", icon: ActivityIcon },
     ],
   },
   {
     label: "Система",
     items: [
-      { to: "/channels", label: "Каналы", icon: CableIcon },
       { to: "/notifications", label: "Уведомления", icon: BellIcon },
-      { to: "/webhooks", label: "Вебхуки", icon: WebhookIcon },
-      { to: "/tools", label: "Инструменты", icon: WrenchIcon },
-      { to: "/referral", label: "Партнёры", icon: LinkIcon },
+      { to: "/billing", label: "LLM-использование", icon: BarChart2Icon },
+      { to: "/referral", label: "Партнёры", icon: LinkIcon, hideForExchange: true },
       { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
     ],
   },
 ];
+
+/** Фильтр пунктов по вертикали: exchangeOnly показываем только обменке, hideForExchange — скрываем у обменки. */
+function visibleNavItems(items: NavItem[], isExchange: boolean): NavItem[] {
+  return items.filter((it) => {
+    if (it.exchangeOnly && !isExchange) return false;
+    if (it.hideForExchange && isExchange) return false;
+    return true;
+  });
+}
 
 function Brand({ collapsed }: { collapsed?: boolean }) {
   return (
@@ -200,25 +212,25 @@ function NavLinks({
   onNavigate,
   escalatedCount,
   collapsed,
-  isSuperadmin,
+  isExchange,
 }: {
   onNavigate?: () => void;
   escalatedCount?: number;
   collapsed: boolean;
-  isSuperadmin?: boolean;
+  isExchange?: boolean;
 }) {
+  const groups = NAV_GROUPS.map((g) => ({
+    ...g,
+    items: visibleNavItems(g.items, isExchange ?? false),
+  })).filter((g) => g.items.length > 0);
   return (
     <nav className="flex flex-col gap-4">
       <div className="flex flex-col gap-0.5">
         {collapsed && <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />}
-        <NavItemLink
-          item={TOP_NAV_ITEM}
-          collapsed={collapsed}
-          onNavigate={onNavigate}
-        />
+        <NavItemLink item={TOP_NAV_ITEM} collapsed={collapsed} onNavigate={onNavigate} />
       </div>
 
-      {NAV_GROUPS.map((group) => (
+      {groups.map((group) => (
         <div key={group.label} className="flex flex-col gap-0.5">
           {!collapsed && (
             <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
@@ -238,22 +250,6 @@ function NavLinks({
           ))}
         </div>
       ))}
-
-      {isSuperadmin && (
-        <div className="flex flex-col gap-0.5">
-          {!collapsed && (
-            <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-              Платформа
-            </p>
-          )}
-          {collapsed && <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />}
-          <NavItemLink
-            item={{ to: "/superadmin", label: "Аккаунты", icon: ShieldIcon }}
-            collapsed={collapsed}
-            onNavigate={onNavigate}
-          />
-        </div>
-      )}
     </nav>
   );
 }
@@ -263,76 +259,6 @@ const THEME_LABEL: Record<string, string> = {
   dark: "Тёмная",
   system: "Системная",
 };
-
-function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [currentPwd, setCurrentPwd] = useState("");
-  const [newPwd, setNewPwd] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError("");
-    if (newPwd.length < 8) { setError("Новый пароль — не менее 8 символов"); return; }
-    setSaving(true);
-    try {
-      await saas.changePassword(currentPwd, newPwd);
-      toast.success("Пароль изменён");
-      setCurrentPwd(""); setNewPwd("");
-      onClose();
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) { setError("Неверный текущий пароль"); return; }
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Сменить пароль</DialogTitle>
-        </DialogHeader>
-        {error && (
-          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </p>
-        )}
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="space-y-1.5">
-            <Label>Текущий пароль</Label>
-            <Input
-              type="password"
-              autoComplete="current-password"
-              value={currentPwd}
-              onChange={(e) => setCurrentPwd(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Новый пароль (≥ 8 символов)</Label>
-            <Input
-              type="password"
-              autoComplete="new-password"
-              value={newPwd}
-              onChange={(e) => setNewPwd(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={onClose}>Отмена</Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? "Сохраняем…" : "Изменить"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function AccountDropdown({
   admin,
@@ -346,23 +272,25 @@ function AccountDropdown({
   collapsed: boolean;
 }) {
   const { theme, setTheme } = useTheme();
-  const [pwdOpen, setPwdOpen] = useState(false);
-  const initials = (admin?.email ?? "?").slice(0, 2).toUpperCase();
+  // Показываем имя (если задано), иначе email.
+  const displayName = admin?.name?.trim() || admin?.email || "—";
+  const initials = (admin?.name?.trim() || admin?.email || "?").slice(0, 2).toUpperCase();
 
   const menuContent = (
-    <DropdownMenuContent
-      align="start"
-      side={collapsed ? "right" : "top"}
-      className="w-56"
-    >
+    <DropdownMenuContent align="start" side={collapsed ? "right" : "top"} className="w-56">
       <DropdownMenuLabel className="font-normal">
-        <p className="text-sm font-medium truncate">{admin?.email ?? "—"}</p>
+        <p className="text-sm font-medium truncate">{admin?.name || admin?.email || "—"}</p>
         <p className="text-xs text-muted-foreground">
-          {admin?.role === "superadmin" ? "Суперадмин" : "Менеджер"} · {tenant?.slug ?? "—"}
+          {admin?.role === "superadmin" ? "Суперадмин" : "Оператор"} · {tenant?.slug ?? "—"}
         </p>
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
       <DropdownMenuGroup>
+        <DropdownMenuItem asChild>
+          <Link to="/profile">
+            <UserCircleIcon /> Профиль
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link to="/settings">
             <SlidersHorizontalIcon /> Настройки LLM
@@ -373,27 +301,11 @@ function AccountDropdown({
             <UsersIcon /> Команда
           </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/billing">
-            <BarChart2Icon /> LLM-использование
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/diagnostics">
-            <ActivityIcon /> Диагностика
-          </Link>
-        </DropdownMenuItem>
       </DropdownMenuGroup>
       <DropdownMenuSeparator />
       <DropdownMenuSub>
         <DropdownMenuSubTrigger>
-          {theme === "dark" ? (
-            <MoonIcon />
-          ) : theme === "light" ? (
-            <SunIcon />
-          ) : (
-            <MonitorIcon />
-          )}
+          {theme === "dark" ? <MoonIcon /> : theme === "light" ? <SunIcon /> : <MonitorIcon />}
           Тема
           <span className="ml-auto text-xs text-muted-foreground">{THEME_LABEL[theme]}</span>
         </DropdownMenuSubTrigger>
@@ -413,10 +325,6 @@ function AccountDropdown({
         </DropdownMenuSubContent>
       </DropdownMenuSub>
       <DropdownMenuSeparator />
-      <DropdownMenuItem onClick={() => setPwdOpen(true)}>
-        <KeyRoundIcon /> Сменить пароль
-      </DropdownMenuItem>
-      <DropdownMenuSeparator />
       <DropdownMenuItem variant="destructive" onClick={onLogout}>
         <LogOutIcon /> Выйти
       </DropdownMenuItem>
@@ -425,9 +333,7 @@ function AccountDropdown({
 
   if (collapsed) {
     return (
-      <>
-        <ChangePasswordDialog open={pwdOpen} onClose={() => setPwdOpen(false)} />
-        <DropdownMenu>
+      <DropdownMenu>
         <Tooltip>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
@@ -444,40 +350,36 @@ function AccountDropdown({
             </DropdownMenuTrigger>
           </TooltipTrigger>
           <TooltipContent side="right" className="text-xs">
-            {admin?.email}
+            {displayName}
           </TooltipContent>
         </Tooltip>
         {menuContent}
       </DropdownMenu>
-      </>
     );
   }
 
   return (
-    <>
-      <ChangePasswordDialog open={pwdOpen} onClose={() => setPwdOpen(false)} />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent/60 cursor-pointer"
-          >
-            <Avatar className="size-8 rounded-lg">
-              <AvatarFallback className="rounded-lg bg-primary/15 text-primary">
-                {initials}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{admin?.email ?? "—"}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {tenant?.slug ?? "—"} · {tenant?.plan ?? "free"}
-              </p>
-            </div>
-          </button>
-        </DropdownMenuTrigger>
-        {menuContent}
-      </DropdownMenu>
-    </>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent/60 cursor-pointer"
+        >
+          <Avatar className="size-8 rounded-lg">
+            <AvatarFallback className="rounded-lg bg-primary/15 text-primary">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{displayName}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {admin?.name ? admin.email : (tenant?.slug ?? "—")}
+            </p>
+          </div>
+        </button>
+      </DropdownMenuTrigger>
+      {menuContent}
+    </DropdownMenu>
   );
 }
 
@@ -489,6 +391,7 @@ function SidebarBody({
   escalatedCount,
   collapsed,
   onToggleCollapse,
+  isExchange,
 }: {
   admin: Admin | null;
   tenant: Tenant | null;
@@ -497,6 +400,7 @@ function SidebarBody({
   escalatedCount?: number;
   collapsed: boolean;
   onToggleCollapse?: () => void;
+  isExchange?: boolean;
 }) {
   return (
     <div className="flex h-full flex-col gap-1">
@@ -542,19 +446,21 @@ function SidebarBody({
                 <ChevronRightIcon className="size-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right" className="text-xs">Развернуть</TooltipContent>
+            <TooltipContent side="right" className="text-xs">
+              Развернуть
+            </TooltipContent>
           </Tooltip>
         )}
-        <NavLinks onNavigate={onNavigate} escalatedCount={escalatedCount} collapsed={collapsed} isSuperadmin={admin?.role === "superadmin"} />
+        <NavLinks
+          onNavigate={onNavigate}
+          escalatedCount={escalatedCount}
+          collapsed={collapsed}
+          isExchange={isExchange}
+        />
       </div>
 
       <div className="border-t border-sidebar-border p-3">
-        <AccountDropdown
-          admin={admin}
-          tenant={tenant}
-          onLogout={onLogout}
-          collapsed={collapsed}
-        />
+        <AccountDropdown admin={admin} tenant={tenant} onLogout={onLogout} collapsed={collapsed} />
       </div>
     </div>
   );
@@ -566,11 +472,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const [admin, setAdmin] = useState<Admin | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
+  const [isExchange, setIsExchange] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [escalatedCount, setEscalatedCount] = useState(0);
-  const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem(COLLAPSED_KEY) === "true",
-  );
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === "true");
 
   function toggleCollapse() {
     setCollapsed((v) => {
@@ -589,8 +494,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setTenant(res.tenant);
       })
       .catch(() => {});
+    // Вертикаль тенанта (для скрытия нерелевантных пунктов меню у обменки).
+    saas
+      .onboardingStatus()
+      .then((s) => {
+        if (!cancelled) setIsExchange(s.isExchange === true);
+      })
+      .catch(() => {});
+    // Профиль обновился (имя) — обновляем сразу, без перезагрузки.
+    const onProfileUpdated = (e: Event) => {
+      const next = (e as CustomEvent<Admin>).detail;
+      if (next) setAdmin((prev) => (prev ? { ...prev, ...next } : next));
+    };
+    window.addEventListener("admin-profile-updated", onProfileUpdated);
     return () => {
       cancelled = true;
+      window.removeEventListener("admin-profile-updated", onProfileUpdated);
     };
   }, []);
 
@@ -607,9 +526,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         if (prevEscalatedRef.current !== null && n > prevEscalatedRef.current) {
           const delta = n - prevEscalatedRef.current;
           toast.warning(
-            delta === 1
-              ? "Новый диалог ждёт оператора"
-              : `${delta} новых диалога ждут оператора`,
+            delta === 1 ? "Новый диалог ждёт оператора" : `${delta} новых диалога ждут оператора`,
             {
               description: "Перейдите в Диалоги чтобы ответить",
               action: { label: "Перейти", onClick: () => navigate("/conversations") },
@@ -657,6 +574,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             escalatedCount={escalatedCount}
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
+            isExchange={isExchange}
           />
         </aside>
 
@@ -677,6 +595,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   onNavigate={() => setMobileOpen(false)}
                   escalatedCount={escalatedCount}
                   collapsed={false}
+                  isExchange={isExchange}
                 />
               </SheetContent>
             </Sheet>

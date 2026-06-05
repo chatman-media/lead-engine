@@ -1,11 +1,22 @@
 import {
-  AlertTriangleIcon,
+  BadgePercentIcon,
   BarChart2Icon,
+  ChevronDownIcon,
+  ClipboardListIcon,
+  ClockIcon,
+  CreditCardIcon,
+  FlagIcon,
+  GaugeIcon,
   GripVerticalIcon,
-  LayersIcon,
+  HeadphonesIcon,
+  type LucideIcon,
+  PenLineIcon,
+  PhoneIcon,
   PlusIcon,
+  ShieldCheckIcon,
   SparklesIcon,
   Trash2Icon,
+  UploadIcon,
 } from "lucide-react";
 import { type DragEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -36,7 +47,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "form_fill", label: "Сбор данных" },
@@ -51,14 +62,6 @@ const STAGE_TYPES: { value: StageType; label: string }[] = [
   { value: "assessment", label: "Оценка" },
   { value: "milestone", label: "Контрольная точка" },
 ];
-
-const FUNNEL_TEMPLATES = [
-  { id: "exchange", label: "Обменный пункт", icon: "💱", stages: 12 },
-  { id: "visa", label: "Виза / иммиграция", icon: "🛂", stages: 7 },
-  { id: "real_estate", label: "Недвижимость", icon: "🏠", stages: null },
-  { id: "modeling", label: "Модельное агентство", icon: "✨", stages: null },
-  { id: "recruitment", label: "Рекрутинг", icon: "👔", stages: null },
-] as const;
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "text", label: "Текст" },
@@ -75,12 +78,40 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "video", label: "Видео" },
 ];
 
-const KIND_COLORS: Record<string, string> = {
-  intake: "bg-blue-500/10 border-blue-500/30",
-  active: "bg-card border-border",
-  terminal_won: "bg-emerald-500/10 border-emerald-500/30",
-  terminal_lost: "bg-red-500/10 border-red-500/30",
+/** Иконка по типу стадии (для визуальной читаемости шага). */
+const STAGE_TYPE_ICON: Record<StageType, LucideIcon> = {
+  form_fill: ClipboardListIcon,
+  document_upload: UploadIcon,
+  document_signature: PenLineIcon,
+  rate_confirmation: BadgePercentIcon,
+  external_approval: ShieldCheckIcon,
+  payment: CreditCardIcon,
+  waiting: ClockIcon,
+  awaiting_operator: HeadphonesIcon,
+  interaction: PhoneIcon,
+  assessment: GaugeIcon,
+  milestone: FlagIcon,
 };
+
+/** Вид стадии: подпись + цвет номера-кружка + левый акцент карточки. */
+const KIND_META: Record<string, { label: string; num: string; accent: string }> = {
+  intake: { label: "Заявка", num: "bg-blue-500 text-white", accent: "border-l-blue-500" },
+  active: {
+    label: "Рабочая",
+    num: "bg-primary/15 text-primary",
+    accent: "border-l-border",
+  },
+  terminal_won: {
+    label: "Успех",
+    num: "bg-emerald-500 text-white",
+    accent: "border-l-emerald-500",
+  },
+  terminal_lost: { label: "Отказ", num: "bg-red-500 text-white", accent: "border-l-red-500" },
+};
+
+function kindMeta(kind: string) {
+  return KIND_META[kind] ?? KIND_META.active!;
+}
 
 export function SaasFunnel() {
   const navigate = useNavigate();
@@ -89,12 +120,10 @@ export function SaasFunnel() {
   const [error, setError] = useState("");
   const [expandedStage, setExpandedStage] = useState<number | null>(null);
   const [addingStage, setAddingStage] = useState(false);
-  const [seeding, setSeeding] = useState(false);
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dragOverId, setDragOverId] = useState<number | null>(null);
   const [analytics, setAnalytics] = useState<FunnelAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [confirmSeedTemplate, setConfirmSeedTemplate] = useState<string | null>(null);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [newStage, setNewStage] = useState({
     slug: "",
@@ -205,24 +234,6 @@ export function SaasFunnel() {
     }
   }
 
-  async function handleSeed(template: string) {
-    if (funnel?.stages && funnel.stages.length > 0 && confirmSeedTemplate !== template) {
-      setConfirmSeedTemplate(template);
-      return;
-    }
-    setConfirmSeedTemplate(null);
-    setSeeding(true);
-    try {
-      const result = await saas.seedFunnel(template);
-      toast.success(`Шаблон применён: ${result.stagesCreated} стадий`);
-      reload();
-    } catch (err) {
-      onAuthError(err);
-    } finally {
-      setSeeding(false);
-    }
-  }
-
   if (loading)
     return (
       <div className="flex flex-col gap-6 p-6">
@@ -274,68 +285,14 @@ export function SaasFunnel() {
 
       <AiWorkflowPanel open={aiPanelOpen} onOpenChange={setAiPanelOpen} onApplied={reload} />
 
-      {/* Шаблоны воронки */}
-      <div className="rounded-md border p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <LayersIcon className="size-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Загрузить шаблон воронки</span>
-          {funnel?.stages && funnel.stages.length > 0 && (
-            <span className="text-xs text-muted-foreground">
-              Сейчас {funnel.stages.length} стадий · заменит текущую воронку
-            </span>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {FUNNEL_TEMPLATES.map((tpl) => (
-            <Button
-              key={tpl.id}
-              variant={confirmSeedTemplate === tpl.id ? "destructive" : "outline"}
-              size="sm"
-              disabled={seeding}
-              onClick={() => handleSeed(tpl.id)}
-            >
-              {tpl.icon} {tpl.label}
-              {tpl.stages ? ` · ${tpl.stages}` : ""}
-            </Button>
-          ))}
-        </div>
-        {confirmSeedTemplate && (
-          <div className="mt-3 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <AlertTriangleIcon className="size-4 shrink-0" />
-            <span className="flex-1">
-              Заменит {funnel?.stages?.length ?? 0} стадий на{" "}
-              {FUNNEL_TEMPLATES.find((tpl) => tpl.id === confirmSeedTemplate)?.stages
-                ? `${FUNNEL_TEMPLATES.find((tpl) => tpl.id === confirmSeedTemplate)?.stages} стадий`
-                : "стадии"}{" "}
-              выбранного шаблона. Продолжить?
-            </span>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => handleSeed(confirmSeedTemplate)}
-              disabled={seeding}
-            >
-              Да
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setConfirmSeedTemplate(null)}>
-              Нет
-            </Button>
-          </div>
-        )}
-      </div>
-
-      {!funnel?.funnel && (
-        <div className="rounded-md border border-dashed p-6 text-center text-muted-foreground text-sm">
-          Выберите шаблон выше или воронка будет создана при загрузке шаблона.
-        </div>
-      )}
-
       {funnel?.funnel && (
-        <div className="flex flex-col gap-3">
-          {funnel.stages.map((stage) => (
+        <div className="flex flex-col gap-0">
+          {funnel.stages.map((stage, idx) => (
             <StageCard
               key={stage.id}
               stage={stage}
+              index={idx + 1}
+              isLast={idx === funnel.stages.length - 1}
               isExpanded={expandedStage === stage.id}
               isDragging={draggedId === stage.id}
               isDragOver={dragOverId === stage.id}
@@ -354,7 +311,7 @@ export function SaasFunnel() {
           {!addingStage ? (
             <Button
               variant="outline"
-              className="border-dashed"
+              className="mt-3 border-dashed"
               onClick={() => setAddingStage(true)}
             >
               <PlusIcon className="mr-1.5 size-4" />
@@ -548,6 +505,8 @@ export function SaasFunnel() {
 
 function StageCard({
   stage,
+  index,
+  isLast,
   isExpanded,
   isDragging,
   isDragOver,
@@ -561,6 +520,8 @@ function StageCard({
   onReload,
 }: {
   stage: StageDefinition;
+  index: number;
+  isLast: boolean;
   isExpanded: boolean;
   isDragging: boolean;
   isDragOver: boolean;
@@ -613,53 +574,93 @@ function StageCard({
     }
   }
 
+  const kind = kindMeta(stage.kind);
+  const TypeIcon = STAGE_TYPE_ICON[stage.stageType] ?? ClipboardListIcon;
+  const typeLabel = STAGE_TYPES.find((t) => t.value === stage.stageType)?.label ?? stage.stageType;
+
   return (
-    <Card
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
-      className={[
-        "border transition-opacity",
-        KIND_COLORS[stage.kind] ?? "",
-        isDragging ? "opacity-40" : "",
-        isDragOver ? "ring-2 ring-primary ring-offset-1" : "",
-      ].join(" ")}
-    >
-      <CardHeader className="pb-2">
-        <div className="flex items-center gap-2">
-          <GripVerticalIcon className="size-4 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" />
+    <div className="relative flex gap-3">
+      {/* Рельс таймлайна: номер шага + соединительная линия */}
+      <div className="flex w-7 shrink-0 flex-col items-center">
+        <div
+          className={cn(
+            "mt-3 grid size-7 place-items-center rounded-full text-xs font-bold tabular-nums",
+            kind.num,
+          )}
+        >
+          {index}
+        </div>
+        {!isLast && <div className="my-1 w-px flex-1 bg-border" />}
+      </div>
+
+      <Card
+        draggable
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onDragEnd={onDragEnd}
+        className={cn(
+          "mb-3 flex-1 border-l-2 py-0 transition-all",
+          kind.accent,
+          isExpanded ? "ring-1 ring-primary/30" : "hover:bg-accent/40",
+          isDragging ? "opacity-40" : "",
+          isDragOver ? "ring-2 ring-primary ring-offset-1" : "",
+        )}
+      >
+        <div className="flex items-center gap-2.5 px-3 py-2.5">
+          <GripVerticalIcon className="size-4 shrink-0 cursor-grab text-muted-foreground/60 active:cursor-grabbing" />
+
+          <span
+            className={cn(
+              "grid size-8 shrink-0 place-items-center rounded-md",
+              "bg-muted text-muted-foreground",
+            )}
+          >
+            <TypeIcon className="size-4" />
+          </span>
 
           <button
             type="button"
-            className="flex flex-1 items-center gap-3 text-left"
+            className="flex min-w-0 flex-1 items-center gap-3 text-left"
             onClick={onToggle}
           >
-            <div>
-              <p className="text-sm font-semibold">{stage.displayName}</p>
-              <p className="text-xs text-muted-foreground font-mono">{stage.slug}</p>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{stage.displayName}</p>
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span>{typeLabel}</span>
+                <span className="opacity-40">·</span>
+                <span className="font-mono">{stage.slug}</span>
+              </p>
             </div>
-            <div className="ml-auto flex items-center gap-2">
-              <Badge variant="secondary" className="text-xs">
-                {STAGE_TYPES.find((t) => t.value === stage.stageType)?.label ?? stage.stageType}
-              </Badge>
+            <div className="ml-auto flex shrink-0 items-center gap-2">
               {stage.supportMode && (
-                <Badge variant="outline" className="text-xs text-muted-foreground">
+                <Badge variant="outline" className="hidden text-xs text-muted-foreground sm:inline">
                   поддержка
                 </Badge>
               )}
-              <Badge variant="outline" className="text-xs">
+              {(stage.kind === "terminal_won" || stage.kind === "terminal_lost") && (
+                <Badge variant="outline" className="text-xs">
+                  {kind.label}
+                </Badge>
+              )}
+              <span className="text-xs tabular-nums text-muted-foreground">
                 {stage.fields.length} полей
-              </Badge>
+              </span>
+              <ChevronDownIcon
+                className={cn(
+                  "size-4 text-muted-foreground transition-transform",
+                  isExpanded ? "rotate-180" : "",
+                )}
+              />
             </div>
           </button>
 
           {confirmDelete ? (
-            <div className="flex items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               <Button
                 size="sm"
                 variant="destructive"
+                className="h-7 px-2"
                 onClick={() => {
                   setConfirmDelete(false);
                   onDelete();
@@ -667,7 +668,12 @@ function StageCard({
               >
                 Да
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2"
+                onClick={() => setConfirmDelete(false)}
+              >
                 Нет
               </Button>
             </div>
@@ -675,141 +681,143 @@ function StageCard({
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              className="text-muted-foreground hover:text-destructive"
+              className="shrink-0 text-muted-foreground/60 hover:text-destructive"
             >
               <Trash2Icon className="size-4" />
             </button>
           )}
         </div>
-      </CardHeader>
 
-      {isExpanded && (
-        <CardContent className="space-y-4 pt-0">
-          {/* Support mode toggle */}
-          <div className="flex items-center gap-2">
-            <Switch
-              id={`support-${stage.id}`}
-              checked={stage.supportMode}
-              onCheckedChange={(v) => onUpdate({ supportMode: v })}
-            />
-            <Label htmlFor={`support-${stage.id}`} className="text-sm">
-              Support mode
-            </Label>
-          </div>
-
-          {/* Fields list */}
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Поля</p>
-            {stage.fields.length === 0 && (
-              <p className="text-xs text-muted-foreground">Полей пока нет.</p>
-            )}
-            <div className="flex flex-col gap-1.5">
-              {stage.fields.map((field) => (
-                <FieldRow
-                  key={field.id}
-                  field={field}
-                  onDelete={() => handleDeleteField(field.id)}
-                />
-              ))}
+        {isExpanded && (
+          <CardContent className="space-y-4 border-t px-3 pb-4 pt-3">
+            {/* Support mode toggle */}
+            <div className="flex items-center gap-2">
+              <Switch
+                id={`support-${stage.id}`}
+                checked={stage.supportMode}
+                onCheckedChange={(v) => onUpdate({ supportMode: v })}
+              />
+              <Label htmlFor={`support-${stage.id}`} className="text-sm">
+                Support mode
+              </Label>
             </div>
-          </div>
 
-          {/* Add field */}
-          {!addingField ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-dashed"
-              onClick={() => setAddingField(true)}
-            >
-              <PlusIcon className="mr-1 size-3.5" />
-              Добавить поле
-            </Button>
-          ) : (
-            <div className="rounded-md border p-3 space-y-2.5">
-              <p className="text-xs font-semibold">Новое поле</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Slug</Label>
-                  <Input
-                    value={newField.slug}
-                    onChange={(e) =>
-                      setNewField((p) => ({
-                        ...p,
-                        slug: e.target.value.toLowerCase().replace(/\s+/g, "_"),
-                      }))
-                    }
-                    placeholder="full_name"
-                    className="text-sm h-8"
+            {/* Fields list */}
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Поля</p>
+              {stage.fields.length === 0 && (
+                <p className="text-xs text-muted-foreground">Полей пока нет.</p>
+              )}
+              <div className="flex flex-col gap-1.5">
+                {stage.fields.map((field) => (
+                  <FieldRow
+                    key={field.id}
+                    field={field}
+                    onDelete={() => handleDeleteField(field.id)}
                   />
+                ))}
+              </div>
+            </div>
+
+            {/* Add field */}
+            {!addingField ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-dashed"
+                onClick={() => setAddingField(true)}
+              >
+                <PlusIcon className="mr-1 size-3.5" />
+                Добавить поле
+              </Button>
+            ) : (
+              <div className="rounded-md border p-3 space-y-2.5">
+                <p className="text-xs font-semibold">Новое поле</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Slug</Label>
+                    <Input
+                      value={newField.slug}
+                      onChange={(e) =>
+                        setNewField((p) => ({
+                          ...p,
+                          slug: e.target.value.toLowerCase().replace(/\s+/g, "_"),
+                        }))
+                      }
+                      placeholder="full_name"
+                      className="text-sm h-8"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Название</Label>
+                    <Input
+                      value={newField.displayName}
+                      onChange={(e) => setNewField((p) => ({ ...p, displayName: e.target.value }))}
+                      placeholder="Полное имя"
+                      className="text-sm h-8"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Тип</Label>
+                    <Select
+                      value={newField.fieldType}
+                      onValueChange={(v) =>
+                        setNewField((p) => ({ ...p, fieldType: v as FieldType }))
+                      }
+                    >
+                      <SelectTrigger className="text-sm h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FIELD_TYPES.map((t) => (
+                          <SelectItem key={t.value} value={t.value}>
+                            {t.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Название</Label>
-                  <Input
-                    value={newField.displayName}
-                    onChange={(e) => setNewField((p) => ({ ...p, displayName: e.target.value }))}
-                    placeholder="Полное имя"
-                    className="text-sm h-8"
-                  />
+                <div className="flex gap-4">
+                  <div className="flex items-center gap-1.5">
+                    <Switch
+                      id={`req-${stage.id}`}
+                      checked={newField.required}
+                      onCheckedChange={(v) => setNewField((p) => ({ ...p, required: v }))}
+                    />
+                    <Label htmlFor={`req-${stage.id}`} className="text-xs">
+                      Обязательное
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Switch
+                      id={`ai-${stage.id}`}
+                      checked={newField.aiExtractable}
+                      onCheckedChange={(v) => setNewField((p) => ({ ...p, aiExtractable: v }))}
+                    />
+                    <Label htmlFor={`ai-${stage.id}`} className="text-xs">
+                      AI извлечение
+                    </Label>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Тип</Label>
-                  <Select
-                    value={newField.fieldType}
-                    onValueChange={(v) => setNewField((p) => ({ ...p, fieldType: v as FieldType }))}
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={handleCreateField}
+                    disabled={!newField.slug || !newField.displayName}
                   >
-                    <SelectTrigger className="text-sm h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {FIELD_TYPES.map((t) => (
-                        <SelectItem key={t.value} value={t.value}>
-                          {t.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    Добавить
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setAddingField(false)}>
+                    Отмена
+                  </Button>
                 </div>
               </div>
-              <div className="flex gap-4">
-                <div className="flex items-center gap-1.5">
-                  <Switch
-                    id={`req-${stage.id}`}
-                    checked={newField.required}
-                    onCheckedChange={(v) => setNewField((p) => ({ ...p, required: v }))}
-                  />
-                  <Label htmlFor={`req-${stage.id}`} className="text-xs">
-                    Обязательное
-                  </Label>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Switch
-                    id={`ai-${stage.id}`}
-                    checked={newField.aiExtractable}
-                    onCheckedChange={(v) => setNewField((p) => ({ ...p, aiExtractable: v }))}
-                  />
-                  <Label htmlFor={`ai-${stage.id}`} className="text-xs">
-                    AI извлечение
-                  </Label>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={handleCreateField}
-                  disabled={!newField.slug || !newField.displayName}
-                >
-                  Добавить
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setAddingField(false)}>
-                  Отмена
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      )}
-    </Card>
+            )}
+          </CardContent>
+        )}
+      </Card>
+    </div>
   );
 }
 

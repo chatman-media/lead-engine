@@ -1,6 +1,15 @@
+import { CalendarClockIcon, PlusIcon, SendIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiError, clearToken, saas, type AuditEntry, type FunnelData, type MessageTemplate } from "@/api/saas";
+import { toast } from "sonner";
+import {
+  ApiError,
+  type AuditEntry,
+  clearToken,
+  type FunnelData,
+  type MessageTemplate,
+  saas,
+} from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +25,6 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { CalendarClockIcon, PlusIcon, SendIcon, Trash2Icon } from "lucide-react";
 
 function fmtDateTime(epoch: number) {
   return new Date(epoch * 1000).toLocaleString("ru-RU", {
@@ -39,7 +47,9 @@ function OutreachHistoryItem({ entry }: { entry: AuditEntry }) {
     <div className="flex flex-col gap-1 rounded-md border px-4 py-3 text-sm">
       <div className="flex items-start justify-between gap-4">
         <p className="flex-1 text-muted-foreground line-clamp-2">{text || "—"}</p>
-        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{fmtDateTime(entry.createdAt)}</span>
+        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+          {fmtDateTime(entry.createdAt)}
+        </span>
       </div>
       <div className="flex items-center gap-3 pt-0.5">
         {stageSlug && (
@@ -53,9 +63,7 @@ function OutreachHistoryItem({ entry }: { entry: AuditEntry }) {
           </Badge>
         )}
         <span className="text-xs text-green-600 font-medium">{enqueued} отправлено</span>
-        {skipped > 0 && (
-          <span className="text-xs text-muted-foreground">{skipped} пропущено</span>
-        )}
+        {skipped > 0 && <span className="text-xs text-muted-foreground">{skipped} пропущено</span>}
         {entry.adminEmail && (
           <span className="ml-auto text-xs text-muted-foreground">{entry.adminEmail}</span>
         )}
@@ -74,7 +82,11 @@ export function SaasOutreach() {
   const [text, setText] = useState("");
   const [scheduledAt, setScheduledAt] = useState(""); // datetime-local string
   const [sending, setSending] = useState(false);
-  const [sendResult, setSendResult] = useState<{ enqueued: number; skipped: number; scheduledAt: number | null } | null>(null);
+  const [sendResult, setSendResult] = useState<{
+    enqueued: number;
+    skipped: number;
+    scheduledAt: number | null;
+  } | null>(null);
 
   // Templates state
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -95,12 +107,22 @@ export function SaasOutreach() {
   }
 
   useEffect(() => {
-    saas.getFunnel().then(setFunnel).catch((err) => { onAuthError(err); });
-    saas.listMessageTemplates().then((r) => setTemplates(r.items)).catch(() => {});
+    saas
+      .getFunnel()
+      .then(setFunnel)
+      .catch((err) => {
+        onAuthError(err);
+      });
+    saas
+      .listMessageTemplates()
+      .then((r) => setTemplates(r.items))
+      .catch(() => {});
     saas
       .listAuditLog({ limit: 200 })
       .then((res) => setHistory(res.items.filter((e) => e.action === "outreach.send")))
-      .catch((err) => { onAuthError(err); })
+      .catch((err) => {
+        onAuthError(err);
+      })
       .finally(() => setHistoryLoading(false));
   }, []);
 
@@ -149,7 +171,9 @@ export function SaasOutreach() {
       const res = await saas.sendOutreach({
         text: text.trim(),
         ...(target === "stage" && stageSlug ? { stageSlug } : {}),
-        ...(scheduledAtEpoch && scheduledAtEpoch > Math.floor(Date.now() / 1000) ? { scheduledAt: scheduledAtEpoch } : {}),
+        ...(scheduledAtEpoch && scheduledAtEpoch > Math.floor(Date.now() / 1000)
+          ? { scheduledAt: scheduledAtEpoch }
+          : {}),
       });
       setSendResult(res);
       // Refresh history
@@ -165,7 +189,8 @@ export function SaasOutreach() {
   }
 
   const stages = funnel?.stages ?? [];
-  const canSend = text.trim().length > 0 && text.length <= 4000 && !sending && (target === "all" || !!stageSlug);
+  const canSend =
+    text.trim().length > 0 && text.length <= 4000 && !sending && (target === "all" || !!stageSlug);
 
   return (
     <div className="space-y-6">
@@ -218,10 +243,12 @@ export function SaasOutreach() {
             <div className="flex items-center justify-between gap-3">
               <Label>Текст сообщения</Label>
               {templates.length > 0 && (
-                <Select onValueChange={(id) => {
-                  const tpl = templates.find((t) => String(t.id) === id);
-                  if (tpl) setText(tpl.body);
-                }}>
+                <Select
+                  onValueChange={(id) => {
+                    const tpl = templates.find((t) => String(t.id) === id);
+                    if (tpl) setText(tpl.body);
+                  }}
+                >
                   <SelectTrigger className="h-7 w-auto max-w-[200px] text-xs">
                     <SelectValue placeholder="Загрузить шаблон…" />
                   </SelectTrigger>
@@ -274,7 +301,10 @@ export function SaasOutreach() {
               <p className="text-xs text-muted-foreground font-medium">Шаблоны</p>
               <div className="flex flex-wrap gap-1.5">
                 {templates.map((t) => (
-                  <div key={t.id} className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs">
+                  <div
+                    key={t.id}
+                    className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs"
+                  >
                     <button
                       type="button"
                       className="hover:underline cursor-pointer"
@@ -312,7 +342,8 @@ export function SaasOutreach() {
             />
             {scheduledAt && (
               <p className="text-xs text-muted-foreground">
-                Сообщения будут поставлены в очередь и отправлены в {new Date(scheduledAt).toLocaleString("ru-RU")}
+                Сообщения будут поставлены в очередь и отправлены в{" "}
+                {new Date(scheduledAt).toLocaleString("ru-RU")}
               </p>
             )}
           </div>
@@ -320,10 +351,17 @@ export function SaasOutreach() {
           {sendResult && (
             <div className="rounded-md bg-muted px-4 py-3 text-sm flex items-center gap-4">
               <span>
-                {sendResult.scheduledAt
-                  ? <>Запланировано: <span className="font-semibold text-blue-600">{sendResult.enqueued}</span></>
-                  : <>Отправлено: <span className="font-semibold text-green-600">{sendResult.enqueued}</span></>
-                }
+                {sendResult.scheduledAt ? (
+                  <>
+                    Запланировано:{" "}
+                    <span className="font-semibold text-blue-600">{sendResult.enqueued}</span>
+                  </>
+                ) : (
+                  <>
+                    Отправлено:{" "}
+                    <span className="font-semibold text-green-600">{sendResult.enqueued}</span>
+                  </>
+                )}
               </span>
               <span className="text-muted-foreground">·</span>
               <span>
@@ -342,7 +380,11 @@ export function SaasOutreach() {
           )}
 
           <Button disabled={!canSend} onClick={handleSend} className="gap-2">
-            {scheduledAt ? <CalendarClockIcon className="size-4" /> : <SendIcon className="size-4" />}
+            {scheduledAt ? (
+              <CalendarClockIcon className="size-4" />
+            ) : (
+              <SendIcon className="size-4" />
+            )}
             {sending ? "Сохраняем…" : scheduledAt ? "Запланировать" : "Отправить"}
           </Button>
         </CardContent>

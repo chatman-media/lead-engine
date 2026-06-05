@@ -1,10 +1,4 @@
-import {
-  CalendarIcon,
-  CheckIcon,
-  ClipboardCopyIcon,
-  CpuIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { CalendarIcon, CheckIcon, ClipboardCopyIcon, CpuIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
@@ -24,7 +18,7 @@ const MCP_TOOLS = [
   { name: "conversation_history", desc: "История сообщений разговора" },
 ];
 
-export function ToolsSettings() {
+export function ToolsSettings({ embedded = false }: { embedded?: boolean } = {}) {
   const [booking, setBooking] = useState<BookingConfig | null>(null);
   const [urlInput, setUrlInput] = useState("");
   const [loading, setLoading] = useState(true);
@@ -85,8 +79,8 @@ export function ToolsSettings() {
   }
 
   return (
-    <div className="space-y-6 p-6">
-      <PageHeader title="Инструменты бота" />
+    <div className={embedded ? "space-y-6" : "space-y-6 p-6"}>
+      {!embedded && <PageHeader title="Инструменты бота" />}
 
       {loading ? (
         <p className="text-muted-foreground text-sm">Загрузка...</p>
@@ -109,8 +103,8 @@ export function ToolsSettings() {
             </div>
             <CardDescription>
               Когда кандидат или лид просит записаться на звонок / демо, бот вызывает этот
-              инструмент и вставляет ссылку в ответ. Поддерживает Calendly, Cal.com, Tidycal и
-              любой другой URL.
+              инструмент и вставляет ссылку в ответ. Поддерживает Calendly, Cal.com, Tidycal и любой
+              другой URL.
             </CardDescription>
           </CardHeader>
 
@@ -130,28 +124,36 @@ export function ToolsSettings() {
                 <Button onClick={handleSave} disabled={saving || !urlInput.trim()}>
                   {saving ? "Сохранение..." : "Сохранить"}
                 </Button>
-                {booking?.enabled && (
-                  confirmDelete ? (
+                {booking?.enabled &&
+                  (confirmDelete ? (
                     <>
                       <span className="self-center text-sm text-muted-foreground">Удалить?</span>
-                      <Button size="sm" variant="destructive" onClick={handleDelete}>Да</Button>
-                      <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Нет</Button>
+                      <Button size="sm" variant="destructive" onClick={handleDelete}>
+                        Да
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+                        Нет
+                      </Button>
                     </>
                   ) : (
-                    <Button variant="ghost" size="icon" onClick={() => setConfirmDelete(true)} title="Удалить">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setConfirmDelete(true)}
+                      title="Удалить"
+                    >
                       <Trash2Icon className="h-4 w-4 text-destructive" />
                     </Button>
-                  )
-                )}
+                  ))}
               </div>
             </div>
 
             {error && <p className="text-sm text-destructive">{error}</p>}
 
             <p className="text-muted-foreground text-xs">
-              Бот предлагает ссылку только когда человек явно просит записаться — не навязывает
-              её в каждом ответе. Требует модель с поддержкой function calling (GPT-4o, GPT-4o
-              mini, Claude 3.5+).
+              Бот предлагает ссылку только когда человек явно просит записаться — не навязывает её в
+              каждом ответе. Требует модель с поддержкой function calling (GPT-4o, GPT-4o mini,
+              Claude 3.5+).
             </p>
           </CardContent>
         </Card>
@@ -217,7 +219,7 @@ export function ToolsSettings() {
             <Label className="text-xs">Конфиг для Claude Desktop / Cursor</Label>
             <div className="relative">
               <pre className="rounded-md bg-muted px-3 py-2.5 text-xs font-mono overflow-x-auto">
-{`{
+                {`{
   "mcpServers": {
     "lead-engine": {
       "type": "http",
@@ -233,10 +235,24 @@ export function ToolsSettings() {
                 variant="ghost"
                 size="icon"
                 className="absolute top-2 right-2 h-6 w-6"
-                onClick={() => copyToClipboard(
-                  JSON.stringify({ mcpServers: { "lead-engine": { type: "http", url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2),
-                  "Конфиг"
-                )}
+                onClick={() =>
+                  copyToClipboard(
+                    JSON.stringify(
+                      {
+                        mcpServers: {
+                          "lead-engine": {
+                            type: "http",
+                            url: mcpUrl,
+                            headers: { Authorization: `Bearer ${token}` },
+                          },
+                        },
+                      },
+                      null,
+                      2,
+                    ),
+                    "Конфиг",
+                  )
+                }
               >
                 <ClipboardCopyIcon className="h-3 w-3" />
               </Button>

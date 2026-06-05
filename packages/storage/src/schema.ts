@@ -203,6 +203,8 @@ export const admins = pgTable("admins", {
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  // Опциональное отображаемое имя (профиль / приветствия в UI).
+  name: text("name"),
   // 'superadmin' (полный доступ — деструктивные операции, system settings)
   // или 'manager' (повседневное — лиды, чаты, KB).
   role: text("role").notNull().default("superadmin"),
@@ -346,6 +348,17 @@ export const STAGE_KINDS = [
   "terminal_lost",    // финал — отказ
 ] as const;
 
+// Макро-фаза «середины» воронки (универсальный костяк). Хранится только на
+// active-стадиях; capture/won/lost выводятся из kind. Полная семантика и
+// валидатор — в @chatman-media/verticals (phases.ts); здесь дублируем литералы
+// для CHECK, т.к. storage не зависит от verticals (как и STAGE_KINDS).
+export const STAGE_PHASES = [
+  "qualify",  // понять нужду + оценить сделку
+  "offer",    // предложить условия + получить «да»
+  "clear",    // гейты: KYC, документы, одобрения 3-й стороны
+  "fulfill",  // доставить + провести деньги
+] as const;
+
 export const FIELD_TYPES = [
   "text", "textarea", "number", "date",
   "select", "multiselect", "boolean",
@@ -364,6 +377,9 @@ export const stageDefinitions = pgTable("stage_definitions", {
   position: integer("position").notNull().default(0),
   kind: text("kind").notNull().default("active"),
   stageType: text("stage_type").notNull().default("form_fill"),
+  // макро-фаза костяка (qualify/offer/clear/fulfill) — только для active-стадий;
+  // для intake/terminal_* фаза выводится из kind, поэтому здесь NULL.
+  phase: text("phase"),
   // тип-специфичные параметры: ai_collect, max_files, expected_days и т.п.
   configJson: text("config_json").notNull().default("{}"),
   // slugs стадий, в которые разрешён переход из этой
@@ -381,6 +397,7 @@ export const stageDefinitions = pgTable("stage_definitions", {
 }, (t) => [
   check("stage_definitions_kind_check", sql`${t.kind} IN ('intake','active','terminal_won','terminal_lost')`),
   check("stage_definitions_type_check", sql`${t.stageType} IN ('form_fill','document_upload','document_signature','rate_confirmation','external_approval','payment','waiting','awaiting_operator','interaction','assessment','milestone')`),
+  check("stage_definitions_phase_check", sql`${t.phase} IS NULL OR ${t.phase} IN ('qualify','offer','clear','fulfill')`),
   uniqueIndex("uniq_stage_def_funnel_slug").on(t.funnelId, t.slug),
   index("idx_stage_def_funnel_pos").on(t.funnelId, t.position),
 ]);
@@ -907,7 +924,7 @@ export const llmProviderConfigs = pgTable("llm_provider_configs", {
 }, (t) => [
   check(
     "llm_configs_purpose_check",
-    sql`${t.purpose} IN ('chat','embed','vision','judge','reranker')`,
+    sql`${t.purpose} IN ('chat','embed','vision','judge','reranker','transcribe')`,
   ),
   check(
     "llm_configs_provider_check",

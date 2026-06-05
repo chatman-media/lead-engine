@@ -22,7 +22,7 @@ import { llmProviderConfigs } from "@chatman-media/storage";
 import { eq } from "drizzle-orm";
 import type { ApiConfig } from "../config.ts";
 
-export type LlmPurpose = "chat" | "embed" | "vision" | "judge";
+export type LlmPurpose = "chat" | "embed" | "vision" | "judge" | "transcribe";
 export type LlmProvider = "openai" | "openrouter" | "ollama" | "anthropic";
 
 export interface ResolvedLlmConfig {
@@ -201,8 +201,8 @@ export async function loadTenantLlmConfigs(opts: LoadOpts): Promise<LoadedLlmCon
       anyEmbed = true;
     }
 
-    // VISION + JUDGE: DB only (env не имеет полей под эти purposes).
-    for (const purpose of ["vision", "judge"] as const) {
+    // VISION + JUDGE + TRANSCRIBE: DB only (env не имеет полей под эти purposes).
+    for (const purpose of ["vision", "judge", "transcribe"] as const) {
       const dbRow = dbConfigs?.get(purpose);
       if (dbRow) {
         const cfg = await resolveDbConfig(dbRow, opts);

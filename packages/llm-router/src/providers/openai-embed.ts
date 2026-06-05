@@ -1,8 +1,4 @@
-import {
-  type EmbeddingClient,
-  EmbeddingApiError,
-  type FetchLike,
-} from "../types.ts";
+import { type EmbeddingClient, EmbeddingApiError, type FetchLike } from "../types.ts";
 
 export interface OpenAIEmbeddingOptions {
   apiKey: string;
@@ -81,13 +77,34 @@ export class OpenAIEmbeddingClient implements EmbeddingClient {
         `expected ${inputs.length} embeddings, got ${sorted.length}`,
       );
     }
-    for (const item of sorted) {
-      if (item.embedding.length !== this.dim) {
-        throw new Error(
-          `Embedding dim mismatch: expected ${this.dim}, got ${item.embedding.length}`,
-        );
-      }
+    return sorted.map((d) => this.fitDim(d.embedding, res.status));
+  }
+
+  /**
+   * Приводит вектор модели к целевой размерности `this.dim` — чтобы БЗ
+   * (колонка vector(N)) работала с любой современной моделью, у которой
+   * размерность отличается.
+   *
+   *  - len === dim → как есть.
+   *  - len  >  dim → обрезаем до dim + L2-перенормировка. Для Matryoshka-моделей
+   *    (OpenAI text-embedding-3-*, Gemini embedding и т.п.) это официально
+   *    поддерживаемый способ снизить размерность без потери качества.
+   *  - len  <  dim → нельзя «дофантазировать» недостающие компоненты → понятная
+   *    ошибка (нужна модель с размерностью ≥ dim).
+   */
+  private fitDim(embedding: number[], status: number): number[] {
+    if (embedding.length === this.dim) return embedding;
+    if (embedding.length < this.dim) {
+      throw new EmbeddingApiError(
+        status,
+        `model "${this.model}" returned ${embedding.length}-dim vectors, but ${this.dim} required — ` +
+          `choose an embedding model with dimensions ≥ ${this.dim}`,
+      );
     }
-    return sorted.map((d) => d.embedding);
+    const sliced = embedding.slice(0, this.dim);
+    let norm = 0;
+    for (const v of sliced) norm += v * v;
+    norm = Math.sqrt(norm);
+    return norm > 0 ? sliced.map((v) => v / norm) : sliced;
   }
 }

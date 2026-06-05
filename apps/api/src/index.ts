@@ -1,4 +1,10 @@
-import { checkRlsEnforcement, NotificationsRepo, NotificationService, OperatorBotHandler, OpsAlertRouter } from "@chatman-media/conversation-engine";
+import {
+  checkRlsEnforcement,
+  NotificationsRepo,
+  NotificationService,
+  OperatorBotHandler,
+  OpsAlertRouter,
+} from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { funnels, tenants } from "@chatman-media/storage";
@@ -180,6 +186,8 @@ async function main() {
   await channels.loadFromDb(db as any, {
     masterKeyHex: cfg.masterKeyHex,
     onWarn: (msg, ctx) => log.warn(`channel-registry: ${msg}`, ctx),
+    ...(cfg.whatsappVerifyToken ? { whatsappVerifyTokenFallback: cfg.whatsappVerifyToken } : {}),
+    ...(cfg.whatsappAppSecret ? { whatsappAppSecretFallback: cfg.whatsappAppSecret } : {}),
   });
 
   const app = new Hono();
@@ -208,6 +216,7 @@ async function main() {
       secret: cfg.authSecret,
       mailer,
       appUrl: cfg.mailer.appUrl,
+      allowSignup: process.env.ALLOW_PUBLIC_SIGNUP === "1",
     }),
   );
   log.info("auth routes enabled", {
@@ -241,8 +250,11 @@ async function main() {
     masterKeyHex: cfg.masterKeyHex,
     log,
   });
-  const userbotEnabled = cfg.telegramUserbot.apiId > 0 && !!cfg.telegramUserbot.apiHash;
-  const userbotLoginStore = userbotEnabled ? new UserbotLoginStore() : undefined;
+  // Userbot-сабсистем включён всегда: api_id/api_hash резолвятся per-tenant из
+  // tenant_secrets (env TELEGRAM_API_ID/HASH — лишь общий фолбэк). Тенант вводит
+  // свои креды в кабинете → онбординг работает без env на сервере.
+  const userbotEnvFallback = cfg.telegramUserbot.apiId > 0 && !!cfg.telegramUserbot.apiHash;
+  const userbotLoginStore = new UserbotLoginStore();
 
   // Hot-reload bus: admin routes вызывают reloadLlm/reloadChannels(tenantId)
   // после изменения, live применяя в текущем процессе. apps/worker — отдельный
@@ -331,9 +343,9 @@ async function main() {
       webhookSecret: cfg.telegramWebhookSecret,
       ...(cfg.whatsappVerifyToken ? { whatsappVerifyToken: cfg.whatsappVerifyToken } : {}),
       ...(cfg.webWidgetScriptUrl ? { webWidgetScriptUrl: cfg.webWidgetScriptUrl } : {}),
-      ...(userbotEnabled ? { telegramApiId: cfg.telegramUserbot.apiId } : {}),
-      ...(userbotEnabled ? { telegramApiHash: cfg.telegramUserbot.apiHash } : {}),
-      ...(userbotLoginStore ? { userbotLoginStore } : {}),
+      telegramApiId: cfg.telegramUserbot.apiId,
+      telegramApiHash: cfg.telegramUserbot.apiHash,
+      userbotLoginStore,
       onReload: reloader.reloadChannels,
     }),
   );
@@ -370,7 +382,16 @@ async function main() {
 
   // Leads pipeline (list, create, stage transition, field values).
   app.route("/", makeAdminLeadsRoutes({ db, notificationService }));
-  app.route("/api/admin/notifications", makeAdminNotificationsRoutes({ repo: notificationsRepo, botUsername: cfg.operatorBotUsername, notificationService, opsRouter: opsAlertRouter, opsEmailConfigured: !!cfg.mailer.apiKey }));
+  app.route(
+    "/api/admin/notifications",
+    makeAdminNotificationsRoutes({
+      repo: notificationsRepo,
+      botUsername: cfg.operatorBotUsername,
+      notificationService,
+      opsRouter: opsAlertRouter,
+      opsEmailConfigured: !!cfg.mailer.apiKey,
+    }),
+  );
   log.info("admin-leads routes enabled");
 
   // Funnel builder (stage_definitions, stage_fields) + skills list.
@@ -412,10 +433,13 @@ async function main() {
   log.info("admin-director-hooks routes enabled");
   app.route("/", makeAdminExperimentsRoutes({ db }));
   log.info("admin-experiments routes enabled");
-  app.route("/", makeAdminStylesRoutes({
-    db,
-    resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
-  }));
+  app.route(
+    "/",
+    makeAdminStylesRoutes({
+      db,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    }),
+  );
   log.info("admin-styles routes enabled");
 
   // Real-time SSE push for admin UI.
@@ -439,11 +463,14 @@ async function main() {
   log.info("admin-verticals routes enabled");
 
   // MCP (Model Context Protocol) endpoint — для Claude Desktop / Cursor / агентов.
-  app.route("/", makeMcpRoutes({
-    db,
-    authSecret: cfg.authSecret,
-    resolveEmbedder: embedderResolver ?? undefined,
-  }));
+  app.route(
+    "/",
+    makeMcpRoutes({
+      db,
+      authSecret: cfg.authSecret,
+      resolveEmbedder: embedderResolver ?? undefined,
+    }),
+  );
   log.info("MCP endpoint enabled at POST /mcp");
 
   const strategyBundle: ReplyStrategyBundle | null = makeReplyStrategy(
@@ -453,7 +480,6 @@ async function main() {
     metrics,
     recordUsage,
   );
-
 
   // Agentic tool configuration (booking link, etc.).
   app.route(
@@ -564,7 +590,9 @@ async function main() {
 
   const resolveTranscriber = makeTranscriberResolver(loadedRef);
   if (resolveTranscriber) {
-    log.info("voice transcription enabled (Whisper) — uses per-tenant chat API key");
+    log.info(
+      "voice transcription enabled — dedicated 'transcribe' config or OpenAI/OpenRouter key (chat/embed/vision)",
+    );
   }
 
   const sink = makeMetricsSink(metrics);
@@ -722,7 +750,7 @@ async function main() {
   // соединений; runner-factory инжектит pipeline-deps (replyStrategy и т.д.).
   const userbotAbort = new AbortController();
   let userbotDispatcherPromise: Promise<void> = Promise.resolve();
-  if (userbotEnabled) {
+  {
     userbotRegistry.setRunnerFactory((entry, signal) =>
       startUserbotInboundRunner({
         entry,
@@ -754,9 +782,10 @@ async function main() {
         err: err instanceof Error ? err : new Error(String(err)),
       });
     });
-    log.info("channel-userbot enabled", { connected: userbotRegistry.size() });
-  } else {
-    log.info("channel-userbot disabled — TELEGRAM_API_ID/HASH not set");
+    log.info("channel-userbot enabled (per-tenant MTProto creds)", {
+      connected: userbotRegistry.size(),
+      envFallback: userbotEnvFallback,
+    });
   }
   const wsRoutes = makeWebSocketRoutes({
     registry: webRegistry,
@@ -823,17 +852,23 @@ async function main() {
   };
   // Usage alerts — проверяем каждый час все активные тенанты.
   // Отправляет email при 80% / 100% LLM-квоты (дедупликация in-memory по месяцу).
-  const usageAlertInterval = setInterval(() => {
-    checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
-      log.warn("usage-alerts check failed", { err: e }),
-    );
-  }, 60 * 60 * 1000); // каждый час
+  const usageAlertInterval = setInterval(
+    () => {
+      checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
+        log.warn("usage-alerts check failed", { err: e }),
+      );
+    },
+    60 * 60 * 1000,
+  ); // каждый час
   // Первый запуск через 5 минут после старта (не сразу — дать DB прогреться).
-  const usageAlertFirstRun = setTimeout(() => {
-    checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
-      log.warn("usage-alerts initial check failed", { err: e }),
-    );
-  }, 5 * 60 * 1000);
+  const usageAlertFirstRun = setTimeout(
+    () => {
+      checkUsageAlerts(db as never, mailer, cfg.mailer.appUrl).catch((e) =>
+        log.warn("usage-alerts initial check failed", { err: e }),
+      );
+    },
+    5 * 60 * 1000,
+  );
 
   // Exchange rate-feed: периодически тянет рыночный base_rate для auto-курсов.
   // RATE_FEED_MS (default 180000 = 3 мин). 0 — отключить.

@@ -43,14 +43,6 @@ export function SaasLogin() {
     <AuthLayout
       title="С возвращением"
       subtitle="Войдите в панель управления ассистентом"
-      footer={
-        <>
-          Нет аккаунта?{" "}
-          <Link to="/signup" className="font-medium text-primary hover:underline">
-            Зарегистрироваться
-          </Link>
-        </>
-      }
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">

@@ -56,9 +56,12 @@ async function getFxPerUsd(): Promise<Record<string, number>> {
 }
 
 async function getBinanceUsdt(symbolBase: string): Promise<number> {
-  const json = (await fetchJson(`${BINANCE_TICKER}?symbol=${symbolBase}USDT`)) as { price?: string };
+  const json = (await fetchJson(`${BINANCE_TICKER}?symbol=${symbolBase}USDT`)) as {
+    price?: string;
+  };
   const price = Number(json.price);
-  if (!Number.isFinite(price) || price <= 0) throw new Error(`Binance: bad price for ${symbolBase}`);
+  if (!Number.isFinite(price) || price <= 0)
+    throw new Error(`Binance: bad price for ${symbolBase}`);
   return price;
 }
 
@@ -165,17 +168,20 @@ export interface RateCardProposal {
   message: string;
 }
 
+// Дефолтные тиры — под типовое табло обменника (Пхукет). Подобраны как стартовые;
+// тенант правит под себя в онбординге/кабинете. Для больших сумм курс выгоднее
+// клиенту (RUB/THB ниже, THB/USDT выше), но спред не схлопывается в ноль.
 const DEFAULT_RATE_CARD: Record<string, RateCardTierSpec[]> = {
   RUB: [
-    { minThb: 2_000, maxThb: 3_000, displayRate: 2.64 },
-    { minThb: 3_000, maxThb: 7_000, displayRate: 2.59 },
-    { minThb: 7_000, maxThb: 20_000, displayRate: 2.52 },
-    { minThb: 20_000, maxThb: 50_000, displayRate: 2.48 },
-    { minThb: 50_000, maxThb: null, displayRate: 2.39 },
+    { minThb: 2_000, maxThb: 3_000, displayRate: 2.6 },
+    { minThb: 3_000, maxThb: 7_000, displayRate: 2.52 },
+    { minThb: 7_000, maxThb: 20_000, displayRate: 2.48 },
+    { minThb: 20_000, maxThb: 50_000, displayRate: 2.45 },
+    { minThb: 50_000, maxThb: null, displayRate: 2.43 },
   ],
   USDT: [
-    { minThb: 2_000, maxThb: 10_000, displayRate: 31.35 },
-    { minThb: 10_000, maxThb: 100_000, displayRate: 31.45 },
+    { minThb: 2_000, maxThb: 10_000, displayRate: 31.4 },
+    { minThb: 10_000, maxThb: 100_000, displayRate: 31.5 },
     { minThb: 100_000, maxThb: null, displayRate: 31.7 },
   ],
 };
@@ -203,16 +209,29 @@ export function renderRateCardMessage(proposals: RateCardProposal[]): string {
   if (rub) {
     rub.tiers.forEach((tier, idx) => {
       const marker = idx === 0 ? ">" : idx === 1 ? "-" : "<";
-      lines.push(`🇷🇺RUB // Баты - ${formatRate(tier.displayRate)} ${marker} (${formatThbRange(tier.minThb, tier.maxThb)}🇹🇭`);
+      lines.push(
+        `🇷🇺RUB // Баты - ${formatRate(tier.displayRate)} ${marker} (${formatThbRange(tier.minThb, tier.maxThb)}🇹🇭`,
+      );
     });
     lines.push("***", "", "🏪💲———💳💳 💰 💳💳———💲🏪", "");
   }
 
   if (usdt) {
     usdt.tiers.forEach((tier) => {
-      lines.push(`💲USDT // Баты < ${formatRate(tier.displayRate)} - (${formatThbRange(tier.minThb, tier.maxThb)})🇹🇭`);
+      lines.push(
+        `💲USDT // Баты < ${formatRate(tier.displayRate)} - (${formatThbRange(tier.minThb, tier.maxThb)})🇹🇭`,
+      );
     });
-    lines.push("", "💲💲💲💲💲💲без карты(Инструкция)", "", "📞 LINE", "📞 WhatsApp", "📞 WeChat", "", "💬Отзывы о Нашей Работе 📨");
+    lines.push(
+      "",
+      "💲💲💲💲💲💲без карты(Инструкция)",
+      "",
+      "📞 LINE",
+      "📞 WhatsApp",
+      "📞 WeChat",
+      "",
+      "💬Отзывы о Нашей Работе 📨",
+    );
   }
 
   return lines.join("\n");
@@ -291,14 +310,19 @@ export async function refreshTenantRates(
   const updates: Array<{ id: number; baseRate: number }> = [];
   for (const row of rows) {
     try {
-      const next = await fetchMarketBaseRate(row.asset, row.quoteMode === "divide" ? "divide" : "multiply");
+      const next = await fetchMarketBaseRate(
+        row.asset,
+        row.quoteMode === "divide" ? "divide" : "multiply",
+      );
       if (next === null) {
         result.skipped++;
         continue;
       }
       if (!isRateSane(Number(row.baseRate), next)) {
         result.skipped++;
-        log?.warn?.(`rate-feed: ${row.asset} отклонён sanity-guard (prev=${row.baseRate}, next=${next})`);
+        log?.warn?.(
+          `rate-feed: ${row.asset} отклонён sanity-guard (prev=${row.baseRate}, next=${next})`,
+        );
         const prev = Number(row.baseRate);
         // Резкое колебание курса — поднимаем аномалию (доставку владельцу делает #145).
         onAnomaly?.({
@@ -313,7 +337,9 @@ export async function refreshTenantRates(
       updates.push({ id: row.id, baseRate: round(next) });
     } catch (err) {
       result.failed++;
-      log?.warn?.(`rate-feed: ${row.asset} fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+      log?.warn?.(
+        `rate-feed: ${row.asset} fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -338,15 +364,22 @@ export async function refreshAllActiveTenants(
   log?: { warn?: (msg: string) => void; info?: (msg: string) => void },
   onAnomaly?: (a: RateFeedAnomaly) => void,
 ): Promise<void> {
-  const rows = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.status, "active"));
+  const rows = await db
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(eq(tenants.status, "active"));
   for (const { id } of rows) {
     try {
       const r = await refreshTenantRates(db, id, log, onAnomaly);
       if (r.updated > 0 || r.failed > 0) {
-        log?.info?.(`rate-feed tenant=${id} updated=${r.updated} skipped=${r.skipped} failed=${r.failed}`);
+        log?.info?.(
+          `rate-feed tenant=${id} updated=${r.updated} skipped=${r.skipped} failed=${r.failed}`,
+        );
       }
     } catch (err) {
-      log?.warn?.(`rate-feed tenant=${id} error: ${err instanceof Error ? err.message : String(err)}`);
+      log?.warn?.(
+        `rate-feed tenant=${id} error: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 }

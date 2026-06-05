@@ -1,14 +1,18 @@
-// Integration test для admin-onboarding endpoint. Sequence:
-//   1. fresh tenant → status: всё false, done=false
-//   2. insert chat config → chatLlmConfigured=true
-//   3. insert channel → channelConnected=true
-//   4. insert kb_document → hasKbDocuments=true, done=true (когда все три)
+// Integration test для admin-onboarding endpoint.
+//
+// Новые правила `done`:
+//   - generic тенант: channel + chat LLM (KB и embed — НЕ требуются).
+//   - exchange тенант (funnel slug='exchange'): + ≥1 активный курс + ≥1 реквизит.
+//
+// Изолированная PG; self-skip без DATABASE_URL.
 
-import { setEncryptedSecret } from "@chatman-media/conversation-engine";
+import { setEncryptedSecret, withTenant } from "@chatman-media/conversation-engine";
 import {
   applyAllMigrations,
   channels,
   createIsolatedDb,
+  exchangeRates,
+  funnels,
   kbDocuments,
   llmProviderConfigs,
   schema,
@@ -45,34 +49,43 @@ let app: Hono;
 let token = "";
 let tenantId = 0;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+interface StatusBody {
+  channelConnected: boolean;
+  chatLlmConfigured: boolean;
+  hasKbDocuments: boolean;
+  isExchange: boolean;
+  funnelInstalled: boolean;
+  activeRateCount: number;
+  requisiteCount: number;
+  channelKind?: string;
+  channelExternalId?: string;
+  chatProvider?: string;
+  chatModel?: string;
+  chatHasSecret?: boolean;
+  done: boolean;
+}
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminOnboardingRoutes({ db }));
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "onb@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
-    token = sba.token;
-    tenantId = sba.admin.tenantId;
-  },
-  30_000,
-);
+  app = new Hono();
+  // allowSignup:true — публичная регистрация по умолчанию закрыта; тесту нужен tenant.
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET, allowSignup: true }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminOnboardingRoutes({ db }));
+
+  const sa = await signupReq("onb@demo.io");
+  token = sa.token;
+  tenantId = sa.tenantId;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -81,17 +94,98 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function authReq(path: string, init: RequestInit = {}): Promise<Response> {
-  return await app.request(path, {
-    ...init,
-    headers: {
-      ...(init.headers ?? {}),
-      Authorization: `Bearer ${token}`,
-    },
+async function signupReq(email: string): Promise<{ token: string; tenantId: number }> {
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password: "strong-pwd-12345" }),
+  });
+  const j = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  return { token: j.token, tenantId: j.admin.tenantId };
+}
+
+async function getStatus(tk: string): Promise<StatusBody> {
+  const res = await app.request("/api/admin/onboarding-status", {
+    headers: { Authorization: `Bearer ${tk}` },
+  });
+  return (await res.json()) as StatusBody;
+}
+
+const NOW = Math.floor(Date.now() / 1000);
+
+async function insertChannel(tid: number, externalId = "testbot_42") {
+  await withTenant(db, tid, (tx) =>
+    tx.insert(channels).values({
+      tenantId: tid,
+      kind: "telegram_bot",
+      externalId,
+      status: "active",
+      createdAt: NOW,
+      updatedAt: NOW,
+    }),
+  );
+}
+
+async function insertChatLlm(tid: number) {
+  await setEncryptedSecret({
+    db,
+    tenantId: tid,
+    key: "llm_chat_apikey",
+    value: "sk-test",
+    masterKeyHex: MASTER_KEY,
+    nowEpoch: NOW,
+  });
+  await withTenant(db, tid, (tx) =>
+    tx.insert(llmProviderConfigs).values({
+      tenantId: tid,
+      purpose: "chat",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      secretRef: "llm_chat_apikey",
+      createdAt: NOW,
+      updatedAt: NOW,
+    }),
+  );
+}
+
+async function insertExchangeFunnel(tid: number) {
+  await withTenant(db, tid, (tx) =>
+    tx.insert(funnels).values({
+      tenantId: tid,
+      slug: "exchange",
+      isActive: true,
+      createdAt: NOW,
+      updatedAt: NOW,
+    }),
+  );
+}
+
+async function insertActiveRate(tid: number) {
+  await withTenant(db, tid, (tx) =>
+    tx.insert(exchangeRates).values({
+      tenantId: tid,
+      asset: "USDT",
+      network: "trc20",
+      baseRate: 36.5,
+      isActive: true,
+      createdAt: NOW,
+      updatedAt: NOW,
+    }),
+  );
+}
+
+async function insertRequisite(tid: number) {
+  await setEncryptedSecret({
+    db,
+    tenantId: tid,
+    key: "exchange_wallet_usdt_trc20",
+    value: "TXyz...",
+    masterKeyHex: MASTER_KEY,
+    nowEpoch: NOW,
   });
 }
 
-describe("admin-onboarding-status", () => {
+describe("admin-onboarding-status — auth + generic", () => {
   it("без auth → 401", async () => {
     if (!sql) return;
     const res = await app.request("/api/admin/onboarding-status");
@@ -100,117 +194,47 @@ describe("admin-onboarding-status", () => {
 
   it("fresh tenant → all false, done=false", async () => {
     if (!sql) return;
-    const res = await authReq("/api/admin/onboarding-status");
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      channelConnected: boolean;
-      chatLlmConfigured: boolean;
-      hasKbDocuments: boolean;
-      done: boolean;
-    };
+    const body = await getStatus(token);
     expect(body.channelConnected).toBe(false);
     expect(body.chatLlmConfigured).toBe(false);
     expect(body.hasKbDocuments).toBe(false);
+    expect(body.isExchange).toBe(false);
     expect(body.done).toBe(false);
   });
 
-  it("insert chat LLM config → chatLlmConfigured=true, done still false", async () => {
+  it("insert chat LLM → chatLlmConfigured=true, done still false (нет канала)", async () => {
     if (!sql) return;
-    const now = Math.floor(Date.now() / 1000);
-    await setEncryptedSecret({
-      db,
-      tenantId,
-      key: "llm_chat_apikey",
-      value: "sk-test",
-      masterKeyHex: MASTER_KEY,
-      nowEpoch: now,
-    });
-    await db.insert(llmProviderConfigs).values({
-      tenantId,
-      purpose: "chat",
-      provider: "openai",
-      model: "gpt-4o-mini",
-      secretRef: "llm_chat_apikey",
-      createdAt: now,
-      updatedAt: now,
-    });
-    const res = await authReq("/api/admin/onboarding-status");
-    const body = (await res.json()) as {
-      chatLlmConfigured: boolean;
-      chatProvider: string;
-      chatModel: string;
-      chatHasSecret: boolean;
-      done: boolean;
-    };
+    await insertChatLlm(tenantId);
+    const body = await getStatus(token);
     expect(body.chatLlmConfigured).toBe(true);
     expect(body.chatProvider).toBe("openai");
-    expect(body.chatModel).toBe("gpt-4o-mini");
     expect(body.chatHasSecret).toBe(true);
     expect(body.done).toBe(false);
   });
 
-  it("insert active channel → channelConnected=true, externalId returned", async () => {
+  it("insert channel → generic tenant done=true (KB НЕ требуется)", async () => {
     if (!sql) return;
-    const now = Math.floor(Date.now() / 1000);
-    await db.insert(channels).values({
-      tenantId,
-      kind: "telegram_bot",
-      externalId: "testbot_42",
-      credentialsRef: "channel_telegram_bot_testbot_42",
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
-    });
-    const res = await authReq("/api/admin/onboarding-status");
-    const body = (await res.json()) as {
-      channelConnected: boolean;
-      channelKind: string;
-      channelExternalId: string;
-      done: boolean;
-    };
+    await insertChannel(tenantId);
+    const body = await getStatus(token);
     expect(body.channelConnected).toBe(true);
-    expect(body.channelKind).toBe("telegram_bot");
     expect(body.channelExternalId).toBe("testbot_42");
-    expect(body.done).toBe(false); // KB пуст
+    expect(body.hasKbDocuments).toBe(false);
+    expect(body.done).toBe(true); // generic: channel + chat достаточно
   });
 
   it("paused channel НЕ считается active", async () => {
     if (!sql) return;
-    const now = Math.floor(Date.now() / 1000);
     await db
       .update(channels)
-      .set({ status: "paused", updatedAt: now })
+      .set({ status: "paused", updatedAt: NOW })
       .where(eq(channels.tenantId, tenantId));
-    const beforeRes = await authReq("/api/admin/onboarding-status");
-    const before = (await beforeRes.json()) as { channelConnected: boolean };
+    const before = await getStatus(token);
     expect(before.channelConnected).toBe(false);
+    expect(before.done).toBe(false);
     await db
       .update(channels)
-      .set({ status: "active", updatedAt: now })
+      .set({ status: "active", updatedAt: NOW })
       .where(eq(channels.tenantId, tenantId));
-  });
-
-  it("insert kb_document → hasKbDocuments=true, done=true (all three)", async () => {
-    if (!sql) return;
-    const now = Math.floor(Date.now() / 1000);
-    await db.insert(kbDocuments).values({
-      tenantId,
-      source: "test-source",
-      title: "Test doc",
-      contentHash: "hash-123",
-      createdAt: now,
-    });
-    const res = await authReq("/api/admin/onboarding-status");
-    const body = (await res.json()) as {
-      channelConnected: boolean;
-      chatLlmConfigured: boolean;
-      hasKbDocuments: boolean;
-      done: boolean;
-    };
-    expect(body.hasKbDocuments).toBe(true);
-    expect(body.channelConnected).toBe(true);
-    expect(body.chatLlmConfigured).toBe(true);
-    expect(body.done).toBe(true);
   });
 
   it("tampered token → 401", async () => {
@@ -219,5 +243,64 @@ describe("admin-onboarding-status", () => {
       headers: { Authorization: "Bearer not-a-valid-token" },
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("admin-onboarding-status — exchange gating", () => {
+  it("exchange: воронка + канал + chat, без курса → НЕ done", async () => {
+    if (!sql) return;
+    const t = await signupReq("onb-ex-norate@demo.io");
+    await insertExchangeFunnel(t.tenantId);
+    await insertChannel(t.tenantId, "exbot_1");
+    await insertChatLlm(t.tenantId);
+    await insertRequisite(t.tenantId);
+    const body = await getStatus(t.token);
+    expect(body.isExchange).toBe(true);
+    expect(body.funnelInstalled).toBe(true);
+    expect(body.activeRateCount).toBe(0);
+    expect(body.done).toBe(false);
+  });
+
+  it("exchange: курс есть, реквизита нет → НЕ done", async () => {
+    if (!sql) return;
+    const t = await signupReq("onb-ex-noreq@demo.io");
+    await insertExchangeFunnel(t.tenantId);
+    await insertChannel(t.tenantId, "exbot_2");
+    await insertChatLlm(t.tenantId);
+    await insertActiveRate(t.tenantId);
+    const body = await getStatus(t.token);
+    expect(body.isExchange).toBe(true);
+    expect(body.activeRateCount).toBe(1);
+    expect(body.requisiteCount).toBe(0);
+    expect(body.done).toBe(false);
+  });
+
+  it("exchange: канал + chat + воронка + курс + реквизит → done", async () => {
+    if (!sql) return;
+    const t = await signupReq("onb-ex-full@demo.io");
+    await insertExchangeFunnel(t.tenantId);
+    await insertChannel(t.tenantId, "exbot_3");
+    await insertChatLlm(t.tenantId);
+    await insertActiveRate(t.tenantId);
+    await insertRequisite(t.tenantId);
+    const body = await getStatus(t.token);
+    expect(body.isExchange).toBe(true);
+    expect(body.activeRateCount).toBe(1);
+    expect(body.requisiteCount).toBe(1);
+    expect(body.done).toBe(true);
+  });
+
+  it("kbDocuments не требуется для done (generic)", async () => {
+    if (!sql) return;
+    await db.insert(kbDocuments).values({
+      tenantId,
+      source: "test-source",
+      title: "Test doc",
+      contentHash: "hash-123",
+      createdAt: NOW,
+    });
+    const body = await getStatus(token);
+    expect(body.hasKbDocuments).toBe(true);
+    expect(body.done).toBe(true);
   });
 });

@@ -54,6 +54,68 @@ function OkNote({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Карточка «канал уже подключён»: статус + Переподключить/Отключить. */
+function ConnectedChannelCard({
+  title,
+  statusText,
+  reconnectLabel,
+  onReconnect,
+  confirmDelete,
+  onAskDelete,
+  onConfirmDelete,
+  onCancelDelete,
+}: {
+  title: string;
+  statusText: string;
+  reconnectLabel: string;
+  onReconnect: () => void;
+  confirmDelete: boolean;
+  onAskDelete: () => void;
+  onConfirmDelete: () => void;
+  onCancelDelete: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+        <div className="flex items-center gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[color-mix(in_oklch,var(--success)_15%,transparent)] text-[var(--success)]">
+            <CheckIcon className="size-5" />
+          </span>
+          <div>
+            <p className="text-sm font-medium">{title}</p>
+            <p className="text-xs text-muted-foreground">{statusText}</p>
+          </div>
+        </div>
+        <span className="text-xs font-semibold text-[var(--success)]">активен</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={onReconnect}>
+          {reconnectLabel}
+        </Button>
+        {confirmDelete ? (
+          <>
+            <span className="self-center text-sm text-muted-foreground">Отключить?</span>
+            <Button variant="destructive" onClick={onConfirmDelete}>
+              Да, отключить
+            </Button>
+            <Button variant="ghost" onClick={onCancelDelete}>
+              Отмена
+            </Button>
+          </>
+        ) : (
+          <Button
+            variant="ghost"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={onAskDelete}
+          >
+            Отключить
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function SaasChannels() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<ChannelTab>("telegram");
@@ -67,16 +129,26 @@ export function SaasChannels() {
 
   const [ubStep, setUbStep] = useState<UserbotStep>("phone");
   const [ubPhone, setUbPhone] = useState("");
+  const [ubApiId, setUbApiId] = useState("");
+  const [ubApiHash, setUbApiHash] = useState("");
   const [ubCode, setUbCode] = useState("");
   const [ubPassword, setUbPassword] = useState("");
   const [ubLoginId, setUbLoginId] = useState("");
   const [ubSubmitting, setUbSubmitting] = useState(false);
   const [ubError, setUbError] = useState("");
   const [ubDone, setUbDone] = useState<{ username: string | null } | null>(null);
+  // Если личный аккаунт уже подключён — показываем статус, а не мастер заново.
+  // ubReconnect=true принудительно открывает мастер для переподключения.
+  const [ubReconnect, setUbReconnect] = useState(false);
+  // Для bot/whatsapp/web: какая вкладка принудительно показывает форму
+  // (переподключение / добавить), несмотря на уже подключённый канал.
+  const [reconnectKind, setReconnectKind] = useState<ChannelTab | null>(null);
 
   const [waPhoneId, setWaPhoneId] = useState("");
   const [waAccessToken, setWaAccessToken] = useState("");
   const [waBizId, setWaBizId] = useState("");
+  const [waVerifyToken, setWaVerifyToken] = useState("");
+  const [waAppSecret, setWaAppSecret] = useState("");
   const [waSubmitting, setWaSubmitting] = useState(false);
   const [waResult, setWaResult] = useState<CreateWhatsAppChannelResult | null>(null);
 
@@ -128,6 +200,7 @@ export function SaasChannels() {
       const res = await saas.createTelegramChannel(trimmed);
       setLastCreated({ username: res.username });
       setBotToken("");
+      setReconnectKind(null);
       await refresh();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -177,6 +250,7 @@ export function SaasChannels() {
         ...(/^#[0-9a-fA-F]{3,8}$/.test(webColor) ? { primaryColor: webColor } : {}),
       });
       setWebResult(res);
+      setReconnectKind(null);
       await refresh();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -224,9 +298,12 @@ export function SaasChannels() {
         phoneNumberId,
         accessToken,
         ...(waBizId.trim() ? { businessAccountId: waBizId.trim() } : {}),
+        ...(waVerifyToken.trim() ? { verifyToken: waVerifyToken.trim() } : {}),
+        ...(waAppSecret.trim() ? { appSecret: waAppSecret.trim() } : {}),
       });
       setWaResult(res);
       setWaAccessToken("");
+      setReconnectKind(null);
       await refresh();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -260,7 +337,13 @@ export function SaasChannels() {
         navigate("/login", { replace: true });
         return "";
       }
-      if (err.status === 503) return "Userbot отключён на сервере (нет TELEGRAM_API_ID/HASH)";
+      if (err.errorCode === "userbot_creds_required" || err.errorCode === "userbot_creds_invalid") {
+        return (
+          (err.extra?.message as string | undefined) ??
+          "Укажите API ID и API Hash (my.telegram.org → API development tools)"
+        );
+      }
+      if (err.status === 503) return "Userbot временно недоступен — попробуйте позже";
       if (err.status === 403) return "Доступно только для superadmin";
       const msg = err.extra?.message as string | undefined;
       const retry = err.extra?.retryAfterSec as number | undefined;
@@ -275,6 +358,8 @@ export function SaasChannels() {
   function resetUserbot() {
     setUbStep("phone");
     setUbPhone("");
+    setUbApiId("");
+    setUbApiHash("");
     setUbCode("");
     setUbPassword("");
     setUbLoginId("");
@@ -292,7 +377,7 @@ export function SaasChannels() {
     }
     setUbSubmitting(true);
     try {
-      const res = await saas.startUserbotLogin(phone);
+      const res = await saas.startUserbotLogin(phone, ubApiId, ubApiHash);
       setUbLoginId(res.loginId);
       setUbStep("code");
     } catch (err) {
@@ -313,6 +398,7 @@ export function SaasChannels() {
       } else {
         setUbDone({ username: res.username });
         resetUserbot();
+        setUbReconnect(false);
         await refresh();
       }
     } catch (err) {
@@ -330,6 +416,7 @@ export function SaasChannels() {
       const res = await saas.submitUserbot2fa(ubLoginId, ubPassword);
       if (!("awaiting" in res)) setUbDone({ username: res.username });
       resetUserbot();
+      setUbReconnect(false);
       await refresh();
     } catch (err) {
       setUbError(userbotErrMessage(err));
@@ -357,6 +444,11 @@ export function SaasChannels() {
       </div>
     );
   }
+
+  const existingUserbot = channels.find((c) => c.kind === "telegram_userbot");
+  const existingBot = channels.find((c) => c.kind === "telegram_bot");
+  const existingWa = channels.find((c) => c.kind === "whatsapp");
+  const existingWeb = channels.find((c) => c.kind === "web");
 
   return (
     <div className="space-y-6">
@@ -395,7 +487,11 @@ export function SaasChannels() {
         <TabsContent value="telegram">
           <Card>
             <CardHeader>
-              <CardTitle>Подключить Telegram-бота</CardTitle>
+              <CardTitle>
+                {existingBot && reconnectKind !== "telegram"
+                  ? "Telegram-бот"
+                  : "Подключить Telegram-бота"}
+              </CardTitle>
               <p className="text-sm text-muted-foreground">
                 Создайте бота в{" "}
                 <a
@@ -410,21 +506,55 @@ export function SaasChannels() {
               </p>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label>Токен бота</Label>
-                  <Input
-                    type="password"
-                    autoComplete="off"
-                    value={botToken}
-                    onChange={(e) => setBotToken(e.target.value)}
-                    placeholder="123456789:AAEhBP…"
-                  />
-                </div>
-                <Button type="submit" disabled={submitting || !botToken.trim()}>
-                  {submitting ? "Проверяем…" : "Подключить"}
-                </Button>
-              </form>
+              {existingBot && reconnectKind !== "telegram" ? (
+                <ConnectedChannelCard
+                  title={
+                    existingBot.username
+                      ? `@${existingBot.username}`
+                      : `Бот ${existingBot.externalId}`
+                  }
+                  statusText="Бот подключён — webhook активен"
+                  reconnectLabel="Заменить токен"
+                  onReconnect={() => {
+                    setReconnectKind("telegram");
+                    setBotToken("");
+                    setLastCreated(null);
+                  }}
+                  confirmDelete={confirmDeleteChannelId === existingBot.id}
+                  onAskDelete={() => setConfirmDeleteChannelId(existingBot.id)}
+                  onConfirmDelete={() => handleDelete(existingBot.id)}
+                  onCancelDelete={() => setConfirmDeleteChannelId(null)}
+                />
+              ) : (
+                <form onSubmit={handleSubmit} className="space-y-3">
+                  {existingBot && reconnectKind === "telegram" && (
+                    <p className="text-xs text-muted-foreground">
+                      Новый токен заменит текущего бота{" "}
+                      {existingBot.username ? `@${existingBot.username}` : ""}.
+                    </p>
+                  )}
+                  <div className="space-y-1.5">
+                    <Label>Токен бота</Label>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={botToken}
+                      onChange={(e) => setBotToken(e.target.value)}
+                      placeholder="123456789:AAEhBP…"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={submitting || !botToken.trim()}>
+                      {submitting ? "Проверяем…" : "Подключить"}
+                    </Button>
+                    {existingBot && reconnectKind === "telegram" && (
+                      <Button type="button" variant="ghost" onClick={() => setReconnectKind(null)}>
+                        Отмена
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -432,88 +562,209 @@ export function SaasChannels() {
         <TabsContent value="userbot">
           <Card>
             <CardHeader>
-              <CardTitle>Подключить личный Telegram-аккаунт</CardTitle>
+              <CardTitle>
+                {existingUserbot && !ubReconnect
+                  ? "Личный Telegram-аккаунт"
+                  : "Подключить личный Telegram-аккаунт"}
+              </CardTitle>
               <p className="text-sm text-muted-foreground">
                 Для случаев, когда лиды пишут вам в личку (а не боту). Подключается через MTProto:
                 ассистент анализирует входящие и отвечает от вашего имени.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="flex items-start gap-2 rounded-md border border-[var(--warning)]/40 bg-[color-mix(in_oklch,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
-                <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
-                Это автоматизация личного аккаунта. Подключайте только свой аккаунт и для ответов
-                своим лидам — массовая рассылка нарушает правила Telegram.
-              </p>
-              {ubError && <ErrorNote>{ubError}</ErrorNote>}
-
-              {ubStep === "phone" && (
-                <form onSubmit={handleUbPhone} className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label>Номер телефона аккаунта</Label>
-                    <Input
-                      type="tel"
-                      autoComplete="off"
-                      value={ubPhone}
-                      onChange={(e) => setUbPhone(e.target.value)}
-                      placeholder="+79991234567"
-                    />
+              {/* Уже подключён — показываем статус, без повторного мастера. */}
+              {existingUserbot && !ubReconnect ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[color-mix(in_oklch,var(--success)_15%,transparent)] text-[var(--success)]">
+                        <CheckIcon className="size-5" />
+                      </span>
+                      <div>
+                        <p className="text-sm font-medium">
+                          {existingUserbot.username
+                            ? `@${existingUserbot.username}`
+                            : `TG ${existingUserbot.externalId}`}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {existingUserbot.status === "active"
+                            ? "Подключён — входящие в личку обрабатывает ассистент"
+                            : `Статус: ${existingUserbot.status}`}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-xs font-semibold text-[var(--success)]">активен</span>
                   </div>
-                  <Button type="submit" disabled={ubSubmitting || !ubPhone.trim()}>
-                    {ubSubmitting ? "Отправляем код…" : "Получить код"}
-                  </Button>
-                </form>
-              )}
-
-              {ubStep === "code" && (
-                <form onSubmit={handleUbCode} className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    Telegram отправил код на {ubPhone}. Введите его.
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        resetUserbot();
+                        setUbDone(null);
+                        setUbReconnect(true);
+                      }}
+                    >
+                      Переподключить
+                    </Button>
+                    {confirmDeleteChannelId === existingUserbot.id ? (
+                      <>
+                        <span className="self-center text-sm text-muted-foreground">
+                          Отключить?
+                        </span>
+                        <Button
+                          variant="destructive"
+                          onClick={() => handleDelete(existingUserbot.id)}
+                        >
+                          Да, отключить
+                        </Button>
+                        <Button variant="ghost" onClick={() => setConfirmDeleteChannelId(null)}>
+                          Отмена
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setConfirmDeleteChannelId(existingUserbot.id)}
+                      >
+                        Отключить
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="flex items-start gap-2 rounded-md border border-[var(--warning)]/40 bg-[color-mix(in_oklch,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
+                    <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+                    Это автоматизация личного аккаунта. Подключайте только свой аккаунт и для
+                    ответов своим лидам — массовая рассылка нарушает правила Telegram.
                   </p>
-                  <div className="space-y-1.5">
-                    <Label>Код подтверждения</Label>
-                    <Input
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      value={ubCode}
-                      onChange={(e) => setUbCode(e.target.value)}
-                      placeholder="12345"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <Button type="submit" disabled={ubSubmitting || !ubCode.trim()}>
-                      {ubSubmitting ? "Проверяем…" : "Подтвердить"}
-                    </Button>
-                    <Button type="button" variant="ghost" onClick={resetUserbot}>
-                      Изменить номер
-                    </Button>
-                  </div>
-                </form>
-              )}
+                  {existingUserbot && ubReconnect && (
+                    <p className="text-xs text-muted-foreground">
+                      Переподключение заменит текущий аккаунт{" "}
+                      {existingUserbot.username ? `@${existingUserbot.username}` : ""}.
+                    </p>
+                  )}
+                  {ubError && <ErrorNote>{ubError}</ErrorNote>}
 
-              {ubStep === "2fa" && (
-                <form onSubmit={handleUb2fa} className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    У аккаунта включён облачный пароль (2FA). Введите его.
-                  </p>
-                  <div className="space-y-1.5">
-                    <Label>Пароль 2FA</Label>
-                    <Input
-                      type="password"
-                      autoComplete="off"
-                      value={ubPassword}
-                      onChange={(e) => setUbPassword(e.target.value)}
-                      placeholder="••••••••"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <Button type="submit" disabled={ubSubmitting || !ubPassword}>
-                      {ubSubmitting ? "Проверяем…" : "Войти"}
-                    </Button>
-                    <Button type="button" variant="ghost" onClick={resetUserbot}>
-                      Начать заново
-                    </Button>
-                  </div>
-                </form>
+                  {ubStep === "phone" && (
+                    <form onSubmit={handleUbPhone} className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label>API ID</Label>
+                          <Input
+                            inputMode="numeric"
+                            autoComplete="off"
+                            value={ubApiId}
+                            onChange={(e) => setUbApiId(e.target.value)}
+                            placeholder="1234567"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>API Hash</Label>
+                          <Input
+                            autoComplete="off"
+                            value={ubApiHash}
+                            onChange={(e) => setUbApiHash(e.target.value)}
+                            placeholder="abcd1234ef…"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Получите на{" "}
+                        <a
+                          href="https://my.telegram.org/apps"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline"
+                        >
+                          my.telegram.org → API development tools
+                        </a>
+                        . Можно оставить пустым, если платформа предоставляет общие ключи.
+                      </p>
+                      <div className="space-y-1.5">
+                        <Label>Номер телефона аккаунта</Label>
+                        <Input
+                          type="tel"
+                          autoComplete="off"
+                          value={ubPhone}
+                          onChange={(e) => setUbPhone(e.target.value)}
+                          placeholder="+79991234567"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button type="submit" disabled={ubSubmitting || !ubPhone.trim()}>
+                          {ubSubmitting ? "Отправляем код…" : "Получить код"}
+                        </Button>
+                        {existingUserbot && ubReconnect && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => {
+                              setUbReconnect(false);
+                              resetUserbot();
+                            }}
+                          >
+                            Отмена
+                          </Button>
+                        )}
+                      </div>
+                    </form>
+                  )}
+
+                  {ubStep === "code" && (
+                    <form onSubmit={handleUbCode} className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Telegram отправил код на {ubPhone}. Введите его.
+                      </p>
+                      <div className="space-y-1.5">
+                        <Label>Код подтверждения</Label>
+                        <Input
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          value={ubCode}
+                          onChange={(e) => setUbCode(e.target.value)}
+                          placeholder="12345"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button type="submit" disabled={ubSubmitting || !ubCode.trim()}>
+                          {ubSubmitting ? "Проверяем…" : "Подтвердить"}
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={resetUserbot}>
+                          Изменить номер
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+
+                  {ubStep === "2fa" && (
+                    <form onSubmit={handleUb2fa} className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        У аккаунта включён облачный пароль (2FA). Введите его.
+                      </p>
+                      <div className="space-y-1.5">
+                        <Label>Пароль 2FA</Label>
+                        <Input
+                          type="password"
+                          autoComplete="off"
+                          value={ubPassword}
+                          onChange={(e) => setUbPassword(e.target.value)}
+                          placeholder="••••••••"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button type="submit" disabled={ubSubmitting || !ubPassword}>
+                          {ubSubmitting ? "Проверяем…" : "Войти"}
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={resetUserbot}>
+                          Начать заново
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -522,7 +773,11 @@ export function SaasChannels() {
         <TabsContent value="whatsapp">
           <Card>
             <CardHeader>
-              <CardTitle>Подключить WhatsApp Business</CardTitle>
+              <CardTitle>
+                {existingWa && reconnectKind !== "whatsapp"
+                  ? "WhatsApp Business"
+                  : "Подключить WhatsApp Business"}
+              </CardTitle>
               <p className="text-sm text-muted-foreground">
                 Из{" "}
                 <a
@@ -538,41 +793,90 @@ export function SaasChannels() {
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form onSubmit={handleWhatsAppSubmit} className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label>Phone number ID</Label>
-                  <Input
-                    value={waPhoneId}
-                    onChange={(e) => setWaPhoneId(e.target.value)}
-                    placeholder="123456789012345"
-                    pattern="\d{10,20}"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Access token</Label>
-                  <Input
-                    type="password"
-                    autoComplete="off"
-                    value={waAccessToken}
-                    onChange={(e) => setWaAccessToken(e.target.value)}
-                    placeholder="EAAJZBxxxxxxx…"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Business account ID (опционально)</Label>
-                  <Input
-                    value={waBizId}
-                    onChange={(e) => setWaBizId(e.target.value)}
-                    placeholder="123456789012345"
-                  />
-                </div>
-                <Button
-                  type="submit"
-                  disabled={waSubmitting || !waPhoneId.trim() || !waAccessToken.trim()}
-                >
-                  {waSubmitting ? "Проверяем у Meta…" : "Подключить"}
-                </Button>
-              </form>
+              {existingWa && reconnectKind !== "whatsapp" ? (
+                <ConnectedChannelCard
+                  title={`WhatsApp #${existingWa.externalId}`}
+                  statusText="Подключён — входящие обрабатывает ассистент"
+                  reconnectLabel="Переподключить"
+                  onReconnect={() => {
+                    setReconnectKind("whatsapp");
+                    setWaResult(null);
+                  }}
+                  confirmDelete={confirmDeleteChannelId === existingWa.id}
+                  onAskDelete={() => setConfirmDeleteChannelId(existingWa.id)}
+                  onConfirmDelete={() => handleDelete(existingWa.id)}
+                  onCancelDelete={() => setConfirmDeleteChannelId(null)}
+                />
+              ) : (
+                <form onSubmit={handleWhatsAppSubmit} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label>Phone number ID</Label>
+                    <Input
+                      value={waPhoneId}
+                      onChange={(e) => setWaPhoneId(e.target.value)}
+                      placeholder="123456789012345"
+                      pattern="\d{10,20}"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Access token</Label>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={waAccessToken}
+                      onChange={(e) => setWaAccessToken(e.target.value)}
+                      placeholder="EAAJZBxxxxxxx…"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Business account ID (опционально)</Label>
+                    <Input
+                      value={waBizId}
+                      onChange={(e) => setWaBizId(e.target.value)}
+                      placeholder="123456789012345"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Verify Token (опц.)</Label>
+                      <Input
+                        autoComplete="off"
+                        value={waVerifyToken}
+                        onChange={(e) => setWaVerifyToken(e.target.value)}
+                        placeholder="любая строка для Meta webhook"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>App Secret (опц.)</Label>
+                      <Input
+                        type="password"
+                        autoComplete="off"
+                        value={waAppSecret}
+                        onChange={(e) => setWaAppSecret(e.target.value)}
+                        placeholder="Meta → App settings → Basic"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Verify Token — придумайте строку и впишите её же в Meta dashboard при настройке
+                    webhook. App Secret включает проверку подписи входящих вебхуков. Оставьте
+                    пустыми для общих ключей платформы.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="submit"
+                      disabled={waSubmitting || !waPhoneId.trim() || !waAccessToken.trim()}
+                    >
+                      {waSubmitting ? "Проверяем у Meta…" : "Подключить"}
+                    </Button>
+                    {existingWa && reconnectKind === "whatsapp" && (
+                      <Button type="button" variant="ghost" onClick={() => setReconnectKind(null)}>
+                        Отмена
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              )}
               {waResult && (
                 <OkNote>
                   ✓ WhatsApp {waResult.displayPhoneNumber ?? waResult.phoneNumberId} подключён.
@@ -592,37 +896,66 @@ export function SaasChannels() {
         <TabsContent value="web">
           <Card>
             <CardHeader>
-              <CardTitle>Web-виджет на сайт</CardTitle>
+              <CardTitle>
+                {existingWeb && reconnectKind !== "web" ? "Web-виджет" : "Web-виджет на сайт"}
+              </CardTitle>
               <p className="text-sm text-muted-foreground">
                 Плавающий чат для вашего сайта. После включения покажем готовый snippet.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form onSubmit={handleWebSubmit} className="space-y-3">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label>Название бренда (опц.)</Label>
-                    <Input
-                      value={webBrand}
-                      onChange={(e) => setWebBrand(e.target.value)}
-                      placeholder="Acme Support"
-                      maxLength={64}
-                    />
+              {existingWeb && reconnectKind !== "web" && !webResult ? (
+                <ConnectedChannelCard
+                  title={`Web (${existingWeb.externalId})`}
+                  statusText="Виджет включён — встроен на сайт"
+                  reconnectLabel="Настроить заново"
+                  onReconnect={() => setReconnectKind("web")}
+                  confirmDelete={confirmDeleteChannelId === existingWeb.id}
+                  onAskDelete={() => setConfirmDeleteChannelId(existingWeb.id)}
+                  onConfirmDelete={() => handleDelete(existingWeb.id)}
+                  onCancelDelete={() => setConfirmDeleteChannelId(null)}
+                />
+              ) : (
+                <form onSubmit={handleWebSubmit} className="space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Название бренда (опц.)</Label>
+                      <Input
+                        value={webBrand}
+                        onChange={(e) => setWebBrand(e.target.value)}
+                        placeholder="Acme Support"
+                        maxLength={64}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Цвет акцента (hex)</Label>
+                      <Input
+                        value={webColor}
+                        onChange={(e) => setWebColor(e.target.value)}
+                        placeholder="#6aa6ff"
+                        pattern="#[0-9a-fA-F]{3,8}"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label>Цвет акцента (hex)</Label>
-                    <Input
-                      value={webColor}
-                      onChange={(e) => setWebColor(e.target.value)}
-                      placeholder="#6aa6ff"
-                      pattern="#[0-9a-fA-F]{3,8}"
-                    />
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={webSubmitting}>
+                      {webSubmitting ? "Создаём…" : webResult ? "Обновить" : "Включить виджет"}
+                    </Button>
+                    {existingWeb && reconnectKind === "web" && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => {
+                          setReconnectKind(null);
+                          setWebResult(null);
+                        }}
+                      >
+                        Отмена
+                      </Button>
+                    )}
                   </div>
-                </div>
-                <Button type="submit" disabled={webSubmitting}>
-                  {webSubmitting ? "Создаём…" : webResult ? "Обновить" : "Включить виджет"}
-                </Button>
-              </form>
+                </form>
+              )}
 
               {webResult?.snippet && (
                 <div className="space-y-2 rounded-lg border bg-muted/40 p-4">
@@ -679,7 +1012,13 @@ export function SaasChannels() {
                       <p className="truncate text-sm font-medium">{title}</p>
                       <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                         <Badge variant={ch.status === "error" ? "warning" : "secondary"}>
-                          {ch.status === "active" ? "активен" : ch.status === "paused" ? "на паузе" : ch.status === "error" ? "ошибка" : ch.status}
+                          {ch.status === "active"
+                            ? "активен"
+                            : ch.status === "paused"
+                              ? "на паузе"
+                              : ch.status === "error"
+                                ? "ошибка"
+                                : ch.status}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
                           {new Date(ch.createdAt * 1000).toLocaleDateString("ru")}
@@ -705,7 +1044,11 @@ export function SaasChannels() {
                         <Button size="sm" variant="destructive" onClick={() => handleDelete(ch.id)}>
                           Да
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteChannelId(null)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setConfirmDeleteChannelId(null)}
+                        >
                           Нет
                         </Button>
                       </div>

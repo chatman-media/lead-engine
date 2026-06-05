@@ -1,0 +1,316 @@
+import {
+  CheckIcon,
+  FileTextIcon,
+  LightbulbIcon,
+  Trash2Icon,
+  UploadIcon,
+  XIcon,
+} from "lucide-react";
+import { type FormEvent, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { ApiError, clearToken, type KbDoc, type KbSuggestion, saas } from "../api/saas.ts";
+
+/**
+ * FAQ-справочник для бота: документы (RAG) и предложенные ботом Q&A.
+ * Бот обменки использует это как необязательный справочник для общих вопросов
+ * клиентов (часы работы, лимиты, «как без карты» и т.п.) — ядро обмена (курсы,
+ * заявки, реквизиты) работает на инструментах, не на документах.
+ */
+export function SaasFaq() {
+  const navigate = useNavigate();
+  const [docs, setDocs] = useState<KbDoc[]>([]);
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  const [pasteTitle, setPasteTitle] = useState("");
+  const [pasteBody, setPasteBody] = useState("");
+  const [pasteTopic, setPasteTopic] = useState("");
+
+  const [suggestions, setSuggestions] = useState<KbSuggestion[]>([]);
+  const [suggestionDrafts, setSuggestionDrafts] = useState<Record<number, string>>({});
+  const [decidingId, setDecidingId] = useState<number | null>(null);
+
+  function onAuthError(err: unknown): boolean {
+    if (err instanceof ApiError && err.status === 401) {
+      clearToken();
+      navigate("/login", { replace: true });
+      return true;
+    }
+    return false;
+  }
+
+  async function refreshDocs() {
+    try {
+      const list = await saas.listDocs();
+      setDocs(list.items);
+    } catch (err) {
+      if (!onAuthError(err)) setDocs([]);
+    }
+  }
+
+  async function refreshSuggestions() {
+    try {
+      const res = await saas.listKbSuggestions({ status: "pending", limit: 20 });
+      setSuggestions(res.items);
+      setSuggestionDrafts((prev) => {
+        const next = { ...prev };
+        for (const s of res.items) {
+          if (!(s.id in next)) next[s.id] = s.answerDraft ?? "";
+        }
+        return next;
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    refreshDocs();
+    refreshSuggestions();
+    // biome-ignore lint/correctness/useExhaustiveDependencies: run once
+  }, []);
+
+  async function handlePaste(e: FormEvent) {
+    e.preventDefault();
+    if (!pasteBody.trim()) return;
+    setUploading(true);
+    setError("");
+    try {
+      await saas.uploadJson({
+        title: pasteTitle.trim() || "untitled",
+        body: pasteBody,
+        ...(pasteTopic.trim() ? { topic: pasteTopic.trim() } : {}),
+      });
+      setPasteTitle("");
+      setPasteBody("");
+      setPasteTopic("");
+      await refreshDocs();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 402) {
+        setError((err.extra?.upgradeHint as string) ?? "Лимит документов исчерпан");
+      } else if (!onAuthError(err)) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setError("");
+    try {
+      await saas.uploadFile(file);
+      await refreshDocs();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 402) {
+        setError((err.extra?.upgradeHint as string) ?? "Лимит документов исчерпан");
+      } else if (!onAuthError(err)) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleDelete(id: number) {
+    try {
+      await saas.deleteDoc(id);
+      await refreshDocs();
+    } catch (err) {
+      onAuthError(err);
+    }
+  }
+
+  async function handleDecide(id: number, action: "approve" | "reject") {
+    setDecidingId(id);
+    try {
+      await saas.decideKbSuggestion(id, action, {
+        answerDraft: action === "approve" ? suggestionDrafts[id] : undefined,
+      });
+      await Promise.all([refreshSuggestions(), refreshDocs()]);
+    } catch {
+      // ignore
+    } finally {
+      setDecidingId(null);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="FAQ-справочник"
+        description="Документы, по которым бот отвечает на общие вопросы клиентов (часы работы, лимиты, как без карты). Курсы и заявки бот считает сам — это не про документы."
+      />
+
+      {error && (
+        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Добавить материал</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/30 px-4 py-8 text-center transition-colors hover:border-primary/50 hover:bg-muted/50">
+                <span className="grid size-10 place-items-center rounded-full bg-primary/15 text-primary">
+                  <UploadIcon className="size-5" />
+                </span>
+                <span className="text-sm font-medium">Загрузить файл</span>
+                <span className="text-xs text-muted-foreground">.txt, .md, .json, .pdf</span>
+                <input
+                  type="file"
+                  accept=".txt,.md,.json,.pdf"
+                  onChange={handleFileUpload}
+                  disabled={uploading}
+                  className="sr-only"
+                />
+              </label>
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-card px-2 text-xs uppercase tracking-wider text-muted-foreground">
+                    или вставить текст
+                  </span>
+                </div>
+              </div>
+
+              <form onSubmit={handlePaste} className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input
+                    placeholder="Заголовок (напр. «Часы работы»)"
+                    value={pasteTitle}
+                    onChange={(e) => setPasteTitle(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Тема (опционально)"
+                    value={pasteTopic}
+                    onChange={(e) => setPasteTopic(e.target.value)}
+                  />
+                </div>
+                <Textarea
+                  placeholder="Текст материала…"
+                  rows={6}
+                  className="font-mono text-xs"
+                  value={pasteBody}
+                  onChange={(e) => setPasteBody(e.target.value)}
+                />
+                <Button type="submit" disabled={uploading || !pasteBody.trim()}>
+                  {uploading ? "Загружаем…" : "Добавить материал"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <CardTitle>Материалы</CardTitle>
+              <Badge variant="secondary">{docs.length}</Badge>
+            </CardHeader>
+            <CardContent>
+              {docs.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  Материалов пока нет. Добавьте первый ↑
+                </p>
+              ) : (
+                <ul className="divide-y">
+                  {docs.map((d) => (
+                    <li key={d.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+                        <FileTextIcon className="size-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{d.title}</p>
+                        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                          {d.topic && <Badge variant="outline">{d.topic}</Badge>}
+                          <span className="font-mono">{d.source}</span>
+                          <span>· {new Date(d.createdAt * 1000).toLocaleDateString("ru")}</span>
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDelete(d.id)}
+                      >
+                        <Trash2Icon className="size-4" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {suggestions.length > 0 && (
+          <Card className="h-fit">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="flex items-center gap-2">
+                <LightbulbIcon className="size-4 text-amber-500" />
+                Предложения бота
+              </CardTitle>
+              <Badge variant="secondary">{suggestions.length}</Badge>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Вопросы клиентов, на которые у бота не было ответа. Допишите ответ и добавьте в
+                справочник.
+              </p>
+              <ul className="divide-y">
+                {suggestions.map((s) => (
+                  <li key={s.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
+                    <p className="text-sm font-medium">{s.questionText}</p>
+                    <textarea
+                      className="min-h-[80px] w-full resize-none rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                      placeholder="Ответ для добавления в справочник…"
+                      value={suggestionDrafts[s.id] ?? ""}
+                      onChange={(e) =>
+                        setSuggestionDrafts((prev) => ({ ...prev, [s.id]: e.target.value }))
+                      }
+                    />
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        disabled={decidingId === s.id || !(suggestionDrafts[s.id] ?? "").trim()}
+                        onClick={() => handleDecide(s.id, "approve")}
+                      >
+                        <CheckIcon className="mr-1.5 size-3.5" />
+                        Добавить
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-destructive"
+                        disabled={decidingId === s.id}
+                        onClick={() => handleDecide(s.id, "reject")}
+                      >
+                        <XIcon className="mr-1.5 size-3.5" />
+                        Отклонить
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}

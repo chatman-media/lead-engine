@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -16,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   ApiError,
   clearToken,
@@ -37,7 +37,25 @@ const PROVIDER_LABEL: Record<LlmProvider, string> = {
   cohere: "Cohere",
 };
 
-const ALL_PROVIDERS: LlmProvider[] = ["openai", "openrouter", "anthropic", "ollama", "jina", "cohere"];
+const ALL_PROVIDERS: LlmProvider[] = [
+  "openai",
+  "openrouter",
+  "anthropic",
+  "ollama",
+  "jina",
+  "cohere",
+];
+
+// Дефолтный base URL провайдера (применяется на сервере, если поле пустое).
+// Показываем как placeholder, чтобы было видно, куда пойдут запросы.
+const DEFAULT_BASE_URL: Record<LlmProvider, string> = {
+  openai: "https://api.openai.com/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  anthropic: "https://api.anthropic.com",
+  ollama: "http://localhost:11434",
+  jina: "https://api.jina.ai/v1",
+  cohere: "https://api.cohere.com/v2",
+};
 
 const PURPOSES: {
   value: LlmPurpose;
@@ -74,6 +92,13 @@ const PURPOSES: {
     defaultProvider: "jina",
     defaultModel: "jina-reranker-v2-base-multilingual",
   },
+  {
+    value: "transcribe",
+    label: "Расшифровка голоса",
+    hint: "Распознавание голосовых. OpenRouter: модель google/chirp-3 или openai/whisper-1 (тем же ключом, что чат). OpenAI: whisper-1. Groq: выберите OpenAI + Base URL https://api.groq.com/openai/v1, модель whisper-large-v3. Если не задать — возьмётся ключ чата/эмбеддингов (если это OpenAI/OpenRouter).",
+    defaultProvider: "openrouter",
+    defaultModel: "google/chirp-3",
+  },
 ];
 
 interface PurposeForm {
@@ -92,7 +117,12 @@ export function SaasSettings() {
 
   // Ключи по провайдерам (вводятся один раз)
   const [providerKeys, setProviderKeys] = useState<Record<LlmProvider, string>>({
-    openai: "", openrouter: "", anthropic: "", ollama: "", jina: "", cohere: "",
+    openai: "",
+    openrouter: "",
+    anthropic: "",
+    ollama: "",
+    jina: "",
+    cohere: "",
   });
   const [savingProvider, setSavingProvider] = useState<LlmProvider | null>(null);
 
@@ -141,7 +171,9 @@ export function SaasSettings() {
       for (const cfg of items) applyConfigToForm(cfg);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        clearToken(); navigate("/login", { replace: true }); return;
+        clearToken();
+        navigate("/login", { replace: true });
+        return;
       }
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -149,8 +181,13 @@ export function SaasSettings() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => { await refresh(); if (!cancelled) setLoading(false); })();
-    return () => { cancelled = true; };
+    (async () => {
+      await refresh();
+      if (!cancelled) setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
     // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
 
@@ -168,7 +205,9 @@ export function SaasSettings() {
     try {
       const purposesForProvider = configs.filter((c) => c.provider === provider);
       if (purposesForProvider.length === 0) {
-        setError(`Сначала сохраните хотя бы одно назначение с провайдером ${PROVIDER_LABEL[provider]}`);
+        setError(
+          `Сначала сохраните хотя бы одно назначение с провайдером ${PROVIDER_LABEL[provider]}`,
+        );
         return;
       }
       // Обновляем ключ во всех назначениях с этим провайдером
@@ -188,7 +227,9 @@ export function SaasSettings() {
       await refresh();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        clearToken(); navigate("/login", { replace: true }); return;
+        clearToken();
+        navigate("/login", { replace: true });
+        return;
       }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -199,14 +240,21 @@ export function SaasSettings() {
   async function savePurpose(purpose: LlmPurpose) {
     setError("");
     const f = forms[purpose];
-    if (!f.model.trim()) { setError(`${purpose}: укажите модель`); return; }
+    if (!f.model.trim()) {
+      setError(`${purpose}: укажите модель`);
+      return;
+    }
     if (purpose === "embed" && !f.embedDim) {
-      setError("embed: укажите размерность (например, 1536)"); return;
+      setError("embed: укажите размерность (например, 1536)");
+      return;
     }
     const existing = configs.find((c) => c.purpose === purpose);
     const apiKey = providerKeys[f.provider].trim();
-    if (f.provider !== "ollama" && !apiKey && !existing?.hasSecret) {
-      setError(`Введите API-ключ для ${PROVIDER_LABEL[f.provider]} в разделе «Ключи провайдеров»`);
+    // Ключ нужен, только если: провайдер требует его (не ollama) И его ещё нигде
+    // нет — ни в этом назначении (existing.hasSecret), ни в другом с тем же
+    // провайдером (providerHasKey, ключ переиспользуется на бэкенде).
+    if (f.provider !== "ollama" && !apiKey && !existing?.hasSecret && !providerHasKey(f.provider)) {
+      setError(`Введите API-ключ ${PROVIDER_LABEL[f.provider]} в поле на этой карточке.`);
       return;
     }
     setSavingPurpose(purpose);
@@ -222,7 +270,9 @@ export function SaasSettings() {
       await refresh();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        clearToken(); navigate("/login", { replace: true }); return;
+        clearToken();
+        navigate("/login", { replace: true });
+        return;
       }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -242,7 +292,13 @@ export function SaasSettings() {
       const def = PURPOSES.find((p) => p.value === purpose)!;
       setForms((prev) => ({
         ...prev,
-        [purpose]: { provider: def.defaultProvider, model: def.defaultModel, baseUrl: "", embedDim: "", timeoutMs: "" },
+        [purpose]: {
+          provider: def.defaultProvider,
+          model: def.defaultModel,
+          baseUrl: "",
+          embedDim: "",
+          timeoutMs: "",
+        },
       }));
       await refresh();
     } catch (err) {
@@ -257,20 +313,25 @@ export function SaasSettings() {
   // Провайдер имеет сохранённый ключ хотя бы в одном назначении
   const providerHasKey = (p: LlmProvider) => configs.some((c) => c.provider === p && c.hasSecret);
 
-  if (loading) return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <Skeleton className="h-6 w-40" />
-        <Skeleton className="h-4 w-80" />
+  if (loading)
+    return (
+      <div className="space-y-6">
+        <div className="space-y-1">
+          <Skeleton className="h-6 w-40" />
+          <Skeleton className="h-4 w-80" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-20 rounded-lg" />
+          ))}
+        </div>
+        <div className="grid gap-6 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-48 rounded-lg" />
+          ))}
+        </div>
       </div>
-      <div className="grid gap-4 sm:grid-cols-3">
-        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-20 rounded-lg" />)}
-      </div>
-      <div className="grid gap-6 lg:grid-cols-3">
-        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-48 rounded-lg" />)}
-      </div>
-    </div>
-  );
+    );
 
   return (
     <div className="space-y-8">
@@ -304,15 +365,14 @@ export function SaasSettings() {
                     <Badge variant="warning">нет ключа</Badge>
                   )}
                 </div>
-                <form
-                  onSubmit={(e) => handleSaveProviderKey(e, provider)}
-                  className="flex gap-2"
-                >
+                <form onSubmit={(e) => handleSaveProviderKey(e, provider)} className="flex gap-2">
                   <Input
                     type="password"
                     autoComplete="new-password"
                     value={providerKeys[provider]}
-                    onChange={(e) => setProviderKeys((prev) => ({ ...prev, [provider]: e.target.value }))}
+                    onChange={(e) =>
+                      setProviderKeys((prev) => ({ ...prev, [provider]: e.target.value }))
+                    }
                     placeholder={providerHasKey(provider) ? "•••••••• (обновить)" : "sk-…"}
                     className="text-xs h-8"
                   />
@@ -359,18 +419,34 @@ export function SaasSettings() {
                         disabled={savingPurpose === purpose}
                         onClick={() => savePurpose(purpose)}
                       >
-                        {savingPurpose === purpose
-                          ? <span className="text-[10px]">…</span>
-                          : <SaveIcon className="size-3" />}
+                        {savingPurpose === purpose ? (
+                          <span className="text-[10px]">…</span>
+                        ) : (
+                          <SaveIcon className="size-3" />
+                        )}
                       </Button>
                     )}
                     {/* Иконка удаления — при наведении, только если есть сохранённый конфиг */}
-                    {cfg && (
-                      confirmDeletePurpose === purpose ? (
+                    {cfg &&
+                      (confirmDeletePurpose === purpose ? (
                         <>
                           <span className="text-xs text-muted-foreground mr-1">Удалить?</span>
-                          <Button size="sm" variant="destructive" className="h-6 px-2 text-xs" onClick={() => handleDelete(purpose)}>Да</Button>
-                          <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setConfirmDeletePurpose(null)}>Нет</Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => handleDelete(purpose)}
+                          >
+                            Да
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => setConfirmDeletePurpose(null)}
+                          >
+                            Нет
+                          </Button>
                         </>
                       ) : (
                         <Button
@@ -381,8 +457,7 @@ export function SaasSettings() {
                         >
                           <Trash2Icon className="size-3" />
                         </Button>
-                      )
-                    )}
+                      ))}
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -390,11 +465,15 @@ export function SaasSettings() {
                     <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs">
                       <code className="font-mono text-primary">{cfg.provider}</code>
                       <span className="text-muted-foreground">/</span>
-                      <code className="font-mono truncate max-w-[120px]">{cfg.model}</code>
+                      <code className="font-mono break-all">{cfg.model}</code>
                       {providerHasKey(cfg.provider) ? (
-                        <Badge variant="success" className="ml-auto text-[10px] py-0">ключ есть</Badge>
+                        <Badge variant="success" className="ml-auto text-[10px] py-0">
+                          ключ есть
+                        </Badge>
                       ) : (
-                        <Badge variant="warning" className="ml-auto text-[10px] py-0">без ключа</Badge>
+                        <Badge variant="warning" className="ml-auto text-[10px] py-0">
+                          без ключа
+                        </Badge>
                       )}
                     </div>
                   )}
@@ -417,6 +496,24 @@ export function SaasSettings() {
                         </SelectContent>
                       </Select>
                     </div>
+                    {/* Inline API-ключ — пока у выбранного провайдера ключа нет.
+                        Разрывает тупик: новое назначение (напр. Jina reranker) можно
+                        сохранить сразу с ключом, не имея ещё карточки в «Ключи провайдеров». */}
+                    {f.provider !== "ollama" && !providerHasKey(f.provider) && (
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">API-ключ {PROVIDER_LABEL[f.provider]}</Label>
+                        <Input
+                          type="password"
+                          autoComplete="new-password"
+                          className="h-8 text-xs"
+                          value={providerKeys[f.provider]}
+                          onChange={(e) =>
+                            setProviderKeys((prev) => ({ ...prev, [f.provider]: e.target.value }))
+                          }
+                          placeholder="sk-…"
+                        />
+                      </div>
+                    )}
                     <div className="space-y-1.5">
                       <Label className="text-xs">Модель</Label>
                       <Input
@@ -435,7 +532,9 @@ export function SaasSettings() {
                           className="h-8 text-xs"
                           inputMode="numeric"
                           value={f.embedDim}
-                          onChange={(e) => updateForm(purpose, { embedDim: e.target.value.replace(/\D/g, "") })}
+                          onChange={(e) =>
+                            updateForm(purpose, { embedDim: e.target.value.replace(/\D/g, "") })
+                          }
                           placeholder="1536"
                         />
                       </div>
@@ -447,7 +546,9 @@ export function SaasSettings() {
                           className="h-8 text-xs"
                           inputMode="numeric"
                           value={f.timeoutMs}
-                          onChange={(e) => updateForm(purpose, { timeoutMs: e.target.value.replace(/\D/g, "") })}
+                          onChange={(e) =>
+                            updateForm(purpose, { timeoutMs: e.target.value.replace(/\D/g, "") })
+                          }
                           placeholder="30000"
                         />
                       </div>
@@ -457,14 +558,17 @@ export function SaasSettings() {
                           className="h-8 text-xs"
                           value={f.baseUrl}
                           onChange={(e) => updateForm(purpose, { baseUrl: e.target.value })}
-                          placeholder={
-                            f.provider === "ollama" ? "http://localhost:11434" : ""
-                          }
+                          placeholder={DEFAULT_BASE_URL[f.provider] ?? ""}
                         />
                       </div>
                     </div>
                     {!cfg && (
-                      <Button type="submit" size="sm" className="w-full" disabled={savingPurpose !== null}>
+                      <Button
+                        type="submit"
+                        size="sm"
+                        className="w-full"
+                        disabled={savingPurpose !== null}
+                      >
                         {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
                       </Button>
                     )}

@@ -9,6 +9,13 @@ import {
 	STAGE_KINDS,
 	STAGE_TYPES,
 } from "./admin-funnel.ts";
+import {
+	ACTIVE_PHASES,
+	type ActivePhase,
+	deriveDefaultPhase,
+	isActivePhase,
+	validateBackbone,
+} from "@chatman-media/verticals";
 
 /**
  * AI Workflow Builder — оператор описывает свой бизнес в диалоге с AI,
@@ -49,6 +56,7 @@ const SYSTEM_PROMPT = `Ты — помощник по настройке вор�
   "displayName": "Название на языке оператора",
   "kind": один из ${JSON.stringify(STAGE_KINDS)},
   "stageType": один из ${JSON.stringify(STAGE_TYPES)},
+  "phase": один из ${JSON.stringify(ACTIVE_PHASES)} — макро-фаза для active-стадий (для intake/terminal НЕ указывай),
   "color": "#hex (опционально)",
   "supportMode": true|false (true = бот замолкает, работает оператор; опц.),
   "nextStages": ["slug", ...] — в какие стадии можно перейти (терминальные = []),
@@ -68,6 +76,12 @@ const SYSTEM_PROMPT = `Ты — помощник по настройке вор�
 
 ПРАВИЛА:
 - Ровно одна стадия с kind "intake" (первый контакт), хотя бы одна "terminal_won" и одна "terminal_lost".
+- Костяк воронки: capture (intake) → qualify → offer → [clear] → [fulfill] → won/lost.
+  qualify = понять нужду и оценить сделку; offer = предложить условия и получить «да»;
+  clear = гейты (KYC, документы, одобрения третьих сторон) — добавляй только если они реально есть;
+  fulfill = исполнить/доставить и провести оплату — только если есть.
+- Проставляй "phase" каждой active-стадии. Обязательны qualify и offer. Фазы идут по порядку, без возврата назад.
+- terminal_won ставь после последней реальной фазы (нет fulfill/clear → сразу после offer).
 - slug'и уникальны; nextStages ссылаются только на существующие slug'и.
 - Поля, которые бот может вытащить из диалога (имя, сумма, тип), помечай aiExtractable: true.
 - Используй короткие воронки (4–8 стадий) — не усложняй.`;
@@ -88,6 +102,7 @@ export interface StageDraft {
 	displayName: string;
 	kind: string;
 	stageType: string;
+	phase?: string;
 	color?: string;
 	supportMode?: boolean;
 	nextStages?: string[];
@@ -114,6 +129,7 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 	const validFieldType = new Set<string>(FIELD_TYPES);
 
 	const stages: SeedStage[] = [];
+	let prevPhase: ActivePhase | null = null;
 	for (let i = 0; i < draft.length; i++) {
 		const d = draft[i];
 		if (!d || typeof d.slug !== "string" || typeof d.displayName !== "string")
@@ -126,6 +142,13 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 		const stageType = validStageType.has(d.stageType)
 			? d.stageType
 			: "form_fill";
+		const phase: ActivePhase | undefined =
+			kind === "active"
+				? isActivePhase(d.phase)
+					? d.phase
+					: deriveDefaultPhase(stageType, prevPhase)
+				: undefined;
+		if (phase) prevPhase = phase;
 
 		const fields: SeedStage["fields"] = [];
 		const draftFields = d.fields ?? [];
@@ -163,6 +186,7 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 			displayName: d.displayName,
 			kind,
 			stageType,
+			...(phase ? { phase } : {}),
 			position: i,
 			...(typeof d.color === "string" ? { color: d.color } : {}),
 			...(d.supportMode === true ? { supportMode: true } : {}),
@@ -290,7 +314,14 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 					aiExtractable: f.aiExtractable,
 				})),
 			}));
-			return c.json({ reply, readyToGenerate: true, stages, preview });
+			const backbone = validateBackbone(stages);
+			return c.json({
+				reply,
+				readyToGenerate: true,
+				stages,
+				preview,
+				backbone,
+			});
 		}
 
 		return c.json({ reply: reply || raw.trim(), readyToGenerate: false });
@@ -318,6 +349,14 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 		// Повторно нормализуем на сервере — клиенту не доверяем.
 		const stages = normalizeStages(body.stages as StageDraft[]);
 		if (stages.length === 0) return c.json({ error: "no valid stages" }, 400);
+
+		const backbone = validateBackbone(stages);
+		if (backbone.errors.length > 0) {
+			return c.json(
+				{ error: "Воронка не соответствует костяку", violations: backbone.errors },
+				400,
+			);
+		}
 
 		const result = await applyFunnelStages(
 			opts.db,

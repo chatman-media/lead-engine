@@ -1,6 +1,7 @@
 import {
   ArrowRightIcon,
   CheckIcon,
+  ChevronDownIcon,
   RocketIcon,
   SendIcon,
   TriangleAlertIcon,
@@ -30,27 +31,131 @@ import {
   ApiError,
   type ChannelItem,
   clearToken,
+  type ExchangeRate,
+  type ExchangeRateCardProposal,
   type KbDoc,
   type LlmConfig,
   type LlmProvider,
   type LlmPurpose,
-  type VerticalInfo,
+  type OnboardingStatus,
   saas,
+  type VerticalInfo,
 } from "../api/saas.ts";
 
 /**
- * Пошаговый мастер первичной настройки: канал → API-ключи → база знаний →
- * готово. Порядок не случаен: эмбеддинги базы требуют ключ embed-провайдера.
+ * Обязательный пошаговый мастер первичной настройки. Заполняется ВНАЧАЛЕ —
+ * только после завершения (server `onboarding-status.done`) гейт пускает в
+ * кабинет (см. App.tsx OnboardingGate).
+ *
+ * Шаги динамические и зависят от вертикали:
+ *   generic:  Бизнес → Канал → LLM → База знаний(opt) → Готово
+ *   exchange: Бизнес → Канал → LLM → Курсы → Реквизиты → Тир-карта(opt)
+ *             → База знаний(opt) → Бизнес-данные(opt) → Готово
+ *
+ * Required-шаги гейтят завершение и зеркалят серверный расчёт `done`.
  */
 
-const PROVIDERS: { value: LlmProvider; label: string }[] = [
-  { value: "openai", label: "OpenAI" },
-  { value: "openrouter", label: "OpenRouter" },
-  { value: "anthropic", label: "Anthropic" },
-  { value: "ollama", label: "Ollama (local)" },
-];
+const PROVIDER_LABEL: Record<LlmProvider, string> = {
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+  anthropic: "Anthropic",
+  ollama: "Ollama (local)",
+  jina: "Jina",
+  cohere: "Cohere",
+};
 
-const STEP_LABELS = ["Канал", "Провайдер", "База знаний", "Готово"];
+/** Назначения LLM (purpose) — chat обязателен, остальные опциональны. */
+const ALL_PURPOSES: LlmPurpose[] = ["chat", "embed", "vision", "judge", "reranker"];
+
+interface PurposeMeta {
+  label: string;
+  desc: string;
+  required: boolean;
+  providers: LlmProvider[];
+}
+const PURPOSE_META: Record<LlmPurpose, PurposeMeta> = {
+  chat: {
+    label: "Chat — ответы ассистента",
+    desc: "Основные ответы бота клиентам",
+    required: true,
+    providers: ["openai", "openrouter", "anthropic", "ollama"],
+  },
+  embed: {
+    label: "Embeddings — поиск по базе",
+    desc: "Нужны для базы знаний (RAG)",
+    required: false,
+    providers: ["openai", "openrouter", "ollama", "jina", "cohere"],
+  },
+  vision: {
+    label: "Vision — анализ изображений",
+    desc: "Фото и документы: чеки, KYC",
+    required: false,
+    providers: ["openai", "openrouter", "anthropic", "ollama"],
+  },
+  judge: {
+    label: "Judge — оценка ответов",
+    desc: "Оценка качества и сравнение моделей",
+    required: false,
+    providers: ["openai", "openrouter", "anthropic"],
+  },
+  reranker: {
+    label: "Reranker — точность поиска",
+    desc: "Переранжирование результатов RAG",
+    required: false,
+    providers: ["jina", "cohere"],
+  },
+  transcribe: {
+    label: "Расшифровка голоса",
+    desc: "Распознавание голосовых (OpenRouter / OpenAI / Groq)",
+    required: false,
+    providers: ["openrouter", "openai"],
+  },
+};
+
+/** Пример модели под (провайдер × назначение) — для placeholder поля «Модель». */
+const MODEL_PLACEHOLDER: Partial<Record<LlmProvider, Partial<Record<LlmPurpose, string>>>> = {
+  openai: {
+    chat: "gpt-4o-mini",
+    embed: "text-embedding-3-small",
+    vision: "gpt-4o",
+    judge: "gpt-4o",
+  },
+  openrouter: {
+    chat: "google/gemini-2.5-flash",
+    embed: "google/gemini-embedding-2",
+    vision: "google/gemini-2.5-flash",
+    judge: "google/gemini-2.5-flash",
+  },
+  anthropic: {
+    chat: "claude-3-5-sonnet-latest",
+    vision: "claude-3-5-sonnet-latest",
+    judge: "claude-3-5-sonnet-latest",
+  },
+  ollama: { chat: "llama3.2", embed: "nomic-embed-text", vision: "llama3.2-vision" },
+  jina: { embed: "jina-embeddings-v3", reranker: "jina-reranker-v2-base-multilingual" },
+  cohere: { embed: "embed-multilingual-v3.0", reranker: "rerank-multilingual-v3.0" },
+};
+function modelPlaceholder(provider: LlmProvider, purpose: LlmPurpose): string {
+  return MODEL_PLACEHOLDER[provider]?.[purpose] ?? "model-id";
+}
+
+type StepId =
+  | "vertical"
+  | "channel"
+  | "llm"
+  | "ex_rates"
+  | "ex_requisites"
+  | "kb"
+  | "ex_business"
+  | "done";
+
+interface StepDef {
+  id: StepId;
+  label: string;
+  required: boolean;
+  done: boolean;
+  visible: boolean;
+}
 
 interface KeyForm {
   provider: LlmProvider;
@@ -60,12 +165,57 @@ interface KeyForm {
   embedDim: string;
 }
 
-const EMPTY_KEY_FORM: KeyForm = { provider: "openai", model: "", apiKey: "", baseUrl: "", embedDim: "" };
-
-const OLLAMA_PRESETS: Record<"chat" | "embed", { model: string; embedDim?: string }> = {
-  chat: { model: "llama3.2" },
-  embed: { model: "nomic-embed-text", embedDim: "768" },
+const EMPTY_KEY_FORM: KeyForm = {
+  provider: "openai",
+  model: "",
+  apiKey: "",
+  baseUrl: "",
+  embedDim: "",
 };
+
+const OLLAMA_PRESETS: Partial<Record<LlmPurpose, { model: string; embedDim?: string }>> = {
+  chat: { model: "llama3.2" },
+  embed: { model: "nomic-embed-text" },
+  vision: { model: "llama3.2-vision" },
+};
+
+/** Типы реквизитов приёма для шага «Реквизиты» (ключи tenant_secrets). */
+const REQUISITE_TYPES: { key: string; label: string; placeholder: string }[] = [
+  { key: "exchange_wallet_usdt_trc20", label: "USDT TRC20 — адрес кошелька", placeholder: "T..." },
+  { key: "exchange_wallet_usdt_erc20", label: "USDT ERC20 — адрес", placeholder: "0x..." },
+  { key: "exchange_wallet_btc_default", label: "BTC — адрес", placeholder: "bc1..." },
+  { key: "exchange_wallet_eth_erc20", label: "ETH ERC20 — адрес", placeholder: "0x..." },
+  { key: "exchange_binance_id", label: "Binance ID (P2P)", placeholder: "123456789" },
+  {
+    key: "exchange_fiat_payment_url",
+    label: "СБП / платёжная ссылка (RUB)",
+    placeholder: "https://...",
+  },
+  {
+    key: "exchange_rub_card_requisites",
+    label: "Карта / телефон для RUB",
+    placeholder: "2200… / +7…",
+  },
+];
+
+/** Только ключи-реквизиты приёма (кошельки + фиксированные платёжные). */
+function isRequisiteKey(key: string): boolean {
+  return (
+    key.startsWith("exchange_wallet_") ||
+    ["exchange_binance_id", "exchange_fiat_payment_url", "exchange_rub_card_requisites"].includes(
+      key,
+    )
+  );
+}
+
+/** Человекочитаемая подпись реквизита по ключу. */
+function requisiteLabel(key: string): string {
+  const known = REQUISITE_TYPES.find((t) => t.key === key);
+  if (known) return known.label;
+  const m = /^exchange_wallet_(.+)$/.exec(key);
+  if (m) return `Кошелёк ${m[1].replace(/_/g, " ").toUpperCase()}`;
+  return key;
+}
 
 function configReady(cfg: LlmConfig | undefined): boolean {
   if (!cfg) return false;
@@ -81,6 +231,7 @@ export function SaasOnboarding() {
   const [channels, setChannels] = useState<ChannelItem[]>([]);
   const [configs, setConfigs] = useState<LlmConfig[]>([]);
   const [docs, setDocs] = useState<KbDoc[]>([]);
+  const [status, setStatus] = useState<OnboardingStatus | null>(null);
 
   const [channelMode, setChannelMode] = useState<"userbot" | "bot">("userbot");
   const [botToken, setBotToken] = useState("");
@@ -88,17 +239,32 @@ export function SaasOnboarding() {
 
   const [ubStep, setUbStep] = useState<"phone" | "code" | "2fa">("phone");
   const [ubPhone, setUbPhone] = useState("");
+  const [ubApiId, setUbApiId] = useState("");
+  const [ubApiHash, setUbApiHash] = useState("");
   const [ubCode, setUbCode] = useState("");
   const [ubPassword, setUbPassword] = useState("");
   const [ubLoginId, setUbLoginId] = useState("");
   const [ubSubmitting, setUbSubmitting] = useState(false);
   const [ubError, setUbError] = useState("");
 
-  const [keyForms, setKeyForms] = useState<Record<"chat" | "embed", KeyForm>>({
-    chat: { ...EMPTY_KEY_FORM },
-    embed: { ...EMPTY_KEY_FORM },
+  const [keyForms, setKeyForms] = useState<Record<LlmPurpose, KeyForm>>(() => {
+    const init = {} as Record<LlmPurpose, KeyForm>;
+    for (const p of ALL_PURPOSES) {
+      init[p] = {
+        ...EMPTY_KEY_FORM,
+        provider: PURPOSE_META[p].providers[0] ?? "openai",
+        // Размерность embed фиксирована под колонку БЗ (vector(1536)); вектор
+        // любой модели приводится к ней автоматически (openai-embed.fitDim).
+        ...(p === "embed" ? { embedDim: "1536" } : {}),
+      };
+    }
+    return init;
   });
   const [savingPurpose, setSavingPurpose] = useState<LlmPurpose | null>(null);
+  // Какие назначения раскрыты в аккордеоне (chat — по умолчанию).
+  const [expandedPurpose, setExpandedPurpose] = useState<Set<LlmPurpose>>(
+    () => new Set<LlmPurpose>(["chat"]),
+  );
 
   const [pasteTitle, setPasteTitle] = useState("");
   const [pasteTopic, setPasteTopic] = useState("");
@@ -110,18 +276,88 @@ export function SaasOnboarding() {
   const [installingVertical, setInstallingVertical] = useState<string | null>(null);
   const [installedVertical, setInstalledVertical] = useState<string | null>(null);
 
+  // Exchange — курсы (тир-карта от рыночного фида: RUB + USDT)
+  const [rates, setRates] = useState<ExchangeRate[]>([]);
+  const [cardProposals, setCardProposals] = useState<ExchangeRateCardProposal[]>([]);
+  const [cardLoading, setCardLoading] = useState(false);
+  const [cardSaving, setCardSaving] = useState(false);
+  const [cardError, setCardError] = useState("");
+
+  // Exchange — реквизиты
+  const [reqType, setReqType] = useState(REQUISITE_TYPES[0]!.key);
+  const [reqValue, setReqValue] = useState("");
+  const [savingReq, setSavingReq] = useState(false);
+  const [savedRequisites, setSavedRequisites] = useState<Array<{ key: string; value: string }>>([]);
+
+  // Exchange — бизнес-данные (информационные)
+  const [bizForm, setBizForm] = useState({
+    operatorContact: "",
+    payoutMethods: "",
+    kycPolicy: "",
+    workingHours: "",
+    officeAddress: "",
+  });
+  const [savingBiz, setSavingBiz] = useState(false);
+  const [bizSaved, setBizSaved] = useState(false);
+
   const chatCfg = configs.find((c) => c.purpose === "chat");
-  const embedCfg = configs.find((c) => c.purpose === "embed");
 
-  const channelDone = channels.length > 0;
-  const keysDone = configReady(chatCfg) && configReady(embedCfg);
+  /** Есть ли уже сохранённый ключ у какого-либо назначения с этим провайдером. */
+  const providerHasKey = (provider: LlmProvider): boolean =>
+    configs.some((c) => c.provider === provider && c.hasSecret);
+
+  const isExchange = installedVertical === "exchange_v1" || status?.isExchange === true;
+
+  // Completion-предикаты (зеркалят серверный `done`).
+  const verticalDone = !!installedVertical || !!status?.funnelInstalled;
+  // Только активные каналы — зеркалит серверный onboarding-status (paused не считается).
+  const channelDone = channels.some((c) => c.status === "active");
+  const chatDone = configReady(chatCfg); // chat обязателен; embed — опционально
+  const ratesDone = rates.some((r) => r.isActive);
+  const requisitesDone = (status?.requisiteCount ?? 0) >= 1;
   const kbDone = docs.length > 0;
-  const stepDone = [channelDone, keysDone, kbDone, false];
 
+  const allSteps: StepDef[] = [
+    { id: "vertical", label: "Бизнес", required: true, done: verticalDone, visible: true },
+    { id: "channel", label: "Канал", required: true, done: channelDone, visible: true },
+    { id: "llm", label: "LLM", required: true, done: chatDone, visible: true },
+    { id: "ex_rates", label: "Курсы", required: true, done: ratesDone, visible: isExchange },
+    {
+      id: "ex_requisites",
+      label: "Реквизиты",
+      required: true,
+      done: requisitesDone,
+      visible: isExchange,
+    },
+    { id: "kb", label: "База знаний", required: false, done: kbDone, visible: true },
+    { id: "ex_business", label: "Данные", required: false, done: bizSaved, visible: isExchange },
+    { id: "done", label: "Готово", required: false, done: false, visible: true },
+  ];
+  const steps = allSteps.filter((s) => s.visible);
+  const currentId: StepId = steps[Math.min(step, steps.length - 1)]?.id ?? "vertical";
+
+  /** Шаг достижим, если все предыдущие REQUIRED-шаги выполнены. */
   function reachable(target: number): boolean {
-    if (target <= 0) return true;
-    if (target === 1) return channelDone;
-    return channelDone && keysDone;
+    for (let i = 0; i < target; i++) {
+      const s = steps[i];
+      if (s?.required && !s.done) return false;
+    }
+    return true;
+  }
+
+  /** Все ли required-шаги выполнены (можно завершить онбординг). */
+  const allRequiredDone = steps.every((s) => !s.required || s.done);
+
+  /** Перейти к шагу по id (после успешного сохранения). */
+  function goToStep(id: StepId) {
+    const idx = steps.findIndex((s) => s.id === id);
+    if (idx >= 0) setStep(idx);
+  }
+
+  /** Перейти к первому незавершённому required-шагу (или к Готово). */
+  function resumeStep(list: StepDef[]) {
+    const idx = list.findIndex((s) => s.required && !s.done);
+    setStep(idx >= 0 ? idx : list.length - 1);
   }
 
   function handleAuthError(err: unknown): boolean {
@@ -134,23 +370,41 @@ export function SaasOnboarding() {
   }
 
   async function loadState() {
-    const [ch, cfg, verts] = await Promise.all([
+    const [ch, cfg, verts, st] = await Promise.all([
       saas.listChannels(),
       saas.listLlmConfigs(),
       saas.listVerticals().catch(() => ({ items: [] as VerticalInfo[] })),
+      saas.onboardingStatus().catch(() => null),
     ]);
     setVerticals(verts.items);
+    setStatus(st);
+    if (st?.funnelInstalled && st.vertical)
+      setInstalledVertical((prev) => prev ?? st.vertical ?? null);
     let docItems: KbDoc[] = [];
     try {
       docItems = (await saas.listDocs()).items;
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) throw err;
     }
+    let rateItems: ExchangeRate[] = [];
+    try {
+      rateItems = (await saas.exchangeRates()).rates;
+    } catch {
+      // не-обменный тенант / нет доступа — игнорируем
+    }
+    let reqItems: Array<{ key: string; value: string }> = [];
+    try {
+      reqItems = (await saas.exchangeRequisites()).items;
+    } catch {
+      // нет доступа / не-обменный — игнорируем
+    }
     setChannels(ch.items);
     setConfigs(cfg.items);
     setDocs(docItems);
+    setRates(rateItems);
+    setSavedRequisites(reqItems);
     for (const c of cfg.items) {
-      if (c.purpose === "chat" || c.purpose === "embed") {
+      if ((ALL_PURPOSES as string[]).includes(c.purpose)) {
         setKeyForms((prev) => ({
           ...prev,
           [c.purpose]: {
@@ -158,12 +412,28 @@ export function SaasOnboarding() {
             model: c.model,
             apiKey: "",
             baseUrl: c.baseUrl ?? "",
-            embedDim: c.embedDim?.toString() ?? "",
+            embedDim: c.embedDim?.toString() ?? (c.purpose === "embed" ? "1536" : ""),
           },
         }));
       }
     }
-    return { ch: ch.items, cfg: cfg.items, kb: docItems };
+    // Для ещё НЕ настроенных назначений по умолчанию подставляем уже выбранного
+    // провайдера (chat) — если он валиден для этого назначения. Тогда ключ
+    // переиспользуется (один провайдер) и не нужно вводить повторно / ловить
+    // ошибку «укажите ключ» из-за дефолтного openai.
+    const primary = cfg.items.find((c) => c.purpose === "chat")?.provider ?? cfg.items[0]?.provider;
+    if (primary) {
+      const configured = new Set(cfg.items.map((c) => c.purpose));
+      for (const p of ALL_PURPOSES) {
+        if (!configured.has(p) && PURPOSE_META[p].providers.includes(primary as LlmProvider)) {
+          setKeyForms((prev) => ({
+            ...prev,
+            [p]: { ...prev[p], provider: primary as LlmProvider },
+          }));
+        }
+      }
+    }
+    return { ch: ch.items, cfg: cfg.items, kb: docItems, rates: rateItems, status: st };
   }
 
   const chatConfigured = configReady(chatCfg);
@@ -176,11 +446,11 @@ export function SaasOnboarding() {
     llmReady: chatConfigured,
     data: {
       step,
-      stepLabel: STEP_LABELS[step],
+      stepLabel: currentId,
       channelCount: channels.length,
       channelDone,
       chatConfigured,
-      embedConfigured: configReady(embedCfg),
+      embedConfigured: configReady(configs.find((c) => c.purpose === "embed")),
       kbDocs: docs.length,
       verticals: verticals.map((v) => ({ slug: v.slug, displayName: v.displayName })),
       installedVertical,
@@ -201,14 +471,53 @@ export function SaasOnboarding() {
     let cancelled = false;
     (async () => {
       try {
-        const { ch, cfg, kb } = await loadState();
+        const res = await loadState();
         if (cancelled) return;
-        const cDone = ch.length > 0;
-        const kDone =
-          configReady(cfg.find((c) => c.purpose === "chat")) &&
-          configReady(cfg.find((c) => c.purpose === "embed"));
-        const dDone = kb.length > 0;
-        setStep(!cDone ? 0 : !kDone ? 1 : !dDone ? 2 : 3);
+        // Пересобираем шаги под загруженное состояние и резюмим с первого незавершённого.
+        const exch = res.status?.isExchange === true;
+        const list = (
+          [
+            {
+              id: "vertical",
+              label: "",
+              required: true,
+              done: !!res.status?.funnelInstalled,
+              visible: true,
+            },
+            {
+              id: "channel",
+              label: "",
+              required: true,
+              done: res.ch.some((c) => c.status === "active"),
+              visible: true,
+            },
+            {
+              id: "llm",
+              label: "",
+              required: true,
+              done: configReady(res.cfg.find((c) => c.purpose === "chat")),
+              visible: true,
+            },
+            {
+              id: "ex_rates",
+              label: "",
+              required: true,
+              done: res.rates.some((r) => r.isActive),
+              visible: exch,
+            },
+            {
+              id: "ex_requisites",
+              label: "",
+              required: true,
+              done: (res.status?.requisiteCount ?? 0) >= 1,
+              visible: exch,
+            },
+            { id: "kb", label: "", required: false, done: res.kb.length > 0, visible: true },
+            { id: "ex_business", label: "", required: false, done: false, visible: exch },
+            { id: "done", label: "", required: false, done: false, visible: true },
+          ] satisfies StepDef[]
+        ).filter((s) => s.visible);
+        resumeStep(list);
       } catch (err) {
         if (cancelled) return;
         if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
@@ -222,8 +531,25 @@ export function SaasOnboarding() {
     // biome-ignore lint/correctness/useExhaustiveDependencies: run once
   }, []);
 
-  function updateKeyForm(purpose: "chat" | "embed", patch: Partial<KeyForm>) {
+  // Авто-подтягиваем курс с рынка при входе на шаг «Курсы» (если ещё не настроен).
+  useEffect(() => {
+    if (currentId === "ex_rates" && !ratesDone && cardProposals.length === 0 && !cardLoading) {
+      void loadRateCard();
+    }
+    // biome-ignore lint/correctness/useExhaustiveDependencies: реагируем на смену шага
+  }, [currentId]);
+
+  function updateKeyForm(purpose: LlmPurpose, patch: Partial<KeyForm>) {
     setKeyForms((prev) => ({ ...prev, [purpose]: { ...prev[purpose], ...patch } }));
+  }
+
+  function togglePurpose(purpose: LlmPurpose) {
+    setExpandedPurpose((prev) => {
+      const next = new Set(prev);
+      if (next.has(purpose)) next.delete(purpose);
+      else next.add(purpose);
+      return next;
+    });
   }
 
   async function handleTelegram(e: FormEvent) {
@@ -238,8 +564,8 @@ export function SaasOnboarding() {
     try {
       await saas.createTelegramChannel(token);
       setBotToken("");
-      const { ch } = await loadState();
-      if (ch.length > 0) setStep(1);
+      await loadState();
+      goToStep("llm");
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 401 && err.errorCode.toLowerCase().includes("telegram")) {
@@ -264,7 +590,13 @@ export function SaasOnboarding() {
   function userbotErrMessage(err: unknown): string {
     if (err instanceof ApiError) {
       if (handleAuthError(err)) return "";
-      if (err.status === 503) return "Userbot отключён на сервере (нет TELEGRAM_API_ID/HASH)";
+      if (err.errorCode === "userbot_creds_required" || err.errorCode === "userbot_creds_invalid") {
+        return (
+          (err.extra?.message as string | undefined) ??
+          "Укажите API ID и API Hash (my.telegram.org → API development tools)"
+        );
+      }
+      if (err.status === 503) return "Userbot временно недоступен — попробуйте позже";
       const msg = err.extra?.message as string | undefined;
       const retry = err.extra?.retryAfterSec as number | undefined;
       if (err.errorCode === "flood_wait") {
@@ -278,6 +610,8 @@ export function SaasOnboarding() {
   function resetUserbot() {
     setUbStep("phone");
     setUbPhone("");
+    setUbApiId("");
+    setUbApiHash("");
     setUbCode("");
     setUbPassword("");
     setUbLoginId("");
@@ -294,7 +628,7 @@ export function SaasOnboarding() {
     }
     setUbSubmitting(true);
     try {
-      const res = await saas.startUserbotLogin(phone);
+      const res = await saas.startUserbotLogin(phone, ubApiId, ubApiHash);
       setUbLoginId(res.loginId);
       setUbStep("code");
     } catch (err) {
@@ -315,8 +649,8 @@ export function SaasOnboarding() {
         return;
       }
       resetUserbot();
-      const { ch } = await loadState();
-      if (ch.length > 0) setStep(1);
+      await loadState();
+      goToStep("llm");
     } catch (err) {
       setUbError(userbotErrMessage(err));
     } finally {
@@ -331,8 +665,8 @@ export function SaasOnboarding() {
     try {
       await saas.submitUserbot2fa(ubLoginId, ubPassword);
       resetUserbot();
-      const { ch } = await loadState();
-      if (ch.length > 0) setStep(1);
+      await loadState();
+      goToStep("llm");
     } catch (err) {
       setUbError(userbotErrMessage(err));
     } finally {
@@ -340,7 +674,7 @@ export function SaasOnboarding() {
     }
   }
 
-  async function handleSaveKey(e: FormEvent, purpose: "chat" | "embed") {
+  async function handleSaveKey(e: FormEvent, purpose: LlmPurpose) {
     e.preventDefault();
     setError("");
     const f = keyForms[purpose];
@@ -353,7 +687,14 @@ export function SaasOnboarding() {
       return;
     }
     const existing = configs.find((c) => c.purpose === purpose);
-    if (f.provider !== "ollama" && !f.apiKey && !existing?.hasSecret) {
+    // Ключ обязателен, только если у этого назначения его нет И нет сохранённого
+    // ключа того же провайдера в другом назначении (бэкенд переиспользует его).
+    if (
+      f.provider !== "ollama" &&
+      !f.apiKey &&
+      !existing?.hasSecret &&
+      !providerHasKey(f.provider)
+    ) {
       setError(`${purpose}: укажите API key`);
       return;
     }
@@ -367,15 +708,142 @@ export function SaasOnboarding() {
         ...(purpose === "embed" && f.embedDim ? { embedDim: Number.parseInt(f.embedDim, 10) } : {}),
       });
       updateKeyForm(purpose, { apiKey: "" });
-      const { cfg } = await loadState();
-      const ready =
-        configReady(cfg.find((c) => c.purpose === "chat")) &&
-        configReady(cfg.find((c) => c.purpose === "embed"));
-      if (ready) setStep(2);
+      await loadState();
     } catch (err) {
       if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSavingPurpose(null);
+    }
+  }
+
+  // Курсы = тир-карта от рыночного фида (Binance + ЦБ). Превью тянет актуальный
+  // рынок и строит дефолтные тиры RUB+USDT; пользователь правит курсы; сохранение
+  // (approve) создаёт активные базовые курсы + тиры. Авто-обновление рынка — да.
+  async function loadRateCard() {
+    setCardError("");
+    setCardLoading(true);
+    try {
+      const res = await saas.previewExchangeRateCard();
+      setCardProposals(res.proposals);
+    } catch (err) {
+      if (!handleAuthError(err)) {
+        setCardError(err instanceof Error ? err.message : "Не удалось получить курс с рынка");
+      }
+    } finally {
+      setCardLoading(false);
+    }
+  }
+
+  /** Патч одного тира (курс/мин/макс). При смене курса пересчитывает отклонение. */
+  function patchTier(
+    pIdx: number,
+    tIdx: number,
+    patch: Partial<{ minThb: number; maxThb: number | null; displayRate: number }>,
+  ) {
+    setCardProposals((prev) =>
+      prev.map((p, i) => {
+        if (i !== pIdx) return p;
+        const tiers = p.tiers.map((t, j) => {
+          if (j !== tIdx) return t;
+          const next = { ...t, ...patch };
+          if (patch.displayRate !== undefined) {
+            next.deviationPct =
+              p.marketRate > 0 && Number.isFinite(next.displayRate)
+                ? Math.round(((next.displayRate - p.marketRate) / p.marketRate) * 10000) / 100
+                : t.deviationPct;
+          }
+          return next;
+        });
+        return { ...p, tiers };
+      }),
+    );
+  }
+
+  /** Добавить строку диапазона снизу (своя шкала). */
+  function addTier(pIdx: number) {
+    setCardProposals((prev) =>
+      prev.map((p, i) => {
+        if (i !== pIdx) return p;
+        const last = p.tiers[p.tiers.length - 1];
+        const minThb = last ? (last.maxThb ?? last.minThb + 1000) : 0;
+        const displayRate = last ? last.displayRate : p.marketRate;
+        const dev =
+          p.marketRate > 0 && Number.isFinite(displayRate)
+            ? Math.round(((displayRate - p.marketRate) / p.marketRate) * 10000) / 100
+            : 0;
+        return {
+          ...p,
+          tiers: [
+            ...p.tiers,
+            { minThb, maxThb: null, displayRate, deviationPct: dev, formula: "" },
+          ],
+        };
+      }),
+    );
+  }
+
+  function removeTier(pIdx: number, tIdx: number) {
+    setCardProposals((prev) =>
+      prev.map((p, i) => (i === pIdx ? { ...p, tiers: p.tiers.filter((_, j) => j !== tIdx) } : p)),
+    );
+  }
+
+  async function saveRateCard() {
+    if (cardProposals.length === 0) {
+      setCardError("Сначала получите курс с рынка");
+      return;
+    }
+    setCardError("");
+    setCardSaving(true);
+    try {
+      await saas.approveExchangeRateCard(cardProposals);
+      await loadState();
+    } catch (err) {
+      if (!handleAuthError(err)) setCardError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCardSaving(false);
+    }
+  }
+
+  async function handleSaveRequisite(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    if (!reqValue.trim()) {
+      setError("Реквизиты: укажите значение");
+      return;
+    }
+    setSavingReq(true);
+    try {
+      await saas.saveExchangeRequisite(reqType, reqValue.trim());
+      setReqValue("");
+      await loadState();
+    } catch (err) {
+      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingReq(false);
+    }
+  }
+
+  async function handleSaveBusiness(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setSavingBiz(true);
+    try {
+      const entries: [string, string][] = [
+        ["exchange_operator_contact", bizForm.operatorContact],
+        ["exchange_payout_methods", bizForm.payoutMethods],
+        ["exchange_kyc_policy", bizForm.kycPolicy],
+        ["exchange_working_hours", bizForm.workingHours],
+        ["exchange_office_address", bizForm.officeAddress],
+      ];
+      for (const [key, value] of entries) {
+        if (value.trim()) await saas.saveExchangeRequisite(key, value.trim());
+      }
+      setBizSaved(true);
+    } catch (err) {
+      if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingBiz(false);
     }
   }
 
@@ -429,6 +897,15 @@ export function SaasOnboarding() {
     }
   }
 
+  /** Кнопка «Далее» — к следующему видимому шагу. */
+  function NextButton({ label }: { label: string }) {
+    return (
+      <Button onClick={() => setStep((s) => Math.min(s + 1, steps.length - 1))}>
+        {label} <ArrowRightIcon />
+      </Button>
+    );
+  }
+
   if (loading) {
     return (
       <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">
@@ -440,20 +917,15 @@ export function SaasOnboarding() {
   return (
     <div className="min-h-screen">
       <header className="flex h-14 items-center justify-between border-b px-4 md:px-8">
-        <Link to="/dashboard" className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5">
           <span className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-primary to-chart-5 text-primary-foreground">
             <RocketIcon className="size-4" />
           </span>
           <span className="text-[15px] font-semibold tracking-tight">
             lead<span className="text-primary">·</span>engine
           </span>
-        </Link>
-        <div className="flex items-center gap-1">
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/dashboard">Пропустить →</Link>
-          </Button>
-          <ModeToggle />
         </div>
+        <ModeToggle />
       </header>
 
       <div className="flex">
@@ -462,24 +934,24 @@ export function SaasOnboarding() {
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">Настройка кабинета</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Несколько шагов — и бот начнёт отвечать вашим клиентам.
+            Заполните настройки — и бот начнёт отвечать вашим клиентам. Необязательные шаги можно
+            пропустить.
           </p>
         </div>
 
         {/* Stepper */}
-        <ol className="mb-8 flex items-center gap-2">
-          {STEP_LABELS.map((label, i) => {
-            const done = stepDone[i];
-            const active = step === i;
+        <ol className="mb-8 flex flex-wrap items-center gap-2">
+          {steps.map((s, i) => {
+            const active = i === step;
             const canGo = reachable(i);
             return (
-              <li key={label} className="flex flex-1 items-center gap-2">
+              <li key={s.id} className="flex items-center gap-2">
                 <button
                   type="button"
                   disabled={!canGo}
                   onClick={() => canGo && setStep(i)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+                    "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
                     active && "border-primary/50 bg-accent text-foreground",
                     !active && canGo && "text-muted-foreground hover:bg-muted/60",
                     !canGo && "cursor-not-allowed opacity-50",
@@ -488,16 +960,19 @@ export function SaasOnboarding() {
                   <span
                     className={cn(
                       "grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-semibold",
-                      done
+                      s.done
                         ? "bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
                         : active
                           ? "bg-primary text-primary-foreground"
                           : "bg-muted text-muted-foreground",
                     )}
                   >
-                    {done ? <CheckIcon className="size-3" /> : i + 1}
+                    {s.done ? <CheckIcon className="size-3" /> : i + 1}
                   </span>
-                  <span className="hidden font-medium sm:inline">{label}</span>
+                  <span className="hidden font-medium sm:inline">
+                    {s.label}
+                    {!s.required && <span className="text-muted-foreground"> ·опц</span>}
+                  </span>
                 </button>
               </li>
             );
@@ -510,52 +985,68 @@ export function SaasOnboarding() {
           </p>
         )}
 
-        {step === 0 && (
+        {currentId === "vertical" && (
           <Card>
             <CardHeader>
-              <CardTitle>Шаг 1. Подключите канал</CardTitle>
+              <CardTitle>Тип бизнеса</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Откуда приходят лиды? Подключите свой личный Telegram, чтобы ассистент отвечал в
-                вашей личке, или отдельного бота.
+                Выберите шаблон — он настроит этапы воронки, навыки, стили продаж и стартовую базу
+                знаний. Для обменного пункта выберите «Обменник».
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              {verticals.length > 0 && (
-                <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium">Шаблон воронки (опционально)</p>
-                    {installedVertical && <Badge variant="success">установлен</Badge>}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Автоматически настроит этапы воронки, навыки и стили продаж.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {verticals.map((v) => (
-                      <Button
-                        key={v.slug}
-                        type="button"
-                        variant={installedVertical === v.slug ? "default" : "outline"}
-                        size="sm"
-                        disabled={installingVertical !== null}
-                        onClick={async () => {
-                          setInstallingVertical(v.slug);
-                          setError("");
-                          try {
-                            await saas.installVertical(v.slug);
-                            setInstalledVertical(v.slug);
-                          } catch (err) {
-                            setError(err instanceof Error ? err.message : String(err));
-                          } finally {
-                            setInstallingVertical(null);
-                          }
-                        }}
-                      >
-                        {installingVertical === v.slug ? "Устанавливаем…" : v.displayName}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
+              {verticals.length === 0 && (
+                <p className="text-sm text-muted-foreground">Список шаблонов недоступен.</p>
               )}
+              <div className="flex flex-wrap gap-2">
+                {verticals.map((v) => (
+                  <Button
+                    key={v.slug}
+                    type="button"
+                    variant={installedVertical === v.slug ? "default" : "outline"}
+                    size="sm"
+                    disabled={installingVertical !== null}
+                    onClick={async () => {
+                      setInstallingVertical(v.slug);
+                      setError("");
+                      try {
+                        await saas.installVertical(v.slug);
+                        setInstalledVertical(v.slug);
+                        await loadState();
+                      } catch (err) {
+                        if (!handleAuthError(err)) {
+                          setError(err instanceof Error ? err.message : String(err));
+                        }
+                      } finally {
+                        setInstallingVertical(null);
+                      }
+                    }}
+                  >
+                    {installingVertical === v.slug ? "Устанавливаем…" : v.displayName}
+                    {installedVertical === v.slug && <CheckIcon className="size-3.5" />}
+                  </Button>
+                ))}
+              </div>
+              {verticalDone && (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  Шаблон установлен <Badge variant="success">готово</Badge>
+                </p>
+              )}
+              {verticalDone && <NextButton label="Далее: канал" />}
+            </CardContent>
+          </Card>
+        )}
+
+        {currentId === "channel" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Подключите канал</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Откуда приходят лиды? Достаточно одного мессенджера — личный Telegram или отдельный
+                бот.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
               {channelDone && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                   Подключено каналов: <code className="font-mono">{channels.length}</code>
@@ -576,7 +1067,9 @@ export function SaasOnboarding() {
                 >
                   <UserIcon className="mt-0.5 size-4 shrink-0" />
                   <span>
-                    <span className="block text-sm font-medium text-foreground">Личный аккаунт</span>
+                    <span className="block text-sm font-medium text-foreground">
+                      Личный аккаунт
+                    </span>
                     <span className="block text-xs">Лиды пишут вам в личку</span>
                   </span>
                 </button>
@@ -613,6 +1106,39 @@ export function SaasOnboarding() {
 
                   {ubStep === "phone" && (
                     <form onSubmit={handleUbPhone} className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label>API ID</Label>
+                          <Input
+                            inputMode="numeric"
+                            autoComplete="off"
+                            value={ubApiId}
+                            onChange={(e) => setUbApiId(e.target.value)}
+                            placeholder="1234567"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>API Hash</Label>
+                          <Input
+                            autoComplete="off"
+                            value={ubApiHash}
+                            onChange={(e) => setUbApiHash(e.target.value)}
+                            placeholder="abcd1234ef…"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Получите на{" "}
+                        <a
+                          href="https://my.telegram.org/apps"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline"
+                        >
+                          my.telegram.org → API development tools
+                        </a>
+                        . Можно оставить пустым, если платформа предоставляет общие ключи.
+                      </p>
                       <div className="space-y-1.5">
                         <Label>Номер телефона аккаунта</Label>
                         <Input
@@ -719,164 +1245,418 @@ export function SaasOnboarding() {
                   Все типы каналов →
                 </Link>
               </p>
-              {channelDone && (
-                <Button onClick={() => setStep(1)}>
-                  Далее: LLM-провайдер <ArrowRightIcon />
-                </Button>
-              )}
+              {channelDone && <NextButton label="Далее: LLM-провайдер" />}
             </CardContent>
           </Card>
         )}
 
-        {step === 1 && (
+        {currentId === "llm" && (
           <Card>
             <CardHeader>
-              <CardTitle>Шаг 2. LLM-провайдер</CardTitle>
+              <CardTitle>LLM-провайдеры</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Выберите AI-провайдер. Если Ollama уже запущена локально — API-ключ не нужен.
+                Chat обязателен — ответы бота. Остальное по желанию: embeddings (база знаний),
+                vision (фото/документы), judge (оценка/сравнение), reranker (точность поиска). Для
+                Ollama API-ключ не нужен.
               </p>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {(["chat", "embed"] as const).map((purpose) => {
-                const cfg = purpose === "chat" ? chatCfg : embedCfg;
+            <CardContent className="space-y-2">
+              {ALL_PURPOSES.map((purpose) => {
+                const meta = PURPOSE_META[purpose];
+                const cfg = configs.find((c) => c.purpose === purpose);
                 const f = keyForms[purpose];
-                const isChat = purpose === "chat";
+                const open = expandedPurpose.has(purpose);
+                const ready = configReady(cfg);
+                const hasOllama = meta.providers.includes("ollama");
+                // Ключ этого провайдера уже сохранён в другом назначении → можно не вводить.
+                const reuseKey =
+                  !cfg?.hasSecret && f.provider !== "ollama" && providerHasKey(f.provider);
                 return (
-                  <div
-                    key={purpose}
-                    className="space-y-3 border-t pt-5 first:border-t-0 first:pt-0"
-                  >
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold">
-                        {isChat ? "Chat — ответы ассистента" : "Embeddings — поиск по базе"}
-                      </h3>
-                      {cfg &&
-                        (configReady(cfg) ? (
-                          <Badge variant="success">настроено</Badge>
-                        ) : (
-                          <Badge variant="warning">не настроено</Badge>
-                        ))}
-                    </div>
-                    <form
-                      onSubmit={(e) => handleSaveKey(e, purpose)}
-                      className="grid gap-3 sm:grid-cols-2"
+                  <div key={purpose} className="rounded-lg border">
+                    <button
+                      type="button"
+                      onClick={() => togglePurpose(purpose)}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
                     >
-                      <div className="space-y-1.5">
-                        <Label>Провайдер</Label>
-                        <Select
-                          value={f.provider}
-                          onValueChange={(v) =>
-                            updateKeyForm(purpose, { provider: v as LlmProvider })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {PROVIDERS.map((p) => (
-                              <SelectItem key={p.value} value={p.value}>
-                                {p.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Модель</Label>
-                        <Input
-                          value={f.model}
-                          onChange={(e) => updateKeyForm(purpose, { model: e.target.value })}
-                          placeholder={isChat ? "gpt-4o-mini" : "text-embedding-3-small"}
+                      <span className="min-w-0">
+                        <span className="text-sm font-medium">
+                          {meta.label}
+                          {meta.required && <span className="text-destructive"> *</span>}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {meta.desc}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        {ready ? (
+                          <Badge variant="success">настроено</Badge>
+                        ) : meta.required ? (
+                          <Badge variant="warning">нужно</Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">опц.</span>
+                        )}
+                        <ChevronDownIcon
+                          className={cn(
+                            "size-4 text-muted-foreground transition-transform",
+                            open && "rotate-180",
+                          )}
                         />
-                      </div>
-                      {f.provider !== "ollama" && (
+                      </span>
+                    </button>
+                    {open && (
+                      <form
+                        onSubmit={(e) => handleSaveKey(e, purpose)}
+                        className="grid gap-3 border-t px-3 py-3 sm:grid-cols-2"
+                      >
                         <div className="space-y-1.5">
-                          <Label>API-ключ {cfg?.hasSecret ? "(пусто — не менять)" : ""}</Label>
-                          <Input
-                            type="password"
-                            autoComplete="new-password"
-                            value={f.apiKey}
-                            onChange={(e) => updateKeyForm(purpose, { apiKey: e.target.value })}
-                            placeholder={cfg?.hasSecret ? "•••••••• (сохранён)" : "sk-…"}
-                          />
-                        </div>
-                      )}
-                      {f.provider === "ollama" && (
-                        <div className="space-y-1.5">
-                          <Label>URL Ollama</Label>
-                          <Input
-                            value={f.baseUrl}
-                            onChange={(e) => updateKeyForm(purpose, { baseUrl: e.target.value })}
-                            placeholder="http://localhost:11434"
-                          />
-                        </div>
-                      )}
-                      {!isChat && (
-                        <div className="space-y-1.5">
-                          <Label>Размерность embed</Label>
-                          <Input
-                            type="number"
-                            value={f.embedDim}
-                            onChange={(e) => updateKeyForm(purpose, { embedDim: e.target.value })}
-                            placeholder="1536"
-                          />
-                        </div>
-                      )}
-                      {f.provider === "ollama" && (
-                        <p className="sm:col-span-2 text-xs text-muted-foreground rounded-md bg-muted/50 px-3 py-2">
-                          Ollama работает локально — API-ключ не нужен. Убедитесь, что{" "}
-                          <code className="font-mono">ollama serve</code> запущен и модель загружена:{" "}
-                          <code className="font-mono">ollama pull {OLLAMA_PRESETS[purpose].model}</code>
-                        </p>
-                      )}
-                      <div className="sm:col-span-2 flex items-center gap-2">
-                        <Button type="submit" disabled={savingPurpose !== null}>
-                          {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
-                        </Button>
-                        {f.provider !== "ollama" && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              updateKeyForm(purpose, {
-                                provider: "ollama",
-                                model: OLLAMA_PRESETS[purpose].model,
-                                baseUrl: "http://localhost:11434",
-                                apiKey: "",
-                                ...(OLLAMA_PRESETS[purpose].embedDim
-                                  ? { embedDim: OLLAMA_PRESETS[purpose].embedDim }
-                                  : {}),
-                              })
+                          <Label>Провайдер</Label>
+                          <Select
+                            value={f.provider}
+                            onValueChange={(v) =>
+                              updateKeyForm(purpose, { provider: v as LlmProvider })
                             }
                           >
-                            Использовать Ollama
-                          </Button>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {meta.providers.map((pv) => (
+                                <SelectItem key={pv} value={pv}>
+                                  {PROVIDER_LABEL[pv]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Модель</Label>
+                          <Input
+                            value={f.model}
+                            onChange={(e) => updateKeyForm(purpose, { model: e.target.value })}
+                            placeholder={modelPlaceholder(f.provider, purpose)}
+                          />
+                        </div>
+                        {f.provider !== "ollama" && (
+                          <div className="space-y-1.5">
+                            <Label>
+                              API-ключ{" "}
+                              {cfg?.hasSecret
+                                ? "(пусто — не менять)"
+                                : reuseKey
+                                  ? "(можно не вводить)"
+                                  : ""}
+                            </Label>
+                            <Input
+                              type="password"
+                              autoComplete="new-password"
+                              value={f.apiKey}
+                              onChange={(e) => updateKeyForm(purpose, { apiKey: e.target.value })}
+                              placeholder={
+                                cfg?.hasSecret
+                                  ? "•••••••• (сохранён)"
+                                  : reuseKey
+                                    ? `ключ ${PROVIDER_LABEL[f.provider]} уже сохранён — переиспользуем`
+                                    : "sk-…"
+                              }
+                            />
+                          </div>
                         )}
-                      </div>
-                    </form>
+                        {f.provider === "ollama" && (
+                          <div className="space-y-1.5">
+                            <Label>URL Ollama</Label>
+                            <Input
+                              value={f.baseUrl}
+                              onChange={(e) => updateKeyForm(purpose, { baseUrl: e.target.value })}
+                              placeholder="http://localhost:11434"
+                            />
+                          </div>
+                        )}
+                        {purpose === "embed" && (
+                          <div className="space-y-1.5">
+                            <Label>Размерность</Label>
+                            <Input
+                              type="number"
+                              value={f.embedDim}
+                              onChange={(e) => updateKeyForm(purpose, { embedDim: e.target.value })}
+                              placeholder="1536"
+                            />
+                          </div>
+                        )}
+                        {purpose === "embed" && (
+                          <p className="sm:col-span-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                            Оставьте <code className="font-mono">1536</code> — под базу знаний.
+                            Вектор любой современной модели приводится к 1536 автоматически (нужна
+                            модель с размерностью ≥ 1536).
+                          </p>
+                        )}
+                        {f.provider === "ollama" && OLLAMA_PRESETS[purpose] && (
+                          <p className="sm:col-span-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                            Ollama локальный — ключ не нужен. Запустите{" "}
+                            <code className="font-mono">ollama serve</code> и{" "}
+                            <code className="font-mono">
+                              ollama pull {OLLAMA_PRESETS[purpose]?.model}
+                            </code>
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 sm:col-span-2">
+                          <Button type="submit" disabled={savingPurpose !== null}>
+                            {savingPurpose === purpose ? "Сохраняем…" : "Сохранить"}
+                          </Button>
+                          {hasOllama && f.provider !== "ollama" && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                updateKeyForm(purpose, {
+                                  provider: "ollama",
+                                  model: OLLAMA_PRESETS[purpose]?.model ?? "",
+                                  baseUrl: "http://localhost:11434",
+                                  apiKey: "",
+                                })
+                              }
+                            >
+                              Использовать Ollama
+                            </Button>
+                          )}
+                        </div>
+                      </form>
+                    )}
                   </div>
                 );
               })}
               <p className="text-sm text-muted-foreground">
-                Timeout и другие параметры —{" "}
+                Расширенные параметры (timeout и т.д.) —{" "}
                 <Link to="/settings" className="text-primary hover:underline">
-                  расширенные настройки →
+                  настройки →
                 </Link>
               </p>
-              {keysDone && (
-                <Button onClick={() => setStep(2)}>
-                  Далее: база знаний <ArrowRightIcon />
-                </Button>
-              )}
+              {chatDone && <NextButton label="Далее" />}
             </CardContent>
           </Card>
         )}
 
-        {step === 2 && (
+        {currentId === "ex_rates" && (
           <Card>
             <CardHeader>
-              <CardTitle>Шаг 3. База знаний (опционально)</CardTitle>
+              <CardTitle>Курсы обмена</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Актуальный курс берём с рынка (Binance + ЦБ) и авто-обновляем. Вы задаёте свои курсы
+                по диапазонам сумм — отдельно для рублей и USDT (как на табло). Бот выдаёт клиенту
+                ровно эти значения.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {cardError && (
+                <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {cardError}
+                </p>
+              )}
+
+              {cardProposals.length === 0 ? (
+                <Button type="button" onClick={loadRateCard} disabled={cardLoading}>
+                  {cardLoading ? "Получаем курс…" : "Получить актуальный курс с рынка"}
+                </Button>
+              ) : (
+                <>
+                  {cardProposals.map((p, pIdx) => (
+                    <div key={p.asset} className="rounded-lg border">
+                      <div className="flex items-center justify-between border-b px-3 py-2">
+                        <span className="text-sm font-medium">
+                          {p.asset === "RUB"
+                            ? "🇷🇺 RUB → THB"
+                            : p.asset === "USDT"
+                              ? "💲 USDT → THB"
+                              : `${p.asset} → THB`}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          рынок: {p.marketRate}{" "}
+                          {p.quoteMode === "divide" ? `${p.asset}/THB` : `THB/${p.asset}`}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-[1fr_1fr_5rem_3rem_1.5rem] gap-2 px-3 py-1.5 text-xs text-muted-foreground">
+                        <span>от (THB)</span>
+                        <span>до (THB)</span>
+                        <span>курс</span>
+                        <span className="text-right">откл.</span>
+                        <span />
+                      </div>
+                      {p.tiers.map((t, tIdx) => (
+                        <div
+                          // biome-ignore lint/suspicious/noArrayIndexKey: строки переупорядочиваемы пользователем
+                          key={`${p.asset}-${tIdx}`}
+                          className="grid grid-cols-[1fr_1fr_5rem_3rem_1.5rem] items-center gap-2 border-t px-3 py-1.5"
+                        >
+                          <Input
+                            className="h-8"
+                            type="number"
+                            step="any"
+                            value={Number.isFinite(t.minThb) ? t.minThb : ""}
+                            onChange={(e) =>
+                              patchTier(pIdx, tIdx, { minThb: Number.parseFloat(e.target.value) })
+                            }
+                          />
+                          <Input
+                            className="h-8"
+                            type="number"
+                            step="any"
+                            placeholder="∞"
+                            value={t.maxThb ?? ""}
+                            onChange={(e) =>
+                              patchTier(pIdx, tIdx, {
+                                maxThb:
+                                  e.target.value.trim() === ""
+                                    ? null
+                                    : Number.parseFloat(e.target.value),
+                              })
+                            }
+                          />
+                          <Input
+                            className="h-8"
+                            type="number"
+                            step="any"
+                            value={Number.isFinite(t.displayRate) ? t.displayRate : ""}
+                            onChange={(e) =>
+                              patchTier(pIdx, tIdx, {
+                                displayRate: Number.parseFloat(e.target.value),
+                              })
+                            }
+                          />
+                          <span className="text-right text-xs text-muted-foreground">
+                            {t.deviationPct > 0 ? "+" : ""}
+                            {t.deviationPct}%
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeTier(pIdx, tIdx)}
+                            aria-label="Удалить строку"
+                            className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                      <div className="border-t px-3 py-1.5">
+                        <button
+                          type="button"
+                          onClick={() => addTier(pIdx)}
+                          className="text-sm text-primary hover:underline"
+                        >
+                          + Добавить диапазон
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" onClick={saveRateCard} disabled={cardSaving}>
+                      {cardSaving ? "Сохраняем…" : ratesDone ? "Обновить курсы" : "Сохранить курсы"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={loadRateCard}
+                      disabled={cardLoading}
+                    >
+                      {cardLoading ? "Обновляем…" : "Сбросить к рынку"}
+                    </Button>
+                  </div>
+                </>
+              )}
+
+              {ratesDone && (
+                <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
+                  ✓ Курсы сохранены и активны. Авто-обновление рынка включено.
+                </p>
+              )}
+              {ratesDone && <NextButton label="Далее: реквизиты" />}
+            </CardContent>
+          </Card>
+        )}
+
+        {currentId === "ex_requisites" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Реквизиты приёма</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Куда клиент отправляет средства. Добавьте минимум один реквизит — бот выдаёт их
+                клиенту автоматически (иначе — передача оператору). Значения шифруются.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Сохранено реквизитов:{" "}
+                <code className="font-mono">{status?.requisiteCount ?? 0}</code>
+                {requisitesDone && (
+                  <Badge variant="success" className="ml-2">
+                    готово
+                  </Badge>
+                )}
+              </p>
+
+              {savedRequisites.filter((r) => isRequisiteKey(r.key)).length > 0 && (
+                <ul className="space-y-1.5">
+                  {savedRequisites
+                    .filter((r) => isRequisiteKey(r.key))
+                    .map((r) => (
+                      <li
+                        key={r.key}
+                        className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                      >
+                        <CheckIcon className="size-4 shrink-0 text-[var(--success)]" />
+                        <span className="shrink-0 font-medium">{requisiteLabel(r.key)}:</span>
+                        <span
+                          className="truncate font-mono text-xs text-muted-foreground"
+                          title={r.value}
+                        >
+                          {r.value}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              )}
+
+              <form onSubmit={handleSaveRequisite} className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Тип реквизита</Label>
+                  <Select value={reqType} onValueChange={setReqType}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REQUISITE_TYPES.map((t) => (
+                        <SelectItem key={t.key} value={t.key}>
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Значение</Label>
+                  <Input
+                    autoComplete="off"
+                    value={reqValue}
+                    onChange={(e) => setReqValue(e.target.value)}
+                    placeholder={
+                      REQUISITE_TYPES.find((t) => t.key === reqType)?.placeholder ?? "значение"
+                    }
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <Button type="submit" disabled={savingReq || !reqValue.trim()}>
+                    {savingReq ? "Сохраняем…" : "Добавить реквизит"}
+                  </Button>
+                </div>
+              </form>
+              {requisitesDone && <NextButton label="Далее" />}
+            </CardContent>
+          </Card>
+        )}
+
+        {currentId === "kb" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>База знаний (опционально)</CardTitle>
               <p className="text-sm text-muted-foreground">
                 Загрузите документы — бот будет отвечать по вашей базе (RAG). Шаг можно пропустить.
               </p>
@@ -934,60 +1714,125 @@ export function SaasOnboarding() {
                 </p>
               )}
 
-              <Button onClick={() => setStep(3)}>
-                {kbDone ? "Далее" : "Пропустить"} <ArrowRightIcon />
-              </Button>
+              <NextButton label={kbDone ? "Далее" : "Пропустить"} />
             </CardContent>
           </Card>
         )}
 
-        {step === 3 && (
+        {currentId === "ex_business" && (
           <Card>
             <CardHeader>
-              <CardTitle>Готово!</CardTitle>
-              <p className="text-sm text-muted-foreground">Можно переходить к работе.</p>
+              <CardTitle>Данные обменника (опционально)</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Эти данные сохраняются для оператора. Автоматизация (подстановка в ответы бота,
+                расписание, KYC-гейтинг) — в следующем релизе.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {bizSaved && (
+                <p className="rounded-md border border-[var(--success)]/40 bg-[color-mix(in_oklch,var(--success)_12%,transparent)] px-3 py-2 text-sm text-[var(--success)]">
+                  ✓ Данные сохранены.
+                </p>
+              )}
+              <form onSubmit={handleSaveBusiness} className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Контакт оператора (для эскалаций)</Label>
+                  <Input
+                    value={bizForm.operatorContact}
+                    onChange={(e) => setBizForm((p) => ({ ...p, operatorContact: e.target.value }))}
+                    placeholder="@operator / +66…"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Методы выдачи</Label>
+                  <Input
+                    value={bizForm.payoutMethods}
+                    onChange={(e) => setBizForm((p) => ({ ...p, payoutMethods: e.target.value }))}
+                    placeholder="офис, безкарточный ATM, курьер, тайский банк"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Политика KYC</Label>
+                  <Input
+                    value={bizForm.kycPolicy}
+                    onChange={(e) => setBizForm((p) => ({ ...p, kycPolicy: e.target.value }))}
+                    placeholder="напр. обязательна свыше 50 000 THB"
+                  />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Часы работы</Label>
+                    <Input
+                      value={bizForm.workingHours}
+                      onChange={(e) => setBizForm((p) => ({ ...p, workingHours: e.target.value }))}
+                      placeholder="10:00–20:00, Пхукет"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Адрес офиса</Label>
+                    <Input
+                      value={bizForm.officeAddress}
+                      onChange={(e) => setBizForm((p) => ({ ...p, officeAddress: e.target.value }))}
+                      placeholder="—"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button type="submit" disabled={savingBiz}>
+                    {savingBiz ? "Сохраняем…" : "Сохранить"}
+                  </Button>
+                  <NextButton label="Далее" />
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {currentId === "done" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>{allRequiredDone ? "Готово!" : "Почти готово"}</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                {allRequiredDone
+                  ? "Всё настроено — можно переходить к работе."
+                  : "Завершите обязательные шаги (отмечены без «·опц»), чтобы открыть кабинет."}
+              </p>
             </CardHeader>
             <CardContent className="space-y-4">
               <ul className="space-y-2">
-                {[
-                  {
-                    done: channelDone,
-                    title: "Канал",
-                    hint: channelDone ? `Подключено: ${channels.length}` : "Не подключён",
-                  },
-                  {
-                    done: keysDone,
-                    title: "LLM-провайдер",
-                    hint: keysDone ? "chat + embed настроены" : "Не настроены",
-                  },
-                  {
-                    done: kbDone,
-                    title: "База знаний",
-                    hint: kbDone ? `Документов: ${docs.length}` : "Пропущено (опционально)",
-                  },
-                ].map((s) => (
-                  <li
-                    key={s.title}
-                    className="flex items-center gap-3 rounded-lg border px-3 py-2.5"
-                  >
-                    <span
-                      className={cn(
-                        "grid size-6 shrink-0 place-items-center rounded-full text-xs",
-                        s.done
-                          ? "bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
-                          : "border text-muted-foreground",
-                      )}
+                {steps
+                  .filter((s) => s.id !== "done")
+                  .map((s) => (
+                    <li
+                      key={s.id}
+                      className="flex items-center gap-3 rounded-lg border px-3 py-2.5"
                     >
-                      {s.done ? <CheckIcon className="size-3.5" /> : "○"}
-                    </span>
-                    <div>
-                      <p className="text-sm font-medium leading-tight">{s.title}</p>
-                      <p className="text-xs text-muted-foreground">{s.hint}</p>
-                    </div>
-                  </li>
-                ))}
+                      <span
+                        className={cn(
+                          "grid size-6 shrink-0 place-items-center rounded-full text-xs",
+                          s.done
+                            ? "bg-[color-mix(in_oklch,var(--success)_22%,transparent)] text-[var(--success)]"
+                            : "border text-muted-foreground",
+                        )}
+                      >
+                        {s.done ? <CheckIcon className="size-3.5" /> : "○"}
+                      </span>
+                      <div>
+                        <p className="text-sm font-medium leading-tight">
+                          {s.label}
+                          {!s.required && (
+                            <span className="text-muted-foreground"> (опционально)</span>
+                          )}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
               </ul>
-              <Button className="w-full" onClick={() => navigate("/dashboard", { replace: true })}>
+              <Button
+                className="w-full"
+                disabled={!allRequiredDone}
+                onClick={() => navigate("/dashboard", { replace: true })}
+              >
                 Перейти в кабинет <ArrowRightIcon />
               </Button>
             </CardContent>

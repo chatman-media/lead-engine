@@ -192,7 +192,12 @@ async function answerFromHits(opts: {
   const { hits, baseTelemetry, startedAt, input, activePersona } = opts;
   const vacBlock = (input.vacanciesBlock ?? "").trim();
 
-  if (hits.length === 0 && !vacBlock && !input.style) {
+  // Ранний выход «нет контекста» — только если ОТВЕЧАТЬ реально нечем: нет
+  // KB-хитов, нет блока вакансий, нет стиля И нет инструментов. Если есть
+  // инструменты (напр. обменник: computeQuote/createOrder/fetchRequisites),
+  // вызываем LLM с ними — ответ строится на инструментах, а не на базе знаний.
+  const hasTools = !!(input.tools && input.tools.length > 0);
+  if (hits.length === 0 && !vacBlock && !input.style && !hasTools) {
     return {
       text: NO_CONTEXT_MARKER,
       usedChunkIds: [],
@@ -602,7 +607,27 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
   }
 
   const topK = input.topK ?? 5;
-  const { hits, retrievalMs, searchQuery, queries, usedTopic } = await retrieveHits(input);
+  // RAG-поиск не критичен: если эмбеддер/векторный поиск недоступен (напр.
+  // 429 quota у провайдера эмбеддингов), не роняем весь ответ — отвечаем без
+  // KB-контекста (на чате + инструментах). База знаний для бота опциональна.
+  let retrieval: RetrievalResult;
+  try {
+    retrieval = await retrieveHits(input);
+  } catch (err) {
+    console.warn(
+      `[rag] retrieval failed → отвечаем без базы знаний: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    retrieval = {
+      hits: [],
+      retrievalMs: 0,
+      searchQuery: input.question,
+      queries: [],
+      usedTopic: null,
+    };
+  }
+  const { hits, retrievalMs, searchQuery, queries, usedTopic } = retrieval;
 
   const baseTelemetry: AnswerTelemetry = {
     path: "ok",

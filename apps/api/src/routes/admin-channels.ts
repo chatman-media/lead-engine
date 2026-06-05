@@ -13,8 +13,10 @@ import { type Db, setEncryptedSecret, withTenant } from "@chatman-media/conversa
 import { channels, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { type Context, Hono } from "hono";
+import { WHATSAPP_APP_SECRET_KEY, WHATSAPP_VERIFY_TOKEN_KEY } from "../channel-registry.ts";
 import { recordAudit } from "../lib/audit.ts";
 import { canAddChannel } from "../lib/quota.ts";
+import { resolveUserbotCreds, setUserbotCreds } from "../lib/userbot-creds.ts";
 import type { UserbotLoginStore } from "../lib/userbot-login-store.ts";
 
 /**
@@ -148,6 +150,10 @@ interface WhatsAppCreateBody {
   phoneNumberId: unknown;
   accessToken: unknown;
   businessAccountId?: unknown;
+  /** Per-tenant Meta webhook verify_token (опц.) — фолбэк на env WHATSAPP_VERIFY_TOKEN. */
+  verifyToken?: unknown;
+  /** Per-tenant Meta app secret (опц.) — фолбэк на env WHATSAPP_APP_SECRET. */
+  appSecret?: unknown;
 }
 
 interface WebCreateBody {
@@ -459,6 +465,8 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
       typeof body.businessAccountId === "string" && body.businessAccountId.trim()
         ? body.businessAccountId.trim()
         : null;
+    const verifyToken = typeof body.verifyToken === "string" ? body.verifyToken.trim() : "";
+    const appSecret = typeof body.appSecret === "string" ? body.appSecret.trim() : "";
 
     // Validate via Meta Graph.
     const waClient = new WhatsAppClient({
@@ -539,6 +547,29 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
           ...(businessAccountId ? { businessAccountId } : {}),
         });
 
+        // Per-tenant Meta webhook creds (опц.) — шифруем в tenant_secrets, чтобы
+        // ChannelRegistry резолвил их в entry, а webhook валидировал без env.
+        if (verifyToken) {
+          await setEncryptedSecret({
+            db: tx,
+            tenantId,
+            key: WHATSAPP_VERIFY_TOKEN_KEY,
+            value: verifyToken,
+            masterKeyHex: opts.masterKeyHex,
+            nowEpoch,
+          });
+        }
+        if (appSecret) {
+          await setEncryptedSecret({
+            db: tx,
+            tenantId,
+            key: WHATSAPP_APP_SECRET_KEY,
+            value: appSecret,
+            masterKeyHex: opts.masterKeyHex,
+            nowEpoch,
+          });
+        }
+
         if (existing) {
           await setEncryptedSecret({
             db: tx,
@@ -616,9 +647,10 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
         if (tenant) {
           webhookSetupHint = {
             url: `${opts.publicUrl}/webhook/whatsapp/${tenant.slug}`,
-            verifyToken: opts.whatsappVerifyToken ?? "<set WHATSAPP_VERIFY_TOKEN env>",
-            appSecretHint:
-              "Meta dashboard → App settings → Basic → App Secret — добавить в WHATSAPP_APP_SECRET env",
+            verifyToken: verifyToken || opts.whatsappVerifyToken || "<укажите Verify Token>",
+            appSecretHint: appSecret
+              ? "App Secret сохранён — подпись вебхуков будет проверяться"
+              : "Meta dashboard → App settings → Basic → App Secret (укажите в форме или в env WHATSAPP_APP_SECRET)",
           };
         }
       }
@@ -916,8 +948,10 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
   //
   // Доступно любому тенанту: каждый подключает свой личный аккаунт (скоуп по tenantId).
 
-  const userbotEnabled = () =>
-    !!opts.userbotLoginStore && !!opts.telegramApiId && !!opts.telegramApiHash;
+  // Userbot-онбординг доступен всегда, когда есть login-store. MTProto-креды
+  // (api_id/api_hash) резолвятся per-request: тело запроса → tenant_secrets →
+  // env-фолбэк (opts.telegramApiId/Hash). Если кредов нет нигде — /start отдаёт 400.
+  const userbotEnabled = () => !!opts.userbotLoginStore;
 
   /** Маппинг UserbotLoginError → HTTP-код + тело для UI. */
   function loginErrorResponse(err: unknown) {
@@ -1065,17 +1099,11 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
 
   app.post("/api/admin/channels/userbot/start", async (c) => {
     if (!userbotEnabled()) {
-      return c.json(
-        {
-          error: "userbot_disabled",
-          message: "TELEGRAM_API_ID/HASH не заданы",
-        },
-        503,
-      );
+      return c.json({ error: "userbot_disabled" }, 503);
     }
-    let body: { phone?: unknown };
+    let body: { phone?: unknown; apiId?: unknown; apiHash?: unknown };
     try {
-      body = (await c.req.json()) as { phone?: unknown };
+      body = (await c.req.json()) as { phone?: unknown; apiId?: unknown; apiHash?: unknown };
     } catch {
       return c.json({ error: "invalid json" }, 400);
     }
@@ -1089,10 +1117,59 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
         400,
       );
     }
+
+    // Креды из тела (если тенант ввёл свои) — валидируем и сохраняем ДО логина,
+    // чтобы registry мог переподключаться по ним позже.
+    const tenantId = c.var.tenantId;
+    const rawApiId =
+      typeof body.apiId === "string" || typeof body.apiId === "number"
+        ? Number.parseInt(String(body.apiId).trim(), 10)
+        : Number.NaN;
+    const rawApiHash = typeof body.apiHash === "string" ? body.apiHash.trim() : "";
+    if (rawApiHash || !Number.isNaN(rawApiId)) {
+      if (!(rawApiId > 0) || !rawApiHash) {
+        return c.json(
+          {
+            error: "userbot_creds_invalid",
+            message: "Укажите оба значения: API ID (число) и API Hash",
+          },
+          400,
+        );
+      }
+      await withTenant(opts.db, tenantId, async (tx) => {
+        await setUserbotCreds({
+          db: tx,
+          tenantId,
+          apiId: rawApiId,
+          apiHash: rawApiHash,
+          masterKeyHex: opts.masterKeyHex,
+          nowEpoch: Math.floor(Date.now() / 1000),
+        });
+      });
+    }
+
+    // Резолв эффективных кредов: tenant_secrets (только что сохранённые или
+    // прежние) → env-фолбэк.
+    const creds = await resolveUserbotCreds({
+      db: opts.db,
+      tenantId,
+      masterKeyHex: opts.masterKeyHex,
+      fallbackApiId: opts.telegramApiId,
+      fallbackApiHash: opts.telegramApiHash,
+    });
+    if (!creds) {
+      return c.json(
+        {
+          error: "userbot_creds_required",
+          message: "Укажите API ID и API Hash (my.telegram.org → API development tools)",
+        },
+        400,
+      );
+    }
     try {
       const started = await startUserbotLogin({
-        apiId: opts.telegramApiId as number,
-        apiHash: opts.telegramApiHash as string,
+        apiId: creds.apiId,
+        apiHash: creds.apiHash,
         phone,
       });
       const loginId = randomUUID();

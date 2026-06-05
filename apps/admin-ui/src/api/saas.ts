@@ -5,6 +5,7 @@
 export interface Admin {
   id: number;
   email: string;
+  name?: string | null;
   role: "superadmin" | "manager";
   tenantId: number;
 }
@@ -57,7 +58,7 @@ export interface KbUploadResult {
   created: boolean;
 }
 
-export type LlmPurpose = "chat" | "embed" | "vision" | "judge" | "reranker";
+export type LlmPurpose = "chat" | "embed" | "vision" | "judge" | "reranker" | "transcribe";
 export type LlmProvider = "openai" | "openrouter" | "ollama" | "anthropic" | "jina" | "cohere";
 
 export interface LlmConfig {
@@ -347,12 +348,20 @@ export interface OnboardingStatus {
   embedProvider?: string;
   embedModel?: string;
   hasKbDocuments: boolean;
+  /** Активная вертикаль тенанта (funnels.vertical_template_id), напр. "exchange". */
+  vertical?: string | null;
+  isExchange?: boolean;
+  funnelInstalled?: boolean;
+  activeRateCount?: number;
+  requisiteCount?: number;
   done: boolean;
 }
 
 // ── Lead pipeline types ──────────────────────────────────────────────────
 
 export type StageKind = "intake" | "active" | "terminal_won" | "terminal_lost";
+/** Макро-фаза костяка — хранится только на active-стадиях. */
+export type StagePhase = "qualify" | "offer" | "clear" | "fulfill";
 export type StageType =
   | "form_fill"
   | "document_upload"
@@ -402,6 +411,7 @@ export interface StageDefinition {
   position: number;
   kind: StageKind;
   stageType: StageType;
+  phase: StagePhase | null;
   configJson: string;
   nextStages: string[];
   staleTimeoutDays: number | null;
@@ -415,6 +425,12 @@ export interface StageDefinition {
 export interface FunnelData {
   funnel: { id: number; slug: string; isActive: boolean } | null;
   stages: StageDefinition[];
+}
+
+/** Сквозное распределение лидов по макро-фазам костяка (capture→…→won/lost). */
+export interface PhaseStats {
+  phases: Array<{ phase: string; leads: number }>;
+  unassigned: number;
 }
 
 export interface WorkflowChatMessage {
@@ -871,6 +887,8 @@ export interface ExchangeOrder {
   };
   createdAt: number;
   updatedAt: number;
+  /** Проставляется бэкендом при переходе статуса в 'completed'. */
+  completedAt?: number | null;
 }
 
 export interface ExchangeTurnover {
@@ -1013,6 +1031,8 @@ export const saas = {
     phoneNumberId: string;
     accessToken: string;
     businessAccountId?: string;
+    verifyToken?: string;
+    appSecret?: string;
   }) {
     return request<CreateWhatsAppChannelResult>("/api/admin/channels/whatsapp", {
       method: "POST",
@@ -1029,10 +1049,14 @@ export const saas = {
     return request<WebSnippet>("/api/admin/channels/web/snippet");
   },
   // ── Telegram userbot (личный аккаунт, MTProto) — пошаговый логин ──────
-  startUserbotLogin(phone: string) {
+  startUserbotLogin(phone: string, apiId?: string, apiHash?: string) {
     return request<UserbotLoginStartResult>("/api/admin/channels/userbot/start", {
       method: "POST",
-      body: JSON.stringify({ phone }),
+      body: JSON.stringify({
+        phone,
+        ...(apiId?.trim() ? { apiId: apiId.trim() } : {}),
+        ...(apiHash?.trim() ? { apiHash: apiHash.trim() } : {}),
+      }),
     });
   },
   verifyUserbotCode(loginId: string, code: string) {
@@ -1059,7 +1083,17 @@ export const saas = {
   },
 
   // ── Conversations (read-only) ────────────────────────────────────────
-  listConversations(opts: { limit?: number; cursor?: number; contactId?: number; source?: string; mode?: string; escalated?: boolean; q?: string } = {}) {
+  listConversations(
+    opts: {
+      limit?: number;
+      cursor?: number;
+      contactId?: number;
+      source?: string;
+      mode?: string;
+      escalated?: boolean;
+      q?: string;
+    } = {},
+  ) {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.cursor) params.set("cursor", String(opts.cursor));
@@ -1081,10 +1115,13 @@ export const saas = {
     }>(`/api/admin/conversations/${id}`);
   },
   updateConversation(id: number, patch: { status?: string; assignedAdminId?: number | null }) {
-    return request<{ ok: boolean; conversation: ConversationDetail }>(`/api/admin/conversations/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    });
+    return request<{ ok: boolean; conversation: ConversationDetail }>(
+      `/api/admin/conversations/${id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      },
+    );
   },
   replyToConversation(id: number, text: string) {
     return request<{
@@ -1197,20 +1234,37 @@ export const saas = {
     });
   },
 
-  forgotPassword(email: string) {
-    return request<{ ok: true }>("/api/auth/forgot-password", {
-      method: "POST",
+  // Обновить профиль текущего пользователя (display name).
+  updateProfile(name: string) {
+    return request<{ ok: true; admin: Admin }>("/api/auth/me", {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    }, false);
+      body: JSON.stringify({ name }),
+    });
+  },
+
+  forgotPassword(email: string) {
+    return request<{ ok: true }>(
+      "/api/auth/forgot-password",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      },
+      false,
+    );
   },
 
   resetPassword(token: string, password: string) {
-    return request<{ ok: true }>("/api/auth/reset-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, password }),
-    }, false);
+    return request<{ ok: true }>(
+      "/api/auth/reset-password",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, password }),
+      },
+      false,
+    );
   },
 
   listAuditLog(opts: { limit?: number; cursor?: number } = {}) {
@@ -1311,6 +1365,9 @@ export const saas = {
   // ── Funnel builder ───────────────────────────────────────────────────
   getFunnel() {
     return request<FunnelData>("/api/admin/funnel");
+  },
+  getPhaseStats() {
+    return request<PhaseStats>("/api/admin/funnel/phase-stats");
   },
   createStage(data: {
     funnelId: number;
@@ -1550,14 +1607,24 @@ export const saas = {
   },
 
   // ── Outreach campaigns ────────────────────────────────────────────────
-  sendOutreach(body: { text: string; leadIds?: number[]; stageSlug?: string; scheduledAt?: number }) {
-    return request<{ enqueued: number; skipped: number; scheduledAt: number | null }>("/api/admin/outreach", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+  sendOutreach(body: {
+    text: string;
+    leadIds?: number[];
+    stageSlug?: string;
+    scheduledAt?: number;
+  }) {
+    return request<{ enqueued: number; skipped: number; scheduledAt: number | null }>(
+      "/api/admin/outreach",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
   },
 
-  async importLeadsCsv(file: File): Promise<{ imported: number; skipped: number; errors: string[] }> {
+  async importLeadsCsv(
+    file: File,
+  ): Promise<{ imported: number; skipped: number; errors: string[] }> {
     const token = getToken();
     const form = new FormData();
     form.append("file", file);
@@ -1567,7 +1634,7 @@ export const saas = {
       body: form,
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({})) as { error?: string };
+      const err = (await res.json().catch(() => ({}))) as { error?: string };
       throw new ApiError(res.status, err.error ?? "import_failed");
     }
     return res.json() as Promise<{ imported: number; skipped: number; errors: string[] }>;
@@ -1578,10 +1645,16 @@ export const saas = {
     return request<{ items: MessageTemplate[] }>("/api/admin/message-templates");
   },
   createMessageTemplate(data: { name: string; body: string }) {
-    return request<MessageTemplate>("/api/admin/message-templates", { method: "POST", body: JSON.stringify(data) });
+    return request<MessageTemplate>("/api/admin/message-templates", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
   updateMessageTemplate(id: number, data: { name?: string; body?: string }) {
-    return request<MessageTemplate>(`/api/admin/message-templates/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+    return request<MessageTemplate>(`/api/admin/message-templates/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
   },
   deleteMessageTemplate(id: number) {
     return request<{ ok: boolean }>(`/api/admin/message-templates/${id}`, { method: "DELETE" });
@@ -1632,19 +1705,27 @@ export const saas = {
     return request<{ items: TenantRow[] }>("/api/superadmin/tenants");
   },
   updateTenantPlan(id: number, plan: string) {
-    return request<{ id: number; slug: string; plan: string }>(`/api/superadmin/tenants/${id}/plan`, {
-      method: "PATCH",
-      body: JSON.stringify({ plan }),
-    });
+    return request<{ id: number; slug: string; plan: string }>(
+      `/api/superadmin/tenants/${id}/plan`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ plan }),
+      },
+    );
   },
 
   // ── Notifications ─────────────────────────────────────────────────────
   getNotificationSettings() {
-    return request<{ adminId: number; telegramChatId: string | null; notifyOnAssignedOnly: boolean }>(
-      "/api/admin/notifications/settings",
-    );
+    return request<{
+      adminId: number;
+      telegramChatId: string | null;
+      notifyOnAssignedOnly: boolean;
+    }>("/api/admin/notifications/settings");
   },
-  updateNotificationSettings(body: { telegramChatId?: string | null; notifyOnAssignedOnly?: boolean }) {
+  updateNotificationSettings(body: {
+    telegramChatId?: string | null;
+    notifyOnAssignedOnly?: boolean;
+  }) {
     return request<{ ok: boolean }>("/api/admin/notifications/settings", {
       method: "PUT",
       body: JSON.stringify(body),
@@ -1672,7 +1753,9 @@ export const saas = {
     return request<{ ok: boolean }>(`/api/admin/notifications/rules/${id}`, { method: "DELETE" });
   },
   testNotificationRule(id: number) {
-    return request<{ ok: boolean; error?: string }>(`/api/admin/notifications/rules/${id}/test`, { method: "POST" });
+    return request<{ ok: boolean; error?: string }>(`/api/admin/notifications/rules/${id}/test`, {
+      method: "POST",
+    });
   },
   getOpsAlertStatus() {
     return request<{
@@ -1691,15 +1774,21 @@ export const saas = {
     return request<{ items: NotificationTemplate[] }>("/api/admin/notifications/templates");
   },
   upsertNotificationTemplate(slug: string, body: string) {
-    return request<{ ok: boolean }>(`/api/admin/notifications/templates/${encodeURIComponent(slug)}`, {
-      method: "PUT",
-      body: JSON.stringify({ body }),
-    });
+    return request<{ ok: boolean }>(
+      `/api/admin/notifications/templates/${encodeURIComponent(slug)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ body }),
+      },
+    );
   },
   deleteNotificationTemplate(slug: string) {
-    return request<{ ok: boolean }>(`/api/admin/notifications/templates/${encodeURIComponent(slug)}`, {
-      method: "DELETE",
-    });
+    return request<{ ok: boolean }>(
+      `/api/admin/notifications/templates/${encodeURIComponent(slug)}`,
+      {
+        method: "DELETE",
+      },
+    );
   },
 
   // ── Bot Tester ────────────────────────────────────────────────────────
@@ -1760,8 +1849,16 @@ export const saas = {
       body: JSON.stringify({ key, value }),
     });
   },
-  exchangeOrders(status?: string) {
-    const q = status ? `?status=${encodeURIComponent(status)}` : "";
+  exchangeRequisites() {
+    return request<{ items: Array<{ key: string; value: string }> }>(
+      "/api/admin/exchange/requisites",
+    );
+  },
+  exchangeOrders(status?: string, limit?: number) {
+    const p = new URLSearchParams();
+    if (status) p.set("status", status);
+    if (limit) p.set("limit", String(limit));
+    const q = p.toString() ? `?${p.toString()}` : "";
     return request<{ orders: ExchangeOrder[] }>(`/api/admin/exchange/orders${q}`);
   },
   updateExchangeOrder(

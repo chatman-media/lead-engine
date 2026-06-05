@@ -1,33 +1,57 @@
 import {
-  type Db,
-  DrizzleKbStore,
-  ExperimentsRepo,
-  getDecryptedSecret,
-  LlmMemoryExtractor,
-  LlmReplyStrategy,
-  loadExperimentVariants,
-  type MemoryExtractor,
-  MessagesRepo,
-  parseStyleConfig,
-  RagReplyStrategy,
-  type ReplyStrategy,
-  type StageClassifier,
-  StylesRepo,
+	type Db,
+	DrizzleKbStore,
+	ExperimentsRepo,
+	getDecryptedSecret,
+	type ITranscriber,
+	LlmMemoryExtractor,
+	LlmReplyStrategy,
+	loadExperimentVariants,
+	type MemoryExtractor,
+	MessagesRepo,
+	parseStyleConfig,
+	RagReplyStrategy,
+	type ReplyStrategy,
+	type StageClassifier,
+	StylesRepo,
 } from "@chatman-media/conversation-engine";
-import { ABRouter, type AnyRagTool, CohereReranker, type DirectorHookForPrompt, JinaReranker, makeBookingLinkTool, type Reranker, type SkillForPrompt, type Style } from "@chatman-media/kb";
 import {
-  type EmbeddingClient as RagEmbeddingClient,
-  InMemoryLlmRouter,
-  type LlmProviderConfig as RouterCfg,
+	ABRouter,
+	type AnyRagTool,
+	CohereReranker,
+	type DirectorHookForPrompt,
+	JinaReranker,
+	makeBookingLinkTool,
+	type Reranker,
+	type SkillForPrompt,
+	type Style,
+} from "@chatman-media/kb";
+import type {
+	InMemoryLlmRouter,
+	EmbeddingClient as RagEmbeddingClient,
+	LlmProviderConfig as RouterCfg,
 } from "@chatman-media/llm-router";
 import type { PlatformMetrics } from "@chatman-media/observability";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
-import { directorHooks, leads, llmProviderConfigs, skills, stageDefinitions } from "@chatman-media/storage";
-import { and, asc, eq, isNotNull } from "drizzle-orm";
+import {
+	directorHooks,
+	leads,
+	llmProviderConfigs,
+	skills,
+	stageDefinitions,
+} from "@chatman-media/storage";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import type { ApiConfig } from "./config.ts";
-import { hasActiveExchangeRates, makeExchangeTools } from "./lib/exchange/tools.ts";
-import { type OnUsage, wrapChatClient, wrapEmbeddingClient } from "./lib/llm-metrics-wrapper.ts";
+import {
+	hasActiveExchangeRates,
+	makeExchangeTools,
+} from "./lib/exchange/tools.ts";
+import {
+	type OnUsage,
+	wrapChatClient,
+	wrapEmbeddingClient,
+} from "./lib/llm-metrics-wrapper.ts";
 
 /**
  * Опциональный hook: фабрики передают каждому wrapped client'у callback
@@ -35,12 +59,17 @@ import { type OnUsage, wrapChatClient, wrapEmbeddingClient } from "./lib/llm-met
  * LlmUsageWriter'у — events batch'аются в DB для billing dashboard'а.
  * `tenantId` приходит из `resolveChat(tid)` контекста.
  */
-export type RecordUsage = (tenantId: number, event: Parameters<OnUsage>[0]) => void;
+export type RecordUsage = (
+	tenantId: number,
+	event: Parameters<OnUsage>[0],
+) => void;
+
 import {
-  getConfig,
-  type LoadedLlmConfigs,
-  type ResolvedLlmConfig,
+	getConfig,
+	type LoadedLlmConfigs,
+	type ResolvedLlmConfig,
 } from "./lib/llm-config-loader.ts";
+import { OpenRouterTranscriber } from "./lib/openrouter-transcriber.ts";
 import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
 
 /**
@@ -60,31 +89,31 @@ import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
  */
 
 export interface LoadedRef {
-  current: LoadedLlmConfigs;
-  /**
-   * Shared router instance. Lives across reloads — invalidate(tenantId)
-   * сбрасывает cache, setConfig инжектит новые. Один router на process.
-   */
-  router: InMemoryLlmRouter;
+	current: LoadedLlmConfigs;
+	/**
+	 * Shared router instance. Lives across reloads — invalidate(tenantId)
+	 * сбрасывает cache, setConfig инжектит новые. Один router на process.
+	 */
+	router: InMemoryLlmRouter;
 }
 
 function toRouterConfig(
-  tenantId: number,
-  purpose: "chat" | "embed" | "vision" | "judge",
-  cfg: ResolvedLlmConfig,
+	tenantId: number,
+	purpose: "chat" | "embed" | "vision" | "judge",
+	cfg: ResolvedLlmConfig,
 ): RouterCfg {
-  // RouterCfg union'нится по provider; cast'им через any к одному shape'у.
-  return {
-    tenantId,
-    purpose,
-    provider: cfg.provider as RouterCfg["provider"],
-    model: cfg.model,
-    ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}),
-    ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
-    ...(cfg.embedDim !== undefined ? { embedDim: cfg.embedDim } : {}),
-    ...(cfg.timeoutMs !== undefined ? { timeoutMs: cfg.timeoutMs } : {}),
-    // biome-ignore lint/suspicious/noExplicitAny: union of provider-specific shapes
-  } as any;
+	// RouterCfg union'нится по provider; cast'им через any к одному shape'у.
+	return {
+		tenantId,
+		purpose,
+		provider: cfg.provider as RouterCfg["provider"],
+		model: cfg.model,
+		...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}),
+		...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
+		...(cfg.embedDim !== undefined ? { embedDim: cfg.embedDim } : {}),
+		...(cfg.timeoutMs !== undefined ? { timeoutMs: cfg.timeoutMs } : {}),
+		// biome-ignore lint/suspicious/noExplicitAny: union of provider-specific shapes
+	} as any;
 }
 
 /**
@@ -92,38 +121,38 @@ function toRouterConfig(
  * reply-strategy. apps/api прокидывает его в webhook-route → ProcessInboundDeps.
  */
 export function makeMemoryExtractor(
-  ref: LoadedRef,
-  db: Db,
-  metrics?: PlatformMetrics,
-  recordUsage?: RecordUsage,
+	ref: LoadedRef,
+	db: Db,
+	metrics?: PlatformMetrics,
+	recordUsage?: RecordUsage,
 ): MemoryExtractor | null {
-  if (!ref.current.anyTenantHasChat) return null;
-  // Регистрируем initial configs. После hot-reload tenant-reloader сам
-  // setConfig'нет на router — фабрика об этом не знает.
-  for (const [tenantId, perPurpose] of ref.current.byTenant) {
-    const chat = perPurpose.get("chat");
-    if (chat) ref.router.setConfig(toRouterConfig(tenantId, "chat", chat));
-  }
-  return new LlmMemoryExtractor(
-    {
-      resolveChat: (tenantId: number) => {
-        const inner = ref.router.resolveChat(tenantId, "chat");
-        if (!metrics) return inner;
-        const cfg = getConfig(ref.current, tenantId, "chat");
-        return wrapChatClient(
-          inner,
-          metrics,
-          {
-            provider: cfg?.provider ?? "unknown",
-            purpose: "memory",
-            ...(cfg?.model ? { model: cfg.model } : {}),
-          },
-          recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
-        );
-      },
-    },
-    (tenantId: number) => new MessagesRepo({ db, tenantId }),
-  );
+	if (!ref.current.anyTenantHasChat) return null;
+	// Регистрируем initial configs. После hot-reload tenant-reloader сам
+	// setConfig'нет на router — фабрика об этом не знает.
+	for (const [tenantId, perPurpose] of ref.current.byTenant) {
+		const chat = perPurpose.get("chat");
+		if (chat) ref.router.setConfig(toRouterConfig(tenantId, "chat", chat));
+	}
+	return new LlmMemoryExtractor(
+		{
+			resolveChat: (tenantId: number) => {
+				const inner = ref.router.resolveChat(tenantId, "chat");
+				if (!metrics) return inner;
+				const cfg = getConfig(ref.current, tenantId, "chat");
+				return wrapChatClient(
+					inner,
+					metrics,
+					{
+						provider: cfg?.provider ?? "unknown",
+						purpose: "memory",
+						...(cfg?.model ? { model: cfg.model } : {}),
+					},
+					recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
+				);
+			},
+		},
+		(tenantId: number) => new MessagesRepo({ db, tenantId }),
+	);
 }
 
 /**
@@ -132,382 +161,419 @@ export function makeMemoryExtractor(
  * null (current_stage не пишется).
  */
 export function makeStageClassifier(
-  ref: LoadedRef,
-  cfg: ApiConfig,
-  db: Db,
-  metrics?: PlatformMetrics,
-  recordUsage?: RecordUsage,
+	ref: LoadedRef,
+	cfg: ApiConfig,
+	db: Db,
+	metrics?: PlatformMetrics,
+	recordUsage?: RecordUsage,
 ): StageClassifier | null {
-  void db; // db не нужен classifier'у; pipeline передаёт deps.db в applyClassifiedStage.
-  if (cfg.stageClassifier === "regex") {
-    return new RegexStageClassifier();
-  }
-  if (cfg.stageClassifier === "llm") {
-    if (!ref.current.anyTenantHasChat) {
-      console.warn(
-        "[apps/api] STAGE_CLASSIFIER=llm requested but no tenant has chat LLM configured — disabling",
-      );
-      return null;
-    }
-    for (const [tenantId, perPurpose] of ref.current.byTenant) {
-      const chat = perPurpose.get("chat");
-      if (chat) ref.router.setConfig(toRouterConfig(tenantId, "chat", chat));
-    }
-    return new LlmStageClassifier({
-      resolveChat: (tenantId: number) => {
-        const inner = ref.router.resolveChat(tenantId, "chat");
-        if (!metrics) return inner;
-        const chatCfg = getConfig(ref.current, tenantId, "chat");
-        return wrapChatClient(
-          inner,
-          metrics,
-          {
-            provider: chatCfg?.provider ?? "unknown",
-            purpose: "stage",
-            ...(chatCfg?.model ? { model: chatCfg.model } : {}),
-          },
-          recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
-        );
-      },
-    });
-  }
-  return null;
+	void db; // db не нужен classifier'у; pipeline передаёт deps.db в applyClassifiedStage.
+	if (cfg.stageClassifier === "regex") {
+		return new RegexStageClassifier();
+	}
+	if (cfg.stageClassifier === "llm") {
+		if (!ref.current.anyTenantHasChat) {
+			console.warn(
+				"[apps/api] STAGE_CLASSIFIER=llm requested but no tenant has chat LLM configured — disabling",
+			);
+			return null;
+		}
+		for (const [tenantId, perPurpose] of ref.current.byTenant) {
+			const chat = perPurpose.get("chat");
+			if (chat) ref.router.setConfig(toRouterConfig(tenantId, "chat", chat));
+		}
+		return new LlmStageClassifier({
+			resolveChat: (tenantId: number) => {
+				const inner = ref.router.resolveChat(tenantId, "chat");
+				if (!metrics) return inner;
+				const chatCfg = getConfig(ref.current, tenantId, "chat");
+				return wrapChatClient(
+					inner,
+					metrics,
+					{
+						provider: chatCfg?.provider ?? "unknown",
+						purpose: "stage",
+						...(chatCfg?.model ? { model: chatCfg.model } : {}),
+					},
+					recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
+				);
+			},
+		});
+	}
+	return null;
 }
 
 function makeSupportModeResolver(db: Db) {
-  return async (input: { tenantId: number; contactId: number }): Promise<boolean> => {
-    const rows = await db
-      .select({ supportMode: stageDefinitions.supportMode })
-      .from(leads)
-      .leftJoin(stageDefinitions, eq(leads.stageDefinitionId, stageDefinitions.id))
-      .where(
-        and(
-          eq(leads.tenantId, input.tenantId),
-          eq(leads.userId, input.contactId),
-          isNotNull(leads.stageDefinitionId),
-        ),
-      )
-      .limit(1);
-    return rows[0]?.supportMode === true;
-  };
+	return async (input: {
+		tenantId: number;
+		contactId: number;
+	}): Promise<boolean> => {
+		const rows = await db
+			.select({ supportMode: stageDefinitions.supportMode })
+			.from(leads)
+			.leftJoin(
+				stageDefinitions,
+				eq(leads.stageDefinitionId, stageDefinitions.id),
+			)
+			.where(
+				and(
+					eq(leads.tenantId, input.tenantId),
+					eq(leads.userId, input.contactId),
+					isNotNull(leads.stageDefinitionId),
+				),
+			)
+			.limit(1);
+		return rows[0]?.supportMode === true;
+	};
 }
 
 export interface ReplyStrategyBundle {
-  strategy: ReplyStrategy;
-  /**
-   * Invalidate the per-tenant tools cache for a specific tenant.
-   * Call this after the tenant updates their tool configuration (booking URL, etc.)
-   * so the next incoming message picks up the new config without a restart.
-   */
-  invalidateToolsFor: (tenantId: number) => void;
+	strategy: ReplyStrategy;
+	/**
+	 * Invalidate the per-tenant tools cache for a specific tenant.
+	 * Call this after the tenant updates their tool configuration (booking URL, etc.)
+	 * so the next incoming message picks up the new config without a restart.
+	 */
+	invalidateToolsFor: (tenantId: number) => void;
 }
 
 export function makeReplyStrategy(
-  ref: LoadedRef,
-  cfg: ApiConfig,
-  db: Db,
-  metrics?: PlatformMetrics,
-  recordUsage?: RecordUsage,
+	ref: LoadedRef,
+	cfg: ApiConfig,
+	db: Db,
+	metrics?: PlatformMetrics,
+	recordUsage?: RecordUsage,
 ): ReplyStrategyBundle | null {
-  if (!ref.current.anyTenantHasChat) return null;
+	if (!ref.current.anyTenantHasChat) return null;
 
-  for (const [tenantId, perPurpose] of ref.current.byTenant) {
-    const chat = perPurpose.get("chat");
-    if (chat) ref.router.setConfig(toRouterConfig(tenantId, "chat", chat));
-    const embed = perPurpose.get("embed");
-    if (embed) ref.router.setConfig(toRouterConfig(tenantId, "embed", embed));
-  }
+	for (const [tenantId, perPurpose] of ref.current.byTenant) {
+		const chat = perPurpose.get("chat");
+		if (chat) ref.router.setConfig(toRouterConfig(tenantId, "chat", chat));
+		const embed = perPurpose.get("embed");
+		if (embed) ref.router.setConfig(toRouterConfig(tenantId, "embed", embed));
+	}
 
-  const template = RECRUITMENT_V1;
+	const template = RECRUITMENT_V1;
 
-  // Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
-  // NB: проверка против initial snapshot'а; если tenant позже добавит embed,
-  // reloader setConfig'нет на router, но strategy уже LlmReplyStrategy. После
-  // hot-reload с появлением embed — restart нужен. (Acceptable trade-off:
-  // chat/embed добавление редкое, токены/каналы — частое.)
-  if (!ref.current.anyTenantHasEmbed) {
-    return {
-      strategy: new LlmReplyStrategy(
-        {
-          template,
-          resolveChat: (tenantId: number) => ref.router.resolveChat(tenantId, "chat"),
-          resolveIsSupport: makeSupportModeResolver(db),
-        },
-        (tenantId: number) => new MessagesRepo({ db, tenantId }),
-      ),
-      invalidateToolsFor: () => {}, // LlmReplyStrategy has no tools cache
-    };
-  }
+	// Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
+	// NB: проверка против initial snapshot'а; если tenant позже добавит embed,
+	// reloader setConfig'нет на router, но strategy уже LlmReplyStrategy. После
+	// hot-reload с появлением embed — restart нужен. (Acceptable trade-off:
+	// chat/embed добавление редкое, токены/каналы — частое.)
+	if (!ref.current.anyTenantHasEmbed) {
+		return {
+			strategy: new LlmReplyStrategy(
+				{
+					template,
+					resolveChat: (tenantId: number) =>
+						ref.router.resolveChat(tenantId, "chat"),
+					resolveIsSupport: makeSupportModeResolver(db),
+				},
+				(tenantId: number) => new MessagesRepo({ db, tenantId }),
+			),
+			invalidateToolsFor: () => {}, // LlmReplyStrategy has no tools cache
+		};
+	}
 
-  // resolveStyle: priority chain (см. предыдущую версию для деталей).
-  const styleCache = new Map<number, Style | null>();
-  const experimentCache = new Map<number, ABRouter | "absent">();
-  const defaultSlug = cfg.defaultStyleSlug;
-  const experimentSlug = cfg.experimentSlug;
+	// resolveStyle: priority chain (см. предыдущую версию для деталей).
+	const styleCache = new Map<number, Style | null>();
+	const experimentCache = new Map<number, ABRouter | "absent">();
+	const defaultSlug = cfg.defaultStyleSlug;
+	const experimentSlug = cfg.experimentSlug;
 
-  const resolveStyle =
-    experimentSlug || defaultSlug
-      ? async (input: { tenantId: number; contactId: number }): Promise<Style | null> => {
-          if (experimentSlug) {
-            let abRouter = experimentCache.get(input.tenantId);
-            if (abRouter === undefined) {
-              const expRepo = new ExperimentsRepo({ db, tenantId: input.tenantId });
-              const stylesRepo = new StylesRepo({ db, tenantId: input.tenantId });
-              const exp = await expRepo.findRunningBySlug(experimentSlug);
-              if (exp) {
-                const variants = await loadExperimentVariants(exp, stylesRepo);
-                if (variants) {
-                  abRouter = new ABRouter({ variants, salt: exp.slug });
-                  experimentCache.set(input.tenantId, abRouter);
-                } else {
-                  experimentCache.set(input.tenantId, "absent");
-                  abRouter = "absent";
-                }
-              } else {
-                experimentCache.set(input.tenantId, "absent");
-                abRouter = "absent";
-              }
-            }
-            if (abRouter !== "absent") {
-              return abRouter.assign(String(input.contactId)).style;
-            }
-          }
-          if (defaultSlug) {
-            const cached = styleCache.get(input.tenantId);
-            if (cached !== undefined) return cached;
-            const repo = new StylesRepo({ db, tenantId: input.tenantId });
-            const row = await repo.findActiveBySlug(defaultSlug);
-            const parsed = row ? parseStyleConfig(row.configJson) : null;
-            styleCache.set(input.tenantId, parsed);
-            return parsed;
-          }
-          return null;
-        }
-      : undefined;
+	const resolveStyle =
+		experimentSlug || defaultSlug
+			? async (input: {
+					tenantId: number;
+					contactId: number;
+				}): Promise<Style | null> => {
+					if (experimentSlug) {
+						let abRouter = experimentCache.get(input.tenantId);
+						if (abRouter === undefined) {
+							const expRepo = new ExperimentsRepo({
+								db,
+								tenantId: input.tenantId,
+							});
+							const stylesRepo = new StylesRepo({
+								db,
+								tenantId: input.tenantId,
+							});
+							const exp = await expRepo.findRunningBySlug(experimentSlug);
+							if (exp) {
+								const variants = await loadExperimentVariants(exp, stylesRepo);
+								if (variants) {
+									abRouter = new ABRouter({ variants, salt: exp.slug });
+									experimentCache.set(input.tenantId, abRouter);
+								} else {
+									experimentCache.set(input.tenantId, "absent");
+									abRouter = "absent";
+								}
+							} else {
+								experimentCache.set(input.tenantId, "absent");
+								abRouter = "absent";
+							}
+						}
+						if (abRouter !== "absent") {
+							return abRouter.assign(String(input.contactId)).style;
+						}
+					}
+					if (defaultSlug) {
+						const cached = styleCache.get(input.tenantId);
+						if (cached !== undefined) return cached;
+						const repo = new StylesRepo({ db, tenantId: input.tenantId });
+						const row = await repo.findActiveBySlug(defaultSlug);
+						const parsed = row ? parseStyleConfig(row.configJson) : null;
+						styleCache.set(input.tenantId, parsed);
+						return parsed;
+					}
+					return null;
+				}
+			: undefined;
 
-  // resolveSkills: loads all enabled skills for the tenant.
-  // Stage-kind filtering (intake/active/always) happens inside composeSystemPrompt.
-  // Results are cached per-tenant (skills rarely change at runtime; restart invalidates).
-  const skillsCache = new Map<number, readonly SkillForPrompt[]>();
-  async function resolveSkills(input: { tenantId: number }): Promise<readonly SkillForPrompt[]> {
-    const cached = skillsCache.get(input.tenantId);
-    if (cached !== undefined) return cached;
-    const rows = await db
-      .select({
-        slug: skills.slug,
-        displayName: skills.displayName,
-        promptFragment: skills.promptFragment,
-        applicableStagesJson: skills.applicableStagesJson,
-      })
-      .from(skills)
-      .where(and(eq(skills.tenantId, input.tenantId), eq(skills.isEnabled, true)))
-      .orderBy(asc(skills.family), asc(skills.displayName));
-    const result: SkillForPrompt[] = rows.map((r) => ({
-      slug: r.slug,
-      displayName: r.displayName,
-      promptFragment: r.promptFragment,
-      // applicableStagesJson is a JSON array of FunnelStage strings (or empty = always).
-      applicableStages: (() => {
-        try {
-          return JSON.parse(r.applicableStagesJson) as string[];
-        } catch {
-          return [];
-        }
-      })() as readonly string[],
-    }));
-    skillsCache.set(input.tenantId, result);
-    return result;
-  }
+	// resolveSkills: loads all enabled skills for the tenant.
+	// Stage-kind filtering (intake/active/always) happens inside composeSystemPrompt.
+	// Results are cached per-tenant (skills rarely change at runtime; restart invalidates).
+	const skillsCache = new Map<number, readonly SkillForPrompt[]>();
+	async function resolveSkills(input: {
+		tenantId: number;
+	}): Promise<readonly SkillForPrompt[]> {
+		const cached = skillsCache.get(input.tenantId);
+		if (cached !== undefined) return cached;
+		const rows = await db
+			.select({
+				slug: skills.slug,
+				displayName: skills.displayName,
+				promptFragment: skills.promptFragment,
+				applicableStagesJson: skills.applicableStagesJson,
+			})
+			.from(skills)
+			.where(
+				and(eq(skills.tenantId, input.tenantId), eq(skills.isEnabled, true)),
+			)
+			.orderBy(asc(skills.family), asc(skills.displayName));
+		const result: SkillForPrompt[] = rows.map((r) => ({
+			slug: r.slug,
+			displayName: r.displayName,
+			promptFragment: r.promptFragment,
+			// applicableStagesJson is a JSON array of FunnelStage strings (or empty = always).
+			applicableStages: (() => {
+				try {
+					return JSON.parse(r.applicableStagesJson) as string[];
+				} catch {
+					return [];
+				}
+			})() as readonly string[],
+		}));
+		skillsCache.set(input.tenantId, result);
+		return result;
+	}
 
-  // resolveDirectorHooks: loads active director hooks for the tenant.
-  // No server-side cache — hooks can change at any time from the UI.
-  // Each reply triggers one fast indexed query (idx_director_hooks_active).
-  async function resolveDirectorHooks(input: {
-    tenantId: number;
-  }): Promise<readonly DirectorHookForPrompt[]> {
-    const rows = await db
-      .select({
-        name: directorHooks.name,
-        body: directorHooks.body,
-        triggerHint: directorHooks.triggerHint,
-      })
-      .from(directorHooks)
-      .where(and(eq(directorHooks.tenantId, input.tenantId), eq(directorHooks.isActive, true)))
-      .orderBy(asc(directorHooks.position), asc(directorHooks.id));
-    return rows;
-  }
+	// resolveDirectorHooks: loads active director hooks for the tenant.
+	// No server-side cache — hooks can change at any time from the UI.
+	// Each reply triggers one fast indexed query (idx_director_hooks_active).
+	async function resolveDirectorHooks(input: {
+		tenantId: number;
+	}): Promise<readonly DirectorHookForPrompt[]> {
+		const rows = await db
+			.select({
+				name: directorHooks.name,
+				body: directorHooks.body,
+				triggerHint: directorHooks.triggerHint,
+			})
+			.from(directorHooks)
+			.where(
+				and(
+					eq(directorHooks.tenantId, input.tenantId),
+					eq(directorHooks.isActive, true),
+				),
+			)
+			.orderBy(asc(directorHooks.position), asc(directorHooks.id));
+		return rows;
+	}
 
-  // resolveTools: builds the list of agentic tools enabled for the tenant.
-  //
-  // Два класса tools:
-  //   - tenant-bound (booking_link): зависят только от tenantId → кешируются.
-  //   - conversation-bound (exchange): зависят от conversationId → строятся
-  //     СВЕЖИМИ на каждый ответ (нельзя кешировать по тенанту, иначе захватят
-  //     первый conversationId). Гейт «включён ли обмен» (наличие активных
-  //     курсов) кешируется отдельным boolean.
-  // Оба кеша сбрасываются через invalidateToolsFor(tenantId) (admin-tools /
-  // admin-exchange onReload).
-  const toolsCache = new Map<number, AnyRagTool[]>();
-  const exchangeEnabledCache = new Map<number, boolean>();
-  async function resolveTools(input: {
-    tenantId: number;
-    conversationId: number;
-  }): Promise<AnyRagTool[]> {
-    let base = toolsCache.get(input.tenantId);
-    if (base === undefined) {
-      const bookingUrl = await getDecryptedSecret({
-        db,
-        tenantId: input.tenantId,
-        key: "tool_booking_url",
-        masterKeyHex: cfg.masterKeyHex,
-      });
-      base = [];
-      if (bookingUrl) base.push(makeBookingLinkTool(bookingUrl));
-      toolsCache.set(input.tenantId, base);
-    }
+	// resolveTools: builds the list of agentic tools enabled for the tenant.
+	//
+	// Два класса tools:
+	//   - tenant-bound (booking_link): зависят только от tenantId → кешируются.
+	//   - conversation-bound (exchange): зависят от conversationId → строятся
+	//     СВЕЖИМИ на каждый ответ (нельзя кешировать по тенанту, иначе захватят
+	//     первый conversationId). Гейт «включён ли обмен» (наличие активных
+	//     курсов) кешируется отдельным boolean.
+	// Оба кеша сбрасываются через invalidateToolsFor(tenantId) (admin-tools /
+	// admin-exchange onReload).
+	const toolsCache = new Map<number, AnyRagTool[]>();
+	const exchangeEnabledCache = new Map<number, boolean>();
+	async function resolveTools(input: {
+		tenantId: number;
+		conversationId: number;
+	}): Promise<AnyRagTool[]> {
+		let base = toolsCache.get(input.tenantId);
+		if (base === undefined) {
+			const bookingUrl = await getDecryptedSecret({
+				db,
+				tenantId: input.tenantId,
+				key: "tool_booking_url",
+				masterKeyHex: cfg.masterKeyHex,
+			});
+			base = [];
+			if (bookingUrl) base.push(makeBookingLinkTool(bookingUrl));
+			toolsCache.set(input.tenantId, base);
+		}
 
-    let exchangeEnabled = exchangeEnabledCache.get(input.tenantId);
-    if (exchangeEnabled === undefined) {
-      exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(() => false);
-      exchangeEnabledCache.set(input.tenantId, exchangeEnabled);
-    }
-    if (!exchangeEnabled) return base;
+		let exchangeEnabled = exchangeEnabledCache.get(input.tenantId);
+		if (exchangeEnabled === undefined) {
+			exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(
+				() => false,
+			);
+			exchangeEnabledCache.set(input.tenantId, exchangeEnabled);
+		}
+		if (!exchangeEnabled) return base;
 
-    const exchangeTools = makeExchangeTools({
-      db,
-      tenantId: input.tenantId,
-      conversationId: input.conversationId,
-      masterKeyHex: cfg.masterKeyHex,
-    });
-    return [...base, ...exchangeTools];
-  }
+		const exchangeTools = makeExchangeTools({
+			db,
+			tenantId: input.tenantId,
+			conversationId: input.conversationId,
+			masterKeyHex: cfg.masterKeyHex,
+		});
+		return [...base, ...exchangeTools];
+	}
 
-  // resolveReranker: reads per-tenant llm_provider_configs with purpose='reranker'.
-  // Results are cached per-tenant (Reranker objects are stateless wrappers —
-  // they hold only the API key and model, so caching per-tenant is safe).
-  // Cache is never invalidated at runtime — requires restart if the admin
-  // changes the reranker config. Acceptable trade-off: reranker changes rarely.
-  const rerankerCache = new Map<number, Reranker | null>();
-  async function resolveReranker(input: { tenantId: number }): Promise<Reranker | null> {
-    if (rerankerCache.has(input.tenantId)) {
-      return rerankerCache.get(input.tenantId) ?? null;
-    }
-    const [row] = await db
-      .select({
-        provider: llmProviderConfigs.provider,
-        model: llmProviderConfigs.model,
-        secretRef: llmProviderConfigs.secretRef,
-        baseUrl: llmProviderConfigs.baseUrl,
-        timeoutMs: llmProviderConfigs.timeoutMs,
-      })
-      .from(llmProviderConfigs)
-      .where(
-        and(
-          eq(llmProviderConfigs.tenantId, input.tenantId),
-          eq(llmProviderConfigs.purpose, "reranker"),
-        ),
-      )
-      .limit(1);
+	// resolveReranker: reads per-tenant llm_provider_configs with purpose='reranker'.
+	// Results are cached per-tenant (Reranker objects are stateless wrappers —
+	// they hold only the API key and model, so caching per-tenant is safe).
+	// Cache is never invalidated at runtime — requires restart if the admin
+	// changes the reranker config. Acceptable trade-off: reranker changes rarely.
+	const rerankerCache = new Map<number, Reranker | null>();
+	async function resolveReranker(input: {
+		tenantId: number;
+	}): Promise<Reranker | null> {
+		if (rerankerCache.has(input.tenantId)) {
+			return rerankerCache.get(input.tenantId) ?? null;
+		}
+		const [row] = await db
+			.select({
+				provider: llmProviderConfigs.provider,
+				model: llmProviderConfigs.model,
+				secretRef: llmProviderConfigs.secretRef,
+				baseUrl: llmProviderConfigs.baseUrl,
+				timeoutMs: llmProviderConfigs.timeoutMs,
+			})
+			.from(llmProviderConfigs)
+			.where(
+				and(
+					eq(llmProviderConfigs.tenantId, input.tenantId),
+					eq(llmProviderConfigs.purpose, "reranker"),
+				),
+			)
+			.limit(1);
 
-    if (!row || !row.secretRef) {
-      rerankerCache.set(input.tenantId, null);
-      return null;
-    }
+		if (!row || !row.secretRef) {
+			rerankerCache.set(input.tenantId, null);
+			return null;
+		}
 
-    let apiKey: string | null = null;
-    try {
-      apiKey = await getDecryptedSecret({
-        db,
-        tenantId: input.tenantId,
-        key: row.secretRef,
-        masterKeyHex: cfg.masterKeyHex,
-      });
-    } catch (err) {
-      console.warn(`[reranker] failed to decrypt API key for tenant ${input.tenantId}:`, err);
-      rerankerCache.set(input.tenantId, null);
-      return null;
-    }
+		let apiKey: string | null = null;
+		try {
+			apiKey = await getDecryptedSecret({
+				db,
+				tenantId: input.tenantId,
+				key: row.secretRef,
+				masterKeyHex: cfg.masterKeyHex,
+			});
+		} catch (err) {
+			console.warn(
+				`[reranker] failed to decrypt API key for tenant ${input.tenantId}:`,
+				err,
+			);
+			rerankerCache.set(input.tenantId, null);
+			return null;
+		}
 
-    if (!apiKey) {
-      rerankerCache.set(input.tenantId, null);
-      return null;
-    }
+		if (!apiKey) {
+			rerankerCache.set(input.tenantId, null);
+			return null;
+		}
 
-    let reranker: Reranker | null = null;
-    if (row.provider === "cohere") {
-      reranker = new CohereReranker({
-        apiKey,
-        ...(row.model ? { model: row.model } : {}),
-        ...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
-        ...(row.timeoutMs !== null ? { timeoutMs: row.timeoutMs } : {}),
-      });
-    } else if (row.provider === "jina") {
-      reranker = new JinaReranker({
-        apiKey,
-        ...(row.model ? { model: row.model } : {}),
-        ...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
-        ...(row.timeoutMs !== null ? { timeoutMs: row.timeoutMs } : {}),
-      });
-    } else {
-      console.warn(`[reranker] unsupported provider "${row.provider}" for tenant ${input.tenantId}`);
-    }
+		let reranker: Reranker | null = null;
+		if (row.provider === "cohere") {
+			reranker = new CohereReranker({
+				apiKey,
+				...(row.model ? { model: row.model } : {}),
+				...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
+				...(row.timeoutMs !== null ? { timeoutMs: row.timeoutMs } : {}),
+			});
+		} else if (row.provider === "jina") {
+			reranker = new JinaReranker({
+				apiKey,
+				...(row.model ? { model: row.model } : {}),
+				...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
+				...(row.timeoutMs !== null ? { timeoutMs: row.timeoutMs } : {}),
+			});
+		} else {
+			console.warn(
+				`[reranker] unsupported provider "${row.provider}" for tenant ${input.tenantId}`,
+			);
+		}
 
-    rerankerCache.set(input.tenantId, reranker);
-    return reranker;
-  }
+		rerankerCache.set(input.tenantId, reranker);
+		return reranker;
+	}
 
-  const strategy = new RagReplyStrategy(
-    {
-      template,
-      resolveChat: (tenantId: number) => {
-        const inner = ref.router.resolveChat(tenantId, "chat");
-        if (!metrics) return inner;
-        const chatCfg = getConfig(ref.current, tenantId, "chat");
-        return wrapChatClient(
-          inner,
-          metrics,
-          {
-            provider: chatCfg?.provider ?? "unknown",
-            purpose: "chat",
-            ...(chatCfg?.model ? { model: chatCfg.model } : {}),
-          },
-          recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
-        );
-      },
-      resolveEmbed: (tenantId: number) => {
-        const inner = ref.router.resolveEmbed(tenantId);
-        if (!metrics) return inner as unknown as RagEmbeddingClient;
-        const embedCfg = getConfig(ref.current, tenantId, "embed");
-        const wrapped = wrapEmbeddingClient(
-          inner,
-          metrics,
-          {
-            provider: embedCfg?.provider ?? "unknown",
-            purpose: "embed",
-            ...(embedCfg?.model ? { model: embedCfg.model } : {}),
-          },
-          recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
-        );
-        return wrapped as unknown as RagEmbeddingClient;
-      },
-      resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
-      ...(resolveStyle ? { resolveStyle } : {}),
-      resolveIsSupport: makeSupportModeResolver(db),
-      resolveSkills,
-      resolveDirectorHooks,
-      resolveTools,
-      resolveReranker,
-    },
-    (tenantId: number) => new MessagesRepo({ db, tenantId }),
-  );
+	const strategy = new RagReplyStrategy(
+		{
+			template,
+			resolveChat: (tenantId: number) => {
+				const inner = ref.router.resolveChat(tenantId, "chat");
+				if (!metrics) return inner;
+				const chatCfg = getConfig(ref.current, tenantId, "chat");
+				return wrapChatClient(
+					inner,
+					metrics,
+					{
+						provider: chatCfg?.provider ?? "unknown",
+						purpose: "chat",
+						...(chatCfg?.model ? { model: chatCfg.model } : {}),
+					},
+					recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
+				);
+			},
+			resolveEmbed: (tenantId: number) => {
+				const inner = ref.router.resolveEmbed(tenantId);
+				if (!metrics) return inner as unknown as RagEmbeddingClient;
+				const embedCfg = getConfig(ref.current, tenantId, "embed");
+				const wrapped = wrapEmbeddingClient(
+					inner,
+					metrics,
+					{
+						provider: embedCfg?.provider ?? "unknown",
+						purpose: "embed",
+						...(embedCfg?.model ? { model: embedCfg.model } : {}),
+					},
+					recordUsage ? (ev) => recordUsage(tenantId, ev) : undefined,
+				);
+				return wrapped as unknown as RagEmbeddingClient;
+			},
+			resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
+			...(resolveStyle ? { resolveStyle } : {}),
+			resolveIsSupport: makeSupportModeResolver(db),
+			resolveSkills,
+			resolveDirectorHooks,
+			resolveTools,
+			resolveReranker,
+			// Если основной ответ пуст (модель «промолчала», нет KB-контекста) —
+			// генерируем мягкий ответ в персоне, а не молчим.
+			softFallback: true,
+		},
+		(tenantId: number) => new MessagesRepo({ db, tenantId }),
+	);
 
-  return {
-    strategy,
-    invalidateToolsFor: (tenantId: number) => {
-      toolsCache.delete(tenantId);
-      exchangeEnabledCache.delete(tenantId);
-    },
-  };
+	return {
+		strategy,
+		invalidateToolsFor: (tenantId: number) => {
+			toolsCache.delete(tenantId);
+			exchangeEnabledCache.delete(tenantId);
+		},
+	};
 }
 
 /**
@@ -516,19 +582,75 @@ export function makeReplyStrategy(
  * Работает только для провайдеров с apiKey (openai, openrouter, custom).
  * Возвращает null если ни у одного тенанта нет подходящего ключа.
  */
+// STT-эндпоинт /audio/transcriptions дают OpenAI (multipart, + Groq openai-
+// совместимо) и OpenRouter (JSON+base64, модели whisper/chirp). НЕ-аудио
+// провайдеры (ollama/anthropic/jina/cohere) тут не подходят.
+const AUDIO_CAPABLE_PROVIDERS = new Set(["openai", "openrouter"]);
+
+function pickTranscriberConfig(
+	ref: LoadedRef,
+	tenantId: number,
+): { cfg: ResolvedLlmConfig; dedicated: boolean } | null {
+	// 1) Явный purpose 'transcribe' (любой провайдер с ключом — пользователь сам
+	//    выбрал модель/endpoint: OpenAI whisper-1, Groq, OpenRouter chirp-3) — приоритет.
+	const dedicated = getConfig(ref.current, tenantId, "transcribe");
+	if (dedicated?.apiKey) return { cfg: dedicated, dedicated: true };
+	// 2) Фолбэк: ключ от любого аудио-способного назначения (chat → embed → vision).
+	//    Так голос расшифровывается даже без отдельного ключа — на существующем
+	//    OpenRouter- или OpenAI-ключе чата.
+	for (const purpose of ["chat", "embed", "vision"] as const) {
+		const cfg = getConfig(ref.current, tenantId, purpose);
+		if (cfg?.apiKey && AUDIO_CAPABLE_PROVIDERS.has(cfg.provider)) {
+			return { cfg, dedicated: false };
+		}
+	}
+	return null;
+}
+
+/** Строит транскрайбер под провайдера. Модель берётся только для выделенного
+ *  transcribe-конфига; в фолбэке — дефолтная STT-модель провайдера. */
+function buildTranscriber(
+	provider: string,
+	apiKey: string,
+	baseUrl: string | undefined,
+	model: string | undefined,
+): ITranscriber {
+	if (provider === "openrouter") {
+		return new OpenRouterTranscriber({
+			apiKey,
+			...(baseUrl ? { baseUrl } : {}),
+			...(model ? { model } : {}),
+		});
+	}
+	// openai (+ Groq через baseUrl) — multipart Whisper API.
+	return new WhisperTranscriber({
+		apiKey,
+		...(baseUrl ? { baseUrl } : {}),
+		...(model ? { model } : {}),
+	});
+}
+
 export function makeTranscriberResolver(
-  ref: LoadedRef,
-): ((tenantId: number) => WhisperTranscriber | null) | null {
-  const hasAnyKey = [...ref.current.byTenant.values()].some((m) => m.get("chat")?.apiKey);
-  if (!hasAnyKey) return null;
-  return (tenantId: number) => {
-    const cfg = getConfig(ref.current, tenantId, "chat");
-    if (!cfg?.apiKey) return null;
-    return new WhisperTranscriber({
-      apiKey: cfg.apiKey,
-      ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
-    });
-  };
+	ref: LoadedRef,
+): ((tenantId: number) => ITranscriber | null) | null {
+	const anyAudioKey = [...ref.current.byTenant.keys()].some(
+		(tenantId) => pickTranscriberConfig(ref, tenantId) !== null,
+	);
+	if (!anyAudioKey) return null;
+	return (tenantId: number) => {
+		const picked = pickTranscriberConfig(ref, tenantId);
+		const apiKey = picked?.cfg.apiKey;
+		if (!apiKey) return null;
+		const { cfg, dedicated } = picked;
+		// Модель берём только из выделенного transcribe-конфига — у chat/embed/
+		// vision модель не для аудио, поэтому в фолбэке используем дефолтную STT.
+		return buildTranscriber(
+			cfg.provider,
+			apiKey,
+			cfg.baseUrl,
+			dedicated ? cfg.model : undefined,
+		);
+	};
 }
 
 /**
@@ -537,12 +659,14 @@ export function makeTranscriberResolver(
  * per tenant. Возвращает null если ни один tenant не имеет embed config'а.
  */
 export function makeEmbedderResolver(
-  ref: LoadedRef,
-): ((tenantId: number) => import("@chatman-media/llm-router").EmbeddingClient) | null {
-  if (!ref.current.anyTenantHasEmbed) return null;
-  for (const [tenantId, perPurpose] of ref.current.byTenant) {
-    const embed = perPurpose.get("embed");
-    if (embed) ref.router.setConfig(toRouterConfig(tenantId, "embed", embed));
-  }
-  return (tenantId: number) => ref.router.resolveEmbed(tenantId);
+	ref: LoadedRef,
+):
+	| ((tenantId: number) => import("@chatman-media/llm-router").EmbeddingClient)
+	| null {
+	if (!ref.current.anyTenantHasEmbed) return null;
+	for (const [tenantId, perPurpose] of ref.current.byTenant) {
+		const embed = perPurpose.get("embed");
+		if (embed) ref.router.setConfig(toRouterConfig(tenantId, "embed", embed));
+	}
+	return (tenantId: number) => ref.router.resolveEmbed(tenantId);
 }
