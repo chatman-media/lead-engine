@@ -849,6 +849,8 @@ export interface ExchangeOrder {
   };
   createdAt: number;
   updatedAt: number;
+  /** Проставляется бэкендом при переходе статуса в 'completed'. */
+  completedAt?: number | null;
 }
 
 export interface ExchangeTurnover {
@@ -1790,8 +1792,11 @@ export const saas = {
       "/api/admin/exchange/requisites",
     );
   },
-  exchangeOrders(status?: string) {
-    const q = status ? `?status=${encodeURIComponent(status)}` : "";
+  exchangeOrders(status?: string, limit?: number) {
+    const p = new URLSearchParams();
+    if (status) p.set("status", status);
+    if (limit) p.set("limit", String(limit));
+    const q = p.toString() ? `?${p.toString()}` : "";
     return request<{ orders: ExchangeOrder[] }>(`/api/admin/exchange/orders${q}`);
   },
   updateExchangeOrder(

@@ -80,6 +80,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Обмен",
     items: [
       { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon, exchangeOnly: true },
+      { to: "/analytics", label: "Аналитика", icon: BarChart2Icon, exchangeOnly: true },
       { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
     ],
   },

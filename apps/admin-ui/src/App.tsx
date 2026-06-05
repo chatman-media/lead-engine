@@ -7,6 +7,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { getToken, saas } from "./api/saas.ts";
 import { useAdminEvents } from "./hooks/useAdminEvents.ts";
 import { SaasAcceptInvite } from "./pages/SaasAcceptInvite.tsx";
+import { SaasAnalytics } from "./pages/SaasAnalytics.tsx";
 import { SaasAudit } from "./pages/SaasAudit.tsx";
 import { SaasBilling } from "./pages/SaasBilling.tsx";
 import { SaasChannels } from "./pages/SaasChannels.tsx";
@@ -148,6 +149,7 @@ export function App() {
                 <Route path="/conversations/:id" element={<SaasConversations />} />
                 <Route path="/funnel" element={<SaasFunnel />} />
                 <Route path="/exchange" element={<SaasExchange />} />
+                <Route path="/analytics" element={<SaasAnalytics />} />
                 <Route path="/vacancies" element={<SaasVacancies />} />
                 <Route path="/skills" element={<SaasSkills />} />
                 <Route path="/hooks" element={<SaasHooks />} />
