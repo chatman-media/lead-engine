@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { LoadedRef } from "../llm-bootstrap.ts";
-import { makeFieldExtractor } from "./field-extractor.ts";
+import { makeFieldExtractor, selectNextStage } from "./field-extractor.ts";
 
 function makeRef(overrides: {
   resolveChatImpl?: (tenantId: number) => unknown | null;
@@ -53,6 +53,86 @@ describe("makeFieldExtractor — early exits", () => {
     await expect(
       extractor.extract({ tenantId: 1, contactId: 1, text: "", db: makeDb() }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("selectNextStage — branch-aware advance (concierge)", () => {
+  const CONCIERGE_BRANCHES = [
+    "exchange_request",
+    "transfer_request",
+    "food_request",
+    "cancelled",
+  ];
+
+  it("ветвит по request_type в соответствующую ветку и фиксирует тип", () => {
+    expect(
+      selectNextStage({
+        nextStages: CONCIERGE_BRANCHES,
+        hasRequestTypeField: true,
+        requestType: "transfer",
+      }),
+    ).toEqual({ nextSlug: "transfer_request", requestType: "transfer" });
+
+    expect(
+      selectNextStage({
+        nextStages: CONCIERGE_BRANCHES,
+        hasRequestTypeField: true,
+        requestType: "exchange",
+      }),
+    ).toEqual({ nextSlug: "exchange_request", requestType: "exchange" });
+  });
+
+  it("не уводит в первую ветку при нераспознанном/other типе (возвращает null)", () => {
+    expect(
+      selectNextStage({
+        nextStages: CONCIERGE_BRANCHES,
+        hasRequestTypeField: true,
+        requestType: "other",
+      }),
+    ).toBeNull();
+    expect(
+      selectNextStage({
+        nextStages: CONCIERGE_BRANCHES,
+        hasRequestTypeField: true,
+        requestType: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("сопоставляет ветку и по префиксу `<type>_`", () => {
+    expect(
+      selectNextStage({
+        nextStages: ["exchange_quote", "cancelled"],
+        hasRequestTypeField: true,
+        requestType: "exchange",
+      }),
+    ).toEqual({ nextSlug: "exchange_quote", requestType: "exchange" });
+  });
+
+  it("линейная воронка (нет поля request_type) → nextStages[0], тип не трогается", () => {
+    expect(
+      selectNextStage({
+        nextStages: ["quote_calculated", "cancelled"],
+        hasRequestTypeField: false,
+        requestType: null,
+      }),
+    ).toEqual({ nextSlug: "quote_calculated", requestType: null });
+  });
+
+  it("одна ветка при наличии поля request_type → линейный путь (не ветвление)", () => {
+    expect(
+      selectNextStage({
+        nextStages: ["only_next"],
+        hasRequestTypeField: true,
+        requestType: "exchange",
+      }),
+    ).toEqual({ nextSlug: "only_next", requestType: null });
+  });
+
+  it("пустой nextStages → null", () => {
+    expect(
+      selectNextStage({ nextStages: [], hasRequestTypeField: false, requestType: null }),
+    ).toBeNull();
   });
 });
 
