@@ -23,7 +23,7 @@ import {
   stageDefinitions,
   stageFields,
 } from "@chatman-media/storage";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { LoadedRef } from "../llm-bootstrap.ts";
 
 export interface FieldExtractor {
@@ -83,52 +83,93 @@ export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
       const now = Math.floor(Date.now() / 1000);
 
       await withTenant(db, tenantId, async (tx) => {
-        // 0. Find lead for this contact; auto-create if funnel exists
-        let [lead] = await tx
-          .select({
-            id: leads.id,
-            state: leads.state,
-            stageDefinitionId: leads.stageDefinitionId,
-          })
-          .from(leads)
-          .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)));
-
-        if (!lead) {
-          // No lead — try to auto-create in the first stage of the active funnel
-          const [activeFunnel] = await tx
-            .select({ id: funnels.id })
-            .from(funnels)
-            .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
-            .limit(1);
-
-          if (activeFunnel) {
-            const [firstStage] = await tx
+        // 0. Резолвим активную воронку и её первую (intake) стадию — нужны и
+        // для определения multi-request режима, и для auto-create лида.
+        const [activeFunnel] = await tx
+          .select({ id: funnels.id })
+          .from(funnels)
+          .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
+          .limit(1);
+        const [firstStage] = activeFunnel
+          ? await tx
               .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
               .from(stageDefinitions)
               .where(eq(stageDefinitions.funnelId, activeFunnel.id))
               .orderBy(asc(stageDefinitions.position))
-              .limit(1);
+              .limit(1)
+          : [];
 
-            if (firstStage) {
-              const [created] = await tx
-                .insert(leads)
-                .values({
-                  tenantId,
-                  userId: contactId,
-                  state: firstStage.slug,
-                  stageDefinitionId: firstStage.id,
-                  createdAt: now,
-                  updatedAt: now,
-                })
-                .onConflictDoNothing()
-                .returning({
-                  id: leads.id,
-                  state: leads.state,
-                  stageDefinitionId: leads.stageDefinitionId,
-                });
-              if (created) lead = created;
-            }
-          }
+        // Concierge multi-request: если первая стадия имеет поле `request_type`,
+        // гость может держать несколько ПОСЛЕДОВАТЕЛЬНЫХ запросов — по одному
+        // лиду на запрос. Тогда таргетим самый свежий НЕ-терминальный лид, а при
+        // его отсутствии создаём новый. Для линейных воронок (нет поля
+        // `request_type`) — прежнее поведение «один лид на контакт».
+        let multiRequest = false;
+        if (firstStage) {
+          const [rtField] = await tx
+            .select({ id: stageFields.id })
+            .from(stageFields)
+            .where(
+              and(
+                eq(stageFields.stageId, firstStage.id),
+                eq(stageFields.slug, "request_type"),
+              ),
+            )
+            .limit(1);
+          multiRequest = !!rtField;
+        }
+
+        // Находим лид для извлечения.
+        let lead: { id: number; state: string; stageDefinitionId: number | null } | undefined;
+        if (multiRequest) {
+          // Самый свежий НЕ-терминальный лид контакта (concierge: N лидов).
+          [lead] = await tx
+            .select({
+              id: leads.id,
+              state: leads.state,
+              stageDefinitionId: leads.stageDefinitionId,
+            })
+            .from(leads)
+            .leftJoin(stageDefinitions, eq(leads.stageDefinitionId, stageDefinitions.id))
+            .where(
+              and(
+                eq(leads.tenantId, tenantId),
+                eq(leads.userId, contactId),
+                notInArray(stageDefinitions.kind, ["terminal_won", "terminal_lost"]),
+              ),
+            )
+            .orderBy(desc(leads.updatedAt))
+            .limit(1);
+        } else {
+          // Легаси: один лид на контакт.
+          [lead] = await tx
+            .select({
+              id: leads.id,
+              state: leads.state,
+              stageDefinitionId: leads.stageDefinitionId,
+            })
+            .from(leads)
+            .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)));
+        }
+
+        // Нет (открытого) лида — создаём новый в первой стадии воронки.
+        if (!lead && firstStage) {
+          const [created] = await tx
+            .insert(leads)
+            .values({
+              tenantId,
+              userId: contactId,
+              state: firstStage.slug,
+              stageDefinitionId: firstStage.id,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning({
+              id: leads.id,
+              state: leads.state,
+              stageDefinitionId: leads.stageDefinitionId,
+            });
+          if (created) lead = created;
         }
 
         if (!lead?.stageDefinitionId) return;

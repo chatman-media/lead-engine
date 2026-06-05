@@ -16,10 +16,11 @@ import {
   leadEvents,
   leads,
   schema,
+  stageDefinitions,
   tryConnectToPg,
 } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
@@ -153,5 +154,53 @@ describe("concierge branch-aware auto-advance (slice 3)", () => {
     const lead = await leadOf(contactId);
     expect(lead?.state).toBe("request_received");
     expect(lead?.requestType).toBeNull();
+  });
+
+  it("multi-request (3b): после завершения первого запроса новый создаёт отдельный лид", async () => {
+    if (!sql) return;
+    const contactId = await freshContact();
+
+    // 1) Первый запрос: трансфер → transfer_request.
+    await makeFieldExtractor(stubRef('{"request_type":"transfer"}')).extract({
+      tenantId,
+      contactId,
+      text: "нужен трансфер",
+      db,
+    });
+    const first = await leadOf(contactId);
+    expect(first?.state).toBe("transfer_request");
+
+    // 2) Завершаем первый лид (терминал completed).
+    const [completed] = await db
+      .select({ id: stageDefinitions.id })
+      .from(stageDefinitions)
+      .where(
+        and(
+          eq(stageDefinitions.tenantId, tenantId),
+          eq(stageDefinitions.slug, "completed"),
+        ),
+      );
+    await db
+      .update(leads)
+      .set({ stageDefinitionId: completed!.id, state: "completed" })
+      .where(eq(leads.id, first!.id));
+
+    // 3) Новый запрос того же гостя: обмен → ОТДЕЛЬНЫЙ новый лид.
+    await makeFieldExtractor(stubRef('{"request_type":"exchange"}')).extract({
+      tenantId,
+      contactId,
+      text: "теперь хочу поменять деньги",
+      db,
+    });
+
+    const all = await db
+      .select()
+      .from(leads)
+      .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)))
+      .orderBy(desc(leads.updatedAt));
+    expect(all.length).toBe(2);
+    const open = all.find((l) => l.state !== "completed");
+    expect(open?.state).toBe("exchange_request");
+    expect(open?.requestType).toBe("exchange");
   });
 });
