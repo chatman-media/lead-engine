@@ -1,0 +1,85 @@
+# Agentic tools (tool-loop)
+
+Бот не только читает KB и отвечает — он может **вызывать инструменты**
+(agentic actions). Поверх RAG-ответа крутится tool-loop: LLM решает вызвать
+инструмент, получает результат и продолжает, пока не сформирует финальный ответ.
+
+## Контракт инструмента
+
+`packages/kb/src/tool-loop.ts` — интерфейс `RagTool`:
+
+```ts
+interface RagTool<TParams extends z.ZodTypeAny> {
+  name: string;                 // имя функции для LLM
+  description: string;          // когда вызывать (читает модель)
+  parameters: TParams;          // Zod-схема → JSON schema аргументов
+  execute: (args) => Promise<unknown>;  // выполнение
+}
+```
+
+Zod-схема конвертится в OpenAI function-формат (`toolToOpenAIFunction()`),
+аргументы валидируются перед `execute`.
+
+## Алгоритм tool-loop
+
+`runToolLoop()` (`tool-loop.ts`), макс. циклов `DEFAULT_MAX_TOOL_CYCLES = 4`:
+
+```
+повтор до maxCycles:
+  1. chat.completeWithTools(messages, toolDefs)
+  2. нет tool-calls → return { content, exhausted: false }   ← финал
+  3. добавить assistant-сообщение с вызовами
+  4. выполнить инструменты параллельно (Promise.allSettled)
+  5. результат каждого → message { role: "tool", tool_call_id, content }
+  6. записать ToolCallRecord (name, args, result/ошибка, cycle)
+лимит исчерпан → return { content: null, exhausted: true }
+```
+
+Устойчивость к ошибкам: неизвестный инструмент и брошенная `execute`-ошибка
+возвращаются модели как `{ error }` — loop **никогда не падает** на ошибке
+инструмента, модель может попробовать иначе.
+
+## Встроенные инструменты
+
+| Инструмент | Файл | Что делает |
+|---|---|---|
+| `offer_booking_link` | `packages/kb/src/built-in-tools/calendly.ts` | `makeBookingLinkTool(url)` — когда лид хочет записаться/созвониться, возвращает `{ url }` (Calendly/Cal.com/Tidycal). Без аргументов. |
+| Exchange-инструменты | `apps/api/src/lib/exchange/tools.ts` | `makeExchangeTools()` — котировка, KYC-гейт, заявка, реквизиты и т.д. (подключаются если у тенанта есть активные курсы). См. [EXCHANGE.md](EXCHANGE.md). |
+
+## Подключение в pipeline
+
+- `RagReplyStrategy.resolveTools({ tenantId, conversationId })`
+  (`packages/conversation-engine/src/reply-strategy/rag-reply.ts`) вызывается
+  раз на входящее сообщение и возвращает список `RagTool[]`; они передаются в
+  `answerWithRag()`. Нет резолвера → пустой список → tool-loop не активен.
+- Резолвер собирается в `apps/api/src/llm-bootstrap.ts`: booking (из секрета
+  `tool_booking_url`) + exchange-инструменты (если активны курсы). Кеши
+  сбрасываются `invalidateToolsFor(tenantId)` после правок в админке.
+
+## Настройка booking (admin API)
+
+`apps/api/src/routes/admin-tools.ts`, хранение в `tenant_secrets`
+(`tool_booking_url`, encrypted):
+
+```
+GET    /api/admin/tools             — список инструментов + enabled-флаги
+GET    /api/admin/tools/booking     — { enabled, url }
+POST   /api/admin/tools/booking     — { url } → валидирует, шифрует, hot-reload
+DELETE /api/admin/tools/booking     — отключить
+```
+
+UI: страница «Инструменты» (`/tools`).
+
+## Как добавить кастомный инструмент
+
+1. Реализовать `RagTool` (name / description / Zod `parameters` / `execute`).
+2. Вернуть его из резолвера в `RagReplyStrategy` (через опцию `resolveTools`).
+3. Если конфигурируется тенантом — завести секрет/конфиг, ручки в admin-API и
+   подключить в `llm-bootstrap.ts` с кешем + `onReload`-инвалидацией.
+
+Образец — booking-инструмент выше.
+
+## Roadmap
+
+Дальнейшие инструменты (CRM create-lead, calendar book-slot, payment invoice,
+operator alert) — см. [strategy/ROADMAP.md](../strategy/ROADMAP.md) (M7).

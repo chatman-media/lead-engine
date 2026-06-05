@@ -13,6 +13,10 @@
 | [engineering/CONFIGURATION.md](engineering/CONFIGURATION.md) | Полный референс env-переменных (all vars, required/optional, fallback/per-tenant) |
 | [engineering/EXCHANGE.md](engineering/EXCHANGE.md) | Обменная вертикаль: воронка, курсы/тиры, guardrails, ops-watch, реквизиты, orders CRM |
 | [engineering/NOTIFICATIONS.md](engineering/NOTIFICATIONS.md) | Stage webhooks + правила/шаблоны уведомлений + operator settings + Telegram-группы + ops-алерты |
+| [engineering/AGENTIC_TOOLS.md](engineering/AGENTIC_TOOLS.md) | Tool-loop: контракт инструмента, встроенные (booking), подключение в pipeline, кастомный инструмент |
+| [engineering/COPILOT.md](engineering/COPILOT.md) | Page-aware AI-ассистент кабинета: эндпоинт, action-allowlist, advice+confirm, BYOK |
+| [engineering/WEB_WIDGET.md](engineering/WEB_WIDGET.md) | Веб-виджет: бандл, embed-сниппет, WebSocket lifecycle, протокол, доставка |
+| [engineering/TESTING.md](engineering/TESTING.md) | Тест-харнесс: изоляция БД, паттерн интеграционного теста, моки LLM/каналов, фикстуры |
 
 ## ⚙️ Operations
 
