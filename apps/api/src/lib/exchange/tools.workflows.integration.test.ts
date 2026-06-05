@@ -516,6 +516,7 @@ describe("Exchange workflow fixtures", () => {
 			expect(JSON.stringify(fixture)).not.toContain("Код: 289");
 			expect(JSON.stringify(fixture)).not.toContain("Максим");
 			expect(JSON.stringify(fixture)).not.toContain("Маргарита");
+			expect(JSON.stringify(fixture)).not.toContain("Exasia");
 		}
 	});
 
