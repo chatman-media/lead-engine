@@ -1,10 +1,10 @@
 import { useState } from "react";
 
 export const SIGNUP_URL =
-  (import.meta.env.VITE_APP_URL ?? "https://app.leadengine.pro") + "/signup";
+  (import.meta.env.VITE_APP_URL ?? "https://app.exchanges.agency") + "/signup";
 export const DEMO_URL =
   (import.meta.env.VITE_DEMO_URL as string | undefined) ??
-  "https://calendly.com/leadengine/demo";
+  "https://calendly.com/exchanges-agency/demo";
 
 export interface TgMessage {
   from: "user" | "bot";
@@ -15,7 +15,7 @@ export interface TgMessage {
 export function TelegramMockup({
   messages,
   notify,
-  botName = "Lead Engine",
+  botName = "exchanges·agency",
   ctaLabel = "📋 Заполнить анкету →",
 }: {
   messages: TgMessage[];
@@ -111,7 +111,7 @@ export function Nav({
       <div className="container">
         <div className="nav-inner">
           <a href="/" className="nav-logo">
-            Lead<span>Engine</span>
+            exchanges<span>·agency</span>
           </a>
           <div className="nav-right">
             <LangToggle lang={lang} setLang={setLang} />
@@ -201,7 +201,7 @@ export function Footer({
       <div className="container">
         <div className="footer-inner">
           <div className="footer-logo">
-            Lead<span>Engine</span>
+            exchanges<span>·agency</span>
           </div>
           <div className="footer-links">
             <a href="/privacy">{privacy}</a>
