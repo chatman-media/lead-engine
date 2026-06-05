@@ -71,6 +71,9 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       position: 0,
       color: "#3b82f6",
       nextStages: ["exchange_request", "transfer_request", "food_request", "cancelled"],
+      // Авто-advance по заполнению request_type; branch-aware выбор ветки —
+      // в field-extractor.selectNextStage (а не nextStages[0]).
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
       fields: [
         { slug: "request_type", displayName: "Тип запроса", fieldType: "select", required: true, aiExtractable: true, hint: "Обмен / Трансфер / Еда / Другое — выбирает ветку воронки", position: 0,
           optionsJson: '[{"value":"exchange","label":"Обмен"},{"value":"transfer","label":"Трансфер"},{"value":"food","label":"Еда"},{"value":"other","label":"Другое"}]' },
