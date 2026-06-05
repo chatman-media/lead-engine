@@ -739,6 +739,8 @@ payment_proof_waiting → payment_verified → payout_or_completion / cancelled`
 
 ## Admin copilot
 
+> Полное описание — [COPILOT.md](COPILOT.md). Здесь — краткая сводка.
+
 Page-aware AI-ассистент в кабинете (`apps/admin-ui/src/components/copilot/`,
 backend `apps/api/src/routes/admin-copilot.ts`). BYOK (tenant's chat-LLM;
 `503 llm_not_configured` если не настроен). Появляется на **всех** страницах
