@@ -449,6 +449,35 @@ export interface WorkflowChatResponse {
   preview?: WorkflowPreviewStage[];
 }
 
+// ── AI-ассистент (copilot) ───────────────────────────────────────────────
+
+export interface CopilotChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Предложенное ассистентом действие. Эндпоинт chat НЕ выполняет его — UI
+ * рендерит карточку подтверждения и по кнопке зовёт существующие методы
+ * (`installVertical` / `applyWorkflow`). `build_funnel.preview` совпадает по
+ * форме с `WorkflowPreviewStage`.
+ */
+export type CopilotAction =
+  | { type: "install_vertical"; slug: string; displayName: string }
+  | { type: "build_funnel"; stages: unknown[]; preview: WorkflowPreviewStage[] }
+  | { type: "navigate"; to?: string; step?: number };
+
+export interface CopilotChatResponse {
+  reply: string;
+  action: CopilotAction | null;
+}
+
+export interface CopilotChatInput {
+  page: string;
+  context?: unknown;
+  messages: CopilotChatMessage[];
+}
+
 export interface LeadListItem {
   id: number;
   state: string;
@@ -1373,6 +1402,14 @@ export const saas = {
     return request<{ ok: boolean; stageCount: number }>("/api/admin/workflows/apply", {
       method: "POST",
       body: JSON.stringify({ stages }),
+    });
+  },
+
+  // ── AI-ассистент (copilot) ───────────────────────────────────────────
+  copilotChat(input: CopilotChatInput) {
+    return request<CopilotChatResponse>("/api/admin/copilot/chat", {
+      method: "POST",
+      body: JSON.stringify(input),
     });
   },
 

@@ -83,7 +83,7 @@ interface FieldDraft {
 	hint?: string;
 	options?: string[];
 }
-interface StageDraft {
+export interface StageDraft {
 	slug: string;
 	displayName: string;
 	kind: string;
@@ -108,7 +108,7 @@ function sanitizeSlug(s: string): string {
  * Нормализует и валидирует драфт стадий от LLM в SeedStage[].
  * Отбрасывает невалидные значения, проставляет позиции, чинит nextStages.
  */
-function normalizeStages(draft: StageDraft[]): SeedStage[] {
+export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 	const validKind = new Set<string>(STAGE_KINDS);
 	const validStageType = new Set<string>(STAGE_TYPES);
 	const validFieldType = new Set<string>(FIELD_TYPES);

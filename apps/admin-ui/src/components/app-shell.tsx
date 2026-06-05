@@ -39,6 +39,7 @@ import { toast } from "sonner";
 import { type Admin, ApiError, clearToken, saas, type Tenant } from "@/api/saas";
 import { useTheme } from "@/components/theme-provider";
 import { ModeToggle } from "@/components/mode-toggle";
+import { CopilotDock } from "@/components/copilot";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -691,6 +692,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="mx-auto w-full max-w-6xl">{children}</div>
           </main>
         </div>
+
+        <CopilotDock />
       </div>
     </TooltipProvider>
   );
