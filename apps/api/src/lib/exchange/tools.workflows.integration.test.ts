@@ -25,7 +25,7 @@ import { updateOrder } from "./orders.ts";
 import { makeExchangeTools } from "./tools.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
-const dbName = `lead_engine_exchange_forsanya_${Math.random().toString(36).slice(2, 10)}`;
+const dbName = `lead_engine_exchange_workflows_${Math.random().toString(36).slice(2, 10)}`;
 const migrationsDir = resolve(
 	__dirname,
 	"..",
@@ -47,7 +47,7 @@ const fixturesPath = resolve(
 	"apps",
 	"vertical-exchange",
 	"evals",
-	"forsanya-exchange-workflows.jsonl",
+	"exchange-workflows.jsonl",
 );
 const MASTER_KEY =
 	"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -382,7 +382,7 @@ async function seedRatesAndSecrets() {
 		db,
 		tenantId,
 		key: "exchange_wallet_usdt_trc20",
-		value: "TMockForsanyaWallet111111111111111111",
+		value: "TMockExchangeWallet111111111111111111",
 		masterKeyHex: MASTER_KEY,
 		nowEpoch: now,
 	});
@@ -480,7 +480,7 @@ beforeAll(async () => {
 	const now = Math.floor(Date.now() / 1000);
 	const [tenant] = await db
 		.insert(schema.tenants)
-		.values({ slug: `forsanya-${now}` })
+		.values({ slug: `exchange-${now}` })
 		.returning({ id: schema.tenants.id });
 	tenantId = must(tenant, "tenant").id;
 	await withTenant(db, tenantId, async (tx) => {
@@ -504,7 +504,7 @@ afterAll(async () => {
 	if (sql) await sql.end({ timeout: 0 }).catch(() => {});
 }, 10_000);
 
-describe("Forsanya exchange workflow fixtures", () => {
+describe("Exchange workflow fixtures", () => {
 	it("loads exactly 10 redacted workflow documents", () => {
 		const fixtures = loadFixtures();
 		expect(fixtures).toHaveLength(10);
@@ -516,6 +516,7 @@ describe("Forsanya exchange workflow fixtures", () => {
 			expect(JSON.stringify(fixture)).not.toContain("Код: 289");
 			expect(JSON.stringify(fixture)).not.toContain("Максим");
 			expect(JSON.stringify(fixture)).not.toContain("Маргарита");
+			expect(JSON.stringify(fixture)).not.toContain("Exasia");
 		}
 	});
 

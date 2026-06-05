@@ -458,7 +458,7 @@ DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 - **RAG pipeline** (`packages/kb/test/`): 180 tests — MMR, RRF merge, dynamic threshold, multi-query expansion, reranker, semantic cache, topic classifier, rewrite-query, tool-loop, structured output
 - **SaaS routes** (KB, LLM configs, channels, conversations, onboarding, audit, diagnostics, tenant pause): ~250 integration tests
 - **Exchange e2e mocks**:
-  - `apps/api/src/lib/exchange/tools.forsanya.integration.test.ts` — 10 redacted Forsanya exchange workflows over real DB/tools: quote, KYC gate, order, requisites, receipt proof, payout code
+  - `apps/api/src/lib/exchange/tools.workflows.integration.test.ts` — 10 redacted exchange workflows over real DB/tools: quote, KYC gate, order, requisites, receipt proof, payout code
   - `apps/api/src/routes/admin-exchange.integration.test.ts` — admin rate-card approval, requisites, order CRM, operator patch, turnover and tenant isolation
 - **Rate limiter**: 6 unit + 3 webhook integration tests
 - **Hot-reload**: 6 tenant-reloader tests (LLM + channels)
@@ -468,7 +468,7 @@ Focused exchange check:
 ```bash
 DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine \
   bun test apps/api/src/routes/admin-exchange.integration.test.ts \
-           apps/api/src/lib/exchange/tools.forsanya.integration.test.ts
+           apps/api/src/lib/exchange/tools.workflows.integration.test.ts
 ```
 
 Run with coverage:
