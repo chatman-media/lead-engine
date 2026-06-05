@@ -1,5 +1,8 @@
 # Bot → packages migration plan
 
+> 🗄 **ARCHIVED.** Migration complete — `apps/bot` has been removed and the
+> rag/sales duplication is gone. Kept for historical context only.
+
 Migrate `apps/bot` to consume `@chatman-media/rag` and `@chatman-media/sales`
 as workspace packages, deleting the bot's duplicated RAG/sales-engine code.
 This is the final step that removes the rag/sales duplication for good.
