@@ -1637,6 +1637,19 @@ export const saas = {
   testNotificationRule(id: number) {
     return request<{ ok: boolean; error?: string }>(`/api/admin/notifications/rules/${id}/test`, { method: "POST" });
   },
+  getOpsAlertStatus() {
+    return request<{
+      enabled: boolean;
+      botConfigured: boolean;
+      telegramLinked: boolean;
+      emailConfigured: boolean;
+    }>("/api/admin/notifications/ops-status");
+  },
+  testOpsAlert() {
+    return request<{ ok: boolean; error?: string }>("/api/admin/notifications/ops-test", {
+      method: "POST",
+    });
+  },
   getNotificationTemplates() {
     return request<{ items: NotificationTemplate[] }>("/api/admin/notifications/templates");
   },

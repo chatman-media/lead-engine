@@ -31,6 +31,19 @@ export {
   type OperatorSettings,
 } from "./dal/index.ts";
 export { NotificationService, type NotificationEvent } from "./notifications.ts";
+export {
+  type OpsAlert,
+  type OpsAlertKind,
+  type OpsAlertRouterDeps,
+  type OpsAlertSink,
+  type OpsEmailSender,
+  OpsAlertRouter,
+  type OpsSeverity,
+  type OwnerContacts,
+  renderOpsEmailHtml,
+  ResendEmailSender,
+  resolveOwnerContacts,
+} from "./ops-alerts.ts";
 export { OperatorBotHandler } from "./operator-bot-handler.ts";
 // CoachAnalyzer переехал в @chatman-media/sales (sales-domain code).
 // Back-compat re-export невозможен — создал бы circular dep (sales импортит
