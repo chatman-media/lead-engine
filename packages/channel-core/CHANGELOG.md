@@ -1,3 +1,10 @@
+# [@chatman-media/channel-core-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.1.0...@chatman-media/channel-core-v1.2.0) (2026-06-05)
+
+
+### Features
+
+* **channel-facebook:** Facebook Messenger channel adapter (Meta Graph) ([#181](https://github.com/chatman-media/lead-engine/issues/181)) ([36de749](https://github.com/chatman-media/lead-engine/commit/36de7495188d9d6319da8128ba86f0155fc6d7bf))
+
 # [@chatman-media/channel-core-v1.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.0.0...@chatman-media/channel-core-v1.1.0) (2026-06-03)
 
 
