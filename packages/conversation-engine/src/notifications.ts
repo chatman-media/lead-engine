@@ -1,4 +1,5 @@
 import { TelegramClient } from "@chatman-media/channel-telegram";
+import type { AdminInformer } from "./admin-informer.ts";
 import type { NotificationRule, NotificationsRepo } from "./dal/notifications.ts";
 
 export interface NotificationEvent {
@@ -19,6 +20,12 @@ export class NotificationService {
     private readonly repo: NotificationsRepo,
     private readonly botToken: string,
     private readonly appUrl: string,
+    /**
+     * Если задан — владелец (superadmin) обслуживается информером (уровни +
+     * дайджест + лента) и пропускается в per-operator-рассылке ниже, чтобы не
+     * было дублей. Операторские правила/группы — без изменений.
+     */
+    private readonly informer?: AdminInformer,
   ) {
     if (botToken) {
       this.client = new TelegramClient({ token: botToken });
@@ -26,6 +33,14 @@ export class NotificationService {
   }
 
   async notify(event: NotificationEvent): Promise<void> {
+    // Владелец — через информер (уровни/дайджест/лента), отдельно от операторов.
+    const ownerAdminId = this.informer
+      ? await this.informer.resolveOwnerAdminId(event.tenantId)
+      : null;
+    if (this.informer) {
+      await this.informer.emitNotificationEvent(event);
+    }
+
     if (!this.client) return;
 
     const [rules, operatorSettingsList] = await Promise.all([
@@ -50,6 +65,8 @@ export class NotificationService {
     // 2. Личные уведомления операторам через operator_settings
     for (const settings of operatorSettingsList) {
       if (!settings.telegramChatId) continue;
+      // Владельца обслуживает информер — пропускаем, чтобы не дублировать.
+      if (ownerAdminId !== null && settings.adminId === ownerAdminId) continue;
       // Фильтр по назначению: пропускаем если флаг включён, а лид назначен другому
       if (
         settings.notifyOnAssignedOnly &&

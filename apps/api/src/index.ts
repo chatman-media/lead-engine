@@ -1,4 +1,5 @@
 import {
+  AdminInformer,
   checkRlsEnforcement,
   NotificationsRepo,
   NotificationService,
@@ -285,22 +286,36 @@ async function main() {
     usageWriter.record(tenantId, ev);
 
   const notificationsRepo = new NotificationsRepo(db as any);
+  // Информер владельца: единый путь доставки (уровни + дайджест + лента).
+  // Mailer структурно — OpsEmailSender (email-гарантия для critical).
+  const adminInformer = new AdminInformer({
+    db: db as never,
+    botToken: cfg.operatorBotToken,
+    appUrl: cfg.mailer.appUrl,
+    email: mailer,
+    log: {
+      warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
+      info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),
+    },
+  });
   const notificationService = new NotificationService(
     notificationsRepo,
     cfg.operatorBotToken,
     cfg.mailer.appUrl,
+    adminInformer,
   );
   const operatorBotHandler = new OperatorBotHandler(notificationsRepo, cfg.operatorBotToken);
   if (cfg.operatorBotToken) {
     log.info("operator notification bot enabled");
   }
-  // Роутер операционных алертов владельцу (#145): Telegram DM + email (Mailer),
-  // severity-маршрутизация, анти-шторм. Mailer структурно — OpsEmailSender.
+  // Роутер операционных алертов владельцу (#145): делегирует доставку информеру
+  // (уровни/дайджест/лента); Mailer остаётся email-гарантией для critical.
   const opsAlertRouter = new OpsAlertRouter({
     db: db as never,
     botToken: cfg.operatorBotToken,
     appUrl: cfg.mailer.appUrl,
     email: mailer,
+    informer: adminInformer,
     log: {
       warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
       info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),

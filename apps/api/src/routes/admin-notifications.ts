@@ -1,9 +1,14 @@
 import {
+  type InformerPrefs,
   type NotificationService,
   type NotificationsRepo,
   type OpsAlertRouter,
 } from "@chatman-media/conversation-engine";
 import { Hono } from "hono";
+
+const INFORMER_LEVELS = ["silent", "critical", "important", "all"];
+const INFORMER_DIGESTS = ["off", "daily", "shift"];
+const INFORMER_TOPIC_KEYS = ["leads", "escalation", "orders", "system"];
 
 export function makeAdminNotificationsRoutes(opts: {
   repo: NotificationsRepo;
@@ -97,6 +102,53 @@ export function makeAdminNotificationsRoutes(opts: {
     const eventType: string = body.eventType || "stage_changed";
     const token = await opts.repo.generateGroupLinkToken(tenantId, adminId, eventType);
     return c.json({ token });
+  });
+
+  // ---- Информер владельца (уровни + дайджест + лента) ----
+
+  // GET /api/admin/notifications/informer/feed — последние уведомления (лента/scrollback).
+  app.get("/informer/feed", async (c) => {
+    const adminId = c.var.adminId;
+    const tenantId = c.var.tenantId;
+    const limitRaw = Number(c.req.query("limit"));
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 20;
+    const items = await opts.repo.listRecentNotifications(tenantId, adminId, limit);
+    return c.json({ items });
+  });
+
+  // PUT /api/admin/notifications/informer — настройки информера (порог/темы/дайджест/мут).
+  app.put("/informer", async (c) => {
+    const adminId = c.var.adminId;
+    const tenantId = c.var.tenantId;
+    const body = await c.req.json().catch(() => ({}));
+    const prefs: InformerPrefs = {};
+    if (typeof body.informerLevel === "string" && INFORMER_LEVELS.includes(body.informerLevel)) {
+      prefs.informerLevel = body.informerLevel;
+    }
+    if (typeof body.informerDigest === "string" && INFORMER_DIGESTS.includes(body.informerDigest)) {
+      prefs.informerDigest = body.informerDigest;
+    }
+    if (
+      Number.isInteger(body.informerDigestHour) &&
+      body.informerDigestHour >= 0 &&
+      body.informerDigestHour <= 23
+    ) {
+      prefs.informerDigestHour = body.informerDigestHour;
+    }
+    if (typeof body.informerTz === "string" && body.informerTz.length > 0 && body.informerTz.length <= 64) {
+      prefs.informerTz = body.informerTz;
+    }
+    if ("informerMutedUntil" in body) {
+      const v = body.informerMutedUntil;
+      prefs.informerMutedUntil = v === null || !Number.isFinite(Number(v)) ? null : Number(v);
+    }
+    if (body.informerTopics && typeof body.informerTopics === "object") {
+      const map: Record<string, boolean> = {};
+      for (const t of INFORMER_TOPIC_KEYS) map[t] = body.informerTopics[t] !== false;
+      prefs.informerTopics = JSON.stringify(map);
+    }
+    await opts.repo.updateInformerPrefs(adminId, prefs, tenantId);
+    return c.json({ ok: true });
   });
 
   // ---- Операционные алерты (#145) ----

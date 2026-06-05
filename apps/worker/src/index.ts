@@ -1,4 +1,5 @@
 import {
+  AdminInformer,
   checkRlsEnforcement,
   NotificationsRepo,
   NotificationService,
@@ -13,6 +14,7 @@ import { OutboundDispatcher } from "./dispatcher.ts";
 import { type MetricsServer, startMetricsServer } from "./metrics-server.ts";
 import { CheckinSweeper } from "./checkin-sweep.ts";
 import { ExchangePaymentSweeper } from "./exchange-payment-sweep.ts";
+import { InformerDigestSweeper } from "./informer-digest-sweep.ts";
 import { OperationsWatchSweeper } from "./ops-watch-sweep.ts";
 import { StaleleadSweeper } from "./stale-lead-sweep.ts";
 
@@ -45,10 +47,27 @@ async function main() {
   });
 
   const notificationsRepo = new NotificationsRepo(db as any);
+  // Email-канал владельца (для critical-гарантии информера и ops-алертов).
+  const ownerEmail = cfg.resendApiKey
+    ? new ResendEmailSender(cfg.resendApiKey, cfg.fromEmail)
+    : null;
+  // Информер владельца: единый путь доставки (уровни + дайджест + лента).
+  const adminInformer = new AdminInformer({
+    db: db as never,
+    botToken: cfg.operatorBotToken,
+    appUrl: cfg.appUrl,
+    email: ownerEmail,
+    cooldownSec: cfg.opsAlertCooldownMin * 60,
+    log: {
+      warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
+      info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),
+    },
+  });
   const notifications = new NotificationService(
     notificationsRepo,
     cfg.operatorBotToken,
     cfg.appUrl,
+    adminInformer,
   );
   if (cfg.operatorBotToken) {
     log.info("operator notification bot enabled");
@@ -134,7 +153,9 @@ async function main() {
       db,
       botToken: cfg.operatorBotToken,
       appUrl: cfg.appUrl,
-      email: cfg.resendApiKey ? new ResendEmailSender(cfg.resendApiKey, cfg.fromEmail) : null,
+      email: ownerEmail,
+      // Делегируем доставку информеру (уровни/дайджест/лента) — без дублей.
+      informer: adminInformer,
       log: {
         warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
         info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),
@@ -158,6 +179,22 @@ async function main() {
       feedStaleMin: cfg.opsFeedStaleMin,
       stuckOrderMin: cfg.opsStuckOrderMin,
     });
+  }
+
+  // Informer-digest: периодическая сводка владельцу по накопленной ленте
+  // (события, не ушедшие в реалтайм). Расписание — в operator_settings.
+  let informerDigestPromise: Promise<void> = Promise.resolve();
+  if (cfg.informerDigestMs > 0 && cfg.operatorBotToken) {
+    const digestSweeper = new InformerDigestSweeper(db, {
+      intervalMs: cfg.informerDigestMs,
+      botToken: cfg.operatorBotToken,
+    });
+    informerDigestPromise = digestSweeper.run(abort.signal).catch((err) => {
+      log.error("informer-digest fatal", {
+        err: err instanceof Error ? err : new Error(String(err)),
+      });
+    });
+    log.info("informer-digest enabled", { intervalMs: cfg.informerDigestMs });
   }
 
   // Periodic channel reload — подхватывает newly-onboarded боты которые
@@ -194,6 +231,7 @@ async function main() {
       checkinSweeperPromise,
       exchangePaymentSweeperPromise,
       opsWatchPromise,
+      informerDigestPromise,
     ]);
     channels.closeAll();
     await close();

@@ -29,6 +29,13 @@ function makeOperatorSettings(overrides: Partial<OperatorSettings> = {}): Operat
     notifyOnAssignedOnly: false,
     linkToken: null,
     linkTokenExpiresAt: null,
+    informerLevel: "important",
+    informerTopics: null,
+    informerDigest: "daily",
+    informerDigestHour: 9,
+    informerTz: "UTC",
+    informerMutedUntil: null,
+    informerLastDigestAt: null,
     updatedAt: 0,
     ...overrides,
   };
