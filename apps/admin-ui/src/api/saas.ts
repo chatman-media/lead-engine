@@ -360,6 +360,8 @@ export interface OnboardingStatus {
 // ── Lead pipeline types ──────────────────────────────────────────────────
 
 export type StageKind = "intake" | "active" | "terminal_won" | "terminal_lost";
+/** Макро-фаза костяка — хранится только на active-стадиях. */
+export type StagePhase = "qualify" | "offer" | "clear" | "fulfill";
 export type StageType =
   | "form_fill"
   | "document_upload"
@@ -409,6 +411,7 @@ export interface StageDefinition {
   position: number;
   kind: StageKind;
   stageType: StageType;
+  phase: StagePhase | null;
   configJson: string;
   nextStages: string[];
   staleTimeoutDays: number | null;
@@ -422,6 +425,12 @@ export interface StageDefinition {
 export interface FunnelData {
   funnel: { id: number; slug: string; isActive: boolean } | null;
   stages: StageDefinition[];
+}
+
+/** Сквозное распределение лидов по макро-фазам костяка (capture→…→won/lost). */
+export interface PhaseStats {
+  phases: Array<{ phase: string; leads: number }>;
+  unassigned: number;
 }
 
 export interface WorkflowChatMessage {
@@ -1327,6 +1336,9 @@ export const saas = {
   // ── Funnel builder ───────────────────────────────────────────────────
   getFunnel() {
     return request<FunnelData>("/api/admin/funnel");
+  },
+  getPhaseStats() {
+    return request<PhaseStats>("/api/admin/funnel/phase-stats");
   },
   createStage(data: {
     funnelId: number;

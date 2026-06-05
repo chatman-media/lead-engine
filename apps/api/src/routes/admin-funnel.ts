@@ -9,6 +9,14 @@ import {
   stageFields,
   styles,
 } from "@chatman-media/storage";
+import {
+  type ActivePhase,
+  buildSkeletonFunnel,
+  deriveDefaultPhase,
+  effectivePhase,
+  FUNNEL_PHASES,
+  type FunnelPhase,
+} from "@chatman-media/verticals";
 import { and, asc, count, eq, isNull, sql } from "drizzle-orm";
 import { SKILLS_CATALOGUE } from "../lib/skills-catalogue.ts";
 import { Hono } from "hono";
@@ -21,6 +29,8 @@ type SeedStage = {
   displayName: string;
   kind: "intake" | "active" | "terminal_won" | "terminal_lost";
   stageType: string;
+  /** Макро-фаза костяка — только для active; intake/terminal не задаются. */
+  phase?: ActivePhase;
   position: number;
   color?: string;
   staleTimeoutDays?: number;
@@ -40,7 +50,12 @@ type SeedStage = {
   }>;
 };
 
-const SEED_TEMPLATES: Record<string, SeedStage[]> = {
+export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
+  // Универсальный скелет костяка — стартовая воронка для новой вертикали.
+  // 6 фаз (capture→qualify→offer→clear→fulfill→won/lost), поверх — кастомизация.
+  skeleton: buildSkeletonFunnel({ includeClear: true, includeFulfill: true }).map(
+    (s) => ({ ...s, fields: [] }),
+  ),
   // Обменный пункт (Пхукет): крипта / RUB-перевод / наличные → THB.
   // Slugs совпадают с EXCHANGE_FUNNEL_STAGES в @chatman-media/vertical-exchange.
   exchange: [
@@ -61,6 +76,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "exchange_request",
+      phase: "qualify",
       displayName: "Параметры обмена",
       kind: "active",
       stageType: "form_fill",
@@ -80,6 +96,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "quote_calculated",
+      phase: "offer",
       displayName: "Курс рассчитан",
       kind: "active",
       stageType: "rate_confirmation",
@@ -94,6 +111,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "verification_check",
+      phase: "clear",
       displayName: "Проверка верификации",
       kind: "active",
       stageType: "assessment",
@@ -107,6 +125,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "kyc_collection",
+      phase: "clear",
       displayName: "Сбор документов (KYC)",
       kind: "active",
       stageType: "document_upload",
@@ -120,6 +139,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "risk_review",
+      phase: "clear",
       displayName: "Проверка риска",
       kind: "active",
       stageType: "assessment",
@@ -134,6 +154,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "order_created",
+      phase: "fulfill",
       displayName: "Заявка создана",
       kind: "active",
       stageType: "milestone",
@@ -146,6 +167,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "requisites_sent",
+      phase: "fulfill",
       displayName: "Реквизиты отправлены",
       kind: "active",
       stageType: "external_approval",
@@ -159,6 +181,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "payment_proof_waiting",
+      phase: "fulfill",
       displayName: "Ожидание оплаты",
       kind: "active",
       stageType: "payment",
@@ -174,6 +197,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "payment_verified",
+      phase: "fulfill",
       displayName: "Оплата подтверждена",
       kind: "active",
       stageType: "assessment",
@@ -343,6 +367,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "viewings",
+      phase: "qualify",
       displayName: "Просмотры",
       kind: "active",
       stageType: "interaction",
@@ -361,6 +386,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "offer_negotiation",
+      phase: "offer",
       displayName: "Оффер и переговоры",
       kind: "active",
       stageType: "form_fill",
@@ -377,6 +403,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "mou_signed",
+      phase: "offer",
       displayName: "MOU подписан (Form F)",
       kind: "active",
       stageType: "document_signature",
@@ -396,6 +423,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "noc_application",
+      phase: "clear",
       displayName: "NOC от застройщика",
       kind: "active",
       stageType: "external_approval",
@@ -413,6 +441,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "mortgage_approval",
+      phase: "clear",
       displayName: "Одобрение ипотеки",
       kind: "active",
       stageType: "external_approval",
@@ -597,6 +626,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "intake_complete",
+      phase: "qualify",
       displayName: "Анкета собрана",
       kind: "active",
       stageType: "assessment",
@@ -607,6 +637,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "partner_review",
+      phase: "offer",
       displayName: "На рассмотрении у партнёра",
       kind: "active",
       stageType: "external_approval",
@@ -618,6 +649,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "approved",
+      phase: "offer",
       displayName: "Одобрена",
       kind: "active",
       stageType: "milestone",
@@ -628,6 +660,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "docs_pending",
+      phase: "clear",
       displayName: "Сбор документов",
       kind: "active",
       stageType: "document_upload",
@@ -644,6 +677,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "docs_complete",
+      phase: "clear",
       displayName: "Документы собраны",
       kind: "active",
       stageType: "milestone",
@@ -654,6 +688,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "visa_form",
+      phase: "clear",
       displayName: "Заполнение визовой анкеты",
       kind: "active",
       stageType: "form_fill",
@@ -700,6 +735,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "visa_filing",
+      phase: "clear",
       displayName: "Подача документов на визу",
       kind: "active",
       stageType: "external_approval",
@@ -710,6 +746,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "visa_waiting",
+      phase: "clear",
       displayName: "Ожидание решения по визе",
       kind: "active",
       stageType: "waiting",
@@ -721,6 +758,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "ready_to_work",
+      phase: "fulfill",
       displayName: "Готова к работе",
       kind: "active",
       stageType: "milestone",
@@ -949,6 +987,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "qualified",
+      phase: "qualify",
       displayName: "Квалифицирован",
       kind: "active",
       stageType: "interaction",
@@ -963,6 +1002,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "demo_scheduled",
+      phase: "qualify",
       displayName: "Демо назначено",
       kind: "active",
       stageType: "milestone",
@@ -976,6 +1016,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "demo_done",
+      phase: "qualify",
       displayName: "Демо проведено",
       kind: "active",
       stageType: "interaction",
@@ -991,6 +1032,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "proposal_sent",
+      phase: "offer",
       displayName: "КП отправлено",
       kind: "active",
       stageType: "document_signature",
@@ -1006,6 +1048,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "negotiation",
+      phase: "offer",
       displayName: "Переговоры",
       kind: "active",
       stageType: "interaction",
@@ -1068,6 +1111,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "brief_call",
+      phase: "qualify",
       displayName: "Бриф / звонок",
       kind: "active",
       stageType: "interaction",
@@ -1082,6 +1126,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "quote_sent",
+      phase: "offer",
       displayName: "Смета отправлена",
       kind: "active",
       stageType: "form_fill",
@@ -1096,6 +1141,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "quote_approved",
+      phase: "offer",
       displayName: "Смета согласована",
       kind: "active",
       stageType: "milestone",
@@ -1110,6 +1156,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "shoot_scheduled",
+      phase: "fulfill",
       displayName: "Съёмка назначена",
       kind: "active",
       stageType: "milestone",
@@ -1124,6 +1171,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "editing",
+      phase: "fulfill",
       displayName: "Монтаж",
       kind: "active",
       stageType: "interaction",
@@ -1138,6 +1186,7 @@ const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "delivery",
+      phase: "fulfill",
       displayName: "Сдача материала",
       kind: "active",
       stageType: "milestone",
@@ -1239,6 +1288,18 @@ export const FIELD_TYPES = [
 export type { SeedStage };
 
 /**
+ * Фаза костяка для стадии при сидировании: явный тег → эвристика; null для
+ * якорей (intake/terminal). Общая логика для applyFunnelStages и тестов костяка.
+ */
+export function resolveSeedPhase(
+  stage: Pick<SeedStage, "kind" | "stageType" | "phase">,
+  prevPhase: ActivePhase | null,
+): ActivePhase | null {
+  if (stage.kind !== "active") return null;
+  return stage.phase ?? deriveDefaultPhase(stage.stageType, prevPhase);
+}
+
+/**
  * Создаёт воронку из набора стадий (заменяя текущую активную воронку тенанта).
  * Используется и seed-шаблонами вертикалей, и AI workflow builder'ом.
  */
@@ -1277,8 +1338,11 @@ export async function applyFunnelStages(
     }
 
     let stagesCreated = 0;
+    let prevPhase: ActivePhase | null = null;
     for (const stageTpl of stages) {
       const { fields, ...stageData } = stageTpl;
+      const phase = resolveSeedPhase(stageData, prevPhase);
+      if (phase) prevPhase = phase;
       const [stage] = await tx
         .insert(stageDefinitions)
         .values({
@@ -1288,6 +1352,7 @@ export async function applyFunnelStages(
           displayName: stageData.displayName,
           kind: stageData.kind,
           stageType: stageData.stageType,
+          phase,
           position: stageData.position,
           color: stageData.color ?? null,
           staleTimeoutDays: stageData.staleTimeoutDays ?? null,
@@ -1446,6 +1511,7 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
       displayName: string;
       kind?: string;
       stageType?: string;
+      phase?: string;
       position?: number;
       color?: string;
       icon?: string;
@@ -1473,6 +1539,7 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
           position: body.position ?? 0,
           kind: body.kind ?? "active",
           stageType: body.stageType ?? "form_fill",
+          phase: body.phase ?? null,
           color: body.color ?? undefined,
           icon: body.icon ?? undefined,
           staleTimeoutDays: body.staleTimeoutDays ?? undefined,
@@ -1511,6 +1578,7 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
       description: string;
       kind: string;
       stageType: string;
+      phase: string;
       position: number;
       color: string;
       icon: string;
@@ -1527,6 +1595,7 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
     if (body.description !== undefined) patch.description = body.description;
     if (body.kind !== undefined) patch.kind = body.kind;
     if (body.stageType !== undefined) patch.stageType = body.stageType;
+    if (body.phase !== undefined) patch.phase = body.phase;
     if (body.position !== undefined) patch.position = body.position;
     if (body.color !== undefined) patch.color = body.color;
     if (body.icon !== undefined) patch.icon = body.icon;
@@ -1918,6 +1987,58 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
     }));
 
     return c.json({ stages: result });
+  });
+
+  /**
+   * GET /api/admin/funnel/phase-stats
+   * Сквозная воронка по макро-фазам костяка (capture → … → won/lost).
+   * Группирует лидов по effectivePhase их текущей стадии. Метрика
+   * vertical-agnostic — сопоставима между любыми вертикалями.
+   */
+  app.get("/api/admin/funnel/phase-stats", async (c) => {
+    const tenantId = c.var.tenantId;
+
+    const stages = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select({
+          id: stageDefinitions.id,
+          kind: stageDefinitions.kind,
+          phase: stageDefinitions.phase,
+        })
+        .from(stageDefinitions)
+        .where(eq(stageDefinitions.tenantId, tenantId)),
+    );
+
+    const counts = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select({ stageDefinitionId: leads.stageDefinitionId, n: count() })
+        .from(leads)
+        .where(eq(leads.tenantId, tenantId))
+        .groupBy(leads.stageDefinitionId),
+    );
+
+    // stageDefinitionId → фаза костяка (capture/won/lost из kind, остальное из phase)
+    const phaseByStage = new Map<number, FunnelPhase | null>();
+    for (const s of stages) phaseByStage.set(s.id, effectivePhase(s));
+
+    const totals = new Map<FunnelPhase, number>();
+    let unassigned = 0;
+    for (const r of counts) {
+      const n = Number(r.n);
+      const p =
+        r.stageDefinitionId != null
+          ? phaseByStage.get(r.stageDefinitionId)
+          : null;
+      if (p) totals.set(p, (totals.get(p) ?? 0) + n);
+      else unassigned += n;
+    }
+
+    const phases = FUNNEL_PHASES.map((phase) => ({
+      phase,
+      leads: totals.get(phase) ?? 0,
+    }));
+
+    return c.json({ phases, unassigned });
   });
 
   /**

@@ -17,6 +17,7 @@ import {
   clearToken,
   type FunnelData,
   type LeadListItem,
+  type PhaseStats,
   saas,
 } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
@@ -34,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { type FunnelPhase, groupStagesByPhase, PHASE_ACCENT, PHASE_LABEL } from "@/lib/phases";
 
 const STATE_RU: Record<string, string> = {
   active: "активен",
@@ -64,8 +66,9 @@ const STAGE_TYPE_RU: Record<string, string> = {
 };
 
 function progressPct(filled: number, total: number) {
-  if (total === 0) return null;
-  return Math.round((filled / total) * 100);
+  if (!total || total <= 0) return null;
+  const pct = Math.round((filled / total) * 100);
+  return Number.isFinite(pct) ? pct : null;
 }
 
 function formatDate(epoch: number) {
@@ -120,6 +123,7 @@ export function SaasLeads() {
   const [selectedStageId, setSelectedStageId] = useState<string>("");
   const [creatingLead, setCreatingLead] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [phaseStats, setPhaseStats] = useState<PhaseStats | null>(null);
 
   function onAuthError(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
@@ -131,6 +135,10 @@ export function SaasLeads() {
   }
 
   function reload() {
+    saas
+      .getPhaseStats()
+      .then(setPhaseStats)
+      .catch(() => {});
     Promise.all([saas.getFunnel(), saas.listLeads({ limit: 200 })])
       .then(([f, l]) => {
         setFunnel(f);
@@ -663,64 +671,96 @@ export function SaasLeads() {
           );
         })()}
 
-      {/* Kanban — горизонтальный скролл по стадиям */}
+      {/* Kanban — колонки сгруппированы по фазам костяка */}
       {hasStages && viewMode === "kanban" && (
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {stages.map((stage) => {
-            const stageLeads = leadsByStage.get(`stage:${stage.id}`) ?? [];
-            const isOver = dragOverStageId === stage.id;
-            return (
-              <div
-                key={stage.id}
-                className="flex w-72 shrink-0 flex-col gap-2"
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOverStageId(stage.id);
-                }}
-                onDragLeave={() => setDragOverStageId(null)}
-                onDrop={(e) => handleLeadDrop(e, stage.id)}
-              >
-                <div
-                  className={`flex items-center justify-between rounded-lg border-l-4 bg-card px-3 py-2 shadow-sm transition-colors ${KIND_COLOR[stage.kind] ?? "border-gray-300"} ${isOver ? "bg-accent" : ""}`}
-                >
-                  <div>
-                    <p className="text-sm font-semibold">{stage.displayName}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {STAGE_TYPE_RU[stage.stageType] ?? stage.stageType}
-                    </p>
-                  </div>
-                  <Badge variant="secondary" className="text-xs">
-                    {stageLeads.length}
-                  </Badge>
-                </div>
-
-                <div
-                  className={`flex flex-col gap-2 rounded-lg transition-colors ${isOver ? "bg-accent/30 p-1" : ""}`}
-                >
-                  {stageLeads.map((lead) => (
-                    <LeadCard
-                      key={lead.id}
-                      lead={lead}
-                      isDragging={draggedLeadId === lead.id}
-                      onDragStart={() => setDraggedLeadId(lead.id)}
-                      onDragEnd={() => {
-                        setDraggedLeadId(null);
-                        setDragOverStageId(null);
-                      }}
+        <>
+          {phaseStats && phaseStats.phases.some((p) => p.leads > 0) && (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-xs text-muted-foreground">Лиды по фазам:</span>
+              {phaseStats.phases
+                .filter((p) => p.leads > 0)
+                .map((p) => (
+                  <Badge key={p.phase} variant="secondary" className="gap-1.5">
+                    <span
+                      className={`size-2 rounded-full ${PHASE_ACCENT[p.phase as FunnelPhase] ?? "bg-gray-400"}`}
                     />
-                  ))}
-                  {stageLeads.length === 0 && (
-                    <p
-                      className={`rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground ${isOver ? "border-primary" : ""}`}
-                    >
-                      {isOver ? "Перетащить сюда" : "Нет лидов"}
-                    </p>
-                  )}
+                    {PHASE_LABEL[p.phase as FunnelPhase] ?? p.phase}: {p.leads}
+                  </Badge>
+                ))}
+              {phaseStats.unassigned > 0 && (
+                <Badge variant="outline">Прочее: {phaseStats.unassigned}</Badge>
+              )}
+            </div>
+          )}
+          <div className="flex gap-6 overflow-x-auto pb-4">
+            {groupStagesByPhase(stages).map((group) => (
+              <div key={group.key} className="flex shrink-0 flex-col gap-2">
+                <div className="flex items-center gap-2 px-1">
+                  <span className={`size-2 rounded-full ${group.accent}`} />
+                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {group.label}
+                  </span>
+                </div>
+                <div className="flex gap-4">
+                  {group.stages.map((stage) => {
+                    const stageLeads = leadsByStage.get(`stage:${stage.id}`) ?? [];
+                    const isOver = dragOverStageId === stage.id;
+                    return (
+                      <div
+                        key={stage.id}
+                        className="flex w-72 shrink-0 flex-col gap-2"
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setDragOverStageId(stage.id);
+                        }}
+                        onDragLeave={() => setDragOverStageId(null)}
+                        onDrop={(e) => handleLeadDrop(e, stage.id)}
+                      >
+                        <div
+                          className={`flex items-center justify-between rounded-lg border-l-4 bg-card px-3 py-2 shadow-sm transition-colors ${KIND_COLOR[stage.kind] ?? "border-gray-300"} ${isOver ? "bg-accent" : ""}`}
+                        >
+                          <div>
+                            <p className="text-sm font-semibold">{stage.displayName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {STAGE_TYPE_RU[stage.stageType] ?? stage.stageType}
+                            </p>
+                          </div>
+                          <Badge variant="secondary" className="text-xs">
+                            {stageLeads.length}
+                          </Badge>
+                        </div>
+
+                        <div
+                          className={`flex flex-col gap-2 rounded-lg transition-colors ${isOver ? "bg-accent/30 p-1" : ""}`}
+                        >
+                          {stageLeads.map((lead) => (
+                            <LeadCard
+                              key={lead.id}
+                              lead={lead}
+                              isDragging={draggedLeadId === lead.id}
+                              onDragStart={() => setDraggedLeadId(lead.id)}
+                              onDragEnd={() => {
+                                setDraggedLeadId(null);
+                                setDragOverStageId(null);
+                              }}
+                            />
+                          ))}
+                          {stageLeads.length === 0 && (
+                            <p
+                              className={`rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground ${isOver ? "border-primary" : ""}`}
+                            >
+                              {isOver ? "Перетащить сюда" : "Нет лидов"}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Fallback — таблица если нет воронки */}
