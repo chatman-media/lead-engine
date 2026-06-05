@@ -4,7 +4,7 @@
 
 # Lead Engine
 
-**面向 Telegram 招聘机构的 AI 销售成交助手**
+**多渠道 AI 销售成交助手 — Telegram · WhatsApp · 网页挂件**
 
 [![CI](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml)
@@ -20,333 +20,154 @@
 
 多租户 SaaS · BYOK LLM · 按租户隔离的 RAG · 销售方法论（SPIN / NEPQ / AIDA）· 人工接管
 
----
-
-🌐 **Language / Язык / 语言**
-
-[🇬🇧 English](README.md) &nbsp;·&nbsp; [🇷🇺 Русский](README.ru.md) &nbsp;·&nbsp; 🇨🇳 **中文**
+🌐 [🇬🇧 English](README.md) &nbsp;·&nbsp; [🇷🇺 Русский](README.ru.md) &nbsp;·&nbsp; 🇨🇳 **中文**
 
 </div>
 
 ---
 
-**面向 Telegram 招聘机构的 AI 销售成交助手。**
-一个多租户 SaaS 平台。30 秒内回复入站线索，把候选人从"只是了解一下"
-一路推进到提交申请，并将高意向线索（hot lead）转交给招聘专员。
-由销售方法论（SPIN、NEPQ、AIDA）驱动——而不是一个 FAQ 机器人。
+一个**多租户 SaaS**：在 Telegram、WhatsApp 和网页挂件上约 30 秒内回复进线，
+将客户从「随便看看」推进到提交申请 / 下单，并把高意向线索移交给人工坐席。
+由销售方法论（SPIN、NEPQ、AIDA）驱动，而非 FAQ 机器人。
 
-**Phase 1 ICP：** RU/CIS/MENA 地区、以 Telegram 为主的招聘机构，
-ARPU 99–199 美元/月。[Phase 2：房地产。Phase 3：横向扩展。]
+每个客户都是隔离的 `tenant`，拥有各自的渠道、LLM 配置和知识库——数据隔离
+在 **Postgres RLS** 层强制执行。**BYOK**：使用你自己的 OpenAI / Anthropic 密钥。
 
-**工作方式：** 商家注册 → 接入自己的 Telegram 机器人
-（60 秒内自动 `setWebhook`）→ 配置自己的 OpenAI / Anthropic 密钥
-（BYOK）→ 向知识库（KB）上传文档 → AI 回复并推进漏斗。
-人工坐席可随时从收件箱接管任意对话。
+**第一阶段 ICP：** 招聘机构（RU / 独联体 / 中东，Telegram 优先，ARPU
+$99–199/月）。引擎本身与垂类无关——已提供多垂类模板，`exchange`（兑换）已上线。
+*（第二阶段：房产 · 第三阶段：横向通用。）*
 
-每个客户都是一个独立的 `tenant`，拥有各自的渠道、LLM 配置、知识库，
-数据隔离在 Postgres RLS 层面强制实施。
-
-> 本产品在技术上可通用于任何带有消息漏斗的客户型业务。Phase 1
-> 聚焦招聘行业，以实现精准的市场切入。详见
-> [`docs/strategy/COMPETITORS.md §0`](docs/strategy/COMPETITORS.md)。
-
-通过一系列架构性 PR 从遗留的 Telegram 机器人中抽取而成
-（见 `docs/strategy/ROADMAP.md` 和 git log）。
-
-📖 **另见：** — 完整索引见 [`docs/README.md`](docs/README.md)
-- [`docs/engineering/ARCHITECTURE.md`](docs/engineering/ARCHITECTURE.md) — 数据流、RLS、热重载细节
-- [`docs/engineering/ONBOARDING.md`](docs/engineering/ONBOARDING.md) — 新租户的接入路径（UI + curl）
-- [`docs/engineering/EXCHANGE.md`](docs/engineering/EXCHANGE.md) — 兑换垂直：汇率、guardrails、收款信息、订单
-- [`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md) — 完整环境变量参考
-- [`docs/strategy/ROADMAP.md`](docs/strategy/ROADMAP.md) — 已完成、进行中、下一步
-- [`docs/strategy/COMPETITORS.md`](docs/strategy/COMPETITORS.md) — 竞品分析与定位
+📖 **文档：** [索引](docs/README.md) · [Architecture](docs/engineering/ARCHITECTURE.md) · [Onboarding](docs/engineering/ONBOARDING.md) · [Exchange](docs/engineering/EXCHANGE.md) · [Configuration](docs/engineering/CONFIGURATION.md) · [Roadmap](docs/strategy/ROADMAP.md) · [Competitors](docs/strategy/COMPETITORS.md)
 
 ---
 
-## 自助式租户接入流程
+## 功能速览
 
-完整接入流程——**无需 env 变量，无需重启**：
+| 渠道 | AI 引擎 | 坐席工具 |
+|---|---|---|
+| Telegram Bot + Userbot | RAG：pgvector + BM25 + RRF 融合 | 收件箱 + 会话接管 |
+| WhatsApp Cloud API | 多查询扩展 + MMR + 重排序 | 线索流水线（看板） |
+| 网页挂件（WebSocket） | BYOK LLM（OpenAI / Anthropic / Ollama） | 拖拽式漏斗构建器 |
+| 自动 setWebhook（60 秒） | SPIN / NEPQ / AIDA 方法论 | A/B 实验 + ELO 排名 |
+| 按租户 RLS 隔离 | 护照 OCR + 图片视觉识别 | 群发触达 + 消息模板 |
+| 通用漏斗 phase 主干 | 幻觉防护 + 语义缓存 | 超管面板 · 邀请 · 审计 |
+| 多垂类模板（exchange 已上线） | 按用途的 LLM 路由 | 管理副驾（页面感知，BYOK） |
+
+---
+
+## 引导与配额
+
+自助式——**无需环境变量、无需重启**。公开注册默认关闭（设 `ALLOW_PUBLIC_SIGNUP=1`
+开启）；首位管理员为 `superadmin`。一个强制的、垂类感知的向导会拦截后台入口：
 
 ```
-0. 访问          → 公共注册默认关闭（设 ALLOW_PUBLIC_SIGNUP=1 开启）；租户通过邀请创建。首位 admin = superadmin。
-1. /onboarding   → OnboardingGate 强制完成按垂直定制的必填向导后才解锁后台：
-                   垂直 → 渠道 → LLM →（兑换：汇率 → 收款信息）→ KB → 完成
-2. /channels     → Telegram 标签页：粘贴 @BotFather token → 自动 setWebhook + 加密 + reload
-                   WhatsApp 标签页：粘贴 { phoneNumberId, accessToken } → Meta Graph
-                   校验 → 加密 + Meta dashboard 的 webhook 设置提示
-                   ✓ 渠道立即接收入站消息（Worker reload ≤30s）
-3. /settings     → 保存 OpenAI / Anthropic / Ollama 密钥 → AES-256-GCM 加密，
-                   InMemoryLlmRouter 热重载 → ✓ AI 已就绪
-4. /dashboard    → 上传 .txt / .md / .json → ingest + embed → kb_chunks
-                   ✓ 基于业务知识的 RAG 回复
-5. /conversations → 收件箱，5s 自动轮询。"接管" → mode='human' →
-                   AI 在该对话中静默。"交还 AI" → 恢复
-6. /audit        → 哪个管理员改了什么（所有 PUT/POST/DELETE）
-7. /diagnostics  → 一键对整套配置做健康检查
-8. /dashboard    → PlanWidget：用量条 + "Upgrade Starter $99 / Pro $199"
-                   → Stripe Checkout（14 天试用）→ webhook 提升套餐 →
-                   配额即时增加
+/onboarding → 垂类 → 渠道 → LLM →（兑换：汇率 → 收付款信息）→ 知识库 → 完成
 ```
 
-**各套餐配额**（见 `apps/api/src/lib/plans.ts`）：
+接入 Telegram bot（60 秒自动 `setWebhook`）、WhatsApp 或网页挂件；保存 BYOK
+LLM 密钥（AES-256-GCM 加密）；上传知识库文档。渠道立即开始接收进线，坐席可
+从收件箱接管任意会话。所有变更通过进程内总线 + ≤30 秒的 worker 轮询**实时生效**。
+完整流程见 [docs/engineering/ONBOARDING.md](docs/engineering/ONBOARDING.md)。
 
-| 套餐 | 渠道数 | KB 文档 | 速率/分钟 | 价格 |
+**各档配额**（`apps/api/src/lib/plans.ts`）：
+
+| 套餐 | 渠道 | 知识库文档 | 速率/分钟 | 价格 |
 |---|---|---|---|---|
 | `free` | 100 | 100000 | 120 | $0 |
 | `starter` | 3 | 500 | 60 | $99/月 |
 | `pro` | 10 | 10000 | 120 | $199/月 |
-| `enterprise` | 100 | 100000 | 600 | 定制（自托管） |
+| `enterprise` | 100 | 100000 | 600 | 定制 |
 
-> 在当前以兑换为核心 / 自托管的配置下，`free` 套餐实际**无限制**（无 SaaS 计费）。
-> `starter`/`pro` 套餐在代码中（`apps/api/src/lib/plans.ts`）用于计费路径。
-
-超出 channel/KB 的 POST 限制 → `402 Payment Required`，返回结构化响应
-（`{ reason, limit, current, plan, upgradeHint }`）——UI 显示
-"Upgrade" CTA。
-
-变更通过进程内总线（`apps/api`）加 30 秒轮询重载（`apps/worker`）
-**实时**生效。详见
-[`docs/engineering/ARCHITECTURE.md#hot-reload`](docs/engineering/ARCHITECTURE.md)。
+> 在当前以兑换为主 / 自托管的配置下，`free` 实际上**不限量**（无 SaaS 计费）；
+> `starter`/`pro` 仍保留在代码中以支持 Stripe 计费路径。超过限额 → `402`，
+> 返回 `{ reason, limit, current, plan, upgradeHint }`。
 
 ---
 
 ## 架构
 
-### Apps（可部署进程）
+| 应用 | 说明 |
+|---|---|
+| `apps/api` | HTTP 服务：webhook 处理（telegram / whatsapp / stripe）、`/ws/:slug`（网页）、完整 admin API、`/metrics`、`/healthz` |
+| `apps/worker` | 出站派发（`SKIP LOCKED` 队列）、渠道重载轮询、定时任务 |
+| `apps/admin-ui` | React 19 + Vite SPA（Tailwind v4 + shadcn/ui）——引导向导、仪表盘、渠道、会话、线索、漏斗构建器、审计等 |
+| `apps/vertical-*` | 垂类模板（`exchange` 已上线，另有 real-estate / recruitment / saas / video）——经 `packages/verticals` 加载，不单独部署 |
 
-| App | 是什么 | 部署 |
-|---|---|---|
-| `apps/api` | HTTP 服务器：webhook 处理器（telegram/whatsapp/stripe）、`/ws/:slug`（web）、admin API（auth + KB + LLM 配置 + 渠道 + 对话 + 审计 + 诊断 + 租户暂停）、`/metrics`、`/healthz` | Fly app / Node 托管 |
-| `apps/worker` | 出站调度器（`SKIP LOCKED` 队列）、轮询渠道重载、定时任务 | Fly app 进程组 |
-| `apps/admin-ui` | React 19 + Vite SPA——完整 SaaS UI：强制 onboarding 向导 + dashboard / channels / settings / leads / funnel builder / exchange / conversations / audit / diagnostics + 页面感知 copilot dock | 静态 / CDN |
-| `apps/vertical-*` | 垂直模板——`exchange`（live）、`real-estate`、`recruitment`、`saas`、`video`：KB 种子 + 漏斗阶段 + phase 主干 + 风格提示。不部署，通过 `packages/verticals` 加载 | — |
-
-### Packages（领域模块）
-
-```
-@chatman-media/storage             — Drizzle schema + 迁移、集成 helper
-@chatman-media/observability       — JsonLogger、Counter/Histogram、PlatformMetrics
-@chatman-media/channel-core        — ChannelAdapter 契约、Inbound、OutboundEnvelope
-@chatman-media/channel-telegram    — BotAPI + MTProto userbot
-@chatman-media/channel-whatsapp    — Meta Graph API
-@chatman-media/channel-web         — 基于 WebSocket 的聊天挂件渠道
-@chatman-media/llm-router          — LLM I/O（chat/embed/providers/router）。按租户配置
-@chatman-media/kb                  — RAG（ingest、answer、混合检索、ABRouter、图片分类、护照 OCR）
-@chatman-media/sales               — 销售领域（CoachAnalyzer、StageClassifier、ELO）
-@chatman-media/conversation-engine — pipeline 契约 + DAL + 持久化
-@chatman-media/verticals           — VerticalTemplate 注册表 + 漏斗 phase 主干（phases.ts）
-```
-
-所有 `packages/*` 都以 `@chatman-media` scope 发布到 npm。见
-[发布软件包](#发布软件包)。
-
-**依赖方向**（无环）：
-
-```
-conversation-engine ── llm-router
-                  ├── kb ── llm-router
-                  ├── sales ── kb, llm-router
-                  └── storage
-channel-* ── channel-core
-apps/api ── conversation-engine, channel-*, sales, kb, llm-router
-apps/worker ── conversation-engine, channel-telegram
-```
+领域逻辑位于 `packages/*`（以 `@chatman-media` 域发布到 npm）：`storage`
+（Drizzle schema + 迁移）、`channel-{core,telegram,whatsapp,web}`、`llm-router`、
+`kb`（RAG）、`sales`、`conversation-engine`、`verticals`、`observability`。
+依赖图与拆分事务（split-tx）管线详见 [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)。
 
 ---
 
 ## 快速开始（本地开发）
 
-### 依赖
-
-- [Bun](https://bun.sh) 1.3.14+
-- Docker（用于带 pgvector 的 Postgres）
-
-### 安装
+需要 [Bun](https://bun.sh) 1.3.14+ 和 Docker（Postgres + pgvector）。
 
 ```bash
 git clone git@github.com:chatman-media/lead-engine.git
-cd lead-engine
-bun install
+cd lead-engine && bun install
 
 cp .env.example .env
-# 最少需要：PLATFORM_MASTER_KEY (openssl rand -hex 32)、
-#          TELEGRAM_WEBHOOK_SECRET（任意字符串）、
-#          PLATFORM_PUBLIC_URL=http://localhost:3000（用于 auto-setWebhook）
+# 最少：PLATFORM_MASTER_KEY (openssl rand -hex 32)、
+#       TELEGRAM_WEBHOOK_SECRET（任意字符串）、
+#       PLATFORM_PUBLIC_URL=http://localhost:3000（用于自动 setWebhook）
 
-bun db:up                                                    # postgres@5434
-bun run apps/api/scripts/reset-and-migrate.ts                # 应用迁移
+bun db:up                                       # postgres @ 5434
+bun run apps/api/scripts/reset-and-migrate.ts   # 执行迁移
 
-bun run dev          # apps/api 监听 PORT 3000
+bun run dev          # apps/api  → PORT 3000
 bun run dev:worker   # apps/worker（出站 + 重载轮询）
-cd apps/admin-ui && bun run dev   # admin-ui 在 http://localhost:5173
+cd apps/admin-ui && bun run dev   # admin-ui → http://localhost:5173
 ```
 
-公共注册默认关闭——本地开发请在 `.env` 设 `ALLOW_PUBLIC_SIGNUP=1`，然后打开
-`http://localhost:5173` → 创建 tenant → 完成必填向导（`/onboarding`）：垂直 →
-渠道 → LLM →（兑换：汇率 → 收款信息）→ KB → 完成。
-
-### Bun 快捷命令
+本地开发请设置 `ALLOW_PUBLIC_SIGNUP=1`，打开 admin UI，创建租户并完成向导。
 
 ```bash
-bun db:up          # 启动 Postgres 容器
-bun db:down        # 停止
-bun db:reset       # 删除 + 重新迁移（干净 DB）
-bun db:psql        # 容器内的 psql shell
-bun run typecheck  # 对全部 15 个包跑 tsc
-bun run test       # 对整个 monorepo 跑 bun test（700+ 测试）
+bun db:up / db:down / db:reset / db:psql   # Postgres 容器辅助命令
+bun run typecheck                          # 对所有包执行 tsc
+bun run test                               # 对整个 monorepo 执行 bun test
 ```
 
 ---
 
-## 多租户模型
+## 多租户与安全
 
-每个客户是一行 `tenant`，带唯一的 `slug`。所有领域数据按 `tenant_id`
-隔离：
+每个客户是一行 `tenant`；所有领域数据按 `tenant_id` 隔离。租户相关表启用
+`FORCE ROW LEVEL SECURITY`，所有生产代码路径都用 `withTenant(db, tenantId, fn)`
+包裹仓储调用（在每个事务内设置 `app.tenant_id`）。机密（LLM 密钥、userbot
+会话）以 AES-256-GCM 加密存放在 `tenant_secrets`。
 
-```
-tenants ─┬─ admins（每租户多管理员——invite 流程 TODO）
-         ├─ channels（telegram_bot / telegram_userbot / whatsapp / web）
-         ├─ contacts ─ channel_identities（渠道无关的 人 ↔ 消息账号）
-         ├─ conversations ─ messages
-         ├─ leads ─ lead_events ─ lead_notes
-         ├─ kb_documents ─ kb_chunks（按租户的 RAG）
-         ├─ styles, experiments, skills, ...
-         ├─ outbound_queue（SKIP LOCKED）
-         ├─ tenant_secrets（AES-256-GCM 加密）
-         ├─ llm_provider_configs（按用途：chat | embed | vision | judge | reranker | transcribe）
-         └─ audit_log
-```
-
-### RLS——行级安全
-
-在 34 张按租户隔离的表上启用 `FORCE ROW LEVEL SECURITY`，策略为：
-
-```sql
-USING (tenant_id = current_setting('app.tenant_id', true)::int)
-WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::int)
-```
-
-所有生产代码路径都把 repo 调用包在 `withTenant(db, tenantId, fn)` 中
-——它会开启事务并执行 `SET LOCAL app.tenant_id = X`。
-
-**生产关键：** `apps/api` / `apps/worker` 必须以
-`NOSUPERUSER NOBYPASSRLS` 的 Postgres 角色连接，否则 RLS 会被绕过。
-两个进程在启动时会记录 `info "RLS enforced"` 或
-`warn "RLS not enforced"` 并附带修复提示。
-
-已在 `packages/storage/src/rls.integration.test.ts`（8 个测试）和
-`apps/api/src/multi-tenant.integration.test.ts`（10 个 E2E 测试）中验证。
+> **生产环境：** `apps/api` / `apps/worker` 必须以 `NOSUPERUSER NOBYPASSRLS`
+> 的 Postgres 角色连接，否则 RLS 会被绕过。两者启动时都会记录
+> `"RLS enforced"` / `"RLS not enforced"`。迁移使用单独的 owner 角色运行。
+> 由 RLS 与多租户集成测试覆盖验证。
 
 ---
 
-## 渠道
+## 渠道与管线
 
-| 渠道 | 入站 | 出站 | adapter 位置 |
-|---|---|---|---|
-| `telegram_bot` | webhook `POST /webhook/telegram/:slug`（X-Telegram-Bot-Api-Secret-Token） | `apps/worker` → BotAPI HTTPS | apps/api + apps/worker |
-| `telegram_userbot` | `apps/worker` MTProto 接收循环 | `apps/worker` → MTProto | apps/worker |
-| `whatsapp` | webhook `POST /webhook/whatsapp/:slug`（X-Hub-Signature-256） | `apps/worker` → Meta Graph | apps/api + apps/worker |
-| `web` | WebSocket `/ws/:slug?user=X&auth=Y` | `apps/api` 进程内通过 `WebOutboundDispatcher`（pinned WS） | 仅 apps/api |
-
-**Auto-setWebhook**：插入后，`POST /api/admin/channels/telegram`
-会自动调用 Telegram `setWebhook(url=<PLATFORM_PUBLIC_URL>/webhook/telegram/<slug>,
-secret_token=<TELEGRAM_WEBHOOK_SECRET>)`。渠道立即可用，无需手动 curl。
-
-### 签名校验
-
-- **Telegram**：`X-Telegram-Bot-Api-Secret-Token` = `TELEGRAM_WEBHOOK_SECRET`
-- **WhatsApp**：用 `WHATSAPP_APP_SECRET` 对原始 body 做 `X-Hub-Signature-256` HMAC-SHA256。在 tenant 查找**之前**校验（防枚举）。
-- **Web**：通过 `WEB_WS_AUTH_SECRET` 的可选共享密钥。JWT 是下一次迭代。
-- **Stripe**：用 `STRIPE_WEBHOOK_SECRET` 做 HMAC-SHA256。
-
----
-
-## Pipeline（入站 → 出站）
-
-```
-1. Webhook 处理器接收 HTTP POST                                 (apps/api)
-2. 校验签名 → 失败则 401
-3. 通过 ChannelRegistry（内存）查找 tenant + channel
-4. 按租户做限流检查（默认 60/分钟、600/小时）→ 超限则 429
-5. adapter.pushUpdate(payload) → adapter 收件箱
-6. ┌─ Phase 1（tx1，withTenant）：在 Postgres 内持久化 ──────┐
-   │  - resolveContact（查找或创建 Contact + ChannelIdentity）
-   │  - resolveConversation（按渠道）
-   │  - persist Message（按 external_message_id 唯一去重）
-   │  - vertical-template extractFields 钩子
-   │  - stageClassifier（~300ms LLM）→ applyClassifiedStage
-   │  - memoryExtractor（~500ms LLM）→ mergeAttributes
-   └────────────────────────────────────────────────────────────┘
-7. Phase 2（不在 tx 内）：reply.generate(...) — ~1-2s LLM。连接池连接
-   已释放。
-8. Phase 3（tx2，withTenant）：将 OutboundEnvelope[] 入队 outbound_queue。
-9. Phase 4（异步，不在 tx 内）：如 inbound 含图片且租户配置了
-   purpose='vision' LLM → classifyPhoto() → 如为 "passport" →
-   extractPassportIdentity()（OCR MRZ）→ 合并到 contact.attributes_json。
-   Fire-and-forget——不阻塞 webhook 响应。
-10. Webhook → 200 ack（通常 < 100ms）。
-11. apps/worker（TG/WA/userbot）或 apps/api（web）通过 SKIP LOCKED
-    抽干 outbound_queue → adapter.send → 标记已发送。
-```
-
----
-
-## 热重载（无需重启 app）
-
-| 变更 | 效果 | 延迟 |
+| 渠道 | 进站 | 出站 |
 |---|---|---|
-| `PUT /api/admin/llm-configs/:purpose` | `InMemoryLlmRouter.invalidate(tenantId)` + setConfig + 修改 `LoadedRef.current` | 即时 |
-| `POST /api/admin/channels/telegram` | `apps/api` 中 `ChannelRegistry.reloadTenant(tenantId)` 即时；`apps/worker` 通过轮询拾取 | api 即时，worker ≤30s |
-| `POST /api/admin/channels/whatsapp` | 同上；Meta dashboard 中的 Meta webhook 设置需手动 | api 即时，worker ≤30s |
-| `PUT /api/admin/tenant/status`（暂停/恢复） | reloadChannels——暂停时驱逐，恢复时还原 | api 即时 |
-| `PUT /api/admin/conversations/:id/mode` | 修改 `conversations.mode`，pipeline 立即遵循 | 即时 |
-| Stripe webhook `customer.subscription.*` | 根据 priceId 映射修改 `tenants.plan` | 即时（Stripe 投递后） |
-| KB 上传 | DrizzleKbStore 实时从 DB 读取 | 即时 |
+| `telegram_bot` | webhook + secret-token 头 | `apps/worker` → Bot API |
+| `telegram_userbot` | MTProto 接收循环（apps/api） | 进程内 |
+| `whatsapp` | webhook + `X-Hub-Signature-256` | `apps/worker` → Meta Graph |
+| `web` | WebSocket `/ws/:slug` | 进程内 |
 
-详见 [`docs/engineering/ARCHITECTURE.md#hot-reload`](docs/engineering/ARCHITECTURE.md)。
+进站消息先校验（按渠道验签 → 限流），在 tx1 持久化，经分类与 RAG 生成回复，
+随后在 tx2 入队出站消息，webhook 在 <100ms 内确认；`apps/worker` 通过
+`SKIP LOCKED` 消费 `outbound_queue`。流程图与分步细节见
+[docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)。
 
 ---
 
-## Admin API 端点（SaaS 流程）
+## Admin API
 
-全部在 `/api/admin/*` 下，需要 `Authorization: Bearer <jwt>`（来自 `/api/auth/signup` 或 `/login`）。
-
-```
-GET    /api/auth/me                              — admin + tenant 信息
-POST   /api/auth/signup                          — 创建 tenant + admin
-POST   /api/auth/login                           — 签发 JWT
-POST   /api/auth/logout                          — 失效（客户端侧）
-
-GET    /api/admin/onboarding-status              — gated 向导状态（vertical, channel, chatLlm, isExchange, funnel/rate/requisite, done）
-GET    /api/admin/tenant                         — { id, slug, plan, status, ... }
-PUT    /api/admin/tenant/status                  — { paused: boolean } → 暂停/恢复
-GET    /api/admin/diagnostics                    — 健康检查（channel + LLM + KB）
-
-POST   /api/admin/channels/telegram              — { botToken } → auto-setWebhook
-POST   /api/admin/channels/whatsapp              — { phoneNumberId, accessToken } → Meta Graph 校验 + webhook 设置提示
-GET    /api/admin/channels                       — 列表（不含凭据）
-DELETE /api/admin/channels/:id
-
-PUT    /api/admin/llm-configs/:purpose           — { provider, model, apiKey?, ... }
-GET    /api/admin/llm-configs                    — 列表（不含密钥值）
-DELETE /api/admin/llm-configs/:purpose
-
-POST   /api/admin/kb/documents                   — multipart 文件 或 { title, body, topic? }
-GET    /api/admin/kb/documents                   — 列表
-DELETE /api/admin/kb/documents/:id
-
-GET    /api/admin/conversations                  — 分页列表（cursor）
-GET    /api/admin/conversations/:id              — 线程 + 消息
-POST   /api/admin/conversations/:id/reply        — 坐席回复（mode=human）
-PUT    /api/admin/conversations/:id/mode         — { mode: 'ai'|'human' } 切换接管
-
-GET    /api/admin/audit-log                      — cursor 分页的审计历史
-
-GET    /api/admin/billing/plan                   — 当前套餐 + 用量 + 状态
-GET    /api/admin/billing/plans                  — 列出 4 个档位 + stripeEnabled 布尔
-POST   /api/admin/billing/checkout               — { plan: 'starter'|'pro' } → Stripe Checkout URL
-POST   /api/admin/billing/portal                 — Stripe Customer Portal URL
-```
+`/api/admin/*` 下约 120 个 REST 端点（Bearer JWT，来自 `/api/auth/login`）：
+认证与邀请、引导状态、渠道、LLM 配置、知识库、会话、线索 + 漏斗构建器、
+风格、实验、计费（Stripe）、群发触达及超管。可浏览
+[`apps/api/src/routes/`](apps/api/src/routes)；端到端租户流程见
+[docs/engineering/ONBOARDING.md](docs/engineering/ONBOARDING.md)。
 
 ---
 
@@ -356,99 +177,60 @@ POST   /api/admin/billing/portal                 — Stripe Customer Portal URL
 DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 ```
 
-**791 个测试**，分布在 13 个包中。
-worker: 15；storage: 15；channel-whatsapp: 17；observability: 16；channel-telegram: 11；
-channel-web: 11；llm-router: 9；verticals: 6；vertical-recruitment-uae: 5）。重点：
-
-- **多租户 E2E**（`apps/api/src/multi-tenant.integration.test.ts`）：通过真实 webhook 处理器 + admin API 的租户隔离
-- **RLS 契约**（`packages/storage/src/rls.integration.test.ts`）：非绕过角色校验
-- **withTenant 接线**：apps/api + apps/worker 中的回归 oracle
-- **拆分 processInbound 不变式**：`events.indexOf("llm-call") < events.indexOf("tx-open")`
-- **SaaS 路由**（auth、KB、LLM 配置、channels、conversations、onboarding、audit、diagnostics、租户暂停）：约 250 个集成测试
-- **限流器**：6 个单元 + 3 个 webhook 集成测试
-- **热重载**：6 个 tenant-reloader 测试（LLM + channels）
-
-带覆盖率运行：
-
-```bash
-bun test --coverage
-```
-
----
-
-## 发布软件包
-
-`packages/*` 中的 `@chatman-media/*` 包在每次推送到 `main` 时通过
-[semantic-release](https://semantic-release.gitbook.io/) 发布到 npm。
-版本按每个包独立计算，依据
-[Conventional Commits](https://www.conventionalcommits.org/) 并按包目录
-进行 scope（[semantic-release-monorepo](https://github.com/pmowrer/semantic-release-monorepo)）。
-
-- 触及 `packages/kb` 的 `feat:` 提交会为 `@chatman-media/kb` 切出 `minor`。
-- `fix:` → `patch`；`feat!:` / `BREAKING CHANGE:` → `major`。
-- 每次发布都会打标签 `@chatman-media/<pkg>-vX.Y.Z`，更新包的
-  `CHANGELOG.md`，发布到 npm，并创建 GitHub Release。
-- Workspace 依赖（`workspace:*`）在发布时通过 `bun publish` 解析为具体版本。
-
-CI 按依赖顺序发布各包，使相互依赖的包总能正确解析。需要在仓库
-secret 中配置具有 `@chatman-media` scope 发布权限的 `NPM_TOKEN`。
+15 个包中 950+ 个测试——经真实 webhook 处理的多租户 E2E、RLS 非绕过契约、
+RAG 管线（约 180）、SaaS 路由集成，以及兑换工作流 mock。覆盖率：
+`bun test --coverage`。更多见 [docs/engineering/TESTING.md](docs/engineering/TESTING.md)。
 
 ---
 
 ## 部署
 
-### 环境变量
+关键环境变量（完整参考见 [docs/engineering/CONFIGURATION.md](docs/engineering/CONFIGURATION.md)；
+运维见 [docs/operations/SERVER_RUNBOOK.md](docs/operations/SERVER_RUNBOOK.md)）：
 
-下面是核心变量；**完整参考**（所有变量，按组、必需/可选）见
-[`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md)。copy-paste
-模板：[`.env.example`](.env.example)。
+| 变量 | 说明 |
+|---|---|
+| `DATABASE_URL` ✅ | Postgres——**生产用 NOSUPERUSER NOBYPASSRLS 角色** |
+| `PLATFORM_MASTER_KEY` ✅ | 32 字节十六进制，用于 AES-256-GCM（`tenant_secrets`） |
+| `TELEGRAM_WEBHOOK_SECRET` ✅ | `X-Telegram-Bot-Api-Secret-Token` 头 |
+| `PLATFORM_PUBLIC_URL` | apps/api 的基础 URL，用于自动 `setWebhook` |
+| `STRIPE_*` | secret key + price ID + webhook secret（留空 → 关闭计费） |
+| `RATE_LIMIT_PER_MIN` / `_PER_HOUR` | 默认 60 / 600（`0` = 关闭——生产勿关） |
 
-| 变量 | 必需 | 说明 |
-|---|---|---|
-| `DATABASE_URL` | ✅ | Postgres 连接。**生产中使用 NOSUPERUSER NOBYPASSRLS 角色** |
-| `PLATFORM_MASTER_KEY` | ✅ | AES-256-GCM 用的 32 字节 hex（tenant_secrets） |
-| `TELEGRAM_WEBHOOK_SECRET` | ✅ | X-Telegram-Bot-Api-Secret-Token 头 |
-| `PLATFORM_PUBLIC_URL` | 可选 | apps/api 的基础 URL，用于 auto-setWebhook（`https://api.example.com`） |
-| `ALLOW_PUBLIC_SIGNUP` | 可选 | `1` 开启公共 `/api/auth/signup`（默认关闭 → 403） |
-| Stripe / LLM / WhatsApp / userbot / rate-limit / worker | 可选 | 见 [`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md) |
-
-### 生产检查清单
-
-- [ ] apps 使用 `NOSUPERUSER NOBYPASSRLS` 的 Postgres 角色（非 owner / 非 superuser）
-- [ ] 迁移在单独的 BYPASSRLS 角色（owner / superuser）下运行
-- [ ] 若启用 WhatsApp，则设置 `WHATSAPP_APP_SECRET`
-- [ ] 若启用 web 渠道，则设置 `WEB_WS_AUTH_SECRET`（或 JWT auth）
-- [ ] 通过 `rotate-master-key.ts` 脚本轮换 `PLATFORM_MASTER_KEY`
-- [ ] 为 auto-setWebhook 体验设置 `PLATFORM_PUBLIC_URL`（Telegram 渠道接入）
-- [ ] 设置 `RATE_LIMIT_*`（生产中不要禁用——失控成本保护）
-- [ ] Stripe：`STRIPE_SECRET_KEY` + `STRIPE_PRICE_STARTER` + `STRIPE_PRICE_PRO` +
-      `STRIPE_WEBHOOK_SECRET` + 成功/取消 URL。在 Stripe dashboard 中
-      把 webhook 注册到 `<PLATFORM_PUBLIC_URL>/webhook/stripe`
-- [ ] 启动日志检查：info 中出现 `"RLS enforced"`；`"RLS not enforced"` warn = 配置有误
+迁移用 owner / BYPASSRLS 角色运行，应用用受限角色。完整生产清单见
+[docs/operations/SERVER_RUNBOOK.md](docs/operations/SERVER_RUNBOOK.md)。
 
 ---
 
-## 路线图与竞品
+## 定位
 
-- **已完成 / 进行中 / 下一步** — 见 [`docs/strategy/ROADMAP.md`](docs/strategy/ROADMAP.md)
-- **市场分析与定位** — 见 [`docs/strategy/COMPETITORS.md`](docs/strategy/COMPETITORS.md)
+| | **Lead Engine** | Intercom Fin | Chatbase | Decagon |
+|---|:---:|:---:|:---:|:---:|
+| 原生 Telegram | ✅ | ❌ | ❌ | ❌ |
+| WhatsApp / 网页 | ✅ | ✅ | 网页 | 网页 |
+| BYOK LLM | ✅ | ❌ | 部分 | ❌ |
+| 人工接管 | ✅ | ✅ | ❌ | ✅ |
+| 线索流水线 + 漏斗构建器 | ✅ | ❌ | ❌ | ❌ |
+| 自托管 / 开源 | ✅ MIT | ❌ | ❌ | ❌ |
 
-TL;DR 产品定位：**面向以消息为中心的市场（Telegram / WhatsApp）的
-AI 优先客户服务**。像 Intercom Fin / Sierra / Decagon 这类竞品偏企业级
-且以 web 聊天为主。Chatbase / CustomGPT 是简单的知识机器人，没有人工
-接管，也没有 channels-as-a-service。我们的定位：开放架构 + BYOK +
-Telegram 优先 + 完整的坐席工作流（收件箱 + 回复 + 审计 + 诊断）。
+定位：面向以即时通讯为中心的市场（Telegram / WhatsApp）、AI 优先、支持 BYOK
+且具备完整坐席工作流的客户服务。完整分析与路线图：
+[docs/strategy/COMPETITORS.md](docs/strategy/COMPETITORS.md) · [docs/strategy/ROADMAP.md](docs/strategy/ROADMAP.md)。
 
 ---
 
-## 许可证
+## 贡献与许可
+
+欢迎 PR。请使用 [Conventional Commits](https://www.conventionalcommits.org/)
+（`feat:` / `fix:` / …）——semantic-release 据此推导版本并在推送到 `main` 时
+将 `@chatman-media/*` 发布到 npm。提交前请运行 `bun run typecheck && bun test`，
+并在改动 `apps/api` 或各包前阅读 [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
+（RLS / `withTenant` 与 split-tx 契约是关键不变量）。
 
 [MIT](LICENSE) — Alexander Kireev / [chatman-media](https://github.com/chatman-media)
 
----
-
 <div align="center">
 
-[🇬🇧 English](README.md) &nbsp;·&nbsp; [🇷🇺 Русский](README.ru.md) &nbsp;·&nbsp; 🇨🇳 **中文**
+[🇬🇧 English](README.md) &nbsp;·&nbsp; [🇷🇺 Русский](README.ru.md) &nbsp;·&nbsp; [⬆ 顶部](#top)
 
 </div>
