@@ -18,6 +18,7 @@ import {
 	verifyAuthToken,
 	verifyPassword,
 } from "../lib/auth.ts";
+import { isUniqueViolation } from "../lib/db-errors.ts";
 import {
 	forgotPasswordEmailHtml,
 	type Mailer,
@@ -155,8 +156,7 @@ export function makeAuthRoutes(opts: AuthRoutesOpts): Hono {
 					.returning();
 				if (t) tenantRow = { id: t.id, slug: t.slug };
 			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				if (msg.includes("unique") || msg.includes("duplicate")) {
+				if (isUniqueViolation(err)) {
 					if (customSlug) {
 						// Если пользователь явно задал — вернуть 409 (не reroll'им).
 						return c.json({ error: "tenantSlug already taken" }, 409);

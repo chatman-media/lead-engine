@@ -111,7 +111,9 @@ describe("admin-billing", () => {
     };
     expect(body.plan.kind).toBe("free");
     expect(body.plan.label).toBe("Free");
-    expect(body.plan.maxChannels).toBe(1);
+    // Free теперь эффективно безлимитен — кастомная обменка без SaaS-биллинга
+    // (см. apps/api/src/lib/plans.ts: maxChannels=100 как «большой запас»).
+    expect(body.plan.maxChannels).toBe(100);
     expect(body.usage.channels).toBe(0);
     expect(body.usage.kbDocuments).toBe(0);
     expect(body.status).toBe("ok");
@@ -144,10 +146,12 @@ describe("admin-billing", () => {
     expect(body.plan.priceUsd).toBe(99);
   });
 
-  it("downgrade back to free + усиленный insert → over_limit_channels status", async () => {
+  it("starter plan + каналы сверх лимита → over_limit_channels status", async () => {
     if (!sql) return;
     const now = Math.floor(Date.now() / 1000);
-    // Insert 2 каналов (free limit=1)
+    // Starter limit = 3 канала; вставляем 4 → over limit. (Free теперь
+    // эффективно безлимитен — кастомная обменка без SaaS-биллинга, см. plans.ts,
+    // поэтому over-limit-логику проверяем на платном тарифе с конечным лимитом.)
     await db.insert(channels).values([
       {
         tenantId,
@@ -165,26 +169,48 @@ describe("admin-billing", () => {
         createdAt: now,
         updatedAt: now,
       },
+      {
+        tenantId,
+        kind: "telegram_bot",
+        externalId: "over3",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        tenantId,
+        kind: "telegram_bot",
+        externalId: "over4",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
     ]);
     await db
       .update(tenants)
-      .set({ plan: "free" })
+      .set({ plan: "starter" })
       .where(eq(tenants.id, tenantId));
 
     const res = await authReq("/api/admin/billing/plan");
     const body = (await res.json()) as { usage: { channels: number }; status: string };
-    expect(body.usage.channels).toBe(2);
+    expect(body.usage.channels).toBe(4);
     expect(body.status).toBe("over_limit_channels");
 
     // cleanup для следующих тестов
     await db.delete(channels).where(eq(channels.tenantId, tenantId));
   });
 
-  it("free plan + KB upload до limit → ok, потом 402", async () => {
+  it("starter plan + KB upload до limit → потом 402", async () => {
     if (!sql) return;
-    // Free limit = 50. Симулируем insert 50 docs прямо в БД (быстрее upload x50).
+    // Starter limit = 500. Симулируем insert 500 docs прямо в БД (быстрее
+    // upload x500). Free теперь без практического лимита (обменка без
+    // SaaS-биллинга), поэтому quota-enforcement проверяем на Starter.
+    await db
+      .update(tenants)
+      .set({ plan: "starter" })
+      .where(eq(tenants.id, tenantId));
     const now = Math.floor(Date.now() / 1000);
-    const rows = Array.from({ length: 50 }, (_, i) => ({
+    const rows = Array.from({ length: 500 }, (_, i) => ({
       tenantId,
       source: `seed-${i}`,
       title: `Seed ${i}`,
@@ -199,7 +225,7 @@ describe("admin-billing", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: "Should be blocked",
-        body: "Этот документ должен быть отвергнут — лимит free=50.",
+        body: "Этот документ должен быть отвергнут — лимит starter=500.",
       }),
     });
     expect(res.status).toBe(402);
@@ -212,9 +238,9 @@ describe("admin-billing", () => {
     };
     expect(body.error).toBe("quota_exceeded");
     expect(body.reason).toBe("max_kb_documents");
-    expect(body.limit).toBe(50);
-    expect(body.current).toBe(50);
-    expect(body.plan).toBe("free");
+    expect(body.limit).toBe(500);
+    expect(body.current).toBe(500);
+    expect(body.plan).toBe("starter");
   });
 
   it("upgrade в pro → previously-blocked upload должен пройти", async () => {

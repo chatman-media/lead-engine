@@ -3,6 +3,7 @@ import { referralCodes } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
+import { isUniqueViolation } from "../lib/db-errors.ts";
 
 export interface AdminReferralRoutesOpts {
   // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
@@ -75,8 +76,7 @@ export function makeAdminReferralRoutes(opts: AdminReferralRoutesOpts): Hono {
       );
       row = inserted!;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("unique") || msg.includes("duplicate")) {
+      if (isUniqueViolation(err)) {
         return c.json({ error: "code already exists" }, 409);
       }
       throw err;
