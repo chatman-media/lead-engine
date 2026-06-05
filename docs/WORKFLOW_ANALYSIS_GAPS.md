@@ -3,6 +3,16 @@
 _Дата обновления: 2026-05-29_
 _Статус: переоценка после universal pipeline; exchange action layer подтянут из PR #140_
 
+> **Update 2026-06-05 (PR #160):** появился **универсальный костяк воронки**
+> (`stage_definitions.phase`, `packages/verticals/src/phases.ts`, миграция
+> `0031`) — общая ось фаз `capture → qualify → offer → clear → fulfill →
+> won/lost` над всеми 5 вертикалями + `validateBackbone()` +
+> `phase-stats`. Это закрывает значительную часть «двух расходящихся слоёв
+> воронки» (§1.1): фазовая семантика теперь общая и валидируется. Актуальное
+> описание — [`ARCHITECTURE.md#funnel-phase-backbone`](ARCHITECTURE.md) и
+> [`VERTICALS.md`](VERTICALS.md). Каталог stage/field types также сведён в
+> единый `STAGE_TYPES`/`FIELD_TYPES` (см. §1.0).
+
 Документ фиксирует не маркетинговое описание, а операционные разрывы между
 реальным процессом клиента, текущим `main` и концепцией универсальных стадий.
 

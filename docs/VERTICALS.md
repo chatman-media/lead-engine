@@ -1,6 +1,6 @@
 # Lead Engine: Вертикали и ниши
 
-_Обновлено: 2026-05-26. Внутренний документ._
+_Обновлено: 2026-06-05. Внутренний документ._
 
 Сводная карта всех вертикалей — от уже реализованных до перспективных ниш (Пхукет / Таиланд и универсальные).
 
@@ -8,9 +8,52 @@ _Обновлено: 2026-05-26. Внутренний документ._
 
 ## Статусы
 
-- **Phase 1** — реализовано, текущий ICP
+- **Implemented** — есть vertical template в коде (`apps/vertical-*`), сидится из UI
+- **Phase 1** — реализовано, текущий GTM-ICP
 - **Phase 2** — запланировано в роадмапе
 - **Prospect** — перспективная ниша, не начата
+
+---
+
+## Реализованные вертикали (vertical templates)
+
+В коде есть **5 vertical templates** (`apps/vertical-*`, зарегистрированы в
+`apps/api`), каждый сеет воронку + intake-анкету + стили из UI:
+
+| Template slug | Ниша | Seed key | Статус |
+|---|---|---|---|
+| `exchange_v1` | Обменник (крипта/RUB → THB наличные) | `exchange` | ✅ **live, самая активная** |
+| `recruitment_v1` | Найм (UAE/виза) | `recruitment` | ✅ прод (GTM-ICP) |
+| `real_estate_v1` | Недвижимость (Dubai) | `real_estate` | ✅ |
+| `saas_v1` | SaaS-продукт | `saas` | ✅ |
+| `video_v1` | Видеопродакшн | `video` | ✅ |
+
+(Плюс seed-шаблон `recruitment_generic` — упрощённая HR-воронка без UAE-специфики.)
+
+### Универсальный костяк воронки (`phase`)
+
+Поверх произвольных стадий у всех вертикалей лежит общая ось фаз
+(`packages/verticals/src/phases.ts`, миграция `0031_stage_phase.sql`):
+
+```
+capture → qualify → offer → [clear] → [fulfill] → won / lost
+```
+
+`qualify`/`offer` обязательны; `clear` (KYC/комплаенс/документы) и `fulfill`
+(доставка/оплата) опциональны; `capture`/`won`/`lost` выводятся из `kind`.
+Маппинг стадий каждой вертикали на фазы:
+
+| Вертикаль | capture | qualify | offer | clear | fulfill | won / lost |
+|---|---|---|---|---|---|---|
+| **exchange** | intent_detected | exchange_request | quote_calculated | verification_check, kyc_collection, risk_review | order_created, requisites_sent, payment_proof_waiting, payment_verified | payout_or_completion / cancelled |
+| **real_estate** | qualification | viewings | offer_negotiation, mou_signed | noc_application, mortgage_approval | — | dld_transfer / deal_lost |
+| **recruitment** | intake_pending | intake_complete, partner_review | approved | docs_pending, docs_complete, visa_* | ready_to_work | closed / rejected |
+| **saas** | discovery | qualified, demo_scheduled | demo_done, proposal_sent, negotiation | — | — | signed / lost |
+| **video** | inquiry | brief_call | quote_sent, quote_approved | — | shoot_scheduled, editing, delivery | invoiced / declined |
+
+Костяк валидируется (`validateBackbone`) при AI-сборке и `apply`; cross-vertical
+метрика — `GET /api/admin/funnel/phase-stats`. Технические детали —
+[`ARCHITECTURE.md#funnel-phase-backbone`](ARCHITECTURE.md).
 
 ---
 
@@ -50,7 +93,7 @@ Workflow:
 
 ---
 
-### 2. Недвижимость (продажа) ★★★★★ — Phase 2 (ноябрь 2026)
+### 2. Недвижимость (продажа) ★★★★★ — Phase 2 (ноябрь 2026) · template `real_estate_v1` ✅ готов
 
 Workflow:
 - Входящий → квалификация (тип объекта, бюджет, цель — инвест/проживание)

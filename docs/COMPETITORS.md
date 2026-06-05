@@ -196,9 +196,13 @@ BYOK + Telegram-native + multi-tenant + operator-handoff + готовность
 | Тир | Якоря рынка | Типичный ACV / месяц | Что Lead Engine должен брать |
 |-----|-------------|----------------------|------------------------------|
 | **Free / hobby** | Chatbase Free, Botpress Free, ManyChat Free | $0, ограничение ~100–1K msgs | Free: 1 tenant, 100 LLM-ответов/мес, только BYOK — funnel hook |
-| **SMB Starter** | Chatbase Hobby $40, Tidio $24+, Lyro $39, Threado $49, Helpshift $150 | $30–$150/мес | **$49/мес**: 1 tenant, Telegram + 1 канал, 2K msgs, 1 оператор, BYOK |
-| **SMB Growth** | Chatbase Standard $150, Crisp Essentials $95, Lyro $79–149, Tidio mid | $80–$200/мес | **$149/мес**: 3 канала, 10K msgs, 3 оператора, RAG до 50MB, agency mode preview |
-| **Pro / agency** | Chatbase Pro $500, Crisp Plus/Unlimited $295–495, Botpress Team $495, Sendbird Starter $349 | $300–$700/мес | **$499/мес**: безлимит tenant'ов под одной org, 50K msgs, white-label, SLA |
+| **SMB Starter** | Chatbase Hobby $40, Tidio $24+, Lyro $39, Threado $49, Helpshift $150 | $30–$150/мес | **$99/мес**: 3 канала, 500 docs, 60 msg/min, BYOK |
+| **SMB Growth** | Chatbase Standard $150, Crisp Essentials $95, Lyro $79–149, Tidio mid | $80–$200/мес | **$199/мес**: 10 каналов, 10K docs, 120 msg/min, agency mode preview |
+| **Pro / agency** | Chatbase Pro $500, Crisp Plus/Unlimited $295–495, Botpress Team $495, Sendbird Starter $349 | $300–$700/мес | **$499/мес** (план): безлимит tenant'ов под одной org, white-label, SLA |
+
+> **Реализовано** (PR #41, май 2026): pivot $49/$149 → **$99/$199**. Живые тиры
+> в коде — `free` / `starter $99` / `pro $199` / `enterprise` (custom);
+> agency $499 white-label — пока план (см. ROADMAP M12/M16).
 | **Enterprise / self-host** | Rasa Pro $35K+/год, Cognigy $2.5K+/мес, Forethought $56K/год, Ada $30K+/год | $30K–$300K/год | **От $24K/год** за on-prem deployment + support; usage-тиры сверху |
 
 Add-on логика повторяет рынок:

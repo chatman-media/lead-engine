@@ -77,6 +77,8 @@ PRs (see `docs/ROADMAP.md` and the git log).
 | — | Passport OCR + photo vision | Superadmin panel (tenant list + plan mgmt) |
 | — | Hallucination guard + semantic cache | Forgot/reset password flow |
 | — | Per-purpose LLM routing | Admin invite flow + roles |
+| — | Universal funnel phase backbone | Admin copilot (page-aware, BYOK) |
+| — | Multi-vertical templates (exchange live) | Exchange rate-card + guardrails + ops alerts |
 
 > **Screenshot / GIF coming soon** — admin UI preview (inbox · lead pipeline · funnel builder)
 
@@ -87,8 +89,11 @@ PRs (see `docs/ROADMAP.md` and the git log).
 The full onboarding cycle — **no env vars, no restarts**:
 
 ```
-1. /signup       → email + password → JWT + tenant created (free plan) →
-                   redirect to /onboarding (guided wizard: channel → keys → KB → done)
+0. access        → public signup is CLOSED by default (ALLOW_PUBLIC_SIGNUP=1 to
+                   open); tenants are created via invite. First admin = superadmin.
+1. /onboarding   → OnboardingGate forces a mandatory, vertical-aware wizard
+                   before the cabinet unlocks: vertical → channel → LLM →
+                   (exchange: rates → requisites) → KB → done
 2. /channels     → Telegram tab: paste @BotFather token → auto setWebhook + encrypt + reload
                    Personal tab: phone → code → 2FA (MTProto userbot, superadmin)
                    WhatsApp tab: paste { phoneNumberId, accessToken } → Meta Graph
@@ -111,10 +116,14 @@ The full onboarding cycle — **no env vars, no restarts**:
 
 | Plan | Channels | KB docs | Rate/min | Price |
 |---|---|---|---|---|
-| `free` | 1 | 50 | 30 | $0 |
+| `free` | 100 | 100000 | 120 | $0 |
 | `starter` | 3 | 500 | 60 | $99/mo |
 | `pro` | 10 | 10000 | 120 | $199/mo |
 | `enterprise` | 100 | 100000 | 600 | custom (self-host) |
+
+> In the current exchange-focused / self-host config the `free` plan is
+> effectively **unlimited** (no SaaS billing). The `starter`/`pro` tiers exist
+> in code (`apps/api/src/lib/plans.ts`) for the billing path.
 
 Exceeding a channel/KB POST limit → `402 Payment Required` with a structured
 response (`{ reason, limit, current, plan, upgradeHint }`) — the UI shows an
@@ -135,7 +144,7 @@ Changes apply **live** through an in-process bus (`apps/api`) plus a
 | `apps/api` | HTTP server: webhook handlers (telegram/whatsapp/stripe), `/ws/:slug` (web), admin API (auth + KB + LLM config + channels + conversations + leads + funnel builder + skills + styles + experiments + audit + diagnostics + tenant pause), `/metrics`, `/healthz` | Fly app / Node hosting |
 | `apps/worker` | Outbound dispatcher (`SKIP LOCKED` queue), polling channel-reload, cron jobs | Fly app process group |
 | `apps/admin-ui` | React 19 + Vite SPA on **Tailwind v4 + shadcn/ui** (Linear theme, left sidebar, light/dark) — full SaaS UI: guided onboarding wizard + dashboard / channels / settings / conversations / leads / funnel builder / skills / styles / experiments / team / audit / diagnostics | Static / CDN |
-| `apps/vertical-recruitment-uae` | Vertical template (KB seed + funnel stages + style prompts) — NOT deployed, loaded via `packages/verticals` | — |
+| `apps/vertical-*` | Vertical templates — `exchange` (live), `real-estate`, `recruitment`, `saas`, `video`: KB seed + funnel stages + phase backbone + style prompts. NOT deployed, loaded via `packages/verticals` | — |
 
 ### Packages (domain modules)
 
@@ -150,7 +159,7 @@ Changes apply **live** through an in-process bus (`apps/api`) plus a
 @chatman-media/kb                  — RAG (ingest, answer, hybrid search, ABRouter, photo classification + passport OCR)
 @chatman-media/sales               — sales domain (CoachAnalyzer, StageClassifier, ELO)
 @chatman-media/conversation-engine — pipeline contracts + DAL + persistence
-@chatman-media/verticals           — VerticalTemplate registry (recruitment_uae_v1)
+@chatman-media/verticals           — VerticalTemplate registry + funnel phase backbone (phases.ts)
 ```
 
 All `packages/*` are published to npm under the `@chatman-media` scope. See
@@ -197,8 +206,10 @@ bun run dev:worker   # apps/worker (outbound + reload polling)
 cd apps/admin-ui && bun run dev   # admin-ui on http://localhost:5173
 ```
 
-Open `http://localhost:5173/signup` → create a tenant → guided onboarding
-wizard (`/onboarding`): channel → API keys → knowledge base → done.
+Public signup is closed by default — for local dev set `ALLOW_PUBLIC_SIGNUP=1`
+in `.env`, then open `http://localhost:5173` → create a tenant → the mandatory
+guided wizard (`/onboarding`): vertical → channel → LLM → (exchange: rates →
+requisites) → KB → done.
 
 Server update / production runbook: [docs/SERVER_RUNBOOK.md](docs/SERVER_RUNBOOK.md).
 
@@ -230,7 +241,7 @@ tenants ─┬─ admins (multi-admin per tenant + invite flow) ─ admin_invite
          ├─ styles, experiments, skills, ...
          ├─ outbound_queue (SKIP LOCKED)
          ├─ tenant_secrets (AES-256-GCM encrypted)
-         ├─ llm_provider_configs (per-purpose: chat | embed | vision | judge)
+         ├─ llm_provider_configs (per-purpose: chat | embed | vision | judge | reranker | transcribe)
          └─ audit_log
 ```
 
@@ -369,7 +380,7 @@ POST   /api/auth/reset-password                  — consume token + set new pas
 POST   /api/auth/change-password                 — change password (authenticated)
 POST   /api/auth/accept-invite                   — accept team invite token
 
-GET    /api/admin/onboarding-status              — checklist (channel/llm/kb)
+GET    /api/admin/onboarding-status              — gated-wizard status (vertical, channel, chatLlm, isExchange, funnel/rate/requisite counts, done)
 GET    /api/admin/tenant                         — { id, slug, plan, status, ... }
 PUT    /api/admin/tenant/status                  — { paused: boolean } → pause/resume
 GET    /api/admin/diagnostics                    — health check (channel + LLM + KB)
@@ -408,7 +419,7 @@ PUT    /api/admin/leads/:id/field-values         — bulk upsert stage field val
 POST   /api/admin/leads/:id/notes               — add operator note
 
 GET    /api/admin/funnel                         — funnel + stage_definitions + stage_fields
-POST   /api/admin/funnel/seed                    — seed from template (visa/real_estate/modeling/recruitment)
+POST   /api/admin/funnel/seed                    — seed from template (exchange/real_estate/recruitment/recruitment_generic/saas/video/visa/modeling/skeleton)
 POST   /api/admin/funnel/stages                  — create stage
 PATCH  /api/admin/funnel/stages/:id              — update stage config (incl. supportMode)
 DELETE /api/admin/funnel/stages/:id              — delete stage
@@ -510,9 +521,9 @@ resolve. Requires an `NPM_TOKEN` repository secret with publish rights to the
 | `PLATFORM_MASTER_KEY` | ✅ | 32-byte hex for AES-256-GCM (tenant_secrets) |
 | `PLATFORM_AUTH_SECRET` | opt | HMAC secret for JWT-like auth tokens (falls back to MASTER_KEY) |
 | `TELEGRAM_WEBHOOK_SECRET` | ✅ | X-Telegram-Bot-Api-Secret-Token header |
-| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | opt | MTProto app credentials (my.telegram.org). Required for userbot onboarding. Empty → Personal tab hidden, routes return 503 |
+| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | opt | MTProto app credentials (my.telegram.org). **Fallback** for userbot — creds are per-tenant in `tenant_secrets`; if absent there and in env, `/userbot/start` returns `400` asking for them |
 | `PLATFORM_PUBLIC_URL` | opt | Base URL of apps/api for auto-setWebhook (`https://api.example.com`) |
-| `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | opt | Meta webhook setup |
+| `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | opt | Meta webhook setup. **Fallback** — these are also per-tenant in `tenant_secrets` |
 | `WEB_WS_AUTH_SECRET` | opt | Shared secret for `/ws/:slug?auth=...` |
 | `STRIPE_SECRET_KEY` | opt | `sk_test_xxx` / `sk_live_xxx`. Empty → `/checkout` and `/portal` return 503 |
 | `STRIPE_PRICE_STARTER` / `STRIPE_PRICE_PRO` | opt | Price IDs from the Stripe dashboard. The webhook handler maps priceId → plan |

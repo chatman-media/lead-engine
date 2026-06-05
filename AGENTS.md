@@ -8,7 +8,7 @@ For architecture and feature overview see [README.md](README.md) and [docs/ROADM
 ## Dev environment
 
 - **Runtime:** [Bun](https://bun.sh) 1.3.14+. Never use Node/npm directly.
-- **Database:** PostgreSQL 15 + pgvector, via Docker Compose on port **5434** (not 5432 — avoids conflicts with other local Postgres instances).
+- **Database:** PostgreSQL 17 + pgvector (`pgvector/pgvector:pg17`), via Docker Compose on port **5434** (not 5432 — avoids conflicts with other local Postgres instances).
 - **Linter/formatter:** [Biome](https://biomejs.dev/). Run `bun run check` to lint+format. CI runs the same check.
 
 ### First-time setup
@@ -44,15 +44,22 @@ bun run check         # biome lint + format check
 
 ## Dev login
 
-After `bun db:reset` the DB is empty. Register via UI or curl:
+After `bun db:reset` the DB is empty. **Public signup is closed by default**
+(`POST /api/auth/signup` → `403 signup_disabled`) — for local dev set
+`ALLOW_PUBLIC_SIGNUP=1` in `.env` first, then register via UI or curl:
 
 ```bash
+# .env: ALLOW_PUBLIC_SIGNUP=1
 curl -s -X POST http://localhost:3000/api/auth/signup \
   -H 'Content-Type: application/json' \
   -d '{"email":"bob@demo.io","password":"test1234"}' | jq .token
 ```
 
 **Default dev credentials:** `bob@demo.io` / `test1234`
+
+After signing in, the `OnboardingGate` redirects to `/onboarding` until the
+mandatory wizard is complete (channel + chat-LLM; exchange also needs funnel +
+rate + requisite). See [docs/ONBOARDING.md](docs/ONBOARDING.md).
 
 The first admin of a tenant gets `role=superadmin` automatically. To test cross-tenant isolation or manager-role restrictions, sign up a second tenant or invite a manager:
 
@@ -170,7 +177,7 @@ packages/
   channel-whatsapp   — Meta Graph API
   channel-web        — WebSocket chat widget
   observability      — JsonLogger, PlatformMetrics
-  verticals          — VerticalTemplate registry
+  verticals          — VerticalTemplate registry + funnel phase backbone (phases.ts)
 
 apps/
   api                — Hono HTTP server: webhooks + admin API + WS
@@ -178,7 +185,9 @@ apps/
   admin-ui           — React 19 + Vite SPA (Tailwind v4 + shadcn/ui)
   widget             — Embed script < 50KB gzip
   landing            — Marketing site
-  vertical-*         — Vertical template packages (real_estate, saas, video, recruitment)
+  vertical-*         — Vertical template packages: exchange (exchange_v1),
+                       real-estate (real_estate_v1), recruitment (recruitment_v1),
+                       saas (saas_v1), video (video_v1)
 ```
 
 **Dependency direction (acyclic):**
@@ -207,19 +216,24 @@ conversations       — tenantId, contactId, channelId, mode (ai/human)
 messages            — conversationId, role (user/assistant/human), content
 leads               — tenantId, userId (contactId), state, stageDefinitionId
 lead_field_values   — leadId, fieldId, value
-funnels             — tenantId, slug, stagesJson
-stage_definitions   — tenantId, funnelId, slug, kind (intake/active/terminal_won/terminal_lost)
+funnels             — tenantId, slug, verticalTemplateId, stagesJson
+stage_definitions   — tenantId, funnelId, slug, kind (intake/active/terminal_won/terminal_lost), phase (qualify/offer/clear/fulfill — костяк)
 kb_documents        — tenantId, title, contentHash (dedup)
 kb_chunks           — documentId, embedding (vector), text, topic
 outbound_queue      — tenantId, channelId, payloadJson, scheduledAt, sentAt (SKIP LOCKED)
 tenant_secrets      — tenantId, key, value (AES-256-GCM encrypted)
-llm_provider_configs — tenantId, purpose (chat/embed/vision/judge), provider, model
+llm_provider_configs — tenantId, purpose (chat/embed/vision/judge/reranker/transcribe), provider, model
 audit_log           — tenantId, adminId, action, resourceType, resourceId, diff
 message_templates   — tenantId, name, body
 referral_codes      — tenantId, code, usageCount
+exchange_rates      — tenantId, asset, network, baseRate, marginPct, feeFixedThb (обменник)
+exchange_rate_tiers — tenantId, targetThb, displayRate, marketRate (approved объёмные ступени)
+exchange_orders     — tenantId, leadId, status, amounts, payment rails
 ```
 
 **`stage_definitions.kind` enum:** only `'intake' | 'active' | 'terminal_won' | 'terminal_lost'` — CHECK constraint will reject anything else.
+
+**`stage_definitions.phase`:** NULL for anchors (intake/terminal); for `active` stages ∈ `'qualify' | 'offer' | 'clear' | 'fulfill'` (CHECK). `validateBackbone()` in `packages/verticals` enforces phase monotonicity + mandatory `qualify`/`offer` — funnel `apply` returns `400` on violation.
 
 **`conversations.source` enum:** only `'bot' | 'userbot' | 'self_play'` — CHECK constraint.
 

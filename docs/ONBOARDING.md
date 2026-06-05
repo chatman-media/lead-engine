@@ -1,7 +1,9 @@
 # Onboarding (tenant journey)
 
-Полный путь от "регистрации" до "бот отвечает клиентам в Telegram".
-Self-service через UI, без env vars, без рестартов apps.
+Полный путь от доступа к кабинету до "бот отвечает клиентам".
+Self-service через **обязательный onboarding-визард**, без env vars и без
+рестартов apps. Визард **vertical-aware**: набор шагов зависит от выбранной
+вертикали (generic vs обменник).
 
 ---
 
@@ -13,44 +15,82 @@ Self-service через UI, без env vars, без рестартов apps.
    — нужен чтобы auto-setWebhook работал
 3. У бизнеса есть:
    - OpenAI / Anthropic / OpenRouter API key (BYOK)
-   - Telegram bot token (создаётся через `@BotFather` за 30 секунд)
-   - 1+ document с информацией бизнеса (тарифы, FAQ, политика возврата, и т.д.)
+   - Telegram bot token (через `@BotFather` за 30 секунд) — или личный
+     аккаунт для userbot (MTProto), или WhatsApp Cloud API
+   - (опц.) document'ы с информацией бизнеса для KB (тарифы, FAQ, политика)
 
 ---
 
-## Шаг 1. Signup
+## Шаг 1. Доступ и onboarding-визард
+
+### 1a. Регистрация закрыта по умолчанию
+
+Публичный self-service signup **закрыт**: `POST /api/auth/signup` → `403
+signup_disabled`, страницы `/signup` в admin-UI больше нет. Открывается
+только явно — env `ALLOW_PUBLIC_SIGNUP=1` на apps/api (прокидывается в
+`allowSignup`, см. `apps/api/src/index.ts` + `apps/api/src/routes/auth.ts`).
+
+Способы завести tenant'а:
+
+- **Invite** (основной путь) — superadmin шлёт magic-link
+  (`POST /api/admin/admins/invite { email, role }`), приглашённый
+  активирует через `/accept-invite` (`POST /api/auth/accept-invite
+  { token, password }`).
+- **Открыть signup** — выставить `ALLOW_PUBLIC_SIGNUP=1` (нужно и для
+  локальной разработки, см. [`../AGENTS.md`](../AGENTS.md)). Тогда
+  `POST /api/auth/signup { email, password, tenantSlug? }` создаёт tenant
+  + первого admin'а с `role=superadmin`.
+
+Token живёт 30 дней (`signAuthToken` в `apps/api/src/lib/auth.ts`),
+хранится в `localStorage[lead_engine_token]`.
+
+### 1b. Обязательный визард (`/onboarding`)
+
+После логина `OnboardingGate` (`apps/admin-ui/src/App.tsx`) читает
+`GET /api/admin/onboarding-status` и редиректит:
+
+- `done=false` → `/onboarding` (кабинет недоступен, пока setup не завершён)
+- `done=true` → `/dashboard`
+
+Fail-open: если status-эндпоинт недоступен, считаем `done=true` (не лочим
+пользователя).
+
+Визард — **динамическая step-машина** (`apps/admin-ui/src/pages/SaasOnboarding.tsx`),
+набор шагов зависит от вертикали:
+
+| Шаг | Generic | Обменник | Обязателен |
+|---|:---:|:---:|---|
+| Вертикаль (бизнес) | ✓ | ✓ | да |
+| Канал | ✓ | ✓ | да (≥1 messenger) |
+| LLM | ✓ | ✓ | да (чат-LLM) |
+| Курсы | — | ✓ | да (обменник) |
+| Реквизиты | — | ✓ | да (обменник) |
+| База знаний | ✓ | ✓ | нет |
+| Бизнес-данные | — | ✓ | нет |
+| Готово | ✓ | ✓ | — |
+
+**Обменник** определяется по `funnels.vertical_template_id='exchange_v1'`
+или `funnels.slug='exchange'` (флаг `isExchange` в onboarding-status).
+
+### 1c. Условие завершения (`done`)
+
+`GET /api/admin/onboarding-status` (`apps/api/src/routes/admin-onboarding.ts`)
+возвращает: `channelConnected`, `chatLlmConfigured`, `hasKbDocuments`,
+`vertical`, `isExchange`, `funnelInstalled`, `activeRateCount`,
+`requisiteCount`, `done`.
 
 ```
-http://localhost:5173/signup
+exchangeReady = funnelInstalled && activeRateCount >= 1 && requisiteCount >= 1
+done = channelConnected && chatLlmConfigured && (!isExchange || exchangeReady)
 ```
 
-Form:
+- **Generic**: достаточно канал + чат-LLM (KB больше **не** входит в `done`).
+- **Обменник**: дополнительно нужны установленная воронка + ≥1 активный
+  курс + ≥1 реквизит (кошелёк или платёжный метод).
 
-- **Email** — будет admin login
-- **Password** ≥ 8 символов
-- **Slug** (опционально) — `acme-corp` → доступ через `acme-corp.leadengine.app`
-  в проде. Если пусто — генерится из email (`alice-acme-com` для `alice@acme.com`).
-
-POST → `/api/auth/signup`:
-
-```sh
-curl -X POST http://localhost:3000/api/auth/signup \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"founder@acme.com","password":"strong-pwd-12345","tenantSlug":"acme"}'
-```
-
-Response:
-
-```json
-{
-  "token": "eyJhZG...",
-  "admin": { "id": 1, "email": "founder@acme.com", "role": "superadmin", "tenantId": 5 },
-  "tenant": { "id": 5, "slug": "acme", "plan": "free" }
-}
-```
-
-Token живёт 30 дней (`signAuthToken` в `apps/api/src/lib/auth.ts`).
-Хранится в `localStorage[lead_engine_token]`.
+Сайдбар тоже vertical-aware (`apps/admin-ui/src/components/app-shell.tsx`):
+обменным тенантам показывается «Обменник» и скрываются «Каталог / Навыки /
+Хуки / Стили / Эксперименты / Партнёры»; остальным — наоборот.
 
 ---
 
@@ -154,6 +194,35 @@ curl -X POST http://localhost:3000/api/admin/channels/whatsapp \
   -d '{"phoneNumberId":"123456789012345","accessToken":"EAAJZB..."}'
 ```
 
+### 2c. Telegram userbot (личный аккаунт, MTProto)
+
+Помимо бота, тенант может подключить **личный аккаунт** (userbot) для
+работы из обычного Telegram-аккаунта. Подсистема userbot **always-on**;
+MTProto-креды (`api_id` / `api_hash` с my.telegram.org) хранятся
+**per-tenant** в `tenant_secrets` с fallback на env `TELEGRAM_API_ID` /
+`TELEGRAM_API_HASH` (`apps/api/src/lib/userbot-creds.ts`).
+
+Flow (вкладка "Личный аккаунт"):
+
+```
+POST /api/admin/channels/userbot/start  { phone, apiId?, apiHash? }
+  ├─ apiId/apiHash переданы → валидируются и сохраняются в tenant_secrets
+  ├─ не переданы → резолв из tenant_secrets, затем env
+  ├─ кредов нет нигде → 400 "укажите API ID и API Hash" (а не глобальный 503)
+  └─ ок → MTProto sendCode → { loginId, awaiting: "code" }
+POST /api/admin/channels/userbot/verify { loginId, code }   → signIn / needs2fa
+POST /api/admin/channels/userbot/2fa    { loginId, password } → SRP → канал создан
+```
+
+### 2d. Per-tenant креды каналов
+
+WhatsApp `verify_token` / `app_secret` тоже **per-tenant** (`tenant_secrets`,
+ключи в `requisite-keys`/channel-секретах) с fallback на env
+`WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET`. Передаются в
+`POST /api/admin/channels/whatsapp { verifyToken?, appSecret? }` и сохраняются,
+если указаны. То есть один деплой обслуживает разных тенантов с их
+собственными Meta-приложениями без общих env.
+
 ---
 
 ## Шаг 3. Настроить LLM
@@ -162,7 +231,12 @@ curl -X POST http://localhost:3000/api/admin/channels/whatsapp \
 http://localhost:5173/settings
 ```
 
-Две секции: **Chat (ответ ассистента)** + **Embeddings (поиск по KB)**.
+LLM-шаг визарда — компактный **accordion по всем purpose'ам**: `chat`
+(раскрыт + обязателен) и сворачиваемые опциональные `embed` / `vision` /
+`judge` / `reranker`. Списки провайдеров и плейсхолдер модели адаптируются
+под purpose (например, reranker → jina/cohere; OpenRouter → подсказка
+`google/gemini-2.5-flash`). Каждый purpose сохраняется через
+`PUT /api/admin/llm-configs/:purpose`.
 
 ### Chat config
 
@@ -176,10 +250,12 @@ http://localhost:5173/settings
 
 - Provider: обычно `openai`
 - Model: `text-embedding-3-small`
-- API key (опц., если тот же что chat — можно пустым оставить, валидация
-  упадёт; нужно отдельно paste)
-- **Embed dim**: 1536 для text-embedding-3-small, **обязательно**
-  (vector dim в `kb_chunks` фиксирован при первом upload'е)
+- API key (нужно paste отдельно — даже если совпадает с chat-ключом)
+- **Embed dim**: дефолт **1536** (фиксированный размер колонки `kb_chunks`).
+  Любая современная модель авто-подгоняется под целевую размерность через
+  `fitDim()` в `llm-router` (truncate + L2-renormalize — валидная Matryoshka-
+  редукция для OpenAI v3 / Gemini embedding и т.д.), так что выбирать dim
+  вручную больше не нужно.
 
 Backend (`PUT /api/admin/llm-configs/chat`):
 
@@ -224,12 +300,20 @@ http://localhost:5173/funnel
 
 | Шаблон | Описание |
 |--------|---------|
-| `recruitment_generic` | Найм — новый лид → квалификация → интервью → оффер |
-| `recruitment_uae_v1` | Специализированный шаблон для UAE/CIS-найма |
-| `real_estate` | Заявки на недвижимость, запись на просмотры |
-| `saas` | SaaS-продукт — demo request, квалификация |
-| `video` | Видеопроизводство — бриф, KV, смета |
-| `exchange` | Обменный пункт — крипта/RUB → THB наличные |
+| `recruitment` | Найм (UAE/виза) — расширенная воронка с docs/visa-стадиями |
+| `recruitment_generic` | Найм — простая воронка: лид → квалификация → оффер |
+| `real_estate` | Недвижимость — просмотры → оффер → NOC/ипотека → передача |
+| `saas` | SaaS — discovery → demo → proposal → подписка |
+| `video` | Видеопродакшн — бриф → смета → съёмка → монтаж → сдача |
+| `exchange` | Обменник — крипта/RUB → THB наличные (12 стадий) |
+
+> Это ключи `POST /api/admin/funnel/seed` (`SEED_TEMPLATES` в
+> `apps/api/src/routes/admin-funnel.ts`). Дополнительно есть ключи `visa`,
+> `modeling`, `leadengine_sales_v1` (мета-демо продажи самого Lead Engine) и
+> `skeleton` (пустой универсальный костяк для новой вертикали). В визарде шаг
+> «Вертикаль» устанавливает соответствующий **vertical template** (`exchange_v1`,
+> `real_estate_v1`, `recruitment_v1`, `saas_v1`, `video_v1`) — он сеет
+> воронку **и** проставляет `funnels.vertical_template_id`.
 
 ```sh
 curl -X POST http://localhost:3000/api/admin/funnel/seed \
@@ -246,9 +330,68 @@ curl -X POST http://localhost:3000/api/admin/funnel/seed \
 
 ### C. Создать вручную (drag-drop)
 
-Добавить стадии и поля через drag-drop редактор на `/funnel`. Поддерживаемые
-типы стадий: `form_fill`, `document_upload`, `rate_confirmation`, `awaiting_operator`,
-`payment`, `waiting`, `interaction`, `assessment`, `milestone`.
+Добавить стадии и поля через drag-drop редактор на `/funnel`. Типы стадий
+(`STAGE_TYPES`): `form_fill`, `document_upload`, `document_signature`,
+`rate_confirmation`, `external_approval`, `payment`, `awaiting_operator`,
+`interaction`, `assessment`, `waiting`, `milestone`. Типы полей
+(`FIELD_TYPES`): `text`, `textarea`, `number`, `date`, `select`,
+`multiselect`, `boolean`, `phone`, `email`, `photo`, `file`, `video`.
+
+### D. Костяк воронки (универсальный `phase`)
+
+Поверх произвольных стадий лежит **универсальная ось фаз** — общий язык для
+всех вертикалей (`packages/verticals/src/phases.ts`, миграция
+`0031_stage_phase.sql`):
+
+```
+capture → qualify → offer → [clear] → [fulfill] → won / lost
+```
+
+- В БД у активных стадий хранится `stage_definitions.phase` ∈
+  `qualify | offer | clear | fulfill`; якоря `capture/won/lost` выводятся
+  из `kind` (intake / terminal_won / terminal_lost).
+- `qualify` и `offer` обязательны в каждой воронке; `clear` (KYC/комплаенс/
+  документы) и `fulfill` (доставка/оплата) опциональны.
+- AI-builder и `POST /api/admin/workflows/apply` валидируют костяк
+  (`validateBackbone`): монотонность фаз, наличие intake/terminal,
+  обязательные `qualify`/`offer` — иначе `400` со списком нарушений.
+- `GET /api/admin/funnel/phase-stats` даёт vertical-agnostic метрику —
+  число лидов в каждой фазе (сравнимо между вертикалями).
+
+Подробнее — [`ARCHITECTURE.md#funnel-phase-backbone`](ARCHITECTURE.md) и
+[`VERTICALS.md`](VERTICALS.md).
+
+---
+
+## Шаг 4b. (Обменник) Курсы и реквизиты
+
+Для обменных тенантов визард добавляет обязательные шаги **Курсы** и
+**Реквизиты** (и опциональные **Бизнес-данные**).
+
+### Курсы (`/exchange` → Rate card)
+
+- Базовые курсы (`exchange_rates`): asset+network, маржа %, фикс-комиссия
+  (THB), мин/макс, авто-обновление с рыночного фида.
+- Approved rate tiers (`exchange_rate_tiers`): объёмные ступени с
+  `display_rate` (показывается клиенту) и `market_rate` (референс).
+- Эндпоинты: `GET/POST /api/admin/exchange/rates`,
+  `POST /api/admin/exchange/rates/refresh`,
+  `POST /api/admin/exchange/rate-card/preview|approve`.
+- Курсы проходят **guardrails** (`apps/api/src/lib/exchange/guardrails.ts`):
+  отклонение эффективного курса от базового > `maxDeviationPct` (дефолт 35%)
+  → отказ от котировки (ловит опечатки тарифа и мусор из фида).
+
+### Реквизиты (`/exchange` → Requisites)
+
+Шифрованные `tenant_secrets` (allowlist в
+`apps/api/src/lib/exchange/requisite-keys.ts`):
+
+- кошельки по asset/network (`exchange_wallet_*`);
+- фиксированные платёжные ключи (фиат payment URL, Binance ID, реквизиты карты);
+- бизнес-данные (контакт оператора, методы выплат, KYC-политика, часы, адрес).
+
+Эндпоинты `GET/POST /api/admin/exchange/requisites`. Для завершения
+onboarding обменника нужен ≥1 активный курс **и** ≥1 реквизит.
 
 ---
 
@@ -300,15 +443,21 @@ Backend:
 
 ## Шаг 6. Проверить что работает
 
-### A. Onboarding checklist (на /dashboard)
+### A. Статус onboarding
+
+Прогресс отслеживает `GET /api/admin/onboarding-status` (см. [Шаг 1c](#1c-условие-завершения-done)).
 
 ```
-✓ 1. Подключите канал           @acme_support_bot активен
-✓ 2. Настройте LLM              openai / gpt-4o-mini
-✓ 3. Загрузите документы в KB   Есть документы
+✓ Вертикаль выбрана
+✓ Канал активен                 @acme_support_bot
+✓ Чат-LLM настроен              openai / gpt-4o-mini
+  (обменник) ✓ Воронка + ≥1 курс + ≥1 реквизит
 ```
 
-`done=true` когда все три ✓ — checklist auto-hide.
+`done=true` (generic) когда канал активен **и** чат-LLM настроен; для
+обменника — плюс воронка + ≥1 активный курс + ≥1 реквизит. KB в `done`
+**не** входит. Пока `done=false`, `OnboardingGate` держит пользователя
+на `/onboarding`; после — пускает в `/dashboard`.
 
 ### B. Диагностика
 
@@ -478,14 +627,16 @@ curl -X POST http://localhost:3000/api/admin/leads/42/send-photo \
 
 ## Curl playbook (CI / scripting)
 
-Полный onboarding скриптом:
+Полный onboarding скриптом. **Требует `ALLOW_PUBLIC_SIGNUP=1` на apps/api**
+(иначе `POST /api/auth/signup` → `403 signup_disabled`) — либо замените
+шаг 1 на invite-flow (`/accept-invite`).
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 API="${API:-http://localhost:3000}"
 
-# 1. Signup
+# 1. Signup (нужен ALLOW_PUBLIC_SIGNUP=1)
 SIGNUP=$(curl -fsS -X POST "$API/api/auth/signup" \
   -H 'Content-Type: application/json' \
   -d "{\"email\":\"$1\",\"password\":\"$2\",\"tenantSlug\":\"$3\"}")
@@ -527,7 +678,10 @@ Usage:
 
 | Симптом | Причина | Fix |
 |---|---|---|
+| Signup → 403 `signup_disabled` | Публичная регистрация закрыта (дефолт) | `ALLOW_PUBLIC_SIGNUP=1` на apps/api, или заводите tenant через invite |
 | Signup → 409 conflict | Email или slug уже занят | Сменить email/slug |
+| После логина всегда редирект на `/onboarding` | `onboarding-status.done=false` | Доведите обязательные шаги визарда (канал + чат-LLM; обменник: + курс + реквизит) |
+| `userbot/start` → 400 «укажите API ID и API Hash» | Нет MTProto-кредов | Передайте `apiId`/`apiHash` в запросе или задайте env `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` |
 | Channel POST → 401 | Telegram отверг token | Проверить что скопировали без пробелов |
 | Channel POST → 502 | Telegram unreachable | network issue, retry |
 | Webhook не приходит | `PLATFORM_PUBLIC_URL` неверный или setWebhook не отработал | Проверить `webhookSet: true` в response; вручную дёрнуть `setWebhook` через `getWebhookInfo` |
