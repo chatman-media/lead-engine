@@ -24,6 +24,7 @@ import {
   type ExchangeOrder,
   type ExchangeRate,
   type ExchangeTurnover,
+  type FunnelAnalytics,
   type OnboardingStatus,
   saas,
   type TenantInfo,
@@ -50,12 +51,57 @@ const ORDER_STATUS: Record<
   expired: { label: "истекло", variant: "destructive" },
 };
 
+const STATUS_ORDER = Object.keys(ORDER_STATUS);
+
+const PAYMENT_LABEL: Record<string, string> = {
+  crypto_transfer: "Crypto",
+  sbp_qr: "СБП QR",
+  card_transfer: "Карта",
+  bank_transfer: "Банк",
+  cash: "Наличные",
+};
+const PAYOUT_LABEL: Record<string, string> = {
+  office_cash: "Офис",
+  courier_cash: "Курьер",
+  cardless_atm: "Cardless ATM",
+  thai_bank_transfer: "Тайский банк",
+  atm: "ATM",
+};
+
 function fmtMoney(n: number): string {
   return Math.round(n || 0).toLocaleString("ru-RU");
 }
 
 function fmtRate(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function pct(n: number): string {
+  return `${Math.round(n)}%`;
+}
+
+/** Горизонтальная строка-бар для распределений (доля от max). */
+function BarRow({
+  label,
+  value,
+  max,
+  right,
+}: {
+  label: React.ReactNode;
+  value: number;
+  max: number;
+  right: React.ReactNode;
+}) {
+  const width = max > 0 ? Math.max(2, (value / max) * 100) : 0;
+  return (
+    <div className="flex items-center gap-3 py-1.5 text-sm">
+      <span className="w-32 shrink-0 truncate">{label}</span>
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-primary/70" style={{ width: `${width}%` }} />
+      </div>
+      <span className="w-28 shrink-0 text-right tabular-nums text-muted-foreground">{right}</span>
+    </div>
+  );
 }
 
 export function SaasDashboard() {
@@ -68,6 +114,7 @@ export function SaasDashboard() {
   const [turnover, setTurnover] = useState<ExchangeTurnover | null>(null);
   const [orders, setOrders] = useState<ExchangeOrder[]>([]);
   const [rates, setRates] = useState<ExchangeRate[]>([]);
+  const [funnel, setFunnel] = useState<FunnelAnalytics | null>(null);
   const [togglingPause, setTogglingPause] = useState(false);
   const [confirmingPause, setConfirmingPause] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -106,14 +153,16 @@ export function SaasDashboard() {
   // у остальных вернут 404, поэтому ошибки молча игнорируем).
   async function refreshExchange() {
     try {
-      const [t, o, r] = await Promise.all([
+      const [t, o, r, f] = await Promise.all([
         saas.exchangeTurnover(),
-        saas.exchangeOrders(),
+        saas.exchangeOrders(undefined, 500),
         saas.exchangeRates(),
+        saas.getFunnelAnalytics().catch(() => null),
       ]);
       setTurnover(t);
       setOrders(o.orders);
       setRates(r.rates);
+      setFunnel(f);
     } catch {
       // не обменный тенант / нет доступа — секция просто не покажется
     }
@@ -280,6 +329,66 @@ export function SaasDashboard() {
   const chartMax = Math.max(1, ...chartSeries.map((b) => b.value));
   const chartEmpty = chartSeries.every((b) => b.value === 0);
 
+  // ── Аналитика (доп. метрики и разрезы) ──────────────────────────────
+  const avgTicket = completedInPeriod.length > 0 ? periodTurnover / completedInPeriod.length : 0;
+  const createdInPeriod = byCurrency.filter((o) => o.createdAt >= periodCutoff);
+  const conversion =
+    createdInPeriod.length > 0
+      ? Math.min(100, (completedInPeriod.length / createdInPeriod.length) * 100)
+      : 0;
+
+  // По валютам (завершённые в периоде)
+  const assetAgg = new Map<string, { count: number; turnover: number }>();
+  for (const o of completedInPeriod) {
+    const cur = assetAgg.get(o.assetFrom) ?? { count: 0, turnover: 0 };
+    cur.count += 1;
+    cur.turnover += o.amountToThb || 0;
+    assetAgg.set(o.assetFrom, cur);
+  }
+  const assetRows = [...assetAgg.entries()]
+    .map(([asset, v]) => ({ asset, ...v }))
+    .sort((a, b) => b.turnover - a.turnover);
+
+  // По статусам (созданные в периоде)
+  const statusCounts = STATUS_ORDER.map((s) => ({
+    status: s,
+    count: createdInPeriod.filter((o) => o.status === s).length,
+  })).filter((x) => x.count > 0);
+  const statusMax = Math.max(1, ...statusCounts.map((s) => s.count));
+
+  // Способы оплаты / выдачи (завершённые)
+  const methodAgg = (key: "paymentMethod" | "payoutMethod") => {
+    const m = new Map<string, number>();
+    for (const o of completedInPeriod) {
+      const k = o[key] ?? "—";
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return [...m.entries()].map(([k, count]) => ({ k, count })).sort((a, b) => b.count - a.count);
+  };
+  const payments = methodAgg("paymentMethod");
+  const payouts = methodAgg("payoutMethod");
+  const payMax = Math.max(1, ...payments.map((p) => p.count));
+  const payoutMax = Math.max(1, ...payouts.map((p) => p.count));
+
+  // Воронка обмена (из funnel/analytics)
+  const funnelStages = (funnel?.stages ?? []).slice().sort((a, b) => a.position - b.position);
+  const useEntered = funnelStages.some((s) => s.leadsEntered > 0);
+  const funnelVals = funnelStages.map((s) => (useEntered ? s.leadsEntered : s.leadsCurrent));
+  const funnelFirst = Math.max(1, funnelVals[0] ?? 1);
+  let biggestDrop = -1;
+  let biggestDropPct = 0;
+  for (let i = 1; i < funnelStages.length; i++) {
+    const prev = funnelVals[i - 1] ?? 0;
+    const cur = funnelVals[i] ?? 0;
+    if (prev > 0) {
+      const drop = 100 - (cur / prev) * 100;
+      if (drop > biggestDropPct) {
+        biggestDropPct = drop;
+        biggestDrop = i;
+      }
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -383,7 +492,7 @@ export function SaasDashboard() {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
             <Card>
               <CardContent className="pt-4 pb-3">
                 <p className="text-2xl font-bold tabular-nums">
@@ -399,6 +508,23 @@ export function SaasDashboard() {
                   {completedInPeriod.length}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">Завершено сделок</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <p className="text-2xl font-bold tabular-nums">
+                  {fmtMoney(avgTicket)}{" "}
+                  <span className="text-sm font-normal text-muted-foreground">฿</span>
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Средний чек</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <p className="text-2xl font-bold tabular-nums">{pct(conversion)}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Конверсия (завершено / создано)
+                </p>
               </CardContent>
             </Card>
             <Card>
@@ -617,6 +743,196 @@ export function SaasDashboard() {
               </CardContent>
             </Card>
           </div>
+
+          {/* ── Аналитика: разрезы и воронка ── */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">По валютам</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {assetRows.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    Нет завершённых сделок
+                  </p>
+                ) : (
+                  assetRows.map((r) => (
+                    <BarRow
+                      key={r.asset}
+                      label={<span className="font-medium">{r.asset}</span>}
+                      value={r.turnover}
+                      max={assetRows[0]?.turnover ?? 1}
+                      right={
+                        <span>
+                          {fmtMoney(r.turnover)} ฿ · {r.count}
+                        </span>
+                      }
+                    />
+                  ))
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Заявки по статусам</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {statusCounts.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    Нет заявок за период
+                  </p>
+                ) : (
+                  statusCounts.map((s) => (
+                    <BarRow
+                      key={s.status}
+                      label={
+                        <Badge variant={ORDER_STATUS[s.status]?.variant ?? "secondary"}>
+                          {ORDER_STATUS[s.status]?.label ?? s.status}
+                        </Badge>
+                      }
+                      value={s.count}
+                      max={statusMax}
+                      right={<span>{s.count}</span>}
+                    />
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {funnelStages.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Воронка обмена</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  По всем заявкам (не зависит от фильтра периода/валюты)
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-1">
+                {funnelStages.map((s, i) => {
+                  const val = funnelVals[i] ?? 0;
+                  const prev = funnelVals[i - 1] ?? 0;
+                  const conv = i > 0 && prev > 0 ? (val / prev) * 100 : null;
+                  const isDrop = i === biggestDrop;
+                  const terminal =
+                    s.kind === "terminal_won" ? "✓" : s.kind === "terminal_lost" ? "✗" : "";
+                  return (
+                    <div
+                      key={s.id}
+                      className={`flex items-center gap-3 rounded-md px-2 py-1.5 ${
+                        isDrop ? "border-l-2 border-l-red-500 bg-red-500/5" : ""
+                      }`}
+                    >
+                      <span className="flex w-44 shrink-0 items-center gap-1.5 truncate text-sm">
+                        {s.color && (
+                          <span
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: s.color }}
+                          />
+                        )}
+                        <span className="truncate">{s.displayName}</span>
+                        {terminal && <span className="text-muted-foreground">{terminal}</span>}
+                      </span>
+                      <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary/70"
+                          style={{ width: `${Math.max(2, (val / funnelFirst) * 100)}%` }}
+                        />
+                      </div>
+                      <span className="w-10 shrink-0 text-right text-sm font-semibold tabular-nums">
+                        {val}
+                      </span>
+                      <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                        {conv !== null ? pct(conv) : "—"}
+                      </span>
+                      <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                        {s.avgDaysInStage !== null ? `${s.avgDaysInStage}д` : "—"}
+                      </span>
+                      {isDrop && (
+                        <Badge variant="destructive" className="shrink-0 text-[10px]">
+                          −{Math.round(biggestDropPct)}% отвал
+                        </Badge>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="flex justify-end pt-1 text-[10px] text-muted-foreground">
+                  вошло · конверсия · ср. дней
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Способы оплаты</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {payments.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">Нет данных</p>
+                ) : (
+                  payments.map((p) => (
+                    <BarRow
+                      key={p.k}
+                      label={PAYMENT_LABEL[p.k] ?? p.k}
+                      value={p.count}
+                      max={payMax}
+                      right={<span>{p.count}</span>}
+                    />
+                  ))
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Способы выдачи</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {payouts.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">Нет данных</p>
+                ) : (
+                  payouts.map((p) => (
+                    <BarRow
+                      key={p.k}
+                      label={PAYOUT_LABEL[p.k] ?? p.k}
+                      value={p.count}
+                      max={payoutMax}
+                      right={<span>{p.count}</span>}
+                    />
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {turnover && turnover.byContact.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Топ клиентов</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="divide-y">
+                  {turnover.byContact.slice(0, 10).map((c, idx) => (
+                    <li
+                      key={`${c.contactId ?? "x"}-${c.telegramId ?? "x"}-${idx}`}
+                      className="flex items-center justify-between py-2 text-sm first:pt-0 last:pb-0"
+                    >
+                      <span className="truncate">
+                        {c.telegramId ? `@${c.telegramId}` : c.contactId ? `#${c.contactId}` : "—"}
+                      </span>
+                      <span className="flex items-center gap-4 tabular-nums text-muted-foreground">
+                        <span>{c.orders} сделок</span>
+                        <span className="font-semibold text-foreground">
+                          {fmtMoney(c.totalThb)} ฿
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
