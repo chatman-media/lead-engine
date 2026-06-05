@@ -128,6 +128,30 @@ guest (contact)
 
 ---
 
+## 10. Slice 3 — дизайн живого роутинга (заземлён на реальный lead-lifecycle)
+
+**Корректировка ранней гипотезы (по итогам разбора кода).** Slice 3 — НЕ про `process-inbound`/`ensureLead`:
+- `ensureLead` (`packages/conversation-engine/src/lead-lifecycle.ts:12`) — **мёртвый код**, нигде в рантайме не вызывается.
+- `process-inbound` лиды не создаёт и не двигает вообще.
+- Реальный авто-лайфцикл лида в клиентском потоке — **field-extractor** (`apps/api/src/lib/field-extractor.ts`), запускается async после inbound (вшит в webhook-роуты, напр. `webhook-telegram.ts:260`): авто-создаёт лид в первой по `position` стадии активной воронки (для concierge — `request_received`), LLM-ом извлекает поля в `lead_field_values` и по `autoAdvanceCondition: all_required_fields_filled` двигает лид дальше.
+
+**Ключевой гэп для ветвления.** Авто-advance жёстко берёт `nextStages[0]` (`field-extractor.ts:245`). Для ветвящегося intake `request_received` (`nextStages: [exchange_request, transfer_request, food_request, cancelled]`) это всегда уведёт в `exchange_request`, игнорируя реальный тип запроса. Это — основное, что чинит slice 3.
+
+**Минимальное изменение (ADDITIVE, gated) — всё в `field-extractor.ts`:**
+1. **Классификатор не нужен.** `request_type` — это `aiExtractable` select-поле intake; существующий field-extractor уже извлекает его в `lead_field_values`. (Отдельный `RequestClassifier` + хук в `process-inbound` — избыточно.)
+2. **Branch-aware advance.** Если у стадии >1 не-терминального `nextStages` **и** среди её полей есть `request_type` → выбирать переход по значению (`transfer` → `transfer_request`), а не `nextStages[0]`. Линейные воронки 5 вертикалей (один forward-next, нет поля `request_type`) не меняются.
+3. **Писать `leads.request_type`.** При определении типа проставлять колонку (для борда и резолвинга лида).
+
+**Сложная часть — N одновременных запросов на гостя.** Field-extractor сейчас «один лид на контакт»: lookup `leads WHERE tenant AND user` берёт первый (`field-extractor.ts:54-61`), а `.onConflictDoNothing()` (`:90`) после снятия `UNIQUE` (migration 0032) **больше не защищает** от дублей (нет conflict-target). Развилка:
+- **MVP (slice 3):** один активный запрос на гостя за раз — таргетим самый свежий **не-терминальный** лид; новый запрос — после закрытия предыдущего. `onConflictDoNothing` заменить на явный guard «нет открытого лида». Детерминированно, мало кода.
+- **Полный (slice 3b):** распознавать «это НОВЫЙ запрос» vs «продолжение» в одном треде (классификатор new-vs-existing) и вести параллельные лиды. Сложнее — отдельная итерация.
+
+**Не трогаем:** `process-inbound`, reply-strategy, 5 вертикалей (gating по наличию ветвления + поля `request_type`), `validateBackbone`, install/seed.
+
+**План slice 3:** (1) branch-aware advance + запись `leads.request_type` в field-extractor (gated); (2) заменить `onConflictDoNothing` на guard «нет открытого лида»; (3) тест: concierge-лид с `request_type=transfer` уходит в `transfer_request`, не `exchange_request`; (4) _[slice 3b]_ new-vs-existing для параллельных запросов.
+
+---
+
 ## Ссылки на код
 
 - Резолвинг лида: `packages/conversation-engine/src/dal/leads.ts:41`, `lead-lifecycle.ts:12`
