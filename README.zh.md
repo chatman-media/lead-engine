@@ -12,7 +12,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Bun](https://img.shields.io/badge/Bun-1.3-fbf0df?logo=bun&logoColor=black)](https://bun.sh/)
 [![PostgreSQL + RLS](https://img.shields.io/badge/PostgreSQL-RLS%20%2B%20pgvector-336791?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: PolyForm NC 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 
 多租户 SaaS · BYOK LLM · 按租户隔离的 RAG · 销售方法论（SPIN / NEPQ / AIDA）· 人工接管
 
@@ -207,7 +207,7 @@ RAG 管线（约 180）、SaaS 路由集成，以及兑换工作流 mock。覆�
 | BYOK LLM | ✅ | ❌ | 部分 | ❌ |
 | 人工接管 | ✅ | ✅ | ❌ | ✅ |
 | 线索流水线 + 漏斗构建器 | ✅ | ❌ | ❌ | ❌ |
-| 自托管 / 开源 | ✅ MIT | ❌ | ❌ | ❌ |
+| 自托管 / 源码公开 | ✅ | ❌ | ❌ | ❌ |
 
 定位：面向以即时通讯为中心的市场（Telegram / WhatsApp）、AI 优先、支持 BYOK
 且具备完整坐席工作流的客户服务。完整分析与路线图：
@@ -223,7 +223,7 @@ RAG 管线（约 180）、SaaS 路由集成，以及兑换工作流 mock。覆�
 并在改动 `apps/api` 或各包前阅读 [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
 （RLS / `withTenant` 与 split-tx 契约是关键不变量）。
 
-[MIT](LICENSE) — Alexander Kireev / [chatman-media](https://github.com/chatman-media)
+**许可：** 产品采用 [PolyForm Noncommercial 1.0.0](LICENSE)——任何非商业用途免费；**商业用途需付费许可**（联系 [chatman-media](https://github.com/chatman-media)）。`packages/*` 中的可复用库仍为 **MIT**。© Alexander Kireev / chatman-media。
 
 <div align="center">
 

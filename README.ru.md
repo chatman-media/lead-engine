@@ -12,7 +12,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Bun](https://img.shields.io/badge/Bun-1.3-fbf0df?logo=bun&logoColor=black)](https://bun.sh/)
 [![PostgreSQL + RLS](https://img.shields.io/badge/PostgreSQL-RLS%20%2B%20pgvector-336791?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: PolyForm NC 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 
 Multi-tenant SaaS · BYOK LLM · per-tenant RAG · методологии продаж (SPIN / NEPQ / AIDA) · перехват оператором
 
@@ -217,7 +217,7 @@ ops — в [docs/operations/SERVER_RUNBOOK.md](docs/operations/SERVER_RUNBOOK.md
 | BYOK LLM | ✅ | ❌ | частично | ❌ |
 | Перехват оператором | ✅ | ✅ | ❌ | ✅ |
 | Воронка лидов + конструктор | ✅ | ❌ | ❌ | ❌ |
-| Self-host / open source | ✅ MIT | ❌ | ❌ | ❌ |
+| Self-host / source-available | ✅ | ❌ | ❌ | ❌ |
 
 Ниша: AI-first клиентский сервис для messenger-центричных рынков (Telegram /
 WhatsApp) с BYOK и полным workflow оператора. Полный разбор и роадмап:
@@ -234,7 +234,7 @@ PR приветствуются. Используйте [Conventional Commits](h
 перед правками `apps/api` или пакетов (контракты RLS / `withTenant` и split-tx —
 критичные инварианты).
 
-[MIT](LICENSE) — Alexander Kireev / [chatman-media](https://github.com/chatman-media)
+**Лицензия:** продукт — [PolyForm Noncommercial 1.0.0](LICENSE): любое некоммерческое использование бесплатно; **коммерческое — по платной лицензии** (контакт: [chatman-media](https://github.com/chatman-media)). Переиспользуемые библиотеки в `packages/*` остаются под **MIT**. © Alexander Kireev / chatman-media.
 
 <div align="center">
 

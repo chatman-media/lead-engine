@@ -12,7 +12,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Bun](https://img.shields.io/badge/Bun-1.3-fbf0df?logo=bun&logoColor=black)](https://bun.sh/)
 [![PostgreSQL + RLS](https://img.shields.io/badge/PostgreSQL-RLS%20%2B%20pgvector-336791?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: PolyForm NC 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 
 Multi-tenant SaaS · BYOK LLM · per-tenant RAG · sales methodologies (SPIN / NEPQ / AIDA) · operator takeover
 
@@ -216,7 +216,7 @@ role. Full production checklist: [docs/operations/SERVER_RUNBOOK.md](docs/operat
 | BYOK LLM | ✅ | ❌ | partial | ❌ |
 | Operator takeover | ✅ | ✅ | ❌ | ✅ |
 | Lead pipeline + funnel builder | ✅ | ❌ | ❌ | ❌ |
-| Self-host / open source | ✅ MIT | ❌ | ❌ | ❌ |
+| Self-host / source-available | ✅ | ❌ | ❌ | ❌ |
 
 Niche: AI-first customer service for messenger-centric markets (Telegram /
 WhatsApp) with BYOK and a full operator workflow. Full analysis and roadmap:
@@ -233,7 +233,7 @@ before submitting, and read [docs/engineering/ARCHITECTURE.md](docs/engineering/
 before touching `apps/api` or the packages (the RLS / `withTenant` and split-tx
 contracts are critical invariants).
 
-[MIT](LICENSE) — Alexander Kireev / [chatman-media](https://github.com/chatman-media)
+**License:** the product is [PolyForm Noncommercial 1.0.0](LICENSE) — free for any noncommercial use; **commercial use requires a paid license** (contact [chatman-media](https://github.com/chatman-media)). The reusable libraries in `packages/*` stay **MIT**. © Alexander Kireev / chatman-media.
 
 <div align="center">
 
