@@ -4,9 +4,6 @@ import {
   FaqAccordion,
   Footer,
   Nav,
-  PLANS_EN,
-  PLANS_RU,
-  PricingSection,
   SIGNUP_URL,
   TelegramMockup,
   type Lang,
@@ -20,7 +17,7 @@ const CONTENT = {
       headline: ["AI-ассистент для ", "обменного пункта", ", который не теряет клиентов"],
       sub: "Отвечает на запросы в Telegram за 30 секунд. Уточняет актив, сеть и сумму. Подтверждает курс — и ведёт клиента до выдачи наличных THB через банкомат.",
       ctaPrimary: "Попробовать бесплатно",
-      ctaSecondary: "Смотреть демо (15 мин)",
+      ctaSecondary: "Смотреть демо",
       trust: "Работает 24/7. Поддерживает USDT TRC20/ERC20/BEP20, BTC, ETH и рублёвые переводы.",
     },
     tg: {
@@ -51,7 +48,7 @@ const CONTENT = {
         desc: "Клиент присылает пруф (tx hash или скрин перевода). Оператор генерирует cardless-withdrawal QR и отправляет клиенту через admin-панель — без перехвата чата.",
       },
     ],
-    whyLabel: "Почему Lead Engine",
+    whyLabel: "Почему exchanges·agency",
     whyTitle: "Не просто чат-бот — полный цикл обмена.",
     moats: [
       {
@@ -80,9 +77,13 @@ const CONTENT = {
         desc: "Используете собственный OpenAI / Anthropic ключ. Данные клиентов хранятся в вашей изолированной базе.",
       },
     ],
-    pricingLabel: "Тарифы",
-    pricingTitle: "Прозрачные цены без скрытых платежей",
-    pricingNote: "Все тарифы включают: BYOK · Operator handoff · Telegram + WhatsApp + Web chat",
+    pricingLabel: "Цена",
+    pricingTitle: "Цена — по запросу",
+    pricingSub:
+      "Стоимость зависит от объёма сделок и подключённых каналов. Напишите нам — подберём под ваш обменник и покажем живое демо.",
+    pricingPrimary: "Смотреть демо",
+    pricingSecondary: "Написать нам",
+    pricingNote: "Включено: BYOK · Operator handoff · Telegram + WhatsApp + Web chat",
     faqLabel: "Частые вопросы",
     faqTitle: "Ответы на главные вопросы",
     faq: [
@@ -109,7 +110,7 @@ const CONTENT = {
       },
     ],
     faqDemoBtn: "Записаться на демо →",
-    footer: { privacy: "Политика конфиденциальности", terms: "Условия использования", copy: "© 2026 Lead Engine" },
+    footer: { privacy: "Политика конфиденциальности", terms: "Условия использования", copy: "© 2026 exchanges·agency" },
   },
   en: {
     nav: { cta: "Try Free" },
@@ -118,7 +119,7 @@ const CONTENT = {
       headline: ["AI Assistant for ", "Currency Exchange", " That Never Misses a Client"],
       sub: "Responds to Telegram inquiries in 30 seconds. Confirms asset, network, and amount. Locks in the rate — and guides the client to THB cash via ATM cardless withdrawal.",
       ctaPrimary: "Try Free",
-      ctaSecondary: "Watch Demo (15 min)",
+      ctaSecondary: "See live demo",
       trust: "Runs 24/7. Supports USDT TRC20/ERC20/BEP20, BTC, ETH and ruble bank transfers.",
     },
     tg: {
@@ -149,7 +150,7 @@ const CONTENT = {
         desc: "Client sends proof (tx hash or transfer screenshot). Operator generates cardless-withdrawal QR and sends it via the admin panel — without taking over the chat.",
       },
     ],
-    whyLabel: "Why Lead Engine",
+    whyLabel: "Why exchanges·agency",
     whyTitle: "Not just a chatbot — a full exchange workflow.",
     moats: [
       {
@@ -179,8 +180,12 @@ const CONTENT = {
       },
     ],
     pricingLabel: "Pricing",
-    pricingTitle: "Transparent pricing, no hidden fees",
-    pricingNote: "All plans include: BYOK · Operator handoff · Telegram + WhatsApp + Web chat",
+    pricingTitle: "Pricing — on request",
+    pricingSub:
+      "Pricing depends on deal volume and connected channels. Contact us — we'll tailor it to your exchange and show a live demo.",
+    pricingPrimary: "See live demo",
+    pricingSecondary: "Contact us",
+    pricingNote: "Included: BYOK · Operator handoff · Telegram + WhatsApp + Web chat",
     faqLabel: "FAQ",
     faqTitle: "Common questions, straight answers",
     faq: [
@@ -207,14 +212,13 @@ const CONTENT = {
       },
     ],
     faqDemoBtn: "Book a demo →",
-    footer: { privacy: "Privacy Policy", terms: "Terms of Use", copy: "© 2026 Lead Engine" },
+    footer: { privacy: "Privacy Policy", terms: "Terms of Use", copy: "© 2026 exchanges·agency" },
   },
 };
 
 export default function LandingExchange() {
   const [lang, setLang] = useState<Lang>("ru");
   const c = CONTENT[lang];
-  const plans = lang === "ru" ? PLANS_RU : PLANS_EN;
 
   return (
     <>
@@ -233,7 +237,7 @@ export default function LandingExchange() {
               <p className="hero-sub">{c.hero.sub}</p>
               <div className="hero-actions">
                 <a href={SIGNUP_URL} className="btn btn-primary btn-lg">{c.hero.ctaPrimary}</a>
-                <a href={DEMO_URL} className="btn btn-secondary btn-lg">{c.hero.ctaSecondary}</a>
+                <a href="/demo" className="btn btn-secondary btn-lg">{c.hero.ctaSecondary}</a>
               </div>
               <div className="hero-trust">{c.hero.trust}</div>
             </div>
@@ -279,12 +283,26 @@ export default function LandingExchange() {
         </div>
       </section>
 
-      <PricingSection
-        label={c.pricingLabel}
-        title={c.pricingTitle}
-        plans={plans}
-        note={c.pricingNote}
-      />
+      <section className="section section-alt" id="pricing">
+        <div className="container">
+          <div className="section-label">{c.pricingLabel}</div>
+          <h2 className="section-title">{c.pricingTitle}</h2>
+          <p className="section-sub" style={{ margin: "0 auto 28px", textAlign: "center" }}>
+            {c.pricingSub}
+          </p>
+          <div className="hero-actions" style={{ justifyContent: "center" }}>
+            <a href="/demo" className="btn btn-primary btn-lg">
+              {c.pricingPrimary}
+            </a>
+            <a href={DEMO_URL} className="btn btn-secondary btn-lg">
+              {c.pricingSecondary}
+            </a>
+          </div>
+          <p className="plan-note" style={{ marginTop: 24 }}>
+            <strong>{c.pricingNote}</strong>
+          </p>
+        </div>
+      </section>
 
       <section className="section" id="faq">
         <div className="container">

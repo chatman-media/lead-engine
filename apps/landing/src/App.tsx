@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Route, Routes } from "react-router-dom";
+import DemoExchange from "./DemoExchange.tsx";
 import LandingExchange from "./LandingExchange.tsx";
 import LandingRealEstate from "./LandingRealEstate.tsx";
 import {
@@ -299,8 +300,10 @@ function LandingRecruit() {
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<LandingRecruit />} />
+      <Route path="/" element={<LandingExchange />} />
       <Route path="/exchange" element={<LandingExchange />} />
+      <Route path="/demo" element={<DemoExchange />} />
+      <Route path="/recruit" element={<LandingRecruit />} />
       <Route path="/real-estate" element={<LandingRealEstate />} />
     </Routes>
   );

@@ -141,7 +141,7 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
       </span>
       {!collapsed && (
         <span className="text-[15px] font-semibold tracking-tight truncate">
-          lead<span className="text-primary">·</span>engine
+          exchanges<span className="text-primary">·</span>agency
         </span>
       )}
     </Link>
