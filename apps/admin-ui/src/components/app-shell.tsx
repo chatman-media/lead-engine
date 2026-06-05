@@ -468,8 +468,13 @@ function SidebarBody({
 
 const COLLAPSED_KEY = "sidebar-collapsed";
 
+// Страницы без max-width кап-а контента — занимают всю ширину области <main>.
+const FULL_WIDTH_PATHS = new Set(["/faq"]);
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const fullWidth = FULL_WIDTH_PATHS.has(pathname);
   const [admin, setAdmin] = useState<Admin | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [isExchange, setIsExchange] = useState(false);
@@ -608,7 +613,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </header>
 
           <main className="flex-1 px-4 py-6 md:px-8 md:py-8">
-            <div className="mx-auto w-full max-w-6xl">{children}</div>
+            <div className={fullWidth ? "w-full" : "mx-auto w-full max-w-6xl"}>{children}</div>
           </main>
         </div>
 
