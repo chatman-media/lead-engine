@@ -40,7 +40,8 @@ for arg in "$@"; do
   esac
 done
 
-# подхватить локальный env-файл, если он есть
+# подхватить env-файлы, если они есть (.env — основной, .deploy.env — оверрайды)
+[ -f "$APP_DIR/.env" ]        && set -a && . "$APP_DIR/.env"        && set +a
 [ -f "$APP_DIR/.deploy.env" ] && set -a && . "$APP_DIR/.deploy.env" && set +a
 
 HEALTH_URL="${HEALTH_URL:-${PLATFORM_PUBLIC_URL:-}/healthz}"

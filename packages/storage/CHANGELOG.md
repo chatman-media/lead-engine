@@ -1,3 +1,11 @@
+# [@chatman-media/storage-v1.4.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.4.0...@chatman-media/storage-v1.4.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* **storage:** allow video stage fields on legacy dbs ([865eb06](https://github.com/chatman-media/lead-engine/commit/865eb06eedc10179d14e7cbef9bf4fdcf9028e86))
+* **verticals:** set funnels.vertical_template_id on install ([#141](https://github.com/chatman-media/lead-engine/issues/141)) ([c661a53](https://github.com/chatman-media/lead-engine/commit/c661a534e6f2c4d05e35831c823e4d048b95e5d5))
+
 # [@chatman-media/storage-v1.4.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.3.0...@chatman-media/storage-v1.4.0) (2026-06-03)
 
 
