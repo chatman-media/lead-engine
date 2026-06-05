@@ -99,7 +99,7 @@ in-process bus + поллинг воркера ≤30 сек. Полный гай
 | `apps/vertical-*` | Шаблоны вертикалей (`exchange` live + real-estate / recruitment / saas / video) — грузятся через `packages/verticals`, не деплоятся |
 
 Доменная логика — в `packages/*` (публикуются в npm под `@chatman-media`):
-`storage` (Drizzle-схема + миграции), `channel-{core,telegram,whatsapp,web}`,
+`storage` (Drizzle-схема + миграции), `channel-{core,telegram,whatsapp,facebook,web}`,
 `llm-router`, `kb` (RAG), `sales`, `conversation-engine`, `verticals`,
 `observability`. Граф зависимостей и split-tx-пайплайн —
 в [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md).

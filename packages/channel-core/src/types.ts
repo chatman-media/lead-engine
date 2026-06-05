@@ -11,6 +11,7 @@ export type ChannelKind =
   | "telegram_bot"
   | "telegram_userbot"
   | "whatsapp"
+  | "facebook"
   | "web";
 
 /**
