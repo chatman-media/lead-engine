@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # deploy.sh — деплой lead-engine на сервере.
-# Кодифицирует docs/SERVER_RUNBOOK.md: pull → install → migrate → build → restart → health.
+# Кодифицирует docs/operations/SERVER_RUNBOOK.md: pull → install → migrate → build → restart → health.
 #
 # Использование:
 #   ./deploy.sh                 # полный деплой

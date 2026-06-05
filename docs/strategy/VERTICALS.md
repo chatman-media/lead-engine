@@ -53,7 +53,7 @@ capture → qualify → offer → [clear] → [fulfill] → won / lost
 
 Костяк валидируется (`validateBackbone`) при AI-сборке и `apply`; cross-vertical
 метрика — `GET /api/admin/funnel/phase-stats`. Технические детали —
-[`ARCHITECTURE.md#funnel-phase-backbone`](ARCHITECTURE.md).
+[`ARCHITECTURE.md#funnel-phase-backbone`](../engineering/ARCHITECTURE.md).
 
 ---
 

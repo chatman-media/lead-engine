@@ -1,5 +1,10 @@
 # Анализ workflow: recruitment China, exchange, Philippines exchange
 
+> 🗄 **АРХИВ.** Рабочая аналитическая заметка; ключевой разрыв («два слоя
+> воронки») закрыт универсальным костяком фаз (PR #160). Актуальный reference —
+> [engineering/ARCHITECTURE.md](../engineering/ARCHITECTURE.md) и
+> [strategy/VERTICALS.md](../strategy/VERTICALS.md).
+
 _Дата обновления: 2026-05-29_
 _Статус: переоценка после universal pipeline; exchange action layer подтянут из PR #140_
 
@@ -9,8 +14,8 @@ _Статус: переоценка после universal pipeline; exchange acti
 > won/lost` над всеми 5 вертикалями + `validateBackbone()` +
 > `phase-stats`. Это закрывает значительную часть «двух расходящихся слоёв
 > воронки» (§1.1): фазовая семантика теперь общая и валидируется. Актуальное
-> описание — [`ARCHITECTURE.md#funnel-phase-backbone`](ARCHITECTURE.md) и
-> [`VERTICALS.md`](VERTICALS.md). Каталог stage/field types также сведён в
+> описание — [`ARCHITECTURE.md#funnel-phase-backbone`](../engineering/ARCHITECTURE.md) и
+> [`VERTICALS.md`](../strategy/VERTICALS.md). Каталог stage/field types также сведён в
 > единый `STAGE_TYPES`/`FIELD_TYPES` (см. §1.0).
 
 Документ фиксирует не маркетинговое описание, а операционные разрывы между

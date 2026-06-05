@@ -48,16 +48,18 @@ ARPU 99–199 美元/月。[Phase 2：房地产。Phase 3：横向扩展。]
 
 > 本产品在技术上可通用于任何带有消息漏斗的客户型业务。Phase 1
 > 聚焦招聘行业，以实现精准的市场切入。详见
-> [`docs/COMPETITORS.md §0`](docs/COMPETITORS.md)。
+> [`docs/strategy/COMPETITORS.md §0`](docs/strategy/COMPETITORS.md)。
 
 通过一系列架构性 PR 从遗留的 Telegram 机器人中抽取而成
-（见 `docs/ROADMAP.md` 和 git log）。
+（见 `docs/strategy/ROADMAP.md` 和 git log）。
 
-📖 **另见：**
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 数据流、RLS、热重载细节
-- [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — 新租户的接入路径（UI + curl）
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — 已完成、进行中、下一步
-- [`docs/COMPETITORS.md`](docs/COMPETITORS.md) — 竞品分析与定位
+📖 **另见：** — 完整索引见 [`docs/README.md`](docs/README.md)
+- [`docs/engineering/ARCHITECTURE.md`](docs/engineering/ARCHITECTURE.md) — 数据流、RLS、热重载细节
+- [`docs/engineering/ONBOARDING.md`](docs/engineering/ONBOARDING.md) — 新租户的接入路径（UI + curl）
+- [`docs/engineering/EXCHANGE.md`](docs/engineering/EXCHANGE.md) — 兑换垂直：汇率、guardrails、收款信息、订单
+- [`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md) — 完整环境变量参考
+- [`docs/strategy/ROADMAP.md`](docs/strategy/ROADMAP.md) — 已完成、进行中、下一步
+- [`docs/strategy/COMPETITORS.md`](docs/strategy/COMPETITORS.md) — 竞品分析与定位
 
 ---
 
@@ -104,7 +106,7 @@ ARPU 99–199 美元/月。[Phase 2：房地产。Phase 3：横向扩展。]
 
 变更通过进程内总线（`apps/api`）加 30 秒轮询重载（`apps/worker`）
 **实时**生效。详见
-[`docs/ARCHITECTURE.md#hot-reload`](docs/ARCHITECTURE.md)。
+[`docs/engineering/ARCHITECTURE.md#hot-reload`](docs/engineering/ARCHITECTURE.md)。
 
 ---
 
@@ -301,7 +303,7 @@ secret_token=<TELEGRAM_WEBHOOK_SECRET>)`。渠道立即可用，无需手动 cur
 | Stripe webhook `customer.subscription.*` | 根据 priceId 映射修改 `tenants.plan` | 即时（Stripe 投递后） |
 | KB 上传 | DrizzleKbStore 实时从 DB 读取 | 即时 |
 
-详见 [`docs/ARCHITECTURE.md#hot-reload`](docs/ARCHITECTURE.md)。
+详见 [`docs/engineering/ARCHITECTURE.md#hot-reload`](docs/engineering/ARCHITECTURE.md)。
 
 ---
 
@@ -395,26 +397,20 @@ secret 中配置具有 `@chatman-media` scope 发布权限的 `NPM_TOKEN`。
 
 ## 部署
 
-### 环境变量（见 `.env.example`）
+### 环境变量
+
+下面是核心变量；**完整参考**（所有变量，按组、必需/可选）见
+[`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md)。copy-paste
+模板：[`.env.example`](.env.example)。
 
 | 变量 | 必需 | 说明 |
 |---|---|---|
 | `DATABASE_URL` | ✅ | Postgres 连接。**生产中使用 NOSUPERUSER NOBYPASSRLS 角色** |
 | `PLATFORM_MASTER_KEY` | ✅ | AES-256-GCM 用的 32 字节 hex（tenant_secrets） |
-| `PLATFORM_AUTH_SECRET` | 可选 | JWT 式 auth token 的 HMAC 密钥（回退到 MASTER_KEY） |
 | `TELEGRAM_WEBHOOK_SECRET` | ✅ | X-Telegram-Bot-Api-Secret-Token 头 |
-| `ALLOW_PUBLIC_SIGNUP` | 可选 | `1` 开启公共 `/api/auth/signup`（默认关闭 → 403） |
-| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | 可选 | MTProto 凭据（my.telegram.org）。userbot 的**回退值**——凭据按租户存于 `tenant_secrets` |
 | `PLATFORM_PUBLIC_URL` | 可选 | apps/api 的基础 URL，用于 auto-setWebhook（`https://api.example.com`） |
-| `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | 可选 | Meta webhook 设置。**回退值**——也按租户存于 `tenant_secrets` |
-| `WEB_WS_AUTH_SECRET` | 可选 | `/ws/:slug?auth=...` 的共享密钥 |
-| `STRIPE_SECRET_KEY` | 可选 | `sk_test_xxx` / `sk_live_xxx`。为空 → `/checkout` 与 `/portal` 返回 503 |
-| `STRIPE_PRICE_STARTER` / `STRIPE_PRICE_PRO` | 可选 | Stripe dashboard 的 Price ID。webhook 处理器将 priceId 映射到 plan |
-| `STRIPE_CHECKOUT_SUCCESS_URL` / `STRIPE_CHECKOUT_CANCEL_URL` | 可选 | 重定向 URL（支持 `{TENANT}` 占位符） |
-| `STRIPE_WEBHOOK_SECRET` | 可选 | Stripe webhook HMAC |
-| `LLM_*` / `LLM_EMBED_*` | 可选 | 当租户没有 DB 配置时的 env 回退 |
-| `RATE_LIMIT_PER_MIN` / `RATE_LIMIT_PER_HOUR` | 可选 | 默认 60 / 600。`0` = 禁用 |
-| `WORKER_CHANNEL_RELOAD_MS` | 可选 | Worker 轮询间隔。默认 30000。`0` = 禁用 |
+| `ALLOW_PUBLIC_SIGNUP` | 可选 | `1` 开启公共 `/api/auth/signup`（默认关闭 → 403） |
+| Stripe / LLM / WhatsApp / userbot / rate-limit / worker | 可选 | 见 [`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md) |
 
 ### 生产检查清单
 
@@ -434,8 +430,8 @@ secret 中配置具有 `@chatman-media` scope 发布权限的 `NPM_TOKEN`。
 
 ## 路线图与竞品
 
-- **已完成 / 进行中 / 下一步** — 见 [`docs/ROADMAP.md`](docs/ROADMAP.md)
-- **市场分析与定位** — 见 [`docs/COMPETITORS.md`](docs/COMPETITORS.md)
+- **已完成 / 进行中 / 下一步** — 见 [`docs/strategy/ROADMAP.md`](docs/strategy/ROADMAP.md)
+- **市场分析与定位** — 见 [`docs/strategy/COMPETITORS.md`](docs/strategy/COMPETITORS.md)
 
 TL;DR 产品定位：**面向以消息为中心的市场（Telegram / WhatsApp）的
 AI 优先客户服务**。像 Intercom Fin / Sierra / Decagon 这类竞品偏企业级

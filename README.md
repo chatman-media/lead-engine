@@ -51,16 +51,18 @@ level.
 
 > The product is technically universal for any customer-facing business
 > with a messenger funnel. Phase 1 focuses on recruitment for a
-> laser-precision go-to-market. More in [`docs/COMPETITORS.md §0`](docs/COMPETITORS.md).
+> laser-precision go-to-market. More in [`docs/strategy/COMPETITORS.md §0`](docs/strategy/COMPETITORS.md).
 
 Extracted from a legacy Telegram bot through a series of architectural
-PRs (see `docs/ROADMAP.md` and the git log).
+PRs (see `docs/strategy/ROADMAP.md` and the git log).
 
-📖 **See also:**
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — data flow, RLS, hot-reload details
-- [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — a new tenant's path (UI + curl)
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — what's done, in progress, and next
-- [`docs/COMPETITORS.md`](docs/COMPETITORS.md) — competitor analysis and positioning
+📖 **See also:** — full index in [`docs/README.md`](docs/README.md)
+- [`docs/engineering/ARCHITECTURE.md`](docs/engineering/ARCHITECTURE.md) — data flow, RLS, hot-reload details
+- [`docs/engineering/ONBOARDING.md`](docs/engineering/ONBOARDING.md) — a new tenant's path (UI + curl)
+- [`docs/engineering/EXCHANGE.md`](docs/engineering/EXCHANGE.md) — exchange vertical: rates, guardrails, requisites, orders
+- [`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md) — full env-var reference
+- [`docs/strategy/ROADMAP.md`](docs/strategy/ROADMAP.md) — what's done, in progress, and next
+- [`docs/strategy/COMPETITORS.md`](docs/strategy/COMPETITORS.md) — competitor analysis and positioning
 
 ---
 
@@ -131,7 +133,7 @@ response (`{ reason, limit, current, plan, upgradeHint }`) — the UI shows an
 
 Changes apply **live** through an in-process bus (`apps/api`) plus a
 30-second polling reload (`apps/worker`). Details in
-[`docs/ARCHITECTURE.md#hot-reload`](docs/ARCHITECTURE.md).
+[`docs/engineering/ARCHITECTURE.md#hot-reload`](docs/engineering/ARCHITECTURE.md).
 
 ---
 
@@ -211,7 +213,7 @@ in `.env`, then open `http://localhost:5173` → create a tenant → the mandato
 guided wizard (`/onboarding`): vertical → channel → LLM → (exchange: rates →
 requisites) → KB → done.
 
-Server update / production runbook: [docs/SERVER_RUNBOOK.md](docs/SERVER_RUNBOOK.md).
+Server update / production runbook: [docs/operations/SERVER_RUNBOOK.md](docs/operations/SERVER_RUNBOOK.md).
 
 ### Bun shortcuts
 
@@ -362,7 +364,7 @@ flowchart LR
 | Stripe webhook `customer.subscription.*` | `tenants.plan` mutates based on the priceId map | instant (after Stripe delivery) |
 | KB upload | DrizzleKbStore reads live from the DB | instant |
 
-Details in [`docs/ARCHITECTURE.md#hot-reload`](docs/ARCHITECTURE.md).
+Details in [`docs/engineering/ARCHITECTURE.md#hot-reload`](docs/engineering/ARCHITECTURE.md).
 
 ---
 
@@ -513,25 +515,20 @@ resolve. Requires an `NPM_TOKEN` repository secret with publish rights to the
 
 ## Deployment
 
-### Env vars (see `.env.example`)
+### Env vars
+
+Essentials below; the **full reference** (all vars, grouped, required/optional) is
+[`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md). Copy-paste
+template: [`.env.example`](.env.example).
 
 | Var | Required | Description |
 |---|---|---|
 | `DATABASE_URL` | ✅ | Postgres connection. **NOSUPERUSER NOBYPASSRLS role in prod** |
 | `PLATFORM_MASTER_KEY` | ✅ | 32-byte hex for AES-256-GCM (tenant_secrets) |
-| `PLATFORM_AUTH_SECRET` | opt | HMAC secret for JWT-like auth tokens (falls back to MASTER_KEY) |
 | `TELEGRAM_WEBHOOK_SECRET` | ✅ | X-Telegram-Bot-Api-Secret-Token header |
-| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | opt | MTProto app credentials (my.telegram.org). **Fallback** for userbot — creds are per-tenant in `tenant_secrets`; if absent there and in env, `/userbot/start` returns `400` asking for them |
 | `PLATFORM_PUBLIC_URL` | opt | Base URL of apps/api for auto-setWebhook (`https://api.example.com`) |
-| `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | opt | Meta webhook setup. **Fallback** — these are also per-tenant in `tenant_secrets` |
-| `WEB_WS_AUTH_SECRET` | opt | Shared secret for `/ws/:slug?auth=...` |
-| `STRIPE_SECRET_KEY` | opt | `sk_test_xxx` / `sk_live_xxx`. Empty → `/checkout` and `/portal` return 503 |
-| `STRIPE_PRICE_STARTER` / `STRIPE_PRICE_PRO` | opt | Price IDs from the Stripe dashboard. The webhook handler maps priceId → plan |
-| `STRIPE_CHECKOUT_SUCCESS_URL` / `STRIPE_CHECKOUT_CANCEL_URL` | opt | Redirect URLs (support a `{TENANT}` placeholder) |
-| `STRIPE_WEBHOOK_SECRET` | opt | Stripe webhook HMAC |
-| `LLM_*` / `LLM_EMBED_*` | opt | Env fallback if a tenant has no DB config |
-| `RATE_LIMIT_PER_MIN` / `RATE_LIMIT_PER_HOUR` | opt | Default 60 / 600. `0` = disabled |
-| `WORKER_CHANNEL_RELOAD_MS` | opt | Worker polling interval. Default 30000. `0` = disabled |
+| `ALLOW_PUBLIC_SIGNUP` | opt | `1` opens public `/api/auth/signup` (closed by default → 403) |
+| Stripe / LLM / WhatsApp / userbot / rate-limit / worker | opt | See [`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md) |
 
 ### Production checklist
 
@@ -564,14 +561,14 @@ resolve. Requires an `NPM_TOKEN` repository secret with publish rights to the
 | Self-host | ✅ enterprise | ❌ | ❌ | ❌ | ❌ |
 | Open source | ✅ MIT | ❌ | ❌ | ❌ | ❌ |
 
-Full competitive analysis: [`docs/COMPETITORS.md`](docs/COMPETITORS.md)
+Full competitive analysis: [`docs/strategy/COMPETITORS.md`](docs/strategy/COMPETITORS.md)
 
 ---
 
 ## Roadmap & competitors
 
-- **Done / in progress / next** — see [`docs/ROADMAP.md`](docs/ROADMAP.md)
-- **Market analysis and positioning** — see [`docs/COMPETITORS.md`](docs/COMPETITORS.md)
+- **Done / in progress / next** — see [`docs/strategy/ROADMAP.md`](docs/strategy/ROADMAP.md)
+- **Market analysis and positioning** — see [`docs/strategy/COMPETITORS.md`](docs/strategy/COMPETITORS.md)
 
 TL;DR product niche: **AI-first customer service for messenger-centric
 markets** (Telegram / WhatsApp). Competitors like Intercom Fin / Sierra /
@@ -589,7 +586,7 @@ PRs are welcome. A few guidelines:
 - **Branches**: `feat/<name>` for features, `fix/<name>` for bug fixes
 - **Commits**: follow [Conventional Commits](https://www.conventionalcommits.org/) — `feat:`, `fix:`, `chore:`, etc. Semantic-release derives versions and changelogs from them
 - **Before submitting**: run `bun run typecheck && bun test` across the monorepo. CI is the same check
-- **Architecture context**: read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before touching `apps/api` or the packages — the RLS / withTenant contract and the split-tx pipeline are critical invariants
+- **Architecture context**: read [`docs/engineering/ARCHITECTURE.md`](docs/engineering/ARCHITECTURE.md) before touching `apps/api` or the packages — the RLS / withTenant contract and the split-tx pipeline are critical invariants
 - **New packages**: add to `packages/`, export from `@chatman-media/<name>`, wire up `bun.lockb` + tsconfig paths
 
 ---

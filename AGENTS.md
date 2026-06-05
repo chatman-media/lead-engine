@@ -1,7 +1,7 @@
 # AGENTS.md — AI Agent Instructions
 
 Rules, patterns and context for AI agents working in this codebase.
-For architecture and feature overview see [README.md](README.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+For architecture and feature overview see [README.md](README.md) and [docs/strategy/ROADMAP.md](docs/strategy/ROADMAP.md).
 
 ---
 
@@ -59,7 +59,7 @@ curl -s -X POST http://localhost:3000/api/auth/signup \
 
 After signing in, the `OnboardingGate` redirects to `/onboarding` until the
 mandatory wizard is complete (channel + chat-LLM; exchange also needs funnel +
-rate + requisite). See [docs/ONBOARDING.md](docs/ONBOARDING.md).
+rate + requisite). See [docs/engineering/ONBOARDING.md](docs/engineering/ONBOARDING.md).
 
 The first admin of a tenant gets `role=superadmin` automatically. To test cross-tenant isolation or manager-role restrictions, sign up a second tenant or invite a manager:
 

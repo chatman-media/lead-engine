@@ -10,7 +10,7 @@ Self-service через **обязательный onboarding-визард**, б
 ## Prerequisites
 
 1. Развёрнуты `apps/api` + `apps/worker` + `apps/admin-ui` (см.
-   [`../README.md#quick-start`](../README.md))
+   [`../../README.md#quick-start`](../../README.md))
 2. `PLATFORM_PUBLIC_URL` задан в env apps/api (например `https://api.acme.com`)
    — нужен чтобы auto-setWebhook работал
 3. У бизнеса есть:
@@ -37,7 +37,7 @@ signup_disabled`, страницы `/signup` в admin-UI больше нет. О
   активирует через `/accept-invite` (`POST /api/auth/accept-invite
   { token, password }`).
 - **Открыть signup** — выставить `ALLOW_PUBLIC_SIGNUP=1` (нужно и для
-  локальной разработки, см. [`../AGENTS.md`](../AGENTS.md)). Тогда
+  локальной разработки, см. [`../../AGENTS.md`](../../AGENTS.md)). Тогда
   `POST /api/auth/signup { email, password, tenantSlug? }` создаёт tenant
   + первого admin'а с `role=superadmin`.
 
@@ -359,11 +359,14 @@ capture → qualify → offer → [clear] → [fulfill] → won / lost
   число лидов в каждой фазе (сравнимо между вертикалями).
 
 Подробнее — [`ARCHITECTURE.md#funnel-phase-backbone`](ARCHITECTURE.md) и
-[`VERTICALS.md`](VERTICALS.md).
+[`VERTICALS.md`](../strategy/VERTICALS.md).
 
 ---
 
 ## Шаг 4b. (Обменник) Курсы и реквизиты
+
+> Полное описание системы обмена (курсы, guardrails, ops-watch, реквизиты,
+> orders) — [EXCHANGE.md](EXCHANGE.md).
 
 Для обменных тенантов визард добавляет обязательные шаги **Курсы** и
 **Реквизиты** (и опциональные **Бизнес-данные**).

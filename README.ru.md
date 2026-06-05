@@ -48,16 +48,18 @@ ARPU $99–199/мес. [Phase 2: real estate. Phase 3: horizontal.]
 
 > Продукт технически универсален для любого клиентского бизнеса с
 > мессенджер-воронкой. В Phase 1 фокус на recruitment для laser-precision
-> go-to-market. Подробнее: [`docs/COMPETITORS.md §0`](docs/COMPETITORS.md).
+> go-to-market. Подробнее: [`docs/strategy/COMPETITORS.md §0`](docs/strategy/COMPETITORS.md).
 
 Извлечён из legacy Telegram-бота через
-серию архитектурных PR'ов (см. `docs/ROADMAP.md` и git log).
+серию архитектурных PR'ов (см. `docs/strategy/ROADMAP.md` и git log).
 
-📖 **См. также:**
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — детали data flow, RLS, hot-reload
-- [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — путь нового tenant'а (UI + curl)
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — что готово, что в работе, что дальше
-- [`docs/COMPETITORS.md`](docs/COMPETITORS.md) — анализ конкурентов и позиционирование
+📖 **См. также:** — полный индекс в [`docs/README.md`](docs/README.md)
+- [`docs/engineering/ARCHITECTURE.md`](docs/engineering/ARCHITECTURE.md) — детали data flow, RLS, hot-reload
+- [`docs/engineering/ONBOARDING.md`](docs/engineering/ONBOARDING.md) — путь нового tenant'а (UI + curl)
+- [`docs/engineering/EXCHANGE.md`](docs/engineering/EXCHANGE.md) — обменник: курсы, guardrails, реквизиты, заявки
+- [`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md) — полный референс env-переменных
+- [`docs/strategy/ROADMAP.md`](docs/strategy/ROADMAP.md) — что готово, что в работе, что дальше
+- [`docs/strategy/COMPETITORS.md`](docs/strategy/COMPETITORS.md) — анализ конкурентов и позиционирование
 
 ---
 
@@ -107,7 +109,7 @@ response (`{ reason, limit, current, plan, upgradeHint }`) — UI показыв
 
 Изменения применяются **live** через in-process bus (`apps/api`) +
 30-сек polling reload (`apps/worker`). Подробности в
-[`docs/ARCHITECTURE.md#hot-reload`](docs/ARCHITECTURE.md).
+[`docs/engineering/ARCHITECTURE.md#hot-reload`](docs/engineering/ARCHITECTURE.md).
 
 ---
 
@@ -306,7 +308,7 @@ secret_token=<TELEGRAM_WEBHOOK_SECRET>)`. Канал работает сразу
 | Stripe webhook `customer.subscription.*` | `tenants.plan` mutates на основе priceId map | instant (после Stripe delivery) |
 | KB upload | DrizzleKbStore читает live из БД | instant |
 
-Подробности в [`docs/ARCHITECTURE.md#hot-reload`](docs/ARCHITECTURE.md).
+Подробности в [`docs/engineering/ARCHITECTURE.md#hot-reload`](docs/engineering/ARCHITECTURE.md).
 
 ---
 
@@ -400,26 +402,20 @@ CI публикует пакеты в порядке зависимостей, �
 
 ## Deployment
 
-### Env vars (см. `.env.example`)
+### Env vars
+
+Ниже — основное; **полный референс** (все переменные, по группам, required/optional)
+в [`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md). Copy-paste
+шаблон: [`.env.example`](.env.example).
 
 | Var | Required | Description |
 |---|---|---|
 | `DATABASE_URL` | ✅ | Postgres connection. **NOSUPERUSER NOBYPASSRLS role в prod** |
 | `PLATFORM_MASTER_KEY` | ✅ | 32-byte hex для AES-256-GCM (tenant_secrets) |
-| `PLATFORM_AUTH_SECRET` | opt | HMAC секрет для JWT-like auth tokens (fallback на MASTER_KEY) |
 | `TELEGRAM_WEBHOOK_SECRET` | ✅ | X-Telegram-Bot-Api-Secret-Token header |
-| `ALLOW_PUBLIC_SIGNUP` | opt | `1` открывает публичный `/api/auth/signup` (по умолчанию закрыт → 403) |
-| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | opt | MTProto-креды (my.telegram.org). **Fallback** для userbot — креды per-tenant в `tenant_secrets` |
 | `PLATFORM_PUBLIC_URL` | opt | Базовый URL apps/api для auto-setWebhook (`https://api.example.com`) |
-| `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | opt | Meta webhook setup. **Fallback** — также per-tenant в `tenant_secrets` |
-| `WEB_WS_AUTH_SECRET` | opt | Shared secret для `/ws/:slug?auth=...` |
-| `STRIPE_SECRET_KEY` | opt | `sk_test_xxx` / `sk_live_xxx`. Пусто → `/checkout` и `/portal` вернут 503 |
-| `STRIPE_PRICE_STARTER` / `STRIPE_PRICE_PRO` | opt | Price IDs из Stripe dashboard. Webhook handler маппит priceId → plan |
-| `STRIPE_CHECKOUT_SUCCESS_URL` / `STRIPE_CHECKOUT_CANCEL_URL` | opt | Redirect URLs (поддерживают `{TENANT}` placeholder) |
-| `STRIPE_WEBHOOK_SECRET` | opt | Stripe webhook HMAC |
-| `LLM_*` / `LLM_EMBED_*` | opt | Env fallback если у tenant'а нет DB config'а |
-| `RATE_LIMIT_PER_MIN` / `RATE_LIMIT_PER_HOUR` | opt | Default 60 / 600. `0` = disabled |
-| `WORKER_CHANNEL_RELOAD_MS` | opt | Worker polling interval. Default 30000. `0` = disabled |
+| `ALLOW_PUBLIC_SIGNUP` | opt | `1` открывает публичный `/api/auth/signup` (по умолчанию закрыт → 403) |
+| Stripe / LLM / WhatsApp / userbot / rate-limit / worker | opt | См. [`docs/engineering/CONFIGURATION.md`](docs/engineering/CONFIGURATION.md) |
 
 ### Production checklist
 
@@ -439,8 +435,8 @@ CI публикует пакеты в порядке зависимостей, �
 
 ## Roadmap & competitors
 
-- **Что готово / в работе / дальше** — см. [`docs/ROADMAP.md`](docs/ROADMAP.md)
-- **Анализ рынка и позиционирование** — см. [`docs/COMPETITORS.md`](docs/COMPETITORS.md)
+- **Что готово / в работе / дальше** — см. [`docs/strategy/ROADMAP.md`](docs/strategy/ROADMAP.md)
+- **Анализ рынка и позиционирование** — см. [`docs/strategy/COMPETITORS.md`](docs/strategy/COMPETITORS.md)
 
 TL;DR продуктовая ниша: **AI-first customer service для мессенджер-
 центричных рынков** (Telegram / WhatsApp). Конкуренты типа Intercom Fin

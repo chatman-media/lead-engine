@@ -2,7 +2,7 @@
 
 Детальная архитектура `lead-engine`: процессы, data flow, изоляция,
 hot-reload, secrets. Для high-level introduction — см.
-[`../README.md`](../README.md).
+[`../../README.md`](../../README.md).
 
 ---
 
@@ -637,7 +637,7 @@ capture → qualify → offer → [clear] → [fulfill] → won / lost
   валидный костяк для кастомных/AI-воронок.
 - `GET /api/admin/funnel/phase-stats` — число лидов по фазам (vertical-agnostic).
 
-Маппинг стадий на фазы по 5 вертикалям — см. [`VERTICALS.md`](VERTICALS.md).
+Маппинг стадий на фазы по 5 вертикалям — см. [`VERTICALS.md`](../strategy/VERTICALS.md).
 
 ### Photo + passport fields
 
@@ -699,6 +699,8 @@ done = channelConnected && chatLlmConfigured && (!isExchange || (funnelInstalled
 ---
 
 ## Exchange vertical
+
+> Полное описание — [EXCHANGE.md](EXCHANGE.md). Здесь — краткая сводка.
 
 Крипто/нал обменник (`exchange_v1`) — основная live-вертикаль. 12-стадийная
 воронка (`apps/vertical-exchange/src/funnel-stages.ts`):

@@ -9,7 +9,7 @@ push main ──▶ workspace (tests) ──▶ deploy (ssh → ./deploy.sh) ─
                   └──▶ release (npm publish, параллельно)
 ```
 
-Job описан в [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`jobs.deploy`).
+Job описан в [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) (`jobs.deploy`).
 Деплоится только реальный `push` в `main` и только после зелёных тестов
 (`needs: workspace`). Деплои не пересекаются (`concurrency: deploy-production`).
 
