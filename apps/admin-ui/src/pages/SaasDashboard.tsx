@@ -337,17 +337,36 @@ export function SaasDashboard() {
       ? Math.min(100, (completedInPeriod.length / createdInPeriod.length) * 100)
       : 0;
 
-  // По валютам (завершённые в периоде)
-  const assetAgg = new Map<string, { count: number; turnover: number }>();
+  // Оценка маржи на сделку: рыночная стоимость отданного актива − выданные THB.
+  // Рыночный курс берём из активного rates.baseRate (авто-обновляется). Это
+  // оценка (курс на момент сделки мог отличаться) — но осмысленнее marginPct.
+  const rateByAsset = new Map<string, ExchangeRate>();
+  for (const r of rates) {
+    if (r.isActive && !rateByAsset.has(r.asset)) rateByAsset.set(r.asset, r);
+  }
+  const orderMargin = (o: ExchangeOrder): number | null => {
+    const r = rateByAsset.get(o.assetFrom);
+    if (!r || !(r.baseRate > 0)) return null;
+    const marketThb =
+      r.quoteMode === "divide" ? o.amountFrom / r.baseRate : o.amountFrom * r.baseRate;
+    return marketThb - (o.amountToThb || 0);
+  };
+
+  // По валютам (завершённые в периоде) + маржа по активу
+  const assetAgg = new Map<string, { count: number; turnover: number; margin: number }>();
   for (const o of completedInPeriod) {
-    const cur = assetAgg.get(o.assetFrom) ?? { count: 0, turnover: 0 };
+    const cur = assetAgg.get(o.assetFrom) ?? { count: 0, turnover: 0, margin: 0 };
     cur.count += 1;
     cur.turnover += o.amountToThb || 0;
+    const m = orderMargin(o);
+    if (m !== null) cur.margin += m;
     assetAgg.set(o.assetFrom, cur);
   }
   const assetRows = [...assetAgg.entries()]
     .map(([asset, v]) => ({ asset, ...v }))
     .sort((a, b) => b.turnover - a.turnover);
+  const marginEstimate = assetRows.reduce((s, r) => s + r.margin, 0);
+  const marginKnown = completedInPeriod.some((o) => orderMargin(o) !== null);
 
   // По статусам (созданные в периоде)
   const statusCounts = STATUS_ORDER.map((s) => ({
@@ -492,7 +511,7 @@ export function SaasDashboard() {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Card>
               <CardContent className="pt-4 pb-3">
                 <p className="text-2xl font-bold tabular-nums">
@@ -551,6 +570,23 @@ export function SaasDashboard() {
                 </CardContent>
               </Card>
             </button>
+            <Card>
+              <CardContent className="pt-4 pb-3">
+                <p className="text-2xl font-bold tabular-nums">
+                  {marginKnown ? (
+                    <>
+                      {fmtMoney(marginEstimate)}{" "}
+                      <span className="text-sm font-normal text-muted-foreground">฿</span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Маржа ≈ {!marginKnown && "(нужны курсы)"}
+                </p>
+              </CardContent>
+            </Card>
           </div>
 
           {/* График оборота за период */}
@@ -764,7 +800,13 @@ export function SaasDashboard() {
                       max={assetRows[0]?.turnover ?? 1}
                       right={
                         <span>
-                          {fmtMoney(r.turnover)} ฿ · {r.count}
+                          {fmtMoney(r.turnover)} ฿
+                          {r.margin > 0 && (
+                            <span className="text-[var(--success)]">
+                              {" "}
+                              · +{fmtMoney(r.margin)} маржа
+                            </span>
+                          )}
                         </span>
                       }
                     />
