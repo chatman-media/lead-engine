@@ -200,3 +200,44 @@ jobs:
             (cd "packages/$pkg" && bunx semantic-release)
             echo "::endgroup::"
           done
+
+  deploy:
+    name: Deploy — SSH → сервер → deploy.sh
+    needs: workspace
+    runs-on: ubuntu-latest
+    # Катим только реальный push в main: PR, форки и ручные ветки на прод не идут.
+    # needs: workspace — деплоим лишь после зелёных тестов. release не нужен:
+    # сервер ставит @chatman-media/* как workspace-зависимости, а не из npm.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    timeout-minutes: 20
+    # Деплои строго по одному: in-progress не отменяем — обрыв на середине
+    # migrate/build опаснее, чем подождать. Параллельные пуши в main встают в очередь.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    # GitHub Environment даёт историю деплоев и точку для будущих protection
+    # rules (required reviewers и т.п.), если позже захочется ручной апрув.
+    environment:
+      name: production
+
+    steps:
+      - name: Deploy over SSH (запустить deploy.sh на сервере)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          # deploy.sh внутри сам с `set -euo pipefail`; script_stop ловит обрыв
+          # ещё на `cd`, если каталога нет. Любой ненулевой код — красный job.
+          script_stop: true
+          # install + typecheck + сборка ui/widget/пакетов бывает долгой.
+          command_timeout: 18m
+          script: |
+            # bun не в PATH у non-interactive SSH (его добавляет ~/.bashrc,
+            # который для неинтерактивных сессий выходит раньше). Прописываем
+            # ДО запуска, чтобы и текущий on-disk deploy.sh нашёл bun на самом
+            # первом деплое (дочерний процесс наследует PATH из сессии).
+            export BUN_INSTALL="$HOME/.bun"
+            export PATH="$BUN_INSTALL/bin:$PATH"
+            cd /opt/lead-engine
+            ./deploy.sh

@@ -44,6 +44,13 @@ done
 [ -f "$APP_DIR/.env" ]        && set -a && . "$APP_DIR/.env"        && set +a
 [ -f "$APP_DIR/.deploy.env" ] && set -a && . "$APP_DIR/.deploy.env" && set +a
 
+# bun ставится в ~/.bun/bin, которого нет в PATH у non-interactive shell:
+# CI/CD заходит по SSH именно так, а ~/.bashrc на Ubuntu для неинтерактивных
+# сессий выходит раньше, чем добавит bun. Прописываем явно, чтобы deploy.sh
+# не зависел от способа вызова (BUN_INSTALL можно переопределить в .deploy.env).
+export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+export PATH="$BUN_INSTALL/bin:$PATH"
+
 HEALTH_URL="${HEALTH_URL:-${PLATFORM_PUBLIC_URL:-}/healthz}"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
