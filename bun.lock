@@ -280,7 +280,7 @@
     },
     "packages/kb": {
       "name": "@chatman-media/kb",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "dependencies": {
         "@chatman-media/llm-router": "workspace:*",
         "unpdf": "^1.6.2",
@@ -299,7 +299,7 @@
     },
     "packages/llm-router": {
       "name": "@chatman-media/llm-router",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "devDependencies": {
         "@biomejs/biome": "^2.4.16",
         "@types/bun": "1.3.14",
@@ -335,7 +335,7 @@
     },
     "packages/storage": {
       "name": "@chatman-media/storage",
-      "version": "1.4.1",
+      "version": "1.5.0",
       "devDependencies": {
         "@biomejs/biome": "^2.4.16",
         "@chatman-media/sales": "^0.1.0",
@@ -353,7 +353,7 @@
     },
     "packages/verticals": {
       "name": "@chatman-media/verticals",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "devDependencies": {
         "@biomejs/biome": "^2.4.16",
         "@types/bun": "1.3.14",
