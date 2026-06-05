@@ -49,7 +49,7 @@ export class WhatsAppClient {
     this.phoneNumberId = opts.phoneNumberId;
     this.accessToken = opts.accessToken;
     this.apiVersion = opts.apiVersion ?? "v18.0";
-    this.baseUrl = (opts.baseUrl ?? "https://graph.facebook.com").replace(/\/+$/, "");
+    this.baseUrl = (opts.baseUrl ?? "https://graph.facebook.com").replace(/\/{1,512}$/, "");
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   }
 

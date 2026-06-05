@@ -60,7 +60,7 @@ const fakeTelegramFetch = (async (
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   // ── WhatsApp Meta Graph intercept ────────────────────────────────────
   // Pattern: https://graph.facebook.com/v18.0/<phone_number_id>
-  if (url.includes("graph.facebook.com")) {
+  if (url.startsWith("https://graph.facebook.com/")) {
     const headers = init?.headers as Record<string, string> | undefined;
     const auth = headers?.authorization ?? headers?.Authorization ?? "";
     if (auth.includes("bad-token")) {

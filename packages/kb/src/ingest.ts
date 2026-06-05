@@ -187,7 +187,12 @@ function* walk(dir: string): Generator<string> {
 export function stripNonContent(raw: string): string {
   let s = raw;
   s = s.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
-  s = s.replace(/<!--[\s\S]*?-->/g, "");
+  // Strip HTML comments. Bounded quantifier avoids polynomial backtracking;
+  // loop until stable so a leftover `<!--` can't survive a single pass.
+  for (let prev = ""; prev !== s; ) {
+    prev = s;
+    s = s.replace(/<!--[\s\S]{0,10000}?-->/g, "");
+  }
   s = s.replace(/\n{3,}/g, "\n\n").trim();
   return `${s}\n`;
 }

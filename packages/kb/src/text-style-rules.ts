@@ -37,7 +37,7 @@ export interface TextStyleRule {
 export const replaceEmDash: TextStyleRule = {
   name: "replace-em-dash",
   description: "U+2014 «—» → «-» (с нормализацией пробелов)",
-  apply: (s) => s.replace(/\s*—\s*/g, " - ").replace(/ {2,}/g, " "),
+  apply: (s) => s.replace(/\s{0,200}—\s{0,200}/g, " - ").replace(/ {2,}/g, " "),
 };
 
 /**
