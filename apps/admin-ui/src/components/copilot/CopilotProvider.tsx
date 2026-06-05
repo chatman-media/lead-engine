@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ApiError, type CopilotAction, type CopilotChatMessage, saas } from "@/api/saas";
 
@@ -61,8 +61,62 @@ export function useCopilot(): CopilotContextValue {
 
 const OPEN_KEY = "copilot-dock-open";
 
+/**
+ * Маршрут → {pageId, label} (совпадает с навигацией сайдбара). Даёт page-aware
+ * контекст на ЛЮБОЙ странице кабинета без правок самих страниц: страница может
+ * дополнительно опубликовать структурный контекст через usePageCopilot.
+ */
+const ROUTE_META: Record<string, { pageId: string; label: string }> = {
+  "/dashboard": { pageId: "dashboard", label: "Главная" },
+  "/leads": { pageId: "leads", label: "Лиды" },
+  "/conversations": { pageId: "conversations", label: "Диалоги" },
+  "/outreach": { pageId: "outreach", label: "Рассылка" },
+  "/funnel": { pageId: "funnel", label: "Воронка" },
+  "/exchange": { pageId: "exchange", label: "Обменник" },
+  "/vacancies": { pageId: "vacancies", label: "Каталог" },
+  "/skills": { pageId: "skills", label: "Навыки" },
+  "/hooks": { pageId: "hooks", label: "Хуки" },
+  "/styles": { pageId: "styles", label: "Стили" },
+  "/experiments": { pageId: "experiments", label: "Эксперименты" },
+  "/test": { pageId: "test", label: "Тест бота" },
+  "/channels": { pageId: "channels", label: "Каналы" },
+  "/notifications": { pageId: "notifications", label: "Уведомления" },
+  "/webhooks": { pageId: "webhooks", label: "Вебхуки" },
+  "/tools": { pageId: "tools", label: "Инструменты" },
+  "/referral": { pageId: "referral", label: "Партнёры" },
+  "/audit": { pageId: "audit", label: "Аудит" },
+  "/settings": { pageId: "settings", label: "Настройки LLM" },
+  "/team": { pageId: "team", label: "Команда" },
+  "/billing": { pageId: "billing", label: "Использование LLM" },
+  "/diagnostics": { pageId: "diagnostics", label: "Диагностика" },
+  "/superadmin": { pageId: "superadmin", label: "Аккаунты" },
+};
+
+function routeMetaFor(pathname: string): { pageId: string; label: string } {
+  for (const [path, meta] of Object.entries(ROUTE_META)) {
+    if (pathname === path || pathname.startsWith(`${path}/`)) return meta;
+  }
+  return { pageId: "unknown", label: "Ассистент" };
+}
+
+/**
+ * Фолбэк-контекст: видимый текст основной области (что реально видит оператор).
+ * Используется, когда страница не опубликовала структурный контекст. Режем —
+ * бэкенд всё равно ограничивает до 6000.
+ */
+function getVisibleContext(): { visibleText: string } | undefined {
+  if (typeof document === "undefined") return undefined;
+  const main = document.querySelector("main");
+  const text = main?.innerText
+    ?.replace(/[ \t]+\n/g, "\n")
+    .trim()
+    .slice(0, 4000);
+  return text ? { visibleText: text } : undefined;
+}
+
 export function CopilotProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [open, setOpenState] = useState(() => localStorage.getItem(OPEN_KEY) === "true");
   const [messages, setMessages] = useState<CopilotChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
@@ -82,6 +136,7 @@ export function CopilotProvider({ children }: { children: React.ReactNode }) {
   // лишних ререндеров и stale-замыканий. Прочие refs синхронизируют значения
   // для стабильных (useCallback []) async-колбэков.
   const pageRef = useRef<PageCopilotContext | null>(null);
+  const routeRef = useRef(routeMetaFor(pathname));
   const busyRef = useRef(busy);
   const messagesRef = useRef(messages);
   const pendingRef = useRef(pendingAction);
@@ -127,17 +182,35 @@ export function CopilotProvider({ children }: { children: React.ReactNode }) {
   const publishContext = useCallback((ctx: PageCopilotContext | null) => {
     const prevId = pageRef.current?.pageId;
     pageRef.current = ctx;
-    const nextId = ctx?.pageId ?? "unknown";
+    // Нет явного контекста → метаданные берём из текущего маршрута.
+    const fallback = routeRef.current;
+    const nextId = ctx?.pageId ?? fallback.pageId;
     if (nextId !== prevId) setLlmError(false); // смена страницы сбрасывает 503-флаг
     const next = ctx
       ? { pageId: ctx.pageId, label: ctx.label, llmReady: ctx.llmReady ?? true }
-      : { pageId: "unknown", label: "Ассистент", llmReady: true };
+      : { pageId: fallback.pageId, label: fallback.label, llmReady: true };
     setPageMeta((prev) =>
       prev.pageId === next.pageId && prev.label === next.label && prev.llmReady === next.llmReady
         ? prev
         : next,
     );
   }, []);
+
+  // Маршрут сменился: обновляем route-метаданные. Если страница НЕ опубликовала
+  // явный контекст (usePageCopilot), берём label/pageId из маршрута и сбрасываем
+  // 503-флаг — так каждая страница кабинета становится page-aware.
+  useEffect(() => {
+    const rm = routeMetaFor(pathname);
+    routeRef.current = rm;
+    if (!pageRef.current) {
+      setLlmError(false);
+      setPageMeta((prev) =>
+        prev.pageId === rm.pageId && prev.label === rm.label && prev.llmReady
+          ? prev
+          : { pageId: rm.pageId, label: rm.label, llmReady: true },
+      );
+    }
+  }, [pathname]);
 
   const send = useCallback(async (text: string) => {
     const t = text.trim();
@@ -149,8 +222,8 @@ export function CopilotProvider({ children }: { children: React.ReactNode }) {
     setBusy(true);
     try {
       const res = await saas.copilotChat({
-        page: pageRef.current?.pageId ?? "unknown",
-        context: pageRef.current?.data,
+        page: pageRef.current?.pageId ?? routeRef.current.pageId,
+        context: pageRef.current?.data ?? getVisibleContext(),
         messages: next,
       });
       setMessages([...next, { role: "assistant", content: res.reply }]);
