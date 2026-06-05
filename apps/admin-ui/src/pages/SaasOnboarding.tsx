@@ -139,6 +139,82 @@ function modelPlaceholder(provider: LlmProvider, purpose: LlmPurpose): string {
   return MODEL_PLACEHOLDER[provider]?.[purpose] ?? "model-id";
 }
 
+/**
+ * Готовые заготовки KB-документов для обменника. Жмёшь чип — форма «Добавить
+ * текст» заполняется шаблоном с уже подставленными вариантами (цветные
+ * банкоматы, способы выдачи и т.п.); остаётся вписать своё вместо `<…>`.
+ * Бот отвечает по этим документам через RAG (см. шаг «База знаний»).
+ */
+const EXCHANGE_KB_TEMPLATES: { label: string; title: string; topic: string; body: string }[] = [
+  {
+    label: "Офисы и банкоматы",
+    title: "Офисы, точки выдачи и банкоматы",
+    topic: "locations",
+    body: [
+      "# Офисы, точки выдачи и банкоматы",
+      "",
+      "## Офисы",
+      "- <район>: <адрес>, часы 10:00–20:00",
+      "- <район>: <адрес>, часы 11:00–19:00",
+      "(подскажем ближайший; код выдачи даёт оператор)",
+      "",
+      "## Cardless-снятие в банкомате (без карты)",
+      "Поддерживаем «цветные» банкоматы:",
+      "- 🟢 зелёный — Kasikorn (KBank)",
+      "- 🟡 жёлтый — Krungsri",
+      "- 🔵 синий — Bangkok Bank",
+      "- 🟣 фиолетовый — SCB",
+      "Подойдёт любой рядом с вами — пришлём банк, телефон и код снятия.",
+      "",
+      "## Курьер",
+      "Доставка наличных: <зоны>, мин. сумма <…>, срок <…>.",
+    ].join("\n"),
+  },
+  {
+    label: "Способы и сроки выдачи",
+    title: "Способы и сроки выдачи",
+    topic: "payout",
+    body: [
+      "# Способы и сроки выдачи THB",
+      "",
+      "- Наличные в офисе (код): <условия>",
+      "- Cardless в банкомате (🟢 KBank / 🟡 Krungsri / 🔵 Bangkok Bank / 🟣 SCB): <условия>",
+      "- Курьер: <зоны, мин. сумма, срок>",
+      "- Перевод на тайский банк: <банки, срок>",
+      "",
+      "Сроки: обычно <…> минут после подтверждения оплаты.",
+    ].join("\n"),
+  },
+  {
+    label: "Курс, лимиты, комиссии",
+    title: "Курс, лимиты и комиссии",
+    topic: "rates",
+    body: [
+      "# Курс, лимиты и комиссии",
+      "",
+      "- Направления: RUB→THB, USDT→THB, THB→RUB",
+      "- Минимальная сумма: <…>",
+      "- Комиссия: <… или «уже в курсе»>",
+      "- Курс действует <…> минут после фиксации.",
+      "- KYC: <напр. паспорт свыше 50 000 THB>",
+    ].join("\n"),
+  },
+  {
+    label: "Как проходит обмен",
+    title: "Как проходит обмен",
+    topic: "faq",
+    body: [
+      "# Как проходит обмен",
+      "",
+      "1. Вы пишете сумму и направление (напр. 45 000 ₽ → THB).",
+      "2. Мы фиксируем курс и даём реквизиты для оплаты (QR/СБП, карта или крипто-кошелёк).",
+      "3. Вы оплачиваете и присылаете подтверждение.",
+      "4. Мы подтверждаем оплату и согласуем выдачу: офис, банкомат, курьер или перевод на банк.",
+      "5. Выдаём наличные/перевод и присылаем код снятия (для банкомата).",
+    ].join("\n"),
+  },
+];
+
 type StepId =
   | "vertical"
   | "channel"
@@ -969,9 +1045,13 @@ export function SaasOnboarding() {
                   >
                     {s.done ? <CheckIcon className="size-3" /> : i + 1}
                   </span>
-                  <span className="hidden font-medium sm:inline">
+                  <span className="hidden items-center gap-1.5 font-medium sm:inline-flex">
                     {s.label}
-                    {!s.required && <span className="text-muted-foreground"> ·опц</span>}
+                    {!s.required && (
+                      <span className="rounded-full bg-muted px-1.5 py-px text-[10px] font-medium leading-normal text-muted-foreground">
+                        опц
+                      </span>
+                    )}
                   </span>
                 </button>
               </li>
@@ -1683,6 +1763,32 @@ export function SaasOnboarding() {
                 />
               </label>
 
+              {isExchange && (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Заготовки для обменника — нажмите, заполнится форма ниже, останется вписать свои
+                    адреса и условия:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {EXCHANGE_KB_TEMPLATES.map((t) => (
+                      <Button
+                        key={t.title}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setPasteTitle(t.title);
+                          setPasteTopic(t.topic);
+                          setPasteBody(t.body);
+                        }}
+                      >
+                        {t.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <form onSubmit={handlePaste} className="space-y-3">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Input
@@ -1795,7 +1901,7 @@ export function SaasOnboarding() {
               <p className="text-sm text-muted-foreground">
                 {allRequiredDone
                   ? "Всё настроено — можно переходить к работе."
-                  : "Завершите обязательные шаги (отмечены без «·опц»), чтобы открыть кабинет."}
+                  : "Завершите обязательные шаги (без пометки «опц»), чтобы открыть кабинет."}
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
