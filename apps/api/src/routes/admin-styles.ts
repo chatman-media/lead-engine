@@ -2,6 +2,7 @@ import { type Db, StylesRepo, withTenant } from "@chatman-media/conversation-eng
 import type { ChatClient } from "@chatman-media/llm-router";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
+import { isUniqueViolation } from "../lib/db-errors.ts";
 
 /**
  * Styles CRUD — tenant-specific sales personas / communication frameworks.
@@ -153,8 +154,7 @@ ${samples}`;
         return repo.create({ slug, displayName, configJson, isActive });
       });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("uniq_styles_active_slug") || msg.includes("unique")) {
+      if (isUniqueViolation(err)) {
         return c.json({ error: "style with this slug already exists" }, 409);
       }
       throw err;

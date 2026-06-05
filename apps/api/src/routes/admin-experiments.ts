@@ -1,6 +1,7 @@
 import { type Db, ExperimentsRepo, withTenant } from "@chatman-media/conversation-engine";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
+import { isUniqueViolation } from "../lib/db-errors.ts";
 
 /**
  * Experiments CRUD — A/B тесты стилей общения.
@@ -73,8 +74,7 @@ export function makeAdminExperimentsRoutes(opts: AdminExperimentsRoutesOpts): Ho
         return repo.create({ slug, allocationJson: allocationRaw, successMetric: metric });
       });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("unique")) return c.json({ error: "experiment with this slug already exists" }, 409);
+      if (isUniqueViolation(err)) return c.json({ error: "experiment with this slug already exists" }, 409);
       throw err;
     }
 
