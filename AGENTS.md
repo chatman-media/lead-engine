@@ -75,6 +75,8 @@ curl -s -X POST http://localhost:3000/api/admin/admins/invite \
 
 ## Running tests
 
+> Full testing guide: [docs/engineering/TESTING.md](docs/engineering/TESTING.md).
+
 Tests require a live Postgres instance. Each integration test creates an isolated DB via `createIsolatedDb` and applies migrations before the suite runs.
 
 ```bash
