@@ -94,7 +94,7 @@ LLM 密钥（AES-256-GCM 加密）；上传知识库文档。渠道立即开始�
 | `apps/vertical-*` | 垂类模板（`exchange` 已上线，另有 real-estate / recruitment / saas / video）——经 `packages/verticals` 加载，不单独部署 |
 
 领域逻辑位于 `packages/*`（以 `@chatman-media` 域发布到 npm）：`storage`
-（Drizzle schema + 迁移）、`channel-{core,telegram,whatsapp,web}`、`llm-router`、
+（Drizzle schema + 迁移）、`channel-{core,telegram,whatsapp,facebook,web}`、`llm-router`、
 `kb`（RAG）、`sales`、`conversation-engine`、`verticals`、`observability`。
 依赖图与拆分事务（split-tx）管线详见 [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)。
 

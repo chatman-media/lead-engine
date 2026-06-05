@@ -99,7 +99,7 @@ Full walkthrough: [docs/engineering/ONBOARDING.md](docs/engineering/ONBOARDING.m
 | `apps/vertical-*` | Vertical templates (`exchange` live, plus real-estate / recruitment / saas / video) — loaded via `packages/verticals`, not deployed |
 
 Domain logic lives in `packages/*` (published to npm under `@chatman-media`):
-`storage` (Drizzle schema + migrations), `channel-{core,telegram,whatsapp,web}`,
+`storage` (Drizzle schema + migrations), `channel-{core,telegram,whatsapp,facebook,web}`,
 `llm-router`, `kb` (RAG), `sales`, `conversation-engine`, `verticals`,
 `observability`. Dependency graph and the split-tx pipeline are documented in
 [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md).
