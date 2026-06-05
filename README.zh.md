@@ -66,7 +66,9 @@ ARPU 99–199 美元/月。[Phase 2：房地产。Phase 3：横向扩展。]
 完整接入流程——**无需 env 变量，无需重启**：
 
 ```
-1. /signup       → email + password → JWT + 创建 tenant（free 套餐）
+0. 访问          → 公共注册默认关闭（设 ALLOW_PUBLIC_SIGNUP=1 开启）；租户通过邀请创建。首位 admin = superadmin。
+1. /onboarding   → OnboardingGate 强制完成按垂直定制的必填向导后才解锁后台：
+                   垂直 → 渠道 → LLM →（兑换：汇率 → 收款信息）→ KB → 完成
 2. /channels     → Telegram 标签页：粘贴 @BotFather token → 自动 setWebhook + 加密 + reload
                    WhatsApp 标签页：粘贴 { phoneNumberId, accessToken } → Meta Graph
                    校验 → 加密 + Meta dashboard 的 webhook 设置提示
@@ -88,10 +90,13 @@ ARPU 99–199 美元/月。[Phase 2：房地产。Phase 3：横向扩展。]
 
 | 套餐 | 渠道数 | KB 文档 | 速率/分钟 | 价格 |
 |---|---|---|---|---|
-| `free` | 1 | 50 | 30 | $0 |
+| `free` | 100 | 100000 | 120 | $0 |
 | `starter` | 3 | 500 | 60 | $99/月 |
 | `pro` | 10 | 10000 | 120 | $199/月 |
 | `enterprise` | 100 | 100000 | 600 | 定制（自托管） |
+
+> 在当前以兑换为核心 / 自托管的配置下，`free` 套餐实际**无限制**（无 SaaS 计费）。
+> `starter`/`pro` 套餐在代码中（`apps/api/src/lib/plans.ts`）用于计费路径。
 
 超出 channel/KB 的 POST 限制 → `402 Payment Required`，返回结构化响应
 （`{ reason, limit, current, plan, upgradeHint }`）——UI 显示
@@ -111,8 +116,8 @@ ARPU 99–199 美元/月。[Phase 2：房地产。Phase 3：横向扩展。]
 |---|---|---|
 | `apps/api` | HTTP 服务器：webhook 处理器（telegram/whatsapp/stripe）、`/ws/:slug`（web）、admin API（auth + KB + LLM 配置 + 渠道 + 对话 + 审计 + 诊断 + 租户暂停）、`/metrics`、`/healthz` | Fly app / Node 托管 |
 | `apps/worker` | 出站调度器（`SKIP LOCKED` 队列）、轮询渠道重载、定时任务 | Fly app 进程组 |
-| `apps/admin-ui` | React 19 + Vite SPA——完整 SaaS UI（signup → channels → settings → leads → funnel builder → skills → styles → experiments → conversations → audit → diagnostics） | 静态 / CDN |
-| `apps/vertical-recruitment-uae` | 垂直模板（KB 种子 + 漏斗阶段 + 风格提示）——不部署，通过 `packages/verticals` 加载 | — |
+| `apps/admin-ui` | React 19 + Vite SPA——完整 SaaS UI：强制 onboarding 向导 + dashboard / channels / settings / leads / funnel builder / exchange / conversations / audit / diagnostics + 页面感知 copilot dock | 静态 / CDN |
+| `apps/vertical-*` | 垂直模板——`exchange`（live）、`real-estate`、`recruitment`、`saas`、`video`：KB 种子 + 漏斗阶段 + phase 主干 + 风格提示。不部署，通过 `packages/verticals` 加载 | — |
 
 ### Packages（领域模块）
 
@@ -127,7 +132,7 @@ ARPU 99–199 美元/月。[Phase 2：房地产。Phase 3：横向扩展。]
 @chatman-media/kb                  — RAG（ingest、answer、混合检索、ABRouter、图片分类、护照 OCR）
 @chatman-media/sales               — 销售领域（CoachAnalyzer、StageClassifier、ELO）
 @chatman-media/conversation-engine — pipeline 契约 + DAL + 持久化
-@chatman-media/verticals           — VerticalTemplate 注册表（recruitment_uae_v1）
+@chatman-media/verticals           — VerticalTemplate 注册表 + 漏斗 phase 主干（phases.ts）
 ```
 
 所有 `packages/*` 都以 `@chatman-media` scope 发布到 npm。见
@@ -174,7 +179,9 @@ bun run dev:worker   # apps/worker（出站 + 重载轮询）
 cd apps/admin-ui && bun run dev   # admin-ui 在 http://localhost:5173
 ```
 
-打开 `http://localhost:5173/signup` → 创建 tenant → 走完 5 步接入清单。
+公共注册默认关闭——本地开发请在 `.env` 设 `ALLOW_PUBLIC_SIGNUP=1`，然后打开
+`http://localhost:5173` → 创建 tenant → 完成必填向导（`/onboarding`）：垂直 →
+渠道 → LLM →（兑换：汇率 → 收款信息）→ KB → 完成。
 
 ### Bun 快捷命令
 
@@ -204,7 +211,7 @@ tenants ─┬─ admins（每租户多管理员——invite 流程 TODO）
          ├─ styles, experiments, skills, ...
          ├─ outbound_queue（SKIP LOCKED）
          ├─ tenant_secrets（AES-256-GCM 加密）
-         ├─ llm_provider_configs（按用途：chat | embed | vision | judge）
+         ├─ llm_provider_configs（按用途：chat | embed | vision | judge | reranker | transcribe）
          └─ audit_log
 ```
 
@@ -308,7 +315,7 @@ POST   /api/auth/signup                          — 创建 tenant + admin
 POST   /api/auth/login                           — 签发 JWT
 POST   /api/auth/logout                          — 失效（客户端侧）
 
-GET    /api/admin/onboarding-status              — 清单（channel/llm/kb）
+GET    /api/admin/onboarding-status              — gated 向导状态（vertical, channel, chatLlm, isExchange, funnel/rate/requisite, done）
 GET    /api/admin/tenant                         — { id, slug, plan, status, ... }
 PUT    /api/admin/tenant/status                  — { paused: boolean } → 暂停/恢复
 GET    /api/admin/diagnostics                    — 健康检查（channel + LLM + KB）
@@ -396,8 +403,10 @@ secret 中配置具有 `@chatman-media` scope 发布权限的 `NPM_TOKEN`。
 | `PLATFORM_MASTER_KEY` | ✅ | AES-256-GCM 用的 32 字节 hex（tenant_secrets） |
 | `PLATFORM_AUTH_SECRET` | 可选 | JWT 式 auth token 的 HMAC 密钥（回退到 MASTER_KEY） |
 | `TELEGRAM_WEBHOOK_SECRET` | ✅ | X-Telegram-Bot-Api-Secret-Token 头 |
+| `ALLOW_PUBLIC_SIGNUP` | 可选 | `1` 开启公共 `/api/auth/signup`（默认关闭 → 403） |
+| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | 可选 | MTProto 凭据（my.telegram.org）。userbot 的**回退值**——凭据按租户存于 `tenant_secrets` |
 | `PLATFORM_PUBLIC_URL` | 可选 | apps/api 的基础 URL，用于 auto-setWebhook（`https://api.example.com`） |
-| `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | 可选 | Meta webhook 设置 |
+| `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | 可选 | Meta webhook 设置。**回退值**——也按租户存于 `tenant_secrets` |
 | `WEB_WS_AUTH_SECRET` | 可选 | `/ws/:slug?auth=...` 的共享密钥 |
 | `STRIPE_SECRET_KEY` | 可选 | `sk_test_xxx` / `sk_live_xxx`。为空 → `/checkout` 与 `/portal` 返回 503 |
 | `STRIPE_PRICE_STARTER` / `STRIPE_PRICE_PRO` | 可选 | Stripe dashboard 的 Price ID。webhook 处理器将 priceId 映射到 plan |

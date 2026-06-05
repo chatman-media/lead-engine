@@ -66,7 +66,11 @@ ARPU $99–199/мес. [Phase 2: real estate. Phase 3: horizontal.]
 Полный цикл онбординга **без env vars, без рестартов**:
 
 ```
-1. /signup       → email + password → JWT + tenant created (free plan)
+0. доступ        → публичный signup ЗАКРЫТ по умолчанию (ALLOW_PUBLIC_SIGNUP=1
+                   чтобы открыть); tenant'ы заводятся через invite. 1-й admin = superadmin.
+1. /onboarding   → OnboardingGate форсит обязательный vertical-aware визард до
+                   входа в кабинет: вертикаль → канал → LLM →
+                   (обменник: курсы → реквизиты) → KB → готово
 2. /channels     → tab Telegram: paste @BotFather token → auto setWebhook + encrypt + reload
                    tab WhatsApp: paste { phoneNumberId, accessToken } → Meta Graph
                    validate → encrypt + webhook-setup-hint для Meta dashboard
@@ -88,10 +92,14 @@ ARPU $99–199/мес. [Phase 2: real estate. Phase 3: horizontal.]
 
 | Plan | Channels | KB docs | Rate/min | Цена |
 |---|---|---|---|---|
-| `free` | 1 | 50 | 30 | $0 |
+| `free` | 100 | 100000 | 120 | $0 |
 | `starter` | 3 | 500 | 60 | $99/мес |
 | `pro` | 10 | 10000 | 120 | $199/мес |
 | `enterprise` | 100 | 100000 | 600 | custom (self-host) |
+
+> В текущей обменно-ориентированной / self-host конфигурации план `free`
+> фактически **без лимитов** (SaaS-биллинга нет). Тиры `starter`/`pro`
+> существуют в коде (`apps/api/src/lib/plans.ts`) для биллингового пути.
 
 Превышение лимита на channel/KB POST → `402 Payment Required` со structured
 response (`{ reason, limit, current, plan, upgradeHint }`) — UI показывает
@@ -111,8 +119,8 @@ response (`{ reason, limit, current, plan, upgradeHint }`) — UI показыв
 |---|---|---|
 | `apps/api` | HTTP-сервер: webhook handlers (telegram/whatsapp/stripe), `/ws/:slug` (web), admin-API (auth + KB + LLM-config + channels + conversations + audit + diagnostics + tenant pause), `/metrics`, `/healthz` | Fly app / Node-hosting |
 | `apps/worker` | Outbound dispatcher (`SKIP LOCKED` очередь), polling channel-reload, cron jobs | Fly app process group |
-| `apps/admin-ui` | React 19 + Vite SPA — full SaaS UI (signup → channels → settings → leads → funnel builder → skills → styles → experiments → conversations → audit → diagnostics) | Static / CDN |
-| `apps/vertical-recruitment-uae` | Vertical template (KB seed + funnel stages + style prompts) — НЕ деплоится, грузится через `packages/verticals` | — |
+| `apps/admin-ui` | React 19 + Vite SPA — full SaaS UI: gated onboarding-визард + dashboard / channels / settings / leads / funnel builder / exchange / conversations / audit / diagnostics + page-aware copilot dock | Static / CDN |
+| `apps/vertical-*` | Vertical templates — `exchange` (live), `real-estate`, `recruitment`, `saas`, `video`: KB seed + funnel stages + phase backbone + style prompts. НЕ деплоится, грузится через `packages/verticals` | — |
 
 ### Packages (доменные модули)
 
@@ -127,7 +135,7 @@ response (`{ reason, limit, current, plan, upgradeHint }`) — UI показыв
 @chatman-media/kb                 — RAG (ingest, answer, hybrid search, ABRouter, классификация фото, OCR паспортов)
 @chatman-media/sales              — sales-domain (CoachAnalyzer, StageClassifier, ELO)
 @chatman-media/conversation-engine — Pipeline contracts + DAL + persistence
-@chatman-media/verticals          — VerticalTemplate registry (recruitment_uae_v1)
+@chatman-media/verticals          — VerticalTemplate registry + funnel phase backbone (phases.ts)
 ```
 
 Все пакеты `packages/*` публикуются в npm под scope `@chatman-media`. См.
@@ -174,8 +182,10 @@ bun run dev:worker   # apps/worker (outbound + reload polling)
 cd apps/admin-ui && bun run dev   # admin-ui на http://localhost:5173
 ```
 
-Открыть `http://localhost:5173/signup` → создать tenant → пройти 5-шаговый
-onboarding checklist.
+Публичный signup закрыт по умолчанию — для локальной разработки выставьте
+`ALLOW_PUBLIC_SIGNUP=1` в `.env`, затем откройте `http://localhost:5173` →
+создайте tenant → пройдите обязательный визард (`/onboarding`): вертикаль →
+канал → LLM → (обменник: курсы → реквизиты) → KB → готово.
 
 ### Bun shortcuts
 
@@ -205,7 +215,7 @@ tenants ─┬─ admins (multi-admin per tenant — invite flow TODO)
          ├─ styles, experiments, skills, ...
          ├─ outbound_queue (SKIP LOCKED)
          ├─ tenant_secrets (AES-256-GCM encrypted)
-         ├─ llm_provider_configs (per-purpose: chat | embed | vision | judge)
+         ├─ llm_provider_configs (per-purpose: chat | embed | vision | judge | reranker | transcribe)
          └─ audit_log
 ```
 
@@ -310,7 +320,7 @@ POST   /api/auth/signup                          — создать tenant + adm
 POST   /api/auth/login                           — выдать JWT
 POST   /api/auth/logout                          — invalidate (client-side)
 
-GET    /api/admin/onboarding-status              — checklist (channel/llm/kb)
+GET    /api/admin/onboarding-status              — статус gated-визарда (vertical, channel, chatLlm, isExchange, funnel/rate/requisite, done)
 GET    /api/admin/tenant                         — { id, slug, plan, status, ... }
 PUT    /api/admin/tenant/status                  — { paused: boolean } → pause/resume
 GET    /api/admin/diagnostics                    — health-check (channel + LLM + KB)
@@ -398,8 +408,10 @@ CI публикует пакеты в порядке зависимостей, �
 | `PLATFORM_MASTER_KEY` | ✅ | 32-byte hex для AES-256-GCM (tenant_secrets) |
 | `PLATFORM_AUTH_SECRET` | opt | HMAC секрет для JWT-like auth tokens (fallback на MASTER_KEY) |
 | `TELEGRAM_WEBHOOK_SECRET` | ✅ | X-Telegram-Bot-Api-Secret-Token header |
+| `ALLOW_PUBLIC_SIGNUP` | opt | `1` открывает публичный `/api/auth/signup` (по умолчанию закрыт → 403) |
+| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | opt | MTProto-креды (my.telegram.org). **Fallback** для userbot — креды per-tenant в `tenant_secrets` |
 | `PLATFORM_PUBLIC_URL` | opt | Базовый URL apps/api для auto-setWebhook (`https://api.example.com`) |
-| `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | opt | Meta webhook setup |
+| `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | opt | Meta webhook setup. **Fallback** — также per-tenant в `tenant_secrets` |
 | `WEB_WS_AUTH_SECRET` | opt | Shared secret для `/ws/:slug?auth=...` |
 | `STRIPE_SECRET_KEY` | opt | `sk_test_xxx` / `sk_live_xxx`. Пусто → `/checkout` и `/portal` вернут 503 |
 | `STRIPE_PRICE_STARTER` / `STRIPE_PRICE_PRO` | opt | Price IDs из Stripe dashboard. Webhook handler маппит priceId → plan |

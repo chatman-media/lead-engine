@@ -1,6 +1,6 @@
 # Roadmap
 
-Последнее обновление: 2026-05-26 (AI Workflow Builder + Exchange (Phuket) вертикаль + QR-delivery из admin-UI).
+Последнее обновление: 2026-06-05 (онбординг-рефактор + закрытая регистрация + универсальный костяк воронки (phase) + admin copilot + per-tenant креды каналов + CI-безопасность).
 
 Стратегический контекст — см. [`COMPETITORS.md`](COMPETITORS.md), [`POSITIONING.md`](POSITIONING.md).
 
@@ -264,15 +264,55 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
 
 - ✅ **Guided onboarding wizard** (`/onboarding`) — после signup ведёт по шагам
   канал → API-ключи → база знаний → готово, с прогрессом и возобновлением.
-  Чеклист и редирект после регистрации ведут в мастер.
+  Чеклист и редирект после регистрации ведут в мастер. _(Переработан в июне
+  2026 в обязательный gated vertical-aware визард — см. ниже.)_
 - ✅ **Telegram userbot (личный аккаунт) — M9** — пошаговый MTProto-логин
   phone → code → 2FA (GramJS) с in-memory login-store; сессия encrypted в
   `tenant_secrets`. Userbot живёт в `apps/api` (как web): registry + inbound-runner
   (`receive → processInbound`) + outbound-dispatcher. UI: таб «Telegram (личный)» +
-  re-auth при revoked-сессии. `apiId/apiHash` платформенные из env.
+  re-auth при revoked-сессии. `apiId/apiHash` изначально из env; с июня 2026 —
+  per-tenant в `tenant_secrets` с fallback на env (PR #160).
 - ✅ **Admin-UI редизайн** — Tailwind v4 + shadcn/ui, Linear-эстетика
   (oklch-токены, индиго-акцент), левый сайдбар со всеми разделами,
   светлая/тёмная/системная темы. Все страницы переведены на shadcn.
+
+### Онбординг-рефактор + костяк воронки + copilot (июнь 2026, PR #142–160)
+
+- ✅ **Универсальный костяк воронки (`phase`)** (PR #160) — общая ось фаз
+  `capture → qualify → offer → [clear] → [fulfill] → won/lost` поверх стадий
+  всех 5 вертикалей. `stage_definitions.phase` (миграция `0031_stage_phase.sql`),
+  `packages/verticals/src/phases.ts`, `validateBackbone()` (монотонность +
+  обязательные qualify/offer), `GET /api/admin/funnel/phase-stats`. AI-builder
+  и `apply` валидируют костяк (400 при нарушении).
+- ✅ **Закрытая регистрация + gated онбординг** (PR #160) — публичный signup
+  закрыт по умолчанию (`ALLOW_PUBLIC_SIGNUP=1` чтобы открыть), `/signup`
+  страница убрана; tenant'ы — через invite. `OnboardingGate` форсит
+  обязательный визард до разблокировки кабинета.
+- ✅ **Динамический vertical-aware визард** (PR #160) — step-машина
+  `vertical → channel → LLM → (обменник: rates → requisites → rate-card) →
+  KB → (обменник: business data) → done`. Условие `done` зависит от вертикали
+  (generic: канал+чат-LLM; обменник: + воронка + курс + реквизит). Сайдбар
+  скрывает/показывает пункты по `isExchange`.
+- ✅ **Per-tenant креды каналов** (PR #160) — Telegram MTProto
+  (`api_id`/`api_hash`) и WhatsApp (`verify_token`/`app_secret`) теперь
+  per-tenant в `tenant_secrets` с fallback на env. `/userbot/start` просит
+  креды (400) вместо глобального 503. Userbot-подсистема always-on.
+- ✅ **Embeddings auto-fit** (PR #160) — `fitDim()` подгоняет любую модель под
+  колонку `vector(1536)` (truncate + L2-renormalize, Matryoshka). LLM-шаг
+  визарда — accordion по всем purpose'ам (chat обязателен, остальные опц.).
+- ✅ **Admin copilot (page-aware)** (PR #146, #148) — AI-ассистент-док на всех
+  страницах кабинета (route + видимый контент), BYOK, advice + confirm перед
+  применением действия (`install_vertical`/`build_funnel`/`navigate`).
+  `POST /api/admin/copilot/chat`.
+- ✅ **Надёжность курсов обменника + ops-алерты** (PR #142, #147) —
+  guardrails котировок (отклонение > `maxDeviationPct`, дефолт 35%, в т.ч. для
+  tier `display_rate`) + ops-watch sweeper (`rate_feed_stale`/`order_stuck`/
+  `channel_down`/`volume_spike` → алерт владельцу с дедупом/cooldown).
+- ✅ **CI-безопасность (бесплатно)** (PR #149–158) — CodeQL (security-extended,
+  weekly), Dependabot (bun + GitHub Actions), CodeRabbit (ru-RU + gitleaks/
+  semgrep/trivy/checkov), Codecov upload + бейджи в README.
+- ✅ **15 анонимизированных exchange-кейсов** (PR #159) — диалоги кандидатов
+  в `apps/vertical-exchange/evals/exchange-candidate-cases/` вместо прежних сэмплов.
 
 ---
 
@@ -391,7 +431,8 @@ Use-case: рекрутеры / sales-teams, чьи лиды пишут на ли
   `UserbotChannelRegistry` + inbound-runner (`receive → processInbound`) +
   `UserbotOutboundDispatcher`. `telegram_userbot` убран из claimKinds воркера.
 - ✅ Re-auth при revoked-сессии (auth_key_duplicated → status='error' → кнопка в UI)
-- ✅ Платформенные `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (env)
+- ✅ `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` — per-tenant в `tenant_secrets`
+  с fallback на env (PR #160); `/userbot/start` просит креды (400) если их нет
 - 🔲 QR-code login flow — отложено (текущего phone+code+2FA достаточно)
 
 > **Переоценка (май 2026):** Telegram запустил официальный **Business Account
@@ -578,7 +619,7 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
 
 ## Краткий summary
 
-**Где мы сейчас (PR #123, май 2026):**
+**Где мы сейчас (PR #160, июнь 2026):**
 
 - Self-service onboarding end-to-end без env vars / рестартов
 - Channels: TG bot + TG userbot + WhatsApp + web widget — все через UI
@@ -597,6 +638,13 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
 - **Exchange vertical (`exchange_v1`):** крипто/RUB → THB для обменников Пхукета, approved rate-card, exchange orders CRM, Forsanya e2e mocks
 - **QR/photo delivery:** оператор отправляет cardless-withdrawal QR клиенту через admin-UI
 - **6 вертикальных шаблонов:** UAE + generic + RE + SaaS + video + exchange
+- **Универсальный костяк воронки (`phase`):** общая ось фаз над всеми
+  вертикалями + валидация + phase-stats
+- **Закрытая регистрация + gated vertical-aware онбординг:** invite-flow,
+  обязательный визард, per-tenant креды каналов (TG MTProto + WhatsApp)
+- **Admin copilot:** page-aware AI-ассистент на всех страницах (BYOK, advice+confirm)
+- **Надёжность обменника:** guardrails курсов + ops-алерты владельцу
+- **CI-безопасность:** CodeQL + Dependabot + CodeRabbit + Codecov
 - **950+ tests**, multi-tenant RLS, encrypted secrets, observability
 - 1 живой prod tenant (recruitment UAE), Stripe-ready
 

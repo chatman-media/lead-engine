@@ -51,14 +51,14 @@ hot-reload, secrets. Для high-level introduction — см.
                         │
        ┌──────────────────────────┐
        │  apps/admin-ui (React)   │
-       │  signup / login          │
+       │  login / accept-invite   │
+       │  /onboarding (gated)     │
        │  /channels  /settings    │
        │  /leads  /funnel         │
-       │  /skills  /styles        │
-       │  /experiments            │
+       │  /exchange (обменник)    │
        │  /conversations  /audit  │
-       │  /diagnostics            │
-       │  /superadmin             │
+       │  /diagnostics  /superadmin│
+       │  Copilot dock (page-aware)│
        └──────────────────────────┘
 ```
 
@@ -254,13 +254,29 @@ getDecryptedSecret({ db, tenantId, key, masterKeyHex })
 
 **Что лежит зашифрованным** в `tenant_secrets`:
 
+Каналы (per-tenant креды, с fallback на env):
+
 - `channel_telegram_bot_<username>` — Telegram bot token
-- `channel_userbot_<phone>` — MTProto session string (TBD)
-- `channel_whatsapp_<phone_id>` — WhatsApp access token (TBD UI)
-- `llm_chat_apikey` — OpenAI/Anthropic chat key
-- `llm_embed_apikey` — embedding API key
-- `llm_vision_apikey` — vision LLM key (используется photo-processor'ом для классификации фото и OCR паспортов)
-- `llm_judge_apikey` — judge LLM key (используется для ELO-grading skills)
+- `telegram_api_id` / `telegram_api_hash` — MTProto app credentials для
+  userbot (fallback env `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`,
+  `apps/api/src/lib/userbot-creds.ts`)
+- `channel_userbot_<phone>` — MTProto session string
+- `channel_whatsapp_<phone_id>` — WhatsApp access token
+- `whatsapp_verify_token` / `whatsapp_app_secret` — Meta webhook креды
+  (fallback env `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET`)
+
+LLM (по purpose):
+
+- `llm_chat_apikey` / `llm_embed_apikey` / `llm_vision_apikey`
+  (photo-processor: классификация фото + OCR паспортов) /
+  `llm_judge_apikey` (ELO-grading skills) / `llm_reranker_apikey` /
+  `llm_transcribe_apikey`
+
+Обменник (allowlist в `apps/api/src/lib/exchange/requisite-keys.ts`):
+
+- `exchange_wallet_<asset>_<network>` — адреса кошельков
+- фиксированные платёжные ключи (фиат payment URL, Binance ID, реквизиты карты)
+- бизнес-данные: контакт оператора, методы выплат, KYC-политика, часы, адрес
 
 ---
 
@@ -296,10 +312,17 @@ tenant'а — следующий resolve пересоберёт с новым co
 
 | Plan | maxChannels | maxKbDocuments | rateLimitPerMinute | priceUsd |
 |---|---|---|---|---|
-| `free` | 1 | 50 | 30 | 0 |
-| `starter` | 3 | 500 | 60 | 49 |
-| `pro` | 10 | 10000 | 120 | 149 |
+| `free` | 100 | 100000 | 120 | 0 |
+| `starter` | 3 | 500 | 60 | 99 |
+| `pro` | 10 | 10000 | 120 | 199 |
 | `enterprise` | 100 | 100000 | 600 | null (custom / self-host) |
+
+> **NB**: в текущей (обменно-ориентированной / self-host) конфигурации
+> базовый план `free` фактически **без лимитов** (SaaS-биллинга нет —
+> `maxChannels/maxKbDocuments` заданы с большим запасом, потому что
+> quota-чек не понимает `-1`). SaaS-тиры `starter $99` / `pro $199`
+> существуют в коде для биллингового пути, но в self-host деплое не
+> применяются. См. комментарий в `plans.ts`.
 
 `resolvePlan(planStr)` маппит `tenants.plan` строку в `PlanLimits`.
 Unknown plan → fallback на `free` с warning hook.
@@ -323,7 +346,7 @@ Unknown plan → fallback на `free` с warning hook.
   "current": 1,
   "plan": "free",
   "planLabel": "Free",
-  "upgradeHint": "Перейдите на план Starter ($49/мес) для большего числа каналов"
+  "upgradeHint": "Перейдите на план Starter ($99/мес) для большего числа каналов"
 }
 ```
 
@@ -458,10 +481,33 @@ Defaults: 60 msg/min, 600 msg/hour per tenant. Configurable через env.
 0006_stripe_billing.sql            — stripe_customers, stripe_subscriptions
 0007_conversations_to_contacts_fk.sql — FK swap users → contacts
 0008_drop_users.sql                — drop legacy users table
+0009_admin_invites.sql             — invite-flow (закрытая регистрация)
+0010_llm_usage_events.sql          — учёт LLM-вызовов / billing usage
+0011_universal_pipeline.sql        — stage_definitions / stage_fields / lead_field_values
+0012_director_hooks.sql            — hooks (инъекции в промпт)
+0013_referral_codes.sql            — реферальные коды
+0014_stage_webhooks.sql            — вебхуки на смену стадии
+0015_reranker_provider.sql         — purpose='reranker'
+0017_message_templates.sql         — шаблоны сообщений
+0018_password_resets.sql           — forgot/reset password
+0019_notifications.sql             — правила уведомлений оператора
+0020_notification_group_tokens.sql — групповые токены уведомлений
+0021_skills_tenant_slug_unique.sql — uniq skills per tenant
+0022_exchange.sql                  — exchange_rates / exchange_orders
+0023_universal_stage_types.sql     — расширённый каталог STAGE_TYPES
+0024_conversation_inbox_fields.sql — поля оператор-инбокса
+0025_exchange_rate_tiers.sql       — approved rate tiers
+0026_exchange_order_methods.sql    — платёжные рельсы заказа
+0027_stage_fields_video_constraint.sql — fieldType='video'
+0028_stage_definitions_type_constraint.sql — CHECK STAGE_TYPES
+0029_llm_transcribe_purpose.sql    — purpose='transcribe'
+0030_admins_name.sql               — admins.name
+0031_stage_phase.sql               — stage_definitions.phase (костяк воронки)
 ```
 
-Migrations run раздельно от app process под superuser/owner role. Apps
-запускаются под `NOSUPERUSER NOBYPASSRLS`.
+(Файл `0016` отсутствует намеренно — номер пропущен.) Migrations run
+раздельно от app process под superuser/owner role. Apps запускаются под
+`NOSUPERUSER NOBYPASSRLS`.
 
 ---
 
@@ -519,6 +565,13 @@ lead_engine_llm_errors_total{provider, purpose, kind} — error rates
 | Pipeline (processInbound) | `packages/conversation-engine/src/process-inbound.ts` |
 | Reply strategies | `packages/conversation-engine/src/{llm,rag}-reply-strategy.ts` |
 | RAG core | `packages/kb/src/answer.ts` + `hybrid-search.ts` |
+| Funnel phase backbone | `packages/verticals/src/phases.ts` |
+| Onboarding status + gate | `apps/api/src/routes/admin-onboarding.ts` + `apps/admin-ui/src/pages/SaasOnboarding.tsx` |
+| Userbot creds (per-tenant) | `apps/api/src/lib/userbot-creds.ts` |
+| Exchange rates / guardrails | `apps/api/src/lib/exchange/{rates,guardrails}.ts` |
+| Exchange requisite keys | `apps/api/src/lib/exchange/requisite-keys.ts` |
+| Ops-watch sweeper (alerts) | `apps/worker/src/ops-watch-sweep.ts` |
+| Admin copilot | `apps/api/src/routes/admin-copilot.ts` |
 | Drizzle schema | `packages/storage/src/schema.ts` |
 
 ---
@@ -533,8 +586,8 @@ lead_engine_llm_errors_total{provider, purpose, kind} — error rates
 
 | Таблица | Назначение |
 |---|---|
-| `stage_definitions` | Стадии воронки: slug, тип (`form_fill`, `document_upload`, `external_approval`, `payment`, `waiting`, `interaction`, `assessment`, `milestone`), позиция, timeout |
-| `stage_fields` | Поля данных на стадии: тип (`text`, `number`, `date`, `select`, `multiselect`, `boolean`, `phone`, `email`, `file`, `photo`), `required`, `ai_extractable` |
+| `stage_definitions` | Стадии воронки: slug, `kind` (`intake`/`active`/`terminal_won`/`terminal_lost`), `phase` (костяк — у активных стадий), тип (`form_fill`, `document_upload`, `document_signature`, `rate_confirmation`, `external_approval`, `payment`, `awaiting_operator`, `interaction`, `assessment`, `waiting`, `milestone`), позиция, timeout |
+| `stage_fields` | Поля данных на стадии: тип (`text`, `textarea`, `number`, `date`, `select`, `multiselect`, `boolean`, `phone`, `email`, `photo`, `file`, `video`), `required`, `ai_extractable` |
 | `lead_field_values` | Значения полей для конкретного лида (upsert по `(lead_id, field_id)`) |
 | `leads` | Лид с `stage_definition_id` FK; `state` text-колонка сохранена для backward compatibility с вертикалью recruitment-UAE |
 
@@ -553,6 +606,38 @@ lead_engine_llm_errors_total{provider, purpose, kind} — error rates
 | `interaction` | Встреча/звонок/просмотр |
 | `assessment` | Оценка/квалификация |
 | `milestone` | Контрольная точка |
+
+### Funnel phase backbone (костяк)
+
+Стадии у каждой вертикали свои, но поверх них лежит **универсальная ось
+фаз** — общий семантический слой для cross-vertical аналитики, AI-сборки и
+валидации (`packages/verticals/src/phases.ts`, миграция `0031_stage_phase.sql`):
+
+```
+capture → qualify → offer → [clear] → [fulfill] → won / lost
+```
+
+| Фаза | Что значит | Источник |
+|---|---|---|
+| `capture` | первый контакт, сырой интент | derived из `kind='intake'` |
+| `qualify` | понять потребность + оценить качество сделки | `phase` колонка |
+| `offer` | предложить условия (цена/курс/scope) + согласие | `phase` колонка |
+| `clear` | гейты: KYC, комплаенс, документы, 3-rd party | `phase` колонка (опц.) |
+| `fulfill` | доставка ценности + оплата | `phase` колонка (опц.) |
+| `won` / `lost` | терминальные | derived из `kind` |
+
+- В БД у активных стадий хранится `stage_definitions.phase` ∈
+  `qualify | offer | clear | fulfill` (CHECK-констрейнт); якоря выводятся
+  из `kind`. `effectivePhase(stage)` объединяет оба источника.
+- `qualify` и `offer` обязательны; `clear`/`fulfill` опциональны.
+- `validateBackbone()` проверяет: ровно один intake, ≥1 terminal_won/lost,
+  уникальные slug'и, валидные `nextStages`, **монотонность фаз** (активные
+  стадии по позиции не идут «назад» по фазе), наличие qualify/offer.
+- `deriveDefaultPhase()` / `buildSkeletonFunnel()` дают эвристику и минимальный
+  валидный костяк для кастомных/AI-воронок.
+- `GET /api/admin/funnel/phase-stats` — число лидов по фазам (vertical-agnostic).
+
+Маппинг стадий на фазы по 5 вертикалям — см. [`VERTICALS.md`](VERTICALS.md).
 
 ### Photo + passport fields
 
@@ -573,8 +658,11 @@ OCR'ят MRZ и заполняют `contact.attributes_json` с ключами
 Выбирает только из каталога `STAGE_TYPES` / `FIELD_TYPES` (экспортируются из `admin-funnel.ts`).
 
 `POST /api/admin/workflows/apply` — применяет `stages` к тенанту:
-удаляет текущие стадии → создаёт новые через `applyFunnelStages()`.
-Использует tenant's LLM client (`resolveChat(tenantId, "chat")`).
+сначала `validateBackbone(stages)` (костяк фаз — см. выше); при нарушениях
+`400` со списком `violations`. Иначе удаляет текущие стадии → создаёт новые
+через `applyFunnelStages()`. Использует tenant's LLM client
+(`resolveChat(tenantId, "chat")`). Сам промпт инструктирует AI проставлять
+`phase`, держать `qualify`/`offer` и не регрессировать по фазам.
 
 Системный промпт кэшируется на Anthropic API (prompt caching) — длинный диалог
 экономит токены. Frontend: `AiWorkflowPanel` — Sheet с чатом, preview и кнопкой "Применить".
@@ -586,6 +674,79 @@ OCR'ят MRZ и заполняют `contact.attributes_json` с ключами
 или публичный HTTPS URL. Ставит `outbound_queue` запись с `kind="photo"`.
 Основной кейс: оператор обменника загружает cardless-withdrawal QR и пересылает
 его клиенту через admin-UI (путь Б доставки QR).
+
+---
+
+## Onboarding & access gate
+
+Регистрация **закрыта по умолчанию**: `POST /api/auth/signup` → `403`, пока
+`allowSignup` (env `ALLOW_PUBLIC_SIGNUP=1`) не включён; tenant'ы заводятся
+invite-flow'ом. После логина `OnboardingGate` (`apps/admin-ui/src/App.tsx`)
+читает `GET /api/admin/onboarding-status` и держит юзера на `/onboarding`,
+пока `done=false` (fail-open при ошибке status).
+
+Визард — динамическая vertical-aware step-машина (`SaasOnboarding.tsx`):
+`vertical → channel → LLM → (обменник: rates → requisites → rate-card) → KB →
+(обменник: business data) → done`. Условие `done`:
+
+```
+done = channelConnected && chatLlmConfigured && (!isExchange || (funnelInstalled && activeRateCount>=1 && requisiteCount>=1))
+```
+
+Сайдбар vertical-aware (`app-shell.tsx`): по `isExchange` показывает/скрывает
+пункты меню. Полный путь — [`ONBOARDING.md`](ONBOARDING.md).
+
+---
+
+## Exchange vertical
+
+Крипто/нал обменник (`exchange_v1`) — основная live-вертикаль. 12-стадийная
+воронка (`apps/vertical-exchange/src/funnel-stages.ts`):
+`intent_detected → exchange_request → quote_calculated → verification_check →
+kyc_collection → risk_review → order_created → requisites_sent →
+payment_proof_waiting → payment_verified → payout_or_completion / cancelled`.
+
+### Курсы и котировки
+
+- `exchange_rates` — базовый курс на asset+network: маржа %, фикс-комиссия,
+  мин/макс, авто-обновление с фида. `exchange_rate_tiers` — approved объёмные
+  ступени (`display_rate` для клиента + `market_rate` референс).
+- `computeQuote()` (`apps/api/src/lib/exchange/rates.ts`): coins — режим
+  «multiply» (THB за 1 asset), фиат — «divide». Тиры перекрывают базовый курс
+  в своём диапазоне.
+
+### Guardrails + ops-watch
+
+- **Guardrails** (`apps/api/src/lib/exchange/guardrails.ts`): синхронный
+  `checkRateGuard()` — отклонение эффективного курса от базового >
+  `maxDeviationPct` (дефолт 35%) отклоняет котировку (ловит опечатки тарифа и
+  мусор из фида). Применяется и к tier `display_rate`.
+- **Ops-watch** (`apps/worker/src/ops-watch-sweep.ts`): периодический sweeper
+  ловит `rate_feed_stale`, `order_stuck`, `channel_down`, `volume_spike` →
+  `OpsAlert` владельцу с дедупом и cooldown'ом (`OPS_ALERT_COOLDOWN_MIN`).
+
+### Реквизиты
+
+Шифрованные `tenant_secrets` через allowlist
+`apps/api/src/lib/exchange/requisite-keys.ts`: кошельки `exchange_wallet_*`,
+фиксированные платёжные ключи (фиат URL, Binance ID, карта) и бизнес-данные
+(контакт оператора, методы выплат, KYC-политика, часы, адрес). Эндпоинты —
+`/api/admin/exchange/{rates,rate-card,requisites,orders}`.
+
+---
+
+## Admin copilot
+
+Page-aware AI-ассистент в кабинете (`apps/admin-ui/src/components/copilot/`,
+backend `apps/api/src/routes/admin-copilot.ts`). BYOK (tenant's chat-LLM;
+`503 llm_not_configured` если не настроен). Появляется на **всех** страницах
+кабинета (Cmd/Ctrl+J), знает текущую страницу (route + видимый контент) через
+`PAGE_HINTS`.
+
+`POST /api/admin/copilot/chat` → LLM возвращает JSON `{ reply, action? }`, где
+`action` — предложение (`install_vertical` / `build_funnel` / `navigate`),
+проверяемое по allowlist. Действие применяется **только после подтверждения**
+пользователем (advice + confirm), вызывая существующие эндпоинты.
 
 ---
 
