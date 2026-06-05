@@ -1,0 +1,25 @@
+{
+  "name": "@chatman-media/vertical-concierge",
+  "version": "0.1.0",
+  "description": "Vertical template для консьерж-сервиса (вилла/гостевой дом): любой запрос гостя — обмен, трансфер, еда, услуга — как короткий воркфлоу поверх костяка воронки. Data-only пакет, потребляется через @chatman-media/verticals registry.",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check": "biome check ./src",
+    "format": "biome format --write ./src",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@chatman-media/verticals": "workspace:*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
+    "@types/bun": "1.3.14",
+    "typescript": "^6.0.3"
+  }
+}

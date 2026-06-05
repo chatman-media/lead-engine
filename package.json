@@ -8,6 +8,7 @@
     "apps/admin-ui",
     "apps/api",
     "apps/landing",
+    "apps/vertical-concierge",
     "apps/vertical-exchange",
     "apps/vertical-real-estate",
     "apps/vertical-recruitment",

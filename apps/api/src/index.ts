@@ -8,6 +8,7 @@ import {
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { funnels, tenants } from "@chatman-media/storage";
+import { CONCIERGE_V1 } from "@chatman-media/vertical-concierge";
 import { EXCHANGE_V1 } from "@chatman-media/vertical-exchange";
 import { REAL_ESTATE_V1 } from "@chatman-media/vertical-real-estate";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
@@ -91,6 +92,7 @@ import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
 /** Known vertical templates by slug. */
 const KNOWN_TEMPLATES: Record<string, VerticalTemplate> = {
+  concierge_v1: CONCIERGE_V1,
   exchange_v1: EXCHANGE_V1,
   real_estate_v1: REAL_ESTATE_V1,
   recruitment_v1: RECRUITMENT_V1,
