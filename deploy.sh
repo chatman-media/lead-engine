@@ -109,14 +109,32 @@ if [ "$DO_TEST" -eq 1 ]; then
 fi
 
 # ── 5. рестарт процессов ─────────────────────────────────────────────────────
+# Юнит сразу падает в auto-restart, если процесс умер на старте (например
+# `bun: command not found` при пустом PATH в юните → exit 127). `systemctl
+# restart` при этом возвращает 0, поэтому проверяем, что юнит реально active,
+# и при провале выводим журнал и валим деплой — а не печатаем фальшивое «✓».
+check_service() {
+  local svc="$1" tries=0
+  while [ "$tries" -lt 10 ]; do
+    case "$(sudo systemctl is-active "$svc" 2>/dev/null)" in
+      active) return 0 ;;
+      failed) break ;;
+    esac
+    tries=$((tries + 1)); sleep 1
+  done
+  [ "$(sudo systemctl is-active "$svc" 2>/dev/null)" = active ] && return 0
+  printf '\033[1;31m✗ %s не поднялся (см. журнал):\033[0m\n' "$svc" >&2
+  sudo journalctl -u "$svc" -n 30 --no-pager >&2 || true
+  return 1
+}
+
 if [ "$DO_RESTART" -eq 1 ]; then
   if command -v systemctl >/dev/null; then
     log "Рестарт сервисов"
     sudo systemctl restart "$API_SERVICE"
     sudo systemctl restart "$WORKER_SERVICE"
-    sleep 2
-    sudo systemctl --no-pager --lines=0 status "$API_SERVICE"    || true
-    sudo systemctl --no-pager --lines=0 status "$WORKER_SERVICE" || true
+    check_service "$API_SERVICE"    || die "$API_SERVICE не запустился"
+    check_service "$WORKER_SERVICE" || die "$WORKER_SERVICE не запустился"
     ok "Сервисы перезапущены"
   else
     echo "  ⚠ systemctl не найден — рестартни процессы вручную ($API_SERVICE / $WORKER_SERVICE)"

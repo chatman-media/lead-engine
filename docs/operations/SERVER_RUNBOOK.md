@@ -75,6 +75,13 @@ sudo systemctl status lead-engine-api --no-pager
 sudo systemctl status lead-engine-worker --no-pager
 ```
 
+> **Юнит обязан задавать `PATH` с `~/.bun/bin`.** `ExecStart=… bun run start`
+> запускает вложенный `bun` через `/usr/bin/bash`, а у systemd-юнита PATH
+> пустой → `bun: command not found` → `status=127` (краш-луп). В юните должно
+> быть `Environment=PATH=/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`
+> (или drop-in `…/<svc>.service.d/path.conf`). Подробности и команда лечения —
+> в [CD_SETUP.md](CD_SETUP.md) («Если упало»).
+
 Проверить health:
 
 ```bash
