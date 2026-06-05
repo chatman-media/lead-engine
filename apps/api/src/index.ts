@@ -1,4 +1,4 @@
-import { checkRlsEnforcement, NotificationsRepo, NotificationService, OperatorBotHandler } from "@chatman-media/conversation-engine";
+import { checkRlsEnforcement, NotificationsRepo, NotificationService, OperatorBotHandler, OpsAlertRouter } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { funnels, tenants } from "@chatman-media/storage";
@@ -282,6 +282,18 @@ async function main() {
   if (cfg.operatorBotToken) {
     log.info("operator notification bot enabled");
   }
+  // Роутер операционных алертов владельцу (#145): Telegram DM + email (Mailer),
+  // severity-маршрутизация, анти-шторм. Mailer структурно — OpsEmailSender.
+  const opsAlertRouter = new OpsAlertRouter({
+    db: db as never,
+    botToken: cfg.operatorBotToken,
+    appUrl: cfg.mailer.appUrl,
+    email: mailer,
+    log: {
+      warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
+      info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),
+    },
+  });
 
   const embedderResolver = makeEmbedderResolver(loadedRef);
   if (embedderResolver) {
@@ -358,7 +370,7 @@ async function main() {
 
   // Leads pipeline (list, create, stage transition, field values).
   app.route("/", makeAdminLeadsRoutes({ db, notificationService }));
-  app.route("/api/admin/notifications", makeAdminNotificationsRoutes({ repo: notificationsRepo, botUsername: cfg.operatorBotUsername, notificationService }));
+  app.route("/api/admin/notifications", makeAdminNotificationsRoutes({ repo: notificationsRepo, botUsername: cfg.operatorBotUsername, notificationService, opsRouter: opsAlertRouter, opsEmailConfigured: !!cfg.mailer.apiKey }));
   log.info("admin-leads routes enabled");
 
   // Funnel builder (stage_definitions, stage_fields) + skills list.
@@ -829,10 +841,37 @@ async function main() {
   let rateFeedInterval: ReturnType<typeof setInterval> | null = null;
   if (rateFeedMs > 0) {
     const runFeed = () =>
-      refreshAllActiveTenants(db, {
-        warn: (m) => log.warn(m),
-        info: (m) => log.info(m),
-      }).catch((e) => log.warn("rate-feed run failed", { err: e }));
+      refreshAllActiveTenants(
+        db,
+        {
+          warn: (m) => log.warn(m),
+          info: (m) => log.info(m),
+        },
+        // Резкое колебание курса (sanity-guard отклонил фид) → алерт владельцу.
+        (a) => {
+          const dev = Number.isFinite(a.deviationPct) ? Math.round(a.deviationPct) : null;
+          log.warn("rate-feed anomaly: резкое колебание курса", {
+            tenantId: a.tenantId,
+            asset: a.asset,
+            prev: a.prev,
+            next: a.next,
+            deviationPct: dev,
+          });
+          void opsAlertRouter
+            .emit({
+              tenantId: a.tenantId,
+              kind: "rate_anomaly",
+              severity: "critical",
+              title: "Резкое колебание курса",
+              detail:
+                `Фид по ${a.asset} дал ${a.next} при текущем ${a.prev}` +
+                `${dev !== null ? ` (${dev > 0 ? "+" : ""}${dev}%)` : ""} — отклонено sanity-guard'ом. ` +
+                "Курс заморожен на прежнем значении, бот может котировать устаревший курс. Проверьте фид/курс.",
+              dedupKey: `rate_anomaly:${a.asset}`,
+            })
+            .catch((e) => log.warn("ops-alert emit failed", { err: String(e) }));
+        },
+      ).catch((e) => log.warn("rate-feed run failed", { err: e }));
     rateFeedInterval = setInterval(runFeed, rateFeedMs);
     setTimeout(runFeed, 15_000); // первый прогон через 15с после старта
     log.info("exchange rate-feed enabled", { intervalMs: rateFeedMs });

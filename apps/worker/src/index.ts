@@ -1,4 +1,10 @@
-import { checkRlsEnforcement, NotificationsRepo, NotificationService } from "@chatman-media/conversation-engine";
+import {
+  checkRlsEnforcement,
+  NotificationsRepo,
+  NotificationService,
+  OpsAlertRouter,
+  ResendEmailSender,
+} from "@chatman-media/conversation-engine";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
 import { WorkerChannelRegistry } from "./channel-registry.ts";
 import { loadWorkerConfig } from "./config.ts";
@@ -7,6 +13,7 @@ import { OutboundDispatcher } from "./dispatcher.ts";
 import { type MetricsServer, startMetricsServer } from "./metrics-server.ts";
 import { CheckinSweeper } from "./checkin-sweep.ts";
 import { ExchangePaymentSweeper } from "./exchange-payment-sweep.ts";
+import { OperationsWatchSweeper } from "./ops-watch-sweep.ts";
 import { StaleleadSweeper } from "./stale-lead-sweep.ts";
 
 async function main() {
@@ -117,6 +124,42 @@ async function main() {
     log.info("exchange payment-TTL sweep enabled", { intervalMs: cfg.exchangePaymentSweepMs });
   }
 
+  // Operations-watcher: следит за здоровьем обменника (устаревание курсов,
+  // зависшие заявки, упавшие каналы, всплеск оборота).
+  let opsWatchPromise: Promise<void> = Promise.resolve();
+  if (cfg.opsWatchMs > 0) {
+    // Severity-роутер: личный Telegram владельца + email (fallback/critical),
+    // анти-шторм через cooldown. #145.
+    const opsRouter = new OpsAlertRouter({
+      db,
+      botToken: cfg.operatorBotToken,
+      appUrl: cfg.appUrl,
+      email: cfg.resendApiKey ? new ResendEmailSender(cfg.resendApiKey, cfg.fromEmail) : null,
+      log: {
+        warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
+        info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),
+      },
+    });
+    const opsSweeper = new OperationsWatchSweeper(db, {
+      intervalMs: cfg.opsWatchMs,
+      sink: opsRouter,
+      thresholds: {
+        feedStaleMin: cfg.opsFeedStaleMin,
+        stuckOrderMin: cfg.opsStuckOrderMin,
+        volumeSpikeThb: cfg.opsVolumeSpikeThb,
+        alertCooldownMin: cfg.opsAlertCooldownMin,
+      },
+    });
+    opsWatchPromise = opsSweeper.run(abort.signal).catch((err) => {
+      log.error("ops-watch fatal", { err: err instanceof Error ? err : new Error(String(err)) });
+    });
+    log.info("operations-watcher enabled", {
+      intervalMs: cfg.opsWatchMs,
+      feedStaleMin: cfg.opsFeedStaleMin,
+      stuckOrderMin: cfg.opsStuckOrderMin,
+    });
+  }
+
   // Periodic channel reload — подхватывает newly-onboarded боты которые
   // tenant добавил через apps/api UI после worker boot. apps/api делает
   // in-process hot-reload, worker — отдельный процесс, polling.
@@ -150,6 +193,7 @@ async function main() {
       staleSweeperPromise,
       checkinSweeperPromise,
       exchangePaymentSweeperPromise,
+      opsWatchPromise,
     ]);
     channels.closeAll();
     await close();

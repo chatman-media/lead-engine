@@ -23,6 +23,13 @@ const FX_TTL_MS = 10 * 60_000;
 
 export type QuoteMode = "multiply" | "divide";
 
+/** Порог sanity-guard рыночного фида (доля). Переопределяется env. */
+const FEED_MAX_DEVIATION = (() => {
+  const raw = process.env.EXCHANGE_FEED_MAX_DEVIATION;
+  const n = raw ? Number(raw) : Number.NaN;
+  return Number.isFinite(n) && n > 0 ? n : 0.5;
+})();
+
 let fxCache: { at: number; rates: Record<string, number> } | null = null;
 
 async function fetchJson(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<unknown> {
@@ -107,7 +114,7 @@ export async function fetchMarketBaseRate(
  * Проверка адекватности нового курса относительно прежнего. Защита от глюков фида.
  * Если prev>0 и отклонение > maxDeviation (доля) — отклоняем.
  */
-export function isRateSane(prev: number, next: number, maxDeviation = 0.5): boolean {
+export function isRateSane(prev: number, next: number, maxDeviation = FEED_MAX_DEVIATION): boolean {
   if (!Number.isFinite(next) || next <= 0) return false;
   if (!Number.isFinite(prev) || prev <= 0) return true; // первичная установка
   return Math.abs(next - prev) / prev <= maxDeviation;
@@ -122,6 +129,16 @@ export interface RefreshResult {
   updated: number;
   skipped: number;
   failed: number;
+}
+
+/** Резкое отклонение курса от фида, отклонённое sanity-guard'ом. */
+export interface RateFeedAnomaly {
+  tenantId: number;
+  asset: string;
+  prev: number;
+  next: number;
+  /** Отклонение next от prev, % со знаком. */
+  deviationPct: number;
 }
 
 export interface RateCardTierSpec {
@@ -248,6 +265,7 @@ export async function refreshTenantRates(
   db: Db,
   tenantId: number,
   log?: { warn?: (msg: string) => void },
+  onAnomaly?: (a: RateFeedAnomaly) => void,
 ): Promise<RefreshResult> {
   const rows = await withTenant(db, tenantId, async (tx) =>
     tx
@@ -281,6 +299,15 @@ export async function refreshTenantRates(
       if (!isRateSane(Number(row.baseRate), next)) {
         result.skipped++;
         log?.warn?.(`rate-feed: ${row.asset} отклонён sanity-guard (prev=${row.baseRate}, next=${next})`);
+        const prev = Number(row.baseRate);
+        // Резкое колебание курса — поднимаем аномалию (доставку владельцу делает #145).
+        onAnomaly?.({
+          tenantId,
+          asset: row.asset,
+          prev,
+          next,
+          deviationPct: prev > 0 ? ((next - prev) / prev) * 100 : Number.NaN,
+        });
         continue;
       }
       updates.push({ id: row.id, baseRate: round(next) });
@@ -309,11 +336,12 @@ export async function refreshTenantRates(
 export async function refreshAllActiveTenants(
   db: Db,
   log?: { warn?: (msg: string) => void; info?: (msg: string) => void },
+  onAnomaly?: (a: RateFeedAnomaly) => void,
 ): Promise<void> {
   const rows = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.status, "active"));
   for (const { id } of rows) {
     try {
-      const r = await refreshTenantRates(db, id, log);
+      const r = await refreshTenantRates(db, id, log, onAnomaly);
       if (r.updated > 0 || r.failed > 0) {
         log?.info?.(`rate-feed tenant=${id} updated=${r.updated} skipped=${r.skipped} failed=${r.failed}`);
       }

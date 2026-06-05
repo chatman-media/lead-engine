@@ -1,10 +1,18 @@
-import { type NotificationService, type NotificationsRepo } from "@chatman-media/conversation-engine";
+import {
+  type NotificationService,
+  type NotificationsRepo,
+  type OpsAlertRouter,
+} from "@chatman-media/conversation-engine";
 import { Hono } from "hono";
 
 export function makeAdminNotificationsRoutes(opts: {
   repo: NotificationsRepo;
   botUsername?: string;
   notificationService?: NotificationService;
+  /** Роутер операционных алертов владельцу (#145). */
+  opsRouter?: OpsAlertRouter;
+  /** Настроен ли email-канал (RESEND_API_KEY) — для UI-индикатора. */
+  opsEmailConfigured?: boolean;
 }): Hono {
   const app = new Hono();
 
@@ -89,6 +97,36 @@ export function makeAdminNotificationsRoutes(opts: {
     const eventType: string = body.eventType || "stage_changed";
     const token = await opts.repo.generateGroupLinkToken(tenantId, adminId, eventType);
     return c.json({ token });
+  });
+
+  // ---- Операционные алерты (#145) ----
+
+  // GET /api/admin/notifications/ops-status — готовность доставки владельцу.
+  app.get("/ops-status", async (c) => {
+    const tenantId = c.var.tenantId;
+    const settings = await opts.repo.findOperatorSettingsByTenant(tenantId);
+    const telegramLinked = settings.some((s) => !!s.telegramChatId);
+    return c.json({
+      enabled: !!opts.opsRouter,
+      botConfigured: !!opts.botUsername,
+      telegramLinked,
+      emailConfigured: !!opts.opsEmailConfigured,
+    });
+  });
+
+  // POST /api/admin/notifications/ops-test — тестовый операционный алерт владельцу.
+  app.post("/ops-test", async (c) => {
+    const tenantId = c.var.tenantId;
+    if (!opts.opsRouter) return c.json({ ok: false, error: "Ops-роутер не настроен" });
+    await opts.opsRouter.emit({
+      tenantId,
+      kind: "rate_feed_stale",
+      severity: "warning",
+      title: "Тестовый операционный алерт",
+      detail: "Если вы это видите — доставка алертов владельцу работает (Telegram/email).",
+      dedupKey: `ops-test:${c.var.adminId}:${Math.floor(Date.now() / 1000)}`,
+    });
+    return c.json({ ok: true });
   });
 
   // ---- Templates ----
