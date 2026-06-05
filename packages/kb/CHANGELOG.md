@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.3.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.2.0...@chatman-media/kb-v1.3.0) (2026-06-05)
+
+
+### Features
+
+* **exchange:** онбординг + рефактор обмена + универсальный костяк воронки (phase) ([#160](https://github.com/chatman-media/lead-engine/issues/160)) ([3eed910](https://github.com/chatman-media/lead-engine/commit/3eed91030ec8b4d1f5644dff0d6122d5f67ad2b2))
+
 # [@chatman-media/kb-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.1.0...@chatman-media/kb-v1.2.0) (2026-05-24)
 
 
