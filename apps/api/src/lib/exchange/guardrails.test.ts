@@ -36,7 +36,7 @@ describe("checkRateGuard — легальные котировки проход�
     expect(r.tripped).toBe(false);
   });
 
-  // Реальные тарифы forsanya: объёмные RUB-тарифы намеренно НИЖЕ base (volume discount).
+  // Реальные тарифы обменника: объёмные RUB-тарифы намеренно НИЖЕ base (volume discount).
   it.each([2.64, 2.59, 2.52, 2.48, 2.39])(
     "RUB volume-tier %p при базе 2.55 не роняет guard",
     (displayRate) => {

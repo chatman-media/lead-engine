@@ -249,9 +249,9 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
   обменника генерирует cardless-withdrawal QR в банковском приложении (KBank/BBL)
   и отправляет клиенту через admin-UI без перехвата чата.
 
-- ✅ **Exchange action layer + Forsanya E2E mocks** — админка обменника управляет
+- ✅ **Exchange action layer + E2E mocks** — админка обменника управляет
   approved rate-card, формулами/отклонениями, реквизитами, заявками и оборотом.
-  Tool-loop покрывает 10 редактированных Forsanya сценариев: RUB QR/SBP, RUB card,
+  Tool-loop покрывает 10 редактированных exchange-сценариев: RUB QR/SBP, RUB card,
   USDT TRC20, Binance ID, KYC gate, receipt proof, courier/cardless ATM/Thai bank
   payout metadata. Route-level E2E покрывает auth, tenant isolation, operator patch
   и turnover без реальных банков/API.
@@ -594,7 +594,7 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
 - **Agentic tool calls:** booking link wired, tool-loop engine готов к расширению
 - **RAG v2:** multi-query expansion (RRF merge) + MMR diversification + dynamic threshold + Jina/Cohere reranker
 - **AI Workflow Builder:** многоходовой диалог с AI → генерация воронки за 5 минут без технических знаний
-- **Exchange vertical (`exchange_v1`):** крипто/RUB → THB для обменников Пхукета, approved rate-card, exchange orders CRM, Forsanya e2e mocks
+- **Exchange vertical (`exchange_v1`):** крипто/RUB → THB для обменников Пхукета, approved rate-card, exchange orders CRM, exchange e2e mocks
 - **QR/photo delivery:** оператор отправляет cardless-withdrawal QR клиенту через admin-UI
 - **6 вертикальных шаблонов:** UAE + generic + RE + SaaS + video + exchange
 - **950+ tests**, multi-tenant RLS, encrypted secrets, observability
