@@ -128,6 +128,20 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		const feeFixedThb = Number.isFinite(Number(body?.feeFixedThb))
 			? Number(body.feeFixedThb)
 			: 0;
+		// Save-time guardrails: не даём сохранить заведомо убыточную/абсурдную формулу.
+		// Плавающую проверку «спред vs рынок» делает computeQuote (guardrails.ts) на лету.
+		if (feeFixedThb < 0) {
+			return c.json({ error: "fee_fixed_thb не может быть отрицательной" }, 400);
+		}
+		if (marginPct < 0) {
+			return c.json(
+				{ error: "Маржа не может быть отрицательной — это продажа в убыток" },
+				400,
+			);
+		}
+		if (marginPct >= 100) {
+			return c.json({ error: "Маржа ≥ 100% — похоже на опечатку" }, 400);
+		}
 		const minAmountFrom =
 			body?.minAmountFrom == null || body.minAmountFrom === ""
 				? null
