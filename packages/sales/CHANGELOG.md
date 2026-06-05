@@ -1,3 +1,10 @@
+# [@chatman-media/sales-v1.1.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/sales-v1.1.0...@chatman-media/sales-v1.1.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* **security:** resolve CodeQL code-scanning alerts (ReDoS, biased RNG, XSS, log/url) ([#184](https://github.com/chatman-media/lead-engine/issues/184)) ([a68bd16](https://github.com/chatman-media/lead-engine/commit/a68bd16ebf54b8ccb283a1f41c945e091cc3cd1d)), closes [js/xss-throu#dom](https://github.com/js/xss-throu/issues/dom)
+
 # [@chatman-media/sales-v1.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/sales-v1.0.0...@chatman-media/sales-v1.1.0) (2026-06-03)
 
 
