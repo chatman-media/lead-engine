@@ -37,3 +37,10 @@ TODO.md
 
 # Local raw Telegram exports used only to derive redacted eval fixtures.
 forsanya/
+
+# Проект на bun (корневой bun.lock). Локфайлы других пакет-менеджеров —
+# случайный мусор от `pnpm/npm/yarn install`, плодят ложные Dependabot-алерты
+# (так пришёл удалённый conversation-engine/pnpm-lock.yaml). Не коммитим.
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
