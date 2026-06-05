@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
+import { CopilotProvider } from "@/components/copilot";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { getToken, saas } from "./api/saas.ts";
@@ -122,8 +123,9 @@ export function App() {
   return (
     <ThemeProvider>
       <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "") || "/"}>
-        <Routes>
-          {/* Публичные (регистрация закрыта — только login + invite) */}
+        <CopilotProvider>
+          <Routes>
+            {/* Публичные (регистрация закрыта — только login + invite) */}
           <Route path="/login" element={<SaasLogin />} />
           <Route path="/accept-invite" element={<SaasAcceptInvite />} />
           <Route path="/forgot-password" element={<SaasForgotPassword />} />
@@ -170,7 +172,8 @@ export function App() {
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+          </Routes>
+        </CopilotProvider>
       </BrowserRouter>
       <Toaster />
     </ThemeProvider>

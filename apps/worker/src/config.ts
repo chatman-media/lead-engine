@@ -37,6 +37,20 @@ export interface WorkerConfig {
    */
   exchangePaymentSweepMs: number;
   /**
+   * Период operations-watcher (#144), ms. Default 300000 (5 мин). 0 — отключить.
+   * Проверяет здоровье обменника: устаревание курсов, зависшие заявки,
+   * упавшие каналы, всплеск оборота.
+   */
+  opsWatchMs: number;
+  /** Курс auto-строк не обновлялся дольше N минут → алерт. Default 20. */
+  opsFeedStaleMin: number;
+  /** Заявка в paid/payout дольше N минут → алерт. Default 45. */
+  opsStuckOrderMin: number;
+  /** Оборот за час выше N THB → алерт. Default 0 (отключено). */
+  opsVolumeSpikeThb: number;
+  /** Не повторять алерт одного типа чаще N минут. Default 60. */
+  opsAlertCooldownMin: number;
+  /**
    * Платформенный токен для бота уведомлений операторов.
    * env PLATFORM_OPERATOR_BOT_TOKEN.
    */
@@ -46,6 +60,10 @@ export interface WorkerConfig {
    * env PLATFORM_APP_URL.
    */
   appUrl: string;
+  /** Resend API key для email-алертов владельцу (#145). Пусто → email отключён. */
+  resendApiKey: string;
+  /** From-адрес для email. env PLATFORM_FROM_EMAIL. */
+  fromEmail: string;
 }
 
 function required(name: string): string {
@@ -80,7 +98,14 @@ export function loadWorkerConfig(): WorkerConfig {
       process.env.WORKER_EXCHANGE_PAYMENT_SWEEP_MS ?? "60000",
       10,
     ),
+    opsWatchMs: Number.parseInt(process.env.WORKER_OPS_WATCH_MS ?? "300000", 10),
+    opsFeedStaleMin: Number.parseInt(process.env.OPS_FEED_STALE_MIN ?? "20", 10),
+    opsStuckOrderMin: Number.parseInt(process.env.OPS_STUCK_ORDER_MIN ?? "45", 10),
+    opsVolumeSpikeThb: Number.parseInt(process.env.OPS_VOLUME_SPIKE_THB ?? "0", 10),
+    opsAlertCooldownMin: Number.parseInt(process.env.OPS_ALERT_COOLDOWN_MIN ?? "60", 10),
     operatorBotToken: process.env.PLATFORM_OPERATOR_BOT_TOKEN ?? "",
     appUrl: process.env.PLATFORM_APP_URL ?? "https://app.leadengine.app",
+    resendApiKey: process.env.RESEND_API_KEY ?? "",
+    fromEmail: process.env.PLATFORM_FROM_EMAIL ?? "lead-engine <noreply@leadengine.app>",
   };
 }

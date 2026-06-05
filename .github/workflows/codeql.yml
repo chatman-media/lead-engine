@@ -1,0 +1,54 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Еженедельный полный скан: ловит уязвимости по НОВЫМ CodeQL-правилам
+    # даже когда код не менялся (PR-триггер видит только дельту).
+    - cron: "27 4 * * 1"
+
+# Дублирующие PR-сканы на одном ref отменяем; на main не отменяем.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      security-events: write # загрузка SARIF-результатов в Security tab
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # JS+TS анализируются одним экстрактором. build-mode none —
+          # CodeQL читает исходники напрямую, билд (bun) не нужен.
+          - language: javascript-typescript
+            build-mode: none
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # security-extended = default + расширенный набор security-запросов
+          # (больше покрытие, иногда больше шума — снять при желании).
+          queries: security-extended
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

@@ -36,6 +36,7 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { type Admin, clearToken, saas, type Tenant } from "@/api/saas";
 import { ModeToggle } from "@/components/mode-toggle";
+import { CopilotDock } from "@/components/copilot";
 import { useTheme } from "@/components/theme-provider";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -610,6 +611,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="mx-auto w-full max-w-6xl">{children}</div>
           </main>
         </div>
+
+        <CopilotDock />
       </div>
     </TooltipProvider>
   );

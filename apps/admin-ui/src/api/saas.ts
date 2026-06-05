@@ -465,6 +465,35 @@ export interface WorkflowChatResponse {
   preview?: WorkflowPreviewStage[];
 }
 
+// ── AI-ассистент (copilot) ───────────────────────────────────────────────
+
+export interface CopilotChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Предложенное ассистентом действие. Эндпоинт chat НЕ выполняет его — UI
+ * рендерит карточку подтверждения и по кнопке зовёт существующие методы
+ * (`installVertical` / `applyWorkflow`). `build_funnel.preview` совпадает по
+ * форме с `WorkflowPreviewStage`.
+ */
+export type CopilotAction =
+  | { type: "install_vertical"; slug: string; displayName: string }
+  | { type: "build_funnel"; stages: unknown[]; preview: WorkflowPreviewStage[] }
+  | { type: "navigate"; to?: string; step?: number };
+
+export interface CopilotChatResponse {
+  reply: string;
+  action: CopilotAction | null;
+}
+
+export interface CopilotChatInput {
+  page: string;
+  context?: unknown;
+  messages: CopilotChatMessage[];
+}
+
 export interface LeadListItem {
   id: number;
   state: string;
@@ -1433,6 +1462,14 @@ export const saas = {
     });
   },
 
+  // ── AI-ассистент (copilot) ───────────────────────────────────────────
+  copilotChat(input: CopilotChatInput) {
+    return request<CopilotChatResponse>("/api/admin/copilot/chat", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
   getFunnelAnalytics() {
     return request<FunnelAnalytics>("/api/admin/funnel/analytics");
   },
@@ -1717,6 +1754,19 @@ export const saas = {
   },
   testNotificationRule(id: number) {
     return request<{ ok: boolean; error?: string }>(`/api/admin/notifications/rules/${id}/test`, {
+      method: "POST",
+    });
+  },
+  getOpsAlertStatus() {
+    return request<{
+      enabled: boolean;
+      botConfigured: boolean;
+      telegramLinked: boolean;
+      emailConfigured: boolean;
+    }>("/api/admin/notifications/ops-status");
+  },
+  testOpsAlert() {
+    return request<{ ok: boolean; error?: string }>("/api/admin/notifications/ops-test", {
       method: "POST",
     });
   },

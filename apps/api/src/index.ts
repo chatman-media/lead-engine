@@ -3,6 +3,7 @@ import {
   NotificationsRepo,
   NotificationService,
   OperatorBotHandler,
+  OpsAlertRouter,
 } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import { makeDefaultLogger, makePlatformMetrics } from "@chatman-media/observability";
@@ -73,6 +74,7 @@ import { makeAdminExchangeRoutes } from "./routes/admin-exchange.ts";
 import { refreshAllActiveTenants } from "./lib/exchange/rate-feed.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeAdminWorkflowRoutes } from "./routes/admin-workflow.ts";
+import { makeAdminCopilotRoutes } from "./routes/admin-copilot.ts";
 import { makeAdminNotificationsRoutes } from "./routes/admin-notifications.ts";
 import { makeAdminTestRoutes } from "./routes/admin-test.ts";
 import { makeMcpRoutes } from "./routes/mcp.ts";
@@ -292,6 +294,18 @@ async function main() {
   if (cfg.operatorBotToken) {
     log.info("operator notification bot enabled");
   }
+  // Роутер операционных алертов владельцу (#145): Telegram DM + email (Mailer),
+  // severity-маршрутизация, анти-шторм. Mailer структурно — OpsEmailSender.
+  const opsAlertRouter = new OpsAlertRouter({
+    db: db as never,
+    botToken: cfg.operatorBotToken,
+    appUrl: cfg.mailer.appUrl,
+    email: mailer,
+    log: {
+      warn: (m, ctx) => log.warn(m, ctx as Record<string, unknown>),
+      info: (m, ctx) => log.info(m, ctx as Record<string, unknown>),
+    },
+  });
 
   const embedderResolver = makeEmbedderResolver(loadedRef);
   if (embedderResolver) {
@@ -374,6 +388,8 @@ async function main() {
       repo: notificationsRepo,
       botUsername: cfg.operatorBotUsername,
       notificationService,
+      opsRouter: opsAlertRouter,
+      opsEmailConfigured: !!cfg.mailer.apiKey,
     }),
   );
   log.info("admin-leads routes enabled");
@@ -392,6 +408,17 @@ async function main() {
     }),
   );
   log.info("admin-workflow routes enabled (AI funnel builder)");
+
+  // AI-ассистент админки (copilot) — чат по данным страницы + помощь с
+  // онбордингом/воронкой. BYOK через тот же resolveChat, что и workflow.
+  app.route(
+    "/",
+    makeAdminCopilotRoutes({
+      db,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    }),
+  );
+  log.info("admin-copilot routes enabled (page-aware AI assistant)");
 
   // Dashboard aggregate stats.
   app.route("/", makeAdminDashboardRoutes({ db }));
@@ -849,10 +876,37 @@ async function main() {
   let rateFeedInterval: ReturnType<typeof setInterval> | null = null;
   if (rateFeedMs > 0) {
     const runFeed = () =>
-      refreshAllActiveTenants(db, {
-        warn: (m) => log.warn(m),
-        info: (m) => log.info(m),
-      }).catch((e) => log.warn("rate-feed run failed", { err: e }));
+      refreshAllActiveTenants(
+        db,
+        {
+          warn: (m) => log.warn(m),
+          info: (m) => log.info(m),
+        },
+        // Резкое колебание курса (sanity-guard отклонил фид) → алерт владельцу.
+        (a) => {
+          const dev = Number.isFinite(a.deviationPct) ? Math.round(a.deviationPct) : null;
+          log.warn("rate-feed anomaly: резкое колебание курса", {
+            tenantId: a.tenantId,
+            asset: a.asset,
+            prev: a.prev,
+            next: a.next,
+            deviationPct: dev,
+          });
+          void opsAlertRouter
+            .emit({
+              tenantId: a.tenantId,
+              kind: "rate_anomaly",
+              severity: "critical",
+              title: "Резкое колебание курса",
+              detail:
+                `Фид по ${a.asset} дал ${a.next} при текущем ${a.prev}` +
+                `${dev !== null ? ` (${dev > 0 ? "+" : ""}${dev}%)` : ""} — отклонено sanity-guard'ом. ` +
+                "Курс заморожен на прежнем значении, бот может котировать устаревший курс. Проверьте фид/курс.",
+              dedupKey: `rate_anomaly:${a.asset}`,
+            })
+            .catch((e) => log.warn("ops-alert emit failed", { err: String(e) }));
+        },
+      ).catch((e) => log.warn("rate-feed run failed", { err: e }));
     rateFeedInterval = setInterval(runFeed, rateFeedMs);
     setTimeout(runFeed, 15_000); // первый прогон через 15с после старта
     log.info("exchange rate-feed enabled", { intervalMs: rateFeedMs });

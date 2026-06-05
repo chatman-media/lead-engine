@@ -12,6 +12,11 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import { exchangeRates, exchangeRateTiers } from "@chatman-media/storage";
 import { and, asc, eq } from "drizzle-orm";
+import {
+  checkRateGuard,
+  type ExchangeGuardrails,
+  type RateGuardTrip,
+} from "./guardrails.ts";
 
 export const QUOTE_ASSET = "THB";
 export const CRYPTO_ASSETS = ["USDT", "BTC", "ETH"] as const;
@@ -32,6 +37,8 @@ export interface QuoteResult {
 export interface QuoteError {
   ok: false;
   error: string;
+  /** Заполнено, если котировку заблокировал guardrail (а не обычная валидация). */
+  guard?: RateGuardTrip;
 }
 
 export function normAsset(a: string): string {
@@ -177,6 +184,7 @@ export async function computeQuote(
     amount: number;
     amountMode?: "source_amount" | "target_thb";
   },
+  guardrails?: ExchangeGuardrails,
 ): Promise<QuoteResult | QuoteError> {
   const asset = normAsset(input.asset);
   const amount = Number(input.amount);
@@ -217,8 +225,12 @@ export async function computeQuote(
     : mode === "divide"
       ? row.baseRate * (1 + row.marginPct / 100)
       : row.baseRate * (1 - row.marginPct / 100);
-  if (!Number.isFinite(eff) || eff <= 0) {
-    return { ok: false, error: "Некорректный курс. Нужен оператор." };
+
+  // Guardrail: блокируем неадекватную/убыточную котировку. Срабатывает и для
+  // tier.displayRate — он раньше обходил любые проверки (кейс «10 вместо 35»).
+  const guard = checkRateGuard({ eff, baseRate: row.baseRate, mode, guardrails });
+  if (guard.tripped) {
+    return { ok: false, error: "Некорректный курс. Нужен оператор.", guard };
   }
 
   const amountFrom = amountMode === "target_thb"

@@ -1,4 +1,5 @@
 import {
+  ActivityIcon,
   BellIcon,
   CheckIcon,
   ClipboardCopyIcon,
@@ -63,6 +64,15 @@ export function SaasNotifications() {
   const [generatingGroupToken, setGeneratingGroupToken] = useState(false);
   const [addMode, setAddMode] = useState<"bot" | "manual" | null>(null);
 
+  // ── Операционные алерты (#145) ──────────────────────────────────────────
+  const [opsStatus, setOpsStatus] = useState<{
+    enabled: boolean;
+    botConfigured: boolean;
+    telegramLinked: boolean;
+    emailConfigured: boolean;
+  } | null>(null);
+  const [testingOps, setTestingOps] = useState(false);
+
   // ── Templates ─────────────────────────────────────────────────────────
   const [templates, setTemplates] = useState<NotificationTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
@@ -113,11 +123,33 @@ export function SaasNotifications() {
     }
   }
 
+  async function reloadOpsStatus() {
+    try {
+      setOpsStatus(await saas.getOpsAlertStatus());
+    } catch {
+      // ignore — секция просто не покажет статус
+    }
+  }
+
   useEffect(() => {
     reloadSettings();
     reloadRules();
     reloadTemplates();
+    reloadOpsStatus();
   }, []);
+
+  async function handleTestOps() {
+    setTestingOps(true);
+    try {
+      const result = await saas.testOpsAlert();
+      if (result.ok) toast.success("Тестовый алерт отправлен владельцу");
+      else toast.error(result.error ?? "Не удалось отправить");
+    } catch (err) {
+      if (!onAuthError(err)) toast.error("Ошибка при отправке");
+    } finally {
+      setTestingOps(false);
+    }
+  }
 
   // ── Personal ───────────────────────────────────────────────────────────
 
@@ -684,6 +716,67 @@ export function SaasNotifications() {
               </div>
             </form>
           )}
+        </CardContent>
+      </Card>
+
+      {/* ── Операционные алерты обменника ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <ActivityIcon className="h-5 w-5 text-primary" />
+              <div>
+                <CardTitle className="text-base">Операционные алерты</CardTitle>
+                <CardDescription className="mt-0.5">
+                  Авто-сигналы о проблемах обменника владельцу: резкие колебания курса, фид встал,
+                  зависшие заявки, упавший канал. Critical → Telegram + email, иначе Telegram.
+                </CardDescription>
+              </div>
+            </div>
+            {opsStatus &&
+              (opsStatus.telegramLinked || opsStatus.emailConfigured ? (
+                <Badge variant="success" className="gap-1">
+                  <CheckIcon className="size-3" /> Доставка настроена
+                </Badge>
+              ) : (
+                <Badge variant="warning">Нет канала</Badge>
+              ))}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-2 text-sm sm:grid-cols-2">
+            <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2">
+              <CheckIcon
+                className={`size-3.5 shrink-0 ${opsStatus?.telegramLinked ? "text-green-500" : "text-muted-foreground/40"}`}
+              />
+              <span className="text-muted-foreground">
+                Telegram владельца{" "}
+                {opsStatus?.telegramLinked ? "привязан" : "не привязан (см. «Личные уведомления»)"}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2">
+              <CheckIcon
+                className={`size-3.5 shrink-0 ${opsStatus?.emailConfigured ? "text-green-500" : "text-muted-foreground/40"}`}
+              />
+              <span className="text-muted-foreground">
+                Email {opsStatus?.emailConfigured ? "настроен" : "не настроен (RESEND_API_KEY)"}
+              </span>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Пороги (устаревание фида, зависшая заявка и т.д.) задаются в конфиге сервера. Отправьте
+            тестовый алерт — он придёт владельцу в Telegram/email тем же путём, что и реальные.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-2"
+            disabled={testingOps || !opsStatus?.enabled}
+            onClick={handleTestOps}
+          >
+            <FlaskConicalIcon className="size-3.5" />
+            {testingOps ? "Отправляем…" : "Отправить тестовый алерт"}
+          </Button>
         </CardContent>
       </Card>
 

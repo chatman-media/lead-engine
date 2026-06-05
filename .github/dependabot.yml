@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # JS-зависимости всего Bun-воркспейса (apps/* + packages/*).
+  # package-ecosystem "bun" читает текстовый bun.lock — GA с 02.2025,
+  # требует bun >= 1.1.39 (у нас 1.3.14). NB: авто-PR именно на CVE
+  # (security updates) для bun ещё не GA — их закрывает Dependabot alerts
+  # в Security tab; этот блок держит версии свежими (version updates).
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      # patch/minor одним PR, чтобы не плодить шум; major — отдельно,
+      # их нужно ревьюить вручную.
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Версии самих GitHub Actions в .github/workflows/* (ci.yml + codeql.yml).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(ci)"

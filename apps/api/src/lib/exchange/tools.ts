@@ -25,9 +25,32 @@ import {
   updateOrder,
 } from "./orders.ts";
 import { getPaymentProvider } from "./providers.ts";
+import type { RateGuardTrip } from "./guardrails.ts";
 import { computeQuote, isCryptoAsset, normAsset, resolveNetwork } from "./rates.ts";
 import { assessOrderRisk } from "./risk.ts";
 import { getExchangeVerificationStatus } from "./verification.ts";
+
+/**
+ * Срабатывание guardrail курса не должно быть «тихим». Пока — структурный warn.
+ * TODO(#145): маршрутизировать как событие `rate_guard_tripped` владельцу
+ * (Telegram DM + email) через NotificationService.
+ */
+function logGuardTrip(
+  tenantId: number,
+  conversationId: number,
+  asset: string,
+  network: string | undefined,
+  guard: RateGuardTrip,
+): void {
+  const dev = Number.isFinite(guard.deviationPct)
+    ? `${guard.deviationPct.toFixed(2)}%`
+    : "n/a";
+  console.warn(
+    `[exchange-guard] tripped tenant=${tenantId} conv=${conversationId} ` +
+      `${asset}${network ? `/${network}` : ""} reason=${guard.reason} ` +
+      `deviation=${dev} base=${guard.baseRate} eff=${guard.eff} threshold=${guard.threshold ?? "n/a"}`,
+  );
+}
 
 export interface ExchangeToolsDeps {
   db: Db;
@@ -78,7 +101,10 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         amountMode: args.amountMode,
         network: args.network,
       });
-      if (!q.ok) return { error: q.error };
+      if (!q.ok) {
+        if (q.guard?.tripped) logGuardTrip(tenantId, conversationId, args.asset, args.network, q.guard);
+        return { error: q.error };
+      }
       return {
         direction: q.direction,
         asset: q.asset,
@@ -133,7 +159,10 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         amountMode: args.amountMode,
         network: args.network,
       });
-      if (!q.ok) return { error: q.error };
+      if (!q.ok) {
+        if (q.guard?.tripped) logGuardTrip(tenantId, conversationId, args.asset, args.network, q.guard);
+        return { error: q.error };
+      }
 
       const verification = await getExchangeVerificationStatus(db, tenantId, conversationId);
       if (!verification.verified) {
