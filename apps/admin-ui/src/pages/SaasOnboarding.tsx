@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { CopilotDock, useCopilot, usePageCopilot } from "@/components/copilot";
 import {
   ApiError,
   type ChannelItem,
@@ -164,6 +165,37 @@ export function SaasOnboarding() {
     }
     return { ch: ch.items, cfg: cfg.items, kb: docItems };
   }
+
+  const chatConfigured = configReady(chatCfg);
+
+  const { appliedTick, navStep } = useCopilot();
+
+  usePageCopilot({
+    pageId: "onboarding",
+    label: "Онбординг — настройка кабинета",
+    llmReady: chatConfigured,
+    data: {
+      step,
+      stepLabel: STEP_LABELS[step],
+      channelCount: channels.length,
+      channelDone,
+      chatConfigured,
+      embedConfigured: configReady(embedCfg),
+      kbDocs: docs.length,
+      verticals: verticals.map((v) => ({ slug: v.slug, displayName: v.displayName })),
+      installedVertical,
+    },
+  });
+
+  // Копайлот применил действие (установка вертикали/воронки) → перечитать стейт.
+  useEffect(() => {
+    if (appliedTick > 0) loadState().catch(() => {});
+  }, [appliedTick]);
+
+  // Ассистент попросил перейти к шагу онбординга.
+  useEffect(() => {
+    if (navStep && navStep.step >= 0 && navStep.step <= 3) setStep(navStep.step);
+  }, [navStep]);
 
   useEffect(() => {
     let cancelled = false;
@@ -424,6 +456,8 @@ export function SaasOnboarding() {
         </div>
       </header>
 
+      <div className="flex">
+      <div className="min-w-0 flex-1">
       <div className="mx-auto w-full max-w-2xl px-4 py-10">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">Настройка кабинета</h1>
@@ -959,6 +993,9 @@ export function SaasOnboarding() {
             </CardContent>
           </Card>
         )}
+      </div>
+      </div>
+      <CopilotDock underHeader />
       </div>
     </div>
   );

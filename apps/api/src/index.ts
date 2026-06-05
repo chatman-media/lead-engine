@@ -68,6 +68,7 @@ import { makeAdminExchangeRoutes } from "./routes/admin-exchange.ts";
 import { refreshAllActiveTenants } from "./lib/exchange/rate-feed.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeAdminWorkflowRoutes } from "./routes/admin-workflow.ts";
+import { makeAdminCopilotRoutes } from "./routes/admin-copilot.ts";
 import { makeAdminNotificationsRoutes } from "./routes/admin-notifications.ts";
 import { makeAdminTestRoutes } from "./routes/admin-test.ts";
 import { makeMcpRoutes } from "./routes/mcp.ts";
@@ -374,6 +375,17 @@ async function main() {
     }),
   );
   log.info("admin-workflow routes enabled (AI funnel builder)");
+
+  // AI-ассистент админки (copilot) — чат по данным страницы + помощь с
+  // онбордингом/воронкой. BYOK через тот же resolveChat, что и workflow.
+  app.route(
+    "/",
+    makeAdminCopilotRoutes({
+      db,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    }),
+  );
+  log.info("admin-copilot routes enabled (page-aware AI assistant)");
 
   // Dashboard aggregate stats.
   app.route("/", makeAdminDashboardRoutes({ db }));
