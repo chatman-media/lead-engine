@@ -12,10 +12,16 @@ export interface AdminReferralRoutesOpts {
 
 function generateCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  // Rejection sampling: discard bytes in the non-uniform tail so every char is
+  // equally likely (avoids modulo bias for any alphabet length).
+  const limit = 256 - (256 % chars.length);
   let code = "";
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  for (const b of bytes) {
-    code += chars[b % chars.length];
+  while (code.length < 8) {
+    for (const b of crypto.getRandomValues(new Uint8Array(8))) {
+      if (b >= limit) continue;
+      code += chars[b % chars.length];
+      if (code.length === 8) break;
+    }
   }
   return `${code.slice(0, 4)}-${code.slice(4)}`;
 }

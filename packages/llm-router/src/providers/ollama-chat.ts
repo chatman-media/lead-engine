@@ -43,7 +43,7 @@ export class OllamaChatClient implements ChatClient {
   private readonly timeoutMs: number;
 
   constructor(opts: OllamaChatOptions) {
-    this.host = opts.host.replace(/\/+$/, "");
+    this.host = opts.host.replace(/\/{1,512}$/, "");
     this.model = opts.model;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
     this.disableThinking = opts.disableThinking ?? true;

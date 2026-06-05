@@ -24,7 +24,7 @@ export class OllamaEmbeddingClient implements EmbeddingClient {
   private readonly timeoutMs: number;
 
   constructor(opts: OllamaEmbeddingOptions) {
-    this.host = opts.host.replace(/\/+$/, "");
+    this.host = opts.host.replace(/\/{1,512}$/, "");
     this.model = opts.model;
     this.dim = opts.dim;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);

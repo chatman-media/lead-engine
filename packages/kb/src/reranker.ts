@@ -49,7 +49,7 @@ export class CohereReranker implements Reranker {
     if (!opts.apiKey) throw new Error("CohereReranker: apiKey required");
     this.apiKey = opts.apiKey;
     this.model = opts.model ?? "rerank-v3.5";
-    this.baseUrl = (opts.baseUrl ?? "https://api.cohere.com/v2").replace(/\/+$/, "");
+    this.baseUrl = (opts.baseUrl ?? "https://api.cohere.com/v2").replace(/\/{1,512}$/, "");
     this.timeoutMs = opts.timeoutMs ?? 30_000;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   }
@@ -128,7 +128,7 @@ export class JinaReranker implements Reranker {
     if (!opts.apiKey) throw new Error("JinaReranker: apiKey required");
     this.apiKey = opts.apiKey;
     this.model = opts.model ?? "jina-reranker-v2-base-multilingual";
-    this.baseUrl = (opts.baseUrl ?? "https://api.jina.ai/v1").replace(/\/+$/, "");
+    this.baseUrl = (opts.baseUrl ?? "https://api.jina.ai/v1").replace(/\/{1,512}$/, "");
     this.timeoutMs = opts.timeoutMs ?? 30_000;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   }

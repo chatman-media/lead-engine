@@ -74,7 +74,7 @@ export async function classifyPhoto(opts: ClassifyPhotoOptions): Promise<PhotoCl
   if (!opts.apiKey || opts.apiKey.trim().length === 0) {
     throw new Error("classifyPhoto: apiKey required");
   }
-  const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/{1,512}$/, "");
   const fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const mime = opts.mimeType?.trim() ? opts.mimeType : "image/jpeg";
   const base64 = Buffer.from(opts.bytes).toString("base64");
@@ -210,7 +210,7 @@ export async function extractPassportIdentity(
   if (!opts.apiKey || opts.apiKey.trim().length === 0) {
     throw new Error("extractPassportIdentity: apiKey required");
   }
-  const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/{1,512}$/, "");
   const fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const mime = opts.mimeType?.trim() ? opts.mimeType : "image/jpeg";
   const base64 = Buffer.from(opts.bytes).toString("base64");

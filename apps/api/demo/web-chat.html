@@ -199,9 +199,13 @@
       function append(kind, text) {
         const row = document.createElement("div");
         row.className = `row ${kind}`;
-        row.innerHTML = `<span class="ts">${nowTs()}</span>${
-          kind === "user" ? "→" : kind === "bot" ? "←" : "·"
-        } ${text}`;
+        const ts = document.createElement("span");
+        ts.className = "ts";
+        ts.textContent = nowTs();
+        const arrow = kind === "user" ? "→" : kind === "bot" ? "←" : "·";
+        row.appendChild(ts);
+        // textContent (not innerHTML) — message text is never parsed as HTML.
+        row.appendChild(document.createTextNode(`${arrow} ${text}`));
         log.appendChild(row);
         log.scrollTop = log.scrollHeight;
       }

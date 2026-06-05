@@ -45,7 +45,7 @@ export class MessengerClient {
     if (!opts.pageAccessToken) throw new Error("MessengerClient: pageAccessToken required");
     this.pageAccessToken = opts.pageAccessToken;
     this.apiVersion = opts.apiVersion ?? "v18.0";
-    this.baseUrl = (opts.baseUrl ?? "https://graph.facebook.com").replace(/\/+$/, "");
+    this.baseUrl = (opts.baseUrl ?? "https://graph.facebook.com").replace(/\/{1,512}$/, "");
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   }
 

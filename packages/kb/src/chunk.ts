@@ -137,7 +137,7 @@ export function chunkBySections(text: string, opts: Partial<ChunkOptions> = {}):
   };
 
   for (const line of lines) {
-    const m = line.match(/^(#{1,6})\s+(.+)$/);
+    const m = line.match(/^(#{1,6})\s+(\S.*)$/);
     if (m) {
       flush();
       currentHeading = m[2] ?? null;

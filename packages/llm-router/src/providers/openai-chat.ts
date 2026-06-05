@@ -55,7 +55,7 @@ export class OpenAIChatClient implements ChatClient {
   constructor(opts: OpenAIChatOptions) {
     if (!opts.apiKey) throw new Error("OpenAIChatClient: apiKey required");
     this.apiKey = opts.apiKey;
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    this.baseUrl = opts.baseUrl.replace(/\/{1,512}$/, "");
     this.model = opts.model;
     this.timeoutMs = opts.timeoutMs ?? 60_000;
     this.fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);

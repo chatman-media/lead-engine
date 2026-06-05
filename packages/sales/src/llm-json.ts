@@ -30,7 +30,7 @@ function tryParseObject(s: string): Record<string, unknown> | null {
 export function extractJsonObject(raw: string): Record<string, unknown> | null {
   if (typeof raw !== "string") return null;
   const stripped = raw
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]{0,20000}?<\/think>/gi, "")
     .replace(/^\s*```(?:json|js)?\s*/i, "")
     .replace(/\s*```\s*$/i, "")
     .trim();

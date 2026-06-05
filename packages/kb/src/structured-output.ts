@@ -24,7 +24,7 @@ export function parseStructuredOutput<T extends z.ZodTypeAny>(
   const cleaned = raw
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "")
+    .replace(/\s{0,1000}```$/, "")
     .trim();
 
   let parsed: unknown;

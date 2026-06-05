@@ -33,7 +33,7 @@ export class OpenAIEmbeddingClient implements EmbeddingClient {
   constructor(opts: OpenAIEmbeddingOptions) {
     if (!opts.apiKey) throw new Error("OpenAIEmbeddingClient: apiKey required");
     this.apiKey = opts.apiKey;
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    this.baseUrl = opts.baseUrl.replace(/\/{1,512}$/, "");
     this.model = opts.model;
     this.dim = opts.dim;
     this.timeoutMs = opts.timeoutMs ?? 60_000;

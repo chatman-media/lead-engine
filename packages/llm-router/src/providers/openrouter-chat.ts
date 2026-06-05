@@ -76,7 +76,7 @@ export class OpenRouterChatClient implements ChatClient {
 			throw new Error("OpenRouterChatClient: model required");
 		}
 		this.apiKey = opts.apiKey;
-		this.baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+		this.baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/{1,512}$/, "");
 		this.model = opts.model;
 		this.siteUrl = opts.siteUrl;
 		this.appName = opts.appName;

@@ -115,12 +115,14 @@ async function main() {
     try {
       const frame = JSON.parse(ev.data as string);
       if (frame.type === "ready") {
-        console.log(`[smoke] ready (channel=${frame.channelId}, user=${frame.userId})`);
+        console.log(
+          `[smoke] ready (channel=${String(frame.channelId).replace(/[\r\n]/g, " ")}, user=${String(frame.userId).replace(/[\r\n]/g, " ")})`,
+        );
       } else if (frame.type === "bot_text") {
         receivedReply = { id: frame.id, text: frame.text };
-        console.log(`[smoke] bot_text received (${frame.text.length} chars)`);
+        console.log(`[smoke] bot_text received (${String(frame.text).replace(/[\r\n]/g, " ").length} chars)`);
       } else {
-        console.log("[smoke] unknown frame:", frame);
+        console.log("[smoke] unknown frame:", JSON.stringify(frame).replace(/[\r\n]/g, " "));
       }
     } catch (err) {
       console.error("[smoke] parse error", err);
@@ -184,7 +186,7 @@ async function main() {
   console.log(`[smoke] queue status: ${newRow.status}${newRow.lastError ? ` (error: ${newRow.lastError})` : ""}`);
 
   if (receivedReply) {
-    console.log(`[smoke] WS bot_text frame: ${receivedReply.text.length} chars (matched DB: ${receivedReply.text === replyText})`);
+    console.log(`[smoke] WS bot_text frame: ${String(receivedReply.text).replace(/[\r\n]/g, " ").length} chars (matched DB: ${receivedReply.text === replyText})`);
   } else {
     console.log("[smoke] ⚠ WS bot_text frame NOT received — adapter.send not invoked in time");
   }

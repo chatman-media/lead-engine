@@ -522,7 +522,7 @@ describe("admin-billing /checkout + /portal", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; url: string; sessionId: string };
     expect(body.ok).toBe(true);
-    expect(body.url).toMatch(/checkout\.stripe\.com/);
+    expect(body.url).toContain("checkout.stripe.com");
     expect(body.sessionId).toMatch(/^cs_test_/);
 
     // Stripe API called: customers + checkout sessions
@@ -587,7 +587,7 @@ describe("admin-billing /checkout + /portal", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { url: string };
-    expect(body.url).toMatch(/billing\.stripe\.com/);
+    expect(body.url).toContain("billing.stripe.com");
   });
 
   it("если STRIPE_SECRET_KEY не задан → /checkout 503", async () => {

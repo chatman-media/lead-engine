@@ -134,7 +134,7 @@ export class NotificationService {
     for (const [key, value] of Object.entries(vars)) {
       result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), String(value ?? ""));
     }
-    return result.replace(/\{\{.*?\}\}/g, "");
+    return result.replace(/\{\{.{0,200}?\}\}/g, "");
   }
 
   formatMessage(event: NotificationEvent): string {
