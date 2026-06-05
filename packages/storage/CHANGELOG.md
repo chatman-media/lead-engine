@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.6.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.5.0...@chatman-media/storage-v1.6.0) (2026-06-05)
+
+
+### Features
+
+* **notifications:** бот-информер владельца — уровни, дайджест, лента ([#182](https://github.com/chatman-media/lead-engine/issues/182)) ([5822964](https://github.com/chatman-media/lead-engine/commit/582296499270d47014078e7abfb91d76cec5a678))
+
 # [@chatman-media/storage-v1.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.4.1...@chatman-media/storage-v1.5.0) (2026-06-05)
 
 
