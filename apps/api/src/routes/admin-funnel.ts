@@ -56,6 +56,127 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
   skeleton: buildSkeletonFunnel({ includeClear: true, includeFulfill: true }).map(
     (s) => ({ ...s, fields: [] }),
   ),
+  // Консьерж-сервис (вилла): один общий intake ветвится по типу запроса
+  // (обмен / трансфер / еда), каждая ветка — короткий qualify → offer → fulfill,
+  // все сходятся в общие completed / cancelled. Одна валидная воронка костяка
+  // (1 intake, монотонные фазы, 1 won + 1 lost). Slugs совпадают с
+  // CONCIERGE_FUNNEL_STAGES в @chatman-media/vertical-concierge. Ветку лида
+  // помечает leads.request_type (migration 0032).
+  concierge: [
+    {
+      slug: "request_received",
+      displayName: "Запрос принят",
+      kind: "intake",
+      stageType: "form_fill",
+      position: 0,
+      color: "#3b82f6",
+      nextStages: ["exchange_request", "transfer_request", "food_request", "cancelled"],
+      // Авто-advance по заполнению request_type; branch-aware выбор ветки —
+      // в field-extractor.selectNextStage (а не nextStages[0]).
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "request_type", displayName: "Тип запроса", fieldType: "select", required: true, aiExtractable: true, hint: "Обмен / Трансфер / Еда / Другое — выбирает ветку воронки", position: 0,
+          optionsJson: '[{"value":"exchange","label":"Обмен"},{"value":"transfer","label":"Трансфер"},{"value":"food","label":"Еда"},{"value":"other","label":"Другое"}]' },
+        { slug: "summary", displayName: "Описание", fieldType: "textarea", required: false, aiExtractable: true, position: 1 },
+      ],
+    },
+
+    // ── qualify: детали запроса по типу ──
+    {
+      slug: "exchange_request", phase: "qualify", displayName: "Обмен: детали", kind: "active",
+      stageType: "form_fill", position: 1, color: "#6366f1",
+      nextStages: ["exchange_offer", "cancelled"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "asset_from", displayName: "Что меняем", fieldType: "text", required: true, aiExtractable: true, hint: "Напр. USDT, RUB", position: 0 },
+        { slug: "amount_from", displayName: "Сумма", fieldType: "number", required: true, aiExtractable: true, position: 1 },
+      ],
+    },
+    {
+      slug: "transfer_request", phase: "qualify", displayName: "Трансфер: детали", kind: "active",
+      stageType: "form_fill", position: 2, color: "#6366f1",
+      nextStages: ["transfer_offer", "cancelled"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "pickup", displayName: "Откуда", fieldType: "text", required: true, aiExtractable: true, position: 0 },
+        { slug: "dropoff", displayName: "Куда", fieldType: "text", required: true, aiExtractable: true, position: 1 },
+        { slug: "when", displayName: "Когда", fieldType: "text", required: false, aiExtractable: true, position: 2 },
+        { slug: "pax", displayName: "Пассажиров", fieldType: "number", required: false, aiExtractable: true, position: 3 },
+      ],
+    },
+    {
+      slug: "food_request", phase: "qualify", displayName: "Еда: заказ", kind: "active",
+      stageType: "form_fill", position: 3, color: "#6366f1",
+      nextStages: ["food_offer", "cancelled"],
+      autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+      fields: [
+        { slug: "items", displayName: "Что заказать", fieldType: "textarea", required: true, aiExtractable: true, position: 0 },
+        { slug: "deliver_to", displayName: "Куда доставить", fieldType: "text", required: false, aiExtractable: true, position: 1 },
+      ],
+    },
+
+    // ── offer: условия (цена/курс) — НЕ выдумываются, приходят от tools/оператора ──
+    {
+      slug: "exchange_offer", phase: "offer", displayName: "Обмен: котировка", kind: "active",
+      stageType: "rate_confirmation", position: 4, color: "#f59e0b",
+      nextStages: ["exchange_fulfill", "cancelled"],
+      fields: [
+        { slug: "quote", displayName: "Курс / сумма к выдаче", fieldType: "number", required: true, aiExtractable: false, position: 0 },
+        { slug: "confirmed", displayName: "Гость подтвердил", fieldType: "boolean", required: true, aiExtractable: true, position: 1 },
+      ],
+    },
+    {
+      slug: "transfer_offer", phase: "offer", displayName: "Трансфер: предложение", kind: "active",
+      stageType: "interaction", position: 5, color: "#f59e0b",
+      nextStages: ["transfer_fulfill", "cancelled"],
+      fields: [
+        { slug: "price", displayName: "Цена", fieldType: "number", required: true, aiExtractable: false, position: 0 },
+        { slug: "vehicle", displayName: "Класс авто", fieldType: "text", required: false, aiExtractable: true, position: 1 },
+        { slug: "confirmed", displayName: "Гость подтвердил", fieldType: "boolean", required: true, aiExtractable: true, position: 2 },
+      ],
+    },
+    {
+      slug: "food_offer", phase: "offer", displayName: "Еда: подтверждение", kind: "active",
+      stageType: "interaction", position: 6, color: "#f59e0b",
+      nextStages: ["food_fulfill", "cancelled"],
+      fields: [
+        { slug: "total", displayName: "Сумма", fieldType: "number", required: true, aiExtractable: false, position: 0 },
+        { slug: "eta", displayName: "Время доставки", fieldType: "text", required: false, aiExtractable: false, position: 1 },
+        { slug: "confirmed", displayName: "Гость подтвердил", fieldType: "boolean", required: true, aiExtractable: true, position: 2 },
+      ],
+    },
+
+    // ── fulfill: исполнение ──
+    {
+      slug: "exchange_fulfill", phase: "fulfill", displayName: "Обмен: выдача", kind: "active",
+      stageType: "milestone", position: 7, color: "#06b6d4",
+      nextStages: ["completed", "cancelled"],
+      fields: [
+        { slug: "handover_method", displayName: "Способ выдачи", fieldType: "select", required: false, aiExtractable: true, position: 0,
+          optionsJson: '[{"value":"office","label":"Офис"},{"value":"atm","label":"Банкомат"},{"value":"delivery","label":"Доставка"}]' },
+      ],
+    },
+    {
+      slug: "transfer_fulfill", phase: "fulfill", displayName: "Трансфер: подача", kind: "active",
+      stageType: "milestone", position: 8, color: "#06b6d4",
+      nextStages: ["completed", "cancelled"],
+      fields: [
+        { slug: "driver_assigned", displayName: "Водитель назначен", fieldType: "boolean", required: false, aiExtractable: false, position: 0 },
+      ],
+    },
+    {
+      slug: "food_fulfill", phase: "fulfill", displayName: "Еда: доставка", kind: "active",
+      stageType: "milestone", position: 9, color: "#06b6d4",
+      nextStages: ["completed", "cancelled"],
+      fields: [
+        { slug: "delivered", displayName: "Доставлено", fieldType: "boolean", required: false, aiExtractable: false, position: 0 },
+      ],
+    },
+
+    // ── Общие терминалы ──
+    { slug: "completed", displayName: "Выполнено", kind: "terminal_won", stageType: "milestone", position: 10, color: "#10b981", nextStages: [], fields: [] },
+    { slug: "cancelled", displayName: "Отменено", kind: "terminal_lost", stageType: "milestone", position: 11, color: "#ef4444", nextStages: [], fields: [] },
+  ],
   // Обменный пункт (Пхукет): крипта / RUB-перевод / наличные → THB.
   // Slugs совпадают с EXCHANGE_FUNNEL_STAGES в @chatman-media/vertical-exchange.
   exchange: [

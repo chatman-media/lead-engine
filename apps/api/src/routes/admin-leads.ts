@@ -78,6 +78,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
           rejectedReason: leads.rejectedReason,
           contactId: leads.userId,
           contactName: contacts.displayName,
+          requestType: leads.requestType,
           // процент заполненности: filled required fields / total required fields
           requiredFieldsTotal: sql<number>`(
             SELECT COUNT(*) FROM stage_fields sf

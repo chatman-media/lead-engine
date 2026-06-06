@@ -432,12 +432,18 @@ export const stageFields = pgTable("stage_fields", {
 export const leads = pgTable("leads", {
   id: serial("id").primaryKey(),
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  userId: integer("user_id").notNull().unique().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
+  // UNIQUE снят (concierge): один контакт может держать несколько лидов —
+  // по одному на активный запрос (request_type). Для одно-воронных вертикалей
+  // лид по-прежнему один (на уровне приложения), регресса нет.
+  userId: integer("user_id").notNull().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
   // Текстовый slug стадии — legacy для recruitment и новый для динамических воронок.
   // CHECK constraint убран в migration 0011 — валидация на уровне приложения (funnel-machine).
   state: text("state").notNull().default("intake_pending"),
   // Ссылка на динамически созданную стадию. NULL = legacy recruitment lead.
   stageDefinitionId: integer("stage_definition_id").references(() => stageDefinitions.id, { onDelete: "set null" }),
+  // Тип запроса (concierge-режим): exchange | transfer | food | … — выбирает,
+  // в какой короткой воронке живёт лид. NULL для одно-воронных вертикалей.
+  requestType: text("request_type"),
   intakeJson: text("intake_json"),
   visaDocsJson: text("visa_docs_json"),
   applicationId: text("application_id").unique(),
@@ -453,6 +459,8 @@ export const leads = pgTable("leads", {
 }, (t) => [
   index("idx_leads_state_recency").on(t.state, sql`${t.updatedAt} DESC`),
   index("idx_leads_stage_def").on(t.stageDefinitionId),
+  // Резолвинг лидов контакта (concierge: N открытых лидов на гостя).
+  index("idx_leads_tenant_user").on(t.tenantId, t.userId),
 ]);
 
 // Значения полей лида — заменяет intake_json/visa_docs_json для динамических воронок.

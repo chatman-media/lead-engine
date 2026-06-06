@@ -24,12 +24,18 @@ class FakeLeadsRepo {
   async findByContactId(contactId: number): Promise<LeadRow | null> {
     return this.rows.find((r) => r.userId === contactId) ?? null;
   }
-  async create(opts: { contactId: number; state: string; nowEpoch: number }): Promise<LeadRow> {
+  async create(opts: {
+    contactId: number;
+    state: string;
+    requestType?: string | null;
+    nowEpoch: number;
+  }): Promise<LeadRow> {
     const row: LeadRow = {
       id: this.nextId++,
       tenantId: this.tenantId,
       userId: opts.contactId,
       state: opts.state,
+      requestType: opts.requestType ?? null,
       assignedAdminId: null,
       intakeJson: null,
       visaDocsJson: null,

@@ -23,7 +23,7 @@ import {
   stageDefinitions,
   stageFields,
 } from "@chatman-media/storage";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { LoadedRef } from "../llm-bootstrap.ts";
 
 export interface FieldExtractor {
@@ -33,6 +33,39 @@ export interface FieldExtractor {
     text: string;
     db: Db;
   }): Promise<void>;
+}
+
+/**
+ * Выбор следующей стадии при auto-advance.
+ *
+ * Branch-aware (concierge): если у стадии есть поле `request_type` и >1 ветки,
+ * уводим в ветку `<request_type>_*` (напр. `transfer` → `transfer_request`) и
+ * возвращаем `requestType` для записи в `leads.request_type`. Если валидной
+ * ветки нет (напр. `other` / не распознано) — возвращаем `null` = «не
+ * продвигать», лид остаётся на intake для оператора/уточнения.
+ *
+ * Линейные воронки (5 вертикалей) не затронуты: у их стадий нет поля
+ * `request_type`, поэтому `hasRequestTypeField=false` → прежнее поведение
+ * `nextStages[0]`, `requestType=null` (колонка не трогается).
+ */
+export function selectNextStage(opts: {
+  nextStages: readonly string[];
+  hasRequestTypeField: boolean;
+  requestType: string | null;
+}): { nextSlug: string; requestType: string | null } | null {
+  const { nextStages, hasRequestTypeField, requestType } = opts;
+  if (hasRequestTypeField && nextStages.length > 1) {
+    const branch = requestType
+      ? nextStages.find(
+          (s) => s === `${requestType}_request` || s.startsWith(`${requestType}_`),
+        )
+      : undefined;
+    if (!branch) return null;
+    return { nextSlug: branch, requestType };
+  }
+  const first = nextStages[0];
+  if (!first) return null;
+  return { nextSlug: first, requestType: null };
 }
 
 export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
@@ -50,52 +83,98 @@ export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
       const now = Math.floor(Date.now() / 1000);
 
       await withTenant(db, tenantId, async (tx) => {
-        // 0. Find lead for this contact; auto-create if funnel exists
-        let [lead] = await tx
-          .select({
-            id: leads.id,
-            state: leads.state,
-            stageDefinitionId: leads.stageDefinitionId,
-          })
-          .from(leads)
-          .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)));
-
-        if (!lead) {
-          // No lead — try to auto-create in the first stage of the active funnel
-          const [activeFunnel] = await tx
-            .select({ id: funnels.id })
-            .from(funnels)
-            .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
-            .limit(1);
-
-          if (activeFunnel) {
-            const [firstStage] = await tx
+        // 0. Резолвим активную воронку и её первую (intake) стадию — нужны и
+        // для определения multi-request режима, и для auto-create лида.
+        const [activeFunnel] = await tx
+          .select({ id: funnels.id })
+          .from(funnels)
+          .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
+          .limit(1);
+        const [firstStage] = activeFunnel
+          ? await tx
               .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
               .from(stageDefinitions)
               .where(eq(stageDefinitions.funnelId, activeFunnel.id))
               .orderBy(asc(stageDefinitions.position))
-              .limit(1);
+              .limit(1)
+          : [];
 
-            if (firstStage) {
-              const [created] = await tx
-                .insert(leads)
-                .values({
-                  tenantId,
-                  userId: contactId,
-                  state: firstStage.slug,
-                  stageDefinitionId: firstStage.id,
-                  createdAt: now,
-                  updatedAt: now,
-                })
-                .onConflictDoNothing()
-                .returning({
-                  id: leads.id,
-                  state: leads.state,
-                  stageDefinitionId: leads.stageDefinitionId,
-                });
-              if (created) lead = created;
-            }
-          }
+        // Concierge multi-request: если первая стадия имеет поле `request_type`,
+        // гость может держать несколько ПОСЛЕДОВАТЕЛЬНЫХ запросов — по одному
+        // лиду на запрос. Тогда таргетим самый свежий НЕ-терминальный лид, а при
+        // его отсутствии создаём новый. Для линейных воронок (нет поля
+        // `request_type`) — прежнее поведение «один лид на контакт».
+        let multiRequest = false;
+        if (firstStage) {
+          const [rtField] = await tx
+            .select({ id: stageFields.id })
+            .from(stageFields)
+            .where(
+              and(
+                eq(stageFields.stageId, firstStage.id),
+                eq(stageFields.slug, "request_type"),
+              ),
+            )
+            .limit(1);
+          multiRequest = !!rtField;
+        }
+
+        // Находим лид для извлечения.
+        let lead:
+          | { id: number; state: string; stageDefinitionId: number | null; requestType: string | null }
+          | undefined;
+        if (multiRequest) {
+          // Самый свежий НЕ-терминальный лид контакта (concierge: N лидов).
+          [lead] = await tx
+            .select({
+              id: leads.id,
+              state: leads.state,
+              stageDefinitionId: leads.stageDefinitionId,
+              requestType: leads.requestType,
+            })
+            .from(leads)
+            .leftJoin(stageDefinitions, eq(leads.stageDefinitionId, stageDefinitions.id))
+            .where(
+              and(
+                eq(leads.tenantId, tenantId),
+                eq(leads.userId, contactId),
+                notInArray(stageDefinitions.kind, ["terminal_won", "terminal_lost"]),
+              ),
+            )
+            .orderBy(desc(leads.updatedAt))
+            .limit(1);
+        } else {
+          // Легаси: один лид на контакт.
+          [lead] = await tx
+            .select({
+              id: leads.id,
+              state: leads.state,
+              stageDefinitionId: leads.stageDefinitionId,
+              requestType: leads.requestType,
+            })
+            .from(leads)
+            .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)));
+        }
+
+        // Нет (открытого) лида — создаём новый в первой стадии воронки.
+        if (!lead && firstStage) {
+          const [created] = await tx
+            .insert(leads)
+            .values({
+              tenantId,
+              userId: contactId,
+              state: firstStage.slug,
+              stageDefinitionId: firstStage.id,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning({
+              id: leads.id,
+              state: leads.state,
+              stageDefinitionId: leads.stageDefinitionId,
+              requestType: leads.requestType,
+            });
+          if (created) lead = created;
         }
 
         if (!lead?.stageDefinitionId) return;
@@ -150,6 +229,15 @@ export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
           })
           .join("\n");
 
+        // Concierge: если лид уже в ветке (не на intake) — даём LLM возможность
+        // в ТОМ ЖЕ вызове сигнализировать о НОВОМ параллельном запросе другого
+        // типа (поле `_new_request`). Без доп. LLM-вызова.
+        const inBranch =
+          multiRequest && !!firstStage && lead.state !== firstStage.slug;
+        const newRequestHint = inBranch
+          ? '\n- ОТДЕЛЬНО: если гость в этом сообщении начинает СОВЕРШЕННО ДРУГУЮ услугу (не относящуюся к текущему запросу) — добавь поле "_new_request" со значением одного из: exchange|transfer|food. Если это продолжение текущего запроса — НЕ добавляй "_new_request".'
+          : "";
+
         const systemPrompt = `Ты — ассистент по извлечению данных из текста диалога.
 Из сообщения пользователя извлеки значения следующих полей (если они упомянуты):
 
@@ -163,7 +251,7 @@ ${fieldDescriptions}
 - Для number: только число без единиц измерения.
 - Для date: ISO-формат YYYY-MM-DD.
 - Если поле не упомянуто — не включай его в ответ.
-- Отвечай ТОЛЬКО JSON-объектом без markdown, без пояснений.`;
+- Отвечай ТОЛЬКО JSON-объектом без markdown, без пояснений.${newRequestHint}`;
 
         let responseText: string;
         try {
@@ -185,6 +273,51 @@ ${fieldDescriptions}
         }
 
         if (Object.keys(extracted).length === 0) return;
+
+        // 4b. Параллельный запрос (concierge): гость начал ДРУГУЮ услугу в треде
+        // с уже открытым запросом → заводим ОТДЕЛЬНЫЙ лид сразу в его ветке, не
+        // смешивая с текущим. Сигнал `_new_request` пришёл в том же LLM-ответе.
+        if (inBranch) {
+          const nr =
+            typeof extracted._new_request === "string"
+              ? extracted._new_request.trim()
+              : null;
+          if (nr && nr !== lead.requestType) {
+            const [branchStage] = await tx
+              .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
+              .from(stageDefinitions)
+              .where(
+                and(
+                  eq(stageDefinitions.tenantId, tenantId),
+                  eq(stageDefinitions.slug, `${nr}_request`),
+                ),
+              );
+            if (branchStage) {
+              const [created] = await tx
+                .insert(leads)
+                .values({
+                  tenantId,
+                  userId: contactId,
+                  state: branchStage.slug,
+                  stageDefinitionId: branchStage.id,
+                  requestType: nr,
+                  createdAt: now,
+                  updatedAt: now,
+                })
+                .returning({ id: leads.id });
+              if (created) {
+                await tx.insert(leadEvents).values({
+                  tenantId,
+                  leadId: created.id,
+                  fromState: firstStage?.slug ?? "request_received",
+                  toState: branchStage.slug,
+                  createdAt: now,
+                });
+                return; // новый параллельный запрос заведён — сообщение обработано
+              }
+            }
+          }
+        }
 
         // 5. Write to lead_field_values
         const fieldBySlug = new Map(extractableFields.map((f) => [f.slug, f]));
@@ -241,8 +374,42 @@ ${fieldDescriptions}
           );
         if (filledRequired.length < allRequired.length) return;
 
-        // Advance the lead
-        const nextSlug = stage.nextStages[0]!;
+        // 7. Advance the lead. Branch-aware для concierge — логика в чистой
+        // selectNextStage(); здесь только резолвим значение request_type
+        // (из текущей экстракции или из сохранённого) для ветвящихся стадий.
+        const requestTypeField = extractableFields.find((f) => f.slug === "request_type");
+        let rt: string | null = null;
+        if (requestTypeField) {
+          rt = typeof extracted.request_type === "string" ? extracted.request_type : null;
+          if (!rt) {
+            const [stored] = await tx
+              .select({ valueJson: leadFieldValues.valueJson })
+              .from(leadFieldValues)
+              .where(
+                and(
+                  eq(leadFieldValues.leadId, lead.id),
+                  eq(leadFieldValues.fieldId, requestTypeField.id),
+                ),
+              );
+            if (stored?.valueJson) {
+              try {
+                const v = JSON.parse(stored.valueJson);
+                if (typeof v === "string") rt = v;
+              } catch {
+                // ignore malformed stored value
+              }
+            }
+          }
+        }
+
+        const selected = selectNextStage({
+          nextStages: stage.nextStages,
+          hasRequestTypeField: !!requestTypeField,
+          requestType: rt,
+        });
+        if (!selected) return;
+        const { nextSlug, requestType: resolvedRequestType } = selected;
+
         const [nextStageDef] = await tx
           .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
           .from(stageDefinitions)
@@ -256,7 +423,12 @@ ${fieldDescriptions}
 
         await tx
           .update(leads)
-          .set({ stageDefinitionId: nextStageDef.id, state: nextStageDef.slug, updatedAt: now })
+          .set({
+            stageDefinitionId: nextStageDef.id,
+            state: nextStageDef.slug,
+            ...(resolvedRequestType ? { requestType: resolvedRequestType } : {}),
+            updatedAt: now,
+          })
           .where(eq(leads.id, lead.id));
 
         await tx.insert(leadEvents).values({

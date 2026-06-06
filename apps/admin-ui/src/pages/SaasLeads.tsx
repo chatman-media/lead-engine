@@ -46,6 +46,16 @@ const STATE_RU: Record<string, string> = {
   terminal_lost: "закрыт ✗",
 };
 
+// Лейблы типов запроса для concierge-вертикали (leads.request_type).
+const REQUEST_TYPE_RU: Record<string, string> = {
+  exchange: "Обмен",
+  transfer: "Трансфер",
+  food: "Еда",
+  housekeeping: "Уборка",
+  tour: "Экскурсия",
+  other: "Другое",
+};
+
 const KIND_COLOR: Record<string, string> = {
   intake: "border-blue-300",
   active: "border-green-300",
@@ -808,9 +818,16 @@ function LeadCard({
           </CardHeader>
           <CardContent className="pb-3">
             <div className="flex items-center justify-between">
-              <Badge variant="outline" className="text-xs">
-                {STATE_RU[lead.state] ?? lead.state}
-              </Badge>
+              <div className="flex items-center gap-1">
+                {lead.requestType && (
+                  <Badge variant="secondary" className="text-xs">
+                    {REQUEST_TYPE_RU[lead.requestType] ?? lead.requestType}
+                  </Badge>
+                )}
+                <Badge variant="outline" className="text-xs">
+                  {STATE_RU[lead.state] ?? lead.state}
+                </Badge>
+              </div>
               <span className="text-xs text-muted-foreground">{formatDate(lead.updatedAt)}</span>
             </div>
 

@@ -63,6 +63,7 @@
         "@chatman-media/observability": "workspace:*",
         "@chatman-media/sales": "workspace:*",
         "@chatman-media/storage": "workspace:*",
+        "@chatman-media/vertical-concierge": "workspace:*",
         "@chatman-media/vertical-exchange": "workspace:*",
         "@chatman-media/vertical-real-estate": "workspace:*",
         "@chatman-media/vertical-recruitment": "workspace:*",
@@ -96,6 +97,18 @@
         "@vitejs/plugin-react": "^4.4.1",
         "typescript": "^6.0.3",
         "vite": "^6.3.4",
+      },
+    },
+    "apps/vertical-concierge": {
+      "name": "@chatman-media/vertical-concierge",
+      "version": "0.1.0",
+      "dependencies": {
+        "@chatman-media/verticals": "workspace:*",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "^2.4.16",
+        "@types/bun": "1.3.14",
+        "typescript": "^6.0.3",
       },
     },
     "apps/vertical-exchange": {
@@ -448,6 +461,8 @@
     "@chatman-media/sales": ["@chatman-media/sales@workspace:packages/sales"],
 
     "@chatman-media/storage": ["@chatman-media/storage@workspace:packages/storage"],
+
+    "@chatman-media/vertical-concierge": ["@chatman-media/vertical-concierge@workspace:apps/vertical-concierge"],
 
     "@chatman-media/vertical-exchange": ["@chatman-media/vertical-exchange@workspace:apps/vertical-exchange"],
 
