@@ -195,3 +195,59 @@ describe("registerHandler + receive abort", () => {
     expect((await p).done).toBe(true);
   });
 });
+
+describe("connect() (через clientFactory)", () => {
+  const fakeGramjs = (over: Record<string, unknown> = {}) => ({
+    connect: async () => true,
+    session: { save: () => "NEWSESS" },
+    addEventHandler: () => {},
+    disconnect: async () => {},
+    connected: false,
+    ...over,
+  });
+  const withFactory = (fc: unknown, over: Record<string, unknown> = {}) =>
+    new TelegramUserbotAdapter({
+      id: "ub1",
+      apiId: 1,
+      apiHash: "h",
+      sessionString: "",
+      connectionRetries: 1,
+      retryDelayMs: 0,
+      clientFactory: (() => fc) as never,
+      ...over,
+    });
+
+  it("успех: client установлен, emitted connected, onSessionUpdated при смене сессии", async () => {
+    const updated: string[] = [];
+    const a = withFactory(fakeGramjs(), { onSessionUpdated: (s: string) => updated.push(s) });
+    await a.connect();
+    expect((await a.healthEvents()[Symbol.asyncIterator]().next()).value.status).toBe("connected");
+    expect(updated).toEqual(["NEWSESS"]);
+  });
+
+  it("AUTH_KEY_DUPLICATED → health auth_key_duplicated + throw", async () => {
+    const a = withFactory(fakeGramjs({ connect: async () => { throw new Error("AUTH_KEY_DUPLICATED"); } }));
+    await expect(a.connect()).rejects.toThrow("auth key revoked");
+    expect((await a.healthEvents()[Symbol.asyncIterator]().next()).value.status).toBe("auth_key_duplicated");
+  });
+
+  it("connect бросает (non-auth) на всех попытках → connection_failed + throw", async () => {
+    const a = withFactory(fakeGramjs({ connect: async () => { throw new Error("network blip"); } }));
+    await expect(a.connect()).rejects.toThrow("connect failed");
+    expect((await a.healthEvents()[Symbol.asyncIterator]().next()).value.status).toBe("connection_failed");
+  });
+
+  it("connect возвращает false → connection_failed", async () => {
+    const a = withFactory(fakeGramjs({ connect: async () => false }));
+    await expect(a.connect()).rejects.toThrow("connect failed");
+  });
+
+  it("идемпотентность: уже connected → фабрика не зовётся", async () => {
+    const a = new TelegramUserbotAdapter({
+      id: "ub1", apiId: 1, apiHash: "h", sessionString: "",
+      clientFactory: (() => { throw new Error("должен быть no-op"); }) as never,
+    });
+    priv(a).client = { connected: true };
+    await a.connect(); // не бросает → фабрика не вызвана
+  });
+});

@@ -69,6 +69,36 @@ export interface TelegramUserbotAdapterOptions {
   connectionRetries?: number;
   /** ms между connect-попытками, default 5000. */
   retryDelayMs?: number;
+  /**
+   * Фабрика gramjs-клиента. По умолчанию — реальный конструктор
+   * (StringSession + GramjsClient + setLogLevel). Инъектируется в тестах,
+   * чтобы покрыть connect() без живого MTProto-соединения.
+   */
+  clientFactory?: (opts: GramjsClientFactoryOpts) => GramjsClient;
+}
+
+export interface GramjsClientFactoryOpts {
+  sessionString: string;
+  apiId: number;
+  apiHash: string;
+  connectionRetries: number;
+  retryDelayMs: number;
+}
+
+/** Реальная фабрика gramjs-клиента (production-путь connect()). */
+function defaultGramjsClientFactory(o: GramjsClientFactoryOpts): GramjsClient {
+  const session = new StringSession(o.sessionString);
+  const client = new GramjsClient(session, o.apiId, o.apiHash, {
+    // count, not flag — 5 = разумный лимит чтобы supervisor мог перерестартить.
+    connectionRetries: o.connectionRetries,
+    retryDelay: o.retryDelayMs,
+    timeout: 30,
+  });
+  // GramJS на уровне ERROR console.error'ит рутинные ping-timeout'ы своего
+  // update-loop'а (он сам их ловит и reconnect'ит). Для long-running SaaS это
+  // шум; значимые статусы отдаём через healthEvents().
+  client.setLogLevel(LogLevel.NONE);
+  return client;
 }
 
 const TG_USERBOT_CAPABILITIES: ChannelCapabilities = {
@@ -117,19 +147,13 @@ export class TelegramUserbotAdapter implements ChannelAdapter {
    */
   async connect(): Promise<void> {
     if (this.client && this.client.connected) return;
-    const session = new StringSession(this.opts.sessionString);
-    const client = new GramjsClient(session, this.opts.apiId, this.opts.apiHash, {
-      // count, not flag — Infinity = бесконечно, 5 = разумный лимит чтобы
-      // supervisor мог перерестартить вместо infinite-spin'а.
+    const client = (this.opts.clientFactory ?? defaultGramjsClientFactory)({
+      sessionString: this.opts.sessionString,
+      apiId: this.opts.apiId,
+      apiHash: this.opts.apiHash,
       connectionRetries: this.opts.connectionRetries ?? 5,
-      retryDelay: this.opts.retryDelayMs ?? 3000,
-      timeout: 30,
+      retryDelayMs: this.opts.retryDelayMs ?? 3000,
     });
-    // GramJS на уровне ERROR console.error'ит рутинные ping-timeout'ы своего
-    // update-loop'а (он сам их ловит и делает reconnect — см. updates.js).
-    // Для long-running SaaS это шум; значимые статусы (connected /
-    // connection_failed / auth_key_duplicated) мы отдаём через healthEvents().
-    client.setLogLevel(LogLevel.NONE);
 
     const maxAttempts = this.opts.connectionRetries ?? 5;
     let lastErr: string | null = null;

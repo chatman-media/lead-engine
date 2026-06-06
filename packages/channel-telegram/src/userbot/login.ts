@@ -78,15 +78,22 @@ function mapRpcError(err: unknown): UserbotLoginError {
   return new UserbotLoginError("unknown", msg);
 }
 
+/** Фабрика клиента для startUserbotLogin (по умолчанию — реальный конструктор). */
+export type LoginClientFactory = (apiId: number, apiHash: string) => TelegramClient;
+
+function defaultLoginClientFactory(apiId: number, apiHash: string): TelegramClient {
+  return new TelegramClient(new StringSession(""), apiId, apiHash, { connectionRetries: 3 });
+}
+
 /** Шаг 1: подключиться и отправить код подтверждения на номер. */
 export async function startUserbotLogin(opts: {
   apiId: number;
   apiHash: string;
   phone: string;
+  /** Инъекция клиента для тестов; по умолчанию — defaultLoginClientFactory. */
+  clientFactory?: LoginClientFactory;
 }): Promise<StartedUserbotLogin> {
-  const client = new TelegramClient(new StringSession(""), opts.apiId, opts.apiHash, {
-    connectionRetries: 3,
-  });
+  const client = (opts.clientFactory ?? defaultLoginClientFactory)(opts.apiId, opts.apiHash);
   await client.connect();
   try {
     const { phoneCodeHash } = await client.sendCode(
