@@ -1169,6 +1169,28 @@ export const saas = {
   deleteSim(conversationId: number) {
     return request<{ ok: boolean }>(`/api/admin/sim/${conversationId}`, { method: "DELETE" });
   },
+  startSimStream(opts: {
+    count: number;
+    intervalSec?: number;
+    personaIds?: string[];
+    maxTurns?: number;
+  }) {
+    return request<{ ok: boolean; streamId: string; count: number; intervalSec: number }>(
+      "/api/admin/sim/stream",
+      { method: "POST", body: JSON.stringify(opts) },
+    );
+  },
+  listSimStreams() {
+    return request<{
+      streams: Array<{ id: string; total: number; spawned: number; intervalSec: number }>;
+    }>("/api/admin/sim/streams");
+  },
+  stopSimStream(streamId: string) {
+    return request<{ ok: boolean; spawned: number; total: number }>(
+      `/api/admin/sim/stream/${streamId}`,
+      { method: "DELETE" },
+    );
+  },
   updateConversation(id: number, patch: { status?: string; assignedAdminId?: number | null }) {
     return request<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/admin/conversations/${id}`,

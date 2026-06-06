@@ -111,6 +111,13 @@ export function SaasConversations() {
   const [simPersonaId, setSimPersonaId] = useState("");
   const [simTurns, setSimTurns] = useState("6");
   const [simStarting, setSimStarting] = useState(false);
+  // Поток («боевой режим»): N клиентов по интервалу
+  const [simStream, setSimStream] = useState(false);
+  const [simCount, setSimCount] = useState("10");
+  const [simIntervalSec, setSimIntervalSec] = useState("60");
+  const [simStreams, setSimStreams] = useState<
+    Array<{ id: string; total: number; spawned: number; intervalSec: number }>
+  >([]);
 
   function handleAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
@@ -125,35 +132,60 @@ export function SaasConversations() {
     saas.listAdmins().then((r) => setAdmins(r.items)).catch(() => {});
   }, []);
 
+  const refreshSimStreams = useCallback(() => {
+    saas.listSimStreams().then((r) => setSimStreams(r.streams)).catch(() => {});
+  }, []);
+
   useEffect(() => {
-    if (!simOpen || simPersonas.length > 0) return;
-    saas
-      .listSimPersonas()
-      .then((r) => {
-        setSimPersonas(r.personas);
-        if (r.personas[0]) setSimPersonaId(r.personas[0].id);
-      })
-      .catch(() => {});
-  }, [simOpen, simPersonas.length]);
+    if (!simOpen) return;
+    if (simPersonas.length === 0) {
+      saas
+        .listSimPersonas()
+        .then((r) => {
+          setSimPersonas(r.personas);
+          if (r.personas[0]) setSimPersonaId(r.personas[0].id);
+        })
+        .catch(() => {});
+    }
+    refreshSimStreams();
+  }, [simOpen, simPersonas.length, refreshSimStreams]);
 
   async function handleStartSim() {
-    if (!simPersonaId) return;
     setSimStarting(true);
     setError("");
     try {
-      const res = await saas.startSim({
-        personaId: simPersonaId,
-        maxTurns: Number.parseInt(simTurns, 10) || 6,
-      });
-      setSimOpen(false);
-      await refreshList();
-      navigate(`/conversations/${res.conversationId}`);
+      const maxTurns = Number.parseInt(simTurns, 10) || 6;
+      if (simStream) {
+        await saas.startSimStream({
+          count: Number.parseInt(simCount, 10) || 10,
+          intervalSec: Number.parseInt(simIntervalSec, 10) || 60,
+          ...(simPersonaId ? { personaIds: [simPersonaId] } : {}),
+          maxTurns,
+        });
+        await refreshList();
+        refreshSimStreams();
+      } else {
+        if (!simPersonaId) return;
+        const res = await saas.startSim({ personaId: simPersonaId, maxTurns });
+        setSimOpen(false);
+        await refreshList();
+        navigate(`/conversations/${res.conversationId}`);
+      }
     } catch (err) {
       if (!handleAuthError(err)) {
         setError(err instanceof ApiError ? err.message : "Не удалось запустить симуляцию");
       }
     } finally {
       setSimStarting(false);
+    }
+  }
+
+  async function handleStopStream(id: string) {
+    try {
+      await saas.stopSimStream(id);
+      refreshSimStreams();
+    } catch (err) {
+      handleAuthError(err);
     }
   }
 
@@ -354,36 +386,88 @@ export function SaasConversations() {
       />
 
       {simOpen && (
-        <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
-          <div className="flex-1 space-y-1">
-            <span className="text-xs font-medium text-muted-foreground">Сценарий / персона</span>
-            <Select value={simPersonaId} onValueChange={setSimPersonaId}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Выберите персону…" />
-              </SelectTrigger>
-              <SelectContent>
-                {simPersonas.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name} — {p.displayName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <Card className="space-y-3 p-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[220px] flex-1 space-y-1">
+              <span className="text-xs font-medium text-muted-foreground">
+                {simStream ? "Сценарий (пусто = все по очереди)" : "Сценарий / персона"}
+              </span>
+              <Select value={simPersonaId} onValueChange={setSimPersonaId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Выберите персону…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {simPersonas.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name} — {p.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <span className="text-xs font-medium text-muted-foreground">Ходов</span>
+              <Input
+                type="number"
+                min={1}
+                max={20}
+                value={simTurns}
+                onChange={(e) => setSimTurns(e.target.value)}
+                className="w-20"
+              />
+            </div>
+            {simStream && (
+              <>
+                <div className="space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">Клиентов</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={simCount}
+                    onChange={(e) => setSimCount(e.target.value)}
+                    className="w-20"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">Интервал, сек</span>
+                  <Input
+                    type="number"
+                    min={5}
+                    value={simIntervalSec}
+                    onChange={(e) => setSimIntervalSec(e.target.value)}
+                    className="w-24"
+                  />
+                </div>
+              </>
+            )}
+            <Button onClick={handleStartSim} disabled={simStarting || (!simStream && !simPersonaId)}>
+              {simStarting ? "Запуск…" : simStream ? "Запустить поток" : "Запустить"}
+            </Button>
           </div>
-          <div className="space-y-1">
-            <span className="text-xs font-medium text-muted-foreground">Ходов</span>
-            <Input
-              type="number"
-              min={1}
-              max={20}
-              value={simTurns}
-              onChange={(e) => setSimTurns(e.target.value)}
-              className="w-20"
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={simStream}
+              onChange={(e) => setSimStream(e.target.checked)}
             />
-          </div>
-          <Button onClick={handleStartSim} disabled={simStarting || !simPersonaId}>
-            {simStarting ? "Запуск…" : "Запустить"}
-          </Button>
+            Поток («боевой режим»): новый клиент каждые N секунд
+          </label>
+          {simStreams.length > 0 && (
+            <div className="space-y-1 border-t pt-2">
+              <span className="text-xs font-medium text-muted-foreground">Активные потоки</span>
+              {simStreams.map((s) => (
+                <div key={s.id} className="flex items-center justify-between text-xs">
+                  <span>
+                    {s.spawned}/{s.total} клиентов · каждые {s.intervalSec}с
+                  </span>
+                  <Button size="sm" variant="ghost" onClick={() => handleStopStream(s.id)}>
+                    Стоп
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       )}
 
