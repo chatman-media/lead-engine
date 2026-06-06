@@ -55,6 +55,16 @@ const KIND_RU: Record<string, string> = {
   terminal_lost: "закрыт ✗",
 };
 
+const ORDER_STATUS: Record<string, { label: string; dot: string }> = {
+  quote: { label: "котировка", dot: "bg-muted-foreground/40" },
+  awaiting_payment: { label: "ждёт оплаты", dot: "bg-amber-400" },
+  paid: { label: "оплачено", dot: "bg-blue-400" },
+  payout: { label: "выдача", dot: "bg-blue-400" },
+  completed: { label: "завершено", dot: "bg-emerald-500" },
+  cancelled: { label: "отменено", dot: "bg-red-400" },
+  expired: { label: "просрочено", dot: "bg-muted-foreground/40" },
+};
+
 function formatDate(epoch: number) {
   return new Date(epoch * 1000).toLocaleString("ru-RU", {
     day: "2-digit",
@@ -516,17 +526,48 @@ export function SaasLeadDetail() {
       {/* Сводка: сумма переведённого + последние сообщения (в первую очередь) */}
       <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
         <Card className="overflow-hidden">
-          <CardContent className="flex h-full flex-col justify-center gap-1 py-4">
-            <span className="text-xs uppercase tracking-wide text-muted-foreground">
-              Переведено всего
-            </span>
-            <span className="font-mono text-3xl font-semibold leading-none">
-              {(data.transferredThb ?? 0).toLocaleString("ru")}{" "}
-              <span className="text-base text-muted-foreground">THB</span>
-            </span>
-            <span className="text-xs text-muted-foreground">
-              завершённых сделок: {data.ordersCompleted ?? 0}
-            </span>
+          <CardContent className="flex h-full flex-col gap-2 py-4">
+            <div>
+              <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                Переведено всего
+              </span>
+              <div className="font-mono text-3xl font-semibold leading-none">
+                {(data.transferredThb ?? 0).toLocaleString("ru")}{" "}
+                <span className="text-base text-muted-foreground">THB</span>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                завершённых сделок: {data.ordersCompleted ?? 0}
+              </span>
+            </div>
+
+            {(data.orders ?? []).length > 0 && (
+              <div className="mt-1 space-y-1 border-t pt-2">
+                {(data.orders ?? []).slice(0, 6).map((o) => (
+                  <div key={o.id} className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="truncate">
+                      <span className="font-mono font-medium">
+                        {Math.round(Number(o.amountFrom ?? 0))} {o.assetFrom?.toUpperCase()}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {" → "}
+                        {Math.round(Number(o.amountToThb ?? 0)).toLocaleString("ru")} ฿
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <span
+                        className={`size-1.5 rounded-full ${ORDER_STATUS[o.status]?.dot ?? "bg-muted-foreground/40"}`}
+                      />
+                      <span className="text-muted-foreground">{ORDER_STATUS[o.status]?.label ?? o.status}</span>
+                    </span>
+                  </div>
+                ))}
+                {(data.orders ?? []).length > 6 && (
+                  <p className="text-[10px] text-muted-foreground">
+                    и ещё {(data.orders ?? []).length - 6}…
+                  </p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 

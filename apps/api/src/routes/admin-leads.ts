@@ -554,20 +554,27 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         .from(contacts)
         .where(eq(contacts.id, lead.userId));
 
-      // Сколько всего переведено (завершённые обменные заявки контакта).
-      const [exch] = await tx
+      // Сделки контакта (все статусы) + сумма завершённых.
+      const orders = await tx
         .select({
-          totalThb: sql<number>`coalesce(sum(${exchangeOrders.amountToThb}), 0)`,
-          completed: sql<number>`count(*)`,
+          id: exchangeOrders.id,
+          assetFrom: exchangeOrders.assetFrom,
+          network: exchangeOrders.network,
+          amountFrom: exchangeOrders.amountFrom,
+          amountToThb: exchangeOrders.amountToThb,
+          rate: exchangeOrders.rate,
+          status: exchangeOrders.status,
+          payoutCode: exchangeOrders.payoutCode,
+          createdAt: exchangeOrders.createdAt,
+          completedAt: exchangeOrders.completedAt,
         })
         .from(exchangeOrders)
-        .where(
-          and(
-            eq(exchangeOrders.tenantId, tenantId),
-            eq(exchangeOrders.contactId, lead.userId),
-            eq(exchangeOrders.status, "completed"),
-          ),
-        );
+        .where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.contactId, lead.userId)))
+        .orderBy(desc(exchangeOrders.id))
+        .limit(50);
+      const transferredThb = orders
+        .filter((o) => o.status === "completed")
+        .reduce((s, o) => s + Math.round(Number(o.amountToThb ?? 0)), 0);
 
       return {
         lead,
@@ -577,8 +584,9 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         events,
         notes,
         contact,
-        transferredThb: Math.round(Number(exch?.totalThb ?? 0)),
-        ordersCompleted: Number(exch?.completed ?? 0),
+        transferredThb,
+        ordersCompleted: orders.filter((o) => o.status === "completed").length,
+        orders,
       };
     });
 
