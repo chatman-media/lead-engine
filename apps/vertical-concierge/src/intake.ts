@@ -13,17 +13,20 @@ export const CONCIERGE_INTAKE: QuestionnaireSchema = {
     "• Обмен валюты\n" +
     "• Трансфер\n" +
     "• Еда\n" +
+    "• Уборка\n" +
+    "• Экскурсии и туры\n" +
     "• Другие услуги\n" +
     "Что нужно?",
   completionMessage: "Принял запрос — сейчас уточню детали.",
   fields: [
     {
       slug: "request_type",
-      question: "Что вам нужно: обмен валюты, трансфер, еда или другая услуга?",
+      question:
+        "Что вам нужно: обмен валюты, трансфер, еда, уборка, экскурсия или другая услуга?",
       kind: "enum",
       required: true,
-      options: ["Обмен", "Трансфер", "Еда", "Другое"],
-      hint: "Тип запроса гостя — выбирает ветку воронки (exchange / transfer / food / other).",
+      options: ["Обмен", "Трансфер", "Еда", "Уборка", "Экскурсия", "Другое"],
+      hint: "Тип запроса гостя — выбирает ветку воронки (exchange / transfer / food / housekeeping / tour / other).",
     },
     {
       slug: "summary",
