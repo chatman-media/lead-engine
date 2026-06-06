@@ -11,6 +11,7 @@
     "types": ["bun"],
     "skipLibCheck": true,
     "paths": {
+      "@chatman-media/kb": ["../../packages/kb/src/index.ts"],
       "@chatman-media/verticals": ["../../packages/verticals/src/index.ts"]
     }
   },
