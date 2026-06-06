@@ -14,7 +14,7 @@
  * Non-fatal: any LLM or DB error is caught. The calling webhook never waits.
  */
 
-import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import { type Db, type NotificationService, withTenant } from "@chatman-media/conversation-engine";
 import {
   funnels,
   leadEvents,
@@ -68,7 +68,10 @@ export function selectNextStage(opts: {
   return { nextSlug: first, requestType: null };
 }
 
-export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
+export function makeFieldExtractor(
+  ref: LoadedRef,
+  notificationService?: NotificationService,
+): FieldExtractor {
   return {
     async extract({ tenantId, contactId, text, db }) {
       // Resolve chat client — skip if no chat config for this tenant
@@ -81,6 +84,9 @@ export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
       if (!chatClient) return;
 
       const now = Math.floor(Date.now() / 1000);
+      // Если лид авто-продвигается В стадию awaiting_operator — после коммита tx
+      // шлём проактивный пинг оператору (лид ждёт человека). Захватываем здесь.
+      let awaitingOpEntry: { leadId: number; toStage: string } | null = null;
 
       await withTenant(db, tenantId, async (tx) => {
         // 0. Резолвим активную воронку и её первую (intake) стадию — нужны и
@@ -411,7 +417,12 @@ ${fieldDescriptions}
         const { nextSlug, requestType: resolvedRequestType } = selected;
 
         const [nextStageDef] = await tx
-          .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
+          .select({
+            id: stageDefinitions.id,
+            slug: stageDefinitions.slug,
+            displayName: stageDefinitions.displayName,
+            stageType: stageDefinitions.stageType,
+          })
           .from(stageDefinitions)
           .where(
             and(
@@ -438,7 +449,26 @@ ${fieldDescriptions}
           toState: nextStageDef.slug,
           createdAt: now,
         });
+
+        if (nextStageDef.stageType === "awaiting_operator") {
+          awaitingOpEntry = { leadId: lead.id, toStage: nextStageDef.displayName };
+        }
       });
+
+      // Проактивный пинг оператору: лид вошёл в awaiting_operator → нужен человек.
+      // Fire-and-forget, вне tx (Telegram I/O). /send-offer шлёт на ВЫХОДЕ из стадии.
+      if (awaitingOpEntry && notificationService) {
+        const entry: { leadId: number; toStage: string } = awaitingOpEntry;
+        void notificationService
+          .notify({
+            tenantId,
+            eventType: "stage_changed",
+            leadId: entry.leadId,
+            contactId,
+            data: { toStage: entry.toStage, awaitingOperator: true },
+          })
+          .catch(() => {});
+      }
     },
   };
 }

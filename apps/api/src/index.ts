@@ -613,7 +613,7 @@ async function main() {
   const photoProcessor = makePhotoProcessor(loadedRef);
   log.info("photo processor enabled (activates per-tenant when vision LLM is configured)");
 
-  const fieldExtractor = makeFieldExtractor(loadedRef);
+  const fieldExtractor = makeFieldExtractor(loadedRef, notificationService);
   log.info("field extractor enabled (activates per-tenant when chat LLM is configured)");
 
   const resolveTranscriber = makeTranscriberResolver(loadedRef);
