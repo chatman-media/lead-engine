@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "paths": {
       "@chatman-media/kb": ["../../packages/kb/src/index.ts"],
+      "@chatman-media/llm-router": ["../../packages/llm-router/src/index.ts"],
       "@chatman-media/verticals": ["../../packages/verticals/src/index.ts"]
     }
   },
