@@ -84,7 +84,7 @@ _Создано: 2026-06-06._
 |---|---|---|---|---|
 | **R1** | stage `goal`/`guidance` → reply-промпт (slice C-2) | 2 | M | ✅ #211 merged |
 | **R2** | дегейтинг multi-request: capability-флаг вместо `concierge_v1` | 3 | S–M | ✅ сделано |
-| **R3** | AI-билдер учится multi-request-ветвлению | 1 | M | после R2 |
+| **R3** | AI-билдер учится multi-request-ветвлению | 1 | M | ✅ сделано |
 | **R4** | `request_type` + cross-request awareness в промпте | 2 | S–M | после R1 |
 | **R5** | оператор-handoff как стадия `awaiting_operator` | P3 | M–L | после R1–R3 |
 | **R6** | _(опц., позже)_ первоклассная сущность «заявка/тикет» | P4 | L | будущее |
@@ -119,16 +119,21 @@ _Создано: 2026-06-06._
 > Реальность main: концерж-гейт был ровно один (`list_my_requests`). Витрина/callback из анализа —
 > на несмёрженной ветке `concierge-phase2-tails`; когда приедут, их гейт тоже = capability.
 
-### R3 — AI-билдер учится multi-request · M · **после R2**
+### R3 — AI-билдер учится multi-request · M · ✅ **сделано (эта ветка)**
 Флагман: self-serve строит концерж-образные воронки.
-- Расширить `SYSTEM_PROMPT` ([`admin-workflow.ts`](../../apps/api/src/routes/admin-workflow.ts))
-  паттерну: intake с select-полем `request_type`, опции → ветки `<X>_request/offer/fulfill`,
-  схождение в общий won/lost. Диалог должен **спрашивать** «будут ли параллельные типы запросов?».
-- `normalizeStages` уже принимает произвольные поля/стадии — структурно готов. Добавить в
-  `validateBackbone` ([`phases.ts`](../../packages/verticals/src/phases.ts)) проверку
-  **branch-consistency** (у каждой ветки есть qualify→offer, все ветки сходятся в терминалы).
-- **Тест:** описание мульти-сервисного бизнеса → билдер эмитит ветвистую воронку, проходящую
-  backbone; применённая воронка реально ветвится в рантайме (вместе с R2).
+- ✅ `SYSTEM_PROMPT` ([`admin-workflow.ts`](../../apps/api/src/routes/admin-workflow.ts)) обучён
+  паттерну МУЛЬТИ-ЗАПРОС: intake с select-полем `request_type` (латинские `value` = префиксы веток),
+  ветки `<X>_request/offer/fulfill`, схождение в общий won/lost, монотонный порядок фаз; диалог
+  **спрашивает** «несколько ли параллельных типов запросов?».
+- ✅ `normalizeStages` теперь сохраняет опции select как `{value,label}` и **пробрасывает**
+  `optionsJson` при re-apply — иначе `value`-ключи `request_type` терялись и ветвление ломалось.
+- ✅ Контракт ветвления валидируется `multiRequestBranchErrors` (в `admin-workflow.ts`, **не** в
+  `validateBackbone` — тот не видит поля стадий): каждое значение `request_type` обязано иметь ветку
+  `<value>_*` в `nextStages` intake; гейтит `/ai-chat` и `/apply` (400 на разрыв).
+- ✅ **Тест:** ветвистая воронка применяется, латинские `value` опций сохранены; тип без ветки → 400.
+  17/17 admin-workflow + 56/56 (copilot/backbone/admin-funnel) зелёные, tsc чист.
+> Нюанс: качество ЖИВОЙ генерации LLM не проверено (в воркти нет LLM-ключа) — фейковый клиент
+> покрывает логику нормализации/валидации/persist, не саму модель.
 
 ### R4 — `request_type` + cross-request awareness в промпте · S–M · **после R1**
 - В тот же резолвер (R1) добавить `leads.requestType` и краткую сводку «у гостя N открытых
