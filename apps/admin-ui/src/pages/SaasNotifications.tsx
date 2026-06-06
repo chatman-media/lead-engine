@@ -507,24 +507,46 @@ export function SaasNotifications() {
                       </Button>
                     </a>
                   ) : (
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all">
-                        /start {linkToken}
-                      </code>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="shrink-0 h-8 w-8"
-                        onClick={() => copyToClipboard(`/start ${linkToken}`)}
-                      >
-                        <ClipboardCopyIcon className="h-3.5 w-3.5" />
-                      </Button>
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-muted-foreground">
+                        Отправьте боту-оператору{" "}
+                        {botUsername ? (
+                          <a
+                            href={`https://t.me/${botUsername}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-medium text-primary hover:underline"
+                          >
+                            @{botUsername}
+                          </a>
+                        ) : (
+                          "(вашему боту-оператору в Telegram)"
+                        )}
+                        :
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 rounded-md bg-muted px-3 py-2 text-xs font-mono break-all">
+                          /start {linkToken}
+                        </code>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="shrink-0 h-8 w-8"
+                          onClick={() => copyToClipboard(`/start ${linkToken}`)}
+                        >
+                          <ClipboardCopyIcon className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
                   )}
 
                   {!botUsername && (
-                    <p className="text-xs text-muted-foreground">
-                      Задайте <code>PLATFORM_OPERATOR_BOT_USERNAME</code> в конфиге API для прямой ссылки на бота.
+                    <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                      ⚠️ Бот-оператор пока не подключён к платформе — это отдельный
+                      служебный Telegram-бот, который шлёт уведомления операторам (не
+                      клиентский бот). Без него имя бота и прямая ссылка недоступны.
+                      Попросите администратора задать <code>PLATFORM_OPERATOR_BOT_TOKEN</code>{" "}
+                      и <code>PLATFORM_OPERATOR_BOT_USERNAME</code> в конфиге API.
                     </p>
                   )}
 
