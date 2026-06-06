@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Route, Routes } from "react-router-dom";
+import DemoConcierge from "./DemoConcierge.tsx";
 import DemoExchange from "./DemoExchange.tsx";
+import DemoVisa from "./DemoVisa.tsx";
 import LandingExchange from "./LandingExchange.tsx";
 import LandingRealEstate from "./LandingRealEstate.tsx";
 import {
@@ -303,6 +305,9 @@ export default function App() {
       <Route path="/" element={<LandingExchange />} />
       <Route path="/exchange" element={<LandingExchange />} />
       <Route path="/demo" element={<DemoExchange />} />
+      <Route path="/demo/exchange" element={<DemoExchange />} />
+      <Route path="/demo/concierge" element={<DemoConcierge />} />
+      <Route path="/demo/visa" element={<DemoVisa />} />
       <Route path="/recruit" element={<LandingRecruit />} />
       <Route path="/real-estate" element={<LandingRealEstate />} />
     </Routes>
