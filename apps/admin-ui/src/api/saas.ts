@@ -567,6 +567,8 @@ export interface LeadDetail {
     createdAt: number;
   }>;
   contact: { id: number; displayName: string | null; attributesJson: string | null } | undefined;
+  transferredThb?: number;
+  ordersCompleted?: number;
 }
 
 export interface ContactItem {

@@ -2,7 +2,6 @@ import {
   AlertTriangleIcon,
   ArrowLeftIcon,
   CheckIcon,
-  ChevronRightIcon,
   EditIcon,
   SendIcon,
   Trash2Icon,
@@ -223,6 +222,7 @@ export function SaasLeadDetail() {
   const [data, setData] = useState<LeadDetail | null>(null);
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
   const [conversationId, setConversationId] = useState<number | null>(null);
+  const [recentMessages, setRecentMessages] = useState<import("@/api/saas").MessageRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [noteText, setNoteText] = useState("");
@@ -285,7 +285,16 @@ export function SaasLeadDetail() {
     if (!data?.contact) return;
     saas
       .listConversations({ contactId: data.contact.id, limit: 1 })
-      .then((r) => setConversationId(r.items[0]?.id ?? null))
+      .then((r) => {
+        const cid = r.items[0]?.id ?? null;
+        setConversationId(cid);
+        if (cid) {
+          saas
+            .getConversation(cid)
+            .then((d) => setRecentMessages(d.messages))
+            .catch(() => {});
+        }
+      })
       .catch(() => {});
   }, [data?.contact?.id]);
 
@@ -502,6 +511,59 @@ export function SaasLeadDetail() {
             </Button>
           )}
         </div>
+      </div>
+
+      {/* Сводка: сумма переведённого + последние сообщения (в первую очередь) */}
+      <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+        <Card className="overflow-hidden">
+          <CardContent className="flex h-full flex-col justify-center gap-1 py-4">
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">
+              Переведено всего
+            </span>
+            <span className="font-mono text-3xl font-semibold leading-none">
+              {(data.transferredThb ?? 0).toLocaleString("ru")}{" "}
+              <span className="text-base text-muted-foreground">THB</span>
+            </span>
+            <span className="text-xs text-muted-foreground">
+              завершённых сделок: {data.ordersCompleted ?? 0}
+            </span>
+          </CardContent>
+        </Card>
+
+        <Card className="flex flex-col">
+          <CardHeader className="flex flex-row items-center justify-between py-2.5">
+            <CardTitle className="text-sm">Последние сообщения</CardTitle>
+            {conversationId !== null && (
+              <Link
+                to={`/conversations/${conversationId}`}
+                className="text-xs text-primary hover:underline"
+              >
+                открыть диалог →
+              </Link>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-1.5 pb-3">
+            {recentMessages.length === 0 && (
+              <p className="text-xs text-muted-foreground">Сообщений пока нет</p>
+            )}
+            {recentMessages.slice(-5).map((m) => (
+              <div key={m.id} className="flex gap-2 text-[13px]">
+                <span
+                  className={`mt-0.5 w-12 shrink-0 text-[10px] font-medium uppercase ${
+                    m.role === "user"
+                      ? "text-foreground"
+                      : m.role === "human"
+                        ? "text-amber-400"
+                        : "text-primary"
+                  }`}
+                >
+                  {m.role === "user" ? "клиент" : m.role === "human" ? "оператор" : "бот"}
+                </span>
+                <span className="min-w-0 flex-1 break-words text-muted-foreground">{m.text}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Pipeline stepper */}
@@ -837,13 +899,6 @@ export function SaasLeadDetail() {
   );
 }
 
-const KIND_COLOR_STEP: Record<string, string> = {
-  intake: "border-blue-400 text-blue-600",
-  active: "border-green-400 text-green-600",
-  terminal_won: "border-emerald-500 text-emerald-600",
-  terminal_lost: "border-red-400 text-red-500",
-};
-
 function PipelineStepper({
   stages,
   currentStageId,
@@ -865,58 +920,74 @@ function PipelineStepper({
     setPendingId(null);
   }
 
+  const total = stages.length;
+  const donePct = currentIdx >= 0 ? Math.round(((currentIdx + 1) / total) * 100) : 0;
+
   return (
     <div className="rounded-lg border bg-card px-4 py-3">
-      <p className="text-xs text-muted-foreground mb-2.5">
-        Пайплайн · нажмите на стадию чтобы перевести лида
-      </p>
-      <div className="flex items-center gap-0 overflow-x-auto pb-1 scrollbar-none">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">Пайплайн · клик по стадии — перевести лида</p>
+        <span className="text-xs font-medium">
+          Пройдено <span className="text-foreground">{Math.max(currentIdx + 1, 0)}</span>/{total}
+          <span className="ml-1 text-muted-foreground">· {donePct}%</span>
+        </span>
+      </div>
+      <div className="flex items-stretch overflow-x-auto pb-1 scrollbar-none">
         {stages.map((stage, idx) => {
           const isCurrent = stage.id === currentStageId;
           const isPast = currentIdx >= 0 && idx < currentIdx;
+          const isDone = isPast; // пройдено
+          const reached = currentIdx >= 0 && idx <= currentIdx;
           const isPending = pendingId === stage.id;
-          const colorClass = KIND_COLOR_STEP[stage.kind] ?? "border-gray-300 text-gray-500";
+          const isTerminalWon = stage.kind === "terminal_won";
 
           return (
-            <div key={stage.id} className="flex items-center shrink-0">
-              <button
-                type="button"
-                disabled={movingStage}
-                onClick={() => handleClick(stage.id)}
-                className={`flex flex-col items-center gap-1 px-2 py-1 rounded-md transition-colors group ${
-                  isCurrent
-                    ? "cursor-default"
-                    : movingStage
-                      ? "opacity-50 cursor-not-allowed"
-                      : "cursor-pointer hover:bg-accent"
-                }`}
-                title={stage.displayName}
-              >
-                <div
-                  className={`flex size-7 items-center justify-center rounded-full border-2 text-xs font-semibold transition-colors ${
-                    isCurrent
-                      ? `${colorClass} bg-primary/5`
-                      : isPast
-                        ? "border-muted-foreground/40 bg-muted-foreground/10 text-muted-foreground"
-                        : isPending
-                          ? "border-primary bg-primary/10 text-primary animate-pulse"
-                          : "border-muted-foreground/20 text-muted-foreground/50 group-hover:border-muted-foreground/60 group-hover:text-muted-foreground"
-                  }`}
-                >
-                  {isPast ? <CheckIcon className="size-3" /> : idx + 1}
-                </div>
+            <button
+              key={stage.id}
+              type="button"
+              disabled={movingStage}
+              onClick={() => handleClick(stage.id)}
+              title={stage.displayName}
+              className={`group relative flex min-w-[84px] flex-1 shrink-0 flex-col items-center gap-1.5 px-1 ${
+                isCurrent ? "cursor-default" : movingStage ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+              }`}
+            >
+              {/* connector behind the node */}
+              {idx > 0 && (
                 <span
-                  className={`max-w-[72px] text-center text-[10px] leading-tight whitespace-nowrap overflow-hidden text-ellipsis ${
-                    isCurrent ? "font-semibold text-foreground" : "text-muted-foreground"
+                  className={`absolute left-0 top-[11px] h-[2px] w-1/2 -translate-x-1/2 ${
+                    reached ? "bg-emerald-500/70" : "bg-muted-foreground/15"
                   }`}
-                >
-                  {stage.displayName}
-                </span>
-              </button>
-              {idx < stages.length - 1 && (
-                <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/30" />
+                />
               )}
-            </div>
+              {idx < total - 1 && (
+                <span
+                  className={`absolute right-0 top-[11px] h-[2px] w-1/2 translate-x-1/2 ${
+                    isPast ? "bg-emerald-500/70" : "bg-muted-foreground/15"
+                  }`}
+                />
+              )}
+              <span
+                className={`relative z-10 flex size-6 items-center justify-center rounded-full text-[11px] font-semibold transition-all ${
+                  isCurrent
+                    ? `ring-2 ring-offset-2 ring-offset-card ${isTerminalWon ? "bg-emerald-500 text-white ring-emerald-500" : "bg-primary text-primary-foreground ring-primary"} ${!movingStage ? "animate-pulse" : ""}`
+                    : isDone
+                      ? "bg-emerald-500/90 text-white"
+                      : isPending
+                        ? "bg-primary/20 text-primary animate-pulse"
+                        : "bg-muted text-muted-foreground/60 group-hover:bg-muted-foreground/20"
+                }`}
+              >
+                {isDone ? <CheckIcon className="size-3.5" /> : idx + 1}
+              </span>
+              <span
+                className={`max-w-[88px] overflow-hidden text-ellipsis whitespace-nowrap text-center text-[10px] leading-tight ${
+                  isCurrent ? "font-semibold text-foreground" : isDone ? "text-foreground/70" : "text-muted-foreground/60"
+                }`}
+              >
+                {stage.displayName}
+              </span>
+            </button>
           );
         })}
       </div>

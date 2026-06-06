@@ -4,6 +4,7 @@ import {
   channels,
   contacts,
   conversations,
+  exchangeOrders,
   leadEvents,
   leadFieldValues,
   leadNotes,
@@ -553,7 +554,32 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         .from(contacts)
         .where(eq(contacts.id, lead.userId));
 
-      return { lead, stageDef, fields, fieldValues, events, notes, contact };
+      // Сколько всего переведено (завершённые обменные заявки контакта).
+      const [exch] = await tx
+        .select({
+          totalThb: sql<number>`coalesce(sum(${exchangeOrders.amountToThb}), 0)`,
+          completed: sql<number>`count(*)`,
+        })
+        .from(exchangeOrders)
+        .where(
+          and(
+            eq(exchangeOrders.tenantId, tenantId),
+            eq(exchangeOrders.contactId, lead.userId),
+            eq(exchangeOrders.status, "completed"),
+          ),
+        );
+
+      return {
+        lead,
+        stageDef,
+        fields,
+        fieldValues,
+        events,
+        notes,
+        contact,
+        transferredThb: Math.round(Number(exch?.totalThb ?? 0)),
+        ordersCompleted: Number(exch?.completed ?? 0),
+      };
     });
 
     if (!result) return c.json({ error: "lead not found" }, 404);
