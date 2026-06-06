@@ -247,4 +247,78 @@ describe("informer commands", () => {
     // дефолт all-on → первый тогл выключает orders
     expect(repo.prefs[0]?.informerTopics).toBe('{"leads":true,"escalation":true,"orders":false,"system":true}');
   });
+
+  it("/status показывает уровень, дайджест и темы", async () => {
+    const { handler, client } = wire(
+      makeSettings({
+        telegramChatId: "777",
+        informerLevel: "important",
+        informerDigest: "daily",
+        informerTopics: '{"orders":false}',
+      }),
+    );
+    await handler.handleUpdate(makeUpdate("/status", 777));
+    const text = client.sent[0]?.text ?? "";
+    expect(text).toContain("Информер");
+    expect(text).toContain("Важное");
+    expect(text).toContain("⬜ 💱 Заявки"); // выключенная тема
+    expect(text).toContain("✅ 🆕 Лиды"); // включённая
+  });
+
+  it("/topics показывает тоглы тем с галочками", async () => {
+    const { handler, client } = wire(
+      makeSettings({ telegramChatId: "777", informerTopics: '{"system":false}' }),
+    );
+    await handler.handleUpdate(makeUpdate("/topics", 777));
+    const flat = JSON.stringify(client.sent[0]?.replyMarkup);
+    expect(client.sent[0]?.replyMarkup?.inline_keyboard?.length).toBe(4);
+    expect(flat).toContain("tpc:system");
+    expect(flat).toContain("⬜ 🛠 Система"); // выключена
+    expect(flat).toContain("✅ 🆕 Лиды"); // включена
+  });
+
+  it("/digest показывает клавиатуру расписания", async () => {
+    const { handler, client } = wire(makeSettings({ telegramChatId: "777", informerDigest: "daily" }));
+    await handler.handleUpdate(makeUpdate("/digest", 777));
+    const flat = JSON.stringify(client.sent[0]?.replyMarkup);
+    expect(flat).toContain("dig:off");
+    expect(flat).toContain("dig:daily");
+    expect(flat).toContain("dig:shift");
+    expect(flat).toContain("• "); // текущий помечен
+  });
+
+  it("callback dig:shift обновляет расписание", async () => {
+    const { repo, handler } = wire(makeSettings({ telegramChatId: "777", adminId: 10 }));
+    const cb = {
+      update_id: 4,
+      callback_query: {
+        id: "cb3",
+        from: { id: 5 },
+        data: "dig:shift",
+        message: { message_id: 9, date: 0, chat: { id: 777, type: "private" } },
+      },
+    } as unknown as TgUpdate;
+    await handler.handleUpdate(cb);
+    expect(repo.prefs[0]).toMatchObject({ adminId: 10, informerDigest: "shift" });
+  });
+
+  it("/last рендерит ленту последних событий", async () => {
+    const { repo, handler, client } = wire(makeSettings({ telegramChatId: "777" }));
+    repo.recent = [
+      { id: 2, severity: "critical", title: "Канал упал", body: "telegram_bot #1", createdAt: 1_700_000_000 },
+      { id: 1, severity: "info", title: "Новый лид", body: "", createdAt: 1_699_999_000 },
+    ];
+    await handler.handleUpdate(makeUpdate("/last", 777));
+    const text = client.sent[0]?.text ?? "";
+    expect(text).toContain("Последние 2");
+    expect(text).toContain("Канал упал");
+    expect(text).toContain("🔴");
+  });
+
+  it("/last на пустой ленте → подсказка", async () => {
+    const { repo, handler, client } = wire(makeSettings({ telegramChatId: "777" }));
+    repo.recent = [];
+    await handler.handleUpdate(makeUpdate("/last", 777));
+    expect(client.sent[0]?.text).toContain("пусто");
+  });
 });
