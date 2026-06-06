@@ -868,6 +868,13 @@ export interface ExchangeRateInput {
   autoUpdate?: boolean;
 }
 
+export interface ExchangeSettings {
+  /** Как часто планировщик обновляет auto-курсы (сек). */
+  rateRefreshSec: number;
+  /** Порог «курсы устарели» (сек). null = авто (max(env, 3 × refresh)). */
+  feedStaleSec: number | null;
+}
+
 export interface ExchangeRateCardProposal {
   asset: string;
   network: string;
@@ -1914,6 +1921,15 @@ export const saas = {
     return request<{ ok: boolean; updated: number; skipped: number; failed: number }>(
       "/api/admin/exchange/rates/refresh",
       { method: "POST" },
+    );
+  },
+  exchangeSettings() {
+    return request<ExchangeSettings>("/api/admin/exchange/settings");
+  },
+  saveExchangeSettings(input: ExchangeSettings) {
+    return request<{ ok: boolean; settings: ExchangeSettings }>(
+      "/api/admin/exchange/settings",
+      { method: "PUT", body: JSON.stringify(input) },
     );
   },
   previewExchangeRateCard() {
