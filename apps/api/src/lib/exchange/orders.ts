@@ -29,6 +29,7 @@ export interface OrderRow {
   payoutLocation: string | null;
   payoutDestinationJson: string | null;
   payoutCode: string | null;
+  payoutCodeExpiresAt: number | null;
   requisitesJson: string | null;
   proofJson: string | null;
   verificationId: string | null;
@@ -56,6 +57,7 @@ const ORDER_COLS = {
   payoutLocation: exchangeOrders.payoutLocation,
   payoutDestinationJson: exchangeOrders.payoutDestinationJson,
   payoutCode: exchangeOrders.payoutCode,
+  payoutCodeExpiresAt: exchangeOrders.payoutCodeExpiresAt,
   requisitesJson: exchangeOrders.requisitesJson,
   proofJson: exchangeOrders.proofJson,
   verificationId: exchangeOrders.verificationId,
@@ -84,6 +86,7 @@ function coerce(row: Record<string, unknown>): OrderRow {
     payoutLocation: (row.payoutLocation as string | null) ?? null,
     payoutDestinationJson: (row.payoutDestinationJson as string | null) ?? null,
     payoutCode: (row.payoutCode as string | null) ?? null,
+    payoutCodeExpiresAt: (row.payoutCodeExpiresAt as number | null) ?? null,
     requisitesJson: (row.requisitesJson as string | null) ?? null,
     proofJson: (row.proofJson as string | null) ?? null,
     verificationId: (row.verificationId as string | null) ?? null,
@@ -270,6 +273,7 @@ export async function updateOrder(
     payoutLocation: string | null;
     payoutDestinationJson: string | null;
     payoutCode: string | null;
+    payoutCodeExpiresAt: number | null;
     verificationId: string | null;
     paymentMethod: string | null;
     paymentRail: string | null;

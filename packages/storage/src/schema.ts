@@ -1288,6 +1288,7 @@ export const exchangeOrders = pgTable("exchange_orders", {
   payoutLocation: text("payout_location"),
   payoutDestinationJson: text("payout_destination_json"),
   payoutCode: text("payout_code"),
+  payoutCodeExpiresAt: integer("payout_code_expires_at"),
   status: text("status").notNull().default("quote"),
   requisitesJson: text("requisites_json"),
   proofJson: text("proof_json"),

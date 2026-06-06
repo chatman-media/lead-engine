@@ -463,15 +463,29 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       });
 
       // Код выдачи не генерируется ботом. Если оператор уже проставил payout_code —
-      // отдаём его клиенту; иначе сигнализируем needsOperator.
+      // отдаём его клиенту; иначе сигнализируем needsOperator. Просроченный код
+      // (payout_code_expires_at < now) НЕ выдаём — это снова кейс оператора.
       const fresh = await findActiveOrder(db, tenantId, conversationId);
-      if (fresh?.payoutCode) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const codeExpired =
+        fresh?.payoutCodeExpiresAt != null && fresh.payoutCodeExpiresAt < nowSec;
+      if (fresh?.payoutCode && !codeExpired) {
         return {
           orderId: order.id,
           payoutMethod: args.payoutMethod,
           location: args.location,
           payoutCode: fresh.payoutCode,
           amountToThb: order.amountToThb,
+        };
+      }
+      if (codeExpired) {
+        return {
+          orderId: order.id,
+          needsOperator: true,
+          codeExpired: true,
+          note: "Срок действия кода истёк — оператор выпустит новый. Сообщите клиенту, что код скоро обновят.",
+          payoutMethod: args.payoutMethod,
+          location: args.location,
         };
       }
       return {

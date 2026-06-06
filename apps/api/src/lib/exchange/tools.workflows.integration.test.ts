@@ -633,6 +633,22 @@ describe("Exchange workflow fixtures", () => {
 			})) as Record<string, unknown>;
 			expect(payout.payoutCode).toBe(`CODE-${orderId}`);
 
+			// TTL: просроченный код боту не выдаётся — снова кейс оператора.
+			await updateOrder(db, tenantId, orderId, {
+				payoutCodeExpiresAt: Math.floor(Date.now() / 1000) - 60,
+			});
+			const expired = (await must(
+				tools.issue_exchange_payout,
+				"issue_exchange_payout",
+			).execute({
+				payoutMethod: scenario.payoutMethod,
+				location: scenario.payoutLocation,
+				destination: scenario.payoutDestination ?? {},
+			})) as Record<string, unknown>;
+			expect(expired.payoutCode).toBeUndefined();
+			expect(expired.needsOperator).toBe(true);
+			expect(expired.codeExpired).toBe(true);
+
 			const [row] = await withTenant(db, tenantId, (tx) =>
 				tx
 					.select()
