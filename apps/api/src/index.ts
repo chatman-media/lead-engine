@@ -450,14 +450,7 @@ async function main() {
   log.info("admin-director-hooks routes enabled");
   app.route("/", makeAdminExperimentsRoutes({ db }));
   log.info("admin-experiments routes enabled");
-  app.route(
-    "/",
-    makeAdminStylesRoutes({
-      db,
-      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
-    }),
-  );
-  log.info("admin-styles routes enabled");
+  // admin-styles mounted after strategyBundle (needs onReload → invalidateStyleFor).
 
   // Real-time SSE push for admin UI.
   app.route("/", makeAdminEventsRoutes());
@@ -523,6 +516,20 @@ async function main() {
     }),
   );
   log.info("admin-exchange routes enabled");
+
+  // Sales styles (personas) + AI generate-full. onReload drops the cached style
+  // so a generated/edited style drives the bot without a restart (Phase 2 slice B).
+  app.route(
+    "/",
+    makeAdminStylesRoutes({
+      db,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+      onReload: strategyBundle
+        ? (tenantId) => strategyBundle.invalidateStyleFor(tenantId)
+        : undefined,
+    }),
+  );
+  log.info("admin-styles routes enabled");
 
   // Diagnostics — health-check для tenant setup'а.
   // resolveChat передаём для ?live=1 LLM smoke-test (стоит ~1 токен).
