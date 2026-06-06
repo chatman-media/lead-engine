@@ -19,6 +19,7 @@ import {
   stageDefinitions,
   tryConnectToPg,
 } from "@chatman-media/storage";
+import type { NotificationService } from "@chatman-media/conversation-engine";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -235,5 +236,39 @@ describe("concierge branch-aware auto-advance (slice 3)", () => {
     expect(all.find((l) => l.requestType === "food")?.state).toBe("food_request");
     // Старый transfer-лид не тронут.
     expect(all.find((l) => l.requestType === "transfer")?.state).toBe("transfer_request");
+  });
+});
+
+describe("awaiting_operator entry → пинг оператору (R5)", () => {
+  it("advance в awaiting_operator-стадию шлёт notify; обычный advance — нет", async () => {
+    if (!sql) return;
+    const events: Array<{ eventType: string; data: Record<string, unknown> }> = [];
+    const spy = {
+      async notify(e: { eventType: string; data: Record<string, unknown> }) {
+        events.push(e);
+      },
+    } as unknown as NotificationService;
+
+    const contactId = await freshContact();
+    // intake → transfer_request (qualify, НЕ awaiting_operator) → пинга нет
+    await makeFieldExtractor(stubRef('{"request_type":"transfer"}'), spy).extract({
+      tenantId,
+      contactId,
+      text: "нужен трансфер",
+      db,
+    });
+    expect((await leadOf(contactId))?.state).toBe("transfer_request");
+    expect(events.length).toBe(0);
+
+    // заполняем required (pickup+dropoff) → autoAdvance в transfer_offer
+    // (awaiting_operator) → проактивный пинг оператору
+    await makeFieldExtractor(
+      stubRef('{"pickup":"отель Riva","dropoff":"аэропорт HKT"}'),
+      spy,
+    ).extract({ tenantId, contactId, text: "из отеля Riva в аэропорт", db });
+    expect((await leadOf(contactId))?.state).toBe("transfer_offer");
+    expect(
+      events.some((e) => e.eventType === "stage_changed" && e.data.awaitingOperator === true),
+    ).toBe(true);
   });
 });
