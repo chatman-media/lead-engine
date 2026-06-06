@@ -10,7 +10,7 @@ import type {
   MessagesRepo,
   OutboundQueueRepo,
 } from "./dal/index.ts";
-import { ensureLead } from "./lead-lifecycle.ts";
+import { ensureAndAdvanceLeadByPhase } from "./lead-advance.ts";
 import { type MemoryExtractor, runMemoryExtraction } from "./memory-extractor.ts";
 import { dispatchOutbound } from "./outbound-dispatch.ts";
 import { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
@@ -388,27 +388,30 @@ export async function processInbound(
         });
       }
 
-      // Цель/интент определён (стадия ≠ opener) → сразу заводим Lead.
-      // Без template/leads — пропускаем (legacy: лиды не из диалога).
-      if (newStage && newStage !== "opener" && deps.leads && deps.template) {
+      // Цель/интент определён (стадия ≠ opener) → заводим лид и продвигаем
+      // его по фазам воронки в такт диалогу (qualify→offer→clear→fulfill).
+      // Гейт — deps.leads (opt-in); сама работа идёт по DB-воронке тенанта.
+      if (newStage && newStage !== "opener" && deps.leads && deps.db) {
         try {
-          const { lead, created } = await ensureLead({
+          const res = await ensureAndAdvanceLeadByPhase({
+            db: deps.db,
+            tenantId: deps.tenant.tenantId,
             contactId: contact.id,
-            template: deps.template,
-            leads: deps.leads,
+            salesStage: newStage,
             nowEpoch: now,
           });
-          if (created) {
-            deps.sink?.log?.("info", "lead auto-created on intent", {
+          if (res && (res.created || res.advanced)) {
+            deps.sink?.log?.("info", res.created ? "lead auto-created" : "lead advanced", {
               tenantId: deps.tenant.tenantId,
               conversationId: conversation.id,
               contactId: contact.id,
-              leadId: lead.id,
-              stage: newStage,
+              leadId: res.leadId,
+              stage: res.stageSlug,
+              salesStage: newStage,
             });
           }
         } catch (err) {
-          deps.sink?.log?.("warn", "lead auto-create failed", {
+          deps.sink?.log?.("warn", "lead auto-advance failed", {
             tenantId: deps.tenant.tenantId,
             conversationId: conversation.id,
             error: err instanceof Error ? err.message : String(err),
