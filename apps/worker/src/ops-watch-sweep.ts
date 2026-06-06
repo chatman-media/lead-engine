@@ -25,7 +25,13 @@ import {
   type OpsAlertSink,
   withTenant,
 } from "@chatman-media/conversation-engine";
-import { channels, exchangeOrders, exchangeRates, tenants } from "@chatman-media/storage";
+import {
+  channels,
+  exchangeOrders,
+  exchangeRates,
+  exchangeSettings,
+  tenants,
+} from "@chatman-media/storage";
 import { and, eq, gte, inArray, lt, max, sql } from "drizzle-orm";
 
 // OpsAlert / OpsAlertSink / OpsAlertKind / OpsSeverity живут в conversation-engine
@@ -48,6 +54,19 @@ export interface OpsWatchOpts {
   intervalMs: number;
   sink: OpsAlertSink;
   thresholds: OpsWatchThresholds;
+}
+
+/**
+ * Эффективный порог «курсы устарели» (сек) для тенанта: явный feed_stale_sec,
+ * иначе авто = max(envStaleSec, 3 × rate_refresh_sec) — чтобы медленный per-tenant
+ * интервал не давал ложных rate_feed_stale.
+ */
+export function effectiveStaleSec(
+  envStaleSec: number,
+  settings: { rateRefreshSec?: number | null; feedStaleSec?: number | null } | undefined,
+): number {
+  if (settings?.feedStaleSec != null) return settings.feedStaleSec;
+  return Math.max(envStaleSec, 3 * (settings?.rateRefreshSec ?? 0));
 }
 
 const STUCK_STATUSES = ["paid", "payout"] as const;
@@ -116,6 +135,17 @@ export class OperationsWatchSweeper {
   async sweepTenant(tenantId: number, now: number): Promise<void> {
     const t = this.opts.thresholds;
     await withTenant(this.db, tenantId, async (tx) => {
+      // Per-tenant порог «устарело»: явный feed_stale_sec, иначе авто (3 × refresh).
+      const [settings] = await tx
+        .select({
+          rateRefreshSec: exchangeSettings.rateRefreshSec,
+          feedStaleSec: exchangeSettings.feedStaleSec,
+        })
+        .from(exchangeSettings)
+        .where(eq(exchangeSettings.tenantId, tenantId))
+        .limit(1);
+      const staleSec = effectiveStaleSec(t.feedStaleMin * 60, settings);
+
       // 1. Feed staleness (только auto-курсы — у ручных updated_at не двигается).
       const [{ maxUpdated } = { maxUpdated: null }] = await tx
         .select({ maxUpdated: max(exchangeRates.updatedAt) })
@@ -129,7 +159,7 @@ export class OperationsWatchSweeper {
         );
       if (maxUpdated !== null && maxUpdated !== undefined) {
         const ageSec = now - Number(maxUpdated);
-        if (ageSec > t.feedStaleMin * 60) {
+        if (ageSec > staleSec) {
           const mins = Math.floor(ageSec / 60);
           await this.emit(
             {
@@ -137,7 +167,7 @@ export class OperationsWatchSweeper {
               kind: "rate_feed_stale",
               severity: "warning",
               title: "Курсы не обновляются",
-              detail: `Авто-курсы не обновлялись ${mins} мин (порог ${t.feedStaleMin}). Рыночный фид мог встать — бот может котировать устаревший курс.`,
+              detail: `Авто-курсы не обновлялись ${mins} мин (порог ${Math.round(staleSec / 60)}). Рыночный фид мог встать — бот может котировать устаревший курс.`,
               dedupKey: "rate_feed_stale",
             },
             now,

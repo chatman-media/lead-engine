@@ -38,6 +38,11 @@ SERVER_RUNBOOK. Онбординг обменного тенанта (визар
 - **`exchange_rate_tiers`** — approved объёмные ступени: `targetThb`,
   `display_rate` (показывается клиенту), `market_rate` (live-референс),
   отклонение от рынка. Перекрывают базовый курс в своём диапазоне.
+- **`exchange_settings`** — per-tenant настройки фида (нет строки → дефолты):
+  `rate_refresh_sec` (как часто планировщик обновляет auto-курсы; дефолт 180с, пол
+  60с) и `feed_stale_sec` (порог `rate_feed_stale`; NULL → авто `max(env, 3 × refresh)`).
+  Планировщик — тик `min(RATE_FEED_MS, 60с)` + per-tenant due-check (last-refresh в
+  памяти процесса; на рестарте рефрешит всех). `RATE_FEED_MS` env → дефолт + `0` отключает.
 
 `computeQuote()`: для монет режим **multiply** (THB за 1 asset), для фиата
 **divide** (source за 1 THB); применяет маржу/комиссию, округляет по decimals.
@@ -90,6 +95,8 @@ GET    /api/admin/exchange/rates                 — список базовых
 POST   /api/admin/exchange/rates                 — upsert базового курса
 DELETE /api/admin/exchange/rates/:id             — отключить
 POST   /api/admin/exchange/rates/refresh         — форс-обновление с фида
+GET    /api/admin/exchange/settings              — per-tenant частота/порог фида
+PUT    /api/admin/exchange/settings              — задать частоту (60..86400с) + порог
 POST   /api/admin/exchange/rate-card/preview     — превью тиров (снимок рынка)
 POST   /api/admin/exchange/rate-card/approve     — применить тиры
 GET    /api/admin/exchange/requisites            — реквизиты (decrypted)

@@ -27,6 +27,7 @@ import {
   SparklesIcon,
   SunIcon,
   TestTube2Icon,
+  TrendingUpIcon,
   UserCircleIcon,
   UsersIcon,
   ZapIcon,
@@ -82,6 +83,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon, exchangeOnly: true },
       { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
+      { to: "/roi", label: "ROI", icon: TrendingUpIcon },
     ],
   },
   {

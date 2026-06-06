@@ -9,6 +9,7 @@ import {
   type ExchangeRate,
   type ExchangeRateCardProposal,
   type ExchangeRateInput,
+  type ExchangeSettings,
   type ExchangeTurnover,
   saas,
 } from "@/api/saas";
@@ -153,6 +154,22 @@ function calcDeviation(displayRate: number, marketRate: number): number {
     : 0;
 }
 
+const REFRESH_PRESETS = [
+  { sec: 180, label: "Каждые 3 мин" },
+  { sec: 300, label: "Каждые 5 мин" },
+  { sec: 600, label: "Каждые 10 мин" },
+  { sec: 900, label: "Каждые 15 мин" },
+  { sec: 1800, label: "Каждые 30 мин" },
+  { sec: 3600, label: "Каждый час" },
+];
+const STALE_PRESETS = [
+  { sec: 600, label: "10 мин" },
+  { sec: 1200, label: "20 мин" },
+  { sec: 1800, label: "30 мин" },
+  { sec: 3600, label: "1 час" },
+];
+const DEFAULT_SETTINGS: ExchangeSettings = { rateRefreshSec: 180, feedStaleSec: null };
+
 export function SaasExchange() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -166,6 +183,8 @@ export function SaasExchange() {
   const [cardSaving, setCardSaving] = useState(false);
   const [rateCardMessage, setRateCardMessage] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [settings, setSettings] = useState<ExchangeSettings>(DEFAULT_SETTINGS);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   // Произвольное направление обмена (помимо табло RUB/USDT→THB)
   const [addingRate, setAddingRate] = useState(false);
@@ -194,12 +213,14 @@ export function SaasExchange() {
       saas.exchangeOrders(),
       saas.exchangeTurnover(),
       saas.exchangeRequisites().catch(() => ({ items: [] })),
+      saas.exchangeSettings().catch(() => DEFAULT_SETTINGS),
     ])
-      .then(([r, o, t, req]) => {
+      .then(([r, o, t, req, st]) => {
         setRates(r.rates);
         setOrders(o.orders);
         setTurnover(t);
         setSavedRequisites(req.items);
+        setSettings(st);
       })
       .catch((err) => {
         if (!handle401(err)) toast.error("Не удалось загрузить данные обменника");
@@ -253,6 +274,21 @@ export function SaasExchange() {
       if (!handle401(err)) toast.error("Не удалось обновить курсы с рынка");
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function saveSettings() {
+    setSavingSettings(true);
+    try {
+      const r = await saas.saveExchangeSettings(settings);
+      setSettings(r.settings);
+      toast.success("Настройки обновления сохранены");
+    } catch (err) {
+      if (!handle401(err)) {
+        toast.error(err instanceof ApiError ? err.message : "Не удалось сохранить настройки");
+      }
+    } finally {
+      setSavingSettings(false);
     }
   }
 
@@ -435,6 +471,69 @@ export function SaasExchange() {
 
         {/* ── Курсы ─────────────────────────────────────────────── */}
         <TabsContent value="rates" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Обновление курсов с рынка</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Как часто авто-курсы подтягиваются с рынка. Реальная цена меняется раз в
+                ~10–15 мин, поэтому чаще обычно не нужно — настройка полезнее, чтобы обновлять
+                реже (стабильнее котировки) под вашу пару.
+              </p>
+            </CardHeader>
+            <CardContent className="flex flex-wrap items-end gap-4">
+              <div className="space-y-1.5">
+                <Label>Частота обновления</Label>
+                <Select
+                  value={String(settings.rateRefreshSec)}
+                  onValueChange={(v) => {
+                    const sec = Number(v);
+                    setSettings((s) => ({
+                      rateRefreshSec: sec,
+                      feedStaleSec:
+                        s.feedStaleSec != null && s.feedStaleSec < sec ? null : s.feedStaleSec,
+                    }));
+                  }}
+                >
+                  <SelectTrigger className="w-44">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REFRESH_PRESETS.map((p) => (
+                      <SelectItem key={p.sec} value={String(p.sec)}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Порог «курсы устарели»</Label>
+                <Select
+                  value={settings.feedStaleSec == null ? "auto" : String(settings.feedStaleSec)}
+                  onValueChange={(v) =>
+                    setSettings((s) => ({ ...s, feedStaleSec: v === "auto" ? null : Number(v) }))
+                  }
+                >
+                  <SelectTrigger className="w-44">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Авто (по частоте)</SelectItem>
+                    {STALE_PRESETS.filter((p) => p.sec >= settings.rateRefreshSec).map((p) => (
+                      <SelectItem key={p.sec} value={String(p.sec)}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button type="button" onClick={saveSettings} disabled={savingSettings}>
+                <SaveIcon className="size-4" />
+                {savingSettings ? "Сохранение…" : "Сохранить"}
+              </Button>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Курсы обмена по диапазонам</CardTitle>

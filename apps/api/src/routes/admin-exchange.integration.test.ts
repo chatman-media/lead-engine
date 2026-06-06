@@ -19,6 +19,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import postgres, { type Sql } from "postgres";
+import { getTenantRefreshSec } from "../lib/exchange/rate-feed.ts";
 import { makeExchangeTools } from "../lib/exchange/tools.ts";
 import { makeRequireAuth } from "../middleware/require-auth.ts";
 import { makeAdminExchangeRoutes } from "./admin-exchange.ts";
@@ -498,5 +499,52 @@ describe("admin-exchange routes", () => {
 			},
 		);
 		expect(res.status).toBe(400);
+	});
+});
+
+describe("admin-exchange settings (per-tenant частота/порог)", () => {
+	it("GET по умолчанию → 180с / null", async () => {
+		if (!sql) return;
+		const res = await authReq(tokenA, "/api/admin/exchange/settings");
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			rateRefreshSec: number;
+			feedStaleSec: number | null;
+		};
+		expect(body.rateRefreshSec).toBe(180);
+		expect(body.feedStaleSec).toBe(null);
+	});
+
+	it("PUT валидные → сохраняет; GET и планировщик видят", async () => {
+		if (!sql) return;
+		const put = await authReq(tokenA, "/api/admin/exchange/settings", {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ rateRefreshSec: 600, feedStaleSec: 1800 }),
+		});
+		expect(put.status).toBe(200);
+		const got = (await (
+			await authReq(tokenA, "/api/admin/exchange/settings")
+		).json()) as { rateRefreshSec: number; feedStaleSec: number | null };
+		expect(got.rateRefreshSec).toBe(600);
+		expect(got.feedStaleSec).toBe(1800);
+		// планировщик читает то же значение
+		expect(await getTenantRefreshSec(db as never, tenantA, 180)).toBe(600);
+	});
+
+	it("PUT невалидные → 400 (частота < 60 / stale < refresh)", async () => {
+		if (!sql) return;
+		const tooFast = await authReq(tokenA, "/api/admin/exchange/settings", {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ rateRefreshSec: 30 }),
+		});
+		expect(tooFast.status).toBe(400);
+		const badStale = await authReq(tokenA, "/api/admin/exchange/settings", {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ rateRefreshSec: 600, feedStaleSec: 120 }),
+		});
+		expect(badStale.status).toBe(400);
 	});
 });

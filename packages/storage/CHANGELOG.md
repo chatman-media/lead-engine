@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.10.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.9.0...@chatman-media/storage-v1.10.0) (2026-06-06)
+
+
+### Features
+
+* **exchange:** per-tenant частота обновления курсов + порог (Phase 1 backend) ([#234](https://github.com/chatman-media/lead-engine/issues/234)) ([1c80e3a](https://github.com/chatman-media/lead-engine/commit/1c80e3a018b9cc18ff232fa3d804ff738ff3ccfe))
+
 # [@chatman-media/storage-v1.9.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.8.0...@chatman-media/storage-v1.9.0) (2026-06-06)
 
 

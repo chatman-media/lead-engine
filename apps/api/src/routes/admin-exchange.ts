@@ -16,6 +16,7 @@ import {
 	exchangeOrders,
 	exchangeRates,
 	exchangeRateTiers,
+	exchangeSettings,
 	tenantSecrets,
 } from "@chatman-media/storage";
 import { and, desc, eq, like, sql } from "drizzle-orm";
@@ -215,6 +216,68 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				502,
 			);
 		}
+	});
+
+	// Per-tenant настройки обновления курсов (нет строки → дефолты 180с / авто-порог).
+	app.get("/api/admin/exchange/settings", async (c) => {
+		const tenantId = c.var.tenantId;
+		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
+			tx
+				.select({
+					rateRefreshSec: exchangeSettings.rateRefreshSec,
+					feedStaleSec: exchangeSettings.feedStaleSec,
+				})
+				.from(exchangeSettings)
+				.where(eq(exchangeSettings.tenantId, tenantId))
+				.limit(1),
+		);
+		return c.json({
+			rateRefreshSec: row?.rateRefreshSec ?? 180,
+			feedStaleSec: row?.feedStaleSec ?? null,
+		});
+	});
+
+	// Сохранить: rateRefreshSec (сек, 60..86400) + feedStaleSec (сек, ≥ refresh или
+	// пусто = авто). Планировщик (api) и ops-watch (worker) читают это per-tenant.
+	app.put("/api/admin/exchange/settings", async (c) => {
+		const tenantId = c.var.tenantId;
+		const body = await c.req.json().catch(() => ({}));
+
+		const refresh = Math.floor(Number(body?.rateRefreshSec));
+		if (!Number.isFinite(refresh) || refresh < 60 || refresh > 86400) {
+			return c.json({ error: "rateRefreshSec должен быть 60..86400 секунд" }, 400);
+		}
+		let stale: number | null = null;
+		if (body?.feedStaleSec != null && body.feedStaleSec !== "") {
+			stale = Math.floor(Number(body.feedStaleSec));
+			if (!Number.isFinite(stale) || stale < refresh) {
+				return c.json(
+					{ error: "feedStaleSec должен быть ≥ rateRefreshSec (или пусто = авто)" },
+					400,
+				);
+			}
+		}
+		const now = Math.floor(Date.now() / 1000);
+		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
+			tx
+				.insert(exchangeSettings)
+				.values({
+					tenantId,
+					rateRefreshSec: refresh,
+					feedStaleSec: stale,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.onConflictDoUpdate({
+					target: exchangeSettings.tenantId,
+					set: { rateRefreshSec: refresh, feedStaleSec: stale, updatedAt: now },
+				})
+				.returning({
+					rateRefreshSec: exchangeSettings.rateRefreshSec,
+					feedStaleSec: exchangeSettings.feedStaleSec,
+				}),
+		);
+		return c.json({ ok: true, settings: row });
 	});
 
 	app.post("/api/admin/exchange/rate-card/preview", async (c) => {

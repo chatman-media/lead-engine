@@ -632,6 +632,26 @@ export interface DashboardStats {
   };
 }
 
+// ── ROI dashboard ────────────────────────────────────────────────────────
+
+export interface RoiStats {
+  periodDays: number;
+  leadsReceived: number;
+  fastReply: {
+    answered: number;
+    within30: number;
+    /** Доля авто-ответов ≤30с, % (null — ещё нет отвеченных сообщений). */
+    rate: number | null;
+    thresholdSeconds: number;
+  };
+  /** Диалоги, где AI ответил вне рабочих часов («пока вы спали»). */
+  savedLeads: number;
+  handoffs: number;
+  conversions: { won: number; lost: number };
+  funnel: Array<{ phase: string; leads: number }>;
+  unassigned: number;
+}
+
 // ── Funnel analytics ─────────────────────────────────────────────────────
 
 export interface FunnelAnalyticsStage {
@@ -866,6 +886,13 @@ export interface ExchangeRateInput {
   maxAmountFrom?: number | null;
   isActive?: boolean;
   autoUpdate?: boolean;
+}
+
+export interface ExchangeSettings {
+  /** Как часто планировщик обновляет auto-курсы (сек). */
+  rateRefreshSec: number;
+  /** Порог «курсы устарели» (сек). null = авто (max(env, 3 × refresh)). */
+  feedStaleSec: number | null;
 }
 
 export interface ExchangeRateCardProposal {
@@ -1642,6 +1669,10 @@ export const saas = {
     return request<DashboardStats>("/api/admin/dashboard");
   },
 
+  getRoi(periodDays = 30) {
+    return request<RoiStats>(`/api/admin/roi?period=${periodDays}`);
+  },
+
   // ── Vacancies ────────────────────────────────────────────────────────
   listVacancies() {
     return request<{ items: VacancyItem[] }>("/api/admin/vacancies");
@@ -1941,6 +1972,15 @@ export const saas = {
     return request<{ ok: boolean; updated: number; skipped: number; failed: number }>(
       "/api/admin/exchange/rates/refresh",
       { method: "POST" },
+    );
+  },
+  exchangeSettings() {
+    return request<ExchangeSettings>("/api/admin/exchange/settings");
+  },
+  saveExchangeSettings(input: ExchangeSettings) {
+    return request<{ ok: boolean; settings: ExchangeSettings }>(
+      "/api/admin/exchange/settings",
+      { method: "PUT", body: JSON.stringify(input) },
     );
   },
   previewExchangeRateCard() {

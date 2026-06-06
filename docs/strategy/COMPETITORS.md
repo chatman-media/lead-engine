@@ -1,8 +1,58 @@
 # Анализ конкурентов — Lead Engine
 
-Последнее обновление: 2026-05-23. Источники приведены инлайн; цены —
+Последнее обновление: 2026-06-06. Источники приведены инлайн; цены —
 публичный прайс на момент исследования и могут меняться ежеквартально —
 перепроверить перед использованием в pitch'ах.
+
+---
+
+## 0a. Update — июнь 2026 (платформа зашла в нишу)
+
+> **TL;DR:** Категория «AI отвечает за тебя в мессенджере» коммодитизируется
+> на глазах. Технология перестаёт быть moat — defensible остаётся
+> **вертикаль + дистрибуция в Telegram-СНГ**, а не «движок». Это подтверждает
+> правильность exchange-пивота (уход в моно-вертикаль).
+
+**Главное событие: Meta Business Agent — глобально и бесплатно (3 июня 2026).**
+Meta встроила AI-агента прямо в WhatsApp Business: отвечает, рекомендует,
+бронирует, **квалифицирует лиды**, эскалирует на человека. Уже >1 млн
+бизнесов на WhatsApp/Messenger; платные тиры — позже.
+([TechCrunch](https://techcrunch.com/2026/06/03/metas-ai-agent-for-whatsapp-business-is-now-available-globally/),
+[Startup Fortune](https://startupfortune.com/meta-is-turning-whatsapp-business-into-an-ai-sales-desk/))
+
+→ **Импликация:** если продукт = «автоответы на WhatsApp», маржу будет жрать
+владелец платформы. **Не двигать центр тяжести в WhatsApp-only.** Защита —
+**Telegram (Meta туда не зайдёт) + userbot на личном аккаунте + вертикальная
+воронка** — ровно то, что у нас уже в проде.
+
+**Новый кластер: WhatsApp-native AI sales-агенты.**
+[Patagon AI](https://www.patagon.ai/) (квалификация лидов на WA),
+[Leadsales](https://www.latamrepublic.com/leadsales-introduces-ai-agents-designed-for-whatsapp-based-sales-teams/) (LATAM),
+[BotPenguin](https://botpenguin.com/blogs/whatsapp-ai-agents). Близко по идее,
+но WhatsApp-first и не-СНГ; после Meta Business Agent — под самым большим
+давлением платформы. Лезть в этот кластер не нужно — он подтверждает наш
+Telegram-wedge.
+
+**RU/CIS-кластер обзавёлся AI-надстройками.**
+[SaleBot](https://salebot.pro/) (от 799₽/мес, +649₽/канал, +599₽/оператор),
+[BotHelp](https://bothelp.io/) (PRO от 1599₽/мес, 150k AI-токенов в комплекте),
+ManyChat (free / Pro от $15, **без Telegram**). Это «другая категория» —
+DIY-конструкторы со сценариями + тонкой LLM-обёрткой. Риск не в фичах, а в
+том, что клиент «и так на SaleBot»; ответ — продавать *результат* (закрытые
+лиды) и вертикаль, не блоки и не цену.
+
+**Западные AI SDR — НЕ наши конкуренты (не путать).**
+[Artisan/Ava](https://www.amplemarket.com/blog/best-ai-sales-agents) (~$60K/год),
+[11x.ai](https://www.amplemarket.com/blog/best-ai-sales-agents) (~$60K/год,
+репорты 75–90% churn на 3 мес), [AiSDR](https://aisdr.com/) ($900/мес),
+[Fin AI](https://fin.ai/learn/best-ai-sdr-tools). Все — **outbound B2B**,
+англоязычные, email/LinkedIn, enterprise-прайс. Мы — **inbound-closer в
+мессенджерах, СНГ, $99–299**. Использовать для контраста, не для сравнения фич.
+
+**Четвёртый «конкурент» — живые операторы / онлайн-работники.** Аутсорс-SMM /
+операторы переписки. Мы с ними не конкурируем по фичам — мы их *замещаем*
+(или продаём *им* как рычаг). Это и есть базовый ROI-питч: «оператор спит
+8 часов → 40% лидов остыло; Lead Engine не спит».
 
 ---
 
