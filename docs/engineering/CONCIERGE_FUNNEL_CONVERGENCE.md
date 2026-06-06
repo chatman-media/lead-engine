@@ -86,7 +86,7 @@ _Создано: 2026-06-06._
 | **R2** | дегейтинг multi-request: capability-флаг вместо `concierge_v1` | 3 | S–M | ✅ сделано |
 | **R3** | AI-билдер учится multi-request-ветвлению | 1 | M | ✅ сделано |
 | **R4** | `request_type` + cross-request awareness в промпте | 2 | S–M | ✅ сделано (+ почин #211) |
-| **R5** | оператор-handoff как стадия `awaiting_operator` | P3 | M–L | 🟢 почти (handoff-loop готов; остался proactive-пинг входа) |
+| **R5** | оператор-handoff как стадия `awaiting_operator` | P3 | M–L | ✅ готово |
 | **R6** | _(опц., позже)_ первоклассная сущность «заявка/тикет» | P4 | L | будущее |
 
 ### R1 — stage `goal`/`guidance` → reply-промпт · M · **первым**
@@ -147,7 +147,7 @@ _Создано: 2026-06-06._
 - ✅ **Тесты:** kb unit (блок «ЗАПРОС ГОСТЯ»), integration (`makeRequestContextResolver`: 1 открытый →
   тип; 2 → счётчик; терминальный → null). 42/42 apps/api + 5/5 kb + 189/189 conversation-engine, tsc чист.
 
-### R5 — оператор-handoff как стадия `awaiting_operator` · M–L · 🟢 **handoff-loop готов (остался proactive-пинг)**
+### R5 — оператор-handoff как стадия `awaiting_operator` · M–L · ✅ **готово**
 Сделано (эта ветка) — рантайм-семантика + билдер:
 - ✅ Бот **придерживает гостя** на `awaiting_operator`-стадии: резолвер `makeAwaitingOperatorResolver`
   (llm-bootstrap) → флаг `awaitingOperator` проброшен через kb/conversation-engine (по паттерну R4) →
@@ -168,10 +168,12 @@ _Создано: 2026-06-06._
   обычная стадия → не двигает). 80/80 apps/api (admin-leads/funnel/concierge) + 31/31 (field-extractor/
   llm-bootstrap), tsc чист.
 
-R5-остаток (последнее — отдельный заход, правка reply-движка):
-- **Проактивный пинг оператору при ВХОДЕ в `awaiting_operator`.** Сейчас field-extractor продвигает
-  лид молча; нужно протянуть `notificationService` в `makeFieldExtractor` (`index.ts:616`) и слать
-  нотификацию на входе в awaiting_operator. (`/send-offer` уже шлёт нотификацию на ВЫХОДЕ.)
+- ✅ **Проактивный пинг оператору при ВХОДЕ в `awaiting_operator`** — `notificationService` протянут
+  в `makeFieldExtractor` (`index.ts`); при авто-продвижении лида В awaiting_operator-стадию шлётся
+  `notify(stage_changed, awaitingOperator:true)` (fire-and-forget, вне tx). (`/send-offer` шлёт на ВЫХОДЕ.)
+  Тест: advance в awaiting_operator → notify; в qualify → нет. 6/6 field-extractor + 36/36 смежных.
+
+**R5 закрыт полностью** — конвергенция R1–R5 завершена.
 
 ### R6 — _(опц., позже)_ первоклассная сущность «заявка/тикет» · L
 - Заменить nullable `leads.request_type` на реальную модель заявок (тикет с FK на контакт) —
