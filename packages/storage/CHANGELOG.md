@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.11.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.10.1...@chatman-media/storage-v1.11.0) (2026-06-06)
+
+
+### Features
+
+* **informer:** тихие часы (DND) + кнопка «Тест» + привязка к подключению ([#265](https://github.com/chatman-media/lead-engine/issues/265)) ([3d150c8](https://github.com/chatman-media/lead-engine/commit/3d150c886ad5370b10d1ba9edf2c7b469cf37886))
+
 # [@chatman-media/storage-v1.10.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.10.0...@chatman-media/storage-v1.10.1) (2026-06-06)
 
 
