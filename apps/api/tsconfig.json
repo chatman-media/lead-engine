@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "paths": {
       "@chatman-media/channel-core": ["../../packages/channel-core/src/index.ts"],
+      "@chatman-media/channel-facebook": ["../../packages/channel-facebook/src/index.ts"],
       "@chatman-media/channel-telegram": ["../../packages/channel-telegram/src/index.ts"],
       "@chatman-media/channel-web": ["../../packages/channel-web/src/index.ts"],
       "@chatman-media/channel-whatsapp": ["../../packages/channel-whatsapp/src/index.ts"],

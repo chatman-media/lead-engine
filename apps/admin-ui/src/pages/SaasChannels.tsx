@@ -1,6 +1,7 @@
 import {
   CheckIcon,
   CopyIcon,
+  FacebookIcon,
   GlobeIcon,
   MessageCircleIcon,
   SendIcon,
@@ -22,19 +23,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ApiError,
   type ChannelItem,
+  type CreateFacebookChannelResult,
   type CreateWebChannelResult,
   type CreateWhatsAppChannelResult,
   clearToken,
   saas,
 } from "../api/saas.ts";
 
-type ChannelTab = "telegram" | "userbot" | "whatsapp" | "web";
+type ChannelTab = "telegram" | "userbot" | "whatsapp" | "facebook" | "web";
 type UserbotStep = "phone" | "code" | "2fa";
 
 const KIND_META: Record<string, { icon: typeof SendIcon; label: string }> = {
   telegram_bot: { icon: SendIcon, label: "Telegram-бот" },
   telegram_userbot: { icon: UserIcon, label: "Личный аккаунт" },
   whatsapp: { icon: MessageCircleIcon, label: "WhatsApp" },
+  facebook: { icon: FacebookIcon, label: "Facebook Messenger" },
   web: { icon: GlobeIcon, label: "Web-виджет" },
 };
 
@@ -151,6 +154,12 @@ export function SaasChannels() {
   const [waAppSecret, setWaAppSecret] = useState("");
   const [waSubmitting, setWaSubmitting] = useState(false);
   const [waResult, setWaResult] = useState<CreateWhatsAppChannelResult | null>(null);
+
+  const [fbPageToken, setFbPageToken] = useState("");
+  const [fbVerifyToken, setFbVerifyToken] = useState("");
+  const [fbAppSecret, setFbAppSecret] = useState("");
+  const [fbSubmitting, setFbSubmitting] = useState(false);
+  const [fbResult, setFbResult] = useState<CreateFacebookChannelResult | null>(null);
 
   const [webBrand, setWebBrand] = useState("");
   const [webColor, setWebColor] = useState("");
@@ -330,6 +339,49 @@ export function SaasChannels() {
     }
   }
 
+  async function handleFacebookSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setFbResult(null);
+    const pageAccessToken = fbPageToken.trim();
+    if (!pageAccessToken) {
+      setError("Page Access Token обязателен");
+      return;
+    }
+    setFbSubmitting(true);
+    try {
+      const res = await saas.createFacebookChannel({
+        pageAccessToken,
+        ...(fbVerifyToken.trim() ? { verifyToken: fbVerifyToken.trim() } : {}),
+        ...(fbAppSecret.trim() ? { appSecret: fbAppSecret.trim() } : {}),
+      });
+      setFbResult(res);
+      setFbPageToken("");
+      setReconnectKind(null);
+      await refresh();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 401) {
+          if (err.errorCode.toLowerCase().includes("meta")) {
+            setError("Meta отвергла Page Access Token — проверьте permissions и срок действия");
+          } else {
+            clearToken();
+            navigate("/login", { replace: true });
+            return;
+          }
+        } else if (err.status === 502) {
+          setError("Meta Graph недоступен — попробуйте позже");
+        } else {
+          setError(`Ошибка ${err.status}: ${err.errorCode}`);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setFbSubmitting(false);
+    }
+  }
+
   function userbotErrMessage(err: unknown): string {
     if (err instanceof ApiError) {
       if (err.status === 401) {
@@ -448,6 +500,7 @@ export function SaasChannels() {
   const existingUserbot = channels.find((c) => c.kind === "telegram_userbot");
   const existingBot = channels.find((c) => c.kind === "telegram_bot");
   const existingWa = channels.find((c) => c.kind === "whatsapp");
+  const existingFb = channels.find((c) => c.kind === "facebook");
   const existingWeb = channels.find((c) => c.kind === "web");
 
   return (
@@ -478,6 +531,9 @@ export function SaasChannels() {
           </TabsTrigger>
           <TabsTrigger value="whatsapp">
             <MessageCircleIcon /> WhatsApp
+          </TabsTrigger>
+          <TabsTrigger value="facebook">
+            <FacebookIcon /> Facebook
           </TabsTrigger>
           <TabsTrigger value="web">
             <GlobeIcon /> Web
@@ -885,6 +941,110 @@ export function SaasChannels() {
                       Webhook URL: {waResult.webhookSetupHint.url}
                       <br />
                       Verify token: {waResult.webhookSetupHint.verifyToken}
+                    </span>
+                  )}
+                </OkNote>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="facebook">
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {existingFb && reconnectKind !== "facebook"
+                  ? "Facebook Messenger"
+                  : "Подключить Facebook Messenger"}
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Из{" "}
+                <a
+                  href="https://developers.facebook.com/apps/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  Meta for Developers
+                </a>{" "}
+                → Messenger → Settings: сгенерируйте{" "}
+                <code className="font-mono">Page Access Token</code> для вашей Страницы. Page ID
+                определится автоматически.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {existingFb && reconnectKind !== "facebook" ? (
+                <ConnectedChannelCard
+                  title={`Facebook #${existingFb.externalId}`}
+                  statusText="Подключён — входящие обрабатывает ассистент"
+                  reconnectLabel="Переподключить"
+                  onReconnect={() => {
+                    setReconnectKind("facebook");
+                    setFbResult(null);
+                  }}
+                  confirmDelete={confirmDeleteChannelId === existingFb.id}
+                  onAskDelete={() => setConfirmDeleteChannelId(existingFb.id)}
+                  onConfirmDelete={() => handleDelete(existingFb.id)}
+                  onCancelDelete={() => setConfirmDeleteChannelId(null)}
+                />
+              ) : (
+                <form onSubmit={handleFacebookSubmit} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label>Page Access Token</Label>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={fbPageToken}
+                      onChange={(e) => setFbPageToken(e.target.value)}
+                      placeholder="EAAJZBxxxxxxx…"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Verify Token (опц.)</Label>
+                      <Input
+                        autoComplete="off"
+                        value={fbVerifyToken}
+                        onChange={(e) => setFbVerifyToken(e.target.value)}
+                        placeholder="любая строка для Meta webhook"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>App Secret (опц.)</Label>
+                      <Input
+                        type="password"
+                        autoComplete="off"
+                        value={fbAppSecret}
+                        onChange={(e) => setFbAppSecret(e.target.value)}
+                        placeholder="Meta → App settings → Basic"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Verify Token — придумайте строку и впишите её же в Meta dashboard при настройке
+                    webhook. App Secret включает проверку подписи входящих вебхуков. Оставьте
+                    пустыми для общих ключей платформы.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={fbSubmitting || !fbPageToken.trim()}>
+                      {fbSubmitting ? "Проверяем у Meta…" : "Подключить"}
+                    </Button>
+                    {existingFb && reconnectKind === "facebook" && (
+                      <Button type="button" variant="ghost" onClick={() => setReconnectKind(null)}>
+                        Отмена
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              )}
+              {fbResult && (
+                <OkNote>
+                  ✓ Facebook {fbResult.pageName ?? fbResult.pageId} подключён.
+                  {fbResult.webhookSetupHint && (
+                    <span className="mt-2 block font-mono text-xs">
+                      Webhook URL: {fbResult.webhookSetupHint.url}
+                      <br />
+                      Verify token: {fbResult.webhookSetupHint.verifyToken}
                     </span>
                   )}
                 </OkNote>

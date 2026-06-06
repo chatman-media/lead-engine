@@ -821,7 +821,7 @@ export const channels = pgTable("channels", {
 }, (t) => [
   check(
     "channels_kind_check",
-    sql`${t.kind} IN ('telegram_bot','telegram_userbot','whatsapp','web')`,
+    sql`${t.kind} IN ('telegram_bot','telegram_userbot','whatsapp','facebook','web')`,
   ),
   check("channels_status_check", sql`${t.status} IN ('active','paused','error')`),
   uniqueIndex("uniq_channels_tenant_kind_external").on(t.tenantId, t.kind, t.externalId),

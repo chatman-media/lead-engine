@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@chatman-media/channel-core": "workspace:*",
+    "@chatman-media/channel-facebook": "workspace:*",
     "@chatman-media/channel-telegram": "workspace:*",
     "@chatman-media/channel-web": "workspace:*",
     "@chatman-media/channel-whatsapp": "workspace:*",

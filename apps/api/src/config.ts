@@ -41,6 +41,18 @@ export interface ApiConfig {
    */
   whatsappAppSecret: string;
   /**
+   * Verify-token для Facebook Messenger webhook setup'а (Meta dashboard →
+   * Webhooks → Verify Token). Если задан, /webhook/facebook/:slug подключается.
+   * Пусто = Facebook webhook'и не принимаются.
+   */
+  facebookVerifyToken: string;
+  /**
+   * App secret из Meta dashboard → App Settings → Basic для HMAC-SHA256
+   * валидации `X-Hub-Signature-256` Facebook-вебхуков. Пусто — signature check
+   * пропускается (warning на boot). Production deploy ОБЯЗАН задавать.
+   */
+  facebookAppSecret: string;
+  /**
    * Stripe webhook signing secret (whsec_...) — опционально. Если пусто,
    * /webhook/stripe не подключается и Stripe-billing просто не работает.
    */
@@ -233,6 +245,8 @@ export function loadApiConfig(): ApiConfig {
     telegramWebhookSecret: required("TELEGRAM_WEBHOOK_SECRET"),
     whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
     whatsappAppSecret: process.env.WHATSAPP_APP_SECRET ?? "",
+    facebookVerifyToken: process.env.FACEBOOK_VERIFY_TOKEN ?? "",
+    facebookAppSecret: process.env.FACEBOOK_APP_SECRET ?? "",
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
     healthCheckTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "2000", 10),
     llm: {

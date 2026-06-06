@@ -87,6 +87,7 @@ import { makeMetricsRoutes } from "./routes/metrics.ts";
 import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 import { makeWhatsAppWebhookRoutes } from "./routes/webhook-whatsapp.ts";
+import { makeFacebookWebhookRoutes } from "./routes/webhook-facebook.ts";
 import { makeOperatorBotWebhookRoutes } from "./routes/webhook-operator-bot.ts";
 import { makeWidgetStaticRoutes } from "./routes/widget-static.ts";
 import { makeWebSocketRoutes } from "./routes/ws-web.ts";
@@ -191,6 +192,8 @@ async function main() {
     onWarn: (msg, ctx) => log.warn(`channel-registry: ${msg}`, ctx),
     ...(cfg.whatsappVerifyToken ? { whatsappVerifyTokenFallback: cfg.whatsappVerifyToken } : {}),
     ...(cfg.whatsappAppSecret ? { whatsappAppSecretFallback: cfg.whatsappAppSecret } : {}),
+    ...(cfg.facebookVerifyToken ? { facebookVerifyTokenFallback: cfg.facebookVerifyToken } : {}),
+    ...(cfg.facebookAppSecret ? { facebookAppSecretFallback: cfg.facebookAppSecret } : {}),
   });
 
   const app = new Hono();
@@ -359,6 +362,7 @@ async function main() {
       ...(cfg.publicUrl ? { publicUrl: cfg.publicUrl } : {}),
       webhookSecret: cfg.telegramWebhookSecret,
       ...(cfg.whatsappVerifyToken ? { whatsappVerifyToken: cfg.whatsappVerifyToken } : {}),
+      ...(cfg.facebookVerifyToken ? { facebookVerifyToken: cfg.facebookVerifyToken } : {}),
       ...(cfg.webWidgetScriptUrl ? { webWidgetScriptUrl: cfg.webWidgetScriptUrl } : {}),
       telegramApiId: cfg.telegramUserbot.apiId,
       telegramApiHash: cfg.telegramUserbot.apiHash,
@@ -709,6 +713,37 @@ async function main() {
     }
     log.info("whatsapp webhook enabled", {
       signatureCheck: cfg.whatsappAppSecret ? "enabled" : "off (dev mode)",
+    });
+  }
+
+  if (cfg.facebookVerifyToken) {
+    app.route(
+      "/",
+      makeFacebookWebhookRoutes({
+        db,
+        channels,
+        verifyToken: cfg.facebookVerifyToken,
+        ...(cfg.facebookAppSecret ? { appSecret: cfg.facebookAppSecret } : {}),
+        replyStrategy,
+        resolveTemplate,
+        memoryExtractor,
+        stageClassifier,
+        notificationService,
+        photoProcessor,
+        fieldExtractor,
+        sink,
+        metrics,
+        ...(rateLimiter ? { rateLimiter } : {}),
+        ...(resolveTranscriber ? { resolveTranscriber } : {}),
+      }),
+    );
+    if (!cfg.facebookAppSecret) {
+      log.warn("facebook webhook signature verification disabled", {
+        remediation: "Set FACEBOOK_APP_SECRET env (Meta dashboard → App Settings → Basic)",
+      });
+    }
+    log.info("facebook webhook enabled", {
+      signatureCheck: cfg.facebookAppSecret ? "enabled" : "off (dev mode)",
     });
   }
 
