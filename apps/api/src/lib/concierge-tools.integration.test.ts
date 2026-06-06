@@ -1,6 +1,6 @@
 /**
  * Integration test для concierge agentic tools (Фаза 2 — трекинг статуса гостем).
- * Прогоняет DB-путь против изолированной БД: isConciergeTenant, listOpenRequests
+ * Прогоняет DB-путь против изолированной БД: tenantSupportsMultiRequest, listOpenRequests
  * и сам tool (resolve contactId из conversationId → открытые запросы).
  *
  * Без DATABASE_URL — мягкий skip (как прочие *.integration.test.ts).
@@ -11,7 +11,6 @@ import {
   contacts,
   conversations,
   createIsolatedDb,
-  funnels,
   leads,
   schema,
   stageDefinitions,
@@ -26,9 +25,9 @@ import postgres, { type Sql } from "postgres";
 import { applyFunnelStages, SEED_TEMPLATES } from "../routes/admin-funnel.ts";
 import { makeAuthRoutes } from "../routes/auth.ts";
 import {
-  isConciergeTenant,
   listOpenRequests,
   makeConciergeRequestsTool,
+  tenantSupportsMultiRequest,
 } from "./concierge-tools.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
@@ -38,6 +37,7 @@ const SECRET = "test-secret-concierge-tools-12345";
 
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
+let app: Hono;
 let tenantId = 0;
 let contactId = 0;
 let conversationId = 0;
@@ -61,7 +61,7 @@ beforeAll(async () => {
   await applyAllMigrations(sql, migrationsDir);
   db = drizzle(sql, { schema });
 
-  const app = new Hono();
+  app = new Hono();
   // biome-ignore lint/suspicious/noExplicitAny: drizzle generic in test harness
   app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
   const sa = await app.request("/api/auth/signup", {
@@ -72,11 +72,8 @@ beforeAll(async () => {
   tenantId = ((await sa.json()) as { admin: { tenantId: number } }).admin.tenantId;
 
   await applyFunnelStages(db as never, tenantId, SEED_TEMPLATES.concierge!, "concierge");
-  // Помечаем воронку как concierge_v1 (как делает install-endpoint) — гейт isConciergeTenant.
-  await db
-    .update(funnels)
-    .set({ verticalTemplateId: "concierge_v1" })
-    .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)));
+  // Воронку НЕ помечаем concierge_v1: гейт теперь capability-based (intake имеет
+  // поле request_type), от template id не зависит — это и проверяет тест ниже.
 
   const [c] = await db.insert(contacts).values({ tenantId }).returning({ id: contacts.id });
   contactId = c!.id;
@@ -107,9 +104,21 @@ afterAll(async () => {
 }, 10_000);
 
 describe("concierge tools (Фаза 2 — статус гостя)", () => {
-  it("isConciergeTenant = true для воронки concierge_v1", async () => {
+  it("tenantSupportsMultiRequest = true для воронки с request_type на intake (без concierge_v1)", async () => {
     if (!sql) return;
-    expect(await isConciergeTenant(db as never, tenantId)).toBe(true);
+    expect(await tenantSupportsMultiRequest(db as never, tenantId)).toBe(true);
+  });
+
+  it("tenantSupportsMultiRequest = false для линейной воронки (нет request_type на intake)", async () => {
+    if (!sql) return;
+    const sa = await app.request("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "ctools-linear@demo.io", password: "strong-pwd-12345" }),
+    });
+    const t2 = ((await sa.json()) as { admin: { tenantId: number } }).admin.tenantId;
+    await applyFunnelStages(db as never, t2, SEED_TEMPLATES.saas!, "saas");
+    expect(await tenantSupportsMultiRequest(db as never, t2)).toBe(false);
   });
 
   it("listOpenRequests возвращает тип + человекочитаемую стадию", async () => {

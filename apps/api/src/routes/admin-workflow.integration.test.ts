@@ -13,6 +13,7 @@ import {
   schema,
   skills,
   stageDefinitions,
+  stageFields,
   tryConnectToPg,
 } from "@chatman-media/storage";
 import type { ChatClient } from "@chatman-media/llm-router";
@@ -106,6 +107,19 @@ const VALID_STAGES = [
   { slug: "offer", displayName: "Оффер", kind: "active", stageType: "rate_confirmation", phase: "offer", nextStages: ["won", "lost"], fields: [] },
   { slug: "won", displayName: "Успех", kind: "terminal_won", stageType: "milestone", nextStages: [], fields: [] },
   { slug: "lost", displayName: "Отказ", kind: "terminal_lost", stageType: "milestone", nextStages: [], fields: [] },
+];
+
+/** Ветвящаяся (мульти-запрос) воронка: intake(request_type) → 2 ветки → общие won/lost. */
+const MULTI_STAGES = [
+  { slug: "request_received", displayName: "Заявка", kind: "intake", stageType: "form_fill", nextStages: ["exchange_request", "transfer_request", "cancelled"], fields: [{ slug: "request_type", displayName: "Тип запроса", fieldType: "select", required: true, aiExtractable: true, options: [{ value: "exchange", label: "Обмен" }, { value: "transfer", label: "Трансфер" }] }] },
+  { slug: "exchange_request", displayName: "Обмен: детали", kind: "active", stageType: "form_fill", phase: "qualify", nextStages: ["exchange_offer"], fields: [] },
+  { slug: "transfer_request", displayName: "Трансфер: детали", kind: "active", stageType: "form_fill", phase: "qualify", nextStages: ["transfer_offer"], fields: [] },
+  { slug: "exchange_offer", displayName: "Обмен: оффер", kind: "active", stageType: "rate_confirmation", phase: "offer", nextStages: ["exchange_fulfill"], fields: [] },
+  { slug: "transfer_offer", displayName: "Трансфер: оффер", kind: "active", stageType: "rate_confirmation", phase: "offer", nextStages: ["transfer_fulfill"], fields: [] },
+  { slug: "exchange_fulfill", displayName: "Обмен: выдача", kind: "active", stageType: "milestone", phase: "fulfill", nextStages: ["completed", "cancelled"], fields: [] },
+  { slug: "transfer_fulfill", displayName: "Трансфер: подача", kind: "active", stageType: "milestone", phase: "fulfill", nextStages: ["completed", "cancelled"], fields: [] },
+  { slug: "completed", displayName: "Выполнено", kind: "terminal_won", stageType: "milestone", nextStages: [], fields: [] },
+  { slug: "cancelled", displayName: "Отменено", kind: "terminal_lost", stageType: "milestone", nextStages: [], fields: [] },
 ];
 
 describe("admin-workflow /ai-chat", () => {
@@ -214,6 +228,46 @@ describe("admin-workflow /apply", () => {
     expect(rows.map((r) => r.slug).sort()).toEqual(["intake", "lost", "offer", "qualify", "won"]);
     // Phase 2 slice C: AI-emitted per-stage goal is normalized + persisted.
     expect(rows.find((r) => r.slug === "qualify")?.goal).toBe("понять сумму и валюту");
+  });
+});
+
+describe("admin-workflow /apply мульти-запрос (R3)", () => {
+  it("ветвящаяся воронка применяется + request_type options сохранены", async () => {
+    if (!sql) return;
+    const res = await post(app, APPLY, { stages: MULTI_STAGES });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; stageCount: number };
+    expect(body.stageCount).toBe(9);
+
+    const [intake] = await db
+      .select({ id: stageDefinitions.id })
+      .from(stageDefinitions)
+      .where(and(eq(stageDefinitions.tenantId, tenantId), eq(stageDefinitions.slug, "request_received")));
+    const fields = await db
+      .select({ slug: stageFields.slug, optionsJson: stageFields.optionsJson })
+      .from(stageFields)
+      .where(eq(stageFields.stageId, intake!.id));
+    const rt = fields.find((f) => f.slug === "request_type");
+    expect(rt).toBeDefined();
+    // value-ключи опций сохранены латиницей — иначе сломалась бы маршрутизация веток.
+    const opts = JSON.parse(rt!.optionsJson) as Array<{ value: string }>;
+    expect(opts.map((o) => o.value).sort()).toEqual(["exchange", "transfer"]);
+  });
+
+  it("мультизапрос: тип без ветки → 400 + violation", async () => {
+    if (!sql) return;
+    const broken = MULTI_STAGES.map((s) =>
+      s.slug === "request_received"
+        ? {
+            ...s,
+            fields: [{ slug: "request_type", displayName: "Тип запроса", fieldType: "select", required: true, aiExtractable: true, options: [{ value: "exchange", label: "Обмен" }, { value: "transfer", label: "Трансфер" }, { value: "food", label: "Еда" }] }],
+          }
+        : s,
+    );
+    const res = await post(app, APPLY, { stages: broken });
+    expect(res.status).toBe(400);
+    const b = (await res.json()) as { violations?: string[] };
+    expect((b.violations ?? []).some((v) => v.includes("food"))).toBe(true);
   });
 });
 
