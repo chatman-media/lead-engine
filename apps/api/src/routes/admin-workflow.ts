@@ -91,7 +91,22 @@ const SYSTEM_PROMPT = `Ты — помощник по настройке вор�
 - slug'и уникальны; nextStages ссылаются только на существующие slug'и.
 - Поля, которые бот может вытащить из диалога (имя, сумма, тип), помечай aiExtractable: true.
 - Для active-стадий заполняй "goal" (что сделать на стадии) и по возможности "guidance" (как вести диалог) под этот бизнес.
-- Используй короткие воронки (4–8 стадий) — не усложняй.`;
+- Линейные воронки держи короткими (4–8 стадий) — не усложняй.
+
+МУЛЬТИ-ЗАПРОС (один клиент ↔ несколько типов услуг):
+- Если бизнес оказывает НЕСКОЛЬКО разных услуг, которые один клиент может запрашивать
+  параллельно и повторно (консьерж, сервис-деск, мультисервис) — СПРОСИ об этом и, если да,
+  построй ВЕТВЯЩУЮСЯ воронку:
+  - intake-стадия с полем {"slug":"request_type","fieldType":"select","aiExtractable":true},
+    options — латинские snake_case ключи услуг с локализованными подписями:
+    [{"value":"transfer","label":"Трансфер"},{"value":"food","label":"Еда"}].
+  - На КАЖДЫЙ ключ <X> — короткая ветка: <X>_request (phase qualify) → <X>_offer (phase offer)
+    → <X>_fulfill (phase fulfill). slug ветки ОБЯЗАН начинаться с "<X>_" (тот же ключ), иначе
+    маршрутизация по типу не сработает.
+  - Все <X>_fulfill → одна общая terminal_won (напр. "completed"); intake и ветки → общая
+    terminal_lost ("cancelled"). intake.nextStages = все <X>_request + терминал отказа.
+  - Порядок: сперва все *_request (qualify), затем *_offer (offer), затем *_fulfill (fulfill),
+    потом терминалы — иначе нарушишь монотонность фаз. Длина 1+3×N+2 — норма, лимит 4–8 не про них.`;
 
 const MAX_TURNS = 60;
 
@@ -102,7 +117,8 @@ interface FieldDraft {
 	required?: boolean;
 	aiExtractable?: boolean;
 	hint?: string;
-	options?: string[];
+	options?: Array<string | { value: string; label: string }>;
+	optionsJson?: string;
 }
 export interface StageDraft {
 	slug: string;
@@ -126,6 +142,29 @@ function sanitizeSlug(s: string): string {
 		.replace(/_+/g, "_")
 		.replace(/^_|_$/g, "")
 		.slice(0, 48);
+}
+
+/**
+ * select/multiselect → optionsJson [{value,label}]. Пробрасывает уже готовый
+ * optionsJson (re-apply на /apply — иначе значения опций, важные для
+ * маршрутизации request_type, терялись бы); options принимает строки или
+ * объекты {value,label}. value всегда латинский snake_case (slug ветки).
+ */
+function normalizeOptions(fieldType: string, f: FieldDraft): string | undefined {
+	if (fieldType !== "select" && fieldType !== "multiselect") return undefined;
+	if (typeof f.optionsJson === "string" && f.optionsJson.trim())
+		return f.optionsJson;
+	if (!Array.isArray(f.options)) return undefined;
+	return JSON.stringify(
+		f.options.map((o) =>
+			o && typeof o === "object"
+				? {
+						value: sanitizeSlug(String(o.value)) || String(o.value),
+						label: String(o.label ?? o.value),
+					}
+				: { value: sanitizeSlug(String(o)) || String(o), label: String(o) },
+		),
+	);
 }
 
 /**
@@ -168,16 +207,7 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 			const fslug = sanitizeSlug(f.slug);
 			if (!fslug) continue;
 			const fieldType = validFieldType.has(f.fieldType) ? f.fieldType : "text";
-			const optionsJson =
-				(fieldType === "select" || fieldType === "multiselect") &&
-				Array.isArray(f.options)
-					? JSON.stringify(
-							f.options.map((o) => ({
-								value: sanitizeSlug(String(o)) || String(o),
-								label: String(o),
-							})),
-						)
-					: undefined;
+			const optionsJson = normalizeOptions(fieldType, f);
 			fields.push({
 				slug: fslug,
 				displayName: f.displayName,
@@ -221,6 +251,58 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 		s.nextStages = s.nextStages.filter((n) => known.has(n) && n !== s.slug);
 	}
 	return stages;
+}
+
+/**
+ * Контракт мульти-запроса (ветвление по request_type): если intake имеет
+ * select-поле request_type, каждое его значение <X> обязано иметь ветку,
+ * достижимую из intake (стадия <X>_request / любой <X>_*) — иначе рантайм
+ * (field-extractor.selectNextStage) не сможет увести лид в нужную ветку.
+ * Для линейных воронок (нет поля request_type) — пусто.
+ */
+export function multiRequestBranchErrors(stages: SeedStage[]): string[] {
+	const errors: string[] = [];
+	const intake = stages.find((s) => s.kind === "intake");
+	if (!intake) return errors;
+	const rt = intake.fields.find((f) => f.slug === "request_type");
+	if (!rt) return errors; // линейная воронка — не мульти-запрос
+	let values: string[] = [];
+	if (rt.optionsJson) {
+		try {
+			values = (JSON.parse(rt.optionsJson) as Array<{ value?: unknown }>)
+				.map((o) => String(o.value ?? ""))
+				.filter(Boolean);
+		} catch {
+			// невалидный optionsJson — отдадим «нет опций» ниже
+		}
+	}
+	if (values.length === 0) {
+		errors.push("Мультизапрос: у поля request_type на intake нет валидных опций.");
+		return errors;
+	}
+	const next = intake.nextStages ?? [];
+	for (const v of values) {
+		const hasBranch = next.some(
+			(n) => n === `${v}_request` || n.startsWith(`${v}_`),
+		);
+		if (!hasBranch)
+			errors.push(
+				`Мультизапрос: для типа "${v}" нет ветки — добавь стадию "${v}_request" и укажи её в nextStages intake.`,
+			);
+	}
+	return errors;
+}
+
+/** validateBackbone + контракт мульти-запроса — общий gate для AI-builder. */
+function validateFunnel(stages: SeedStage[]): {
+	errors: string[];
+	warnings: string[];
+} {
+	const base = validateBackbone(stages);
+	return {
+		errors: [...base.errors, ...multiRequestBranchErrors(stages)],
+		warnings: base.warnings,
+	};
 }
 
 export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
@@ -329,7 +411,7 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 					aiExtractable: f.aiExtractable,
 				})),
 			}));
-			const backbone = validateBackbone(stages);
+			const backbone = validateFunnel(stages);
 			return c.json({
 				reply,
 				readyToGenerate: true,
@@ -365,7 +447,7 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 		const stages = normalizeStages(body.stages as StageDraft[]);
 		if (stages.length === 0) return c.json({ error: "no valid stages" }, 400);
 
-		const backbone = validateBackbone(stages);
+		const backbone = validateFunnel(stages);
 		if (backbone.errors.length > 0) {
 			return c.json(
 				{
