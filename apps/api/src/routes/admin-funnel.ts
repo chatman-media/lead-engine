@@ -1833,6 +1833,9 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
       supportMode: boolean;
       nextStages: string[];
       configJson: string;
+      goal: string | null;
+      guidance: string | null;
+      autoAdvanceCondition: string | null;
     }>>();
 
     const now = Math.floor(Date.now() / 1000);
@@ -1850,6 +1853,9 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
     if (body.supportMode !== undefined) patch.supportMode = body.supportMode;
     if (body.nextStages !== undefined) patch.nextStages = body.nextStages;
     if (body.configJson !== undefined) patch.configJson = body.configJson;
+    if (body.goal !== undefined) patch.goal = body.goal;
+    if (body.guidance !== undefined) patch.guidance = body.guidance;
+    if (body.autoAdvanceCondition !== undefined) patch.autoAdvanceCondition = body.autoAdvanceCondition;
 
     await withTenant(opts.db, tenantId, async (tx) =>
       tx
