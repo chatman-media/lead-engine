@@ -103,7 +103,14 @@ export function makeAdminVerticalsRoutes(opts: AdminVerticalsRoutesOpts): Hono {
       let stylesUpdated = 0;
 
       await withTenant(opts.db, tenantId, async (tx) => {
-        for (const styleSeed of tpl.styles!) {
+        for (const [i, styleSeed] of tpl.styles!.entries()) {
+          // Только ПЕРВЫЙ стиль шаблона становится активным (дефолт воронки);
+          // остальные сидятся неактивными — оператор переключит их в Настройках.
+          // Иначе у тенанта несколько активных стилей и reply-движок берёт
+          // «самый свежий активный» недетерминированно (resolveTenantStyle).
+          const makeActive = i === 0;
+          // Идемпотентно по slug (вне зависимости от isActive), чтобы повторная
+          // установка не плодила дубликаты неактивных стилей.
           const [existing] = await tx
             .select({ id: stylesTable.id })
             .from(stylesTable)
@@ -111,7 +118,6 @@ export function makeAdminVerticalsRoutes(opts: AdminVerticalsRoutesOpts): Hono {
               and(
                 eq(stylesTable.tenantId, tenantId),
                 eq(stylesTable.slug, styleSeed.slug),
-                eq(stylesTable.isActive, true),
                 sql`deleted_at IS NULL`,
               ),
             )
@@ -120,7 +126,11 @@ export function makeAdminVerticalsRoutes(opts: AdminVerticalsRoutesOpts): Hono {
           if (existing) {
             await tx
               .update(stylesTable)
-              .set({ displayName: styleSeed.displayName, configJson: styleSeed.configJson })
+              .set({
+                displayName: styleSeed.displayName,
+                configJson: styleSeed.configJson,
+                isActive: makeActive,
+              })
               .where(eq(stylesTable.id, existing.id));
             stylesUpdated++;
           } else {
@@ -129,7 +139,7 @@ export function makeAdminVerticalsRoutes(opts: AdminVerticalsRoutesOpts): Hono {
               slug: styleSeed.slug,
               displayName: styleSeed.displayName,
               configJson: styleSeed.configJson,
-              isActive: true,
+              isActive: makeActive,
               version: 1,
               createdAt: nowEpoch,
             });
