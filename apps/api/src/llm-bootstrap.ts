@@ -235,6 +235,32 @@ export interface ReplyStrategyBundle {
 	 * so the next incoming message picks up the new config without a restart.
 	 */
 	invalidateToolsFor: (tenantId: number) => void;
+	/**
+	 * Invalidate the per-tenant style cache (+ experiment cache) after the tenant
+	 * generates/edits/deletes a style — next reply uses it without a restart.
+	 */
+	invalidateStyleFor: (tenantId: number) => void;
+}
+
+/**
+ * Per-tenant style resolution when no A/B experiment applies. Priority:
+ *   1. the configured default slug (global `STYLE_SLUG`), if it resolves;
+ *   2. fallback — the tenant's most-recently-created active style.
+ * Lets an AI-generated (active) style drive the bot per tenant (Phase 2).
+ */
+export async function resolveTenantStyle(
+	repo: Pick<StylesRepo, "findActiveBySlug" | "listActive">,
+	defaultSlug: string,
+): Promise<Style | null> {
+	if (defaultSlug) {
+		const row = await repo.findActiveBySlug(defaultSlug);
+		const parsed = row ? parseStyleConfig(row.configJson) : null;
+		if (parsed) return parsed;
+	}
+	const actives = await repo.listActive();
+	if (actives.length === 0) return null;
+	const latest = actives.reduce((a, b) => (b.createdAt > a.createdAt ? b : a));
+	return parseStyleConfig(latest.configJson);
 }
 
 export function makeReplyStrategy(
@@ -272,6 +298,7 @@ export function makeReplyStrategy(
 				(tenantId: number) => new MessagesRepo({ db, tenantId }),
 			),
 			invalidateToolsFor: () => {}, // LlmReplyStrategy has no tools cache
+			invalidateStyleFor: () => {}, // LlmReplyStrategy resolves no styles
 		};
 	}
 
@@ -281,54 +308,48 @@ export function makeReplyStrategy(
 	const defaultSlug = cfg.defaultStyleSlug;
 	const experimentSlug = cfg.experimentSlug;
 
-	const resolveStyle =
-		experimentSlug || defaultSlug
-			? async (input: {
-					tenantId: number;
-					contactId: number;
-				}): Promise<Style | null> => {
-					if (experimentSlug) {
-						let abRouter = experimentCache.get(input.tenantId);
-						if (abRouter === undefined) {
-							const expRepo = new ExperimentsRepo({
-								db,
-								tenantId: input.tenantId,
-							});
-							const stylesRepo = new StylesRepo({
-								db,
-								tenantId: input.tenantId,
-							});
-							const exp = await expRepo.findRunningBySlug(experimentSlug);
-							if (exp) {
-								const variants = await loadExperimentVariants(exp, stylesRepo);
-								if (variants) {
-									abRouter = new ABRouter({ variants, salt: exp.slug });
-									experimentCache.set(input.tenantId, abRouter);
-								} else {
-									experimentCache.set(input.tenantId, "absent");
-									abRouter = "absent";
-								}
-							} else {
-								experimentCache.set(input.tenantId, "absent");
-								abRouter = "absent";
-							}
-						}
-						if (abRouter !== "absent") {
-							return abRouter.assign(String(input.contactId)).style;
-						}
+	// Always defined: experiment → global default slug → tenant's active style.
+	const resolveStyle = async (input: {
+		tenantId: number;
+		contactId: number;
+	}): Promise<Style | null> => {
+		if (experimentSlug) {
+			let abRouter = experimentCache.get(input.tenantId);
+			if (abRouter === undefined) {
+				const expRepo = new ExperimentsRepo({
+					db,
+					tenantId: input.tenantId,
+				});
+				const stylesRepo = new StylesRepo({
+					db,
+					tenantId: input.tenantId,
+				});
+				const exp = await expRepo.findRunningBySlug(experimentSlug);
+				if (exp) {
+					const variants = await loadExperimentVariants(exp, stylesRepo);
+					if (variants) {
+						abRouter = new ABRouter({ variants, salt: exp.slug });
+						experimentCache.set(input.tenantId, abRouter);
+					} else {
+						experimentCache.set(input.tenantId, "absent");
+						abRouter = "absent";
 					}
-					if (defaultSlug) {
-						const cached = styleCache.get(input.tenantId);
-						if (cached !== undefined) return cached;
-						const repo = new StylesRepo({ db, tenantId: input.tenantId });
-						const row = await repo.findActiveBySlug(defaultSlug);
-						const parsed = row ? parseStyleConfig(row.configJson) : null;
-						styleCache.set(input.tenantId, parsed);
-						return parsed;
-					}
-					return null;
+				} else {
+					experimentCache.set(input.tenantId, "absent");
+					abRouter = "absent";
 				}
-			: undefined;
+			}
+			if (abRouter !== "absent") {
+				return abRouter.assign(String(input.contactId)).style;
+			}
+		}
+		const cached = styleCache.get(input.tenantId);
+		if (cached !== undefined) return cached;
+		const repo = new StylesRepo({ db, tenantId: input.tenantId });
+		const parsed = await resolveTenantStyle(repo, defaultSlug);
+		styleCache.set(input.tenantId, parsed);
+		return parsed;
+	};
 
 	// resolveSkills: loads all enabled skills for the tenant.
 	// Stage-kind filtering (intake/active/always) happens inside composeSystemPrompt.
@@ -554,7 +575,7 @@ export function makeReplyStrategy(
 				return wrapped as unknown as RagEmbeddingClient;
 			},
 			resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
-			...(resolveStyle ? { resolveStyle } : {}),
+			resolveStyle,
 			resolveIsSupport: makeSupportModeResolver(db),
 			resolveSkills,
 			resolveDirectorHooks,
@@ -572,6 +593,10 @@ export function makeReplyStrategy(
 		invalidateToolsFor: (tenantId: number) => {
 			toolsCache.delete(tenantId);
 			exchangeEnabledCache.delete(tenantId);
+		},
+		invalidateStyleFor: (tenantId: number) => {
+			styleCache.delete(tenantId);
+			experimentCache.delete(tenantId);
 		},
 	};
 }

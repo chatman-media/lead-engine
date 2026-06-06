@@ -19,6 +19,9 @@ export interface AdminStylesRoutesOpts {
   db: Db;
   /** Tenant chat LLM — needed for /generate. If absent, /generate returns 503. */
   resolveChat?: (tenantId: number) => ChatClient;
+  /** Called after a style is generated/created/updated/deleted so the reply
+   *  pipeline drops its cached style for the tenant (apply без рестарта). */
+  onReload?: (tenantId: number) => void;
 }
 
 export function makeAdminStylesRoutes(opts: AdminStylesRoutesOpts): Hono {
@@ -236,6 +239,7 @@ ${description}`;
       details: { slug: style.slug, displayName: style.displayName },
     });
 
+    opts.onReload?.(tenantId);
     return c.json({ id: row.id, slug: row.slug, displayName: row.displayName, style }, 201);
   });
 
@@ -301,6 +305,7 @@ ${description}`;
       details: { slug, displayName },
     });
 
+    opts.onReload?.(tenantId);
     return c.json(row, 201);
   });
 
@@ -351,6 +356,7 @@ ${description}`;
       details: patch,
     });
 
+    opts.onReload?.(tenantId);
     return c.json(updated);
   });
 
@@ -379,6 +385,7 @@ ${description}`;
       details: {},
     });
 
+    opts.onReload?.(tenantId);
     return c.json({ ok: true });
   });
 

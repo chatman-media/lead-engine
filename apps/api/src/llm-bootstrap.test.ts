@@ -15,6 +15,7 @@ import {
   makeMemoryExtractor,
   makeReplyStrategy,
   makeStageClassifier,
+  resolveTenantStyle,
 } from "./llm-bootstrap.ts";
 
 function refWith(opts: {
@@ -156,5 +157,67 @@ describe("makeEmbedderResolver", () => {
     if (!r) throw new Error("expected resolver");
     expect(() => r(1)).toThrow(/LLM config not set/);
     expect(r(2)).toBeDefined();
+  });
+});
+
+// --- resolveTenantStyle (Phase 2 slice B): per-tenant style fallback ---
+
+const styleJson = (slug: string): string =>
+  JSON.stringify({
+    slug,
+    displayName: slug,
+    persona: { name: "A", role: "human" },
+    voice: { tone: "friendly", language: "ru", forbid: [] },
+    framework: "SPIN",
+    hooks: [],
+    stages: { qualify: { goal: "g" } },
+    fewShot: [],
+    guardrails: { forbiddenTopics: [] },
+    model: { id: "x", temperature: 0.5, maxTokens: 100 },
+  });
+
+function fakeStylesRepo(opts: {
+  bySlug?: Record<string, string | null>;
+  active?: Array<{ configJson: string; createdAt: number }>;
+  // biome-ignore lint/suspicious/noExplicitAny: minimal StylesRepo stub for the unit
+}): any {
+  return {
+    findActiveBySlug: async (slug: string) => {
+      const cj = opts.bySlug?.[slug];
+      return cj ? { configJson: cj } : null;
+    },
+    listActive: async () => opts.active ?? [],
+  };
+}
+
+describe("resolveTenantStyle", () => {
+  it("default slug found → that style", async () => {
+    const repo = fakeStylesRepo({
+      bySlug: { def: styleJson("def") },
+      active: [{ configJson: styleJson("other"), createdAt: 100 }],
+    });
+    expect((await resolveTenantStyle(repo, "def"))?.slug).toBe("def");
+  });
+
+  it("no default slug → most-recent active style", async () => {
+    const repo = fakeStylesRepo({
+      active: [
+        { configJson: styleJson("old"), createdAt: 100 },
+        { configJson: styleJson("new"), createdAt: 200 },
+      ],
+    });
+    expect((await resolveTenantStyle(repo, ""))?.slug).toBe("new");
+  });
+
+  it("default slug set but unresolved → falls back to active", async () => {
+    const repo = fakeStylesRepo({
+      bySlug: { def: null },
+      active: [{ configJson: styleJson("act"), createdAt: 5 }],
+    });
+    expect((await resolveTenantStyle(repo, "def"))?.slug).toBe("act");
+  });
+
+  it("no default + no active → null", async () => {
+    expect(await resolveTenantStyle(fakeStylesRepo({ active: [] }), "")).toBeNull();
   });
 });
