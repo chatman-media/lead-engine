@@ -6,9 +6,11 @@ import type {
   ChannelIdentitiesRepo,
   ContactsRepo,
   ConversationsRepo,
+  LeadsRepo,
   MessagesRepo,
   OutboundQueueRepo,
 } from "./dal/index.ts";
+import { ensureAndAdvanceLeadByPhase } from "./lead-advance.ts";
 import { type MemoryExtractor, runMemoryExtraction } from "./memory-extractor.ts";
 import { dispatchOutbound } from "./outbound-dispatch.ts";
 import { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
@@ -55,6 +57,13 @@ export interface ProcessInboundDeps {
   conversations: ConversationsRepo;
   messages: MessagesRepo;
   outbound: OutboundQueueRepo;
+  /**
+   * Опциональный LeadsRepo. Если задан вместе с `template` и `stageClassifier`,
+   * pipeline авто-создаёт Lead, как только цель/интент клиента определён
+   * (stage classifier вернул стадию ≠ "opener"). Без него лиды не создаются
+   * из диалога (legacy-поведение).
+   */
+  leads?: LeadsRepo;
   /** Стратегия ответа. null = pipeline сохраняет inbound и не отвечает. */
   reply?: ReplyStrategy | null;
   /**
@@ -377,6 +386,37 @@ export async function processInbound(
           from: conversation.currentStage,
           to: newStage,
         });
+      }
+
+      // Цель/интент определён (стадия ≠ opener) → заводим лид и продвигаем
+      // его по фазам воронки в такт диалогу (qualify→offer→clear→fulfill).
+      // Гейт — deps.leads (opt-in); сама работа идёт по DB-воронке тенанта.
+      if (newStage && newStage !== "opener" && deps.leads && deps.db) {
+        try {
+          const res = await ensureAndAdvanceLeadByPhase({
+            db: deps.db,
+            tenantId: deps.tenant.tenantId,
+            contactId: contact.id,
+            salesStage: newStage,
+            nowEpoch: now,
+          });
+          if (res && (res.created || res.advanced)) {
+            deps.sink?.log?.("info", res.created ? "lead auto-created" : "lead advanced", {
+              tenantId: deps.tenant.tenantId,
+              conversationId: conversation.id,
+              contactId: contact.id,
+              leadId: res.leadId,
+              stage: res.stageSlug,
+              salesStage: newStage,
+            });
+          }
+        } catch (err) {
+          deps.sink?.log?.("warn", "lead auto-advance failed", {
+            tenantId: deps.tenant.tenantId,
+            conversationId: conversation.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     } catch (err) {
       deps.sink?.log?.("warn", "stage classifier failed", {

@@ -6,6 +6,7 @@ import {
   type Db,
   generateReplyAndEnqueue,
   type ITranscriber,
+  LeadsRepo,
   type MemoryExtractor,
   MessagesRepo,
   OutboundQueueRepo,
@@ -206,6 +207,7 @@ export function makeTelegramWebhookRoutes(opts: {
         conversations: new ConversationsRepo(repoCtx),
         messages: new MessagesRepo(repoCtx),
         outbound: new OutboundQueueRepo(repoCtx),
+        leads: new LeadsRepo(repoCtx),
         notifications: opts.notificationService,
         // reply остаётся для conv-engine'а как gate — но НЕ вызывается
         // при deferReply, processInbound вернётся раньше.
