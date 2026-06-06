@@ -213,4 +213,41 @@ describe("AdminInformer.emit", () => {
     expect(email.sends.length).toBe(1);
     expect(await rowCount(tenantNoTg, "n-crit")).toBe(1);
   });
+
+  it("emitNotificationEvent: human_takeover → escalation/important, реалтайм + ledger", async () => {
+    if (!enabled) return;
+    await setOwner(tenantWith, { informerLevel: "important" });
+    const tg = new FakeTelegram();
+    await makeInformer(tg, new FakeEmail()).emitNotificationEvent({
+      tenantId: tenantWith,
+      eventType: "human_takeover",
+      leadId: 5,
+      data: { displayName: "Иван" },
+    });
+    expect(tg.sends.length).toBe(1);
+    const row = await lastRow(tenantWith, "human_takeover:5");
+    expect(row?.topic).toBe("escalation");
+    expect(row?.severity).toBe("important");
+    expect(row?.kind).toBe("human_takeover");
+  });
+
+  it("emitNotificationEvent: неизвестный eventType → ничего (нет строки)", async () => {
+    if (!enabled) return;
+    const tg = new FakeTelegram();
+    await makeInformer(tg, new FakeEmail()).emitNotificationEvent({
+      tenantId: tenantWith,
+      eventType: "no_such_event",
+      leadId: 7,
+      data: {},
+    });
+    expect(tg.sends.length).toBe(0);
+    expect(await rowCount(tenantWith, "no_such_event:7")).toBe(0);
+  });
+
+  it("resolveOwnerAdminId: владелец → adminId, чужой тенант → null", async () => {
+    if (!enabled) return;
+    const informer = makeInformer(null, new FakeEmail());
+    expect(await informer.resolveOwnerAdminId(tenantWith)).toBe(ownerAdminId);
+    expect(await informer.resolveOwnerAdminId(999_999)).toBeNull();
+  });
 });

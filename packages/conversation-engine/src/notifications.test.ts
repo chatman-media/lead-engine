@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
+import type { AdminInformer } from "./admin-informer.ts";
 import type { NotificationRule, NotificationsRepo, OperatorSettings } from "./dal/notifications.ts";
 import { NotificationService, type NotificationEvent } from "./notifications.ts";
 
@@ -228,5 +229,25 @@ describe("NotificationService.notify", () => {
     svc.client = { sendMessage: async ({ text }: { text: string }) => { texts.push(text); } };
     await svc.notify(BASE_EVENT);
     expect(texts[0]).toBe("Новая стадия: qualified");
+  });
+
+  it("with informer: skips owner in per-operator loop, still notifies other operators + calls informer", async () => {
+    const sent: string[] = [];
+    let emitted = 0;
+    const owner = makeOperatorSettings({ adminId: 10, telegramChatId: "owner-chat", notifyOnAssignedOnly: false });
+    const other = makeOperatorSettings({ adminId: 11, telegramChatId: "other-chat", notifyOnAssignedOnly: false });
+    const informer = {
+      resolveOwnerAdminId: async () => 10,
+      emitNotificationEvent: async () => {
+        emitted++;
+      },
+    } as unknown as AdminInformer;
+    const svc = new NotificationService(makeRepo([], [owner, other]), "fake-token", "http://app", informer);
+    // @ts-expect-error patch private client
+    svc.client = { sendMessage: async ({ chatId }: { chatId: string }) => { sent.push(chatId); } };
+    await svc.notify(BASE_EVENT);
+    expect(emitted).toBe(1); // владелец обслужен информером
+    expect(sent).toContain("other-chat"); // не-владельцу шлём как раньше
+    expect(sent).not.toContain("owner-chat"); // владельца пропустили (без дублей)
   });
 });
