@@ -69,7 +69,7 @@ import {
 	type LoadedLlmConfigs,
 	type ResolvedLlmConfig,
 } from "./lib/llm-config-loader.ts";
-import { isConciergeTenant, makeConciergeRequestsTool } from "./lib/concierge-tools.ts";
+import { makeConciergeRequestsTool, tenantSupportsMultiRequest } from "./lib/concierge-tools.ts";
 import { OpenRouterTranscriber } from "./lib/openrouter-transcriber.ts";
 import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
 
@@ -460,7 +460,7 @@ export function makeReplyStrategy(
 	// admin-exchange onReload).
 	const toolsCache = new Map<number, AnyRagTool[]>();
 	const exchangeEnabledCache = new Map<number, boolean>();
-	const conciergeEnabledCache = new Map<number, boolean>();
+	const multiRequestToolCache = new Map<number, boolean>();
 	async function resolveTools(input: {
 		tenantId: number;
 		conversationId: number;
@@ -499,14 +499,14 @@ export function makeReplyStrategy(
 			);
 		}
 
-		let conciergeEnabled = conciergeEnabledCache.get(input.tenantId);
-		if (conciergeEnabled === undefined) {
-			conciergeEnabled = await isConciergeTenant(db, input.tenantId).catch(
+		let multiRequestEnabled = multiRequestToolCache.get(input.tenantId);
+		if (multiRequestEnabled === undefined) {
+			multiRequestEnabled = await tenantSupportsMultiRequest(db, input.tenantId).catch(
 				() => false,
 			);
-			conciergeEnabledCache.set(input.tenantId, conciergeEnabled);
+			multiRequestToolCache.set(input.tenantId, multiRequestEnabled);
 		}
-		if (conciergeEnabled) {
+		if (multiRequestEnabled) {
 			conversationBound.push(
 				makeConciergeRequestsTool({
 					db,
@@ -653,7 +653,7 @@ export function makeReplyStrategy(
 		invalidateToolsFor: (tenantId: number) => {
 			toolsCache.delete(tenantId);
 			exchangeEnabledCache.delete(tenantId);
-			conciergeEnabledCache.delete(tenantId);
+			multiRequestToolCache.delete(tenantId);
 		},
 		invalidateStyleFor: (tenantId: number) => {
 			styleCache.delete(tenantId);

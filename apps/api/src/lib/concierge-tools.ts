@@ -3,12 +3,12 @@
 // Сейчас один tool — list_my_requests: гость спрашивает «что с моим заказом /
 // статус / мои запросы», бот вызывает tool и получает открытые запросы гостя
 // (тип услуги + текущая стадия). Даёт гостю самообслуживаемый трекинг статуса
-// без операторской стороны. Гейтится на concierge-тенанта (isConciergeTenant).
+// без операторской стороны. Гейтится на multi-request воронку (tenantSupportsMultiRequest).
 
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import type { AnyRagTool } from "@chatman-media/kb";
-import { conversations, funnels, leads, stageDefinitions } from "@chatman-media/storage";
-import { and, desc, eq, notInArray } from "drizzle-orm";
+import { conversations, funnels, leads, stageDefinitions, stageFields } from "@chatman-media/storage";
+import { and, asc, desc, eq, notInArray } from "drizzle-orm";
 import { z } from "zod";
 
 const REQUEST_TYPE_LABEL: Record<string, string> = {
@@ -20,15 +20,35 @@ const REQUEST_TYPE_LABEL: Record<string, string> = {
   other: "Другое",
 };
 
-/** concierge-тенант = активная воронка привязана к шаблону concierge_v1. */
-export async function isConciergeTenant(db: Db, tenantId: number): Promise<boolean> {
+/**
+ * Multi-request capability: активная воронка ветвится по типу запроса — её
+ * первая (intake) стадия имеет поле `request_type`. Зеркалит детект multiRequest
+ * в field-extractor (selectNextStage), поэтому самообслуживаемый трекинг и
+ * рантайм-ветвление включаются вместе. Заменяет template-специфичный
+ * isConciergeTenant: способность универсальна, не привязана к concierge_v1 —
+ * любую multi-request воронку (в т.ч. AI-собранную) гейт пускает одинаково.
+ */
+export async function tenantSupportsMultiRequest(db: Db, tenantId: number): Promise<boolean> {
   return withTenant(db, tenantId, async (tx) => {
-    const [f] = await tx
-      .select({ vt: funnels.verticalTemplateId })
+    const [activeFunnel] = await tx
+      .select({ id: funnels.id })
       .from(funnels)
       .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
       .limit(1);
-    return f?.vt === "concierge_v1";
+    if (!activeFunnel) return false;
+    const [firstStage] = await tx
+      .select({ id: stageDefinitions.id })
+      .from(stageDefinitions)
+      .where(eq(stageDefinitions.funnelId, activeFunnel.id))
+      .orderBy(asc(stageDefinitions.position))
+      .limit(1);
+    if (!firstStage) return false;
+    const [rtField] = await tx
+      .select({ id: stageFields.id })
+      .from(stageFields)
+      .where(and(eq(stageFields.stageId, firstStage.id), eq(stageFields.slug, "request_type")))
+      .limit(1);
+    return !!rtField;
   });
 }
 
