@@ -438,6 +438,9 @@ export interface StageDefinition {
   supportMode: boolean;
   color: string | null;
   icon: string | null;
+  goal: string | null;
+  guidance: string | null;
+  autoAdvanceCondition: string | null;
   fields: StageField[];
 }
 

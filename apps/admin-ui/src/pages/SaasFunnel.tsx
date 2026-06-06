@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 const STAGE_TYPES: { value: StageType; label: string }[] = [
@@ -291,6 +292,7 @@ export function SaasFunnel() {
             <StageCard
               key={stage.id}
               stage={stage}
+              allStages={funnel.stages}
               index={idx + 1}
               isLast={idx === funnel.stages.length - 1}
               isExpanded={expandedStage === stage.id}
@@ -505,6 +507,7 @@ export function SaasFunnel() {
 
 function StageCard({
   stage,
+  allStages,
   index,
   isLast,
   isExpanded,
@@ -520,6 +523,7 @@ function StageCard({
   onReload,
 }: {
   stage: StageDefinition;
+  allStages: StageDefinition[];
   index: number;
   isLast: boolean;
   isExpanded: boolean;
@@ -698,9 +702,12 @@ function StageCard({
                 onCheckedChange={(v) => onUpdate({ supportMode: v })}
               />
               <Label htmlFor={`support-${stage.id}`} className="text-sm">
-                Support mode
+                Support mode (отвечает оператор, бот молчит)
               </Label>
             </div>
+
+            {/* Поведение и логика стадии */}
+            <StageBehaviourEditor stage={stage} allStages={allStages} onUpdate={onUpdate} />
 
             {/* Fields list */}
             <div>
@@ -817,6 +824,179 @@ function StageCard({
           </CardContent>
         )}
       </Card>
+    </div>
+  );
+}
+
+const AUTO_ADVANCE_FILLED = '{"type":"all_required_fields_filled"}';
+
+function StageBehaviourEditor({
+  stage,
+  allStages,
+  onUpdate,
+}: {
+  stage: StageDefinition;
+  allStages: StageDefinition[];
+  onUpdate: (patch: Partial<StageDefinition>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [goal, setGoal] = useState(stage.goal ?? "");
+  const [guidance, setGuidance] = useState(stage.guidance ?? "");
+  const [stale, setStale] = useState(stage.staleTimeoutDays?.toString() ?? "");
+  const [checkin, setCheckin] = useState(stage.checkinIntervalDays?.toString() ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const autoAdvance = !!stage.autoAdvanceCondition;
+  // краткая сводка для свёрнутого вида
+  const summary = [
+    stage.goal ? "цель" : null,
+    stage.guidance ? "поведение" : null,
+    autoAdvance ? "авто-переход" : null,
+    (stage.nextStages?.length ?? 0) > 0 ? `${stage.nextStages.length} перех.` : null,
+  ].filter(Boolean);
+  const dirty =
+    goal !== (stage.goal ?? "") ||
+    guidance !== (stage.guidance ?? "") ||
+    stale !== (stage.staleTimeoutDays?.toString() ?? "") ||
+    checkin !== (stage.checkinIntervalDays?.toString() ?? "");
+
+  async function save() {
+    setSaving(true);
+    try {
+      await onUpdate({
+        goal: goal.trim() || null,
+        guidance: guidance.trim() || null,
+        staleTimeoutDays: stale ? Number(stale) : null,
+        checkinIntervalDays: checkin ? Number(checkin) : null,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleNext(slug: string, on: boolean) {
+    const set = new Set(stage.nextStages ?? []);
+    if (on) set.add(slug);
+    else set.delete(slug);
+    onUpdate({ nextStages: [...set] });
+  }
+
+  return (
+    <div className="rounded-md border border-dashed">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2"
+      >
+        <span className="text-xs font-semibold uppercase text-muted-foreground">
+          ⚙ Поведение и логика
+        </span>
+        <span className="flex items-center gap-1.5">
+          {!open &&
+            summary.map((s) => (
+              <Badge key={s} variant="outline" className="text-[10px] font-normal">
+                {s}
+              </Badge>
+            ))}
+          <ChevronDownIcon
+            className={cn("size-4 text-muted-foreground transition-transform", open ? "rotate-180" : "")}
+          />
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-2.5 border-t px-3 pb-3 pt-2.5">
+      <div className="space-y-1">
+        <Label className="text-xs">🎯 Цель стадии (что должен достичь бот)</Label>
+        <Textarea
+          rows={2}
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          placeholder="Напр.: выяснить сумму и сеть обмена, подтвердить курс"
+          className="text-sm"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">🧠 Как себя вести (тон, что можно/нельзя)</Label>
+        <Textarea
+          rows={2}
+          value={guidance}
+          onChange={(e) => setGuidance(e.target.value)}
+          placeholder="Напр.: дружелюбно, не называй курс без инструмента, не дави"
+          className="text-sm"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs">⏰ «Завис» через, дней</Label>
+          <Input
+            type="number"
+            min={0}
+            value={stale}
+            onChange={(e) => setStale(e.target.value)}
+            placeholder="—"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">🔁 Автопинг каждые, дней</Label>
+          <Input
+            type="number"
+            min={0}
+            value={checkin}
+            onChange={(e) => setCheckin(e.target.value)}
+            placeholder="—"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Switch
+          id={`auto-${stage.id}`}
+          checked={autoAdvance}
+          onCheckedChange={(v) => onUpdate({ autoAdvanceCondition: v ? AUTO_ADVANCE_FILLED : null })}
+        />
+        <Label htmlFor={`auto-${stage.id}`} className="text-sm">
+          ⚙️ Авто-переход когда заполнены обязательные поля
+        </Label>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs">🔀 Переходы дальше (next stages)</Label>
+        <div className="flex flex-wrap gap-1.5">
+          {allStages
+            .filter((s) => s.id !== stage.id)
+            .map((s) => {
+              const on = (stage.nextStages ?? []).includes(s.slug);
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => toggleNext(s.slug, !on)}
+                  className={cn(
+                    "rounded-full border px-2 py-0.5 text-xs transition-colors",
+                    on
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {s.displayName}
+                </button>
+              );
+            })}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={save} disabled={saving || !dirty}>
+          {saving ? "…" : "Сохранить"}
+        </Button>
+        {saved && <span className="text-xs text-emerald-500">✓ сохранено</span>}
+      </div>
+        </div>
+      )}
     </div>
   );
 }
