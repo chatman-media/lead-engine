@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.10.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.10.0...@chatman-media/storage-v1.10.1) (2026-06-06)
+
+
+### Bug Fixes
+
+* **migrations:** перенумеровать 0032_admin_informer → 0036 (дубль номера ронял информер) ([#250](https://github.com/chatman-media/lead-engine/issues/250)) ([1856c83](https://github.com/chatman-media/lead-engine/commit/1856c8396c31c240e1224155711158aa20c9348f))
+
 # [@chatman-media/storage-v1.10.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.9.0...@chatman-media/storage-v1.10.0) (2026-06-06)
 
 
