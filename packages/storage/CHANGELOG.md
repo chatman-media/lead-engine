@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.12.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.11.0...@chatman-media/storage-v1.12.0) (2026-06-06)
+
+
+### Features
+
+* **exchange:** real operator payout-code flow with push delivery + TTL ([#261](https://github.com/chatman-media/lead-engine/issues/261) A1) ([#273](https://github.com/chatman-media/lead-engine/issues/273)) ([4ee392f](https://github.com/chatman-media/lead-engine/commit/4ee392f05cd96f031c795b2a441dcfeb995ceae1))
+
 # [@chatman-media/storage-v1.11.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.10.1...@chatman-media/storage-v1.11.0) (2026-06-06)
 
 
