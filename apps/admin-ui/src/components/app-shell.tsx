@@ -78,15 +78,10 @@ const TOP_NAV_ITEM: NavItem = { to: "/dashboard", label: "Главная", icon:
 // exchangeOnly — показываются только ей.
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: "Обмен",
+    label: "Продажи",
     items: [
       { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon, exchangeOnly: true },
       { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
-    ],
-  },
-  {
-    label: "Клиенты",
-    items: [
       { to: "/leads", label: "Лиды", icon: UserCircleIcon },
       { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
       { to: "/outreach", label: "Рассылка", icon: SendIcon },
@@ -94,17 +89,16 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "Бот и каналы",
+    label: "Бот",
     items: [
       { to: "/channels", label: "Каналы", icon: CableIcon },
       { to: "/test", label: "Тест бота", icon: TestTube2Icon },
+      { to: "/integrations", label: "Интеграции", icon: BlocksIcon },
+      { to: "/faq", label: "FAQ-справочник", icon: BookOpenIcon },
       { to: "/skills", label: "Навыки", icon: ZapIcon, hideForExchange: true },
       { to: "/hooks", label: "Хуки", icon: SparklesIcon, hideForExchange: true },
       { to: "/styles", label: "Стили", icon: PaletteIcon, hideForExchange: true },
       { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon, hideForExchange: true },
-      { to: "/integrations", label: "Интеграции", icon: BlocksIcon },
-      { to: "/faq", label: "FAQ-справочник", icon: BookOpenIcon },
-      { to: "/diagnostics", label: "Диагностика", icon: ActivityIcon },
     ],
   },
   {
@@ -112,8 +106,9 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/notifications", label: "Уведомления", icon: BellIcon },
       { to: "/billing", label: "LLM-использование", icon: BarChart2Icon },
-      { to: "/referral", label: "Партнёры", icon: LinkIcon, hideForExchange: true },
+      { to: "/diagnostics", label: "Диагностика", icon: ActivityIcon },
       { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
+      { to: "/referral", label: "Партнёры", icon: LinkIcon, hideForExchange: true },
     ],
   },
 ];
