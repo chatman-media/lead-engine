@@ -632,6 +632,26 @@ export interface DashboardStats {
   };
 }
 
+// ── ROI dashboard ────────────────────────────────────────────────────────
+
+export interface RoiStats {
+  periodDays: number;
+  leadsReceived: number;
+  fastReply: {
+    answered: number;
+    within30: number;
+    /** Доля авто-ответов ≤30с, % (null — ещё нет отвеченных сообщений). */
+    rate: number | null;
+    thresholdSeconds: number;
+  };
+  /** Диалоги, где AI ответил вне рабочих часов («пока вы спали»). */
+  savedLeads: number;
+  handoffs: number;
+  conversions: { won: number; lost: number };
+  funnel: Array<{ phase: string; leads: number }>;
+  unassigned: number;
+}
+
 // ── Funnel analytics ─────────────────────────────────────────────────────
 
 export interface FunnelAnalyticsStage {
@@ -1620,6 +1640,10 @@ export const saas = {
   // ── Dashboard ────────────────────────────────────────────────────────
   getDashboardStats() {
     return request<DashboardStats>("/api/admin/dashboard");
+  },
+
+  getRoi(periodDays = 30) {
+    return request<RoiStats>(`/api/admin/roi?period=${periodDays}`);
   },
 
   // ── Vacancies ────────────────────────────────────────────────────────
