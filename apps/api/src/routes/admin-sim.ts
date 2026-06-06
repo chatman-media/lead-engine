@@ -36,6 +36,7 @@ import {
 } from "@chatman-media/conversation-engine";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { FieldExtractor } from "../lib/field-extractor.ts";
+import { scoreExchangeDialog } from "../lib/exchange/eval.ts";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { Inbound, OutboundPart } from "@chatman-media/channel-core";
 import {
@@ -499,7 +500,14 @@ export function makeAdminSimRoutes(opts: {
   // (await — чтобы вернуть conversationId), остальные ходы — в фоне.
   async function simulateClient(
     ctx: SimCtx,
-    params: { brief: string; displayName: string; maxTurns: number; isCancelled?: () => boolean },
+    params: {
+      brief: string;
+      displayName: string;
+      maxTurns: number;
+      isCancelled?: () => boolean;
+      /** false = прогнать все ходы синхронно (для eval-харнесса), потом вернуть. */
+      background?: boolean;
+    },
   ): Promise<number> {
     const { tenantId, adminId } = ctx;
     // Снимок epoch на старте: если «Остановить все» инкрементит его — прерываемся.
@@ -619,8 +627,7 @@ export function makeAdminSimRoutes(opts: {
     if (!first) throw new Error("pipeline produced no conversation");
     exchanges.push({ user: firstUser, bot: first.botReply });
 
-    // Остальные ходы — в фоне (инбокс наполняется по поллингу).
-    void (async () => {
+    const runRest = async () => {
       for (let turn = 1; turn < params.maxTurns; turn++) {
         if (aborted()) break; // kill-switch: «Остановить все» / стоп потока
         const userText = await nextUserMessage();
@@ -629,9 +636,17 @@ export function makeAdminSimRoutes(opts: {
         if (!res) break;
         exchanges.push({ user: userText, bot: res.botReply });
       }
-    })().catch(() => {
-      /* фоновая симуляция — ошибки не должны валить процесс */
-    });
+    };
+
+    if (params.background === false) {
+      // Eval-режим: ждём весь диалог, чтобы потом оценить его целиком.
+      await runRest();
+    } else {
+      // Боевой режим: остальные ходы в фоне (инбокс наполняется по поллингу).
+      void runRest().catch(() => {
+        /* фоновая симуляция — ошибки не должны валить процесс */
+      });
+    }
 
     return first.conversationId;
   }
@@ -682,6 +697,51 @@ export function makeAdminSimRoutes(opts: {
     for (const t of st.timers) clearTimeout(t);
     st.timers = [];
     return c.json({ ok: true, spawned: st.spawned, total: st.total });
+  });
+
+  // ── POST /api/admin/sim/exchange-eval ──────────────────────────────────
+  // Эмуляционный харнесс качества: гоняет exchange-сценарии как ЖИВЫЕ
+  // LLM-диалоги (синхронно, до конца) и авто-оценивает каждый — дошёл ли бот
+  // до курса/реквизитов и не сбежал ли к оператору раньше времени.
+  app.post("/api/admin/sim/exchange-eval", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? 0;
+    const ctx = await buildCtx(tenantId, adminId);
+    if (typeof ctx === "string") return c.json({ error: ctx }, 400);
+
+    const body = await c.req.json().catch(() => ({}) as Record<string, unknown>);
+    const maxTurns = Math.min(
+      Math.max(1, (body.maxTurns as number) ?? DEFAULT_MAX_TURNS),
+      MAX_TURNS_CAP,
+    );
+    const ids = Array.isArray(body.personaIds) ? (body.personaIds as string[]) : undefined;
+    const scenarios = PERSONAS.filter(
+      (p) => p.id.startsWith("exchange") && (!ids || ids.includes(p.id)),
+    );
+    if (scenarios.length === 0) return c.json({ error: "no exchange scenarios" }, 400);
+
+    const report: Array<Record<string, unknown>> = [];
+    for (const s of scenarios) {
+      try {
+        const conversationId = await simulateClient(ctx, {
+          brief: s.brief,
+          displayName: s.displayName,
+          maxTurns,
+          background: false,
+        });
+        const score = await scoreExchangeDialog(opts.db, tenantId, conversationId);
+        report.push({ id: s.id, displayName: s.displayName, ...score });
+      } catch (e) {
+        report.push({
+          id: s.id,
+          displayName: s.displayName,
+          passed: false,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    const passed = report.filter((r) => r.passed === true).length;
+    return c.json({ summary: { passed, total: report.length }, report });
   });
 
   // ── POST /api/admin/sim/start ──────────────────────────────────────────
