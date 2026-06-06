@@ -19,6 +19,154 @@ const baseStyle: Style = {
   model: { id: "x", temperature: 0.5, maxTokens: 100 },
 };
 
+describe("composeSystemPrompt — persona / voice / framework blocks", () => {
+  it("human persona: менеджер агентства + честное раскрытие бота (botDisclosure=true)", () => {
+    const p = composeSystemPrompt(
+      { ...baseStyle, persona: { name: "Аня", role: "human", company: "Acme" } },
+      "qualify",
+    );
+    expect(p).toContain("менеджер агентства Acme");
+    expect(p).toContain("ЧЕСТНО ответь, что ты ИИ-ассистент");
+    expect(p).toContain("ФРЕЙМВОРК");
+  });
+
+  it("human persona, botDisclosure=false → уклончивый ответ про бота", () => {
+    const s: Style = {
+      ...baseStyle,
+      guardrails: { ...baseStyle.guardrails, botDisclosureOnDirectQuestion: false },
+    };
+    const p = composeSystemPrompt(s, "qualify");
+    expect(p).toContain("отвечай уклончиво");
+  });
+
+  it("assistant persona: ИИ-ассистент", () => {
+    const p = composeSystemPrompt(
+      { ...baseStyle, persona: { name: "Бот", role: "assistant", company: "Acme" } },
+      "qualify",
+    );
+    expect(p).toContain("ИИ-ассистент агентства Acme");
+  });
+
+  it("persona.facts → блок личных фактов", () => {
+    const p = composeSystemPrompt(
+      { ...baseStyle, persona: { name: "Аня", role: "human", facts: { age: "25", empty: " " } } },
+      "qualify",
+    );
+    expect(p).toContain("ЛИЧНЫЕ ФАКТЫ");
+    expect(p).toContain("age: 25");
+    expect(p).not.toContain("empty");
+  });
+
+  it("voice.forbid → блок ЗАПРЕЩЕНО; язык en", () => {
+    const p = composeSystemPrompt(
+      { ...baseStyle, voice: { tone: "bold", language: "en", forbid: ["мат", "сленг"] } },
+      "qualify",
+    );
+    expect(p).toContain("Язык: английский");
+    expect(p).toContain("ЗАПРЕЩЕНО: мат; сленг");
+  });
+});
+
+describe("composeSystemPrompt — hooks / director hooks / skills", () => {
+  it("hooks → блок ХУКИ с лейблами", () => {
+    const p = composeSystemPrompt(
+      { ...baseStyle, hooks: [{ kind: "scarcity", text: "осталось 3 места" }] },
+      "qualify",
+    );
+    expect(p).toContain("ДЕФИЦИТ: осталось 3 места");
+  });
+
+  it("directorHooks → блок ХУКИ УБЕЖДЕНИЯ + triggerHint", () => {
+    const p = composeSystemPrompt(baseStyle, "qualify", null, {
+      directorHooks: [{ name: "FOMO", body: "дави на срочность", triggerHint: "колеблется" }],
+    });
+    expect(p).toContain("ХУКИ УБЕЖДЕНИЯ");
+    expect(p).toContain("FOMO");
+    expect(p).toContain("Когда: колеблется");
+  });
+
+  it("skills фильтруются по стадии", () => {
+    const p = composeSystemPrompt(baseStyle, "qualify", null, {
+      skills: [
+        { slug: "mirror", displayName: "Зеркало", promptFragment: "отражай", applicableStages: ["qualify"] },
+        { slug: "close", displayName: "Закрытие", promptFragment: "закрывай", applicableStages: ["close"] },
+        { slug: "always", displayName: "Всегда", promptFragment: "везде", applicableStages: [] },
+      ],
+    });
+    expect(p).toContain("ПРИЁМЫ");
+    expect(p).toContain("Зеркало");
+    expect(p).toContain("Всегда");
+    expect(p).not.toContain("Закрытие");
+  });
+});
+
+describe("composeSystemPrompt — support mode / grounding / few-shot", () => {
+  it("supportPhase=docs → блок поддержки, sales-блоки выкинуты", () => {
+    const s: Style = { ...baseStyle, hooks: [{ kind: "scarcity", text: "x" }] };
+    const p = composeSystemPrompt(s, "qualify", null, { supportPhase: "docs" });
+    expect(p).toContain("РЕЖИМ ПОДДЕРЖКИ");
+    expect(p).toContain("около 10 дней");
+    expect(p).not.toContain("ФРЕЙМВОРК");
+    expect(p).not.toContain("ДЕФИЦИТ");
+  });
+
+  it("supportPhase=submitted → текст про консульство", () => {
+    const p = composeSystemPrompt(baseStyle, "qualify", null, { supportPhase: "submitted" });
+    expect(p).toContain("подана в консульство");
+  });
+
+  it("groundingRequired + нет KB контекста → напоминание о grounding (human)", () => {
+    const s: Style = {
+      ...baseStyle,
+      persona: { name: "Аня", role: "human" },
+      stages: { qualify: { goal: "G", groundingRequired: true } },
+    };
+    const p = composeSystemPrompt(s, "qualify");
+    expect(p).toContain("GROUNDING");
+    expect(p).toContain("Никогда не выдумывай");
+  });
+
+  it("groundingRequired + есть KB контекст → KB CONTEXT присутствует", () => {
+    const s: Style = {
+      ...baseStyle,
+      stages: { qualify: { goal: "G", groundingRequired: true } },
+    };
+    const p = composeSystemPrompt(s, "qualify", "факт: зарплата 1500");
+    expect(p).toContain("KB CONTEXT");
+  });
+
+  it("few-shot включается по умолчанию и выключается флагом", () => {
+    const s: Style = {
+      ...baseStyle,
+      fewShot: [{ user: "сколько?", assistant: "уточню", stage: "qualify" }],
+    };
+    expect(composeSystemPrompt(s, "qualify")).toContain("ПРИМЕРЫ ДИАЛОГА");
+    expect(composeSystemPrompt(s, "qualify", null, { includeFewShot: false })).not.toContain(
+      "ПРИМЕРЫ ДИАЛОГА",
+    );
+  });
+
+  it("guardrails: noMinors + forbiddenTopics → жёсткие правила", () => {
+    const s: Style = {
+      ...baseStyle,
+      guardrails: {
+        noMinors: true,
+        botDisclosureOnDirectQuestion: true,
+        forbiddenTopics: ["политика"],
+      },
+    };
+    const p = composeSystemPrompt(s, "qualify");
+    expect(p).toContain("ЖЁСТКИЕ ПРАВИЛА");
+    expect(p).toContain("<18 лет");
+    expect(p).toContain("Запрещённые темы: политика");
+  });
+
+  it("стадия без конфига и без override → generic-блок", () => {
+    const p = composeSystemPrompt(baseStyle, "pitch");
+    expect(p).toContain("Специфических правил для этапа нет");
+  });
+});
+
 describe("composeSystemPrompt — stageOverride (Phase 2 C-2)", () => {
   it("без override → goal берётся из Style", () => {
     const p = composeSystemPrompt(baseStyle, "qualify");
