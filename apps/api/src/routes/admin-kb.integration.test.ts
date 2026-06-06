@@ -6,10 +6,12 @@ import { NullEmbeddingClient } from "@chatman-media/llm-router";
 import {
   applyAllMigrations,
   createIsolatedDb,
+  kbSuggestions,
   schema,
   tryConnectToPg,
 } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
@@ -257,5 +259,149 @@ describe("admin-kb upload/list/delete flow", () => {
       headers: { Authorization: "Bearer garbage-token" },
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("admin-kb suggestions", () => {
+  let pendingId = 0;
+  let decidedId = 0;
+
+  beforeAll(async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [p] = await db
+      .insert(kbSuggestions)
+      .values({
+        tenantId,
+        questionText: "Какой курс USDT?",
+        answerDraft: "Курс 36.5 ₽",
+        status: "pending",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: kbSuggestions.id });
+    pendingId = p!.id;
+    const [d] = await db
+      .insert(kbSuggestions)
+      .values({
+        tenantId,
+        questionText: "Уже решённый вопрос",
+        status: "rejected",
+        createdAt: now - 10,
+        updatedAt: now - 10,
+      })
+      .returning({ id: kbSuggestions.id });
+    decidedId = d!.id;
+  });
+
+  it("GET без auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request("/api/admin/kb/suggestions");
+    expect(res.status).toBe(401);
+  });
+
+  it("GET ?status=pending → возвращает pending + pendingCount", async () => {
+    if (!sql) return;
+    const res = await authReq("/api/admin/kb/suggestions");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: Array<{ id: number; status: string }>;
+      pendingCount: number;
+    };
+    expect(body.items.every((i) => i.status === "pending")).toBe(true);
+    expect(body.pendingCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("GET ?status=rejected → только rejected", async () => {
+    if (!sql) return;
+    const res = await authReq("/api/admin/kb/suggestions?status=rejected");
+    const body = (await res.json()) as { items: Array<{ id: number; status: string }> };
+    expect(body.items.some((i) => i.id === decidedId)).toBe(true);
+    expect(body.items.every((i) => i.status === "rejected")).toBe(true);
+  });
+
+  it("PATCH bad id → 400", async () => {
+    if (!sql) return;
+    const res = await authReq("/api/admin/kb/suggestions/abc", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reject" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH несуществующий → 404", async () => {
+    if (!sql) return;
+    const res = await authReq("/api/admin/kb/suggestions/999999", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reject" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("PATCH уже решённого → 409", async () => {
+    if (!sql) return;
+    const res = await authReq(`/api/admin/kb/suggestions/${decidedId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reject" }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("PATCH approve без answerDraft → ингестит из suggestion.answerDraft", async () => {
+    if (!sql) return;
+    const res = await authReq(`/api/admin/kb/suggestions/${pendingId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "approve" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; kbDocumentId: number };
+    expect(body.ok).toBe(true);
+    expect(body.kbDocumentId).toBeGreaterThan(0);
+    const [row] = await db
+      .select({ status: kbSuggestions.status, kbDocumentId: kbSuggestions.kbDocumentId })
+      .from(kbSuggestions)
+      .where(and(eq(kbSuggestions.id, pendingId), eq(kbSuggestions.tenantId, tenantId)));
+    expect(row!.status).toBe("ingested");
+    expect(row!.kbDocumentId).toBe(body.kbDocumentId);
+  });
+
+  it("PATCH approve пустого answerDraft → 400", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [s] = await db
+      .insert(kbSuggestions)
+      .values({ tenantId, questionText: "Без ответа", status: "pending", createdAt: now, updatedAt: now })
+      .returning({ id: kbSuggestions.id });
+    const res = await authReq(`/api/admin/kb/suggestions/${s!.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "approve" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH reject c reason → status=rejected", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [s] = await db
+      .insert(kbSuggestions)
+      .values({ tenantId, questionText: "Отклонить", status: "pending", createdAt: now, updatedAt: now })
+      .returning({ id: kbSuggestions.id });
+    const res = await authReq(`/api/admin/kb/suggestions/${s!.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reject", rejectedReason: "не релевантно" }),
+    });
+    expect(res.status).toBe(200);
+    const [row] = await db
+      .select({ status: kbSuggestions.status, reason: kbSuggestions.rejectedReason })
+      .from(kbSuggestions)
+      .where(eq(kbSuggestions.id, s!.id));
+    expect(row!.status).toBe("rejected");
+    expect(row!.reason).toBe("не релевантно");
   });
 });

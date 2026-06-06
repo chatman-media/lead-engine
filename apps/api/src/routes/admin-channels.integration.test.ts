@@ -3,6 +3,8 @@
 // list → delete. Проверяем что token encrypted в tenant_secrets и не
 // возвращается через GET.
 
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { resolve } from "node:path";
 import {
   applyAllMigrations,
   channels,
@@ -11,12 +13,11 @@ import {
   tenantSecrets,
   tryConnectToPg,
 } from "@chatman-media/storage";
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
-import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
+import { UserbotLoginStore } from "../lib/userbot-login-store.ts";
 import { makeRequireAuth } from "../middleware/require-auth.ts";
 import { makeAdminChannelsRoutes } from "./admin-channels.ts";
 import { makeAuthRoutes } from "./auth.ts";
@@ -39,6 +40,9 @@ const MASTER_KEY_HEX = "a".repeat(64);
 let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
 let app: Hono;
+// Второй app с userbotLoginStore — чтобы пройти guard userbotEnabled() и
+// добраться до валидации (phone/creds/loginId) без реального MTProto-логина.
+let appUb: Hono;
 let tokenA = "";
 let tenantIdA = 0;
 let tokenB = "";
@@ -68,6 +72,20 @@ const fakeTelegramFetch = (async (
         JSON.stringify({ error: { code: 190, message: "Invalid OAuth access token" } }),
         { status: 401, headers: { "content-type": "application/json" } },
       );
+    }
+    // ── Facebook Messenger page-info: GET /me?fields=id,name ──────────────
+    // Token `unexpected-id` → Graph returns a non-numeric id (→ 502 in route).
+    if (url.includes("/me?fields=id,name")) {
+      if (auth.includes("unexpected-id")) {
+        return new Response(JSON.stringify({ id: "not-a-number", name: "X" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ id: "112233445566", name: "Acme Page" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     }
     const m = url.match(/\/v\d+\.\d+\/(\d+)$/);
     const phoneId = m?.[1] ?? "";
@@ -130,55 +148,68 @@ const fakeTelegramFetch = (async (
   );
 }) as unknown as typeof fetch;
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route(
-      "/",
-      makeAdminChannelsRoutes({
-        db,
-        masterKeyHex: MASTER_KEY_HEX,
-        fetchImpl: fakeTelegramFetch,
-        publicUrl: "https://api.example.test",
-        webhookSecret: "test-webhook-secret-12345",
-        whatsappVerifyToken: "test-wa-verify-token",
-      }),
-    );
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route(
+    "/",
+    makeAdminChannelsRoutes({
+      db,
+      masterKeyHex: MASTER_KEY_HEX,
+      fetchImpl: fakeTelegramFetch,
+      publicUrl: "https://api.example.test",
+      webhookSecret: "test-webhook-secret-12345",
+      whatsappVerifyToken: "test-wa-verify-token",
+    }),
+  );
 
-    // Tenant A
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "chan-a@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
-    tokenA = sba.token;
-    tenantIdA = sba.admin.tenantId;
+  // Userbot-enabled app: login-store задан, но MTProto-кредов НЕТ (ни env,
+  // ни tenant_secrets) — /start доходит до 400 creds_required без сети.
+  appUb = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  appUb.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  appUb.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  appUb.route(
+    "/",
+    makeAdminChannelsRoutes({
+      db,
+      masterKeyHex: MASTER_KEY_HEX,
+      fetchImpl: fakeTelegramFetch,
+      userbotLoginStore: new UserbotLoginStore(),
+    }),
+  );
 
-    // Tenant B (cross-tenant isolation)
-    const sb = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "chan-b@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sbb = (await sb.json()) as { token: string; admin: { tenantId: number } };
-    tokenB = sbb.token;
-    tenantIdB = sbb.admin.tenantId;
-  },
-  30_000,
-);
+  // Tenant A
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "chan-a@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  tokenA = sba.token;
+  tenantIdA = sba.admin.tenantId;
+
+  // Tenant B (cross-tenant isolation)
+  const sb = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "chan-b@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sbb = (await sb.json()) as { token: string; admin: { tenantId: number } };
+  tokenB = sbb.token;
+  tenantIdB = sbb.admin.tenantId;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -187,11 +218,7 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function authReq(
-  token: string,
-  path: string,
-  init: RequestInit = {},
-): Promise<Response> {
+async function authReq(token: string, path: string, init: RequestInit = {}): Promise<Response> {
   return await app.request(path, {
     ...init,
     headers: {
@@ -291,9 +318,7 @@ describe("admin-channels CRUD", () => {
     const [chan] = await db
       .select()
       .from(channels)
-      .where(
-        and(eq(channels.tenantId, tenantIdA), eq(channels.kind, "telegram_bot")),
-      );
+      .where(and(eq(channels.tenantId, tenantIdA), eq(channels.kind, "telegram_bot")));
     expect(chan).toBeDefined();
     expect(chan!.credentialsRef).toBe(`channel_telegram_bot_${body.username}`);
     expect(chan!.status).toBe("active");
@@ -661,5 +686,196 @@ describe("admin-channels POST /web + GET /web/snippet", () => {
     // Master key / API keys / etc — НЕ в snippet
     expect(body.snippet.html).not.toMatch(/sk-|api_key|secret/i);
     expect(body.snippet.wsUrl).not.toMatch(/sk-|api_key|secret/i);
+  });
+});
+
+describe("POST /api/admin/channels/facebook", () => {
+  it("без auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request("/api/admin/channels/facebook", { method: "POST" });
+    expect(res.status).toBe(401);
+  });
+
+  it("invalid json → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/facebook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{bad",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("без pageAccessToken → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/facebook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ verifyToken: "vt" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("Meta отклонил токен (bad-token) → 401", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/facebook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pageAccessToken: "bad-token-xyz" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("Meta вернула не-числовой page id → 502", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/facebook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pageAccessToken: "unexpected-id-token" }),
+    });
+    expect(res.status).toBe(502);
+  });
+
+  it("happy: создаёт facebook-канал, шифрует токен + verify/appSecret", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/facebook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pageAccessToken: "EAAG-good-page-token",
+        verifyToken: "my-verify",
+        appSecret: "my-app-secret",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; pageId: string; pageName?: string };
+    expect(body.ok).toBe(true);
+    expect(body.pageId).toBe("112233445566");
+    expect(body.pageName).toBe("Acme Page");
+    // канал создан
+    const chRows = await db
+      .select({ kind: channels.kind, externalId: channels.externalId })
+      .from(channels)
+      .where(and(eq(channels.tenantId, tenantIdA), eq(channels.kind, "facebook")));
+    expect(chRows.some((r) => r.externalId === "112233445566")).toBe(true);
+    // токен зашифрован в tenant_secrets
+    const secrets = await db
+      .select({ key: tenantSecrets.key })
+      .from(tenantSecrets)
+      .where(eq(tenantSecrets.tenantId, tenantIdA));
+    const keys = secrets.map((s) => s.key);
+    expect(keys.some((k) => k.startsWith("channel_facebook_"))).toBe(true);
+  });
+});
+
+describe("DELETE /api/admin/channels/:id", () => {
+  it("invalid id → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/abc", { method: "DELETE" });
+    expect(res.status).toBe(400);
+  });
+
+  it("несуществующий канал → 404", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/99999999", { method: "DELETE" });
+    expect(res.status).toBe(404);
+  });
+
+  it("happy: удаляет канал tenant A", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [ch] = await db
+      .insert(channels)
+      .values({
+        tenantId: tenantIdA,
+        kind: "telegram_bot",
+        externalId: "to-delete",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: channels.id });
+    const res = await authReq(tokenA, `/api/admin/channels/${ch!.id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; deleted: number };
+    expect(body.ok).toBe(true);
+    expect(body.deleted).toBe(1);
+  });
+});
+
+describe("userbot routes — guards", () => {
+  it("start: login-store не задан → 503", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/userbot/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: "+79991234567" }),
+    });
+    expect(res.status).toBe(503);
+  });
+
+  it("verify / 2fa: login-store не задан → 503", async () => {
+    if (!sql) return;
+    for (const path of ["verify", "2fa"]) {
+      const res = await authReq(tokenA, `/api/admin/channels/userbot/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loginId: "x", code: "1", password: "p" }),
+      });
+      expect(res.status).toBe(503);
+    }
+  });
+
+  async function ubReq(path: string, body: unknown): Promise<Response> {
+    return appUb.request(`/api/admin/channels/userbot/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("start: невалидный телефон → 400 phone_invalid", async () => {
+    if (!sql) return;
+    const res = await ubReq("start", { phone: "abc" });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("phone_invalid");
+  });
+
+  it("start: apiId без apiHash → 400 creds_invalid", async () => {
+    if (!sql) return;
+    const res = await ubReq("start", { phone: "+79991234567", apiId: 123 });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("userbot_creds_invalid");
+  });
+
+  it("start: валидный телефон, но кредов нет нигде → 400 creds_required", async () => {
+    if (!sql) return;
+    const res = await ubReq("start", { phone: "+79991234567" });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("userbot_creds_required");
+  });
+
+  it("verify: нет loginId/code → 400", async () => {
+    if (!sql) return;
+    const res = await ubReq("verify", { loginId: "" });
+    expect(res.status).toBe(400);
+  });
+
+  it("verify: неизвестный loginId → 410 login_expired", async () => {
+    if (!sql) return;
+    const res = await ubReq("verify", { loginId: "nope", code: "12345" });
+    expect(res.status).toBe(410);
+  });
+
+  it("2fa: нет loginId/password → 400", async () => {
+    if (!sql) return;
+    const res = await ubReq("2fa", { loginId: "x" });
+    expect(res.status).toBe(400);
+  });
+
+  it("2fa: неизвестный loginId → 410", async () => {
+    if (!sql) return;
+    const res = await ubReq("2fa", { loginId: "nope", password: "secret" });
+    expect(res.status).toBe(410);
   });
 });

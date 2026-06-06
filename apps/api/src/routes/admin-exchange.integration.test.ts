@@ -600,3 +600,184 @@ describe("admin-exchange settings (per-tenant частота/порог)", () =>
 		expect(badStale.status).toBe(400);
 	});
 });
+
+describe("POST /api/admin/exchange/rates — upsert + validation", () => {
+	it("без auth → 401", async () => {
+		if (!sql) return;
+		const res = await app.request("/api/admin/exchange/rates", { method: "POST" });
+		expect(res.status).toBe(401);
+	});
+
+	it("без asset → 400", async () => {
+		if (!sql) return;
+		const res = await postJson(tokenA, "/api/admin/exchange/rates", { baseRate: 36 });
+		expect(res.status).toBe(400);
+	});
+
+	it("manual курс baseRate<=0 → 400", async () => {
+		if (!sql) return;
+		const res = await postJson(tokenA, "/api/admin/exchange/rates", {
+			asset: "USDT",
+			baseRate: 0,
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("отрицательная маржа → 400", async () => {
+		if (!sql) return;
+		const res = await postJson(tokenA, "/api/admin/exchange/rates", {
+			asset: "USDT",
+			baseRate: 36,
+			marginPct: -5,
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("маржа ≥100% → 400", async () => {
+		if (!sql) return;
+		const res = await postJson(tokenA, "/api/admin/exchange/rates", {
+			asset: "USDT",
+			baseRate: 36,
+			marginPct: 150,
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("отрицательная fee → 400", async () => {
+		if (!sql) return;
+		const res = await postJson(tokenA, "/api/admin/exchange/rates", {
+			asset: "USDT",
+			baseRate: 36,
+			feeFixedThb: -1,
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("happy manual: создаёт rate + onReload", async () => {
+		if (!sql) return;
+		reloadCalls = [];
+		const res = await postJson(tokenA, "/api/admin/exchange/rates", {
+			asset: "usdt",
+			quoteAsset: "thb",
+			network: "TRC-20",
+			baseRate: 36.5,
+			marginPct: 2,
+			feeFixedThb: 10,
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			ok: boolean;
+			rate: { asset: string; network: string; baseRate: number };
+		};
+		expect(body.ok).toBe(true);
+		expect(body.rate.asset).toBe("USDT"); // upper-cased
+		expect(body.rate.network).toBe("trc20"); // lower-cased + dashes stripped
+		expect(reloadCalls).toContain(tenantA);
+	});
+
+	it("auto-update: baseRate 0 допустим", async () => {
+		if (!sql) return;
+		const res = await postJson(tokenA, "/api/admin/exchange/rates", {
+			asset: "BTC",
+			autoUpdate: true,
+			baseRate: 0,
+		});
+		expect(res.status).toBe(200);
+	});
+
+	it("повторный POST (asset,quote,network) → upsert обновляет", async () => {
+		if (!sql) return;
+		const first = await postJson(tokenA, "/api/admin/exchange/rates", {
+			asset: "ETH",
+			quoteAsset: "thb",
+			network: "erc20",
+			baseRate: 100,
+		});
+		const firstBody = (await first.json()) as { rate: { id: number } };
+		const second = await postJson(tokenA, "/api/admin/exchange/rates", {
+			asset: "ETH",
+			quoteAsset: "thb",
+			network: "erc20",
+			baseRate: 200,
+		});
+		const secondBody = (await second.json()) as { rate: { id: number; baseRate: number } };
+		expect(secondBody.rate.id).toBe(firstBody.rate.id);
+		expect(Number(secondBody.rate.baseRate)).toBe(200);
+	});
+});
+
+describe("DELETE /api/admin/exchange/rates/:id", () => {
+	it("bad id (не число) → 400", async () => {
+		if (!sql) return;
+		const res = await authReq(tokenA, "/api/admin/exchange/rates/abc", {
+			method: "DELETE",
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("несуществующий id → 200 (idempotent delete)", async () => {
+		if (!sql) return;
+		const res = await authReq(tokenA, "/api/admin/exchange/rates/99999999", {
+			method: "DELETE",
+		});
+		expect(res.status).toBe(200);
+	});
+
+	it("happy: удаляет свой rate", async () => {
+		if (!sql) return;
+		const created = await postJson(tokenA, "/api/admin/exchange/rates", {
+			asset: "SOL",
+			quoteAsset: "thb",
+			network: "sol",
+			baseRate: 50,
+		});
+		const { rate } = (await created.json()) as { rate: { id: number } };
+		const res = await authReq(tokenA, `/api/admin/exchange/rates/${rate.id}`, {
+			method: "DELETE",
+		});
+		expect(res.status).toBe(200);
+	});
+});
+
+describe("exchange requisites", () => {
+	it("POST неизвестный key → 400", async () => {
+		if (!sql) return;
+		const res = await postJson(tokenA, "/api/admin/exchange/requisites", {
+			key: "not_allowed",
+			value: "x",
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("POST без value → 400", async () => {
+		if (!sql) return;
+		const res = await postJson(tokenA, "/api/admin/exchange/requisites", {
+			key: "exchange_binance_id",
+			value: "",
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("POST happy → шифрует, GET возвращает расшифрованным", async () => {
+		if (!sql) return;
+		const res = await postJson(tokenA, "/api/admin/exchange/requisites", {
+			key: "exchange_binance_id",
+			value: "binance-12345",
+		});
+		expect(res.status).toBe(200);
+		const getRes = await authReq(tokenA, "/api/admin/exchange/requisites");
+		const body = (await getRes.json()) as { items: Array<{ key: string; value: string }> };
+		const bn = body.items.find((i) => i.key === "exchange_binance_id");
+		expect(bn?.value).toBe("binance-12345");
+	});
+});
+
+describe("POST /api/admin/exchange/rates/refresh", () => {
+	it("без auto-курсов → ok с пустым результатом", async () => {
+		if (!sql) return;
+		const res = await postJson(tokenB, "/api/admin/exchange/rates/refresh", {});
+		// refreshTenantRates без сети может вернуть ok (нет auto-rates) или 502;
+		// проверяем что роут отвечает детерминированно одним из этих.
+		expect([200, 502]).toContain(res.status);
+	});
+});

@@ -2,23 +2,26 @@
 // stages, field values — pagination, contactId filter, stage move, field upsert,
 // cross-tenant isolation, contact search.
 
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { resolve } from "node:path";
 import {
   applyAllMigrations,
   channelIdentities,
   channels,
   contacts,
+  conversations,
   createIsolatedDb,
   funnels,
   leads,
+  messages,
+  outboundQueue,
   schema,
   stageDefinitions,
   tenants,
   tryConnectToPg,
 } from "@chatman-media/storage";
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
-import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
 import { makeRequireAuth } from "../middleware/require-auth.ts";
 import { makeAdminLeadsRoutes } from "./admin-leads.ts";
@@ -56,170 +59,167 @@ let leadIdA = 0;
 let leadIdA2 = 0;
 let leadIdA3 = 0; // fresh lead on stageIdA for transition validation tests
 
-beforeAll(
-  async () => {
-    if (!ownerUrl) return;
-    const probe = await tryConnectToPg(ownerUrl);
-    if (!probe) return;
-    await probe.end({ timeout: 0 });
-    const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
-    sql = postgres(testUrl, { max: 2, onnotice: () => {} });
-    await applyAllMigrations(sql, migrationsDir);
-    db = drizzle(sql, { schema });
+beforeAll(async () => {
+  if (!ownerUrl) return;
+  const probe = await tryConnectToPg(ownerUrl);
+  if (!probe) return;
+  await probe.end({ timeout: 0 });
+  const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
+  sql = postgres(testUrl, { max: 2, onnotice: () => {} });
+  await applyAllMigrations(sql, migrationsDir);
+  db = drizzle(sql, { schema });
 
-    app = new Hono();
-    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
-    app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
-    app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminLeadsRoutes({ db }));
+  app = new Hono();
+  // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+  app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+  app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+  app.route("/", makeAdminLeadsRoutes({ db }));
 
-    // Tenant A
-    const sa = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "leads-a@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
-    tokenA = sba.token;
-    tenantA = sba.admin.tenantId;
+  // Tenant A
+  const sa = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "leads-a@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sba = (await sa.json()) as { token: string; admin: { tenantId: number } };
+  tokenA = sba.token;
+  tenantA = sba.admin.tenantId;
 
-    // Tenant B
-    const sb = await app.request("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "leads-b@demo.io", password: "strong-pwd-12345" }),
-    });
-    const sbb = (await sb.json()) as { token: string; admin: { tenantId: number } };
-    tokenB = sbb.token;
-    tenantB = sbb.admin.tenantId;
+  // Tenant B
+  const sb = await app.request("/api/auth/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "leads-b@demo.io", password: "strong-pwd-12345" }),
+  });
+  const sbb = (await sb.json()) as { token: string; admin: { tenantId: number } };
+  tokenB = sbb.token;
+  tenantB = sbb.admin.tenantId;
 
-    const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(Date.now() / 1000);
 
-    // Create contacts for tenant A
-    const [c1] = await db
-      .insert(contacts)
-      .values({ tenantId: tenantA, displayName: "Alice Wonderland" })
-      .returning({ id: contacts.id });
-    contactIdA = c1!.id;
+  // Create contacts for tenant A
+  const [c1] = await db
+    .insert(contacts)
+    .values({ tenantId: tenantA, displayName: "Alice Wonderland" })
+    .returning({ id: contacts.id });
+  contactIdA = c1!.id;
 
-    const [c2] = await db
-      .insert(contacts)
-      .values({ tenantId: tenantA, displayName: "Bob Builder" })
-      .returning({ id: contacts.id });
-    contactIdA2 = c2!.id;
+  const [c2] = await db
+    .insert(contacts)
+    .values({ tenantId: tenantA, displayName: "Bob Builder" })
+    .returning({ id: contacts.id });
+  contactIdA2 = c2!.id;
 
-    // Create a contact for tenant B (to verify isolation)
-    await db
-      .insert(contacts)
-      .values({ tenantId: tenantB, displayName: "Charlie Chaplin" })
-      .returning({ id: contacts.id });
+  // Create a contact for tenant B (to verify isolation)
+  await db
+    .insert(contacts)
+    .values({ tenantId: tenantB, displayName: "Charlie Chaplin" })
+    .returning({ id: contacts.id });
 
-    // Create funnel + stages for tenant A
-    const [funnel] = await db
-      .insert(funnels)
-      .values({ tenantId: tenantA, slug: "main", isActive: true, createdAt: now, updatedAt: now })
-      .returning({ id: funnels.id });
-    funnelIdA = funnel!.id;
+  // Create funnel + stages for tenant A
+  const [funnel] = await db
+    .insert(funnels)
+    .values({ tenantId: tenantA, slug: "main", isActive: true, createdAt: now, updatedAt: now })
+    .returning({ id: funnels.id });
+  funnelIdA = funnel!.id;
 
-    const [stage1] = await db
-      .insert(stageDefinitions)
-      .values({
-        tenantId: tenantA,
-        funnelId: funnelIdA,
-        slug: "intake_pending",
-        displayName: "Intake",
-        kind: "intake",
-        stageType: "form_fill",
-        position: 0,
-        nextStages: ["review"],
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: stageDefinitions.id });
-    stageIdA = stage1!.id;
+  const [stage1] = await db
+    .insert(stageDefinitions)
+    .values({
+      tenantId: tenantA,
+      funnelId: funnelIdA,
+      slug: "intake_pending",
+      displayName: "Intake",
+      kind: "intake",
+      stageType: "form_fill",
+      position: 0,
+      nextStages: ["review"],
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: stageDefinitions.id });
+  stageIdA = stage1!.id;
 
-    const [stage2] = await db
-      .insert(stageDefinitions)
-      .values({
-        tenantId: tenantA,
-        funnelId: funnelIdA,
-        slug: "review",
-        displayName: "Review",
-        kind: "active",
-        stageType: "form_fill",
-        position: 1,
-        nextStages: [],
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: stageDefinitions.id });
-    stageIdA2 = stage2!.id;
+  const [stage2] = await db
+    .insert(stageDefinitions)
+    .values({
+      tenantId: tenantA,
+      funnelId: funnelIdA,
+      slug: "review",
+      displayName: "Review",
+      kind: "active",
+      stageType: "form_fill",
+      position: 1,
+      nextStages: [],
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: stageDefinitions.id });
+  stageIdA2 = stage2!.id;
 
-    // Third stage — slug "blocked_stage", NOT listed in stageIdA.nextStages
-    const [stage3] = await db
-      .insert(stageDefinitions)
-      .values({
-        tenantId: tenantA,
-        funnelId: funnelIdA,
-        slug: "blocked_stage",
-        displayName: "Blocked Stage",
-        kind: "active",
-        stageType: "form_fill",
-        position: 2,
-        nextStages: [],
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: stageDefinitions.id });
-    stageIdA3 = stage3!.id;
+  // Third stage — slug "blocked_stage", NOT listed in stageIdA.nextStages
+  const [stage3] = await db
+    .insert(stageDefinitions)
+    .values({
+      tenantId: tenantA,
+      funnelId: funnelIdA,
+      slug: "blocked_stage",
+      displayName: "Blocked Stage",
+      kind: "active",
+      stageType: "form_fill",
+      position: 2,
+      nextStages: [],
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: stageDefinitions.id });
+  stageIdA3 = stage3!.id;
 
-    // Create two leads for tenant A
-    const [lead1] = await db
-      .insert(leads)
-      .values({
-        tenantId: tenantA,
-        userId: contactIdA,
-        state: "intake_pending",
-        stageDefinitionId: stageIdA,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning({ id: leads.id });
-    leadIdA = lead1!.id;
+  // Create two leads for tenant A
+  const [lead1] = await db
+    .insert(leads)
+    .values({
+      tenantId: tenantA,
+      userId: contactIdA,
+      state: "intake_pending",
+      stageDefinitionId: stageIdA,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: leads.id });
+  leadIdA = lead1!.id;
 
-    const [lead2] = await db
-      .insert(leads)
-      .values({
-        tenantId: tenantA,
-        userId: contactIdA2,
-        state: "intake_pending",
-        stageDefinitionId: stageIdA,
-        createdAt: now - 100,
-        updatedAt: now - 100,
-      })
-      .returning({ id: leads.id });
-    leadIdA2 = lead2!.id;
+  const [lead2] = await db
+    .insert(leads)
+    .values({
+      tenantId: tenantA,
+      userId: contactIdA2,
+      state: "intake_pending",
+      stageDefinitionId: stageIdA,
+      createdAt: now - 100,
+      updatedAt: now - 100,
+    })
+    .returning({ id: leads.id });
+  leadIdA2 = lead2!.id;
 
-    // Third contact + lead for transition validation tests
-    const [c3] = await db
-      .insert(contacts)
-      .values({ tenantId: tenantA, displayName: "Dave Validation" })
-      .returning({ id: contacts.id });
-    const [lead3] = await db
-      .insert(leads)
-      .values({
-        tenantId: tenantA,
-        userId: c3!.id,
-        state: "intake_pending",
-        stageDefinitionId: stageIdA,
-        createdAt: now - 200,
-        updatedAt: now - 200,
-      })
-      .returning({ id: leads.id });
-    leadIdA3 = lead3!.id;
-  },
-  30_000,
-);
+  // Third contact + lead for transition validation tests
+  const [c3] = await db
+    .insert(contacts)
+    .values({ tenantId: tenantA, displayName: "Dave Validation" })
+    .returning({ id: contacts.id });
+  const [lead3] = await db
+    .insert(leads)
+    .values({
+      tenantId: tenantA,
+      userId: c3!.id,
+      state: "intake_pending",
+      stageDefinitionId: stageIdA,
+      createdAt: now - 200,
+      updatedAt: now - 200,
+    })
+    .returning({ id: leads.id });
+  leadIdA3 = lead3!.id;
+}, 30_000);
 
 afterAll(async () => {
   if (sql) {
@@ -228,11 +228,7 @@ afterAll(async () => {
   }
 }, 10_000);
 
-async function authReq(
-  token: string,
-  path: string,
-  init: RequestInit = {},
-): Promise<Response> {
+async function authReq(token: string, path: string, init: RequestInit = {}): Promise<Response> {
   return await app.request(path, {
     ...init,
     headers: {
@@ -559,7 +555,11 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
       body: JSON.stringify({ values: [{ fieldId, value: "hello world" }] }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; advanced: boolean; newStageSlug: string | null };
+    const body = (await res.json()) as {
+      ok: boolean;
+      advanced: boolean;
+      newStageSlug: string | null;
+    };
     expect(body.ok).toBe(true);
     expect(typeof body.advanced).toBe("boolean");
 
@@ -799,34 +799,76 @@ describe("send-offer — awaiting_operator advance (R5)", () => {
     const [fulfill] = await db
       .insert(stageDefinitions)
       .values({
-        tenantId: tenantA, funnelId: funnelIdA, slug: "op_fulfill", displayName: "Fulfill",
-        kind: "active", stageType: "milestone", position: 10, nextStages: [], createdAt: now, updatedAt: now,
+        tenantId: tenantA,
+        funnelId: funnelIdA,
+        slug: "op_fulfill",
+        displayName: "Fulfill",
+        kind: "active",
+        stageType: "milestone",
+        position: 10,
+        nextStages: [],
+        createdAt: now,
+        updatedAt: now,
       })
       .returning({ id: stageDefinitions.id });
     void fulfill;
     const [offer] = await db
       .insert(stageDefinitions)
       .values({
-        tenantId: tenantA, funnelId: funnelIdA, slug: "op_offer", displayName: "Offer (operator)",
-        kind: "active", stageType: "awaiting_operator", phase: "offer", position: 9,
-        nextStages: ["op_fulfill"], createdAt: now, updatedAt: now,
+        tenantId: tenantA,
+        funnelId: funnelIdA,
+        slug: "op_offer",
+        displayName: "Offer (operator)",
+        kind: "active",
+        stageType: "awaiting_operator",
+        phase: "offer",
+        position: 9,
+        nextStages: ["op_fulfill"],
+        createdAt: now,
+        updatedAt: now,
       })
       .returning({ id: stageDefinitions.id });
     // канал + identity для contactIdA — иначе send-offer вернёт 409 no_channel
     const [ch] = await db
       .insert(channels)
-      .values({ tenantId: tenantA, kind: "telegram_bot", externalId: "op-bot", status: "active", createdAt: now, updatedAt: now })
+      .values({
+        tenantId: tenantA,
+        kind: "telegram_bot",
+        externalId: "op-bot",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
       .returning({ id: channels.id });
-    await db.insert(channelIdentities).values({ contactId: contactIdA, channelId: ch!.id, externalUserId: "tg-op-1", createdAt: now });
+    await db.insert(channelIdentities).values({
+      contactId: contactIdA,
+      channelId: ch!.id,
+      externalUserId: "tg-op-1",
+      createdAt: now,
+    });
     const [l1] = await db
       .insert(leads)
-      .values({ tenantId: tenantA, userId: contactIdA, state: "op_offer", stageDefinitionId: offer!.id, createdAt: now, updatedAt: now })
+      .values({
+        tenantId: tenantA,
+        userId: contactIdA,
+        state: "op_offer",
+        stageDefinitionId: offer!.id,
+        createdAt: now,
+        updatedAt: now,
+      })
       .returning({ id: leads.id });
     opLeadId = l1!.id;
     // лид того же контакта на обычной стадии (канал есть) — для негатива
     const [l2] = await db
       .insert(leads)
-      .values({ tenantId: tenantA, userId: contactIdA, state: "review", stageDefinitionId: stageIdA2, createdAt: now, updatedAt: now })
+      .values({
+        tenantId: tenantA,
+        userId: contactIdA,
+        state: "review",
+        stageDefinitionId: stageIdA2,
+        createdAt: now,
+        updatedAt: now,
+      })
       .returning({ id: leads.id });
     normLeadId = l2!.id;
   });
@@ -856,6 +898,297 @@ describe("send-offer — awaiting_operator advance (R5)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { advancedTo: string | null };
     expect(body.advancedTo).toBe(null);
+  });
+});
+
+describe("POST /api/admin/leads/:id/advance", () => {
+  let freshLeadId = 0;
+  beforeAll(async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [l] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: contactIdA,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    freshLeadId = l!.id;
+  });
+
+  it("invalid id → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads/abc/advance", { method: "POST" });
+    expect(res.status).toBe(400);
+  });
+
+  it("happy: двигает на nextStages[0] (intake_pending → review)", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, `/api/admin/leads/${freshLeadId}/advance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "переводим в ревью" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; from: string; to: string };
+    expect(body.ok).toBe(true);
+    expect(body.to).toBe("review");
+  });
+
+  it("пустое тело допустимо (note optional)", async () => {
+    if (!sql) return;
+    // lead now on "review" (nextStages: []) → no further stage → 409
+    const res = await authReq(tokenA, `/api/admin/leads/${freshLeadId}/advance`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(409);
+  });
+});
+
+describe("GET /api/admin/leads/export.csv", () => {
+  it("без auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request("/api/admin/leads/export.csv");
+    expect(res.status).toBe(401);
+  });
+
+  it("отдаёт CSV с BOM, заголовками и строками лидов tenant A", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads/export.csv");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("text/csv");
+    expect(res.headers.get("Content-Disposition")).toContain("leads.csv");
+    const text = await res.text();
+    expect(text.charCodeAt(0)).toBe(0xfeff); // UTF-8 BOM
+    const headerLine = text.replace(/^﻿/, "").split("\r\n")[0] ?? "";
+    expect(headerLine).toContain("id");
+    expect(headerLine).toContain("contactName");
+    expect(text).toContain("Alice Wonderland");
+  });
+
+  it("экранирует CSV-ячейки с запятыми/кавычками (через имя контакта)", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [qc] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: 'Quote "Comma", Inc' })
+      .returning({ id: contacts.id });
+    await db.insert(leads).values({
+      tenantId: tenantA,
+      userId: qc!.id,
+      state: "intake_pending",
+      stageDefinitionId: stageIdA,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const res = await authReq(tokenA, "/api/admin/leads/export.csv");
+    const text = await res.text();
+    // CSV-quoting удваивает внутренние кавычки и оборачивает ячейку
+    expect(text).toContain('"Quote ""Comma"", Inc"');
+  });
+});
+
+describe("POST /api/admin/leads/import", () => {
+  it("text/csv body → импортирует строки", async () => {
+    if (!sql) return;
+    const csv = "name,phone,email,stage_slug\nИмпорт Один,+100,one@x.io,review\nИмпорт Два,,,";
+    const res = await authReq(tokenA, "/api/admin/leads/import", {
+      method: "POST",
+      headers: { "Content-Type": "text/csv" },
+      body: csv,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { imported: number; skipped: number; errors: string[] };
+    expect(body.imported).toBe(2);
+  });
+
+  it("multipart form file → импортирует", async () => {
+    if (!sql) return;
+    const form = new FormData();
+    form.set("file", new File(["name\nИз Файла"], "leads.csv", { type: "text/csv" }));
+    const res = await authReq(tokenA, "/api/admin/leads/import", { method: "POST", body: form });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { imported: number };
+    expect(body.imported).toBe(1);
+  });
+
+  it("multipart без файла → 400", async () => {
+    if (!sql) return;
+    const form = new FormData();
+    form.set("notfile", "x");
+    const res = await authReq(tokenA, "/api/admin/leads/import", { method: "POST", body: form });
+    expect(res.status).toBe(400);
+  });
+
+  it("без колонки name → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads/import", {
+      method: "POST",
+      headers: { "Content-Type": "text/csv" },
+      body: "phone,email\n+1,a@b.io",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("только заголовок (нет данных) → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads/import", {
+      method: "POST",
+      headers: { "Content-Type": "text/csv" },
+      body: "name,phone",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("строки без name пропускаются (skipped)", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads/import", {
+      method: "POST",
+      headers: { "Content-Type": "text/csv" },
+      body: 'name,phone\n"",+1\nВалид,+2',
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { imported: number; skipped: number };
+    expect(body.imported).toBe(1);
+    expect(body.skipped).toBe(1);
+  });
+});
+
+describe("POST /api/admin/leads/:id/send-photo", () => {
+  let photoContactId = 0;
+  let photoLeadId = 0;
+  let noChannelLeadId = 0;
+
+  beforeAll(async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [pc] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Photo Target" })
+      .returning({ id: contacts.id });
+    photoContactId = pc!.id;
+    const [ch] = await db
+      .insert(channels)
+      .values({
+        tenantId: tenantA,
+        kind: "telegram_bot",
+        externalId: "photo-bot",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: channels.id });
+    await db.insert(channelIdentities).values({
+      contactId: photoContactId,
+      channelId: ch!.id,
+      externalUserId: "tg-photo-1",
+      createdAt: now,
+    });
+    await db.insert(conversations).values({
+      tenantId: tenantA,
+      userId: photoContactId,
+      lastMessageAt: now,
+      createdAt: now,
+    });
+    const [l] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: photoContactId,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    photoLeadId = l!.id;
+    // lead whose contact has no channel
+    const [nc] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "No Channel" })
+      .returning({ id: contacts.id });
+    const [l2] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: nc!.id,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    noChannelLeadId = l2!.id;
+  });
+
+  it("bad id → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads/notanumber/send-photo", { method: "POST" });
+    expect(res.status).toBe(400);
+  });
+
+  it("invalid json → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, `/api/admin/leads/${photoLeadId}/send-photo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{bad",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("без photoRef → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, `/api/admin/leads/${photoLeadId}/send-photo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caption: "no ref" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("несуществующий лид → 404", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/leads/99999999/send-photo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photoRef: "file-123" }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("лид без активного канала → 409", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, `/api/admin/leads/${noChannelLeadId}/send-photo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photoRef: "file-123" }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("happy: ставит фото в outbound_queue + пишет сообщение", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, `/api/admin/leads/${photoLeadId}/send-photo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photoRef: "https://example.com/p.jpg", caption: "вот фото" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; channelKind: string };
+    expect(body.ok).toBe(true);
+    expect(body.channelKind).toBe("telegram_bot");
+    const { eq } = await import("drizzle-orm");
+    const queued = await db
+      .select({ id: outboundQueue.id })
+      .from(outboundQueue)
+      .where(eq(outboundQueue.tenantId, tenantA));
+    expect(queued.length).toBeGreaterThan(0);
+    void messages;
   });
 });
 
