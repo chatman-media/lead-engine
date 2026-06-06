@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.8.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.7.0...@chatman-media/conversation-engine-v1.8.0) (2026-06-06)
+
+
+### Features
+
+* **sim:** dialog simulator — LLM «клиент» ведёт self_play-диалог в живом инбоксе ([#233](https://github.com/chatman-media/lead-engine/issues/233)) ([180c1a1](https://github.com/chatman-media/lead-engine/commit/180c1a1e2f904190a59360cd4e1276592cf17074))
+
 # [@chatman-media/conversation-engine-v1.7.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.6.0...@chatman-media/conversation-engine-v1.7.0) (2026-06-06)
 
 
