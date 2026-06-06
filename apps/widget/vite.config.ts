@@ -1,3 +1,4 @@
+import { codecovVitePlugin } from "@codecov/vite-plugin";
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 
@@ -10,6 +11,15 @@ import { resolve } from "node:path";
  * Build artifact: dist/widget.js (single file).
  */
 export default defineConfig({
+  plugins: [
+    // Codecov Bundle Analysis — uploads when CODECOV_TOKEN is set (CI only).
+    codecovVitePlugin({
+      enableBundleAnalysis: process.env.CODECOV_TOKEN !== undefined,
+      bundleName: "widget",
+      uploadToken: process.env.CODECOV_TOKEN,
+      gitService: "github",
+    }),
+  ],
   build: {
     target: "es2020",
     outDir: "dist",
