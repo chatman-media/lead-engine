@@ -4,7 +4,7 @@
 
 # Lead Engine
 
-**多渠道 AI 销售成交助手 — Telegram · WhatsApp · 网页挂件**
+**多渠道 AI 销售成交助手 — Telegram · WhatsApp · Messenger · 网页挂件**
 
 [![CI](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml)
@@ -16,6 +16,7 @@
 [![License: PolyForm NC 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 [![Telegram](https://img.shields.io/badge/Telegram-bot%20%2B%20userbot-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
 [![WhatsApp](https://img.shields.io/badge/WhatsApp-Cloud%20API-25D366?logo=whatsapp&logoColor=white)](https://developers.facebook.com/docs/whatsapp)
+[![Messenger](https://img.shields.io/badge/Messenger-Send%20API-0084FF?logo=messenger&logoColor=white)](https://developers.facebook.com/docs/messenger-platform)
 [![Stripe](https://img.shields.io/badge/Stripe-billing-635BFF?logo=stripe&logoColor=white)](https://stripe.com/)
 
 多租户 SaaS · BYOK LLM · 按租户隔离的 RAG · 销售方法论（SPIN / NEPQ / AIDA）· 人工接管

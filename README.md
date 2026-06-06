@@ -4,7 +4,7 @@
 
 # Lead Engine
 
-**Multichannel AI Sales Closer — Telegram · WhatsApp · Web Widget**
+**Multichannel AI Sales Closer — Telegram · WhatsApp · Messenger · Web Widget**
 
 [![CI](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml)
@@ -16,6 +16,7 @@
 [![License: PolyForm NC 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 [![Telegram](https://img.shields.io/badge/Telegram-bot%20%2B%20userbot-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
 [![WhatsApp](https://img.shields.io/badge/WhatsApp-Cloud%20API-25D366?logo=whatsapp&logoColor=white)](https://developers.facebook.com/docs/whatsapp)
+[![Messenger](https://img.shields.io/badge/Messenger-Send%20API-0084FF?logo=messenger&logoColor=white)](https://developers.facebook.com/docs/messenger-platform)
 [![Stripe](https://img.shields.io/badge/Stripe-billing-635BFF?logo=stripe&logoColor=white)](https://stripe.com/)
 
 Multi-tenant SaaS · BYOK LLM · per-tenant RAG · sales methodologies (SPIN / NEPQ / AIDA) · operator takeover
@@ -27,7 +28,7 @@ Multi-tenant SaaS · BYOK LLM · per-tenant RAG · sales methodologies (SPIN / N
 ---
 
 A **multi-tenant SaaS** that replies to inbound leads in ~30 seconds across
-Telegram, WhatsApp, and a web widget — it walks a person from "just curious"
+Telegram, WhatsApp, Messenger, and a web widget — it walks a person from "just curious"
 to a submitted application/order and hands hot leads off to an operator.
 Driven by sales methodologies (SPIN, NEPQ, AIDA), not a FAQ bot.
 

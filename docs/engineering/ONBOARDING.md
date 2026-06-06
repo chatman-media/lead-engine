@@ -194,6 +194,79 @@ curl -X POST http://localhost:3000/api/admin/channels/whatsapp \
   -d '{"phoneNumberId":"123456789012345","accessToken":"EAAJZB..."}'
 ```
 
+### 2bb. Facebook Messenger (Meta webhook — manual)
+
+Канал Messenger ездит на том же Meta Graph API, что и WhatsApp, поэтому
+сетап почти идентичен (`packages/channel-facebook` зеркалит
+`packages/channel-whatsapp`). Отличия: события вебхука приходят как
+`entry[].messaging[]` (а не `entry[].changes[]`), endpoint отправки —
+`/me/messages`, а идентификатор канала — это **Facebook Page ID**.
+
+1. Открыть [Meta for Developers](https://developers.facebook.com/apps/) →
+   ваше приложение → добавить продукт **Messenger** → раздел
+   **Access Tokens**
+2. Привязать Facebook Page и сгенерировать **Page Access Token**
+   (нужен permission `pages_messaging`; для production — App Review)
+3. Вставить Page Access Token в форму на вкладке "Messenger".
+   Опционально: per-tenant `Verify Token` и `App Secret`
+   (иначе фолбэк на env `FACEBOOK_VERIFY_TOKEN` / `FACEBOOK_APP_SECRET`)
+
+Backend (`POST /api/admin/channels/facebook`):
+
+```
+1. pageAccessToken required → 400 если пусто
+2. MessengerClient.getPageInfo() — GET /me:
+   - 401/403 если bad token
+   - returns { id (=pageId), name }
+3. validate pageId regex /^\d{5,25}$/ → 400 если bad
+4. Quota check → 402 если over limit
+5. encrypt token → tenant_secrets[channel_facebook_<pageId>]
+   (+ опц. verifyToken / appSecret в tenant_secrets)
+6. upsert channels (kind=facebook, external_id=pageId,
+                    metadata: { pageName })
+7. recordAudit + reloadChannels
+```
+
+Как и WhatsApp, **Meta webhook нельзя настроить автоматически**. Response
+содержит `webhookSetupHint`:
+
+```json
+{
+  "webhookSetupHint": {
+    "url": "https://api.example.com/webhook/facebook/acme",
+    "verifyToken": "<FACEBOOK_VERIFY_TOKEN>",
+    "appSecretHint": "Meta dashboard → App settings → Basic → App Secret — добавить в FACEBOOK_APP_SECRET env (или в форме)"
+  }
+}
+```
+
+UI показывает эти значения для copy-paste в Meta dashboard → Messenger →
+**Webhooks** → Edit subscription:
+- **Callback URL** = `webhookSetupHint.url`
+- **Verify Token** = `webhookSetupHint.verifyToken`
+- Подписаться на `messages`, `messaging_postbacks` events
+- Subscribe приложение к нужной Page
+
+Meta отправит GET с challenge, Lead Engine ответит plaintext challenge
+(см. `verifyWebhookSubscription` в `packages/channel-facebook`). Подпись
+вебхука (`X-Hub-Signature-256`, App Secret) проверяется на route-слое
+**до** tenant lookup (`apps/api/src/lib/facebook-signature.ts`).
+
+> **24-часовое окно.** `send()` использует `messaging_type: "RESPONSE"`.
+> Вне 24 часов с последнего сообщения пользователя Meta разрешает только
+> сообщения с message tag. Capabilities: `text`, `photo`, `video`,
+> `voice`, `document`, `callbackQuery` (postbacks / quick replies),
+> `typing`. `edit`/`delete` Send API не поддерживает.
+
+curl:
+
+```sh
+curl -X POST http://localhost:3000/api/admin/channels/facebook \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"pageAccessToken":"EAAJZB..."}'
+```
+
 ### 2c. Telegram userbot (личный аккаунт, MTProto)
 
 Помимо бота, тенант может подключить **личный аккаунт** (userbot) для

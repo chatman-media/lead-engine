@@ -11,7 +11,8 @@ hot-reload, secrets. Для high-level introduction — см.
 ```
                      ┌─────────────────────────────────────┐
                      │           Customer (end-user)       │
-                     │  Telegram / WhatsApp / Web widget   │
+                     │  Telegram / WhatsApp / Messenger /  │
+                     │  Web widget                         │
                      └─────────────────┬───────────────────┘
                                        │
                                        ▼
@@ -20,6 +21,7 @@ hot-reload, secrets. Для high-level introduction — см.
        │  ┌────────────────────────────────────────────────┐  │
        │  │  /webhook/telegram/:slug      ←  Telegram       │  │
        │  │  /webhook/whatsapp/:slug      ←  Meta Cloud     │  │
+       │  │  /webhook/facebook/:slug      ←  Meta Messenger │  │
        │  │  /ws/:slug?user=X             ←  Web widget     │  │
        │  │  /api/auth/*  /api/admin/*    ←  Admin UI       │  │
        │  └────────────────────────────────────────────────┘  │
@@ -38,7 +40,8 @@ hot-reload, secrets. Для high-level introduction — см.
        │  tenants                 │    │    (SKIP LOCKED)      │
        │  channels                │    │  - Telegram BotAPI    │
        │  conversations, messages │    │    + MTProto userbot  │
-       │  kb_documents, kb_chunks │    │  - WhatsApp send      │
+       │  kb_documents, kb_chunks │    │  - WhatsApp / Messenger│
+       │                          │    │    send (Meta Graph)  │
        │  llm_provider_configs    │    │  - Periodic channel   │
        │  tenant_secrets (AES-256)│    │    reload (30s poll)  │
        │  outbound_queue          │    │  - Cron jobs          │
@@ -162,7 +165,7 @@ ALTER TABLE conversations FORCE ROW LEVEL SECURITY;
 1. apps/worker dispatcher poll'ит outbound_queue (1s default):
    SELECT id FROM outbound_queue
      WHERE status = 'pending' AND scheduled_at <= now()
-     AND kind IN ('telegram_bot', 'whatsapp', 'telegram_userbot')
+     AND kind IN ('telegram_bot', 'whatsapp', 'facebook', 'telegram_userbot')
      ORDER BY scheduled_at
      FOR UPDATE SKIP LOCKED
      LIMIT $batchSize
@@ -179,7 +182,7 @@ ALTER TABLE conversations FORCE ROW LEVEL SECURITY;
 **Web canal** — особенный: pinned WebSocket-connection живёт в
 `apps/api`, поэтому отдельный `WebOutboundDispatcher` (in-process) с
 фильтром `kind='web'` крутится в api-процессе. Worker дисптачер
-фильтрует `claimKinds: ['telegram_bot', 'telegram_userbot', 'whatsapp']`
+фильтрует `claimKinds: ['telegram_bot', 'whatsapp', 'facebook']`
 чтобы не grab'ить web-rows которые он не может отправить.
 
 ---
@@ -203,7 +206,7 @@ Routes вызывают callback после успешного PUT/POST/DELETE:
 |---|---|
 | `PUT /api/admin/llm-configs/:purpose` | `router.invalidate(tenantId)` + setConfig + mutate `LoadedRef.current.byTenant` |
 | `DELETE /api/admin/llm-configs/:purpose` | то же — purpose удалён из snapshot'а |
-| `POST /api/admin/channels/telegram` | `ChannelRegistry.reloadTenant(tenantId, slug)` — close old adapter, instantiate new |
+| `POST /api/admin/channels/{telegram,whatsapp,facebook}` | `ChannelRegistry.reloadTenant(tenantId, slug)` — close old adapter, instantiate new |
 | `DELETE /api/admin/channels/:id` | то же |
 | `PUT /api/admin/tenant/status` | reloadChannels (evict при pause, restore при resume) |
 
@@ -264,6 +267,9 @@ getDecryptedSecret({ db, tenantId, key, masterKeyHex })
 - `channel_whatsapp_<phone_id>` — WhatsApp access token
 - `whatsapp_verify_token` / `whatsapp_app_secret` — Meta webhook креды
   (fallback env `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET`)
+- `channel_facebook_<page_id>` — Messenger Page Access Token
+- `facebook_verify_token` / `facebook_app_secret` — Meta webhook креды
+  (fallback env `FACEBOOK_VERIFY_TOKEN` / `FACEBOOK_APP_SECRET`)
 
 LLM (по purpose):
 
@@ -330,7 +336,7 @@ Unknown plan → fallback на `free` с warning hook.
 **Quota enforcement** — `apps/api/src/lib/quota.ts`:
 
 - `canAddChannel({ db, tenantId })` — вызывается в `POST /api/admin/channels/telegram`
-  и `/whatsapp` **только** на new-channel path. Token rotation для существующего
+  , `/whatsapp` и `/facebook` **только** на new-channel path. Token rotation для существующего
   channel bypass'ит quota.
 - `canAddKbDocument({ db, tenantId })` — вызывается в `POST /api/admin/kb/documents`.
   Dedup по `content_hash` работает orthogonally — same-content re-upload не
