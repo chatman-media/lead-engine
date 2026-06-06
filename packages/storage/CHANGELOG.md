@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.7.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.6.0...@chatman-media/storage-v1.7.0) (2026-06-06)
+
+
+### Features
+
+* **concierge:** вертикаль «Консьерж-сервис» — воронка как набор воркфлоу (Фаза 1 + Фаза 2) ([#180](https://github.com/chatman-media/lead-engine/issues/180)) ([16fce20](https://github.com/chatman-media/lead-engine/commit/16fce205ced728813d0cf7d0b63b17e24e0be423)), closes [#175](https://github.com/chatman-media/lead-engine/issues/175)
+
 # [@chatman-media/storage-v1.6.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.5.0...@chatman-media/storage-v1.6.0) (2026-06-05)
 
 
