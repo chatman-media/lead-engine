@@ -38,8 +38,18 @@ import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { Inbound, OutboundPart } from "@chatman-media/channel-core";
 import { channels, conversations, messages, tenants } from "@chatman-media/storage";
+import { randomBytes } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
+
+/**
+ * Криптостойкий короткий токен для sim-идентификаторов (sim-user, message-id,
+ * stream-id). Эти id участвуют в дедупликации/идентичности контактов, поэтому
+ * Math.random() здесь небезопасен (CodeQL js/insecure-randomness).
+ */
+function simToken(bytes = 5): string {
+  return randomBytes(bytes).toString("hex");
+}
 
 // ── Predefined personas ─────────────────────────────────────────────────────
 
@@ -245,7 +255,7 @@ export function makeAdminSimRoutes(opts: {
       externalId: ctx.externalId,
     };
     const channelIdStr = String(ctx.channelDbId);
-    const simStamp = `${adminId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const simStamp = `${adminId}_${Date.now()}_${simToken()}`;
     const externalUserId = `__sim_${simStamp}__`;
 
     const runExchange = async (
@@ -254,7 +264,7 @@ export function makeAdminSimRoutes(opts: {
       const now = Math.floor(Date.now() / 1000);
       const inbound: Inbound = {
         channelId: channelIdStr,
-        externalMessageId: `sim-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        externalMessageId: `sim-${Date.now()}-${simToken()}`,
         externalUserId,
         externalUsername: params.displayName,
         parts: [{ kind: "text", text: userText }],
@@ -452,7 +462,7 @@ export function makeAdminSimRoutes(opts: {
     const ctx = await buildCtx(tenantId, adminId);
     if (typeof ctx === "string") return c.json({ error: ctx }, 400);
 
-    const streamId = `str_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const streamId = `str_${Date.now()}_${simToken(6)}`;
     const state: StreamState = {
       id: streamId,
       tenantId,
