@@ -70,7 +70,8 @@ export function SaasLeads() {
 
   // View mode
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
-  const [listStageId, setListStageId] = useState<number | null>(null);
+  // -1 = вкладка «Все» (по умолчанию), иначе id стадии
+  const [listStageId, setListStageId] = useState<number | null>(-1);
 
   // Lead search
   const [leadSearch, setLeadSearch] = useState("");
@@ -125,7 +126,7 @@ export function SaasLeads() {
         setLeads(l.items);
         // auto-switch to list if many stages
         if (f.stages.length > 6) setViewMode("list");
-        if (f.stages.length > 0 && listStageId === null) setListStageId(f.stages[0].id);
+        // листинг по умолчанию открывается на вкладке «Все» (listStageId=-1)
       })
       .catch((err) => {
         if (!onAuthError(err)) setError("Не удалось загрузить данные");
@@ -608,12 +609,32 @@ export function SaasLeads() {
       {hasStages &&
         viewMode === "list" &&
         (() => {
-          const activeStage = stages.find((s) => s.id === listStageId) ?? stages[0];
-          const activeLeads = leadsByStage.get(`stage:${activeStage?.id}`) ?? [];
+          const isAll = (listStageId ?? -1) === -1;
+          const recencyOf = (l: LeadListItem) => l.lastMessageAt ?? l.updatedAt ?? 0;
+          const activeStage = isAll ? null : (stages.find((s) => s.id === listStageId) ?? stages[0]);
+          const activeLeads = isAll
+            ? [...filteredLeads].sort((a, b) => recencyOf(b) - recencyOf(a))
+            : (leadsByStage.get(`stage:${activeStage?.id}`) ?? []);
           return (
             <div className="flex flex-col gap-3">
               {/* Stage tabs */}
               <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => setListStageId(-1)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
+                    isAll
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-transparent bg-muted text-muted-foreground hover:border-border hover:text-foreground"
+                  }`}
+                >
+                  Все
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] leading-none ${isAll ? "bg-primary text-primary-foreground" : "bg-muted-foreground/20"}`}
+                  >
+                    {filteredLeads.length}
+                  </span>
+                </button>
                 {stages.map((stage) => {
                   const count = (leadsByStage.get(`stage:${stage.id}`) ?? []).length;
                   const isActive = stage.id === (listStageId ?? stages[0]?.id);
@@ -645,15 +666,19 @@ export function SaasLeads() {
               </div>
 
               {/* Stage info bar */}
-              {activeStage && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">{activeStage.displayName}</span>
-                  <span>·</span>
-                  <span>{STAGE_TYPE_RU[activeStage.stageType] ?? activeStage.stageType}</span>
-                  <span>·</span>
-                  <span>{activeLeads.length} лидов</span>
-                </div>
-              )}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {isAll ? "Все лиды" : activeStage?.displayName}
+                </span>
+                {!isAll && activeStage && (
+                  <>
+                    <span>·</span>
+                    <span>{STAGE_TYPE_RU[activeStage.stageType] ?? activeStage.stageType}</span>
+                  </>
+                )}
+                <span>·</span>
+                <span>{activeLeads.length} лидов</span>
+              </div>
 
               {/* Leads list — плотные строки */}
               <div className="space-y-1.5">
@@ -662,7 +687,7 @@ export function SaasLeads() {
                 ))}
                 {activeLeads.length === 0 && (
                   <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                    Нет лидов в этой стадии
+                    {isAll ? "Лидов пока нет" : "Нет лидов в этой стадии"}
                   </p>
                 )}
               </div>
