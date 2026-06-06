@@ -63,7 +63,6 @@ import { makeAdminTenantRoutes } from "./routes/admin-tenant.ts";
 import { makeAdminLeadsRoutes } from "./routes/admin-leads.ts";
 import { makeAdminFunnelRoutes } from "./routes/admin-funnel.ts";
 import { makeAdminDashboardRoutes } from "./routes/admin-dashboard.ts";
-import { makeAdminRoiRoutes } from "./routes/admin-roi.ts";
 import { makeAdminReferralRoutes } from "./routes/admin-referral.ts";
 import { makeAdminVacanciesRoutes } from "./routes/admin-vacancies.ts";
 import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
@@ -447,10 +446,6 @@ async function main() {
   // Dashboard aggregate stats.
   app.route("/", makeAdminDashboardRoutes({ db }));
   log.info("admin-dashboard route enabled");
-
-  // ROI dashboard — value delivered by the AI (fast reply, saved leads, …).
-  app.route("/", makeAdminRoiRoutes({ db }));
-  log.info("admin-roi route enabled");
 
   // Vacancies CRUD.
   app.route("/", makeAdminVacanciesRoutes({ db }));
