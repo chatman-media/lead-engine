@@ -120,7 +120,9 @@ export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
         }
 
         // Находим лид для извлечения.
-        let lead: { id: number; state: string; stageDefinitionId: number | null } | undefined;
+        let lead:
+          | { id: number; state: string; stageDefinitionId: number | null; requestType: string | null }
+          | undefined;
         if (multiRequest) {
           // Самый свежий НЕ-терминальный лид контакта (concierge: N лидов).
           [lead] = await tx
@@ -128,6 +130,7 @@ export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
               id: leads.id,
               state: leads.state,
               stageDefinitionId: leads.stageDefinitionId,
+              requestType: leads.requestType,
             })
             .from(leads)
             .leftJoin(stageDefinitions, eq(leads.stageDefinitionId, stageDefinitions.id))
@@ -147,6 +150,7 @@ export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
               id: leads.id,
               state: leads.state,
               stageDefinitionId: leads.stageDefinitionId,
+              requestType: leads.requestType,
             })
             .from(leads)
             .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)));
@@ -168,6 +172,7 @@ export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
               id: leads.id,
               state: leads.state,
               stageDefinitionId: leads.stageDefinitionId,
+              requestType: leads.requestType,
             });
           if (created) lead = created;
         }
@@ -224,6 +229,15 @@ export function makeFieldExtractor(ref: LoadedRef): FieldExtractor {
           })
           .join("\n");
 
+        // Concierge: если лид уже в ветке (не на intake) — даём LLM возможность
+        // в ТОМ ЖЕ вызове сигнализировать о НОВОМ параллельном запросе другого
+        // типа (поле `_new_request`). Без доп. LLM-вызова.
+        const inBranch =
+          multiRequest && !!firstStage && lead.state !== firstStage.slug;
+        const newRequestHint = inBranch
+          ? '\n- ОТДЕЛЬНО: если гость в этом сообщении начинает СОВЕРШЕННО ДРУГУЮ услугу (не относящуюся к текущему запросу) — добавь поле "_new_request" со значением одного из: exchange|transfer|food. Если это продолжение текущего запроса — НЕ добавляй "_new_request".'
+          : "";
+
         const systemPrompt = `Ты — ассистент по извлечению данных из текста диалога.
 Из сообщения пользователя извлеки значения следующих полей (если они упомянуты):
 
@@ -237,7 +251,7 @@ ${fieldDescriptions}
 - Для number: только число без единиц измерения.
 - Для date: ISO-формат YYYY-MM-DD.
 - Если поле не упомянуто — не включай его в ответ.
-- Отвечай ТОЛЬКО JSON-объектом без markdown, без пояснений.`;
+- Отвечай ТОЛЬКО JSON-объектом без markdown, без пояснений.${newRequestHint}`;
 
         let responseText: string;
         try {
@@ -259,6 +273,51 @@ ${fieldDescriptions}
         }
 
         if (Object.keys(extracted).length === 0) return;
+
+        // 4b. Параллельный запрос (concierge): гость начал ДРУГУЮ услугу в треде
+        // с уже открытым запросом → заводим ОТДЕЛЬНЫЙ лид сразу в его ветке, не
+        // смешивая с текущим. Сигнал `_new_request` пришёл в том же LLM-ответе.
+        if (inBranch) {
+          const nr =
+            typeof extracted._new_request === "string"
+              ? extracted._new_request.trim()
+              : null;
+          if (nr && nr !== lead.requestType) {
+            const [branchStage] = await tx
+              .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
+              .from(stageDefinitions)
+              .where(
+                and(
+                  eq(stageDefinitions.tenantId, tenantId),
+                  eq(stageDefinitions.slug, `${nr}_request`),
+                ),
+              );
+            if (branchStage) {
+              const [created] = await tx
+                .insert(leads)
+                .values({
+                  tenantId,
+                  userId: contactId,
+                  state: branchStage.slug,
+                  stageDefinitionId: branchStage.id,
+                  requestType: nr,
+                  createdAt: now,
+                  updatedAt: now,
+                })
+                .returning({ id: leads.id });
+              if (created) {
+                await tx.insert(leadEvents).values({
+                  tenantId,
+                  leadId: created.id,
+                  fromState: firstStage?.slug ?? "request_received",
+                  toState: branchStage.slug,
+                  createdAt: now,
+                });
+                return; // новый параллельный запрос заведён — сообщение обработано
+              }
+            }
+          }
+        }
 
         // 5. Write to lead_field_values
         const fieldBySlug = new Map(extractableFields.map((f) => [f.slug, f]));

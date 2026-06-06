@@ -203,4 +203,37 @@ describe("concierge branch-aware auto-advance (slice 3)", () => {
     expect(open?.state).toBe("exchange_request");
     expect(open?.requestType).toBe("exchange");
   });
+
+  it("multi-request (parallel): новый тип в треде с открытым запросом → отдельный лид в его ветке", async () => {
+    if (!sql) return;
+    const contactId = await freshContact();
+
+    // 1) Открываем transfer → transfer_request (лид в ветке).
+    await makeFieldExtractor(stubRef('{"request_type":"transfer"}')).extract({
+      tenantId,
+      contactId,
+      text: "нужен трансфер",
+      db,
+    });
+    expect((await leadOf(contactId))?.state).toBe("transfer_request");
+
+    // 2) В ТОМ ЖЕ треде гость начинает другую услугу — LLM сигналит _new_request.
+    await makeFieldExtractor(stubRef('{"_new_request":"food"}')).extract({
+      tenantId,
+      contactId,
+      text: "и ещё закажи пиццу",
+      db,
+    });
+
+    const all = await db
+      .select()
+      .from(leads)
+      .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)))
+      .orderBy(desc(leads.updatedAt));
+    expect(all.length).toBe(2);
+    // Новый food-лид сразу в своей ветке.
+    expect(all.find((l) => l.requestType === "food")?.state).toBe("food_request");
+    // Старый transfer-лид не тронут.
+    expect(all.find((l) => l.requestType === "transfer")?.state).toBe("transfer_request");
+  });
 });
