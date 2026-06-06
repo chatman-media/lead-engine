@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.4.0...@chatman-media/kb-v1.5.0) (2026-06-06)
+
+
+### Features
+
+* **reply:** конвергенция R4+R5 — request_type в промпте + awaiting_operator (+ почин [#211](https://github.com/chatman-media/lead-engine/issues/211)) ([#225](https://github.com/chatman-media/lead-engine/issues/225)) ([e8619eb](https://github.com/chatman-media/lead-engine/commit/e8619ebcf21a16c4541307d1f4627c90bf9f7c79))
+
 # [@chatman-media/kb-v1.4.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.3.1...@chatman-media/kb-v1.4.0) (2026-06-06)
 
 
