@@ -17,7 +17,7 @@ import {
   FUNNEL_PHASES,
   type FunnelPhase,
 } from "@chatman-media/verticals";
-import { and, asc, count, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import { SKILLS_CATALOGUE } from "../lib/skills-catalogue.ts";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
@@ -1508,6 +1508,19 @@ export async function applyFunnelStages(
       .select({ id: stageDefinitions.id })
       .from(stageDefinitions)
       .where(eq(stageDefinitions.funnelId, funnel.id));
+    const existingStageIds = existingStages.map((s) => s.id);
+
+    // Какие лиды сейчас стоят на стадиях этой воронки — их перенесём на
+    // стартовую стадию НОВОЙ воронки, чтобы не осиротить (FK set null →
+    // лид исчезает из канбана). Без этого «замена воронки» теряет лиды.
+    const leadsOnFunnel =
+      existingStageIds.length > 0
+        ? await tx
+            .select({ id: leads.id })
+            .from(leads)
+            .where(and(eq(leads.tenantId, tenantId), inArray(leads.stageDefinitionId, existingStageIds)))
+        : [];
+    const leadIdsToRehome = leadsOnFunnel.map((l) => l.id);
 
     for (const s of existingStages) {
       await tx.delete(stageFields).where(eq(stageFields.stageId, s.id));
@@ -1518,6 +1531,7 @@ export async function applyFunnelStages(
 
     let stagesCreated = 0;
     let prevPhase: ActivePhase | null = null;
+    let initialStage: { id: number; slug: string } | null = null;
     for (const stageTpl of stages) {
       const { fields, ...stageData } = stageTpl;
       const phase = resolveSeedPhase(stageData, prevPhase);
@@ -1547,6 +1561,8 @@ export async function applyFunnelStages(
 
       if (!stage) continue;
       stagesCreated++;
+      // Стартовая стадия = intake (или первая созданная) — куда переносим лиды.
+      if (!initialStage || stageData.kind === "intake") initialStage = stage;
 
       for (const fieldTpl of fields) {
         await tx.insert(stageFields).values({
@@ -1563,6 +1579,15 @@ export async function applyFunnelStages(
           createdAt: now,
         });
       }
+    }
+
+    // Переносим лиды со старых (удалённых) стадий на стартовую новую — чтобы
+    // не пропали из канбана. Без миграции FK set null осиротил бы их.
+    if (initialStage && leadIdsToRehome.length > 0) {
+      await tx
+        .update(leads)
+        .set({ stageDefinitionId: initialStage.id, state: initialStage.slug, updatedAt: now })
+        .where(and(eq(leads.tenantId, tenantId), inArray(leads.id, leadIdsToRehome)));
     }
 
     return { funnelId: funnel.id, stagesCreated };
