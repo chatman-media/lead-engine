@@ -86,7 +86,7 @@ _Создано: 2026-06-06._
 | **R2** | дегейтинг multi-request: capability-флаг вместо `concierge_v1` | 3 | S–M | ✅ сделано |
 | **R3** | AI-билдер учится multi-request-ветвлению | 1 | M | ✅ сделано |
 | **R4** | `request_type` + cross-request awareness в промпте | 2 | S–M | ✅ сделано (+ почин #211) |
-| **R5** | оператор-handoff как стадия `awaiting_operator` | P3 | M–L | 🟡 частично (runtime+builder) |
+| **R5** | оператор-handoff как стадия `awaiting_operator` | P3 | M–L | 🟢 почти (handoff-loop готов; остался proactive-пинг входа) |
 | **R6** | _(опц., позже)_ первоклассная сущность «заявка/тикет» | P4 | L | будущее |
 
 ### R1 — stage `goal`/`guidance` → reply-промпт · M · **первым**
@@ -147,7 +147,7 @@ _Создано: 2026-06-06._
 - ✅ **Тесты:** kb unit (блок «ЗАПРОС ГОСТЯ»), integration (`makeRequestContextResolver`: 1 открытый →
   тип; 2 → счётчик; терминальный → null). 42/42 apps/api + 5/5 kb + 189/189 conversation-engine, tsc чист.
 
-### R5 — оператор-handoff как стадия `awaiting_operator` · M–L · 🟡 **частично (runtime + builder)**
+### R5 — оператор-handoff как стадия `awaiting_operator` · M–L · 🟢 **handoff-loop готов (остался proactive-пинг)**
 Сделано (эта ветка) — рантайм-семантика + билдер:
 - ✅ Бот **придерживает гостя** на `awaiting_operator`-стадии: резолвер `makeAwaitingOperatorResolver`
   (llm-bootstrap) → флаг `awaitingOperator` проброшен через kb/conversation-engine (по паттерну R4) →
@@ -158,11 +158,20 @@ _Создано: 2026-06-06._
 - ✅ **Тесты:** kb unit (блок «ОЖИДАНИЕ ОПЕРАТОРА»), integration (резолвер: обычная стадия → false,
   awaiting_operator → true). 44/44 apps/api + 7/7 kb + 189/189 conversation-engine, tsc чист.
 
-R5-остаток (тяжелее, частично без живого бота/UI — отдельная итерация):
-- `/send-offer` ([`admin-leads.ts:949`](../../apps/api/src/routes/admin-leads.ts)) → «оператор
-  завершает стадию» (двигает лид дальше), а не только инжект сообщения.
-- Сёрфить вход в `awaiting_operator` оператору (ops/informer, см. [`NOTIFICATIONS.md`](NOTIFICATIONS.md)).
-- Миграция SEED-концержа: offer-стадии `rate_confirmation` → `awaiting_operator` (меняет живой флоу — решение пользователя).
+Доделано (R5-tail, эта ветка):
+- ✅ **`/send-offer` завершает `awaiting_operator`-стадию** ([`admin-leads.ts`](../../apps/api/src/routes/admin-leads.ts)):
+  если лид на awaiting_operator — отправка оффера двигает его по `nextStages[0]` (offer→fulfill) +
+  fires stage-change нотификации (webhooks / adminEventBus / informer-оператор). Прочие стадии — только отправка.
+- ✅ **Миграция SEED-концержа:** все 5 offer-стадий (`<X>_offer`) → `stageType: awaiting_operator` —
+  концерж реально придерживает гостя и ждёт оператора на оффере.
+- ✅ **Тесты:** integration (лид на awaiting_operator → /send-offer двигает в fulfill + advancedTo;
+  обычная стадия → не двигает). 80/80 apps/api (admin-leads/funnel/concierge) + 31/31 (field-extractor/
+  llm-bootstrap), tsc чист.
+
+R5-остаток (последнее — отдельный заход, правка reply-движка):
+- **Проактивный пинг оператору при ВХОДЕ в `awaiting_operator`.** Сейчас field-extractor продвигает
+  лид молча; нужно протянуть `notificationService` в `makeFieldExtractor` (`index.ts:616`) и слать
+  нотификацию на входе в awaiting_operator. (`/send-offer` уже шлёт нотификацию на ВЫХОДЕ.)
 
 ### R6 — _(опц., позже)_ первоклассная сущность «заявка/тикет» · L
 - Заменить nullable `leads.request_type` на реальную модель заявок (тикет с FK на контакт) —
