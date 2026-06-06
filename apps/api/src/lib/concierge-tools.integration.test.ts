@@ -29,6 +29,7 @@ import {
   makeConciergeRequestsTool,
   tenantSupportsMultiRequest,
 } from "./concierge-tools.ts";
+import { makeRequestContextResolver } from "../llm-bootstrap.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_ctools_${Math.random().toString(36).slice(2, 10)}`;
@@ -151,5 +152,39 @@ describe("concierge tools (Фаза 2 — статус гостя)", () => {
     });
     const reqs = await listOpenRequests({ db: db as never, tenantId, contactId: cid });
     expect(reqs).toEqual([]);
+  });
+});
+
+describe("makeRequestContextResolver (R4 — request_type в промпт)", () => {
+  it("1 открытый запрос → контекст с типом, без счётчика", async () => {
+    if (!sql) return;
+    const resolve = makeRequestContextResolver(db as never);
+    const ctx = await resolve({ tenantId, contactId });
+    expect(ctx).toContain("«Трансфер»");
+    expect(ctx).not.toContain("Всего открытых");
+  });
+
+  it("несколько открытых → контекст со счётчиком", async () => {
+    if (!sql) return;
+    const [c] = await db.insert(contacts).values({ tenantId }).returning({ id: contacts.id });
+    const multiId = c!.id;
+    const now = Math.floor(Date.parse("2026-06-06T02:00:00Z") / 1000);
+    await db.insert(leads).values([
+      { tenantId, userId: multiId, state: "transfer_request", stageDefinitionId: await stageId("transfer_request"), requestType: "transfer", createdAt: now, updatedAt: now },
+      { tenantId, userId: multiId, state: "exchange_request", stageDefinitionId: await stageId("exchange_request"), requestType: "exchange", createdAt: now, updatedAt: now + 1 },
+    ]);
+    const resolve = makeRequestContextResolver(db as never);
+    const ctx = await resolve({ tenantId, contactId: multiId });
+    expect(ctx).toContain("Всего открытых запросов у гостя: 2");
+  });
+
+  it("нет открытых (только терминальный) → null", async () => {
+    if (!sql) return;
+    const [c] = await db.insert(contacts).values({ tenantId }).returning({ id: contacts.id });
+    const doneId = c!.id;
+    const now = Math.floor(Date.parse("2026-06-06T03:00:00Z") / 1000);
+    await db.insert(leads).values({ tenantId, userId: doneId, state: "completed", stageDefinitionId: await stageId("completed"), requestType: "food", createdAt: now, updatedAt: now });
+    const resolve = makeRequestContextResolver(db as never);
+    expect(await resolve({ tenantId, contactId: doneId })).toBe(null);
   });
 });

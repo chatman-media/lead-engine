@@ -100,6 +100,15 @@ export interface RagReplyStrategyOpts {
     contactId: number;
   }) => Promise<{ goal: string; guidance?: string } | null>;
   /**
+   * Опциональный resolver динамического контекста запроса (multi-request /
+   * concierge): тип запроса гостя + число открытых. Идёт в composeSystemPrompt
+   * (requestContext). null → блок «ЗАПРОС ГОСТЯ» не добавляется.
+   */
+  resolveRequestContext?: (input: {
+    tenantId: number;
+    contactId: number;
+  }) => Promise<string | null>;
+  /**
    * Загрузить включённые навыки убеждения для тенанта. Возвращает список
    * SkillForPrompt, уже отфильтрованных по is_enabled = true.
    * Stage-фильтрация (intake/active/always) выполняется внутри
@@ -293,7 +302,7 @@ export class RagReplyStrategy implements ReplyStrategy {
     // Load persuasion skills, director hooks, agentic tools, and reranker in parallel.
     // All are optional — if resolvers not configured, values stay empty/null
     // and the pipeline silently skips those blocks.
-    const [skills, directorHooks, tools, reranker, stageGuidance] = await Promise.all([
+    const [skills, directorHooks, tools, reranker, stageGuidance, requestContext] = await Promise.all([
       this.opts.resolveSkills ? this.opts.resolveSkills({ tenantId }) : Promise.resolve([]),
       this.opts.resolveDirectorHooks
         ? this.opts.resolveDirectorHooks({ tenantId })
@@ -306,6 +315,9 @@ export class RagReplyStrategy implements ReplyStrategy {
         : Promise.resolve(null),
       this.opts.resolveStageGuidance
         ? this.opts.resolveStageGuidance({ tenantId, contactId: input.contactId })
+        : Promise.resolve(null),
+      this.opts.resolveRequestContext
+        ? this.opts.resolveRequestContext({ tenantId, contactId: input.contactId })
         : Promise.resolve(null),
     ]);
 
@@ -334,6 +346,7 @@ export class RagReplyStrategy implements ReplyStrategy {
       ...(reranker ? { reranker } : {}),
       ...(conversationSummary ? { conversationSummary } : {}),
       ...(stageGuidance ? { stageOverride: stageGuidance } : {}),
+      ...(requestContext ? { requestContext } : {}),
     });
 
     // ── Soft fallback when RAG has no context ────────────────────────────────

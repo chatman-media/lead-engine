@@ -11,7 +11,7 @@ import { conversations, funnels, leads, stageDefinitions, stageFields } from "@c
 import { and, asc, desc, eq, notInArray } from "drizzle-orm";
 import { z } from "zod";
 
-const REQUEST_TYPE_LABEL: Record<string, string> = {
+export const REQUEST_TYPE_LABEL: Record<string, string> = {
   exchange: "Обмен валюты",
   transfer: "Трансфер",
   food: "Еда",

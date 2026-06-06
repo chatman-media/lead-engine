@@ -64,6 +64,11 @@ export interface AnswerInput {
    */
   stageOverride?: { goal: string; guidance?: string };
   /**
+   * Dynamic per-request context (R4 / multi-request): the guest's current
+   * request_type + how many open requests. Injected as a separate prompt block.
+   */
+  requestContext?: string;
+  /**
    * Called after every `answerWithRag` or `answerWithRagStream` call with the
    * final telemetry. Useful for logging, metrics, or A/B experiment recording
    * without having to unwrap the return value.

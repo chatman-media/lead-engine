@@ -134,6 +134,12 @@ export function composeSystemPrompt(
         : "")
     : `ТЕКУЩИЙ ЭТАП: ${stage}. (Специфических правил для этапа нет — используй общий стиль.)`;
 
+  // Динамический контекст текущего запроса гостя (multi-request): тип запроса +
+  // сколько открыто — помогает боту не путать параллельные заявки.
+  const requestBlock = options.requestContext
+    ? `ЗАПРОС ГОСТЯ: ${options.requestContext}`
+    : "";
+
   const minorRule = guardrails.noMinors ? "- Если prospect <18 лет — вежливо заверши диалог." : "";
   const topicsRule = guardrails.forbiddenTopics.length
     ? `- Запрещённые темы: ${guardrails.forbiddenTopics.join(", ")}.`
@@ -182,6 +188,7 @@ export function composeSystemPrompt(
     support ? "" : directorHooksBlock,
     support ? "" : skillsBlock,
     support || stageBlock,
+    requestBlock,
     summaryBlock,
     userFactsBlock,
     needsGroundingReminder ? kbGroundingReminder(persona.role) : "",
