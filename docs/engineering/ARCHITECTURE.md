@@ -639,6 +639,13 @@ capture → qualify → offer → [clear] → [fulfill] → won / lost
 
 Маппинг стадий на фазы по 5 вертикалям — см. [`VERTICALS.md`](../strategy/VERTICALS.md).
 
+**UI vs backend:** фазы — backend-слой (валидация костяка + cross-vertical аналитика);
+в кабинете оператор видит `displayName`/`kind` стадий, а не фазы. **Одна активная воронка
+на тенант** (`funnels.is_active`): смена вертикали или повторный apply (включая AI-сборку)
+**замещает** стадии — старые удаляются, версионирования/отката пока нет (в роадмапе).
+Мульти-тип в одной вертикали — через `request_type`-ветвление (concierge-модель), а не
+несколько активных воронок. AI-сборка воронки — [`AI_FUNNEL_BUILDER.md`](AI_FUNNEL_BUILDER.md).
+
 ### Photo + passport fields
 
 Поля с `fieldType='photo'` и `aiExtractable=true` предназначены для
