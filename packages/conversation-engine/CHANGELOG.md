@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.10.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.9.0...@chatman-media/conversation-engine-v1.10.0) (2026-06-06)
+
+
+### Features
+
+* **informer:** тихие часы (DND) + кнопка «Тест» + привязка к подключению ([#265](https://github.com/chatman-media/lead-engine/issues/265)) ([3d150c8](https://github.com/chatman-media/lead-engine/commit/3d150c886ad5370b10d1ba9edf2c7b469cf37886))
+
 # [@chatman-media/conversation-engine-v1.9.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.8.0...@chatman-media/conversation-engine-v1.9.0) (2026-06-06)
 
 
