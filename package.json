@@ -37,6 +37,7 @@
     "db:psql": "docker compose exec postgres psql -U lead lead_engine"
   },
   "devDependencies": {
+    "@codecov/vite-plugin": "^2.0.1",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/exec": "^7.0.3",
     "@semantic-release/git": "^10.0.1",

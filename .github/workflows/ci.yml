@@ -118,6 +118,15 @@ jobs:
             apps/*/coverage/lcov.info
           if-no-files-found: ignore
 
+      # Codecov Bundle Analysis: build the Vite frontends so the codecovVitePlugin
+      # uploads bundle stats (size trends per commit/PR). Token-gated — the plugin
+      # no-ops without CODECOV_TOKEN, so this is a plain build otherwise.
+      - name: Bundle analysis — build frontends (Codecov)
+        if: always()
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: bun run --filter './apps/admin-ui' --filter './apps/landing' --filter './apps/widget' build
+
   release:
     name: Release — publish @chatman-media/* to npm
     needs: workspace
