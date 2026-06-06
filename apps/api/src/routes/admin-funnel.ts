@@ -1511,16 +1511,17 @@ export async function applyFunnelStages(
     const existingStageIds = existingStages.map((s) => s.id);
 
     // Какие лиды сейчас стоят на стадиях этой воронки — их перенесём на
-    // стартовую стадию НОВОЙ воронки, чтобы не осиротить (FK set null →
-    // лид исчезает из канбана). Без этого «замена воронки» теряет лиды.
+    // стадию НОВОЙ воронки ТОЙ ЖЕ фазы (сохраняя прогресс), чтобы не
+    // осиротить (FK set null → лид исчезает из канбана) и не свалить всех
+    // на первую стадию. Без этого «замена воронки» теряет/сбрасывает лиды.
     const leadsOnFunnel =
       existingStageIds.length > 0
         ? await tx
-            .select({ id: leads.id })
+            .select({ id: leads.id, oldPhase: stageDefinitions.phase, oldKind: stageDefinitions.kind })
             .from(leads)
+            .innerJoin(stageDefinitions, eq(stageDefinitions.id, leads.stageDefinitionId))
             .where(and(eq(leads.tenantId, tenantId), inArray(leads.stageDefinitionId, existingStageIds)))
         : [];
-    const leadIdsToRehome = leadsOnFunnel.map((l) => l.id);
 
     for (const s of existingStages) {
       await tx.delete(stageFields).where(eq(stageFields.stageId, s.id));
@@ -1532,6 +1533,13 @@ export async function applyFunnelStages(
     let stagesCreated = 0;
     let prevPhase: ActivePhase | null = null;
     let initialStage: { id: number; slug: string } | null = null;
+    const createdStages: Array<{
+      id: number;
+      slug: string;
+      phase: string | null;
+      kind: string;
+      position: number;
+    }> = [];
     for (const stageTpl of stages) {
       const { fields, ...stageData } = stageTpl;
       const phase = resolveSeedPhase(stageData, prevPhase);
@@ -1561,7 +1569,14 @@ export async function applyFunnelStages(
 
       if (!stage) continue;
       stagesCreated++;
-      // Стартовая стадия = intake (или первая созданная) — куда переносим лиды.
+      createdStages.push({
+        id: stage.id,
+        slug: stage.slug,
+        phase,
+        kind: stageData.kind,
+        position: stageData.position,
+      });
+      // Стартовая стадия = intake (или первая созданная) — fallback переноса.
       if (!initialStage || stageData.kind === "intake") initialStage = stage;
 
       for (const fieldTpl of fields) {
@@ -1581,13 +1596,38 @@ export async function applyFunnelStages(
       }
     }
 
-    // Переносим лиды со старых (удалённых) стадий на стартовую новую — чтобы
-    // не пропали из канбана. Без миграции FK set null осиротил бы их.
-    if (initialStage && leadIdsToRehome.length > 0) {
-      await tx
-        .update(leads)
-        .set({ stageDefinitionId: initialStage.id, state: initialStage.slug, updatedAt: now })
-        .where(and(eq(leads.tenantId, tenantId), inArray(leads.id, leadIdsToRehome)));
+    // Переносим лиды со старых стадий на новые ТОЙ ЖЕ фазы (сохраняя прогресс).
+    // Терминальные kind → новый терминал того же kind; иначе fallback intake.
+    if (initialStage && leadsOnFunnel.length > 0) {
+      const byPhase = new Map<string, { id: number; slug: string }>();
+      for (const cs of [...createdStages].sort((a, b) => a.position - b.position)) {
+        if (cs.phase && !byPhase.has(cs.phase)) byPhase.set(cs.phase, { id: cs.id, slug: cs.slug });
+      }
+      const byKind = new Map<string, { id: number; slug: string }>();
+      for (const cs of createdStages) {
+        if ((cs.kind === "terminal_won" || cs.kind === "terminal_lost") && !byKind.has(cs.kind)) {
+          byKind.set(cs.kind, { id: cs.id, slug: cs.slug });
+        }
+      }
+      // Группируем лиды по целевой стадии и обновляем батчами.
+      const targetToLeadIds = new Map<number, { slug: string; ids: number[] }>();
+      for (const l of leadsOnFunnel) {
+        const target =
+          (l.oldKind === "terminal_won" || l.oldKind === "terminal_lost"
+            ? byKind.get(l.oldKind)
+            : l.oldPhase
+              ? byPhase.get(l.oldPhase)
+              : null) ?? initialStage;
+        const entry = targetToLeadIds.get(target.id) ?? { slug: target.slug, ids: [] };
+        entry.ids.push(l.id);
+        targetToLeadIds.set(target.id, entry);
+      }
+      for (const [stageId, { slug, ids }] of targetToLeadIds) {
+        await tx
+          .update(leads)
+          .set({ stageDefinitionId: stageId, state: slug, updatedAt: now })
+          .where(and(eq(leads.tenantId, tenantId), inArray(leads.id, ids)));
+      }
     }
 
     return { funnelId: funnel.id, stagesCreated };
