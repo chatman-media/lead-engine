@@ -6,9 +6,11 @@ import type {
   ChannelIdentitiesRepo,
   ContactsRepo,
   ConversationsRepo,
+  LeadsRepo,
   MessagesRepo,
   OutboundQueueRepo,
 } from "./dal/index.ts";
+import { ensureLead } from "./lead-lifecycle.ts";
 import { type MemoryExtractor, runMemoryExtraction } from "./memory-extractor.ts";
 import { dispatchOutbound } from "./outbound-dispatch.ts";
 import { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
@@ -55,6 +57,13 @@ export interface ProcessInboundDeps {
   conversations: ConversationsRepo;
   messages: MessagesRepo;
   outbound: OutboundQueueRepo;
+  /**
+   * Опциональный LeadsRepo. Если задан вместе с `template` и `stageClassifier`,
+   * pipeline авто-создаёт Lead, как только цель/интент клиента определён
+   * (stage classifier вернул стадию ≠ "opener"). Без него лиды не создаются
+   * из диалога (legacy-поведение).
+   */
+  leads?: LeadsRepo;
   /** Стратегия ответа. null = pipeline сохраняет inbound и не отвечает. */
   reply?: ReplyStrategy | null;
   /**
@@ -377,6 +386,34 @@ export async function processInbound(
           from: conversation.currentStage,
           to: newStage,
         });
+      }
+
+      // Цель/интент определён (стадия ≠ opener) → сразу заводим Lead.
+      // Без template/leads — пропускаем (legacy: лиды не из диалога).
+      if (newStage && newStage !== "opener" && deps.leads && deps.template) {
+        try {
+          const { lead, created } = await ensureLead({
+            contactId: contact.id,
+            template: deps.template,
+            leads: deps.leads,
+            nowEpoch: now,
+          });
+          if (created) {
+            deps.sink?.log?.("info", "lead auto-created on intent", {
+              tenantId: deps.tenant.tenantId,
+              conversationId: conversation.id,
+              contactId: contact.id,
+              leadId: lead.id,
+              stage: newStage,
+            });
+          }
+        } catch (err) {
+          deps.sink?.log?.("warn", "lead auto-create failed", {
+            tenantId: deps.tenant.tenantId,
+            conversationId: conversation.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     } catch (err) {
       deps.sink?.log?.("warn", "stage classifier failed", {
