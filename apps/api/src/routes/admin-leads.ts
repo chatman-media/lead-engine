@@ -935,5 +935,120 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     return c.json({ ok: true, channelKind: outcome.channelKind });
   });
 
+  /**
+   * POST /api/admin/leads/:id/send-offer
+   * Body: { text: string }
+   *
+   * Оператор-ассистируемый фулфилмент: отправляет гостю текст (обычно оффер —
+   * заполненные оператором цена/время) в активный канал, НЕ переключая разговор
+   * в human — AI продолжает вести. Гость отвечает «да» → field-extractor ставит
+   * `confirmed` и авто-двигает стадию (offer→fulfill). Сообщение попадает в
+   * историю (role=human → в chat-history маппится как assistant), так что бот
+   * видит оффер в контексте. Парный к send-photo (тот же путь доставки).
+   */
+  app.post("/api/admin/leads/:id/send-offer", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+
+    let body: { text?: unknown };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text) return c.json({ error: "text required" }, 400);
+    if (text.length > 4000) return c.json({ error: "text too long (max 4000)" }, 400);
+
+    const now = Math.floor(Date.now() / 1000);
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      const [lead] = await tx
+        .select({ id: leads.id, userId: leads.userId })
+        .from(leads)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
+      if (!lead) return { kind: "not_found" } as const;
+
+      const [identity] = await tx
+        .select({
+          channelDbId: channels.id,
+          channelKind: channels.kind,
+          externalUserId: channelIdentities.externalUserId,
+        })
+        .from(channelIdentities)
+        .innerJoin(channels, eq(channels.id, channelIdentities.channelId))
+        .where(
+          and(
+            eq(channelIdentities.contactId, lead.userId),
+            eq(channels.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!identity) return { kind: "no_channel" } as const;
+
+      const [conv] = await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.tenantId, tenantId),
+            eq(conversations.userId, lead.userId),
+          ),
+        )
+        .orderBy(desc(conversations.lastMessageAt))
+        .limit(1);
+
+      if (conv?.id) {
+        await tx.insert(messages).values({
+          tenantId,
+          conversationId: conv.id,
+          role: "human",
+          text,
+          metaJson: JSON.stringify({ adminId, sentVia: "operator-offer" }),
+          createdAt: now,
+        });
+        // Превью + lastMessageAt; mode НЕ трогаем — AI продолжает вести.
+        await tx
+          .update(conversations)
+          .set({ lastMessageAt: now, lastMessageText: text.slice(0, 200) })
+          .where(eq(conversations.id, conv.id));
+      }
+
+      const envelope = {
+        channelId: String(identity.channelDbId),
+        externalUserId: identity.externalUserId,
+        parts: [{ kind: "text", text }],
+      };
+      await tx.insert(outboundQueue).values({
+        tenantId,
+        channelId: identity.channelDbId,
+        conversationId: conv?.id ?? null,
+        payloadJson: JSON.stringify(envelope),
+        idempotencyKey: `lead-offer-${id}-${now}`,
+        scheduledAt: now,
+        createdAt: now,
+      });
+
+      return { kind: "sent", channelKind: identity.channelKind } as const;
+    });
+
+    if (outcome.kind === "not_found") return c.json({ error: "lead not found" }, 404);
+    if (outcome.kind === "no_channel") {
+      return c.json({ error: "no active channel for this contact — cannot deliver" }, 409);
+    }
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "lead.send_offer",
+      targetKind: "lead",
+      targetId: String(id),
+      details: { channelKind: outcome.channelKind, textLength: text.length },
+    });
+
+    return c.json({ ok: true, channelKind: outcome.channelKind });
+  });
+
   return app;
 }
