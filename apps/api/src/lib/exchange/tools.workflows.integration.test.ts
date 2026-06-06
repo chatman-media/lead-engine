@@ -672,4 +672,70 @@ describe("Exchange workflow fixtures", () => {
 				expect(order.proofJson).toContain("fiat_receipt");
 		});
 	}
+
+	// A3: бот читает бизнес-настройки (часы/контакт/выдача/KYC/адрес) из секретов.
+	it("get_exchange_business_info returns configured settings (A3)", async () => {
+		if (!sql) return;
+		const now = Math.floor(Date.now() / 1000);
+		for (const [key, value] of [
+			["exchange_working_hours", "Пн–Вс 09:00–21:00"],
+			["exchange_operator_contact", "@phuket_operator"],
+			["exchange_office_address", "Бангтао, Soi 5"],
+		] as const) {
+			await setEncryptedSecret({ db, tenantId, key, value, masterKeyHex: MASTER_KEY, nowEpoch: now });
+		}
+		const { conversationId } = await makeConversation(
+			{ id: "a3-info", title: "A3 info" } as Parameters<typeof makeConversation>[0],
+			true,
+		);
+		const tools = toTools(conversationId);
+		const info = (await must(tools.get_exchange_business_info, "get_exchange_business_info").execute(
+			{},
+		)) as Record<string, unknown>;
+		expect(info.workingHours).toBe("Пн–Вс 09:00–21:00");
+		expect(info.operatorContact).toBe("@phuket_operator");
+		expect(info.officeAddress).toBe("Бангтао, Soi 5");
+	});
+
+	// A4: срабатывание rate-guard вызывает алерт владельцу (notifyRateGuard).
+	it("rate-guard trip fires notifyRateGuard (A4)", async () => {
+		if (!sql) return;
+		const now = Math.floor(Date.now() / 1000);
+		await withTenant(db, tenantId, (tx) =>
+			tx.insert(exchangeRates).values({
+				tenantId,
+				asset: "ETH",
+				quoteAsset: "THB",
+				network: "erc20",
+				baseRate: 100000,
+				quoteMode: "multiply",
+				marginPct: 50, // eff = base*0.5 → отклонение −50% > порога 35% → trips
+				autoUpdate: false,
+				createdAt: now,
+				updatedAt: now,
+			}),
+		);
+		const { conversationId } = await makeConversation(
+			{ id: "a4-guard", title: "A4 guard" } as Parameters<typeof makeConversation>[0],
+			true,
+		);
+		const alerts: Array<{ reason: string; asset: string }> = [];
+		const tools = Object.fromEntries(
+			makeExchangeTools({
+				db,
+				tenantId,
+				conversationId,
+				masterKeyHex: MASTER_KEY,
+				notifyRateGuard: (a) => alerts.push({ reason: a.reason, asset: a.asset }),
+			}).map((t) => [t.name, t]),
+		) as Record<string, { execute: (a: unknown) => Promise<unknown> }>;
+		await must(tools.compute_exchange_quote, "compute_exchange_quote").execute({
+			asset: "ETH",
+			amount: 1,
+			network: "erc20",
+		});
+		expect(alerts.length).toBeGreaterThanOrEqual(1);
+		expect(alerts[0]?.asset).toBe("ETH");
+		expect(alerts[0]?.reason).toBe("implausible_deviation");
+	});
 });

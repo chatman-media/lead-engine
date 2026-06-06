@@ -47,6 +47,7 @@ import type { ApiConfig } from "./config.ts";
 import {
 	hasActiveExchangeRates,
 	makeExchangeTools,
+	type RateGuardAlert,
 } from "./lib/exchange/tools.ts";
 import {
 	type OnUsage,
@@ -404,6 +405,7 @@ export function makeReplyStrategy(
 	db: Db,
 	metrics?: PlatformMetrics,
 	recordUsage?: RecordUsage,
+	notifyRateGuard?: (alert: RateGuardAlert) => void,
 ): ReplyStrategyBundle | null {
 	if (!ref.current.anyTenantHasChat) return null;
 
@@ -463,6 +465,7 @@ export function makeReplyStrategy(
 					tenantId: input.tenantId,
 					conversationId: input.conversationId,
 					masterKeyHex: cfg.masterKeyHex,
+					...(notifyRateGuard ? { notifyRateGuard } : {}),
 				}),
 			);
 		}

@@ -11,7 +11,7 @@
  * результат verbatim.
  */
 
-import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import { type Db, getDecryptedSecret, withTenant } from "@chatman-media/conversation-engine";
 import type { AnyRagTool } from "@chatman-media/kb";
 import { exchangeRates } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
@@ -52,11 +52,27 @@ function logGuardTrip(
   );
 }
 
+/** Событие срабатывания guardrail курса — уходит владельцу (A4 / #145). */
+export interface RateGuardAlert {
+  tenantId: number;
+  conversationId: number;
+  asset: string;
+  network?: string;
+  reason: string;
+  deviationPct: number;
+  threshold?: number;
+}
+
 export interface ExchangeToolsDeps {
   db: Db;
   tenantId: number;
   conversationId: number;
   masterKeyHex: string;
+  /**
+   * A4: алерт владельцу при срабатывании rate-guard (вместо «тихого» warn).
+   * Fire-and-forget; если не задан — остаётся только console.warn.
+   */
+  notifyRateGuard?: (alert: RateGuardAlert) => void;
 }
 
 const AssetEnum = z
@@ -77,6 +93,20 @@ const PayoutMethodEnum = z
 
 export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
   const { db, tenantId, conversationId, masterKeyHex } = deps;
+
+  // Срабатывание guardrail курса: лог (всегда) + алерт владельцу (если задан).
+  const onGuardTrip = (asset: string, network: string | undefined, guard: RateGuardTrip) => {
+    logGuardTrip(tenantId, conversationId, asset, network, guard);
+    deps.notifyRateGuard?.({
+      tenantId,
+      conversationId,
+      asset,
+      ...(network ? { network } : {}),
+      reason: guard.reason ?? "rate_guard",
+      deviationPct: guard.deviationPct,
+      ...(guard.threshold != null ? { threshold: guard.threshold } : {}),
+    });
+  };
 
   const computeQuoteTool: AnyRagTool = {
     name: "compute_exchange_quote",
@@ -102,7 +132,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         network: args.network,
       });
       if (!q.ok) {
-        if (q.guard?.tripped) logGuardTrip(tenantId, conversationId, args.asset, args.network, q.guard);
+        if (q.guard?.tripped) onGuardTrip(args.asset, args.network, q.guard);
         return { error: q.error };
       }
       return {
@@ -160,7 +190,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         network: args.network,
       });
       if (!q.ok) {
-        if (q.guard?.tripped) logGuardTrip(tenantId, conversationId, args.asset, args.network, q.guard);
+        if (q.guard?.tripped) onGuardTrip(args.asset, args.network, q.guard);
         return { error: q.error };
       }
 
@@ -498,6 +528,45 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     },
   };
 
+  // A3: бизнес-настройки обменника из tenant_secrets — часы работы, контакт
+  // оператора, способы выдачи, KYC-политика, адрес офиса. Раньше хранились, но
+  // рантайм их не читал; теперь бот может ответить «когда работаете / какие
+  // документы / как получить / куда подойти» из настроек, не выдумывая.
+  const businessInfoTool: AnyRagTool = {
+    name: "get_exchange_business_info",
+    description: [
+      "Справочные данные обменника: часы работы, контакт оператора, способы выдачи,",
+      "KYC-политика (какие документы нужны), адрес офиса. Вызывай, когда клиент",
+      "спрашивает «во сколько работаете», «как получить», «какие документы», «где офис»,",
+      "«как связаться». Отвечай ТОЛЬКО тем, что вернул инструмент; пустые поля не выдумывай.",
+    ].join(" "),
+    parameters: z.object({}),
+    execute: async () => {
+      const read = (key: string) =>
+        getDecryptedSecret({ db, tenantId, key, masterKeyHex });
+      const [workingHours, operatorContact, payoutMethods, kycPolicy, officeAddress] =
+        await Promise.all([
+          read("exchange_working_hours"),
+          read("exchange_operator_contact"),
+          read("exchange_payout_methods"),
+          read("exchange_kyc_policy"),
+          read("exchange_office_address"),
+        ]);
+      const info: Record<string, string> = {};
+      if (workingHours) info.workingHours = workingHours;
+      if (operatorContact) info.operatorContact = operatorContact;
+      if (payoutMethods) info.payoutMethods = payoutMethods;
+      if (kycPolicy) info.kycPolicy = kycPolicy;
+      if (officeAddress) info.officeAddress = officeAddress;
+      if (Object.keys(info).length === 0) {
+        return {
+          note: "Справочные данные не заданы оператором. Подскажи, что уточнишь у оператора.",
+        };
+      }
+      return info;
+    },
+  };
+
   return [
     computeQuoteTool,
     checkVerificationTool,
@@ -505,6 +574,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     fetchRequisitesTool,
     verifyPaymentTool,
     issuePayoutTool,
+    businessInfoTool,
   ];
 }
 
