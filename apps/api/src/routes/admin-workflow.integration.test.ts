@@ -11,12 +11,14 @@ import {
   applyAllMigrations,
   createIsolatedDb,
   schema,
+  skills,
   stageDefinitions,
   tryConnectToPg,
 } from "@chatman-media/storage";
 import type { ChatClient } from "@chatman-media/llm-router";
+import { SKILLS_CATALOGUE } from "../lib/skills-catalogue.ts";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
@@ -212,5 +214,53 @@ describe("admin-workflow /apply", () => {
     expect(rows.map((r) => r.slug).sort()).toEqual(["intake", "lost", "offer", "qualify", "won"]);
     // Phase 2 slice C: AI-emitted per-stage goal is normalized + persisted.
     expect(rows.find((r) => r.slug === "qualify")?.goal).toBe("понять сумму и валюту");
+  });
+});
+
+const RS = "/api/admin/workflows/recommend-skills";
+
+describe("admin-workflow /recommend-skills", () => {
+  it("без resolveChat → 503", async () => {
+    if (!sql) return;
+    const res = await post(appNoLlm, RS, { description: "обменник" });
+    expect(res.status).toBe(503);
+  });
+
+  it("без description → 400", async () => {
+    if (!sql) return;
+    const res = await post(app, RS, {});
+    expect(res.status).toBe(400);
+  });
+
+  it("не-JSON ответ → 502", async () => {
+    if (!sql) return;
+    nextRaw = "не json";
+    const res = await post(app, RS, { description: "обменник" });
+    expect(res.status).toBe(502);
+  });
+
+  it("нет валидных slug → 502", async () => {
+    if (!sql) return;
+    nextRaw = JSON.stringify({ slugs: ["no_such_skill_xyz"] });
+    const res = await post(app, RS, { description: "обменник" });
+    expect(res.status).toBe(502);
+  });
+
+  it("happy → включает РОВНО рекомендованные навыки", async () => {
+    if (!sql) return;
+    const pick = [SKILLS_CATALOGUE[0]!.slug, SKILLS_CATALOGUE[1]!.slug];
+    nextRaw = JSON.stringify({ slugs: pick });
+    const res = await post(app, RS, { description: "обменник крипты на THB" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { enabled: string[]; count: number };
+    expect(body.count).toBe(2);
+    expect([...body.enabled].sort()).toEqual([...pick].sort());
+
+    // В БД включены РОВНО рекомендованные (остальной каталог выключен).
+    const enabled = await db
+      .select({ slug: skills.slug })
+      .from(skills)
+      .where(and(eq(skills.tenantId, tenantId), eq(skills.isEnabled, true)));
+    expect(enabled.map((s) => s.slug).sort()).toEqual([...pick].sort());
   });
 });
