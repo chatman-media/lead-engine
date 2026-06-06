@@ -306,6 +306,11 @@ function validateFunnel(stages: SeedStage[]): {
 	};
 }
 
+/** true, если модель явно пыталась вернуть JSON воронки, а не текст-реплику. */
+function looksLikeFunnelJson(raw: string): boolean {
+	return /"(?:readyToGenerate|stages)"\s*:/.test(raw);
+}
+
 export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 	const app = new Hono();
 
@@ -361,7 +366,7 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 		let raw: string;
 		try {
 			raw = await client.complete(llmMessages, {
-				numPredict: 2000,
+				numPredict: 4000,
 				temperature: 0.4,
 			});
 		} catch (err) {
@@ -385,9 +390,39 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 		};
 
 		let parsed = tryParse(raw);
+
+		// Битый JSON (модель пыталась собрать воронку, но синтаксис сломан) —
+		// один retry с просьбой переотдать строго валидный JSON.
+		if (!parsed && looksLikeFunnelJson(raw)) {
+			try {
+				const retryRaw = await client.complete(
+					[
+						...llmMessages,
+						{ role: "assistant", content: raw },
+						{
+							role: "user",
+							content:
+								"Твой прошлый ответ — невалидный JSON. Верни ТОЛЬКО корректный " +
+								"JSON-объект по схеме: без markdown-обёрток и без текста вне JSON.",
+						},
+					],
+					{ numPredict: 4000, temperature: 0.2 },
+				);
+				parsed = tryParse(retryRaw);
+			} catch {
+				// LLM упал на retry — уходим в дружелюбный fallback ниже.
+			}
+		}
+
 		if (!parsed) {
-			// LLM не вернул JSON — отдаём текст как реплику, продолжаем диалог.
-			return c.json({ reply: raw.trim(), readyToGenerate: false });
+			// Стоп-течь: не показываем сырой (битый) JSON пользователю. Если это была
+			// JSON-попытка — просим переформулировать; иначе это текст-реплика модели.
+			return c.json({
+				reply: looksLikeFunnelJson(raw)
+					? "Не получилось собрать воронку из ответа — переформулируйте запрос или попробуйте ещё раз."
+					: raw.trim(),
+				readyToGenerate: false,
+			});
 		}
 		// Слабые модели (напр. gpt-4.1-nano) иногда вкладывают весь JSON воронки
 		// строкой в поле `reply`. Разворачиваем вложенность до реального объекта.

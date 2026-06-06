@@ -40,9 +40,16 @@ let appNoLlm: Hono;
 let token = "";
 let tenantId = 0;
 
-// Фейковый chat-клиент: complete() отдаёт `nextRaw` («что бы вернула модель»).
+// Фейковый chat-клиент: complete() отдаёт `nextRaw` («что бы вернула модель»),
+// либо последовательность из `nextRawQueue` (для теста retry).
 let nextRaw = "";
-const fakeClient = { complete: async () => nextRaw } as unknown as ChatClient;
+let nextRawQueue: string[] | null = null;
+const fakeClient = {
+  complete: async () => {
+    if (nextRawQueue && nextRawQueue.length > 0) return nextRawQueue.shift() as string;
+    return nextRaw;
+  },
+} as unknown as ChatClient;
 
 beforeAll(
   async () => {
@@ -188,6 +195,33 @@ describe("admin-workflow /ai-chat", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { readyToGenerate: boolean };
     expect(body.readyToGenerate).toBe(false);
+  });
+
+  it("битый JSON-ответ → дружелюбный fallback, сырьё не утекает", async () => {
+    if (!sql) return;
+    nextRawQueue = null;
+    // Похоже на JSON воронки, но синтаксис сломан → retry вернёт то же → fallback.
+    nextRaw = '{"reply":"ок","readyToGenerate":true,"stages":[{"slug":"a"';
+    const res = await post(app, AICHAT, { messages: MSGS });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { reply: string; readyToGenerate: boolean };
+    expect(body.readyToGenerate).toBe(false);
+    expect(body.reply).not.toContain('"stages"'); // сырой JSON не показан
+    expect(body.reply.toLowerCase()).toContain("переформулируйте");
+  });
+
+  it("битый JSON → один retry с валидным → stages + preview", async () => {
+    if (!sql) return;
+    nextRawQueue = [
+      '{"reply":"x","readyToGenerate":true,"stages":[{"slug":"a"',
+      JSON.stringify({ reply: "Готова", readyToGenerate: true, stages: VALID_STAGES }),
+    ];
+    const res = await post(app, AICHAT, { messages: MSGS });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { readyToGenerate: boolean; stages: unknown[] };
+    expect(body.readyToGenerate).toBe(true);
+    expect(body.stages.length).toBe(5);
+    nextRawQueue = null;
   });
 });
 
