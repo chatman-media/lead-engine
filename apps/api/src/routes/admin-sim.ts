@@ -38,9 +38,21 @@ import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { FieldExtractor } from "../lib/field-extractor.ts";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { Inbound, OutboundPart } from "@chatman-media/channel-core";
-import { channels, conversations, messages, tenants } from "@chatman-media/storage";
+import {
+  channels,
+  contacts,
+  conversations,
+  funnels,
+  leadEvents,
+  leadFieldValues,
+  leads,
+  messages,
+  stageDefinitions,
+  stageFields,
+  tenants,
+} from "@chatman-media/storage";
 import { randomBytes } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 
 /**
@@ -173,6 +185,241 @@ const STREAMS = new Map<string, StreamState>();
 // идущий simulateClient видит расхождение между своим стартовым epoch и текущим
 // → прерывает диалог между ходами (не убивая сервер).
 const CANCEL_EPOCH = new Map<number, number>();
+
+// ── Funnel walker (полное прохождение воронки «как нужно») ────────────────────
+
+interface WalkField {
+  id: number;
+  slug: string;
+  fieldType: string;
+  required: boolean;
+  optionsJson: string;
+  displayName: string;
+}
+interface WalkStage {
+  id: number;
+  slug: string;
+  displayName: string;
+  kind: string;
+  stageType: string;
+  nextStages: string[];
+}
+
+// Правдоподобные числа для типовых полей обмена/воронки.
+const NUM_BY_SLUG: Record<string, number> = {
+  amount_from: 500,
+  exchange_rate: 32.7,
+  thb_amount: 16350,
+  matched_amount: 16350,
+  final_thb_paid: 16350,
+  risk_score: 12,
+  requisites_ttl: 30,
+};
+
+function synthValue(f: WalkField): unknown {
+  let opts: Array<{ value: string; label?: string }> = [];
+  try {
+    opts = JSON.parse(f.optionsJson || "[]");
+  } catch {
+    opts = [];
+  }
+  switch (f.fieldType) {
+    case "select":
+      return opts[0]?.value ?? "ok";
+    case "multiselect":
+      return opts[0]?.value ? [opts[0].value] : [];
+    case "boolean":
+      return true;
+    case "number":
+      return NUM_BY_SLUG[f.slug] ?? 1;
+    case "date":
+      return "2026-06-20";
+    case "phone":
+      return "+66 80 123 4567";
+    case "email":
+      return "client@example.com";
+    case "photo":
+    case "video":
+    case "file":
+      return "received";
+    default:
+      return f.displayName;
+  }
+}
+
+function isMedia(f: WalkField): boolean {
+  return f.fieldType === "video" || f.fieldType === "photo" || f.fieldType === "file";
+}
+
+// Реплика-нарратор для стадии: клиент (ответ/медиа) или оператор (подтверждение).
+function narrate(stage: WalkStage, fields: WalkField[]): { role: "user" | "assistant"; text: string } {
+  if (stage.kind === "terminal_won") return { role: "assistant", text: "🎉 Сделка завершена — выдача выполнена." };
+  if (stage.kind === "terminal_lost") return { role: "assistant", text: "Заявка отменена." };
+  const media = fields.find(isMedia);
+  if (media) {
+    const isVideo = media.fieldType === "video" || /verif|kyc/.test(media.slug);
+    return {
+      role: "user",
+      text: isVideo
+        ? "📹 Прислал видео для верификации личности."
+        : "🧾 Прислал подтверждение (документ/скрин оплаты).",
+    };
+  }
+  const operatorish = ["assessment", "external_approval", "milestone", "rate_confirmation"].includes(
+    stage.stageType,
+  );
+  if (operatorish) return { role: "assistant", text: `✅ ${stage.displayName} — подтверждено оператором.` };
+  return { role: "user", text: `Ответил на вопросы этапа «${stage.displayName}».` };
+}
+
+/**
+ * Создаёт `count` лидов и проводит каждого по ВСЕЙ активной воронке: на каждой
+ * стадии заполняет её поля (синтетика по типу — ответы, видео-верификация,
+ * пруф оплаты, подтверждения), пишет диалог в self_play и двигает до won.
+ */
+async function walkLeads(
+  db: Db,
+  tenantId: number,
+  adminId: number,
+  count: number,
+  displayName?: string,
+): Promise<{ kind: "ok"; leadIds: number[]; finalStage: string } | { kind: "no_funnel" }> {
+  return withTenant(db, tenantId, async (tx) => {
+    const [funnel] = await tx
+      .select({ id: funnels.id })
+      .from(funnels)
+      .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
+      .limit(1);
+    if (!funnel) return { kind: "no_funnel" as const };
+
+    const stages: WalkStage[] = await tx
+      .select({
+        id: stageDefinitions.id,
+        slug: stageDefinitions.slug,
+        displayName: stageDefinitions.displayName,
+        kind: stageDefinitions.kind,
+        stageType: stageDefinitions.stageType,
+        nextStages: stageDefinitions.nextStages,
+      })
+      .from(stageDefinitions)
+      .where(eq(stageDefinitions.funnelId, funnel.id))
+      .orderBy(asc(stageDefinitions.position));
+    if (stages.length === 0) return { kind: "no_funnel" as const };
+
+    const stageIds = stages.map((s) => s.id);
+    const allFields = await tx
+      .select({
+        stageId: stageFields.stageId,
+        id: stageFields.id,
+        slug: stageFields.slug,
+        fieldType: stageFields.fieldType,
+        required: stageFields.required,
+        optionsJson: stageFields.optionsJson,
+        displayName: stageFields.displayName,
+      })
+      .from(stageFields)
+      .where(eq(stageFields.tenantId, tenantId));
+    const fieldsByStage = new Map<number, WalkField[]>();
+    for (const f of allFields) {
+      if (!stageIds.includes(f.stageId)) continue;
+      const arr = fieldsByStage.get(f.stageId) ?? [];
+      arr.push(f);
+      fieldsByStage.set(f.stageId, arr);
+    }
+
+    const intake = stages.find((s) => s.kind === "intake") ?? stages[0]!;
+    const leadIds: number[] = [];
+    let finalStage = "";
+    const baseNow = Math.floor(Date.now() / 1000);
+
+    for (let i = 0; i < count; i++) {
+      let ts = baseNow + i * 1000;
+      const name = (displayName?.trim() || randomName()).trim();
+      const [contact] = await tx
+        .insert(contacts)
+        .values({ tenantId, displayName: name, createdAt: ts })
+        .returning({ id: contacts.id });
+      const [conv] = await tx
+        .insert(conversations)
+        .values({
+          tenantId,
+          userId: contact!.id,
+          source: "self_play",
+          mode: "ai",
+          status: "open",
+          lastMessageAt: ts,
+        })
+        .returning({ id: conversations.id });
+      const [lead] = await tx
+        .insert(leads)
+        .values({
+          tenantId,
+          userId: contact!.id,
+          state: intake.slug,
+          stageDefinitionId: intake.id,
+          createdAt: ts,
+          updatedAt: ts,
+        })
+        .returning({ id: leads.id });
+      leadIds.push(lead!.id);
+
+      let cur: WalkStage | undefined = intake;
+      let guard = 0;
+      while (cur && guard < stages.length + 2) {
+        guard++;
+        // 1. заполняем поля стадии
+        for (const f of fieldsByStage.get(cur.id) ?? []) {
+          await tx.insert(leadFieldValues).values({
+            leadId: lead!.id,
+            fieldId: f.id,
+            tenantId,
+            valueJson: JSON.stringify(synthValue(f)),
+            updatedAt: ts,
+            updatedByAdminId: adminId,
+          });
+        }
+        // 2. нарратор в чат
+        ts++;
+        const msg = narrate(cur, fieldsByStage.get(cur.id) ?? []);
+        await tx.insert(messages).values({
+          tenantId,
+          conversationId: conv!.id,
+          role: msg.role,
+          text: msg.text,
+          metaJson: JSON.stringify({ _sim: true, _walk: true, adminId }),
+          createdAt: ts,
+        });
+        await tx
+          .update(conversations)
+          .set({ lastMessageAt: ts, lastMessageText: msg.text.slice(0, 200) })
+          .where(eq(conversations.id, conv!.id));
+        finalStage = cur.slug;
+
+        if (cur.kind === "terminal_won" || cur.kind === "terminal_lost") break;
+        const nextSlug: string | undefined = cur.nextStages[0];
+        const next: WalkStage | undefined = nextSlug
+          ? stages.find((s) => s.slug === nextSlug)
+          : undefined;
+        if (!next) break;
+        await tx
+          .update(leads)
+          .set({ stageDefinitionId: next.id, state: next.slug, updatedAt: ts })
+          .where(eq(leads.id, lead!.id));
+        await tx.insert(leadEvents).values({
+          tenantId,
+          leadId: lead!.id,
+          fromState: cur.slug,
+          toState: next.slug,
+          byAdminId: adminId,
+          createdAt: ts,
+        });
+        cur = next;
+      }
+    }
+
+    return { kind: "ok" as const, leadIds, finalStage };
+  });
+}
 
 // ── Route factory ────────────────────────────────────────────────────────────
 
@@ -515,6 +762,27 @@ export function makeAdminSimRoutes(opts: {
     }
 
     return c.json({ ok: true, streamId, count, intervalSec, maxTurns });
+  });
+
+  // ── POST /api/admin/sim/walk ───────────────────────────────────────────
+  // Проводит НОВОГО лида по ВСЕЙ активной воронке «как нужно»: на каждой
+  // стадии удовлетворяет её поля (ответы, видео-верификация, пруф оплаты,
+  // подтверждения оператора) и двигает дальше — до терминальной won-стадии.
+  // Пишет диалог в self_play (виден в инбоксе), заполняет lead_field_values.
+  app.post("/api/admin/sim/walk", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? 0;
+    let body: { count?: number; displayName?: string };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      body = {};
+    }
+    const count = Math.min(Math.max(1, body.count ?? 1), 10);
+
+    const created = await walkLeads(opts.db, tenantId, adminId, count, body.displayName);
+    if (created.kind === "no_funnel") return c.json({ error: "no active funnel with stages" }, 400);
+    return c.json({ ok: true, leads: created.leadIds, finalStage: created.finalStage });
   });
 
   // ── DELETE /api/admin/sim/:id ──────────────────────────────────────────
