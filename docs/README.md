@@ -9,7 +9,7 @@
 | Док | О чём |
 |---|---|
 | [engineering/ARCHITECTURE.md](engineering/ARCHITECTURE.md) | Топология, multi-tenant изоляция (RLS + `withTenant`), pipeline, hot-reload, секреты, костяк воронки (`phase`), exchange/copilot/onboarding |
-| [engineering/AI_FUNNEL_BUILDER.md](engineering/AI_FUNNEL_BUILDER.md) | AI-сборка воронки по описанию бизнеса: `ai-chat → normalize → validateBackbone → apply`; два входа (panel/copilot); что генерит / что пока нет |
+| [engineering/AI_FUNNEL_BUILDER.md](engineering/AI_FUNNEL_BUILDER.md) | AI-сборка воронки по описанию бизнеса: `ai-chat → normalize → validateBackbone → apply`; линейные И мульти-запросные воронки + поведенческий слой (стиль/навыки/пер-стадийное поведение/оператор-handoff) |
 | [engineering/CONCIERGE_FUNNEL_CONVERGENCE.md](engineering/CONCIERGE_FUNNEL_CONVERGENCE.md) | Как срастаются концерж (#207) и универсальная воронка (#208): «общий хребет, разъединённые концы» — 3 шва + продуктовый разбор + дорожная карта конвергенции (R1–R6) |
 | [engineering/ONBOARDING.md](engineering/ONBOARDING.md) | Путь тенанта: закрытая регистрация → обязательный визард → каналы/LLM/KB/обменник (UI + curl) |
 | [engineering/CONFIGURATION.md](engineering/CONFIGURATION.md) | Полный референс env-переменных (all vars, required/optional, fallback/per-tenant) |
