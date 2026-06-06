@@ -1078,34 +1078,62 @@ export function SaasOnboarding() {
               {verticals.length === 0 && (
                 <p className="text-sm text-muted-foreground">Список шаблонов недоступен.</p>
               )}
-              <div className="flex flex-wrap gap-2">
-                {verticals.map((v) => (
-                  <Button
-                    key={v.slug}
-                    type="button"
-                    variant={installedVertical === v.slug ? "default" : "outline"}
-                    size="sm"
-                    disabled={installingVertical !== null}
-                    onClick={async () => {
-                      setInstallingVertical(v.slug);
-                      setError("");
-                      try {
-                        await saas.installVertical(v.slug);
-                        setInstalledVertical(v.slug);
-                        await loadState();
-                      } catch (err) {
-                        if (!handleAuthError(err)) {
-                          setError(err instanceof Error ? err.message : String(err));
+              <div className="grid gap-2 sm:grid-cols-2">
+                {verticals.map((v) => {
+                  const selected = installedVertical === v.slug;
+                  const installing = installingVertical === v.slug;
+                  const includes = [
+                    v.hasFunnel && "Воронка",
+                    v.hasStyles && "Стиль продаж",
+                    v.hasKbDocuments && "База знаний",
+                  ].filter(Boolean) as string[];
+                  return (
+                    <button
+                      key={v.slug}
+                      type="button"
+                      disabled={installingVertical !== null}
+                      aria-pressed={selected}
+                      onClick={async () => {
+                        setInstallingVertical(v.slug);
+                        setError("");
+                        try {
+                          await saas.installVertical(v.slug);
+                          setInstalledVertical(v.slug);
+                          await loadState();
+                        } catch (err) {
+                          if (!handleAuthError(err)) {
+                            setError(err instanceof Error ? err.message : String(err));
+                          }
+                        } finally {
+                          setInstallingVertical(null);
                         }
-                      } finally {
-                        setInstallingVertical(null);
-                      }
-                    }}
-                  >
-                    {installingVertical === v.slug ? "Устанавливаем…" : v.displayName}
-                    {installedVertical === v.slug && <CheckIcon className="size-3.5" />}
-                  </Button>
-                ))}
+                      }}
+                      className={`flex flex-col items-start gap-2 rounded-lg border p-3 text-left transition-colors disabled:opacity-60 ${
+                        selected
+                          ? "border-primary bg-primary/5 ring-1 ring-primary"
+                          : "border-border hover:border-primary/50 hover:bg-muted/50"
+                      }`}
+                    >
+                      <div className="flex w-full items-center justify-between gap-2">
+                        <span className="font-medium">{v.displayName}</span>
+                        {selected && <CheckIcon className="size-4 shrink-0 text-primary" />}
+                      </div>
+                      {installing ? (
+                        <span className="text-xs text-muted-foreground">Устанавливаем…</span>
+                      ) : includes.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {includes.map((label) => (
+                            <Badge key={label} variant="secondary" className="text-[10px]">
+                              {label}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Пустой костяк воронки</span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
               {verticalDone && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">

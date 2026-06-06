@@ -10,11 +10,15 @@ import {
   createIsolatedDb,
   funnels,
   schema,
+  styles as stylesTable,
   tryConnectToPg,
 } from "@chatman-media/storage";
 // Импорт ради side-effect: регистрирует EXCHANGE_V1 в defaultRegistry,
 // который install handler читает через defaultRegistry.tryLoad(slug).
 import { EXCHANGE_V1 } from "@chatman-media/vertical-exchange";
+// Side-effect: регистрирует REAL_ESTATE_V1 (мульти-стилевой шаблон) —
+// нужен для проверки, что install активирует ровно один стиль.
+import { REAL_ESTATE_STYLES } from "@chatman-media/vertical-real-estate";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -135,5 +139,25 @@ describe("admin-verticals install → vertical_template_id", () => {
     expect(res.status).toBe(200);
     const funnel = await activeFunnel();
     expect(funnel.verticalTemplateId).toBe("exchange_v1");
+  });
+
+  it("install мульти-стилевого шаблона активирует ровно ОДИН стиль", async () => {
+    if (!sql) return;
+    // real_estate_v1 несёт несколько стилей (REAL_ESTATE_STYLES). Только
+    // первый должен стать активным — иначе reply-движок берёт «самый свежий
+    // активный» недетерминированно.
+    expect(REAL_ESTATE_STYLES.length).toBeGreaterThan(1);
+    const res = await authReq("/api/admin/verticals/real_estate_v1/install", { method: "POST" });
+    expect(res.status).toBe(200);
+
+    const rows = await db
+      .select({ slug: stylesTable.slug, isActive: stylesTable.isActive })
+      .from(stylesTable)
+      .where(eq(stylesTable.tenantId, tenantId));
+    const seeded = rows.filter((r) => REAL_ESTATE_STYLES.some((s) => s.slug === r.slug));
+    expect(seeded.length).toBe(REAL_ESTATE_STYLES.length);
+    expect(seeded.filter((r) => r.isActive).length).toBe(1);
+    // активным должен быть первый стиль шаблона
+    expect(seeded.find((r) => r.isActive)?.slug).toBe(REAL_ESTATE_STYLES[0]!.slug);
   });
 });
