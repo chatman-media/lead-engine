@@ -35,6 +35,7 @@ import {
   withTenant,
 } from "@chatman-media/conversation-engine";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
+import type { FieldExtractor } from "../lib/field-extractor.ts";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { Inbound, OutboundPart } from "@chatman-media/channel-core";
 import { channels, conversations, messages, tenants } from "@chatman-media/storage";
@@ -181,6 +182,8 @@ export function makeAdminSimRoutes(opts: {
   resolveSimChat: (tenantId: number) => ChatClient | null;
   resolveTemplate?: (tenantSlug: string) => VerticalTemplate | undefined;
   stageClassifier?: StageClassifier | null;
+  /** Извлечение полей лида из текста (заполняет lead_field_values + auto-advance). */
+  fieldExtractor?: FieldExtractor | null;
 }): Hono {
   const app = new Hono();
 
@@ -289,6 +292,22 @@ export function makeAdminSimRoutes(opts: {
         }),
       );
       if (!pi) return null;
+
+      // Извлекаем поля лида из реплики (заполняет lead_field_values + двигает
+      // стадию по заполненности) — чтобы у sim-лидов был реальный прогресс,
+      // а не «0%». Не блокируем диалог: ошибки глотаем.
+      if (opts.fieldExtractor) {
+        try {
+          await opts.fieldExtractor.extract({
+            tenantId,
+            contactId: pi.contactId,
+            text: userText,
+            db: opts.db,
+          });
+        } catch {
+          /* извлечение полей не критично для диалога */
+        }
+      }
 
       let botReply = "";
       try {

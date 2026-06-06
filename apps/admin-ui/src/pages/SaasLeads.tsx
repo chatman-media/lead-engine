@@ -37,15 +37,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { type FunnelPhase, groupStagesByPhase, PHASE_ACCENT, PHASE_LABEL } from "@/lib/phases";
 
-const STATE_RU: Record<string, string> = {
-  active: "активен",
-  won: "выигран",
-  lost: "проигран",
-  intake: "входящий",
-  terminal_won: "закрыт ✓",
-  terminal_lost: "закрыт ✗",
-};
-
 // Лейблы типов запроса для concierge-вертикали (leads.request_type).
 const REQUEST_TYPE_RU: Record<string, string> = {
   exchange: "Обмен",
@@ -75,18 +66,6 @@ const STAGE_TYPE_RU: Record<string, string> = {
   milestone: "Контрольная точка",
 };
 
-function progressPct(filled: number, total: number) {
-  if (!total || total <= 0) return null;
-  const pct = Math.round((filled / total) * 100);
-  return Number.isFinite(pct) ? pct : null;
-}
-
-function formatDate(epoch: number) {
-  return new Date(epoch * 1000).toLocaleDateString("ru-RU", {
-    day: "2-digit",
-    month: "short",
-  });
-}
 
 export function SaasLeads() {
   const navigate = useNavigate();
@@ -797,7 +776,18 @@ function LeadCard({
   onDragStart?: () => void;
   onDragEnd?: () => void;
 }) {
-  const pct = progressPct(lead.requiredFieldsFilled, lead.requiredFieldsTotal);
+  const fields = (lead.keyFields ?? [])
+    .map((f) => ({ label: f.label, value: parseFieldValue(f.value) }))
+    .filter((f) => f.value)
+    .slice(0, 3);
+  const awaiting = lead.stageType === "awaiting_operator";
+  const recency = relTime(lead.lastMessageAt ?? lead.updatedAt);
+  // Прогресс по воронке: позиция стадии / всего стадий. Всегда осмысленно
+  // (per-stage заполненность вводила в заблуждение «0%» на дальних стадиях).
+  const total = lead.funnelStageCount ?? 0;
+  const pos = lead.stagePosition ?? null;
+  const funnelPct =
+    total > 1 && pos !== null ? Math.round((pos / (total - 1)) * 100) : null;
 
   return (
     <div
@@ -807,40 +797,65 @@ function LeadCard({
       className={isDragging ? "opacity-40" : ""}
     >
       <Link to={`/leads/${lead.id}`}>
-        <Card className="cursor-pointer transition-colors hover:bg-accent/30">
+        <Card
+          className="cursor-pointer border-l-2 transition-colors hover:bg-accent/30"
+          style={{ borderLeftColor: lead.stageColor || "var(--border)" }}
+        >
           <CardHeader className="pb-1 pt-3">
-            <CardTitle className="text-sm font-medium">
-              {lead.contactName ?? `Контакт #${lead.contactId}`}
-            </CardTitle>
-            {lead.applicationId && (
-              <p className="text-xs text-muted-foreground font-mono">{lead.applicationId}</p>
-            )}
+            <div className="flex items-start justify-between gap-2">
+              <CardTitle className="text-sm font-medium leading-tight">
+                {lead.contactName ?? `Контакт #${lead.contactId}`}
+              </CardTitle>
+              <span className="shrink-0 text-[10px] text-muted-foreground">{recency}</span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              {lead.source && (
+                <Badge variant="secondary" className="text-[10px]">
+                  {SOURCE_SHORT[lead.source] ?? lead.source}
+                </Badge>
+              )}
+              {awaiting && (
+                <Badge variant="warning" className="text-[10px]">
+                  ждёт оператора
+                </Badge>
+              )}
+              {lead.requestType && (
+                <Badge variant="outline" className="text-[10px]">
+                  {REQUEST_TYPE_RU[lead.requestType] ?? lead.requestType}
+                </Badge>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="pb-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1">
-                {lead.requestType && (
-                  <Badge variant="secondary" className="text-xs">
-                    {REQUEST_TYPE_RU[lead.requestType] ?? lead.requestType}
-                  </Badge>
-                )}
-                <Badge variant="outline" className="text-xs">
-                  {STATE_RU[lead.state] ?? lead.state}
-                </Badge>
+            {fields.length > 0 && (
+              <div className="space-y-0.5">
+                {fields.map((f) => (
+                  <div key={f.label} className="flex justify-between gap-2 text-[11px]">
+                    <span className="shrink-0 text-muted-foreground">{f.label}</span>
+                    <span className="truncate text-right font-medium">{f.value}</span>
+                  </div>
+                ))}
               </div>
-              <span className="text-xs text-muted-foreground">{formatDate(lead.updatedAt)}</span>
-            </div>
+            )}
 
-            {pct !== null && (
+            {lead.lastMessageText && (
+              <p className="mt-1.5 line-clamp-2 text-[11px] italic text-muted-foreground">
+                «{lead.lastMessageText}»
+              </p>
+            )}
+
+            {funnelPct !== null && pos !== null && (
               <div className="mt-2">
-                <div className="flex items-center justify-between text-xs text-muted-foreground mb-0.5">
-                  <span>Заполнено</span>
-                  <span>{pct}%</span>
+                <div className="mb-0.5 flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span className="truncate">{lead.stageName ?? "Воронка"}</span>
+                  <span className="shrink-0">
+                    этап {pos + 1}/{total}
+                  </span>
                 </div>
                 <div className="h-1 w-full rounded-full bg-secondary">
                   <div
                     className="h-1 rounded-full bg-primary transition-all"
-                    style={{ width: `${pct}%` }}
+                    style={{ width: `${funnelPct}%` }}
                   />
                 </div>
               </div>
@@ -850,4 +865,36 @@ function LeadCard({
       </Link>
     </div>
   );
+}
+
+const SOURCE_SHORT: Record<string, string> = {
+  bot: "Telegram",
+  userbot: "Telegram",
+  whatsapp: "WhatsApp",
+  web: "Web",
+  self_play: "SIM",
+};
+
+/** value_json → читаемая строка для карточки. */
+function parseFieldValue(raw: string): string {
+  try {
+    const v = JSON.parse(raw);
+    if (v == null) return "";
+    if (Array.isArray(v)) return v.join(", ");
+    if (typeof v === "object") return Object.values(v).join(" ");
+    return String(v);
+  } catch {
+    return raw;
+  }
+}
+
+/** Относительное время: «5м», «2ч», «3д», иначе дата. */
+function relTime(epoch: number | null | undefined): string {
+  if (!epoch) return "";
+  const diff = Math.floor(Date.now() / 1000) - epoch;
+  if (diff < 60) return "только что";
+  if (diff < 3600) return `${Math.floor(diff / 60)}м`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}ч`;
+  if (diff < 7 * 86400) return `${Math.floor(diff / 86400)}д`;
+  return new Date(epoch * 1000).toLocaleDateString("ru", { day: "2-digit", month: "2-digit" });
 }
