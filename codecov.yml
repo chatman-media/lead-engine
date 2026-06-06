@@ -13,13 +13,59 @@ coverage:
         informational: true
 
 comment:
-  layout: "reach, diff, flags, files"
+  layout: "reach, diff, flags, components, files"
   require_changes: false
 
-# Покрытие меряем только по packages/* (publishable либы): apps/* в CI
-# гоняются без --coverage, поэтому их сюда не тянем.
+# Per-component coverage breakdown (Codecov Components).
+# https://docs.codecov.com/docs/components
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+        threshold: 1%
+        informational: true
+  individual_components:
+    - component_id: app_api
+      name: apps/api
+      paths: ["apps/api/**"]
+    - component_id: app_worker
+      name: apps/worker
+      paths: ["apps/worker/**"]
+    - component_id: app_verticals
+      name: apps/vertical-*
+      paths: ["apps/vertical-*/**"]
+    - component_id: pkg_kb
+      name: kb
+      paths: ["packages/kb/**"]
+    - component_id: pkg_sales
+      name: sales
+      paths: ["packages/sales/**"]
+    - component_id: pkg_conversation_engine
+      name: conversation-engine
+      paths: ["packages/conversation-engine/**"]
+    - component_id: pkg_llm_router
+      name: llm-router
+      paths: ["packages/llm-router/**"]
+    - component_id: pkg_storage
+      name: storage
+      paths: ["packages/storage/**"]
+    - component_id: pkg_verticals
+      name: verticals
+      paths: ["packages/verticals/**"]
+    - component_id: pkg_channels
+      name: channels (telegram/whatsapp/facebook/web/core)
+      paths: ["packages/channel-*/**"]
+    - component_id: pkg_observability
+      name: observability
+      paths: ["packages/observability/**"]
+
+# Меряем packages/* + apps/api/worker/verticals (в CI гоняются с --coverage).
+# Фронтенды (admin-ui/landing/widget) без юнит-покрытия — исключаем.
 ignore:
-  - "apps/**"
+  - "apps/admin-ui/**"
+  - "apps/landing/**"
+  - "apps/widget/**"
   - "**/*.test.ts"
   - "**/*.spec.ts"
   - "**/dist/**"
