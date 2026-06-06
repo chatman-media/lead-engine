@@ -1881,6 +1881,8 @@ export const saas = {
       informerDigestHour?: number;
       informerTz?: string;
       informerMutedUntil?: number | null;
+      informerQuietFrom?: number | null;
+      informerQuietTo?: number | null;
     }>("/api/admin/notifications/settings");
   },
   updateInformerSettings(body: {
@@ -1890,10 +1892,17 @@ export const saas = {
     informerDigestHour?: number;
     informerTz?: string;
     informerMutedUntil?: number | null;
+    informerQuietFrom?: number | null;
+    informerQuietTo?: number | null;
   }) {
     return request<{ ok: boolean }>("/api/admin/notifications/informer", {
       method: "PUT",
       body: JSON.stringify(body),
+    });
+  },
+  sendTestNotification() {
+    return request<{ ok: boolean; error?: string }>("/api/admin/notifications/settings/test", {
+      method: "POST",
     });
   },
   getInformerFeed(limit = 20) {

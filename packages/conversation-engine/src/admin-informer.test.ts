@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   type InformerLevel,
   type InformerSeverity,
+  inQuietHours,
   isMuted,
   notificationEventToInformer,
   opsAlertToInformer,
@@ -27,7 +28,7 @@ function settings(over: Partial<OperatorSettings> = {}): OperatorSettings {
     informerDigestHour: 9,
     informerTz: "UTC",
     informerMutedUntil: null,
-    informerLastDigestAt: null,
+    informerLastDigestAt: null, informerQuietFrom: null, informerQuietTo: null,
     updatedAt: 0,
     ...over,
   };
@@ -74,6 +75,27 @@ describe("isMuted", () => {
   });
   it("null → false", () => {
     expect(isMuted(settings({ informerMutedUntil: null }), 1000)).toBe(false);
+  });
+});
+
+describe("inQuietHours", () => {
+  const at = (utcHour: number) => 1704067200 + utcHour * 3600; // 2024-01-01T00Z + H
+
+  it("выключено при NULL/равных границах", () => {
+    expect(inQuietHours(settings(), at(3))).toBe(false);
+    expect(inQuietHours(settings({ informerQuietFrom: 8, informerQuietTo: 8 }), at(8))).toBe(false);
+  });
+  it("окно через полночь (22→8)", () => {
+    const s = settings({ informerQuietFrom: 22, informerQuietTo: 8, informerTz: "UTC" });
+    expect(inQuietHours(s, at(23))).toBe(true);
+    expect(inQuietHours(s, at(5))).toBe(true);
+    expect(inQuietHours(s, at(12))).toBe(false);
+  });
+  it("окно в пределах суток (9→18)", () => {
+    const s = settings({ informerQuietFrom: 9, informerQuietTo: 18, informerTz: "UTC" });
+    expect(inQuietHours(s, at(12))).toBe(true);
+    expect(inQuietHours(s, at(20))).toBe(false);
+    expect(inQuietHours(s, at(8))).toBe(false);
   });
 });
 

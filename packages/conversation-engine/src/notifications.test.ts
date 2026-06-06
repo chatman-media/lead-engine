@@ -36,7 +36,7 @@ function makeOperatorSettings(overrides: Partial<OperatorSettings> = {}): Operat
     informerDigestHour: 9,
     informerTz: "UTC",
     informerMutedUntil: null,
-    informerLastDigestAt: null,
+    informerLastDigestAt: null, informerQuietFrom: null, informerQuietTo: null,
     updatedAt: 0,
     ...overrides,
   };

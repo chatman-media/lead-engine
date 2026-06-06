@@ -125,7 +125,7 @@ describe("NotificationsRepo: operator settings", () => {
       adminId: admin2, tenantId, telegramChatId: "chat-upsert", notifyOnAssignedOnly: true,
       linkToken: null, linkTokenExpiresAt: null,
       informerLevel: "important", informerTopics: null, informerDigest: "daily",
-      informerDigestHour: 9, informerTz: "UTC", informerMutedUntil: null, informerLastDigestAt: null,
+      informerDigestHour: 9, informerTz: "UTC", informerMutedUntil: null, informerLastDigestAt: null, informerQuietFrom: null, informerQuietTo: null,
     });
     expect((await repo.findOperatorSettings(admin2))?.telegramChatId).toBe("chat-upsert");
   });

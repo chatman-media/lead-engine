@@ -72,6 +72,30 @@ export function isMuted(settings: OperatorSettings | undefined, nowEpoch: number
   return typeof until === "number" && until > nowEpoch;
 }
 
+/**
+ * Тихие часы (DND): true, если текущий локальный час (в informerTz) попадает в
+ * окно [quietFrom, quietTo). Окно может переходить через полночь (22→8).
+ * Выключено, если границы NULL или равны.
+ */
+export function inQuietHours(settings: OperatorSettings | undefined, nowEpoch: number): boolean {
+  const from = settings?.informerQuietFrom;
+  const to = settings?.informerQuietTo;
+  if (from == null || to == null || from === to) return false;
+  let hour: number;
+  try {
+    const tz = settings?.informerTz || "UTC";
+    const s = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour: "2-digit",
+      hour12: false,
+    }).format(new Date(nowEpoch * 1000));
+    hour = Number.parseInt(s, 10) % 24;
+  } catch {
+    hour = new Date(nowEpoch * 1000).getUTCHours();
+  }
+  return from < to ? hour >= from && hour < to : hour >= from || hour < to;
+}
+
 /** Тема включена, если карты нет (NULL = все включены) или ключ != false. */
 export function topicEnabled(settings: OperatorSettings | undefined, topic: InformerTopic): boolean {
   const raw = settings?.informerTopics;
@@ -277,7 +301,9 @@ export class AdminInformer {
 
       const level = (owner.settings?.informerLevel ?? "important") as InformerLevel;
       const realtime =
-        !isMuted(owner.settings, now) && passesThreshold(event.severity, level);
+        !isMuted(owner.settings, now) &&
+        !inQuietHours(owner.settings, now) &&
+        passesThreshold(event.severity, level);
 
       const rowId = await repo.insertAdminNotification({
         tenantId: event.tenantId,

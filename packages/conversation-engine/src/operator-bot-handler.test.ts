@@ -12,7 +12,7 @@ function makeSettings(overrides: Partial<OperatorSettings> = {}): OperatorSettin
     notifyOnAssignedOnly: true,
     informerLevel: "important", informerTopics: null,
     informerDigest: "daily", informerDigestHour: 9, informerTz: "UTC",
-    informerMutedUntil: null, informerLastDigestAt: null,
+    informerMutedUntil: null, informerLastDigestAt: null, informerQuietFrom: null, informerQuietTo: null,
     updatedAt: 0,
     ...overrides,
   };

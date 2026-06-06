@@ -147,8 +147,29 @@ export function makeAdminNotificationsRoutes(opts: {
       for (const t of INFORMER_TOPIC_KEYS) map[t] = body.informerTopics[t] !== false;
       prefs.informerTopics = JSON.stringify(map);
     }
+    for (const key of ["informerQuietFrom", "informerQuietTo"] as const) {
+      if (key in body) {
+        const v = body[key];
+        prefs[key] =
+          v === null || !Number.isInteger(Number(v)) ? null : Math.min(Math.max(Number(v), 0), 23);
+      }
+    }
     await opts.repo.updateInformerPrefs(adminId, prefs, tenantId);
     return c.json({ ok: true });
+  });
+
+  // POST /api/admin/notifications/settings/test — отправить себе тест-уведомление
+  app.post("/settings/test", async (c) => {
+    const adminId = c.var.adminId;
+    const settings = await opts.repo.findOperatorSettings(adminId);
+    if (!settings?.telegramChatId) {
+      return c.json({ ok: false, error: "Telegram не подключён" }, 400);
+    }
+    if (!opts.notificationService) {
+      return c.json({ ok: false, error: "Сервис уведомлений не настроен" }, 400);
+    }
+    const result = await opts.notificationService.sendTestMessage(settings.telegramChatId);
+    return c.json(result);
   });
 
   // ---- Операционные алерты (#145) ----
