@@ -617,6 +617,12 @@ async function main() {
     log.info("stage classifier enabled", { kind: cfg.stageClassifier });
   }
 
+  const photoProcessor = makePhotoProcessor(loadedRef);
+  log.info("photo processor enabled (activates per-tenant when vision LLM is configured)");
+
+  const fieldExtractor = makeFieldExtractor(loadedRef, notificationService);
+  log.info("field extractor enabled (activates per-tenant when chat LLM is configured)");
+
   // Dialog Simulator — LLM «клиент» ведёт диалог, виден в живом инбоксе (self_play).
   app.route(
     "/",
@@ -626,15 +632,10 @@ async function main() {
       resolveSimChat: makeSimChatResolver(loadedRef),
       resolveTemplate,
       stageClassifier,
+      fieldExtractor,
     }),
   );
   log.info("admin-sim routes enabled (dialog simulator)");
-
-  const photoProcessor = makePhotoProcessor(loadedRef);
-  log.info("photo processor enabled (activates per-tenant when vision LLM is configured)");
-
-  const fieldExtractor = makeFieldExtractor(loadedRef, notificationService);
-  log.info("field extractor enabled (activates per-tenant when chat LLM is configured)");
 
   const resolveTranscriber = makeTranscriberResolver(loadedRef);
   if (resolveTranscriber) {

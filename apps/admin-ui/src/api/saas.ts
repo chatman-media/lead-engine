@@ -526,6 +526,16 @@ export interface LeadListItem {
   requestType: string | null;
   requiredFieldsTotal: number;
   requiredFieldsFilled: number;
+  stageName?: string | null;
+  stagePhase?: string | null;
+  stageType?: string | null;
+  stageColor?: string | null;
+  stagePosition?: number | null;
+  funnelStageCount?: number | null;
+  lastMessageText?: string | null;
+  lastMessageAt?: number | null;
+  source?: string | null;
+  keyFields?: Array<{ label: string; value: string }>;
 }
 
 export interface LeadDetail {

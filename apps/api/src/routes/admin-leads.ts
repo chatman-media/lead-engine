@@ -160,9 +160,43 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
               AND lfv.value_json != 'null'
               AND lfv.value_json != '""'
           )`,
+          // Стадия (лейбл + фаза + тип + цвет + позиция) — для карточки.
+          stageName: stageDefinitions.displayName,
+          stagePhase: stageDefinitions.phase,
+          stageType: stageDefinitions.stageType,
+          stageColor: stageDefinitions.color,
+          stagePosition: stageDefinitions.position,
+          funnelStageCount: sql<number>`(
+            SELECT COUNT(*) FROM stage_definitions sd2 WHERE sd2.funnel_id = ${stageDefinitions.funnelId}
+          )`,
+          // Последняя активность диалога контакта — превью + время + канал.
+          lastMessageText: sql<string | null>`(
+            SELECT cv.last_message_text FROM conversations cv
+            WHERE cv.tenant_id = ${tenantId} AND cv.user_id = ${leads.userId}
+            ORDER BY cv.last_message_at DESC NULLS LAST LIMIT 1
+          )`,
+          lastMessageAt: sql<number | null>`(
+            SELECT cv.last_message_at FROM conversations cv
+            WHERE cv.tenant_id = ${tenantId} AND cv.user_id = ${leads.userId}
+            ORDER BY cv.last_message_at DESC NULLS LAST LIMIT 1
+          )`,
+          source: sql<string | null>`(
+            SELECT cv.source FROM conversations cv
+            WHERE cv.tenant_id = ${tenantId} AND cv.user_id = ${leads.userId}
+            ORDER BY cv.last_message_at DESC NULLS LAST LIMIT 1
+          )`,
+          // Ключевые заполненные поля (лейбл + значение) — суть лида.
+          keyFields: sql<Array<{ label: string; value: string }>>`(
+            SELECT COALESCE(json_agg(json_build_object('label', sf.display_name, 'value', lfv.value_json) ORDER BY sf.position), '[]'::json)
+            FROM lead_field_values lfv
+            JOIN stage_fields sf ON lfv.field_id = sf.id
+            WHERE lfv.lead_id = ${leads.id}
+              AND lfv.value_json NOT IN ('null', '""')
+          )`,
         })
         .from(leads)
         .leftJoin(contacts, eq(leads.userId, contacts.id))
+        .leftJoin(stageDefinitions, eq(leads.stageDefinitionId, stageDefinitions.id))
         .where(and(...conditions))
         .orderBy(desc(leads.updatedAt))
         .limit(limit)
