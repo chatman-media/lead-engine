@@ -4,6 +4,8 @@
 
 import {
   applyAllMigrations,
+  channelIdentities,
+  channels,
   contacts,
   createIsolatedDb,
   funnels,
@@ -783,6 +785,77 @@ describe("DELETE /api/admin/leads/:id", () => {
     // But lead should still exist for tenant A
     const check = await authReq(tokenA, `/api/admin/leads/${leadIdA}`);
     expect(check.status).toBe(200);
+  });
+});
+
+describe("send-offer — awaiting_operator advance (R5)", () => {
+  let opLeadId = 0;
+  let normLeadId = 0;
+
+  beforeAll(async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.parse("2026-06-06T05:00:00Z") / 1000);
+    // fulfill + awaiting_operator offer-стадии в воронке tenantA
+    const [fulfill] = await db
+      .insert(stageDefinitions)
+      .values({
+        tenantId: tenantA, funnelId: funnelIdA, slug: "op_fulfill", displayName: "Fulfill",
+        kind: "active", stageType: "milestone", position: 10, nextStages: [], createdAt: now, updatedAt: now,
+      })
+      .returning({ id: stageDefinitions.id });
+    void fulfill;
+    const [offer] = await db
+      .insert(stageDefinitions)
+      .values({
+        tenantId: tenantA, funnelId: funnelIdA, slug: "op_offer", displayName: "Offer (operator)",
+        kind: "active", stageType: "awaiting_operator", phase: "offer", position: 9,
+        nextStages: ["op_fulfill"], createdAt: now, updatedAt: now,
+      })
+      .returning({ id: stageDefinitions.id });
+    // канал + identity для contactIdA — иначе send-offer вернёт 409 no_channel
+    const [ch] = await db
+      .insert(channels)
+      .values({ tenantId: tenantA, kind: "telegram_bot", externalId: "op-bot", status: "active", createdAt: now, updatedAt: now })
+      .returning({ id: channels.id });
+    await db.insert(channelIdentities).values({ contactId: contactIdA, channelId: ch!.id, externalUserId: "tg-op-1", createdAt: now });
+    const [l1] = await db
+      .insert(leads)
+      .values({ tenantId: tenantA, userId: contactIdA, state: "op_offer", stageDefinitionId: offer!.id, createdAt: now, updatedAt: now })
+      .returning({ id: leads.id });
+    opLeadId = l1!.id;
+    // лид того же контакта на обычной стадии (канал есть) — для негатива
+    const [l2] = await db
+      .insert(leads)
+      .values({ tenantId: tenantA, userId: contactIdA, state: "review", stageDefinitionId: stageIdA2, createdAt: now, updatedAt: now })
+      .returning({ id: leads.id });
+    normLeadId = l2!.id;
+  });
+
+  it("лид на awaiting_operator → /send-offer двигает в nextStages[0]", async () => {
+    if (!sql) return;
+    const res = await app.request(`/api/admin/leads/${opLeadId}/send-offer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ text: "Курс 36.5, подача 9:00. Подтвердить?" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { advancedTo: string | null };
+    expect(body.advancedTo).toBe("op_fulfill");
+    const { eq } = await import("drizzle-orm");
+    const [l] = await db.select({ state: leads.state }).from(leads).where(eq(leads.id, opLeadId));
+    expect(l!.state).toBe("op_fulfill");
+  });
+
+  it("лид на обычной стадии → /send-offer не двигает (advancedTo null)", async () => {
+    if (!sql) return;
+    const res = await app.request(`/api/admin/leads/${normLeadId}/send-offer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ text: "Просто сообщение" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { advancedTo: string | null };
+    expect(body.advancedTo).toBe(null);
   });
 });
 

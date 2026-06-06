@@ -142,7 +142,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     // ── offer: условия (цена/курс) — НЕ выдумываются, приходят от tools/оператора ──
     {
       slug: "exchange_offer", phase: "offer", displayName: "Обмен: котировка", kind: "active",
-      stageType: "rate_confirmation", position: 6, color: "#f59e0b",
+      stageType: "awaiting_operator", position: 6, color: "#f59e0b",
       nextStages: ["exchange_fulfill", "cancelled"],
       fields: [
         { slug: "quote", displayName: "Курс / сумма к выдаче", fieldType: "number", required: true, aiExtractable: false, position: 0 },
@@ -151,7 +151,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "transfer_offer", phase: "offer", displayName: "Трансфер: предложение", kind: "active",
-      stageType: "interaction", position: 7, color: "#f59e0b",
+      stageType: "awaiting_operator", position: 7, color: "#f59e0b",
       nextStages: ["transfer_fulfill", "cancelled"],
       fields: [
         { slug: "price", displayName: "Цена", fieldType: "number", required: true, aiExtractable: false, position: 0 },
@@ -161,7 +161,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "food_offer", phase: "offer", displayName: "Еда: подтверждение", kind: "active",
-      stageType: "interaction", position: 8, color: "#f59e0b",
+      stageType: "awaiting_operator", position: 8, color: "#f59e0b",
       nextStages: ["food_fulfill", "cancelled"],
       fields: [
         { slug: "total", displayName: "Сумма", fieldType: "number", required: true, aiExtractable: false, position: 0 },
@@ -171,7 +171,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "housekeeping_offer", phase: "offer", displayName: "Уборка: подтверждение", kind: "active",
-      stageType: "interaction", position: 9, color: "#f59e0b",
+      stageType: "awaiting_operator", position: 9, color: "#f59e0b",
       nextStages: ["housekeeping_fulfill", "cancelled"],
       fields: [
         { slug: "price", displayName: "Цена", fieldType: "number", required: false, aiExtractable: false, position: 0 },
@@ -180,7 +180,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "tour_offer", phase: "offer", displayName: "Тур: предложение", kind: "active",
-      stageType: "interaction", position: 10, color: "#f59e0b",
+      stageType: "awaiting_operator", position: 10, color: "#f59e0b",
       nextStages: ["tour_fulfill", "cancelled"],
       fields: [
         { slug: "price", displayName: "Цена", fieldType: "number", required: true, aiExtractable: false, position: 0 },

@@ -941,10 +941,11 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
    *
    * Оператор-ассистируемый фулфилмент: отправляет гостю текст (обычно оффер —
    * заполненные оператором цена/время) в активный канал, НЕ переключая разговор
-   * в human — AI продолжает вести. Гость отвечает «да» → field-extractor ставит
-   * `confirmed` и авто-двигает стадию (offer→fulfill). Сообщение попадает в
-   * историю (role=human → в chat-history маппится как assistant), так что бот
-   * видит оффер в контексте. Парный к send-photo (тот же путь доставки).
+   * в human — AI продолжает вести. Если лид на стадии `awaiting_operator`
+   * (концерж offer) — отправка оффера ЗАВЕРШАЕТ стадию: лид двигается по
+   * nextStages[0] (offer→fulfill) + fires stage-change нотификации (webhooks /
+   * eventBus / informer). Сообщение попадает в историю (role=human → как
+   * assistant), так что бот видит оффер в контексте. Парный к send-photo.
    */
   app.post("/api/admin/leads/:id/send-offer", async (c) => {
     const tenantId = c.var.tenantId;
@@ -965,7 +966,12 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     const now = Math.floor(Date.now() / 1000);
     const outcome = await withTenant(opts.db, tenantId, async (tx) => {
       const [lead] = await tx
-        .select({ id: leads.id, userId: leads.userId })
+        .select({
+          id: leads.id,
+          userId: leads.userId,
+          state: leads.state,
+          stageDefinitionId: leads.stageDefinitionId,
+        })
         .from(leads)
         .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
       if (!lead) return { kind: "not_found" } as const;
@@ -1030,7 +1036,61 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         createdAt: now,
       });
 
-      return { kind: "sent", channelKind: identity.channelKind } as const;
+      // awaiting_operator: отправка оффера = «оператор завершил стадию» → двигаем
+      // лид по nextStages[0] (offer→fulfill). Прочие стадии — только отправка.
+      let webhookPayload: StageChangedPayload | null = null;
+      if (lead.stageDefinitionId) {
+        const [curStage] = await tx
+          .select({
+            slug: stageDefinitions.slug,
+            displayName: stageDefinitions.displayName,
+            stageType: stageDefinitions.stageType,
+            nextStages: stageDefinitions.nextStages,
+          })
+          .from(stageDefinitions)
+          .where(eq(stageDefinitions.id, lead.stageDefinitionId));
+        const nextSlug = curStage?.nextStages?.[0];
+        if (curStage?.stageType === "awaiting_operator" && nextSlug) {
+          const [next] = await tx
+            .select({ id: stageDefinitions.id, slug: stageDefinitions.slug, displayName: stageDefinitions.displayName })
+            .from(stageDefinitions)
+            .where(and(eq(stageDefinitions.slug, nextSlug), eq(stageDefinitions.tenantId, tenantId)));
+          if (next) {
+            await tx
+              .update(leads)
+              .set({ stageDefinitionId: next.id, state: next.slug, updatedAt: now })
+              .where(eq(leads.id, id));
+            await tx.insert(leadEvents).values({
+              tenantId,
+              leadId: id,
+              fromState: lead.state,
+              toState: next.slug,
+              byAdminId: adminId,
+              createdAt: now,
+            });
+            const [contact] = await tx
+              .select({ displayName: contacts.displayName })
+              .from(contacts)
+              .where(eq(contacts.id, lead.userId));
+            webhookPayload = {
+              event: "lead.stage_changed",
+              tenantId,
+              leadId: id,
+              contactId: lead.userId,
+              contactName: contact?.displayName ?? null,
+              from: { stageId: lead.stageDefinitionId, slug: curStage.slug, displayName: curStage.displayName },
+              to: { stageId: next.id, slug: next.slug, displayName: next.displayName },
+              timestamp: now,
+            };
+          }
+        }
+      }
+
+      return {
+        kind: "sent",
+        channelKind: identity.channelKind,
+        webhookPayload,
+      } as const;
     });
 
     if (outcome.kind === "not_found") return c.json({ error: "lead not found" }, 404);
@@ -1044,10 +1104,45 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       action: "lead.send_offer",
       targetKind: "lead",
       targetId: String(id),
-      details: { channelKind: outcome.channelKind, textLength: text.length },
+      details: {
+        channelKind: outcome.channelKind,
+        textLength: text.length,
+        advancedTo: outcome.webhookPayload?.to.slug ?? null,
+      },
     });
 
-    return c.json({ ok: true, channelKind: outcome.channelKind });
+    // Стадия была awaiting_operator и лид продвинут → нотифицируем как обычный
+    // stage-change (webhooks / admin event bus / informer-оператор).
+    if (outcome.webhookPayload) {
+      const wp = outcome.webhookPayload;
+      void fireStageWebhooks(opts.db, tenantId, wp);
+      adminEventBus.emit({
+        type: "stage_changed",
+        tenantId,
+        leadId: id,
+        toStage: wp.to.slug,
+        toStageDisplayName: wp.to.displayName,
+      });
+      if (opts.notificationService) {
+        void opts.notificationService.notify({
+          tenantId,
+          eventType: "stage_changed",
+          leadId: id,
+          contactId: wp.contactId,
+          data: {
+            fromStage: wp.from?.displayName ?? "Unknown",
+            toStage: wp.to.displayName,
+            displayName: wp.contactName || "Без имени",
+          },
+        });
+      }
+    }
+
+    return c.json({
+      ok: true,
+      channelKind: outcome.channelKind,
+      advancedTo: outcome.webhookPayload?.to.slug ?? null,
+    });
   });
 
   return app;
