@@ -69,6 +69,7 @@ import {
 	type LoadedLlmConfigs,
 	type ResolvedLlmConfig,
 } from "./lib/llm-config-loader.ts";
+import { isConciergeTenant, makeConciergeRequestsTool } from "./lib/concierge-tools.ts";
 import { OpenRouterTranscriber } from "./lib/openrouter-transcriber.ts";
 import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
 
@@ -403,6 +404,7 @@ export function makeReplyStrategy(
 	// admin-exchange onReload).
 	const toolsCache = new Map<number, AnyRagTool[]>();
 	const exchangeEnabledCache = new Map<number, boolean>();
+	const conciergeEnabledCache = new Map<number, boolean>();
 	async function resolveTools(input: {
 		tenantId: number;
 		conversationId: number;
@@ -420,6 +422,9 @@ export function makeReplyStrategy(
 			toolsCache.set(input.tenantId, base);
 		}
 
+		// conversation-bound tools (зависят от conversationId — без кеша по тенанту).
+		const conversationBound: AnyRagTool[] = [];
+
 		let exchangeEnabled = exchangeEnabledCache.get(input.tenantId);
 		if (exchangeEnabled === undefined) {
 			exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(
@@ -427,15 +432,35 @@ export function makeReplyStrategy(
 			);
 			exchangeEnabledCache.set(input.tenantId, exchangeEnabled);
 		}
-		if (!exchangeEnabled) return base;
+		if (exchangeEnabled) {
+			conversationBound.push(
+				...makeExchangeTools({
+					db,
+					tenantId: input.tenantId,
+					conversationId: input.conversationId,
+					masterKeyHex: cfg.masterKeyHex,
+				}),
+			);
+		}
 
-		const exchangeTools = makeExchangeTools({
-			db,
-			tenantId: input.tenantId,
-			conversationId: input.conversationId,
-			masterKeyHex: cfg.masterKeyHex,
-		});
-		return [...base, ...exchangeTools];
+		let conciergeEnabled = conciergeEnabledCache.get(input.tenantId);
+		if (conciergeEnabled === undefined) {
+			conciergeEnabled = await isConciergeTenant(db, input.tenantId).catch(
+				() => false,
+			);
+			conciergeEnabledCache.set(input.tenantId, conciergeEnabled);
+		}
+		if (conciergeEnabled) {
+			conversationBound.push(
+				makeConciergeRequestsTool({
+					db,
+					tenantId: input.tenantId,
+					conversationId: input.conversationId,
+				}),
+			);
+		}
+
+		return conversationBound.length > 0 ? [...base, ...conversationBound] : base;
 	}
 
 	// resolveReranker: reads per-tenant llm_provider_configs with purpose='reranker'.
@@ -572,6 +597,7 @@ export function makeReplyStrategy(
 		invalidateToolsFor: (tenantId: number) => {
 			toolsCache.delete(tenantId);
 			exchangeEnabledCache.delete(tenantId);
+			conciergeEnabledCache.delete(tenantId);
 		},
 	};
 }
