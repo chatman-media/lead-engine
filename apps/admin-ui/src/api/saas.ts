@@ -1151,6 +1151,24 @@ export const saas = {
       messages: MessageRow[];
     }>(`/api/admin/conversations/${id}`);
   },
+  // ── Dialog simulator (dev/test) ──────────────────────────────────────────
+  listSimPersonas() {
+    return request<{
+      personas: Array<{ id: string; name: string; displayName: string; brief: string }>;
+    }>("/api/admin/sim/personas");
+  },
+  startSim(opts: { personaId?: string; brief?: string; displayName?: string; maxTurns?: number }) {
+    return request<{
+      ok: boolean;
+      conversationId: number;
+      displayName: string;
+      maxTurns: number;
+      firstMessage: string;
+    }>("/api/admin/sim/start", { method: "POST", body: JSON.stringify(opts) });
+  },
+  deleteSim(conversationId: number) {
+    return request<{ ok: boolean }>(`/api/admin/sim/${conversationId}`, { method: "DELETE" });
+  },
   updateConversation(id: number, patch: { status?: string; assignedAdminId?: number | null }) {
     return request<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/admin/conversations/${id}`,

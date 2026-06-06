@@ -11,6 +11,11 @@ function channelKindToSource(kind: string): "bot" | "userbot" | "self_play" {
       return "bot";
     case "telegram_userbot":
       return "userbot";
+    case "self_play":
+      // Симулированные диалоги (dev/тест): прогоняются через тот же
+      // pipeline, но помечаются self_play — оператор видит их в инбоксе,
+      // воркер реально в Telegram ничего не шлёт.
+      return "self_play";
     default:
       // WhatsApp / web каналы временно записываются как 'bot' — после
       // миграции на channel_id колонку source перестанет существовать

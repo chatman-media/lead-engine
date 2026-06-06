@@ -40,6 +40,7 @@ import {
   makeMemoryExtractor,
   makeReplyStrategy,
   type ReplyStrategyBundle,
+  makeSimChatResolver,
   makeStageClassifier,
   makeTranscriberResolver,
 } from "./llm-bootstrap.ts";
@@ -78,6 +79,7 @@ import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeAdminWorkflowRoutes } from "./routes/admin-workflow.ts";
 import { makeAdminCopilotRoutes } from "./routes/admin-copilot.ts";
 import { makeAdminNotificationsRoutes } from "./routes/admin-notifications.ts";
+import { makeAdminSimRoutes } from "./routes/admin-sim.ts";
 import { makeAdminTestRoutes } from "./routes/admin-test.ts";
 import { makeMcpRoutes } from "./routes/mcp.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
@@ -609,6 +611,19 @@ async function main() {
   if (stageClassifier) {
     log.info("stage classifier enabled", { kind: cfg.stageClassifier });
   }
+
+  // Dialog Simulator — LLM «клиент» ведёт диалог, виден в живом инбоксе (self_play).
+  app.route(
+    "/",
+    makeAdminSimRoutes({
+      db,
+      replyStrategy: replyStrategy ?? null,
+      resolveSimChat: makeSimChatResolver(loadedRef),
+      resolveTemplate,
+      stageClassifier,
+    }),
+  );
+  log.info("admin-sim routes enabled (dialog simulator)");
 
   const photoProcessor = makePhotoProcessor(loadedRef);
   log.info("photo processor enabled (activates per-tenant when vision LLM is configured)");
