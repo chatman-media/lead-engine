@@ -1,4 +1,5 @@
 import { type Db, StylesRepo, withTenant } from "@chatman-media/conversation-engine";
+import { StyleSchema } from "@chatman-media/kb";
 import type { ChatClient } from "@chatman-media/llm-router";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
@@ -105,6 +106,137 @@ ${samples}`;
       personaCompany: parsed.personaCompany ?? "",
       framework: parsed.framework ?? "",
     });
+  });
+
+  /**
+   * POST /api/admin/styles/generate-full
+   * Body: { description: string }  — business description (max 4000 chars)
+   * AI собирает ПОЛНЫЙ Style (persona/voice/framework/hooks/per-stage goal+
+   * guidance/few-shot) из описания бизнеса, валидирует StyleSchema и сохраняет
+   * как активный стиль. Дополняет лёгкий /generate (тот лишь извлекает метаданные
+   * из примеров). Часть AI-сборки воронки — см. docs AI_FUNNEL_BUILDER.md.
+   */
+  app.post("/api/admin/styles/generate-full", async (c) => {
+    if (!opts.resolveChat) {
+      return c.json({ error: "LLM not configured for this tenant" }, 503);
+    }
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+
+    let body: { description?: unknown };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    if (typeof body.description !== "string" || !body.description.trim()) {
+      return c.json({ error: "description required" }, 400);
+    }
+    const description = body.description.slice(0, 4000);
+
+    const prompt = `Ты проектируешь стиль общения (sales persona) AI-бота по описанию бизнеса.
+Верни ТОЛЬКО JSON-объект по схеме (без markdown, без пояснений):
+{
+  "slug": "kebab-case, только a-z 0-9 -",
+  "displayName": "Название стиля (на языке описания)",
+  "persona": { "name": "Имя менеджера", "role": "human" или "assistant", "company": "название (опц.)" },
+  "voice": { "tone": "тон (напр. дружелюбный, уверенный)", "language": "ru" или "en", "forbid": ["чего избегать"] },
+  "framework": "один из: AIDA, PAS, SPIN, NEPQ, straight_line",
+  "hooks": [ { "kind": "один из: social_proof, scarcity, authority, liking, reciprocity, commitment", "text": "формулировка" } ],
+  "stages": {
+    "opener":    { "goal": "...", "guidance": "..." },
+    "qualify":   { "goal": "...", "guidance": "..." },
+    "pitch":     { "goal": "...", "guidance": "..." },
+    "objection": { "goal": "...", "guidance": "..." },
+    "close":     { "goal": "...", "guidance": "..." }
+  },
+  "fewShot": [ { "user": "реплика клиента", "assistant": "ответ менеджера", "stage": "qualify" } ],
+  "guardrails": { "forbiddenTopics": ["..."] }
+}
+Правила: персона звучит как живой менеджер ИМЕННО этого бизнеса; tone и hooks — под нишу; в stages дай конкретные goal под бизнес; 2-3 few-shot на языке бизнеса. Язык всего — язык описания.
+
+Описание бизнеса:
+${description}`;
+
+    let client: ChatClient;
+    try {
+      client = opts.resolveChat(tenantId);
+    } catch {
+      return c.json({ error: "LLM not configured for this tenant" }, 503);
+    }
+
+    let raw: string;
+    try {
+      raw = await client.complete([{ role: "user", content: prompt }], {
+        numPredict: 1500,
+        temperature: 0.5,
+      });
+    } catch (err) {
+      return c.json(
+        { error: `LLM error: ${err instanceof Error ? err.message : String(err)}` },
+        502,
+      );
+    }
+
+    const jsonStr = raw.replace(/```(?:json)?\n?/g, "").trim();
+    let parsedJson: Record<string, unknown>;
+    try {
+      parsedJson = JSON.parse(jsonStr) as Record<string, unknown>;
+    } catch {
+      return c.json({ error: "LLM returned non-JSON response", raw }, 502);
+    }
+
+    // Sanitize slug to kebab-case so a near-miss doesn't fail schema validation.
+    if (typeof parsedJson.slug === "string") {
+      parsedJson.slug = parsedJson.slug
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 40);
+    }
+
+    // Structural containers the prompt doesn't ask for — let StyleSchema fill
+    // their inner defaults (model pin, guardrail flags) instead of rejecting.
+    if (parsedJson.model == null) parsedJson.model = {};
+    if (parsedJson.guardrails == null) parsedJson.guardrails = {};
+
+    const result = StyleSchema.safeParse(parsedJson);
+    if (!result.success) {
+      return c.json(
+        { error: "generated style failed schema validation", issues: result.error.issues.slice(0, 5) },
+        502,
+      );
+    }
+    const style = result.data;
+
+    let row: Awaited<ReturnType<StylesRepo["create"]>>;
+    try {
+      row = await withTenant(opts.db, tenantId, async (tx) => {
+        const repo = new StylesRepo({ db: tx, tenantId });
+        return repo.create({
+          slug: style.slug,
+          displayName: style.displayName,
+          configJson: JSON.stringify(style),
+          isActive: true,
+        });
+      });
+    } catch (err: unknown) {
+      if (isUniqueViolation(err)) {
+        return c.json({ error: "active style with this slug already exists" }, 409);
+      }
+      throw err;
+    }
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "style.generate_full",
+      targetKind: "style",
+      targetId: row.id,
+      details: { slug: style.slug, displayName: style.displayName },
+    });
+
+    return c.json({ id: row.id, slug: row.slug, displayName: row.displayName, style }, 201);
   });
 
   app.get("/api/admin/styles", async (c) => {
