@@ -1,3 +1,10 @@
+# [@chatman-media/sales-v1.1.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/sales-v1.1.1...@chatman-media/sales-v1.1.2) (2026-06-06)
+
+
+### Bug Fixes
+
+* **sales:** add requestType to coach-analyzer test lead fixture ([#194](https://github.com/chatman-media/lead-engine/issues/194)) ([f0d7299](https://github.com/chatman-media/lead-engine/commit/f0d7299c3961461a6809aa270edbfd255e5ee43a))
+
 # [@chatman-media/sales-v1.1.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/sales-v1.1.0...@chatman-media/sales-v1.1.1) (2026-06-05)
 
 
