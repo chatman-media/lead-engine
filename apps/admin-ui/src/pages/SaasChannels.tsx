@@ -1,9 +1,9 @@
 import {
   CheckIcon,
   CopyIcon,
-  FacebookIcon,
   GlobeIcon,
   MessageCircleIcon,
+  MessagesSquareIcon,
   SendIcon,
   Trash2Icon,
   TriangleAlertIcon,
@@ -37,7 +37,7 @@ const KIND_META: Record<string, { icon: typeof SendIcon; label: string }> = {
   telegram_bot: { icon: SendIcon, label: "Telegram-бот" },
   telegram_userbot: { icon: UserIcon, label: "Личный аккаунт" },
   whatsapp: { icon: MessageCircleIcon, label: "WhatsApp" },
-  facebook: { icon: FacebookIcon, label: "Facebook Messenger" },
+  facebook: { icon: MessagesSquareIcon, label: "Facebook Messenger" },
   web: { icon: GlobeIcon, label: "Web-виджет" },
 };
 
@@ -533,7 +533,7 @@ export function SaasChannels() {
             <MessageCircleIcon /> WhatsApp
           </TabsTrigger>
           <TabsTrigger value="facebook">
-            <FacebookIcon /> Facebook
+            <MessagesSquareIcon /> Facebook
           </TabsTrigger>
           <TabsTrigger value="web">
             <GlobeIcon /> Web
