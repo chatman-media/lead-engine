@@ -1233,6 +1233,12 @@ export const saas = {
       method: "DELETE",
     });
   },
+  walkSim(count = 1, displayName?: string) {
+    return request<{ ok: boolean; leads: number[]; finalStage: string }>(
+      "/api/admin/sim/walk",
+      { method: "POST", body: JSON.stringify({ count, ...(displayName ? { displayName } : {}) }) },
+    );
+  },
   advanceConversation(id: number, text?: string) {
     return request<{
       ok: boolean;

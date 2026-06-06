@@ -106,6 +106,7 @@ export function SaasLeads() {
 
   // Create lead dialog
   const [creating, setCreating] = useState(false);
+  const [walking, setWalking] = useState(false);
   const [contactSearch, setContactSearch] = useState("");
   const [contacts, setContacts] = useState<ContactItem[]>([]);
   const [selectedContactId, setSelectedContactId] = useState<string>("");
@@ -348,6 +349,25 @@ export function SaasLeads() {
           >
             <SendIcon className="mr-1.5 size-3.5" />
             Рассылка
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={walking}
+            onClick={async () => {
+              setWalking(true);
+              try {
+                await saas.walkSim(1);
+                reload();
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setWalking(false);
+              }
+            }}
+            title="Создать лида и провести по всей воронке (демо)"
+          >
+            {walking ? "…" : "▶ Прогон по воронке"}
           </Button>
           <Button
             size="sm"
