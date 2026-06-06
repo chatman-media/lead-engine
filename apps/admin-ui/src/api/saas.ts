@@ -2079,6 +2079,12 @@ export const saas = {
       body: JSON.stringify(patch),
     });
   },
+  confirmExchangePayment(id: number, text?: string) {
+    return request<{ ok: boolean; delivered: boolean; order: ExchangeOrder }>(
+      `/api/admin/exchange/orders/${id}/confirm-payment`,
+      { method: "POST", body: JSON.stringify(text ? { text } : {}) },
+    );
+  },
   issueExchangePayoutCode(
     id: number,
     opts: Partial<{
