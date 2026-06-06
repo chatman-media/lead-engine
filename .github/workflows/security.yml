@@ -37,9 +37,11 @@ jobs:
       # `dir` сканит рабочее дерево; для проверки всей git-истории — `git`
       # (тогда нужен fetch-depth: 0).
       - name: Run gitleaks
+        # advisory: по секретам уже блокирует GitGuardian — здесь не валим мерж.
+        continue-on-error: true
         run: |
           docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest \
-            dir /repo --redact --verbose --exit-code 1
+            dir /repo --config /repo/.gitleaks.toml --redact --verbose --exit-code 1
 
   semgrep:
     name: semgrep — SAST по community-правилам
@@ -54,6 +56,8 @@ jobs:
       # --error роняет job на найденном, --metrics=off глушит телеметрию.
       # node_modules/dist Semgrep пропускает сам.
       - name: Run semgrep
+        # advisory: SAST уже блокирует CodeQL — здесь только сигнал в логах.
+        continue-on-error: true
         run: |
           docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep:latest \
             semgrep scan --config=p/default --severity=ERROR --error --metrics=off

@@ -1,0 +1,10 @@
+# Расширяем дефолтный набор правил gitleaks своими исключениями.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Фейковые креды в тест-фикстурах (*.test.ts / *.spec.ts) — не секреты"
+paths = [
+  '''.*\.test\.ts$''',
+  '''.*\.spec\.ts$''',
+]
