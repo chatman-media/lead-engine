@@ -34,11 +34,10 @@ let appNoChat: Hono; // persona-resolver вернёт null
 let token = "";
 let tenantId = 0;
 
-// Фейковый persona-клиент: выдаёт реплики клиента, затем [DONE].
-const personaScript = ["Привет, хочу обменять 500 USDT", "[DONE]"];
-let personaIdx = 0;
+// Фейковый persona-клиент: всегда выдаёт реплику клиента (диалог стопается
+// по maxTurns в тестах).
 const fakePersona = {
-  complete: async () => personaScript[personaIdx++] ?? "[DONE]",
+  complete: async () => "Здравствуйте, хочу обменять 500 USDT на баты",
 };
 
 beforeAll(
@@ -130,15 +129,13 @@ describe("admin-sim dialog simulator", () => {
 
   it("POST /start (happy) → self_play диалог с user+assistant", async () => {
     if (!sql) return;
-    personaIdx = 0;
     await withTenant(db, tenantId, async (tx) =>
       tx.insert(channels).values({ tenantId, kind: "telegram_bot", externalId: "@simbot", status: "active" }),
     );
     const res = await req("POST", START, { personaId: "exchange_usdt", maxTurns: 1 });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { conversationId: number; firstMessage: string };
+    const body = (await res.json()) as { conversationId: number };
     expect(body.conversationId).toBeGreaterThan(0);
-    expect(body.firstMessage).toContain("USDT");
 
     // Диалог помечен self_play.
     const conv = await withTenant(db, tenantId, async (tx) =>
@@ -165,7 +162,6 @@ describe("admin-sim dialog simulator", () => {
 
   it("DELETE /sim/:id → удаляет self_play диалог", async () => {
     if (!sql) return;
-    personaIdx = 0;
     const start = await req("POST", START, { personaId: "exchange_rub", maxTurns: 1 });
     const { conversationId } = (await start.json()) as { conversationId: number };
     const del = await req("DELETE", `/api/admin/sim/${conversationId}`);
@@ -177,5 +173,45 @@ describe("admin-sim dialog simulator", () => {
         .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId))),
     );
     expect(left.length).toBe(0);
+  });
+
+  it("POST /stream → активный поток, отмена убирает его", async () => {
+    if (!sql) return;
+    const res = await req("POST", "/api/admin/sim/stream", {
+      count: 3,
+      intervalSec: 5,
+      maxTurns: 1,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { streamId: string; count: number; intervalSec: number };
+    expect(body.count).toBe(3);
+    expect(body.intervalSec).toBe(5);
+    expect(body.streamId).toMatch(/^str_/);
+
+    // Поток виден среди активных (первый клиент уже запущен, ещё 2 в очереди).
+    const list = (await (await req("GET", "/api/admin/sim/streams")).json()) as {
+      streams: Array<{ id: string; total: number }>;
+    };
+    expect(list.streams.some((s) => s.id === body.streamId)).toBe(true);
+
+    // Отмена очищает таймеры оставшихся клиентов.
+    const del = await req("DELETE", `/api/admin/sim/stream/${body.streamId}`);
+    expect(del.status).toBe(200);
+    const after = (await (await req("GET", "/api/admin/sim/streams")).json()) as {
+      streams: Array<{ id: string }>;
+    };
+    expect(after.streams.some((s) => s.id === body.streamId)).toBe(false);
+  });
+
+  it("DELETE /streams → kill-switch: гасит все потоки тенанта", async () => {
+    if (!sql) return;
+    await req("POST", "/api/admin/sim/stream", { count: 3, intervalSec: 5, maxTurns: 1 });
+    await req("POST", "/api/admin/sim/stream", { count: 3, intervalSec: 5, maxTurns: 1 });
+    const del = await req("DELETE", "/api/admin/sim/streams");
+    expect(del.status).toBe(200);
+    const list = (await (await req("GET", "/api/admin/sim/streams")).json()) as {
+      streams: unknown[];
+    };
+    expect(list.streams.length).toBe(0);
   });
 });

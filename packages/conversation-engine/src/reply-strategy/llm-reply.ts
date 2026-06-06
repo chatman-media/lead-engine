@@ -1,4 +1,5 @@
 import type { OutboundEnvelope } from "@chatman-media/channel-core";
+import { type AnyRagTool, DEFAULT_MAX_TOOL_CYCLES, runToolLoop } from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
@@ -44,6 +45,16 @@ export interface LlmReplyStrategyOpts {
   resolveChat: (tenantId: number) => ChatClient;
   /** Если возвращает true — стадия лида помечена supportMode, бот молчит. */
   resolveIsSupport?: (input: { tenantId: number; contactId: number }) => Promise<boolean>;
+  /**
+   * Опциональный резолвер agentic-инструментов (напр. расчёт курса обмена).
+   * Если задан и вернул непустой список, а ChatClient умеет completeWithTools —
+   * strategy прогоняет tool-loop, чтобы бот мог дать конкретный ответ
+   * (курс/сумму) даже без RAG/эмбеддингов, а не уходить в «уточню у партнёра».
+   */
+  resolveTools?: (input: {
+    tenantId: number;
+    conversationId: number;
+  }) => Promise<AnyRagTool[]> | AnyRagTool[];
 }
 
 const BASE_SYSTEM_PROMPT =
@@ -90,18 +101,59 @@ export class LlmReplyStrategy implements ReplyStrategy {
     const history = await messages.recent(input.conversationId, this.opts.historyLimit ?? 20);
     const historyMessages = messagesToChatHistory(history);
 
-    const systemPrompt = [BASE_SYSTEM_PROMPT, this.opts.template.systemPromptFragment]
+    const chat = this.opts.resolveChat(input.tenant.tenantId);
+    const llmOpts = {
+      temperature: this.opts.temperature ?? 0.7,
+      numPredict: this.opts.maxOutputTokens ?? 600,
+    };
+
+    // Agentic-инструменты (если есть и клиент их умеет): даёт боту считать
+    // курс/сумму tool-call'ом вместо «уточню у партнёра», даже без RAG.
+    let tools: AnyRagTool[] = [];
+    if (this.opts.resolveTools) {
+      try {
+        tools = await this.opts.resolveTools({
+          tenantId: input.tenant.tenantId,
+          conversationId: input.conversationId,
+        });
+      } catch {
+        tools = [];
+      }
+    }
+    const toolsActive = tools.length > 0 && typeof chat.completeWithTools === "function";
+
+    const systemPrompt = [
+      BASE_SYSTEM_PROMPT,
+      toolsActive
+        ? "Если для ответа есть подходящий инструмент (например, расчёт курса обмена) — " +
+          "ОБЯЗАТЕЛЬНО вызови его и дай конкретные числа. Не отсылай к оператору, если можешь " +
+          "ответить инструментом."
+        : "",
+      this.opts.template.systemPromptFragment,
+    ]
       .filter(Boolean)
       .join("\n\n");
 
-    const chat = this.opts.resolveChat(input.tenant.tenantId);
-    const reply = await chat.complete(
-      [{ role: "system", content: systemPrompt }, ...historyMessages],
-      {
-        temperature: this.opts.temperature ?? 0.7,
-        numPredict: this.opts.maxOutputTokens ?? 600,
-      },
-    );
+    const msgs: ChatMessage[] = [
+      { role: "system", content: systemPrompt },
+      ...historyMessages,
+    ];
+
+    let reply: string;
+    if (toolsActive) {
+      const loop = await runToolLoop({
+        chat,
+        messages: msgs,
+        tools,
+        llmOpts,
+        maxCycles: DEFAULT_MAX_TOOL_CYCLES,
+      });
+      // loop.content — финальный текст; если null (исчерпал циклы) — добиваем
+      // обычным complete по messages с уже вложенными tool-результатами.
+      reply = loop.content ?? (await chat.complete(msgs, llmOpts));
+    } else {
+      reply = await chat.complete(msgs, llmOpts);
+    }
 
     if (reply.trim().length === 0) return null;
     return [
