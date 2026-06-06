@@ -69,6 +69,11 @@ export interface AnswerInput {
    */
   requestContext?: string;
   /**
+   * The guest's current lead is on an `awaiting_operator` stage (R5): the bot
+   * holds and defers pricing/decisions to a human operator.
+   */
+  awaitingOperator?: boolean;
+  /**
    * Called after every `answerWithRag` or `answerWithRagStream` call with the
    * final telemetry. Useful for logging, metrics, or A/B experiment recording
    * without having to unwrap the return value.

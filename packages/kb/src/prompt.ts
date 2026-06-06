@@ -140,6 +140,11 @@ export function composeSystemPrompt(
     ? `ЗАПРОС ГОСТЯ: ${options.requestContext}`
     : "";
 
+  // Лид ждёт оператора (awaiting_operator): бот держит, не выдумывает цену/условия.
+  const operatorBlock = options.awaitingOperator
+    ? `ОЖИДАНИЕ ОПЕРАТОРА: на этой стадии условия/цену/решение готовит коллега-человек. НЕ выдумывай числа и детали. Скажи гостю коротко, что уточняешь и вернёшься с ответом — и жди, не дави и не закрывай сделку.`
+    : "";
+
   const minorRule = guardrails.noMinors ? "- Если prospect <18 лет — вежливо заверши диалог." : "";
   const topicsRule = guardrails.forbiddenTopics.length
     ? `- Запрещённые темы: ${guardrails.forbiddenTopics.join(", ")}.`
@@ -188,6 +193,7 @@ export function composeSystemPrompt(
     support ? "" : directorHooksBlock,
     support ? "" : skillsBlock,
     support || stageBlock,
+    operatorBlock,
     requestBlock,
     summaryBlock,
     userFactsBlock,

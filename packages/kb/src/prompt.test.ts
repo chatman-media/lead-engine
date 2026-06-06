@@ -57,3 +57,15 @@ describe("composeSystemPrompt — requestContext (R4 multi-request)", () => {
     expect(p).not.toContain("ЗАПРОС ГОСТЯ:");
   });
 });
+
+describe("composeSystemPrompt — awaitingOperator (R5)", () => {
+  it("awaitingOperator → блок «ОЖИДАНИЕ ОПЕРАТОРА»", () => {
+    const p = composeSystemPrompt(baseStyle, "close", null, { awaitingOperator: true });
+    expect(p).toContain("ОЖИДАНИЕ ОПЕРАТОРА");
+  });
+
+  it("без флага → блока нет", () => {
+    const p = composeSystemPrompt(baseStyle, "close");
+    expect(p).not.toContain("ОЖИДАНИЕ ОПЕРАТОРА");
+  });
+});

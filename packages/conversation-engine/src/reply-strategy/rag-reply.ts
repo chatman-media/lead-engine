@@ -109,6 +109,14 @@ export interface RagReplyStrategyOpts {
     contactId: number;
   }) => Promise<string | null>;
   /**
+   * Опциональный resolver «лид ждёт оператора» (R5): true → в промпт идёт блок
+   * «ОЖИДАНИЕ ОПЕРАТОРА» (бот держит, не выдумывает цену). false/absent → нет.
+   */
+  resolveAwaitingOperator?: (input: {
+    tenantId: number;
+    contactId: number;
+  }) => Promise<boolean>;
+  /**
    * Загрузить включённые навыки убеждения для тенанта. Возвращает список
    * SkillForPrompt, уже отфильтрованных по is_enabled = true.
    * Stage-фильтрация (intake/active/always) выполняется внутри
@@ -302,7 +310,7 @@ export class RagReplyStrategy implements ReplyStrategy {
     // Load persuasion skills, director hooks, agentic tools, and reranker in parallel.
     // All are optional — if resolvers not configured, values stay empty/null
     // and the pipeline silently skips those blocks.
-    const [skills, directorHooks, tools, reranker, stageGuidance, requestContext] = await Promise.all([
+    const [skills, directorHooks, tools, reranker, stageGuidance, requestContext, awaitingOperator] = await Promise.all([
       this.opts.resolveSkills ? this.opts.resolveSkills({ tenantId }) : Promise.resolve([]),
       this.opts.resolveDirectorHooks
         ? this.opts.resolveDirectorHooks({ tenantId })
@@ -319,6 +327,9 @@ export class RagReplyStrategy implements ReplyStrategy {
       this.opts.resolveRequestContext
         ? this.opts.resolveRequestContext({ tenantId, contactId: input.contactId })
         : Promise.resolve(null),
+      this.opts.resolveAwaitingOperator
+        ? this.opts.resolveAwaitingOperator({ tenantId, contactId: input.contactId })
+        : Promise.resolve(false),
     ]);
 
     // answerWithRag принимает rag's ChatClient/EmbeddingClient. Структурно
@@ -347,6 +358,7 @@ export class RagReplyStrategy implements ReplyStrategy {
       ...(conversationSummary ? { conversationSummary } : {}),
       ...(stageGuidance ? { stageOverride: stageGuidance } : {}),
       ...(requestContext ? { requestContext } : {}),
+      ...(awaitingOperator ? { awaitingOperator } : {}),
     });
 
     // ── Soft fallback when RAG has no context ────────────────────────────────

@@ -305,6 +305,40 @@ export function makeRequestContextResolver(db: Db) {
 	};
 }
 
+/**
+ * Resolves whether the guest's current open lead sits on an `awaiting_operator`
+ * stage (R5): the bot must hold — defer pricing/decision to a human operator and
+ * not invent details. Mirrors makeRequestContextResolver's current-open-lead pick.
+ */
+export function makeAwaitingOperatorResolver(db: Db) {
+	return async (input: {
+		tenantId: number;
+		contactId: number;
+	}): Promise<boolean> => {
+		const rows = await db
+			.select({
+				stageType: stageDefinitions.stageType,
+				kind: stageDefinitions.kind,
+			})
+			.from(leads)
+			.leftJoin(
+				stageDefinitions,
+				eq(leads.stageDefinitionId, stageDefinitions.id),
+			)
+			.where(
+				and(
+					eq(leads.tenantId, input.tenantId),
+					eq(leads.userId, input.contactId),
+				),
+			)
+			.orderBy(desc(leads.updatedAt));
+		const open = rows.filter(
+			(r) => r.kind !== "terminal_won" && r.kind !== "terminal_lost",
+		);
+		return open[0]?.stageType === "awaiting_operator";
+	};
+}
+
 export interface ReplyStrategyBundle {
 	strategy: ReplyStrategy;
 	/**
@@ -681,6 +715,7 @@ export function makeReplyStrategy(
 			resolveIsSupport: makeSupportModeResolver(db),
 			resolveStageGuidance: makeStageGuidanceResolver(db),
 			resolveRequestContext: makeRequestContextResolver(db),
+			resolveAwaitingOperator: makeAwaitingOperatorResolver(db),
 			resolveSkills,
 			resolveDirectorHooks,
 			resolveTools,

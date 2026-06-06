@@ -29,7 +29,7 @@ import {
   makeConciergeRequestsTool,
   tenantSupportsMultiRequest,
 } from "./concierge-tools.ts";
-import { makeRequestContextResolver } from "../llm-bootstrap.ts";
+import { makeAwaitingOperatorResolver, makeRequestContextResolver } from "../llm-bootstrap.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_ctools_${Math.random().toString(36).slice(2, 10)}`;
@@ -186,5 +186,37 @@ describe("makeRequestContextResolver (R4 — request_type в промпт)", () 
     await db.insert(leads).values({ tenantId, userId: doneId, state: "completed", stageDefinitionId: await stageId("completed"), requestType: "food", createdAt: now, updatedAt: now });
     const resolve = makeRequestContextResolver(db as never);
     expect(await resolve({ tenantId, contactId: doneId })).toBe(null);
+  });
+});
+
+describe("makeAwaitingOperatorResolver (R5)", () => {
+  it("лид на обычной стадии → false", async () => {
+    if (!sql) return;
+    const resolve = makeAwaitingOperatorResolver(db as never);
+    expect(await resolve({ tenantId, contactId })).toBe(false);
+  });
+
+  it("лид на awaiting_operator-стадии → true", async () => {
+    if (!sql) return;
+    // помечаем transfer_offer как awaiting_operator (как мог бы AI-билдер)
+    const offerId = await stageId("transfer_offer");
+    await db
+      .update(stageDefinitions)
+      .set({ stageType: "awaiting_operator" })
+      .where(eq(stageDefinitions.id, offerId));
+    const [c] = await db.insert(contacts).values({ tenantId }).returning({ id: contacts.id });
+    const opId = c!.id;
+    const now = Math.floor(Date.parse("2026-06-06T04:00:00Z") / 1000);
+    await db.insert(leads).values({
+      tenantId,
+      userId: opId,
+      state: "transfer_offer",
+      stageDefinitionId: offerId,
+      requestType: "transfer",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const resolve = makeAwaitingOperatorResolver(db as never);
+    expect(await resolve({ tenantId, contactId: opId })).toBe(true);
   });
 });

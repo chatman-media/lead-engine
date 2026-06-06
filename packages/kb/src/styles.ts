@@ -147,4 +147,9 @@ export interface ComposeOptions {
    * ГОСТЯ». null/absent для линейных вертикалей.
    */
   requestContext?: string;
+  /**
+   * Лид стоит на стадии awaiting_operator (R5): цену/условия даёт человек-оператор.
+   * Бот придерживает гостя и не выдумывает детали. Блок «ОЖИДАНИЕ ОПЕРАТОРА».
+   */
+  awaitingOperator?: boolean;
 }
