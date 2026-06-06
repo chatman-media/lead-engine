@@ -38,6 +38,8 @@ type SeedStage = {
   supportMode?: boolean;
   nextStages: string[];
   autoAdvanceCondition?: string;
+  goal?: string;
+  guidance?: string;
   fields: Array<{
     slug: string;
     displayName: string;
@@ -1535,6 +1537,8 @@ export async function applyFunnelStages(
           staleTimeoutDays: stageData.staleTimeoutDays ?? null,
           nextStages: stageData.nextStages,
           autoAdvanceCondition: stageData.autoAdvanceCondition ?? null,
+          goal: stageData.goal ?? null,
+          guidance: stageData.guidance ?? null,
           supportMode: stageData.supportMode ?? false,
           createdAt: now,
           updatedAt: now,
