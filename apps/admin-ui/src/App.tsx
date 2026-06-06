@@ -30,7 +30,6 @@ import { SaasOutreach } from "./pages/SaasOutreach.tsx";
 import SaasProfile from "./pages/SaasProfile.tsx";
 import { SaasReferral } from "./pages/SaasReferral.tsx";
 import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
-import { SaasRoiDashboard } from "./pages/SaasRoiDashboard.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
 import { SaasSkills } from "./pages/SaasSkills.tsx";
 import { SaasStyles } from "./pages/SaasStyles.tsx";
@@ -150,7 +149,6 @@ export function App() {
                 <Route path="/conversations" element={<SaasConversations />} />
                 <Route path="/conversations/:id" element={<SaasConversations />} />
                 <Route path="/funnel" element={<SaasFunnel />} />
-                <Route path="/roi" element={<SaasRoiDashboard />} />
                 <Route path="/exchange" element={<SaasExchange />} />
                 <Route path="/vacancies" element={<SaasVacancies />} />
                 <Route path="/skills" element={<SaasSkills />} />
