@@ -443,6 +443,18 @@ export function SaasNotifications() {
         </CardHeader>
 
         <CardContent className="space-y-4">
+          {/* Пояснение: зачем отдельный бот, если клиентский уже подключён */}
+          <div className="flex gap-2.5 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs text-muted-foreground">
+            <span aria-hidden className="shrink-0 text-base leading-none">💡</span>
+            <p>
+              Это <strong className="text-foreground">служебный бот для вас и операторов</strong> — он
+              шлёт алерты в личку (новый лид, «нужна помощь», крупная сделка). Это{" "}
+              <strong className="text-foreground">не тот бот из «Каналов»</strong>, который переписывается
+              с клиентами: у каждого бота свой канал, поэтому уведомления вынесены в отдельного бота.
+              Подключаете один раз — каждый оператор привязывает свой Telegram сам.
+            </p>
+          </div>
+
           {loadingSettings ? (
             <Skeleton className="h-10 w-full" />
           ) : connected ? (
