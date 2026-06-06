@@ -117,6 +117,7 @@ describe("CoachAnalyzer", () => {
     tenantId: 1,
     userId: 1,
     state: "ready_to_work",
+    requestType: null,
     intakeJson: null,
     visaDocsJson: null,
     applicationId: null,
