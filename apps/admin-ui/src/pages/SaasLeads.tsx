@@ -37,16 +37,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { type FunnelPhase, groupStagesByPhase, PHASE_ACCENT, PHASE_LABEL } from "@/lib/phases";
 
-// Лейблы типов запроса для concierge-вертикали (leads.request_type).
-const REQUEST_TYPE_RU: Record<string, string> = {
-  exchange: "Обмен",
-  transfer: "Трансфер",
-  food: "Еда",
-  housekeeping: "Уборка",
-  tour: "Экскурсия",
-  other: "Другое",
-};
-
 const KIND_COLOR: Record<string, string> = {
   intake: "border-blue-300",
   active: "border-green-300",
@@ -80,7 +70,8 @@ export function SaasLeads() {
 
   // View mode
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
-  const [listStageId, setListStageId] = useState<number | null>(null);
+  // -1 = вкладка «Все» (по умолчанию), иначе id стадии
+  const [listStageId, setListStageId] = useState<number | null>(-1);
 
   // Lead search
   const [leadSearch, setLeadSearch] = useState("");
@@ -135,7 +126,7 @@ export function SaasLeads() {
         setLeads(l.items);
         // auto-switch to list if many stages
         if (f.stages.length > 6) setViewMode("list");
-        if (f.stages.length > 0 && listStageId === null) setListStageId(f.stages[0].id);
+        // листинг по умолчанию открывается на вкладке «Все» (listStageId=-1)
       })
       .catch((err) => {
         if (!onAuthError(err)) setError("Не удалось загрузить данные");
@@ -618,12 +609,32 @@ export function SaasLeads() {
       {hasStages &&
         viewMode === "list" &&
         (() => {
-          const activeStage = stages.find((s) => s.id === listStageId) ?? stages[0];
-          const activeLeads = leadsByStage.get(`stage:${activeStage?.id}`) ?? [];
+          const isAll = (listStageId ?? -1) === -1;
+          const recencyOf = (l: LeadListItem) => l.lastMessageAt ?? l.updatedAt ?? 0;
+          const activeStage = isAll ? null : (stages.find((s) => s.id === listStageId) ?? stages[0]);
+          const activeLeads = isAll
+            ? [...filteredLeads].sort((a, b) => recencyOf(b) - recencyOf(a))
+            : (leadsByStage.get(`stage:${activeStage?.id}`) ?? []);
           return (
             <div className="flex flex-col gap-3">
               {/* Stage tabs */}
               <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => setListStageId(-1)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
+                    isAll
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-transparent bg-muted text-muted-foreground hover:border-border hover:text-foreground"
+                  }`}
+                >
+                  Все
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] leading-none ${isAll ? "bg-primary text-primary-foreground" : "bg-muted-foreground/20"}`}
+                  >
+                    {filteredLeads.length}
+                  </span>
+                </button>
                 {stages.map((stage) => {
                   const count = (leadsByStage.get(`stage:${stage.id}`) ?? []).length;
                   const isActive = stage.id === (listStageId ?? stages[0]?.id);
@@ -655,24 +666,28 @@ export function SaasLeads() {
               </div>
 
               {/* Stage info bar */}
-              {activeStage && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">{activeStage.displayName}</span>
-                  <span>·</span>
-                  <span>{STAGE_TYPE_RU[activeStage.stageType] ?? activeStage.stageType}</span>
-                  <span>·</span>
-                  <span>{activeLeads.length} лидов</span>
-                </div>
-              )}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {isAll ? "Все лиды" : activeStage?.displayName}
+                </span>
+                {!isAll && activeStage && (
+                  <>
+                    <span>·</span>
+                    <span>{STAGE_TYPE_RU[activeStage.stageType] ?? activeStage.stageType}</span>
+                  </>
+                )}
+                <span>·</span>
+                <span>{activeLeads.length} лидов</span>
+              </div>
 
-              {/* Leads list */}
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {/* Leads list — плотные строки */}
+              <div className="space-y-1.5">
                 {activeLeads.map((lead) => (
-                  <LeadCard key={lead.id} lead={lead} />
+                  <LeadRow key={lead.id} lead={lead} />
                 ))}
                 {activeLeads.length === 0 && (
-                  <p className="col-span-full rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                    Нет лидов в этой стадии
+                  <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    {isAll ? "Лидов пока нет" : "Нет лидов в этой стадии"}
                   </p>
                 )}
               </div>
@@ -785,6 +800,84 @@ export function SaasLeads() {
   );
 }
 
+const SOURCE_SHORT: Record<string, string> = {
+  bot: "Telegram",
+  userbot: "Telegram",
+  whatsapp: "WhatsApp",
+  web: "Web",
+  self_play: "SIM",
+};
+
+const DEFAULT_ACCENT = "#6366f1";
+
+function leadView(lead: LeadListItem) {
+  const accent = lead.stageColor || DEFAULT_ACCENT;
+  const name = lead.contactName ?? `Контакт #${lead.contactId}`;
+  const fields = (lead.keyFields ?? [])
+    .map((f) => ({ label: f.label, value: parseFieldValue(f.value) }))
+    .filter((f) => f.value);
+  const total = lead.funnelStageCount ?? 0;
+  const pos = lead.stagePosition ?? null;
+  return {
+    accent,
+    name,
+    fields,
+    total,
+    pos,
+    awaiting: lead.stageType === "awaiting_operator",
+    recency: relTime(lead.lastMessageAt ?? lead.updatedAt),
+  };
+}
+
+function leadInitials(name: string): string {
+  const p = name.trim().split(/\s+/).filter(Boolean);
+  return (((p[0]?.[0] ?? "") + (p[1]?.[0] ?? "")).toUpperCase() || "#").slice(0, 2);
+}
+
+function LeadAvatar({ name, accent, size = 32 }: { name: string; accent: string; size?: number }) {
+  return (
+    <span
+      className="flex shrink-0 items-center justify-center rounded-full font-semibold"
+      style={{
+        width: size,
+        height: size,
+        fontSize: size * 0.36,
+        backgroundColor: `${accent}1f`,
+        color: accent,
+        boxShadow: `inset 0 0 0 1px ${accent}55`,
+      }}
+    >
+      {leadInitials(name)}
+    </span>
+  );
+}
+
+/** Сегментный индикатор воронки: точка на каждую стадию, пройденные — в цвете. */
+function FunnelSteps({ pos, total, accent }: { pos: number; total: number; accent: string }) {
+  if (total <= 0 || pos === null) return null;
+  return (
+    <div className="flex items-center gap-[3px]" title={`Этап ${pos + 1} из ${total}`}>
+      {Array.from({ length: Math.min(total, 14) }).map((_, i) => (
+        <span
+          key={i}
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ backgroundColor: accent, opacity: i <= pos ? 1 : 0.22 }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ChannelChip({ source }: { source?: string | null }) {
+  if (!source) return null;
+  return (
+    <span className="text-[10px] font-medium text-muted-foreground">
+      {SOURCE_SHORT[source] ?? source}
+    </span>
+  );
+}
+
+// ── Компактная карточка для канбана ──────────────────────────────────────────
 function LeadCard({
   lead,
   isDragging,
@@ -796,104 +889,113 @@ function LeadCard({
   onDragStart?: () => void;
   onDragEnd?: () => void;
 }) {
-  const fields = (lead.keyFields ?? [])
-    .map((f) => ({ label: f.label, value: parseFieldValue(f.value) }))
-    .filter((f) => f.value)
-    .slice(0, 3);
-  const awaiting = lead.stageType === "awaiting_operator";
-  const recency = relTime(lead.lastMessageAt ?? lead.updatedAt);
-  // Прогресс по воронке: позиция стадии / всего стадий. Всегда осмысленно
-  // (per-stage заполненность вводила в заблуждение «0%» на дальних стадиях).
-  const total = lead.funnelStageCount ?? 0;
-  const pos = lead.stagePosition ?? null;
-  const funnelPct =
-    total > 1 && pos !== null ? Math.round((pos / (total - 1)) * 100) : null;
-
+  const v = leadView(lead);
+  const primary = v.fields[0];
   return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      className={isDragging ? "opacity-40" : ""}
-    >
-      <Link to={`/leads/${lead.id}`}>
-        <Card
-          className="cursor-pointer border-l-2 transition-colors hover:bg-accent/30"
-          style={{ borderLeftColor: lead.stageColor || "var(--border)" }}
+    <div draggable onDragStart={onDragStart} onDragEnd={onDragEnd} className={isDragging ? "opacity-40" : ""}>
+      <Link to={`/leads/${lead.id}`} className="block">
+        <div
+          className="group rounded-lg border bg-card/60 p-2.5 transition-all hover:border-foreground/25 hover:bg-accent/30 hover:shadow-sm"
+          style={{ borderLeft: `3px solid ${v.accent}` }}
         >
-          <CardHeader className="pb-1 pt-3">
-            <div className="flex items-start justify-between gap-2">
-              <CardTitle className="text-sm font-medium leading-tight">
-                {lead.contactName ?? `Контакт #${lead.contactId}`}
-              </CardTitle>
-              <span className="shrink-0 text-[10px] text-muted-foreground">{recency}</span>
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-1">
-              {lead.source && (
-                <Badge variant="secondary" className="text-[10px]">
-                  {SOURCE_SHORT[lead.source] ?? lead.source}
-                </Badge>
-              )}
-              {awaiting && (
-                <Badge variant="warning" className="text-[10px]">
-                  ждёт оператора
-                </Badge>
-              )}
-              {lead.requestType && (
-                <Badge variant="outline" className="text-[10px]">
-                  {REQUEST_TYPE_RU[lead.requestType] ?? lead.requestType}
-                </Badge>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="pb-3">
-            {fields.length > 0 && (
-              <div className="space-y-0.5">
-                {fields.map((f) => (
-                  <div key={f.label} className="flex justify-between gap-2 text-[11px]">
-                    <span className="shrink-0 text-muted-foreground">{f.label}</span>
-                    <span className="truncate text-right font-medium">{f.value}</span>
-                  </div>
-                ))}
+          <div className="flex items-center gap-2">
+            <LeadAvatar name={v.name} accent={v.accent} size={30} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="truncate text-[13px] font-semibold leading-tight">{v.name}</span>
+                <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{v.recency}</span>
               </div>
-            )}
-
-            {lead.lastMessageText && (
-              <p className="mt-1.5 line-clamp-2 text-[11px] italic text-muted-foreground">
-                «{lead.lastMessageText}»
-              </p>
-            )}
-
-            {funnelPct !== null && pos !== null && (
-              <div className="mt-2">
-                <div className="mb-0.5 flex items-center justify-between text-[10px] text-muted-foreground">
-                  <span className="truncate">{lead.stageName ?? "Воронка"}</span>
-                  <span className="shrink-0">
-                    этап {pos + 1}/{total}
+              <div className="flex items-center gap-1.5">
+                <ChannelChip source={lead.source} />
+                {v.awaiting && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-400">
+                    <span className="size-1.5 animate-pulse rounded-full bg-amber-400" />
+                    ждёт
                   </span>
-                </div>
-                <div className="h-1 w-full rounded-full bg-secondary">
-                  <div
-                    className="h-1 rounded-full bg-primary transition-all"
-                    style={{ width: `${funnelPct}%` }}
-                  />
-                </div>
+                )}
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </div>
+          </div>
+
+          {primary && (
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{primary.label}</span>
+              <span className="truncate font-mono text-[13px] font-semibold">{primary.value}</span>
+            </div>
+          )}
+
+          {lead.lastMessageText && (
+            <p className="mt-1.5 line-clamp-1 text-[11px] text-muted-foreground/80">{lead.lastMessageText}</p>
+          )}
+
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="truncate text-[10px] font-medium" style={{ color: v.accent }}>
+              {lead.stageName ?? "—"}
+            </span>
+            <FunnelSteps pos={v.pos ?? -1} total={v.total} accent={v.accent} />
+          </div>
+        </div>
       </Link>
     </div>
   );
 }
 
-const SOURCE_SHORT: Record<string, string> = {
-  bot: "Telegram",
-  userbot: "Telegram",
-  whatsapp: "WhatsApp",
-  web: "Web",
-  self_play: "SIM",
-};
+// ── Плотная строка для списка (горизонтальная, без пустот) ────────────────────
+function LeadRow({ lead }: { lead: LeadListItem }) {
+  const v = leadView(lead);
+  return (
+    <Link to={`/leads/${lead.id}`} className="block">
+      <div
+        className="group flex items-center gap-3 rounded-lg border bg-card/50 px-3 py-2 transition-all hover:border-foreground/25 hover:bg-accent/30"
+        style={{ borderLeft: `3px solid ${v.accent}` }}
+      >
+        <LeadAvatar name={v.name} accent={v.accent} size={34} />
+
+        {/* Имя + канал */}
+        <div className="w-40 min-w-0 shrink-0">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-semibold">{v.name}</span>
+            {v.awaiting && <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-400" />}
+          </div>
+          <ChannelChip source={lead.source} />
+        </div>
+
+        {/* Ключевые поля + последнее сообщение */}
+        <div className="hidden min-w-0 flex-1 md:block">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            {v.fields.slice(0, 3).map((f) => (
+              <span key={f.label} className="text-[11px] text-muted-foreground">
+                {f.label}: <span className="font-mono font-medium text-foreground">{f.value}</span>
+              </span>
+            ))}
+          </div>
+          {lead.lastMessageText && (
+            <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground/70">{lead.lastMessageText}</p>
+          )}
+        </div>
+
+        {/* Стадия + прогресс */}
+        <div className="hidden w-44 shrink-0 flex-col items-end gap-1 lg:flex">
+          <span className="truncate text-[11px] font-medium" style={{ color: v.accent }}>
+            {lead.stageName ?? "—"}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <FunnelSteps pos={v.pos ?? -1} total={v.total} accent={v.accent} />
+            {v.pos !== null && v.total > 0 && (
+              <span className="text-[10px] tabular-nums text-muted-foreground">
+                {v.pos + 1}/{v.total}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
+          {v.recency}
+        </span>
+      </div>
+    </Link>
+  );
+}
 
 /** value_json → читаемая строка для карточки. */
 function parseFieldValue(raw: string): string {

@@ -570,6 +570,20 @@ export interface LeadDetail {
     createdAt: number;
   }>;
   contact: { id: number; displayName: string | null; attributesJson: string | null } | undefined;
+  transferredThb?: number;
+  ordersCompleted?: number;
+  orders?: Array<{
+    id: number;
+    assetFrom: string;
+    network: string | null;
+    amountFrom: number | string | null;
+    amountToThb: number | string | null;
+    rate: number | string | null;
+    status: string;
+    payoutCode: string | null;
+    createdAt: number;
+    completedAt: number | null;
+  }>;
 }
 
 export interface ContactItem {

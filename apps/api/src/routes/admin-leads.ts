@@ -4,6 +4,7 @@ import {
   channels,
   contacts,
   conversations,
+  exchangeOrders,
   leadEvents,
   leadFieldValues,
   leadNotes,
@@ -553,7 +554,40 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         .from(contacts)
         .where(eq(contacts.id, lead.userId));
 
-      return { lead, stageDef, fields, fieldValues, events, notes, contact };
+      // Сделки контакта (все статусы) + сумма завершённых.
+      const orders = await tx
+        .select({
+          id: exchangeOrders.id,
+          assetFrom: exchangeOrders.assetFrom,
+          network: exchangeOrders.network,
+          amountFrom: exchangeOrders.amountFrom,
+          amountToThb: exchangeOrders.amountToThb,
+          rate: exchangeOrders.rate,
+          status: exchangeOrders.status,
+          payoutCode: exchangeOrders.payoutCode,
+          createdAt: exchangeOrders.createdAt,
+          completedAt: exchangeOrders.completedAt,
+        })
+        .from(exchangeOrders)
+        .where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.contactId, lead.userId)))
+        .orderBy(desc(exchangeOrders.id))
+        .limit(50);
+      const transferredThb = orders
+        .filter((o) => o.status === "completed")
+        .reduce((s, o) => s + Math.round(Number(o.amountToThb ?? 0)), 0);
+
+      return {
+        lead,
+        stageDef,
+        fields,
+        fieldValues,
+        events,
+        notes,
+        contact,
+        transferredThb,
+        ordersCompleted: orders.filter((o) => o.status === "completed").length,
+        orders,
+      };
     });
 
     if (!result) return c.json({ error: "lead not found" }, 404);
