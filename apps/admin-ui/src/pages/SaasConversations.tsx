@@ -34,6 +34,7 @@ const SOURCE_RU: Record<string, string> = {
   userbot: "Telegram",
   whatsapp: "WhatsApp",
   web: "Web",
+  self_play: "Симуляция",
 };
 const MODE_RU: Record<string, string> = { ai: "AI", human: "Оператор" };
 const STATUS_RU: Record<string, string> = {
@@ -102,6 +103,15 @@ export function SaasConversations() {
   const [contactLead, setContactLead] = useState<LeadListItem | null>(null);
   const [admins, setAdmins] = useState<import("../api/saas.ts").AdminRow[]>([]);
 
+  // Dialog simulator (dev/test)
+  const [simOpen, setSimOpen] = useState(false);
+  const [simPersonas, setSimPersonas] = useState<
+    Array<{ id: string; name: string; displayName: string }>
+  >([]);
+  const [simPersonaId, setSimPersonaId] = useState("");
+  const [simTurns, setSimTurns] = useState("6");
+  const [simStarting, setSimStarting] = useState(false);
+
   function handleAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
       clearToken();
@@ -114,6 +124,38 @@ export function SaasConversations() {
   useEffect(() => {
     saas.listAdmins().then((r) => setAdmins(r.items)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!simOpen || simPersonas.length > 0) return;
+    saas
+      .listSimPersonas()
+      .then((r) => {
+        setSimPersonas(r.personas);
+        if (r.personas[0]) setSimPersonaId(r.personas[0].id);
+      })
+      .catch(() => {});
+  }, [simOpen, simPersonas.length]);
+
+  async function handleStartSim() {
+    if (!simPersonaId) return;
+    setSimStarting(true);
+    setError("");
+    try {
+      const res = await saas.startSim({
+        personaId: simPersonaId,
+        maxTurns: Number.parseInt(simTurns, 10) || 6,
+      });
+      setSimOpen(false);
+      await refreshList();
+      navigate(`/conversations/${res.conversationId}`);
+    } catch (err) {
+      if (!handleAuthError(err)) {
+        setError(err instanceof ApiError ? err.message : "Не удалось запустить симуляцию");
+      }
+    } finally {
+      setSimStarting(false);
+    }
+  }
 
   const buildFilters = useCallback(() => ({
     status: filterStatus,
@@ -304,7 +346,46 @@ export function SaasConversations() {
       <PageHeader
         title="Диалоги"
         description="Входящие от клиентов и ответы бота. Авто-обновление каждые 5 секунд."
+        actions={
+          <Button variant="outline" size="sm" onClick={() => setSimOpen((v) => !v)}>
+            🤖 Симулировать клиента
+          </Button>
+        }
       />
+
+      {simOpen && (
+        <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
+          <div className="flex-1 space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Сценарий / персона</span>
+            <Select value={simPersonaId} onValueChange={setSimPersonaId}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Выберите персону…" />
+              </SelectTrigger>
+              <SelectContent>
+                {simPersonas.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name} — {p.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Ходов</span>
+            <Input
+              type="number"
+              min={1}
+              max={20}
+              value={simTurns}
+              onChange={(e) => setSimTurns(e.target.value)}
+              className="w-20"
+            />
+          </div>
+          <Button onClick={handleStartSim} disabled={simStarting || !simPersonaId}>
+            {simStarting ? "Запуск…" : "Запустить"}
+          </Button>
+        </Card>
+      )}
 
       {error && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -426,6 +507,7 @@ export function SaasConversations() {
                           </div>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-1">
+                          {c.source === "self_play" && <Badge variant="warning">SIM</Badge>}
                           <Badge variant="secondary">{SOURCE_RU[c.source] ?? c.source}</Badge>
                           <Badge variant={c.mode === "human" ? "warning" : "outline"}>
                             {MODE_RU[c.mode] ?? c.mode}
