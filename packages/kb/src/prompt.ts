@@ -121,11 +121,15 @@ export function composeSystemPrompt(
       skillsForStage.map((s) => `- ${s.displayName} — ${s.promptFragment}`).join("\n")
     : "";
 
-  const stageBlock = stageCfg
+  // Per-stage instructions: the lead's funnel-stage override (Phase 2) takes
+  // precedence over the Style's per-sales-stage config; grounding stays from style.
+  const effGoal = options.stageOverride?.goal ?? stageCfg?.goal;
+  const effGuidance = options.stageOverride?.guidance ?? stageCfg?.guidance;
+  const stageBlock = effGoal
     ? `ТЕКУЩИЙ ЭТАП: ${stage.toUpperCase()}.\n` +
-      `ЦЕЛЬ ЭТАПА: ${stageCfg.goal}.` +
-      (stageCfg.guidance ? `\nКАК: ${stageCfg.guidance}` : "") +
-      (stageCfg.groundingRequired
+      `ЦЕЛЬ ЭТАПА: ${effGoal}.` +
+      (effGuidance ? `\nКАК: ${effGuidance}` : "") +
+      (stageCfg?.groundingRequired
         ? `\nGROUNDING: на этом этапе все конкретные факты (цифры, суммы, сроки) бери ТОЛЬКО из секции KB CONTEXT ниже. Если её нет или нужного факта в ней нет — не выдумывай, скажи что уточнишь.`
         : "")
     : `ТЕКУЩИЙ ЭТАП: ${stage}. (Специфических правил для этапа нет — используй общий стиль.)`;
