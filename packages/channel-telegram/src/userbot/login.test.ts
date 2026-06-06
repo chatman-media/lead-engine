@@ -2,6 +2,7 @@ import type { TelegramClient } from "telegram";
 import { describe, expect, it } from "bun:test";
 import {
   finishUserbotLogin,
+  startUserbotLogin,
   submitUserbot2fa,
   submitUserbotCode,
   UserbotLoginError,
@@ -87,5 +88,31 @@ describe("submitUserbot2fa", () => {
     await expect(
       submitUserbot2fa({ client: throwing("PASSWORD_HASH_INVALID"), password: "p" }),
     ).rejects.toMatchObject({ code: "password_invalid" });
+  });
+});
+
+describe("startUserbotLogin (через clientFactory)", () => {
+  it("успех → { client, phoneCodeHash }", async () => {
+    const fc = { connect: async () => {}, sendCode: async () => ({ phoneCodeHash: "hash" }), disconnect: async () => {} };
+    const r = await startUserbotLogin({ apiId: 1, apiHash: "h", phone: "+100", clientFactory: (() => fc) as never });
+    expect(r.phoneCodeHash).toBe("hash");
+    expect(r.client).toBe(fc as never);
+  });
+
+  it("ошибка sendCode → disconnect + mapRpcError", async () => {
+    let disconnected = false;
+    const fc = {
+      connect: async () => {},
+      sendCode: async () => {
+        throw new Error("PHONE_NUMBER_INVALID");
+      },
+      disconnect: async () => {
+        disconnected = true;
+      },
+    };
+    await expect(
+      startUserbotLogin({ apiId: 1, apiHash: "h", phone: "+100", clientFactory: (() => fc) as never }),
+    ).rejects.toMatchObject({ code: "phone_invalid" });
+    expect(disconnected).toBe(true);
   });
 });
