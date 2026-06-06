@@ -177,6 +177,7 @@ export class NotificationService {
       document_uploaded: "📸",
       high_value_deal: "💎",
       lead_stale: "⏰",
+      operator_confirm_needed: "✋",
     };
     return map[type] ?? "🔔";
   }
@@ -189,6 +190,7 @@ export class NotificationService {
       document_uploaded: "Загружен документ",
       high_value_deal: "Крупная сделка",
       lead_stale: "Лид завис",
+      operator_confirm_needed: "Нужно подтверждение оператора",
     };
     return map[type] ?? "Уведомление";
   }

@@ -1449,6 +1449,19 @@ export const saas = {
       body: JSON.stringify({ stageDefinitionId }),
     });
   },
+  advanceLead(id: number, text?: string) {
+    return request<{
+      ok: boolean;
+      from: string;
+      to: string;
+      toDisplayName: string;
+      awaitingOperator: boolean;
+      terminal: boolean;
+    }>(`/api/admin/leads/${id}/advance`, {
+      method: "POST",
+      body: JSON.stringify(text ? { text } : {}),
+    });
+  },
   upsertLeadFieldValues(id: number, values: Array<{ fieldId: number; value: unknown }>) {
     return request<{ ok: boolean; advanced: boolean; newStageSlug: string | null }>(
       `/api/admin/leads/${id}/field-values`,
