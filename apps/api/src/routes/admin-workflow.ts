@@ -1,14 +1,6 @@
-import type { Db } from "@chatman-media/conversation-engine";
+import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
-import { Hono } from "hono";
-import { recordAudit } from "../lib/audit.ts";
-import {
-	applyFunnelStages,
-	FIELD_TYPES,
-	type SeedStage,
-	STAGE_KINDS,
-	STAGE_TYPES,
-} from "./admin-funnel.ts";
+import { skills } from "@chatman-media/storage";
 import {
 	ACTIVE_PHASES,
 	type ActivePhase,
@@ -16,6 +8,18 @@ import {
 	isActivePhase,
 	validateBackbone,
 } from "@chatman-media/verticals";
+import { and, eq, inArray } from "drizzle-orm";
+import { Hono } from "hono";
+import { recordAudit } from "../lib/audit.ts";
+import { SKILLS_CATALOGUE } from "../lib/skills-catalogue.ts";
+import {
+	applyFunnelStages,
+	FIELD_TYPES,
+	type SeedStage,
+	STAGE_KINDS,
+	STAGE_TYPES,
+	seedSkillsCatalogue,
+} from "./admin-funnel.ts";
 
 /**
  * AI Workflow Builder — оператор описывает свой бизнес в диалоге с AI,
@@ -364,7 +368,10 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 		const backbone = validateBackbone(stages);
 		if (backbone.errors.length > 0) {
 			return c.json(
-				{ error: "Воронка не соответствует костяку", violations: backbone.errors },
+				{
+					error: "Воронка не соответствует костяку",
+					violations: backbone.errors,
+				},
 				400,
 			);
 		}
@@ -386,6 +393,117 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 		});
 
 		return c.json({ ok: true, stageCount: result.stagesCreated });
+	});
+
+	/**
+	 * POST /api/admin/workflows/recommend-skills
+	 * Body: { description } — AI выбирает уместные техники убеждения из каталога
+	 * (SKILLS_CATALOGUE) под бизнес, ставит каталог тенанту и включает только
+	 * рекомендованные (остальные выключает). Phase 2 slice D.
+	 */
+	app.post("/api/admin/workflows/recommend-skills", async (c) => {
+		if (!opts.resolveChat) {
+			return c.json({ error: "LLM not configured for this tenant" }, 503);
+		}
+		const tenantId = c.var.tenantId;
+		const adminId = (c.var.adminId as number | null) ?? undefined;
+
+		let body: { description?: unknown };
+		try {
+			body = (await c.req.json()) as typeof body;
+		} catch {
+			return c.json({ error: "invalid json" }, 400);
+		}
+		if (typeof body.description !== "string" || !body.description.trim()) {
+			return c.json({ error: "description required" }, 400);
+		}
+		const description = body.description.slice(0, 4000);
+
+		const catalogue = SKILLS_CATALOGUE.map(
+			(s) => `- ${s.slug}: ${s.description}`,
+		).join("\n");
+		const prompt = `Ты подбираешь техники убеждения (skills) для AI-бота под конкретный бизнес.
+Каталог техник (slug — описание):
+${catalogue}
+
+Бизнес: ${description}
+
+Верни ТОЛЬКО JSON: {"slugs": ["slug", ...]} — 5-10 наиболее уместных техник ИМЕННО для этого бизнеса. Только slug'и из каталога, без выдумок.`;
+
+		let client: ChatClient;
+		try {
+			client = opts.resolveChat(tenantId);
+		} catch {
+			return c.json({ error: "LLM not configured for this tenant" }, 503);
+		}
+
+		let raw: string;
+		try {
+			raw = await client.complete([{ role: "user", content: prompt }], {
+				numPredict: 400,
+				temperature: 0.3,
+			});
+		} catch (err) {
+			return c.json(
+				{
+					error: `LLM error: ${err instanceof Error ? err.message : String(err)}`,
+				},
+				502,
+			);
+		}
+
+		const jsonStr = raw.replace(/```(?:json)?\n?/g, "").trim();
+		let parsed: { slugs?: unknown };
+		try {
+			parsed = JSON.parse(jsonStr) as typeof parsed;
+		} catch {
+			return c.json({ error: "LLM returned non-JSON response", raw }, 502);
+		}
+
+		const known = new Set(SKILLS_CATALOGUE.map((s) => s.slug));
+		const recommended = Array.isArray(parsed.slugs)
+			? [
+					...new Set(
+						parsed.slugs.filter(
+							(s): s is string => typeof s === "string" && known.has(s),
+						),
+					),
+				]
+			: [];
+		if (recommended.length === 0) {
+			return c.json({ error: "no valid skills recommended", raw }, 502);
+		}
+
+		// Ставим весь каталог (идемпотентно), затем включаем только рекомендованные.
+		await seedSkillsCatalogue(opts.db, tenantId);
+		const now = Math.floor(Date.now() / 1000);
+		await withTenant(opts.db, tenantId, async (tx) => {
+			await tx
+				.update(skills)
+				.set({ isEnabled: false, updatedAt: now })
+				.where(eq(skills.tenantId, tenantId));
+			await tx
+				.update(skills)
+				.set({ isEnabled: true, updatedAt: now })
+				.where(
+					and(eq(skills.tenantId, tenantId), inArray(skills.slug, recommended)),
+				);
+		});
+
+		await recordAudit(opts.db, {
+			tenantId,
+			adminId,
+			action: "skills.ai_recommend",
+			targetKind: "skills",
+			targetId: "catalogue",
+			details: { enabled: recommended },
+		});
+
+		return c.json({
+			ok: true,
+			enabled: recommended,
+			count: recommended.length,
+		});
 	});
 
 	return app;
