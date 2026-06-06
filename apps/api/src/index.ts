@@ -74,7 +74,7 @@ import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminExchangeRoutes } from "./routes/admin-exchange.ts";
-import { refreshAllActiveTenants } from "./lib/exchange/rate-feed.ts";
+import { refreshDueTenants } from "./lib/exchange/rate-feed.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeAdminWorkflowRoutes } from "./routes/admin-workflow.ts";
 import { makeAdminCopilotRoutes } from "./routes/admin-copilot.ts";
@@ -944,20 +944,27 @@ async function main() {
     5 * 60 * 1000,
   );
 
-  // Exchange rate-feed: периодически тянет рыночный base_rate для auto-курсов.
-  // RATE_FEED_MS (default 180000 = 3 мин). 0 — отключить.
+  // Exchange rate-feed: тик-планировщик с per-tenant частотой (exchange_settings).
+  // RATE_FEED_MS (default 180000 = 3 мин) — дефолт per-tenant; 0 — отключить.
+  // Тик = min(RATE_FEED_MS, 60с): на каждом тике рефрешим тенантов, у кого подошёл
+  // их интервал. last-refresh держим в памяти (на рестарте рефрешим всех).
   const rateFeedMs = Number.parseInt(process.env.RATE_FEED_MS ?? "180000", 10);
   let rateFeedInterval: ReturnType<typeof setInterval> | null = null;
   if (rateFeedMs > 0) {
+    const defaultRefreshSec = Math.max(60, Math.floor(rateFeedMs / 1000));
+    const tickMs = Math.min(rateFeedMs, 60_000);
+    const lastRefreshByTenant = new Map<number, number>();
     const runFeed = () =>
-      refreshAllActiveTenants(
-        db,
-        {
+      refreshDueTenants(db, {
+        defaultRefreshSec,
+        lastRefreshByTenant,
+        nowSec: Math.floor(Date.now() / 1000),
+        log: {
           warn: (m) => log.warn(m),
           info: (m) => log.info(m),
         },
         // Резкое колебание курса (sanity-guard отклонил фид) → алерт владельцу.
-        (a) => {
+        onAnomaly: (a) => {
           const dev = Number.isFinite(a.deviationPct) ? Math.round(a.deviationPct) : null;
           log.warn("rate-feed anomaly: резкое колебание курса", {
             tenantId: a.tenantId,
@@ -980,10 +987,10 @@ async function main() {
             })
             .catch((e) => log.warn("ops-alert emit failed", { err: String(e) }));
         },
-      ).catch((e) => log.warn("rate-feed run failed", { err: e }));
-    rateFeedInterval = setInterval(runFeed, rateFeedMs);
+      }).catch((e) => log.warn("rate-feed tick failed", { err: e }));
+    rateFeedInterval = setInterval(runFeed, tickMs);
     setTimeout(runFeed, 15_000); // первый прогон через 15с после старта
-    log.info("exchange rate-feed enabled", { intervalMs: rateFeedMs });
+    log.info("exchange rate-feed enabled (per-tenant)", { defaultRefreshSec, tickMs });
   }
 
   process.on("SIGTERM", () => void shutdown());
