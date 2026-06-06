@@ -105,6 +105,7 @@
       "name": "@chatman-media/vertical-concierge",
       "version": "0.1.0",
       "dependencies": {
+        "@chatman-media/kb": "workspace:*",
         "@chatman-media/verticals": "workspace:*",
       },
       "devDependencies": {
@@ -274,7 +275,7 @@
     },
     "packages/conversation-engine": {
       "name": "@chatman-media/conversation-engine",
-      "version": "1.7.0",
+      "version": "1.9.0",
       "dependencies": {
         "@chatman-media/channel-core": "workspace:*",
         "@chatman-media/channel-telegram": "workspace:*",
@@ -351,7 +352,7 @@
     },
     "packages/storage": {
       "name": "@chatman-media/storage",
-      "version": "1.9.0",
+      "version": "1.10.1",
       "devDependencies": {
         "@biomejs/biome": "^2.4.16",
         "@chatman-media/sales": "^0.1.0",
