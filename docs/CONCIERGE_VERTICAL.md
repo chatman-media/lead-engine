@@ -143,12 +143,12 @@ guest (contact)
 3. **Писать `leads.request_type`.** При определении типа проставлять колонку (для борда и резолвинга лида).
 
 **Сложная часть — N одновременных запросов на гостя.** Field-extractor сейчас «один лид на контакт»: lookup `leads WHERE tenant AND user` берёт первый (`field-extractor.ts:54-61`), а `.onConflictDoNothing()` (`:90`) после снятия `UNIQUE` (migration 0032) **больше не защищает** от дублей (нет conflict-target). Развилка:
-- **MVP (slice 3):** один активный запрос на гостя за раз — таргетим самый свежий **не-терминальный** лид; новый запрос — после закрытия предыдущего. `onConflictDoNothing` заменить на явный guard «нет открытого лида». Детерминированно, мало кода.
-- **Полный (slice 3b):** распознавать «это НОВЫЙ запрос» vs «продолжение» в одном треде (классификатор new-vs-existing) и вести параллельные лиды. Сложнее — отдельная итерация.
+- ✅ **MVP (slice 3):** один активный запрос на гостя за раз — таргетим самый свежий **не-терминальный** лид; новый запрос — после закрытия предыдущего. Реализовано.
+- ✅ **Полный (slice 3b):** распознавание «НОВЫЙ запрос vs продолжение» в одном треде — сигнал `_new_request` встроен в **тот же** LLM-вызов извлечения (без доп. стоимости); другой тип в треде → отдельный лид сразу в его ветке. Реализовано + integration-verified.
 
 **Не трогаем:** `process-inbound`, reply-strategy, 5 вертикалей (gating по наличию ветвления + поля `request_type`), `validateBackbone`, install/seed.
 
-**План slice 3:** (1) branch-aware advance + запись `leads.request_type` в field-extractor (gated); (2) заменить `onConflictDoNothing` на guard «нет открытого лида»; (3) тест: concierge-лид с `request_type=transfer` уходит в `transfer_request`, не `exchange_request`; (4) _[slice 3b]_ new-vs-existing для параллельных запросов.
+**План slice 3 — выполнено:** (1) ✅ branch-aware advance + запись `leads.request_type` в field-extractor (gated, `selectNextStage`); (2) ✅ multi-request lookup (самый свежий не-терминальный лид, иначе создаём новый); (3) ✅ integration-тесты (`field-extractor.integration.test.ts`); (4) ✅ параллельные запросы через `_new_request` в том же LLM-вызове. Всё на живом Postgres: field-extractor 14 pass / 26 expect.
 
 ---
 
