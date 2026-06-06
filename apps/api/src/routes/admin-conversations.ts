@@ -5,8 +5,11 @@ import {
   channels,
   contacts,
   conversations,
+  leadEvents,
+  leads,
   messages,
   outboundQueue,
+  stageDefinitions,
 } from "@chatman-media/storage";
 import { and, desc, eq, ilike, isNotNull, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -359,6 +362,172 @@ export function makeAdminConversationsRoutes(
       ok: true,
       messageId: outcome.messageId,
       channelKind: outcome.channelKind,
+    });
+  });
+
+  /**
+   * POST /api/admin/conversations/:id/advance
+   * Body: { text?: string }
+   *
+   * Operator-in-the-loop: подтверждает текущую operator-стадию лида и двигает
+   * его на следующую (next_stages[0]). Пишет сообщение в чат (role=assistant —
+   * «бот» подтверждает шаг и ведёт дальше), НЕ глушит AI (mode остаётся 'ai').
+   * Для real-канала сообщение уходит клиенту; для self_play — только в чат.
+   * Так оператор проходит воронку по шагам прямо из диалога.
+   */
+  app.post("/api/admin/conversations/:id/advance", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const conversationId = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isFinite(conversationId) || conversationId <= 0) {
+      return c.json({ error: "invalid conversation id" }, 400);
+    }
+    let body: { text?: unknown };
+    try {
+      body = (await c.req.json()) as { text?: unknown };
+    } catch {
+      body = {};
+    }
+    const note = typeof body.text === "string" ? body.text.trim().slice(0, 2000) : "";
+    const now = Math.floor(Date.now() / 1000);
+
+    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
+      const [conv] = await tx
+        .select({ id: conversations.id, contactId: conversations.userId, source: conversations.source })
+        .from(conversations)
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)));
+      if (!conv) return { kind: "not_found" } as const;
+
+      const [lead] = await tx
+        .select({ id: leads.id, state: leads.state, stageDefinitionId: leads.stageDefinitionId })
+        .from(leads)
+        .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, conv.contactId)))
+        .orderBy(desc(leads.id))
+        .limit(1);
+      if (!lead || !lead.stageDefinitionId) return { kind: "no_lead" } as const;
+
+      const [cur] = await tx
+        .select({
+          slug: stageDefinitions.slug,
+          displayName: stageDefinitions.displayName,
+          nextStages: stageDefinitions.nextStages,
+        })
+        .from(stageDefinitions)
+        .where(and(eq(stageDefinitions.id, lead.stageDefinitionId), eq(stageDefinitions.tenantId, tenantId)));
+      if (!cur) return { kind: "no_lead" } as const;
+      const nextSlug = cur.nextStages[0];
+      if (!nextSlug) return { kind: "terminal", stage: cur.slug } as const;
+
+      const [next] = await tx
+        .select({
+          id: stageDefinitions.id,
+          slug: stageDefinitions.slug,
+          displayName: stageDefinitions.displayName,
+          stageType: stageDefinitions.stageType,
+          nextStages: stageDefinitions.nextStages,
+        })
+        .from(stageDefinitions)
+        .where(and(eq(stageDefinitions.slug, nextSlug), eq(stageDefinitions.tenantId, tenantId)));
+      if (!next) return { kind: "terminal", stage: cur.slug } as const;
+
+      // advance lead
+      await tx
+        .update(leads)
+        .set({ stageDefinitionId: next.id, state: next.slug, updatedAt: now })
+        .where(eq(leads.id, lead.id));
+      await tx.insert(leadEvents).values({
+        tenantId,
+        leadId: lead.id,
+        fromState: lead.state,
+        toState: next.slug,
+        byAdminId: adminId,
+        createdAt: now,
+      });
+
+      // chat message (бот ведёт клиента дальше)
+      const msgText = note || `✅ ${cur.displayName} — готово. Переходим к этапу: ${next.displayName}.`;
+      const [msg] = await tx
+        .insert(messages)
+        .values({
+          tenantId,
+          conversationId,
+          role: "assistant",
+          text: msgText,
+          metaJson: JSON.stringify({ adminId, sentVia: "operator-advance", toStage: next.slug }),
+          createdAt: now,
+        })
+        .returning({ id: messages.id });
+
+      await tx
+        .update(conversations)
+        .set({ lastMessageAt: now, lastMessageText: msgText.slice(0, 200), unreadCount: 0 })
+        .where(eq(conversations.id, conversationId));
+
+      // доставка клиенту только для реальных каналов (не self_play)
+      if (conv.source !== "self_play") {
+        const [identity] = await tx
+          .select({ channelDbId: channels.id, externalUserId: channelIdentities.externalUserId })
+          .from(channelIdentities)
+          .innerJoin(channels, eq(channels.id, channelIdentities.channelId))
+          .where(and(eq(channelIdentities.contactId, conv.contactId), eq(channels.status, "active")))
+          .limit(1);
+        if (identity) {
+          await tx.insert(outboundQueue).values({
+            tenantId,
+            channelId: identity.channelDbId,
+            conversationId,
+            payloadJson: JSON.stringify({
+              channelId: String(identity.channelDbId),
+              externalUserId: identity.externalUserId,
+              parts: [{ kind: "text", text: msgText }],
+            }),
+            idempotencyKey: `op-advance-${msg!.id}`,
+            scheduledAt: now,
+            createdAt: now,
+          });
+        }
+      }
+
+      return {
+        kind: "advanced",
+        from: cur.slug,
+        to: next.slug,
+        toDisplayName: next.displayName,
+        awaitingOperator: next.stageType === "awaiting_operator",
+        terminal: next.nextStages.length === 0,
+        leadId: lead.id,
+      } as const;
+    });
+
+    if (outcome.kind === "not_found") return c.json({ error: "conversation not found" }, 404);
+    if (outcome.kind === "no_lead") return c.json({ error: "no lead with funnel stage for this conversation" }, 409);
+    if (outcome.kind === "terminal") {
+      return c.json({ error: "lead already at terminal stage", stage: outcome.stage }, 409);
+    }
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "conversation.advance",
+      targetKind: "lead",
+      targetId: outcome.leadId,
+      details: { from: outcome.from, to: outcome.to },
+    });
+    adminEventBus.emit({
+      type: "stage_changed",
+      tenantId,
+      leadId: outcome.leadId,
+      toStage: outcome.to,
+      toStageDisplayName: outcome.toDisplayName,
+    });
+
+    return c.json({
+      ok: true,
+      from: outcome.from,
+      to: outcome.to,
+      toDisplayName: outcome.toDisplayName,
+      awaitingOperator: outcome.awaitingOperator,
+      terminal: outcome.terminal,
     });
   });
 

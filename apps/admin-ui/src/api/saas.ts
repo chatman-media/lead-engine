@@ -1223,6 +1223,19 @@ export const saas = {
       method: "DELETE",
     });
   },
+  advanceConversation(id: number, text?: string) {
+    return request<{
+      ok: boolean;
+      from: string;
+      to: string;
+      toDisplayName: string;
+      awaitingOperator: boolean;
+      terminal: boolean;
+    }>(`/api/admin/conversations/${id}/advance`, {
+      method: "POST",
+      body: JSON.stringify(text ? { text } : {}),
+    });
+  },
   updateConversation(id: number, patch: { status?: string; assignedAdminId?: number | null }) {
     return request<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/admin/conversations/${id}`,

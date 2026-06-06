@@ -99,6 +99,7 @@ export function SaasConversations() {
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
   const [togglingMode, setTogglingMode] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
   const [confirmingTakeover, setConfirmingTakeover] = useState(false);
   const [contactLead, setContactLead] = useState<LeadListItem | null>(null);
   const [admins, setAdmins] = useState<import("../api/saas.ts").AdminRow[]>([]);
@@ -897,6 +898,28 @@ export function SaasConversations() {
                       <p className="text-[11px] text-muted-foreground">Стадия</p>
                       <Badge variant="outline" className="text-[10px]">{STATE_RU[contactLead.state] ?? contactLead.state}</Badge>
                     </div>
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      disabled={advancing}
+                      onClick={async () => {
+                        setAdvancing(true);
+                        setError("");
+                        try {
+                          const r = await saas.advanceConversation(detail.conversation.id);
+                          await refreshDetail(detail.conversation.id);
+                          await refreshList();
+                          if (r.terminal) setError("");
+                        } catch (err) {
+                          if (!handleAuthError(err))
+                            setError(err instanceof ApiError ? err.message : "Не удалось продвинуть");
+                        } finally {
+                          setAdvancing(false);
+                        }
+                      }}
+                    >
+                      {advancing ? "…" : "✅ Подтвердить · дальше"}
+                    </Button>
                   </div>
                 ) : (
                   <div className="rounded-lg border border-dashed p-3 text-center">
