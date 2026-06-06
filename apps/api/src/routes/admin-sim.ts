@@ -281,9 +281,10 @@ async function walkLeads(
   db: Db,
   tenantId: number,
   adminId: number,
-  count: number,
-  displayName?: string,
+  opts: { count?: number; displayName?: string; spread?: boolean },
 ): Promise<{ kind: "ok"; leadIds: number[]; finalStage: string } | { kind: "no_funnel" }> {
+  const count = Math.min(Math.max(1, opts.count ?? 1), 30);
+  const displayName = opts.displayName;
   return withTenant(db, tenantId, async (tx) => {
     const [funnel] = await tx
       .select({ id: funnels.id })
@@ -332,8 +333,10 @@ async function walkLeads(
     let finalStage = "";
     const baseNow = Math.floor(Date.now() / 1000);
 
-    for (let i = 0; i < count; i++) {
-      let ts = baseNow + i * 1000;
+    // Один лид: создаём контакт+диалог+лид и ведём по стадиям. Если задан
+    // stopSlug — паркуем лид на этой стадии (для spread-раскладки по доске).
+    const runOne = async (idx: number, stopSlug?: string) => {
+      let ts = baseNow + idx * 1000;
       const name = (displayName?.trim() || randomName()).trim();
       const [contact] = await tx
         .insert(contacts)
@@ -367,7 +370,6 @@ async function walkLeads(
       let guard = 0;
       while (cur && guard < stages.length + 2) {
         guard++;
-        // 1. заполняем поля стадии
         for (const f of fieldsByStage.get(cur.id) ?? []) {
           await tx.insert(leadFieldValues).values({
             leadId: lead!.id,
@@ -378,7 +380,6 @@ async function walkLeads(
             updatedByAdminId: adminId,
           });
         }
-        // 2. нарратор в чат
         ts++;
         const msg = narrate(cur, fieldsByStage.get(cur.id) ?? []);
         await tx.insert(messages).values({
@@ -395,6 +396,7 @@ async function walkLeads(
           .where(eq(conversations.id, conv!.id));
         finalStage = cur.slug;
 
+        if (cur.slug === stopSlug) break; // запаркован на целевой стадии
         if (cur.kind === "terminal_won" || cur.kind === "terminal_lost") break;
         const nextSlug: string | undefined = cur.nextStages[0];
         const next: WalkStage | undefined = nextSlug
@@ -415,6 +417,14 @@ async function walkLeads(
         });
         cur = next;
       }
+    };
+
+    if (opts.spread) {
+      // По одному лиду на каждую стадию (кроме «отмены») — красивая раскладка.
+      const targets = stages.filter((s) => s.kind !== "terminal_lost");
+      for (let i = 0; i < targets.length; i++) await runOne(i, targets[i]!.slug);
+    } else {
+      for (let i = 0; i < count; i++) await runOne(i);
     }
 
     return { kind: "ok" as const, leadIds, finalStage };
@@ -772,15 +782,18 @@ export function makeAdminSimRoutes(opts: {
   app.post("/api/admin/sim/walk", async (c) => {
     const tenantId = c.var.tenantId;
     const adminId = (c.var.adminId as number | null) ?? 0;
-    let body: { count?: number; displayName?: string };
+    let body: { count?: number; displayName?: string; spread?: boolean };
     try {
       body = (await c.req.json()) as typeof body;
     } catch {
       body = {};
     }
-    const count = Math.min(Math.max(1, body.count ?? 1), 10);
 
-    const created = await walkLeads(opts.db, tenantId, adminId, count, body.displayName);
+    const created = await walkLeads(opts.db, tenantId, adminId, {
+      count: body.count,
+      displayName: body.displayName,
+      spread: body.spread === true,
+    });
     if (created.kind === "no_funnel") return c.json({ error: "no active funnel with stages" }, 400);
     return c.json({ ok: true, leads: created.leadIds, finalStage: created.finalStage });
   });
