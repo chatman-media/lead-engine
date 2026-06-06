@@ -20,6 +20,7 @@ import type { PlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { Hono } from "hono";
 import type { ChannelRegistry } from "../channel-registry.ts";
+import { makeConciergeCallbackHandler } from "../lib/concierge-tools.ts";
 import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
 import { resolvePlan } from "../lib/plans.ts";
 import type { FieldExtractor } from "../lib/field-extractor.ts";
@@ -211,9 +212,12 @@ export function makeTelegramWebhookRoutes(opts: {
         // при deferReply, processInbound вернётся раньше.
         reply: opts.replyStrategy ?? null,
         deferReply: true,
+        db: tx,
+        // concierge клик-витрина: req:<type> callback → завести лид + подтверждение.
+        handleCallback: makeConciergeCallbackHandler(),
         ...(template ? { template } : {}),
         ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
-        ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
+        ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier } : {}),
         ...(opts.sink ? { sink: opts.sink } : {}),
         ...(opts.resolveTranscriber
           ? (() => {

@@ -1,4 +1,4 @@
-import type { OutboundEnvelope } from "@chatman-media/channel-core";
+import type { OutboundEnvelope, ReplyMarkup } from "@chatman-media/channel-core";
 import type {
   ChatClient,
   ChatMessage,
@@ -80,6 +80,16 @@ export interface RagReplyStrategyOpts {
     conversationId: number;
     contactId: number;
   }) => Promise<Style | null> | Style | null;
+  /**
+   * Опциональные inline-кнопки к ответу (concierge клик-витрина). Если задан
+   * и возвращает ReplyMarkup — он прикрепляется к outbound-конверту (Telegram
+   * рендерит inline_keyboard; прочие каналы игнорируют). null = без кнопок.
+   */
+  resolveReplyMarkup?: (input: {
+    tenantId: number;
+    conversationId: number;
+    contactId: number;
+  }) => Promise<ReplyMarkup | null> | ReplyMarkup | null;
   /**
    * Опциональная проверка support-mode. Если возвращает true — стадия лида
    * помечена как supportMode и бот не отвечает (возвращает null). Оператор
@@ -368,11 +378,19 @@ export class RagReplyStrategy implements ReplyStrategy {
       ];
     }
 
+    const replyMarkup = this.opts.resolveReplyMarkup
+      ? await this.opts.resolveReplyMarkup({
+          tenantId,
+          conversationId: input.conversationId,
+          contactId: input.contactId,
+        })
+      : null;
     return [
       {
         channelId: String(input.channel.channelId),
         externalUserId: input.inbound.externalUserId,
         parts: [{ kind: "text", text: result.text }],
+        ...(replyMarkup ? { replyMarkup } : {}),
       },
     ];
   }

@@ -23,11 +23,14 @@ import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
+import { withTenant } from "@chatman-media/conversation-engine";
 import { applyFunnelStages, SEED_TEMPLATES } from "../routes/admin-funnel.ts";
 import { makeAuthRoutes } from "../routes/auth.ts";
 import {
+  buildVitrinaButtons,
   isConciergeTenant,
   listOpenRequests,
+  makeConciergeCallbackHandler,
   makeConciergeRequestsTool,
 } from "./concierge-tools.ts";
 
@@ -142,5 +145,60 @@ describe("concierge tools (Фаза 2 — статус гостя)", () => {
     });
     const reqs = await listOpenRequests({ db: db as never, tenantId, contactId: cid });
     expect(reqs).toEqual([]);
+  });
+
+  it("buildVitrinaButtons строит кнопки из request_type optionsJson (без other)", async () => {
+    if (!sql) return;
+    const rm = await buildVitrinaButtons(db as never, tenantId);
+    const cbs = (rm?.inlineButtons ?? []).flat().map((b) => b.callbackData);
+    expect(cbs).toContain("req:exchange");
+    expect(cbs).toContain("req:transfer");
+    expect(cbs).toContain("req:housekeeping");
+    expect(cbs).toContain("req:tour");
+    expect(cbs).not.toContain("req:other");
+  });
+
+  it("callback req:food заводит лид в food_request + подтверждение", async () => {
+    if (!sql) return;
+    const fresh = await db.insert(contacts).values({ tenantId }).returning({ id: contacts.id });
+    const cid = fresh[0]!.id;
+    const handler = makeConciergeCallbackHandler();
+    const res = await withTenant(db as never, tenantId, (tx) =>
+      handler({
+        tenantId,
+        contactId: cid,
+        conversationId,
+        channelId: 1,
+        externalUserId: "tg-1",
+        data: "req:food",
+        nowEpoch: Math.floor(Date.parse("2026-06-06T02:00:00Z") / 1000),
+        db: tx as never,
+      }),
+    );
+    expect(res?.reply.parts[0]).toMatchObject({ kind: "text" });
+    const [lead] = await db
+      .select()
+      .from(leads)
+      .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, cid)));
+    expect(lead?.state).toBe("food_request");
+    expect(lead?.requestType).toBe("food");
+  });
+
+  it("callback не-req: → null (skip-поведение сохраняется)", async () => {
+    if (!sql) return;
+    const handler = makeConciergeCallbackHandler();
+    const res = await withTenant(db as never, tenantId, (tx) =>
+      handler({
+        tenantId,
+        contactId,
+        conversationId,
+        channelId: 1,
+        externalUserId: "x",
+        data: "noise:foo",
+        nowEpoch: 1,
+        db: tx as never,
+      }),
+    );
+    expect(res).toBeNull();
   });
 });

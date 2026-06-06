@@ -58,6 +58,23 @@ export interface ProcessInboundDeps {
   /** Стратегия ответа. null = pipeline сохраняет inbound и не отвечает. */
   reply?: ReplyStrategy | null;
   /**
+   * Опциональный хэндлер inbound callback_query (нажатие inline-кнопки).
+   * Если задан и callback обработан — возвращает реплику, которую pipeline
+   * enqueue'ит. null = callback не обработан (прежнее поведение skip).
+   * По умолчанию не задан → callbacks как раньше. Используется concierge-
+   * витриной (req:<type>) — гейтинг внутри самого хэндлера.
+   */
+  handleCallback?: (input: {
+    tenantId: number;
+    contactId: number;
+    conversationId: number;
+    channelId: number;
+    externalUserId: string;
+    data: string;
+    nowEpoch: number;
+    db: import("./dal/types.ts").Db;
+  }) => Promise<{ reply: import("@chatman-media/channel-core").OutboundEnvelope } | null>;
+  /**
    * Vertical-template для текущей conversation. Если задан и в нём
    * есть hooks.extractFields — pipeline после persist user-message
    * дёрнет hook и merge'нёт извлечённые поля в contact.attributes_json.
@@ -233,15 +250,46 @@ export async function processInbound(
   }
   const { text, mediaOnly } = inboundText(inbound);
 
-  // Skip persist для callback_query — это не сообщение в диалоге,
-  // а действие на кнопке (отрабатывается отдельным хэндлером).
-  const isCallback = inbound.parts.some((p) => p.kind === "callback_query");
-  if (isCallback) {
+  // callback_query — не сообщение в диалоге, а нажатие inline-кнопки.
+  // Не персистим как user-message; если задан handleCallback — отдаём ему
+  // (concierge-витрина req:<type>), реплику от него enqueue'им. Иначе skip.
+  const cbPart = inbound.parts.find((p) => p.kind === "callback_query");
+  if (cbPart) {
+    let outboundEnqueued = 0;
+    const data = cbPart.kind === "callback_query" ? cbPart.data : undefined;
+    if (data && deps.handleCallback && deps.db) {
+      try {
+        const nowEpoch = Math.floor(Date.now() / 1000);
+        const res = await deps.handleCallback({
+          tenantId: deps.tenant.tenantId,
+          contactId: contact.id,
+          conversationId: conversation.id,
+          channelId: deps.channelDbId,
+          externalUserId: inbound.externalUserId,
+          data,
+          nowEpoch,
+          db: deps.db,
+        });
+        if (res?.reply) {
+          await deps.outbound.enqueue({
+            channelId: deps.channelDbId,
+            conversationId: conversation.id,
+            envelope: res.reply,
+            nowEpoch,
+          });
+          outboundEnqueued = 1;
+        }
+      } catch (err) {
+        deps.sink?.log?.("warn", "handleCallback failed", {
+          error: (err as Error).message,
+        });
+      }
+    }
     return {
       contactId: contact.id,
       conversationId: conversation.id,
       persisted: false,
-      outboundEnqueued: 0,
+      outboundEnqueued,
     };
   }
 

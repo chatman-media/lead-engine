@@ -69,7 +69,12 @@ import {
 	type LoadedLlmConfigs,
 	type ResolvedLlmConfig,
 } from "./lib/llm-config-loader.ts";
-import { isConciergeTenant, makeConciergeRequestsTool } from "./lib/concierge-tools.ts";
+import {
+	buildVitrinaButtons,
+	isConciergeTenant,
+	listOpenRequests,
+	makeConciergeRequestsTool,
+} from "./lib/concierge-tools.ts";
 import { OpenRouterTranscriber } from "./lib/openrouter-transcriber.ts";
 import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
 
@@ -584,6 +589,25 @@ export function makeReplyStrategy(
 			resolveSkills,
 			resolveDirectorHooks,
 			resolveTools,
+			// Concierge клик-витрина: inline-кнопки услуг, пока у гостя нет
+			// открытого запроса (он в начале диалога). Дальше — не мешаем.
+			resolveReplyMarkup: async ({
+				tenantId,
+				contactId,
+			}: {
+				tenantId: number;
+				contactId: number;
+			}) => {
+				let conciergeEnabled = conciergeEnabledCache.get(tenantId);
+				if (conciergeEnabled === undefined) {
+					conciergeEnabled = await isConciergeTenant(db, tenantId).catch(() => false);
+					conciergeEnabledCache.set(tenantId, conciergeEnabled);
+				}
+				if (!conciergeEnabled) return null;
+				const open = await listOpenRequests({ db, tenantId, contactId }).catch(() => []);
+				if (open.length > 0) return null;
+				return buildVitrinaButtons(db, tenantId);
+			},
 			resolveReranker,
 			// Если основной ответ пуст (модель «промолчала», нет KB-контекста) —
 			// генерируем мягкий ответ в персоне, а не молчим.
