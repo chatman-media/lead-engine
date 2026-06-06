@@ -1385,6 +1385,12 @@ export const saas = {
       body: JSON.stringify({ photoRef, caption }),
     });
   },
+  sendLeadOffer(id: number, text: string) {
+    return request<{ ok: boolean; channelKind: string }>(`/api/admin/leads/${id}/send-offer`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+  },
   createLead(contactId: number, stageDefinitionId?: number) {
     return request<{ id: number }>("/api/admin/leads", {
       method: "POST",

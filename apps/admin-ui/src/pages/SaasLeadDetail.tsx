@@ -247,6 +247,11 @@ export function SaasLeadDetail() {
   const [sendingPhoto, setSendingPhoto] = useState(false);
   const [photoMsg, setPhotoMsg] = useState("");
 
+  // Send-offer state (concierge: оператор шлёт гостю оффер, AI продолжает вести)
+  const [offerText, setOfferText] = useState("");
+  const [sendingOffer, setSendingOffer] = useState(false);
+  const [offerMsg, setOfferMsg] = useState("");
+
   function onAuthError(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
       clearToken();
@@ -312,6 +317,43 @@ export function SaasLeadDetail() {
       }
     } finally {
       setSendingPhoto(false);
+    }
+  }
+
+  // Составить текст оффера из заполненных полей текущей стадии (без boolean-флагов).
+  function composeOfferFromFields(): string {
+    if (!data) return "";
+    const parts: string[] = [];
+    for (const f of data.fields) {
+      if (f.fieldType === "boolean") continue;
+      let raw = fieldEdits[f.id];
+      if (raw === undefined) {
+        const vj = data.fieldValues.find((v) => v.fieldId === f.id)?.valueJson;
+        try {
+          raw = vj ? JSON.parse(vj) : null;
+        } catch {
+          raw = null;
+        }
+      }
+      if (raw === null || raw === undefined || raw === "") continue;
+      parts.push(`${f.displayName}: ${String(raw)}`);
+    }
+    return parts.length ? `${parts.join(", ")}. Подтвердить?` : "";
+  }
+
+  async function handleSendOffer() {
+    if (!id || !offerText.trim()) return;
+    setSendingOffer(true);
+    setOfferMsg("");
+    try {
+      await saas.sendLeadOffer(Number(id), offerText.trim());
+      setOfferMsg("Отправлено гостю ✓ — AI продолжает вести");
+    } catch (err) {
+      if (!onAuthError(err)) {
+        setOfferMsg(err instanceof Error ? err.message : "Не удалось отправить");
+      }
+    } finally {
+      setSendingOffer(false);
     }
   }
 
@@ -506,6 +548,46 @@ export function SaasLeadDetail() {
               </CardContent>
             </Card>
           )}
+
+          {/* Сообщить гостю оффер (concierge — оператор вписал цену/время) */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Сообщить гостю (оффер)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7"
+                onClick={() => setOfferText(composeOfferFromFields())}
+              >
+                Составить из полей
+              </Button>
+              <Textarea
+                value={offerText}
+                onChange={(e) => setOfferText(e.target.value)}
+                placeholder="Например: Трансфер: 800 THB, подача в 9:00. Подтвердить?"
+                rows={3}
+                className="text-sm"
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-8"
+                  disabled={!offerText.trim() || sendingOffer}
+                  onClick={handleSendOffer}
+                >
+                  <SendIcon className="size-3.5 mr-1" />
+                  {sendingOffer ? "Отправка…" : "Отправить гостю"}
+                </Button>
+                {offerMsg && <span className="text-xs text-muted-foreground">{offerMsg}</span>}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Отправит гостю текст в его канал. AI продолжает вести — когда гость подтвердит
+                («да»), стадия двинется автоматически.
+              </p>
+            </CardContent>
+          </Card>
 
           {/* Отправить QR / фото клиенту */}
           <Card>
