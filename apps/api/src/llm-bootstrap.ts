@@ -416,6 +416,83 @@ export function makeReplyStrategy(
 
 	const template = RECRUITMENT_V1;
 
+	// resolveTools: builds the list of agentic tools enabled for the tenant.
+	// Определён ДО embed-проверки, чтобы и LLM-only fallback мог давать боту
+	// инструменты (напр. расчёт курса) — иначе бот без эмбеддингов уходит в
+	// «уточню у партнёра» и не считает курс.
+	//
+	// Два класса tools:
+	//   - tenant-bound (booking_link): зависят только от tenantId → кешируются.
+	//   - conversation-bound (exchange): зависят от conversationId → строятся
+	//     СВЕЖИМИ на каждый ответ. Гейт «включён ли обмен» кешируется boolean'ом.
+	// Кеши сбрасываются через invalidateToolsFor(tenantId).
+	const toolsCache = new Map<number, AnyRagTool[]>();
+	const exchangeEnabledCache = new Map<number, boolean>();
+	const multiRequestToolCache = new Map<number, boolean>();
+	async function resolveTools(input: {
+		tenantId: number;
+		conversationId: number;
+	}): Promise<AnyRagTool[]> {
+		let base = toolsCache.get(input.tenantId);
+		if (base === undefined) {
+			const bookingUrl = await getDecryptedSecret({
+				db,
+				tenantId: input.tenantId,
+				key: "tool_booking_url",
+				masterKeyHex: cfg.masterKeyHex,
+			});
+			base = [];
+			if (bookingUrl) base.push(makeBookingLinkTool(bookingUrl));
+			toolsCache.set(input.tenantId, base);
+		}
+
+		// conversation-bound tools (зависят от conversationId — без кеша по тенанту).
+		const conversationBound: AnyRagTool[] = [];
+
+		let exchangeEnabled = exchangeEnabledCache.get(input.tenantId);
+		if (exchangeEnabled === undefined) {
+			exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(
+				() => false,
+			);
+			exchangeEnabledCache.set(input.tenantId, exchangeEnabled);
+		}
+		if (exchangeEnabled) {
+			conversationBound.push(
+				...makeExchangeTools({
+					db,
+					tenantId: input.tenantId,
+					conversationId: input.conversationId,
+					masterKeyHex: cfg.masterKeyHex,
+				}),
+			);
+		}
+
+		let multiRequestEnabled = multiRequestToolCache.get(input.tenantId);
+		if (multiRequestEnabled === undefined) {
+			multiRequestEnabled = await tenantSupportsMultiRequest(db, input.tenantId).catch(
+				() => false,
+			);
+			multiRequestToolCache.set(input.tenantId, multiRequestEnabled);
+		}
+		if (multiRequestEnabled) {
+			conversationBound.push(
+				makeConciergeRequestsTool({
+					db,
+					tenantId: input.tenantId,
+					conversationId: input.conversationId,
+				}),
+			);
+		}
+
+		return conversationBound.length > 0 ? [...base, ...conversationBound] : base;
+	}
+
+	const invalidateTools = (tenantId: number) => {
+		toolsCache.delete(tenantId);
+		exchangeEnabledCache.delete(tenantId);
+		multiRequestToolCache.delete(tenantId);
+	};
+
 	// Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
 	// NB: проверка против initial snapshot'а; если tenant позже добавит embed,
 	// reloader setConfig'нет на router, но strategy уже LlmReplyStrategy. После
@@ -429,10 +506,11 @@ export function makeReplyStrategy(
 					resolveChat: (tenantId: number) =>
 						ref.router.resolveChat(tenantId, "chat"),
 					resolveIsSupport: makeSupportModeResolver(db),
+					resolveTools,
 				},
 				(tenantId: number) => new MessagesRepo({ db, tenantId }),
 			),
-			invalidateToolsFor: () => {}, // LlmReplyStrategy has no tools cache
+			invalidateToolsFor: invalidateTools, // exchange/booking tools без RAG
 			invalidateStyleFor: () => {}, // LlmReplyStrategy resolves no styles
 		};
 	}
@@ -547,76 +625,6 @@ export function makeReplyStrategy(
 		return rows;
 	}
 
-	// resolveTools: builds the list of agentic tools enabled for the tenant.
-	//
-	// Два класса tools:
-	//   - tenant-bound (booking_link): зависят только от tenantId → кешируются.
-	//   - conversation-bound (exchange): зависят от conversationId → строятся
-	//     СВЕЖИМИ на каждый ответ (нельзя кешировать по тенанту, иначе захватят
-	//     первый conversationId). Гейт «включён ли обмен» (наличие активных
-	//     курсов) кешируется отдельным boolean.
-	// Оба кеша сбрасываются через invalidateToolsFor(tenantId) (admin-tools /
-	// admin-exchange onReload).
-	const toolsCache = new Map<number, AnyRagTool[]>();
-	const exchangeEnabledCache = new Map<number, boolean>();
-	const multiRequestToolCache = new Map<number, boolean>();
-	async function resolveTools(input: {
-		tenantId: number;
-		conversationId: number;
-	}): Promise<AnyRagTool[]> {
-		let base = toolsCache.get(input.tenantId);
-		if (base === undefined) {
-			const bookingUrl = await getDecryptedSecret({
-				db,
-				tenantId: input.tenantId,
-				key: "tool_booking_url",
-				masterKeyHex: cfg.masterKeyHex,
-			});
-			base = [];
-			if (bookingUrl) base.push(makeBookingLinkTool(bookingUrl));
-			toolsCache.set(input.tenantId, base);
-		}
-
-		// conversation-bound tools (зависят от conversationId — без кеша по тенанту).
-		const conversationBound: AnyRagTool[] = [];
-
-		let exchangeEnabled = exchangeEnabledCache.get(input.tenantId);
-		if (exchangeEnabled === undefined) {
-			exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(
-				() => false,
-			);
-			exchangeEnabledCache.set(input.tenantId, exchangeEnabled);
-		}
-		if (exchangeEnabled) {
-			conversationBound.push(
-				...makeExchangeTools({
-					db,
-					tenantId: input.tenantId,
-					conversationId: input.conversationId,
-					masterKeyHex: cfg.masterKeyHex,
-				}),
-			);
-		}
-
-		let multiRequestEnabled = multiRequestToolCache.get(input.tenantId);
-		if (multiRequestEnabled === undefined) {
-			multiRequestEnabled = await tenantSupportsMultiRequest(db, input.tenantId).catch(
-				() => false,
-			);
-			multiRequestToolCache.set(input.tenantId, multiRequestEnabled);
-		}
-		if (multiRequestEnabled) {
-			conversationBound.push(
-				makeConciergeRequestsTool({
-					db,
-					tenantId: input.tenantId,
-					conversationId: input.conversationId,
-				}),
-			);
-		}
-
-		return conversationBound.length > 0 ? [...base, ...conversationBound] : base;
-	}
 
 	// resolveReranker: reads per-tenant llm_provider_configs with purpose='reranker'.
 	// Results are cached per-tenant (Reranker objects are stateless wrappers —
@@ -752,11 +760,7 @@ export function makeReplyStrategy(
 
 	return {
 		strategy,
-		invalidateToolsFor: (tenantId: number) => {
-			toolsCache.delete(tenantId);
-			exchangeEnabledCache.delete(tenantId);
-			multiRequestToolCache.delete(tenantId);
-		},
+		invalidateToolsFor: invalidateTools,
 		invalidateStyleFor: (tenantId: number) => {
 			styleCache.delete(tenantId);
 			experimentCache.delete(tenantId);
