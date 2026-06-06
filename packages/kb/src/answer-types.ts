@@ -64,6 +64,16 @@ export interface AnswerInput {
    */
   stageOverride?: { goal: string; guidance?: string };
   /**
+   * Dynamic per-request context (R4 / multi-request): the guest's current
+   * request_type + how many open requests. Injected as a separate prompt block.
+   */
+  requestContext?: string;
+  /**
+   * The guest's current lead is on an `awaiting_operator` stage (R5): the bot
+   * holds and defers pricing/decisions to a human operator.
+   */
+  awaitingOperator?: boolean;
+  /**
    * Called after every `answerWithRag` or `answerWithRagStream` call with the
    * final telemetry. Useful for logging, metrics, or A/B experiment recording
    * without having to unwrap the return value.

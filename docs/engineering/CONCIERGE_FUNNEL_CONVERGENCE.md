@@ -85,14 +85,15 @@ _Создано: 2026-06-06._
 | **R1** | stage `goal`/`guidance` → reply-промпт (slice C-2) | 2 | M | ✅ #211 merged |
 | **R2** | дегейтинг multi-request: capability-флаг вместо `concierge_v1` | 3 | S–M | ✅ сделано |
 | **R3** | AI-билдер учится multi-request-ветвлению | 1 | M | ✅ сделано |
-| **R4** | `request_type` + cross-request awareness в промпте | 2 | S–M | после R1 |
-| **R5** | оператор-handoff как стадия `awaiting_operator` | P3 | M–L | после R1–R3 |
+| **R4** | `request_type` + cross-request awareness в промпте | 2 | S–M | ✅ сделано (+ почин #211) |
+| **R5** | оператор-handoff как стадия `awaiting_operator` | P3 | M–L | 🟡 частично (runtime+builder) |
 | **R6** | _(опц., позже)_ первоклассная сущность «заявка/тикет» | P4 | L | будущее |
 
 ### R1 — stage `goal`/`guidance` → reply-промпт · M · **первым**
 Наибольший рычаг: оживляет behavior-слой #208 для **всех** вертикалей, не только концержа.
-> ✅ **Сделано:** слайс C-2 смёржен в main как PR **#211** (06.06) — `composeSystemPrompt` читает
-> per-stage goal/guidance из `stage_definitions`. На рабочую ветку приехал при синхронизации с main.
+> ✅ **Сделано (с оговоркой):** слайс C-2 смёржен в main как PR **#211** (06.06), НО резолвер
+> `makeStageGuidanceResolver` оказался **определён, но не подключён** к `RagReplyStrategy` — в
+> рантайме per-stage goal/guidance не доходил до промпта. Провод вшит здесь вместе с R4.
 - Добавить в `composeSystemPrompt` опцию `stageOverride {goal, guidance}`
   ([`kb/prompt.ts:126`](../../packages/kb/src/prompt.ts),
   [`sales/prompt.ts:173`](../../packages/sales/src/prompt.ts)): при наличии — брать
@@ -135,23 +136,33 @@ _Создано: 2026-06-06._
 > Нюанс: качество ЖИВОЙ генерации LLM не проверено (в воркти нет LLM-ключа) — фейковый клиент
 > покрывает логику нормализации/валидации/persist, не саму модель.
 
-### R4 — `request_type` + cross-request awareness в промпте · S–M · **после R1**
-- В тот же резолвер (R1) добавить `leads.requestType` и краткую сводку «у гостя N открытых
-  заявок» (переиспользовать `findByContactAndType` / list-open из
-  [`leads.ts:70`](../../packages/conversation-engine/src/dal/leads.ts)) → инжектить в системный
-  промпт.
-- **Тест:** промпт для концерж-лида несёт тип ветки и число открытых заявок.
+### R4 — `request_type` + cross-request awareness в промпте · S–M · ✅ **сделано (эта ветка)**
+- ✅ Отдельное поле `requestContext` проброшено через 3 пакета (kb `composeSystemPrompt`/`answer`
+  → conversation-engine `rag-reply` `resolveRequestContext` → apps/api `makeRequestContextResolver`):
+  резолвер грузит `request_type` текущего открытого лида + число открытых заявок, инжектит блок
+  «ЗАПРОС ГОСТЯ» в системный промпт. Линейные вертикали (нет `request_type`) не затронуты (null).
+- ✅ **Попутно закрыт латентный баг #211 (R1):** `makeStageGuidanceResolver` был определён, но НЕ
+  вшит в `RagReplyStrategy` → goal/guidance в рантайме не работал. Теперь оба резолвера
+  (`resolveStageGuidance` + `resolveRequestContext`) подключены к strategy.
+- ✅ **Тесты:** kb unit (блок «ЗАПРОС ГОСТЯ»), integration (`makeRequestContextResolver`: 1 открытый →
+  тип; 2 → счётчик; терминальный → null). 42/42 apps/api + 5/5 kb + 189/189 conversation-engine, tsc чист.
 
-### R5 — оператор-handoff как стадия `awaiting_operator` · M–L · **после R1–R3**
-- Переосмыслить `/send-offer`
-  ([`admin-leads.ts:949`](../../apps/api/src/routes/admin-leads.ts)) как «оператор завершает
-  `awaiting_operator`-стадию», а не параллельный путь. Использовать существующий
-  `stageType: 'awaiting_operator'` ([`schema.ts:399`](../../packages/storage/src/schema.ts));
-  вход лида в такую стадию сёрфить оператору (переиспользовать ops/informer-инфраструктуру
-  админ-информера, см. [`NOTIFICATIONS.md`](NOTIFICATIONS.md)).
-- **Бонус:** становится конструктом, который билдер может **эмитить**, а другие вертикали —
-  переиспользовать (real_estate offer-negotiation, recruitment partner_review).
-- **Тест:** лид на `awaiting_operator` → нотификация оператору; `/send-offer` двигает стадию.
+### R5 — оператор-handoff как стадия `awaiting_operator` · M–L · 🟡 **частично (runtime + builder)**
+Сделано (эта ветка) — рантайм-семантика + билдер:
+- ✅ Бот **придерживает гостя** на `awaiting_operator`-стадии: резолвер `makeAwaitingOperatorResolver`
+  (llm-bootstrap) → флаг `awaitingOperator` проброшен через kb/conversation-engine (по паттерну R4) →
+  блок «ОЖИДАНИЕ ОПЕРАТОРА» в промпте («цену/решение даёт человек, не выдумывай, скажи что уточнишь»).
+  Гейтится на текущий открытый лид; линейные вертикали не затронуты.
+- ✅ AI-билдер обучён ставить `stageType: awaiting_operator`, когда условия/цену/решение даёт
+  человек-оператор (`awaiting_operator` уже в `STAGE_TYPES` — нормализация/apply работают).
+- ✅ **Тесты:** kb unit (блок «ОЖИДАНИЕ ОПЕРАТОРА»), integration (резолвер: обычная стадия → false,
+  awaiting_operator → true). 44/44 apps/api + 7/7 kb + 189/189 conversation-engine, tsc чист.
+
+R5-остаток (тяжелее, частично без живого бота/UI — отдельная итерация):
+- `/send-offer` ([`admin-leads.ts:949`](../../apps/api/src/routes/admin-leads.ts)) → «оператор
+  завершает стадию» (двигает лид дальше), а не только инжект сообщения.
+- Сёрфить вход в `awaiting_operator` оператору (ops/informer, см. [`NOTIFICATIONS.md`](NOTIFICATIONS.md)).
+- Миграция SEED-концержа: offer-стадии `rate_confirmation` → `awaiting_operator` (меняет живой флоу — решение пользователя).
 
 ### R6 — _(опц., позже)_ первоклассная сущность «заявка/тикет» · L
 - Заменить nullable `leads.request_type` на реальную модель заявок (тикет с FK на контакт) —

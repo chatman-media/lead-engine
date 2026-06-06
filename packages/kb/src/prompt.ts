@@ -134,6 +134,17 @@ export function composeSystemPrompt(
         : "")
     : `ТЕКУЩИЙ ЭТАП: ${stage}. (Специфических правил для этапа нет — используй общий стиль.)`;
 
+  // Динамический контекст текущего запроса гостя (multi-request): тип запроса +
+  // сколько открыто — помогает боту не путать параллельные заявки.
+  const requestBlock = options.requestContext
+    ? `ЗАПРОС ГОСТЯ: ${options.requestContext}`
+    : "";
+
+  // Лид ждёт оператора (awaiting_operator): бот держит, не выдумывает цену/условия.
+  const operatorBlock = options.awaitingOperator
+    ? `ОЖИДАНИЕ ОПЕРАТОРА: на этой стадии условия/цену/решение готовит коллега-человек. НЕ выдумывай числа и детали. Скажи гостю коротко, что уточняешь и вернёшься с ответом — и жди, не дави и не закрывай сделку.`
+    : "";
+
   const minorRule = guardrails.noMinors ? "- Если prospect <18 лет — вежливо заверши диалог." : "";
   const topicsRule = guardrails.forbiddenTopics.length
     ? `- Запрещённые темы: ${guardrails.forbiddenTopics.join(", ")}.`
@@ -182,6 +193,8 @@ export function composeSystemPrompt(
     support ? "" : directorHooksBlock,
     support ? "" : skillsBlock,
     support || stageBlock,
+    operatorBlock,
+    requestBlock,
     summaryBlock,
     userFactsBlock,
     needsGroundingReminder ? kbGroundingReminder(persona.role) : "",

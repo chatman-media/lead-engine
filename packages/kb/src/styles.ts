@@ -141,4 +141,15 @@ export interface ComposeOptions {
    * block. Lets AI-built funnels carry per-stage instructions.
    */
   stageOverride?: { goal: string; guidance?: string };
+  /**
+   * Динамический контекст текущего запроса гостя (multi-request / concierge):
+   * какой тип запроса ведётся + сколько открыто. Инжектится блоком «ЗАПРОС
+   * ГОСТЯ». null/absent для линейных вертикалей.
+   */
+  requestContext?: string;
+  /**
+   * Лид стоит на стадии awaiting_operator (R5): цену/условия даёт человек-оператор.
+   * Бот придерживает гостя и не выдумывает детали. Блок «ОЖИДАНИЕ ОПЕРАТОРА».
+   */
+  awaitingOperator?: boolean;
 }

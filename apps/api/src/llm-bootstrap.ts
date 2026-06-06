@@ -41,7 +41,7 @@ import {
 	stageDefinitions,
 } from "@chatman-media/storage";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
-import { and, asc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import type { ApiConfig } from "./config.ts";
 import {
 	hasActiveExchangeRates,
@@ -69,7 +69,7 @@ import {
 	type LoadedLlmConfigs,
 	type ResolvedLlmConfig,
 } from "./lib/llm-config-loader.ts";
-import { makeConciergeRequestsTool, tenantSupportsMultiRequest } from "./lib/concierge-tools.ts";
+import { makeConciergeRequestsTool, REQUEST_TYPE_LABEL, tenantSupportsMultiRequest } from "./lib/concierge-tools.ts";
 import { OpenRouterTranscriber } from "./lib/openrouter-transcriber.ts";
 import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
 
@@ -260,6 +260,82 @@ function makeStageGuidanceResolver(db: Db) {
 		if (!goal) return null;
 		const guidance = rows[0]?.guidance;
 		return guidance ? { goal, guidance } : { goal };
+	};
+}
+
+/**
+ * Resolves dynamic per-request context for the reply prompt (R4): the
+ * multi-request guest's current request_type + how many requests are open.
+ * Mirrors the stage-guidance query (leads → stage_definitions). null for linear
+ * verticals (no request_type) or no open request — no block injected.
+ */
+export function makeRequestContextResolver(db: Db) {
+	return async (input: {
+		tenantId: number;
+		contactId: number;
+	}): Promise<string | null> => {
+		const rows = await db
+			.select({
+				requestType: leads.requestType,
+				kind: stageDefinitions.kind,
+			})
+			.from(leads)
+			.leftJoin(
+				stageDefinitions,
+				eq(leads.stageDefinitionId, stageDefinitions.id),
+			)
+			.where(
+				and(
+					eq(leads.tenantId, input.tenantId),
+					eq(leads.userId, input.contactId),
+				),
+			)
+			.orderBy(desc(leads.updatedAt));
+		const open = rows.filter(
+			(r) => r.kind !== "terminal_won" && r.kind !== "terminal_lost",
+		);
+		const rt = open[0]?.requestType;
+		if (!rt) return null; // линейная вертикаль / нет открытых — блок не нужен
+		const label = REQUEST_TYPE_LABEL[rt] ?? rt;
+		const more =
+			open.length > 1
+				? ` Всего открытых запросов у гостя: ${open.length} — не путай их детали.`
+				: "";
+		return `гость сейчас ведёт запрос «${label}».${more}`;
+	};
+}
+
+/**
+ * Resolves whether the guest's current open lead sits on an `awaiting_operator`
+ * stage (R5): the bot must hold — defer pricing/decision to a human operator and
+ * not invent details. Mirrors makeRequestContextResolver's current-open-lead pick.
+ */
+export function makeAwaitingOperatorResolver(db: Db) {
+	return async (input: {
+		tenantId: number;
+		contactId: number;
+	}): Promise<boolean> => {
+		const rows = await db
+			.select({
+				stageType: stageDefinitions.stageType,
+				kind: stageDefinitions.kind,
+			})
+			.from(leads)
+			.leftJoin(
+				stageDefinitions,
+				eq(leads.stageDefinitionId, stageDefinitions.id),
+			)
+			.where(
+				and(
+					eq(leads.tenantId, input.tenantId),
+					eq(leads.userId, input.contactId),
+				),
+			)
+			.orderBy(desc(leads.updatedAt));
+		const open = rows.filter(
+			(r) => r.kind !== "terminal_won" && r.kind !== "terminal_lost",
+		);
+		return open[0]?.stageType === "awaiting_operator";
 	};
 }
 
@@ -637,6 +713,9 @@ export function makeReplyStrategy(
 			resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
 			resolveStyle,
 			resolveIsSupport: makeSupportModeResolver(db),
+			resolveStageGuidance: makeStageGuidanceResolver(db),
+			resolveRequestContext: makeRequestContextResolver(db),
+			resolveAwaitingOperator: makeAwaitingOperatorResolver(db),
 			resolveSkills,
 			resolveDirectorHooks,
 			resolveTools,
