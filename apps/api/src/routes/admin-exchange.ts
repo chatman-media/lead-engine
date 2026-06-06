@@ -13,10 +13,15 @@ import {
 	withTenant,
 } from "@chatman-media/conversation-engine";
 import {
+	channelIdentities,
+	channels,
+	conversations,
 	exchangeOrders,
 	exchangeRates,
 	exchangeRateTiers,
 	exchangeSettings,
+	messages,
+	outboundQueue,
 	tenantSecrets,
 } from "@chatman-media/storage";
 import { and, desc, eq, like, sql } from "drizzle-orm";
@@ -600,6 +605,74 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				.returning(),
 		);
 		if (!row) return c.json({ error: "not found" }, 404);
+
+		// Last mile: при смене статуса оператором — сообщаем клиенту в чат
+		// (оплата подтверждена / выдача / завершено / отмена). Иначе клиент
+		// «висит» — бот сам про операторское решение не узнаёт.
+		if (typeof body?.status === "string" && row.conversationId) {
+			const thb = row.amountToThb ? Math.round(Number(row.amountToThb)) : null;
+			const note =
+				row.status === "paid"
+					? "✅ Оплата получена и подтверждена. Готовим выдачу."
+					: row.status === "payout"
+						? "💸 Выдача в работе — скоро пришлём детали получения."
+						: row.status === "completed"
+							? `🎉 Обмен завершён!${thb ? ` Вы получаете ${thb} THB.` : ""}` +
+								`${row.payoutCode ? ` Код выдачи: ${row.payoutCode}.` : ""}` +
+								`${row.payoutLocation ? ` Место: ${row.payoutLocation}.` : ""}`
+							: row.status === "cancelled"
+								? "Заявка отменена. Если это ошибка — напишите нам, поможем."
+								: null;
+			if (note) {
+				await withTenant(opts.db, tenantId, async (tx) => {
+					const [msg] = await tx
+						.insert(messages)
+						.values({
+							tenantId,
+							conversationId: row.conversationId!,
+							role: "assistant",
+							text: note,
+							metaJson: JSON.stringify({ sentVia: "exchange-status", status: row.status }),
+							createdAt: now,
+						})
+						.returning({ id: messages.id });
+					await tx
+						.update(conversations)
+						.set({ lastMessageAt: now, lastMessageText: note.slice(0, 200) })
+						.where(eq(conversations.id, row.conversationId!));
+
+					const [conv] = await tx
+						.select({ source: conversations.source })
+						.from(conversations)
+						.where(eq(conversations.id, row.conversationId!))
+						.limit(1);
+					if (conv && conv.source !== "self_play" && row.contactId) {
+						const [identity] = await tx
+							.select({ channelDbId: channels.id, externalUserId: channelIdentities.externalUserId })
+							.from(channelIdentities)
+							.innerJoin(channels, eq(channels.id, channelIdentities.channelId))
+							.where(and(eq(channelIdentities.contactId, row.contactId), eq(channels.status, "active")))
+							.limit(1);
+						if (identity) {
+							await tx.insert(outboundQueue).values({
+								tenantId,
+								channelId: identity.channelDbId,
+								conversationId: row.conversationId!,
+								payloadJson: JSON.stringify({
+									channelId: String(identity.channelDbId),
+									externalUserId: identity.externalUserId,
+									parts: [{ kind: "text", text: note }],
+								}),
+								idempotencyKey: `exch-status-${row.id}-${row.status}-${msg!.id}`,
+								scheduledAt: now,
+								createdAt: now,
+							});
+						}
+					}
+				});
+			}
+		}
+
 		return c.json({ ok: true, order: serializeExchangeOrder(row) });
 	});
 
