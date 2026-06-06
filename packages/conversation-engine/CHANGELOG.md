@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.6.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.5.0...@chatman-media/conversation-engine-v1.6.0) (2026-06-06)
+
+
+### Features
+
+* **reply:** bot uses per-stage goal/guidance (Phase 2 slice C-2) ([#211](https://github.com/chatman-media/lead-engine/issues/211)) ([dcd8dbc](https://github.com/chatman-media/lead-engine/commit/dcd8dbc20ec43afa39bb846693016362cfd76e4c))
+
 # [@chatman-media/conversation-engine-v1.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.4.0...@chatman-media/conversation-engine-v1.5.0) (2026-06-06)
 
 
