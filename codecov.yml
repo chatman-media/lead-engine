@@ -16,10 +16,12 @@ comment:
   layout: "reach, diff, flags, files"
   require_changes: false
 
-# Покрытие меряем только по packages/* (publishable либы): apps/* в CI
-# гоняются без --coverage, поэтому их сюда не тянем.
+# Меряем packages/* + apps/api/worker/verticals (в CI гоняются с --coverage).
+# Фронтенды (admin-ui/landing/widget) без юнит-покрытия — исключаем.
 ignore:
-  - "apps/**"
+  - "apps/admin-ui/**"
+  - "apps/landing/**"
+  - "apps/widget/**"
   - "**/*.test.ts"
   - "**/*.spec.ts"
   - "**/dist/**"

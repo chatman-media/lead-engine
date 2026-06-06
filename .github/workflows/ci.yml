@@ -88,6 +88,16 @@ jobs:
             --coverage-reporter=text \
             --coverage-reporter=lcov 2>&1 | tee coverage.txt
 
+      # apps/api/worker/verticals имеют реальные bun-тесты — меряем покрытие и
+      # грузим в Codecov (фронтенды admin-ui/landing/widget — без --coverage).
+      - name: Tests + coverage — apps (api/worker/verticals)
+        run: |
+          set -o pipefail
+          bun run --filter './apps/api' --filter './apps/worker' --filter './apps/vertical-*' test \
+            --coverage \
+            --coverage-reporter=text \
+            --coverage-reporter=lcov 2>&1 | tee -a coverage.txt
+
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v5
