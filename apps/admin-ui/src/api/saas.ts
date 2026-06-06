@@ -504,6 +504,7 @@ export interface LeadListItem {
   rejectedReason: string | null;
   contactId: number;
   contactName: string | null;
+  requestType: string | null;
   requiredFieldsTotal: number;
   requiredFieldsFilled: number;
 }
