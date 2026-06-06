@@ -316,8 +316,7 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
   tier `display_rate`) + ops-watch sweeper (`rate_feed_stale`/`order_stuck`/
   `channel_down`/`volume_spike` → алерт владельцу с дедупом/cooldown).
 - ✅ **CI-безопасность (бесплатно)** (PR #149–158) — CodeQL (security-extended,
-  weekly), Dependabot (bun + GitHub Actions), CodeRabbit (ru-RU + gitleaks/
-  semgrep/trivy/checkov), Codecov upload + бейджи в README.
+  weekly), Dependabot (bun + GitHub Actions), Codecov upload + бейджи в README.
 - ✅ **15 анонимизированных exchange-кейсов** (PR #159) — диалоги кандидатов
   в `apps/vertical-exchange/evals/exchange-candidate-cases/` вместо прежних сэмплов.
 
@@ -651,7 +650,7 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
   обязательный визард, per-tenant креды каналов (TG MTProto + WhatsApp)
 - **Admin copilot:** page-aware AI-ассистент на всех страницах (BYOK, advice+confirm)
 - **Надёжность обменника:** guardrails курсов + ops-алерты владельцу
-- **CI-безопасность:** CodeQL + Dependabot + CodeRabbit + Codecov
+- **CI-безопасность:** CodeQL + Dependabot + Codecov
 - **950+ tests**, multi-tenant RLS, encrypted secrets, observability
 - 1 живой prod tenant (recruitment UAE), Stripe-ready
 

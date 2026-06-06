@@ -1,0 +1,80 @@
+name: Security
+
+# Бесплатные OSS-сканеры на каждый PR (и push в main) — замена тем, что
+# раньше гонял CodeRabbit. Всё через публичные образы: ни токенов, ни
+# лицензий, ни денег. Секреты не нужны, поэтому PR из форков тоже сканятся.
+#
+# Образы взяты как :latest намеренно — у сканеров безопасности свежие
+# правила/БД важнее воспроизводимости. Нужен детерминизм — пин по версии
+# (ghcr.io/gitleaks/gitleaks:vX.Y.Z и т.п.).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Отменяем stale-прогоны на том же ref (как в ci.yml). Релиз на main не
+# отменяем — там это неважно, сканеры идемпотентны, но держим единый стиль.
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Джобам нужно только читать код.
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: gitleaks — утёкшие секреты/токены
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      # Через образ, а НЕ gitleaks-action@v2: тот для GitHub-организаций
+      # требует (бесплатный, но) ключ GITLEAKS_LICENSE. Образ — без лицензии.
+      # `dir` сканит рабочее дерево; для проверки всей git-истории — `git`
+      # (тогда нужен fetch-depth: 0).
+      - name: Run gitleaks
+        # advisory: по секретам уже блокирует GitGuardian — здесь не валим мерж.
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest \
+            dir /repo --config /repo/.gitleaks.toml --redact --verbose --exit-code 1
+
+  semgrep:
+    name: semgrep — SAST по community-правилам
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      # p/default — бесплатный курируемый набор правил из реестра Semgrep
+      # (токен/логин не нужен). --severity=ERROR держит гейт нешумным,
+      # --error роняет job на найденном, --metrics=off глушит телеметрию.
+      # node_modules/dist Semgrep пропускает сам.
+      - name: Run semgrep
+        # advisory: SAST уже блокирует CodeQL — здесь только сигнал в логах.
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep:latest \
+            semgrep scan --config=p/default --severity=ERROR --error --metrics=off
+
+  trivy:
+    name: trivy — уязвимости зависимостей + мисконфиги (заменяет checkov)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      # scanners vuln,misconfig = и зависимости (bun.lock и т.п.), и
+      # Dockerfile/compose-мисконфиги — поэтому отдельный checkov не нужен.
+      # --ignore-unfixed не валит на уязвимостях, для которых ещё нет патча.
+      - name: Run trivy
+        run: |
+          docker run --rm -v "$PWD:/repo" aquasec/trivy:latest \
+            fs /repo --scanners vuln,misconfig --severity HIGH,CRITICAL \
+            --ignore-unfixed --exit-code 1 --no-progress
