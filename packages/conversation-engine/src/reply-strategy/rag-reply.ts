@@ -90,6 +90,16 @@ export interface RagReplyStrategyOpts {
     contactId: number;
   }) => Promise<boolean>;
   /**
+   * Опциональный resolver пер-стадийных инструкций (Phase 2): goal/guidance
+   * текущей стадии лида из stage_definitions. Если вернёт значение — оно идёт
+   * в composeSystemPrompt (stageOverride) с приоритетом над Style.stages.
+   * null → используется Style.
+   */
+  resolveStageGuidance?: (input: {
+    tenantId: number;
+    contactId: number;
+  }) => Promise<{ goal: string; guidance?: string } | null>;
+  /**
    * Загрузить включённые навыки убеждения для тенанта. Возвращает список
    * SkillForPrompt, уже отфильтрованных по is_enabled = true.
    * Stage-фильтрация (intake/active/always) выполняется внутри
@@ -283,7 +293,7 @@ export class RagReplyStrategy implements ReplyStrategy {
     // Load persuasion skills, director hooks, agentic tools, and reranker in parallel.
     // All are optional — if resolvers not configured, values stay empty/null
     // and the pipeline silently skips those blocks.
-    const [skills, directorHooks, tools, reranker] = await Promise.all([
+    const [skills, directorHooks, tools, reranker, stageGuidance] = await Promise.all([
       this.opts.resolveSkills ? this.opts.resolveSkills({ tenantId }) : Promise.resolve([]),
       this.opts.resolveDirectorHooks
         ? this.opts.resolveDirectorHooks({ tenantId })
@@ -293,6 +303,9 @@ export class RagReplyStrategy implements ReplyStrategy {
         : Promise.resolve([]),
       this.opts.resolveReranker
         ? this.opts.resolveReranker({ tenantId })
+        : Promise.resolve(null),
+      this.opts.resolveStageGuidance
+        ? this.opts.resolveStageGuidance({ tenantId, contactId: input.contactId })
         : Promise.resolve(null),
     ]);
 
@@ -320,6 +333,7 @@ export class RagReplyStrategy implements ReplyStrategy {
       ...(tools.length > 0 ? { tools } : {}),
       ...(reranker ? { reranker } : {}),
       ...(conversationSummary ? { conversationSummary } : {}),
+      ...(stageGuidance ? { stageOverride: stageGuidance } : {}),
     });
 
     // ── Soft fallback when RAG has no context ────────────────────────────────

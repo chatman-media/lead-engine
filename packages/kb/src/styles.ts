@@ -135,4 +135,10 @@ export interface ComposeOptions {
    * block instead. `docs` = collecting their documents, `submitted` = filed.
    */
   supportPhase?: "docs" | "submitted";
+  /**
+   * Per-stage override (Phase 2): goal/guidance from the lead's current funnel
+   * stage_definition. Takes precedence over `style.stages[stage]` for the stage
+   * block. Lets AI-built funnels carry per-stage instructions.
+   */
+  stageOverride?: { goal: string; guidance?: string };
 }

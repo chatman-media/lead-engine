@@ -228,6 +228,41 @@ function makeSupportModeResolver(db: Db) {
 	};
 }
 
+/**
+ * Resolves the lead's current funnel-stage goal/guidance (Phase 2 C-2) so the
+ * reply prompt can carry per-stage instructions. Mirrors the support-mode query
+ * (leads → stage_definitions by leads.stageDefinitionId). null = no instructions.
+ */
+function makeStageGuidanceResolver(db: Db) {
+	return async (input: {
+		tenantId: number;
+		contactId: number;
+	}): Promise<{ goal: string; guidance?: string } | null> => {
+		const rows = await db
+			.select({
+				goal: stageDefinitions.goal,
+				guidance: stageDefinitions.guidance,
+			})
+			.from(leads)
+			.leftJoin(
+				stageDefinitions,
+				eq(leads.stageDefinitionId, stageDefinitions.id),
+			)
+			.where(
+				and(
+					eq(leads.tenantId, input.tenantId),
+					eq(leads.userId, input.contactId),
+					isNotNull(leads.stageDefinitionId),
+				),
+			)
+			.limit(1);
+		const goal = rows[0]?.goal;
+		if (!goal) return null;
+		const guidance = rows[0]?.guidance;
+		return guidance ? { goal, guidance } : { goal };
+	};
+}
+
 export interface ReplyStrategyBundle {
 	strategy: ReplyStrategy;
 	/**

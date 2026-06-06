@@ -234,6 +234,7 @@ async function answerFromHits(opts: {
         ? { directorHooks: input.directorHooks }
         : {}),
       ...(input.supportPhase ? { supportPhase: input.supportPhase } : {}),
+      ...(input.stageOverride ? { stageOverride: input.stageOverride } : {}),
     });
     temperature = input.style.model.temperature;
   } else {
@@ -503,6 +504,7 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
         ? { directorHooks: input.directorHooks }
         : {}),
       ...(input.supportPhase ? { supportPhase: input.supportPhase } : {}),
+      ...(input.stageOverride ? { stageOverride: input.stageOverride } : {}),
     });
     temperature = input.style.model.temperature;
   } else {

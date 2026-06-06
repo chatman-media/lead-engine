@@ -58,6 +58,12 @@ export interface AnswerInput {
    */
   supportPhase?: "docs" | "submitted";
   /**
+   * Per-stage override (Phase 2 C-2): the lead's current funnel-stage goal/
+   * guidance from stage_definitions. Takes precedence over the Style's
+   * per-sales-stage config when composing the prompt.
+   */
+  stageOverride?: { goal: string; guidance?: string };
+  /**
    * Called after every `answerWithRag` or `answerWithRagStream` call with the
    * final telemetry. Useful for logging, metrics, or A/B experiment recording
    * without having to unwrap the return value.
