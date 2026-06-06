@@ -306,32 +306,6 @@ function validateFunnel(stages: SeedStage[]): {
 	};
 }
 
-/**
- * Достаёт JSON-объект из ответа модели: снимает markdown-обёртку и, если вокруг
- * есть лишний текст, пробует первый сбалансированный {…}. null — если не парсится.
- */
-function parseModelJson(
-	raw: string,
-): { reply?: unknown; readyToGenerate?: unknown; stages?: unknown } | null {
-	const stripped = raw.replace(/```(?:json)?\n?/g, "").trim();
-	const candidates = [stripped];
-	const start = stripped.indexOf("{");
-	const end = stripped.lastIndexOf("}");
-	if (start >= 0 && end > start) candidates.push(stripped.slice(start, end + 1));
-	for (const cand of candidates) {
-		try {
-			return JSON.parse(cand) as {
-				reply?: unknown;
-				readyToGenerate?: unknown;
-				stages?: unknown;
-			};
-		} catch {
-			// пробуем следующего кандидата
-		}
-	}
-	return null;
-}
-
 /** true, если модель явно пыталась вернуть JSON воронки, а не текст-реплику. */
 function looksLikeFunnelJson(raw: string): boolean {
 	return /"(?:readyToGenerate|stages)"\s*:/.test(raw);
@@ -404,7 +378,18 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 			);
 		}
 
-		let parsed = parseModelJson(raw);
+		const stripFence = (s: string) => s.replace(/```(?:json)?\n?/g, "").trim();
+		type Parsed = { reply?: unknown; readyToGenerate?: unknown; stages?: unknown };
+		const tryParse = (s: string): Parsed | null => {
+			try {
+				const v = JSON.parse(stripFence(s));
+				return v && typeof v === "object" ? (v as Parsed) : null;
+			} catch {
+				return null;
+			}
+		};
+
+		let parsed = tryParse(raw);
 
 		// Битый JSON (модель пыталась собрать воронку, но синтаксис сломан) —
 		// один retry с просьбой переотдать строго валидный JSON.
@@ -423,7 +408,7 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 					],
 					{ numPredict: 4000, temperature: 0.2 },
 				);
-				parsed = parseModelJson(retryRaw);
+				parsed = tryParse(retryRaw);
 			} catch {
 				// LLM упал на retry — уходим в дружелюбный fallback ниже.
 			}
@@ -438,6 +423,20 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 					: raw.trim(),
 				readyToGenerate: false,
 			});
+		}
+		// Слабые модели (напр. gpt-4.1-nano) иногда вкладывают весь JSON воронки
+		// строкой в поле `reply`. Разворачиваем вложенность до реального объекта.
+		let unwrapGuard = 0;
+		while (
+			parsed.readyToGenerate !== true &&
+			typeof parsed.reply === "string" &&
+			unwrapGuard < 3
+		) {
+			const inner = tryParse(parsed.reply);
+			if (inner && (typeof inner.readyToGenerate === "boolean" || Array.isArray(inner.stages))) {
+				parsed = inner;
+				unwrapGuard += 1;
+			} else break;
 		}
 
 		const reply = typeof parsed.reply === "string" ? parsed.reply : "";
