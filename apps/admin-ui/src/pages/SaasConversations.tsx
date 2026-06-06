@@ -455,6 +455,9 @@ export function SaasConversations() {
             <Button onClick={handleStartSim} disabled={simStarting || (!simStream && !simPersonaId)}>
               {simStarting ? "Запуск…" : simStream ? "Запустить поток" : "Запустить"}
             </Button>
+            <Button variant="destructive" onClick={handleStopAllStreams}>
+              ⏹ Остановить все
+            </Button>
           </div>
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input
@@ -462,16 +465,12 @@ export function SaasConversations() {
               checked={simStream}
               onChange={(e) => setSimStream(e.target.checked)}
             />
-            Поток («боевой режим»): новый клиент каждые N секунд
+            Поток («боевой режим»): новый клиент каждые N секунд. «Остановить все» глушит и
+            уже идущие диалоги.
           </label>
           {simStreams.length > 0 && (
             <div className="space-y-1 border-t pt-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-muted-foreground">Активные потоки</span>
-                <Button size="sm" variant="destructive" onClick={handleStopAllStreams}>
-                  Остановить все
-                </Button>
-              </div>
+              <span className="text-xs font-medium text-muted-foreground">Активные потоки</span>
               {simStreams.map((s) => (
                 <div key={s.id} className="flex items-center justify-between text-xs">
                   <span>

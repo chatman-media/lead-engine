@@ -202,4 +202,16 @@ describe("admin-sim dialog simulator", () => {
     };
     expect(after.streams.some((s) => s.id === body.streamId)).toBe(false);
   });
+
+  it("DELETE /streams → kill-switch: гасит все потоки тенанта", async () => {
+    if (!sql) return;
+    await req("POST", "/api/admin/sim/stream", { count: 3, intervalSec: 5, maxTurns: 1 });
+    await req("POST", "/api/admin/sim/stream", { count: 3, intervalSec: 5, maxTurns: 1 });
+    const del = await req("DELETE", "/api/admin/sim/streams");
+    expect(del.status).toBe(200);
+    const list = (await (await req("GET", "/api/admin/sim/streams")).json()) as {
+      streams: unknown[];
+    };
+    expect(list.streams.length).toBe(0);
+  });
 });

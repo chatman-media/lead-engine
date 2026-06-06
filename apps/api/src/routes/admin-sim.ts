@@ -157,6 +157,11 @@ interface StreamState {
 }
 const STREAMS = new Map<string, StreamState>();
 
+// Глобальный kill-switch на тенант: «Остановить все» инкрементит epoch, и каждый
+// идущий simulateClient видит расхождение между своим стартовым epoch и текущим
+// → прерывает диалог между ходами (не убивая сервер).
+const CANCEL_EPOCH = new Map<number, number>();
+
 // ── Route factory ────────────────────────────────────────────────────────────
 
 export function makeAdminSimRoutes(opts: {
@@ -223,9 +228,13 @@ export function makeAdminSimRoutes(opts: {
   // (await — чтобы вернуть conversationId), остальные ходы — в фоне.
   async function simulateClient(
     ctx: SimCtx,
-    params: { brief: string; displayName: string; maxTurns: number },
+    params: { brief: string; displayName: string; maxTurns: number; isCancelled?: () => boolean },
   ): Promise<number> {
     const { tenantId, adminId } = ctx;
+    // Снимок epoch на старте: если «Остановить все» инкрементит его — прерываемся.
+    const startEpoch = CANCEL_EPOCH.get(tenantId) ?? 0;
+    const aborted = () =>
+      (CANCEL_EPOCH.get(tenantId) ?? 0) !== startEpoch || params.isCancelled?.() === true;
     const tenant = { tenantId, slug: ctx.tenantSlug, llmBillingMode: "byok" as const };
     // kind='self_play' → conversation.source='self_play' (см. channelKindToSource).
     // ChannelContext.kind не содержит 'self_play' в типе — cast локально для sim.
@@ -325,8 +334,9 @@ export function makeAdminSimRoutes(opts: {
     // Остальные ходы — в фоне (инбокс наполняется по поллингу).
     void (async () => {
       for (let turn = 1; turn < params.maxTurns; turn++) {
+        if (aborted()) break; // kill-switch: «Остановить все» / стоп потока
         const userText = await nextUserMessage();
-        if (!userText) break;
+        if (!userText || aborted()) break;
         const res = await runExchange(userText);
         if (!res) break;
         exchanges.push({ user: userText, bot: res.botReply });
@@ -361,6 +371,9 @@ export function makeAdminSimRoutes(opts: {
   // Остановить ВСЕ активные потоки тенанта разом.
   app.delete("/api/admin/sim/streams", async (c) => {
     const tenantId = c.var.tenantId;
+    // Глобальный kill-switch: инкремент epoch обрывает ВСЕ идущие диалоги тенанта
+    // (и потоковые, и одиночные) между ходами.
+    CANCEL_EPOCH.set(tenantId, (CANCEL_EPOCH.get(tenantId) ?? 0) + 1);
     let stopped = 0;
     for (const st of STREAMS.values()) {
       if (st.tenantId !== tenantId || st.cancelled) continue;
@@ -457,6 +470,7 @@ export function makeAdminSimRoutes(opts: {
         brief: persona.brief,
         displayName: randomName(),
         maxTurns,
+        isCancelled: () => state.cancelled, // стоп потока обрывает и идущие диалоги
       }).catch(() => {
         /* отдельный клиент упал — поток продолжается */
       });
