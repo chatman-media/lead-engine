@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.9.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.8.0...@chatman-media/conversation-engine-v1.9.0) (2026-06-06)
+
+
+### Features
+
+* **ops:** продвижение лида со страницы лида + пинг оператору на operator-гейте ([#243](https://github.com/chatman-media/lead-engine/issues/243)) ([34aee02](https://github.com/chatman-media/lead-engine/commit/34aee0242093c59b300c617ee70e923818b64dbb))
+
 # [@chatman-media/conversation-engine-v1.8.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.7.0...@chatman-media/conversation-engine-v1.8.0) (2026-06-06)
 
 
