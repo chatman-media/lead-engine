@@ -12,7 +12,7 @@
  */
 
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
-import { exchangeRates, tenants } from "@chatman-media/storage";
+import { exchangeRates, exchangeSettings, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 
 const FX_API = "https://open.er-api.com/v6/latest/USD";
@@ -379,6 +379,74 @@ export async function refreshAllActiveTenants(
     } catch (err) {
       log?.warn?.(
         `rate-feed tenant=${id} error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+}
+
+/** Чистый предикат тик-планировщика: пора ли рефрешить тенанта. */
+export function isRefreshDue(
+  nowSec: number,
+  lastRefreshSec: number | undefined,
+  refreshSec: number,
+): boolean {
+  return nowSec - (lastRefreshSec ?? 0) >= refreshSec;
+}
+
+/** Per-tenant интервал рефреша auto-курсов (сек). Нет настройки → defaultSec. */
+export async function getTenantRefreshSec(
+  db: Db,
+  tenantId: number,
+  defaultSec: number,
+): Promise<number> {
+  return withTenant(db, tenantId, async (tx) => {
+    const [s] = await tx
+      .select({ rateRefreshSec: exchangeSettings.rateRefreshSec })
+      .from(exchangeSettings)
+      .where(eq(exchangeSettings.tenantId, tenantId))
+      .limit(1);
+    return s?.rateRefreshSec ?? defaultSec;
+  });
+}
+
+export interface DueFeedOpts {
+  /** Дефолтный интервал для тенантов без настройки (сек). */
+  defaultRefreshSec: number;
+  /** Время последнего рефреша per-tenant (epoch sec) — мутируется на месте. */
+  lastRefreshByTenant: Map<number, number>;
+  /** Текущее время (epoch sec). */
+  nowSec: number;
+  log?: { warn?: (msg: string) => void; info?: (msg: string) => void };
+  onAnomaly?: (a: RateFeedAnomaly) => void;
+}
+
+/**
+ * Тик планировщика курсов: рефрешит auto-курсы тех активных тенантов, у кого
+ * подошёл их per-tenant интервал (exchange_settings.rate_refresh_sec, иначе
+ * defaultRefreshSec). last-refresh держится в `lastRefreshByTenant` (память
+ * процесса) — на рестарте map пуст → рефрешим всех (как прежний boot-прогон).
+ */
+export async function refreshDueTenants(db: Db, opts: DueFeedOpts): Promise<void> {
+  const tenantRows = await db
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(eq(tenants.status, "active"));
+  for (const { id } of tenantRows) {
+    try {
+      const refreshSec = await getTenantRefreshSec(db, id, opts.defaultRefreshSec);
+      if (!isRefreshDue(opts.nowSec, opts.lastRefreshByTenant.get(id), refreshSec)) {
+        continue;
+      }
+      opts.lastRefreshByTenant.set(id, opts.nowSec);
+      const r = await refreshTenantRates(db, id, opts.log, opts.onAnomaly);
+      if (r.updated > 0 || r.failed > 0) {
+        opts.log?.info?.(
+          `rate-feed tenant=${id} updated=${r.updated} skipped=${r.skipped} failed=${r.failed}`,
+        );
+      }
+    } catch (err) {
+      opts.log?.warn?.(
+        `rate-feed tick tenant=${id}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

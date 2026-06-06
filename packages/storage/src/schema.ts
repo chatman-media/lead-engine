@@ -1241,6 +1241,22 @@ export const exchangeRateTiers = pgTable("exchange_rate_tiers", {
   index("idx_exchange_rate_tiers_active").on(t.tenantId, t.asset, t.isActive),
 ]);
 
+// Per-tenant настройки обменника (нет строки → платформенные дефолты):
+// частота обновления auto-курсов планировщиком + порог «курсы устарели» (ops-watch).
+// last-refresh планировщик держит в памяти процесса (на рестарте рефрешит всех).
+export const exchangeSettings = pgTable("exchange_settings", {
+  tenantId: integer("tenant_id").primaryKey().references(() => tenants.id, { onDelete: "cascade" }),
+  // как часто планировщик обновляет auto-курсы тенанта (сек). 180 = 3 мин.
+  rateRefreshSec: integer("rate_refresh_sec").notNull().default(180),
+  // порог «курсы устарели» для ops-watch (сек). NULL → авто: max(env, 3 × refresh).
+  feedStaleSec: integer("feed_stale_sec"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("exchange_settings_refresh_check", sql`${t.rateRefreshSec} >= 60 AND ${t.rateRefreshSec} <= 86400`),
+  check("exchange_settings_stale_check", sql`${t.feedStaleSec} IS NULL OR ${t.feedStaleSec} >= 60`),
+]);
+
 // Заявка на обмен. rate/amount_to_thb — снапшот на момент создания заявки.
 // Оборот считается агрегатом SUM(amount_to_thb) по completed.
 export const exchangeOrders = pgTable("exchange_orders", {
