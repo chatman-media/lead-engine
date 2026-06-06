@@ -16,7 +16,7 @@ export interface TenantContext {
  */
 export interface ChannelContext {
   channelId: number;
-  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "web";
+  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "web";
   /** External id канала у провайдера (bot username, phone). Для логов. */
   externalId: string;
 }

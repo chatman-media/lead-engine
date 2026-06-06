@@ -1,5 +1,7 @@
 import type { ChannelAdapter } from "@chatman-media/channel-core";
+import { MessengerAdapter } from "@chatman-media/channel-facebook";
 import { TelegramBotAdapter } from "@chatman-media/channel-telegram";
+import { WhatsAppCloudAdapter } from "@chatman-media/channel-whatsapp";
 import { type Db, getDecryptedSecret } from "@chatman-media/conversation-engine";
 import { channels, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
@@ -14,7 +16,7 @@ export interface WorkerChannelEntry {
   channelDbId: number;
   tenantId: number;
   tenantSlug: string;
-  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "web";
+  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "web";
   adapter: ChannelAdapter;
 }
 
@@ -65,6 +67,42 @@ export class WorkerChannelRegistry {
     return process.env[envKey] ?? process.env.BOT_TOKEN ?? null;
   }
 
+  /**
+   * Generic per-tenant credential resolver для Meta-каналов (whatsapp/facebook):
+   * tenant_secrets[credentialsRef] (decrypt) → env `<PREFIX>_<SLUG>` → env `<PREFIX>`.
+   */
+  private async resolveCredential(
+    db: Db,
+    tenantId: number,
+    tenantSlug: string,
+    credentialsRef: string | null,
+    masterKeyHex: string | undefined,
+    onWarn: ((msg: string, ctx: Record<string, unknown>) => void) | undefined,
+    envPrefix: string,
+  ): Promise<string | null> {
+    if (credentialsRef && masterKeyHex) {
+      try {
+        const decrypted = await getDecryptedSecret({
+          db,
+          tenantId,
+          key: credentialsRef,
+          masterKeyHex,
+        });
+        if (decrypted) return decrypted;
+      } catch (err) {
+        onWarn?.("failed to decrypt worker channel credential", {
+          tenantId,
+          tenantSlug,
+          credentialsRef,
+          envPrefix,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    const envKey = `${envPrefix}_${tenantSlug.toUpperCase().replace(/-/g, "_")}`;
+    return process.env[envKey] ?? process.env[envPrefix] ?? null;
+  }
+
   async loadFromDb(db: Db, opts: LoadFromDbOpts = {}): Promise<void> {
     this.loadOpts = opts;
     this.dbRef = db;
@@ -72,6 +110,7 @@ export class WorkerChannelRegistry {
       .select({
         channelId: channels.id,
         kind: channels.kind,
+        externalId: channels.externalId,
         credentialsRef: channels.credentialsRef,
         tenantId: tenants.id,
         tenantSlug: tenants.slug,
@@ -81,22 +120,57 @@ export class WorkerChannelRegistry {
       .where(and(eq(channels.status, "active"), eq(tenants.status, "active")));
 
     for (const row of rows) {
-      if (row.kind !== "telegram_bot") continue;
-      const token = await this.resolveBotToken(
-        db,
-        row.tenantId,
-        row.tenantSlug,
-        row.credentialsRef,
-        opts.masterKeyHex,
-        opts.onWarn,
-      );
-      if (!token) continue;
-      const adapter = new TelegramBotAdapter({ id: String(row.channelId), token });
+      let adapter: ChannelAdapter | null = null;
+      if (row.kind === "telegram_bot") {
+        const token = await this.resolveBotToken(
+          db,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          opts.masterKeyHex,
+          opts.onWarn,
+        );
+        if (!token) continue;
+        adapter = new TelegramBotAdapter({ id: String(row.channelId), token });
+      } else if (row.kind === "whatsapp") {
+        const token = await this.resolveCredential(
+          db,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          opts.masterKeyHex,
+          opts.onWarn,
+          "WA_ACCESS_TOKEN",
+        );
+        if (!token) continue;
+        // external_id у whatsapp канала = phone_number_id (Meta).
+        adapter = new WhatsAppCloudAdapter({
+          id: String(row.channelId),
+          phoneNumberId: row.externalId,
+          accessToken: token,
+        });
+      } else if (row.kind === "facebook") {
+        const token = await this.resolveCredential(
+          db,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          opts.masterKeyHex,
+          opts.onWarn,
+          "FB_PAGE_TOKEN",
+        );
+        if (!token) continue;
+        adapter = new MessengerAdapter({ id: String(row.channelId), pageAccessToken: token });
+      } else {
+        // telegram_userbot / web держат pinned-соединение в apps/api.
+        continue;
+      }
+      if (!adapter) continue;
       this.byDbId.set(row.channelId, {
         channelDbId: row.channelId,
         tenantId: row.tenantId,
         tenantSlug: row.tenantSlug,
-        kind: row.kind as "telegram_bot",
+        kind: row.kind as WorkerChannelEntry["kind"],
         adapter,
       });
     }
@@ -128,7 +202,9 @@ export class WorkerChannelRegistry {
 
   closeAll(): void {
     for (const entry of this.byDbId.values()) {
-      if (entry.adapter instanceof TelegramBotAdapter) entry.adapter.close();
+      // close() есть у всех загружаемых адаптеров (telegram/whatsapp/facebook),
+      // но не объявлен в ChannelAdapter-интерфейсе — зовём опционально.
+      (entry.adapter as { close?: () => void }).close?.();
     }
   }
 }

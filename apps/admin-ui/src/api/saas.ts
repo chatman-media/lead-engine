@@ -90,7 +90,12 @@ export interface UpsertLlmConfigInput {
   timeoutMs?: number;
 }
 
-export type ChannelKind = "telegram_bot" | "telegram_userbot" | "whatsapp" | "web";
+export type ChannelKind =
+  | "telegram_bot"
+  | "telegram_userbot"
+  | "whatsapp"
+  | "facebook"
+  | "web";
 export type ChannelStatus = "active" | "paused" | "error";
 
 export interface ChannelItem {
@@ -140,6 +145,20 @@ export interface CreateWhatsAppChannelResult {
   phoneNumberId: string;
   verifiedName?: string;
   displayPhoneNumber?: string;
+  webhookSetupHint?: {
+    url: string;
+    verifyToken: string;
+    appSecretHint: string;
+  };
+  reloadError?: string;
+}
+
+export interface CreateFacebookChannelResult {
+  ok: boolean;
+  id: number;
+  updated: boolean;
+  pageId: string;
+  pageName?: string;
   webhookSetupHint?: {
     url: string;
     verifyToken: string;
@@ -1047,6 +1066,12 @@ export const saas = {
     appSecret?: string;
   }) {
     return request<CreateWhatsAppChannelResult>("/api/admin/channels/whatsapp", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  createFacebookChannel(input: { pageAccessToken: string; verifyToken?: string; appSecret?: string }) {
+    return request<CreateFacebookChannelResult>("/api/admin/channels/facebook", {
       method: "POST",
       body: JSON.stringify(input),
     });

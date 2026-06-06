@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { MessengerApiError, MessengerClient } from "@chatman-media/channel-facebook";
 import {
   type FinishedUserbotLogin,
   startUserbotLogin,
@@ -13,7 +14,12 @@ import { type Db, setEncryptedSecret, withTenant } from "@chatman-media/conversa
 import { channels, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { type Context, Hono } from "hono";
-import { WHATSAPP_APP_SECRET_KEY, WHATSAPP_VERIFY_TOKEN_KEY } from "../channel-registry.ts";
+import {
+  FACEBOOK_APP_SECRET_KEY,
+  FACEBOOK_VERIFY_TOKEN_KEY,
+  WHATSAPP_APP_SECRET_KEY,
+  WHATSAPP_VERIFY_TOKEN_KEY,
+} from "../channel-registry.ts";
 import { recordAudit } from "../lib/audit.ts";
 import { canAddChannel } from "../lib/quota.ts";
 import { resolveUserbotCreds, setUserbotCreds } from "../lib/userbot-creds.ts";
@@ -72,6 +78,12 @@ export interface AdminChannelsRoutesOpts {
    * configuration).
    */
   whatsappVerifyToken?: string;
+  /**
+   * Facebook Meta verify_token — нужен для webhookSetupHint в POST /facebook
+   * response (UI показывает copy-paste snippet для Meta dashboard webhook
+   * configuration).
+   */
+  facebookVerifyToken?: string;
   /**
    * URL CDN-bundle'а виджета. Если задан — POST /web возвращает
    * production-ready `<script src="...">` snippet. Если пусто (текущее
@@ -153,6 +165,15 @@ interface WhatsAppCreateBody {
   /** Per-tenant Meta webhook verify_token (опц.) — фолбэк на env WHATSAPP_VERIFY_TOKEN. */
   verifyToken?: unknown;
   /** Per-tenant Meta app secret (опц.) — фолбэк на env WHATSAPP_APP_SECRET. */
+  appSecret?: unknown;
+}
+
+interface FacebookCreateBody {
+  /** Page Access Token (long-lived). Page id выводится из него через Graph. */
+  pageAccessToken: unknown;
+  /** Per-tenant Meta webhook verify_token (опц.) — фолбэк на env FACEBOOK_VERIFY_TOKEN. */
+  verifyToken?: unknown;
+  /** Per-tenant Meta app secret (опц.) — фолбэк на env FACEBOOK_APP_SECRET. */
   appSecret?: unknown;
 }
 
@@ -667,6 +688,214 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
     } catch (err) {
       if (err instanceof Error && /unique|duplicate/i.test(err.message)) {
         return c.json({ error: "channel already exists", phoneNumberId }, 409);
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * POST /api/admin/channels/facebook
+   * Body: { pageAccessToken, verifyToken?, appSecret? }
+   *
+   * Page Access Token однозначно принадлежит одной Facebook Page, поэтому
+   * page id выводим из Graph (/me), не требуем в body. Зеркалит /whatsapp:
+   * validate → encrypt в tenant_secrets (channel_facebook_<pageId>) → upsert
+   * channels(kind='facebook', external_id=pageId).
+   *
+   * Errors: 400 bad json / token missing · 401 Meta отверг token · 502 Meta down
+   */
+  app.post("/api/admin/channels/facebook", async (c) => {
+    const tenantId = c.var.tenantId;
+    let body: FacebookCreateBody;
+    try {
+      body = (await c.req.json()) as FacebookCreateBody;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const pageAccessToken =
+      typeof body.pageAccessToken === "string" ? body.pageAccessToken.trim() : "";
+    if (!pageAccessToken) {
+      return c.json({ error: "pageAccessToken required" }, 400);
+    }
+    const verifyToken = typeof body.verifyToken === "string" ? body.verifyToken.trim() : "";
+    const appSecret = typeof body.appSecret === "string" ? body.appSecret.trim() : "";
+
+    // Validate token via Meta Graph (/me) → page id + name.
+    const fbClient = new MessengerClient({
+      pageAccessToken,
+      ...(opts.fetchImpl ? { fetch: opts.fetchImpl } : {}),
+    });
+    let pageInfo: Awaited<ReturnType<MessengerClient["getPageInfo"]>>;
+    try {
+      pageInfo = await fbClient.getPageInfo();
+    } catch (err) {
+      if (err instanceof MessengerApiError && (err.statusCode === 401 || err.statusCode === 403)) {
+        return c.json({ error: "Meta rejected token (invalid)" }, 401);
+      }
+      return c.json(
+        {
+          error: "Meta Graph unreachable or rejected",
+          detail: err instanceof Error ? err.message : String(err),
+        },
+        502,
+      );
+    }
+    const pageId = pageInfo.id;
+    if (!/^\d{5,25}$/.test(pageId)) {
+      return c.json({ error: "Meta returned unexpected page id" }, 502);
+    }
+
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const secretKey = `channel_facebook_${pageId}`;
+
+    // Quota check для new Facebook channel (см. telegram/whatsapp POST).
+    const [maybeExistingFb] = await opts.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(
+        and(
+          eq(channels.tenantId, tenantId),
+          eq(channels.kind, "facebook"),
+          eq(channels.externalId, pageId),
+        ),
+      );
+    if (!maybeExistingFb) {
+      const quota = await canAddChannel({ db: opts.db, tenantId });
+      if (!quota.allowed) {
+        return c.json(
+          {
+            error: "quota_exceeded",
+            reason: quota.reason,
+            limit: quota.limit,
+            current: quota.current,
+            plan: quota.plan,
+            planLabel: quota.planLabel,
+            upgradeHint: "Перейдите на план Starter ($99/мес) для большего числа каналов",
+          },
+          402,
+        );
+      }
+    }
+
+    try {
+      const result = await withTenant(opts.db, tenantId, async (tx) => {
+        const [existing] = await tx
+          .select({ id: channels.id })
+          .from(channels)
+          .where(
+            and(
+              eq(channels.tenantId, tenantId),
+              eq(channels.kind, "facebook"),
+              eq(channels.externalId, pageId),
+            ),
+          );
+
+        const metadata = JSON.stringify({ pageName: pageInfo.name ?? null });
+
+        // Per-tenant Meta webhook creds (опц.) — шифруем в tenant_secrets.
+        if (verifyToken) {
+          await setEncryptedSecret({
+            db: tx,
+            tenantId,
+            key: FACEBOOK_VERIFY_TOKEN_KEY,
+            value: verifyToken,
+            masterKeyHex: opts.masterKeyHex,
+            nowEpoch,
+          });
+        }
+        if (appSecret) {
+          await setEncryptedSecret({
+            db: tx,
+            tenantId,
+            key: FACEBOOK_APP_SECRET_KEY,
+            value: appSecret,
+            masterKeyHex: opts.masterKeyHex,
+            nowEpoch,
+          });
+        }
+        await setEncryptedSecret({
+          db: tx,
+          tenantId,
+          key: secretKey,
+          value: pageAccessToken,
+          masterKeyHex: opts.masterKeyHex,
+          nowEpoch,
+        });
+
+        if (existing) {
+          await tx
+            .update(channels)
+            .set({
+              credentialsRef: secretKey,
+              status: "active",
+              metadataJson: metadata,
+              updatedAt: nowEpoch,
+            })
+            .where(eq(channels.id, existing.id));
+          return { id: existing.id, updated: true };
+        }
+        const [inserted] = await tx
+          .insert(channels)
+          .values({
+            tenantId,
+            kind: "facebook",
+            externalId: pageId,
+            credentialsRef: secretKey,
+            status: "active",
+            metadataJson: metadata,
+            createdAt: nowEpoch,
+            updatedAt: nowEpoch,
+          })
+          .returning({ id: channels.id });
+        return { id: inserted!.id, updated: false };
+      });
+
+      await recordAudit(opts.db, {
+        tenantId,
+        adminId: c.var.adminId,
+        action: result.updated ? "channel.update" : "channel.create",
+        targetKind: "channel",
+        targetId: result.id,
+        details: { kind: "facebook", pageId, pageName: pageInfo.name },
+      });
+
+      let reloadError: string | undefined;
+      if (opts.onReload) {
+        try {
+          await opts.onReload(tenantId);
+        } catch (err) {
+          reloadError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
+      let webhookSetupHint: { url: string; verifyToken: string; appSecretHint: string } | undefined;
+      if (opts.publicUrl) {
+        const [tenant] = await opts.db
+          .select({ slug: tenants.slug })
+          .from(tenants)
+          .where(eq(tenants.id, tenantId));
+        if (tenant) {
+          webhookSetupHint = {
+            url: `${opts.publicUrl}/webhook/facebook/${tenant.slug}`,
+            verifyToken: verifyToken || opts.facebookVerifyToken || "<укажите Verify Token>",
+            appSecretHint: appSecret
+              ? "App Secret сохранён — подпись вебхуков будет проверяться"
+              : "Meta dashboard → App settings → Basic → App Secret (укажите в форме или в env FACEBOOK_APP_SECRET)",
+          };
+        }
+      }
+
+      return c.json({
+        ok: true,
+        ...result,
+        pageId,
+        ...(pageInfo.name ? { pageName: pageInfo.name } : {}),
+        ...(webhookSetupHint ? { webhookSetupHint } : {}),
+        ...(reloadError ? { reloadError } : {}),
+      });
+    } catch (err) {
+      if (err instanceof Error && /unique|duplicate/i.test(err.message)) {
+        return c.json({ error: "channel already exists", pageId }, 409);
       }
       throw err;
     }
