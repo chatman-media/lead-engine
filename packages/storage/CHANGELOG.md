@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.8.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.7.0...@chatman-media/storage-v1.8.0) (2026-06-06)
+
+
+### Features
+
+* **channels:** wire Facebook Messenger end-to-end (issue [#179](https://github.com/chatman-media/lead-engine/issues/179)) ([#203](https://github.com/chatman-media/lead-engine/issues/203)) ([18047ac](https://github.com/chatman-media/lead-engine/commit/18047ac522963c5b59834c174125082950d3a5e2)), closes [#181](https://github.com/chatman-media/lead-engine/issues/181)
+
 # [@chatman-media/storage-v1.7.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.6.0...@chatman-media/storage-v1.7.0) (2026-06-06)
 
 
