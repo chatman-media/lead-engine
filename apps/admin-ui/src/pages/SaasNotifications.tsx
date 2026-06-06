@@ -44,6 +44,8 @@ interface Settings {
   informerDigestHour?: number;
   informerTz?: string;
   informerMutedUntil?: number | null;
+  informerQuietFrom?: number | null;
+  informerQuietTo?: number | null;
 }
 
 const EVENT_TYPES: Record<string, string> = {
@@ -239,6 +241,27 @@ export function SaasNotifications() {
     toast.success(until ? "Заглушено" : "Мут снят");
   }
 
+  function handleQuiet(from: number | null, to: number | null) {
+    saveInformer(
+      { informerQuietFrom: from, informerQuietTo: to },
+      { informerQuietFrom: from, informerQuietTo: to },
+    );
+  }
+
+  const [sendingTest, setSendingTest] = useState(false);
+  async function handleSendTest() {
+    setSendingTest(true);
+    try {
+      const res = await saas.sendTestNotification();
+      if (res.ok) toast.success("Тест отправлен — проверьте Telegram");
+      else toast.error(res.error || "Не удалось отправить");
+    } catch {
+      toast.error("Не удалось отправить");
+    } finally {
+      setSendingTest(false);
+    }
+  }
+
   async function handleTestOps() {
     setTestingOps(true);
     try {
@@ -410,6 +433,9 @@ export function SaasNotifications() {
   const topics = parseTopics(settings?.informerTopics);
   const digest = settings?.informerDigest ?? "daily";
   const digestHour = settings?.informerDigestHour ?? 9;
+  const quietFrom = settings?.informerQuietFrom ?? null;
+  const quietTo = settings?.informerQuietTo ?? null;
+  const quietOn = quietFrom != null && quietTo != null && quietFrom !== quietTo;
   const nowSec = Math.floor(Date.now() / 1000);
   const muted = !!settings?.informerMutedUntil && settings.informerMutedUntil > nowSec;
   const muteLeftMin = muted ? Math.ceil((settings!.informerMutedUntil! - nowSec) / 60) : 0;
@@ -466,16 +492,28 @@ export function SaasNotifications() {
                 />
               </div>
 
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2 text-destructive hover:text-destructive hover:border-destructive/50"
-                onClick={handleDisconnect}
-                disabled={savingToggle}
-              >
-                <Trash2Icon className="size-3.5" />
-                Отключить Telegram
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={handleSendTest}
+                  disabled={sendingTest}
+                >
+                  <SendIcon className="size-3.5" />
+                  {sendingTest ? "Отправляем…" : "Отправить тест"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 text-destructive hover:text-destructive hover:border-destructive/50"
+                  onClick={handleDisconnect}
+                  disabled={savingToggle}
+                >
+                  <Trash2Icon className="size-3.5" />
+                  Отключить Telegram
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="space-y-4">
@@ -592,6 +630,12 @@ export function SaasNotifications() {
             <Skeleton className="h-10 w-full" />
           ) : (
             <>
+              {!connected && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-muted-foreground">
+                  Telegram ещё не привязан — настройки сохранятся, но уведомления начнут
+                  приходить только после подключения (см. «Личные уведомления» выше).
+                </div>
+              )}
               {/* Порог важности */}
               <div className="space-y-2">
                 <Label className="text-sm">Порог важности</Label>
@@ -699,6 +743,60 @@ export function SaasNotifications() {
                       : "Реалтайм активен."}
                   </p>
                 </div>
+              </div>
+
+              {/* Тихие часы (DND) */}
+              <div className="space-y-2">
+                <Label className="text-sm">Тихие часы</Label>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">с</span>
+                  <select
+                    value={quietFrom ?? ""}
+                    disabled={savingInformer}
+                    onChange={(e) =>
+                      handleQuiet(e.target.value === "" ? null : Number(e.target.value), quietTo)
+                    }
+                    className="rounded-md border bg-background px-2 py-1.5"
+                  >
+                    <option value="">—</option>
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>
+                        {String(h).padStart(2, "0")}:00
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-muted-foreground">до</span>
+                  <select
+                    value={quietTo ?? ""}
+                    disabled={savingInformer}
+                    onChange={(e) =>
+                      handleQuiet(quietFrom, e.target.value === "" ? null : Number(e.target.value))
+                    }
+                    className="rounded-md border bg-background px-2 py-1.5"
+                  >
+                    <option value="">—</option>
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>
+                        {String(h).padStart(2, "0")}:00
+                      </option>
+                    ))}
+                  </select>
+                  {quietOn && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={savingInformer}
+                      onClick={() => handleQuiet(null, null)}
+                    >
+                      Выключить
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {quietOn
+                    ? `Ночью (${String(quietFrom).padStart(2, "0")}:00–${String(quietTo).padStart(2, "0")}:00) реалтайм молчит — события придут утром в дайджесте.`
+                    : "Не беспокоить по расписанию (например 22:00–08:00). Критичное приходит всегда."}
+                </p>
               </div>
 
               {/* Лента последних событий */}

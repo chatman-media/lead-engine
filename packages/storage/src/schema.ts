@@ -1138,6 +1138,10 @@ export const operatorSettings = pgTable("operator_settings", {
   informerMutedUntil: integer("informer_muted_until"),
   // epoch последней отправленной сводки (анти-повтор дайджеста).
   informerLastDigestAt: integer("informer_last_digest_at"),
+  // Тихие часы (DND): локальные часы 0..23 в informerTz. Если from==to или NULL —
+  // выключено. Окно может переходить через полночь (напр. 22→8).
+  informerQuietFrom: integer("informer_quiet_from"),
+  informerQuietTo: integer("informer_quiet_to"),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
   uniqueIndex("uniq_op_settings_admin").on(t.adminId),

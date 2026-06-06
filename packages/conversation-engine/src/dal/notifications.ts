@@ -19,6 +19,8 @@ export type InformerPrefs = Partial<
     | "informerTz"
     | "informerMutedUntil"
     | "informerLastDigestAt"
+    | "informerQuietFrom"
+    | "informerQuietTo"
   >
 >;
 
