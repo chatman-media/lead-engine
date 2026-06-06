@@ -38,7 +38,7 @@ export interface AdminWorkflowRoutesOpts {
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
 
-const SYSTEM_PROMPT = `Ты — помощник по настройке воронки продаж/квалификации в SaaS-платформе lead-engine.
+export const SYSTEM_PROMPT = `Ты — помощник по настройке воронки продаж/квалификации в SaaS-платформе lead-engine.
 Оператор описывает свой бизнес, а ты проектируешь воронку (funnel) из стадий и полей.
 
 ВЕДИ ДИАЛОГ: задавай по одному уточняющему вопросу за раз, пока не соберёшь достаточно
@@ -107,7 +107,36 @@ const SYSTEM_PROMPT = `Ты — помощник по настройке вор�
   - Все <X>_fulfill → одна общая terminal_won (напр. "completed"); intake и ветки → общая
     terminal_lost ("cancelled"). intake.nextStages = все <X>_request + терминал отказа.
   - Порядок: сперва все *_request (qualify), затем *_offer (offer), затем *_fulfill (fulfill),
-    потом терминалы — иначе нарушишь монотонность фаз. Длина 1+3×N+2 — норма, лимит 4–8 не про них.`;
+    потом терминалы — иначе нарушишь монотонность фаз. Длина 1+3×N+2 — норма, лимит 4–8 не про них.
+
+ПРИМЕРЫ (как из описания собрать качественную воронку — ориентируйся на них):
+
+Пример 1 — линейная воронка.
+Оператор: «Онлайн-школа английского. Люди пишут в Telegram, записываем на пробный урок, потом продаём пакет занятий».
+Хороший ответ:
+{"reply":"Собрал воронку: заявка → квалификация → пробный урок → оплата пакета. Терминалы: оплатил / отказ.","readyToGenerate":true,"stages":[
+{"slug":"new_lead","displayName":"Новая заявка","kind":"intake","stageType":"form_fill","nextStages":["qualify","lost"],"fields":[{"slug":"name","displayName":"Имя","fieldType":"text","required":true,"aiExtractable":true},{"slug":"goal_level","displayName":"Цель и уровень","fieldType":"textarea","required":false,"aiExtractable":true}]},
+{"slug":"qualify","displayName":"Квалификация","kind":"active","stageType":"form_fill","phase":"qualify","nextStages":["trial","lost"],"goal":"Понять цель обучения, уровень и бюджет ученика.","guidance":"Спроси про цель, текущий уровень и удобное время, по одному вопросу. Не дави, веди к пробному уроку.","fields":[{"slug":"budget","displayName":"Бюджет","fieldType":"text","required":false,"aiExtractable":true}]},
+{"slug":"trial","displayName":"Пробный урок","kind":"active","stageType":"interaction","phase":"offer","nextStages":["payment","lost"],"goal":"Согласовать и провести пробный урок.","guidance":"Подбери удобные дату и время пробного, подтверди запись и напомни перед уроком.","fields":[{"slug":"trial_at","displayName":"Время пробного","fieldType":"text","required":true,"aiExtractable":true}]},
+{"slug":"payment","displayName":"Оплата пакета","kind":"active","stageType":"payment","phase":"fulfill","nextStages":["won","lost"],"goal":"Продать пакет занятий и получить оплату.","guidance":"Предложи пакет под цель ученика, отработай возражения по цене, доведи до оплаты.","fields":[{"slug":"package","displayName":"Выбранный пакет","fieldType":"text","required":false,"aiExtractable":true}]},
+{"slug":"won","displayName":"Оплатил","kind":"terminal_won","stageType":"milestone","nextStages":[],"fields":[]},
+{"slug":"lost","displayName":"Отказ","kind":"terminal_lost","stageType":"milestone","nextStages":[],"fields":[]}
+]}
+
+Пример 2 — ветвящаяся воронка (мульти-запрос).
+Оператор: «Сервис для туристов: помогаем с трансфером и с арендой байка. Один и тот же гость может заказать и то, и другое».
+Хороший ответ:
+{"reply":"Сделал ветвящуюся воронку: общий приём → ветки «трансфер» и «аренда байка» (qualify→offer→fulfill) → общий «выполнено» / «отменено».","readyToGenerate":true,"stages":[
+{"slug":"request_received","displayName":"Запрос принят","kind":"intake","stageType":"form_fill","nextStages":["transfer_request","bike_request","cancelled"],"fields":[{"slug":"request_type","displayName":"Тип запроса","fieldType":"select","required":true,"aiExtractable":true,"hint":"Выбирает ветку воронки","options":[{"value":"transfer","label":"Трансфер"},{"value":"bike","label":"Аренда байка"}]}]},
+{"slug":"transfer_request","displayName":"Трансфер: детали","kind":"active","stageType":"form_fill","phase":"qualify","nextStages":["transfer_offer","cancelled"],"goal":"Собрать маршрут и время трансфера.","guidance":"Уточни откуда, куда, когда и сколько человек. Цену пока не называй.","fields":[{"slug":"route","displayName":"Маршрут","fieldType":"text","required":true,"aiExtractable":true}]},
+{"slug":"bike_request","displayName":"Байк: детали","kind":"active","stageType":"form_fill","phase":"qualify","nextStages":["bike_offer","cancelled"],"goal":"Собрать параметры аренды байка.","guidance":"Уточни модель/класс, срок аренды и дату начала.","fields":[{"slug":"days","displayName":"Срок аренды","fieldType":"text","required":true,"aiExtractable":true}]},
+{"slug":"transfer_offer","displayName":"Трансфер: предложение","kind":"active","stageType":"awaiting_operator","phase":"offer","nextStages":["transfer_fulfill","cancelled"],"goal":"Передать цену трансфера и получить подтверждение.","guidance":"Цену даёт оператор — придержи гостя и дождись её, не выдумывай.","fields":[{"slug":"confirmed","displayName":"Гость подтвердил","fieldType":"boolean","required":true,"aiExtractable":true}]},
+{"slug":"bike_offer","displayName":"Байк: предложение","kind":"active","stageType":"awaiting_operator","phase":"offer","nextStages":["bike_fulfill","cancelled"],"goal":"Передать цену аренды и получить подтверждение.","guidance":"Цену даёт оператор — дождись её и подтверди условия с гостем.","fields":[{"slug":"confirmed","displayName":"Гость подтвердил","fieldType":"boolean","required":true,"aiExtractable":true}]},
+{"slug":"transfer_fulfill","displayName":"Трансфер: подача","kind":"active","stageType":"milestone","phase":"fulfill","nextStages":["completed","cancelled"],"goal":"Назначить водителя и подать авто.","guidance":"Сообщи гостю, что водитель назначен, держи в курсе подачи.","fields":[]},
+{"slug":"bike_fulfill","displayName":"Байк: выдача","kind":"active","stageType":"milestone","phase":"fulfill","nextStages":["completed","cancelled"],"goal":"Выдать байк гостю.","guidance":"Согласуй место и время выдачи, подтверди передачу.","fields":[]},
+{"slug":"completed","displayName":"Выполнено","kind":"terminal_won","stageType":"milestone","nextStages":[],"fields":[]},
+{"slug":"cancelled","displayName":"Отменено","kind":"terminal_lost","stageType":"milestone","nextStages":[],"fields":[]}
+]}`;
 
 const MAX_TURNS = 60;
 
@@ -295,7 +324,7 @@ export function multiRequestBranchErrors(stages: SeedStage[]): string[] {
 }
 
 /** validateBackbone + контракт мульти-запроса — общий gate для AI-builder. */
-function validateFunnel(stages: SeedStage[]): {
+export function validateFunnel(stages: SeedStage[]): {
 	errors: string[];
 	warnings: string[];
 } {
