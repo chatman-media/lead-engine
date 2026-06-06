@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.9.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.8.0...@chatman-media/storage-v1.9.0) (2026-06-06)
+
+
+### Features
+
+* **funnel:** per-stage goal/guidance — AI emits + persists (Phase 2 slice C-1) ([#208](https://github.com/chatman-media/lead-engine/issues/208)) ([aa44acd](https://github.com/chatman-media/lead-engine/commit/aa44acdf2d51e334c9ebe6aafe68e84c9e8a44c2))
+
 # [@chatman-media/storage-v1.8.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.7.0...@chatman-media/storage-v1.8.0) (2026-06-06)
 
 
