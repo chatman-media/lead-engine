@@ -10,7 +10,10 @@ import {
   GripVerticalIcon,
   HeadphonesIcon,
   type LucideIcon,
+  CheckIcon,
+  PencilIcon,
   PenLineIcon,
+  XIcon,
   PhoneIcon,
   PlusIcon,
   ShieldCheckIcon,
@@ -693,7 +696,7 @@ function StageCard({
         </div>
 
         {isExpanded && (
-          <CardContent className="space-y-4 border-t px-3 pb-4 pt-3">
+          <CardContent className="space-y-3 border-t px-3 pb-3 pt-3">
             {/* Support mode toggle */}
             <div className="flex items-center gap-2">
               <Switch
@@ -711,16 +714,17 @@ function StageCard({
 
             {/* Fields list */}
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Поля</p>
+              <p className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Поля</p>
               {stage.fields.length === 0 && (
                 <p className="text-xs text-muted-foreground">Полей пока нет.</p>
               )}
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap gap-x-4 gap-y-0">
                 {stage.fields.map((field) => (
                   <FieldRow
                     key={field.id}
                     field={field}
                     onDelete={() => handleDeleteField(field.id)}
+                    onEdit={(patch) => saas.updateStageField(stage.id, field.id, patch).then(onReload)}
                   />
                 ))}
               </div>
@@ -907,60 +911,65 @@ function StageBehaviourEditor({
         </span>
       </button>
       {open && (
-        <div className="space-y-2.5 border-t px-3 pb-3 pt-2.5">
-      <div className="space-y-1">
-        <Label className="text-xs">🎯 Цель стадии (что должен достичь бот)</Label>
-        <Textarea
-          rows={2}
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-          placeholder="Напр.: выяснить сумму и сеть обмена, подтвердить курс"
-          className="text-sm"
-        />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">🧠 Как себя вести (тон, что можно/нельзя)</Label>
-        <Textarea
-          rows={2}
-          value={guidance}
-          onChange={(e) => setGuidance(e.target.value)}
-          placeholder="Напр.: дружелюбно, не называй курс без инструмента, не дави"
-          className="text-sm"
-        />
+        <div className="space-y-2 border-t px-3 pb-3 pt-2.5">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">🎯 Цель (что достичь боту)</Label>
+          <Textarea
+            rows={2}
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            placeholder="выяснить сумму и сеть, подтвердить курс"
+            className="text-sm resize-none"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">🧠 Поведение (тон, что можно/нельзя)</Label>
+          <Textarea
+            rows={2}
+            value={guidance}
+            onChange={(e) => setGuidance(e.target.value)}
+            placeholder="дружелюбно, не называй курс без инструмента"
+            className="text-sm resize-none"
+          />
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs">⏰ «Завис» через, дней</Label>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex items-center gap-1.5">
+          <Label className="text-xs text-muted-foreground whitespace-nowrap">⏰ Завис через</Label>
           <Input
             type="number"
             min={0}
             value={stale}
             onChange={(e) => setStale(e.target.value)}
             placeholder="—"
+            className="h-7 w-16 text-sm"
           />
+          <span className="text-xs text-muted-foreground">дн.</span>
         </div>
-        <div className="space-y-1">
-          <Label className="text-xs">🔁 Автопинг каждые, дней</Label>
+        <div className="flex items-center gap-1.5">
+          <Label className="text-xs text-muted-foreground whitespace-nowrap">🔁 Автопинг каждые</Label>
           <Input
             type="number"
             min={0}
             value={checkin}
             onChange={(e) => setCheckin(e.target.value)}
             placeholder="—"
+            className="h-7 w-16 text-sm"
           />
+          <span className="text-xs text-muted-foreground">дн.</span>
         </div>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Switch
-          id={`auto-${stage.id}`}
-          checked={autoAdvance}
-          onCheckedChange={(v) => onUpdate({ autoAdvanceCondition: v ? AUTO_ADVANCE_FILLED : null })}
-        />
-        <Label htmlFor={`auto-${stage.id}`} className="text-sm">
-          ⚙️ Авто-переход когда заполнены обязательные поля
-        </Label>
+        <div className="flex items-center gap-1.5">
+          <Switch
+            id={`auto-${stage.id}`}
+            checked={autoAdvance}
+            onCheckedChange={(v) => onUpdate({ autoAdvanceCondition: v ? AUTO_ADVANCE_FILLED : null })}
+          />
+          <Label htmlFor={`auto-${stage.id}`} className="text-xs text-muted-foreground">
+            Авто-переход по полям
+          </Label>
+        </div>
       </div>
 
       <div className="space-y-1.5">
@@ -1001,31 +1010,93 @@ function StageBehaviourEditor({
   );
 }
 
-function FieldRow({ field, onDelete }: { field: StageField; onDelete: () => void }) {
-  return (
-    <div className="flex items-center justify-between rounded-md border px-3 py-1.5 text-sm">
-      <div className="flex items-center gap-2">
-        <span className="font-medium">{field.displayName}</span>
-        <Badge variant="outline" className="text-xs capitalize">
-          {field.fieldType}
-        </Badge>
-        {field.required && <span className="text-xs text-destructive">*</span>}
-        {field.aiExtractable && (
-          <Badge variant="secondary" className="text-xs">
-            AI
-          </Badge>
-        )}
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground font-mono">{field.slug}</span>
-        <button
-          type="button"
-          onClick={onDelete}
-          className="text-muted-foreground hover:text-destructive"
-        >
-          <Trash2Icon className="size-3.5" />
+function FieldRow({
+  field,
+  onDelete,
+  onEdit,
+}: {
+  field: StageField;
+  onDelete: () => void;
+  onEdit: (patch: Partial<StageField>) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(field.displayName);
+  const [type, setType] = useState<FieldType>(field.fieldType);
+  const [required, setRequired] = useState(field.required);
+  const [ai, setAi] = useState(field.aiExtractable);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await onEdit({ displayName: name, fieldType: type, required, aiExtractable: ai });
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1.5 py-0.5 flex-wrap">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="h-6 w-32 text-xs px-1.5"
+          autoFocus
+        />
+        <Select value={type} onValueChange={(v) => setType(v as FieldType)}>
+          <SelectTrigger className="h-6 w-24 text-xs px-1.5">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {FIELD_TYPES.map((t) => (
+              <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
+          <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} className="size-3" />
+          обяз.
+        </label>
+        <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
+          <input type="checkbox" checked={ai} onChange={(e) => setAi(e.target.checked)} className="size-3" />
+          AI
+        </label>
+        <button type="button" onClick={save} disabled={saving || !name} className="text-emerald-500 hover:text-emerald-400 transition-colors">
+          <CheckIcon className="size-3.5" />
+        </button>
+        <button type="button" onClick={() => setEditing(false)} className="text-muted-foreground/40 hover:text-muted-foreground transition-colors">
+          <XIcon className="size-3.5" />
         </button>
       </div>
+    );
+  }
+
+  return (
+    <div className="group flex items-center gap-1.5 py-0.5 text-sm">
+      <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/40" />
+      <span className="font-medium">{field.displayName}</span>
+      <span className="text-xs text-muted-foreground/60">·</span>
+      <span className="text-xs text-muted-foreground">{field.fieldType}</span>
+      {field.required && <span className="text-xs text-destructive font-bold">*</span>}
+      {field.aiExtractable && (
+        <Badge variant="secondary" className="text-[10px] px-1 py-0">AI</Badge>
+      )}
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="text-muted-foreground/40 hover:text-muted-foreground transition-colors ml-1"
+      >
+        <PencilIcon className="size-3" />
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        className="text-muted-foreground/40 hover:text-destructive transition-colors"
+      >
+        <Trash2Icon className="size-3" />
+      </button>
     </div>
   );
 }
