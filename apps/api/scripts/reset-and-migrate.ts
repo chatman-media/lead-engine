@@ -71,8 +71,13 @@ async function main() {
     const appliedSet = new Set(applied.map((r) => r.name));
 
     // First run with tracking: if _migrations is empty but DB already has tables,
-    // seed _migrations with all migrations that exist as files EXCEPT the last one,
-    // so we only apply truly new ones. Detect by checking if 'admins' table exists.
+    // seed _migrations with ALL migration files (assume everything on disk was
+    // already applied to this pre-tracking DB), so we only run truly new ones.
+    // Detect by checking if 'admins' table exists.
+    // ⚠️ Caveat: any file present at this moment but never actually applied gets
+    // marked "applied" without running. Migrations must therefore be idempotent
+    // (ADD COLUMN IF NOT EXISTS / CREATE TABLE IF NOT EXISTS), and a fix for a
+    // skipped migration is to give it a NEW (higher) filename so it re-applies.
     if (appliedSet.size === 0) {
       const [existing] = await sql<{ exists: boolean }[]>`
         SELECT EXISTS (
