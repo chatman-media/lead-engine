@@ -9,6 +9,7 @@
 [![CI](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml)
 [![codecov](https://codecov.io/gh/chatman-media/lead-engine/graph/badge.svg)](https://codecov.io/gh/chatman-media/lead-engine)
+[![Codecov Bundles](https://img.shields.io/badge/Codecov-Bundle%20Analysis-F01F7A?logo=codecov&logoColor=white)](https://app.codecov.io/gh/chatman-media/lead-engine/bundles)
 [![Security](https://github.com/chatman-media/lead-engine/actions/workflows/security.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/security.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Bun](https://img.shields.io/badge/Bun-1.3-fbf0df?logo=bun&logoColor=black)](https://bun.sh/)
