@@ -306,6 +306,37 @@ function validateFunnel(stages: SeedStage[]): {
 	};
 }
 
+/**
+ * Достаёт JSON-объект из ответа модели: снимает markdown-обёртку и, если вокруг
+ * есть лишний текст, пробует первый сбалансированный {…}. null — если не парсится.
+ */
+function parseModelJson(
+	raw: string,
+): { reply?: unknown; readyToGenerate?: unknown; stages?: unknown } | null {
+	const stripped = raw.replace(/```(?:json)?\n?/g, "").trim();
+	const candidates = [stripped];
+	const start = stripped.indexOf("{");
+	const end = stripped.lastIndexOf("}");
+	if (start >= 0 && end > start) candidates.push(stripped.slice(start, end + 1));
+	for (const cand of candidates) {
+		try {
+			return JSON.parse(cand) as {
+				reply?: unknown;
+				readyToGenerate?: unknown;
+				stages?: unknown;
+			};
+		} catch {
+			// пробуем следующего кандидата
+		}
+	}
+	return null;
+}
+
+/** true, если модель явно пыталась вернуть JSON воронки, а не текст-реплику. */
+function looksLikeFunnelJson(raw: string): boolean {
+	return /"(?:readyToGenerate|stages)"\s*:/.test(raw);
+}
+
 export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 	const app = new Hono();
 
@@ -361,7 +392,7 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 		let raw: string;
 		try {
 			raw = await client.complete(llmMessages, {
-				numPredict: 2000,
+				numPredict: 4000,
 				temperature: 0.4,
 			});
 		} catch (err) {
@@ -373,17 +404,40 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 			);
 		}
 
-		const jsonStr = raw.replace(/```(?:json)?\n?/g, "").trim();
-		let parsed: {
-			reply?: unknown;
-			readyToGenerate?: unknown;
-			stages?: unknown;
-		};
-		try {
-			parsed = JSON.parse(jsonStr) as typeof parsed;
-		} catch {
-			// LLM не вернул JSON — отдаём текст как реплику, продолжаем диалог.
-			return c.json({ reply: raw.trim(), readyToGenerate: false });
+		let parsed = parseModelJson(raw);
+
+		// Битый JSON (модель пыталась собрать воронку, но синтаксис сломан) —
+		// один retry с просьбой переотдать строго валидный JSON.
+		if (!parsed && looksLikeFunnelJson(raw)) {
+			try {
+				const retryRaw = await client.complete(
+					[
+						...llmMessages,
+						{ role: "assistant", content: raw },
+						{
+							role: "user",
+							content:
+								"Твой прошлый ответ — невалидный JSON. Верни ТОЛЬКО корректный " +
+								"JSON-объект по схеме: без markdown-обёрток и без текста вне JSON.",
+						},
+					],
+					{ numPredict: 4000, temperature: 0.2 },
+				);
+				parsed = parseModelJson(retryRaw);
+			} catch {
+				// LLM упал на retry — уходим в дружелюбный fallback ниже.
+			}
+		}
+
+		if (!parsed) {
+			// Стоп-течь: не показываем сырой (битый) JSON пользователю. Если это была
+			// JSON-попытка — просим переформулировать; иначе это текст-реплика модели.
+			return c.json({
+				reply: looksLikeFunnelJson(raw)
+					? "Не получилось собрать воронку из ответа — переформулируйте запрос или попробуйте ещё раз."
+					: raw.trim(),
+				readyToGenerate: false,
+			});
 		}
 
 		const reply = typeof parsed.reply === "string" ? parsed.reply : "";
