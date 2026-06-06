@@ -1191,6 +1191,11 @@ export const saas = {
       { method: "DELETE" },
     );
   },
+  stopAllSimStreams() {
+    return request<{ ok: boolean; stopped: number }>("/api/admin/sim/streams", {
+      method: "DELETE",
+    });
+  },
   updateConversation(id: number, patch: { status?: string; assignedAdminId?: number | null }) {
     return request<{ ok: boolean; conversation: ConversationDetail }>(
       `/api/admin/conversations/${id}`,

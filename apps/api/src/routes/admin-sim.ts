@@ -58,7 +58,9 @@ const PERSONAS: SimPersona[] = [
     displayName: "Сергей Котов",
     brief:
       "Ты — клиент криптообменника. Хочешь обменять 500 USDT (сеть TRC20) на тайские баты. " +
-      "Спрашиваешь курс, уточняешь детали, готов подтвердить и отправить перевод. Веди себя естественно.",
+      "Сразу называешь сумму и сеть и ТРЕБУЕШЬ конкретный курс и сколько бат получишь на руки — " +
+      "не соглашаешься на «уточню у оператора», переспрашиваешь точную цифру. Получив курс, " +
+      "уточняешь детали и готов подтвердить и отправить перевод. Веди себя естественно.",
   },
   {
     id: "exchange_rub",
@@ -66,7 +68,8 @@ const PERSONAS: SimPersona[] = [
     displayName: "Марина Лебедева",
     brief:
       "Ты — клиент обменника. Хочешь перевести 40 000 рублей в тайские баты, оплата со Сбера. " +
-      "Немного торгуешься по курсу, но в итоге соглашаешься и подтверждаешь перевод.",
+      "Сразу просишь назвать курс и сколько бат получишь за 40 000 ₽, требуешь конкретную цифру, " +
+      "немного торгуешься по курсу, но в итоге соглашаешься и подтверждаешь перевод.",
   },
   {
     id: "recruitment",
@@ -352,6 +355,21 @@ export function makeAdminSimRoutes(opts: {
         intervalSec: s.intervalSec,
       }));
     return c.json({ streams: items });
+  });
+
+  // ── DELETE /api/admin/sim/streams ──────────────────────────────────────
+  // Остановить ВСЕ активные потоки тенанта разом.
+  app.delete("/api/admin/sim/streams", async (c) => {
+    const tenantId = c.var.tenantId;
+    let stopped = 0;
+    for (const st of STREAMS.values()) {
+      if (st.tenantId !== tenantId || st.cancelled) continue;
+      st.cancelled = true;
+      for (const t of st.timers) clearTimeout(t);
+      st.timers = [];
+      stopped += 1;
+    }
+    return c.json({ ok: true, stopped });
   });
 
   // ── DELETE /api/admin/sim/stream/:id ───────────────────────────────────

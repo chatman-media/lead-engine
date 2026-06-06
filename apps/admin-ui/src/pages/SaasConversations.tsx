@@ -148,6 +148,8 @@ export function SaasConversations() {
         .catch(() => {});
     }
     refreshSimStreams();
+    const t = setInterval(refreshSimStreams, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
   }, [simOpen, simPersonas.length, refreshSimStreams]);
 
   async function handleStartSim() {
@@ -183,6 +185,15 @@ export function SaasConversations() {
   async function handleStopStream(id: string) {
     try {
       await saas.stopSimStream(id);
+      refreshSimStreams();
+    } catch (err) {
+      handleAuthError(err);
+    }
+  }
+
+  async function handleStopAllStreams() {
+    try {
+      await saas.stopAllSimStreams();
       refreshSimStreams();
     } catch (err) {
       handleAuthError(err);
@@ -455,7 +466,12 @@ export function SaasConversations() {
           </label>
           {simStreams.length > 0 && (
             <div className="space-y-1 border-t pt-2">
-              <span className="text-xs font-medium text-muted-foreground">Активные потоки</span>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground">Активные потоки</span>
+                <Button size="sm" variant="destructive" onClick={handleStopAllStreams}>
+                  Остановить все
+                </Button>
+              </div>
               {simStreams.map((s) => (
                 <div key={s.id} className="flex items-center justify-between text-xs">
                   <span>
