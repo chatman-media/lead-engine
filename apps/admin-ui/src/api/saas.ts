@@ -2100,6 +2100,27 @@ export const saas = {
       body: JSON.stringify(opts),
     });
   },
+  runExchangeEval(personaIds?: string[], maxTurns?: number) {
+    return request<{
+      summary: { passed: number; total: number };
+      report: Array<{
+        id: string;
+        displayName: string;
+        passed: boolean;
+        reasons?: string[];
+        error?: string;
+        signals?: {
+          reachedQuote: boolean;
+          requisitesIssued: boolean;
+          payoutDelivered: boolean;
+          prematureOperator: boolean;
+        };
+      }>;
+    }>("/api/admin/sim/exchange-eval", {
+      method: "POST",
+      body: JSON.stringify({ personaIds, maxTurns }),
+    });
+  },
   exchangeTurnover() {
     return request<ExchangeTurnover>("/api/admin/exchange/turnover");
   },

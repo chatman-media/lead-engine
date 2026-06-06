@@ -415,6 +415,28 @@ export function SaasExchange() {
     }
   }
 
+  async function runEval() {
+    const tid = toast.loading("Прогон эмуляции качества…");
+    try {
+      const r = await saas.runExchangeEval(undefined, 6);
+      toast.success(`Эмуляция: ${r.summary.passed}/${r.summary.total} сценариев прошли сквозняком`, {
+        id: tid,
+      });
+      // Детали по сценариям — в консоли (pass/fail + причины).
+      console.table(
+        r.report.map((x) => ({
+          scenario: x.id,
+          passed: x.passed,
+          reasons: (x.reasons ?? []).join("; "),
+          error: x.error ?? "",
+        })),
+      );
+    } catch (err) {
+      if (!handle401(err))
+        toast.error("Не удалось прогнать эмуляцию (нужен chat-LLM у тенанта)", { id: tid });
+    }
+  }
+
   async function issueCode(id: number, code: string) {
     try {
       const r = await saas.issueExchangePayoutCode(
@@ -927,11 +949,24 @@ export function SaasExchange() {
         <TabsContent value="orders">
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Заявки обмена</CardTitle>
-              <p className="text-muted-foreground text-xs">
-                Статус — короткий денежный lifecycle заявки. Шаг — бизнес-стадия полной 12-step
-                exchange funnel.
-              </p>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <CardTitle className="text-base">Заявки обмена</CardTitle>
+                  <p className="text-muted-foreground text-xs">
+                    Статус — короткий денежный lifecycle заявки. Шаг — бизнес-стадия полной 12-step
+                    exchange funnel.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={runEval}
+                  title="Прогнать exchange-сценарии как живые LLM-диалоги и оценить сквозной поток"
+                >
+                  ▶ Эмуляция качества
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <Table>
