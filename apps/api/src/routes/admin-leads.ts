@@ -19,6 +19,7 @@ import { recordAudit } from "../lib/audit.ts";
 import { canAddLead } from "../lib/quota.ts";
 import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webhooks.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
+import { advanceLead } from "../lib/advance-lead.ts";
 
 /**
  * Lead pipeline API.
@@ -38,6 +39,69 @@ export interface AdminLeadsRoutesOpts {
 
 export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
   const app = new Hono();
+
+  /**
+   * POST /api/admin/leads/:id/advance
+   * Operator-in-the-loop: подтвердить текущую operator-стадию и перейти на
+   * следующую (next_stages[0]) прямо со страницы лида. Пишет сообщение в чат
+   * клиента, не глушит AI, пингует оператора при входе в awaiting_operator.
+   */
+  app.post("/api/admin/leads/:id/advance", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = (c.var.adminId as number | null) ?? undefined;
+    const leadId = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isFinite(leadId) || leadId <= 0) {
+      return c.json({ error: "invalid lead id" }, 400);
+    }
+    let note = "";
+    try {
+      const b = (await c.req.json()) as { text?: unknown };
+      if (typeof b.text === "string") note = b.text.trim().slice(0, 2000);
+    } catch {
+      /* пустое тело допустимо */
+    }
+
+    const outcome = await advanceLead({
+      db: opts.db,
+      tenantId,
+      ...(adminId !== undefined ? { adminId } : {}),
+      ...(note ? { note } : {}),
+      selector: { leadId },
+      notifications: opts.notificationService ?? null,
+    });
+
+    if (outcome.kind === "no_lead") {
+      return c.json({ error: "lead has no funnel stage" }, 409);
+    }
+    if (outcome.kind === "terminal") {
+      return c.json({ error: "lead already at terminal stage", stage: outcome.stage }, 409);
+    }
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "lead.advance",
+      targetKind: "lead",
+      targetId: String(outcome.leadId),
+      details: { from: outcome.from, to: outcome.to },
+    });
+    adminEventBus.emit({
+      type: "stage_changed",
+      tenantId,
+      leadId: outcome.leadId,
+      toStage: outcome.to,
+      toStageDisplayName: outcome.toDisplayName,
+    });
+
+    return c.json({
+      ok: true,
+      from: outcome.from,
+      to: outcome.to,
+      toDisplayName: outcome.toDisplayName,
+      awaitingOperator: outcome.awaitingOperator,
+      terminal: outcome.terminal,
+    });
+  });
 
   /**
    * GET /api/admin/leads

@@ -230,6 +230,7 @@ export function SaasLeadDetail() {
 
   // Stage move state
   const [movingStage, setMovingStage] = useState(false);
+  const [advancingLead, setAdvancingLead] = useState(false);
 
   // Field editing state
   const [editing, setEditing] = useState(false);
@@ -538,6 +539,27 @@ export function SaasLeadDetail() {
                     <span className="text-xs text-muted-foreground">
                       {STAGE_TYPE_RU[stageDef.stageType] ?? stageDef.stageType}
                     </span>
+                  )}
+                  {stageDef && (
+                    <Button
+                      size="sm"
+                      className="ml-auto"
+                      disabled={advancingLead}
+                      onClick={async () => {
+                        setAdvancingLead(true);
+                        setError("");
+                        try {
+                          await saas.advanceLead(Number(id));
+                          reload();
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : String(err));
+                        } finally {
+                          setAdvancingLead(false);
+                        }
+                      }}
+                    >
+                      {advancingLead ? "…" : "✅ Подтвердить · дальше"}
+                    </Button>
                   )}
                 </div>
                 {lead.rejectedReason && (

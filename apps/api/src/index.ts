@@ -382,7 +382,7 @@ async function main() {
   log.info("admin-onboarding route enabled");
 
   // Read-only conversations + messages для admin-UI inbox.
-  app.route("/", makeAdminConversationsRoutes({ db }));
+  app.route("/", makeAdminConversationsRoutes({ db, notifications: notificationService }));
   log.info("admin-conversations routes enabled (list + thread + reply)");
 
   // Audit log read API.

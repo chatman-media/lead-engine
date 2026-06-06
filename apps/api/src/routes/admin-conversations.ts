@@ -1,20 +1,18 @@
-import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import { type Db, type NotificationService, withTenant } from "@chatman-media/conversation-engine";
 import {
   admins,
   channelIdentities,
   channels,
   contacts,
   conversations,
-  leadEvents,
-  leads,
   messages,
   outboundQueue,
-  stageDefinitions,
 } from "@chatman-media/storage";
 import { and, desc, eq, ilike, isNotNull, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
+import { advanceLead } from "../lib/advance-lead.ts";
 
 /**
  * Per-tenant read-only conversations API под /api/admin/conversations/*.
@@ -29,6 +27,8 @@ import { adminEventBus } from "../lib/admin-event-bus.ts";
  */
 export interface AdminConversationsRoutesOpts {
   db: Db;
+  /** Для пинга оператору при входе лида в awaiting_operator-стадию. */
+  notifications?: NotificationService | null;
 }
 
 export function makeAdminConversationsRoutes(
@@ -389,118 +389,28 @@ export function makeAdminConversationsRoutes(
       body = {};
     }
     const note = typeof body.text === "string" ? body.text.trim().slice(0, 2000) : "";
-    const now = Math.floor(Date.now() / 1000);
 
-    const outcome = await withTenant(opts.db, tenantId, async (tx) => {
-      const [conv] = await tx
-        .select({ id: conversations.id, contactId: conversations.userId, source: conversations.source })
+    const [conv] = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select({ contactId: conversations.userId })
         .from(conversations)
-        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)));
-      if (!conv) return { kind: "not_found" } as const;
+        .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, conversationId)))
+        .limit(1),
+    );
+    if (!conv) return c.json({ error: "conversation not found" }, 404);
 
-      const [lead] = await tx
-        .select({ id: leads.id, state: leads.state, stageDefinitionId: leads.stageDefinitionId })
-        .from(leads)
-        .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, conv.contactId)))
-        .orderBy(desc(leads.id))
-        .limit(1);
-      if (!lead || !lead.stageDefinitionId) return { kind: "no_lead" } as const;
-
-      const [cur] = await tx
-        .select({
-          slug: stageDefinitions.slug,
-          displayName: stageDefinitions.displayName,
-          nextStages: stageDefinitions.nextStages,
-        })
-        .from(stageDefinitions)
-        .where(and(eq(stageDefinitions.id, lead.stageDefinitionId), eq(stageDefinitions.tenantId, tenantId)));
-      if (!cur) return { kind: "no_lead" } as const;
-      const nextSlug = cur.nextStages[0];
-      if (!nextSlug) return { kind: "terminal", stage: cur.slug } as const;
-
-      const [next] = await tx
-        .select({
-          id: stageDefinitions.id,
-          slug: stageDefinitions.slug,
-          displayName: stageDefinitions.displayName,
-          stageType: stageDefinitions.stageType,
-          nextStages: stageDefinitions.nextStages,
-        })
-        .from(stageDefinitions)
-        .where(and(eq(stageDefinitions.slug, nextSlug), eq(stageDefinitions.tenantId, tenantId)));
-      if (!next) return { kind: "terminal", stage: cur.slug } as const;
-
-      // advance lead
-      await tx
-        .update(leads)
-        .set({ stageDefinitionId: next.id, state: next.slug, updatedAt: now })
-        .where(eq(leads.id, lead.id));
-      await tx.insert(leadEvents).values({
-        tenantId,
-        leadId: lead.id,
-        fromState: lead.state,
-        toState: next.slug,
-        byAdminId: adminId,
-        createdAt: now,
-      });
-
-      // chat message (бот ведёт клиента дальше)
-      const msgText = note || `✅ ${cur.displayName} — готово. Переходим к этапу: ${next.displayName}.`;
-      const [msg] = await tx
-        .insert(messages)
-        .values({
-          tenantId,
-          conversationId,
-          role: "assistant",
-          text: msgText,
-          metaJson: JSON.stringify({ adminId, sentVia: "operator-advance", toStage: next.slug }),
-          createdAt: now,
-        })
-        .returning({ id: messages.id });
-
-      await tx
-        .update(conversations)
-        .set({ lastMessageAt: now, lastMessageText: msgText.slice(0, 200), unreadCount: 0 })
-        .where(eq(conversations.id, conversationId));
-
-      // доставка клиенту только для реальных каналов (не self_play)
-      if (conv.source !== "self_play") {
-        const [identity] = await tx
-          .select({ channelDbId: channels.id, externalUserId: channelIdentities.externalUserId })
-          .from(channelIdentities)
-          .innerJoin(channels, eq(channels.id, channelIdentities.channelId))
-          .where(and(eq(channelIdentities.contactId, conv.contactId), eq(channels.status, "active")))
-          .limit(1);
-        if (identity) {
-          await tx.insert(outboundQueue).values({
-            tenantId,
-            channelId: identity.channelDbId,
-            conversationId,
-            payloadJson: JSON.stringify({
-              channelId: String(identity.channelDbId),
-              externalUserId: identity.externalUserId,
-              parts: [{ kind: "text", text: msgText }],
-            }),
-            idempotencyKey: `op-advance-${msg!.id}`,
-            scheduledAt: now,
-            createdAt: now,
-          });
-        }
-      }
-
-      return {
-        kind: "advanced",
-        from: cur.slug,
-        to: next.slug,
-        toDisplayName: next.displayName,
-        awaitingOperator: next.stageType === "awaiting_operator",
-        terminal: next.nextStages.length === 0,
-        leadId: lead.id,
-      } as const;
+    const outcome = await advanceLead({
+      db: opts.db,
+      tenantId,
+      ...(adminId !== undefined ? { adminId } : {}),
+      ...(note ? { note } : {}),
+      selector: { contactId: conv.contactId },
+      notifications: opts.notifications ?? null,
     });
 
-    if (outcome.kind === "not_found") return c.json({ error: "conversation not found" }, 404);
-    if (outcome.kind === "no_lead") return c.json({ error: "no lead with funnel stage for this conversation" }, 409);
+    if (outcome.kind === "no_lead") {
+      return c.json({ error: "no lead with funnel stage for this conversation" }, 409);
+    }
     if (outcome.kind === "terminal") {
       return c.json({ error: "lead already at terminal stage", stage: outcome.stage }, 409);
     }
