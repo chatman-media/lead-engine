@@ -33,6 +33,7 @@ import {
 	renderRateCardMessage,
 } from "../lib/exchange/rate-feed.ts";
 import { isAllowedExchangeSecretKey } from "../lib/exchange/requisite-keys.ts";
+import { recordAudit } from "../lib/audit.ts";
 
 export interface AdminExchangeRoutesOpts {
 	db: Db;
@@ -80,6 +81,73 @@ function serializeExchangeOrder(order: typeof exchangeOrders.$inferSelect) {
 		...order,
 		workflowStage: resolveExchangeWorkflowStage(order),
 	};
+}
+
+/**
+ * Доставляет клиенту сообщение по заявке: пишет ассистент-реплику в беседу,
+ * обновляет lastMessage и кладёт в outbound_queue для реальной отправки в канал
+ * (если беседа не self_play и у контакта есть активный канал). Возвращает, было
+ * ли сообщение поставлено в очередь на отправку. Это «push без поллинга»: бот
+ * не опрашивает статус — оператор нажал, клиент сразу получил.
+ */
+async function deliverExchangeMessage(
+	db: Db,
+	tenantId: number,
+	row: typeof exchangeOrders.$inferSelect,
+	note: string,
+	idempotencyKey: string,
+	sentVia: string,
+): Promise<boolean> {
+	if (!row.conversationId) return false;
+	const now = Math.floor(Date.now() / 1000);
+	return withTenant(db, tenantId, async (tx) => {
+		const [msg] = await tx
+			.insert(messages)
+			.values({
+				tenantId,
+				conversationId: row.conversationId!,
+				role: "assistant",
+				text: note,
+				metaJson: JSON.stringify({ sentVia, orderId: row.id }),
+				createdAt: now,
+			})
+			.returning({ id: messages.id });
+		await tx
+			.update(conversations)
+			.set({ lastMessageAt: now, lastMessageText: note.slice(0, 200) })
+			.where(eq(conversations.id, row.conversationId!));
+
+		const [conv] = await tx
+			.select({ source: conversations.source })
+			.from(conversations)
+			.where(eq(conversations.id, row.conversationId!))
+			.limit(1);
+		if (conv && conv.source !== "self_play" && row.contactId) {
+			const [identity] = await tx
+				.select({ channelDbId: channels.id, externalUserId: channelIdentities.externalUserId })
+				.from(channelIdentities)
+				.innerJoin(channels, eq(channels.id, channelIdentities.channelId))
+				.where(and(eq(channelIdentities.contactId, row.contactId), eq(channels.status, "active")))
+				.limit(1);
+			if (identity) {
+				await tx.insert(outboundQueue).values({
+					tenantId,
+					channelId: identity.channelDbId,
+					conversationId: row.conversationId!,
+					payloadJson: JSON.stringify({
+						channelId: String(identity.channelDbId),
+						externalUserId: identity.externalUserId,
+						parts: [{ kind: "text", text: note }],
+					}),
+					idempotencyKey: `${idempotencyKey}-${msg!.id}`,
+					scheduledAt: now,
+					createdAt: now,
+				});
+				return true;
+			}
+		}
+		return false;
+	});
 }
 
 export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
@@ -674,6 +742,99 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		}
 
 		return c.json({ ok: true, order: serializeExchangeOrder(row) });
+	});
+
+	/**
+	 * POST /api/admin/exchange/orders/:id/issue-payout-code
+	 * Операторская «выдача кода» одной кнопкой: задаёт код (или генерирует),
+	 * опц. место/метод выдачи и TTL, переводит paid→payout и СРАЗУ доставляет
+	 * код клиенту в чат (без поллинга ботом). Тело:
+	 *   { payoutCode?, generate?, payoutLocation?, payoutMethod?, ttlMinutes? }
+	 */
+	app.post("/api/admin/exchange/orders/:id/issue-payout-code", async (c) => {
+		const tenantId = c.var.tenantId;
+		const adminId = c.var.adminId as number | undefined;
+		const id = Number(c.req.param("id"));
+		if (!Number.isInteger(id)) return c.json({ error: "bad id" }, 400);
+		const body = await c.req.json().catch(() => ({}));
+		const now = Math.floor(Date.now() / 1000);
+
+		const provided =
+			typeof body?.payoutCode === "string" && body.payoutCode.trim()
+				? body.payoutCode.trim()
+				: null;
+		const code =
+			provided ??
+			(body?.generate === true
+				? `CODE-${id}-${crypto.randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase()}`
+				: null);
+		if (!code)
+			return c.json({ error: "payoutCode required (or pass generate:true)" }, 400);
+
+		const ttlMinutes =
+			typeof body?.ttlMinutes === "number" && body.ttlMinutes > 0
+				? Math.floor(body.ttlMinutes)
+				: null;
+		const expiresAt = ttlMinutes ? now + ttlMinutes * 60 : null;
+
+		const patch: Record<string, unknown> = {
+			payoutCode: code,
+			payoutCodeExpiresAt: expiresAt,
+			updatedAt: now,
+		};
+		if (typeof body?.payoutLocation === "string")
+			patch.payoutLocation = body.payoutLocation.trim();
+		if (typeof body?.payoutMethod === "string")
+			patch.payoutMethod = body.payoutMethod.trim();
+
+		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
+			tx
+				.update(exchangeOrders)
+				.set(patch)
+				.where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id)))
+				.returning(),
+		);
+		if (!row) return c.json({ error: "not found" }, 404);
+
+		// paid → payout: двигаем статус, раз код выдан.
+		if (row.status === "paid") {
+			await withTenant(opts.db, tenantId, async (tx) =>
+				tx
+					.update(exchangeOrders)
+					.set({ status: "payout", updatedAt: now })
+					.where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id))),
+			);
+			row.status = "payout";
+		}
+
+		const loc = row.payoutLocation ? ` Место: ${row.payoutLocation}.` : "";
+		const ttlNote = ttlMinutes ? ` Код действует ${ttlMinutes} мин.` : "";
+		const note = `🔐 Код выдачи: ${code}.${loc}${ttlNote}`;
+		const delivered = await deliverExchangeMessage(
+			opts.db,
+			tenantId,
+			row,
+			note,
+			`exch-payout-code-${row.id}`,
+			"exchange-payout-code",
+		);
+
+		await recordAudit(opts.db, {
+			tenantId,
+			adminId,
+			action: "exchange.payout_code_issued",
+			targetKind: "exchange_order",
+			targetId: String(id),
+			details: { generated: !provided, ttlMinutes, delivered },
+		});
+
+		return c.json({
+			ok: true,
+			payoutCode: code,
+			expiresAt,
+			delivered,
+			order: serializeExchangeOrder(row),
+		});
 	});
 
 	// ── Оборот (нормализовано в THB) ────────────────────────────────────────────

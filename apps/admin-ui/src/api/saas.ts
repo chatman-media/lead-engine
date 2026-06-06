@@ -2079,6 +2079,27 @@ export const saas = {
       body: JSON.stringify(patch),
     });
   },
+  issueExchangePayoutCode(
+    id: number,
+    opts: Partial<{
+      payoutCode: string;
+      generate: boolean;
+      payoutLocation: string;
+      payoutMethod: string;
+      ttlMinutes: number;
+    }> = {},
+  ) {
+    return request<{
+      ok: boolean;
+      payoutCode: string;
+      expiresAt: number | null;
+      delivered: boolean;
+      order: ExchangeOrder;
+    }>(`/api/admin/exchange/orders/${id}/issue-payout-code`, {
+      method: "POST",
+      body: JSON.stringify(opts),
+    });
+  },
   exchangeTurnover() {
     return request<ExchangeTurnover>("/api/admin/exchange/turnover");
   },

@@ -12,6 +12,7 @@ import {
 	conversations,
 	createIsolatedDb,
 	exchangeOrders,
+	outboundQueue,
 	schema,
 	tryConnectToPg,
 } from "@chatman-media/storage";
@@ -456,6 +457,57 @@ describe("admin-exchange routes", () => {
 		expect(Number(turnover.totals.openCount)).toBe(0);
 		expect(Number(turnover.totals.totalThb)).toBe(10_000);
 		expect(Number(turnover.byContact[0]?.totalThb)).toBe(10_000);
+	});
+
+	it("issue-payout-code generates a code, sets TTL and delivers to client", async () => {
+		if (!sql) return;
+		const [row] = await withTenant(db, tenantA, (tx) =>
+			tx
+				.select({ id: exchangeOrders.id })
+				.from(exchangeOrders)
+				.where(eq(exchangeOrders.tenantId, tenantA))
+				.limit(1),
+		);
+		const orderId = must(row, "exchange order").id;
+
+		const nowSec = Math.floor(Date.now() / 1000);
+		const res = await postJson(
+			tokenA,
+			`/api/admin/exchange/orders/${orderId}/issue-payout-code`,
+			{ generate: true, ttlMinutes: 30, payoutLocation: "Bangtao office" },
+		);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			ok: boolean;
+			payoutCode: string;
+			expiresAt: number | null;
+			delivered: boolean;
+			order: { payoutCode: string; payoutCodeExpiresAt: number | null };
+		};
+		expect(body.ok).toBe(true);
+		expect(body.payoutCode).toMatch(/^CODE-/);
+		expect(body.expiresAt ?? 0).toBeGreaterThan(nowSec);
+		expect(body.order.payoutCode).toBe(body.payoutCode);
+		expect(body.order.payoutCodeExpiresAt).toBe(body.expiresAt);
+		// Доставка без поллинга: сообщение поставлено в outbound_queue.
+		expect(body.delivered).toBe(true);
+		const ob = await withTenant(db, tenantA, (tx) =>
+			tx
+				.select({ key: outboundQueue.idempotencyKey })
+				.from(outboundQueue)
+				.where(eq(outboundQueue.tenantId, tenantA)),
+		);
+		expect(
+			ob.some((r) => String(r.key).startsWith(`exch-payout-code-${orderId}`)),
+		).toBe(true);
+
+		// Требуется код или generate:true.
+		const bad = await postJson(
+			tokenA,
+			`/api/admin/exchange/orders/${orderId}/issue-payout-code`,
+			{},
+		);
+		expect(bad.status).toBe(400);
 	});
 
 	it("keeps exchange CRM isolated by tenant", async () => {

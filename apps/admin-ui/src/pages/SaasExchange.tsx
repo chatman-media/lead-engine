@@ -415,6 +415,23 @@ export function SaasExchange() {
     }
   }
 
+  async function issueCode(id: number, code: string) {
+    try {
+      const r = await saas.issueExchangePayoutCode(
+        id,
+        code.trim() ? { payoutCode: code.trim() } : { generate: true },
+      );
+      toast.success(
+        r.delivered
+          ? `Код ${r.payoutCode} отправлен клиенту`
+          : `Код ${r.payoutCode} сохранён (клиенту не отправлен — нет активного канала)`,
+      );
+      load();
+    } catch (err) {
+      if (!handle401(err)) toast.error("Не удалось выдать код");
+    }
+  }
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -941,7 +958,7 @@ export function SaasExchange() {
                     </TableRow>
                   )}
                   {orders.map((o) => (
-                    <OrderRow key={o.id} order={o} onPatch={patchOrder} />
+                    <OrderRow key={o.id} order={o} onPatch={patchOrder} onIssueCode={issueCode} />
                   ))}
                 </TableBody>
               </Table>
@@ -1029,9 +1046,11 @@ export function SaasExchange() {
 function OrderRow({
   order,
   onPatch,
+  onIssueCode,
 }: {
   order: ExchangeOrder;
   onPatch: (id: number, patch: Parameters<typeof saas.updateExchangeOrder>[1]) => void;
+  onIssueCode: (id: number, code: string) => void;
 }) {
   const [code, setCode] = useState(order.payoutCode ?? "");
   const [verif, setVerif] = useState(order.verificationId ?? "");
@@ -1129,6 +1148,16 @@ function OrderRow({
           }
           placeholder="Код выдачи"
         />
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="mt-1 h-7 w-28 text-[11px]"
+          onClick={() => onIssueCode(order.id, code)}
+          title="Сохранить код, перевести в «выдача» и отправить клиенту в чат"
+        >
+          {code.trim() ? "Выдать клиенту" : "🎲 Сген. и выдать"}
+        </Button>
       </TableCell>
       <TableCell>
         <Select
