@@ -61,6 +61,8 @@ const SYSTEM_PROMPT = `Ты — помощник по настройке вор�
   "supportMode": true|false (true = бот замолкает, работает оператор; опц.),
   "nextStages": ["slug", ...] — в какие стадии можно перейти (терминальные = []),
   "autoAdvanceCondition": "{\\"type\\":\\"all_required_fields_filled\\"}" (опц., для авто-перехода),
+  "goal": "что должна достичь active-стадия (кратко; для intake/terminal не нужно)",
+  "guidance": "как боту вести себя на этой стадии (опц., 1-2 фразы)",
   "fields": [
     {
       "slug": "snake_case",
@@ -84,6 +86,7 @@ const SYSTEM_PROMPT = `Ты — помощник по настройке вор�
 - terminal_won ставь после последней реальной фазы (нет fulfill/clear → сразу после offer).
 - slug'и уникальны; nextStages ссылаются только на существующие slug'и.
 - Поля, которые бот может вытащить из диалога (имя, сумма, тип), помечай aiExtractable: true.
+- Для active-стадий заполняй "goal" (что сделать на стадии) и по возможности "guidance" (как вести диалог) под этот бизнес.
 - Используй короткие воронки (4–8 стадий) — не усложняй.`;
 
 const MAX_TURNS = 60;
@@ -107,6 +110,8 @@ export interface StageDraft {
 	supportMode?: boolean;
 	nextStages?: string[];
 	autoAdvanceCondition?: string;
+	goal?: string;
+	guidance?: string;
 	fields?: FieldDraft[];
 }
 
@@ -195,6 +200,12 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 				: [],
 			...(typeof d.autoAdvanceCondition === "string"
 				? { autoAdvanceCondition: d.autoAdvanceCondition }
+				: {}),
+			...(typeof d.goal === "string" && d.goal.trim()
+				? { goal: d.goal.slice(0, 500) }
+				: {}),
+			...(typeof d.guidance === "string" && d.guidance.trim()
+				? { guidance: d.guidance.slice(0, 1000) }
 				: {}),
 			fields,
 		});

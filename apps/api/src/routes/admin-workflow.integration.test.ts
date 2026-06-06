@@ -100,7 +100,7 @@ const MSGS = [{ role: "user", content: "у меня обменник крипт�
 /** Валидная воронка по костяку: intake → qualify → offer → won/lost. */
 const VALID_STAGES = [
   { slug: "intake", displayName: "Заявка", kind: "intake", stageType: "form_fill", nextStages: ["qualify"], fields: [{ slug: "name", displayName: "Имя", fieldType: "text", required: true, aiExtractable: true }] },
-  { slug: "qualify", displayName: "Квалификация", kind: "active", stageType: "form_fill", phase: "qualify", nextStages: ["offer"], fields: [] },
+  { slug: "qualify", displayName: "Квалификация", kind: "active", stageType: "form_fill", phase: "qualify", goal: "понять сумму и валюту", guidance: "задай 1-2 вопроса", nextStages: ["offer"], fields: [] },
   { slug: "offer", displayName: "Оффер", kind: "active", stageType: "rate_confirmation", phase: "offer", nextStages: ["won", "lost"], fields: [] },
   { slug: "won", displayName: "Успех", kind: "terminal_won", stageType: "milestone", nextStages: [], fields: [] },
   { slug: "lost", displayName: "Отказ", kind: "terminal_lost", stageType: "milestone", nextStages: [], fields: [] },
@@ -205,10 +205,12 @@ describe("admin-workflow /apply", () => {
     expect(body.stageCount).toBe(5);
 
     const rows = await db
-      .select({ slug: stageDefinitions.slug })
+      .select({ slug: stageDefinitions.slug, goal: stageDefinitions.goal })
       .from(stageDefinitions)
       .where(eq(stageDefinitions.tenantId, tenantId));
     expect(rows.length).toBe(5);
     expect(rows.map((r) => r.slug).sort()).toEqual(["intake", "lost", "offer", "qualify", "won"]);
+    // Phase 2 slice C: AI-emitted per-stage goal is normalized + persisted.
+    expect(rows.find((r) => r.slug === "qualify")?.goal).toBe("понять сумму и валюту");
   });
 });

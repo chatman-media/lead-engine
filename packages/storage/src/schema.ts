@@ -392,6 +392,10 @@ export const stageDefinitions = pgTable("stage_definitions", {
   supportMode: boolean("support_mode").notNull().default(false),
   color: text("color"),
   icon: text("icon"),
+  // Per-stage instructions (Phase 2): goal = what to achieve, guidance = how to
+  // behave. Consumed by the reply prompt (slice C-2); NULL = fall back to Style.
+  goal: text("goal"),
+  guidance: text("guidance"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
