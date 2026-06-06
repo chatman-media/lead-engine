@@ -447,11 +447,10 @@ export function SaasNotifications() {
           <div className="flex gap-2.5 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5 text-xs text-muted-foreground">
             <span aria-hidden className="shrink-0 text-base leading-none">💡</span>
             <p>
-              Это <strong className="text-foreground">служебный бот для вас и операторов</strong> — он
-              шлёт алерты в личку (новый лид, «нужна помощь», крупная сделка). Это{" "}
-              <strong className="text-foreground">не тот бот из «Каналов»</strong>, который переписывается
-              с клиентами: у каждого бота свой канал, поэтому уведомления вынесены в отдельного бота.
-              Подключаете один раз — каждый оператор привязывает свой Telegram сам.
+              Служебный бот команды: присылает рабочие уведомления (новый лид, эскалация,
+              крупная сделка) вам и операторам в личные сообщения. Бот из «Каналов» общается
+              с клиентами — это разные боты. Подключается один раз, дальше каждый оператор
+              привязывает свой Telegram.
             </p>
           </div>
 
