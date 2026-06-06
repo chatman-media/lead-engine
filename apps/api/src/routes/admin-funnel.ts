@@ -52,11 +52,40 @@ type SeedStage = {
   }>;
 };
 
+// Цели/инструкции для стадий универсального скелета (бот читает их пер-стадийно).
+const SKELETON_GG: Record<string, { goal: string; guidance: string }> = {
+  new: {
+    goal: "Поприветствовать клиента и понять суть его запроса.",
+    guidance:
+      "Тепло начните диалог, выясните, что нужно клиенту, и зафиксируйте контакт. Задавайте по одному вопросу, не перегружайте.",
+  },
+  qualify: {
+    goal: "Понять потребность, бюджет и готовность клиента двигаться дальше.",
+    guidance:
+      "Уточните детали запроса и ключевые ограничения (бюджет, сроки), задавая вопросы по одному. Слушайте и не предлагайте решение раньше времени.",
+  },
+  offer: {
+    goal: "Сделать релевантное предложение и получить реакцию клиента.",
+    guidance:
+      "Сформулируйте предложение под выявленную потребность, объясните ценность, а не только цену. Дождитесь обратной связи и будьте готовы ответить на вопросы.",
+  },
+  clear: {
+    goal: "Снять возражения и согласовать условия перед выполнением.",
+    guidance:
+      "Выслушайте сомнения, ответьте по существу и зафиксируйте договорённости. Держите конструктивный тон, ведите к чёткому решению.",
+  },
+  fulfill: {
+    goal: "Довести договорённость до выполнения и подтвердить результат клиенту.",
+    guidance:
+      "Сопроводите клиента на этапе выполнения, держите в курсе статуса и подтвердите, что всё сделано. Будьте на связи на случай вопросов.",
+  },
+};
+
 export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
   // Универсальный скелет костяка — стартовая воронка для новой вертикали.
   // 6 фаз (capture→qualify→offer→clear→fulfill→won/lost), поверх — кастомизация.
   skeleton: buildSkeletonFunnel({ includeClear: true, includeFulfill: true }).map(
-    (s) => ({ ...s, fields: [] }),
+    (s) => ({ ...s, fields: [], ...(SKELETON_GG[s.slug] ?? {}) }),
   ),
   // Консьерж-сервис (вилла): один общий intake ветвится по типу запроса
   // (обмен / трансфер / еда / уборка / тур), каждая ветка — короткий qualify → offer → fulfill,
@@ -68,6 +97,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "request_received",
       displayName: "Запрос принят",
+      goal: "Понять, какая услуга нужна гостю, и определить ветку запроса.",
+      guidance: "Тепло поприветствуйте гостя, уточните тип запроса (обмен, трансфер, еда, уборка, экскурсия) и коротко зафиксируйте суть просьбы. Не углубляйтесь в детали — сначала определите категорию.",
       kind: "intake",
       stageType: "form_fill",
       position: 0,
@@ -86,6 +117,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     // ── qualify: детали запроса по типу ──
     {
       slug: "exchange_request", phase: "qualify", displayName: "Обмен: детали", kind: "active",
+      goal: "Собрать валюту и сумму, которую гость хочет обменять.",
+      guidance: "Спокойно уточните, что и в каком объёме меняем (например, USDT или RUB и сумму). Не называйте курс и не обещайте условия — это определит оператор на следующем шаге.",
       stageType: "form_fill", position: 1, color: "#6366f1",
       nextStages: ["exchange_offer", "cancelled"],
       autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
@@ -96,6 +129,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "transfer_request", phase: "qualify", displayName: "Трансфер: детали", kind: "active",
+      goal: "Собрать маршрут трансфера: откуда, куда и при необходимости время и число пассажиров.",
+      guidance: "Уточните точки подачи и назначения, по возможности время и количество пассажиров. Задавайте вопросы по одному, не перегружая гостя; цену пока не озвучивайте.",
       stageType: "form_fill", position: 2, color: "#6366f1",
       nextStages: ["transfer_offer", "cancelled"],
       autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
@@ -108,6 +143,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "food_request", phase: "qualify", displayName: "Еда: заказ", kind: "active",
+      goal: "Зафиксировать состав заказа еды и адрес доставки.",
+      guidance: "Уточните, что именно заказать и куда доставить. Переспросите детали блюд, если формулировка нечёткая; сумму и время назовёте после подтверждения оператором.",
       stageType: "form_fill", position: 3, color: "#6366f1",
       nextStages: ["food_offer", "cancelled"],
       autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
@@ -119,6 +156,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 
     {
       slug: "housekeeping_request", phase: "qualify", displayName: "Уборка: детали", kind: "active",
+      goal: "Понять, какая услуга по уборке нужна и когда.",
+      guidance: "Уточните тип услуги (уборка, смена белья и т.п.) и удобное время. Будьте кратки и вежливы, не навязывайте дополнительные услуги.",
       stageType: "form_fill", position: 4, color: "#6366f1",
       nextStages: ["housekeeping_offer", "cancelled"],
       autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
@@ -129,6 +168,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "tour_request", phase: "qualify", displayName: "Тур: детали", kind: "active",
+      goal: "Собрать пожелания по экскурсии: направление, дату и число участников.",
+      guidance: "Уточните, куда хочет поехать гость, желаемую дату и количество человек. Проявите интерес к пожеланиям, но цену и программу не выдумывайте — они придут от оператора.",
       stageType: "form_fill", position: 5, color: "#6366f1",
       nextStages: ["tour_offer", "cancelled"],
       autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
@@ -142,6 +183,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     // ── offer: условия (цена/курс) — НЕ выдумываются, приходят от tools/оператора ──
     {
       slug: "exchange_offer", phase: "offer", displayName: "Обмен: котировка", kind: "active",
+      goal: "Передать гостю курс от оператора и получить подтверждение обмена.",
+      guidance: "Озвучьте курс и сумму к выдаче ровно так, как их дал оператор, ничего не меняя. Дождитесь явного согласия гостя и не торгуйтесь по курсу.",
       stageType: "awaiting_operator", position: 6, color: "#f59e0b",
       nextStages: ["exchange_fulfill", "cancelled"],
       fields: [
@@ -151,6 +194,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "transfer_offer", phase: "offer", displayName: "Трансфер: предложение", kind: "active",
+      goal: "Сообщить цену и класс авто и получить подтверждение брони трансфера.",
+      guidance: "Передайте цену и класс автомобиля от оператора, ответьте на вопросы по поездке. Дождитесь чёткого «да» от гостя перед бронированием; цену не придумывайте.",
       stageType: "awaiting_operator", position: 7, color: "#f59e0b",
       nextStages: ["transfer_fulfill", "cancelled"],
       fields: [
@@ -161,6 +206,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "food_offer", phase: "offer", displayName: "Еда: подтверждение", kind: "active",
+      goal: "Подтвердить сумму и время доставки заказа и получить согласие гостя.",
+      guidance: "Озвучьте итоговую сумму и время доставки, как их указал оператор. Дождитесь подтверждения заказа; не обещайте сроки, которых нет в данных.",
       stageType: "awaiting_operator", position: 8, color: "#f59e0b",
       nextStages: ["food_fulfill", "cancelled"],
       fields: [
@@ -171,6 +218,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "housekeeping_offer", phase: "offer", displayName: "Уборка: подтверждение", kind: "active",
+      goal: "Согласовать условия уборки и получить подтверждение гостя.",
+      guidance: "Подтвердите услугу и, если есть, цену от оператора. Уточните удобное время и дождитесь согласия; будьте ненавязчивы.",
       stageType: "awaiting_operator", position: 9, color: "#f59e0b",
       nextStages: ["housekeeping_fulfill", "cancelled"],
       fields: [
@@ -180,6 +229,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "tour_offer", phase: "offer", displayName: "Тур: предложение", kind: "active",
+      goal: "Сообщить цену экскурсии и получить подтверждение брони.",
+      guidance: "Передайте цену и условия тура от оператора, ответьте на вопросы о программе. Дождитесь явного согласия гостя; стоимость не выдумывайте.",
       stageType: "awaiting_operator", position: 10, color: "#f59e0b",
       nextStages: ["tour_fulfill", "cancelled"],
       fields: [
@@ -191,6 +242,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     // ── fulfill: исполнение ──
     {
       slug: "exchange_fulfill", phase: "fulfill", displayName: "Обмен: выдача", kind: "active",
+      goal: "Согласовать способ выдачи и довести обмен до завершения.",
+      guidance: "Уточните удобный способ получения средств (офис, банкомат или доставка) и сопроводите гостя до завершения сделки. Чётко проговорите следующий шаг.",
       stageType: "milestone", position: 11, color: "#06b6d4",
       nextStages: ["completed", "cancelled"],
       fields: [
@@ -200,6 +253,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "transfer_fulfill", phase: "fulfill", displayName: "Трансфер: подача", kind: "active",
+      goal: "Подтвердить назначение водителя и подачу авто к месту.",
+      guidance: "Сообщите гостю, что водитель назначен, и держите его в курсе подачи машины. Отвечайте оперативно, если гость уточняет статус.",
       stageType: "milestone", position: 12, color: "#06b6d4",
       nextStages: ["completed", "cancelled"],
       fields: [
@@ -208,6 +263,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "food_fulfill", phase: "fulfill", displayName: "Еда: доставка", kind: "active",
+      goal: "Довести доставку заказа до гостя и подтвердить получение.",
+      guidance: "Сопроводите гостя до момента доставки и убедитесь, что заказ получен. Будьте на связи на случай вопросов по доставке.",
       stageType: "milestone", position: 13, color: "#06b6d4",
       nextStages: ["completed", "cancelled"],
       fields: [
@@ -216,6 +273,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "housekeeping_fulfill", phase: "fulfill", displayName: "Уборка: выполнение", kind: "active",
+      goal: "Проследить выполнение уборки и подтвердить завершение услуги.",
+      guidance: "Подтвердите, что услуга выполнена, и уточните, всё ли устроило гостя. Реагируйте вежливо, если потребуются доработки.",
       stageType: "milestone", position: 14, color: "#06b6d4",
       nextStages: ["completed", "cancelled"],
       fields: [
@@ -224,6 +283,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     },
     {
       slug: "tour_fulfill", phase: "fulfill", displayName: "Тур: бронь", kind: "active",
+      goal: "Завершить бронирование экскурсии и подтвердить детали гостю.",
+      guidance: "Подтвердите, что экскурсия забронирована, и проговорите ключевые детали (дата, место сбора). Пожелайте приятной поездки и оставайтесь на связи.",
       stageType: "milestone", position: 15, color: "#06b6d4",
       nextStages: ["completed", "cancelled"],
       fields: [
@@ -241,6 +302,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "intent_detected",
       displayName: "Детекция интента",
+      goal: "Понять, что нужно клиенту — обмен, курс, трансфер или зелёный коридор — и при необходимости узнать дату прилёта.",
+      guidance: "Поприветствуй коротко и по-деловому, уточни задачу одним вопросом. Если клиент прилетает — предложи трансфер или зелёный коридор. Не углубляйся в курсы и суммы на этом шаге.",
       kind: "intake",
       stageType: "form_fill",
       position: 0,
@@ -257,6 +320,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "exchange_request",
       phase: "qualify",
       displayName: "Параметры обмена",
+      goal: "Собрать параметры обмена: что отдаёт клиент, сумму, сеть для крипты и способ получения THB.",
+      guidance: "Спокойно уточни актив-источник и сумму. Для USDT обязательно спроси сеть (принимаем TRC20). Узнай, как клиент хочет получить баты — наличными в офисе по коду или через банкомат без карты. Курс пока не называй.",
       kind: "active",
       stageType: "form_fill",
       position: 1,
@@ -277,6 +342,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "quote_calculated",
       phase: "offer",
       displayName: "Курс рассчитан",
+      goal: "Озвучить рассчитанный курс и итоговую сумму THB и получить явное подтверждение клиента.",
+      guidance: "Назови ТОЛЬКО тот курс и сумму, которые вернул расчёт — никогда не придумывай и не округляй курс сам и не торгуйся. Чётко проговори, сколько клиент отдаёт и сколько получит на руки, и дождись согласия продолжить.",
       kind: "active",
       stageType: "rate_confirmation",
       position: 2,
@@ -292,6 +359,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "verification_check",
       phase: "clear",
       displayName: "Проверка верификации",
+      goal: "Определить, есть ли клиент в базе верифицированных, чтобы выбрать путь — сразу к риск-проверке или через KYC.",
+      guidance: "Уточни, обменивался ли клиент у нас раньше, без давления и лишних подробностей о внутренней проверке. Если верификация не найдена — мягко объясни, что потребуется быстрый шаг с подтверждением личности.",
       kind: "active",
       stageType: "assessment",
       position: 3,
@@ -306,6 +375,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "kyc_collection",
       phase: "clear",
       displayName: "Сбор документов (KYC)",
+      goal: "Получить от клиента видео-кружок для подтверждения личности и при необходимости имя по документам.",
+      guidance: "Вежливо объясни, что для безопасности сделки нужен короткий видео-кружок, и подскажи, как его записать. Заверь, что это разовая процедура; не запрашивай лишних документов сверх необходимого.",
       kind: "active",
       stageType: "document_upload",
       position: 4,
@@ -320,6 +391,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "risk_review",
       phase: "clear",
       displayName: "Проверка риска",
+      goal: "Дождаться решения по риск-проверке и провести клиента дальше к созданию заявки либо к оператору.",
+      guidance: "Эта оценка внутренняя — не раскрывай клиенту скоринг и критерии. Если решение «нужен оператор», спокойно сообщи, что заявку досмотрит специалист; при отказе вежливо заверши без объяснения причин.",
       kind: "active",
       stageType: "assessment",
       position: 5,
@@ -335,6 +408,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "order_created",
       phase: "fulfill",
       displayName: "Заявка создана",
+      goal: "Подтвердить клиенту, что заявка зафиксирована, и подготовить его к получению реквизитов на оплату.",
+      guidance: "Коротко сообщи, что заявка создана и сейчас придут реквизиты для перевода. Поддерживай уверенный тон; номер заявки формирует система — не выдумывай его.",
       kind: "active",
       stageType: "milestone",
       position: 6,
@@ -348,6 +423,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "requisites_sent",
       phase: "fulfill",
       displayName: "Реквизиты отправлены",
+      goal: "Передать клиенту выданные системой реквизиты для оплаты и указать срок их действия.",
+      guidance: "Отправь реквизиты ровно в том виде, как их выдал инструмент, — не меняй и не сочиняй адреса, карты или кошельки. Предупреди о сроке действия и попроси оплатить в его пределах одним платежом на точную сумму.",
       kind: "active",
       stageType: "external_approval",
       position: 7,
@@ -362,6 +439,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "payment_proof_waiting",
       phase: "fulfill",
       displayName: "Ожидание оплаты",
+      goal: "Дождаться оплаты и получить от клиента пруф — хэш транзакции, ссылку или фото чека.",
+      guidance: "Терпеливо дождись подтверждения оплаты и попроси приложить tx-хэш или чек. Не подтверждай зачисление на словах; при фиатном переводе или заминках предупреди, что зачисление может проверять оператор.",
       kind: "active",
       stageType: "payment",
       position: 8,
@@ -378,6 +457,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "payment_verified",
       phase: "fulfill",
       displayName: "Оплата подтверждена",
+      goal: "Зафиксировать факт поступления оплаты и фактическую сумму перед выдачей THB.",
+      guidance: "Сообщи клиенту, что оплата получена, и уточни банк-отправитель, если он не определился. Опирайся на фактически зачисленную сумму из проверки, а не на ожидаемую; не обещай выдачу до полного подтверждения.",
       kind: "active",
       stageType: "assessment",
       position: 9,
@@ -419,6 +500,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "qualification",
       displayName: "Квалификация",
+      goal: "Определить гражданство, тип визы и уровень английского, чтобы оценить применимый маршрут оформления.",
+      guidance: "Спрашивайте по одному параметру: гражданство, тип визы (рабочая/туристическая/студенческая/воссоединение), опыт работы и уровень английского. Тон деловой и доброжелательный; объясняйте, зачем нужны данные, и не давайте обещаний о шансах одобрения.",
       kind: "intake",
       stageType: "form_fill",
       position: 0,
@@ -437,6 +520,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "documents_collection",
       displayName: "Сбор документов",
+      goal: "Собрать корректный комплект документов: разворот паспорта, при наличии — диплом и историю трудоустройства.",
+      guidance: "Дайте чёткий чек-лист и просите загрузить фото первого разворота паспорта читаемым, без бликов и обрезанных полей. Проверяйте полноту, мягко напоминайте о недостающем; не запрашивайте лишних данных и не комментируйте юридическую силу документов.",
       kind: "active",
       stageType: "document_upload",
       position: 1,
@@ -451,6 +536,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "financial_verification",
       displayName: "Финансовая проверка",
+      goal: "Подтвердить финансовую состоятельность: получить выписку из банка и сумму доступных средств.",
+      guidance: "Попросите загрузить актуальную банковскую выписку и указать сумму средств в USD, объяснив, что это требование для подтверждения платёжеспособности. Будьте тактичны в денежных вопросах; не называйте «достаточный» порог и не гарантируйте одобрение по финансам.",
       kind: "active",
       stageType: "external_approval",
       position: 2,
@@ -464,6 +551,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "application_submission",
       displayName: "Подача заявки",
+      goal: "Зафиксировать факт подачи: дату, номер заявки и подтверждение оплаты консульского сбора.",
+      guidance: "Уточните дату подачи и номер заявки, подтвердите оплату консульского сбора. Подчёркивайте важность точности реквизитов и сохранения квитанции; напоминайте о сроках, но не обещайте конкретный исход.",
       kind: "active",
       stageType: "form_fill",
       position: 3,
@@ -479,6 +568,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "processing",
       displayName: "Рассмотрение",
+      goal: "Сопровождать ожидание решения и держать заявителя в курсе ожидаемых сроков.",
+      guidance: "Сообщите ориентировочную дату решения и спокойно поясните, что рассмотрение может занять время. Поддерживайте и снижайте тревожность, фиксируйте новые сведения в заметках; не давите на консульство и не гарантируйте положительный результат.",
       kind: "active",
       stageType: "waiting",
       position: 4,
@@ -521,6 +612,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "qualification",
       displayName: "Квалификация",
+      goal: "Выяснить бюджет, тип и цель покупки, способ оплаты и срок сделки, чтобы подобрать релевантные объекты.",
+      guidance: "Деликатно и по-деловому уточните бюджет в USD, тип недвижимости, желаемые районы, способ оплаты (наличные/ипотека/рассрочка) и горизонт сделки. Задавайте вопросы по одному, не давите, демонстрируйте экспертизу по рынку Дубая; для ипотечных клиентов отметьте, что потребуется одобрение банка.",
       kind: "intake",
       stageType: "form_fill",
       position: 0,
@@ -548,6 +641,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "viewings",
       phase: "qualify",
       displayName: "Просмотры",
+      goal: "Отправить релевантную подборку объектов, организовать просмотры и довести клиента до выбора конкретного объекта.",
+      guidance: "Предлагайте 2-3 подходящих варианта под запрос, согласовывайте удобные даты и время просмотров (онлайн или вживую), собирайте обратную связь после каждого показа. Будьте отзывчивы и пунктуальны, фиксируйте предпочтения и сужайте выбор до короткого списка.",
       kind: "active",
       stageType: "interaction",
       position: 1,
@@ -567,6 +662,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "offer_negotiation",
       phase: "offer",
       displayName: "Оффер и переговоры",
+      goal: "Согласовать цену между покупателем и продавцом и зафиксировать договорённость для подписания MOU.",
+      guidance: "Помогите клиенту сформировать обоснованное предложение, опираясь на рыночные цены и состояние объекта, и аккуратно ведите торг с продавцом. Сохраняйте профессиональный нейтралитет, управляйте ожиданиями по цене и срокам, не обещайте того, что не подтверждено продавцом.",
       kind: "active",
       stageType: "form_fill",
       position: 2,
@@ -584,6 +681,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "mou_signed",
       phase: "offer",
       displayName: "MOU подписан (Form F)",
+      goal: "Обеспечить подписание MOU (Form F) и оплату депозита (обычно 10%) с фиксацией даты завершения сделки.",
+      guidance: "Разъясните условия Form F, размер и порядок оплаты депозита через защищённый счёт, согласуйте дату завершения сделки. Действуйте чётко и юридически корректно, напоминайте о сроках и просите загрузить подписанный документ; не давайте юридических гарантий вне своей компетенции.",
       kind: "active",
       stageType: "document_signature",
       position: 3,
@@ -604,6 +703,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "noc_application",
       phase: "clear",
       displayName: "NOC от застройщика",
+      goal: "Подать заявку и получить NOC (No Objection Certificate) от застройщика для вторичной сделки.",
+      guidance: "Объясните клиенту назначение NOC и порядок его получения у застройщика, согласуйте подачу заявки и держите его в курсе статуса. Проактивно сопровождайте процесс, предупреждайте о возможных сроках и комиссиях застройщика, добивайтесь загрузки полученного сертификата.",
       kind: "active",
       stageType: "external_approval",
       position: 4,
@@ -622,6 +723,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "mortgage_approval",
       phase: "clear",
       displayName: "Одобрение ипотеки",
+      goal: "Довести ипотечного клиента до финального одобрения банком с подтверждённой суммой и условиями.",
+      guidance: "Сопровождайте сбор документов для банка, уточняйте одобренную сумму, ставку и срок ипотеки, помогайте сравнить предложения банков. Будьте терпеливы и внимательны к финансовым деталям, напоминайте о дедлайнах одобрения и просите письмо об одобрении; не давайте финансовых советов вне компетенции.",
       kind: "active",
       stageType: "external_approval",
       position: 5,
@@ -672,6 +775,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "intake",
       displayName: "Первичный контакт",
+      goal: "Собрать базовую анкету модели: имя, возраст, рост, параметры и опыт.",
+      guidance: "Общайтесь профессионально и дружелюбно, задавайте вопросы по одному и поясняйте, зачем нужны параметры. Если модели меньше 18 лет — обязательно уточните контакт родителя/законного представителя и не запрашивайте откровенных фото; не давайте обещаний о работе и не оценивайте внешность личными комментариями.",
       kind: "intake",
       stageType: "form_fill",
       position: 0,
@@ -691,6 +796,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "portfolio_review",
       displayName: "Ревью портфолио",
+      goal: "Получить качественное портфолио: 6–10 фото (headshot и в полный рост), при наличии комп-карту и видео-рилл.",
+      guidance: "Понятно объясните, какие материалы и в каком формате прислать, и предложите помощь, если их пока нет. Просите только профессионально уместные снимки, никаких откровенных или приватных фото; для несовершеннолетних — съёмка только с согласия и в присутствии родителя.",
       kind: "active",
       stageType: "document_upload",
       position: 1,
@@ -707,6 +814,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "go_see",
       displayName: "Go-See / Кастинг",
+      goal: "Согласовать дату, локацию и детали go-see/кастинга и зафиксировать его результат.",
+      guidance: "Чётко сообщите дату, адрес и что взять с собой, отвечайте на вопросы о клиенте и площадке. Сохраняйте профессиональный тон, не гарантируйте одобрение заранее; для несовершеннолетних — напомните о сопровождении взрослого.",
       kind: "active",
       stageType: "interaction",
       position: 2,
@@ -724,6 +833,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "contract",
       displayName: "Заключение контракта",
+      goal: "Довести модель до подписания контракта и зафиксировать дату и условия комиссии.",
+      guidance: "Прозрачно объясните ключевые условия и размер комиссии агентства, ответьте на вопросы спокойно и без давления. Не торопите с подписанием, рекомендуйте внимательно прочитать документ; для несовершеннолетних договор оформляется через родителя/опекуна.",
       kind: "active",
       stageType: "document_signature",
       position: 3,
@@ -770,6 +881,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "intake_pending",
       displayName: "Заполнение анкеты",
+      goal: "Собрать полную анкету кандидатки со всеми обязательными параметрами для оценки.",
+      guidance: "Дружелюбно и по порядку запрашивайте недостающие поля: данные паспорта, возраст, рост/вес, гражданство, языки и уровень, стили танца, срок загранпаспорта, город и готовность к выезду. Не торопите, поясняйте формат ответов (например параметры ОГ/ОТ/ОБ), не оценивайте внешность и не давайте обещаний по работе.",
       kind: "intake",
       stageType: "form_fill",
       position: 0,
@@ -807,6 +920,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "intake_complete",
       phase: "qualify",
       displayName: "Анкета собрана",
+      goal: "Подтвердить полноту анкеты и подготовить кандидатку к рассмотрению.",
+      guidance: "Поблагодарите за заполнение, кратко подтвердите, что данные приняты, и предупредите, что анкета уходит на оценку/партнёру. Не обещайте одобрение и не называйте сроки решения как гарантию.",
       kind: "active",
       stageType: "assessment",
       position: 1,
@@ -818,6 +933,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "partner_review",
       phase: "offer",
       displayName: "На рассмотрении у партнёра",
+      goal: "Удержать кандидатку на связи, пока партнёр рассматривает анкету.",
+      guidance: "Спокойно сообщите, что анкета на рассмотрении у партнёра и решение занимает время. Отвечайте на вопросы, но не торопите партнёра и не гарантируйте результат; при запросе уточняйте, что сообщите сразу, как будет ответ.",
       kind: "active",
       stageType: "external_approval",
       position: 2,
@@ -830,6 +947,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "approved",
       phase: "offer",
       displayName: "Одобрена",
+      goal: "Сообщить об одобрении и плавно перевести к сбору документов.",
+      guidance: "Поздравьте с одобрением, коротко объясните следующий шаг — подготовку документов и фото/видео. Сохраняйте деловой позитивный тон, без лишних обещаний по условиям контракта.",
       kind: "active",
       stageType: "milestone",
       position: 3,
@@ -841,6 +960,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "docs_pending",
       phase: "clear",
       displayName: "Сбор документов",
+      goal: "Получить все нужные документы: скан загранпаспорта, фотографии и видео.",
+      guidance: "Чётко перечислите, что нужно прислать (скан загранпаспорта, 6–8 фото, видео-визитку и видео танца) и в каком виде. Мягко напоминайте о недостающем, поясняйте требования к качеству, не давите.",
       kind: "active",
       stageType: "document_upload",
       position: 4,
@@ -858,6 +979,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "docs_complete",
       phase: "clear",
       displayName: "Документы собраны",
+      goal: "Подтвердить получение полного пакета документов и анонсировать визовый этап.",
+      guidance: "Подтвердите, что все документы получены и приняты, поблагодарите. Предупредите, что дальше — заполнение визовой анкеты, настройте на внимательность к точности данных.",
       kind: "active",
       stageType: "milestone",
       position: 5,
@@ -869,6 +992,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "visa_form",
       phase: "clear",
       displayName: "Заполнение визовой анкеты",
+      goal: "Собрать все данные для официальной визовой анкеты строго по документам.",
+      guidance: "Запрашивайте поля по порядку и подчёркивайте, что имена, даты и номера вводятся латиницей и точно как в загранпаспорте. Будьте терпеливы и аккуратны, перепроверяйте сомнительные значения, не выдумывайте данные за кандидатку.",
       kind: "active",
       stageType: "form_fill",
       position: 6,
@@ -916,6 +1041,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "visa_filing",
       phase: "clear",
       displayName: "Подача документов на визу",
+      goal: "Сопроводить кандидатку на этапе подачи документов в консульство/визовый центр.",
+      guidance: "Сообщите, что документы поданы на оформление визы, и объясните, чего ждать дальше. Отвечайте на организационные вопросы по подаче, но не гарантируйте сроки и исход рассмотрения консульством.",
       kind: "active",
       stageType: "external_approval",
       position: 7,
@@ -927,6 +1054,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "visa_waiting",
       phase: "clear",
       displayName: "Ожидание решения по визе",
+      goal: "Поддерживать контакт с кандидаткой во время ожидания решения по визе.",
+      guidance: "Спокойно поясните, что виза на рассмотрении и это может занять время. Будьте на связи, отвечайте на вопросы, но не давите на консульство и не обещайте конкретную дату или положительный исход.",
       kind: "active",
       stageType: "waiting",
       position: 8,
@@ -939,6 +1068,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "ready_to_work",
       phase: "fulfill",
       displayName: "Готова к работе",
+      goal: "Подтвердить готовность кандидатки к выезду и переходу к работе.",
+      guidance: "Поздравьте с получением визы и готовностью к работе, обозначьте ближайшие организационные шаги по выезду. Сохраняйте деловой поддерживающий тон и уточняйте оставшиеся вопросы по логистике.",
       kind: "active",
       stageType: "milestone",
       position: 9,
@@ -974,6 +1105,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "new_lead",
       displayName: "Новый лид",
+      goal: "Познакомиться с кандидатом и зафиксировать имя, контакт и интересующую должность.",
+      guidance: "Тепло поприветствуйте, поблагодарите за отклик и дружелюбно уточните недостающие данные: как зовут, как лучше связаться и на какую позицию претендует. Не задавайте лишних вопросов про опыт на этом этапе — только базовое знакомство.",
       kind: "intake",
       stageType: "form_fill",
       position: 0,
@@ -989,6 +1122,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "qualifying",
       displayName: "Квалификация",
+      goal: "Оценить релевантность кандидата: опыт, зарплатные ожидания и готовность выйти на работу.",
+      guidance: "Спрашивайте по одному, без давления: сколько лет опыта, ожидания по зарплате (с валютой), когда готов приступить, при необходимости — готовность к релокации. Будьте доброжелательны и нейтральны, не обещайте оффер и не критикуйте запросы кандидата.",
       kind: "active",
       stageType: "form_fill",
       position: 1,
@@ -1007,6 +1142,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "interview_scheduled",
       displayName: "Интервью назначено",
+      goal: "Согласовать удобные дату, время и формат интервью и подтвердить договорённость.",
+      guidance: "Предложите варианты времени и уточните удобный формат (онлайн, офис или телефон). Чётко проговорите дату, время и что подготовить, вежливо подтвердите запись и напомните, что при изменениях кандидат может написать.",
       kind: "active",
       stageType: "milestone",
       position: 2,
@@ -1021,6 +1158,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "offer_sent",
       displayName: "Оффер отправлен",
+      goal: "Донести условия оффера и помочь кандидату принять решение о выходе.",
+      guidance: "Понятно изложите предложенную зарплату и предполагаемую дату выхода, ответьте на вопросы по условиям. Сохраняйте позитивный тон, мягко уточните решение и срок, не давите со сроками сверх меры.",
       kind: "active",
       stageType: "milestone",
       position: 3,
@@ -1062,6 +1201,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "new_lead",
       displayName: "Новый контакт",
+      goal: "Познакомиться с агентством и понять, как оно сейчас обрабатывает входящие заявки.",
+      guidance: "Тепло начните диалог, узнайте имя, название агентства и город, мягко выясните, как обрабатывают входящих кандидатов сейчас. Не презентуйте продукт сразу — сперва контакт и контекст.",
       kind: "intake",
       stageType: "form_fill",
       position: 0,
@@ -1077,6 +1218,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "qualifying",
       displayName: "Квалификация (NEPQ)",
+      goal: "Выявить боль: объём лидов, потери из-за скорости ответа, текущий инструмент и бюджет.",
+      guidance: "Задавайте проблемно-ориентированные вопросы в духе NEPQ: сколько лидов в день, теряются ли из-за медленных ответов, чем пользуются и какой бюджет. Усиливайте осознание проблемы, не продавайте в лоб.",
       kind: "active",
       stageType: "form_fill",
       position: 1,
@@ -1095,6 +1238,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "objection_handling",
       displayName: "Работа с возражением",
+      goal: "Снять ключевое возражение и вернуть фокус на ценность решения.",
+      guidance: "Спокойно выслушайте сомнение (цена, доверие, «у нас уже есть бот»), отзеркальте его и ответьте фактами и выгодой. Не спорьте и не давите — ведите к пробному периоду.",
       kind: "active",
       stageType: "assessment",
       position: 2,
@@ -1110,6 +1255,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "trial_offered",
       displayName: "Триал предложен",
+      goal: "Предложить запуск пробного периода и получить согласие подключиться.",
+      guidance: "Чётко объясните, что входит в триал и как быстро он развернётся, снимите страх сложного внедрения. Подведите к конкретному «да» и следующему шагу подключения.",
       kind: "active",
       stageType: "milestone",
       position: 3,
@@ -1146,6 +1293,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "discovery",
       displayName: "Первичное знакомство",
+      goal: "Собрать профиль компании и контакт, понять главную боль в работе с лидами.",
+      guidance: "Задавайте вопросы по одному, дружелюбно и без давления: сфера, размер команды, объём лидов и что именно болит. Сначала разберитесь в ситуации клиента, не предлагайте тариф.",
       kind: "intake",
       stageType: "form_fill",
       position: 0,
@@ -1168,6 +1317,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "qualified",
       phase: "qualify",
       displayName: "Квалифицирован",
+      goal: "Оценить серьёзность лида: бюджет, текущее решение и готовность двигаться к демо.",
+      guidance: "Аккуратно проясните, чем пользуются сейчас и какой бюджет закладывают, свяжите это с озвученной болью. Не продавайте в лоб — подведите к идее показать продукт на демо.",
       kind: "active",
       stageType: "interaction",
       position: 1,
@@ -1183,6 +1334,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "demo_scheduled",
       phase: "qualify",
       displayName: "Демо назначено",
+      goal: "Согласовать удобные дату и время демо и довести лида до встречи.",
+      guidance: "Предложите 2–3 слота, подтвердите выбор и кратко напомните, что покажете под боль клиента. Будьте конкретны, снимите страх «потратить время впустую».",
       kind: "active",
       stageType: "milestone",
       position: 2,
@@ -1197,6 +1350,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "demo_done",
       phase: "qualify",
       displayName: "Демо проведено",
+      goal: "Зафиксировать впечатление после демо и определить уровень интереса.",
+      guidance: "Спросите, что понравилось и какие остались вопросы или сомнения, отработайте возражения по существу. Если интерес тёплый или горячий — мягко предложите подготовить коммерческое предложение.",
       kind: "active",
       stageType: "interaction",
       position: 3,
@@ -1213,6 +1368,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "proposal_sent",
       phase: "offer",
       displayName: "КП отправлено",
+      goal: "Презентовать подходящий тариф и сумму, получить реакцию на предложение.",
+      guidance: "Подберите план под размер команды и объём лидов, объясните ценность, а не только цену. Уточните, всё ли понятно в КП, и аккуратно подведите к обсуждению условий.",
       kind: "active",
       stageType: "document_signature",
       position: 4,
@@ -1229,6 +1386,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "negotiation",
       phase: "offer",
       displayName: "Переговоры",
+      goal: "Снять финальные возражения и согласовать условия для подписания договора.",
+      guidance: "Выслушайте сомнения по цене и срокам, ищите компромисс в рамках разумного, фиксируйте договорённости. Держите консультативный тон, ведите к конкретному решению без напора.",
       kind: "active",
       stageType: "interaction",
       position: 5,
@@ -1271,6 +1430,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
     {
       slug: "inquiry",
       displayName: "Первичный запрос",
+      goal: "Зафиксировать тип услуги, локацию и контакты, чтобы понять суть проекта и связаться с клиентом.",
+      guidance: "Дружелюбно и по делу уточните, что нужно снять (мероприятие, корпоратив, Reels и т.д.), где и для чего, спросите про дату, бюджет и референсы. Не давите ценой и не обещайте смету до брифа — сейчас задача собрать вводные.",
       kind: "intake",
       stageType: "form_fill",
       position: 0,
@@ -1292,6 +1453,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "brief_call",
       phase: "qualify",
       displayName: "Бриф / звонок",
+      goal: "Снять полный бриф: задачи, хронометраж, формат и ожидания клиента от видео.",
+      guidance: "Говорите как творческий продюсер — заинтересованно расспросите про идею, целевую аудиторию, желаемый хронометраж и стиль, зафиксируйте детали в заметках. Слушайте больше, чем говорите, и не называйте цифры сметы до согласования объёма работ.",
       kind: "active",
       stageType: "interaction",
       position: 1,
@@ -1307,6 +1470,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "quote_sent",
       phase: "offer",
       displayName: "Смета отправлена",
+      goal: "Презентовать смету и объём работ так, чтобы клиент понял ценность и был готов согласовать.",
+      guidance: "Чётко и прозрачно опишите, что входит в смету (съёмочные дни, монтаж, правки), привяжите цену к задачам из брифа. Будьте открыты к вопросам по составу, но не торгуйтесь беспорядочно — объясняйте, из чего складывается стоимость.",
       kind: "active",
       stageType: "form_fill",
       position: 2,
@@ -1322,6 +1487,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "quote_approved",
       phase: "offer",
       displayName: "Смета согласована",
+      goal: "Подтвердить согласование сметы и получить предоплату для старта работ.",
+      guidance: "Поблагодарите за доверие, проговорите следующий шаг — внесение предоплаты и фиксацию даты съёмки. Спокойно и уверенно подскажите порядок оплаты, не создавая давления, но обозначив, что съёмка стартует после предоплаты.",
       kind: "active",
       stageType: "milestone",
       position: 3,
@@ -1337,6 +1504,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "shoot_scheduled",
       phase: "fulfill",
       displayName: "Съёмка назначена",
+      goal: "Согласовать дату и адрес съёмки и подготовить клиента к съёмочному дню.",
+      guidance: "По-деловому подтвердите дату, локацию и тайминг, уточните организационные детали (доступ, реквизит, участники). Тон — собранный и заботливый, чтобы клиент чувствовал, что всё под контролем.",
       kind: "active",
       stageType: "milestone",
       position: 4,
@@ -1352,6 +1521,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "editing",
       phase: "fulfill",
       displayName: "Монтаж",
+      goal: "Держать клиента в курсе по монтажу и согласовать дедлайн и правки.",
+      guidance: "Информируйте о ходе работы и сроках, аккуратно напоминайте про лимит правок, если клиент просит много изменений. Будьте отзывчивы к замечаниям, но защищайте рамки проекта и качество результата.",
       kind: "active",
       stageType: "interaction",
       position: 5,
@@ -1367,6 +1538,8 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
       slug: "delivery",
       phase: "fulfill",
       displayName: "Сдача материала",
+      goal: "Передать готовый материал и получить подтверждение приёмки от клиента.",
+      guidance: "Передайте ссылку на готовое видео, попросите посмотреть и подтвердить приёмку. Тон — гордый за результат, но внимательный: уточните, всё ли устраивает, и зафиксируйте финальное согласование.",
       kind: "active",
       stageType: "milestone",
       position: 6,
