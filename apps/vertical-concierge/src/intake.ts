@@ -9,7 +9,12 @@ import type { QuestionnaireSchema } from "@chatman-media/verticals";
 export const CONCIERGE_INTAKE: QuestionnaireSchema = {
   stageSlug: "request_received",
   introMessage:
-    "Здравствуйте! Я ваш консьерж. Помогу с обменом валюты, трансфером, заказом еды и другими услугами на вилле. Что нужно?",
+    "Здравствуйте! Я ваш консьерж на вилле. Помогу с:\n" +
+    "• Обмен валюты\n" +
+    "• Трансфер\n" +
+    "• Еда\n" +
+    "• Другие услуги\n" +
+    "Что нужно?",
   completionMessage: "Принял запрос — сейчас уточню детали.",
   fields: [
     {
