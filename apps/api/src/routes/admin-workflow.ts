@@ -373,17 +373,35 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 			);
 		}
 
-		const jsonStr = raw.replace(/```(?:json)?\n?/g, "").trim();
-		let parsed: {
-			reply?: unknown;
-			readyToGenerate?: unknown;
-			stages?: unknown;
+		const stripFence = (s: string) => s.replace(/```(?:json)?\n?/g, "").trim();
+		type Parsed = { reply?: unknown; readyToGenerate?: unknown; stages?: unknown };
+		const tryParse = (s: string): Parsed | null => {
+			try {
+				const v = JSON.parse(stripFence(s));
+				return v && typeof v === "object" ? (v as Parsed) : null;
+			} catch {
+				return null;
+			}
 		};
-		try {
-			parsed = JSON.parse(jsonStr) as typeof parsed;
-		} catch {
+
+		let parsed = tryParse(raw);
+		if (!parsed) {
 			// LLM не вернул JSON — отдаём текст как реплику, продолжаем диалог.
 			return c.json({ reply: raw.trim(), readyToGenerate: false });
+		}
+		// Слабые модели (напр. gpt-4.1-nano) иногда вкладывают весь JSON воронки
+		// строкой в поле `reply`. Разворачиваем вложенность до реального объекта.
+		let unwrapGuard = 0;
+		while (
+			parsed.readyToGenerate !== true &&
+			typeof parsed.reply === "string" &&
+			unwrapGuard < 3
+		) {
+			const inner = tryParse(parsed.reply);
+			if (inner && (typeof inner.readyToGenerate === "boolean" || Array.isArray(inner.stages))) {
+				parsed = inner;
+				unwrapGuard += 1;
+			} else break;
 		}
 
 		const reply = typeof parsed.reply === "string" ? parsed.reply : "";
