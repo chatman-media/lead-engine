@@ -168,3 +168,211 @@ describe("admin-styles /generate-full", () => {
     expect(res.status).toBe(409);
   });
 });
+
+// ── POST /api/admin/styles/generate (лёгкий AI-экстракт метаданных) ───────────
+const SAMPLES_BODY = { samples: "Привет! Я Алекс, менеджер агентства. Чем могу помочь?" };
+const META_RESPONSE = JSON.stringify({
+  displayName: "Дружелюбный менеджер",
+  slug: "friendly_manager",
+  personaName: "Алекс",
+  personaRole: "менеджер",
+  personaCompany: "Агентство",
+  framework: "SPIN",
+});
+
+async function generate(payload: unknown, withAuth = true): Promise<Response> {
+  return app.request("/api/admin/styles/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(withAuth ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+describe("admin-styles /generate (metadata extract)", () => {
+  it("без auth → 401", async () => {
+    if (!sql) return;
+    const res = await generate(SAMPLES_BODY, false);
+    expect(res.status).toBe(401);
+  });
+
+  it("без resolveChat → 503", async () => {
+    if (!sql) return;
+    const res = await appNoLlm.request("/api/admin/styles/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(SAMPLES_BODY),
+    });
+    expect(res.status).toBe(503);
+  });
+
+  it("пустой samples → 400", async () => {
+    if (!sql) return;
+    const res = await generate({ samples: "   " });
+    expect(res.status).toBe(400);
+  });
+
+  it("LLM бросает → 502", async () => {
+    if (!sql) return;
+    const errClient = { complete: async () => { throw new Error("llm down"); } } as unknown as ChatClient;
+    const appErr = new Hono();
+    appErr.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+    appErr.route("/", makeAdminStylesRoutes({ db, resolveChat: () => errClient }));
+    const res = await appErr.request("/api/admin/styles/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(SAMPLES_BODY),
+    });
+    expect(res.status).toBe(502);
+  });
+
+  it("LLM возвращает не-JSON → 502", async () => {
+    if (!sql) return;
+    nextRaw = "не json";
+    const res = await generate(SAMPLES_BODY);
+    expect(res.status).toBe(502);
+  });
+
+  it("happy path → 200 со slug + displayName + framework", async () => {
+    if (!sql) return;
+    nextRaw = META_RESPONSE;
+    const res = await generate(SAMPLES_BODY);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { slug: string; displayName: string; framework: string };
+    expect(body.slug).toBe("friendly_manager");
+    expect(body.displayName).toBe("Дружелюбный менеджер");
+    expect(body.framework).toBe("SPIN");
+  });
+});
+
+// ── CRUD: POST / GET / PATCH / DELETE /api/admin/styles ──────────────────────
+async function req(method: string, path: string, body?: unknown): Promise<Response> {
+  return app.request(path, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+}
+
+describe("admin-styles CRUD", () => {
+  let styleId = 0;
+
+  it("GET /styles (пустой список)", async () => {
+    if (!sql) return;
+    const res = await req("GET", "/api/admin/styles");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[] };
+    // может быть непустым из generate-full теста — просто проверяем структуру
+    expect(Array.isArray(body.items)).toBe(true);
+  });
+
+  it("POST /styles без displayName → 400", async () => {
+    if (!sql) return;
+    const res = await req("POST", "/api/admin/styles", { slug: "x" });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /styles с невалидным slug → 400", async () => {
+    if (!sql) return;
+    const res = await req("POST", "/api/admin/styles", { displayName: "X", slug: "Плохой Слаг" });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /styles с невалидным configJson → 400", async () => {
+    if (!sql) return;
+    const res = await req("POST", "/api/admin/styles", {
+      displayName: "X",
+      slug: "valid-slug",
+      configJson: "{broken",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /styles happy → 201", async () => {
+    if (!sql) return;
+    const res = await req("POST", "/api/admin/styles", {
+      displayName: "Тест Стиль",
+      slug: "test-crud-style",
+      configJson: "{}",
+      isActive: true,
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: number; slug: string };
+    expect(body.slug).toBe("test-crud-style");
+    styleId = body.id;
+  });
+
+  it("POST /styles дубль slug → 409", async () => {
+    if (!sql) return;
+    const res = await req("POST", "/api/admin/styles", {
+      displayName: "Другой",
+      slug: "test-crud-style",
+      configJson: "{}",
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("PATCH /styles/:id невалидный id → 400", async () => {
+    if (!sql) return;
+    const res = await req("PATCH", "/api/admin/styles/abc", { displayName: "X" });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH /styles/:id пустой patch → 400", async () => {
+    if (!sql) return;
+    if (!styleId) return;
+    const res = await req("PATCH", `/api/admin/styles/${styleId}`, {});
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH /styles/:id с невалидным configJson → 400", async () => {
+    if (!sql) return;
+    if (!styleId) return;
+    const res = await req("PATCH", `/api/admin/styles/${styleId}`, { configJson: "{broken" });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH /styles/:id 404 для несуществующего", async () => {
+    if (!sql) return;
+    const res = await req("PATCH", "/api/admin/styles/999999", { displayName: "X" });
+    expect(res.status).toBe(404);
+  });
+
+  it("PATCH /styles/:id happy → 200", async () => {
+    if (!sql) return;
+    if (!styleId) return;
+    const res = await req("PATCH", `/api/admin/styles/${styleId}`, {
+      displayName: "Обновлённый Стиль",
+      isActive: false,
+      configJson: JSON.stringify({ updated: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { displayName: string; isActive: boolean };
+    expect(body.displayName).toBe("Обновлённый Стиль");
+    expect(body.isActive).toBe(false);
+  });
+
+  it("DELETE /styles/:id невалидный id → 400", async () => {
+    if (!sql) return;
+    const res = await req("DELETE", "/api/admin/styles/abc");
+    expect(res.status).toBe(400);
+  });
+
+  it("DELETE /styles/:id 404 для несуществующего", async () => {
+    if (!sql) return;
+    const res = await req("DELETE", "/api/admin/styles/999999");
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE /styles/:id happy → 200", async () => {
+    if (!sql) return;
+    if (!styleId) return;
+    const res = await req("DELETE", `/api/admin/styles/${styleId}`);
+    expect(res.status).toBe(200);
+  });
+});
