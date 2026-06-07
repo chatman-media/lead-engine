@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.11.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.10.0...@chatman-media/conversation-engine-v1.11.0) (2026-06-07)
+
+
+### Features
+
+* **concierge:** Фаза 3 — domain action tools + catalog admin ([#175](https://github.com/chatman-media/lead-engine/issues/175)) ([#289](https://github.com/chatman-media/lead-engine/issues/289)) ([a75d8a4](https://github.com/chatman-media/lead-engine/commit/a75d8a43c621725af804fa4800e4fee62142f6ea))
+
 # [@chatman-media/conversation-engine-v1.10.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.9.0...@chatman-media/conversation-engine-v1.10.0) (2026-06-06)
 
 
