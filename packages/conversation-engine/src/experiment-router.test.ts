@@ -1,51 +1,68 @@
-import { describe, expect, it } from "bun:test";
-import { parseAllocation } from "./dal/experiments.ts";
+import { describe, expect, test } from "bun:test";
+import { loadExperimentVariants } from "./experiment-router.ts";
 
-describe("parseAllocation", () => {
-  it("парсит валидный JSON-массив", () => {
-    const out = parseAllocation('[{"style_slug":"a","weight":2},{"style_slug":"b","weight":1}]');
-    expect(out).toEqual([
-      { styleSlug: "a", weight: 2 },
-      { styleSlug: "b", weight: 1 },
-    ]);
+function makeExperiment(allocationJson: string) {
+  return { id: 1, tenantId: 1, slug: "test-exp", status: "running", allocationJson, createdAt: 0, updatedAt: 0 };
+}
+
+const VALID_CONFIG_JSON = JSON.stringify({
+  slug: "test-style",
+  displayName: "Test",
+  persona: { name: "Марина", role: "human", company: "ACME" },
+  voice: { tone: "дружелюбный", language: "ru" },
+  framework: "SPIN",
+  stages: { qualify: { goal: "понять запрос" } },
+  guardrails: {},
+  model: {},
+});
+
+describe("loadExperimentVariants", () => {
+  test("все стили missing → возвращает null", async () => {
+    const result = await loadExperimentVariants(
+      makeExperiment(JSON.stringify([{ styleSlug: "missing", weight: 1 }])),
+      { findActiveBySlug: async () => null } as never,
+    );
+    expect(result).toBeNull();
   });
 
-  it("default weight = 1 если не указан", () => {
-    const out = parseAllocation('[{"style_slug":"a"},{"style_slug":"b","weight":3}]');
-    expect(out).toEqual([
-      { styleSlug: "a", weight: 1 },
-      { styleSlug: "b", weight: 3 },
-    ]);
+  test("возвращает null когда style не найден", async () => {
+    const result = await loadExperimentVariants(
+      makeExperiment(JSON.stringify([{ styleSlug: "missing", weight: 1 }])),
+      { findActiveBySlug: async () => null } as never,
+    );
+    expect(result).toBeNull();
   });
 
-  it("принимает оба варианта camelCase / snake_case ключа", () => {
-    const out = parseAllocation('[{"styleSlug":"x","weight":1}]');
-    expect(out).toEqual([{ styleSlug: "x", weight: 1 }]);
+  test("возвращает null когда configJson невалидный", async () => {
+    const result = await loadExperimentVariants(
+      makeExperiment(JSON.stringify([{ styleSlug: "bad", weight: 1 }])),
+      { findActiveBySlug: async () => ({ configJson: "{invalid json}" }) } as never,
+    );
+    expect(result).toBeNull();
   });
 
-  it("skip'ает entry без style_slug", () => {
-    const out = parseAllocation('[{"weight":2},{"style_slug":"a"}]');
-    expect(out).toEqual([{ styleSlug: "a", weight: 1 }]);
+  test("возвращает variants для валидного стиля", async () => {
+    const result = await loadExperimentVariants(
+      makeExperiment(JSON.stringify([{ styleSlug: "test-style", weight: 0.6 }])),
+      { findActiveBySlug: async () => ({ configJson: VALID_CONFIG_JSON }) } as never,
+    );
+    expect(result).not.toBeNull();
+    expect(result).toHaveLength(1);
+    expect(result![0]!.weight).toBe(0.6);
+    expect(result![0]!.style.slug).toBe("test-style");
   });
 
-  it("отрицательный/нулевой weight нормализуется к 1", () => {
-    const out = parseAllocation('[{"style_slug":"a","weight":-5},{"style_slug":"b","weight":0}]');
-    expect(out).toEqual([
-      { styleSlug: "a", weight: 1 },
-      { styleSlug: "b", weight: 1 },
-    ]);
-  });
-
-  it("бросает при invalid JSON", () => {
-    expect(() => parseAllocation("not json")).toThrow(/invalid/);
-  });
-
-  it("бросает если top-level не array", () => {
-    expect(() => parseAllocation('{"style_slug":"a"}')).toThrow(/array/);
-  });
-
-  it("бросает если ни одной валидной entry", () => {
-    expect(() => parseAllocation('[{"weight":1}]')).toThrow(/no valid entries/);
-    expect(() => parseAllocation("[]")).toThrow(/no valid entries/);
+  test("пропускает missing стиль, возвращает валидные", async () => {
+    let call = 0;
+    const mixedRepo = { findActiveBySlug: async () => ++call === 1 ? null : { configJson: VALID_CONFIG_JSON } };
+    const result = await loadExperimentVariants(
+      makeExperiment(JSON.stringify([
+        { styleSlug: "missing", weight: 0.3 },
+        { styleSlug: "valid", weight: 0.7 },
+      ])),
+      mixedRepo as never,
+    );
+    expect(result).toHaveLength(1);
+    expect(result![0]!.weight).toBe(0.7);
   });
 });
