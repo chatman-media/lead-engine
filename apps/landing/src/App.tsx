@@ -3,7 +3,9 @@ import { Route, Routes } from "react-router-dom";
 import DemoConcierge from "./DemoConcierge.tsx";
 import DemoExchange from "./DemoExchange.tsx";
 import DemoVisa from "./DemoVisa.tsx";
+import LandingAnyBusiness from "./LandingAnyBusiness.tsx";
 import LandingExchange from "./LandingExchange.tsx";
+import LandingModeling from "./LandingModeling.tsx";
 import LandingRealEstate from "./LandingRealEstate.tsx";
 import {
   DEMO_URL,
@@ -309,7 +311,9 @@ export default function App() {
       <Route path="/demo/concierge" element={<DemoConcierge />} />
       <Route path="/demo/visa" element={<DemoVisa />} />
       <Route path="/recruit" element={<LandingRecruit />} />
+      <Route path="/modeling" element={<LandingModeling />} />
       <Route path="/real-estate" element={<LandingRealEstate />} />
+      <Route path="/business" element={<LandingAnyBusiness />} />
     </Routes>
   );
 }
