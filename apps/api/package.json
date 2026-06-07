@@ -32,6 +32,8 @@
     "@chatman-media/vertical-exchange": "workspace:*",
     "@chatman-media/vertical-modeling": "workspace:*",
     "@chatman-media/vertical-real-estate": "workspace:*",
+    "@chatman-media/vertical-scooter": "workspace:*",
+    "@chatman-media/vertical-visa": "workspace:*",
     "@chatman-media/vertical-recruitment": "workspace:*",
     "@chatman-media/vertical-saas": "workspace:*",
     "@chatman-media/vertical-video": "workspace:*",
