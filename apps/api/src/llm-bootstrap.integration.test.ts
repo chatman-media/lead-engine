@@ -4,15 +4,20 @@
  * makeSimChatResolver — InMemoryLlmRouter. Требует DATABASE_URL для DB-части;
  * без него те тесты graceful-skip.
  */
+import { setEncryptedSecret } from "@chatman-media/conversation-engine";
 import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import {
   applyAllMigrations,
   contacts,
   createIsolatedDb,
+  directorHooks,
   funnels,
   leads,
+  llmProviderConfigs,
   schema,
+  skills,
   stageDefinitions,
+  styles,
   tenants,
   tryConnectToPg,
 } from "@chatman-media/storage";
@@ -23,10 +28,17 @@ import postgres, { type Sql } from "postgres";
 import {
   type LoadedRef,
   makeAwaitingOperatorResolver,
+  makeDirectorHooksResolver,
   makeRequestContextResolver,
+  makeRerankerResolver,
   makeSimChatResolver,
+  makeSkillsResolver,
+  makeStyleResolver,
+  makeToolsResolver,
   resolveTenantStyle,
 } from "./llm-bootstrap.ts";
+
+const MASTER_KEY = "0".repeat(64);
 
 const VALID_STYLE = JSON.stringify({
   slug: "exch-pro",
@@ -205,5 +217,160 @@ describe("makeAwaitingOperatorResolver", () => {
     if (!enabled) return;
     const r = makeAwaitingOperatorResolver(db);
     expect(await r({ tenantId, contactId: plainContactId })).toBe(false);
+  });
+});
+
+describe("makeSkillsResolver", () => {
+  it("возвращает только enabled, парсит applicableStagesJson, кеширует", async () => {
+    if (!enabled) return;
+    await db.insert(skills).values([
+      {
+        tenantId,
+        slug: "mirror",
+        family: "rapport",
+        displayName: "Зеркало",
+        description: "d",
+        promptFragment: "отражай",
+        applicableStagesJson: JSON.stringify(["qualify"]),
+        intent: "rapport",
+        isEnabled: true,
+        createdAt: n,
+        updatedAt: n,
+      },
+      {
+        tenantId,
+        slug: "off-skill",
+        family: "x",
+        displayName: "Выкл",
+        description: "d",
+        promptFragment: "p",
+        applicableStagesJson: "[]",
+        intent: "x",
+        isEnabled: false,
+        createdAt: n,
+        updatedAt: n,
+      },
+    ]);
+    const resolve = makeSkillsResolver(db);
+    const r = await resolve({ tenantId });
+    expect(r.map((s) => s.slug)).toEqual(["mirror"]);
+    expect(r[0]!.applicableStages).toEqual(["qualify"]);
+    // cache: повторный вызов отдаёт тот же массив
+    expect(await resolve({ tenantId })).toBe(r);
+  });
+});
+
+describe("makeDirectorHooksResolver", () => {
+  it("только active, отсортированы по position", async () => {
+    if (!enabled) return;
+    await db.insert(directorHooks).values([
+      { tenantId, name: "B", body: "b", position: 1, isActive: true, createdAt: n, updatedAt: n },
+      { tenantId, name: "A", body: "a", position: 0, isActive: true, createdAt: n, updatedAt: n },
+      { tenantId, name: "Off", body: "x", position: 2, isActive: false, createdAt: n, updatedAt: n },
+    ]);
+    const resolve = makeDirectorHooksResolver(db);
+    const r = await resolve({ tenantId });
+    expect(r.map((h) => h.name)).toEqual(["A", "B"]);
+  });
+});
+
+describe("makeRerankerResolver", () => {
+  it("нет config → null (кеш)", async () => {
+    if (!enabled) return;
+    const resolve = makeRerankerResolver(db, MASTER_KEY);
+    expect(await resolve({ tenantId })).toBeNull();
+    expect(await resolve({ tenantId })).toBeNull(); // из кеша
+  });
+
+  it("cohere config + secret → Reranker", async () => {
+    if (!enabled) return;
+    const [t] = await db.insert(tenants).values({ slug: `rr-${n}` }).returning({ id: tenants.id });
+    await setEncryptedSecret({ db, tenantId: t!.id, key: "rr_key", value: "co-key", masterKeyHex: MASTER_KEY, nowEpoch: n });
+    await db.insert(llmProviderConfigs).values({
+      tenantId: t!.id,
+      purpose: "reranker",
+      provider: "cohere",
+      model: "rerank-3",
+      secretRef: "rr_key",
+      createdAt: n,
+      updatedAt: n,
+    });
+    const resolve = makeRerankerResolver(db, MASTER_KEY);
+    expect(await resolve({ tenantId: t!.id })).not.toBeNull();
+  });
+
+  it("unsupported provider → null", async () => {
+    if (!enabled) return;
+    const [t] = await db.insert(tenants).values({ slug: `rr2-${n}` }).returning({ id: tenants.id });
+    await setEncryptedSecret({ db, tenantId: t!.id, key: "rr_key", value: "k", masterKeyHex: MASTER_KEY, nowEpoch: n });
+    await db.insert(llmProviderConfigs).values({
+      tenantId: t!.id,
+      purpose: "reranker",
+      provider: "openai",
+      model: "m",
+      secretRef: "rr_key",
+      createdAt: n,
+      updatedAt: n,
+    });
+    const resolve = makeRerankerResolver(db, MASTER_KEY);
+    expect(await resolve({ tenantId: t!.id })).toBeNull();
+  });
+});
+
+describe("makeStyleResolver", () => {
+  it("default slug → активный стиль тенанта", async () => {
+    if (!enabled) return;
+    const [t] = await db.insert(tenants).values({ slug: `st-${n}` }).returning({ id: tenants.id });
+    await db.insert(styles).values({
+      tenantId: t!.id,
+      slug: "exch-pro",
+      displayName: "Pro",
+      configJson: VALID_STYLE,
+      isActive: true,
+      version: 1,
+      createdAt: n,
+    });
+    const { resolveStyle } = makeStyleResolver(db, { defaultSlug: "exch-pro", experimentSlug: "" });
+    const style = await resolveStyle({ tenantId: t!.id, contactId: 1 });
+    expect(style?.slug).toBe("exch-pro");
+  });
+
+  it("нет стилей → null; invalidateStyle сбрасывает кеш", async () => {
+    if (!enabled) return;
+    const [t] = await db.insert(tenants).values({ slug: `st2-${n}` }).returning({ id: tenants.id });
+    const { resolveStyle, invalidateStyle } = makeStyleResolver(db, {
+      defaultSlug: "",
+      experimentSlug: "",
+    });
+    expect(await resolveStyle({ tenantId: t!.id, contactId: 1 })).toBeNull();
+    invalidateStyle(t!.id); // не бросает
+    expect(await resolveStyle({ tenantId: t!.id, contactId: 1 })).toBeNull();
+  });
+});
+
+describe("makeToolsResolver", () => {
+  it("booking secret → booking-tool; без него → пусто; invalidate сбрасывает", async () => {
+    if (!enabled) return;
+    const [t] = await db.insert(tenants).values({ slug: `tools-${n}` }).returning({ id: tenants.id });
+    const [tEmpty] = await db
+      .insert(tenants)
+      .values({ slug: `tools-empty-${n}` })
+      .returning({ id: tenants.id });
+    await setEncryptedSecret({
+      db,
+      tenantId: t!.id,
+      key: "tool_booking_url",
+      value: "https://book.me/x",
+      masterKeyHex: MASTER_KEY,
+      nowEpoch: n,
+    });
+    const { resolveTools, invalidateTools } = makeToolsResolver({ db, masterKeyHex: MASTER_KEY });
+    const tools = await resolveTools({ tenantId: t!.id, conversationId: 1 });
+    expect(tools.length).toBeGreaterThanOrEqual(1);
+    // тенант без booking-секрета и без обмена/multi-request → пусто
+    const none = await resolveTools({ tenantId: tEmpty!.id, conversationId: 1 });
+    expect(none).toEqual([]);
+    invalidateTools(t!.id); // не бросает
+    expect((await resolveTools({ tenantId: t!.id, conversationId: 1 })).length).toBeGreaterThanOrEqual(1);
   });
 });
