@@ -22,6 +22,7 @@ import { SaasFunnel } from "./pages/SaasFunnel.tsx";
 import { SaasHooks } from "./pages/SaasHooks.tsx";
 import { SaasIntegrations } from "./pages/SaasIntegrations.tsx";
 import { SaasLeadDetail } from "./pages/SaasLeadDetail.tsx";
+import { SaasCampaigns } from "./pages/SaasCampaigns.tsx";
 import { SaasLeads } from "./pages/SaasLeads.tsx";
 import { SaasLogin } from "./pages/SaasLogin.tsx";
 import { SaasNotifications } from "./pages/SaasNotifications.tsx";
@@ -146,6 +147,7 @@ export function App() {
                 <Route path="/leads" element={<SaasLeads />} />
                 <Route path="/leads/:id" element={<SaasLeadDetail />} />
                 <Route path="/outreach" element={<SaasOutreach />} />
+                <Route path="/campaigns" element={<SaasCampaigns />} />
                 <Route path="/conversations" element={<SaasConversations />} />
                 <Route path="/conversations/:id" element={<SaasConversations />} />
                 <Route path="/funnel" element={<SaasFunnel />} />

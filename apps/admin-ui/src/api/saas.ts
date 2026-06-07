@@ -541,6 +541,19 @@ export interface LeadListItem {
   keyFields?: Array<{ label: string; value: string }>;
 }
 
+export interface DripCampaign {
+  id: number;
+  name: string;
+  status: string;
+  dripPerTick: number;
+  dripIntervalSec: number;
+  createdAt: number;
+  total: number;
+  sent: number;
+  skipped: number;
+  pending: number;
+}
+
 export interface LeadDetail {
   lead: {
     id: number;
@@ -1775,6 +1788,38 @@ export const saas = {
         body: JSON.stringify(body),
       },
     );
+  },
+
+  // ── Drip campaigns ────────────────────────────────────────────────────
+  listDripCampaigns() {
+    return request<{ campaigns: DripCampaign[] }>("/api/admin/outreach-campaigns");
+  },
+  createDripCampaign(body: {
+    name: string;
+    greetingText: string;
+    dripPerTick?: number;
+    dripIntervalSec?: number;
+    leadIds?: number[];
+  }) {
+    return request<{ ok: boolean; id: number; leadsAdded: number; status: string }>(
+      "/api/admin/outreach-campaigns",
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+  updateDripCampaign(
+    id: number,
+    patch: Partial<{
+      status: string;
+      name: string;
+      greetingText: string;
+      dripPerTick: number;
+      dripIntervalSec: number;
+    }>,
+  ) {
+    return request<{ ok: boolean }>(`/api/admin/outreach-campaigns/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
   },
 
   async importLeadsCsv(
