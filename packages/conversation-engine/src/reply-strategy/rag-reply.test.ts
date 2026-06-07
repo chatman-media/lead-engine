@@ -5,7 +5,9 @@
 
 import { describe, expect, it } from "bun:test";
 import type { ChatClient } from "@chatman-media/llm-router";
+import type { VerticalTemplate } from "@chatman-media/verticals";
 import { RagReplyStrategy, type RagReplyStrategyOpts } from "./rag-reply.ts";
+import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
 
 const TENANT = { tenantId: 1 };
 const CHANNEL = { channelId: 10 };
@@ -37,6 +39,14 @@ const HIT = {
   source: "kb",
   title: "Курсы",
 };
+
+const EXCHANGE_TEMPLATE = {
+  slug: "exchange_v1",
+  displayName: "Exchange",
+  version: 1,
+  funnelStages: [],
+  systemPromptFragment: "",
+} as unknown as VerticalTemplate;
 
 /** Минимальный messagesRepo с recent/countByConversation/insert. */
 function fakeMessagesRepo(opts: { recent?: unknown[]; count?: number } = {}) {
@@ -102,6 +112,22 @@ describe("RagReplyStrategy.generate", () => {
     const part = r![0]!.parts[0] as { kind: string; text: string };
     expect(part.kind).toBe("text");
     expect(part.text.toLowerCase()).toContain("курс");
+  });
+
+  it("exchange: неподкреплённый курс заменяется safe fallback", async () => {
+    const s = mk(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chatReturning("Курс 31.5, получите 10553 THB."),
+        resolveEmbed: embed,
+        resolveKb: kbWith([HIT]),
+      },
+      fakeMessagesRepo(),
+    );
+    const r = await s.generate(baseInput());
+    expect(r).not.toBeNull();
+    const part = r![0]!.parts[0] as { text: string };
+    expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
   });
 
   it("no-context + softFallback → envelope с fallback-текстом + лог в suggestions", async () => {

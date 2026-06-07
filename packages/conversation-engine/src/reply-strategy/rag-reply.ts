@@ -24,6 +24,7 @@ import type { ConversationsRepo } from "../dal/conversations.ts";
 import type { KbSuggestionsRepo } from "../dal/kb-suggestions.ts";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
+import { guardExchangeReply } from "./exchange-reply-guard.ts";
 
 /**
  * RAG-аware ReplyStrategy. На каждый user message:
@@ -407,11 +408,20 @@ export class RagReplyStrategy implements ReplyStrategy {
       ];
     }
 
+    const guarded = this.opts.template?.slug === "exchange_v1"
+      ? guardExchangeReply({ text: result.text, telemetry: result.telemetry })
+      : { ok: true, text: result.text };
+    if (!guarded.ok) {
+      console.warn(
+        `[exchange-reply-guard] tenant=${tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
+      );
+    }
+
     return [
       {
         channelId: String(input.channel.channelId),
         externalUserId: input.inbound.externalUserId,
-        parts: [{ kind: "text", text: result.text }],
+        parts: [{ kind: "text", text: guarded.text }],
       },
     ];
   }

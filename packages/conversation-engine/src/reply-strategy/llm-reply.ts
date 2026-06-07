@@ -1,9 +1,16 @@
 import type { OutboundEnvelope } from "@chatman-media/channel-core";
-import { type AnyRagTool, DEFAULT_MAX_TOOL_CYCLES, runToolLoop } from "@chatman-media/kb";
+import {
+  type AnyRagTool,
+  buildToolTelemetry,
+  DEFAULT_MAX_TOOL_CYCLES,
+  runToolLoop,
+  type ToolCallRecord,
+} from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
+import { guardExchangeReply } from "./exchange-reply-guard.ts";
 
 /**
  * Минимальный LLM-based ReplyStrategy. Шаги на каждый inbound:
@@ -140,6 +147,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
     ];
 
     let reply: string;
+    let toolCalls: ToolCallRecord[] = [];
     if (toolsActive) {
       const loop = await runToolLoop({
         chat,
@@ -148,6 +156,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
         llmOpts,
         maxCycles: DEFAULT_MAX_TOOL_CYCLES,
       });
+      toolCalls = loop.toolCalls;
       // loop.content — финальный текст; если null (исчерпал циклы) — добиваем
       // обычным complete по messages с уже вложенными tool-результатами.
       reply = loop.content ?? (await chat.complete(msgs, llmOpts));
@@ -156,11 +165,19 @@ export class LlmReplyStrategy implements ReplyStrategy {
     }
 
     if (reply.trim().length === 0) return null;
+    const guarded = this.opts.template.slug === "exchange_v1"
+      ? guardExchangeReply({ text: reply, telemetry: buildToolTelemetry(toolCalls) })
+      : { ok: true, text: reply };
+    if (!guarded.ok) {
+      console.warn(
+        `[exchange-reply-guard] tenant=${input.tenant.tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
+      );
+    }
     return [
       {
         channelId: String(input.channel.channelId),
         externalUserId: input.inbound.externalUserId,
-        parts: [{ kind: "text", text: reply }],
+        parts: [{ kind: "text", text: guarded.text }],
       },
     ];
   }
