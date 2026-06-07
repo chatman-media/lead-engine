@@ -73,38 +73,25 @@ jobs:
       - name: Typecheck all workspace members (apps/* + packages/*)
         run: bun run --filter '*' typecheck
 
-      # Покрытие гоняем только по packages/* (publishable библиотеки):
-      # все они на `bun test` (channel-core — на echo, тоже терпит флаги).
-      # Apps тестируем отдельным шагом без --coverage: у widget скрипт
-      # `exit 0`, который ломается на лишних аргументах.
-      - name: Tests — apps
-        run: bun run --filter './apps/*' test
-
-      - name: Tests + coverage — packages
+      # Единый проход: bun test сканирует все *.test.ts в workspace.
+      # Фронтенды (admin-ui/landing/widget) не имеют тест-файлов — bun их
+      # просто пропускает. widget'овый скрипт "exit 0" не задействован.
+      # Единый coverage-map даёт корректные цифры: packages покрываются как
+      # своими тестами, так и интеграционными тестами apps/api.
+      - name: Tests + coverage (all workspace)
         run: |
           set -o pipefail
-          bun run --filter './packages/*' test \
+          bun test \
             --coverage \
             --coverage-reporter=text \
             --coverage-reporter=lcov 2>&1 | tee coverage.txt
-
-      # apps/api/worker/verticals имеют реальные bun-тесты — меряем покрытие и
-      # грузим в Codecov (фронтенды admin-ui/landing/widget — без --coverage).
-      - name: Tests + coverage — apps (api/worker/verticals)
-        run: |
-          set -o pipefail
-          bun run --filter './apps/api' --filter './apps/worker' --filter './apps/vertical-*' test \
-            --coverage \
-            --coverage-reporter=text \
-            --coverage-reporter=lcov 2>&1 | tee -a coverage.txt
 
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          # v5 CLI сам находит packages/*/coverage/lcov.info.
-          # apps/* гоняются без --coverage, поэтому грузятся только пакеты.
+          files: coverage/lcov.info
           fail_ci_if_error: false # codecov-флейк не должен ронять CI
 
       - name: Coverage summary
@@ -124,8 +111,7 @@ jobs:
         with:
           name: coverage-lcov
           path: |
-            packages/*/coverage/lcov.info
-            apps/*/coverage/lcov.info
+            coverage/lcov.info
           if-no-files-found: ignore
 
       # Codecov Bundle Analysis: build the Vite frontends so the codecovVitePlugin
