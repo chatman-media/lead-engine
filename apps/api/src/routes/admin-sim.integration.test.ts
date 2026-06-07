@@ -111,6 +111,15 @@ describe("admin-sim dialog simulator", () => {
     expect(((await res.json()) as { personas: unknown[] }).personas.length).toBeGreaterThan(0);
   });
 
+  it("предоставляет ≥15 разнообразных exchange-сценариев с уникальными id (A6)", async () => {
+    if (!sql) return;
+    const res = await req("GET", "/api/admin/sim/personas");
+    const personas = ((await res.json()) as { personas: { id: string }[] }).personas;
+    const exchange = personas.filter((p) => p.id.startsWith("exchange"));
+    expect(exchange.length).toBeGreaterThanOrEqual(15);
+    expect(new Set(exchange.map((p) => p.id)).size).toBe(exchange.length);
+  });
+
   it("POST /start без personaId/brief → 400", async () => {
     if (!sql) return;
     expect((await req("POST", START, {})).status).toBe(400);
