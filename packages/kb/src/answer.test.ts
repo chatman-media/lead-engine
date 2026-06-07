@@ -283,6 +283,44 @@ describe("answerWithRag — main paths", () => {
     expect(r.text.toLowerCase()).toBe("финальный ответ");
     expect(r.telemetry.path).toBe("ok");
   });
+
+  it("fact-check sees tool results as grounding context", async () => {
+    let calls = 0;
+    let checkerPrompt = "";
+    const chat = fakeChat("unused", {
+      completeWithTools: async () => {
+        calls++;
+        if (calls === 1) {
+          return {
+            content: null,
+            toolCalls: [{ id: "q1", name: "quote", args: { asset: "USDT", amount: 335 } }],
+          };
+        }
+        return { content: "Курс 31.5, получите 10553 THB.", toolCalls: [] };
+      },
+      complete: async (messages: ChatMessage[]) => {
+        if ((messages[0]?.content ?? "").includes("grounded")) {
+          checkerPrompt = messages[1]?.content ?? "";
+          return '{"grounded":true,"vacancyOk":true}';
+        }
+        return "Курс 31.5, получите 10553 THB.";
+      },
+    }) as ChatClient;
+    const tool = {
+      name: "quote",
+      description: "d",
+      parameters: z.object({ asset: z.string(), amount: z.number() }),
+      execute: async () => ({ rate: 31.5, amountToThb: 10553 }),
+    };
+    const r = await answerWithRag(
+      baseInput({ chat, reflect: true, tools: [tool] as unknown as AnswerInput["tools"] }),
+    );
+    expect(r.telemetry.path).toBe("ok");
+    expect(r.text).toContain("10553 THB");
+    expect(checkerPrompt).toContain("TOOL RESULTS");
+    expect(checkerPrompt).toContain("quote");
+    expect(checkerPrompt).toContain("10553");
+  });
 });
 
 describe("answerWithRagStream", () => {

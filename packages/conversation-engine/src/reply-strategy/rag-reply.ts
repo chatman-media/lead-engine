@@ -339,8 +339,6 @@ export class RagReplyStrategy implements ReplyStrategy {
     ]);
 
     const isExchange = this.opts.template?.slug === "exchange_v1";
-    const exchangeHasTools = isExchange && tools.length > 0;
-
     // answerWithRag принимает rag's ChatClient/EmbeddingClient. Структурно
     // наш llm-router'овский ChatClient compatible (rag's ChatMessage.content
     // допускает null — наш string ужe; complete(messages, opts?) совпадает).
@@ -354,7 +352,7 @@ export class RagReplyStrategy implements ReplyStrategy {
       topK: this.opts.topK ?? 5,
       hybridSearch: this.opts.hybridSearch ?? true,
       rewriteQueryBeforeRetrieval: this.opts.rewriteQueryBeforeRetrieval ?? true,
-      reflect: this.opts.reflect ?? (isExchange && !exchangeHasTools),
+      reflect: this.opts.reflect ?? isExchange,
       numPredict: this.opts.maxOutputTokens ?? 600,
       // Style: если resolveStyle вернул Style — answerWithRag использует его
       // persona, sales framework, hooks, skills для построения system prompt.

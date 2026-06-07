@@ -33,7 +33,12 @@ import {
   legacyRagSamplingTemperature,
 } from "./system-prompt.ts";
 import { applyStyleRules } from "./text-style-rules.ts";
-import { buildToolTelemetry, DEFAULT_MAX_TOOL_CYCLES, runToolLoop } from "./tool-loop.ts";
+import {
+  buildToolTelemetry,
+  DEFAULT_MAX_TOOL_CYCLES,
+  runToolLoop,
+  type ToolCallRecord,
+} from "./tool-loop.ts";
 import type { AnyRagTool } from "./tools.ts";
 import { classifyTopic } from "./topic-classifier.ts";
 import type { KbSearchHit } from "./types.ts";
@@ -61,6 +66,15 @@ export {
   renderSummaryBlock,
   renderUserFactsBlock,
 } from "./system-prompt.ts";
+
+function toolCallsToGroundingContext(records: ToolCallRecord[] | undefined): string {
+  if (!records || records.length === 0) return "";
+  const lines = records.map((record, index) => {
+    const result = typeof record.result === "string" ? record.result : JSON.stringify(record.result);
+    return `[#tool-${index + 1}] ${record.name}: ${result ?? ""}`;
+  });
+  return `TOOL RESULTS:\n${lines.join("\n")}`;
+}
 
 // ── Shared retrieval ─────────────────────────────────────────────────────────
 
@@ -368,10 +382,12 @@ async function answerFromHits(opts: {
     !(groundingExempt && !runVacancyCheck);
 
   if (runFactCheck) {
+    const toolContext = toolCallsToGroundingContext(multiCycleToolCalls);
+    const groundingContext = toolContext ? [context, toolContext].filter(Boolean).join("\n\n") : context;
     const verdict = await checkFacts({
       question: input.question,
       answer: text,
-      context,
+      context: groundingContext,
       chat: input.chat,
       ...(runVacancyCheck ? { vacanciesBlock: vacBlock } : {}),
     });
