@@ -1,3 +1,15 @@
+# [@chatman-media/storage-v1.13.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.12.0...@chatman-media/storage-v1.13.0) (2026-06-07)
+
+
+### Bug Fixes
+
+* **storage:** update RLS table count 44→46 (outreach_campaigns migration 0039) ([4fcb50c](https://github.com/chatman-media/lead-engine/commit/4fcb50c5b66de45085594c7d4ad59ad0739c6179))
+
+
+### Features
+
+* **outreach:** drip campaign engine — leads → greeting at a rate ([#263](https://github.com/chatman-media/lead-engine/issues/263) C2/C3/C4/C5) ([#282](https://github.com/chatman-media/lead-engine/issues/282)) ([188dbfc](https://github.com/chatman-media/lead-engine/commit/188dbfca11a9148a981685212a6d98005fc5bf72))
+
 # [@chatman-media/storage-v1.12.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.11.0...@chatman-media/storage-v1.12.0) (2026-06-06)
 
 
