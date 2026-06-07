@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.12.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.12.0...@chatman-media/conversation-engine-v1.12.1) (2026-06-07)
+
+
+### Bug Fixes
+
+* **test:** cast experiment stub to any to satisfy ExperimentRow type ([c593a6f](https://github.com/chatman-media/lead-engine/commit/c593a6f785f29a606200dd05d80e324c0a11dc4c))
+
 # [@chatman-media/conversation-engine-v1.12.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.11.0...@chatman-media/conversation-engine-v1.12.0) (2026-06-07)
 
 
