@@ -188,4 +188,167 @@ describe("processInbound", () => {
     expect(deps._fakes.contacts.all()).toHaveLength(1);
     expect(deps._fakes.conversations.all()).toHaveLength(1);
   });
+
+  // ── Опциональные хуки pipeline (notifications / transcriber / extractFields /
+  //    memoryExtractor / deferReply) — все через фейки, без БД. ──────────────
+  type NotifyEvent = { eventType: string; conversationId: number };
+  function fakeNotifications(events: NotifyEvent[]) {
+    return {
+      notify: async (e: NotifyEvent) => {
+        events.push(e);
+      },
+    } as unknown as Parameters<typeof processInbound>[1]["notifications"];
+  }
+
+  it("video_note → notifications verification_requested", async () => {
+    const events: NotifyEvent[] = [];
+    const d = { ...makeDeps(), notifications: fakeNotifications(events) };
+    const inbound: Inbound = {
+      channelId: "tg-1",
+      externalMessageId: "200",
+      externalUserId: "u1",
+      parts: [{ kind: "video_note", mediaRef: { channelId: "tg-1", externalRef: "vn1" } }],
+      receivedAt: 1700000000,
+      raw: {},
+    };
+    await processInbound(inbound, d);
+    expect(events.some((e) => e.eventType === "verification_requested")).toBe(true);
+  });
+
+  it("photo (медиа) → notifications document_uploaded", async () => {
+    const events: NotifyEvent[] = [];
+    const d = { ...makeDeps(), notifications: fakeNotifications(events) };
+    const inbound: Inbound = {
+      channelId: "tg-1",
+      externalMessageId: "201",
+      externalUserId: "u2",
+      parts: [{ kind: "photo", mediaRef: { channelId: "tg-1", externalRef: "ph1" } }],
+      receivedAt: 1700000000,
+      raw: {},
+    };
+    await processInbound(inbound, d);
+    expect(events.some((e) => e.eventType === "document_uploaded")).toBe(true);
+  });
+
+  it("voice part → транскрибируется в текст и персистится", async () => {
+    const d = {
+      ...makeDeps(),
+      transcriber: {
+        transcribe: async () => "привет это расшифровка",
+      } as unknown as Parameters<typeof processInbound>[1]["transcriber"],
+      downloadVoice: (async () =>
+        new Response(new Uint8Array([1, 2, 3]))) as unknown as Parameters<
+        typeof processInbound
+      >[1]["downloadVoice"],
+    };
+    const inbound: Inbound = {
+      channelId: "tg-1",
+      externalMessageId: "202",
+      externalUserId: "u3",
+      parts: [{ kind: "voice", mediaRef: { channelId: "tg-1", externalRef: "v1" } }],
+      receivedAt: 1700000000,
+      raw: {},
+    };
+    const res = await processInbound(inbound, d);
+    expect(res.persisted).toBe(true);
+    // voice-part заменён транскриптом → персистится как текстовое сообщение
+    expect(d._fakes.messages.all()[0]?.text).toBe("привет это расшифровка");
+  });
+
+  it("voice: ошибка транскрипции глотается (pipeline продолжает)", async () => {
+    const d = {
+      ...makeDeps(),
+      transcriber: {
+        transcribe: async () => {
+          throw new Error("whisper down");
+        },
+      } as unknown as Parameters<typeof processInbound>[1]["transcriber"],
+      downloadVoice: (async () =>
+        new Response(new Uint8Array([1]))) as unknown as Parameters<
+        typeof processInbound
+      >[1]["downloadVoice"],
+    };
+    const inbound: Inbound = {
+      channelId: "tg-1",
+      externalMessageId: "203",
+      externalUserId: "u4",
+      parts: [{ kind: "voice", mediaRef: { channelId: "tg-1", externalRef: "v2" } }],
+      receivedAt: 1700000000,
+      raw: {},
+    };
+    const res = await processInbound(inbound, d);
+    expect(res.persisted).toBe(true); // не упало
+  });
+
+  it("template.hooks.extractFields → mergeAttributes на contact", async () => {
+    const d = {
+      ...makeDeps(),
+      template: {
+        hooks: {
+          extractFields: async () => ({ name: "Аня", city: "Сочи" }),
+        },
+      } as unknown as Parameters<typeof processInbound>[1]["template"],
+    };
+    await processInbound(
+      textInbound({ extUserId: "u5", extMessageId: "300", text: "меня зовут Аня" }),
+      d,
+    );
+    const contact = d._fakes.contacts.all()[0];
+    expect(contact?.attributesJson ?? "").toContain("Аня");
+  });
+
+  it("extractFields ошибка глотается", async () => {
+    const d = {
+      ...makeDeps(),
+      template: {
+        hooks: {
+          extractFields: async () => {
+            throw new Error("hook boom");
+          },
+        },
+      } as unknown as Parameters<typeof processInbound>[1]["template"],
+    };
+    const res = await processInbound(
+      textInbound({ extUserId: "u6", extMessageId: "301", text: "текст" }),
+      d,
+    );
+    expect(res.persisted).toBe(true);
+  });
+
+  it("memoryExtractor вызывается и не валит pipeline при ошибке", async () => {
+    let called = false;
+    const d = {
+      ...makeDeps(),
+      memoryExtractor: {
+        extract: async () => {
+          called = true;
+          throw new Error("llm down");
+        },
+      } as unknown as Parameters<typeof processInbound>[1]["memoryExtractor"],
+    };
+    const res = await processInbound(
+      textInbound({ extUserId: "u7", extMessageId: "302", text: "запомни про меня" }),
+      d,
+    );
+    expect(called).toBe(true);
+    expect(res.persisted).toBe(true);
+  });
+
+  it("deferReply → возвращается до reply.generate (replyDeferred)", async () => {
+    let replyCalled = false;
+    const reply: ReplyStrategy = {
+      generate: async () => {
+        replyCalled = true;
+        return [];
+      },
+    };
+    const d = { ...makeDeps(reply), deferReply: true };
+    const res = await processInbound(
+      textInbound({ extUserId: "u8", extMessageId: "303", text: "привет" }),
+      d,
+    );
+    expect(res.replyDeferred).toBe(true);
+    expect(res.outboundEnqueued).toBe(0);
+    expect(replyCalled).toBe(false);
+  });
 });
