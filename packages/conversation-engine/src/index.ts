@@ -110,6 +110,10 @@ export {
 } from "./process-inbound.ts";
 export type { ITranscriber } from "./transcriber.ts";
 export {
+  EXCHANGE_SAFE_FALLBACK,
+  guardExchangeReply,
+  type ExchangeReplyGuardInput,
+  type ExchangeReplyGuardResult,
   LlmReplyStrategy,
   type LlmReplyStrategyOpts,
   parseStyleConfig,
