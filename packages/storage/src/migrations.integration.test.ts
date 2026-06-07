@@ -85,22 +85,22 @@ describe("migrations integration", () => {
     expect(rows[0]?.count).toBeGreaterThanOrEqual(39);
   });
 
-  it("RLS-policies включены на 44 таблицах (exchange_rates/orders/tiers/settings)", async () => {
+  it("RLS-policies включены на 46 таблицах (exchange_rates/orders/tiers/settings/outreach)", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_tables
       WHERE schemaname = 'public' AND rowsecurity = true
     `;
-    expect(rows[0]?.count).toBe(44);
+    expect(rows[0]?.count).toBe(46);
   });
 
-  it("tenant_isolation policies = 44 (по одной на каждую RLS-таблицу)", async () => {
+  it("tenant_isolation policies = 46 (по одной на каждую RLS-таблицу)", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_policies
       WHERE schemaname = 'public' AND policyname = 'tenant_isolation'
     `;
-    expect(rows[0]?.count).toBe(44);
+    expect(rows[0]?.count).toBe(46);
   });
 
   it("legacy tenant (id=1) сидится из 0001", async () => {
