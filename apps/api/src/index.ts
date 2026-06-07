@@ -75,6 +75,7 @@ import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminExchangeRoutes } from "./routes/admin-exchange.ts";
+import { makeAdminConciergeRoutes } from "./routes/admin-concierge.ts";
 import { refreshDueTenants } from "./lib/exchange/rate-feed.ts";
 import { dripDispatchTick } from "./lib/drip-dispatcher.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
@@ -542,6 +543,18 @@ async function main() {
     }),
   );
   log.info("admin-exchange routes enabled");
+
+  app.route(
+    "/",
+    makeAdminConciergeRoutes({
+      db,
+      masterKeyHex: cfg.masterKeyHex,
+      onReload: strategyBundle
+        ? (tenantId) => strategyBundle.invalidateToolsFor(tenantId)
+        : undefined,
+    }),
+  );
+  log.info("admin-concierge routes enabled");
 
   // Sales styles (personas) + AI generate-full. onReload drops the cached style
   // so a generated/edited style drives the bot without a restart (Phase 2 slice B).
