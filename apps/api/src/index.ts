@@ -12,6 +12,8 @@ import { funnels, tenants } from "@chatman-media/storage";
 import { CONCIERGE_V1 } from "@chatman-media/vertical-concierge";
 import { EXCHANGE_V1 } from "@chatman-media/vertical-exchange";
 import { MODELING_V1 } from "@chatman-media/vertical-modeling";
+import { SCOOTER_V1 } from "@chatman-media/vertical-scooter";
+import { VISA_V1 } from "@chatman-media/vertical-visa";
 import { REAL_ESTATE_V1 } from "@chatman-media/vertical-real-estate";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
 import { SAAS_V1 } from "@chatman-media/vertical-saas";
@@ -104,6 +106,8 @@ const KNOWN_TEMPLATES: Record<string, VerticalTemplate> = {
   exchange_v1: EXCHANGE_V1,
   modeling_v1: MODELING_V1,
   real_estate_v1: REAL_ESTATE_V1,
+  scooter_v1: SCOOTER_V1,
+  visa_v1: VISA_V1,
   recruitment_v1: RECRUITMENT_V1,
   saas_v1: SAAS_V1,
   video_v1: VIDEO_V1,

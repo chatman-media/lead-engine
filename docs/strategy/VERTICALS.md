@@ -1,6 +1,6 @@
 # Lead Engine: Вертикали и ниши
 
-_Обновлено: 2026-06-07. Внутренний документ._
+_Обновлено: 2026-06-07 (2). Внутренний документ._
 
 Сводная карта всех вертикалей — от уже реализованных до перспективных ниш (Пхукет / Таиланд и универсальные).
 
@@ -23,7 +23,7 @@ _Обновлено: 2026-06-07. Внутренний документ._
 
 ## Реализованные вертикали (vertical templates)
 
-В коде есть **7 vertical templates** (`apps/vertical-*`, зарегистрированы в
+В коде есть **9 vertical templates** (`apps/vertical-*`, зарегистрированы в
 `apps/api`), каждый сеет воронку + intake-анкету + стили из UI:
 
 | Template slug | Ниша | Seed key | Статус |
@@ -35,6 +35,8 @@ _Обновлено: 2026-06-07. Внутренний документ._
 | `saas_v1` | SaaS-продукт | `saas` | ✅ |
 | `video_v1` | Видеопродакшн | `video` | ✅ |
 | `concierge_v1` | Консьерж / сервис-деск (вилла, expat) | `concierge` | ✅ **мульти-запрос** |
+| `visa_v1` | Визовое агентство (UAE/Thailand/Schengen) | `visa` | ✅ |
+| `scooter_v1` | Аренда байков / скутеров (Пхукет, Бали) | `scooter` | ✅ |
 
 (Плюс seed-шаблон `recruitment_generic` — упрощённая HR-воронка без UAE-специфики.)
 
@@ -62,6 +64,8 @@ capture → qualify → offer → [clear] → [fulfill] → won / lost
 | **exchange** | intent_detected | exchange_request | quote_calculated | verification_check, kyc_collection, risk_review | order_created, requisites_sent, payment_proof_waiting, payment_verified | payout_or_completion / cancelled |
 | **real_estate** | qualification | viewings | offer_negotiation, mou_signed | noc_application, mortgage_approval | — | dld_transfer / deal_lost |
 | **modeling** | intake_pending | intake_complete, casting_review, city | casting_approved, offer_sent | — | contract_signed, show_confirmed | closed / not_suitable, rejected |
+| **visa** | qualification | documents_collection, financial_verification | application_submission | processing | — | visa_issued / rejected |
+| **scooter** | inquiry | booking_confirmed | — | payment_pending | active_rental | returned / cancelled |
 | **recruitment** | intake_pending | intake_complete, partner_review | approved | docs_pending, docs_complete, visa_* | ready_to_work | closed / rejected |
 | **saas** | discovery | qualified, demo_scheduled | demo_done, proposal_sent, negotiation | — | — | signed / lost |
 | **video** | inquiry | brief_call | quote_sent, quote_approved | — | shoot_scheduled, editing, delivery | invoiced / declined |

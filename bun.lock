@@ -71,7 +71,9 @@
         "@chatman-media/vertical-real-estate": "workspace:*",
         "@chatman-media/vertical-recruitment": "workspace:*",
         "@chatman-media/vertical-saas": "workspace:*",
+        "@chatman-media/vertical-scooter": "workspace:*",
         "@chatman-media/vertical-video": "workspace:*",
+        "@chatman-media/vertical-visa": "workspace:*",
         "@chatman-media/verticals": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "drizzle-orm": "^0.45.2",
@@ -180,8 +182,34 @@
         "typescript": "^6.0.3",
       },
     },
+    "apps/vertical-scooter": {
+      "name": "@chatman-media/vertical-scooter",
+      "version": "0.1.0",
+      "dependencies": {
+        "@chatman-media/kb": "workspace:*",
+        "@chatman-media/verticals": "workspace:*",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "^2.4.16",
+        "@types/bun": "1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
     "apps/vertical-video": {
       "name": "@chatman-media/vertical-video",
+      "version": "0.1.0",
+      "dependencies": {
+        "@chatman-media/kb": "workspace:*",
+        "@chatman-media/verticals": "workspace:*",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "^2.4.16",
+        "@types/bun": "1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "apps/vertical-visa": {
+      "name": "@chatman-media/vertical-visa",
       "version": "0.1.0",
       "dependencies": {
         "@chatman-media/kb": "workspace:*",
@@ -289,7 +317,7 @@
     },
     "packages/conversation-engine": {
       "name": "@chatman-media/conversation-engine",
-      "version": "1.11.0",
+      "version": "1.12.0",
       "dependencies": {
         "@chatman-media/channel-core": "workspace:*",
         "@chatman-media/channel-telegram": "workspace:*",
@@ -311,7 +339,7 @@
     },
     "packages/kb": {
       "name": "@chatman-media/kb",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "dependencies": {
         "@chatman-media/llm-router": "workspace:*",
         "unpdf": "^1.6.2",
@@ -495,7 +523,11 @@
 
     "@chatman-media/vertical-saas": ["@chatman-media/vertical-saas@workspace:apps/vertical-saas"],
 
+    "@chatman-media/vertical-scooter": ["@chatman-media/vertical-scooter@workspace:apps/vertical-scooter"],
+
     "@chatman-media/vertical-video": ["@chatman-media/vertical-video@workspace:apps/vertical-video"],
+
+    "@chatman-media/vertical-visa": ["@chatman-media/vertical-visa@workspace:apps/vertical-visa"],
 
     "@chatman-media/verticals": ["@chatman-media/verticals@workspace:packages/verticals"],
 
