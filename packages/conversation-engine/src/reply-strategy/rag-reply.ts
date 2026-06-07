@@ -24,7 +24,7 @@ import type { ConversationsRepo } from "../dal/conversations.ts";
 import type { KbSuggestionsRepo } from "../dal/kb-suggestions.ts";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
-import { guardExchangeReply } from "./exchange-reply-guard.ts";
+import { EXCHANGE_SAFE_FALLBACK, guardExchangeReply } from "./exchange-reply-guard.ts";
 
 /**
  * RAG-аware ReplyStrategy. На каждый user message:
@@ -338,6 +338,7 @@ export class RagReplyStrategy implements ReplyStrategy {
         : Promise.resolve(false),
     ]);
 
+    const isExchange = this.opts.template?.slug === "exchange_v1";
     // answerWithRag принимает rag's ChatClient/EmbeddingClient. Структурно
     // наш llm-router'овский ChatClient compatible (rag's ChatMessage.content
     // допускает null — наш string ужe; complete(messages, opts?) совпадает).
@@ -351,7 +352,7 @@ export class RagReplyStrategy implements ReplyStrategy {
       topK: this.opts.topK ?? 5,
       hybridSearch: this.opts.hybridSearch ?? true,
       rewriteQueryBeforeRetrieval: this.opts.rewriteQueryBeforeRetrieval ?? true,
-      reflect: this.opts.reflect ?? false,
+      reflect: this.opts.reflect ?? isExchange,
       numPredict: this.opts.maxOutputTokens ?? 600,
       // Style: если resolveStyle вернул Style — answerWithRag использует его
       // persona, sales framework, hooks, skills для построения system prompt.
@@ -384,6 +385,19 @@ export class RagReplyStrategy implements ReplyStrategy {
           });
       }
 
+      if (isExchange) {
+        console.warn(
+          `[exchange-reflect-guard] tenant=${tenantId} conversation=${input.conversationId} path=${result.telemetry.path}`,
+        );
+        return [
+          {
+            channelId: String(input.channel.channelId),
+            externalUserId: input.inbound.externalUserId,
+            parts: [{ kind: "text", text: EXCHANGE_SAFE_FALLBACK }],
+          },
+        ];
+      }
+
       if (!this.opts.softFallback) return null;
 
       // Derive persona: from style (if set) or DEFAULT_PERSONA.
@@ -413,7 +427,7 @@ export class RagReplyStrategy implements ReplyStrategy {
       ];
     }
 
-    const guarded = this.opts.template?.slug === "exchange_v1"
+    const guarded = isExchange
       ? guardExchangeReply({ text: result.text, telemetry: result.telemetry })
       : { ok: true, text: result.text };
     if (!guarded.ok) {

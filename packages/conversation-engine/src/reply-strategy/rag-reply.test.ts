@@ -19,6 +19,16 @@ function chatReturning(reply: string): ChatClient {
   return { complete: async () => reply } as unknown as ChatClient;
 }
 
+function chatThenFactCheck(reply: string, verdict: Record<string, unknown>): ChatClient {
+  let calls = 0;
+  return {
+    complete: async () => {
+      calls += 1;
+      return calls === 1 ? reply : JSON.stringify(verdict);
+    },
+  } as unknown as ChatClient;
+}
+
 const embed: RagReplyStrategyOpts["resolveEmbed"] = () =>
   ({ embed: async (xs: string[]) => xs.map(() => [1, 0, 0]), dim: 3 }) as never;
 
@@ -119,6 +129,44 @@ describe("RagReplyStrategy.generate", () => {
       {
         template: EXCHANGE_TEMPLATE,
         resolveChat: () => chatReturning("Курс 31.5, получите 10553 THB."),
+        resolveEmbed: embed,
+        resolveKb: kbWith([HIT]),
+      },
+      fakeMessagesRepo(),
+    );
+    const r = await s.generate(baseInput());
+    expect(r).not.toBeNull();
+    const part = r![0]!.parts[0] as { text: string };
+    expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
+  });
+
+  it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
+    const s = mk(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chatReturning("ответ"),
+        resolveEmbed: embed,
+        resolveKb: kbWith([]),
+        softFallback: false,
+      },
+      fakeMessagesRepo(),
+    );
+    const r = await s.generate(baseInput());
+    expect(r).not.toBeNull();
+    const part = r![0]!.parts[0] as { text: string };
+    expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
+  });
+
+  it("exchange: reflect срезает неподкреплённый статус и возвращает safe fallback", async () => {
+    const s = mk(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () =>
+          chatThenFactCheck("Курьер будет через 10 минут.", {
+            grounded: false,
+            vacancyOk: true,
+            reason: "delivery ETA not in context",
+          }),
         resolveEmbed: embed,
         resolveKb: kbWith([HIT]),
       },
