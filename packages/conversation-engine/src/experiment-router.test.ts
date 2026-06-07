@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { loadExperimentVariants } from "./experiment-router.ts";
 
 function makeExperiment(allocationJson: string) {
-  return { id: 1, tenantId: 1, slug: "test-exp", status: "running", allocationJson, createdAt: 0, updatedAt: 0 };
+  // biome-ignore lint/suspicious/noExplicitAny: partial stub
+  return { id: 1, tenantId: 1, slug: "test-exp", status: "running", allocationJson, createdAt: 0, updatedAt: 0 } as any;
 }
 
 const VALID_CONFIG_JSON = JSON.stringify({
