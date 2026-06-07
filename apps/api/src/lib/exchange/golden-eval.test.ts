@@ -1,6 +1,15 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+	EXCHANGE_SAFE_FALLBACK,
+	RagReplyStrategy,
+	type RagReplyStrategyOpts,
+} from "@chatman-media/conversation-engine";
+import type { ChatClient } from "@chatman-media/llm-router";
+import type { AnyRagTool } from "@chatman-media/kb";
+import type { VerticalTemplate } from "@chatman-media/verticals";
 import { describe, expect, it } from "bun:test";
+import { z } from "zod";
 import {
 	evaluateExchangeGoldenCases,
 	formatExchangeGoldenFailures,
@@ -22,6 +31,121 @@ const fixturesPath = resolve(
 
 function loadCases() {
 	return parseExchangeGoldenJsonl(readFileSync(fixturesPath, "utf8"));
+}
+
+const EXCHANGE_TEMPLATE = {
+	slug: "exchange_v1",
+	displayName: "Exchange",
+	version: 1,
+	funnelStages: [],
+	systemPromptFragment: "",
+} as unknown as VerticalTemplate;
+
+const embed: RagReplyStrategyOpts["resolveEmbed"] = () =>
+	({ embed: async (xs: string[]) => xs.map(() => [1, 0, 0]), dim: 3 }) as never;
+
+const emptyKb: RagReplyStrategyOpts["resolveKb"] = () =>
+	({
+		search: async () => [],
+		hybridSearch: async () => [],
+		prioritySearch: async () => [],
+	}) as never;
+
+const quoteKb: RagReplyStrategyOpts["resolveKb"] = () =>
+	({
+		search: async () => [
+			{
+				chunk_id: 1,
+				distance: 0.1,
+				text: "Курс и сумму называет только compute_exchange_quote.",
+				document_id: 1,
+				source: "kb",
+				title: "Exchange policy",
+			},
+		],
+		hybridSearch: async () => [
+			{
+				chunk_id: 1,
+				distance: 0.1,
+				text: "Курс и сумму называет только compute_exchange_quote.",
+				document_id: 1,
+				source: "kb",
+				title: "Exchange policy",
+			},
+		],
+		prioritySearch: async () => [],
+	}) as never;
+
+function fakeMessagesRepo() {
+	return () =>
+		({
+			recent: async () => [],
+			countByConversation: async () => 0,
+			insert: async () => ({ id: 1 }),
+		}) as never;
+}
+
+function quoteTool(): AnyRagTool {
+	return {
+		name: "compute_exchange_quote",
+		description: "Compute exchange quote",
+		parameters: z.object({ asset: z.string(), amount: z.number() }),
+		execute: async () => ({ rate: 31.5, amountToThb: 10553 }),
+	};
+}
+
+function chatWithQuoteToolTrace(finalReply: string): ChatClient {
+	let calls = 0;
+	return {
+		completeWithTools: async () => {
+			calls += 1;
+			if (calls === 1) {
+				return {
+					content: null,
+					toolCalls: [
+						{
+							id: "quote-1",
+							name: "compute_exchange_quote",
+							args: { asset: "USDT", amount: 335 },
+						},
+					],
+				};
+			}
+			return { content: finalReply, toolCalls: [] };
+		},
+		complete: async () => finalReply,
+	} as unknown as ChatClient;
+}
+
+function chatWithoutTools(finalReply: string): ChatClient {
+	return { complete: async () => finalReply } as unknown as ChatClient;
+}
+
+async function runRagPipelineSmoke(opts: {
+	chat: ChatClient;
+	tools?: AnyRagTool[];
+	resolveKb?: RagReplyStrategyOpts["resolveKb"];
+	userMessageText?: string;
+}) {
+	const strategy = new RagReplyStrategy(
+		{
+			template: EXCHANGE_TEMPLATE,
+			resolveChat: () => opts.chat,
+			resolveEmbed: embed,
+			resolveKb: opts.resolveKb ?? emptyKb,
+			resolveTools: () => opts.tools ?? [],
+			softFallback: false,
+		},
+		fakeMessagesRepo(),
+	);
+	return strategy.generate({
+		tenant: { tenantId: 1 },
+		channel: { channelId: 10 },
+		conversationId: 100,
+		contactId: 5,
+		inbound: { externalUserId: "u1" },
+		userMessageText: opts.userMessageText ?? "сколько получу за 335 usdt?",
+	});
 }
 
 describe("exchange golden eval smoke", () => {
@@ -76,5 +200,27 @@ describe("exchange golden eval smoke", () => {
 		expect(failures).toContain("expected=quote through tool");
 		expect(failures).toContain("actual=draft was allowed");
 		expect(failures).toContain("trace=rate_quote");
+	});
+
+	it("real RAG pipeline smoke: tool-backed quote is sent", async () => {
+		const reply = "Курс 31.5, получите 10553 THB.";
+		const result = await runRagPipelineSmoke({
+			chat: chatWithQuoteToolTrace(reply),
+			tools: [quoteTool()],
+			userMessageText: loadCases()[0]?.messages[0]?.text,
+		});
+		expect(result).not.toBeNull();
+		expect((result![0]!.parts[0] as { text: string }).text).toBe(reply);
+	});
+
+	it("real RAG pipeline smoke: unbacked quote is replaced with safe fallback", async () => {
+		const result = await runRagPipelineSmoke({
+			chat: chatWithoutTools("Курс 31.5, получите 10553 THB."),
+			tools: [],
+			resolveKb: quoteKb,
+			userMessageText: loadCases()[0]?.messages[0]?.text,
+		});
+		expect(result).not.toBeNull();
+		expect((result![0]!.parts[0] as { text: string }).text).toBe(EXCHANGE_SAFE_FALLBACK);
 	});
 });
