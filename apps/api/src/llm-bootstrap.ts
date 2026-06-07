@@ -399,38 +399,218 @@ export async function resolveTenantStyle(
 	return parseStyleConfig(latest.configJson);
 }
 
-export function makeReplyStrategy(
-	ref: LoadedRef,
-	cfg: ApiConfig,
+/**
+ * resolveSkills: загружает enabled-навыки тенанта (кеш per-tenant). Stage-kind
+ * фильтрация — внутри composeSystemPrompt. Вынесено из makeReplyStrategy для
+ * прямого юнит-тестирования.
+ */
+export function makeSkillsResolver(
 	db: Db,
-	metrics?: PlatformMetrics,
-	recordUsage?: RecordUsage,
-	notifyRateGuard?: (alert: RateGuardAlert) => void,
-): ReplyStrategyBundle | null {
-	if (!ref.current.anyTenantHasChat) return null;
+): (input: { tenantId: number }) => Promise<readonly SkillForPrompt[]> {
+	const cache = new Map<number, readonly SkillForPrompt[]>();
+	return async (input: { tenantId: number }): Promise<readonly SkillForPrompt[]> => {
+		const cached = cache.get(input.tenantId);
+		if (cached !== undefined) return cached;
+		const rows = await db
+			.select({
+				slug: skills.slug,
+				displayName: skills.displayName,
+				promptFragment: skills.promptFragment,
+				applicableStagesJson: skills.applicableStagesJson,
+			})
+			.from(skills)
+			.where(and(eq(skills.tenantId, input.tenantId), eq(skills.isEnabled, true)))
+			.orderBy(asc(skills.family), asc(skills.displayName));
+		const result: SkillForPrompt[] = rows.map((r) => ({
+			slug: r.slug,
+			displayName: r.displayName,
+			promptFragment: r.promptFragment,
+			applicableStages: (() => {
+				try {
+					return JSON.parse(r.applicableStagesJson) as string[];
+				} catch {
+					return [];
+				}
+			})() as readonly string[],
+		}));
+		cache.set(input.tenantId, result);
+		return result;
+	};
+}
 
-	for (const [tenantId, perPurpose] of ref.current.byTenant) {
-		const chat = perPurpose.get("chat");
-		if (chat) ref.router.setConfig(toRouterConfig(tenantId, "chat", chat));
-		const embed = perPurpose.get("embed");
-		if (embed) ref.router.setConfig(toRouterConfig(tenantId, "embed", embed));
-	}
+/**
+ * resolveDirectorHooks: активные director-hooks тенанта (без кеша — меняются из
+ * UI в любой момент; один индексированный запрос на ответ).
+ */
+export function makeDirectorHooksResolver(
+	db: Db,
+): (input: { tenantId: number }) => Promise<readonly DirectorHookForPrompt[]> {
+	return async (input: { tenantId: number }): Promise<readonly DirectorHookForPrompt[]> => {
+		const rows = await db
+			.select({
+				name: directorHooks.name,
+				body: directorHooks.body,
+				triggerHint: directorHooks.triggerHint,
+			})
+			.from(directorHooks)
+			.where(and(eq(directorHooks.tenantId, input.tenantId), eq(directorHooks.isActive, true)))
+			.orderBy(asc(directorHooks.position), asc(directorHooks.id));
+		return rows;
+	};
+}
 
-	const template = RECRUITMENT_V1;
+/**
+ * resolveReranker: per-tenant llm_provider_configs purpose='reranker' →
+ * Cohere/Jina reranker (кеш per-tenant, инвалидация только рестартом).
+ */
+export function makeRerankerResolver(
+	db: Db,
+	masterKeyHex: string,
+): (input: { tenantId: number }) => Promise<Reranker | null> {
+	const cache = new Map<number, Reranker | null>();
+	return async (input: { tenantId: number }): Promise<Reranker | null> => {
+		if (cache.has(input.tenantId)) return cache.get(input.tenantId) ?? null;
+		const [row] = await db
+			.select({
+				provider: llmProviderConfigs.provider,
+				model: llmProviderConfigs.model,
+				secretRef: llmProviderConfigs.secretRef,
+				baseUrl: llmProviderConfigs.baseUrl,
+				timeoutMs: llmProviderConfigs.timeoutMs,
+			})
+			.from(llmProviderConfigs)
+			.where(
+				and(
+					eq(llmProviderConfigs.tenantId, input.tenantId),
+					eq(llmProviderConfigs.purpose, "reranker"),
+				),
+			)
+			.limit(1);
 
-	// resolveTools: builds the list of agentic tools enabled for the tenant.
-	// Определён ДО embed-проверки, чтобы и LLM-only fallback мог давать боту
-	// инструменты (напр. расчёт курса) — иначе бот без эмбеддингов уходит в
-	// «уточню у партнёра» и не считает курс.
-	//
-	// Два класса tools:
-	//   - tenant-bound (booking_link): зависят только от tenantId → кешируются.
-	//   - conversation-bound (exchange): зависят от conversationId → строятся
-	//     СВЕЖИМИ на каждый ответ. Гейт «включён ли обмен» кешируется boolean'ом.
-	// Кеши сбрасываются через invalidateToolsFor(tenantId).
+		if (!row || !row.secretRef) {
+			cache.set(input.tenantId, null);
+			return null;
+		}
+
+		let apiKey: string | null = null;
+		try {
+			apiKey = await getDecryptedSecret({
+				db,
+				tenantId: input.tenantId,
+				key: row.secretRef,
+				masterKeyHex,
+			});
+		} catch (err) {
+			console.warn(`[reranker] failed to decrypt API key for tenant ${input.tenantId}:`, err);
+			cache.set(input.tenantId, null);
+			return null;
+		}
+
+		if (!apiKey) {
+			cache.set(input.tenantId, null);
+			return null;
+		}
+
+		let reranker: Reranker | null = null;
+		if (row.provider === "cohere") {
+			reranker = new CohereReranker({
+				apiKey,
+				...(row.model ? { model: row.model } : {}),
+				...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
+				...(row.timeoutMs !== null ? { timeoutMs: row.timeoutMs } : {}),
+			});
+		} else if (row.provider === "jina") {
+			reranker = new JinaReranker({
+				apiKey,
+				...(row.model ? { model: row.model } : {}),
+				...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
+				...(row.timeoutMs !== null ? { timeoutMs: row.timeoutMs } : {}),
+			});
+		} else {
+			console.warn(
+				`[reranker] unsupported provider "${row.provider}" for tenant ${input.tenantId}`,
+			);
+		}
+
+		cache.set(input.tenantId, reranker);
+		return reranker;
+	};
+}
+
+/**
+ * resolveStyle: цепочка приоритета experiment (A/B) → global default slug →
+ * активный стиль тенанта. Кеши per-tenant (style + experiment-router).
+ */
+export function makeStyleResolver(
+	db: Db,
+	opts: { defaultSlug: string; experimentSlug: string },
+): {
+	resolveStyle: (input: { tenantId: number; contactId: number }) => Promise<Style | null>;
+	invalidateStyle: (tenantId: number) => void;
+} {
+	const styleCache = new Map<number, Style | null>();
+	const experimentCache = new Map<number, ABRouter | "absent">();
+	const { defaultSlug, experimentSlug } = opts;
+	const resolveStyle = async (input: {
+		tenantId: number;
+		contactId: number;
+	}): Promise<Style | null> => {
+		if (experimentSlug) {
+			let abRouter = experimentCache.get(input.tenantId);
+			if (abRouter === undefined) {
+				const expRepo = new ExperimentsRepo({ db, tenantId: input.tenantId });
+				const stylesRepo = new StylesRepo({ db, tenantId: input.tenantId });
+				const exp = await expRepo.findRunningBySlug(experimentSlug);
+				if (exp) {
+					const variants = await loadExperimentVariants(exp, stylesRepo);
+					if (variants) {
+						abRouter = new ABRouter({ variants, salt: exp.slug });
+						experimentCache.set(input.tenantId, abRouter);
+					} else {
+						experimentCache.set(input.tenantId, "absent");
+						abRouter = "absent";
+					}
+				} else {
+					experimentCache.set(input.tenantId, "absent");
+					abRouter = "absent";
+				}
+			}
+			if (abRouter !== "absent") {
+				return abRouter.assign(String(input.contactId)).style;
+			}
+		}
+		const cached = styleCache.get(input.tenantId);
+		if (cached !== undefined) return cached;
+		const repo = new StylesRepo({ db, tenantId: input.tenantId });
+		const parsed = await resolveTenantStyle(repo, defaultSlug);
+		styleCache.set(input.tenantId, parsed);
+		return parsed;
+	};
+	const invalidateStyle = (tenantId: number) => {
+		styleCache.delete(tenantId);
+		experimentCache.delete(tenantId);
+	};
+	return { resolveStyle, invalidateStyle };
+}
+
+/**
+ * resolveTools: agentic-инструменты тенанта. tenant-bound (booking_link)
+ * кешируются; conversation-bound (exchange / concierge) строятся свежими (гейт
+ * включённости — boolean-кеш). invalidateTools сбрасывает кеши тенанта.
+ */
+export function makeToolsResolver(opts: {
+	db: Db;
+	masterKeyHex: string;
+	notifyRateGuard?: (alert: RateGuardAlert) => void;
+}): {
+	resolveTools: (input: { tenantId: number; conversationId: number }) => Promise<AnyRagTool[]>;
+	invalidateTools: (tenantId: number) => void;
+} {
+	const { db, masterKeyHex, notifyRateGuard } = opts;
 	const toolsCache = new Map<number, AnyRagTool[]>();
 	const exchangeEnabledCache = new Map<number, boolean>();
 	const multiRequestToolCache = new Map<number, boolean>();
+
 	async function resolveTools(input: {
 		tenantId: number;
 		conversationId: number;
@@ -441,21 +621,18 @@ export function makeReplyStrategy(
 				db,
 				tenantId: input.tenantId,
 				key: "tool_booking_url",
-				masterKeyHex: cfg.masterKeyHex,
+				masterKeyHex,
 			});
 			base = [];
 			if (bookingUrl) base.push(makeBookingLinkTool(bookingUrl));
 			toolsCache.set(input.tenantId, base);
 		}
 
-		// conversation-bound tools (зависят от conversationId — без кеша по тенанту).
 		const conversationBound: AnyRagTool[] = [];
 
 		let exchangeEnabled = exchangeEnabledCache.get(input.tenantId);
 		if (exchangeEnabled === undefined) {
-			exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(
-				() => false,
-			);
+			exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(() => false);
 			exchangeEnabledCache.set(input.tenantId, exchangeEnabled);
 		}
 		if (exchangeEnabled) {
@@ -464,7 +641,7 @@ export function makeReplyStrategy(
 					db,
 					tenantId: input.tenantId,
 					conversationId: input.conversationId,
-					masterKeyHex: cfg.masterKeyHex,
+					masterKeyHex,
 					...(notifyRateGuard ? { notifyRateGuard } : {}),
 				}),
 			);
@@ -496,6 +673,36 @@ export function makeReplyStrategy(
 		multiRequestToolCache.delete(tenantId);
 	};
 
+	return { resolveTools, invalidateTools };
+}
+
+export function makeReplyStrategy(
+	ref: LoadedRef,
+	cfg: ApiConfig,
+	db: Db,
+	metrics?: PlatformMetrics,
+	recordUsage?: RecordUsage,
+	notifyRateGuard?: (alert: RateGuardAlert) => void,
+): ReplyStrategyBundle | null {
+	if (!ref.current.anyTenantHasChat) return null;
+
+	for (const [tenantId, perPurpose] of ref.current.byTenant) {
+		const chat = perPurpose.get("chat");
+		if (chat) ref.router.setConfig(toRouterConfig(tenantId, "chat", chat));
+		const embed = perPurpose.get("embed");
+		if (embed) ref.router.setConfig(toRouterConfig(tenantId, "embed", embed));
+	}
+
+	const template = RECRUITMENT_V1;
+
+	// resolveTools: см. makeToolsResolver. Определён ДО embed-проверки, чтобы и
+	// LLM-only fallback мог давать боту инструменты (напр. расчёт курса).
+	const { resolveTools, invalidateTools } = makeToolsResolver({
+		db,
+		masterKeyHex: cfg.masterKeyHex,
+		...(notifyRateGuard ? { notifyRateGuard } : {}),
+	});
+
 	// Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
 	// NB: проверка против initial snapshot'а; если tenant позже добавит embed,
 	// reloader setConfig'нет на router, но strategy уже LlmReplyStrategy. После
@@ -518,197 +725,14 @@ export function makeReplyStrategy(
 		};
 	}
 
-	// resolveStyle: priority chain (см. предыдущую версию для деталей).
-	const styleCache = new Map<number, Style | null>();
-	const experimentCache = new Map<number, ABRouter | "absent">();
-	const defaultSlug = cfg.defaultStyleSlug;
-	const experimentSlug = cfg.experimentSlug;
+	const { resolveStyle, invalidateStyle } = makeStyleResolver(db, {
+		defaultSlug: cfg.defaultStyleSlug,
+		experimentSlug: cfg.experimentSlug,
+	});
 
-	// Always defined: experiment → global default slug → tenant's active style.
-	const resolveStyle = async (input: {
-		tenantId: number;
-		contactId: number;
-	}): Promise<Style | null> => {
-		if (experimentSlug) {
-			let abRouter = experimentCache.get(input.tenantId);
-			if (abRouter === undefined) {
-				const expRepo = new ExperimentsRepo({
-					db,
-					tenantId: input.tenantId,
-				});
-				const stylesRepo = new StylesRepo({
-					db,
-					tenantId: input.tenantId,
-				});
-				const exp = await expRepo.findRunningBySlug(experimentSlug);
-				if (exp) {
-					const variants = await loadExperimentVariants(exp, stylesRepo);
-					if (variants) {
-						abRouter = new ABRouter({ variants, salt: exp.slug });
-						experimentCache.set(input.tenantId, abRouter);
-					} else {
-						experimentCache.set(input.tenantId, "absent");
-						abRouter = "absent";
-					}
-				} else {
-					experimentCache.set(input.tenantId, "absent");
-					abRouter = "absent";
-				}
-			}
-			if (abRouter !== "absent") {
-				return abRouter.assign(String(input.contactId)).style;
-			}
-		}
-		const cached = styleCache.get(input.tenantId);
-		if (cached !== undefined) return cached;
-		const repo = new StylesRepo({ db, tenantId: input.tenantId });
-		const parsed = await resolveTenantStyle(repo, defaultSlug);
-		styleCache.set(input.tenantId, parsed);
-		return parsed;
-	};
-
-	// resolveSkills: loads all enabled skills for the tenant.
-	// Stage-kind filtering (intake/active/always) happens inside composeSystemPrompt.
-	// Results are cached per-tenant (skills rarely change at runtime; restart invalidates).
-	const skillsCache = new Map<number, readonly SkillForPrompt[]>();
-	async function resolveSkills(input: {
-		tenantId: number;
-	}): Promise<readonly SkillForPrompt[]> {
-		const cached = skillsCache.get(input.tenantId);
-		if (cached !== undefined) return cached;
-		const rows = await db
-			.select({
-				slug: skills.slug,
-				displayName: skills.displayName,
-				promptFragment: skills.promptFragment,
-				applicableStagesJson: skills.applicableStagesJson,
-			})
-			.from(skills)
-			.where(
-				and(eq(skills.tenantId, input.tenantId), eq(skills.isEnabled, true)),
-			)
-			.orderBy(asc(skills.family), asc(skills.displayName));
-		const result: SkillForPrompt[] = rows.map((r) => ({
-			slug: r.slug,
-			displayName: r.displayName,
-			promptFragment: r.promptFragment,
-			// applicableStagesJson is a JSON array of FunnelStage strings (or empty = always).
-			applicableStages: (() => {
-				try {
-					return JSON.parse(r.applicableStagesJson) as string[];
-				} catch {
-					return [];
-				}
-			})() as readonly string[],
-		}));
-		skillsCache.set(input.tenantId, result);
-		return result;
-	}
-
-	// resolveDirectorHooks: loads active director hooks for the tenant.
-	// No server-side cache — hooks can change at any time from the UI.
-	// Each reply triggers one fast indexed query (idx_director_hooks_active).
-	async function resolveDirectorHooks(input: {
-		tenantId: number;
-	}): Promise<readonly DirectorHookForPrompt[]> {
-		const rows = await db
-			.select({
-				name: directorHooks.name,
-				body: directorHooks.body,
-				triggerHint: directorHooks.triggerHint,
-			})
-			.from(directorHooks)
-			.where(
-				and(
-					eq(directorHooks.tenantId, input.tenantId),
-					eq(directorHooks.isActive, true),
-				),
-			)
-			.orderBy(asc(directorHooks.position), asc(directorHooks.id));
-		return rows;
-	}
-
-
-	// resolveReranker: reads per-tenant llm_provider_configs with purpose='reranker'.
-	// Results are cached per-tenant (Reranker objects are stateless wrappers —
-	// they hold only the API key and model, so caching per-tenant is safe).
-	// Cache is never invalidated at runtime — requires restart if the admin
-	// changes the reranker config. Acceptable trade-off: reranker changes rarely.
-	const rerankerCache = new Map<number, Reranker | null>();
-	async function resolveReranker(input: {
-		tenantId: number;
-	}): Promise<Reranker | null> {
-		if (rerankerCache.has(input.tenantId)) {
-			return rerankerCache.get(input.tenantId) ?? null;
-		}
-		const [row] = await db
-			.select({
-				provider: llmProviderConfigs.provider,
-				model: llmProviderConfigs.model,
-				secretRef: llmProviderConfigs.secretRef,
-				baseUrl: llmProviderConfigs.baseUrl,
-				timeoutMs: llmProviderConfigs.timeoutMs,
-			})
-			.from(llmProviderConfigs)
-			.where(
-				and(
-					eq(llmProviderConfigs.tenantId, input.tenantId),
-					eq(llmProviderConfigs.purpose, "reranker"),
-				),
-			)
-			.limit(1);
-
-		if (!row || !row.secretRef) {
-			rerankerCache.set(input.tenantId, null);
-			return null;
-		}
-
-		let apiKey: string | null = null;
-		try {
-			apiKey = await getDecryptedSecret({
-				db,
-				tenantId: input.tenantId,
-				key: row.secretRef,
-				masterKeyHex: cfg.masterKeyHex,
-			});
-		} catch (err) {
-			console.warn(
-				`[reranker] failed to decrypt API key for tenant ${input.tenantId}:`,
-				err,
-			);
-			rerankerCache.set(input.tenantId, null);
-			return null;
-		}
-
-		if (!apiKey) {
-			rerankerCache.set(input.tenantId, null);
-			return null;
-		}
-
-		let reranker: Reranker | null = null;
-		if (row.provider === "cohere") {
-			reranker = new CohereReranker({
-				apiKey,
-				...(row.model ? { model: row.model } : {}),
-				...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
-				...(row.timeoutMs !== null ? { timeoutMs: row.timeoutMs } : {}),
-			});
-		} else if (row.provider === "jina") {
-			reranker = new JinaReranker({
-				apiKey,
-				...(row.model ? { model: row.model } : {}),
-				...(row.baseUrl ? { baseUrl: row.baseUrl } : {}),
-				...(row.timeoutMs !== null ? { timeoutMs: row.timeoutMs } : {}),
-			});
-		} else {
-			console.warn(
-				`[reranker] unsupported provider "${row.provider}" for tenant ${input.tenantId}`,
-			);
-		}
-
-		rerankerCache.set(input.tenantId, reranker);
-		return reranker;
-	}
+	const resolveSkills = makeSkillsResolver(db);
+	const resolveDirectorHooks = makeDirectorHooksResolver(db);
+	const resolveReranker = makeRerankerResolver(db, cfg.masterKeyHex);
 
 	const strategy = new RagReplyStrategy(
 		{
@@ -764,10 +788,7 @@ export function makeReplyStrategy(
 	return {
 		strategy,
 		invalidateToolsFor: invalidateTools,
-		invalidateStyleFor: (tenantId: number) => {
-			styleCache.delete(tenantId);
-			experimentCache.delete(tenantId);
-		},
+		invalidateStyleFor: invalidateStyle,
 	};
 }
 
