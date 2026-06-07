@@ -495,6 +495,23 @@ async function main() {
     db,
     metrics,
     recordUsage,
+    // A4: rate-guard сработал → алерт владельцу (информер/Telegram), не «тихий» warn.
+    (alert) => {
+      void notificationService
+        .notify({
+          tenantId: alert.tenantId,
+          eventType: "exchange_rate_guard_tripped",
+          conversationId: alert.conversationId,
+          data: {
+            asset: alert.asset,
+            network: alert.network ?? "",
+            reason: alert.reason,
+            deviationPct: alert.deviationPct,
+            threshold: alert.threshold ?? null,
+          },
+        })
+        .catch(() => {});
+    },
   );
 
   // Agentic tool configuration (booking link, etc.).
