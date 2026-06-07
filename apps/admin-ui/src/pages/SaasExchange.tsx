@@ -437,6 +437,16 @@ export function SaasExchange() {
     }
   }
 
+  async function confirmPayment(id: number) {
+    try {
+      const r = await saas.confirmExchangePayment(id);
+      toast.success(r.delivered ? "Оплата подтверждена, клиент уведомлён" : "Оплата подтверждена");
+      load();
+    } catch (err) {
+      if (!handle401(err)) toast.error("Не удалось подтвердить оплату");
+    }
+  }
+
   async function issueCode(id: number, code: string) {
     try {
       const r = await saas.issueExchangePayoutCode(
@@ -993,7 +1003,13 @@ export function SaasExchange() {
                     </TableRow>
                   )}
                   {orders.map((o) => (
-                    <OrderRow key={o.id} order={o} onPatch={patchOrder} onIssueCode={issueCode} />
+                    <OrderRow
+                      key={o.id}
+                      order={o}
+                      onPatch={patchOrder}
+                      onIssueCode={issueCode}
+                      onConfirmPayment={confirmPayment}
+                    />
                   ))}
                 </TableBody>
               </Table>
@@ -1082,10 +1098,12 @@ function OrderRow({
   order,
   onPatch,
   onIssueCode,
+  onConfirmPayment,
 }: {
   order: ExchangeOrder;
   onPatch: (id: number, patch: Parameters<typeof saas.updateExchangeOrder>[1]) => void;
   onIssueCode: (id: number, code: string) => void;
+  onConfirmPayment: (id: number) => void;
 }) {
   const [code, setCode] = useState(order.payoutCode ?? "");
   const [verif, setVerif] = useState(order.verificationId ?? "");
@@ -1218,6 +1236,18 @@ function OrderRow({
             ))}
           </SelectContent>
         </Select>
+        {order.status === "awaiting_payment" && (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="mt-1 h-7 w-36 text-[11px]"
+            onClick={() => onConfirmPayment(order.id)}
+            title="Подтвердить оплату (фиат) — перевести в paid и уведомить клиента"
+          >
+            ✅ Подтвердить оплату
+          </Button>
+        )}
       </TableCell>
     </TableRow>
   );

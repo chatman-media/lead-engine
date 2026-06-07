@@ -837,6 +837,53 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		});
 	});
 
+	/**
+	 * POST /api/admin/exchange/orders/:id/confirm-payment
+	 * Оператор подтверждает фиат-оплату (verify_exchange_payment по RUB/EUR не
+	 * может проверить ончейн и возвращает needsOperator). Переводит заявку в
+	 * paid и сразу сообщает клиенту, что оплата принята и готовится выдача —
+	 * клиент не «висит». Дальше оператор выдаёт код (issue-payout-code).
+	 */
+	app.post("/api/admin/exchange/orders/:id/confirm-payment", async (c) => {
+		const tenantId = c.var.tenantId;
+		const adminId = c.var.adminId as number | undefined;
+		const id = Number(c.req.param("id"));
+		if (!Number.isInteger(id)) return c.json({ error: "bad id" }, 400);
+		const body = await c.req.json().catch(() => ({}));
+		const now = Math.floor(Date.now() / 1000);
+
+		const [row] = await withTenant(opts.db, tenantId, async (tx) =>
+			tx
+				.update(exchangeOrders)
+				.set({ status: "paid", updatedAt: now })
+				.where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, id)))
+				.returning(),
+		);
+		if (!row) return c.json({ error: "not found" }, 404);
+
+		const custom = typeof body?.text === "string" && body.text.trim() ? body.text.trim() : null;
+		const note = custom ?? "✅ Оплата получена и подтверждена. Готовим выдачу.";
+		const delivered = await deliverExchangeMessage(
+			opts.db,
+			tenantId,
+			row,
+			note,
+			`exch-pay-confirm-${row.id}`,
+			"exchange-payment-confirmed",
+		);
+
+		await recordAudit(opts.db, {
+			tenantId,
+			adminId,
+			action: "exchange.payment_confirmed",
+			targetKind: "exchange_order",
+			targetId: String(id),
+			details: { delivered, custom: !!custom },
+		});
+
+		return c.json({ ok: true, delivered, order: serializeExchangeOrder(row) });
+	});
+
 	// ── Оборот (нормализовано в THB) ────────────────────────────────────────────
 	app.get("/api/admin/exchange/turnover", async (c) => {
 		const tenantId = c.var.tenantId;

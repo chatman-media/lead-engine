@@ -510,6 +510,44 @@ describe("admin-exchange routes", () => {
 		expect(bad.status).toBe(400);
 	});
 
+	it("confirm-payment moves order to paid and notifies client (A2)", async () => {
+		if (!sql) return;
+		const [row] = await withTenant(db, tenantA, (tx) =>
+			tx
+				.select({ id: exchangeOrders.id })
+				.from(exchangeOrders)
+				.where(eq(exchangeOrders.tenantId, tenantA))
+				.limit(1),
+		);
+		const orderId = must(row, "exchange order").id;
+		// Поставим фиатное «ожидание оплаты», как после verify_exchange_payment(needsOperator).
+		await patchJson(tokenA, `/api/admin/exchange/orders/${orderId}`, {
+			status: "awaiting_payment",
+		});
+
+		const res = await postJson(
+			tokenA,
+			`/api/admin/exchange/orders/${orderId}/confirm-payment`,
+			{},
+		);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			ok: boolean;
+			delivered: boolean;
+			order: { status: string };
+		};
+		expect(body.ok).toBe(true);
+		expect(body.order.status).toBe("paid");
+		expect(body.delivered).toBe(true);
+		const ob = await withTenant(db, tenantA, (tx) =>
+			tx
+				.select({ key: outboundQueue.idempotencyKey })
+				.from(outboundQueue)
+				.where(eq(outboundQueue.tenantId, tenantA)),
+		);
+		expect(ob.some((r) => String(r.key).startsWith(`exch-pay-confirm-${orderId}`))).toBe(true);
+	});
+
 	it("keeps exchange CRM isolated by tenant", async () => {
 		if (!sql) return;
 		expect(tenantA).not.toBe(tenantB);
