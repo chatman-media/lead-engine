@@ -26,6 +26,10 @@ import { resolvePlan } from "../lib/plans.ts";
 import type { FieldExtractor } from "../lib/field-extractor.ts";
 import type { PhotoProcessor } from "../lib/photo-processor.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
+import {
+  expandCallbackQuery,
+  wrapWithConciergeButtons,
+} from "../lib/concierge-reply-markup.ts";
 
 /**
  * Telegram webhook handler. Telegram постит JSON на /webhook/telegram/:slug
@@ -171,7 +175,19 @@ export function makeTelegramWebhookRoutes(opts: {
     if (next.done) {
       return c.json({ ok: true, processed: false });
     }
-    const inbound = next.value;
+    let inbound = next.value;
+
+    // Concierge click-витрина: callback_query с data "srv:<type>" конвертируем
+    // в синтетическое text-сообщение. Это позволяет field-extractor'у
+    // классифицировать request_type без изменений в conversation-engine.
+    const expanded = expandCallbackQuery(inbound);
+    if (expanded) {
+      // Ответить на callback_query — убрать спиннер на кнопке у гостя.
+      void adapter.rawClient
+        .answerCallbackQuery({ callbackQueryId: expanded.callbackQueryId })
+        .catch(() => {});
+      inbound = expanded.syntheticInbound;
+    }
 
     const template = opts.resolveTemplate?.(entry.tenantSlug);
     const tenant = {
@@ -211,7 +227,9 @@ export function makeTelegramWebhookRoutes(opts: {
         notifications: opts.notificationService,
         // reply остаётся для conv-engine'а как gate — но НЕ вызывается
         // при deferReply, processInbound вернётся раньше.
-        reply: opts.replyStrategy ?? null,
+        reply: opts.replyStrategy
+          ? wrapWithConciergeButtons(opts.replyStrategy, opts.db)
+          : null,
         deferReply: true,
         ...(template ? { template } : {}),
         ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
@@ -232,6 +250,7 @@ export function makeTelegramWebhookRoutes(opts: {
     // Освобождает Postgres pool connection на время LLM call'а (~1-2s).
     // Pool=10, под нагрузкой это устраняет typical bottleneck.
     if (result.replyDeferred && opts.replyStrategy) {
+      const replyStrategyWithButtons = wrapWithConciergeButtons(opts.replyStrategy, opts.db);
       const gen = await generateReplyAndEnqueue({
         db: opts.db,
         tenant,
@@ -239,7 +258,7 @@ export function makeTelegramWebhookRoutes(opts: {
         channelDbId: entry.channelDbId,
         inbound,
         result,
-        replyStrategy: opts.replyStrategy,
+        replyStrategy: replyStrategyWithButtons,
         ...(opts.sink ? { sink: opts.sink } : {}),
       });
       result = { ...result, outboundEnqueued: gen.outboundEnqueued };
