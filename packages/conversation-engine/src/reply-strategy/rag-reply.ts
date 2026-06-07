@@ -151,6 +151,7 @@ export interface RagReplyStrategyOpts {
   resolveTools?: (input: {
     tenantId: number;
     conversationId: number;
+    contactId?: number;
   }) => Promise<AnyRagTool[]> | AnyRagTool[];
   /**
    * Если true — когда RAG не находит контекста (NO_CONTEXT_MARKER) бот всё
@@ -317,7 +318,11 @@ export class RagReplyStrategy implements ReplyStrategy {
         ? this.opts.resolveDirectorHooks({ tenantId })
         : Promise.resolve([]),
       this.opts.resolveTools
-        ? this.opts.resolveTools({ tenantId, conversationId: input.conversationId })
+        ? this.opts.resolveTools({
+            tenantId,
+            conversationId: input.conversationId,
+            contactId: input.contactId,
+          })
         : Promise.resolve([]),
       this.opts.resolveReranker
         ? this.opts.resolveReranker({ tenantId })

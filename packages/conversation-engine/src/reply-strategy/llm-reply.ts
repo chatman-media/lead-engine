@@ -61,6 +61,7 @@ export interface LlmReplyStrategyOpts {
   resolveTools?: (input: {
     tenantId: number;
     conversationId: number;
+    contactId?: number;
   }) => Promise<AnyRagTool[]> | AnyRagTool[];
 }
 
@@ -122,6 +123,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
         tools = await this.opts.resolveTools({
           tenantId: input.tenant.tenantId,
           conversationId: input.conversationId,
+          contactId: input.contactId,
         });
       } catch {
         tools = [];

@@ -68,6 +68,8 @@ export interface ExchangeToolsDeps {
   tenantId: number;
   conversationId: number;
   masterKeyHex: string;
+  /** Current exchange_v1 funnel stage. If omitted, tools keep legacy behavior. */
+  stageSlug?: string;
   /**
    * A4: алерт владельцу при срабатывании rate-guard (вместо «тихого» warn).
    * Fire-and-forget; если не задан — остаётся только console.warn.
@@ -91,8 +93,95 @@ const PayoutMethodEnum = z
   .optional()
   .describe("Как клиент получает THB: courier_cash, cardless_atm, thai_bank_transfer, office_cash");
 
+const KNOWN_EXCHANGE_STAGES = new Set([
+  "intent_detected",
+  "exchange_request",
+  "quote_calculated",
+  "verification_check",
+  "kyc_collection",
+  "risk_review",
+  "order_created",
+  "requisites_sent",
+  "payment_proof_waiting",
+  "payment_verified",
+  "payout_or_completion",
+  "cancelled",
+]);
+
+const TOOL_STAGE_MATRIX: Record<string, Set<string> | "any"> = {
+  compute_exchange_quote: new Set(["intent_detected", "exchange_request", "quote_calculated"]),
+  check_exchange_verification: new Set([
+    "quote_calculated",
+    "verification_check",
+    "kyc_collection",
+    "risk_review",
+    "order_created",
+  ]),
+  create_exchange_order: new Set(["quote_calculated", "risk_review", "order_created"]),
+  fetch_exchange_requisites: new Set(["order_created", "requisites_sent"]),
+  verify_exchange_payment: new Set(["requisites_sent", "payment_proof_waiting"]),
+  issue_exchange_payout: new Set(["payment_verified"]),
+  get_exchange_business_info: "any",
+};
+
+export function isKnownExchangeStage(stageSlug: string | null | undefined): stageSlug is string {
+  return typeof stageSlug === "string" && KNOWN_EXCHANGE_STAGES.has(stageSlug);
+}
+
+export function exchangeAllowedActionsBlock(stageSlug: string | null | undefined): string | null {
+  if (!isKnownExchangeStage(stageSlug)) return null;
+  const allowed = Object.entries(TOOL_STAGE_MATRIX)
+    .filter(([, stages]) => stages === "any" || stages.has(stageSlug))
+    .map(([name]) => name);
+  return [
+    `Текущая стадия exchange: ${stageSlug}.`,
+    `Разрешённые инструменты сейчас: ${allowed.join(", ") || "нет"}.`,
+    "Если нужный инструмент не разрешён, не вызывай его и попроси оператора/двигай клиента к следующему корректному шагу.",
+  ].join(" ");
+}
+
+export function guardExchangeToolForStage(toolName: string, stageSlug: string | null | undefined): null | {
+  ok: false;
+  needsOperator: true;
+  reason: "action_not_allowed_for_stage";
+  toolName: string;
+  stageSlug: string;
+  allowedTools: string[];
+  note: string;
+} {
+  if (!isKnownExchangeStage(stageSlug)) return null;
+  const allowed = TOOL_STAGE_MATRIX[toolName] ?? "any";
+  if (allowed === "any" || allowed.has(stageSlug)) return null;
+  const allowedTools = Object.entries(TOOL_STAGE_MATRIX)
+    .filter(([, stages]) => stages === "any" || stages.has(stageSlug))
+    .map(([name]) => name);
+  return {
+    ok: false,
+    needsOperator: true,
+    reason: "action_not_allowed_for_stage",
+    toolName,
+    stageSlug,
+    allowedTools,
+    note: `Инструмент ${toolName} нельзя выполнять на стадии ${stageSlug}.`,
+  };
+}
+
+function withExchangeStagePolicy(tool: AnyRagTool, stageSlug: string | undefined): AnyRagTool {
+  const block = exchangeAllowedActionsBlock(stageSlug);
+  if (!block) return tool;
+  return {
+    ...tool,
+    description: `${tool.description} ${block}`,
+    execute: async (args) => {
+      const denied = guardExchangeToolForStage(tool.name, stageSlug);
+      if (denied) return denied;
+      return tool.execute(args);
+    },
+  };
+}
+
 export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
-  const { db, tenantId, conversationId, masterKeyHex } = deps;
+  const { db, tenantId, conversationId, masterKeyHex, stageSlug } = deps;
 
   // Срабатывание guardrail курса: лог (всегда) + алерт владельцу (если задан).
   const onGuardTrip = (asset: string, network: string | undefined, guard: RateGuardTrip) => {
@@ -575,7 +664,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     verifyPaymentTool,
     issuePayoutTool,
     businessInfoTool,
-  ];
+  ].map((tool) => withExchangeStagePolicy(tool, stageSlug));
 }
 
 /** Есть ли у тенанта хоть один активный курс (гейт для включения exchange-tools). */
