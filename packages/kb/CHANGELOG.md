@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.6.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.5.0...@chatman-media/kb-v1.6.0) (2026-06-07)
+
+
+### Features
+
+* **exchange:** add reflect fallback and self-play judge ([#291](https://github.com/chatman-media/lead-engine/issues/291)) ([d52651f](https://github.com/chatman-media/lead-engine/commit/d52651fd0aa9fdc178f4ddb7d79284eeb951609a))
+
 # [@chatman-media/kb-v1.5.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.4.0...@chatman-media/kb-v1.5.0) (2026-06-06)
 
 
