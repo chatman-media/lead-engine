@@ -2,6 +2,7 @@ import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { describe, expect, it } from "bun:test";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
+import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
 import { LlmReplyStrategy } from "./llm-reply.ts";
 
 const TEMPLATE: VerticalTemplate = {
@@ -10,6 +11,11 @@ const TEMPLATE: VerticalTemplate = {
   version: 1,
   funnelStages: [{ slug: "intake", kind: "intake", displayName: "Intake" }],
   systemPromptFragment: "Ты — тестовый бот вертикали.",
+};
+
+const EXCHANGE_TEMPLATE: VerticalTemplate = {
+  ...TEMPLATE,
+  slug: "exchange_v1",
 };
 
 class CapturingChat implements ChatClient {
@@ -130,6 +136,25 @@ describe("LlmReplyStrategy", () => {
       userMessageText: "?",
     });
     expect(result).toBeNull();
+  });
+
+  it("exchange: неподкреплённый курс заменяет safe fallback", async () => {
+    const chat = new CapturingChat("Курс 31.5, получите 10553 THB.");
+    const repo = fakeMessagesRepo([row(1, "user", "сколько за 335 usdt?")]);
+    const strategy = new LlmReplyStrategy(
+      { template: EXCHANGE_TEMPLATE, resolveChat: () => chat },
+      () => repo,
+    );
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "сколько за 335 usdt?",
+    });
+    expect(result).not.toBeNull();
+    expect((result![0]!.parts[0] as { text: string }).text).toBe(EXCHANGE_SAFE_FALLBACK);
   });
 
   it("резолвит ChatClient per-call с tenantId — позволяет invalidate router", async () => {

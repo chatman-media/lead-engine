@@ -14,6 +14,7 @@ import {
 	type ReplyStrategy,
 	type StageClassifier,
 	StylesRepo,
+	withTenant,
 } from "@chatman-media/conversation-engine";
 import {
 	ABRouter,
@@ -46,6 +47,7 @@ import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import type { ApiConfig } from "./config.ts";
 import {
 	hasActiveExchangeRates,
+	isKnownExchangeStage,
 	makeExchangeTools,
 	type RateGuardAlert,
 } from "./lib/exchange/tools.ts";
@@ -363,6 +365,41 @@ export function makeAwaitingOperatorResolver(db: Db) {
 	};
 }
 
+async function resolveCurrentExchangeStageSlug(
+	db: Db,
+	input: { tenantId: number; contactId: number },
+): Promise<string | null> {
+	const rows = await withTenant(db, input.tenantId, (tx) =>
+		tx
+			.select({
+				requestType: leads.requestType,
+				state: leads.state,
+				slug: stageDefinitions.slug,
+				kind: stageDefinitions.kind,
+			})
+			.from(leads)
+			.leftJoin(
+				stageDefinitions,
+				eq(leads.stageDefinitionId, stageDefinitions.id),
+			)
+			.where(
+				and(
+					eq(leads.tenantId, input.tenantId),
+					eq(leads.userId, input.contactId),
+				),
+			)
+			.orderBy(desc(leads.updatedAt)),
+	);
+	const open = rows.filter(
+		(r) => r.kind !== "terminal_won" && r.kind !== "terminal_lost",
+	);
+	const current = open[0];
+	if (!current) return null;
+	if (current.requestType && current.requestType !== "exchange") return null;
+	const slug = current.slug ?? current.state;
+	return isKnownExchangeStage(slug) ? slug : null;
+}
+
 export interface ReplyStrategyBundle {
 	strategy: ReplyStrategy;
 	/**
@@ -603,7 +640,11 @@ export function makeToolsResolver(opts: {
 	masterKeyHex: string;
 	notifyRateGuard?: (alert: RateGuardAlert) => void;
 }): {
-	resolveTools: (input: { tenantId: number; conversationId: number }) => Promise<AnyRagTool[]>;
+	resolveTools: (input: {
+		tenantId: number;
+		conversationId: number;
+		contactId?: number;
+	}) => Promise<AnyRagTool[]>;
 	invalidateTools: (tenantId: number) => void;
 } {
 	const { db, masterKeyHex, notifyRateGuard } = opts;
@@ -614,6 +655,7 @@ export function makeToolsResolver(opts: {
 	async function resolveTools(input: {
 		tenantId: number;
 		conversationId: number;
+		contactId?: number;
 	}): Promise<AnyRagTool[]> {
 		let base = toolsCache.get(input.tenantId);
 		if (base === undefined) {
@@ -636,12 +678,19 @@ export function makeToolsResolver(opts: {
 			exchangeEnabledCache.set(input.tenantId, exchangeEnabled);
 		}
 		if (exchangeEnabled) {
+			const stageSlug = input.contactId
+				? await resolveCurrentExchangeStageSlug(db, {
+						tenantId: input.tenantId,
+						contactId: input.contactId,
+					}).catch(() => null)
+				: null;
 			conversationBound.push(
 				...makeExchangeTools({
 					db,
 					tenantId: input.tenantId,
 					conversationId: input.conversationId,
 					masterKeyHex,
+					...(stageSlug ? { stageSlug } : {}),
 					...(notifyRateGuard ? { notifyRateGuard } : {}),
 				}),
 			);
