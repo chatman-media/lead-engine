@@ -227,7 +227,7 @@ describe("webhook-whatsapp POST — rate-limit", () => {
       channels: registry,
       verifyToken: VERIFY_TOKEN,
       appSecret: APP_SECRET,
-      rateLimiter: { check: () => ({ allowed: false, reason: "per_minute", retryAfterSec: 60 }) },
+      rateLimiter: { check: () => ({ allowed: false, reason: "per_minute", retryAfterSec: 60 }) } as never,
     }));
 
     const body = waPayload("test rate limit");
