@@ -69,12 +69,14 @@ import { makeAdminDirectorHooksRoutes } from "./routes/admin-director-hooks.ts";
 import { makeAdminExperimentsRoutes } from "./routes/admin-experiments.ts";
 import { makeAdminEventsRoutes } from "./routes/admin-events.ts";
 import { makeAdminOutreachRoutes } from "./routes/admin-outreach.ts";
+import { makeAdminOutreachCampaignsRoutes } from "./routes/admin-outreach-campaigns.ts";
 import { makeAdminMessageTemplatesRoutes } from "./routes/admin-message-templates.ts";
 import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminExchangeRoutes } from "./routes/admin-exchange.ts";
 import { refreshDueTenants } from "./lib/exchange/rate-feed.ts";
+import { dripDispatchTick } from "./lib/drip-dispatcher.ts";
 import { makeAdminVerticalsRoutes } from "./routes/admin-verticals.ts";
 import { makeAdminWorkflowRoutes } from "./routes/admin-workflow.ts";
 import { makeAdminCopilotRoutes } from "./routes/admin-copilot.ts";
@@ -464,6 +466,7 @@ async function main() {
 
   // Outreach campaigns — batch message sending to leads.
   app.route("/", makeAdminOutreachRoutes({ db }));
+  app.route("/", makeAdminOutreachCampaignsRoutes({ db }));
   log.info("admin-outreach routes enabled");
 
   // Message templates for outreach.
@@ -928,6 +931,7 @@ async function main() {
     clearInterval(usageAlertInterval);
     clearTimeout(usageAlertFirstRun);
     if (rateFeedInterval) clearInterval(rateFeedInterval);
+    if (dripDispatchInterval) clearInterval(dripDispatchInterval);
     server.stop();
     webAbort.abort();
     webDispatcher.stop();
@@ -968,6 +972,7 @@ async function main() {
   // их интервал. last-refresh держим в памяти (на рестарте рефрешим всех).
   const rateFeedMs = Number.parseInt(process.env.RATE_FEED_MS ?? "180000", 10);
   let rateFeedInterval: ReturnType<typeof setInterval> | null = null;
+  let dripDispatchInterval: ReturnType<typeof setInterval> | null = null;
   if (rateFeedMs > 0) {
     const defaultRefreshSec = Math.max(60, Math.floor(rateFeedMs / 1000));
     const tickMs = Math.min(rateFeedMs, 60_000);
@@ -1009,6 +1014,24 @@ async function main() {
     rateFeedInterval = setInterval(runFeed, tickMs);
     setTimeout(runFeed, 15_000); // первый прогон через 15с после старта
     log.info("exchange rate-feed enabled (per-tenant)", { defaultRefreshSec, tickMs });
+  }
+
+  // Дрип-диспетчер кампаний: «капает» лидов в outbound_queue с заданной скоростью.
+  // DRIP_DISPATCH_MS=0 отключает. Тик частый (10с), сама скорость — в кампании.
+  const dripDispatchMs = Number.parseInt(process.env.DRIP_DISPATCH_MS ?? "10000", 10);
+  if (dripDispatchMs > 0) {
+    const runDrip = () =>
+      dripDispatchTick(db, {
+        nowSec: Math.floor(Date.now() / 1000),
+        log: { warn: (m) => log.warn(m), info: (m) => log.info(m) },
+      }).catch((e) =>
+        log.warn("drip-dispatcher tick failed", {
+          err: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    dripDispatchInterval = setInterval(runDrip, dripDispatchMs);
+    setTimeout(runDrip, 12_000);
+    log.info("outreach drip-dispatcher enabled", { dripDispatchMs });
   }
 
   process.on("SIGTERM", () => void shutdown());

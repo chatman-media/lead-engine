@@ -467,6 +467,46 @@ export const leads = pgTable("leads", {
   index("idx_leads_tenant_user").on(t.tenantId, t.userId),
 ]);
 
+// Кампания капельной рассылки: список лидов + приветствие + скорость выдачи.
+// Дрип-диспетчер раз в тик отдаёт drip_per_tick лидов в outbound_queue, но не
+// чаще чем раз в drip_interval_sec (last_dripped_at). «Брать по одному с
+// какой-то скоростью» = drip_per_tick=1, drip_interval_sec=60.
+export const outreachCampaigns = pgTable("outreach_campaigns", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  // Приветственное сообщение (центральный промпт кампании). Плейсхолдер
+  // {name} подставляется именем контакта при отправке.
+  greetingText: text("greeting_text").notNull(),
+  dripPerTick: integer("drip_per_tick").notNull().default(1),
+  dripIntervalSec: integer("drip_interval_sec").notNull().default(60),
+  status: text("status").notNull().default("draft"),
+  lastDrippedAt: integer("last_dripped_at"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("outreach_campaigns_status_check", sql`${t.status} IN ('draft','active','paused','completed')`),
+  check("outreach_campaigns_drip_check", sql`${t.dripPerTick} > 0 AND ${t.dripIntervalSec} >= 0`),
+  index("idx_outreach_campaigns_tenant_status").on(t.tenantId, t.status),
+]);
+
+// Членство лида в кампании + его статус доставки.
+export const outreachCampaignLeads = pgTable("outreach_campaign_leads", {
+  id: serial("id").primaryKey(),
+  campaignId: integer("campaign_id").notNull().references(() => outreachCampaigns.id, { onDelete: "cascade" }),
+  leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("pending"),
+  enqueuedAt: integer("enqueued_at"),
+  errorReason: text("error_reason"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("outreach_campaign_leads_status_check", sql`${t.status} IN ('pending','enqueued','sent','skipped','failed')`),
+  uniqueIndex("uniq_outreach_campaign_leads").on(t.campaignId, t.leadId),
+  index("idx_outreach_campaign_leads_status").on(t.campaignId, t.status),
+]);
+
 // Значения полей лида — заменяет intake_json/visa_docs_json для динамических воронок.
 export const leadFieldValues = pgTable("lead_field_values", {
   id: serial("id").primaryKey(),
