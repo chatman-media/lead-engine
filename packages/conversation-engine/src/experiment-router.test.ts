@@ -1,8 +1,19 @@
 import { describe, expect, test } from "bun:test";
+import type { ExperimentRow } from "./dal/index.ts";
 import { loadExperimentVariants } from "./experiment-router.ts";
 
-function makeExperiment(allocationJson: string) {
-  return { id: 1, tenantId: 1, slug: "test-exp", status: "running", allocationJson, createdAt: 0, updatedAt: 0 };
+function makeExperiment(allocationJson: string): ExperimentRow {
+  return {
+    id: 1,
+    tenantId: 1,
+    slug: "test-exp",
+    status: "running",
+    allocationJson,
+    successMetric: "qualified",
+    startedAt: null,
+    endedAt: null,
+    createdAt: 0,
+  };
 }
 
 const VALID_CONFIG_JSON = JSON.stringify({

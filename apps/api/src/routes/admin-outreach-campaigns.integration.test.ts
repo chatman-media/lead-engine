@@ -213,3 +213,76 @@ describe("outreach campaigns + drip", () => {
     expect(row!.status).toBe("completed");
   });
 });
+
+describe("outreach campaigns — GET list + POST leads", () => {
+  let campId = 0;
+  let leadId = 0;
+
+  it("создаёт кампанию для последующих тестов", async () => {
+    if (!sql) return;
+    const res = await authReq("/api/admin/outreach-campaigns", {
+      method: "POST",
+      body: JSON.stringify({ name: "Тест Лист", greetingText: "Привет {name}!" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: number };
+    campId = body.id;
+    expect(campId).toBeGreaterThan(0);
+  });
+
+  it("GET /outreach-campaigns → список содержит созданную кампанию", async () => {
+    if (!sql || !campId) return;
+    const res = await authReq("/api/admin/outreach-campaigns");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { campaigns: Array<{ id: number; name: string }> };
+    expect(Array.isArray(body.campaigns)).toBe(true);
+    expect(body.campaigns.some((c) => c.id === campId)).toBe(true);
+  });
+
+  it("PATCH кампании — обновляет поля", async () => {
+    if (!sql || !campId) return;
+    const res = await authReq(`/api/admin/outreach-campaigns/${campId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ dripPerTick: 5 }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+  });
+
+  it("создаёт лид для тестирования POST leads", async () => {
+    if (!sql) return;
+    leadId = await makeLead({ name: "Тест Постлид", withIdentity: false, withConversation: false });
+    expect(leadId).toBeGreaterThan(0);
+  });
+
+  it("POST /outreach-campaigns/:id/leads → добавляет лидов в кампанию", async () => {
+    if (!sql || !campId || !leadId) return;
+    const res = await authReq(`/api/admin/outreach-campaigns/${campId}/leads`, {
+      method: "POST",
+      body: JSON.stringify({ leadIds: [leadId] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; leadsAdded: number };
+    expect(body.ok).toBe(true);
+    expect(body.leadsAdded).toBe(1);
+  });
+
+  it("POST /outreach-campaigns/:id/leads — пустой массив → 400", async () => {
+    if (!sql || !campId) return;
+    const res = await authReq(`/api/admin/outreach-campaigns/${campId}/leads`, {
+      method: "POST",
+      body: JSON.stringify({ leadIds: [] }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /outreach-campaigns/999999/leads → 404", async () => {
+    if (!sql || !leadId) return;
+    const res = await authReq("/api/admin/outreach-campaigns/999999/leads", {
+      method: "POST",
+      body: JSON.stringify({ leadIds: [leadId] }),
+    });
+    expect(res.status).toBe(404);
+  });
+});
