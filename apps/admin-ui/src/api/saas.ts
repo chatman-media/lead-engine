@@ -771,6 +771,7 @@ export interface ExperimentItem {
 export type QualityOutcome = "won" | "lost" | "draw";
 export type QualityPairwiseWinner = "a" | "b" | "draw";
 export type QualityCoachProposalStatus = "pending" | "applied" | "dismissed";
+export type QualityCoachProposalDecisionStatus = "pending" | "dismissed";
 export type QualityShadowStatus = "running" | "complete" | "failed";
 export type QualityShadowDecision = "keep" | "rollback" | "inconclusive";
 
@@ -870,6 +871,23 @@ export interface QualityPairwiseExportOptions {
   includeTranscript?: boolean;
 }
 
+export interface QualityCoachProposal {
+  id: number;
+  styleSlug: string;
+  sampleSize: number;
+  personaFilter: string | null;
+  summary: string;
+  editsJson: string;
+  rationaleJson: string;
+  rawOutput: string | null;
+  status: QualityCoachProposalStatus;
+  createdAt: number;
+  decidedAt: number | null;
+  decidedByAdminId: number | null;
+  edits: unknown;
+  rationale: string[];
+}
+
 export interface QualityCoachSummary {
   totals: {
     proposals: {
@@ -890,22 +908,7 @@ export interface QualityCoachSummary {
       lastShadowAt: number | null;
     };
   };
-  proposals: Array<{
-    id: number;
-    styleSlug: string;
-    sampleSize: number;
-    personaFilter: string | null;
-    summary: string;
-    editsJson: string;
-    rationaleJson: string;
-    rawOutput: string | null;
-    status: QualityCoachProposalStatus;
-    createdAt: number;
-    decidedAt: number | null;
-    decidedByAdminId: number | null;
-    edits: unknown;
-    rationale: string[];
-  }>;
+  proposals: QualityCoachProposal[];
   shadows: Array<{
     id: number;
     proposalId: number;
@@ -2057,6 +2060,15 @@ export const saas = {
   },
   getQualityCoachSummary() {
     return request<QualityCoachSummary>("/api/admin/quality/coach/summary");
+  },
+  setQualityCoachProposalStatus(id: number, status: QualityCoachProposalDecisionStatus) {
+    return request<{ ok: boolean; proposal: QualityCoachProposal }>(
+      `/api/admin/quality/coach/proposals/${id}/status`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      },
+    );
   },
   async exportQualitySelfPlayJsonl(opts: QualityExportOptions = {}): Promise<void> {
     const params = new URLSearchParams();

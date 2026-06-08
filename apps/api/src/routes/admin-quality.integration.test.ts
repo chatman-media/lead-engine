@@ -431,6 +431,77 @@ describe("admin quality JSONL export", () => {
     expect(JSON.stringify(body)).not.toContain("tenant b coach only");
   });
 
+  it("updates coach proposal decision status without crossing tenants", async () => {
+    if (!sql) return;
+    const before = (await (
+      await authReq(tokenA, "/api/admin/quality/coach/summary")
+    ).json()) as QualityCoachSummaryResponse;
+    const pending = before.proposals.find((item) => item.status === "pending");
+    const applied = before.proposals.find((item) => item.status === "applied");
+    expect(pending).toBeTruthy();
+    expect(applied).toBeTruthy();
+    if (!pending || !applied) return;
+
+    const crossTenant = await authJsonReq(
+      tokenB,
+      `/api/admin/quality/coach/proposals/${pending.id}/status`,
+      { status: "dismissed" },
+    );
+    expect(crossTenant.status).toBe(404);
+
+    const dismiss = await authJsonReq(
+      tokenA,
+      `/api/admin/quality/coach/proposals/${pending.id}/status`,
+      { status: "dismissed" },
+    );
+    expect(dismiss.status).toBe(200);
+    const dismissedBody = (await dismiss.json()) as QualityCoachProposalStatusResponse;
+    expect(dismissedBody.proposal).toMatchObject({
+      id: pending.id,
+      status: "dismissed",
+      decidedByAdminId: expect.any(Number),
+    });
+    expect(dismissedBody.proposal.decidedAt).toBeGreaterThan(0);
+
+    const afterDismiss = (await (
+      await authReq(tokenA, "/api/admin/quality/coach/summary")
+    ).json()) as QualityCoachSummaryResponse;
+    expect(afterDismiss.totals.proposals).toMatchObject({
+      total: 2,
+      pending: 0,
+      applied: 1,
+      dismissed: 1,
+    });
+
+    const invalid = await authJsonReq(
+      tokenA,
+      `/api/admin/quality/coach/proposals/${pending.id}/status`,
+      { status: "applied" },
+    );
+    expect(invalid.status).toBe(400);
+
+    const appliedChange = await authJsonReq(
+      tokenA,
+      `/api/admin/quality/coach/proposals/${applied.id}/status`,
+      { status: "dismissed" },
+    );
+    expect(appliedChange.status).toBe(409);
+
+    const restore = await authJsonReq(
+      tokenA,
+      `/api/admin/quality/coach/proposals/${pending.id}/status`,
+      { status: "pending" },
+    );
+    expect(restore.status).toBe(200);
+    const restoredBody = (await restore.json()) as QualityCoachProposalStatusResponse;
+    expect(restoredBody.proposal).toMatchObject({
+      id: pending.id,
+      status: "pending",
+      decidedAt: null,
+      decidedByAdminId: null,
+    });
+  });
+
   it("exports tenant-scoped pairwise matches as JSONL attachment", async () => {
     if (!sql) return;
     const res = await authReq(tokenA, "/api/admin/quality/pairwise/export.jsonl");
@@ -575,6 +646,14 @@ async function authReq(token: string, path: string): Promise<Response> {
   });
 }
 
+async function authJsonReq(token: string, path: string, body: unknown): Promise<Response> {
+  return await app.request(path, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 type QualityRecord = {
   schemaVersion?: number;
   kind?: string;
@@ -693,13 +772,20 @@ type QualityCoachSummaryResponse = {
     };
   };
   proposals: Array<{
+    id: number;
     styleSlug: string;
     sampleSize: number;
     personaFilter: string | null;
     summary: string;
+    editsJson: string;
+    rationaleJson: string;
+    rawOutput: string | null;
     edits: unknown;
     rationale: string[];
     status: string;
+    createdAt: number;
+    decidedAt: number | null;
+    decidedByAdminId: number | null;
   }>;
   shadows: Array<{
     parentStyleSlug: string;
@@ -711,6 +797,11 @@ type QualityCoachSummaryResponse = {
     status: string;
     decision: string | null;
   }>;
+};
+
+type QualityCoachProposalStatusResponse = {
+  ok: boolean;
+  proposal: QualityCoachSummaryResponse["proposals"][number];
 };
 
 function parseJsonl(text: string): QualityRecord[] {
