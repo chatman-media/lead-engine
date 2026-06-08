@@ -53,6 +53,22 @@ export {
   type SkillForPrompt,
 } from "./prompt.ts";
 export {
+  exportPairwiseMatchJsonl,
+  exportSelfPlayMatchesFromRepoJsonl,
+  exportSelfPlayMatchJsonl,
+  formatQualityLabJsonl,
+  QUALITY_LAB_JSONL_SCHEMA_VERSION,
+  type ExportableSelfPlayMatch,
+  type ExportSelfPlayMatchesQuery,
+  type QualityLabExportOptions,
+  type QualityLabJsonlRecord,
+  type QualityLabPairwiseRecord,
+  type QualityLabSelfPlayExport,
+  type QualityLabSelfPlayRecord,
+  toQualityLabPairwiseRecord,
+  toQualityLabSelfPlayRecord,
+} from "./self-play/export.ts";
+export {
   type JudgeInput,
   type JudgeVerdict,
   judgeMatch,
