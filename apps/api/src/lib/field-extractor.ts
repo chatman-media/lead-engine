@@ -439,6 +439,7 @@ ${fieldDescriptions}
         const workflowResult = await handleFieldUpdatedInTx(tx, {
           tenantId,
           leadId: lead.id,
+          eventType: "message_received",
           extractedValues: extracted,
           now,
         });

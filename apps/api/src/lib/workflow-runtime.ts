@@ -2,6 +2,13 @@ import { type Db, type NotificationService, withTenant } from "@chatman-media/co
 import { leadEvents, leadFieldValues, leads, stageDefinitions, stageFields } from "@chatman-media/storage";
 import { and, eq, inArray, sql } from "drizzle-orm";
 
+export type WorkflowEventType =
+  | "message_received"
+  | "field_updated"
+  | "operator_advanced"
+  | "operator_sent_offer"
+  | "webhook_callback";
+
 export type WorkflowEffect = {
   type: "notify_operator";
   tenantId: number;
@@ -9,6 +16,33 @@ export type WorkflowEffect = {
   contactId: number;
   toStage: string;
 };
+
+export interface WorkflowStageSnapshot {
+  id: number;
+  funnelId: number;
+  slug: string;
+  displayName: string;
+  kind: string;
+  stageType: string;
+  nextStages: string[];
+  autoAdvanceCondition: string | null;
+  configJson: string;
+}
+
+export interface TransitionContext {
+  stage: Pick<WorkflowStageSnapshot, "nextStages" | "autoAdvanceCondition" | "configJson">;
+  hasRequestTypeField: boolean;
+  requestType: string | null;
+  allRequiredFieldsFilled: boolean;
+  eventType: WorkflowEventType;
+}
+
+export interface TransitionSelection {
+  nextSlug: string;
+  requestType: string | null;
+  reason: "workflow_transition" | "legacy_auto_advance";
+  condition: "all_required_fields_filled";
+}
 
 export type WorkflowAutoAdvanceResult =
   | {
@@ -23,16 +57,22 @@ export type WorkflowAutoAdvanceResult =
         | "no_required_fields"
         | "required_fields_missing"
         | "no_matching_branch"
+        | "no_transition"
         | "next_stage_missing";
       effects: WorkflowEffect[];
     }
   | {
       advanced: true;
+      reason: TransitionSelection["reason"];
+      condition: TransitionSelection["condition"];
       leadId: number;
       from: string;
       to: string;
       toDisplayName: string;
       toStageType: string;
+      awaitingOperator: boolean;
+      awaitingPartner: boolean;
+      terminal: boolean;
       requestType: string | null;
       effects: WorkflowEffect[];
     };
@@ -42,21 +82,31 @@ export type FieldUpdatedEvent = {
   leadId: number;
   adminId?: number;
   extractedValues?: Record<string, unknown>;
+  eventType?: Extract<WorkflowEventType, "message_received" | "field_updated">;
   now?: number;
 };
+
+interface WorkflowTransitionRule {
+  to?: unknown;
+  when?: unknown;
+  priority?: unknown;
+}
+
+interface WorkflowWhen {
+  type?: unknown;
+}
 
 /**
  * Выбор следующей стадии при auto-advance.
  *
  * Branch-aware (concierge): если у стадии есть поле `request_type` и >1 ветки,
- * уводим в ветку `<request_type>_*` (напр. `transfer` → `transfer_request`) и
+ * уводим в ветку `<request_type>_*` (напр. `transfer` -> `transfer_request`) и
  * возвращаем `requestType` для записи в `leads.request_type`. Если валидной
- * ветки нет (напр. `other` / не распознано) — возвращаем `null` = «не
- * продвигать», лид остаётся на intake для оператора/уточнения.
+ * ветки нет (напр. `other` / не распознано) - возвращаем `null` = "не
+ * продвигать", лид остаётся на intake для оператора/уточнения.
  *
- * Линейные воронки (5 вертикалей) не затронуты: у их стадий нет поля
- * `request_type`, поэтому `hasRequestTypeField=false` → прежнее поведение
- * `nextStages[0]`, `requestType=null` (колонка не трогается).
+ * Линейные воронки не затронуты: у их стадий нет поля `request_type`, поэтому
+ * `hasRequestTypeField=false` -> прежнее поведение `nextStages[0]`.
  */
 export function selectNextStage(opts: {
   nextStages: readonly string[];
@@ -78,6 +128,56 @@ export function selectNextStage(opts: {
   return { nextSlug: first, requestType: null };
 }
 
+export function evaluateTransition(ctx: TransitionContext): TransitionSelection | null {
+  if (ctx.eventType !== "message_received" && ctx.eventType !== "field_updated") {
+    return null;
+  }
+
+  const workflowRule = parseWorkflowTransitions(ctx.stage.configJson)
+    .filter((rule) => whenType(rule.when) === "all_required_fields_filled")
+    .sort((a, b) => priorityOf(b) - priorityOf(a))[0];
+
+  if (workflowRule) {
+    if (!ctx.allRequiredFieldsFilled) return null;
+    const explicitTo =
+      typeof workflowRule.to === "string" && workflowRule.to.trim()
+        ? workflowRule.to.trim()
+        : null;
+    const selected = explicitTo
+      ? {
+          nextSlug: explicitTo,
+          requestType: ctx.hasRequestTypeField ? ctx.requestType : null,
+        }
+      : selectNextStage({
+          nextStages: ctx.stage.nextStages,
+          hasRequestTypeField: ctx.hasRequestTypeField,
+          requestType: ctx.requestType,
+        });
+    if (!selected) return null;
+    return {
+      ...selected,
+      reason: "workflow_transition",
+      condition: "all_required_fields_filled",
+    };
+  }
+
+  const legacyCondition = parseConditionType(ctx.stage.autoAdvanceCondition);
+  if (legacyCondition !== "all_required_fields_filled") return null;
+  if (!ctx.allRequiredFieldsFilled) return null;
+
+  const selected = selectNextStage({
+    nextStages: ctx.stage.nextStages,
+    hasRequestTypeField: ctx.hasRequestTypeField,
+    requestType: ctx.requestType,
+  });
+  if (!selected) return null;
+  return {
+    ...selected,
+    reason: "legacy_auto_advance",
+    condition: "all_required_fields_filled",
+  };
+}
+
 export class WorkflowRuntime {
   constructor(
     private readonly deps: {
@@ -96,10 +196,30 @@ export class WorkflowRuntime {
   }
 }
 
+export async function autoAdvanceLead(opts: {
+  db: Db;
+  tenantId: number;
+  leadId: number;
+  eventType: Extract<WorkflowEventType, "message_received" | "field_updated">;
+  now: number;
+  adminId?: number;
+  extractedValues?: Record<string, unknown>;
+}): Promise<WorkflowAutoAdvanceResult> {
+  return handleFieldUpdatedInTx(opts.db, {
+    tenantId: opts.tenantId,
+    leadId: opts.leadId,
+    eventType: opts.eventType,
+    now: opts.now,
+    adminId: opts.adminId,
+    extractedValues: opts.extractedValues,
+  });
+}
+
 export async function handleFieldUpdatedInTx(
   tx: Db,
   event: FieldUpdatedEvent & { now: number },
 ): Promise<WorkflowAutoAdvanceResult> {
+  const eventType = event.eventType ?? "field_updated";
   const [lead] = await tx
     .select({
       id: leads.id,
@@ -109,7 +229,8 @@ export async function handleFieldUpdatedInTx(
       requestType: leads.requestType,
     })
     .from(leads)
-    .where(and(eq(leads.id, event.leadId), eq(leads.tenantId, event.tenantId)));
+    .where(and(eq(leads.id, event.leadId), eq(leads.tenantId, event.tenantId)))
+    .limit(1);
   if (!lead) return noAdvance("no_lead");
   if (!lead.stageDefinitionId) return noAdvance("no_stage");
 
@@ -117,9 +238,13 @@ export async function handleFieldUpdatedInTx(
     .select({
       id: stageDefinitions.id,
       funnelId: stageDefinitions.funnelId,
+      slug: stageDefinitions.slug,
+      displayName: stageDefinitions.displayName,
       kind: stageDefinitions.kind,
+      stageType: stageDefinitions.stageType,
       nextStages: stageDefinitions.nextStages,
       autoAdvanceCondition: stageDefinitions.autoAdvanceCondition,
+      configJson: stageDefinitions.configJson,
     })
     .from(stageDefinitions)
     .where(
@@ -127,17 +252,11 @@ export async function handleFieldUpdatedInTx(
         eq(stageDefinitions.id, lead.stageDefinitionId),
         eq(stageDefinitions.tenantId, event.tenantId),
       ),
-    );
+    )
+    .limit(1);
   if (!stage) return noAdvance("no_stage");
   if (stage.kind === "terminal_won" || stage.kind === "terminal_lost") {
     return noAdvance("terminal_stage");
-  }
-  if (stage.nextStages.length === 0) return noAdvance("no_next_stage");
-
-  const condition = parseAutoAdvanceCondition(stage.autoAdvanceCondition);
-  if (condition === "invalid") return noAdvance("invalid_condition");
-  if (condition?.type !== "all_required_fields_filled") {
-    return noAdvance("unsupported_condition");
   }
 
   const fields = await tx
@@ -169,9 +288,7 @@ export async function handleFieldUpdatedInTx(
         sql`${leadFieldValues.valueJson} != 'null' AND ${leadFieldValues.valueJson} != '""' AND ${leadFieldValues.valueJson} != ''`,
       ),
     );
-  if (filledRequired.length < requiredFields.length) {
-    return noAdvance("required_fields_missing");
-  }
+  const allRequiredFieldsFilled = filledRequired.length >= requiredFields.length;
 
   const requestTypeField = fields.find((field) => field.slug === "request_type");
   const requestType = await resolveRequestType({
@@ -182,12 +299,20 @@ export async function handleFieldUpdatedInTx(
     fallbackRequestType: lead.requestType,
   });
 
-  const selected = selectNextStage({
-    nextStages: stage.nextStages,
+  const transition = evaluateTransition({
+    stage,
     hasRequestTypeField: !!requestTypeField,
     requestType,
+    allRequiredFieldsFilled,
+    eventType,
   });
-  if (!selected) return noAdvance("no_matching_branch");
+  if (!transition) {
+    if (!allRequiredFieldsFilled) return noAdvance("required_fields_missing");
+    if (stage.nextStages.length === 0 && parseWorkflowTransitions(stage.configJson).length === 0) {
+      return noAdvance("no_next_stage");
+    }
+    return noAdvance("no_transition");
+  }
 
   const [nextStage] = await tx
     .select({
@@ -195,15 +320,20 @@ export async function handleFieldUpdatedInTx(
       slug: stageDefinitions.slug,
       displayName: stageDefinitions.displayName,
       stageType: stageDefinitions.stageType,
+      kind: stageDefinitions.kind,
+      nextStages: stageDefinitions.nextStages,
+      partnerWebhookUrl: stageDefinitions.partnerWebhookUrl,
+      partnerWebhookMode: stageDefinitions.partnerWebhookMode,
     })
     .from(stageDefinitions)
     .where(
       and(
-        eq(stageDefinitions.slug, selected.nextSlug),
+        eq(stageDefinitions.slug, transition.nextSlug),
         eq(stageDefinitions.tenantId, event.tenantId),
         eq(stageDefinitions.funnelId, stage.funnelId),
       ),
-    );
+    )
+    .limit(1);
   if (!nextStage) return noAdvance("next_stage_missing");
 
   await tx
@@ -211,7 +341,7 @@ export async function handleFieldUpdatedInTx(
     .set({
       stageDefinitionId: nextStage.id,
       state: nextStage.slug,
-      ...(selected.requestType ? { requestType: selected.requestType } : {}),
+      ...(transition.requestType ? { requestType: transition.requestType } : {}),
       updatedAt: event.now,
     })
     .where(eq(leads.id, lead.id));
@@ -222,30 +352,43 @@ export async function handleFieldUpdatedInTx(
     fromState: lead.state,
     toState: nextStage.slug,
     byAdminId: event.adminId,
+    notes: JSON.stringify({
+      type: "workflow_transition",
+      reason: transition.reason,
+      condition: transition.condition,
+      eventType,
+      requestType: transition.requestType,
+    }),
     createdAt: event.now,
   });
 
-  const effects: WorkflowEffect[] =
-    nextStage.stageType === "awaiting_operator"
-      ? [
-          {
-            type: "notify_operator",
-            tenantId: event.tenantId,
-            leadId: lead.id,
-            contactId: lead.contactId,
-            toStage: nextStage.displayName,
-          },
-        ]
-      : [];
+  const awaitingOperator = nextStage.stageType === "awaiting_operator";
+  const effects: WorkflowEffect[] = awaitingOperator
+    ? [
+        {
+          type: "notify_operator",
+          tenantId: event.tenantId,
+          leadId: lead.id,
+          contactId: lead.contactId,
+          toStage: nextStage.displayName,
+        },
+      ]
+    : [];
 
   return {
     advanced: true,
+    reason: transition.reason,
+    condition: transition.condition,
     leadId: lead.id,
     from: lead.state,
     to: nextStage.slug,
     toDisplayName: nextStage.displayName,
     toStageType: nextStage.stageType,
-    requestType: selected.requestType,
+    awaitingOperator,
+    awaitingPartner:
+      Boolean(nextStage.partnerWebhookUrl) && nextStage.partnerWebhookMode === "await_callback",
+    terminal: nextStage.nextStages.length === 0 || nextStage.kind.startsWith("terminal_"),
+    requestType: transition.requestType,
     effects,
   };
 }
@@ -276,14 +419,38 @@ function noAdvance(
   return { advanced: false, reason, effects: [] };
 }
 
-function parseAutoAdvanceCondition(raw: string | null): { type: string } | null | "invalid" {
+function parseConditionType(raw: string | null): string | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as { type?: unknown };
-    return typeof parsed.type === "string" ? { type: parsed.type } : null;
+    return typeof parsed.type === "string" ? parsed.type : null;
   } catch {
-    return "invalid";
+    return null;
   }
+}
+
+function parseWorkflowTransitions(configJson: string): WorkflowTransitionRule[] {
+  try {
+    const parsed = JSON.parse(configJson) as {
+      workflow?: { transitions?: unknown };
+    };
+    return Array.isArray(parsed.workflow?.transitions)
+      ? (parsed.workflow.transitions as WorkflowTransitionRule[])
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function whenType(raw: unknown): string | null {
+  const when = raw as WorkflowWhen | null;
+  return typeof when?.type === "string" ? when.type : null;
+}
+
+function priorityOf(rule: WorkflowTransitionRule): number {
+  return typeof rule.priority === "number" && Number.isFinite(rule.priority)
+    ? rule.priority
+    : 0;
 }
 
 async function resolveRequestType(opts: {
@@ -305,7 +472,8 @@ async function resolveRequestType(opts: {
           eq(leadFieldValues.leadId, opts.leadId),
           eq(leadFieldValues.fieldId, opts.requestTypeFieldId),
         ),
-      );
+      )
+      .limit(1);
     if (stored?.valueJson) {
       try {
         const storedValue = JSON.parse(stored.valueJson) as unknown;

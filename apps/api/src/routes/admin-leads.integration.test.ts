@@ -12,14 +12,17 @@ import {
   conversations,
   createIsolatedDb,
   funnels,
+  leadFieldValues,
   leads,
   messages,
   outboundQueue,
   schema,
   stageDefinitions,
+  stageFields,
   tenants,
   tryConnectToPg,
 } from "@chatman-media/storage";
+import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import postgres, { type Sql } from "postgres";
@@ -618,15 +621,11 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
 
   it("branch-aware auto-advance uses request_type instead of always nextStages[0]", async () => {
     if (!sql) return;
-    const { stageFields } = await import("@chatman-media/storage");
-    const { and, eq } = await import("drizzle-orm");
     const now = Math.floor(Date.now() / 1000);
-
     const [contact] = await db
       .insert(contacts)
       .values({ tenantId: tenantA, displayName: "Branch Admin" })
       .returning({ id: contacts.id });
-
     const [funnel] = await db
       .insert(funnels)
       .values({
@@ -637,7 +636,6 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
         updatedAt: now,
       })
       .returning({ id: funnels.id });
-
     const [intake] = await db
       .insert(stageDefinitions)
       .values({
@@ -654,7 +652,6 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
         updatedAt: now,
       })
       .returning({ id: stageDefinitions.id });
-
     await db.insert(stageDefinitions).values([
       {
         tenantId: tenantA,
@@ -736,6 +733,12 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
       .from(leads)
       .where(and(eq(leads.id, lead!.id), eq(leads.tenantId, tenantA)));
     expect(storedLead).toEqual({ state: "transfer_request", requestType: "transfer" });
+
+    const [storedValue] = await db
+      .select({ valueJson: leadFieldValues.valueJson })
+      .from(leadFieldValues)
+      .where(and(eq(leadFieldValues.leadId, lead!.id), eq(leadFieldValues.fieldId, field!.id)));
+    expect(storedValue!.valueJson).toBe('"transfer"');
   });
 });
 
