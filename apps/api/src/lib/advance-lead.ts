@@ -10,8 +10,17 @@ import {
   messages,
   outboundQueue,
   stageDefinitions,
+  tenants,
 } from "@chatman-media/storage";
 import { and, desc, eq } from "drizzle-orm";
+import { type PartnerPingOpts, firePartnerPing, makeCallbackToken } from "./partner-ping.ts";
+
+/** Optional partner-ping config. Passed by routes that have access to cfg. */
+export interface PartnerPingConfig {
+  appUrl: string;
+  operatorBotToken: string;
+  callbackSecret: string;
+}
 
 export type AdvanceResult =
   | { kind: "no_lead" }
@@ -24,6 +33,8 @@ export type AdvanceResult =
       to: string;
       toDisplayName: string;
       awaitingOperator: boolean;
+      /** true if new stage has a partner webhook in await_callback mode */
+      awaitingPartner: boolean;
       terminal: boolean;
     };
 
@@ -47,9 +58,26 @@ export async function advanceLead(opts: {
   note?: string;
   selector: { leadId: number } | { contactId: number };
   notifications?: NotificationService | null;
+  /** When provided, fires partner webhook if new stage has partnerWebhookUrl set. */
+  partnerPing?: PartnerPingConfig | null;
 }): Promise<AdvanceResult> {
   const { db, tenantId, adminId, note } = opts;
   const now = Math.floor(Date.now() / 1000);
+
+  // Captured from inside tx for post-transaction partner ping.
+  // Uses a container object so TypeScript doesn't narrow away the mutation
+  // that happens inside the withTenant async callback.
+  interface _PartnerCtx {
+    webhookUrl: string;
+    webhookMode: string;
+    stageId: number;
+    stageSlug: string;
+    stageDisplayName: string;
+    leadId: number;
+    contactId: number;
+    tenantSlug: string; // resolved after tx
+  }
+  const _partnerRef: { ctx: _PartnerCtx | null } = { ctx: null };
 
   const result = await withTenant(db, tenantId, async (tx): Promise<AdvanceResult> => {
     // 1. lead
@@ -90,6 +118,8 @@ export async function advanceLead(opts: {
         displayName: stageDefinitions.displayName,
         stageType: stageDefinitions.stageType,
         nextStages: stageDefinitions.nextStages,
+        partnerWebhookUrl: stageDefinitions.partnerWebhookUrl,
+        partnerWebhookMode: stageDefinitions.partnerWebhookMode,
       })
       .from(stageDefinitions)
       .where(and(eq(stageDefinitions.slug, nextSlug), eq(stageDefinitions.tenantId, tenantId)));
@@ -161,6 +191,23 @@ export async function advanceLead(opts: {
       }
     }
 
+    const awaitingPartner =
+      Boolean(next.partnerWebhookUrl) && next.partnerWebhookMode === "await_callback";
+
+    // Capture partner ping context for post-tx execution.
+    if (next.partnerWebhookUrl) {
+      _partnerRef.ctx = {
+        webhookUrl: next.partnerWebhookUrl,
+        webhookMode: next.partnerWebhookMode,
+        stageId: next.id,
+        stageSlug: next.slug,
+        stageDisplayName: next.displayName,
+        leadId: lead.id,
+        contactId: lead.userId,
+        tenantSlug: "", // filled after tx
+      };
+    }
+
     return {
       kind: "advanced",
       leadId: lead.id,
@@ -169,11 +216,72 @@ export async function advanceLead(opts: {
       to: next.slug,
       toDisplayName: next.displayName,
       awaitingOperator: next.stageType === "awaiting_operator",
+      awaitingPartner,
       terminal: next.nextStages.length === 0,
     };
   });
 
-  // 5. Пинг оператору, если въехали в operator-гейт (вне tx — не держим коннект).
+  // 5. Partner ping — уведомить поставщика о новом лиде в стадии (вне tx).
+  if (result.kind === "advanced" && _partnerRef.ctx != null && opts.partnerPing) {
+    const ctx = _partnerRef.ctx;
+    const ping = opts.partnerPing;
+    try {
+      // Resolve tenant slug for payload.
+      const [tenantRow] = await db
+        .select({ slug: tenants.slug })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId))
+        .limit(1);
+      ctx.tenantSlug = tenantRow?.slug ?? String(tenantId);
+
+      // Resolve contact name for TG message.
+      const [contactRow] = await db
+        .select({ displayName: contacts.displayName, intakeJson: leads.intakeJson })
+        .from(contacts)
+        .leftJoin(leads, and(eq(leads.userId, contacts.id), eq(leads.tenantId, tenantId)))
+        .where(eq(contacts.id, ctx.contactId))
+        .limit(1);
+
+      let leadFields: Record<string, unknown> = {};
+      try {
+        leadFields = JSON.parse(contactRow?.intakeJson ?? "{}") as Record<string, unknown>;
+      } catch { /* ignore */ }
+
+      const pingOpts: PartnerPingOpts = {
+        webhookUrl: ctx.webhookUrl,
+        webhookMode: ctx.webhookMode,
+        leadId: ctx.leadId,
+        stageId: ctx.stageId,
+        tenantSlug: ctx.tenantSlug,
+        stageSlug: ctx.stageSlug,
+        stageDisplayName: ctx.stageDisplayName,
+        contactDisplayName: contactRow?.displayName ?? null,
+        leadFields,
+        appUrl: ping.appUrl,
+        operatorBotToken: ping.operatorBotToken,
+        callbackSecret: ping.callbackSecret,
+      };
+
+      const pingResult = await firePartnerPing(pingOpts);
+
+      // For await_callback mode: store token on lead so callback can verify it.
+      if (ctx.webhookMode === "await_callback") {
+        await db
+          .update(leads)
+          .set({ awaitingToken: pingResult.token, updatedAt: Math.floor(Date.now() / 1000) })
+          .where(eq(leads.id, ctx.leadId));
+      }
+    } catch (err) {
+      // Partner ping failure is non-fatal — lead has already been advanced.
+      console.error("[partner-ping] failed", {
+        leadId: ctx.leadId,
+        stageSlug: ctx.stageSlug,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // 6. Пинг оператору, если въехали в operator-гейт (вне tx — не держим коннект).
   if (result.kind === "advanced" && result.awaitingOperator && opts.notifications) {
     try {
       const [contact] = await db

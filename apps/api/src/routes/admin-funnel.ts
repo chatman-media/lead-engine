@@ -2109,6 +2109,8 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
       goal: string | null;
       guidance: string | null;
       autoAdvanceCondition: string | null;
+      partnerWebhookUrl: string | null;
+      partnerWebhookMode: string;
     }>>();
 
     const now = Math.floor(Date.now() / 1000);
@@ -2129,6 +2131,8 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
     if (body.goal !== undefined) patch.goal = body.goal;
     if (body.guidance !== undefined) patch.guidance = body.guidance;
     if (body.autoAdvanceCondition !== undefined) patch.autoAdvanceCondition = body.autoAdvanceCondition;
+    if (body.partnerWebhookUrl !== undefined) patch.partnerWebhookUrl = body.partnerWebhookUrl;
+    if (body.partnerWebhookMode !== undefined) patch.partnerWebhookMode = body.partnerWebhookMode;
 
     await withTenant(opts.db, tenantId, async (tx) =>
       tx

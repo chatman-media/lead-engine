@@ -21,6 +21,11 @@ export interface ApiConfig {
    */
   authSecret: string;
   /**
+   * Secret для HMAC-SHA256 подписи partner-callback токенов.
+   * env PARTNER_CALLBACK_SECRET. Fallback на authSecret.
+   */
+  partnerCallbackSecret: string;
+  /**
    * Webhook secret для Telegram setWebhook — Telegram пробрасывает
    * заголовок `X-Telegram-Bot-Api-Secret-Token`, мы валидируем его до
    * парсинга payload'а. Один секрет на платформу (per-tenant роутинг —
@@ -242,6 +247,7 @@ export function loadApiConfig(): ApiConfig {
     databaseUrl: required("DATABASE_URL"),
     masterKeyHex: required("PLATFORM_MASTER_KEY"),
     authSecret: process.env.PLATFORM_AUTH_SECRET ?? required("PLATFORM_MASTER_KEY"),
+    partnerCallbackSecret: process.env.PARTNER_CALLBACK_SECRET ?? process.env.PLATFORM_AUTH_SECRET ?? required("PLATFORM_MASTER_KEY"),
     telegramWebhookSecret: required("TELEGRAM_WEBHOOK_SECRET"),
     whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
     whatsappAppSecret: process.env.WHATSAPP_APP_SECRET ?? "",

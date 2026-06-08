@@ -75,6 +75,7 @@ import { makeAdminOutreachRoutes } from "./routes/admin-outreach.ts";
 import { makeAdminOutreachCampaignsRoutes } from "./routes/admin-outreach-campaigns.ts";
 import { makeAdminMessageTemplatesRoutes } from "./routes/admin-message-templates.ts";
 import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
+import { makePartnerCallbackRoutes } from "./routes/webhook-partner-callback.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminExchangeRoutes } from "./routes/admin-exchange.ts";
@@ -97,6 +98,7 @@ import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 import { makeWhatsAppWebhookRoutes } from "./routes/webhook-whatsapp.ts";
 import { makeFacebookWebhookRoutes } from "./routes/webhook-facebook.ts";
 import { makeOperatorBotWebhookRoutes } from "./routes/webhook-operator-bot.ts";
+import { makeWestWalletWebhookRoutes } from "./routes/webhook-westwallet.ts";
 import { makeWidgetStaticRoutes } from "./routes/widget-static.ts";
 import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
@@ -390,7 +392,15 @@ async function main() {
   log.info("admin-onboarding route enabled");
 
   // Read-only conversations + messages для admin-UI inbox.
-  app.route("/", makeAdminConversationsRoutes({ db, notifications: notificationService }));
+  app.route("/", makeAdminConversationsRoutes({
+    db,
+    notifications: notificationService,
+    partnerPing: {
+      appUrl: cfg.mailer.appUrl,
+      operatorBotToken: cfg.operatorBotToken,
+      callbackSecret: cfg.partnerCallbackSecret,
+    },
+  }));
   log.info("admin-conversations routes enabled (list + thread + reply)");
 
   // Audit log read API.
@@ -413,7 +423,15 @@ async function main() {
   log.info("admin-tenant routes enabled (pause/resume)");
 
   // Leads pipeline (list, create, stage transition, field values).
-  app.route("/", makeAdminLeadsRoutes({ db, notificationService }));
+  app.route("/", makeAdminLeadsRoutes({
+    db,
+    notificationService,
+    partnerPing: {
+      appUrl: cfg.mailer.appUrl,
+      operatorBotToken: cfg.operatorBotToken,
+      callbackSecret: cfg.partnerCallbackSecret,
+    },
+  }));
   app.route(
     "/api/admin/notifications",
     makeAdminNotificationsRoutes({
@@ -483,6 +501,18 @@ async function main() {
   // Stage-change webhooks CRUD.
   app.route("/", makeAdminStageWebhooksRoutes({ db }));
   log.info("admin-stage-webhooks routes enabled");
+
+  // Partner callback endpoint (public — token is the auth).
+  // GET /api/partner/cb/:token?a=confirm|cancel
+  app.route(
+    "/",
+    makePartnerCallbackRoutes({
+      db,
+      callbackSecret: cfg.partnerCallbackSecret,
+      appUrl: cfg.mailer.appUrl,
+    }),
+  );
+  log.info("partner-callback route enabled (/api/partner/cb/:token)");
 
   // Vertical plugin install.
   app.route("/", makeAdminVerticalsRoutes({ db, resolveEmbedder: embedderResolver ?? undefined }));
@@ -724,6 +754,9 @@ async function main() {
       webhookSecret: cfg.telegramWebhookSecret,
     }),
   );
+
+  app.route("/", makeWestWalletWebhookRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
+  log.info("westwallet webhook enabled");
 
   // Admin-API под /admin/*: tenant resolved из subdomain через
   // makeTenantContextMiddleware (P), затем requireTenant guard 404'ит

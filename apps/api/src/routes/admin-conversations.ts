@@ -29,6 +29,7 @@ export interface AdminConversationsRoutesOpts {
   db: Db;
   /** Для пинга оператору при входе лида в awaiting_operator-стадию. */
   notifications?: NotificationService | null;
+  partnerPing?: { appUrl: string; operatorBotToken: string; callbackSecret: string } | null;
 }
 
 export function makeAdminConversationsRoutes(
@@ -406,6 +407,7 @@ export function makeAdminConversationsRoutes(
       ...(note ? { note } : {}),
       selector: { contactId: conv.contactId },
       notifications: opts.notifications ?? null,
+      partnerPing: opts.partnerPing ?? null,
     });
 
     if (outcome.kind === "no_lead") {
