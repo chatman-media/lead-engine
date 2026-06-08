@@ -6,6 +6,29 @@ export interface RoutableFunnel {
   verticalTemplateId: string | null;
 }
 
+export type CatalogRouteType = "manual" | "funnel" | "partner_service" | "webhook";
+
+export interface RoutableCatalogItem {
+  id: number;
+  slug: string;
+  name: string;
+  category: string | null;
+  description: string | null;
+  routeType: CatalogRouteType;
+  funnelId: number | null;
+  partnerServiceId: number | null;
+  partnerServiceFunnelId: number | null;
+  partnerServiceStageDefinitionId: number | null;
+  webhookUrl: string | null;
+}
+
+export interface ServiceRouteSelection {
+  source: "catalog" | "intent";
+  funnel: RoutableFunnel | null;
+  catalogItem: RoutableCatalogItem | null;
+  intent: ServiceIntent;
+}
+
 const INTENT_PATTERNS: Array<{ intent: Exclude<ServiceIntent, "unclear">; words: RegExp[] }> = [
   {
     intent: "exchange",
@@ -63,7 +86,113 @@ export function chooseFunnelForIntent(
   return rows[0] ?? null;
 }
 
+export function chooseServiceRoute(opts: {
+  funnels: RoutableFunnel[];
+  catalogItems: RoutableCatalogItem[];
+  text: string;
+}): ServiceRouteSelection {
+  const intent = classifyServiceIntent(opts.text);
+  const catalogItem = findMatchingCatalogItem(opts.catalogItems, opts.text);
+  if (catalogItem) {
+    return {
+      source: "catalog",
+      funnel: resolveCatalogFunnel(opts.funnels, catalogItem),
+      catalogItem,
+      intent,
+    };
+  }
+
+  return {
+    source: "intent",
+    funnel: chooseFunnelForIntent(opts.funnels, opts.text),
+    catalogItem: null,
+    intent,
+  };
+}
+
 function funnelMatches(funnel: RoutableFunnel, token: string): boolean {
   const haystack = `${funnel.slug} ${funnel.verticalTemplateId ?? ""}`.toLowerCase();
   return haystack.includes(token);
 }
+
+function resolveCatalogFunnel(
+  funnels: RoutableFunnel[],
+  item: RoutableCatalogItem,
+): RoutableFunnel | null {
+  const direct = item.funnelId ? funnels.find((f) => f.id === item.funnelId) : null;
+
+  if (item.routeType === "partner_service" && item.partnerServiceFunnelId) {
+    const partnerFunnel = funnels.find((f) => f.id === item.partnerServiceFunnelId);
+    if (partnerFunnel) return partnerFunnel;
+  }
+
+  if (direct) return direct;
+
+  return funnels[0] ?? null;
+}
+
+function findMatchingCatalogItem(
+  rows: RoutableCatalogItem[],
+  text: string,
+): RoutableCatalogItem | null {
+  const normalizedText = normalizeForSearch(text);
+  if (!normalizedText) return null;
+  const requestTokens = tokenize(normalizedText);
+
+  for (const item of rows) {
+    const directParts = [item.slug, item.name].map(normalizeForSearch).filter(Boolean);
+    if (directParts.some((part) => part.length >= 3 && normalizedText.includes(part))) {
+      return item;
+    }
+
+    const itemText = normalizeForSearch(
+      [item.slug, item.name, item.category, item.description].filter(Boolean).join(" "),
+    );
+    const itemTokens = tokenize(itemText).filter((t) => !STOP_WORDS.has(t));
+    if (itemTokens.some((token) => tokenMatches(token, requestTokens, normalizedText))) {
+      return item;
+    }
+  }
+
+  return null;
+}
+
+function tokenMatches(token: string, requestTokens: string[], normalizedText: string): boolean {
+  if (token.length < 3) return false;
+  if (normalizedText.includes(token)) return true;
+  if (token.length < 5) return false;
+  const stem = token.slice(0, 5);
+  return requestTokens.some((requestToken) => requestToken.length >= 5 && requestToken.startsWith(stem));
+}
+
+function normalizeForSearch(value: string): string {
+  return value
+    .toLowerCase()
+    .replaceAll("ё", "е")
+    .replace(/[^a-z0-9а-я]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenize(value: string): string[] {
+  return normalizeForSearch(value)
+    .split(" ")
+    .filter((token) => token.length >= 3);
+}
+
+const STOP_WORDS = new Set([
+  "для",
+  "или",
+  "как",
+  "что",
+  "это",
+  "вам",
+  "нас",
+  "наш",
+  "ваш",
+  "service",
+  "services",
+  "услуга",
+  "услуги",
+  "основное",
+]);
