@@ -18,6 +18,9 @@ import {
 	type SeedStage,
 	STAGE_KINDS,
 	STAGE_TYPES,
+	normalizeSeedStageConfigJson,
+	parseAutoAdvanceConditionType,
+	stageWorkflowTransitions,
 	seedSkillsCatalogue,
 } from "./admin-funnel.ts";
 
@@ -201,67 +204,6 @@ function normalizeOptions(fieldType: string, f: FieldDraft): string | undefined 
 	);
 }
 
-function isJsonRecord(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function parseConditionType(raw?: string): string | null {
-	if (!raw) return null;
-	try {
-		const parsed = JSON.parse(raw) as { type?: unknown };
-		return typeof parsed.type === "string" ? parsed.type : null;
-	} catch {
-		return null;
-	}
-}
-
-function parseStageConfigJson(
-	raw: StageDraft["configJson"] | SeedStage["configJson"],
-): Record<string, unknown> {
-	if (typeof raw === "string" && raw.trim()) {
-		try {
-			const parsed = JSON.parse(raw) as unknown;
-			return isJsonRecord(parsed) ? { ...parsed } : {};
-		} catch {
-			return {};
-		}
-	}
-	return isJsonRecord(raw) ? { ...raw } : {};
-}
-
-function workflowTransitions(configJson?: string): unknown[] {
-	const config = parseStageConfigJson(configJson);
-	const workflow = config.workflow;
-	if (!isJsonRecord(workflow) || !Array.isArray(workflow.transitions)) {
-		return [];
-	}
-	return workflow.transitions;
-}
-
-function normalizeStageConfigJson(opts: {
-	raw: StageDraft["configJson"];
-	nextStages: string[];
-	autoAdvanceCondition?: string;
-	hasRequestTypeField: boolean;
-}): string | undefined {
-	const config = parseStageConfigJson(opts.raw);
-	const workflow = isJsonRecord(config.workflow) ? { ...config.workflow } : {};
-	if (
-		!Array.isArray(workflow.transitions) &&
-		parseConditionType(opts.autoAdvanceCondition) === "all_required_fields_filled" &&
-		opts.nextStages.length > 0
-	) {
-		const transition: Record<string, unknown> = {
-			when: { type: "all_required_fields_filled" },
-			priority: 10,
-		};
-		if (!opts.hasRequestTypeField) transition.to = opts.nextStages[0];
-		workflow.transitions = [transition];
-		config.workflow = workflow;
-	}
-	return Object.keys(config).length > 0 ? JSON.stringify(config) : undefined;
-}
-
 function shouldInferAutoAdvanceCondition(opts: {
 	kind: SeedStage["kind"];
 	stageType: string;
@@ -349,12 +291,11 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 				})
 				? JSON.stringify({ type: "all_required_fields_filled" })
 				: undefined;
-		const hasRequestTypeField = fields.some((field) => field.slug === "request_type");
-		const configJson = normalizeStageConfigJson({
-			raw: d.configJson,
+		const configJson = normalizeSeedStageConfigJson({
+			configJson: d.configJson,
 			nextStages,
 			autoAdvanceCondition,
-			hasRequestTypeField,
+			fields,
 		});
 
 		stages.push({
@@ -368,7 +309,7 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 			...(supportMode ? { supportMode: true } : {}),
 			nextStages,
 			...(autoAdvanceCondition ? { autoAdvanceCondition } : {}),
-			...(configJson ? { configJson } : {}),
+			...(configJson !== "{}" ? { configJson } : {}),
 			...(typeof d.goal === "string" && d.goal.trim()
 				? { goal: d.goal.slice(0, 500) }
 				: {}),
@@ -457,8 +398,8 @@ export function workflowBehaviorWarnings(stages: SeedStage[]): string[] {
 			);
 		}
 		const hasExecutableExit =
-			workflowTransitions(stage.configJson).length > 0 ||
-			parseConditionType(stage.autoAdvanceCondition) ===
+			stageWorkflowTransitions(stage.configJson).length > 0 ||
+			parseAutoAdvanceConditionType(stage.autoAdvanceCondition) ===
 				"all_required_fields_filled" ||
 			stage.stageType === "awaiting_operator" ||
 			stage.supportMode === true;
