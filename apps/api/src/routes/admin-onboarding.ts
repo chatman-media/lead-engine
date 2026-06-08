@@ -108,6 +108,8 @@ export function makeAdminOnboardingRoutes(opts: AdminOnboardingRoutesOpts): Hono
                 like(tenantSecrets.key, `${EXCHANGE_WALLET_PREFIX}%`),
                 inArray(tenantSecrets.key, [...EXCHANGE_REQUISITE_FIXED_KEYS]),
               ),
+              sql`${tenantSecrets.key} NOT LIKE ${"%_memo"}`,
+              sql`${tenantSecrets.key} NOT LIKE ${"%_tag"}`,
             ),
           );
         requisiteCount = Number(reqRow?.n ?? 0);

@@ -98,6 +98,7 @@ import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 import { makeWhatsAppWebhookRoutes } from "./routes/webhook-whatsapp.ts";
 import { makeFacebookWebhookRoutes } from "./routes/webhook-facebook.ts";
 import { makeOperatorBotWebhookRoutes } from "./routes/webhook-operator-bot.ts";
+import { makeWestWalletWebhookRoutes } from "./routes/webhook-westwallet.ts";
 import { makeWidgetStaticRoutes } from "./routes/widget-static.ts";
 import { makeWebSocketRoutes } from "./routes/ws-web.ts";
 
@@ -753,6 +754,9 @@ async function main() {
       webhookSecret: cfg.telegramWebhookSecret,
     }),
   );
+
+  app.route("/", makeWestWalletWebhookRoutes({ db, masterKeyHex: cfg.masterKeyHex }));
+  log.info("westwallet webhook enabled");
 
   // Admin-API под /admin/*: tenant resolved из subdomain через
   // makeTenantContextMiddleware (P), затем requireTenant guard 404'ит

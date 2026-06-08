@@ -24,7 +24,7 @@ import {
   resolveConversationParties,
   updateOrder,
 } from "./orders.ts";
-import { getPaymentProvider } from "./providers.ts";
+import { getPaymentProvider, verifyWestWalletInvoicePayment } from "./providers.ts";
 import type { RateGuardTrip } from "./guardrails.ts";
 import { computeQuote, isCryptoAsset, normAsset, resolveNetwork } from "./rates.ts";
 import { assessOrderRisk } from "./risk.ts";
@@ -379,6 +379,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         network: order.network,
         amountFrom: order.amountFrom,
         amountToThb: order.amountToThb,
+        orderId: order.id,
         paymentMethod: order.paymentMethod,
         paymentRail: order.paymentRail,
       });
@@ -399,23 +400,34 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       }
       if (req.kind === "crypto") {
         if (req.exchangeId) {
+          const exchangeName = req.exchangeName ?? req.network ?? "exchange";
           return {
             orderId: order.id,
             kind: "crypto",
-            paymentRail: "binance_id",
+            paymentRail: order.paymentRail ?? req.network,
             exchangeId: req.exchangeId,
+            exchangeName,
             ttlMin,
-            instructions: `Binance ID для перевода: ${req.exchangeId}\nРеквизиты актуальны ${ttlMin} минут. После оплаты пришлите подтверждение перевода.`,
+            instructions: `${exchangeName} UID/ID для перевода: ${req.exchangeId}\nРеквизиты актуальны ${ttlMin} минут. После оплаты пришлите подтверждение перевода.`,
           };
         }
+        const tagLine = req.destTag ? `\nMemo/tag: ${req.destTag}` : "";
+        const paymentUrlLine = req.paymentUrl ? `\nСсылка оплаты: ${req.paymentUrl}` : "";
         return {
           orderId: order.id,
           kind: "crypto",
           address: req.address,
           network: req.network,
+          destTag: req.destTag,
+          paymentUrl: req.paymentUrl,
+          invoiceToken: req.invoiceToken,
+          expiresAt: req.expiresAt,
+          currencyCode: req.currencyCode,
           ttlMin,
           amlNote: true,
-          instructions: `Адрес для ${order.assetFrom} (${req.network}): ${req.address}\nАдрес актуален ${ttlMin} минут. Все входящие транзакции проходят AML-проверку. Переведите точную сумму с учётом сетевой комиссии. После оплаты пришлите tx hash или ссылку на транзакцию.`,
+          instructions: req.paymentUrl
+            ? `Оплата ${order.assetFrom} (${req.network}) через WestWallet:${paymentUrlLine}\nАдрес: ${req.address}${tagLine}\nРеквизиты актуальны ${ttlMin} минут. Все входящие транзакции проходят AML-проверку. Переведите точную сумму с учётом сетевой комиссии. После оплаты пришлите подтверждение перевода.`
+            : `Адрес для ${order.assetFrom} (${req.network}): ${req.address}${tagLine}\nАдрес актуален ${ttlMin} минут. Все входящие транзакции проходят AML-проверку. Переведите точную сумму с учётом сетевой комиссии. После оплаты пришлите tx hash или ссылку на транзакцию.`,
         };
       }
       if (req.detailsText) {
@@ -486,18 +498,49 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         };
       }
 
-      // Крипта — нужен tx hash и адрес-получатель из выданных реквизитов.
+      let issuedRequisites: Record<string, unknown> | null = null;
+      try {
+        issuedRequisites = order.requisitesJson ? JSON.parse(order.requisitesJson) : null;
+      } catch {
+        issuedRequisites = null;
+      }
+
+      if (
+        issuedRequisites?.provider === "westwallet" &&
+        typeof issuedRequisites.invoiceToken === "string"
+      ) {
+        const res = await verifyWestWalletInvoicePayment({
+          db,
+          tenantId,
+          masterKeyHex,
+          token: issuedRequisites.invoiceToken,
+          expectedAmount: order.amountFrom,
+        });
+        await updateOrder(db, tenantId, order.id, {
+          proofJson: JSON.stringify({
+            kind: "westwallet_invoice",
+            invoiceToken: issuedRequisites.invoiceToken,
+            transaction: res.transaction ?? null,
+            verifiedOk: res.ok,
+            needsOperator: res.needsOperator ?? false,
+          }),
+          ...(res.ok ? { status: "paid" } : {}),
+        });
+        return {
+          orderId: order.id,
+          ok: res.ok,
+          needsOperator: res.needsOperator ?? !res.ok,
+          note: res.note,
+        };
+      }
+
+      // Крипта без WestWallet invoice — нужен tx hash и адрес-получатель из выданных реквизитов.
       const txHash = args.proof ? extractTxHash(args.proof) : null;
       if (!txHash) {
         return { ok: false, error: "Пришлите, пожалуйста, tx hash транзакции или ссылку на неё." };
       }
       let toAddress: string | undefined;
-      try {
-        const req = order.requisitesJson ? JSON.parse(order.requisitesJson) : null;
-        toAddress = req?.address;
-      } catch {
-        /* ignore */
-      }
+      toAddress = typeof issuedRequisites?.address === "string" ? issuedRequisites.address : undefined;
       if (!toAddress) {
         return {
           ok: false,

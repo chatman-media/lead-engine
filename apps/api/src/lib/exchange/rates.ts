@@ -19,7 +19,7 @@ import {
 } from "./guardrails.ts";
 
 export const QUOTE_ASSET = "THB";
-export const CRYPTO_ASSETS = ["USDT", "BTC", "ETH"] as const;
+export const CRYPTO_ASSETS = ["USDT", "USDC", "BTC", "ETH", "LTC", "TRX", "TON"] as const;
 
 export interface QuoteResult {
   ok: true;
@@ -56,6 +56,10 @@ export function resolveNetwork(asset: string, network?: string | null): string {
   if (!isCryptoAsset(asset)) return "";
   let net = normNetwork(network);
   if (asset === "USDT" && !net) net = "trc20";
+  if (asset === "USDC" && !net) net = "erc20";
+  if (asset === "ETH" && !net) net = "erc20";
+  if (asset === "TRX" && !net) net = "tron";
+  if (asset === "TON" && !net) net = "ton";
   return net;
 }
 

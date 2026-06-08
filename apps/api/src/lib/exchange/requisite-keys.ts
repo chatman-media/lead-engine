@@ -19,7 +19,23 @@ export const EXCHANGE_WALLET_PREFIX = "exchange_wallet_";
 export const EXCHANGE_REQUISITE_FIXED_KEYS = [
   "exchange_fiat_payment_url",
   "exchange_binance_id",
+  "exchange_bybit_uid",
+  "exchange_htx_uid",
   "exchange_rub_card_requisites",
+] as const;
+
+/** Настройки платёжных провайдеров. Не считаются онбординг-реквизитами сами по себе. */
+export const EXCHANGE_PROVIDER_SETTING_KEYS = [
+  "exchange_westwallet_api_key",
+  "exchange_westwallet_secret_key",
+  "exchange_westwallet_ipn_url",
+  "exchange_westwallet_success_url",
+] as const;
+
+/** Ключи, которые нельзя отдавать обратно в UI открытым текстом. */
+export const EXCHANGE_SENSITIVE_SECRET_KEYS = [
+  "exchange_westwallet_api_key",
+  "exchange_westwallet_secret_key",
 ] as const;
 
 /** Бизнес-настройки (информационные; рантайм пока не использует — см. follow-up). */
@@ -43,6 +59,11 @@ export function isExchangeRequisiteKey(key: string): boolean {
 export function isAllowedExchangeSecretKey(key: string): boolean {
   return (
     isExchangeRequisiteKey(key) ||
-    (EXCHANGE_BUSINESS_SETTING_KEYS as readonly string[]).includes(key)
+    (EXCHANGE_BUSINESS_SETTING_KEYS as readonly string[]).includes(key) ||
+    (EXCHANGE_PROVIDER_SETTING_KEYS as readonly string[]).includes(key)
   );
+}
+
+export function isSensitiveExchangeSecretKey(key: string): boolean {
+  return (EXCHANGE_SENSITIVE_SECRET_KEYS as readonly string[]).includes(key);
 }

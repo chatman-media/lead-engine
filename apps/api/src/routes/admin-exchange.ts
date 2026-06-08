@@ -32,7 +32,10 @@ import {
 	refreshTenantRates,
 	renderRateCardMessage,
 } from "../lib/exchange/rate-feed.ts";
-import { isAllowedExchangeSecretKey } from "../lib/exchange/requisite-keys.ts";
+import {
+	isAllowedExchangeSecretKey,
+	isSensitiveExchangeSecretKey,
+} from "../lib/exchange/requisite-keys.ts";
 import { recordAudit } from "../lib/audit.ts";
 
 export interface AdminExchangeRoutesOpts {
@@ -530,7 +533,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 				.select({ key: tenantSecrets.key })
 				.from(tenantSecrets)
 				.where(and(eq(tenantSecrets.tenantId, tenantId), like(tenantSecrets.key, "exchange_%")));
-			const out: Array<{ key: string; value: string }> = [];
+			const out: Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }> = [];
 			for (const row of rows) {
 				if (!isAllowedExchangeSecretKey(row.key)) continue;
 				let value = "";
@@ -544,6 +547,10 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 						})) ?? "";
 				} catch {
 					value = "";
+				}
+				if (isSensitiveExchangeSecretKey(row.key)) {
+					out.push({ key: row.key, value: "", hasValue: value.length > 0, sensitive: true });
+					continue;
 				}
 				out.push({ key: row.key, value });
 			}

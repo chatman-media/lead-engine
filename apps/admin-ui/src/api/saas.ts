@@ -2092,7 +2092,7 @@ export const saas = {
     });
   },
   exchangeRequisites() {
-    return request<{ items: Array<{ key: string; value: string }> }>(
+    return request<{ items: Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }> }>(
       "/api/admin/exchange/requisites",
     );
   },
