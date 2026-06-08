@@ -9,6 +9,9 @@ import {
   leads,
   messages,
   outboundQueue,
+  partnerDeals,
+  partners,
+  partnerServices,
   stageDefinitions,
   tenants,
 } from "@chatman-media/storage";
@@ -102,6 +105,7 @@ export async function advanceLead(opts: {
     const [cur] = await tx
       .select({
         slug: stageDefinitions.slug,
+        funnelId: stageDefinitions.funnelId,
         displayName: stageDefinitions.displayName,
         nextStages: stageDefinitions.nextStages,
       })
@@ -122,7 +126,13 @@ export async function advanceLead(opts: {
         partnerWebhookMode: stageDefinitions.partnerWebhookMode,
       })
       .from(stageDefinitions)
-      .where(and(eq(stageDefinitions.slug, nextSlug), eq(stageDefinitions.tenantId, tenantId)));
+      .where(
+        and(
+          eq(stageDefinitions.slug, nextSlug),
+          eq(stageDefinitions.tenantId, tenantId),
+          eq(stageDefinitions.funnelId, cur.funnelId),
+        ),
+      );
     if (!next) return { kind: "terminal", stage: cur.slug };
 
     // 3. advance lead
@@ -196,6 +206,38 @@ export async function advanceLead(opts: {
 
     // Capture partner ping context for post-tx execution.
     if (next.partnerWebhookUrl) {
+      const [service] = await tx
+        .select({
+          id: partnerServices.id,
+          partnerId: partnerServices.partnerId,
+          commissionPct: partnerServices.commissionPct,
+          partnerDefaultCommissionPct: partners.defaultCommissionPct,
+        })
+        .from(partnerServices)
+        .innerJoin(partners, eq(partners.id, partnerServices.partnerId))
+        .where(
+          and(
+            eq(partnerServices.tenantId, tenantId),
+            eq(partnerServices.stageDefinitionId, next.id),
+            eq(partnerServices.isActive, true),
+          ),
+        )
+        .limit(1);
+      const commissionPct = Number(service?.commissionPct ?? service?.partnerDefaultCommissionPct ?? 0);
+      await tx.insert(partnerDeals).values({
+        tenantId,
+        partnerId: service?.partnerId ?? null,
+        serviceId: service?.id ?? null,
+        leadId: lead.id,
+        stageDefinitionId: next.id,
+        status: "sent",
+        handoffUrl: next.partnerWebhookUrl,
+        handoffMode: next.partnerWebhookMode,
+        commissionPct,
+        sentAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
       _partnerRef.ctx = {
         webhookUrl: next.partnerWebhookUrl,
         webhookMode: next.partnerWebhookMode,

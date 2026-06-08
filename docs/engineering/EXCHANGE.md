@@ -6,14 +6,13 @@ SERVER_RUNBOOK. Онбординг обменного тенанта (визар
 [ONBOARDING.md](ONBOARDING.md); общий костяк фаз —
 [ARCHITECTURE.md#funnel-phase-backbone](ARCHITECTURE.md).
 
-## Воронка (12 стадий)
+## Воронка (11 стадий)
 
 `apps/vertical-exchange/src/funnel-stages.ts`. Стадии и их фаза костяка:
 
 | Стадия | kind | phase |
 |---|---|---|
-| `intent_detected` | intake | capture |
-| `exchange_request` | active | qualify |
+| `exchange_request` | intake | capture |
 | `quote_calculated` | active | offer |
 | `verification_check` | active | clear |
 | `kyc_collection` (опц.) | active | clear |
@@ -25,7 +24,7 @@ SERVER_RUNBOOK. Онбординг обменного тенанта (визар
 | `payout_or_completion` | terminal_won | won |
 | `cancelled` | terminal_lost | lost |
 
-Поток: клиент → запрос обмена → котировка → верификация/KYC/риск → заявка →
+Поток: клиент → параметры обмена → котировка → верификация/KYC/риск → заявка →
 реквизиты → подтверждение оплаты → проверка → выплата.
 
 ## Курсы и котировки

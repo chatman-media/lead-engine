@@ -12,6 +12,8 @@
  */
 
 import { type Db, getDecryptedSecret } from "@chatman-media/conversation-engine";
+import type { WestWalletTransaction } from "./westwallet.ts";
+import { WestWalletClient } from "./westwallet.ts";
 import { isCryptoAsset, normNetwork } from "./rates.ts";
 
 export const CRYPTO_TTL_MIN = 15;
@@ -164,4 +166,65 @@ export function getPaymentProvider(deps: {
   masterKeyHex: string;
 }): PaymentProvider {
   return new ConfigPaymentProvider(deps);
+}
+
+// ── WestWallet IPN verification ───────────────────────────────────────────────
+
+export interface WestWalletVerificationResult {
+  ok: boolean;
+  transaction: WestWalletTransaction | null;
+  needsOperator?: boolean;
+}
+
+/**
+ * Проверяет оплату WestWallet-инвойса: получает транзакции по invoiceToken,
+ * ищет подтверждённую транзакцию с нужной суммой.
+ * Используется в /webhook/westwallet/:tenantId.
+ */
+export async function verifyWestWalletInvoicePayment(opts: {
+  db: Db;
+  tenantId: number;
+  masterKeyHex: string;
+  token: string;
+  expectedAmount: number;
+}): Promise<WestWalletVerificationResult> {
+  const { db, tenantId, masterKeyHex, token, expectedAmount } = opts;
+
+  const publicKey = await getDecryptedSecret({
+    db,
+    tenantId,
+    key: "exchange_westwallet_public_key",
+    masterKeyHex,
+  });
+  const privateKey = await getDecryptedSecret({
+    db,
+    tenantId,
+    key: "exchange_westwallet_private_key",
+    masterKeyHex,
+  });
+
+  if (!publicKey || !privateKey) {
+    return { ok: false, transaction: null, needsOperator: true };
+  }
+
+  try {
+    const client = new WestWalletClient({ apiKey: publicKey, secretKey: privateKey });
+    const { result: txs } = await client.invoiceTransactions(token);
+    const confirmed = txs.find(
+      (tx) => {
+        const amount = Number(tx.amount);
+        return (
+          (tx.status === "completed" || tx.status === "confirmed") &&
+          Number.isFinite(amount) &&
+          Math.abs(amount - expectedAmount) / Math.max(expectedAmount, 1) < 0.01
+        );
+      },
+    );
+    if (confirmed) {
+      return { ok: true, transaction: confirmed };
+    }
+    return { ok: false, transaction: txs[0] ?? null };
+  } catch {
+    return { ok: false, transaction: null, needsOperator: true };
+  }
 }

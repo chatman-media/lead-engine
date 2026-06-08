@@ -441,12 +441,43 @@ export interface StageDefinition {
   goal: string | null;
   guidance: string | null;
   autoAdvanceCondition: string | null;
+  partnerWebhookUrl: string | null;
+  partnerWebhookMode: "fire_and_forget" | "await_callback";
   fields: StageField[];
 }
 
 export interface FunnelData {
-  funnel: { id: number; slug: string; isActive: boolean } | null;
+  funnel: { id: number; slug: string; verticalTemplateId?: string | null; isActive: boolean } | null;
   stages: StageDefinition[];
+}
+
+export interface FunnelListItem {
+  id: number;
+  slug: string;
+  verticalTemplateId: string | null;
+  isActive: boolean;
+  stagesCount: number;
+  leadsCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface FunnelTemplateInfo {
+  key: string;
+  displayName: string;
+  description: string;
+  verticalTemplateId: string | null;
+  isCreatable: boolean;
+  stagesCount: number;
+  fieldsCount: number;
+  stages: Array<{
+    slug: string;
+    displayName: string;
+    kind: StageKind;
+    stageType: StageType;
+    phase: StagePhase | null;
+    fieldsCount: number;
+  }>;
 }
 
 /** Сквозное распределение лидов по макро-фазам костяка (capture→…→won/lost). */
@@ -597,6 +628,104 @@ export interface LeadDetail {
     createdAt: number;
     completedAt: number | null;
   }>;
+  partnerDeals?: PartnerDeal[];
+}
+
+export interface Partner {
+  id: number;
+  name: string;
+  status: string;
+  contactName: string | null;
+  contactChannel: string | null;
+  contactValue: string | null;
+  defaultCommissionPct: number;
+  settlementCurrency: string;
+  notes: string | null;
+  servicesCount?: number;
+  dealsCount?: number;
+  completedCount?: number;
+  commissionTotal?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PartnerService {
+  id: number;
+  partnerId: number;
+  partnerName?: string | null;
+  name: string;
+  category: string | null;
+  funnelId: number | null;
+  stageDefinitionId: number | null;
+  stageName?: string | null;
+  commissionPct: number;
+  isActive: boolean;
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PartnerDeal {
+  id: number;
+  partnerId: number | null;
+  partnerName?: string | null;
+  serviceId: number | null;
+  serviceName?: string | null;
+  leadId: number | null;
+  stageDefinitionId: number | null;
+  stageName?: string | null;
+  status: string;
+  handoffUrl: string | null;
+  handoffMode: string;
+  grossAmount: number | null;
+  currency: string;
+  commissionPct: number;
+  commissionAmount: number | null;
+  notes: string | null;
+  sentAt: number | null;
+  acceptedAt: number | null;
+  completedAt: number | null;
+  cancelledAt: number | null;
+  settledAt?: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ServiceCatalogRouteType = "manual" | "funnel" | "partner_service" | "webhook";
+
+export interface ServiceCatalogItem {
+  id: number;
+  slug: string;
+  name: string;
+  category: string | null;
+  description: string | null;
+  routeType: ServiceCatalogRouteType;
+  funnelId: number | null;
+  funnelSlug?: string | null;
+  funnelVerticalTemplateId?: string | null;
+  partnerServiceId: number | null;
+  partnerServiceName?: string | null;
+  partnerName?: string | null;
+  webhookUrl: string | null;
+  isActive: boolean;
+  sortOrder: number;
+  metadataJson: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ServiceCatalogInput {
+  slug?: string;
+  name: string;
+  category?: string | null;
+  description?: string | null;
+  routeType: ServiceCatalogRouteType;
+  funnelId?: number | null;
+  partnerServiceId?: number | null;
+  webhookUrl?: string | null;
+  isActive?: boolean;
+  sortOrder?: number;
+  metadataJson?: string;
 }
 
 export interface ContactItem {
@@ -1533,6 +1662,27 @@ export const saas = {
   getFunnel() {
     return request<FunnelData>("/api/admin/funnel");
   },
+  listFunnels() {
+    return request<{ items: FunnelListItem[] }>("/api/admin/funnels");
+  },
+  getFunnelById(id: number) {
+    return request<FunnelData>(`/api/admin/funnels/${id}`);
+  },
+  listFunnelTemplates() {
+    return request<{ items: FunnelTemplateInfo[] }>("/api/admin/funnel/templates");
+  },
+  createFunnel(data: { slug: string; template?: string }) {
+    return request<{
+      ok: boolean;
+      funnelId: number;
+      stagesCreated: number;
+      template: string;
+      verticalTemplateId: string | null;
+    }>("/api/admin/funnels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
   getPhaseStats() {
     return request<PhaseStats>("/api/admin/funnel/phase-stats");
   },
@@ -1637,8 +1787,8 @@ export const saas = {
     });
   },
 
-  getFunnelAnalytics() {
-    return request<FunnelAnalytics>("/api/admin/funnel/analytics");
+  getFunnelAnalytics(funnelId?: number) {
+    return request<FunnelAnalytics>(`/api/admin/funnel/analytics${funnelId ? `?funnelId=${funnelId}` : ""}`);
   },
 
   // ── Skills / Styles / Experiments ────────────────────────────────────
@@ -1898,6 +2048,96 @@ export const saas = {
   },
   deleteReferralCode(id: number) {
     return request<{ ok: boolean }>(`/api/admin/referral-codes/${id}`, { method: "DELETE" });
+  },
+
+  // ── Partner ledger ───────────────────────────────────────────────────
+  listPartners() {
+    return request<{ items: Partner[] }>("/api/admin/partners");
+  },
+  createPartner(data: {
+    name: string;
+    contactName?: string | null;
+    contactChannel?: string | null;
+    contactValue?: string | null;
+    defaultCommissionPct?: number;
+    settlementCurrency?: string;
+    notes?: string | null;
+  }) {
+    return request<{ item: Partner }>("/api/admin/partners", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updatePartner(id: number, patch: Partial<Partner>) {
+    return request<{ item: Partner }>(`/api/admin/partners/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  },
+  listPartnerServices() {
+    return request<{ items: PartnerService[] }>("/api/admin/partner-services");
+  },
+  createPartnerService(data: {
+    partnerId: number;
+    name: string;
+    category?: string | null;
+    funnelId?: number | null;
+    stageDefinitionId?: number | null;
+    commissionPct?: number;
+    notes?: string | null;
+  }) {
+    return request<{ item: PartnerService }>("/api/admin/partner-services", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  listPartnerDeals(opts: { status?: string; leadId?: number } = {}) {
+    const p = new URLSearchParams();
+    if (opts.status) p.set("status", opts.status);
+    if (opts.leadId) p.set("leadId", String(opts.leadId));
+    const q = p.toString();
+    return request<{ items: PartnerDeal[] }>(`/api/admin/partner-deals${q ? `?${q}` : ""}`);
+  },
+  createPartnerDeal(data: {
+    partnerId?: number | null;
+    serviceId?: number | null;
+    leadId?: number | null;
+    stageDefinitionId?: number | null;
+    grossAmount?: number | null;
+    currency?: string;
+    commissionPct?: number;
+    notes?: string | null;
+  }) {
+    return request<{ item: PartnerDeal }>("/api/admin/partner-deals", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updatePartnerDeal(id: number, patch: Partial<PartnerDeal>) {
+    return request<{ item: PartnerDeal }>(`/api/admin/partner-deals/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  },
+
+  // ── Service catalog ──────────────────────────────────────────────────
+  listServiceCatalog() {
+    return request<{ items: ServiceCatalogItem[] }>("/api/admin/service-catalog");
+  },
+  createServiceCatalogItem(data: ServiceCatalogInput) {
+    return request<{ item: ServiceCatalogItem }>("/api/admin/service-catalog/items", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateServiceCatalogItem(id: number, patch: Partial<ServiceCatalogInput>) {
+    return request<{ item: ServiceCatalogItem }>(`/api/admin/service-catalog/items/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  },
+  deleteServiceCatalogItem(id: number) {
+    return request<{ ok: boolean }>(`/api/admin/service-catalog/items/${id}`, { method: "DELETE" });
   },
 
   // ── Superadmin ────────────────────────────────────────────────────────

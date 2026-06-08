@@ -112,6 +112,36 @@ describe("GET /api/admin/funnel — no funnel configured", () => {
     expect(res.status).toBe(401);
   });
 
+  it("GET /api/admin/funnel/templates → built-in presets", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/funnel/templates");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: Array<{
+        key: string;
+        displayName: string;
+        verticalTemplateId: string | null;
+        isCreatable: boolean;
+        stagesCount: number;
+        fieldsCount: number;
+        stages: Array<{ slug: string; displayName: string; fieldsCount: number }>;
+      }>;
+    };
+    expect(body.items.length).toBeGreaterThan(5);
+    const exchange = body.items.find((item) => item.key === "exchange");
+    expect(exchange).toBeDefined();
+    expect(exchange!.displayName).toBe("Обменка");
+    expect(exchange!.verticalTemplateId).toBe("exchange_v1");
+    expect(exchange!.stagesCount).toBe(11);
+    expect(exchange!.fieldsCount).toBeGreaterThan(0);
+    expect(exchange!.stages).toHaveLength(11);
+    expect(exchange!.stages[0]!.slug).toBe("exchange_request");
+    expect(exchange!.stages[0]!.fieldsCount).toBeGreaterThan(0);
+    const catalog = body.items.find((item) => item.key === "concierge");
+    expect(catalog).toBeDefined();
+    expect(catalog!.isCreatable).toBe(false);
+  });
+
   it("fresh tenant → funnel: null, stages: []", async () => {
     if (!sql) return;
     const res = await authReq(tokenA, "/api/admin/funnel");
@@ -237,7 +267,7 @@ describe("POST /api/admin/funnel/seed", () => {
     expect(getBody.stages).toHaveLength(7);
   });
 
-  it("seed with template 'exchange' replaces 7-stage visa funnel with 12 exchange stages", async () => {
+  it("seed with template 'exchange' creates a separate exchange funnel", async () => {
     if (!sql) return;
     const res = await authReq(tokenA, "/api/admin/funnel/seed", {
       method: "POST",
@@ -246,15 +276,21 @@ describe("POST /api/admin/funnel/seed", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { stagesCreated: number; funnelId: number };
-    expect(body.funnelId).toBe(funnelId);
-    expect(body.stagesCreated).toBe(12);
+    expect(body.funnelId).not.toBe(funnelId);
+    expect(body.stagesCreated).toBe(11);
 
-    const getRes = await authReq(tokenA, "/api/admin/funnel");
+    const listRes = await authReq(tokenA, "/api/admin/funnels");
+    const listBody = (await listRes.json()) as { items: Array<{ slug: string; stagesCount: number }> };
+    expect(listBody.items.map((item) => item.slug)).toContain("visa");
+    expect(listBody.items.map((item) => item.slug)).toContain("exchange");
+
+    const getRes = await authReq(tokenA, `/api/admin/funnels/${body.funnelId}`);
     const getBody = (await getRes.json()) as {
+      funnel: { slug: string };
       stages: Array<{ slug: string; supportMode: boolean }>;
     };
+    expect(getBody.funnel.slug).toBe("exchange");
     expect(getBody.stages.map((stage) => stage.slug)).toEqual([
-      "intent_detected",
       "exchange_request",
       "quote_calculated",
       "verification_check",
@@ -279,6 +315,72 @@ describe("POST /api/admin/funnel/seed", () => {
     });
     const resetBody = (await reset.json()) as { stagesCreated: number };
     expect(resetBody.stagesCreated).toBe(7);
+  });
+});
+
+describe("POST /api/admin/funnels — create from preset", () => {
+  it("creates a new direction from selected template and stores verticalTemplateId", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/funnels", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug: "property", template: "real_estate" }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      ok: boolean;
+      funnelId: number;
+      stagesCreated: number;
+      template: string;
+      verticalTemplateId: string | null;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.template).toBe("real_estate");
+    expect(body.verticalTemplateId).toBe("real_estate_v1");
+    expect(body.stagesCreated).toBeGreaterThan(0);
+
+    const getRes = await authReq(tokenB, `/api/admin/funnels/${body.funnelId}`);
+    expect(getRes.status).toBe(200);
+    const getBody = (await getRes.json()) as {
+      funnel: { slug: string; verticalTemplateId: string | null };
+      stages: Array<{ slug: string }>;
+    };
+    expect(getBody.funnel.slug).toBe("property");
+    expect(getBody.funnel.verticalTemplateId).toBe("real_estate_v1");
+    expect(getBody.stages.length).toBe(body.stagesCreated);
+  });
+
+  it("rejects duplicate create for an already installed template", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/funnels", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug: "property_2", template: "real_estate" }),
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as {
+      error: string;
+      slug: string;
+      template: string;
+      verticalTemplateId: string | null;
+    };
+    expect(body.error).toBe("template already installed");
+    expect(body.slug).toBe("property");
+    expect(body.template).toBe("real_estate");
+    expect(body.verticalTemplateId).toBe("real_estate_v1");
+  });
+
+  it("rejects service catalog seed as a directly creatable direction", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/funnels", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug: "service_catalog", template: "concierge" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string; reason: string };
+    expect(body.error).toBe("template is not creatable as a direction");
+    expect(body.reason).toContain("service catalog");
   });
 });
 

@@ -94,7 +94,6 @@ const PayoutMethodEnum = z
   .describe("Как клиент получает THB: courier_cash, cardless_atm, thai_bank_transfer, office_cash");
 
 const KNOWN_EXCHANGE_STAGES = new Set([
-  "intent_detected",
   "exchange_request",
   "quote_calculated",
   "verification_check",
@@ -109,7 +108,7 @@ const KNOWN_EXCHANGE_STAGES = new Set([
 ]);
 
 const TOOL_STAGE_MATRIX: Record<string, Set<string> | "any"> = {
-  compute_exchange_quote: new Set(["intent_detected", "exchange_request", "quote_calculated"]),
+  compute_exchange_quote: new Set(["exchange_request", "quote_calculated"]),
   check_exchange_verification: new Set([
     "quote_calculated",
     "verification_check",

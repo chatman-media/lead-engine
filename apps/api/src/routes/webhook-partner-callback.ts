@@ -8,8 +8,8 @@
  * Токен одноразовый: после обработки leads.awaiting_token очищается.
  */
 
-import type { Db } from "@chatman-media/conversation-engine";
-import { leads, stageDefinitions } from "@chatman-media/storage";
+import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import { leads, partnerDeals, stageDefinitions } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { advanceLead } from "../lib/advance-lead.ts";
@@ -83,6 +83,18 @@ export function makePartnerCallbackRoutes(opts: {
         .update(leads)
         .set({ awaitingToken: null, updatedAt: now })
         .where(and(eq(leads.id, leadId), eq(leads.awaitingToken, token)));
+      await withTenant(opts.db, lead.tenantId, async (tx) => {
+        await tx
+          .update(partnerDeals)
+          .set({ status: "accepted", acceptedAt: now, updatedAt: now })
+          .where(
+            and(
+              eq(partnerDeals.tenantId, lead.tenantId),
+              eq(partnerDeals.leadId, leadId),
+              eq(partnerDeals.stageDefinitionId, stageId),
+            ),
+          );
+      });
 
       // Advance lead to next stage
       const outcome = await advanceLead({
@@ -113,6 +125,18 @@ export function makePartnerCallbackRoutes(opts: {
           updatedAt: now,
         })
         .where(and(eq(leads.id, leadId), eq(leads.awaitingToken, token)));
+      await withTenant(opts.db, lead.tenantId, async (tx) => {
+        await tx
+          .update(partnerDeals)
+          .set({ status: "rejected", cancelledAt: now, updatedAt: now })
+          .where(
+            and(
+              eq(partnerDeals.tenantId, lead.tenantId),
+              eq(partnerDeals.leadId, leadId),
+              eq(partnerDeals.stageDefinitionId, stageId),
+            ),
+          );
+      });
 
       return c.html(htmlPage("Отклонено", `❌ Заявка #${leadId} отмечена как недоступна. Менеджер свяжется с клиентом.`, "cancel"));
     }

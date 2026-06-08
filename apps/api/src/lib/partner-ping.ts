@@ -1,6 +1,6 @@
 /**
- * Partner availability ping — универсальный механизм уведомления партнёра
- * при входе лида на стадию (напр. booking_confirmed → проверить наличие байка).
+ * Partner ping — универсальный механизм уведомления партнёра
+ * при входе лида на партнёрскую стадию.
  *
  * Поддерживает два транспорта:
  *   1. HTTP POST  — partner_webhook_url = "https://..."
@@ -134,7 +134,7 @@ export async function firePartnerPing(
 
   // HTTP POST
   const payload = {
-    event: "lead.partner_check",
+    event: "lead.partner_handoff",
     leadId: opts.leadId,
     tenantSlug: opts.tenantSlug,
     stage: { slug: opts.stageSlug, displayName: opts.stageDisplayName },
@@ -185,7 +185,7 @@ async function sendTelegramPartnerMessage(opts: TgSendOpts): Promise<void> {
     .join("\n");
 
   const text =
-    `🏍️ <b>Запрос на подтверждение наличия</b>\n\n` +
+    `<b>Новая заявка партнёру</b>\n\n` +
     `<b>Клиент:</b> ${opts.contactDisplayName ?? "—"}\n` +
     `<b>Стадия:</b> ${opts.stageDisplayName}\n` +
     `<b>Лид #${opts.leadId}</b>\n` +

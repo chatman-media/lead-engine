@@ -52,7 +52,7 @@ import {
   stageFields,
   tenants,
 } from "@chatman-media/storage";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 
@@ -188,12 +188,12 @@ const PERSONAS: SimPersona[] = [
       "Спрашиваешь лучший курс для большого объёма, способ безопасной выдачи. Деловой тон, подтверждаешь.",
   },
   {
-    id: "exchange_arrival_transfer",
-    name: "Обменник — прилёт + трансфер",
+    id: "exchange_arrival_office",
+    name: "Обменник — прилёт и офис",
     displayName: "Юлия Краснова",
     brief:
       "Ты — турист, прилетаешь на Пхукет завтра в 14:30. Пишешь, что хочешь поменять 1000 USDT по прилёту " +
-      "и интересуешься трансфером из аэропорта. Реагируешь на предложение трансфера/зелёного коридора, уточняешь курс.",
+      "и уточняешь курс, часы работы офиса, адрес и можно ли забрать баты по коду сразу после приезда.",
   },
   {
     id: "exchange_rate_only",
@@ -240,7 +240,10 @@ const LAST_NAMES = [
 ];
 
 function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)]!;
+  if (arr.length === 0) throw new Error("cannot pick from empty array");
+  const value = arr[randomInt(arr.length)];
+  if (value === undefined) throw new Error("cannot pick from empty array");
+  return value;
 }
 
 function randomName(): string {

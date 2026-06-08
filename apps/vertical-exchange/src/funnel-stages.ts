@@ -7,7 +7,7 @@ import type { FunnelStageDef } from "@chatman-media/verticals";
  * DB-определения стадий с полями.
  *
  * Реальный воркфлоу:
- *   intent_detected → exchange_request → quote_calculated →
+ *   exchange_request → quote_calculated →
  *   verification_check → [kyc_collection?] → risk_review → order_created →
  *   requisites_sent → payment_proof_waiting → payment_verified →
  *   payout_or_completion | cancelled.
@@ -22,14 +22,8 @@ import type { FunnelStageDef } from "@chatman-media/verticals";
  */
 export const EXCHANGE_FUNNEL_STAGES: readonly FunnelStageDef[] = [
 	{
-		slug: "intent_detected",
-		kind: "intake",
-		displayName: "Детекция интента",
-		next: ["exchange_request", "cancelled"],
-	},
-	{
 		slug: "exchange_request",
-		kind: "lead",
+		kind: "intake",
 		displayName: "Параметры обмена",
 		next: ["quote_calculated", "cancelled"],
 	},

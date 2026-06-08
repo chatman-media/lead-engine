@@ -167,12 +167,14 @@ describe("admin-verticals — GET list + неизвестный slug", () => {
     if (!sql) return;
     const res = await authReq("/api/admin/verticals");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { items: Array<{ slug: string; hasStyles: boolean }> };
+    const body = (await res.json()) as {
+      items: Array<{ slug: string; hasFunnel: boolean; hasStyles: boolean }>;
+    };
     expect(Array.isArray(body.items)).toBe(true);
     expect(body.items.length).toBeGreaterThan(0);
     const exchange = body.items.find((i) => i.slug === "exchange_v1");
     expect(exchange).toBeDefined();
-    expect(typeof exchange!.hasFunnel).toBe('boolean');
+    expect(typeof exchange!.hasFunnel).toBe("boolean");
   });
 
   it("POST install несуществующий slug → 404", async () => {
