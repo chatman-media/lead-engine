@@ -175,9 +175,9 @@ describe("admin-workflow /ai-chat", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       readyToGenerate: boolean;
-      stages: Array<{ slug: string; position: number }>;
+      stages: Array<{ slug: string; position: number; autoAdvanceCondition?: string; configJson?: string }>;
       preview: Array<{ kind: string }>;
-      backbone: { errors: string[] };
+      backbone: { errors: string[]; warnings: string[] };
     };
     expect(body.readyToGenerate).toBe(true);
     expect(body.stages.length).toBe(5);
@@ -186,6 +186,16 @@ describe("admin-workflow /ai-chat", () => {
     expect(body.backbone.errors).toEqual([]);
     // normalizeStages проставляет позиции по порядку.
     expect(body.stages[0]?.position).toBe(0);
+    expect(JSON.parse(body.stages[0]?.autoAdvanceCondition ?? "{}")).toEqual({
+      type: "all_required_fields_filled",
+    });
+    const config = JSON.parse(body.stages[0]?.configJson ?? "{}") as {
+      workflow?: { transitions?: Array<{ to?: string; when?: { type?: string } }> };
+    };
+    expect(config.workflow?.transitions?.[0]).toMatchObject({
+      to: "qualify",
+      when: { type: "all_required_fields_filled" },
+    });
   });
 
   it("readyToGenerate:true с мусорными stages → откат в диалог", async () => {
@@ -250,18 +260,51 @@ describe("admin-workflow /apply", () => {
     if (!sql) return;
     const res = await post(app, APPLY, { stages: VALID_STAGES });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; stageCount: number };
+    const body = (await res.json()) as { ok: boolean; stageCount: number; warnings: string[] };
     expect(body.ok).toBe(true);
     expect(body.stageCount).toBe(5);
+    expect(Array.isArray(body.warnings)).toBe(true);
 
     const rows = await db
-      .select({ slug: stageDefinitions.slug, goal: stageDefinitions.goal })
+      .select({
+        slug: stageDefinitions.slug,
+        goal: stageDefinitions.goal,
+        autoAdvanceCondition: stageDefinitions.autoAdvanceCondition,
+        configJson: stageDefinitions.configJson,
+      })
       .from(stageDefinitions)
       .where(eq(stageDefinitions.tenantId, tenantId));
     expect(rows.length).toBe(5);
     expect(rows.map((r) => r.slug).sort()).toEqual(["intake", "lost", "offer", "qualify", "won"]);
     // Phase 2 slice C: AI-emitted per-stage goal is normalized + persisted.
     expect(rows.find((r) => r.slug === "qualify")?.goal).toBe("понять сумму и валюту");
+    const intake = rows.find((r) => r.slug === "intake");
+    expect(JSON.parse(intake?.autoAdvanceCondition ?? "{}")).toEqual({
+      type: "all_required_fields_filled",
+    });
+    const intakeConfig = JSON.parse(intake?.configJson ?? "{}") as {
+      workflow?: { transitions?: Array<{ to?: string; when?: { type?: string } }> };
+    };
+    expect(intakeConfig.workflow?.transitions?.[0]).toMatchObject({
+      to: "qualify",
+      when: { type: "all_required_fields_filled" },
+    });
+  });
+
+  it("валидная, но слабая behavior-конфигурация → ok + warnings", async () => {
+    if (!sql) return;
+    const weak = VALID_STAGES.map((stage) =>
+      stage.slug === "qualify"
+        ? { ...stage, goal: undefined, guidance: undefined, fields: [], autoAdvanceCondition: undefined }
+        : stage,
+    );
+    const res = await post(app, APPLY, { stages: weak });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; warnings: string[] };
+    expect(body.ok).toBe(true);
+    expect(body.warnings.some((w) => w.includes('"qualify"') && w.includes("goal"))).toBe(true);
+    expect(body.warnings.some((w) => w.includes('"qualify"') && w.includes("guidance"))).toBe(true);
+    expect(body.warnings.some((w) => w.includes('"qualify"') && w.includes("transition/exit rule"))).toBe(true);
   });
 });
 
@@ -274,7 +317,7 @@ describe("admin-workflow /apply мульти-запрос (R3)", () => {
     expect(body.stageCount).toBe(9);
 
     const [intake] = await db
-      .select({ id: stageDefinitions.id })
+      .select({ id: stageDefinitions.id, configJson: stageDefinitions.configJson })
       .from(stageDefinitions)
       .where(and(eq(stageDefinitions.tenantId, tenantId), eq(stageDefinitions.slug, "request_received")));
     const fields = await db
@@ -286,6 +329,11 @@ describe("admin-workflow /apply мульти-запрос (R3)", () => {
     // value-ключи опций сохранены латиницей — иначе сломалась бы маршрутизация веток.
     const opts = JSON.parse(rt!.optionsJson) as Array<{ value: string }>;
     expect(opts.map((o) => o.value).sort()).toEqual(["exchange", "transfer"]);
+    const config = JSON.parse(intake!.configJson) as {
+      workflow?: { transitions?: Array<{ to?: string; when?: { type?: string } }> };
+    };
+    expect(config.workflow?.transitions?.[0]?.when?.type).toBe("all_required_fields_filled");
+    expect(config.workflow?.transitions?.[0]?.to).toBeUndefined();
   });
 
   it("мультизапрос: тип без ветки → 400 + violation", async () => {

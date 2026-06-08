@@ -65,6 +65,7 @@ export const SYSTEM_PROMPT = `Ты — помощник по настройке 
   "supportMode": true|false (true = бот замолкает, работает оператор; опц.),
   "nextStages": ["slug", ...] — в какие стадии можно перейти (терминальные = []),
   "autoAdvanceCondition": "{\\"type\\":\\"all_required_fields_filled\\"}" (опц., для авто-перехода),
+  "configJson": "{\\"workflow\\":{\\"transitions\\":[{\\"to\\":\\"next_stage_slug\\",\\"when\\":{\\"type\\":\\"all_required_fields_filled\\"},\\"priority\\":10}]}}" (опц.; для branching request_type transition можно без "to"),
   "goal": "что должна достичь active-стадия (кратко; для intake/terminal не нужно)",
   "guidance": "как боту вести себя на этой стадии (опц., 1-2 фразы)",
   "fields": [
@@ -91,6 +92,8 @@ export const SYSTEM_PROMPT = `Ты — помощник по настройке 
 - slug'и уникальны; nextStages ссылаются только на существующие slug'и.
 - Поля, которые бот может вытащить из диалога (имя, сумма, тип), помечай aiExtractable: true.
 - Для active-стадий заполняй "goal" (что сделать на стадии) и по возможности "guidance" (как вести диалог) под этот бизнес.
+- В guidance явно зашивай следующий вопрос/CTA, exit criteria, handoff/SLA если они есть: стадия должна закрываться в следующий шаг, а не быть вечным чатом.
+- Если стадия завершается заполнением обязательных fields — ставь autoAdvanceCondition all_required_fields_filled и workflow transition в configJson.workflow.transitions. Для request_type branching transition оставляй без "to", чтобы runtime выбрал ветку по request_type.
 - Если на стадии условия/цену/решение даёт ЧЕЛОВЕК-оператор (не бот, не автоформула) — ставь stageType "awaiting_operator": бот придержит гостя и подождёт оператора, не выдумывая детали.
 - Линейные воронки держи короткими (4–8 стадий) — не усложняй.
 
@@ -160,6 +163,7 @@ export interface StageDraft {
 	supportMode?: boolean;
 	nextStages?: string[];
 	autoAdvanceCondition?: string;
+	configJson?: string | Record<string, unknown>;
 	goal?: string;
 	guidance?: string;
 	fields?: FieldDraft[];
@@ -195,6 +199,82 @@ function normalizeOptions(fieldType: string, f: FieldDraft): string | undefined 
 				: { value: sanitizeSlug(String(o)) || String(o), label: String(o) },
 		),
 	);
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseConditionType(raw?: string): string | null {
+	if (!raw) return null;
+	try {
+		const parsed = JSON.parse(raw) as { type?: unknown };
+		return typeof parsed.type === "string" ? parsed.type : null;
+	} catch {
+		return null;
+	}
+}
+
+function parseStageConfigJson(
+	raw: StageDraft["configJson"] | SeedStage["configJson"],
+): Record<string, unknown> {
+	if (typeof raw === "string" && raw.trim()) {
+		try {
+			const parsed = JSON.parse(raw) as unknown;
+			return isJsonRecord(parsed) ? { ...parsed } : {};
+		} catch {
+			return {};
+		}
+	}
+	return isJsonRecord(raw) ? { ...raw } : {};
+}
+
+function workflowTransitions(configJson?: string): unknown[] {
+	const config = parseStageConfigJson(configJson);
+	const workflow = config.workflow;
+	if (!isJsonRecord(workflow) || !Array.isArray(workflow.transitions)) {
+		return [];
+	}
+	return workflow.transitions;
+}
+
+function normalizeStageConfigJson(opts: {
+	raw: StageDraft["configJson"];
+	nextStages: string[];
+	autoAdvanceCondition?: string;
+	hasRequestTypeField: boolean;
+}): string | undefined {
+	const config = parseStageConfigJson(opts.raw);
+	const workflow = isJsonRecord(config.workflow) ? { ...config.workflow } : {};
+	if (
+		!Array.isArray(workflow.transitions) &&
+		parseConditionType(opts.autoAdvanceCondition) === "all_required_fields_filled" &&
+		opts.nextStages.length > 0
+	) {
+		const transition: Record<string, unknown> = {
+			when: { type: "all_required_fields_filled" },
+			priority: 10,
+		};
+		if (!opts.hasRequestTypeField) transition.to = opts.nextStages[0];
+		workflow.transitions = [transition];
+		config.workflow = workflow;
+	}
+	return Object.keys(config).length > 0 ? JSON.stringify(config) : undefined;
+}
+
+function shouldInferAutoAdvanceCondition(opts: {
+	kind: SeedStage["kind"];
+	stageType: string;
+	supportMode: boolean;
+	nextStages: string[];
+	fields: SeedStage["fields"];
+	hasExplicitCondition: boolean;
+}): boolean {
+	if (opts.hasExplicitCondition) return false;
+	if (opts.kind === "terminal_won" || opts.kind === "terminal_lost") return false;
+	if (opts.stageType === "awaiting_operator" || opts.supportMode) return false;
+	if (opts.nextStages.length === 0) return false;
+	return opts.fields.some((field) => field.required);
 }
 
 /**
@@ -250,6 +330,33 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 			});
 		}
 
+		const nextStages = Array.isArray(d.nextStages)
+			? d.nextStages.map(sanitizeSlug).filter(Boolean)
+			: [];
+		const supportMode = d.supportMode === true;
+		const hasExplicitCondition =
+			typeof d.autoAdvanceCondition === "string" &&
+			d.autoAdvanceCondition.trim().length > 0;
+		const autoAdvanceCondition = hasExplicitCondition
+			? d.autoAdvanceCondition
+			: shouldInferAutoAdvanceCondition({
+					kind,
+					stageType,
+					supportMode,
+					nextStages,
+					fields,
+					hasExplicitCondition,
+				})
+				? JSON.stringify({ type: "all_required_fields_filled" })
+				: undefined;
+		const hasRequestTypeField = fields.some((field) => field.slug === "request_type");
+		const configJson = normalizeStageConfigJson({
+			raw: d.configJson,
+			nextStages,
+			autoAdvanceCondition,
+			hasRequestTypeField,
+		});
+
 		stages.push({
 			slug,
 			displayName: d.displayName,
@@ -258,13 +365,10 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 			...(phase ? { phase } : {}),
 			position: i,
 			...(typeof d.color === "string" ? { color: d.color } : {}),
-			...(d.supportMode === true ? { supportMode: true } : {}),
-			nextStages: Array.isArray(d.nextStages)
-				? d.nextStages.map(sanitizeSlug).filter(Boolean)
-				: [],
-			...(typeof d.autoAdvanceCondition === "string"
-				? { autoAdvanceCondition: d.autoAdvanceCondition }
-				: {}),
+			...(supportMode ? { supportMode: true } : {}),
+			nextStages,
+			...(autoAdvanceCondition ? { autoAdvanceCondition } : {}),
+			...(configJson ? { configJson } : {}),
 			...(typeof d.goal === "string" && d.goal.trim()
 				? { goal: d.goal.slice(0, 500) }
 				: {}),
@@ -331,8 +435,40 @@ export function validateFunnel(stages: SeedStage[]): {
 	const base = validateBackbone(stages);
 	return {
 		errors: [...base.errors, ...multiRequestBranchErrors(stages)],
-		warnings: base.warnings,
+		warnings: [...base.warnings, ...workflowBehaviorWarnings(stages)],
 	};
+}
+
+export function workflowBehaviorWarnings(stages: SeedStage[]): string[] {
+	const warnings: string[] = [];
+	for (const stage of stages) {
+		if (stage.kind !== "active") continue;
+		if (!stage.goal?.trim()) {
+			warnings.push(`Стадия "${stage.slug}": нет goal — добавь цель стадии.`);
+		}
+		if (!stage.guidance?.trim()) {
+			warnings.push(
+				`Стадия "${stage.slug}": нет guidance — добавь правила диалога и следующий вопрос/CTA.`,
+			);
+		}
+		if (stage.nextStages.length === 0) {
+			warnings.push(
+				`Стадия "${stage.slug}": нет nextStages — стадия не знает следующий шаг.`,
+			);
+		}
+		const hasExecutableExit =
+			workflowTransitions(stage.configJson).length > 0 ||
+			parseConditionType(stage.autoAdvanceCondition) ===
+				"all_required_fields_filled" ||
+			stage.stageType === "awaiting_operator" ||
+			stage.supportMode === true;
+		if (!hasExecutableExit && stage.nextStages.length > 0) {
+			warnings.push(
+				`Стадия "${stage.slug}": нет transition/exit rule — добавь autoAdvanceCondition или configJson.workflow.transitions.`,
+			);
+		}
+	}
+	return [...new Set(warnings)];
 }
 
 /** true, если модель явно пыталась вернуть JSON воронки, а не текст-реплику. */
@@ -554,10 +690,14 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 			action: "funnel.ai_apply",
 			targetKind: "funnel",
 			targetId: String(result.funnelId),
-			details: { stagesCreated: result.stagesCreated },
+			details: { stagesCreated: result.stagesCreated, warnings: backbone.warnings },
 		});
 
-		return c.json({ ok: true, stageCount: result.stagesCreated });
+		return c.json({
+			ok: true,
+			stageCount: result.stagesCreated,
+			warnings: backbone.warnings,
+		});
 	});
 
 	/**
