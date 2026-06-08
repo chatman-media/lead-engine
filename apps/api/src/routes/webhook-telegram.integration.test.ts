@@ -182,3 +182,45 @@ describe("webhook-telegram", () => {
     expect(fieldExtractCalled).toBe(true);
   });
 });
+
+describe("webhook-telegram — callback_query (concierge service buttons)", () => {
+  it("callback_query с srv: prefix → 200 (конвертируется в text-сообщение)", async () => {
+    if (!sql) return;
+    const cbUpdate = {
+      update_id: Math.floor(Math.random() * 1e9),
+      callback_query: {
+        id: "cq123",
+        from: { id: 7, username: "kate" },
+        chat_instance: "ci1",
+        data: "srv:transfer",
+        message: {
+          message_id: 1,
+          date: 1700000000,
+          chat: { id: 7, type: "private" },
+        },
+      },
+    };
+    const res = await post("demo", cbUpdate, TG_SECRET);
+    expect(res.status).toBe(200);
+  });
+
+  it("callback_query без srv: prefix → 200 (не конвертируется, обрабатывается как есть)", async () => {
+    if (!sql) return;
+    const cbUpdate = {
+      update_id: Math.floor(Math.random() * 1e9),
+      callback_query: {
+        id: "cq456",
+        from: { id: 7, username: "kate" },
+        chat_instance: "ci2",
+        data: "other:data",
+        message: {
+          message_id: 2,
+          date: 1700000000,
+          chat: { id: 7, type: "private" },
+        },
+      },
+    };
+    const res = await post("demo", cbUpdate, TG_SECRET);
+    expect(res.status).toBe(200);
+  });
+});

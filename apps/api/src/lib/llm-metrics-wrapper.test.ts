@@ -137,3 +137,93 @@ describe("wrapEmbeddingClient", () => {
     );
   });
 });
+
+// ── completeWithTools / completeStructured / stream (optional methods) ────────
+describe("wrapChatClient — optional methods forwarded", () => {
+  it("completeWithTools — инкрементит llmCalls, пробрасывает результат", async () => {
+    const metrics = makePlatformMetrics();
+    const innerWithTools: ChatClient = {
+      async complete() { return "ok"; },
+      async completeWithTools(_m, _t, _o) { return { message: "tool-result", toolCalls: [] }; },
+    };
+    const w = wrapChatClient(innerWithTools, metrics, { provider: "openai", purpose: "chat" });
+    const result = await w.completeWithTools!([], [], {});
+    expect(result.message).toBe("tool-result");
+    expect(metrics.registry.format()).toContain(
+      'lead_engine_llm_calls_total{provider="openai",purpose="chat"} 1',
+    );
+  });
+
+  it("completeWithTools error → llmErrors + re-throws", async () => {
+    const metrics = makePlatformMetrics();
+    const innerErr: ChatClient = {
+      async complete() { return "ok"; },
+      async completeWithTools() { throw new RangeError("tools-down"); },
+    };
+    const w = wrapChatClient(innerErr, metrics, { provider: "openai", purpose: "chat" });
+    await expect(w.completeWithTools!([], [], {})).rejects.toThrow("tools-down");
+    expect(metrics.registry.format()).toContain('kind="RangeError"');
+  });
+
+  it("completeStructured — пробрасывает напрямую (без обёртки метрик)", async () => {
+    const metrics = makePlatformMetrics();
+    const innerStruct: ChatClient = {
+      async complete() { return "ok"; },
+      // biome-ignore lint/suspicious/noExplicitAny: stub
+      async completeStructured() { return { result: 42 } as any; },
+    };
+    const w = wrapChatClient(innerStruct, metrics, { provider: "openai", purpose: "chat" });
+    // biome-ignore lint/suspicious/noExplicitAny: stub
+    const res = await w.completeStructured!([], {} as any, {});
+    expect((res as { result: number }).result).toBe(42);
+  });
+
+  it("stream — пробрасывается когда inner поддерживает", async () => {
+    const metrics = makePlatformMetrics();
+    async function* fakeStream() { yield "chunk1"; yield "chunk2"; }
+    const innerStream: ChatClient = {
+      async complete() { return "ok"; },
+      stream: () => fakeStream(),
+    };
+    const w = wrapChatClient(innerStream, metrics, { provider: "openai", purpose: "chat" });
+    const chunks: string[] = [];
+    for await (const chunk of w.stream!([])) chunks.push(chunk);
+    expect(chunks).toEqual(["chunk1", "chunk2"]);
+  });
+
+  it("клиент без completeWithTools → wrapper не добавляет метод", () => {
+    const metrics = makePlatformMetrics();
+    const w = wrapChatClient(fakeChat(), metrics, { provider: "openai", purpose: "chat" });
+    expect(w.completeWithTools).toBeUndefined();
+    expect(w.stream).toBeUndefined();
+  });
+
+  it("onComplete callback вызывается с latencyMs и success=true", async () => {
+    const metrics = makePlatformMetrics();
+    const calls: { success: boolean; latencyMs: number }[] = [];
+    const w = wrapChatClient(
+      fakeChat({ reply: "hi" }),
+      metrics,
+      { provider: "openai", purpose: "chat" },
+      (info) => calls.push({ success: info.success, latencyMs: info.latencyMs }),
+    );
+    await w.complete([{ role: "user", content: "x" }]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.success).toBe(true);
+    expect(calls[0]!.latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("onComplete callback вызывается с success=false при ошибке", async () => {
+    const metrics = makePlatformMetrics();
+    const calls: { success: boolean }[] = [];
+    const w = wrapChatClient(
+      fakeChat({ throwError: new Error("fail") }),
+      metrics,
+      { provider: "openai", purpose: "chat" },
+      (info) => calls.push({ success: info.success }),
+    );
+    await expect(w.complete([{ role: "user", content: "x" }])).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.success).toBe(false);
+  });
+});

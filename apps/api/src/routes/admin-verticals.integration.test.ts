@@ -161,3 +161,31 @@ describe("admin-verticals install → vertical_template_id", () => {
     expect(seeded.find((r) => r.isActive)?.slug).toBe(REAL_ESTATE_STYLES[0]!.slug);
   });
 });
+
+describe("admin-verticals — GET list + неизвестный slug", () => {
+  it("GET /api/admin/verticals → список вертикалей", async () => {
+    if (!sql) return;
+    const res = await authReq("/api/admin/verticals");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: Array<{ slug: string; hasStyles: boolean }> };
+    expect(Array.isArray(body.items)).toBe(true);
+    expect(body.items.length).toBeGreaterThan(0);
+    const exchange = body.items.find((i) => i.slug === "exchange_v1");
+    expect(exchange).toBeDefined();
+    expect(typeof exchange!.hasFunnel).toBe('boolean');
+  });
+
+  it("POST install несуществующий slug → 404", async () => {
+    if (!sql) return;
+    const res = await authReq("/api/admin/verticals/nonexistent_v999/install", { method: "POST" });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("not found");
+  });
+
+  it("GET без auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request("/api/admin/verticals");
+    expect(res.status).toBe(401);
+  });
+});
