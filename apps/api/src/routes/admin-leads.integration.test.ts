@@ -615,6 +615,128 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
       .where(and(eq(leadFieldValues.leadId, leadIdA), eq(leadFieldValues.fieldId, fieldId)));
     expect(stored!.valueJson).toBe('"updated"');
   });
+
+  it("branch-aware auto-advance uses request_type instead of always nextStages[0]", async () => {
+    if (!sql) return;
+    const { stageFields } = await import("@chatman-media/storage");
+    const { and, eq } = await import("drizzle-orm");
+    const now = Math.floor(Date.now() / 1000);
+
+    const [contact] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "Branch Admin" })
+      .returning({ id: contacts.id });
+
+    const [funnel] = await db
+      .insert(funnels)
+      .values({
+        tenantId: tenantA,
+        slug: `branch_admin_${Math.random().toString(36).slice(2, 8)}`,
+        isActive: false,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: funnels.id });
+
+    const [intake] = await db
+      .insert(stageDefinitions)
+      .values({
+        tenantId: tenantA,
+        funnelId: funnel!.id,
+        slug: "request_received",
+        displayName: "Request Received",
+        kind: "intake",
+        stageType: "form_fill",
+        position: 0,
+        nextStages: ["exchange_request", "transfer_request"],
+        autoAdvanceCondition: JSON.stringify({ type: "all_required_fields_filled" }),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: stageDefinitions.id });
+
+    await db.insert(stageDefinitions).values([
+      {
+        tenantId: tenantA,
+        funnelId: funnel!.id,
+        slug: "exchange_request",
+        displayName: "Exchange",
+        kind: "active",
+        stageType: "form_fill",
+        phase: "qualify",
+        position: 1,
+        nextStages: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        tenantId: tenantA,
+        funnelId: funnel!.id,
+        slug: "transfer_request",
+        displayName: "Transfer",
+        kind: "active",
+        stageType: "form_fill",
+        phase: "qualify",
+        position: 2,
+        nextStages: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+
+    const [field] = await db
+      .insert(stageFields)
+      .values({
+        stageId: intake!.id,
+        tenantId: tenantA,
+        slug: "request_type",
+        displayName: "Request Type",
+        fieldType: "select",
+        required: true,
+        aiExtractable: true,
+        optionsJson: JSON.stringify([
+          { value: "exchange", label: "Exchange" },
+          { value: "transfer", label: "Transfer" },
+        ]),
+        position: 0,
+        createdAt: now,
+      })
+      .returning({ id: stageFields.id });
+
+    const [lead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: contact!.id,
+        state: "request_received",
+        stageDefinitionId: intake!.id,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+
+    const res = await authReq(tokenA, `/api/admin/leads/${lead!.id}/field-values`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [{ fieldId: field!.id, value: "transfer" }] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      advanced: boolean;
+      newStageSlug: string | null;
+    };
+    expect(body).toEqual({ ok: true, advanced: true, newStageSlug: "transfer_request" });
+
+    const [storedLead] = await db
+      .select({
+        state: leads.state,
+        requestType: leads.requestType,
+      })
+      .from(leads)
+      .where(and(eq(leads.id, lead!.id), eq(leads.tenantId, tenantA)));
+    expect(storedLead).toEqual({ state: "transfer_request", requestType: "transfer" });
+  });
 });
 
 describe("GET /api/admin/contacts", () => {
