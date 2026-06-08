@@ -1008,9 +1008,21 @@ describe("send-offer — awaiting_operator advance (R5)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { advancedTo: string | null };
     expect(body.advancedTo).toBe("op_fulfill");
-    const { eq } = await import("drizzle-orm");
+    const { and, eq } = await import("drizzle-orm");
+    const { leadEvents } = await import("@chatman-media/storage");
     const [l] = await db.select({ state: leads.state }).from(leads).where(eq(leads.id, opLeadId));
     expect(l!.state).toBe("op_fulfill");
+    const [event] = await db
+      .select({ notes: leadEvents.notes })
+      .from(leadEvents)
+      .where(
+        and(
+          eq(leadEvents.tenantId, tenantA),
+          eq(leadEvents.leadId, opLeadId),
+          eq(leadEvents.toState, "op_fulfill"),
+        ),
+      );
+    expect(event?.notes).toContain('"workflowEvent":"operator_sent_offer"');
   });
 
   it("лид на обычной стадии → /send-offer не двигает (advancedTo null)", async () => {

@@ -5,18 +5,17 @@ import {
   channels,
   contacts,
   conversations,
-  leadEvents,
   leads,
   messages,
   outboundQueue,
   partnerDeals,
   partners,
   partnerServices,
-  stageDefinitions,
   tenants,
 } from "@chatman-media/storage";
 import { and, desc, eq } from "drizzle-orm";
-import { type PartnerPingOpts, firePartnerPing, makeCallbackToken } from "./partner-ping.ts";
+import { firePartnerPing, type PartnerPingOpts } from "./partner-ping.ts";
+import { handleOperatorAdvancedInTx } from "./workflow-runtime.ts";
 
 /** Optional partner-ping config. Passed by routes that have access to cfg. */
 export interface PartnerPingConfig {
@@ -83,81 +82,27 @@ export async function advanceLead(opts: {
   const _partnerRef: { ctx: _PartnerCtx | null } = { ctx: null };
 
   const result = await withTenant(db, tenantId, async (tx): Promise<AdvanceResult> => {
-    // 1. lead
-    const whereLead =
-      "leadId" in opts.selector
-        ? and(eq(leads.tenantId, tenantId), eq(leads.id, opts.selector.leadId))
-        : and(eq(leads.tenantId, tenantId), eq(leads.userId, opts.selector.contactId));
-    const [lead] = await tx
-      .select({
-        id: leads.id,
-        userId: leads.userId,
-        state: leads.state,
-        stageDefinitionId: leads.stageDefinitionId,
-      })
-      .from(leads)
-      .where(whereLead)
-      .orderBy(desc(leads.id))
-      .limit(1);
-    if (!lead || !lead.stageDefinitionId) return { kind: "no_lead" };
-
-    // 2. current stage → next
-    const [cur] = await tx
-      .select({
-        slug: stageDefinitions.slug,
-        funnelId: stageDefinitions.funnelId,
-        displayName: stageDefinitions.displayName,
-        nextStages: stageDefinitions.nextStages,
-      })
-      .from(stageDefinitions)
-      .where(and(eq(stageDefinitions.id, lead.stageDefinitionId), eq(stageDefinitions.tenantId, tenantId)));
-    if (!cur) return { kind: "no_lead" };
-    const nextSlug = cur.nextStages[0];
-    if (!nextSlug) return { kind: "terminal", stage: cur.slug };
-
-    const [next] = await tx
-      .select({
-        id: stageDefinitions.id,
-        slug: stageDefinitions.slug,
-        displayName: stageDefinitions.displayName,
-        stageType: stageDefinitions.stageType,
-        nextStages: stageDefinitions.nextStages,
-        partnerWebhookUrl: stageDefinitions.partnerWebhookUrl,
-        partnerWebhookMode: stageDefinitions.partnerWebhookMode,
-      })
-      .from(stageDefinitions)
-      .where(
-        and(
-          eq(stageDefinitions.slug, nextSlug),
-          eq(stageDefinitions.tenantId, tenantId),
-          eq(stageDefinitions.funnelId, cur.funnelId),
-        ),
-      );
-    if (!next) return { kind: "terminal", stage: cur.slug };
-
-    // 3. advance lead
-    await tx
-      .update(leads)
-      .set({ stageDefinitionId: next.id, state: next.slug, updatedAt: now })
-      .where(eq(leads.id, lead.id));
-    await tx.insert(leadEvents).values({
+    const transition = await handleOperatorAdvancedInTx(tx, {
       tenantId,
-      leadId: lead.id,
-      fromState: lead.state,
-      toState: next.slug,
-      byAdminId: adminId,
-      createdAt: now,
+      selector: opts.selector,
+      ...(adminId !== undefined ? { adminId } : {}),
+      now,
     });
+    if (transition.kind === "no_lead") return { kind: "no_lead" };
+    if (transition.kind === "terminal") return transition;
+    if (transition.kind === "not_applicable") return { kind: "no_lead" };
 
-    // 4. conversation (для сообщения в чат) — берём диалог контакта.
+    // conversation (для сообщения в чат) — берём диалог контакта.
     const [conv] = await tx
       .select({ id: conversations.id, source: conversations.source })
       .from(conversations)
-      .where(and(eq(conversations.tenantId, tenantId), eq(conversations.userId, lead.userId)))
+      .where(and(eq(conversations.tenantId, tenantId), eq(conversations.userId, transition.contactId)))
       .orderBy(desc(conversations.lastMessageAt))
       .limit(1);
 
-    const msgText = note || `✅ ${cur.displayName} — готово. Переходим к этапу: ${next.displayName}.`;
+    const msgText =
+      note ||
+      `✅ ${transition.fromDisplayName} — готово. Переходим к этапу: ${transition.toDisplayName}.`;
     if (conv) {
       const [msg] = await tx
         .insert(messages)
@@ -166,7 +111,7 @@ export async function advanceLead(opts: {
           conversationId: conv.id,
           role: "assistant",
           text: msgText,
-          metaJson: JSON.stringify({ adminId, sentVia: "operator-advance", toStage: next.slug }),
+          metaJson: JSON.stringify({ adminId, sentVia: "operator-advance", toStage: transition.to }),
           createdAt: now,
         })
         .returning({ id: messages.id });
@@ -181,7 +126,7 @@ export async function advanceLead(opts: {
           .select({ channelDbId: channels.id, externalUserId: channelIdentities.externalUserId })
           .from(channelIdentities)
           .innerJoin(channels, eq(channels.id, channelIdentities.channelId))
-          .where(and(eq(channelIdentities.contactId, lead.userId), eq(channels.status, "active")))
+          .where(and(eq(channelIdentities.contactId, transition.contactId), eq(channels.status, "active")))
           .limit(1);
         if (identity) {
           await tx.insert(outboundQueue).values({
@@ -201,11 +146,8 @@ export async function advanceLead(opts: {
       }
     }
 
-    const awaitingPartner =
-      Boolean(next.partnerWebhookUrl) && next.partnerWebhookMode === "await_callback";
-
     // Capture partner ping context for post-tx execution.
-    if (next.partnerWebhookUrl) {
+    if (transition.partnerWebhookUrl) {
       const [service] = await tx
         .select({
           id: partnerServices.id,
@@ -218,7 +160,7 @@ export async function advanceLead(opts: {
         .where(
           and(
             eq(partnerServices.tenantId, tenantId),
-            eq(partnerServices.stageDefinitionId, next.id),
+            eq(partnerServices.stageDefinitionId, transition.toStageId),
             eq(partnerServices.isActive, true),
           ),
         )
@@ -228,38 +170,38 @@ export async function advanceLead(opts: {
         tenantId,
         partnerId: service?.partnerId ?? null,
         serviceId: service?.id ?? null,
-        leadId: lead.id,
-        stageDefinitionId: next.id,
+        leadId: transition.leadId,
+        stageDefinitionId: transition.toStageId,
         status: "sent",
-        handoffUrl: next.partnerWebhookUrl,
-        handoffMode: next.partnerWebhookMode,
+        handoffUrl: transition.partnerWebhookUrl,
+        handoffMode: transition.partnerWebhookMode,
         commissionPct,
         sentAt: now,
         createdAt: now,
         updatedAt: now,
       });
       _partnerRef.ctx = {
-        webhookUrl: next.partnerWebhookUrl,
-        webhookMode: next.partnerWebhookMode,
-        stageId: next.id,
-        stageSlug: next.slug,
-        stageDisplayName: next.displayName,
-        leadId: lead.id,
-        contactId: lead.userId,
+        webhookUrl: transition.partnerWebhookUrl,
+        webhookMode: transition.partnerWebhookMode,
+        stageId: transition.toStageId,
+        stageSlug: transition.to,
+        stageDisplayName: transition.toDisplayName,
+        leadId: transition.leadId,
+        contactId: transition.contactId,
         tenantSlug: "", // filled after tx
       };
     }
 
     return {
       kind: "advanced",
-      leadId: lead.id,
+      leadId: transition.leadId,
       conversationId: conv?.id ?? null,
-      from: cur.slug,
-      to: next.slug,
-      toDisplayName: next.displayName,
-      awaitingOperator: next.stageType === "awaiting_operator",
-      awaitingPartner,
-      terminal: next.nextStages.length === 0,
+      from: transition.from,
+      to: transition.to,
+      toDisplayName: transition.toDisplayName,
+      awaitingOperator: transition.toStageType === "awaiting_operator",
+      awaitingPartner: transition.awaitingPartner,
+      terminal: transition.terminal,
     };
   });
 
