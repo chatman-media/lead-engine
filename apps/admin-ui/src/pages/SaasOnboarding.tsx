@@ -255,32 +255,47 @@ const OLLAMA_PRESETS: Partial<Record<LlmPurpose, { model: string; embedDim?: str
   vision: { model: "llama3.2-vision" },
 };
 
-/** Типы реквизитов приёма для шага «Реквизиты» (ключи tenant_secrets). */
-const REQUISITE_TYPES: { key: string; label: string; placeholder: string }[] = [
-  { key: "exchange_wallet_usdt_trc20", label: "USDT TRC20 — адрес кошелька", placeholder: "T..." },
+/** Типы реквизитов и настроек приёма для шага «Реквизиты» (ключи tenant_secrets). */
+const REQUISITE_TYPES: { key: string; label: string; placeholder: string; secret?: boolean }[] = [
+  { key: "exchange_wallet_usdt_trc20", label: "USDT TRC20 — адрес", placeholder: "T..." },
   { key: "exchange_wallet_usdt_erc20", label: "USDT ERC20 — адрес", placeholder: "0x..." },
+  { key: "exchange_wallet_usdt_bep20", label: "USDT BEP20 / BSC — адрес", placeholder: "0x..." },
+  { key: "exchange_wallet_usdt_ton", label: "USDT TON — адрес", placeholder: "UQ..." },
+  { key: "exchange_wallet_usdt_ton_memo", label: "USDT TON — memo/comment", placeholder: "12345 или comment" },
+  { key: "exchange_wallet_usdt_solana", label: "USDT Solana — адрес", placeholder: "solana address" },
+  { key: "exchange_wallet_usdc_erc20", label: "USDC ERC20 — адрес", placeholder: "0x..." },
+  { key: "exchange_wallet_usdc_solana", label: "USDC Solana — адрес", placeholder: "solana address" },
   { key: "exchange_wallet_btc_default", label: "BTC — адрес", placeholder: "bc1..." },
   { key: "exchange_wallet_eth_erc20", label: "ETH ERC20 — адрес", placeholder: "0x..." },
-  { key: "exchange_binance_id", label: "Binance ID (P2P)", placeholder: "123456789" },
+  { key: "exchange_wallet_ltc_default", label: "LTC — адрес", placeholder: "ltc1..." },
+  { key: "exchange_wallet_trx_tron", label: "TRX Tron — адрес", placeholder: "T..." },
+  { key: "exchange_wallet_ton_ton", label: "TON — адрес", placeholder: "UQ..." },
+  { key: "exchange_wallet_ton_ton_memo", label: "TON — memo/comment", placeholder: "12345 или comment" },
+  { key: "exchange_binance_id", label: "Binance ID / Pay ID", placeholder: "123456789" },
+  { key: "exchange_bybit_uid", label: "Bybit UID", placeholder: "123456789" },
+  { key: "exchange_htx_uid", label: "HTX UID", placeholder: "123456789" },
+  { key: "exchange_fiat_payment_url", label: "СБП / платёжная ссылка RUB", placeholder: "https://..." },
+  { key: "exchange_rub_card_requisites", label: "RUB карта / телефон", placeholder: "2200... / +7..." },
+  { key: "exchange_payout_methods", label: "Выдача THB: банки / наличные", placeholder: "Bangkok Bank, Kasikorn, cash..." },
+  { key: "exchange_kyc_policy", label: "AML/KYC правила", placeholder: "AML до 60%, KYC по паспорту..." },
+  { key: "exchange_operator_contact", label: "Контакт оператора", placeholder: "@operator / WhatsApp / Line" },
+  { key: "exchange_office_address", label: "Адрес офиса", placeholder: "Phuket, ..." },
+  { key: "exchange_working_hours", label: "Часы работы", placeholder: "10:00-22:00 Bangkok" },
+  { key: "exchange_westwallet_api_key", label: "WestWallet public API key", placeholder: "public key", secret: true },
+  { key: "exchange_westwallet_secret_key", label: "WestWallet private API key", placeholder: "private key", secret: true },
   {
-    key: "exchange_fiat_payment_url",
-    label: "СБП / платёжная ссылка (RUB)",
-    placeholder: "https://...",
+    key: "exchange_westwallet_ipn_url",
+    label: "WestWallet IPN URL",
+    placeholder: "https://your-domain/webhook/westwallet/tenantId",
   },
-  {
-    key: "exchange_rub_card_requisites",
-    label: "Карта / телефон для RUB",
-    placeholder: "2200… / +7…",
-  },
+  { key: "exchange_westwallet_success_url", label: "WestWallet success URL", placeholder: "https://..." },
 ];
 
-/** Только ключи-реквизиты приёма (кошельки + фиксированные платёжные). */
+/** Ключи, которые относятся к экрану реквизитов/настроек обменника. */
 function isRequisiteKey(key: string): boolean {
   return (
     key.startsWith("exchange_wallet_") ||
-    ["exchange_binance_id", "exchange_fiat_payment_url", "exchange_rub_card_requisites"].includes(
-      key,
-    )
+    REQUISITE_TYPES.some((t) => t.key === key)
   );
 }
 
@@ -363,7 +378,9 @@ export function SaasOnboarding() {
   const [reqType, setReqType] = useState(REQUISITE_TYPES[0]!.key);
   const [reqValue, setReqValue] = useState("");
   const [savingReq, setSavingReq] = useState(false);
-  const [savedRequisites, setSavedRequisites] = useState<Array<{ key: string; value: string }>>([]);
+  const [savedRequisites, setSavedRequisites] = useState<
+    Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }>
+  >([]);
 
   // Exchange — бизнес-данные (информационные)
   const [bizForm, setBizForm] = useState({
@@ -1714,9 +1731,9 @@ export function SaasOnboarding() {
                         <span className="shrink-0 font-medium">{requisiteLabel(r.key)}:</span>
                         <span
                           className="truncate font-mono text-xs text-muted-foreground"
-                          title={r.value}
+                          title={r.sensitive ? undefined : r.value}
                         >
-                          {r.value}
+                          {r.sensitive && r.hasValue ? "сохранено" : r.value}
                         </span>
                       </li>
                     ))}
@@ -1743,6 +1760,7 @@ export function SaasOnboarding() {
                   <Label>Значение</Label>
                   <Input
                     autoComplete="off"
+                    type={REQUISITE_TYPES.find((t) => t.key === reqType)?.secret ? "password" : "text"}
                     value={reqValue}
                     onChange={(e) => setReqValue(e.target.value)}
                     placeholder={
