@@ -24,6 +24,7 @@ import { canAddLead } from "../lib/quota.ts";
 import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webhooks.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
 import { advanceLead } from "../lib/advance-lead.ts";
+import { autoAdvanceLead } from "../lib/workflow-runtime.ts";
 
 /**
  * Lead pipeline API.
@@ -853,80 +854,15 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
           });
       }
 
-      // 2. Check auto-advance condition
-      const [lead] = await tx
-        .select({ id: leads.id, state: leads.state, stageDefinitionId: leads.stageDefinitionId })
-        .from(leads)
-        .where(and(eq(leads.id, id), eq(leads.tenantId, tenantId)));
-      if (!lead?.stageDefinitionId) return null;
-
-      const [stage] = await tx
-        .select({
-          id: stageDefinitions.id,
-          autoAdvanceCondition: stageDefinitions.autoAdvanceCondition,
-          nextStages: stageDefinitions.nextStages,
-          kind: stageDefinitions.kind,
-        })
-        .from(stageDefinitions)
-        .where(and(eq(stageDefinitions.id, lead.stageDefinitionId), eq(stageDefinitions.tenantId, tenantId)));
-      if (!stage) return null;
-
-      // Only advance non-terminal stages
-      if (stage.kind === "terminal_won" || stage.kind === "terminal_lost") return null;
-      if (!stage.nextStages.length) return null;
-
-      let condition: { type: string } | null = null;
-      try {
-        condition = stage.autoAdvanceCondition
-          ? (JSON.parse(stage.autoAdvanceCondition) as { type: string })
-          : null;
-      } catch {
-        return null;
-      }
-      if (condition?.type !== "all_required_fields_filled") return null;
-
-      // Count required fields vs filled values
-      const allRequired = await tx
-        .select({ id: stageFields.id })
-        .from(stageFields)
-        .where(and(eq(stageFields.stageId, stage.id), eq(stageFields.required, true)));
-      if (allRequired.length === 0) return null;
-
-      const filledRequired = await tx
-        .select({ id: leadFieldValues.fieldId })
-        .from(leadFieldValues)
-        .where(
-          and(
-            eq(leadFieldValues.leadId, id),
-            inArray(leadFieldValues.fieldId, allRequired.map((f) => f.id)),
-            sql`${leadFieldValues.valueJson} != 'null' AND ${leadFieldValues.valueJson} != '""' AND ${leadFieldValues.valueJson} != ''`,
-          ),
-        );
-      if (filledRequired.length < allRequired.length) return null;
-
-      // All required fields filled → advance to first allowed next stage
-      const nextSlug = stage.nextStages[0]!;
-      const [nextStageDef] = await tx
-        .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
-        .from(stageDefinitions)
-        .where(and(eq(stageDefinitions.slug, nextSlug), eq(stageDefinitions.tenantId, tenantId)));
-      if (!nextStageDef) return null;
-
-      await tx
-        .update(leads)
-        .set({ stageDefinitionId: nextStageDef.id, state: nextStageDef.slug, updatedAt: now })
-        .where(eq(leads.id, id));
-
-      await tx.insert(leadEvents).values({
+      const result = await autoAdvanceLead({
+        db: tx as Db,
         tenantId,
         leadId: id,
-        fromState: lead.state,
-        toState: nextStageDef.slug,
-        byAdminId: undefined,
-        createdAt: now,
+        eventType: "field_updated",
+        now,
+        adminId,
       });
-
-      return nextStageDef.slug;
+      return result.advanced ? result.to : null;
     });
 
     return c.json({ ok: true, advanced: advanced !== null, newStageSlug: advanced });
