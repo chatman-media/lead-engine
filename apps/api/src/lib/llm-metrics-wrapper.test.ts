@@ -144,11 +144,11 @@ describe("wrapChatClient — optional methods forwarded", () => {
     const metrics = makePlatformMetrics();
     const innerWithTools: ChatClient = {
       async complete() { return "ok"; },
-      async completeWithTools(_m, _t, _o) { return { message: "tool-result", toolCalls: [] }; },
+      async completeWithTools(_m, _t, _o) { return { content: "tool-result", toolCalls: [] }; },
     };
     const w = wrapChatClient(innerWithTools, metrics, { provider: "openai", purpose: "chat" });
     const result = await w.completeWithTools!([], [], {});
-    expect(result.message).toBe("tool-result");
+    expect(result.content).toBe("tool-result");
     expect(metrics.registry.format()).toContain(
       'lead_engine_llm_calls_total{provider="openai",purpose="chat"} 1',
     );
@@ -169,13 +169,12 @@ describe("wrapChatClient — optional methods forwarded", () => {
     const metrics = makePlatformMetrics();
     const innerStruct: ChatClient = {
       async complete() { return "ok"; },
-      // biome-ignore lint/suspicious/noExplicitAny: stub
-      async completeStructured() { return { result: 42 } as any; },
+      async completeStructured() { return JSON.stringify({ result: 42 }); },
     };
     const w = wrapChatClient(innerStruct, metrics, { provider: "openai", purpose: "chat" });
     // biome-ignore lint/suspicious/noExplicitAny: stub
     const res = await w.completeStructured!([], {} as any, {});
-    expect((res as { result: number }).result).toBe(42);
+    expect((JSON.parse(res) as { result: number }).result).toBe(42);
   });
 
   it("stream — пробрасывается когда inner поддерживает", async () => {

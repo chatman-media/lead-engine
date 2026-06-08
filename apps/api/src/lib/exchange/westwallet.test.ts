@@ -6,6 +6,7 @@ describe("westWalletCurrencyCandidates", () => {
 		expect(westWalletCurrencyCandidates("USDT", "trc20")[0]).toBe("USDTTRC");
 		expect(westWalletCurrencyCandidates("USDT", "bep20")).toContain("USDTBEP");
 		expect(westWalletCurrencyCandidates("USDT", "ton")).toContain("USDTTON");
+		expect(westWalletCurrencyCandidates("USDT", "solana")).toContain("USDTSOL");
 		expect(westWalletCurrencyCandidates("BTC", "")).toEqual(["BTC"]);
 	});
 });

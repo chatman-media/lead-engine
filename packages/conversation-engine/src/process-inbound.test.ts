@@ -155,7 +155,7 @@ describe("processInbound", () => {
 
 	it("human/queued conversation → notifications human_takeover", async () => {
 		const events: Array<{ eventType: string; data?: { text?: string } }> = [];
-		deps = {
+		const d = {
 			...makeDeps(),
 			notifications: {
 				notify: async (e: { eventType: string; data?: { text?: string } }) => {
@@ -163,14 +163,14 @@ describe("processInbound", () => {
 				},
 			} as unknown as Parameters<typeof processInbound>[1]["notifications"],
 		};
-		await deps._fakes.conversations.create({
+		await d._fakes.conversations.create({
 			contactId: 1,
 			source: "bot",
 			mode: "human",
 			nowEpoch: 1700000000,
 		});
-		await deps._fakes.contacts.create({ displayName: "Operator user" });
-		await deps._fakes.identities.create({
+		await d._fakes.contacts.create({ displayName: "Operator user" });
+		await d._fakes.identities.create({
 			contactId: 1,
 			channelId: 10,
 			externalUserId: "u-human",
@@ -182,7 +182,7 @@ describe("processInbound", () => {
 				extMessageId: "102",
 				text: "operator please",
 			}),
-			deps,
+			d,
 		);
 
 		expect(events).toContainEqual(

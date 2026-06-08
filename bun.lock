@@ -317,7 +317,7 @@
     },
     "packages/conversation-engine": {
       "name": "@chatman-media/conversation-engine",
-      "version": "1.12.0",
+      "version": "1.13.0",
       "dependencies": {
         "@chatman-media/channel-core": "workspace:*",
         "@chatman-media/channel-telegram": "workspace:*",
@@ -394,7 +394,7 @@
     },
     "packages/storage": {
       "name": "@chatman-media/storage",
-      "version": "1.13.0",
+      "version": "1.14.0",
       "devDependencies": {
         "@biomejs/biome": "^2.4.16",
         "@chatman-media/sales": "^0.1.0",

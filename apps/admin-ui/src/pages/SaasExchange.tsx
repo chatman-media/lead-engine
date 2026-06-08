@@ -39,8 +39,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // Активы и сети для произвольных направлений обмена (не только табло RUB/USDT→THB).
-const ASSETS = ["USDT", "USDC", "BTC", "ETH", "TON", "RUB", "EUR", "USD", "THB"];
-const NETWORKS = ["", "trc20", "erc20", "bep20", "ton"];
+const ASSETS = ["USDT", "USDC", "BTC", "ETH", "LTC", "TRX", "TON", "RUB", "EUR", "USD", "THB"];
+const NETWORKS = ["", "trc20", "erc20", "bep20", "ton", "solana", "tron"];
 
 const EMPTY_RATE: ExchangeRateInput = {
   asset: "USDT",
@@ -66,39 +66,216 @@ const STATUS_VARIANT: Record<
   expired: "destructive",
 };
 
-/** Типы реквизитов приёма (ключи tenant_secrets) — те же, что в онбординге. */
-const REQUISITE_TYPES: { key: string; label: string; placeholder: string }[] = [
-  { key: "exchange_wallet_usdt_trc20", label: "USDT TRC20 — адрес кошелька", placeholder: "T..." },
-  { key: "exchange_wallet_usdt_erc20", label: "USDT ERC20 — адрес", placeholder: "0x..." },
-  { key: "exchange_wallet_btc_default", label: "BTC — адрес", placeholder: "bc1..." },
-  { key: "exchange_wallet_eth_erc20", label: "ETH ERC20 — адрес", placeholder: "0x..." },
-  { key: "exchange_binance_id", label: "Binance ID (P2P)", placeholder: "123456789" },
+type RequisiteField = {
+  key: string;
+  label: string;
+  savedLabel: string;
+  placeholder: string;
+  secret?: boolean;
+};
+
+const REQUISITE_GROUPS: Array<{ title: string; fields: RequisiteField[] }> = [
   {
-    key: "exchange_fiat_payment_url",
-    label: "СБП / платёжная ссылка (RUB)",
-    placeholder: "https://...",
+    title: "USDT TRC20",
+    fields: [
+      { key: "exchange_wallet_usdt_trc20", label: "Адрес", savedLabel: "USDT TRC20 — адрес", placeholder: "T..." },
+    ],
   },
   {
-    key: "exchange_rub_card_requisites",
-    label: "Карта / телефон для RUB",
-    placeholder: "2200… / +7…",
+    title: "USDT ERC20",
+    fields: [
+      { key: "exchange_wallet_usdt_erc20", label: "Адрес", savedLabel: "USDT ERC20 — адрес", placeholder: "0x..." },
+    ],
+  },
+  {
+    title: "USDT BEP20 / BSC",
+    fields: [
+      { key: "exchange_wallet_usdt_bep20", label: "Адрес", savedLabel: "USDT BEP20 / BSC — адрес", placeholder: "0x..." },
+    ],
+  },
+  {
+    title: "USDT TON",
+    fields: [
+      { key: "exchange_wallet_usdt_ton", label: "Адрес", savedLabel: "USDT TON — адрес", placeholder: "UQ..." },
+      {
+        key: "exchange_wallet_usdt_ton_memo",
+        label: "Memo/comment",
+        savedLabel: "USDT TON — memo/comment",
+        placeholder: "12345 или comment",
+      },
+    ],
+  },
+  {
+    title: "USDT Solana",
+    fields: [
+      {
+        key: "exchange_wallet_usdt_solana",
+        label: "Адрес",
+        savedLabel: "USDT Solana — адрес",
+        placeholder: "solana address",
+      },
+    ],
+  },
+  {
+    title: "USDC ERC20",
+    fields: [
+      { key: "exchange_wallet_usdc_erc20", label: "Адрес", savedLabel: "USDC ERC20 — адрес", placeholder: "0x..." },
+    ],
+  },
+  {
+    title: "USDC Solana",
+    fields: [
+      {
+        key: "exchange_wallet_usdc_solana",
+        label: "Адрес",
+        savedLabel: "USDC Solana — адрес",
+        placeholder: "solana address",
+      },
+    ],
+  },
+  {
+    title: "BTC",
+    fields: [
+      { key: "exchange_wallet_btc_default", label: "Адрес", savedLabel: "BTC — адрес", placeholder: "bc1..." },
+    ],
+  },
+  {
+    title: "ETH ERC20",
+    fields: [
+      { key: "exchange_wallet_eth_erc20", label: "Адрес", savedLabel: "ETH ERC20 — адрес", placeholder: "0x..." },
+    ],
+  },
+  {
+    title: "LTC",
+    fields: [
+      { key: "exchange_wallet_ltc_default", label: "Адрес", savedLabel: "LTC — адрес", placeholder: "ltc1..." },
+    ],
+  },
+  {
+    title: "TRX Tron",
+    fields: [
+      { key: "exchange_wallet_trx_tron", label: "Адрес", savedLabel: "TRX Tron — адрес", placeholder: "T..." },
+    ],
+  },
+  {
+    title: "TON",
+    fields: [
+      { key: "exchange_wallet_ton_ton", label: "Адрес", savedLabel: "TON — адрес", placeholder: "UQ..." },
+      {
+        key: "exchange_wallet_ton_ton_memo",
+        label: "Memo/comment",
+        savedLabel: "TON — memo/comment",
+        placeholder: "12345 или comment",
+      },
+    ],
+  },
+  {
+    title: "Exchange ID",
+    fields: [
+      { key: "exchange_binance_id", label: "Binance ID / Pay ID", savedLabel: "Binance ID / Pay ID", placeholder: "123456789" },
+      { key: "exchange_bybit_uid", label: "Bybit UID", savedLabel: "Bybit UID", placeholder: "123456789" },
+      { key: "exchange_htx_uid", label: "HTX UID", savedLabel: "HTX UID", placeholder: "123456789" },
+    ],
+  },
+  {
+    title: "RUB оплата",
+    fields: [
+      { key: "exchange_fiat_payment_url", label: "СБП / платёжная ссылка", savedLabel: "СБП / платёжная ссылка RUB", placeholder: "https://..." },
+      { key: "exchange_rub_card_number", label: "Номер карты", savedLabel: "RUB карта — номер", placeholder: "2200..." },
+      { key: "exchange_rub_card_phone", label: "Телефон", savedLabel: "RUB карта — телефон", placeholder: "+7..." },
+      { key: "exchange_rub_card_bank", label: "Банк", savedLabel: "RUB карта — банк", placeholder: "Сбер / T-Bank..." },
+      { key: "exchange_rub_card_recipient", label: "Получатель", savedLabel: "RUB карта — получатель", placeholder: "Иван И." },
+    ],
+  },
+  {
+    title: "Выдача THB",
+    fields: [
+      {
+        key: "exchange_payout_bank_methods",
+        label: "Банки",
+        savedLabel: "Выдача THB — банки",
+        placeholder: "Bangkok Bank, Kasikorn, SCB...",
+      },
+      {
+        key: "exchange_payout_cash_methods",
+        label: "Наличные / офис / курьер",
+        savedLabel: "Выдача THB — наличные",
+        placeholder: "office cash, courier cash, cardless ATM...",
+      },
+    ],
+  },
+  {
+    title: "AML / KYC",
+    fields: [
+      { key: "exchange_aml_policy", label: "AML правила", savedLabel: "AML правила", placeholder: "AML до 60%, high-risk — оператор..." },
+      { key: "exchange_kyc_policy", label: "KYC правила", savedLabel: "KYC правила", placeholder: "Паспорт / селфи / видео..." },
+    ],
+  },
+  {
+    title: "Контакты и офис",
+    fields: [
+      { key: "exchange_operator_telegram", label: "Telegram", savedLabel: "Контакт оператора — Telegram", placeholder: "@operator" },
+      { key: "exchange_operator_whatsapp", label: "WhatsApp", savedLabel: "Контакт оператора — WhatsApp", placeholder: "+66..." },
+      { key: "exchange_operator_line", label: "Line", savedLabel: "Контакт оператора — Line", placeholder: "line id" },
+      { key: "exchange_office_address", label: "Адрес офиса", savedLabel: "Адрес офиса", placeholder: "Phuket, ..." },
+      { key: "exchange_working_hours", label: "Часы работы", savedLabel: "Часы работы", placeholder: "10:00-22:00 Bangkok" },
+    ],
+  },
+  {
+    title: "WestWallet",
+    fields: [
+      {
+        key: "exchange_westwallet_api_key",
+        label: "Public API key",
+        savedLabel: "WestWallet public API key",
+        placeholder: "public key",
+        secret: true,
+      },
+      {
+        key: "exchange_westwallet_secret_key",
+        label: "Private API key",
+        savedLabel: "WestWallet private API key",
+        placeholder: "private key",
+        secret: true,
+      },
+      {
+        key: "exchange_westwallet_ipn_url",
+        label: "IPN URL",
+        savedLabel: "WestWallet IPN URL",
+        placeholder: "https://your-domain/webhook/westwallet/tenantId",
+      },
+      {
+        key: "exchange_westwallet_success_url",
+        label: "Success URL",
+        savedLabel: "WestWallet success URL",
+        placeholder: "https://...",
+      },
+    ],
   },
 ];
 
-/** Только ключи-реквизиты приёма (кошельки + фиксированные платёжные). */
+const REQUISITE_TYPES = REQUISITE_GROUPS.flatMap((group) => group.fields);
+
+const LEGACY_REQUISITE_LABELS: Record<string, string> = {
+  exchange_operator_contact: "Контакт оператора",
+  exchange_payout_methods: "Выдача THB: банки / наличные",
+  exchange_rub_card_requisites: "RUB карта / телефон",
+};
+
+/** Ключи, которые относятся к экрану реквизитов/настроек обменника. */
 function isRequisiteKey(key: string): boolean {
   return (
     key.startsWith("exchange_wallet_") ||
-    ["exchange_binance_id", "exchange_fiat_payment_url", "exchange_rub_card_requisites"].includes(
-      key,
-    )
+    REQUISITE_TYPES.some((t) => t.key === key) ||
+    key in LEGACY_REQUISITE_LABELS
   );
 }
 
 /** Человекочитаемая подпись реквизита по ключу. */
 function requisiteLabel(key: string): string {
   const known = REQUISITE_TYPES.find((t) => t.key === key);
-  if (known) return known.label;
+  if (known) return known.savedLabel;
+  if (LEGACY_REQUISITE_LABELS[key]) return LEGACY_REQUISITE_LABELS[key];
   const m = /^exchange_wallet_(.+)$/.exec(key);
   if (m) return `Кошелёк ${m[1].replace(/_/g, " ").toUpperCase()}`;
   return key;
@@ -192,10 +369,11 @@ export function SaasExchange() {
   const [savingRate, setSavingRate] = useState(false);
 
   // Реквизиты
-  const [savedRequisites, setSavedRequisites] = useState<Array<{ key: string; value: string }>>([]);
-  const [reqType, setReqType] = useState(REQUISITE_TYPES[0]!.key);
-  const [reqValue, setReqValue] = useState("");
-  const [savingReq, setSavingReq] = useState(false);
+  const [savedRequisites, setSavedRequisites] = useState<
+    Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }>
+  >([]);
+  const [reqValues, setReqValues] = useState<Record<string, string>>({});
+  const [savingReqKey, setSavingReqKey] = useState<string | null>(null);
 
   function handle401(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
@@ -389,19 +567,20 @@ export function SaasExchange() {
     }
   }
 
-  async function handleSaveRequisite() {
-    if (!reqValue.trim()) return;
-    setSavingReq(true);
+  async function handleSaveRequisite(key: string) {
+    const value = reqValues[key]?.trim() ?? "";
+    if (!value) return;
+    setSavingReqKey(key);
     try {
-      await saas.saveExchangeRequisite(reqType, reqValue.trim());
-      toast.success(`Реквизит сохранён: ${requisiteLabel(reqType)}`);
-      setReqValue("");
+      await saas.saveExchangeRequisite(key, value);
+      toast.success(`Реквизит сохранён: ${requisiteLabel(key)}`);
+      setReqValues((prev) => ({ ...prev, [key]: "" }));
       const req = await saas.exchangeRequisites().catch(() => ({ items: savedRequisites }));
       setSavedRequisites(req.items);
     } catch (err) {
       if (!handle401(err)) toast.error("Не удалось сохранить реквизит");
     } finally {
-      setSavingReq(false);
+      setSavingReqKey(null);
     }
   }
 
@@ -474,6 +653,7 @@ export function SaasExchange() {
   }
 
   const visibleRequisites = savedRequisites.filter((r) => isRequisiteKey(r.key));
+  const savedByKey = new Map(visibleRequisites.map((r) => [r.key, r]));
 
   return (
     <div className="space-y-6">
@@ -1039,9 +1219,9 @@ export function SaasExchange() {
                       <span className="shrink-0 font-medium">{requisiteLabel(r.key)}:</span>
                       <span
                         className="truncate font-mono text-xs text-muted-foreground"
-                        title={r.value}
+                        title={r.sensitive ? undefined : r.value}
                       >
-                        {r.value}
+                        {r.sensitive && r.hasValue ? "сохранено" : r.value}
                       </span>
                     </li>
                   ))}
@@ -1052,39 +1232,55 @@ export function SaasExchange() {
                 </p>
               )}
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label>Тип реквизита</Label>
-                  <Select value={reqType} onValueChange={setReqType}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {REQUISITE_TYPES.map((t) => (
-                        <SelectItem key={t.key} value={t.key}>
-                          {t.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Значение</Label>
-                  <Input
-                    autoComplete="off"
-                    value={reqValue}
-                    onChange={(e) => setReqValue(e.target.value)}
-                    placeholder={
-                      REQUISITE_TYPES.find((t) => t.key === reqType)?.placeholder ?? "значение"
-                    }
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <Button onClick={handleSaveRequisite} disabled={savingReq || !reqValue.trim()}>
-                    <SaveIcon className="size-4" />
-                    {savingReq ? "Сохраняем…" : "Добавить реквизит"}
-                  </Button>
-                </div>
+              <div className="grid gap-3 xl:grid-cols-2">
+                {REQUISITE_GROUPS.map((group) => {
+                  const groupHasSavedValue = group.fields.some((field) => {
+                    const saved = savedByKey.get(field.key);
+                    return Boolean(saved?.value || saved?.hasValue);
+                  });
+                  return (
+                    <div key={group.title} className="space-y-3 rounded-md border p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium text-sm">{group.title}</div>
+                        {groupHasSavedValue && <Badge variant="outline">сохранено</Badge>}
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {group.fields.map((item) => {
+                          const saved = savedByKey.get(item.key);
+                          const current = reqValues[item.key] ?? "";
+                          return (
+                            <div key={item.key} className="space-y-1.5">
+                              <Label>{item.label}</Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  autoComplete="off"
+                                  type={item.secret ? "password" : "text"}
+                                  value={current}
+                                  onChange={(e) =>
+                                    setReqValues((prev) => ({ ...prev, [item.key]: e.target.value }))
+                                  }
+                                  placeholder={
+                                    saved?.sensitive && saved.hasValue
+                                      ? "сохранено, введите новое для замены"
+                                      : item.placeholder
+                                  }
+                                />
+                                <Button
+                                  type="button"
+                                  onClick={() => handleSaveRequisite(item.key)}
+                                  disabled={savingReqKey === item.key || !current.trim()}
+                                >
+                                  <SaveIcon className="size-4" />
+                                  OK
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>

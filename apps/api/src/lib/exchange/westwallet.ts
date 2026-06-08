@@ -168,5 +168,6 @@ export function westWalletCurrencyCandidates(asset: string, network: string): st
 	if (a === "ETH") return ["ETH"];
 	if (a === "LTC") return ["LTC"];
 	if (a === "TRX") return ["TRX"];
+	if (a === "TON") return ["TON"];
 	return [];
 }

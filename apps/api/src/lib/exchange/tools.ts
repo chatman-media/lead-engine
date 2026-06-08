@@ -24,7 +24,7 @@ import {
   resolveConversationParties,
   updateOrder,
 } from "./orders.ts";
-import { getPaymentProvider } from "./providers.ts";
+import { getPaymentProvider, verifyWestWalletInvoicePayment } from "./providers.ts";
 import type { RateGuardTrip } from "./guardrails.ts";
 import { computeQuote, isCryptoAsset, normAsset, resolveNetwork } from "./rates.ts";
 import { assessOrderRisk } from "./risk.ts";
@@ -50,6 +50,13 @@ function logGuardTrip(
       `${asset}${network ? `/${network}` : ""} reason=${guard.reason} ` +
       `deviation=${dev} base=${guard.baseRate} eff=${guard.eff} threshold=${guard.threshold ?? "n/a"}`,
   );
+}
+
+function compactInfoLines(lines: Array<string | null | undefined>): string | null {
+  const out = lines
+    .map((line) => line?.trim())
+    .filter((line): line is string => Boolean(line));
+  return out.length > 0 ? out.join("\n") : null;
 }
 
 /** Событие срабатывания guardrail курса — уходит владельцу (A4 / #145). */
@@ -378,6 +385,7 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         network: order.network,
         amountFrom: order.amountFrom,
         amountToThb: order.amountToThb,
+        orderId: order.id,
         paymentMethod: order.paymentMethod,
         paymentRail: order.paymentRail,
       });
@@ -398,23 +406,34 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       }
       if (req.kind === "crypto") {
         if (req.exchangeId) {
+          const exchangeName = req.exchangeName ?? req.network ?? "exchange";
           return {
             orderId: order.id,
             kind: "crypto",
-            paymentRail: "binance_id",
+            paymentRail: order.paymentRail ?? req.network,
             exchangeId: req.exchangeId,
+            exchangeName,
             ttlMin,
-            instructions: `Binance ID для перевода: ${req.exchangeId}\nРеквизиты актуальны ${ttlMin} минут. После оплаты пришлите подтверждение перевода.`,
+            instructions: `${exchangeName} UID/ID для перевода: ${req.exchangeId}\nРеквизиты актуальны ${ttlMin} минут. После оплаты пришлите подтверждение перевода.`,
           };
         }
+        const tagLine = req.destTag ? `\nMemo/tag: ${req.destTag}` : "";
+        const paymentUrlLine = req.paymentUrl ? `\nСсылка оплаты: ${req.paymentUrl}` : "";
         return {
           orderId: order.id,
           kind: "crypto",
           address: req.address,
           network: req.network,
+          destTag: req.destTag,
+          paymentUrl: req.paymentUrl,
+          invoiceToken: req.invoiceToken,
+          expiresAt: req.expiresAt,
+          currencyCode: req.currencyCode,
           ttlMin,
           amlNote: true,
-          instructions: `Адрес для ${order.assetFrom} (${req.network}): ${req.address}\nАдрес актуален ${ttlMin} минут. Все входящие транзакции проходят AML-проверку. Переведите точную сумму с учётом сетевой комиссии. После оплаты пришлите tx hash или ссылку на транзакцию.`,
+          instructions: req.paymentUrl
+            ? `Оплата ${order.assetFrom} (${req.network}) через WestWallet:${paymentUrlLine}\nАдрес: ${req.address}${tagLine}\nРеквизиты актуальны ${ttlMin} минут. Все входящие транзакции проходят AML-проверку. Переведите точную сумму с учётом сетевой комиссии. После оплаты пришлите подтверждение перевода.`
+            : `Адрес для ${order.assetFrom} (${req.network}): ${req.address}${tagLine}\nАдрес актуален ${ttlMin} минут. Все входящие транзакции проходят AML-проверку. Переведите точную сумму с учётом сетевой комиссии. После оплаты пришлите tx hash или ссылку на транзакцию.`,
         };
       }
       if (req.detailsText) {
@@ -485,18 +504,49 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         };
       }
 
-      // Крипта — нужен tx hash и адрес-получатель из выданных реквизитов.
+      let issuedRequisites: Record<string, unknown> | null = null;
+      try {
+        issuedRequisites = order.requisitesJson ? JSON.parse(order.requisitesJson) : null;
+      } catch {
+        issuedRequisites = null;
+      }
+
+      if (
+        issuedRequisites?.provider === "westwallet" &&
+        typeof issuedRequisites.invoiceToken === "string"
+      ) {
+        const res = await verifyWestWalletInvoicePayment({
+          db,
+          tenantId,
+          masterKeyHex,
+          token: issuedRequisites.invoiceToken,
+          expectedAmount: order.amountFrom,
+        });
+        await updateOrder(db, tenantId, order.id, {
+          proofJson: JSON.stringify({
+            kind: "westwallet_invoice",
+            invoiceToken: issuedRequisites.invoiceToken,
+            transaction: res.transaction ?? null,
+            verifiedOk: res.ok,
+            needsOperator: res.needsOperator ?? false,
+          }),
+          ...(res.ok ? { status: "paid" } : {}),
+        });
+        return {
+          orderId: order.id,
+          ok: res.ok,
+          needsOperator: res.needsOperator ?? !res.ok,
+          note: res.note,
+        };
+      }
+
+      // Крипта без WestWallet invoice — нужен tx hash и адрес-получатель из выданных реквизитов.
       const txHash = args.proof ? extractTxHash(args.proof) : null;
       if (!txHash) {
         return { ok: false, error: "Пришлите, пожалуйста, tx hash транзакции или ссылку на неё." };
       }
       let toAddress: string | undefined;
-      try {
-        const req = order.requisitesJson ? JSON.parse(order.requisitesJson) : null;
-        toAddress = req?.address;
-      } catch {
-        /* ignore */
-      }
+      toAddress = typeof issuedRequisites?.address === "string" ? issuedRequisites.address : undefined;
       if (!toAddress) {
         return {
           ok: false,
@@ -632,19 +682,51 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     execute: async () => {
       const read = (key: string) =>
         getDecryptedSecret({ db, tenantId, key, masterKeyHex });
-      const [workingHours, operatorContact, payoutMethods, kycPolicy, officeAddress] =
-        await Promise.all([
-          read("exchange_working_hours"),
-          read("exchange_operator_contact"),
-          read("exchange_payout_methods"),
-          read("exchange_kyc_policy"),
-          read("exchange_office_address"),
-        ]);
+      const [
+        workingHours,
+        operatorContactLegacy,
+        operatorTelegram,
+        operatorWhatsapp,
+        operatorLine,
+        payoutMethodsLegacy,
+        payoutBankMethods,
+        payoutCashMethods,
+        amlPolicy,
+        kycPolicy,
+        officeAddress,
+      ] = await Promise.all([
+        read("exchange_working_hours"),
+        read("exchange_operator_contact"),
+        read("exchange_operator_telegram"),
+        read("exchange_operator_whatsapp"),
+        read("exchange_operator_line"),
+        read("exchange_payout_methods"),
+        read("exchange_payout_bank_methods"),
+        read("exchange_payout_cash_methods"),
+        read("exchange_aml_policy"),
+        read("exchange_kyc_policy"),
+        read("exchange_office_address"),
+      ]);
+      const operatorContact =
+        compactInfoLines([
+          operatorTelegram ? `Telegram: ${operatorTelegram}` : null,
+          operatorWhatsapp ? `WhatsApp: ${operatorWhatsapp}` : null,
+          operatorLine ? `Line: ${operatorLine}` : null,
+        ]) ?? operatorContactLegacy;
+      const payoutMethods =
+        compactInfoLines([
+          payoutBankMethods ? `Банки: ${payoutBankMethods}` : null,
+          payoutCashMethods ? `Наличные/офис/курьер: ${payoutCashMethods}` : null,
+        ]) ?? payoutMethodsLegacy;
+      const policy = compactInfoLines([
+        amlPolicy ? `AML: ${amlPolicy}` : null,
+        kycPolicy ? `KYC: ${kycPolicy}` : null,
+      ]);
       const info: Record<string, string> = {};
       if (workingHours) info.workingHours = workingHours;
       if (operatorContact) info.operatorContact = operatorContact;
       if (payoutMethods) info.payoutMethods = payoutMethods;
-      if (kycPolicy) info.kycPolicy = kycPolicy;
+      if (policy) info.kycPolicy = policy;
       if (officeAddress) info.officeAddress = officeAddress;
       if (Object.keys(info).length === 0) {
         return {

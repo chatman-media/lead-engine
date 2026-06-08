@@ -104,7 +104,7 @@ describe("firePartnerPing", () => {
 			callbackToken: string;
 			fields: Record<string, unknown>;
 		};
-		expect(body.event).toMatch(/^lead\.partner_(check|handoff)$/);
+		expect(body.event).toBe("lead.partner_handoff");
 		expect(body.callbackUrl).toBe(
 			`https://app.test/api/partner/cb/${result.token}`,
 		);
