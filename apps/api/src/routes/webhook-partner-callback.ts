@@ -8,17 +8,21 @@
  * Токен одноразовый: после обработки leads.awaiting_token очищается.
  */
 
-import { type Db, withTenant } from "@chatman-media/conversation-engine";
-import { leads, partnerDeals, stageDefinitions } from "@chatman-media/storage";
-import { and, eq } from "drizzle-orm";
+import { type Db, type NotificationService, withTenant } from "@chatman-media/conversation-engine";
 import { Hono } from "hono";
-import { advanceLead } from "../lib/advance-lead.ts";
 import { verifyCallbackToken } from "../lib/partner-ping.ts";
+import {
+  dispatchWorkflowEffects,
+  handleWebhookCallbackInTx,
+  loadWebhookCallbackPageInTx,
+  type WorkflowEffect,
+} from "../lib/workflow-runtime.ts";
 
 export function makePartnerCallbackRoutes(opts: {
   db: Db;
   callbackSecret: string;
   appUrl: string;
+  notificationService?: NotificationService | null;
 }): Hono {
   const app = new Hono();
 
@@ -36,40 +40,30 @@ export function makePartnerCallbackRoutes(opts: {
       return c.html(htmlPage("Неверная ссылка", "❌ Ссылка недействительна или уже была использована.", "error"));
     }
 
-    const { leadId, stageId } = payload;
-
-    // Fetch lead
-    const [lead] = await opts.db
-      .select({ id: leads.id, tenantId: leads.tenantId, awaitingToken: leads.awaitingToken, state: leads.state })
-      .from(leads)
-      .where(eq(leads.id, leadId))
-      .limit(1);
-
-    if (!lead) {
-      return c.html(htmlPage("Лид не найден", "❌ Заявка не найдена в системе.", "error"));
-    }
-
-    // Check token still active (not already processed)
-    if (lead.awaitingToken !== token) {
-      return c.html(htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"));
-    }
+    const { tenantId, leadId, stageId } = payload;
 
     // No action → show landing page
     if (!action) {
-      const [stage] = await opts.db
-        .select({ displayName: stageDefinitions.displayName })
-        .from(stageDefinitions)
-        .where(and(eq(stageDefinitions.id, stageId), eq(stageDefinitions.tenantId, lead.tenantId)))
-        .limit(1);
+      const page = await withTenant(opts.db, tenantId, (tx) =>
+        loadWebhookCallbackPageInTx(tx, { tenantId, leadId, stageId, token }),
+      );
+      if (page.kind === "no_lead") {
+        return c.html(htmlPage("Лид не найден", "❌ Заявка не найдена в системе.", "error"));
+      }
+      if (page.kind === "already_processed") {
+        return c.html(htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"));
+      }
+      if (page.kind === "stage_mismatch") {
+        return c.html(htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"));
+      }
 
       const confirmUrl = `${opts.appUrl}/api/partner/cb/${token}?a=confirm`;
       const cancelUrl = `${opts.appUrl}/api/partner/cb/${token}?a=cancel`;
-      const stageName = stage?.displayName ?? lead.state;
 
       return c.html(
         htmlLanding({
           leadId,
-          stageName,
+          stageName: page.stageName,
           confirmUrl,
           cancelUrl,
         }),
@@ -77,32 +71,18 @@ export function makePartnerCallbackRoutes(opts: {
     }
 
     if (action === "confirm") {
-      // Clear awaiting_token first (idempotency)
       const now = Math.floor(Date.now() / 1000);
-      await opts.db
-        .update(leads)
-        .set({ awaitingToken: null, updatedAt: now })
-        .where(and(eq(leads.id, leadId), eq(leads.awaitingToken, token)));
-      await withTenant(opts.db, lead.tenantId, async (tx) => {
-        await tx
-          .update(partnerDeals)
-          .set({ status: "accepted", acceptedAt: now, updatedAt: now })
-          .where(
-            and(
-              eq(partnerDeals.tenantId, lead.tenantId),
-              eq(partnerDeals.leadId, leadId),
-              eq(partnerDeals.stageDefinitionId, stageId),
-            ),
-          );
-      });
-
-      // Advance lead to next stage
-      const outcome = await advanceLead({
-        db: opts.db,
-        tenantId: lead.tenantId,
-        note: "✅ Партнёр подтвердил заявку.",
-        selector: { leadId },
-      });
+      const outcome = await withTenant(opts.db, tenantId, (tx) =>
+        handleWebhookCallbackInTx(tx, {
+          tenantId,
+          leadId,
+          stageId,
+          token,
+          action: "confirm",
+          now,
+        }),
+      );
+      dispatchEffectsIfAny(outcome);
 
       if (outcome.kind === "advanced") {
         return c.html(htmlPage("Подтверждено!", `✅ Заявка #${leadId} переведена на этап «${outcome.toDisplayName}».`, "success"));
@@ -110,39 +90,50 @@ export function makePartnerCallbackRoutes(opts: {
       if (outcome.kind === "terminal") {
         return c.html(htmlPage("Подтверждено!", "✅ Заявка подтверждена и находится на финальном этапе.", "success"));
       }
+      if (outcome.kind === "no_lead") {
+        return c.html(htmlPage("Лид не найден", "❌ Заявка не найдена в системе.", "error"));
+      }
+      if (outcome.kind === "already_processed" || outcome.kind === "stage_mismatch") {
+        return c.html(htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"));
+      }
       return c.html(htmlPage("Подтверждено!", "✅ Подтверждение получено.", "success"));
     }
 
     if (action === "cancel") {
       const now = Math.floor(Date.now() / 1000);
-      // Clear token + mark note
-      await opts.db
-        .update(leads)
-        .set({
-          awaitingToken: null,
-          // store cancellation note in rejectedReason (reusing existing field)
-          rejectedReason: "Партнёр отклонил заявку.",
-          updatedAt: now,
-        })
-        .where(and(eq(leads.id, leadId), eq(leads.awaitingToken, token)));
-      await withTenant(opts.db, lead.tenantId, async (tx) => {
-        await tx
-          .update(partnerDeals)
-          .set({ status: "rejected", cancelledAt: now, updatedAt: now })
-          .where(
-            and(
-              eq(partnerDeals.tenantId, lead.tenantId),
-              eq(partnerDeals.leadId, leadId),
-              eq(partnerDeals.stageDefinitionId, stageId),
-            ),
-          );
-      });
+      const outcome = await withTenant(opts.db, tenantId, (tx) =>
+        handleWebhookCallbackInTx(tx, {
+          tenantId,
+          leadId,
+          stageId,
+          token,
+          action: "cancel",
+          now,
+        }),
+      );
+      dispatchEffectsIfAny(outcome);
+
+      if (outcome.kind === "no_lead") {
+        return c.html(htmlPage("Лид не найден", "❌ Заявка не найдена в системе.", "error"));
+      }
+      if (outcome.kind === "already_processed" || outcome.kind === "stage_mismatch") {
+        return c.html(htmlPage("Уже обработано", "✅ Эта заявка уже была обработана ранее.", "success"));
+      }
 
       return c.html(htmlPage("Отклонено", `❌ Заявка #${leadId} отклонена партнёром. Менеджер свяжется с клиентом.`, "cancel"));
     }
 
     return c.html(htmlPage("Неверный запрос", "Неизвестное действие.", "error"));
   });
+
+  function dispatchEffectsIfAny(
+    outcome: { effects?: readonly WorkflowEffect[] } | { kind: string },
+  ): void {
+    dispatchWorkflowEffects(
+      "effects" in outcome ? (outcome.effects ?? []) : [],
+      opts.notificationService ?? null,
+    );
+  }
 
   return app;
 }

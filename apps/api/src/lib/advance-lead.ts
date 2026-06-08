@@ -219,12 +219,14 @@ export async function advanceLead(opts: {
       ctx.tenantSlug = tenantRow?.slug ?? String(tenantId);
 
       // Resolve contact name for TG message.
-      const [contactRow] = await db
-        .select({ displayName: contacts.displayName, intakeJson: leads.intakeJson })
-        .from(contacts)
-        .leftJoin(leads, and(eq(leads.userId, contacts.id), eq(leads.tenantId, tenantId)))
-        .where(eq(contacts.id, ctx.contactId))
-        .limit(1);
+      const [contactRow] = await withTenant(db, tenantId, (tx) =>
+        tx
+          .select({ displayName: contacts.displayName, intakeJson: leads.intakeJson })
+          .from(contacts)
+          .leftJoin(leads, and(eq(leads.userId, contacts.id), eq(leads.tenantId, tenantId)))
+          .where(and(eq(contacts.tenantId, tenantId), eq(contacts.id, ctx.contactId)))
+          .limit(1),
+      );
 
       let leadFields: Record<string, unknown> = {};
       try {
@@ -234,6 +236,7 @@ export async function advanceLead(opts: {
       const pingOpts: PartnerPingOpts = {
         webhookUrl: ctx.webhookUrl,
         webhookMode: ctx.webhookMode,
+        tenantId,
         leadId: ctx.leadId,
         stageId: ctx.stageId,
         tenantSlug: ctx.tenantSlug,
@@ -250,10 +253,13 @@ export async function advanceLead(opts: {
 
       // For await_callback mode: store token on lead so callback can verify it.
       if (ctx.webhookMode === "await_callback") {
-        await db
-          .update(leads)
-          .set({ awaitingToken: pingResult.token, updatedAt: Math.floor(Date.now() / 1000) })
-          .where(eq(leads.id, ctx.leadId));
+        const tokenStoredAt = Math.floor(Date.now() / 1000);
+        await withTenant(db, tenantId, (tx) =>
+          tx
+            .update(leads)
+            .set({ awaitingToken: pingResult.token, updatedAt: tokenStoredAt })
+            .where(and(eq(leads.tenantId, tenantId), eq(leads.id, ctx.leadId))),
+        );
       }
     } catch (err) {
       // Partner ping failure is non-fatal — lead has already been advanced.

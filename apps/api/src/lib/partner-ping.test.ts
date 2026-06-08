@@ -16,6 +16,7 @@ function basePing(overrides: Partial<PartnerPingOpts> = {}): PartnerPingOpts {
 	return {
 		webhookUrl: "https://partner.test/handoff",
 		webhookMode: "await_callback",
+		tenantId: 2,
 		leadId: 42,
 		stageId: 7,
 		tenantSlug: "demo",
@@ -36,7 +37,7 @@ afterEach(() => {
 
 describe("partner-ping token", () => {
 	it("roundtrips sign → verify", async () => {
-		const payload = { leadId: 42, stageId: 7, ts: 1_700_000_000 };
+		const payload = { tenantId: 2, leadId: 42, stageId: 7, ts: 1_700_000_000 };
 		const token = await makeCallbackToken(payload, SECRET);
 		expect(typeof token).toBe("string");
 		expect(token.includes(".")).toBe(true);
@@ -47,7 +48,7 @@ describe("partner-ping token", () => {
 
 	it("rejects tampered token", async () => {
 		const token = await makeCallbackToken(
-			{ leadId: 1, stageId: 2, ts: 100 },
+			{ tenantId: 1, leadId: 1, stageId: 2, ts: 100 },
 			SECRET,
 		);
 		// flip one char in the HMAC part
@@ -66,10 +67,20 @@ describe("partner-ping token", () => {
 
 	it("rejects token with wrong secret", async () => {
 		const token = await makeCallbackToken(
-			{ leadId: 1, stageId: 2, ts: 100 },
+			{ tenantId: 1, leadId: 1, stageId: 2, ts: 100 },
 			SECRET,
 		);
 		expect(await verifyCallbackToken(token, "different-secret")).toBeNull();
+	});
+
+	it("rejects legacy payload without tenantId", async () => {
+		const header = Buffer.from(
+			JSON.stringify({ leadId: 1, stageId: 2, ts: 100 }),
+			"utf8",
+		).toString("base64url");
+		const { signWebhookPayload } = await import("./webhook-sign.ts");
+		const token = `${header}.${await signWebhookPayload(header, SECRET)}`;
+		expect(await verifyCallbackToken(token, SECRET)).toBeNull();
 	});
 });
 
@@ -85,6 +96,7 @@ describe("firePartnerPing", () => {
 
 		expect(result.transport).toBe("http");
 		expect(await verifyCallbackToken(result.token, SECRET)).toMatchObject({
+			tenantId: 2,
 			leadId: 42,
 			stageId: 7,
 		});

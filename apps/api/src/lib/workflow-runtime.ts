@@ -1,5 +1,12 @@
 import { type Db, type NotificationService, withTenant } from "@chatman-media/conversation-engine";
-import { leadEvents, leadFieldValues, leads, stageDefinitions, stageFields } from "@chatman-media/storage";
+import {
+  leadEvents,
+  leadFieldValues,
+  leads,
+  partnerDeals,
+  stageDefinitions,
+  stageFields,
+} from "@chatman-media/storage";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 export type WorkflowEventType =
@@ -105,6 +112,28 @@ export type WorkflowOperatorEvent = {
   now: number;
 };
 
+export type WorkflowWebhookCallbackAction = "confirm" | "cancel";
+
+export type WorkflowWebhookCallbackEvent = {
+  tenantId: number;
+  leadId: number;
+  stageId: number;
+  token: string;
+  action: WorkflowWebhookCallbackAction;
+  now: number;
+};
+
+export type WorkflowWebhookCallbackPageResult =
+  | {
+      kind: "ready";
+      leadId: number;
+      stageName: string;
+      state: string;
+    }
+  | { kind: "no_lead" }
+  | { kind: "already_processed" }
+  | { kind: "stage_mismatch" };
+
 export type WorkflowOperatorTransitionResult =
   | { kind: "no_lead" }
   | { kind: "terminal"; stage: string }
@@ -131,6 +160,21 @@ export type WorkflowOperatorTransitionResult =
       awaitingPartner: boolean;
       partnerWebhookUrl: string | null;
       partnerWebhookMode: string;
+      effects: WorkflowEffect[];
+    };
+
+export type WorkflowWebhookCallbackResult =
+  | WorkflowOperatorTransitionResult
+  | {
+      kind: "already_processed" | "stage_mismatch";
+      leadId: number;
+      stage: string;
+      effects: WorkflowEffect[];
+    }
+  | {
+      kind: "cancelled";
+      leadId: number;
+      stage: string;
       effects: WorkflowEffect[];
     };
 
@@ -452,6 +496,112 @@ export async function handleOperatorSentOfferInTx(
   });
 }
 
+export async function loadWebhookCallbackPageInTx(
+  tx: Db,
+  event: Pick<WorkflowWebhookCallbackEvent, "tenantId" | "leadId" | "stageId" | "token">,
+): Promise<WorkflowWebhookCallbackPageResult> {
+  const callbackLead = await loadActiveCallbackLead(tx, event);
+  if (callbackLead.kind !== "ready") return callbackLead;
+
+  const [stage] = await tx
+    .select({ displayName: stageDefinitions.displayName })
+    .from(stageDefinitions)
+    .where(
+      and(
+        eq(stageDefinitions.id, event.stageId),
+        eq(stageDefinitions.tenantId, event.tenantId),
+      ),
+    )
+    .limit(1);
+
+  return {
+    kind: "ready",
+    leadId: callbackLead.lead.id,
+    state: callbackLead.lead.state,
+    stageName: stage?.displayName ?? callbackLead.lead.state,
+  };
+}
+
+export async function handleWebhookCallbackInTx(
+  tx: Db,
+  event: WorkflowWebhookCallbackEvent,
+): Promise<WorkflowWebhookCallbackResult> {
+  const callbackLead = await loadActiveCallbackLead(tx, event);
+  if (callbackLead.kind !== "ready") {
+    if (callbackLead.kind === "no_lead") return { kind: "no_lead" };
+    return {
+      kind: callbackLead.kind,
+      leadId: event.leadId,
+      stage: "",
+      effects: [],
+    };
+  }
+
+  const { lead } = callbackLead;
+
+  await tx
+    .update(leads)
+    .set({
+      awaitingToken: null,
+      ...(event.action === "cancel" ? { rejectedReason: "Партнёр отклонил заявку." } : {}),
+      updatedAt: event.now,
+    })
+    .where(
+      and(
+        eq(leads.tenantId, event.tenantId),
+        eq(leads.id, event.leadId),
+        eq(leads.awaitingToken, event.token),
+      ),
+    );
+
+  if (event.action === "cancel") {
+    await tx
+      .update(partnerDeals)
+      .set({ status: "rejected", cancelledAt: event.now, updatedAt: event.now })
+      .where(
+        and(
+          eq(partnerDeals.tenantId, event.tenantId),
+          eq(partnerDeals.leadId, event.leadId),
+          eq(partnerDeals.stageDefinitionId, event.stageId),
+        ),
+      );
+
+    await tx.insert(leadEvents).values({
+      tenantId: event.tenantId,
+      leadId: lead.id,
+      fromState: lead.state,
+      toState: lead.state,
+      notes: JSON.stringify({
+        workflowEvent: "webhook_callback",
+        callbackAction: "cancel",
+        stageId: event.stageId,
+      }),
+      createdAt: event.now,
+    });
+
+    return { kind: "cancelled", leadId: lead.id, stage: lead.state, effects: [] };
+  }
+
+  await tx
+    .update(partnerDeals)
+    .set({ status: "accepted", acceptedAt: event.now, updatedAt: event.now })
+    .where(
+      and(
+        eq(partnerDeals.tenantId, event.tenantId),
+        eq(partnerDeals.leadId, event.leadId),
+        eq(partnerDeals.stageDefinitionId, event.stageId),
+      ),
+    );
+
+  return advanceLeadToNextStageInTx(tx, {
+    tenantId: event.tenantId,
+    selector: { leadId: event.leadId },
+    now: event.now,
+    workflowEvent: "webhook_callback",
+    workflowNotes: { callbackAction: "confirm", stageId: event.stageId },
+  });
+}
+
 export function dispatchWorkflowEffects(
   effects: readonly WorkflowEffect[],
   notificationService?: NotificationService | null,
@@ -481,8 +631,9 @@ function noAdvance(
 async function advanceLeadToNextStageInTx(
   tx: Db,
   event: WorkflowOperatorEvent & {
-    workflowEvent: "operator_advanced" | "operator_sent_offer";
+    workflowEvent: "operator_advanced" | "operator_sent_offer" | "webhook_callback";
     requiredCurrentStageType?: string;
+    workflowNotes?: Record<string, unknown>;
   },
 ): Promise<WorkflowOperatorTransitionResult> {
   const whereLead =
@@ -560,7 +711,7 @@ async function advanceLeadToNextStageInTx(
   await tx
     .update(leads)
     .set({ stageDefinitionId: nextStage.id, state: nextStage.slug, updatedAt: event.now })
-    .where(eq(leads.id, lead.id));
+    .where(and(eq(leads.tenantId, event.tenantId), eq(leads.id, lead.id)));
 
   await tx.insert(leadEvents).values({
     tenantId: event.tenantId,
@@ -568,7 +719,7 @@ async function advanceLeadToNextStageInTx(
     fromState: lead.state,
     toState: nextStage.slug,
     byAdminId: event.adminId,
-    notes: JSON.stringify({ workflowEvent: event.workflowEvent }),
+    notes: JSON.stringify({ workflowEvent: event.workflowEvent, ...(event.workflowNotes ?? {}) }),
     createdAt: event.now,
   });
 
@@ -603,6 +754,40 @@ async function advanceLeadToNextStageInTx(
     partnerWebhookMode: nextStage.partnerWebhookMode,
     effects,
   };
+}
+
+async function loadActiveCallbackLead(
+  tx: Db,
+  event: Pick<WorkflowWebhookCallbackEvent, "tenantId" | "leadId" | "stageId" | "token">,
+): Promise<
+  | {
+      kind: "ready";
+      lead: {
+        id: number;
+        state: string;
+        stageDefinitionId: number | null;
+        awaitingToken: string | null;
+      };
+    }
+  | { kind: "no_lead" }
+  | { kind: "already_processed" }
+  | { kind: "stage_mismatch" }
+> {
+  const [lead] = await tx
+    .select({
+      id: leads.id,
+      state: leads.state,
+      stageDefinitionId: leads.stageDefinitionId,
+      awaitingToken: leads.awaitingToken,
+    })
+    .from(leads)
+    .where(and(eq(leads.tenantId, event.tenantId), eq(leads.id, event.leadId)))
+    .limit(1);
+
+  if (!lead) return { kind: "no_lead" };
+  if (lead.awaitingToken !== event.token) return { kind: "already_processed" };
+  if (lead.stageDefinitionId !== event.stageId) return { kind: "stage_mismatch" };
+  return { kind: "ready", lead };
 }
 
 function parseConditionType(raw: string | null): string | null {
