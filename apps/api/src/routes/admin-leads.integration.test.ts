@@ -22,7 +22,7 @@ import {
   tenants,
   tryConnectToPg,
 } from "@chatman-media/storage";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import postgres, { type Sql } from "postgres";
@@ -619,7 +619,7 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
     expect(stored!.valueJson).toBe('"updated"');
   });
 
-  it("branch-aware auto-advance uses request_type for manual field updates", async () => {
+  it("branch-aware auto-advance uses request_type instead of always nextStages[0]", async () => {
     if (!sql) return;
     const now = Math.floor(Date.now() / 1000);
     const [contact] = await db
@@ -630,8 +630,8 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
       .insert(funnels)
       .values({
         tenantId: tenantA,
-        slug: `branch_admin_${now}`,
-        isActive: true,
+        slug: `branch_admin_${Math.random().toString(36).slice(2, 8)}`,
+        isActive: false,
         createdAt: now,
         updatedAt: now,
       })
@@ -646,8 +646,8 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
         kind: "intake",
         stageType: "form_fill",
         position: 0,
-        nextStages: ["exchange_request", "transfer_request", "cancelled"],
-        autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+        nextStages: ["exchange_request", "transfer_request"],
+        autoAdvanceCondition: JSON.stringify({ type: "all_required_fields_filled" }),
         createdAt: now,
         updatedAt: now,
       })
@@ -657,7 +657,7 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
         tenantId: tenantA,
         funnelId: funnel!.id,
         slug: "exchange_request",
-        displayName: "Exchange Request",
+        displayName: "Exchange",
         kind: "active",
         stageType: "form_fill",
         phase: "qualify",
@@ -670,7 +670,7 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
         tenantId: tenantA,
         funnelId: funnel!.id,
         slug: "transfer_request",
-        displayName: "Transfer Request",
+        displayName: "Transfer",
         kind: "active",
         stageType: "form_fill",
         phase: "qualify",
@@ -679,37 +679,27 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
         createdAt: now,
         updatedAt: now,
       },
-      {
-        tenantId: tenantA,
-        funnelId: funnel!.id,
-        slug: "cancelled",
-        displayName: "Cancelled",
-        kind: "terminal_lost",
-        stageType: "milestone",
-        position: 3,
-        nextStages: [],
-        createdAt: now,
-        updatedAt: now,
-      },
     ]);
-    const [requestTypeField] = await db
+
+    const [field] = await db
       .insert(stageFields)
       .values({
-        tenantId: tenantA,
         stageId: intake!.id,
+        tenantId: tenantA,
         slug: "request_type",
         displayName: "Request Type",
         fieldType: "select",
         required: true,
         aiExtractable: true,
-        position: 0,
         optionsJson: JSON.stringify([
           { value: "exchange", label: "Exchange" },
           { value: "transfer", label: "Transfer" },
         ]),
+        position: 0,
         createdAt: now,
       })
       .returning({ id: stageFields.id });
+
     const [lead] = await db
       .insert(leads)
       .values({
@@ -725,24 +715,30 @@ describe("PUT /api/admin/leads/:id/field-values", () => {
     const res = await authReq(tokenA, `/api/admin/leads/${lead!.id}/field-values`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        values: [{ fieldId: requestTypeField!.id, value: "transfer" }],
-      }),
+      body: JSON.stringify({ values: [{ fieldId: field!.id, value: "transfer" }] }),
     });
-
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { advanced: boolean; newStageSlug: string | null };
-    expect(body).toMatchObject({ advanced: true, newStageSlug: "transfer_request" });
-    const [updated] = await db
-      .select({ state: leads.state, requestType: leads.requestType })
+    const body = (await res.json()) as {
+      ok: boolean;
+      advanced: boolean;
+      newStageSlug: string | null;
+    };
+    expect(body).toEqual({ ok: true, advanced: true, newStageSlug: "transfer_request" });
+
+    const [storedLead] = await db
+      .select({
+        state: leads.state,
+        requestType: leads.requestType,
+      })
       .from(leads)
-      .where(eq(leads.id, lead!.id));
-    expect(updated).toEqual({ state: "transfer_request", requestType: "transfer" });
-    const [stored] = await db
+      .where(and(eq(leads.id, lead!.id), eq(leads.tenantId, tenantA)));
+    expect(storedLead).toEqual({ state: "transfer_request", requestType: "transfer" });
+
+    const [storedValue] = await db
       .select({ valueJson: leadFieldValues.valueJson })
       .from(leadFieldValues)
-      .where(eq(leadFieldValues.leadId, lead!.id));
-    expect(stored!.valueJson).toBe('"transfer"');
+      .where(and(eq(leadFieldValues.leadId, lead!.id), eq(leadFieldValues.fieldId, field!.id)));
+    expect(storedValue!.valueJson).toBe('"transfer"');
   });
 });
 

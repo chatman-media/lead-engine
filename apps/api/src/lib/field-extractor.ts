@@ -8,8 +8,7 @@
  *   2. Loads stage fields with ai_extractable = true.
  *   3. Asks the tenant's chat LLM to extract structured values from the text.
  *   4. Writes extracted values to lead_field_values.
- *   5. Checks auto-advance: if autoAdvanceCondition = all_required_fields_filled
- *      and all required fields are now filled, advances the lead to nextStages[0].
+ *   5. Sends field_updated to WorkflowRuntime for auto-advance evaluation.
  *
  * Non-fatal: any LLM or DB error is caught. The calling webhook never waits.
  */
@@ -29,7 +28,13 @@ import {
 import { and, asc, desc, eq, notInArray } from "drizzle-orm";
 import type { LoadedRef } from "../llm-bootstrap.ts";
 import { chooseServiceRoute, type ServiceRouteSelection } from "./service-intent-router.ts";
-import { autoAdvanceLead, selectNextStage } from "./workflow-runtime.ts";
+import {
+  dispatchWorkflowEffects,
+  handleFieldUpdatedInTx,
+  type WorkflowEffect,
+} from "./workflow-runtime.ts";
+
+export { selectNextStage } from "./workflow-runtime.ts";
 
 export interface FieldExtractor {
   extract(opts: {
@@ -39,8 +44,6 @@ export interface FieldExtractor {
     db: Db;
   }): Promise<void>;
 }
-
-export { selectNextStage };
 
 export function makeFieldExtractor(
   ref: LoadedRef,
@@ -58,9 +61,7 @@ export function makeFieldExtractor(
       if (!chatClient) return;
 
       const now = Math.floor(Date.now() / 1000);
-      // Если лид авто-продвигается В стадию awaiting_operator — после коммита tx
-      // шлём проактивный пинг оператору (лид ждёт человека). Захватываем здесь.
-      let awaitingOpEntry: { leadId: number; toStage: string } | null = null;
+      const workflowEffects: WorkflowEffect[] = [];
 
       await withTenant(db, tenantId, async (tx) => {
         // 0. Резолвим направление по тексту. Service Catalog имеет приоритет:
@@ -385,33 +386,19 @@ ${fieldDescriptions}
             });
         }
 
-        const advanced = await autoAdvanceLead({
-          db: tx as Db,
+        const workflowResult = await handleFieldUpdatedInTx(tx, {
           tenantId,
           leadId: lead.id,
           eventType: "message_received",
-          now,
           extractedValues: extracted,
+          now,
         });
-        if (advanced.advanced && advanced.awaitingOperator) {
-          awaitingOpEntry = { leadId: lead.id, toStage: advanced.toDisplayName };
-        }
+        workflowEffects.push(...workflowResult.effects);
       });
 
       // Проактивный пинг оператору: лид вошёл в awaiting_operator → нужен человек.
       // Fire-and-forget, вне tx (Telegram I/O). /send-offer шлёт на ВЫХОДЕ из стадии.
-      if (awaitingOpEntry && notificationService) {
-        const entry: { leadId: number; toStage: string } = awaitingOpEntry;
-        void notificationService
-          .notify({
-            tenantId,
-            eventType: "stage_changed",
-            leadId: entry.leadId,
-            contactId,
-            data: { toStage: entry.toStage, awaitingOperator: true },
-          })
-          .catch(() => {});
-      }
+      dispatchWorkflowEffects(workflowEffects, notificationService);
     },
   };
 }

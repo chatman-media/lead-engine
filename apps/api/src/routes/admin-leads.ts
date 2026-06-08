@@ -24,7 +24,7 @@ import { canAddLead } from "../lib/quota.ts";
 import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webhooks.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
 import { advanceLead } from "../lib/advance-lead.ts";
-import { autoAdvanceLead } from "../lib/workflow-runtime.ts";
+import { dispatchWorkflowEffects, handleFieldUpdatedInTx } from "../lib/workflow-runtime.ts";
 
 /**
  * Lead pipeline API.
@@ -812,10 +812,10 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
    * PUT /api/admin/leads/:id/field-values
    * Body: { values: Array<{ fieldId: number, value: unknown }> }
    *
-   * После upsert проверяет auto-advance: если стадия имеет
+   * После upsert отправляет field_updated в WorkflowRuntime: если стадия имеет
    * autoAdvanceCondition = '{"type":"all_required_fields_filled"}' и все
-   * required-поля заполнены — лид автоматически переходит в первую стадию
-   * из nextStages. Возвращает { ok, advanced: true|false, newStageSlug? }.
+   * required-поля заполнены — лид автоматически переходит в следующую стадию
+   * с учетом branch-aware request_type. Возвращает { ok, advanced, newStageSlug? }.
    */
   app.put("/api/admin/leads/:id/field-values", async (c) => {
     const tenantId = c.var.tenantId;
@@ -831,7 +831,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     }
 
     const now = Math.floor(Date.now() / 1000);
-    const advanced = await withTenant(opts.db, tenantId, async (tx) => {
+    const workflowResult = await withTenant(opts.db, tenantId, async (tx) => {
       // 1. Upsert field values
       for (const { fieldId, value } of values) {
         await tx
@@ -854,18 +854,21 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
           });
       }
 
-      const result = await autoAdvanceLead({
-        db: tx as Db,
+      return handleFieldUpdatedInTx(tx, {
         tenantId,
         leadId: id,
-        eventType: "field_updated",
-        now,
         adminId,
+        now,
       });
-      return result.advanced ? result.to : null;
     });
 
-    return c.json({ ok: true, advanced: advanced !== null, newStageSlug: advanced });
+    dispatchWorkflowEffects(workflowResult.effects, opts.notificationService ?? null);
+
+    return c.json({
+      ok: true,
+      advanced: workflowResult.advanced,
+      newStageSlug: workflowResult.advanced ? workflowResult.to : null,
+    });
   });
 
   /**

@@ -1,11 +1,5 @@
-import type { Db } from "@chatman-media/conversation-engine";
-import {
-  leadEvents,
-  leadFieldValues,
-  leads,
-  stageDefinitions,
-  stageFields,
-} from "@chatman-media/storage";
+import { type Db, type NotificationService, withTenant } from "@chatman-media/conversation-engine";
+import { leadEvents, leadFieldValues, leads, stageDefinitions, stageFields } from "@chatman-media/storage";
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 export type WorkflowEventType =
@@ -14,6 +8,14 @@ export type WorkflowEventType =
   | "operator_advanced"
   | "operator_sent_offer"
   | "webhook_callback";
+
+export type WorkflowEffect = {
+  type: "notify_operator";
+  tenantId: number;
+  leadId: number;
+  contactId: number;
+  toStage: string;
+};
 
 export interface WorkflowStageSnapshot {
   id: number;
@@ -42,17 +44,22 @@ export interface TransitionSelection {
   condition: "all_required_fields_filled";
 }
 
-export type WorkflowAdvanceResult =
+export type WorkflowAutoAdvanceResult =
   | {
       advanced: false;
       reason:
         | "no_lead"
         | "no_stage"
-        | "terminal"
+        | "terminal_stage"
+        | "no_next_stage"
+        | "unsupported_condition"
+        | "invalid_condition"
         | "no_required_fields"
-        | "condition_not_met"
+        | "required_fields_missing"
+        | "no_matching_branch"
         | "no_transition"
-        | "next_stage_not_found";
+        | "next_stage_missing";
+      effects: WorkflowEffect[];
     }
   | {
       advanced: true;
@@ -62,11 +69,22 @@ export type WorkflowAdvanceResult =
       from: string;
       to: string;
       toDisplayName: string;
+      toStageType: string;
       awaitingOperator: boolean;
       awaitingPartner: boolean;
       terminal: boolean;
       requestType: string | null;
+      effects: WorkflowEffect[];
     };
+
+export type FieldUpdatedEvent = {
+  tenantId: number;
+  leadId: number;
+  adminId?: number;
+  extractedValues?: Record<string, unknown>;
+  eventType?: Extract<WorkflowEventType, "message_received" | "field_updated">;
+  now?: number;
+};
 
 interface WorkflowTransitionRule {
   to?: unknown;
@@ -79,10 +97,16 @@ interface WorkflowWhen {
 }
 
 /**
- * Shared branch-aware next-stage selector.
+ * Выбор следующей стадии при auto-advance.
  *
- * If a stage collects `request_type`, the selected branch is `<request_type>_*`.
- * Without that field this preserves the old linear `nextStages[0]` behavior.
+ * Branch-aware (concierge): если у стадии есть поле `request_type` и >1 ветки,
+ * уводим в ветку `<request_type>_*` (напр. `transfer` -> `transfer_request`) и
+ * возвращаем `requestType` для записи в `leads.request_type`. Если валидной
+ * ветки нет (напр. `other` / не распознано) - возвращаем `null` = "не
+ * продвигать", лид остаётся на intake для оператора/уточнения.
+ *
+ * Линейные воронки не затронуты: у их стадий нет поля `request_type`, поэтому
+ * `hasRequestTypeField=false` -> прежнее поведение `nextStages[0]`.
  */
 export function selectNextStage(opts: {
   nextStages: readonly string[];
@@ -109,19 +133,21 @@ export function evaluateTransition(ctx: TransitionContext): TransitionSelection 
     return null;
   }
 
-  const workflowRules = parseWorkflowTransitions(ctx.stage.configJson);
-  const matchingWorkflowRule = workflowRules
+  const workflowRule = parseWorkflowTransitions(ctx.stage.configJson)
     .filter((rule) => whenType(rule.when) === "all_required_fields_filled")
     .sort((a, b) => priorityOf(b) - priorityOf(a))[0];
 
-  if (matchingWorkflowRule) {
+  if (workflowRule) {
     if (!ctx.allRequiredFieldsFilled) return null;
     const explicitTo =
-      typeof matchingWorkflowRule.to === "string" && matchingWorkflowRule.to.trim()
-        ? matchingWorkflowRule.to.trim()
+      typeof workflowRule.to === "string" && workflowRule.to.trim()
+        ? workflowRule.to.trim()
         : null;
     const selected = explicitTo
-      ? { nextSlug: explicitTo, requestType: ctx.hasRequestTypeField ? ctx.requestType : null }
+      ? {
+          nextSlug: explicitTo,
+          requestType: ctx.hasRequestTypeField ? ctx.requestType : null,
+        }
       : selectNextStage({
           nextStages: ctx.stage.nextStages,
           hasRequestTypeField: ctx.hasRequestTypeField,
@@ -152,6 +178,24 @@ export function evaluateTransition(ctx: TransitionContext): TransitionSelection 
   };
 }
 
+export class WorkflowRuntime {
+  constructor(
+    private readonly deps: {
+      db: Db;
+      notificationService?: NotificationService | null;
+    },
+  ) {}
+
+  async handleFieldUpdated(event: FieldUpdatedEvent): Promise<WorkflowAutoAdvanceResult> {
+    const now = event.now ?? Math.floor(Date.now() / 1000);
+    const result = await withTenant(this.deps.db, event.tenantId, (tx) =>
+      handleFieldUpdatedInTx(tx, { ...event, now }),
+    );
+    dispatchWorkflowEffects(result.effects, this.deps.notificationService ?? null);
+    return result;
+  }
+}
+
 export async function autoAdvanceLead(opts: {
   db: Db;
   tenantId: number;
@@ -160,21 +204,37 @@ export async function autoAdvanceLead(opts: {
   now: number;
   adminId?: number;
   extractedValues?: Record<string, unknown>;
-}): Promise<WorkflowAdvanceResult> {
-  const [lead] = await opts.db
+}): Promise<WorkflowAutoAdvanceResult> {
+  return handleFieldUpdatedInTx(opts.db, {
+    tenantId: opts.tenantId,
+    leadId: opts.leadId,
+    eventType: opts.eventType,
+    now: opts.now,
+    adminId: opts.adminId,
+    extractedValues: opts.extractedValues,
+  });
+}
+
+export async function handleFieldUpdatedInTx(
+  tx: Db,
+  event: FieldUpdatedEvent & { now: number },
+): Promise<WorkflowAutoAdvanceResult> {
+  const eventType = event.eventType ?? "field_updated";
+  const [lead] = await tx
     .select({
       id: leads.id,
       state: leads.state,
       stageDefinitionId: leads.stageDefinitionId,
+      contactId: leads.userId,
       requestType: leads.requestType,
     })
     .from(leads)
-    .where(and(eq(leads.id, opts.leadId), eq(leads.tenantId, opts.tenantId)))
+    .where(and(eq(leads.id, event.leadId), eq(leads.tenantId, event.tenantId)))
     .limit(1);
-  if (!lead) return { advanced: false, reason: "no_lead" };
-  if (!lead.stageDefinitionId) return { advanced: false, reason: "no_stage" };
+  if (!lead) return noAdvance("no_lead");
+  if (!lead.stageDefinitionId) return noAdvance("no_stage");
 
-  const [stage] = await opts.db
+  const [stage] = await tx
     .select({
       id: stageDefinitions.id,
       funnelId: stageDefinitions.funnelId,
@@ -187,40 +247,74 @@ export async function autoAdvanceLead(opts: {
       configJson: stageDefinitions.configJson,
     })
     .from(stageDefinitions)
-    .where(and(eq(stageDefinitions.id, lead.stageDefinitionId), eq(stageDefinitions.tenantId, opts.tenantId)))
+    .where(
+      and(
+        eq(stageDefinitions.id, lead.stageDefinitionId),
+        eq(stageDefinitions.tenantId, event.tenantId),
+      ),
+    )
     .limit(1);
-  if (!stage) return { advanced: false, reason: "no_stage" };
+  if (!stage) return noAdvance("no_stage");
   if (stage.kind === "terminal_won" || stage.kind === "terminal_lost") {
-    return { advanced: false, reason: "terminal" };
+    return noAdvance("terminal_stage");
   }
 
-  const requestTypeField = await findRequestTypeField(opts.db, opts.tenantId, stage.id);
+  const fields = await tx
+    .select({
+      id: stageFields.id,
+      slug: stageFields.slug,
+      required: stageFields.required,
+    })
+    .from(stageFields)
+    .where(
+      and(
+        eq(stageFields.stageId, stage.id),
+        eq(stageFields.tenantId, event.tenantId),
+      ),
+    );
+  const requiredFields = fields.filter((field) => field.required);
+  if (requiredFields.length === 0) return noAdvance("no_required_fields");
+
+  const filledRequired = await tx
+    .select({ id: leadFieldValues.fieldId })
+    .from(leadFieldValues)
+    .where(
+      and(
+        eq(leadFieldValues.leadId, lead.id),
+        inArray(
+          leadFieldValues.fieldId,
+          requiredFields.map((field) => field.id),
+        ),
+        sql`${leadFieldValues.valueJson} != 'null' AND ${leadFieldValues.valueJson} != '""' AND ${leadFieldValues.valueJson} != ''`,
+      ),
+    );
+  const allRequiredFieldsFilled = filledRequired.length >= requiredFields.length;
+
+  const requestTypeField = fields.find((field) => field.slug === "request_type");
   const requestType = await resolveRequestType({
-    db: opts.db,
+    tx,
     leadId: lead.id,
     requestTypeFieldId: requestTypeField?.id ?? null,
-    existingRequestType: lead.requestType,
-    extractedValues: opts.extractedValues,
+    extractedValues: event.extractedValues,
+    fallbackRequestType: lead.requestType,
   });
-
-  const requiredState = await requiredFieldsState(opts.db, stage.id, lead.id);
-  if (requiredState.total === 0) return { advanced: false, reason: "no_required_fields" };
 
   const transition = evaluateTransition({
     stage,
     hasRequestTypeField: !!requestTypeField,
     requestType,
-    allRequiredFieldsFilled: requiredState.filled >= requiredState.total,
-    eventType: opts.eventType,
+    allRequiredFieldsFilled,
+    eventType,
   });
   if (!transition) {
-    return {
-      advanced: false,
-      reason: requiredState.filled >= requiredState.total ? "no_transition" : "condition_not_met",
-    };
+    if (!allRequiredFieldsFilled) return noAdvance("required_fields_missing");
+    if (stage.nextStages.length === 0 && parseWorkflowTransitions(stage.configJson).length === 0) {
+      return noAdvance("no_next_stage");
+    }
+    return noAdvance("no_transition");
   }
 
-  const [nextStage] = await opts.db
+  const [nextStage] = await tx
     .select({
       id: stageDefinitions.id,
       slug: stageDefinitions.slug,
@@ -235,38 +329,51 @@ export async function autoAdvanceLead(opts: {
     .where(
       and(
         eq(stageDefinitions.slug, transition.nextSlug),
-        eq(stageDefinitions.tenantId, opts.tenantId),
+        eq(stageDefinitions.tenantId, event.tenantId),
         eq(stageDefinitions.funnelId, stage.funnelId),
       ),
     )
     .limit(1);
-  if (!nextStage) return { advanced: false, reason: "next_stage_not_found" };
+  if (!nextStage) return noAdvance("next_stage_missing");
 
-  await opts.db
+  await tx
     .update(leads)
     .set({
       stageDefinitionId: nextStage.id,
       state: nextStage.slug,
       ...(transition.requestType ? { requestType: transition.requestType } : {}),
-      updatedAt: opts.now,
+      updatedAt: event.now,
     })
     .where(eq(leads.id, lead.id));
 
-  await opts.db.insert(leadEvents).values({
-    tenantId: opts.tenantId,
+  await tx.insert(leadEvents).values({
+    tenantId: event.tenantId,
     leadId: lead.id,
     fromState: lead.state,
     toState: nextStage.slug,
-    byAdminId: opts.adminId,
+    byAdminId: event.adminId,
     notes: JSON.stringify({
       type: "workflow_transition",
       reason: transition.reason,
       condition: transition.condition,
-      eventType: opts.eventType,
+      eventType,
       requestType: transition.requestType,
     }),
-    createdAt: opts.now,
+    createdAt: event.now,
   });
+
+  const awaitingOperator = nextStage.stageType === "awaiting_operator";
+  const effects: WorkflowEffect[] = awaitingOperator
+    ? [
+        {
+          type: "notify_operator",
+          tenantId: event.tenantId,
+          leadId: lead.id,
+          contactId: lead.contactId,
+          toStage: nextStage.displayName,
+        },
+      ]
+    : [];
 
   return {
     advanced: true,
@@ -276,12 +383,40 @@ export async function autoAdvanceLead(opts: {
     from: lead.state,
     to: nextStage.slug,
     toDisplayName: nextStage.displayName,
-    awaitingOperator: nextStage.stageType === "awaiting_operator",
+    toStageType: nextStage.stageType,
+    awaitingOperator,
     awaitingPartner:
       Boolean(nextStage.partnerWebhookUrl) && nextStage.partnerWebhookMode === "await_callback",
     terminal: nextStage.nextStages.length === 0 || nextStage.kind.startsWith("terminal_"),
     requestType: transition.requestType,
+    effects,
   };
+}
+
+export function dispatchWorkflowEffects(
+  effects: readonly WorkflowEffect[],
+  notificationService?: NotificationService | null,
+): void {
+  if (!notificationService) return;
+  for (const effect of effects) {
+    if (effect.type === "notify_operator") {
+      void notificationService
+        .notify({
+          tenantId: effect.tenantId,
+          eventType: "stage_changed",
+          leadId: effect.leadId,
+          contactId: effect.contactId,
+          data: { toStage: effect.toStage, awaitingOperator: true },
+        })
+        .catch(() => {});
+    }
+  }
+}
+
+function noAdvance(
+  reason: Extract<WorkflowAutoAdvanceResult, { advanced: false }>["reason"],
+): Extract<WorkflowAutoAdvanceResult, { advanced: false }> {
+  return { advanced: false, reason, effects: [] };
 }
 
 function parseConditionType(raw: string | null): string | null {
@@ -318,68 +453,43 @@ function priorityOf(rule: WorkflowTransitionRule): number {
     : 0;
 }
 
-async function findRequestTypeField(db: Db, tenantId: number, stageId: number) {
-  const [field] = await db
-    .select({ id: stageFields.id })
-    .from(stageFields)
-    .where(and(eq(stageFields.tenantId, tenantId), eq(stageFields.stageId, stageId), eq(stageFields.slug, "request_type")))
-    .limit(1);
-  return field ?? null;
-}
-
 async function resolveRequestType(opts: {
-  db: Db;
+  tx: Db;
   leadId: number;
   requestTypeFieldId: number | null;
-  existingRequestType: string | null;
   extractedValues?: Record<string, unknown>;
+  fallbackRequestType: string | null;
 }): Promise<string | null> {
-  const extracted = opts.extractedValues?.request_type;
-  if (typeof extracted === "string" && extracted.trim()) return extracted.trim();
-  if (!opts.requestTypeFieldId) return opts.existingRequestType;
+  const extracted = normalizeRequestType(opts.extractedValues?.request_type);
+  if (extracted) return extracted;
 
-  const [stored] = await opts.db
-    .select({ valueJson: leadFieldValues.valueJson })
-    .from(leadFieldValues)
-    .where(
-      and(
-        eq(leadFieldValues.leadId, opts.leadId),
-        eq(leadFieldValues.fieldId, opts.requestTypeFieldId),
-      ),
-    )
-    .limit(1);
-  if (!stored?.valueJson) return opts.existingRequestType;
-  try {
-    const value = JSON.parse(stored.valueJson) as unknown;
-    return typeof value === "string" && value.trim() ? value.trim() : opts.existingRequestType;
-  } catch {
-    return opts.existingRequestType;
+  if (opts.requestTypeFieldId) {
+    const [stored] = await opts.tx
+      .select({ valueJson: leadFieldValues.valueJson })
+      .from(leadFieldValues)
+      .where(
+        and(
+          eq(leadFieldValues.leadId, opts.leadId),
+          eq(leadFieldValues.fieldId, opts.requestTypeFieldId),
+        ),
+      )
+      .limit(1);
+    if (stored?.valueJson) {
+      try {
+        const storedValue = JSON.parse(stored.valueJson) as unknown;
+        const normalized = normalizeRequestType(storedValue);
+        if (normalized) return normalized;
+      } catch {
+        // ignore malformed stored value
+      }
+    }
   }
+
+  return normalizeRequestType(opts.fallbackRequestType);
 }
 
-async function requiredFieldsState(
-  db: Db,
-  stageId: number,
-  leadId: number,
-): Promise<{ total: number; filled: number }> {
-  const required = await db
-    .select({ id: stageFields.id })
-    .from(stageFields)
-    .where(and(eq(stageFields.stageId, stageId), eq(stageFields.required, true)));
-  if (required.length === 0) return { total: 0, filled: 0 };
-
-  const filled = await db
-    .select({ id: leadFieldValues.fieldId })
-    .from(leadFieldValues)
-    .where(
-      and(
-        eq(leadFieldValues.leadId, leadId),
-        inArray(
-          leadFieldValues.fieldId,
-          required.map((f) => f.id),
-        ),
-        sql`${leadFieldValues.valueJson} != 'null' AND ${leadFieldValues.valueJson} != '""' AND ${leadFieldValues.valueJson} != ''`,
-      ),
-    );
-  return { total: required.length, filled: filled.length };
+function normalizeRequestType(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
