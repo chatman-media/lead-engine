@@ -396,6 +396,13 @@ export const stageDefinitions = pgTable("stage_definitions", {
   // behave. Consumed by the reply prompt (slice C-2); NULL = fall back to Style.
   goal: text("goal"),
   guidance: text("guidance"),
+  // Partner availability ping (epic: supplier-check).
+  // partnerWebhookUrl — HTTP(S) URL for a POST callback, or tg://CHAT_ID to
+  //   notify the partner via Telegram (uses tenant's operator bot token).
+  // partnerWebhookMode — 'fire_and_forget': POST and move on;
+  //   'await_callback': lead waits; system advances only after /api/partner/cb/:token.
+  partnerWebhookUrl: text("partner_webhook_url"),
+  partnerWebhookMode: text("partner_webhook_mode").notNull().default("fire_and_forget"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
@@ -458,10 +465,15 @@ export const leads = pgTable("leads", {
   decidedAt: integer("decided_at"),
   lastCheckinAt: integer("last_checkin_at"),
   visaInterviewField: text("visa_interview_field"),
+  // Partner availability check token. Set when a lead enters an await_callback
+  // partner-webhook stage. Cleared once /api/partner/cb/:token is received.
+  // NULL = lead is not pending an external partner confirmation.
+  awaitingToken: text("awaiting_token"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
   index("idx_leads_state_recency").on(t.state, sql`${t.updatedAt} DESC`),
+  index("idx_leads_awaiting_token").on(t.awaitingToken).where(sql`${t.awaitingToken} IS NOT NULL`),
   index("idx_leads_stage_def").on(t.stageDefinitionId),
   // Резолвинг лидов контакта (concierge: N открытых лидов на гостя).
   index("idx_leads_tenant_user").on(t.tenantId, t.userId),

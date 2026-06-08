@@ -36,6 +36,7 @@ import { advanceLead } from "../lib/advance-lead.ts";
 export interface AdminLeadsRoutesOpts {
   db: Db;
   notificationService?: NotificationService;
+  partnerPing?: { appUrl: string; operatorBotToken: string; callbackSecret: string } | null;
 }
 
 export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
@@ -69,6 +70,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       ...(note ? { note } : {}),
       selector: { leadId },
       notifications: opts.notificationService ?? null,
+      partnerPing: opts.partnerPing ?? null,
     });
 
     if (outcome.kind === "no_lead") {
