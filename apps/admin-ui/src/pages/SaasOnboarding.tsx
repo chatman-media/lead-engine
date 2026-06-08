@@ -275,10 +275,17 @@ const REQUISITE_TYPES: { key: string; label: string; placeholder: string; secret
   { key: "exchange_bybit_uid", label: "Bybit UID", placeholder: "123456789" },
   { key: "exchange_htx_uid", label: "HTX UID", placeholder: "123456789" },
   { key: "exchange_fiat_payment_url", label: "СБП / платёжная ссылка RUB", placeholder: "https://..." },
-  { key: "exchange_rub_card_requisites", label: "RUB карта / телефон", placeholder: "2200... / +7..." },
-  { key: "exchange_payout_methods", label: "Выдача THB: банки / наличные", placeholder: "Bangkok Bank, Kasikorn, cash..." },
-  { key: "exchange_kyc_policy", label: "AML/KYC правила", placeholder: "AML до 60%, KYC по паспорту..." },
-  { key: "exchange_operator_contact", label: "Контакт оператора", placeholder: "@operator / WhatsApp / Line" },
+  { key: "exchange_rub_card_number", label: "RUB карта — номер", placeholder: "2200..." },
+  { key: "exchange_rub_card_phone", label: "RUB карта — телефон", placeholder: "+7..." },
+  { key: "exchange_rub_card_bank", label: "RUB карта — банк", placeholder: "Сбер / T-Bank..." },
+  { key: "exchange_rub_card_recipient", label: "RUB карта — получатель", placeholder: "Иван И." },
+  { key: "exchange_payout_bank_methods", label: "Выдача THB — банки", placeholder: "Bangkok Bank, Kasikorn, SCB..." },
+  { key: "exchange_payout_cash_methods", label: "Выдача THB — наличные", placeholder: "office cash, courier cash, cardless ATM..." },
+  { key: "exchange_aml_policy", label: "AML правила", placeholder: "AML до 60%, high-risk — оператор..." },
+  { key: "exchange_kyc_policy", label: "KYC правила", placeholder: "Паспорт / селфи / видео..." },
+  { key: "exchange_operator_telegram", label: "Контакт оператора — Telegram", placeholder: "@operator" },
+  { key: "exchange_operator_whatsapp", label: "Контакт оператора — WhatsApp", placeholder: "+66..." },
+  { key: "exchange_operator_line", label: "Контакт оператора — Line", placeholder: "line id" },
   { key: "exchange_office_address", label: "Адрес офиса", placeholder: "Phuket, ..." },
   { key: "exchange_working_hours", label: "Часы работы", placeholder: "10:00-22:00 Bangkok" },
   { key: "exchange_westwallet_api_key", label: "WestWallet public API key", placeholder: "public key", secret: true },
@@ -291,11 +298,18 @@ const REQUISITE_TYPES: { key: string; label: string; placeholder: string; secret
   { key: "exchange_westwallet_success_url", label: "WestWallet success URL", placeholder: "https://..." },
 ];
 
+const LEGACY_REQUISITE_LABELS: Record<string, string> = {
+  exchange_operator_contact: "Контакт оператора",
+  exchange_payout_methods: "Выдача THB: банки / наличные",
+  exchange_rub_card_requisites: "RUB карта / телефон",
+};
+
 /** Ключи, которые относятся к экрану реквизитов/настроек обменника. */
 function isRequisiteKey(key: string): boolean {
   return (
     key.startsWith("exchange_wallet_") ||
-    REQUISITE_TYPES.some((t) => t.key === key)
+    REQUISITE_TYPES.some((t) => t.key === key) ||
+    key in LEGACY_REQUISITE_LABELS
   );
 }
 
@@ -303,6 +317,7 @@ function isRequisiteKey(key: string): boolean {
 function requisiteLabel(key: string): string {
   const known = REQUISITE_TYPES.find((t) => t.key === key);
   if (known) return known.label;
+  if (LEGACY_REQUISITE_LABELS[key]) return LEGACY_REQUISITE_LABELS[key];
   const m = /^exchange_wallet_(.+)$/.exec(key);
   if (m) return `Кошелёк ${m[1].replace(/_/g, " ").toUpperCase()}`;
   return key;

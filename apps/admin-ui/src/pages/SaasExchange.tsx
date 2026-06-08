@@ -66,54 +66,216 @@ const STATUS_VARIANT: Record<
   expired: "destructive",
 };
 
-/** Типы реквизитов и настроек приёма (ключи tenant_secrets) — те же, что в онбординге. */
-const REQUISITE_TYPES: { key: string; label: string; placeholder: string; secret?: boolean }[] = [
-  { key: "exchange_wallet_usdt_trc20", label: "USDT TRC20 — адрес", placeholder: "T..." },
-  { key: "exchange_wallet_usdt_erc20", label: "USDT ERC20 — адрес", placeholder: "0x..." },
-  { key: "exchange_wallet_usdt_bep20", label: "USDT BEP20 / BSC — адрес", placeholder: "0x..." },
-  { key: "exchange_wallet_usdt_ton", label: "USDT TON — адрес", placeholder: "UQ..." },
-  { key: "exchange_wallet_usdt_ton_memo", label: "USDT TON — memo/comment", placeholder: "12345 или comment" },
-  { key: "exchange_wallet_usdt_solana", label: "USDT Solana — адрес", placeholder: "solana address" },
-  { key: "exchange_wallet_usdc_erc20", label: "USDC ERC20 — адрес", placeholder: "0x..." },
-  { key: "exchange_wallet_usdc_solana", label: "USDC Solana — адрес", placeholder: "solana address" },
-  { key: "exchange_wallet_btc_default", label: "BTC — адрес", placeholder: "bc1..." },
-  { key: "exchange_wallet_eth_erc20", label: "ETH ERC20 — адрес", placeholder: "0x..." },
-  { key: "exchange_wallet_ltc_default", label: "LTC — адрес", placeholder: "ltc1..." },
-  { key: "exchange_wallet_trx_tron", label: "TRX Tron — адрес", placeholder: "T..." },
-  { key: "exchange_wallet_ton_ton", label: "TON — адрес", placeholder: "UQ..." },
-  { key: "exchange_wallet_ton_ton_memo", label: "TON — memo/comment", placeholder: "12345 или comment" },
-  { key: "exchange_binance_id", label: "Binance ID / Pay ID", placeholder: "123456789" },
-  { key: "exchange_bybit_uid", label: "Bybit UID", placeholder: "123456789" },
-  { key: "exchange_htx_uid", label: "HTX UID", placeholder: "123456789" },
-  { key: "exchange_fiat_payment_url", label: "СБП / платёжная ссылка RUB", placeholder: "https://..." },
-  { key: "exchange_rub_card_requisites", label: "RUB карта / телефон", placeholder: "2200... / +7..." },
-  { key: "exchange_payout_methods", label: "Выдача THB: банки / наличные", placeholder: "Bangkok Bank, Kasikorn, cash..." },
-  { key: "exchange_kyc_policy", label: "AML/KYC правила", placeholder: "AML до 60%, KYC по паспорту..." },
-  { key: "exchange_operator_contact", label: "Контакт оператора", placeholder: "@operator / WhatsApp / Line" },
-  { key: "exchange_office_address", label: "Адрес офиса", placeholder: "Phuket, ..." },
-  { key: "exchange_working_hours", label: "Часы работы", placeholder: "10:00-22:00 Bangkok" },
-  { key: "exchange_westwallet_api_key", label: "WestWallet public API key", placeholder: "public key", secret: true },
-  { key: "exchange_westwallet_secret_key", label: "WestWallet private API key", placeholder: "private key", secret: true },
+type RequisiteField = {
+  key: string;
+  label: string;
+  savedLabel: string;
+  placeholder: string;
+  secret?: boolean;
+};
+
+const REQUISITE_GROUPS: Array<{ title: string; fields: RequisiteField[] }> = [
   {
-    key: "exchange_westwallet_ipn_url",
-    label: "WestWallet IPN URL",
-    placeholder: "https://your-domain/webhook/westwallet/tenantId",
+    title: "USDT TRC20",
+    fields: [
+      { key: "exchange_wallet_usdt_trc20", label: "Адрес", savedLabel: "USDT TRC20 — адрес", placeholder: "T..." },
+    ],
   },
-  { key: "exchange_westwallet_success_url", label: "WestWallet success URL", placeholder: "https://..." },
+  {
+    title: "USDT ERC20",
+    fields: [
+      { key: "exchange_wallet_usdt_erc20", label: "Адрес", savedLabel: "USDT ERC20 — адрес", placeholder: "0x..." },
+    ],
+  },
+  {
+    title: "USDT BEP20 / BSC",
+    fields: [
+      { key: "exchange_wallet_usdt_bep20", label: "Адрес", savedLabel: "USDT BEP20 / BSC — адрес", placeholder: "0x..." },
+    ],
+  },
+  {
+    title: "USDT TON",
+    fields: [
+      { key: "exchange_wallet_usdt_ton", label: "Адрес", savedLabel: "USDT TON — адрес", placeholder: "UQ..." },
+      {
+        key: "exchange_wallet_usdt_ton_memo",
+        label: "Memo/comment",
+        savedLabel: "USDT TON — memo/comment",
+        placeholder: "12345 или comment",
+      },
+    ],
+  },
+  {
+    title: "USDT Solana",
+    fields: [
+      {
+        key: "exchange_wallet_usdt_solana",
+        label: "Адрес",
+        savedLabel: "USDT Solana — адрес",
+        placeholder: "solana address",
+      },
+    ],
+  },
+  {
+    title: "USDC ERC20",
+    fields: [
+      { key: "exchange_wallet_usdc_erc20", label: "Адрес", savedLabel: "USDC ERC20 — адрес", placeholder: "0x..." },
+    ],
+  },
+  {
+    title: "USDC Solana",
+    fields: [
+      {
+        key: "exchange_wallet_usdc_solana",
+        label: "Адрес",
+        savedLabel: "USDC Solana — адрес",
+        placeholder: "solana address",
+      },
+    ],
+  },
+  {
+    title: "BTC",
+    fields: [
+      { key: "exchange_wallet_btc_default", label: "Адрес", savedLabel: "BTC — адрес", placeholder: "bc1..." },
+    ],
+  },
+  {
+    title: "ETH ERC20",
+    fields: [
+      { key: "exchange_wallet_eth_erc20", label: "Адрес", savedLabel: "ETH ERC20 — адрес", placeholder: "0x..." },
+    ],
+  },
+  {
+    title: "LTC",
+    fields: [
+      { key: "exchange_wallet_ltc_default", label: "Адрес", savedLabel: "LTC — адрес", placeholder: "ltc1..." },
+    ],
+  },
+  {
+    title: "TRX Tron",
+    fields: [
+      { key: "exchange_wallet_trx_tron", label: "Адрес", savedLabel: "TRX Tron — адрес", placeholder: "T..." },
+    ],
+  },
+  {
+    title: "TON",
+    fields: [
+      { key: "exchange_wallet_ton_ton", label: "Адрес", savedLabel: "TON — адрес", placeholder: "UQ..." },
+      {
+        key: "exchange_wallet_ton_ton_memo",
+        label: "Memo/comment",
+        savedLabel: "TON — memo/comment",
+        placeholder: "12345 или comment",
+      },
+    ],
+  },
+  {
+    title: "Exchange ID",
+    fields: [
+      { key: "exchange_binance_id", label: "Binance ID / Pay ID", savedLabel: "Binance ID / Pay ID", placeholder: "123456789" },
+      { key: "exchange_bybit_uid", label: "Bybit UID", savedLabel: "Bybit UID", placeholder: "123456789" },
+      { key: "exchange_htx_uid", label: "HTX UID", savedLabel: "HTX UID", placeholder: "123456789" },
+    ],
+  },
+  {
+    title: "RUB оплата",
+    fields: [
+      { key: "exchange_fiat_payment_url", label: "СБП / платёжная ссылка", savedLabel: "СБП / платёжная ссылка RUB", placeholder: "https://..." },
+      { key: "exchange_rub_card_number", label: "Номер карты", savedLabel: "RUB карта — номер", placeholder: "2200..." },
+      { key: "exchange_rub_card_phone", label: "Телефон", savedLabel: "RUB карта — телефон", placeholder: "+7..." },
+      { key: "exchange_rub_card_bank", label: "Банк", savedLabel: "RUB карта — банк", placeholder: "Сбер / T-Bank..." },
+      { key: "exchange_rub_card_recipient", label: "Получатель", savedLabel: "RUB карта — получатель", placeholder: "Иван И." },
+    ],
+  },
+  {
+    title: "Выдача THB",
+    fields: [
+      {
+        key: "exchange_payout_bank_methods",
+        label: "Банки",
+        savedLabel: "Выдача THB — банки",
+        placeholder: "Bangkok Bank, Kasikorn, SCB...",
+      },
+      {
+        key: "exchange_payout_cash_methods",
+        label: "Наличные / офис / курьер",
+        savedLabel: "Выдача THB — наличные",
+        placeholder: "office cash, courier cash, cardless ATM...",
+      },
+    ],
+  },
+  {
+    title: "AML / KYC",
+    fields: [
+      { key: "exchange_aml_policy", label: "AML правила", savedLabel: "AML правила", placeholder: "AML до 60%, high-risk — оператор..." },
+      { key: "exchange_kyc_policy", label: "KYC правила", savedLabel: "KYC правила", placeholder: "Паспорт / селфи / видео..." },
+    ],
+  },
+  {
+    title: "Контакты и офис",
+    fields: [
+      { key: "exchange_operator_telegram", label: "Telegram", savedLabel: "Контакт оператора — Telegram", placeholder: "@operator" },
+      { key: "exchange_operator_whatsapp", label: "WhatsApp", savedLabel: "Контакт оператора — WhatsApp", placeholder: "+66..." },
+      { key: "exchange_operator_line", label: "Line", savedLabel: "Контакт оператора — Line", placeholder: "line id" },
+      { key: "exchange_office_address", label: "Адрес офиса", savedLabel: "Адрес офиса", placeholder: "Phuket, ..." },
+      { key: "exchange_working_hours", label: "Часы работы", savedLabel: "Часы работы", placeholder: "10:00-22:00 Bangkok" },
+    ],
+  },
+  {
+    title: "WestWallet",
+    fields: [
+      {
+        key: "exchange_westwallet_api_key",
+        label: "Public API key",
+        savedLabel: "WestWallet public API key",
+        placeholder: "public key",
+        secret: true,
+      },
+      {
+        key: "exchange_westwallet_secret_key",
+        label: "Private API key",
+        savedLabel: "WestWallet private API key",
+        placeholder: "private key",
+        secret: true,
+      },
+      {
+        key: "exchange_westwallet_ipn_url",
+        label: "IPN URL",
+        savedLabel: "WestWallet IPN URL",
+        placeholder: "https://your-domain/webhook/westwallet/tenantId",
+      },
+      {
+        key: "exchange_westwallet_success_url",
+        label: "Success URL",
+        savedLabel: "WestWallet success URL",
+        placeholder: "https://...",
+      },
+    ],
+  },
 ];
+
+const REQUISITE_TYPES = REQUISITE_GROUPS.flatMap((group) => group.fields);
+
+const LEGACY_REQUISITE_LABELS: Record<string, string> = {
+  exchange_operator_contact: "Контакт оператора",
+  exchange_payout_methods: "Выдача THB: банки / наличные",
+  exchange_rub_card_requisites: "RUB карта / телефон",
+};
 
 /** Ключи, которые относятся к экрану реквизитов/настроек обменника. */
 function isRequisiteKey(key: string): boolean {
   return (
     key.startsWith("exchange_wallet_") ||
-    REQUISITE_TYPES.some((t) => t.key === key)
+    REQUISITE_TYPES.some((t) => t.key === key) ||
+    key in LEGACY_REQUISITE_LABELS
   );
 }
 
 /** Человекочитаемая подпись реквизита по ключу. */
 function requisiteLabel(key: string): string {
   const known = REQUISITE_TYPES.find((t) => t.key === key);
-  if (known) return known.label;
+  if (known) return known.savedLabel;
+  if (LEGACY_REQUISITE_LABELS[key]) return LEGACY_REQUISITE_LABELS[key];
   const m = /^exchange_wallet_(.+)$/.exec(key);
   if (m) return `Кошелёк ${m[1].replace(/_/g, " ").toUpperCase()}`;
   return key;
@@ -1070,39 +1232,51 @@ export function SaasExchange() {
                 </p>
               )}
 
-              <div className="grid gap-3 lg:grid-cols-2">
-                {REQUISITE_TYPES.map((item) => {
-                  const saved = savedByKey.get(item.key);
-                  const current = reqValues[item.key] ?? "";
-                  const hasSavedValue = Boolean(saved?.value || saved?.hasValue);
+              <div className="grid gap-3 xl:grid-cols-2">
+                {REQUISITE_GROUPS.map((group) => {
+                  const groupHasSavedValue = group.fields.some((field) => {
+                    const saved = savedByKey.get(field.key);
+                    return Boolean(saved?.value || saved?.hasValue);
+                  });
                   return (
-                    <div key={item.key} className="space-y-1.5 rounded-md border p-3">
+                    <div key={group.title} className="space-y-3 rounded-md border p-3">
                       <div className="flex items-center justify-between gap-2">
-                        <Label>{item.label}</Label>
-                        {hasSavedValue && <Badge variant="outline">сохранено</Badge>}
+                        <div className="font-medium text-sm">{group.title}</div>
+                        {groupHasSavedValue && <Badge variant="outline">сохранено</Badge>}
                       </div>
-                      <div className="flex gap-2">
-                        <Input
-                          autoComplete="off"
-                          type={item.secret ? "password" : "text"}
-                          value={current}
-                          onChange={(e) =>
-                            setReqValues((prev) => ({ ...prev, [item.key]: e.target.value }))
-                          }
-                          placeholder={
-                            saved?.sensitive && saved.hasValue
-                              ? "сохранено, введите новое для замены"
-                              : item.placeholder
-                          }
-                        />
-                        <Button
-                          type="button"
-                          onClick={() => handleSaveRequisite(item.key)}
-                          disabled={savingReqKey === item.key || !current.trim()}
-                        >
-                          <SaveIcon className="size-4" />
-                          OK
-                        </Button>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {group.fields.map((item) => {
+                          const saved = savedByKey.get(item.key);
+                          const current = reqValues[item.key] ?? "";
+                          return (
+                            <div key={item.key} className="space-y-1.5">
+                              <Label>{item.label}</Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  autoComplete="off"
+                                  type={item.secret ? "password" : "text"}
+                                  value={current}
+                                  onChange={(e) =>
+                                    setReqValues((prev) => ({ ...prev, [item.key]: e.target.value }))
+                                  }
+                                  placeholder={
+                                    saved?.sensitive && saved.hasValue
+                                      ? "сохранено, введите новое для замены"
+                                      : item.placeholder
+                                  }
+                                />
+                                <Button
+                                  type="button"
+                                  onClick={() => handleSaveRequisite(item.key)}
+                                  disabled={savingReqKey === item.key || !current.trim()}
+                                >
+                                  <SaveIcon className="size-4" />
+                                  OK
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );

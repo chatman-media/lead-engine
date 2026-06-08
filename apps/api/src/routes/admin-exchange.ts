@@ -559,8 +559,7 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		return c.json({ items });
 	});
 
-	// Body: { key: 'exchange_wallet_*' | 'exchange_fiat_payment_url' |
-	//         'exchange_binance_id' | 'exchange_rub_card_requisites', value }
+	// Body: { key: 'exchange_wallet_*' | exchange requisite/business/provider key, value }
 	app.post("/api/admin/exchange/requisites", async (c) => {
 		const tenantId = c.var.tenantId;
 		const body = await c.req.json().catch(() => ({}));

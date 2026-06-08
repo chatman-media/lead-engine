@@ -52,6 +52,13 @@ function logGuardTrip(
   );
 }
 
+function compactInfoLines(lines: Array<string | null | undefined>): string | null {
+  const out = lines
+    .map((line) => line?.trim())
+    .filter((line): line is string => Boolean(line));
+  return out.length > 0 ? out.join("\n") : null;
+}
+
 /** Событие срабатывания guardrail курса — уходит владельцу (A4 / #145). */
 export interface RateGuardAlert {
   tenantId: number;
@@ -676,19 +683,51 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     execute: async () => {
       const read = (key: string) =>
         getDecryptedSecret({ db, tenantId, key, masterKeyHex });
-      const [workingHours, operatorContact, payoutMethods, kycPolicy, officeAddress] =
-        await Promise.all([
-          read("exchange_working_hours"),
-          read("exchange_operator_contact"),
-          read("exchange_payout_methods"),
-          read("exchange_kyc_policy"),
-          read("exchange_office_address"),
-        ]);
+      const [
+        workingHours,
+        operatorContactLegacy,
+        operatorTelegram,
+        operatorWhatsapp,
+        operatorLine,
+        payoutMethodsLegacy,
+        payoutBankMethods,
+        payoutCashMethods,
+        amlPolicy,
+        kycPolicy,
+        officeAddress,
+      ] = await Promise.all([
+        read("exchange_working_hours"),
+        read("exchange_operator_contact"),
+        read("exchange_operator_telegram"),
+        read("exchange_operator_whatsapp"),
+        read("exchange_operator_line"),
+        read("exchange_payout_methods"),
+        read("exchange_payout_bank_methods"),
+        read("exchange_payout_cash_methods"),
+        read("exchange_aml_policy"),
+        read("exchange_kyc_policy"),
+        read("exchange_office_address"),
+      ]);
+      const operatorContact =
+        compactInfoLines([
+          operatorTelegram ? `Telegram: ${operatorTelegram}` : null,
+          operatorWhatsapp ? `WhatsApp: ${operatorWhatsapp}` : null,
+          operatorLine ? `Line: ${operatorLine}` : null,
+        ]) ?? operatorContactLegacy;
+      const payoutMethods =
+        compactInfoLines([
+          payoutBankMethods ? `Банки: ${payoutBankMethods}` : null,
+          payoutCashMethods ? `Наличные/офис/курьер: ${payoutCashMethods}` : null,
+        ]) ?? payoutMethodsLegacy;
+      const policy = compactInfoLines([
+        amlPolicy ? `AML: ${amlPolicy}` : null,
+        kycPolicy ? `KYC: ${kycPolicy}` : null,
+      ]);
       const info: Record<string, string> = {};
       if (workingHours) info.workingHours = workingHours;
       if (operatorContact) info.operatorContact = operatorContact;
       if (payoutMethods) info.payoutMethods = payoutMethods;
-      if (kycPolicy) info.kycPolicy = kycPolicy;
+      if (policy) info.kycPolicy = policy;
       if (officeAddress) info.officeAddress = officeAddress;
       if (Object.keys(info).length === 0) {
         return {
