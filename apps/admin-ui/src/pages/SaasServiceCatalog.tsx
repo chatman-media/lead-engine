@@ -148,6 +148,24 @@ function uniqueFunnelSlug(base: string, funnels: FunnelListItem[]): string {
   return `${normalized}_${Date.now()}`;
 }
 
+function templateAlreadyExists(template: FunnelTemplateInfo, funnels: FunnelListItem[]): boolean {
+  if (template.key === "skeleton") return false;
+  return funnels.some(
+    (funnel) =>
+      (template.verticalTemplateId && funnel.verticalTemplateId === template.verticalTemplateId) ||
+      funnel.slug === template.key,
+  );
+}
+
+function availableTemplates(
+  templates: FunnelTemplateInfo[],
+  funnels: FunnelListItem[],
+): FunnelTemplateInfo[] {
+  return templates.filter(
+    (template) => template.isCreatable !== false && !templateAlreadyExists(template, funnels),
+  );
+}
+
 function transliterate(value: string): string {
   const map: Record<string, string> = {
     а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i",
@@ -195,6 +213,20 @@ export function SaasServiceCatalog() {
 
   const activeCount = useMemo(() => items.filter((item) => item.isActive).length, [items]);
   const selectedExecutor = EXECUTOR_OPTIONS.find((option) => option.value === form.executor) ?? EXECUTOR_OPTIONS[0]!;
+  const selectableTemplates = useMemo(
+    () => availableTemplates(templates, funnels),
+    [templates, funnels],
+  );
+
+  useEffect(() => {
+    const fallbackTemplate = selectableTemplates[0];
+    if (!fallbackTemplate) return;
+    setForm((prev) =>
+      selectableTemplates.some((template) => template.key === prev.newFunnelTemplate)
+        ? prev
+        : { ...prev, newFunnelTemplate: fallbackTemplate.key },
+    );
+  }, [selectableTemplates]);
 
   async function reload() {
     setError("");
@@ -207,7 +239,7 @@ export function SaasServiceCatalog() {
       ]);
       setItems(catalogRes.items);
       setFunnels(funnelRes.items);
-      setTemplates(templateRes.items.filter((template) => template.isCreatable !== false));
+      setTemplates(templateRes.items);
       setPartnerServices(serviceRes.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить каталог");
@@ -242,10 +274,13 @@ export function SaasServiceCatalog() {
       if (form.executor === "own") {
         routeType = "funnel";
         if (form.processMode === "new") {
+          const template = selectableTemplates.some((item) => item.key === form.newFunnelTemplate)
+            ? form.newFunnelTemplate
+            : (selectableTemplates[0]?.key ?? "skeleton");
           const slug = uniqueFunnelSlug(form.newFunnelSlug || form.name, funnels);
           const created = await saas.createFunnel({
             slug,
-            template: form.newFunnelTemplate || "skeleton",
+            template,
           });
           funnelId = created.funnelId;
         } else {
@@ -277,7 +312,7 @@ export function SaasServiceCatalog() {
       toast.success("Услуга добавлена в каталог");
       setForm({
         ...EMPTY_FORM,
-        newFunnelTemplate: templates[0]?.key ?? "skeleton",
+        newFunnelTemplate: selectableTemplates[0]?.key ?? "skeleton",
       });
       await reload();
     } catch (err) {
@@ -446,12 +481,14 @@ export function SaasServiceCatalog() {
                           <SelectValue placeholder="Выбрать шаблон" />
                         </SelectTrigger>
                         <SelectContent>
-                          {templates.map((template) => (
+                          {selectableTemplates.map((template) => (
                             <SelectItem key={template.key} value={template.key}>
                               {template.displayName} · {template.stagesCount} стадий
                             </SelectItem>
                           ))}
-                          {templates.length === 0 && <SelectItem value="skeleton">Пустой процесс</SelectItem>}
+                          {selectableTemplates.length === 0 && (
+                            <SelectItem value="skeleton">Пустой процесс</SelectItem>
+                          )}
                         </SelectContent>
                       </Select>
                     </div>
