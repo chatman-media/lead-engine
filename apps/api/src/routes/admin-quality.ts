@@ -7,7 +7,12 @@ import {
   type PairwiseWinner,
   type SelfPlayMatchResult,
 } from "@chatman-media/sales";
-import { pairwiseMatches, selfPlayMatches } from "@chatman-media/storage";
+import {
+  coachProposals,
+  pairwiseMatches,
+  selfPlayMatches,
+  shadowEvaluations,
+} from "@chatman-media/storage";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 
@@ -163,6 +168,112 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
           .map(withPairwiseRates)
           .sort((a, b) => b.total - a.total || (b.lastMatchAt ?? 0) - (a.lastMatchAt ?? 0)),
         recent,
+      };
+    });
+
+    return c.json(summary);
+  });
+
+  app.get("/api/admin/quality/coach/summary", async (c) => {
+    const tenantId = c.var.tenantId;
+
+    const summary = await withTenant(opts.db, tenantId, async (tx) => {
+      const [proposalTotals] = await tx
+        .select({
+          total: sql<number>`count(*)::int`,
+          pending: sql<number>`(count(*) filter (where ${coachProposals.status} = 'pending'))::int`,
+          applied: sql<number>`(count(*) filter (where ${coachProposals.status} = 'applied'))::int`,
+          dismissed: sql<number>`(count(*) filter (where ${coachProposals.status} = 'dismissed'))::int`,
+          lastProposalAt: sql<number | null>`max(${coachProposals.createdAt})::int`,
+        })
+        .from(coachProposals)
+        .where(eq(coachProposals.tenantId, tenantId));
+
+      const [shadowTotals] = await tx
+        .select({
+          total: sql<number>`count(*)::int`,
+          running: sql<number>`(count(*) filter (where ${shadowEvaluations.status} = 'running'))::int`,
+          complete: sql<number>`(count(*) filter (where ${shadowEvaluations.status} = 'complete'))::int`,
+          failed: sql<number>`(count(*) filter (where ${shadowEvaluations.status} = 'failed'))::int`,
+          keep: sql<number>`(count(*) filter (where ${shadowEvaluations.decision} = 'keep'))::int`,
+          rollback: sql<number>`(count(*) filter (where ${shadowEvaluations.decision} = 'rollback'))::int`,
+          inconclusive: sql<number>`(count(*) filter (where ${shadowEvaluations.decision} = 'inconclusive'))::int`,
+          lastShadowAt: sql<number | null>`max(${shadowEvaluations.startedAt})::int`,
+        })
+        .from(shadowEvaluations)
+        .where(eq(shadowEvaluations.tenantId, tenantId));
+
+      const proposals = await tx
+        .select({
+          id: coachProposals.id,
+          styleSlug: coachProposals.styleSlug,
+          sampleSize: coachProposals.sampleSize,
+          personaFilter: coachProposals.personaFilter,
+          summary: coachProposals.summary,
+          editsJson: coachProposals.editsJson,
+          rationaleJson: coachProposals.rationaleJson,
+          rawOutput: coachProposals.rawOutput,
+          status: coachProposals.status,
+          createdAt: coachProposals.createdAt,
+          decidedAt: coachProposals.decidedAt,
+          decidedByAdminId: coachProposals.decidedByAdminId,
+        })
+        .from(coachProposals)
+        .where(eq(coachProposals.tenantId, tenantId))
+        .orderBy(desc(coachProposals.createdAt), desc(coachProposals.id))
+        .limit(10);
+
+      const shadows = await tx
+        .select({
+          id: shadowEvaluations.id,
+          proposalId: shadowEvaluations.proposalId,
+          parentStyleSlug: shadowEvaluations.parentStyleSlug,
+          parentStyleId: shadowEvaluations.parentStyleId,
+          newStyleSlug: shadowEvaluations.newStyleSlug,
+          newStyleId: shadowEvaluations.newStyleId,
+          pairsPlanned: shadowEvaluations.pairsPlanned,
+          pairsDone: shadowEvaluations.pairsDone,
+          aWins: shadowEvaluations.aWins,
+          bWins: shadowEvaluations.bWins,
+          draws: shadowEvaluations.draws,
+          winRateLb: shadowEvaluations.winRateLb,
+          status: shadowEvaluations.status,
+          decision: shadowEvaluations.decision,
+          errorMessage: shadowEvaluations.errorMessage,
+          startedAt: shadowEvaluations.startedAt,
+          completedAt: shadowEvaluations.completedAt,
+        })
+        .from(shadowEvaluations)
+        .where(eq(shadowEvaluations.tenantId, tenantId))
+        .orderBy(desc(shadowEvaluations.startedAt), desc(shadowEvaluations.id))
+        .limit(10);
+
+      return {
+        totals: {
+          proposals: proposalTotals ?? {
+            total: 0,
+            pending: 0,
+            applied: 0,
+            dismissed: 0,
+            lastProposalAt: null,
+          },
+          shadows: shadowTotals ?? {
+            total: 0,
+            running: 0,
+            complete: 0,
+            failed: 0,
+            keep: 0,
+            rollback: 0,
+            inconclusive: 0,
+            lastShadowAt: null,
+          },
+        },
+        proposals: proposals.map((row) => ({
+          ...row,
+          edits: parseJsonValue(row.editsJson, {}),
+          rationale: parseStringArray(row.rationaleJson),
+        })),
+        shadows,
       };
     });
 
@@ -369,6 +480,14 @@ function parseLimit(value: string | undefined): number | null {
 function parseIncludeTranscript(value: string | undefined): boolean {
   if (!value) return true;
   return !["0", "false", "no"].includes(value.trim().toLowerCase());
+}
+
+function parseJsonValue(value: string, fallback: unknown): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
 }
 
 type SelfPlayMatchRow = {

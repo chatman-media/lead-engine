@@ -1,10 +1,12 @@
 import {
   admins,
   applyAllMigrations,
+  coachProposals,
   createIsolatedDb,
   pairwiseMatches,
   schema,
   selfPlayMatches,
+  shadowEvaluations,
   tryConnectToPg,
 } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -160,6 +162,121 @@ beforeAll(async () => {
       createdAt: now,
     },
   ]);
+
+  const insertedProposals = await db.insert(coachProposals).values([
+    {
+      tenantId: tenantA,
+      styleSlug: "style-b",
+      sampleSize: 8,
+      personaFilter: "price-sensitive",
+      summary: "Handle price objections earlier",
+      editsJson: JSON.stringify({
+        voice_tone: "warmer and specific",
+        stage_guidance: { objection: "Anchor savings before quoting the price." },
+      }),
+      rationaleJson: JSON.stringify(["The candidate walked away after an unanchored price answer."]),
+      rawOutput: '{"summary":"Handle price objections earlier"}',
+      status: "pending",
+      createdAt: now + 15,
+    },
+    {
+      tenantId: tenantA,
+      styleSlug: "style-a",
+      sampleSize: 5,
+      personaFilter: null,
+      summary: "Tighten close on skeptical personas",
+      editsJson: JSON.stringify({ hooks_add: [{ kind: "social_proof", text: "Recent peer result." }] }),
+      rationaleJson: JSON.stringify(["Skeptical persona asked for proof before committing."]),
+      rawOutput: null,
+      status: "applied",
+      createdAt: now - 25,
+      decidedAt: now - 5,
+    },
+    {
+      tenantId: tenantB,
+      styleSlug: "style-a",
+      sampleSize: 3,
+      personaFilter: null,
+      summary: "tenant b coach only",
+      editsJson: JSON.stringify({ voice_tone: "tenant-b" }),
+      rationaleJson: JSON.stringify(["tenant b rationale"]),
+      status: "pending",
+      createdAt: now,
+    },
+  ]).returning({
+    id: coachProposals.id,
+    tenantId: coachProposals.tenantId,
+    summary: coachProposals.summary,
+  });
+
+  const proposalAPending = insertedProposals.find(
+    (row) => row.tenantId === tenantA && row.summary === "Handle price objections earlier",
+  );
+  const proposalAApplied = insertedProposals.find(
+    (row) => row.tenantId === tenantA && row.summary === "Tighten close on skeptical personas",
+  );
+  const proposalBOther = insertedProposals.find((row) => row.tenantId === tenantB);
+  if (!proposalAPending || !proposalAApplied || !proposalBOther) {
+    throw new Error("coach proposal fixture mismatch");
+  }
+
+  await db.insert(shadowEvaluations).values([
+    {
+      tenantId: tenantA,
+      proposalId: proposalAPending.id,
+      parentStyleSlug: "style-b",
+      parentStyleId: 201,
+      newStyleSlug: "style-b-coach-v2",
+      newStyleId: 202,
+      pairsPlanned: 4,
+      pairsDone: 4,
+      aWins: 1,
+      bWins: 3,
+      draws: 0,
+      winRateLb: 0.62,
+      status: "complete",
+      decision: "keep",
+      startedAt: now + 16,
+      completedAt: now + 18,
+    },
+    {
+      tenantId: tenantA,
+      proposalId: proposalAApplied.id,
+      parentStyleSlug: "style-a",
+      parentStyleId: 101,
+      newStyleSlug: "style-a-coach-v2",
+      newStyleId: 102,
+      pairsPlanned: 4,
+      pairsDone: 2,
+      aWins: 1,
+      bWins: 0,
+      draws: 1,
+      winRateLb: null,
+      status: "failed",
+      decision: null,
+      errorMessage: "judge unavailable",
+      startedAt: now - 12,
+      completedAt: null,
+    },
+    {
+      tenantId: tenantB,
+      proposalId: proposalBOther.id,
+      parentStyleSlug: "style-a",
+      parentStyleId: 301,
+      newStyleSlug: "style-a-tenant-b-v2",
+      newStyleId: 302,
+      pairsPlanned: 2,
+      pairsDone: 2,
+      aWins: 2,
+      bWins: 0,
+      draws: 0,
+      winRateLb: 0.05,
+      status: "complete",
+      decision: "rollback",
+      startedAt: now,
+      completedAt: now + 1,
+    },
+  ]);
 }, 30_000);
 
 afterAll(async () => {
@@ -270,6 +387,50 @@ describe("admin quality JSONL export", () => {
     expect(JSON.stringify(body)).not.toContain("tenant b pairwise only");
   });
 
+  it("returns tenant-scoped coach proposal and shadow summary", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/quality/coach/summary");
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as QualityCoachSummaryResponse;
+    expect(body.totals.proposals).toMatchObject({
+      total: 2,
+      pending: 1,
+      applied: 1,
+      dismissed: 0,
+    });
+    expect(body.totals.shadows).toMatchObject({
+      total: 2,
+      complete: 1,
+      failed: 1,
+      keep: 1,
+      rollback: 0,
+    });
+    expect(body.proposals[0]).toMatchObject({
+      styleSlug: "style-b",
+      sampleSize: 8,
+      personaFilter: "price-sensitive",
+      summary: "Handle price objections earlier",
+      edits: {
+        voice_tone: "warmer and specific",
+        stage_guidance: { objection: "Anchor savings before quoting the price." },
+      },
+      rationale: ["The candidate walked away after an unanchored price answer."],
+      status: "pending",
+    });
+    expect(body.shadows[0]).toMatchObject({
+      parentStyleSlug: "style-b",
+      newStyleSlug: "style-b-coach-v2",
+      pairsPlanned: 4,
+      pairsDone: 4,
+      bWins: 3,
+      winRateLb: 0.62,
+      status: "complete",
+      decision: "keep",
+    });
+    expect(JSON.stringify(body)).not.toContain("tenant b coach only");
+  });
+
   it("exports tenant-scoped pairwise matches as JSONL attachment", async () => {
     if (!sql) return;
     const res = await authReq(tokenA, "/api/admin/quality/pairwise/export.jsonl");
@@ -377,6 +538,14 @@ describe("admin quality JSONL export", () => {
       bWins: 0,
       draws: 1,
     });
+
+    const coachSummary = (await (
+      await authReq(tokenB, "/api/admin/quality/coach/summary")
+    ).json()) as QualityCoachSummaryResponse;
+    expect(coachSummary.totals.proposals).toMatchObject({ total: 1, pending: 1 });
+    expect(coachSummary.totals.shadows).toMatchObject({ total: 1, complete: 1, rollback: 1 });
+    expect(coachSummary.proposals[0]?.summary).toBe("tenant b coach only");
+    expect(coachSummary.shadows[0]?.decision).toBe("rollback");
   });
 });
 
@@ -502,6 +671,45 @@ type PairwiseSummaryResponse = {
     judgeReason: string | null;
     eloAAfter: number;
     eloBAfter: number;
+  }>;
+};
+
+type QualityCoachSummaryResponse = {
+  totals: {
+    proposals: {
+      total: number;
+      pending: number;
+      applied: number;
+      dismissed: number;
+    };
+    shadows: {
+      total: number;
+      running: number;
+      complete: number;
+      failed: number;
+      keep: number;
+      rollback: number;
+      inconclusive: number;
+    };
+  };
+  proposals: Array<{
+    styleSlug: string;
+    sampleSize: number;
+    personaFilter: string | null;
+    summary: string;
+    edits: unknown;
+    rationale: string[];
+    status: string;
+  }>;
+  shadows: Array<{
+    parentStyleSlug: string;
+    newStyleSlug: string;
+    pairsPlanned: number;
+    pairsDone: number;
+    bWins: number;
+    winRateLb: number | null;
+    status: string;
+    decision: string | null;
   }>;
 };
 
