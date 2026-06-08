@@ -1,3 +1,10 @@
+# [@chatman-media/sales-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/sales-v1.1.2...@chatman-media/sales-v1.2.0) (2026-06-08)
+
+
+### Features
+
+* **sales:** add quality lab JSONL exports ([#320](https://github.com/chatman-media/lead-engine/issues/320)) ([cf3c462](https://github.com/chatman-media/lead-engine/commit/cf3c462e5104e3534787f9681ce989b5ccf9f546))
+
 # [@chatman-media/sales-v1.1.2](https://github.com/chatman-media/lead-engine/compare/@chatman-media/sales-v1.1.1...@chatman-media/sales-v1.1.2) (2026-06-06)
 
 
