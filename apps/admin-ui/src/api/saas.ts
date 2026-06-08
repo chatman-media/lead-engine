@@ -769,6 +769,7 @@ export interface ExperimentItem {
 }
 
 export type QualityOutcome = "won" | "lost" | "draw";
+export type QualityPairwiseWinner = "a" | "b" | "draw";
 
 export interface QualitySelfPlaySummary {
   totals: {
@@ -817,6 +818,51 @@ export interface QualityExportOptions {
   styleSlug?: string;
   personaSlug?: string;
   outcome?: QualityOutcome;
+  limit?: number;
+  includeTranscript?: boolean;
+}
+
+export interface QualityPairwiseSummary {
+  totals: {
+    total: number;
+    aWins: number;
+    bWins: number;
+    draws: number;
+    aWinRate: number;
+    bWinRate: number;
+    lastMatchAt: number | null;
+  };
+  byPair: Array<{
+    styleASlug: string;
+    styleBSlug: string;
+    total: number;
+    aWins: number;
+    bWins: number;
+    draws: number;
+    aWinRate: number;
+    bWinRate: number;
+    lastMatchAt: number | null;
+  }>;
+  recent: Array<{
+    id: number;
+    styleASlug: string;
+    styleBSlug: string;
+    personaSlug: string;
+    winner: QualityPairwiseWinner;
+    judgeReason: string | null;
+    matchAId: number | null;
+    matchBId: number | null;
+    eloAAfter: number;
+    eloBAfter: number;
+    createdAt: number;
+  }>;
+}
+
+export interface QualityPairwiseExportOptions {
+  styleASlug?: string;
+  styleBSlug?: string;
+  personaSlug?: string;
+  winner?: QualityPairwiseWinner;
   limit?: number;
   includeTranscript?: boolean;
 }
@@ -1946,6 +1992,9 @@ export const saas = {
   getQualitySelfPlaySummary() {
     return request<QualitySelfPlaySummary>("/api/admin/quality/self-play/summary");
   },
+  getQualityPairwiseSummary() {
+    return request<QualityPairwiseSummary>("/api/admin/quality/pairwise/summary");
+  },
   async exportQualitySelfPlayJsonl(opts: QualityExportOptions = {}): Promise<void> {
     const params = new URLSearchParams();
     if (opts.styleSlug) params.set("styleSlug", opts.styleSlug);
@@ -1971,6 +2020,35 @@ export const saas = {
     const a = document.createElement("a");
     a.href = url;
     a.download = "self-play-matches.jsonl";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  async exportQualityPairwiseJsonl(opts: QualityPairwiseExportOptions = {}): Promise<void> {
+    const params = new URLSearchParams();
+    if (opts.styleASlug) params.set("styleASlug", opts.styleASlug);
+    if (opts.styleBSlug) params.set("styleBSlug", opts.styleBSlug);
+    if (opts.personaSlug) params.set("personaSlug", opts.personaSlug);
+    if (opts.winner) params.set("winner", opts.winner);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.includeTranscript === false) params.set("includeTranscript", "false");
+
+    const token = getToken();
+    const qs = params.toString();
+    const res = await fetch(
+      `${API_BASE}/api/admin/quality/pairwise/export.jsonl${qs ? `?${qs}` : ""}`,
+      {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      },
+    );
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      throw new ApiError(res.status, (body.error as string | undefined) ?? res.statusText);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "pairwise-matches.jsonl";
     a.click();
     URL.revokeObjectURL(url);
   },

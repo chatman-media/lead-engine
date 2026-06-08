@@ -1,14 +1,18 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import {
+  exportPairwiseMatchJsonl,
   exportSelfPlayMatchJsonl,
   type EloOutcome,
+  type PairwiseMatchResult,
+  type PairwiseWinner,
   type SelfPlayMatchResult,
 } from "@chatman-media/sales";
-import { selfPlayMatches } from "@chatman-media/storage";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { pairwiseMatches, selfPlayMatches } from "@chatman-media/storage";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 
 const OUTCOMES = new Set<EloOutcome>(["won", "lost", "draw"]);
+const PAIRWISE_WINNERS = new Set<PairwiseWinner>(["a", "b", "draw"]);
 
 export interface AdminQualityRoutesOpts {
   db: Db;
@@ -103,6 +107,68 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     return c.json(summary);
   });
 
+  app.get("/api/admin/quality/pairwise/summary", async (c) => {
+    const tenantId = c.var.tenantId;
+
+    const summary = await withTenant(opts.db, tenantId, async (tx) => {
+      const [totalsRow] = await tx
+        .select({
+          total: sql<number>`count(*)::int`,
+          aWins: sql<number>`(count(*) filter (where ${pairwiseMatches.winner} = 'a'))::int`,
+          bWins: sql<number>`(count(*) filter (where ${pairwiseMatches.winner} = 'b'))::int`,
+          draws: sql<number>`(count(*) filter (where ${pairwiseMatches.winner} = 'draw'))::int`,
+          lastMatchAt: sql<number | null>`max(${pairwiseMatches.createdAt})::int`,
+        })
+        .from(pairwiseMatches)
+        .where(eq(pairwiseMatches.tenantId, tenantId));
+
+      const byPairRows = await tx
+        .select({
+          styleASlug: pairwiseMatches.styleASlug,
+          styleBSlug: pairwiseMatches.styleBSlug,
+          total: sql<number>`count(*)::int`,
+          aWins: sql<number>`(count(*) filter (where ${pairwiseMatches.winner} = 'a'))::int`,
+          bWins: sql<number>`(count(*) filter (where ${pairwiseMatches.winner} = 'b'))::int`,
+          draws: sql<number>`(count(*) filter (where ${pairwiseMatches.winner} = 'draw'))::int`,
+          lastMatchAt: sql<number | null>`max(${pairwiseMatches.createdAt})::int`,
+        })
+        .from(pairwiseMatches)
+        .where(eq(pairwiseMatches.tenantId, tenantId))
+        .groupBy(pairwiseMatches.styleASlug, pairwiseMatches.styleBSlug);
+
+      const recent = await tx
+        .select({
+          id: pairwiseMatches.id,
+          styleASlug: pairwiseMatches.styleASlug,
+          styleBSlug: pairwiseMatches.styleBSlug,
+          personaSlug: pairwiseMatches.personaSlug,
+          winner: pairwiseMatches.winner,
+          judgeReason: pairwiseMatches.judgeReason,
+          matchAId: pairwiseMatches.matchAId,
+          matchBId: pairwiseMatches.matchBId,
+          eloAAfter: pairwiseMatches.eloAAfter,
+          eloBAfter: pairwiseMatches.eloBAfter,
+          createdAt: pairwiseMatches.createdAt,
+        })
+        .from(pairwiseMatches)
+        .where(eq(pairwiseMatches.tenantId, tenantId))
+        .orderBy(desc(pairwiseMatches.createdAt), desc(pairwiseMatches.id))
+        .limit(10);
+
+      return {
+        totals: withPairwiseRates(
+          totalsRow ?? { total: 0, aWins: 0, bWins: 0, draws: 0, lastMatchAt: null },
+        ),
+        byPair: byPairRows
+          .map(withPairwiseRates)
+          .sort((a, b) => b.total - a.total || (b.lastMatchAt ?? 0) - (a.lastMatchAt ?? 0)),
+        recent,
+      };
+    });
+
+    return c.json(summary);
+  });
+
   /**
    * GET /api/admin/quality/self-play/export.jsonl
    *
@@ -172,6 +238,98 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     });
   });
 
+  app.get("/api/admin/quality/pairwise/export.jsonl", async (c) => {
+    const tenantId = c.var.tenantId;
+    const styleASlug = optionalQuery(c.req.query("styleASlug"));
+    const styleBSlug = optionalQuery(c.req.query("styleBSlug"));
+    const personaSlug = optionalQuery(c.req.query("personaSlug"));
+    const winnerRaw = optionalQuery(c.req.query("winner"));
+    if (winnerRaw && !PAIRWISE_WINNERS.has(winnerRaw as PairwiseWinner)) {
+      return c.json({ error: "winner must be one of: a, b, draw" }, 400);
+    }
+    const winner = winnerRaw as PairwiseWinner | undefined;
+    const limit = parseLimit(c.req.query("limit"));
+    if (limit === null) return c.json({ error: "limit must be an integer between 1 and 1000" }, 400);
+    const includeTranscript = parseIncludeTranscript(c.req.query("includeTranscript"));
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) => {
+      const filters = [eq(pairwiseMatches.tenantId, tenantId)];
+      if (styleASlug) filters.push(eq(pairwiseMatches.styleASlug, styleASlug));
+      if (styleBSlug) filters.push(eq(pairwiseMatches.styleBSlug, styleBSlug));
+      if (personaSlug) filters.push(eq(pairwiseMatches.personaSlug, personaSlug));
+      if (winner) filters.push(eq(pairwiseMatches.winner, winner));
+
+      const pairwiseRows = await tx
+        .select({
+          id: pairwiseMatches.id,
+          styleASlug: pairwiseMatches.styleASlug,
+          styleBSlug: pairwiseMatches.styleBSlug,
+          personaSlug: pairwiseMatches.personaSlug,
+          winner: pairwiseMatches.winner,
+          judgeReason: pairwiseMatches.judgeReason,
+          matchAId: pairwiseMatches.matchAId,
+          matchBId: pairwiseMatches.matchBId,
+          eloAAfter: pairwiseMatches.eloAAfter,
+          eloBAfter: pairwiseMatches.eloBAfter,
+          createdAt: pairwiseMatches.createdAt,
+        })
+        .from(pairwiseMatches)
+        .where(and(...filters))
+        .orderBy(desc(pairwiseMatches.createdAt), desc(pairwiseMatches.id))
+        .limit(limit);
+
+      const matchIds = [
+        ...new Set(
+          pairwiseRows.flatMap((row) => [row.matchAId, row.matchBId]).filter(isPresentId),
+        ),
+      ];
+      const selfPlayRows = matchIds.length
+        ? await tx
+            .select({
+              id: selfPlayMatches.id,
+              styleSlug: selfPlayMatches.styleSlug,
+              personaSlug: selfPlayMatches.personaSlug,
+              outcome: selfPlayMatches.outcome,
+              judgeReason: selfPlayMatches.judgeReason,
+              transcriptJson: selfPlayMatches.transcriptJson,
+              turns: selfPlayMatches.turns,
+              skillsJson: selfPlayMatches.skillsJson,
+              leadId: selfPlayMatches.leadId,
+              fabricationsCaught: selfPlayMatches.fabricationsCaught,
+              createdAt: selfPlayMatches.createdAt,
+            })
+            .from(selfPlayMatches)
+            .where(and(eq(selfPlayMatches.tenantId, tenantId), inArray(selfPlayMatches.id, matchIds)))
+        : [];
+
+      const byId = new Map(selfPlayRows.map((row) => [row.id, row]));
+      return pairwiseRows.map((row) => ({
+        ...row,
+        matchA: row.matchAId ? byId.get(row.matchAId) : undefined,
+        matchB: row.matchBId ? byId.get(row.matchBId) : undefined,
+      }));
+    });
+
+    const exportedAt = new Date().toISOString();
+    const jsonl = rows
+      .map((row) =>
+        exportPairwiseMatchJsonl(toPairwiseResult(row), {
+          exportedAt,
+          includeTranscript,
+          source: "admin-api",
+        }).trimEnd(),
+      )
+      .join("\n");
+    const body = jsonl ? `${jsonl}\n` : "";
+
+    return new Response(body, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="pairwise-matches.jsonl"',
+      },
+    });
+  });
+
   return app;
 }
 
@@ -180,6 +338,20 @@ function withWinRate<T extends { total: number; won: number }>(row: T): T & { wi
     ...row,
     winRate: row.total > 0 ? Math.round((row.won / row.total) * 1000) / 10 : 0,
   };
+}
+
+function withPairwiseRates<T extends { total: number; aWins: number; bWins: number }>(
+  row: T,
+): T & { aWinRate: number; bWinRate: number } {
+  return {
+    ...row,
+    aWinRate: row.total > 0 ? Math.round((row.aWins / row.total) * 1000) / 10 : 0,
+    bWinRate: row.total > 0 ? Math.round((row.bWins / row.total) * 1000) / 10 : 0,
+  };
+}
+
+function isPresentId(value: number | null): value is number {
+  return typeof value === "number" && value > 0;
 }
 
 function optionalQuery(value: string | undefined): string | undefined {
@@ -211,6 +383,81 @@ type SelfPlayMatchRow = {
   leadId: number | null;
   fabricationsCaught: number;
 };
+
+type PairwiseMatchRow = {
+  id: number;
+  styleASlug: string;
+  styleBSlug: string;
+  personaSlug: string;
+  winner: string;
+  judgeReason: string | null;
+  matchAId: number | null;
+  matchBId: number | null;
+  eloAAfter: number;
+  eloBAfter: number;
+  matchA?: SelfPlayMatchRow;
+  matchB?: SelfPlayMatchRow;
+};
+
+function toPairwiseResult(row: PairwiseMatchRow): PairwiseMatchResult {
+  const winner = PAIRWISE_WINNERS.has(row.winner as PairwiseWinner)
+    ? (row.winner as PairwiseWinner)
+    : "draw";
+  return {
+    styleASlug: row.styleASlug,
+    styleBSlug: row.styleBSlug,
+    personaSlug: row.personaSlug,
+    matchA: row.matchA
+      ? toSelfPlayResult(row.matchA)
+      : missingSelfPlayResult({
+          styleSlug: row.styleASlug,
+          personaSlug: row.personaSlug,
+          matchId: row.matchAId,
+          outcome: winner === "a" ? "won" : winner === "b" ? "lost" : "draw",
+        }),
+    matchB: row.matchB
+      ? toSelfPlayResult(row.matchB)
+      : missingSelfPlayResult({
+          styleSlug: row.styleBSlug,
+          personaSlug: row.personaSlug,
+          matchId: row.matchBId,
+          outcome: winner === "b" ? "won" : winner === "a" ? "lost" : "draw",
+        }),
+    verdict: {
+      winner,
+      reason: row.judgeReason ?? "",
+    },
+    eloAAfter: row.eloAAfter,
+    eloBAfter: row.eloBAfter,
+    pairwiseId: row.id,
+    persisted: true,
+  };
+}
+
+function missingSelfPlayResult(input: {
+  styleSlug: string;
+  personaSlug: string;
+  matchId: number | null;
+  outcome: EloOutcome;
+}): SelfPlayMatchResult {
+  return {
+    styleSlug: input.styleSlug,
+    personaSlug: input.personaSlug,
+    turns: 0,
+    transcript: [],
+    skillsAttributed: [],
+    verdict: {
+      outcome: input.outcome,
+      reason: "self-play match unavailable",
+    },
+    outcome: input.outcome,
+    leadId: -1,
+    fabricationsCaught: 0,
+    matchId: input.matchId,
+    persisted: false,
+    warnings: ["self-play match unavailable"],
+  };
+}
 
 function toSelfPlayResult(row: SelfPlayMatchRow): SelfPlayMatchResult {
   const outcome = OUTCOMES.has(row.outcome as EloOutcome)
