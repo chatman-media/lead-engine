@@ -72,7 +72,9 @@ function makeDeps(reply: ReplyStrategy | null = null) {
 }
 
 describe("processInbound", () => {
-	let deps: ReturnType<typeof makeDeps>;
+	let deps: ReturnType<typeof makeDeps> & {
+		notifications?: Parameters<typeof processInbound>[1]["notifications"];
+	};
 	beforeEach(() => {
 		deps = makeDeps();
 	});
