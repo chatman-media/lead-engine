@@ -42,6 +42,8 @@ export interface FieldExtractor {
     contactId: number;
     text: string;
     db: Db;
+    targetFunnelId?: number | null;
+    targetCatalogItemId?: number | null;
   }): Promise<void>;
 }
 
@@ -50,7 +52,7 @@ export function makeFieldExtractor(
   notificationService?: NotificationService,
 ): FieldExtractor {
   return {
-    async extract({ tenantId, contactId, text, db }) {
+    async extract({ tenantId, contactId, text, db, targetFunnelId, targetCatalogItemId }) {
       // Resolve chat client — skip if no chat config for this tenant
       let chatClient: ReturnType<typeof ref.router.resolveChat> | null = null;
       try {
@@ -106,7 +108,7 @@ export function makeFieldExtractor(
             ),
           )
           .orderBy(asc(serviceCatalogItems.sortOrder), asc(serviceCatalogItems.id));
-        const routeSelection = chooseServiceRoute({
+        let routeSelection = chooseServiceRoute({
           funnels: activeFunnels,
           catalogItems: catalogItems.map((item) => ({
             ...item,
@@ -114,7 +116,41 @@ export function makeFieldExtractor(
           })),
           text,
         });
-        const activeFunnel = routeSelection.funnel;
+        let activeFunnel = routeSelection.funnel;
+
+        const forcedCatalogItem =
+          targetCatalogItemId && Number.isFinite(targetCatalogItemId)
+            ? catalogItems.find((item) => item.id === targetCatalogItemId)
+            : null;
+        const forcedFunnelId =
+          targetFunnelId && Number.isFinite(targetFunnelId)
+            ? targetFunnelId
+            : forcedCatalogItem?.routeType === "partner_service" && forcedCatalogItem.partnerServiceFunnelId
+              ? forcedCatalogItem.partnerServiceFunnelId
+              : forcedCatalogItem?.funnelId;
+        if (forcedFunnelId) {
+          const [forcedFunnel] = await tx
+            .select({
+              id: funnels.id,
+              slug: funnels.slug,
+              verticalTemplateId: funnels.verticalTemplateId,
+            })
+            .from(funnels)
+            .where(and(eq(funnels.tenantId, tenantId), eq(funnels.id, forcedFunnelId)))
+            .limit(1);
+          if (forcedFunnel) activeFunnel = forcedFunnel;
+        }
+        if (forcedCatalogItem) {
+          routeSelection = {
+            source: "catalog",
+            funnel: activeFunnel,
+            catalogItem: {
+              ...forcedCatalogItem,
+              routeType: forcedCatalogItem.routeType as "manual" | "funnel" | "partner_service" | "webhook",
+            },
+            intent: routeSelection.intent,
+          };
+        }
         const [firstStage] = activeFunnel
           ? await tx
               .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
@@ -149,8 +185,10 @@ export function makeFieldExtractor(
           | { id: number; state: string; stageDefinitionId: number | null; requestType: string | null }
           | undefined;
         if (multiRequest) {
-          // Самый свежий НЕ-терминальный лид контакта (concierge: N лидов).
-          [lead] = await tx
+          // Самый свежий НЕ-терминальный лид контакта в выбранной воронке
+          // (concierge: N лидов). Без фильтра по funnel несколько бизнесов
+          // одного контакта начинали смешиваться в одну заявку.
+          const query = tx
             .select({
               id: leads.id,
               state: leads.state,
@@ -164,13 +202,15 @@ export function makeFieldExtractor(
                 eq(leads.tenantId, tenantId),
                 eq(leads.userId, contactId),
                 notInArray(stageDefinitions.kind, ["terminal_won", "terminal_lost"]),
+                activeFunnel ? eq(stageDefinitions.funnelId, activeFunnel.id) : undefined,
               ),
             )
             .orderBy(desc(leads.updatedAt))
             .limit(1);
+          [lead] = await query;
         } else {
-          // Легаси: один лид на контакт.
-          [lead] = await tx
+          // Легаси: один лид на контакт внутри выбранной воронки.
+          const query = tx
             .select({
               id: leads.id,
               state: leads.state,
@@ -178,7 +218,17 @@ export function makeFieldExtractor(
               requestType: leads.requestType,
             })
             .from(leads)
-            .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)));
+            .leftJoin(stageDefinitions, eq(leads.stageDefinitionId, stageDefinitions.id))
+            .where(
+              and(
+                eq(leads.tenantId, tenantId),
+                eq(leads.userId, contactId),
+                activeFunnel ? eq(stageDefinitions.funnelId, activeFunnel.id) : undefined,
+              ),
+            )
+            .orderBy(desc(leads.updatedAt))
+            .limit(1);
+          [lead] = await query;
         }
 
         // Нет (открытого) лида — создаём новый в первой стадии воронки.
