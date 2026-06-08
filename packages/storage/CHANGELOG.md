@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.14.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.13.0...@chatman-media/storage-v1.14.0) (2026-06-08)
+
+
+### Features
+
+* partner availability ping (stage webhook + Telegram) ([#295](https://github.com/chatman-media/lead-engine/issues/295)) ([628fa39](https://github.com/chatman-media/lead-engine/commit/628fa3911cc922f88eba3a9abedd6659b47c5f45))
+
 # [@chatman-media/storage-v1.13.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.12.0...@chatman-media/storage-v1.13.0) (2026-06-07)
 
 
