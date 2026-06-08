@@ -315,7 +315,11 @@ function extractCandidates(blocks: string[]): Candidate[] {
 			});
 		}
 
-		if (/westwallet\.io\/page\/ru\/(?:aml|kyc)|westwallet\.io\/fees/i.test(text)) {
+		const hasWestWalletPolicyLink =
+			lower.includes("westwallet.io/page/ru/aml") ||
+			lower.includes("westwallet.io/page/ru/kyc") ||
+			lower.includes("westwallet.io/fees");
+		if (hasWestWalletPolicyLink) {
 			addCandidate(candidates, seen, {
 				...base,
 				key: "exchange_kyc_policy",
