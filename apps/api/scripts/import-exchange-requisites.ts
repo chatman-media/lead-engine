@@ -315,14 +315,18 @@ function extractCandidates(blocks: string[]): Candidate[] {
 			});
 		}
 
-		if (/westwallet\.io\/page\/ru\/(?:aml|kyc)|westwallet\.io\/fees/i.test(text)) {
-			addCandidate(candidates, seen, {
-				...base,
-				key: "exchange_kyc_policy",
-				value: text,
-				confidence: lower.includes("aml") || lower.includes("kyc") ? 9 : 7,
-			});
-		}
+		const hasWestWalletPolicyLink =
+			lower.includes("westwallet.io/page/ru/aml") ||
+			lower.includes("westwallet.io/page/ru/kyc") ||
+			lower.includes("westwallet.io/fees");
+			if (hasWestWalletPolicyLink) {
+				addCandidate(candidates, seen, {
+					...base,
+					key: "exchange_kyc_policy",
+					value: text,
+					confidence: lower.includes("aml") || lower.includes("kyc") ? 9 : 7,
+				});
+			}
 	});
 
 	return candidates.sort((a, b) => a.textIndex - b.textIndex || a.key.localeCompare(b.key));
