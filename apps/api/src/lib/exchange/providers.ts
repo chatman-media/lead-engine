@@ -332,7 +332,7 @@ export async function verifyWestWalletInvoicePayment(opts: {
 	const tx = result.find((item) => item.type === "receive") ?? result[0] ?? null;
 	if (!tx) return { ok: false, transaction: null, note: "Платёж по WestWallet invoice пока не найден." };
 
-	if (tx.status !== "completed") {
+	if (tx.status !== "completed" && tx.status !== "confirmed") {
 		return {
 			ok: false,
 			transaction: tx,

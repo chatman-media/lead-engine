@@ -61,7 +61,7 @@ capture → qualify → offer → [clear] → [fulfill] → won / lost
 
 | Вертикаль | capture | qualify | offer | clear | fulfill | won / lost |
 |---|---|---|---|---|---|---|
-| **exchange** | intent_detected | exchange_request | quote_calculated | verification_check, kyc_collection, risk_review | order_created, requisites_sent, payment_proof_waiting, payment_verified | payout_or_completion / cancelled |
+| **exchange** | exchange_request | — | quote_calculated | verification_check, kyc_collection, risk_review | order_created, requisites_sent, payment_proof_waiting, payment_verified | payout_or_completion / cancelled |
 | **real_estate** | qualification | viewings | offer_negotiation, mou_signed | noc_application, mortgage_approval | — | dld_transfer / deal_lost |
 | **modeling** | intake_pending | intake_complete, casting_review, city | casting_approved, offer_sent | — | contract_signed, show_confirmed | closed / not_suitable, rejected |
 | **visa** | qualification | documents_collection, financial_verification | application_submission | processing | — | visa_issued / rejected |

@@ -1362,3 +1362,120 @@ export const exchangeOrders = pgTable("exchange_orders", {
   index("idx_exchange_orders_tenant_created").on(t.tenantId, t.createdAt),
   index("idx_exchange_orders_awaiting_ttl").on(t.status, t.rateExpiresAt).where(sql`status = 'awaiting_payment'`),
 ]);
+
+// ---- Partner services & commission ledger ------------------------------
+//
+// Partner billing v1 is intentionally operator-driven: partner handoff creates
+// a deal, then an admin enters final turnover and the commission is calculated
+// from the service/partner percentage. Partner portal and complex settlements
+// can build on these tables later.
+export const partners = pgTable("partners", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  status: text("status").notNull().default("active"),
+  contactName: text("contact_name"),
+  contactChannel: text("contact_channel"),
+  contactValue: text("contact_value"),
+  defaultCommissionPct: doublePrecision("default_commission_pct").notNull().default(0),
+  settlementCurrency: text("settlement_currency").notNull().default("THB"),
+  notes: text("notes"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("partners_status_check", sql`${t.status} IN ('active','archived')`),
+  index("idx_partners_tenant_status").on(t.tenantId, t.status),
+]);
+
+export const partnerServices = pgTable("partner_services", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  category: text("category"),
+  funnelId: integer("funnel_id").references(() => funnels.id, { onDelete: "set null" }),
+  stageDefinitionId: integer("stage_definition_id").references(() => stageDefinitions.id, { onDelete: "set null" }),
+  commissionPct: doublePrecision("commission_pct").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  notes: text("notes"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_partner_services_name").on(t.tenantId, t.partnerId, t.name),
+  index("idx_partner_services_tenant_active").on(t.tenantId, t.isActive),
+  index("idx_partner_services_stage").on(t.tenantId, t.stageDefinitionId),
+]);
+
+export const serviceCatalogItems = pgTable("service_catalog_items", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  slug: text("slug").notNull(),
+  name: text("name").notNull(),
+  category: text("category"),
+  description: text("description"),
+  routeType: text("route_type").notNull().default("manual"),
+  funnelId: integer("funnel_id").references(() => funnels.id, { onDelete: "set null" }),
+  partnerServiceId: integer("partner_service_id").references(() => partnerServices.id, { onDelete: "set null" }),
+  webhookUrl: text("webhook_url"),
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  metadataJson: text("metadata_json").notNull().default("{}"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("service_catalog_route_type_check", sql`${t.routeType} IN ('manual','funnel','partner_service','webhook')`),
+  uniqueIndex("uniq_service_catalog_slug").on(t.tenantId, t.slug),
+  index("idx_service_catalog_tenant_active").on(t.tenantId, t.isActive, t.sortOrder),
+  index("idx_service_catalog_funnel").on(t.tenantId, t.funnelId),
+  index("idx_service_catalog_partner_service").on(t.tenantId, t.partnerServiceId),
+]);
+
+export const partnerDeals = pgTable("partner_deals", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  partnerId: integer("partner_id").references(() => partners.id, { onDelete: "set null" }),
+  serviceId: integer("service_id").references(() => partnerServices.id, { onDelete: "set null" }),
+  leadId: integer("lead_id").references(() => leads.id, { onDelete: "set null" }),
+  stageDefinitionId: integer("stage_definition_id").references(() => stageDefinitions.id, { onDelete: "set null" }),
+  status: text("status").notNull().default("sent"),
+  handoffUrl: text("handoff_url"),
+  handoffMode: text("handoff_mode").notNull().default("fire_and_forget"),
+  grossAmount: doublePrecision("gross_amount"),
+  currency: text("currency").notNull().default("THB"),
+  commissionPct: doublePrecision("commission_pct").notNull().default(0),
+  commissionAmount: doublePrecision("commission_amount"),
+  proofJson: text("proof_json"),
+  notes: text("notes"),
+  sentAt: integer("sent_at"),
+  acceptedAt: integer("accepted_at"),
+  completedAt: integer("completed_at"),
+  cancelledAt: integer("cancelled_at"),
+  settledAt: integer("settled_at"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("partner_deals_status_check", sql`${t.status} IN ('sent','accepted','rejected','completed','cancelled','disputed','settled')`),
+  check("partner_deals_mode_check", sql`${t.handoffMode} IN ('fire_and_forget','await_callback')`),
+  index("idx_partner_deals_tenant_status").on(t.tenantId, t.status),
+  index("idx_partner_deals_partner").on(t.tenantId, t.partnerId),
+  index("idx_partner_deals_lead").on(t.tenantId, t.leadId),
+]);
+
+export const partnerSettlements = pgTable("partner_settlements", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  periodStart: integer("period_start").notNull(),
+  periodEnd: integer("period_end").notNull(),
+  status: text("status").notNull().default("draft"),
+  totalGross: doublePrecision("total_gross").notNull().default(0),
+  totalCommission: doublePrecision("total_commission").notNull().default(0),
+  currency: text("currency").notNull().default("THB"),
+  paidAt: integer("paid_at"),
+  notes: text("notes"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check("partner_settlements_status_check", sql`${t.status} IN ('draft','issued','paid','cancelled')`),
+  index("idx_partner_settlements_partner").on(t.tenantId, t.partnerId, t.periodStart),
+]);

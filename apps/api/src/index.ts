@@ -76,6 +76,8 @@ import { makeAdminOutreachCampaignsRoutes } from "./routes/admin-outreach-campai
 import { makeAdminMessageTemplatesRoutes } from "./routes/admin-message-templates.ts";
 import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makePartnerCallbackRoutes } from "./routes/webhook-partner-callback.ts";
+import { makeAdminPartnersRoutes } from "./routes/admin-partners.ts";
+import { makeAdminServiceCatalogRoutes } from "./routes/admin-service-catalog.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
 import { makeAdminExchangeRoutes } from "./routes/admin-exchange.ts";
@@ -447,6 +449,8 @@ async function main() {
   // Funnel builder (stage_definitions, stage_fields) + skills list.
   app.route("/", makeAdminFunnelRoutes({ db }));
   app.route("/", makeAdminReferralRoutes({ db }));
+  app.route("/", makeAdminPartnersRoutes({ db }));
+  app.route("/", makeAdminServiceCatalogRoutes({ db }));
   log.info("admin-funnel routes enabled");
 
   // AI Workflow Builder — диалог с AI для генерации воронки.

@@ -11,8 +11,10 @@ import {
   ChevronRightIcon,
   FlaskConicalIcon,
   GitBranchIcon,
+  HandshakeIcon,
   LayoutDashboardIcon,
   LinkIcon,
+  ListChecksIcon,
   LogOutIcon,
   type LucideIcon,
   MenuIcon,
@@ -73,7 +75,7 @@ interface NavGroup {
 
 const TOP_NAV_ITEM: NavItem = { to: "/dashboard", label: "Главная", icon: LayoutDashboardIcon };
 
-// Компоновка «Обмен во главе»: ядро бизнеса (Обменник/Воронка) сверху, затем
+// Компоновка «Обмен во главе»: ядро бизнеса (Обменник/Процессы) сверху, затем
 // клиенты, бот/каналы, система. Пункты с hideForExchange скрываются у обменки,
 // exchangeOnly — показываются только ей.
 const NAV_GROUPS: NavGroup[] = [
@@ -81,7 +83,9 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Продажи",
     items: [
       { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon, exchangeOnly: true },
-      { to: "/funnel", label: "Воронка", icon: GitBranchIcon },
+      { to: "/funnel", label: "Процессы", icon: GitBranchIcon },
+      { to: "/services", label: "Услуги", icon: ListChecksIcon },
+      { to: "/partners", label: "Партнёры", icon: HandshakeIcon },
       { to: "/leads", label: "Лиды", icon: UserCircleIcon },
       { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
       { to: "/outreach", label: "Рассылка", icon: SendIcon },
@@ -109,7 +113,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/billing", label: "LLM-использование", icon: BarChart2Icon },
       { to: "/diagnostics", label: "Диагностика", icon: ActivityIcon },
       { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
-      { to: "/referral", label: "Партнёры", icon: LinkIcon, hideForExchange: true },
+      { to: "/referral", label: "Рефкоды", icon: LinkIcon, hideForExchange: true },
     ],
   },
 ];

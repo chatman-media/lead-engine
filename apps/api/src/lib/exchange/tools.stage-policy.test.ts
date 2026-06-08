@@ -9,6 +9,7 @@ describe("exchange tool stage policy", () => {
 	it("recognizes exchange_v1 stages", () => {
 		expect(isKnownExchangeStage("exchange_request")).toBe(true);
 		expect(isKnownExchangeStage("payment_verified")).toBe(true);
+		expect(isKnownExchangeStage("intent_detected")).toBe(false);
 		expect(isKnownExchangeStage("exchange_offer")).toBe(false);
 	});
 

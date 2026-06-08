@@ -2,14 +2,14 @@
  * Partner callback endpoint — публичный (auth не нужен, токен = auth).
  *
  * GET /api/partner/cb/:token            → HTML-страница с кнопками
- * GET /api/partner/cb/:token?a=confirm  → подтвердить наличие → advance lead
+ * GET /api/partner/cb/:token?a=confirm  → подтвердить заявку → advance lead
  * GET /api/partner/cb/:token?a=cancel   → отклонить → заметка на лид
  *
  * Токен одноразовый: после обработки leads.awaiting_token очищается.
  */
 
-import type { Db } from "@chatman-media/conversation-engine";
-import { leads, stageDefinitions } from "@chatman-media/storage";
+import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import { leads, partnerDeals, stageDefinitions } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { advanceLead } from "../lib/advance-lead.ts";
@@ -83,12 +83,24 @@ export function makePartnerCallbackRoutes(opts: {
         .update(leads)
         .set({ awaitingToken: null, updatedAt: now })
         .where(and(eq(leads.id, leadId), eq(leads.awaitingToken, token)));
+      await withTenant(opts.db, lead.tenantId, async (tx) => {
+        await tx
+          .update(partnerDeals)
+          .set({ status: "accepted", acceptedAt: now, updatedAt: now })
+          .where(
+            and(
+              eq(partnerDeals.tenantId, lead.tenantId),
+              eq(partnerDeals.leadId, leadId),
+              eq(partnerDeals.stageDefinitionId, stageId),
+            ),
+          );
+      });
 
       // Advance lead to next stage
       const outcome = await advanceLead({
         db: opts.db,
         tenantId: lead.tenantId,
-        note: "✅ Партнёр подтвердил наличие.",
+        note: "✅ Партнёр подтвердил заявку.",
         selector: { leadId },
       });
 
@@ -109,12 +121,24 @@ export function makePartnerCallbackRoutes(opts: {
         .set({
           awaitingToken: null,
           // store cancellation note in rejectedReason (reusing existing field)
-          rejectedReason: "Партнёр отклонил заявку (нет в наличии).",
+          rejectedReason: "Партнёр отклонил заявку.",
           updatedAt: now,
         })
         .where(and(eq(leads.id, leadId), eq(leads.awaitingToken, token)));
+      await withTenant(opts.db, lead.tenantId, async (tx) => {
+        await tx
+          .update(partnerDeals)
+          .set({ status: "rejected", cancelledAt: now, updatedAt: now })
+          .where(
+            and(
+              eq(partnerDeals.tenantId, lead.tenantId),
+              eq(partnerDeals.leadId, leadId),
+              eq(partnerDeals.stageDefinitionId, stageId),
+            ),
+          );
+      });
 
-      return c.html(htmlPage("Отклонено", `❌ Заявка #${leadId} отмечена как недоступна. Менеджер свяжется с клиентом.`, "cancel"));
+      return c.html(htmlPage("Отклонено", `❌ Заявка #${leadId} отклонена партнёром. Менеджер свяжется с клиентом.`, "cancel"));
     }
 
     return c.html(htmlPage("Неверный запрос", "Неизвестное действие.", "error"));
@@ -159,7 +183,7 @@ function htmlLanding(opts: {
 }): string {
   return `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Подтверждение наличия — Lead Engine</title>
+<title>Партнёрская заявка — Lead Engine</title>
 <style>
   body { font-family: system-ui, sans-serif; display: flex; align-items: center;
     justify-content: center; min-height: 100vh; margin: 0; background: #f8fafc; }
@@ -177,15 +201,15 @@ function htmlLanding(opts: {
   .meta { margin-top: 20px; font-size: .8rem; color: #94a3b8; }
 </style></head><body>
 <div class="card">
-  <div class="icon">🏍️</div>
-  <h1>Запрос подтверждения</h1>
-  <p>Пожалуйста, подтвердите наличие для заявки <strong>#${opts.leadId}</strong>
+  <div class="icon">🤝</div>
+  <h1>Партнёрская заявка</h1>
+  <p>Пожалуйста, подтвердите или отклоните заявку <strong>#${opts.leadId}</strong>
   (этап: <em>${opts.stageName}</em>).</p>
   <div class="btns">
     <a class="confirm" href="${opts.confirmUrl}">✅ Подтвердить</a>
     <a class="cancel"  href="${opts.cancelUrl}">❌ Отклонить</a>
   </div>
-  <div class="meta">Lead Engine · Partner Availability Check</div>
+  <div class="meta">Lead Engine · Partner Handoff</div>
 </div>
 </body></html>`;
 }

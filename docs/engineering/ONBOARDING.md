@@ -378,7 +378,7 @@ http://localhost:5173/funnel
 | `real_estate` | Недвижимость — просмотры → оффер → NOC/ипотека → передача |
 | `saas` | SaaS — discovery → demo → proposal → подписка |
 | `video` | Видеопродакшн — бриф → смета → съёмка → монтаж → сдача |
-| `exchange` | Обменник — крипта/RUB → THB наличные (12 стадий) |
+| `exchange` | Обменник — крипта/RUB → THB наличные (11 стадий) |
 
 > Это ключи `POST /api/admin/funnel/seed` (`SEED_TEMPLATES` в
 > `apps/api/src/routes/admin-funnel.ts`). Дополнительно есть ключи `visa`,

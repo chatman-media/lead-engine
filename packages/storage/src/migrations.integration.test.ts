@@ -21,7 +21,6 @@ import postgres, { type Sql } from "postgres";
 import {
   applyAllMigrations,
   createIsolatedDb,
-  dropIsolatedDb,
   tryConnectToPg,
 } from "./integration-helpers.ts";
 
@@ -49,21 +48,18 @@ beforeAll(
   30_000,
 );
 
-afterAll(
-  async () => {
-    if (sql) {
-      await sql.end({ timeout: 0 }).catch(() => {});
-      sql = null;
-    }
-    // dropIsolatedDb намеренно опущен: bun-test'у сложно надёжно
-    // дропать БД через отдельный owner-pool — теndsует timeout'ить
-    // даже при force-terminate. random suffix у dbName исключает
-    // конфликты между runs; cleanup'ить локально — `psql -lqt | grep
-    // lead_engine_int_ | xargs -n1 dropdb` если станет проблемой.
-    // В CI каждый run свежий контейнер pgvector, нечего cleanup'ить.
-  },
-  5_000,
-);
+afterAll(async () => {
+  if (sql) {
+    await sql.end({ timeout: 0 }).catch(() => {});
+    sql = null;
+  }
+  // dropIsolatedDb намеренно опущен: bun-test'у сложно надёжно
+  // дропать БД через отдельный owner-pool — теndsует timeout'ить
+  // даже при force-terminate. random suffix у dbName исключает
+  // конфликты между runs; cleanup'ить локально — `psql -lqt | grep
+  // lead_engine_int_ | xargs -n1 dropdb` если станет проблемой.
+  // В CI каждый run свежий контейнер pgvector, нечего cleanup'ить.
+}, 5_000);
 
 describe("migrations integration", () => {
   it("applies all .sql files in order", () => {
@@ -85,22 +81,32 @@ describe("migrations integration", () => {
     expect(rows[0]?.count).toBeGreaterThanOrEqual(39);
   });
 
-  it("RLS-policies включены на 46 таблицах (exchange_rates/orders/tiers/settings/outreach)", async () => {
+  it("RLS-policies включены на tenant-scoped таблицах", async () => {
     if (!sql) return;
     const rows = await sql<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS count FROM pg_tables
       WHERE schemaname = 'public' AND rowsecurity = true
     `;
-    expect(rows[0]?.count).toBe(46);
+    expect(rows[0]?.count).toBeGreaterThanOrEqual(46);
   });
 
-  it("tenant_isolation policies = 46 (по одной на каждую RLS-таблицу)", async () => {
+  it("tenant_isolation policies есть по одной на каждую RLS-таблицу", async () => {
     if (!sql) return;
-    const rows = await sql<Array<{ count: number }>>`
-      SELECT COUNT(*)::int AS count FROM pg_policies
-      WHERE schemaname = 'public' AND policyname = 'tenant_isolation'
+    const rows = await sql<Array<{ tableName: string; hasPolicy: boolean }>>`
+      SELECT
+        t.tablename AS "tableName",
+        (p.tablename IS NOT NULL) AS "hasPolicy"
+      FROM pg_tables t
+      LEFT JOIN pg_policies p
+        ON p.schemaname = t.schemaname
+        AND p.tablename = t.tablename
+        AND p.policyname = 'tenant_isolation'
+      WHERE t.schemaname = 'public'
+        AND t.rowsecurity = true
+      ORDER BY t.tablename
     `;
-    expect(rows[0]?.count).toBe(46);
+    expect(rows.filter((r) => !r.hasPolicy)).toEqual([]);
+    expect(rows.length).toBeGreaterThanOrEqual(46);
   });
 
   it("legacy tenant (id=1) сидится из 0001", async () => {

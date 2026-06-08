@@ -28,9 +28,11 @@ import { SaasLogin } from "./pages/SaasLogin.tsx";
 import { SaasNotifications } from "./pages/SaasNotifications.tsx";
 import { SaasOnboarding } from "./pages/SaasOnboarding.tsx";
 import { SaasOutreach } from "./pages/SaasOutreach.tsx";
+import { SaasPartners } from "./pages/SaasPartners.tsx";
 import SaasProfile from "./pages/SaasProfile.tsx";
 import { SaasReferral } from "./pages/SaasReferral.tsx";
 import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
+import { SaasServiceCatalog } from "./pages/SaasServiceCatalog.tsx";
 import { SaasSettings } from "./pages/SaasSettings.tsx";
 import { SaasSkills } from "./pages/SaasSkills.tsx";
 import { SaasStyles } from "./pages/SaasStyles.tsx";
@@ -151,6 +153,7 @@ export function App() {
                 <Route path="/conversations" element={<SaasConversations />} />
                 <Route path="/conversations/:id" element={<SaasConversations />} />
                 <Route path="/funnel" element={<SaasFunnel />} />
+                <Route path="/services" element={<SaasServiceCatalog />} />
                 <Route path="/exchange" element={<SaasExchange />} />
                 <Route path="/vacancies" element={<SaasVacancies />} />
                 <Route path="/skills" element={<SaasSkills />} />
@@ -161,6 +164,7 @@ export function App() {
                 <Route path="/billing" element={<SaasBilling />} />
                 <Route path="/settings" element={<SaasSettings />} />
                 <Route path="/profile" element={<SaasProfile />} />
+                <Route path="/partners" element={<SaasPartners />} />
                 <Route path="/referral" element={<SaasReferral />} />
                 <Route path="/integrations" element={<SaasIntegrations />} />
                 <Route path="/faq" element={<SaasFaq />} />

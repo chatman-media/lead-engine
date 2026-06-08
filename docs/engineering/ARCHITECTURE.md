@@ -715,9 +715,9 @@ done = channelConnected && chatLlmConfigured && (!isExchange || (funnelInstalled
 
 > Полное описание — [EXCHANGE.md](EXCHANGE.md). Здесь — краткая сводка.
 
-Крипто/нал обменник (`exchange_v1`) — основная live-вертикаль. 12-стадийная
+Крипто/нал обменник (`exchange_v1`) — основная live-вертикаль. 11-стадийная
 воронка (`apps/vertical-exchange/src/funnel-stages.ts`):
-`intent_detected → exchange_request → quote_calculated → verification_check →
+`exchange_request → quote_calculated → verification_check →
 kyc_collection → risk_review → order_created → requisites_sent →
 payment_proof_waiting → payment_verified → payout_or_completion / cancelled`.
 

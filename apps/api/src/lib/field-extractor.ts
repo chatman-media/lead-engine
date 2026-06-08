@@ -25,6 +25,7 @@ import {
 } from "@chatman-media/storage";
 import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { LoadedRef } from "../llm-bootstrap.ts";
+import { chooseFunnelForIntent } from "./service-intent-router.ts";
 
 export interface FieldExtractor {
   extract(opts: {
@@ -89,13 +90,19 @@ export function makeFieldExtractor(
       let awaitingOpEntry: { leadId: number; toStage: string } | null = null;
 
       await withTenant(db, tenantId, async (tx) => {
-        // 0. Резолвим активную воронку и её первую (intake) стадию — нужны и
-        // для определения multi-request режима, и для auto-create лида.
-        const [activeFunnel] = await tx
-          .select({ id: funnels.id })
+        // 0. Резолвим направление по тексту: при нескольких active funnels
+        // выбираем обменку/недвижку/продукт/партнёров по простому intent-router.
+        // Если intent неясен — остаётся первый active funnel, как раньше.
+        const activeFunnels = await tx
+          .select({
+            id: funnels.id,
+            slug: funnels.slug,
+            verticalTemplateId: funnels.verticalTemplateId,
+          })
           .from(funnels)
           .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
-          .limit(1);
+          .orderBy(asc(funnels.id));
+        const activeFunnel = chooseFunnelForIntent(activeFunnels, text);
         const [firstStage] = activeFunnel
           ? await tx
               .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
@@ -189,6 +196,7 @@ export function makeFieldExtractor(
         const [stage] = await tx
           .select({
             id: stageDefinitions.id,
+            funnelId: stageDefinitions.funnelId,
             kind: stageDefinitions.kind,
             nextStages: stageDefinitions.nextStages,
             autoAdvanceCondition: stageDefinitions.autoAdvanceCondition,
@@ -294,10 +302,11 @@ ${fieldDescriptions}
               .from(stageDefinitions)
               .where(
                 and(
-                  eq(stageDefinitions.tenantId, tenantId),
-                  eq(stageDefinitions.slug, `${nr}_request`),
-                ),
-              );
+              eq(stageDefinitions.tenantId, tenantId),
+              eq(stageDefinitions.slug, `${nr}_request`),
+              eq(stageDefinitions.funnelId, stage.funnelId),
+            ),
+          );
             if (branchStage) {
               const [created] = await tx
                 .insert(leads)
@@ -428,6 +437,7 @@ ${fieldDescriptions}
             and(
               eq(stageDefinitions.slug, nextSlug),
               eq(stageDefinitions.tenantId, tenantId),
+              eq(stageDefinitions.funnelId, stage.funnelId),
             ),
           );
         if (!nextStageDef) return;

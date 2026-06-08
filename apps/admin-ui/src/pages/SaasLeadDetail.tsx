@@ -3,6 +3,7 @@ import {
   ArrowLeftIcon,
   CheckIcon,
   EditIcon,
+  HandshakeIcon,
   SendIcon,
   Trash2Icon,
   XIcon,
@@ -670,6 +671,39 @@ export function SaasLeadDetail() {
                     Причина отказа: {lead.rejectedReason}
                   </p>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {(data.partnerDeals ?? []).length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <HandshakeIcon className="size-4 text-muted-foreground" />
+                  Партнёрские сделки
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {(data.partnerDeals ?? []).map((deal) => (
+                  <div key={deal.id} className="rounded-md border p-2 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium">
+                        #{deal.id} · {deal.partnerName ?? "Партнёр не выбран"}
+                      </span>
+                      <Badge variant={deal.status === "completed" ? "secondary" : "outline"}>
+                        {deal.status}
+                      </Badge>
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {deal.serviceName ?? "Услуга"} · {deal.handoffUrl ?? "ручная сделка"}
+                    </div>
+                    <div className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
+                      <span>Оборот: {deal.grossAmount == null ? "—" : `${Number(deal.grossAmount).toLocaleString("ru")} ${deal.currency}`}</span>
+                      <span>Комиссия: {deal.commissionPct}%</span>
+                      <span>{deal.commissionAmount == null ? "—" : `${Number(deal.commissionAmount).toLocaleString("ru")} ${deal.currency}`}</span>
+                    </div>
+                  </div>
+                ))}
               </CardContent>
             </Card>
           )}

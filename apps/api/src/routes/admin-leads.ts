@@ -11,6 +11,9 @@ import {
   leads,
   messages,
   outboundQueue,
+  partnerDeals,
+  partners,
+  partnerServices,
   stageDefinitions,
   stageFields,
 } from "@chatman-media/storage";
@@ -578,6 +581,35 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         .filter((o) => o.status === "completed")
         .reduce((s, o) => s + Math.round(Number(o.amountToThb ?? 0)), 0);
 
+      const partnerDealRows = await tx
+        .select({
+          id: partnerDeals.id,
+          partnerId: partnerDeals.partnerId,
+          partnerName: partners.name,
+          serviceId: partnerDeals.serviceId,
+          serviceName: partnerServices.name,
+          stageDefinitionId: partnerDeals.stageDefinitionId,
+          status: partnerDeals.status,
+          handoffUrl: partnerDeals.handoffUrl,
+          handoffMode: partnerDeals.handoffMode,
+          grossAmount: partnerDeals.grossAmount,
+          currency: partnerDeals.currency,
+          commissionPct: partnerDeals.commissionPct,
+          commissionAmount: partnerDeals.commissionAmount,
+          notes: partnerDeals.notes,
+          sentAt: partnerDeals.sentAt,
+          acceptedAt: partnerDeals.acceptedAt,
+          completedAt: partnerDeals.completedAt,
+          cancelledAt: partnerDeals.cancelledAt,
+          createdAt: partnerDeals.createdAt,
+          updatedAt: partnerDeals.updatedAt,
+        })
+        .from(partnerDeals)
+        .leftJoin(partners, eq(partners.id, partnerDeals.partnerId))
+        .leftJoin(partnerServices, eq(partnerServices.id, partnerDeals.serviceId))
+        .where(and(eq(partnerDeals.tenantId, tenantId), eq(partnerDeals.leadId, id)))
+        .orderBy(desc(partnerDeals.id));
+
       return {
         lead,
         stageDef,
@@ -589,6 +621,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         transferredThb,
         ordersCompleted: orders.filter((o) => o.status === "completed").length,
         orders,
+        partnerDeals: partnerDealRows,
       };
     });
 

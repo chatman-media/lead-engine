@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { ChatApiError, type ChatClient } from "@chatman-media/llm-router";
-import { EmbeddingApiError, type EmbeddingClient } from "@chatman-media/llm-router";
+import {
+  ChatApiError,
+  type ChatClient,
+  EmbeddingApiError,
+  type EmbeddingClient,
+} from "@chatman-media/llm-router";
 import { withRetryChatClient, withRetryEmbeddingClient } from "../src/retry.ts";
 
 const FAST = { initialDelayMs: 1, maxDelayMs: 5 };
@@ -62,6 +66,21 @@ describe("withRetryChatClient", () => {
     const wrapped = withRetryChatClient(client, { ...FAST, maxAttempts: 3 });
     await expect(wrapped.complete([])).rejects.toThrow(ChatApiError);
     expect(client.calls).toBe(3);
+  });
+
+  test("wraps stream clients and yields streamed chunks", async () => {
+    const client: ChatClient = {
+      complete: async () => "unused",
+      stream: async function* () {
+        yield "one";
+        yield "two";
+      },
+    };
+    const wrapped = withRetryChatClient(client, FAST);
+    const chunks: string[] = [];
+    if (!wrapped.stream) throw new Error("stream wrapper missing");
+    for await (const chunk of wrapped.stream([])) chunks.push(chunk);
+    expect(chunks).toEqual(["one", "two"]);
   });
 });
 

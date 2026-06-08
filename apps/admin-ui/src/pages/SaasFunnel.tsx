@@ -29,6 +29,8 @@ import {
   type FieldType,
   type FunnelAnalytics,
   type FunnelData,
+  type FunnelListItem,
+  type FunnelTemplateInfo,
   type StageDefinition,
   type StageField,
   type StageType,
@@ -117,10 +119,72 @@ function kindMeta(kind: string) {
   return KIND_META[kind] ?? KIND_META.active!;
 }
 
+function stageTypeLabel(value: StageType | string): string {
+  return STAGE_TYPES.find((item) => item.value === value)?.label ?? value;
+}
+
+function pluralRu(count: number, one: string, few: string, many: string): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+function fieldCountLabel(count: number): string {
+  return `${count} ${pluralRu(count, "поле", "поля", "полей")}`;
+}
+
+function funnelLabel(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">): string {
+  const key = `${item.slug} ${item.verticalTemplateId ?? ""}`.toLowerCase();
+  if (key.includes("exchange")) return "Обменка";
+  if (key.includes("concierge")) return "Каталог услуг";
+  if (key.includes("real_estate")) return "Продажа недвижимости";
+  if (key.includes("partner")) return "Партнёры";
+  if (key.includes("saas") || key.includes("product")) return "Продукт";
+  return item.slug.replace(/_/g, " ");
+}
+
+function normalizeSlug(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_-]/g, "");
+}
+
+function uniqueFunnelSlug(base: string, items: FunnelListItem[]): string {
+  const normalized = normalizeSlug(base) || "funnel";
+  const taken = new Set(items.map((item) => item.slug));
+  if (!taken.has(normalized)) return normalized;
+  for (let i = 2; i < 100; i++) {
+    const candidate = `${normalized}_${i}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${normalized}_${Date.now()}`;
+}
+
+function templateAlreadyExists(template: FunnelTemplateInfo, items: FunnelListItem[]): boolean {
+  if (template.key === "skeleton") return false;
+  return items.some(
+    (item) =>
+      (template.verticalTemplateId && item.verticalTemplateId === template.verticalTemplateId) ||
+      item.slug === template.key,
+  );
+}
+
+function availableTemplates(
+  templates: FunnelTemplateInfo[],
+  items: FunnelListItem[],
+): FunnelTemplateInfo[] {
+  return templates.filter(
+    (template) => template.isCreatable !== false && !templateAlreadyExists(template, items),
+  );
+}
+
 export function SaasFunnel() {
   const navigate = useNavigate();
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
+  const [funnels, setFunnels] = useState<FunnelListItem[]>([]);
+  const [selectedFunnelId, setSelectedFunnelId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [funnelLoading, setFunnelLoading] = useState(false);
   const [error, setError] = useState("");
   const [expandedStage, setExpandedStage] = useState<number | null>(null);
   const [addingStage, setAddingStage] = useState(false);
@@ -129,6 +193,10 @@ export function SaasFunnel() {
   const [analytics, setAnalytics] = useState<FunnelAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [addingFunnel, setAddingFunnel] = useState(false);
+  const [funnelTemplates, setFunnelTemplates] = useState<FunnelTemplateInfo[]>([]);
+  const [newFunnelTemplate, setNewFunnelTemplate] = useState("exchange");
+  const [newFunnelSlug, setNewFunnelSlug] = useState("");
   const [newStage, setNewStage] = useState({
     slug: "",
     displayName: "",
@@ -146,19 +214,83 @@ export function SaasFunnel() {
     return false;
   }
 
-  function reload() {
-    saas
-      .getFunnel()
-      .then(setFunnel)
-      .catch((err) => {
-        if (!onAuthError(err)) setError("Не удалось загрузить воронку");
-      })
-      .finally(() => setLoading(false));
+  async function reload(
+    nextFunnelId = selectedFunnelId,
+    options: { refreshTemplates?: boolean } = {},
+  ) {
+    try {
+      const list = await saas.listFunnels();
+      setFunnels(list.items);
+      if (options.refreshTemplates ?? funnelTemplates.length === 0) {
+        const templates = await saas
+          .listFunnelTemplates()
+          .catch(() => ({ items: [] as FunnelTemplateInfo[] }));
+        setFunnelTemplates(templates.items);
+        if (
+          templates.items.length > 0 &&
+          !templates.items.some((t) => t.key === newFunnelTemplate)
+        ) {
+          setNewFunnelTemplate(templates.items[0]!.key);
+        }
+      }
+      const targetId = nextFunnelId ?? list.items[0]?.id ?? null;
+      setSelectedFunnelId(targetId);
+      const data = targetId ? await saas.getFunnelById(targetId) : await saas.getFunnel();
+      setFunnel(data);
+      setAnalytics(null);
+      setError("");
+    } catch (err) {
+      if (!onAuthError(err)) setError("Не удалось загрузить воронку");
+    } finally {
+      setLoading(false);
+      setFunnelLoading(false);
+    }
   }
 
   useEffect(() => {
-    reload();
+    void reload(selectedFunnelId, { refreshTemplates: true });
   }, []);
+
+  async function handleSelectFunnel(id: number) {
+    if (id === selectedFunnelId || funnelLoading) return;
+    setSelectedFunnelId(id);
+    setAddingFunnel(false);
+    setNewFunnelSlug("");
+    setFunnelLoading(true);
+    setAnalytics(null);
+    await reload(id, { refreshTemplates: false });
+  }
+
+  function handleOpenAddFunnel() {
+    const options = availableTemplates(funnelTemplates, funnels);
+    const templateKey = options.some((template) => template.key === newFunnelTemplate)
+      ? newFunnelTemplate
+      : (options[0]?.key ?? "skeleton");
+    setNewFunnelTemplate(templateKey);
+    if (!newFunnelSlug.trim()) {
+      setNewFunnelSlug(uniqueFunnelSlug(templateKey, funnels));
+    }
+    setAddingFunnel(true);
+  }
+
+  function handleNewFunnelTemplateChange(key: string) {
+    setNewFunnelTemplate(key);
+    setNewFunnelSlug(uniqueFunnelSlug(key, funnels));
+  }
+
+  async function handleCreateFunnel() {
+    const template = newFunnelTemplate || "skeleton";
+    const slug = normalizeSlug(newFunnelSlug || uniqueFunnelSlug(template, funnels));
+    if (!slug) return;
+    try {
+      const created = await saas.createFunnel({ slug, template });
+      setNewFunnelSlug("");
+      setAddingFunnel(false);
+      await reload(created.funnelId, { refreshTemplates: false });
+    } catch (err) {
+      if (!onAuthError(err)) setError(err instanceof Error ? err.message : "Не удалось создать процесс");
+    }
+  }
 
   async function handleCreateStage() {
     if (!funnel?.funnel || !newStage.slug || !newStage.displayName) return;
@@ -271,10 +403,16 @@ export function SaasFunnel() {
     );
   if (error) return <p className="p-6 text-destructive text-sm">{error}</p>;
 
+  const selectableTemplates = availableTemplates(funnelTemplates, funnels);
+  const selectedTemplate = funnelTemplates.find((t) => t.key === newFunnelTemplate);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <PageHeader title="Воронка" description="Настройка стадий и полей данных" />
+        <PageHeader
+          title="Процессы обработки"
+          description="Воронки, по которым система ведёт заявки после выбора услуги"
+        />
         <div className="flex items-center gap-2">
           <Badge variant="outline">{funnel?.stages?.length ?? 0} стадий</Badge>
           <Button size="sm" onClick={() => setAiPanelOpen(true)}>
@@ -289,8 +427,159 @@ export function SaasFunnel() {
 
       <AiWorkflowPanel open={aiPanelOpen} onOpenChange={setAiPanelOpen} onApplied={reload} />
 
+      <div className="rounded-md border p-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold uppercase text-muted-foreground">
+            Создание процесса
+          </span>
+          {addingFunnel ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label="Закрыть"
+              onClick={() => setAddingFunnel(false)}
+            >
+              <XIcon className="size-4" />
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" onClick={handleOpenAddFunnel}>
+              <PlusIcon className="size-4" />
+              Создать процесс из шаблона
+            </Button>
+          )}
+        </div>
+        {addingFunnel && (
+          <div className="mt-3 max-w-3xl">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_13rem]">
+              <div className="space-y-1">
+                <Label htmlFor="new-funnel-template" className="text-xs">
+                  Предустановка
+                </Label>
+                <Select value={newFunnelTemplate} onValueChange={handleNewFunnelTemplateChange}>
+                  <SelectTrigger id="new-funnel-template" className="h-8 text-sm">
+                    <SelectValue placeholder="Выберите предустановку" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectableTemplates.map((template) => (
+                      <SelectItem key={template.key} value={template.key}>
+                        {template.displayName} · {template.stagesCount} стадий
+                      </SelectItem>
+                    ))}
+                    {funnelTemplates.length === 0 && (
+                      <SelectItem value="skeleton">Пустой skeleton</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="new-funnel-slug" className="text-xs">
+                  Код процесса
+                </Label>
+                <Input
+                  id="new-funnel-slug"
+                  value={newFunnelSlug}
+                  onChange={(e) => setNewFunnelSlug(normalizeSlug(e.target.value))}
+                  placeholder="partners"
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+            {selectedTemplate && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span>{selectedTemplate.description}</span>
+                <span className="font-medium text-foreground">
+                  {selectedTemplate.stagesCount} стадий · {fieldCountLabel(selectedTemplate.fieldsCount)}
+                </span>
+              </div>
+            )}
+            {selectedTemplate && selectedTemplate.stages.length > 0 && (
+              <div className="mt-3 max-h-56 overflow-auto rounded-md bg-background/70 p-2">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">
+                  Предпросмотр стадий
+                </div>
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  {selectedTemplate.stages.map((stage, idx) => {
+                    const meta = kindMeta(stage.kind);
+                    return (
+                      <div
+                        key={stage.slug}
+                        className="flex min-h-10 items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-muted"
+                      >
+                        <span
+                          className={cn(
+                            "flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
+                            meta.num,
+                          )}
+                        >
+                          {idx + 1}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium text-foreground">
+                            {stage.displayName}
+                          </span>
+                          <span className="block truncate text-muted-foreground">
+                            {stageTypeLabel(stage.stageType)}
+                            {stage.phase ? ` · ${stage.phase}` : ""} · {fieldCountLabel(stage.fieldsCount)}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button size="sm" variant="ghost" onClick={() => setAddingFunnel(false)}>
+                Отмена
+              </Button>
+              <Button size="sm" onClick={handleCreateFunnel} disabled={!newFunnelSlug.trim()}>
+                Создать процесс
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-md border p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold uppercase text-muted-foreground">
+            Процессы обработки
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {funnels.map((item) => {
+            const active = item.id === selectedFunnelId;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                disabled={funnelLoading}
+                onClick={() => void handleSelectFunnel(item.id)}
+                className={cn(
+                  "rounded-md border px-3 py-2 text-left text-sm transition-colors disabled:cursor-wait disabled:opacity-70",
+                  active ? "border-primary bg-primary/10 text-primary" : "hover:bg-muted",
+                )}
+              >
+                <span className="block font-medium">{funnelLabel(item)}</span>
+                <span className="text-xs text-muted-foreground">
+                  {item.stagesCount} стадий · {item.leadsCount} лидов
+                </span>
+              </button>
+            );
+          })}
+          {funnels.length === 0 && (
+            <span className="py-2 text-sm text-muted-foreground">Процессов пока нет</span>
+          )}
+        </div>
+      </div>
+
       {funnel?.funnel && (
-        <div className="flex flex-col gap-0">
+        <div
+          className={cn(
+            "flex flex-col gap-0 transition-opacity",
+            funnelLoading ? "pointer-events-none opacity-60" : "",
+          )}
+        >
           {funnel.stages.map((stage, idx) => (
             <StageCard
               key={stage.id}
@@ -435,7 +724,7 @@ export function SaasFunnel() {
               onClick={async () => {
                 setAnalyticsLoading(true);
                 try {
-                  setAnalytics(await saas.getFunnelAnalytics());
+                  setAnalytics(await saas.getFunnelAnalytics(funnel?.funnel?.id));
                 } catch {
                   // ignore
                 } finally {
@@ -651,7 +940,7 @@ function StageCard({
                 </Badge>
               )}
               <span className="text-xs tabular-nums text-muted-foreground">
-                {stage.fields.length} полей
+                {fieldCountLabel(stage.fields.length)}
               </span>
               <ChevronDownIcon
                 className={cn(
@@ -848,6 +1137,10 @@ function StageBehaviourEditor({
   const [guidance, setGuidance] = useState(stage.guidance ?? "");
   const [stale, setStale] = useState(stage.staleTimeoutDays?.toString() ?? "");
   const [checkin, setCheckin] = useState(stage.checkinIntervalDays?.toString() ?? "");
+  const [partnerWebhookUrl, setPartnerWebhookUrl] = useState(stage.partnerWebhookUrl ?? "");
+  const [partnerWebhookMode, setPartnerWebhookMode] = useState<"fire_and_forget" | "await_callback">(
+    stage.partnerWebhookMode ?? "fire_and_forget",
+  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -857,13 +1150,16 @@ function StageBehaviourEditor({
     stage.goal ? "цель" : null,
     stage.guidance ? "поведение" : null,
     autoAdvance ? "авто-переход" : null,
+    stage.partnerWebhookUrl ? "партнёр" : null,
     (stage.nextStages?.length ?? 0) > 0 ? `${stage.nextStages.length} перех.` : null,
   ].filter(Boolean);
   const dirty =
     goal !== (stage.goal ?? "") ||
     guidance !== (stage.guidance ?? "") ||
     stale !== (stage.staleTimeoutDays?.toString() ?? "") ||
-    checkin !== (stage.checkinIntervalDays?.toString() ?? "");
+    checkin !== (stage.checkinIntervalDays?.toString() ?? "") ||
+    partnerWebhookUrl !== (stage.partnerWebhookUrl ?? "") ||
+    partnerWebhookMode !== (stage.partnerWebhookMode ?? "fire_and_forget");
 
   async function save() {
     setSaving(true);
@@ -873,6 +1169,8 @@ function StageBehaviourEditor({
         guidance: guidance.trim() || null,
         staleTimeoutDays: stale ? Number(stale) : null,
         checkinIntervalDays: checkin ? Number(checkin) : null,
+        partnerWebhookUrl: partnerWebhookUrl.trim() || null,
+        partnerWebhookMode,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
@@ -995,6 +1293,33 @@ function StageBehaviourEditor({
                 </button>
               );
             })}
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-[1fr_220px]">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Партнёрский канал</Label>
+          <Input
+            value={partnerWebhookUrl}
+            onChange={(e) => setPartnerWebhookUrl(e.target.value)}
+            placeholder="tg://123456789 или https://partner.example/webhook"
+            className="h-8 text-sm"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Режим</Label>
+          <Select
+            value={partnerWebhookMode}
+            onValueChange={(v) => setPartnerWebhookMode(v as typeof partnerWebhookMode)}
+          >
+            <SelectTrigger className="h-8 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="fire_and_forget">Отправить</SelectItem>
+              <SelectItem value="await_callback">Ждать ответ</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

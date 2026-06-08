@@ -262,11 +262,11 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
 
 - ✅ **Exchange вертикаль (`exchange_v1`)** — шаблон для обменных пунктов Пхукета:
   крипта (USDT/BTC/ETH) и RUB/EUR/USD → THB через офис, cardless ATM, курьера
-  или перевод на тайский банк. Стадии: `intent_detected` → `exchange_request`
-  → `quote_calculated` → `verification_check` → `kyc_collection` →
+  или перевод на тайский банк. Стадии: `exchange_request` → `quote_calculated`
+  → `verification_check` → `kyc_collection` →
   `risk_review` → `order_created` → `requisites_sent` →
   `payment_proof_waiting` → `payment_verified` → `payout_or_completion`.
-  Поля: intent/arrival_date, asset/network/amount/payout_method, курс и THB,
+  Поля: asset/network/amount/payout_method, курс и THB,
   verification CRM id, risk decision, order id, реквизиты/TTL, чек или tx hash,
   source bank, final payout code/artifact.
   Двуязычный system prompt (RU/EN). Пакет `apps/vertical-exchange`,

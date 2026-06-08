@@ -168,7 +168,7 @@ describe("admin-verticals — GET list + неизвестный slug", () => {
     const res = await authReq("/api/admin/verticals");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      items: Array<{ slug: string; hasStyles: boolean; hasFunnel: boolean }>;
+      items: Array<{ slug: string; hasFunnel: boolean; hasStyles: boolean }>;
     };
     expect(Array.isArray(body.items)).toBe(true);
     expect(body.items.length).toBeGreaterThan(0);
