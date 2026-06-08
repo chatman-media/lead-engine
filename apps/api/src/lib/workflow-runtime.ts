@@ -1,6 +1,6 @@
 import { type Db, type NotificationService, withTenant } from "@chatman-media/conversation-engine";
 import { leadEvents, leadFieldValues, leads, stageDefinitions, stageFields } from "@chatman-media/storage";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 export type WorkflowEventType =
   | "message_received"
@@ -95,6 +95,44 @@ interface WorkflowTransitionRule {
 interface WorkflowWhen {
   type?: unknown;
 }
+
+export type WorkflowLeadSelector = { leadId: number } | { contactId: number };
+
+export type WorkflowOperatorEvent = {
+  tenantId: number;
+  selector: WorkflowLeadSelector;
+  adminId?: number;
+  now: number;
+};
+
+export type WorkflowOperatorTransitionResult =
+  | { kind: "no_lead" }
+  | { kind: "terminal"; stage: string }
+  | {
+      kind: "not_applicable";
+      reason: "current_stage_type";
+      leadId: number;
+      contactId: number;
+      from: string;
+      fromDisplayName: string;
+    }
+  | {
+      kind: "advanced";
+      leadId: number;
+      contactId: number;
+      from: string;
+      fromDisplayName: string;
+      fromStageId: number;
+      to: string;
+      toDisplayName: string;
+      toStageId: number;
+      toStageType: string;
+      terminal: boolean;
+      awaitingPartner: boolean;
+      partnerWebhookUrl: string | null;
+      partnerWebhookMode: string;
+      effects: WorkflowEffect[];
+    };
 
 /**
  * Выбор следующей стадии при auto-advance.
@@ -393,6 +431,27 @@ export async function handleFieldUpdatedInTx(
   };
 }
 
+export async function handleOperatorAdvancedInTx(
+  tx: Db,
+  event: WorkflowOperatorEvent,
+): Promise<WorkflowOperatorTransitionResult> {
+  return advanceLeadToNextStageInTx(tx, {
+    ...event,
+    workflowEvent: "operator_advanced",
+  });
+}
+
+export async function handleOperatorSentOfferInTx(
+  tx: Db,
+  event: WorkflowOperatorEvent,
+): Promise<WorkflowOperatorTransitionResult> {
+  return advanceLeadToNextStageInTx(tx, {
+    ...event,
+    requiredCurrentStageType: "awaiting_operator",
+    workflowEvent: "operator_sent_offer",
+  });
+}
+
 export function dispatchWorkflowEffects(
   effects: readonly WorkflowEffect[],
   notificationService?: NotificationService | null,
@@ -417,6 +476,133 @@ function noAdvance(
   reason: Extract<WorkflowAutoAdvanceResult, { advanced: false }>["reason"],
 ): Extract<WorkflowAutoAdvanceResult, { advanced: false }> {
   return { advanced: false, reason, effects: [] };
+}
+
+async function advanceLeadToNextStageInTx(
+  tx: Db,
+  event: WorkflowOperatorEvent & {
+    workflowEvent: "operator_advanced" | "operator_sent_offer";
+    requiredCurrentStageType?: string;
+  },
+): Promise<WorkflowOperatorTransitionResult> {
+  const whereLead =
+    "leadId" in event.selector
+      ? and(eq(leads.tenantId, event.tenantId), eq(leads.id, event.selector.leadId))
+      : and(eq(leads.tenantId, event.tenantId), eq(leads.userId, event.selector.contactId));
+  const [lead] = await tx
+    .select({
+      id: leads.id,
+      contactId: leads.userId,
+      state: leads.state,
+      stageDefinitionId: leads.stageDefinitionId,
+    })
+    .from(leads)
+    .where(whereLead)
+    .orderBy(desc(leads.id))
+    .limit(1);
+  if (!lead?.stageDefinitionId) return { kind: "no_lead" };
+
+  const [currentStage] = await tx
+    .select({
+      id: stageDefinitions.id,
+      slug: stageDefinitions.slug,
+      funnelId: stageDefinitions.funnelId,
+      displayName: stageDefinitions.displayName,
+      stageType: stageDefinitions.stageType,
+      nextStages: stageDefinitions.nextStages,
+    })
+    .from(stageDefinitions)
+    .where(
+      and(
+        eq(stageDefinitions.id, lead.stageDefinitionId),
+        eq(stageDefinitions.tenantId, event.tenantId),
+      ),
+    );
+  if (!currentStage) return { kind: "no_lead" };
+
+  if (
+    event.requiredCurrentStageType &&
+    currentStage.stageType !== event.requiredCurrentStageType
+  ) {
+    return {
+      kind: "not_applicable",
+      reason: "current_stage_type",
+      leadId: lead.id,
+      contactId: lead.contactId,
+      from: currentStage.slug,
+      fromDisplayName: currentStage.displayName,
+    };
+  }
+
+  const nextSlug = currentStage.nextStages[0];
+  if (!nextSlug) return { kind: "terminal", stage: currentStage.slug };
+
+  const [nextStage] = await tx
+    .select({
+      id: stageDefinitions.id,
+      slug: stageDefinitions.slug,
+      displayName: stageDefinitions.displayName,
+      stageType: stageDefinitions.stageType,
+      nextStages: stageDefinitions.nextStages,
+      partnerWebhookUrl: stageDefinitions.partnerWebhookUrl,
+      partnerWebhookMode: stageDefinitions.partnerWebhookMode,
+    })
+    .from(stageDefinitions)
+    .where(
+      and(
+        eq(stageDefinitions.slug, nextSlug),
+        eq(stageDefinitions.tenantId, event.tenantId),
+        eq(stageDefinitions.funnelId, currentStage.funnelId),
+      ),
+    );
+  if (!nextStage) return { kind: "terminal", stage: currentStage.slug };
+
+  await tx
+    .update(leads)
+    .set({ stageDefinitionId: nextStage.id, state: nextStage.slug, updatedAt: event.now })
+    .where(eq(leads.id, lead.id));
+
+  await tx.insert(leadEvents).values({
+    tenantId: event.tenantId,
+    leadId: lead.id,
+    fromState: lead.state,
+    toState: nextStage.slug,
+    byAdminId: event.adminId,
+    notes: JSON.stringify({ workflowEvent: event.workflowEvent }),
+    createdAt: event.now,
+  });
+
+  const effects: WorkflowEffect[] =
+    nextStage.stageType === "awaiting_operator"
+      ? [
+          {
+            type: "notify_operator",
+            tenantId: event.tenantId,
+            leadId: lead.id,
+            contactId: lead.contactId,
+            toStage: nextStage.displayName,
+          },
+        ]
+      : [];
+
+  return {
+    kind: "advanced",
+    leadId: lead.id,
+    contactId: lead.contactId,
+    from: currentStage.slug,
+    fromDisplayName: currentStage.displayName,
+    fromStageId: currentStage.id,
+    to: nextStage.slug,
+    toDisplayName: nextStage.displayName,
+    toStageId: nextStage.id,
+    toStageType: nextStage.stageType,
+    terminal: nextStage.nextStages.length === 0,
+    awaitingPartner:
+      Boolean(nextStage.partnerWebhookUrl) && nextStage.partnerWebhookMode === "await_callback",
+    partnerWebhookUrl: nextStage.partnerWebhookUrl,
+    partnerWebhookMode: nextStage.partnerWebhookMode,
+    effects,
+  };
 }
 
 function parseConditionType(raw: string | null): string | null {

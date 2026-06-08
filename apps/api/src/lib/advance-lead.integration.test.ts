@@ -141,10 +141,11 @@ describe("advanceLead", () => {
     expect(lead!.state).toBe("qualify");
     expect(lead!.stage).toBe(qualifyId);
     const evs = await db
-      .select({ toState: leadEvents.toState })
+      .select({ toState: leadEvents.toState, notes: leadEvents.notes })
       .from(leadEvents)
       .where(and(eq(leadEvents.tenantId, tenantId), eq(leadEvents.leadId, leadId)));
     expect(evs.some((e) => e.toState === "qualify")).toBe(true);
+    expect(evs.some((e) => e.notes?.includes('"workflowEvent":"operator_advanced"'))).toBe(true);
   });
 
   it("с диалогом + активным каналом → сообщение в чат + outbound доставка", async () => {

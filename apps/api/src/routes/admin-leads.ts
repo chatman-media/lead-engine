@@ -24,7 +24,11 @@ import { canAddLead } from "../lib/quota.ts";
 import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webhooks.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
 import { advanceLead } from "../lib/advance-lead.ts";
-import { dispatchWorkflowEffects, handleFieldUpdatedInTx } from "../lib/workflow-runtime.ts";
+import {
+  dispatchWorkflowEffects,
+  handleFieldUpdatedInTx,
+  handleOperatorSentOfferInTx,
+} from "../lib/workflow-runtime.ts";
 
 /**
  * Lead pipeline API.
@@ -1142,54 +1146,36 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         createdAt: now,
       });
 
-      // awaiting_operator: отправка оффера = «оператор завершил стадию» → двигаем
-      // лид по nextStages[0] (offer→fulfill). Прочие стадии — только отправка.
+      const transition = await handleOperatorSentOfferInTx(tx, {
+        tenantId,
+        selector: { leadId: id },
+        ...(adminId !== undefined ? { adminId } : {}),
+        now,
+      });
       let webhookPayload: StageChangedPayload | null = null;
-      if (lead.stageDefinitionId) {
-        const [curStage] = await tx
-          .select({
-            slug: stageDefinitions.slug,
-            displayName: stageDefinitions.displayName,
-            stageType: stageDefinitions.stageType,
-            nextStages: stageDefinitions.nextStages,
-          })
-          .from(stageDefinitions)
-          .where(eq(stageDefinitions.id, lead.stageDefinitionId));
-        const nextSlug = curStage?.nextStages?.[0];
-        if (curStage?.stageType === "awaiting_operator" && nextSlug) {
-          const [next] = await tx
-            .select({ id: stageDefinitions.id, slug: stageDefinitions.slug, displayName: stageDefinitions.displayName })
-            .from(stageDefinitions)
-            .where(and(eq(stageDefinitions.slug, nextSlug), eq(stageDefinitions.tenantId, tenantId)));
-          if (next) {
-            await tx
-              .update(leads)
-              .set({ stageDefinitionId: next.id, state: next.slug, updatedAt: now })
-              .where(eq(leads.id, id));
-            await tx.insert(leadEvents).values({
-              tenantId,
-              leadId: id,
-              fromState: lead.state,
-              toState: next.slug,
-              byAdminId: adminId,
-              createdAt: now,
-            });
-            const [contact] = await tx
-              .select({ displayName: contacts.displayName })
-              .from(contacts)
-              .where(eq(contacts.id, lead.userId));
-            webhookPayload = {
-              event: "lead.stage_changed",
-              tenantId,
-              leadId: id,
-              contactId: lead.userId,
-              contactName: contact?.displayName ?? null,
-              from: { stageId: lead.stageDefinitionId, slug: curStage.slug, displayName: curStage.displayName },
-              to: { stageId: next.id, slug: next.slug, displayName: next.displayName },
-              timestamp: now,
-            };
-          }
-        }
+      if (transition.kind === "advanced") {
+        const [contact] = await tx
+          .select({ displayName: contacts.displayName })
+          .from(contacts)
+          .where(eq(contacts.id, transition.contactId));
+        webhookPayload = {
+          event: "lead.stage_changed",
+          tenantId,
+          leadId: id,
+          contactId: transition.contactId,
+          contactName: contact?.displayName ?? null,
+          from: {
+            stageId: transition.fromStageId,
+            slug: transition.from,
+            displayName: transition.fromDisplayName,
+          },
+          to: {
+            stageId: transition.toStageId,
+            slug: transition.to,
+            displayName: transition.toDisplayName,
+          },
+          timestamp: now,
+        };
       }
 
       return {
