@@ -15,7 +15,7 @@
  *   GET /api/partner/cb/:token?a=cancel   → set lead state note, clear token
  *   GET /api/partner/cb/:token            → HTML page with two buttons
  *
- * Token format: base64url(JSON{leadId,stageId,ts}).HMAC-SHA256-hex
+ * Token format: base64url(JSON{tenantId,leadId,stageId,ts}).HMAC-SHA256-hex
  */
 
 import { signWebhookPayload } from "./webhook-sign.ts";
@@ -23,6 +23,7 @@ import { signWebhookPayload } from "./webhook-sign.ts";
 // ─── Token ─────────────────────────────────────────────────────────────────
 
 export interface CallbackTokenPayload {
+  tenantId: number;
   leadId: number;
   stageId: number;
   ts: number; // epoch seconds (issued at)
@@ -70,7 +71,21 @@ export async function verifyCallbackToken(
   const raw = parseB64url(header);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as CallbackTokenPayload;
+    const parsed = JSON.parse(raw) as Partial<CallbackTokenPayload>;
+    const { tenantId, leadId, stageId, ts } = parsed;
+    if (
+      typeof tenantId !== "number" ||
+      !Number.isInteger(tenantId) ||
+      typeof leadId !== "number" ||
+      !Number.isInteger(leadId) ||
+      typeof stageId !== "number" ||
+      !Number.isInteger(stageId) ||
+      typeof ts !== "number" ||
+      !Number.isInteger(ts)
+    ) {
+      return null;
+    }
+    return { tenantId, leadId, stageId, ts };
   } catch {
     return null;
   }
@@ -81,6 +96,7 @@ export async function verifyCallbackToken(
 export interface PartnerPingOpts {
   webhookUrl: string;
   webhookMode: string; // 'fire_and_forget' | 'await_callback'
+  tenantId: number;
   leadId: number;
   stageId: number;
   tenantSlug: string;
@@ -110,7 +126,10 @@ export async function firePartnerPing(
   opts: PartnerPingOpts,
 ): Promise<PartnerPingResult> {
   const ts = Math.floor(Date.now() / 1000);
-  const token = await makeCallbackToken({ leadId: opts.leadId, stageId: opts.stageId, ts }, opts.callbackSecret);
+  const token = await makeCallbackToken(
+    { tenantId: opts.tenantId, leadId: opts.leadId, stageId: opts.stageId, ts },
+    opts.callbackSecret,
+  );
   const confirmUrl = `${opts.appUrl}/api/partner/cb/${token}?a=confirm`;
   const cancelUrl = `${opts.appUrl}/api/partner/cb/${token}?a=cancel`;
   const pageUrl = `${opts.appUrl}/api/partner/cb/${token}`;

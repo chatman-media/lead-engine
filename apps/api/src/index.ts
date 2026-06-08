@@ -514,6 +514,7 @@ async function main() {
       db,
       callbackSecret: cfg.partnerCallbackSecret,
       appUrl: cfg.mailer.appUrl,
+      notificationService,
     }),
   );
   log.info("partner-callback route enabled (/api/partner/cb/:token)");
