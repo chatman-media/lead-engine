@@ -19,13 +19,16 @@ import {
   funnels,
   leadEvents,
   leadFieldValues,
+  leadNotes,
   leads,
+  partnerServices,
+  serviceCatalogItems,
   stageDefinitions,
   stageFields,
 } from "@chatman-media/storage";
 import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { LoadedRef } from "../llm-bootstrap.ts";
-import { chooseFunnelForIntent } from "./service-intent-router.ts";
+import { chooseServiceRoute, type ServiceRouteSelection } from "./service-intent-router.ts";
 
 export interface FieldExtractor {
   extract(opts: {
@@ -90,9 +93,10 @@ export function makeFieldExtractor(
       let awaitingOpEntry: { leadId: number; toStage: string } | null = null;
 
       await withTenant(db, tenantId, async (tx) => {
-        // 0. Резолвим направление по тексту: при нескольких active funnels
-        // выбираем обменку/недвижку/продукт/партнёров по простому intent-router.
-        // Если intent неясен — остаётся первый active funnel, как раньше.
+        // 0. Резолвим направление по тексту. Service Catalog имеет приоритет:
+        // владелец может явно сказать, какая услуга ведёт в какой funnel,
+        // partner-service, webhook или ручной разбор. Если catalog не совпал —
+        // остаётся прежний deterministic intent-router.
         const activeFunnels = await tx
           .select({
             id: funnels.id,
@@ -102,7 +106,44 @@ export function makeFieldExtractor(
           .from(funnels)
           .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
           .orderBy(asc(funnels.id));
-        const activeFunnel = chooseFunnelForIntent(activeFunnels, text);
+        const catalogItems = await tx
+          .select({
+            id: serviceCatalogItems.id,
+            slug: serviceCatalogItems.slug,
+            name: serviceCatalogItems.name,
+            category: serviceCatalogItems.category,
+            description: serviceCatalogItems.description,
+            routeType: serviceCatalogItems.routeType,
+            funnelId: serviceCatalogItems.funnelId,
+            partnerServiceId: serviceCatalogItems.partnerServiceId,
+            partnerServiceFunnelId: partnerServices.funnelId,
+            partnerServiceStageDefinitionId: partnerServices.stageDefinitionId,
+            webhookUrl: serviceCatalogItems.webhookUrl,
+          })
+          .from(serviceCatalogItems)
+          .leftJoin(
+            partnerServices,
+            and(
+              eq(partnerServices.tenantId, tenantId),
+              eq(partnerServices.id, serviceCatalogItems.partnerServiceId),
+            ),
+          )
+          .where(
+            and(
+              eq(serviceCatalogItems.tenantId, tenantId),
+              eq(serviceCatalogItems.isActive, true),
+            ),
+          )
+          .orderBy(asc(serviceCatalogItems.sortOrder), asc(serviceCatalogItems.id));
+        const routeSelection = chooseServiceRoute({
+          funnels: activeFunnels,
+          catalogItems: catalogItems.map((item) => ({
+            ...item,
+            routeType: item.routeType as "manual" | "funnel" | "partner_service" | "webhook",
+          })),
+          text,
+        });
+        const activeFunnel = routeSelection.funnel;
         const [firstStage] = activeFunnel
           ? await tx
               .select({ id: stageDefinitions.id, slug: stageDefinitions.slug })
@@ -187,7 +228,27 @@ export function makeFieldExtractor(
               stageDefinitionId: leads.stageDefinitionId,
               requestType: leads.requestType,
             });
-          if (created) lead = created;
+          if (created) {
+            lead = created;
+            const routeNote = buildRouteAuditNote(routeSelection, activeFunnel);
+            if (routeNote) {
+              await tx.insert(leadEvents).values({
+                tenantId,
+                leadId: created.id,
+                fromState: null,
+                toState: firstStage.slug,
+                notes: routeNote,
+                createdAt: now,
+              });
+              await tx.insert(leadNotes).values({
+                tenantId,
+                leadId: created.id,
+                body: buildRouteAuditBody(routeSelection, activeFunnel),
+                source: "service_catalog",
+                createdAt: now,
+              });
+            }
+          }
         }
 
         if (!lead?.stageDefinitionId) return;
@@ -481,4 +542,42 @@ ${fieldDescriptions}
       }
     },
   };
+}
+
+function buildRouteAuditNote(
+  route: ServiceRouteSelection,
+  funnel: { id: number; slug: string; verticalTemplateId: string | null } | null,
+): string | null {
+  if (route.source !== "catalog" || !route.catalogItem) return null;
+  const item = route.catalogItem;
+  return JSON.stringify({
+    type: "service_catalog_route",
+    catalogItemId: item.id,
+    catalogItemSlug: item.slug,
+    catalogItemName: item.name,
+    routeType: item.routeType,
+    targetFunnelId: funnel?.id ?? null,
+    targetFunnelSlug: funnel?.slug ?? null,
+    partnerServiceId: item.partnerServiceId,
+    partnerServiceStageDefinitionId: item.partnerServiceStageDefinitionId,
+    webhookUrl: item.webhookUrl,
+    intent: route.intent,
+  });
+}
+
+function buildRouteAuditBody(
+  route: ServiceRouteSelection,
+  funnel: { slug: string } | null,
+): string {
+  const item = route.catalogItem;
+  if (!item) return "Маршрут создан через каталог услуг.";
+  const target =
+    item.routeType === "funnel"
+      ? `воронка ${funnel?.slug ?? "не выбрана"}`
+      : item.routeType === "partner_service"
+        ? `партнёрская услуга #${item.partnerServiceId ?? "не выбрана"}`
+        : item.routeType === "webhook"
+          ? `webhook ${item.webhookUrl ?? "не задан"}`
+          : "ручная обработка оператором";
+  return `Маршрут из каталога услуг: ${item.name} (${item.slug}) → ${target}.`;
 }
