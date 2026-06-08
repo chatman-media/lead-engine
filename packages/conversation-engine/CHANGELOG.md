@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.13.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.12.1...@chatman-media/conversation-engine-v1.13.0) (2026-06-08)
+
+
+### Features
+
+* **verticals:** add visa_v1 + scooter_v1 vertical packages ([#293](https://github.com/chatman-media/lead-engine/issues/293)) ([0feef4b](https://github.com/chatman-media/lead-engine/commit/0feef4b8613a8f576864776ecafa9c758d1d47f3)), closes [#187](https://github.com/chatman-media/lead-engine/issues/187)
+
 # [@chatman-media/conversation-engine-v1.12.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.12.0...@chatman-media/conversation-engine-v1.12.1) (2026-06-07)
 
 
