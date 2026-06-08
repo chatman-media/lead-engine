@@ -2,6 +2,7 @@ import {
   admins,
   applyAllMigrations,
   createIsolatedDb,
+  pairwiseMatches,
   schema,
   selfPlayMatches,
   tryConnectToPg,
@@ -60,7 +61,7 @@ beforeAll(async () => {
   tenantB = await tenantFor("quality-b@demo.io");
 
   const now = Math.floor(Date.now() / 1000);
-  await db.insert(selfPlayMatches).values([
+  const insertedSelfPlay = await db.insert(selfPlayMatches).values([
     {
       tenantId: tenantA,
       styleSlug: "style-a",
@@ -101,6 +102,61 @@ beforeAll(async () => {
       skillsJson: "[]",
       leadId: null,
       fabricationsCaught: 0,
+      createdAt: now,
+    },
+  ]).returning({
+    id: selfPlayMatches.id,
+    tenantId: selfPlayMatches.tenantId,
+    styleSlug: selfPlayMatches.styleSlug,
+  });
+
+  const matchA = insertedSelfPlay.find(
+    (row) => row.tenantId === tenantA && row.styleSlug === "style-a",
+  );
+  const matchB = insertedSelfPlay.find(
+    (row) => row.tenantId === tenantA && row.styleSlug === "style-b",
+  );
+  const matchOther = insertedSelfPlay.find((row) => row.tenantId === tenantB);
+  if (!matchA || !matchB || !matchOther) throw new Error("self-play fixture mismatch");
+
+  await db.insert(pairwiseMatches).values([
+    {
+      tenantId: tenantA,
+      styleASlug: "style-a",
+      styleBSlug: "style-b",
+      personaSlug: "skeptic-anya",
+      winner: "a",
+      judgeReason: "A closed cleaner",
+      matchAId: matchA.id,
+      matchBId: matchB.id,
+      eloAAfter: 1516,
+      eloBAfter: 1484,
+      createdAt: now + 5,
+    },
+    {
+      tenantId: tenantA,
+      styleASlug: "style-b",
+      styleBSlug: "style-a",
+      personaSlug: "price-sensitive",
+      winner: "b",
+      judgeReason: "B recovered better",
+      matchAId: matchB.id,
+      matchBId: matchA.id,
+      eloAAfter: 1478,
+      eloBAfter: 1522,
+      createdAt: now - 20,
+    },
+    {
+      tenantId: tenantB,
+      styleASlug: "style-a",
+      styleBSlug: "style-b",
+      personaSlug: "skeptic-anya",
+      winner: "draw",
+      judgeReason: "tenant b pairwise only",
+      matchAId: matchOther.id,
+      matchBId: null,
+      eloAAfter: 1500,
+      eloBAfter: 1500,
       createdAt: now,
     },
   ]);
@@ -182,6 +238,83 @@ describe("admin quality JSONL export", () => {
     expect(JSON.stringify(records)).not.toContain("tenant b only");
   });
 
+  it("returns tenant-scoped pairwise summary", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/quality/pairwise/summary");
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as PairwiseSummaryResponse;
+    expect(body.totals).toMatchObject({
+      total: 2,
+      aWins: 1,
+      bWins: 1,
+      draws: 0,
+      aWinRate: 50,
+      bWinRate: 50,
+    });
+    expect(body.byPair[0]).toMatchObject({
+      styleASlug: "style-a",
+      styleBSlug: "style-b",
+      total: 1,
+      aWins: 1,
+      aWinRate: 100,
+    });
+    expect(body.recent[0]).toMatchObject({
+      styleASlug: "style-a",
+      styleBSlug: "style-b",
+      winner: "a",
+      judgeReason: "A closed cleaner",
+      eloAAfter: 1516,
+      eloBAfter: 1484,
+    });
+    expect(JSON.stringify(body)).not.toContain("tenant b pairwise only");
+  });
+
+  it("exports tenant-scoped pairwise matches as JSONL attachment", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/quality/pairwise/export.jsonl");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("application/x-ndjson");
+    expect(res.headers.get("Content-Disposition")).toContain("pairwise-matches.jsonl");
+
+    const records = parseJsonl(await res.text());
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      schemaVersion: 1,
+      kind: "pairwise_match",
+      source: "admin-api",
+      styleASlug: "style-a",
+      styleBSlug: "style-b",
+      winner: "a",
+      reason: "A closed cleaner",
+      persisted: true,
+      elo: { aAfter: 1516, bAfter: 1484 },
+      matchA: { styleSlug: "style-a", outcome: "won", persisted: true },
+      matchB: { styleSlug: "style-b", outcome: "lost", persisted: true },
+    });
+    expect(records[0]?.matchA?.transcript).toHaveLength(2);
+    expect(JSON.stringify(records)).not.toContain("tenant b pairwise only");
+  });
+
+  it("filters pairwise exports and can omit transcripts", async () => {
+    if (!sql) return;
+    const res = await authReq(
+      tokenA,
+      "/api/admin/quality/pairwise/export.jsonl?styleASlug=style-b&styleBSlug=style-a&personaSlug=price-sensitive&winner=b&includeTranscript=false",
+    );
+    expect(res.status).toBe(200);
+    const records = parseJsonl(await res.text());
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      kind: "pairwise_match",
+      styleASlug: "style-b",
+      styleBSlug: "style-a",
+      winner: "b",
+    });
+    expect(records[0]?.matchA?.transcript).toBeUndefined();
+    expect(records[0]?.matchB?.transcript).toBeUndefined();
+  });
+
   it("filters by style/persona/outcome and can omit transcripts", async () => {
     if (!sql) return;
     const res = await authReq(
@@ -207,6 +340,12 @@ describe("admin quality JSONL export", () => {
     expect(
       (await authReq(tokenA, "/api/admin/quality/self-play/export.jsonl?limit=1001")).status,
     ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/pairwise/export.jsonl?winner=bad")).status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/pairwise/export.jsonl?limit=0")).status,
+    ).toBe(400);
   });
 
   it("keeps another tenant isolated", async () => {
@@ -222,6 +361,22 @@ describe("admin quality JSONL export", () => {
     ).json()) as QualitySummaryResponse;
     expect(summary.totals).toMatchObject({ total: 1, won: 0, lost: 0, draw: 1, winRate: 0 });
     expect(summary.recent[0]?.judgeReason).toBe("tenant b only");
+
+    const pairwiseRecords = parseJsonl(
+      await (await authReq(tokenB, "/api/admin/quality/pairwise/export.jsonl")).text(),
+    );
+    expect(pairwiseRecords).toHaveLength(1);
+    expect(pairwiseRecords[0]?.reason).toBe("tenant b pairwise only");
+
+    const pairwiseSummary = (await (
+      await authReq(tokenB, "/api/admin/quality/pairwise/summary")
+    ).json()) as PairwiseSummaryResponse;
+    expect(pairwiseSummary.totals).toMatchObject({
+      total: 1,
+      aWins: 0,
+      bWins: 0,
+      draws: 1,
+    });
   });
 });
 
@@ -266,6 +421,25 @@ type QualityRecord = {
     persisted?: boolean;
     judge: { outcome?: string; reason: string | null };
   };
+  pairwiseId?: number;
+  styleASlug?: string;
+  styleBSlug?: string;
+  winner?: string;
+  reason?: string;
+  persisted?: boolean;
+  elo?: { aAfter?: number; bAfter?: number };
+  matchA?: {
+    styleSlug?: string;
+    outcome?: string;
+    persisted?: boolean;
+    transcript?: unknown[];
+  };
+  matchB?: {
+    styleSlug?: string;
+    outcome?: string;
+    persisted?: boolean;
+    transcript?: unknown[];
+  };
 };
 
 type QualitySummaryResponse = {
@@ -299,6 +473,35 @@ type QualitySummaryResponse = {
     personaSlug: string;
     outcome: string;
     judgeReason: string | null;
+  }>;
+};
+
+type PairwiseSummaryResponse = {
+  totals: {
+    total: number;
+    aWins: number;
+    bWins: number;
+    draws: number;
+    aWinRate: number;
+    bWinRate: number;
+  };
+  byPair: Array<{
+    styleASlug: string;
+    styleBSlug: string;
+    total: number;
+    aWins: number;
+    bWins: number;
+    draws: number;
+    aWinRate: number;
+    bWinRate: number;
+  }>;
+  recent: Array<{
+    styleASlug: string;
+    styleBSlug: string;
+    winner: string;
+    judgeReason: string | null;
+    eloAAfter: number;
+    eloBAfter: number;
   }>;
 };
 
