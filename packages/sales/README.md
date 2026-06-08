@@ -27,6 +27,7 @@ Built from the production sales layer of the Lead Engine platform — battle-tes
 | **Built-in styles** | 4 production-tested personas: marina-prime, cold-direct-pas, empathetic-nepq, flirty-belfort |
 | **Self-play** | `runSelfPlayMatch` — full RAG pipeline vs LLM-driven candidate; per-turn skill grading; reflect guard |
 | **Pairwise** | `runPairwiseMatch` — A vs B against same persona; comparative judge; symmetric ELO update |
+| **Quality export** | `exportSelfPlayMatchJsonl` / `exportPairwiseMatchJsonl` — stable JSONL records for eval dashboards and CI artifacts |
 | **Coach** | `proposeStyleEdits` — reads losing transcripts, proposes concrete JSON edits to tone/hooks/guidance/few-shot |
 | **Shadow eval** | `runShadowEval` — Wilson 95% LB on B's win rate → keep / rollback / inconclusive |
 | **Skill recommender** | `rankSkillRecommendations` — Wilson LB ranking; draws count as 0.5 wins |
@@ -106,6 +107,24 @@ console.log(result.skillsAttributed); // which skills the bot actually used
 console.log(result.fabricationsCaught); // reflect guard catches
 ```
 
+## Quality-lab JSONL export
+
+```typescript
+import {
+  exportSelfPlayMatchJsonl,
+  exportSelfPlayMatchesFromRepoJsonl,
+} from "@chatman-media/sales";
+
+const oneLine = exportSelfPlayMatchJsonl(result, {
+  source: "nightly-self-play",
+});
+
+const recent = await exportSelfPlayMatchesFromRepoJsonl(matchesRepo, {
+  styleSlug: "marina-prime-v1",
+  limit: 50,
+});
+```
+
 ## Coach LLM
 
 ```typescript
@@ -177,7 +196,8 @@ const mirroring = SKILL_BY_SLUG.get("mirroring");
 │   ├── personas.ts   8 candidate archetypes
 │   ├── judge.ts      LLM match judge
 │   ├── orchestrator.ts  Full match loop
-│   └── pairwise.ts   Head-to-head comparison
+│   ├── pairwise.ts   Head-to-head comparison
+│   └── export.ts     JSONL quality-lab export
 ├── coach.ts          Style iteration from losses
 ├── shadow-eval.ts    Wilson-LB A/B shadow runner
 ├── skill-recommendations.ts  Wilson LB skill ranker
