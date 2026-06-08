@@ -15,10 +15,10 @@
   "dependencies": {
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.15.1"
+    "react-router-dom": "^7.17.0"
   },
   "devDependencies": {
-    "@types/react": "^19.2.16",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "^19.1.2",
     "@types/react-router-dom": "^5.3.3",
     "@vitejs/plugin-react": "^4.4.1",
