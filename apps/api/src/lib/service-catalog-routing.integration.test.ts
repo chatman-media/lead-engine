@@ -70,6 +70,14 @@ async function latestLead(contactId: number) {
   return row;
 }
 
+async function allLeads(contactId: number) {
+  return db
+    .select()
+    .from(leads)
+    .where(and(eq(leads.tenantId, tenantId), eq(leads.userId, contactId)))
+    .orderBy(desc(leads.updatedAt), desc(leads.id));
+}
+
 async function firstStageId(funnelId: number): Promise<number> {
   const [row] = await db
     .select({ id: stageDefinitions.id })
@@ -147,8 +155,12 @@ beforeAll(async () => {
   const body = (await res.json()) as { admin: { tenantId: number } };
   tenantId = body.admin.tenantId;
 
-  const exchange = await applyFunnelStages(db as Db, tenantId, SEED_TEMPLATES.exchange!, "exchange");
-  const realEstate = await applyFunnelStages(db as Db, tenantId, SEED_TEMPLATES.real_estate!, "real_estate");
+  const exchange = await applyFunnelStages(db as Db, tenantId, SEED_TEMPLATES.exchange!, "exchange", {
+    targetSlug: "exchange",
+  });
+  const realEstate = await applyFunnelStages(db as Db, tenantId, SEED_TEMPLATES.real_estate!, "real_estate", {
+    targetSlug: "real_estate",
+  });
   exchangeFunnelId = exchange.funnelId;
   realEstateFunnelId = realEstate.funnelId;
 }, 30_000);
@@ -183,6 +195,68 @@ describe("field-extractor service catalog routing", () => {
     const { event, note } = await routeNotes(lead!.id);
     expect(event?.notes).toContain('"catalogItemSlug":"vip_support"');
     expect(note?.source).toBe("service_catalog");
+  });
+
+  it("explicit simulator targetFunnelId overrides the text intent", async () => {
+    if (!sql) return;
+    const contactId = await freshContact();
+    await makeFieldExtractor(stubRef()).extract({
+      tenantId,
+      contactId,
+      text: "хочу обменять 500 USDT на баты",
+      db,
+      targetFunnelId: realEstateFunnelId,
+    });
+
+    const lead = await latestLead(contactId);
+    expect(lead?.stageDefinitionId).toBe(await firstStageId(realEstateFunnelId));
+  });
+
+  it("explicit simulator targetCatalogItemId routes through the selected service", async () => {
+    if (!sql) return;
+    const catalogItemId = await insertCatalogItem({
+      slug: "property_sale_sim",
+      name: "Продажа недвижимости",
+      routeType: "funnel",
+      funnelId: realEstateFunnelId,
+    });
+
+    const contactId = await freshContact();
+    await makeFieldExtractor(stubRef()).extract({
+      tenantId,
+      contactId,
+      text: "хочу обменять 500 USDT на баты",
+      db,
+      targetCatalogItemId: catalogItemId,
+    });
+
+    const lead = await latestLead(contactId);
+    expect(lead?.stageDefinitionId).toBe(await firstStageId(realEstateFunnelId));
+    const { event } = await routeNotes(lead!.id);
+    expect(event?.notes).toContain('"catalogItemSlug":"property_sale_sim"');
+  });
+
+  it("a second selected funnel creates a separate lead for the same contact", async () => {
+    if (!sql) return;
+    const contactId = await freshContact();
+    await makeFieldExtractor(stubRef()).extract({
+      tenantId,
+      contactId,
+      text: "хочу обменять 500 USDT на баты",
+      db,
+    });
+    await makeFieldExtractor(stubRef()).extract({
+      tenantId,
+      contactId,
+      text: "ищу квартиру в Москве",
+      db,
+      targetFunnelId: realEstateFunnelId,
+    });
+
+    const rows = await allLeads(contactId);
+    expect(rows.length).toBe(2);
+    expect(rows.map((row) => row.stageDefinitionId)).toContain(await firstStageId(exchangeFunnelId));
+    expect(rows.map((row) => row.stageDefinitionId)).toContain(await firstStageId(realEstateFunnelId));
   });
 
   it("manual catalog route creates a default-funnel lead with auditable route context", async () => {

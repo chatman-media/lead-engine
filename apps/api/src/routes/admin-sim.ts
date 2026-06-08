@@ -280,6 +280,11 @@ function firstPartText(parts: OutboundPart[]): string {
   return t && "text" in t ? t.text : parts.length > 0 ? "[медиа]" : "";
 }
 
+function positiveInt(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
 // Реестр активных потоков (in-memory; живёт в процессе apps/api).
 interface StreamState {
   id: string;
@@ -392,7 +397,7 @@ async function walkLeads(
   db: Db,
   tenantId: number,
   adminId: number,
-  opts: { count?: number; displayName?: string; spread?: boolean },
+  opts: { count?: number; displayName?: string; spread?: boolean; funnelId?: number },
 ): Promise<{ kind: "ok"; leadIds: number[]; finalStage: string } | { kind: "no_funnel" }> {
   const count = Math.min(Math.max(1, opts.count ?? 1), 30);
   const displayName = opts.displayName;
@@ -400,7 +405,11 @@ async function walkLeads(
     const [funnel] = await tx
       .select({ id: funnels.id })
       .from(funnels)
-      .where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
+      .where(
+        opts.funnelId
+          ? and(eq(funnels.tenantId, tenantId), eq(funnels.id, opts.funnelId))
+          : and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)),
+      )
       .limit(1);
     if (!funnel) return { kind: "no_funnel" as const };
 
@@ -617,6 +626,8 @@ export function makeAdminSimRoutes(opts: {
       isCancelled?: () => boolean;
       /** false = прогнать все ходы синхронно (для eval-харнесса), потом вернуть. */
       background?: boolean;
+      targetFunnelId?: number;
+      targetCatalogItemId?: number;
     },
   ): Promise<number> {
     const { tenantId, adminId } = ctx;
@@ -647,7 +658,12 @@ export function makeAdminSimRoutes(opts: {
         externalUsername: params.displayName,
         parts: [{ kind: "text", text: userText }],
         receivedAt: now,
-        raw: { _sim: true, adminId },
+        raw: {
+          _sim: true,
+          adminId,
+          ...(params.targetFunnelId ? { targetFunnelId: params.targetFunnelId } : {}),
+          ...(params.targetCatalogItemId ? { targetCatalogItemId: params.targetCatalogItemId } : {}),
+        },
       };
 
       const pi = await withTenant(opts.db, tenantId, async (tx) =>
@@ -678,6 +694,8 @@ export function makeAdminSimRoutes(opts: {
             contactId: pi.contactId,
             text: userText,
             db: opts.db,
+            ...(params.targetFunnelId ? { targetFunnelId: params.targetFunnelId } : {}),
+            ...(params.targetCatalogItemId ? { targetCatalogItemId: params.targetCatalogItemId } : {}),
           });
         } catch {
           /* извлечение полей не критично для диалога */
@@ -859,7 +877,14 @@ export function makeAdminSimRoutes(opts: {
     const tenantId = c.var.tenantId;
     const adminId = (c.var.adminId as number | null) ?? 0;
 
-    let body: { personaId?: string; brief?: string; displayName?: string; maxTurns?: number };
+    let body: {
+      personaId?: string;
+      brief?: string;
+      displayName?: string;
+      maxTurns?: number;
+      targetFunnelId?: number;
+      targetCatalogItemId?: number;
+    };
     try {
       body = await c.req.json();
     } catch {
@@ -871,13 +896,21 @@ export function makeAdminSimRoutes(opts: {
     if (!brief) return c.json({ error: "personaId or brief required" }, 400);
     const displayName = (body.displayName?.trim() || persona?.displayName || "Симулятор клиента").trim();
     const maxTurns = Math.min(Math.max(1, body.maxTurns ?? DEFAULT_MAX_TURNS), MAX_TURNS_CAP);
+    const targetFunnelId = positiveInt(body.targetFunnelId);
+    const targetCatalogItemId = positiveInt(body.targetCatalogItemId);
 
     const ctx = await buildCtx(tenantId, adminId);
     if (typeof ctx === "string") return c.json({ error: ctx }, 400);
 
     try {
-      const conversationId = await simulateClient(ctx, { brief, displayName, maxTurns });
-      return c.json({ ok: true, conversationId, displayName, maxTurns });
+      const conversationId = await simulateClient(ctx, {
+        brief,
+        displayName,
+        maxTurns,
+        ...(targetFunnelId ? { targetFunnelId } : {}),
+        ...(targetCatalogItemId ? { targetCatalogItemId } : {}),
+      });
+      return c.json({ ok: true, conversationId, displayName, maxTurns, targetFunnelId, targetCatalogItemId });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
@@ -889,7 +922,14 @@ export function makeAdminSimRoutes(opts: {
     const tenantId = c.var.tenantId;
     const adminId = (c.var.adminId as number | null) ?? 0;
 
-    let body: { count?: number; intervalSec?: number; personaIds?: string[]; maxTurns?: number };
+    let body: {
+      count?: number;
+      intervalSec?: number;
+      personaIds?: string[];
+      maxTurns?: number;
+      targetFunnelId?: number;
+      targetCatalogItemId?: number;
+    };
     try {
       body = await c.req.json();
     } catch {
@@ -899,6 +939,8 @@ export function makeAdminSimRoutes(opts: {
     const count = Math.min(Math.max(1, body.count ?? 5), MAX_STREAM_CLIENTS);
     const intervalSec = Math.max(MIN_STREAM_INTERVAL_SEC, body.intervalSec ?? DEFAULT_STREAM_INTERVAL_SEC);
     const maxTurns = Math.min(Math.max(1, body.maxTurns ?? DEFAULT_MAX_TURNS), MAX_TURNS_CAP);
+    const targetFunnelId = positiveInt(body.targetFunnelId);
+    const targetCatalogItemId = positiveInt(body.targetCatalogItemId);
     const pool =
       body.personaIds && body.personaIds.length > 0
         ? PERSONAS.filter((p) => body.personaIds!.includes(p.id))
@@ -929,6 +971,8 @@ export function makeAdminSimRoutes(opts: {
         displayName: randomName(),
         maxTurns,
         isCancelled: () => state.cancelled, // стоп потока обрывает и идущие диалоги
+        ...(targetFunnelId ? { targetFunnelId } : {}),
+        ...(targetCatalogItemId ? { targetCatalogItemId } : {}),
       }).catch(() => {
         /* отдельный клиент упал — поток продолжается */
       });
@@ -941,7 +985,7 @@ export function makeAdminSimRoutes(opts: {
       state.timers.push(t);
     }
 
-    return c.json({ ok: true, streamId, count, intervalSec, maxTurns });
+    return c.json({ ok: true, streamId, count, intervalSec, maxTurns, targetFunnelId, targetCatalogItemId });
   });
 
   // ── POST /api/admin/sim/walk ───────────────────────────────────────────
@@ -952,7 +996,7 @@ export function makeAdminSimRoutes(opts: {
   app.post("/api/admin/sim/walk", async (c) => {
     const tenantId = c.var.tenantId;
     const adminId = (c.var.adminId as number | null) ?? 0;
-    let body: { count?: number; displayName?: string; spread?: boolean };
+    let body: { count?: number; displayName?: string; spread?: boolean; funnelId?: number };
     try {
       body = (await c.req.json()) as typeof body;
     } catch {
@@ -963,6 +1007,7 @@ export function makeAdminSimRoutes(opts: {
       count: body.count,
       displayName: body.displayName,
       spread: body.spread === true,
+      funnelId: positiveInt(body.funnelId),
     });
     if (created.kind === "no_funnel") return c.json({ error: "no active funnel with stages" }, 400);
     return c.json({ ok: true, leads: created.leadIds, finalStage: created.finalStage });

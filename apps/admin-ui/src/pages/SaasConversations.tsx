@@ -22,9 +22,11 @@ import {
   type ConversationDetail,
   type ConversationListItem,
   clearToken,
+  type FunnelListItem,
   type LeadListItem,
   type MessageRow,
   saas,
+  type ServiceCatalogItem,
 } from "../api/saas.ts";
 
 const POLL_INTERVAL_MS = 5000;
@@ -57,6 +59,14 @@ const STATE_RU: Record<string, string> = {
   terminal_lost: "закрыт ✗",
 };
 
+const FUNNEL_VERTICAL_RU: Record<string, string> = {
+  exchange_v1: "Обменка",
+  real_estate_v1: "Продажа недвижимости",
+  saas_v1: "Продукт",
+  concierge_v1: "Мультисервис",
+  recruitment_v1: "Рекрутинг",
+};
+
 function fmtTime(epoch: number | null): string {
   if (!epoch) return "—";
   return new Date(epoch * 1000).toLocaleString("ru", {
@@ -68,6 +78,20 @@ function fmtTime(epoch: number | null): string {
 }
 function fmtShortTime(epoch: number): string {
   return new Date(epoch * 1000).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+}
+
+function funnelLabel(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">): string {
+  return item.verticalTemplateId ? (FUNNEL_VERTICAL_RU[item.verticalTemplateId] ?? item.slug) : item.slug;
+}
+
+function serviceTargetLabel(item: ServiceCatalogItem): string {
+  const target =
+    item.routeType === "partner_service"
+      ? item.partnerServiceName || "партнёрская услуга"
+      : item.funnelSlug
+        ? funnelLabel({ slug: item.funnelSlug, verticalTemplateId: item.funnelVerticalTemplateId ?? null })
+        : "авто";
+  return `${item.name} → ${target}`;
 }
 
 export function SaasConversations() {
@@ -109,6 +133,9 @@ export function SaasConversations() {
   const [simPersonas, setSimPersonas] = useState<
     Array<{ id: string; name: string; displayName: string }>
   >([]);
+  const [simFunnels, setSimFunnels] = useState<FunnelListItem[]>([]);
+  const [simServices, setSimServices] = useState<ServiceCatalogItem[]>([]);
+  const [simTarget, setSimTarget] = useState("auto");
   const [simPersonaId, setSimPersonaId] = useState("");
   const [simTurns, setSimTurns] = useState("6");
   const [simStarting, setSimStarting] = useState(false);
@@ -148,28 +175,48 @@ export function SaasConversations() {
         })
         .catch(() => {});
     }
+    if (simFunnels.length === 0) {
+      saas.listFunnels().then((r) => setSimFunnels(r.items)).catch(() => {});
+    }
+    if (simServices.length === 0) {
+      saas.listServiceCatalog().then((r) => setSimServices(r.items)).catch(() => {});
+    }
     refreshSimStreams();
     const t = setInterval(refreshSimStreams, POLL_INTERVAL_MS);
     return () => clearInterval(t);
-  }, [simOpen, simPersonas.length, refreshSimStreams]);
+  }, [simOpen, simPersonas.length, simFunnels.length, simServices.length, refreshSimStreams]);
+
+  function simTargetPayload(): { targetFunnelId?: number; targetCatalogItemId?: number } {
+    if (simTarget.startsWith("funnel:")) {
+      const id = Number(simTarget.slice("funnel:".length));
+      return Number.isFinite(id) ? { targetFunnelId: id } : {};
+    }
+    if (simTarget.startsWith("service:")) {
+      const id = Number(simTarget.slice("service:".length));
+      return Number.isFinite(id) ? { targetCatalogItemId: id } : {};
+    }
+    return {};
+  }
 
   async function handleStartSim() {
     setSimStarting(true);
     setError("");
     try {
       const maxTurns = Number.parseInt(simTurns, 10) || 6;
+      const target = simTargetPayload();
       if (simStream) {
         await saas.startSimStream({
           count: Number.parseInt(simCount, 10) || 10,
           intervalSec: Number.parseInt(simIntervalSec, 10) || 60,
           ...(simPersonaId ? { personaIds: [simPersonaId] } : {}),
           maxTurns,
+          ...target,
         });
         await refreshList();
         refreshSimStreams();
       } else {
         if (!simPersonaId) return;
-        const res = await saas.startSim({ personaId: simPersonaId, maxTurns });
+        const res = await saas.startSim({ personaId: simPersonaId, maxTurns, ...target });
         setSimOpen(false);
         await refreshList();
         navigate(`/conversations/${res.conversationId}`);
@@ -385,6 +432,8 @@ export function SaasConversations() {
     // biome-ignore lint/correctness/useExhaustiveDependencies: selectedId only
   }, [selectedId]);
 
+  const activeServiceTargets = simServices.filter((item) => item.isActive);
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -412,6 +461,27 @@ export function SaasConversations() {
                   {simPersonas.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.name} — {p.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="min-w-[220px] flex-1 space-y-1">
+              <span className="text-xs font-medium text-muted-foreground">Куда писать</span>
+              <Select value={simTarget} onValueChange={setSimTarget}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Авто по сообщению" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Авто по сообщению</SelectItem>
+                  {simFunnels.map((f) => (
+                    <SelectItem key={`funnel:${f.id}`} value={`funnel:${f.id}`}>
+                      Воронка: {funnelLabel(f)}
+                    </SelectItem>
+                  ))}
+                  {activeServiceTargets.map((item) => (
+                    <SelectItem key={`service:${item.id}`} value={`service:${item.id}`}>
+                      Услуга: {serviceTargetLabel(item)}
                     </SelectItem>
                   ))}
                 </SelectContent>

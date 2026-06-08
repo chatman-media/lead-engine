@@ -1333,12 +1333,21 @@ export const saas = {
       personas: Array<{ id: string; name: string; displayName: string; brief: string }>;
     }>("/api/admin/sim/personas");
   },
-  startSim(opts: { personaId?: string; brief?: string; displayName?: string; maxTurns?: number }) {
+  startSim(opts: {
+    personaId?: string;
+    brief?: string;
+    displayName?: string;
+    maxTurns?: number;
+    targetFunnelId?: number;
+    targetCatalogItemId?: number;
+  }) {
     return request<{
       ok: boolean;
       conversationId: number;
       displayName: string;
       maxTurns: number;
+      targetFunnelId?: number;
+      targetCatalogItemId?: number;
       firstMessage: string;
     }>("/api/admin/sim/start", { method: "POST", body: JSON.stringify(opts) });
   },
@@ -1350,8 +1359,17 @@ export const saas = {
     intervalSec?: number;
     personaIds?: string[];
     maxTurns?: number;
+    targetFunnelId?: number;
+    targetCatalogItemId?: number;
   }) {
-    return request<{ ok: boolean; streamId: string; count: number; intervalSec: number }>(
+    return request<{
+      ok: boolean;
+      streamId: string;
+      count: number;
+      intervalSec: number;
+      targetFunnelId?: number;
+      targetCatalogItemId?: number;
+    }>(
       "/api/admin/sim/stream",
       { method: "POST", body: JSON.stringify(opts) },
     );
@@ -1372,10 +1390,17 @@ export const saas = {
       method: "DELETE",
     });
   },
-  walkSim(count = 1, displayName?: string) {
+  walkSim(count = 1, displayName?: string, funnelId?: number) {
     return request<{ ok: boolean; leads: number[]; finalStage: string }>(
       "/api/admin/sim/walk",
-      { method: "POST", body: JSON.stringify({ count, ...(displayName ? { displayName } : {}) }) },
+      {
+        method: "POST",
+        body: JSON.stringify({
+          count,
+          ...(displayName ? { displayName } : {}),
+          ...(funnelId ? { funnelId } : {}),
+        }),
+      },
     );
   },
   advanceConversation(id: number, text?: string) {

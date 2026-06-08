@@ -348,7 +348,7 @@ export function SaasLeads() {
             onClick={async () => {
               setWalking(true);
               try {
-                await saas.walkSim(1);
+                await saas.walkSim(1, undefined, funnel?.funnel?.id);
                 reload();
               } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
