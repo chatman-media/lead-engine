@@ -2,6 +2,7 @@ import {
   AlertTriangleIcon,
   BugIcon,
   DownloadIcon,
+  LightbulbIcon,
   RefreshCwIcon,
   TargetIcon,
   TimerIcon,
@@ -14,11 +15,15 @@ import { toast } from "sonner";
 import {
   ApiError,
   clearToken,
+  type QualityCoachProposalStatus,
+  type QualityCoachSummary,
   type QualityExportOptions,
   type QualityOutcome,
   type QualityPairwiseExportOptions,
   type QualityPairwiseSummary,
   type QualityPairwiseWinner,
+  type QualityShadowDecision,
+  type QualityShadowStatus,
   type QualitySelfPlaySummary,
   saas,
 } from "@/api/saas";
@@ -50,6 +55,24 @@ const WINNER_CLASS: Record<QualityPairwiseWinner, string> = {
   a: "bg-[color-mix(in_oklch,var(--success)_12%,transparent)] text-[var(--success)]",
   b: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   draw: "bg-muted text-muted-foreground",
+};
+
+const PROPOSAL_CLASS: Record<QualityCoachProposalStatus, string> = {
+  pending: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  applied: "bg-[color-mix(in_oklch,var(--success)_12%,transparent)] text-[var(--success)]",
+  dismissed: "bg-muted text-muted-foreground",
+};
+
+const SHADOW_STATUS_CLASS: Record<QualityShadowStatus, string> = {
+  running: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  complete: "bg-[color-mix(in_oklch,var(--success)_12%,transparent)] text-[var(--success)]",
+  failed: "bg-destructive/10 text-destructive",
+};
+
+const DECISION_CLASS: Record<QualityShadowDecision, string> = {
+  keep: "bg-[color-mix(in_oklch,var(--success)_12%,transparent)] text-[var(--success)]",
+  rollback: "bg-destructive/10 text-destructive",
+  inconclusive: "bg-muted text-muted-foreground",
 };
 
 function formatDate(epoch: number | null | undefined): string {
@@ -86,10 +109,50 @@ function winnerBadge(winner: string) {
   );
 }
 
+function proposalBadge(status: string) {
+  const value = status as QualityCoachProposalStatus;
+  return (
+    <Badge className={cn("border-transparent font-mono text-[11px]", PROPOSAL_CLASS[value])}>
+      {status}
+    </Badge>
+  );
+}
+
+function shadowBadge(status: string) {
+  const value = status as QualityShadowStatus;
+  return (
+    <Badge className={cn("border-transparent font-mono text-[11px]", SHADOW_STATUS_CLASS[value])}>
+      {status}
+    </Badge>
+  );
+}
+
+function decisionBadge(decision: string | null) {
+  if (!decision) return <span className="text-muted-foreground">нет</span>;
+  const value = decision as QualityShadowDecision;
+  return (
+    <Badge className={cn("border-transparent font-mono text-[11px]", DECISION_CLASS[value])}>
+      {decision}
+    </Badge>
+  );
+}
+
+function editSummary(edits: unknown): string {
+  if (!edits || typeof edits !== "object" || Array.isArray(edits)) return "нет";
+  const keys = Object.keys(edits);
+  return keys.length > 0 ? keys.join(", ") : "нет";
+}
+
+function formatPercent(value: number | null): string {
+  if (value === null) return "нет";
+  return `${Math.round(value * 1000) / 10}%`;
+}
+
 export function SaasQuality() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<QualitySelfPlaySummary | null>(null);
   const [pairwise, setPairwise] = useState<QualityPairwiseSummary | null>(null);
+  const [coach, setCoach] = useState<QualityCoachSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -129,10 +192,15 @@ export function SaasQuality() {
   function load() {
     setLoading(true);
     setError("");
-    Promise.all([saas.getQualitySelfPlaySummary(), saas.getQualityPairwiseSummary()])
-      .then(([selfPlaySummary, pairwiseSummary]) => {
+    Promise.all([
+      saas.getQualitySelfPlaySummary(),
+      saas.getQualityPairwiseSummary(),
+      saas.getQualityCoachSummary(),
+    ])
+      .then(([selfPlaySummary, pairwiseSummary, coachSummary]) => {
         setSummary(selfPlaySummary);
         setPairwise(pairwiseSummary);
+        setCoach(coachSummary);
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) {
@@ -215,12 +283,14 @@ export function SaasQuality() {
 
   const totals = summary?.totals;
   const pairwiseTotals = pairwise?.totals;
+  const proposalTotals = coach?.totals.proposals;
+  const shadowTotals = coach?.totals.shadows;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Качество"
-        description="Self-play, pairwise сравнения и JSONL выгрузка для анализа."
+        description="Self-play, pairwise сравнения, coach proposals и JSONL выгрузка."
         actions={
           <>
             <Button variant="outline" onClick={load} disabled={loading}>
@@ -242,8 +312,8 @@ export function SaasQuality() {
       )}
 
       {loading && !summary ? (
-        <div className="grid gap-3 md:grid-cols-5">
-          {[0, 1, 2, 3, 4].map((item) => (
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
+          {[0, 1, 2, 3, 4, 5, 6].map((item) => (
             <Card key={item}>
               <CardContent className="space-y-3 py-4">
                 <Skeleton className="h-4 w-24" />
@@ -253,12 +323,14 @@ export function SaasQuality() {
           ))}
         </div>
       ) : (
-        <div className="grid gap-3 md:grid-cols-5">
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
           <MetricCard icon={TargetIcon} label="Матчи" value={totals?.total ?? 0} />
           <MetricCard icon={TrophyIcon} label="Win-rate" value={`${totals?.winRate ?? 0}%`} />
           <MetricCard icon={BugIcon} label="Фабрикации" value={totals?.fabricationsCaught ?? 0} />
           <MetricCard icon={TimerIcon} label="Avg turns" value={totals?.avgTurns ?? "нет"} />
           <MetricCard icon={TargetIcon} label="Pairwise" value={pairwiseTotals?.total ?? 0} />
+          <MetricCard icon={LightbulbIcon} label="Coach pending" value={proposalTotals?.pending ?? 0} />
+          <MetricCard icon={TimerIcon} label="Shadow running" value={shadowTotals?.running ?? 0} />
         </div>
       )}
 
@@ -604,6 +676,97 @@ export function SaasQuality() {
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs">
                       {item.eloAAfter}/{item.eloBAfter}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <LightbulbIcon className="size-4 text-amber-500" />
+              Coach proposals
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Style</TableHead>
+                  <TableHead>Summary</TableHead>
+                  <TableHead>Edits</TableHead>
+                  <TableHead className="text-right">When</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(coach?.proposals ?? []).length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      Coach proposals пока нет
+                    </TableCell>
+                  </TableRow>
+                )}
+                {coach?.proposals.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>{proposalBadge(item.status)}</TableCell>
+                    <TableCell className="max-w-[140px] truncate font-mono text-xs">
+                      {item.styleSlug}
+                    </TableCell>
+                    <TableCell className="max-w-[300px] truncate text-sm">{item.summary}</TableCell>
+                    <TableCell className="max-w-[210px] truncate font-mono text-xs text-muted-foreground">
+                      {editSummary(item.edits)}
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">
+                      {formatDate(item.createdAt)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">Shadow evals</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Styles</TableHead>
+                  <TableHead>Decision</TableHead>
+                  <TableHead className="text-right">Pairs</TableHead>
+                  <TableHead className="text-right">LB</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(coach?.shadows ?? []).length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      Shadow evals пока нет
+                    </TableCell>
+                  </TableRow>
+                )}
+                {coach?.shadows.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>{shadowBadge(item.status)}</TableCell>
+                    <TableCell className="max-w-[190px] truncate font-mono text-xs">
+                      {item.parentStyleSlug} → {item.newStyleSlug}
+                    </TableCell>
+                    <TableCell>{decisionBadge(item.decision)}</TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {item.pairsDone}/{item.pairsPlanned}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {formatPercent(item.winRateLb)}
                     </TableCell>
                   </TableRow>
                 ))}

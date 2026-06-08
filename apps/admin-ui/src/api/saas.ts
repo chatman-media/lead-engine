@@ -770,6 +770,9 @@ export interface ExperimentItem {
 
 export type QualityOutcome = "won" | "lost" | "draw";
 export type QualityPairwiseWinner = "a" | "b" | "draw";
+export type QualityCoachProposalStatus = "pending" | "applied" | "dismissed";
+export type QualityShadowStatus = "running" | "complete" | "failed";
+export type QualityShadowDecision = "keep" | "rollback" | "inconclusive";
 
 export interface QualitySelfPlaySummary {
   totals: {
@@ -865,6 +868,63 @@ export interface QualityPairwiseExportOptions {
   winner?: QualityPairwiseWinner;
   limit?: number;
   includeTranscript?: boolean;
+}
+
+export interface QualityCoachSummary {
+  totals: {
+    proposals: {
+      total: number;
+      pending: number;
+      applied: number;
+      dismissed: number;
+      lastProposalAt: number | null;
+    };
+    shadows: {
+      total: number;
+      running: number;
+      complete: number;
+      failed: number;
+      keep: number;
+      rollback: number;
+      inconclusive: number;
+      lastShadowAt: number | null;
+    };
+  };
+  proposals: Array<{
+    id: number;
+    styleSlug: string;
+    sampleSize: number;
+    personaFilter: string | null;
+    summary: string;
+    editsJson: string;
+    rationaleJson: string;
+    rawOutput: string | null;
+    status: QualityCoachProposalStatus;
+    createdAt: number;
+    decidedAt: number | null;
+    decidedByAdminId: number | null;
+    edits: unknown;
+    rationale: string[];
+  }>;
+  shadows: Array<{
+    id: number;
+    proposalId: number;
+    parentStyleSlug: string;
+    parentStyleId: number;
+    newStyleSlug: string;
+    newStyleId: number;
+    pairsPlanned: number;
+    pairsDone: number;
+    aWins: number;
+    bWins: number;
+    draws: number;
+    winRateLb: number | null;
+    status: QualityShadowStatus;
+    decision: QualityShadowDecision | null;
+    errorMessage: string | null;
+    startedAt: number;
+    completedAt: number | null;
+  }>;
 }
 
 export interface VacancyItem {
@@ -1994,6 +2054,9 @@ export const saas = {
   },
   getQualityPairwiseSummary() {
     return request<QualityPairwiseSummary>("/api/admin/quality/pairwise/summary");
+  },
+  getQualityCoachSummary() {
+    return request<QualityCoachSummary>("/api/admin/quality/coach/summary");
   },
   async exportQualitySelfPlayJsonl(opts: QualityExportOptions = {}): Promise<void> {
     const params = new URLSearchParams();
