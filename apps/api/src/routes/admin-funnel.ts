@@ -125,7 +125,7 @@ export const SEED_TEMPLATES: Record<string, SeedStage[]> = {
 				"cancelled",
 			],
 			// Авто-advance по заполнению request_type; branch-aware выбор ветки —
-			// в field-extractor.selectNextStage (а не nextStages[0]).
+			// в workflow runtime (а не nextStages[0]).
 			autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
 			fields: [
 				{
@@ -4130,6 +4130,70 @@ export const FIELD_TYPES = [
 
 export type { SeedStage };
 
+type StageConfigJsonInput = string | Record<string, unknown> | undefined;
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function parseAutoAdvanceConditionType(raw?: string): string | null {
+	if (!raw) return null;
+	try {
+		const parsed = JSON.parse(raw) as { type?: unknown };
+		return typeof parsed.type === "string" ? parsed.type : null;
+	} catch {
+		return null;
+	}
+}
+
+function parseStageConfigJson(raw: StageConfigJsonInput): Record<string, unknown> {
+	if (typeof raw === "string" && raw.trim()) {
+		try {
+			const parsed = JSON.parse(raw) as unknown;
+			return isJsonRecord(parsed) ? { ...parsed } : {};
+		} catch {
+			return {};
+		}
+	}
+	return isJsonRecord(raw) ? { ...raw } : {};
+}
+
+export function stageWorkflowTransitions(configJson?: string): unknown[] {
+	const config = parseStageConfigJson(configJson);
+	const workflow = config.workflow;
+	if (!isJsonRecord(workflow) || !Array.isArray(workflow.transitions)) {
+		return [];
+	}
+	return workflow.transitions;
+}
+
+export function normalizeSeedStageConfigJson(opts: {
+	configJson?: StageConfigJsonInput;
+	autoAdvanceCondition?: string;
+	nextStages: readonly string[];
+	fields: readonly Pick<SeedStage["fields"][number], "slug">[];
+}): string {
+	const config = parseStageConfigJson(opts.configJson);
+	const workflow = isJsonRecord(config.workflow) ? { ...config.workflow } : {};
+	if (
+		!Array.isArray(workflow.transitions) &&
+		parseAutoAdvanceConditionType(opts.autoAdvanceCondition) ===
+			"all_required_fields_filled" &&
+		opts.nextStages.length > 0
+	) {
+		const transition: Record<string, unknown> = {
+			when: { type: "all_required_fields_filled" },
+			priority: 10,
+		};
+		if (!opts.fields.some((field) => field.slug === "request_type")) {
+			transition.to = opts.nextStages[0];
+		}
+		workflow.transitions = [transition];
+		config.workflow = workflow;
+	}
+	return Object.keys(config).length > 0 ? JSON.stringify(config) : "{}";
+}
+
 /**
  * Фаза костяка для стадии при сидировании: явный тег → эвристика; null для
  * якорей (intake/terminal). Общая логика для applyFunnelStages и тестов костяка.
@@ -4234,6 +4298,12 @@ export async function applyFunnelStages(
 			const { fields, ...stageData } = stageTpl;
 			const phase = resolveSeedPhase(stageData, prevPhase);
 			if (phase) prevPhase = phase;
+			const configJson = normalizeSeedStageConfigJson({
+				configJson: stageData.configJson,
+				autoAdvanceCondition: stageData.autoAdvanceCondition,
+				nextStages: stageData.nextStages,
+				fields,
+			});
 			const [stage] = await tx
 				.insert(stageDefinitions)
 				.values({
@@ -4249,7 +4319,7 @@ export async function applyFunnelStages(
 					staleTimeoutDays: stageData.staleTimeoutDays ?? null,
 					nextStages: stageData.nextStages,
 					autoAdvanceCondition: stageData.autoAdvanceCondition ?? null,
-					configJson: stageData.configJson ?? "{}",
+					configJson,
 					goal: stageData.goal ?? null,
 					guidance: stageData.guidance ?? null,
 					supportMode: stageData.supportMode ?? false,

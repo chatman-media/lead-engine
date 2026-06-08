@@ -1,8 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { type ActivePhase, validateBackbone } from "@chatman-media/verticals";
 import {
+	normalizeSeedStageConfigJson,
 	resolveSeedPhase,
 	SEED_TEMPLATES,
+	stageWorkflowTransitions,
 	type SeedStage,
 } from "./admin-funnel.ts";
 
@@ -27,11 +29,11 @@ describe("SEED_TEMPLATES соответствуют костяку", () => {
 });
 
 describe("5 вертикалей: явные теги фаз сохранены", () => {
-		const expected: Record<string, Record<string, ActivePhase>> = {
-			exchange: {
-				quote_calculated: "offer",
-				kyc_collection: "clear",
-				payment_verified: "fulfill",
+	const expected: Record<string, Record<string, ActivePhase>> = {
+		exchange: {
+			quote_calculated: "offer",
+			kyc_collection: "clear",
+			payment_verified: "fulfill",
 		},
 		video: {
 			brief_call: "qualify",
@@ -64,4 +66,93 @@ describe("5 вертикалей: явные теги фаз сохранены"
 			}
 		});
 	}
+});
+
+describe("SEED_TEMPLATES workflow runtime config", () => {
+	it("строит explicit transition для линейного legacy auto-advance stage", () => {
+		const configJson = normalizeSeedStageConfigJson({
+			autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+			nextStages: ["offer", "lost"],
+			fields: [{ slug: "budget" }],
+		});
+		const config = JSON.parse(configJson) as {
+			workflow?: {
+				transitions?: Array<{ to?: string; when?: { type?: string } }>;
+			};
+		};
+		expect(config.workflow?.transitions?.[0]).toMatchObject({
+			to: "offer",
+			when: { type: "all_required_fields_filled" },
+		});
+	});
+
+	it("не фиксирует to для request_type branching stage", () => {
+		const configJson = normalizeSeedStageConfigJson({
+			autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+			nextStages: ["exchange_request", "transfer_request", "cancelled"],
+			fields: [{ slug: "request_type" }],
+		});
+		const config = JSON.parse(configJson) as {
+			workflow?: {
+				transitions?: Array<{ to?: string; when?: { type?: string } }>;
+			};
+		};
+		expect(config.workflow?.transitions?.[0]?.when?.type).toBe(
+			"all_required_fields_filled",
+		);
+		expect(config.workflow?.transitions?.[0]?.to).toBeUndefined();
+	});
+
+	it("сохраняет явно заданные workflow transitions", () => {
+		const configJson = normalizeSeedStageConfigJson({
+			configJson: JSON.stringify({
+				workflow: {
+					transitions: [
+						{
+							to: "manual_next",
+							when: { type: "all_required_fields_filled" },
+							priority: 50,
+						},
+					],
+				},
+				other: { keep: true },
+			}),
+			autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+			nextStages: ["first_next"],
+			fields: [{ slug: "field" }],
+		});
+		const config = JSON.parse(configJson) as {
+			workflow?: { transitions?: Array<{ to?: string; priority?: number }> };
+			other?: { keep?: boolean };
+		};
+		expect(config.workflow?.transitions?.[0]).toMatchObject({
+			to: "manual_next",
+			priority: 50,
+		});
+		expect(config.other?.keep).toBe(true);
+	});
+
+	it("каждая legacy auto-advance стадия seed templates получает workflow transition", () => {
+		for (const [template, stages] of Object.entries(SEED_TEMPLATES)) {
+			for (const stage of stages) {
+				if (
+					stage.autoAdvanceCondition !==
+						'{"type":"all_required_fields_filled"}' ||
+					stage.nextStages.length === 0
+				) {
+					continue;
+				}
+				const configJson = normalizeSeedStageConfigJson({
+					configJson: stage.configJson,
+					autoAdvanceCondition: stage.autoAdvanceCondition,
+					nextStages: stage.nextStages,
+					fields: stage.fields,
+				});
+				expect(
+					stageWorkflowTransitions(configJson).length,
+					`${template}/${stage.slug} should persist workflow.transitions`,
+				).toBeGreaterThan(0);
+			}
+		}
+	});
 });
