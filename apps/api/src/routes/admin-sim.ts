@@ -52,7 +52,7 @@ import {
   stageFields,
   tenants,
 } from "@chatman-media/storage";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 
@@ -240,7 +240,10 @@ const LAST_NAMES = [
 ];
 
 function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)]!;
+  if (arr.length === 0) throw new Error("cannot pick from empty array");
+  const value = arr[randomInt(arr.length)];
+  if (value === undefined) throw new Error("cannot pick from empty array");
+  return value;
 }
 
 function randomName(): string {

@@ -31,15 +31,16 @@ afterEach(() => {
 /** Мок: FX-эндпоинт → заданные rates; Binance → заданная цена. */
 function mockFetch(opts: { fx?: Record<string, number> | "bad"; binance?: Record<string, string> }) {
   globalThis.fetch = (async (url: string) => {
-    if (String(url).includes("er-api.com")) {
+    const parsed = new URL(String(url));
+    if (parsed.hostname === "open.er-api.com") {
       const body =
         opts.fx === "bad"
           ? { result: "error" }
           : { result: "success", rates: opts.fx ?? { THB: 35, RUB: 90, EUR: 0.9 } };
       return { ok: true, status: 200, json: async () => body } as Response;
     }
-    if (String(url).includes("binance")) {
-      const m = String(url).match(/symbol=(\w+?)USDT/);
+    if (parsed.hostname === "api.binance.com") {
+      const m = parsed.searchParams.get("symbol")?.match(/^(\w+?)USDT$/);
       const sym = m?.[1] ?? "BTC";
       return {
         ok: true,
