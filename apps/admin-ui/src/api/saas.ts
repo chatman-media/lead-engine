@@ -768,6 +768,59 @@ export interface ExperimentItem {
   createdAt: number;
 }
 
+export type QualityOutcome = "won" | "lost" | "draw";
+
+export interface QualitySelfPlaySummary {
+  totals: {
+    total: number;
+    won: number;
+    lost: number;
+    draw: number;
+    winRate: number;
+    fabricationsCaught: number;
+    avgTurns: number | null;
+    lastMatchAt: number | null;
+  };
+  byStyle: Array<{
+    styleSlug: string;
+    total: number;
+    won: number;
+    lost: number;
+    draw: number;
+    winRate: number;
+    fabricationsCaught: number;
+    avgTurns: number | null;
+    lastMatchAt: number | null;
+  }>;
+  byPersona: Array<{
+    personaSlug: string;
+    total: number;
+    won: number;
+    lost: number;
+    draw: number;
+    winRate: number;
+    lastMatchAt: number | null;
+  }>;
+  recent: Array<{
+    id: number;
+    styleSlug: string;
+    personaSlug: string;
+    outcome: QualityOutcome;
+    judgeReason: string | null;
+    turns: number;
+    fabricationsCaught: number;
+    createdAt: number;
+  }>;
+}
+
+export interface QualityExportOptions {
+  styleSlug?: string;
+  personaSlug?: string;
+  outcome?: QualityOutcome;
+  limit?: number;
+  includeTranscript?: boolean;
+}
+
 export interface VacancyItem {
   id: number;
   tenantId: number;
@@ -1889,6 +1942,37 @@ export const saas = {
       method: "PUT",
       body: JSON.stringify({ status }),
     });
+  },
+  getQualitySelfPlaySummary() {
+    return request<QualitySelfPlaySummary>("/api/admin/quality/self-play/summary");
+  },
+  async exportQualitySelfPlayJsonl(opts: QualityExportOptions = {}): Promise<void> {
+    const params = new URLSearchParams();
+    if (opts.styleSlug) params.set("styleSlug", opts.styleSlug);
+    if (opts.personaSlug) params.set("personaSlug", opts.personaSlug);
+    if (opts.outcome) params.set("outcome", opts.outcome);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.includeTranscript === false) params.set("includeTranscript", "false");
+
+    const token = getToken();
+    const qs = params.toString();
+    const res = await fetch(
+      `${API_BASE}/api/admin/quality/self-play/export.jsonl${qs ? `?${qs}` : ""}`,
+      {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      },
+    );
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      throw new ApiError(res.status, (body.error as string | undefined) ?? res.statusText);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "self-play-matches.jsonl";
+    a.click();
+    URL.revokeObjectURL(url);
   },
 
   // ── Dashboard ────────────────────────────────────────────────────────
