@@ -7,22 +7,24 @@ import {
   type ITranscriber,
   type MemoryExtractor,
   MessagesRepo,
+  type NotificationService,
   OutboundQueueRepo,
   type PipelineSink,
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
-  type NotificationService,
   withTenant,
 } from "@chatman-media/conversation-engine";
 import type { JsonLogger, PlatformMetrics } from "@chatman-media/observability";
 import { channels } from "@chatman-media/storage";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { and, eq } from "drizzle-orm";
-import { recordAudit } from "./audit.ts";
 import { adminEventBus } from "./admin-event-bus.ts";
+import { recordAudit } from "./audit.ts";
 import type { FieldExtractor } from "./field-extractor.ts";
 import type { PhotoProcessor } from "./photo-processor.ts";
+import { runPostInboundAutomation } from "./post-inbound-automation.ts";
+import type { ServiceCatalogRuntime } from "./service-catalog-runtime.ts";
 import type { UserbotChannelEntry } from "./userbot-channel-registry.ts";
 
 /**
@@ -46,6 +48,7 @@ export function startUserbotInboundRunner(opts: {
   notifications?: NotificationService;
   photoProcessor?: PhotoProcessor;
   fieldExtractor?: FieldExtractor;
+  serviceCatalogRuntime?: ServiceCatalogRuntime;
   resolveTranscriber?: ((tenantId: number) => ITranscriber | null) | null;
   sink?: PipelineSink;
   metrics?: PlatformMetrics;
@@ -128,17 +131,16 @@ export function startUserbotInboundRunner(opts: {
               })
               .catch(() => {});
           }
-          if (result.persisted && opts.fieldExtractor) {
-            const text = inbound.parts
-              .filter((p) => p.kind === "text")
-              .map((p) => (p as { kind: "text"; text: string }).text)
-              .join(" ")
-              .trim();
-            if (text.length > 0) {
-              void opts.fieldExtractor
-                .extract({ tenantId: entry.tenantId, contactId: result.contactId, text, db })
-                .catch(() => {});
-            }
+          if (result.persisted) {
+            void runPostInboundAutomation({
+              db,
+              tenantId: entry.tenantId,
+              contactId: result.contactId,
+              conversationId: result.conversationId,
+              inbound,
+              fieldExtractor: opts.fieldExtractor,
+              serviceCatalogRuntime: opts.serviceCatalogRuntime,
+            });
           }
           if (result.persisted) {
             const inboundParts = inbound.parts as Array<{ kind: string; text?: string }>;

@@ -6,16 +6,19 @@ import {
   generateReplyAndEnqueue,
   type MemoryExtractor,
   MessagesRepo,
+  type NotificationService,
   OutboundQueueRepo,
   type PipelineSink,
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
-  type NotificationService,
   withTenant,
 } from "@chatman-media/conversation-engine";
 import type { JsonLogger, PlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
+import type { FieldExtractor } from "./field-extractor.ts";
+import { runPostInboundAutomation } from "./post-inbound-automation.ts";
+import type { ServiceCatalogRuntime } from "./service-catalog-runtime.ts";
 import type { WebChannelEntry } from "./web-channel-registry.ts";
 
 /**
@@ -38,6 +41,8 @@ export function startWebInboundRunner(opts: {
   memoryExtractor?: MemoryExtractor | null;
   stageClassifier?: StageClassifier | null;
   notifications?: NotificationService;
+  fieldExtractor?: FieldExtractor;
+  serviceCatalogRuntime?: ServiceCatalogRuntime;
   sink?: PipelineSink;
   metrics?: PlatformMetrics;
   log: JsonLogger;
@@ -98,6 +103,17 @@ export function startWebInboundRunner(opts: {
               ...(opts.sink ? { sink: opts.sink } : {}),
             });
             result = { ...result, outboundEnqueued: gen.outboundEnqueued };
+          }
+          if (result.persisted) {
+            void runPostInboundAutomation({
+              db,
+              tenantId: entry.tenantId,
+              contactId: result.contactId,
+              conversationId: result.conversationId,
+              inbound,
+              fieldExtractor: opts.fieldExtractor,
+              serviceCatalogRuntime: opts.serviceCatalogRuntime,
+            });
           }
           if (!result.persisted) {
             opts.metrics?.inboundDeduped.inc(1, { tenant: String(entry.tenantId) });

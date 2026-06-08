@@ -1,4 +1,9 @@
 import {
+  type FbWebhookPayload,
+  type MessengerAdapter,
+  verifyWebhookSubscription,
+} from "@chatman-media/channel-facebook";
+import {
   ChannelIdentitiesRepo,
   ContactsRepo,
   ConversationsRepo,
@@ -7,29 +12,26 @@ import {
   type ITranscriber,
   type MemoryExtractor,
   MessagesRepo,
+  type NotificationService,
   OutboundQueueRepo,
   type PipelineSink,
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
-  type NotificationService,
   withTenant,
 } from "@chatman-media/conversation-engine";
-import {
-  type FbWebhookPayload,
-  type MessengerAdapter,
-  verifyWebhookSubscription,
-} from "@chatman-media/channel-facebook";
 import type { PlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { Hono } from "hono";
 import type { ChannelRegistry } from "../channel-registry.ts";
-import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
-import { resolvePlan } from "../lib/plans.ts";
-import type { FieldExtractor } from "../lib/field-extractor.ts";
-import type { PhotoProcessor } from "../lib/photo-processor.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
 import { FacebookSignatureError, verifyFacebookSignature } from "../lib/facebook-signature.ts";
+import type { FieldExtractor } from "../lib/field-extractor.ts";
+import type { PhotoProcessor } from "../lib/photo-processor.ts";
+import { resolvePlan } from "../lib/plans.ts";
+import { runPostInboundAutomation } from "../lib/post-inbound-automation.ts";
+import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
+import type { ServiceCatalogRuntime } from "../lib/service-catalog-runtime.ts";
 
 /**
  * Facebook Messenger webhook handler. Зеркалит WhatsApp (тот же Meta hub-
@@ -65,6 +67,7 @@ export function makeFacebookWebhookRoutes(opts: {
   notificationService?: NotificationService;
   photoProcessor?: PhotoProcessor;
   fieldExtractor?: FieldExtractor;
+  serviceCatalogRuntime?: ServiceCatalogRuntime;
   resolveTranscriber?: ((tenantId: number) => ITranscriber | null) | null;
 }): Hono {
   const app = new Hono();
@@ -236,17 +239,16 @@ export function makeFacebookWebhookRoutes(opts: {
           })
           .catch(() => {});
       }
-      if (result.persisted && opts.fieldExtractor) {
-        const text = inbound.parts
-          .filter((p) => p.kind === "text")
-          .map((p) => (p as { kind: "text"; text: string }).text)
-          .join(" ")
-          .trim();
-        if (text.length > 0) {
-          void opts.fieldExtractor
-            .extract({ tenantId: entry.tenantId, contactId: result.contactId, text, db: opts.db })
-            .catch(() => {});
-        }
+      if (result.persisted) {
+        void runPostInboundAutomation({
+          db: opts.db,
+          tenantId: entry.tenantId,
+          contactId: result.contactId,
+          conversationId: result.conversationId,
+          inbound,
+          fieldExtractor: opts.fieldExtractor,
+          serviceCatalogRuntime: opts.serviceCatalogRuntime,
+        });
       }
       if (result.persisted) {
         const preview = inbound.parts.find((p) => p.kind === "text") as

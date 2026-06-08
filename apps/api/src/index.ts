@@ -50,6 +50,7 @@ import {
 import { makeFieldExtractor } from "./lib/field-extractor.ts";
 import { Mailer } from "./lib/mailer.ts";
 import { makePhotoProcessor } from "./lib/photo-processor.ts";
+import { makeServiceCatalogRuntime } from "./lib/service-catalog-runtime.ts";
 import { makeRequireAuth } from "./middleware/require-auth.ts";
 import { makeTenantContextMiddleware, requireTenant } from "./middleware/tenant-context.ts";
 import { makeAdminRoutes } from "./routes/admin.ts";
@@ -697,6 +698,11 @@ async function main() {
   const fieldExtractor = makeFieldExtractor(loadedRef, notificationService);
   log.info("field extractor enabled (activates per-tenant when chat LLM is configured)");
 
+  const serviceCatalogRuntime = makeServiceCatalogRuntime({
+    resolveChat: makeSimChatResolver(loadedRef),
+  });
+  log.info("service catalog runtime enabled (routes catalog matches into leads/deals)");
+
   // Dialog Simulator — LLM «клиент» ведёт диалог, виден в живом инбоксе (self_play).
   app.route(
     "/",
@@ -750,6 +756,7 @@ async function main() {
       notificationService,
       photoProcessor,
       fieldExtractor,
+      serviceCatalogRuntime,
       sink,
       metrics,
       ...(rateLimiter ? { rateLimiter } : {}),
@@ -798,6 +805,7 @@ async function main() {
         notificationService,
         photoProcessor,
         fieldExtractor,
+        serviceCatalogRuntime,
         sink,
         metrics,
         ...(rateLimiter ? { rateLimiter } : {}),
@@ -829,6 +837,7 @@ async function main() {
         notificationService,
         photoProcessor,
         fieldExtractor,
+        serviceCatalogRuntime,
         sink,
         metrics,
         ...(rateLimiter ? { rateLimiter } : {}),
@@ -883,6 +892,8 @@ async function main() {
       memoryExtractor,
       stageClassifier,
       notifications: notificationService,
+      fieldExtractor,
+      serviceCatalogRuntime,
       sink,
       metrics,
       log,
@@ -920,6 +931,7 @@ async function main() {
         notifications: notificationService,
         photoProcessor,
         fieldExtractor,
+        serviceCatalogRuntime,
         sink,
         metrics,
         log,
