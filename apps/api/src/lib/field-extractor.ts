@@ -8,8 +8,7 @@
  *   2. Loads stage fields with ai_extractable = true.
  *   3. Asks the tenant's chat LLM to extract structured values from the text.
  *   4. Writes extracted values to lead_field_values.
- *   5. Checks auto-advance: if autoAdvanceCondition = all_required_fields_filled
- *      and all required fields are now filled, advances the lead to nextStages[0].
+ *   5. Sends field_updated to WorkflowRuntime for auto-advance evaluation.
  *
  * Non-fatal: any LLM or DB error is caught. The calling webhook never waits.
  */
@@ -26,9 +25,16 @@ import {
   stageDefinitions,
   stageFields,
 } from "@chatman-media/storage";
-import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, notInArray } from "drizzle-orm";
 import type { LoadedRef } from "../llm-bootstrap.ts";
 import { chooseServiceRoute, type ServiceRouteSelection } from "./service-intent-router.ts";
+import {
+  dispatchWorkflowEffects,
+  handleFieldUpdatedInTx,
+  type WorkflowEffect,
+} from "./workflow-runtime.ts";
+
+export { selectNextStage } from "./workflow-runtime.ts";
 
 export interface FieldExtractor {
   extract(opts: {
@@ -37,39 +43,6 @@ export interface FieldExtractor {
     text: string;
     db: Db;
   }): Promise<void>;
-}
-
-/**
- * Выбор следующей стадии при auto-advance.
- *
- * Branch-aware (concierge): если у стадии есть поле `request_type` и >1 ветки,
- * уводим в ветку `<request_type>_*` (напр. `transfer` → `transfer_request`) и
- * возвращаем `requestType` для записи в `leads.request_type`. Если валидной
- * ветки нет (напр. `other` / не распознано) — возвращаем `null` = «не
- * продвигать», лид остаётся на intake для оператора/уточнения.
- *
- * Линейные воронки (5 вертикалей) не затронуты: у их стадий нет поля
- * `request_type`, поэтому `hasRequestTypeField=false` → прежнее поведение
- * `nextStages[0]`, `requestType=null` (колонка не трогается).
- */
-export function selectNextStage(opts: {
-  nextStages: readonly string[];
-  hasRequestTypeField: boolean;
-  requestType: string | null;
-}): { nextSlug: string; requestType: string | null } | null {
-  const { nextStages, hasRequestTypeField, requestType } = opts;
-  if (hasRequestTypeField && nextStages.length > 1) {
-    const branch = requestType
-      ? nextStages.find(
-          (s) => s === `${requestType}_request` || s.startsWith(`${requestType}_`),
-        )
-      : undefined;
-    if (!branch) return null;
-    return { nextSlug: branch, requestType };
-  }
-  const first = nextStages[0];
-  if (!first) return null;
-  return { nextSlug: first, requestType: null };
 }
 
 export function makeFieldExtractor(
@@ -88,9 +61,7 @@ export function makeFieldExtractor(
       if (!chatClient) return;
 
       const now = Math.floor(Date.now() / 1000);
-      // Если лид авто-продвигается В стадию awaiting_operator — после коммита tx
-      // шлём проактивный пинг оператору (лид ждёт человека). Захватываем здесь.
-      let awaitingOpEntry: { leadId: number; toStage: string } | null = null;
+      const workflowEffects: WorkflowEffect[] = [];
 
       await withTenant(db, tenantId, async (tx) => {
         // 0. Резолвим направление по тексту. Service Catalog имеет приоритет:
@@ -415,131 +386,18 @@ ${fieldDescriptions}
             });
         }
 
-        // 6. Check auto-advance
-        let condition: { type: string } | null = null;
-        try {
-          condition = stage.autoAdvanceCondition
-            ? (JSON.parse(stage.autoAdvanceCondition) as { type: string })
-            : null;
-        } catch {
-          return;
-        }
-        if (condition?.type !== "all_required_fields_filled") return;
-        if (!stage.nextStages.length) return;
-
-        const allRequired = await tx
-          .select({ id: stageFields.id })
-          .from(stageFields)
-          .where(
-            and(eq(stageFields.stageId, stage.id), eq(stageFields.required, true)),
-          );
-        if (allRequired.length === 0) return;
-
-        const filledRequired = await tx
-          .select({ id: leadFieldValues.fieldId })
-          .from(leadFieldValues)
-          .where(
-            and(
-              eq(leadFieldValues.leadId, lead.id),
-              inArray(
-                leadFieldValues.fieldId,
-                allRequired.map((f) => f.id),
-              ),
-              sql`${leadFieldValues.valueJson} != 'null' AND ${leadFieldValues.valueJson} != '""' AND ${leadFieldValues.valueJson} != ''`,
-            ),
-          );
-        if (filledRequired.length < allRequired.length) return;
-
-        // 7. Advance the lead. Branch-aware для concierge — логика в чистой
-        // selectNextStage(); здесь только резолвим значение request_type
-        // (из текущей экстракции или из сохранённого) для ветвящихся стадий.
-        const requestTypeField = extractableFields.find((f) => f.slug === "request_type");
-        let rt: string | null = null;
-        if (requestTypeField) {
-          rt = typeof extracted.request_type === "string" ? extracted.request_type : null;
-          if (!rt) {
-            const [stored] = await tx
-              .select({ valueJson: leadFieldValues.valueJson })
-              .from(leadFieldValues)
-              .where(
-                and(
-                  eq(leadFieldValues.leadId, lead.id),
-                  eq(leadFieldValues.fieldId, requestTypeField.id),
-                ),
-              );
-            if (stored?.valueJson) {
-              try {
-                const v = JSON.parse(stored.valueJson);
-                if (typeof v === "string") rt = v;
-              } catch {
-                // ignore malformed stored value
-              }
-            }
-          }
-        }
-
-        const selected = selectNextStage({
-          nextStages: stage.nextStages,
-          hasRequestTypeField: !!requestTypeField,
-          requestType: rt,
-        });
-        if (!selected) return;
-        const { nextSlug, requestType: resolvedRequestType } = selected;
-
-        const [nextStageDef] = await tx
-          .select({
-            id: stageDefinitions.id,
-            slug: stageDefinitions.slug,
-            displayName: stageDefinitions.displayName,
-            stageType: stageDefinitions.stageType,
-          })
-          .from(stageDefinitions)
-          .where(
-            and(
-              eq(stageDefinitions.slug, nextSlug),
-              eq(stageDefinitions.tenantId, tenantId),
-              eq(stageDefinitions.funnelId, stage.funnelId),
-            ),
-          );
-        if (!nextStageDef) return;
-
-        await tx
-          .update(leads)
-          .set({
-            stageDefinitionId: nextStageDef.id,
-            state: nextStageDef.slug,
-            ...(resolvedRequestType ? { requestType: resolvedRequestType } : {}),
-            updatedAt: now,
-          })
-          .where(eq(leads.id, lead.id));
-
-        await tx.insert(leadEvents).values({
+        const workflowResult = await handleFieldUpdatedInTx(tx, {
           tenantId,
           leadId: lead.id,
-          fromState: lead.state,
-          toState: nextStageDef.slug,
-          createdAt: now,
+          extractedValues: extracted,
+          now,
         });
-
-        if (nextStageDef.stageType === "awaiting_operator") {
-          awaitingOpEntry = { leadId: lead.id, toStage: nextStageDef.displayName };
-        }
+        workflowEffects.push(...workflowResult.effects);
       });
 
       // Проактивный пинг оператору: лид вошёл в awaiting_operator → нужен человек.
       // Fire-and-forget, вне tx (Telegram I/O). /send-offer шлёт на ВЫХОДЕ из стадии.
-      if (awaitingOpEntry && notificationService) {
-        const entry: { leadId: number; toStage: string } = awaitingOpEntry;
-        void notificationService
-          .notify({
-            tenantId,
-            eventType: "stage_changed",
-            leadId: entry.leadId,
-            contactId,
-            data: { toStage: entry.toStage, awaitingOperator: true },
-          })
-          .catch(() => {});
-      }
+      dispatchWorkflowEffects(workflowEffects, notificationService);
     },
   };
 }
