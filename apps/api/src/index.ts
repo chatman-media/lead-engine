@@ -77,6 +77,7 @@ import { makeAdminMessageTemplatesRoutes } from "./routes/admin-message-template
 import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makePartnerCallbackRoutes } from "./routes/webhook-partner-callback.ts";
 import { makeAdminPartnersRoutes } from "./routes/admin-partners.ts";
+import { makeAdminQualityRoutes } from "./routes/admin-quality.ts";
 import { makeAdminServiceCatalogRoutes } from "./routes/admin-service-catalog.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
@@ -477,6 +478,10 @@ async function main() {
   // Dashboard aggregate stats.
   app.route("/", makeAdminDashboardRoutes({ db }));
   log.info("admin-dashboard route enabled");
+
+  // Quality lab exports - self-play / eval artifacts for dashboards and CI.
+  app.route("/", makeAdminQualityRoutes({ db }));
+  log.info("admin-quality routes enabled (self-play JSONL export)");
 
   // Vacancies CRUD.
   app.route("/", makeAdminVacanciesRoutes({ db }));
