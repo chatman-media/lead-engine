@@ -87,6 +87,13 @@ function formatAmount(n?: number): string | null {
 	return String(Number(n.toFixed(8))).replace(/\.0+$/, "");
 }
 
+function compactLines(lines: Array<string | null | undefined>): string | null {
+	const out = lines
+		.map((line) => line?.trim())
+		.filter((line): line is string => Boolean(line));
+	return out.length > 0 ? out.join("\n") : null;
+}
+
 async function readSecret(deps: { db: Db; tenantId: number; masterKeyHex: string }, key: string) {
 	return getDecryptedSecret({
 		db: deps.db,
@@ -105,6 +112,26 @@ async function readWalletDestTag(
 		readSecret(deps, `${walletKey}_tag`),
 	]);
 	return (memo || tag || undefined)?.trim() || undefined;
+}
+
+async function readRubCardDetails(
+	deps: { db: Db; tenantId: number; masterKeyHex: string },
+): Promise<string | null> {
+	const [cardNumber, phone, bank, recipient, legacy] = await Promise.all([
+		readSecret(deps, "exchange_rub_card_number"),
+		readSecret(deps, "exchange_rub_card_phone"),
+		readSecret(deps, "exchange_rub_card_bank"),
+		readSecret(deps, "exchange_rub_card_recipient"),
+		readSecret(deps, "exchange_rub_card_requisites"),
+	]);
+	return (
+		compactLines([
+			cardNumber ? `Карта: ${cardNumber}` : null,
+			phone ? `Телефон: ${phone}` : null,
+			bank ? `Банк: ${bank}` : null,
+			recipient ? `Получатель: ${recipient}` : null,
+		]) ?? legacy
+	);
 }
 
 async function readWestWalletConfig(deps: {
@@ -241,7 +268,7 @@ export class ConfigPaymentProvider implements PaymentProvider {
 		}
 
 		if (input.paymentMethod === "card_transfer") {
-			const detailsText = await readSecret(this.deps, "exchange_rub_card_requisites");
+			const detailsText = await readRubCardDetails(this.deps);
 			if (!detailsText) {
 				return {
 					kind: "fiat",

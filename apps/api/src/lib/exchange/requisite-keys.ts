@@ -22,6 +22,10 @@ export const EXCHANGE_REQUISITE_FIXED_KEYS = [
   "exchange_bybit_uid",
   "exchange_htx_uid",
   "exchange_rub_card_requisites",
+  "exchange_rub_card_number",
+  "exchange_rub_card_phone",
+  "exchange_rub_card_bank",
+  "exchange_rub_card_recipient",
 ] as const;
 
 /** Настройки платёжных провайдеров. Не считаются онбординг-реквизитами сами по себе. */
@@ -41,7 +45,13 @@ export const EXCHANGE_SENSITIVE_SECRET_KEYS = [
 /** Бизнес-настройки (информационные; рантайм пока не использует — см. follow-up). */
 export const EXCHANGE_BUSINESS_SETTING_KEYS = [
   "exchange_operator_contact",
+  "exchange_operator_telegram",
+  "exchange_operator_whatsapp",
+  "exchange_operator_line",
   "exchange_payout_methods",
+  "exchange_payout_bank_methods",
+  "exchange_payout_cash_methods",
+  "exchange_aml_policy",
   "exchange_kyc_policy",
   "exchange_working_hours",
   "exchange_office_address",
