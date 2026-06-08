@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.14.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.13.0...@chatman-media/conversation-engine-v1.14.0) (2026-06-08)
+
+
+### Features
+
+* **saas:** add multi-business catalog and partner workflows ([#308](https://github.com/chatman-media/lead-engine/issues/308)) ([fd9317f](https://github.com/chatman-media/lead-engine/commit/fd9317fd9cb0f3772b69c71580cd92a8d6410198))
+
 # [@chatman-media/conversation-engine-v1.13.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.12.1...@chatman-media/conversation-engine-v1.13.0) (2026-06-08)
 
 
