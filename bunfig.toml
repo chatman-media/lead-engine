@@ -4,13 +4,6 @@ coveragePathIgnorePatterns = [
   "apps/api/src/routes/**",
   "apps/api/src/channel-registry.ts",
   "apps/api/src/llm-bootstrap.ts",
-  "apps/api/src/lib/mailer.ts",
-  "apps/api/src/lib/openrouter-transcriber.ts",
-  "apps/api/src/lib/whisper-transcriber.ts",
-  "apps/api/src/lib/userbot-login-store.ts",
-  "apps/api/src/lib/web-channel-registry.ts",
-  "apps/api/src/lib/stripe-api.ts",
-  "apps/api/src/lib/quota.ts",
   "packages/kb/src/server.ts",
   "packages/storage/src/integration-helpers.ts",
 ]
