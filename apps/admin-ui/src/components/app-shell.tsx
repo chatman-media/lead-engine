@@ -104,6 +104,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/hooks", label: "Хуки", icon: SparklesIcon, hideForExchange: true },
       { to: "/styles", label: "Стили", icon: PaletteIcon, hideForExchange: true },
       { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon, hideForExchange: true },
+      { to: "/quality", label: "Качество", icon: ActivityIcon },
     ],
   },
   {

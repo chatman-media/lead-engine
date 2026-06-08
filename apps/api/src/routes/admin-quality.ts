@@ -5,7 +5,7 @@ import {
   type SelfPlayMatchResult,
 } from "@chatman-media/sales";
 import { selfPlayMatches } from "@chatman-media/storage";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 
 const OUTCOMES = new Set<EloOutcome>(["won", "lost", "draw"]);
@@ -16,6 +16,92 @@ export interface AdminQualityRoutesOpts {
 
 export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
   const app = new Hono();
+
+  app.get("/api/admin/quality/self-play/summary", async (c) => {
+    const tenantId = c.var.tenantId;
+
+    const summary = await withTenant(opts.db, tenantId, async (tx) => {
+      const [totalsRow] = await tx
+        .select({
+          total: sql<number>`count(*)::int`,
+          won: sql<number>`(count(*) filter (where ${selfPlayMatches.outcome} = 'won'))::int`,
+          lost: sql<number>`(count(*) filter (where ${selfPlayMatches.outcome} = 'lost'))::int`,
+          draw: sql<number>`(count(*) filter (where ${selfPlayMatches.outcome} = 'draw'))::int`,
+          fabricationsCaught: sql<number>`coalesce(sum(${selfPlayMatches.fabricationsCaught}), 0)::int`,
+          avgTurns: sql<number | null>`round(avg(${selfPlayMatches.turns})::numeric, 2)::float`,
+          lastMatchAt: sql<number | null>`max(${selfPlayMatches.createdAt})::int`,
+        })
+        .from(selfPlayMatches)
+        .where(eq(selfPlayMatches.tenantId, tenantId));
+
+      const byStyleRows = await tx
+        .select({
+          styleSlug: selfPlayMatches.styleSlug,
+          total: sql<number>`count(*)::int`,
+          won: sql<number>`(count(*) filter (where ${selfPlayMatches.outcome} = 'won'))::int`,
+          lost: sql<number>`(count(*) filter (where ${selfPlayMatches.outcome} = 'lost'))::int`,
+          draw: sql<number>`(count(*) filter (where ${selfPlayMatches.outcome} = 'draw'))::int`,
+          fabricationsCaught: sql<number>`coalesce(sum(${selfPlayMatches.fabricationsCaught}), 0)::int`,
+          avgTurns: sql<number | null>`round(avg(${selfPlayMatches.turns})::numeric, 2)::float`,
+          lastMatchAt: sql<number | null>`max(${selfPlayMatches.createdAt})::int`,
+        })
+        .from(selfPlayMatches)
+        .where(eq(selfPlayMatches.tenantId, tenantId))
+        .groupBy(selfPlayMatches.styleSlug);
+
+      const byPersonaRows = await tx
+        .select({
+          personaSlug: selfPlayMatches.personaSlug,
+          total: sql<number>`count(*)::int`,
+          won: sql<number>`(count(*) filter (where ${selfPlayMatches.outcome} = 'won'))::int`,
+          lost: sql<number>`(count(*) filter (where ${selfPlayMatches.outcome} = 'lost'))::int`,
+          draw: sql<number>`(count(*) filter (where ${selfPlayMatches.outcome} = 'draw'))::int`,
+          lastMatchAt: sql<number | null>`max(${selfPlayMatches.createdAt})::int`,
+        })
+        .from(selfPlayMatches)
+        .where(eq(selfPlayMatches.tenantId, tenantId))
+        .groupBy(selfPlayMatches.personaSlug);
+
+      const recent = await tx
+        .select({
+          id: selfPlayMatches.id,
+          styleSlug: selfPlayMatches.styleSlug,
+          personaSlug: selfPlayMatches.personaSlug,
+          outcome: selfPlayMatches.outcome,
+          judgeReason: selfPlayMatches.judgeReason,
+          turns: selfPlayMatches.turns,
+          fabricationsCaught: selfPlayMatches.fabricationsCaught,
+          createdAt: selfPlayMatches.createdAt,
+        })
+        .from(selfPlayMatches)
+        .where(eq(selfPlayMatches.tenantId, tenantId))
+        .orderBy(desc(selfPlayMatches.createdAt), desc(selfPlayMatches.id))
+        .limit(10);
+
+      return {
+        totals: withWinRate(
+          totalsRow ?? {
+            total: 0,
+            won: 0,
+            lost: 0,
+            draw: 0,
+            fabricationsCaught: 0,
+            avgTurns: null,
+            lastMatchAt: null,
+          },
+        ),
+        byStyle: byStyleRows
+          .map(withWinRate)
+          .sort((a, b) => b.total - a.total || (b.lastMatchAt ?? 0) - (a.lastMatchAt ?? 0)),
+        byPersona: byPersonaRows
+          .map(withWinRate)
+          .sort((a, b) => b.total - a.total || (b.lastMatchAt ?? 0) - (a.lastMatchAt ?? 0)),
+        recent,
+      };
+    });
+
+    return c.json(summary);
+  });
 
   /**
    * GET /api/admin/quality/self-play/export.jsonl
@@ -87,6 +173,13 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
   });
 
   return app;
+}
+
+function withWinRate<T extends { total: number; won: number }>(row: T): T & { winRate: number } {
+  return {
+    ...row,
+    winRate: row.total > 0 ? Math.round((row.won / row.total) * 1000) / 10 : 0,
+  };
 }
 
 function optionalQuery(value: string | undefined): string | undefined {

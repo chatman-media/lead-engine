@@ -120,6 +120,41 @@ describe("admin quality JSONL export", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns tenant-scoped self-play summary", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/quality/self-play/summary");
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as QualitySummaryResponse;
+    expect(body.totals).toMatchObject({
+      total: 2,
+      won: 1,
+      lost: 1,
+      draw: 0,
+      winRate: 50,
+      fabricationsCaught: 1,
+      avgTurns: 1,
+    });
+    expect(body.byStyle).toHaveLength(2);
+    expect(body.byStyle[0]).toMatchObject({
+      styleSlug: "style-a",
+      total: 1,
+      won: 1,
+      winRate: 100,
+    });
+    expect(body.byPersona.map((item) => item.personaSlug)).toEqual([
+      "skeptic-anya",
+      "price-sensitive",
+    ]);
+    expect(body.recent[0]).toMatchObject({
+      styleSlug: "style-a",
+      personaSlug: "skeptic-anya",
+      outcome: "won",
+      judgeReason: "candidate committed",
+    });
+    expect(JSON.stringify(body)).not.toContain("tenant b only");
+  });
+
   it("exports tenant-scoped self-play matches as JSONL attachment", async () => {
     if (!sql) return;
     const res = await authReq(tokenA, "/api/admin/quality/self-play/export.jsonl");
@@ -181,6 +216,12 @@ describe("admin quality JSONL export", () => {
     );
     expect(records).toHaveLength(1);
     expect(records[0]?.match.judge.reason).toBe("tenant b only");
+
+    const summary = (await (
+      await authReq(tokenB, "/api/admin/quality/self-play/summary")
+    ).json()) as QualitySummaryResponse;
+    expect(summary.totals).toMatchObject({ total: 1, won: 0, lost: 0, draw: 1, winRate: 0 });
+    expect(summary.recent[0]?.judgeReason).toBe("tenant b only");
   });
 });
 
@@ -225,6 +266,40 @@ type QualityRecord = {
     persisted?: boolean;
     judge: { outcome?: string; reason: string | null };
   };
+};
+
+type QualitySummaryResponse = {
+  totals: {
+    total: number;
+    won: number;
+    lost: number;
+    draw: number;
+    winRate: number;
+    fabricationsCaught: number;
+    avgTurns: number | null;
+  };
+  byStyle: Array<{
+    styleSlug: string;
+    total: number;
+    won: number;
+    lost: number;
+    draw: number;
+    winRate: number;
+  }>;
+  byPersona: Array<{
+    personaSlug: string;
+    total: number;
+    won: number;
+    lost: number;
+    draw: number;
+    winRate: number;
+  }>;
+  recent: Array<{
+    styleSlug: string;
+    personaSlug: string;
+    outcome: string;
+    judgeReason: string | null;
+  }>;
 };
 
 function parseJsonl(text: string): QualityRecord[] {
