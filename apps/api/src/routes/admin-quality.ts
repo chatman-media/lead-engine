@@ -8,7 +8,9 @@ import {
   type PairwiseWinner,
   parseProposal,
   type SelfPlayMatchResult,
+  shadowDecide,
   StyleSchema,
+  wilsonLowerBound,
 } from "@chatman-media/sales";
 import {
   coachProposals,
@@ -17,7 +19,7 @@ import {
   shadowEvaluations,
   styles,
 } from "@chatman-media/storage";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { isUniqueViolation } from "../lib/db-errors.ts";
@@ -533,6 +535,197 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     return c.json({ ok: true, proposal: result.proposal, style: result.style });
   });
 
+  app.post("/api/admin/quality/coach/proposals/:id/shadow-evaluations", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "bad id" }, 400);
+
+    type ShadowEvalCreateBody = {
+      pairsPlanned?: unknown;
+      limit?: unknown;
+      newStyleSlug?: unknown;
+    };
+    const body = await c.req.json<ShadowEvalCreateBody>().catch((): ShadowEvalCreateBody => ({}));
+    const pairsPlannedInput = parseOptionalBodyInteger(body.pairsPlanned, 1, 1000);
+    if (pairsPlannedInput.kind === "invalid") {
+      return c.json({ error: "pairsPlanned must be an integer between 1 and 1000" }, 400);
+    }
+    const limitInput = parseOptionalBodyInteger(body.limit, 1, 1000);
+    if (limitInput.kind === "invalid") {
+      return c.json({ error: "limit must be an integer between 1 and 1000" }, 400);
+    }
+    const newStyleSlugInput = parseOptionalBodyString(body.newStyleSlug);
+    if (newStyleSlugInput.kind === "invalid") {
+      return c.json({ error: "newStyleSlug must be a non-empty string" }, 400);
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      const [proposal] = await tx
+        .select({
+          id: coachProposals.id,
+          styleSlug: coachProposals.styleSlug,
+          status: coachProposals.status,
+        })
+        .from(coachProposals)
+        .where(and(eq(coachProposals.id, id), eq(coachProposals.tenantId, tenantId)))
+        .limit(1);
+
+      if (!proposal) return { kind: "not_found" as const };
+      if (proposal.status !== "applied") {
+        return {
+          kind: "blocked" as const,
+          error: `only applied proposals can start shadow evaluation; current status is ${proposal.status}`,
+        };
+      }
+
+      const [parent] = await tx
+        .select({
+          id: styles.id,
+          slug: styles.slug,
+        })
+        .from(styles)
+        .where(
+          and(
+            eq(styles.tenantId, tenantId),
+            eq(styles.slug, proposal.styleSlug),
+            sql`${styles.deletedAt} IS NULL`,
+          ),
+        )
+        .limit(1);
+      if (!parent) return { kind: "parent_not_found" as const };
+
+      const candidateFilters = [
+        eq(styles.tenantId, tenantId),
+        sql`${styles.deletedAt} IS NULL`,
+        newStyleSlugInput.value
+          ? eq(styles.slug, newStyleSlugInput.value)
+          : eq(styles.parentId, parent.id),
+      ];
+      const [candidate] = await tx
+        .select({
+          id: styles.id,
+          slug: styles.slug,
+          parentId: styles.parentId,
+        })
+        .from(styles)
+        .where(and(...candidateFilters))
+        .orderBy(desc(styles.createdAt), desc(styles.id))
+        .limit(1);
+      if (!candidate || candidate.id === parent.id) return { kind: "candidate_not_found" as const };
+
+      const pairLimit = limitInput.value ?? pairsPlannedInput.value ?? 200;
+      const pairwiseRows = await tx
+        .select({
+          id: pairwiseMatches.id,
+          styleASlug: pairwiseMatches.styleASlug,
+          styleBSlug: pairwiseMatches.styleBSlug,
+          winner: pairwiseMatches.winner,
+          createdAt: pairwiseMatches.createdAt,
+        })
+        .from(pairwiseMatches)
+        .where(
+          and(
+            eq(pairwiseMatches.tenantId, tenantId),
+            or(
+              and(
+                eq(pairwiseMatches.styleASlug, parent.slug),
+                eq(pairwiseMatches.styleBSlug, candidate.slug),
+              ),
+              and(
+                eq(pairwiseMatches.styleASlug, candidate.slug),
+                eq(pairwiseMatches.styleBSlug, parent.slug),
+              ),
+            ),
+          ),
+        )
+        .orderBy(desc(pairwiseMatches.createdAt), desc(pairwiseMatches.id))
+        .limit(pairLimit);
+
+      if (pairwiseRows.length === 0) return { kind: "no_pairwise" as const };
+
+      const counts = pairwiseRows.reduce(
+        (acc, row) => countShadowPairwise(acc, row, parent.slug, candidate.slug),
+        { aWins: 0, bWins: 0, draws: 0 },
+      );
+      const pairsDone = pairwiseRows.length;
+      const pairsPlanned = pairsDone;
+      const bWinsAdjusted = counts.bWins + 0.5 * counts.draws;
+      const winRateLb = wilsonLowerBound(bWinsAdjusted, pairsDone);
+      const decision = shadowDecide(bWinsAdjusted, pairsDone);
+
+      const [created] = await tx
+        .insert(shadowEvaluations)
+        .values({
+          tenantId,
+          proposalId: proposal.id,
+          parentStyleSlug: parent.slug,
+          parentStyleId: parent.id,
+          newStyleSlug: candidate.slug,
+          newStyleId: candidate.id,
+          pairsPlanned,
+          pairsDone,
+          aWins: counts.aWins,
+          bWins: counts.bWins,
+          draws: counts.draws,
+          winRateLb,
+          status: "complete",
+          decision,
+          startedAt: now,
+          completedAt: now,
+        })
+        .returning({
+          id: shadowEvaluations.id,
+          proposalId: shadowEvaluations.proposalId,
+          parentStyleSlug: shadowEvaluations.parentStyleSlug,
+          parentStyleId: shadowEvaluations.parentStyleId,
+          newStyleSlug: shadowEvaluations.newStyleSlug,
+          newStyleId: shadowEvaluations.newStyleId,
+          pairsPlanned: shadowEvaluations.pairsPlanned,
+          pairsDone: shadowEvaluations.pairsDone,
+          aWins: shadowEvaluations.aWins,
+          bWins: shadowEvaluations.bWins,
+          draws: shadowEvaluations.draws,
+          winRateLb: shadowEvaluations.winRateLb,
+          status: shadowEvaluations.status,
+          decision: shadowEvaluations.decision,
+          errorMessage: shadowEvaluations.errorMessage,
+          startedAt: shadowEvaluations.startedAt,
+          completedAt: shadowEvaluations.completedAt,
+        });
+
+      return { kind: "ok" as const, shadow: created, pairwiseIds: pairwiseRows.map((row) => row.id) };
+    });
+
+    if (result.kind === "not_found") return c.json({ error: "coach proposal not found" }, 404);
+    if (result.kind === "parent_not_found") return c.json({ error: "parent style not found" }, 404);
+    if (result.kind === "candidate_not_found") return c.json({ error: "derived style not found" }, 404);
+    if (result.kind === "no_pairwise") {
+      return c.json({ error: "no pairwise matches found for parent and derived style" }, 409);
+    }
+    if (result.kind === "blocked") return c.json({ error: result.error }, 409);
+    if (!result.shadow) return c.json({ error: "shadow evaluation was not created" }, 500);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "quality.shadow_evaluation.create",
+      targetKind: "coach_proposal",
+      targetId: String(id),
+      details: {
+        shadowEvaluationId: result.shadow.id,
+        parentStyleSlug: result.shadow.parentStyleSlug,
+        newStyleSlug: result.shadow.newStyleSlug,
+        pairsDone: result.shadow.pairsDone,
+        pairwiseIds: result.pairwiseIds,
+        decision: result.shadow.decision,
+      },
+    });
+
+    return c.json({ ok: true, shadow: result.shadow });
+  });
+
   /**
    * GET /api/admin/quality/self-play/export.jsonl
    *
@@ -741,6 +934,52 @@ function parseJsonValue(value: string, fallback: unknown): unknown {
   } catch {
     return fallback;
   }
+}
+
+function parseOptionalBodyInteger(
+  value: unknown,
+  min: number,
+  max: number,
+): { kind: "ok"; value: number | undefined } | { kind: "invalid" } {
+  if (value === undefined || value === null || value === "") return { kind: "ok", value: undefined };
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return { kind: "invalid" };
+  return { kind: "ok", value: parsed };
+}
+
+function parseOptionalBodyString(
+  value: unknown,
+): { kind: "ok"; value: string | undefined } | { kind: "invalid" } {
+  if (value === undefined || value === null) return { kind: "ok", value: undefined };
+  if (typeof value !== "string") return { kind: "invalid" };
+  const trimmed = value.trim();
+  if (!trimmed) return { kind: "invalid" };
+  return { kind: "ok", value: trimmed };
+}
+
+function countShadowPairwise<T extends { aWins: number; bWins: number; draws: number }>(
+  acc: T,
+  row: { styleASlug: string; styleBSlug: string; winner: string },
+  parentSlug: string,
+  newSlug: string,
+): T {
+  if (row.winner === "draw") {
+    acc.draws++;
+    return acc;
+  }
+
+  const parentIsA = row.styleASlug === parentSlug && row.styleBSlug === newSlug;
+  const newIsA = row.styleASlug === newSlug && row.styleBSlug === parentSlug;
+  if (parentIsA) {
+    if (row.winner === "a") acc.aWins++;
+    else if (row.winner === "b") acc.bWins++;
+    return acc;
+  }
+  if (newIsA) {
+    if (row.winner === "a") acc.bWins++;
+    else if (row.winner === "b") acc.aWins++;
+  }
+  return acc;
 }
 
 async function nextCoachStyleSlug(

@@ -3,6 +3,7 @@ import {
   BugIcon,
   CheckCircleIcon,
   DownloadIcon,
+  FlaskConicalIcon,
   LightbulbIcon,
   RefreshCwIcon,
   RotateCcwIcon,
@@ -317,6 +318,24 @@ export function SaasQuality() {
         return;
       }
       toast.error(err instanceof Error ? err.message : "Не удалось применить proposal");
+    } finally {
+      setProposalActionId(null);
+    }
+  }
+
+  async function handleShadowEvaluationCreate(id: number) {
+    setProposalActionId(id);
+    try {
+      const result = await saas.createQualityShadowEvaluation(id, { limit: 200 });
+      setCoach(await saas.getQualityCoachSummary());
+      toast.success(`Shadow eval: ${result.shadow.decision ?? result.shadow.status}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : "Не удалось создать shadow eval");
     } finally {
       setProposalActionId(null);
     }
@@ -805,7 +824,16 @@ export function SaasQuality() {
                         </Button>
                       )}
                       {item.status === "applied" && (
-                        <span className="text-xs text-muted-foreground">locked</span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 gap-1.5 px-2 text-xs"
+                          disabled={proposalActionId === item.id}
+                          onClick={() => void handleShadowEvaluationCreate(item.id)}
+                        >
+                          <FlaskConicalIcon className="size-3.5" />
+                          Shadow
+                        </Button>
                       )}
                     </TableCell>
                   </TableRow>
