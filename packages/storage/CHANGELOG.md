@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.18.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.17.0...@chatman-media/storage-v1.18.0) (2026-06-09)
+
+
+### Features
+
+* **channels:** add vk messenger channel ([#359](https://github.com/chatman-media/lead-engine/issues/359)) ([d4a43cc](https://github.com/chatman-media/lead-engine/commit/d4a43cc5ea653f523820bdc26a15f10b7294ce0e))
+
 # [@chatman-media/storage-v1.17.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.16.0...@chatman-media/storage-v1.17.0) (2026-06-09)
 
 
