@@ -170,10 +170,23 @@ export const kbDocuments = pgTable("kb_documents", {
   title: text("title").notNull(),
   contentHash: text("content_hash").notNull(),
   topic: text("topic"),
+  scopeType: text("scope_type").notNull().default("global"),
+  funnelId: integer("funnel_id"),
+  stageSlug: text("stage_slug"),
   createdAt: integer("created_at").notNull().default(epochNow()),
 }, (t) => [
+  check("kb_documents_scope_type_check", sql`${t.scopeType} IN ('global','funnel','stage')`),
+  check(
+    "kb_documents_scope_shape_check",
+    sql`(
+      (${t.scopeType} = 'global' AND ${t.funnelId} IS NULL AND ${t.stageSlug} IS NULL)
+      OR (${t.scopeType} = 'funnel' AND ${t.funnelId} IS NOT NULL AND ${t.stageSlug} IS NULL)
+      OR (${t.scopeType} = 'stage' AND ${t.funnelId} IS NOT NULL AND ${t.stageSlug} IS NOT NULL)
+    )`,
+  ),
   uniqueIndex("uniq_kb_source_hash").on(t.source, t.contentHash),
   index("idx_kb_docs_topic").on(t.topic).where(sql`topic IS NOT NULL`),
+  index("idx_kb_docs_scope").on(t.tenantId, t.scopeType, t.funnelId, t.stageSlug),
 ]);
 
 export const kbChunks = pgTable("kb_chunks", {
@@ -568,6 +581,9 @@ export const kbSuggestions = pgTable("kb_suggestions", {
   questionText: text("question_text").notNull(),
   answerDraft: text("answer_draft"),
   status: text("status").notNull().default("pending"),
+  scopeType: text("scope_type").notNull().default("global"),
+  funnelId: integer("funnel_id"),
+  stageSlug: text("stage_slug"),
   sourceConversationId: integer("source_conversation_id").references(() => conversations.id, { onDelete: "set null" }),
   sourceMessageId: integer("source_message_id").references(() => messages.id, { onDelete: "set null" }),
   decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
@@ -578,8 +594,18 @@ export const kbSuggestions = pgTable("kb_suggestions", {
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 }, (t) => [
   check("kb_suggestions_status_check", sql`${t.status} IN ('pending','ingested','rejected')`),
+  check("kb_suggestions_scope_type_check", sql`${t.scopeType} IN ('global','funnel','stage')`),
+  check(
+    "kb_suggestions_scope_shape_check",
+    sql`(
+      (${t.scopeType} = 'global' AND ${t.funnelId} IS NULL AND ${t.stageSlug} IS NULL)
+      OR (${t.scopeType} = 'funnel' AND ${t.funnelId} IS NOT NULL AND ${t.stageSlug} IS NULL)
+      OR (${t.scopeType} = 'stage' AND ${t.funnelId} IS NOT NULL AND ${t.stageSlug} IS NOT NULL)
+    )`,
+  ),
   index("idx_kb_suggestions_status").on(t.status, sql`${t.createdAt} DESC`),
   index("idx_kb_suggestions_conv").on(t.sourceConversationId),
+  index("idx_kb_suggestions_scope").on(t.tenantId, t.scopeType, t.funnelId, t.stageSlug, sql`${t.createdAt} DESC`),
 ]);
 
 // ---- Skills / style_skills / skill_outcomes ----------------------------

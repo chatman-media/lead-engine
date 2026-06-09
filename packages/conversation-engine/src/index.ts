@@ -29,6 +29,7 @@ export {
   type OutboundQueueRow,
   parseAllocation,
   type RepoCtx,
+  ScopedKbStore,
   type SkillAggregateRow,
   type SkillOutcomeRow,
   SkillOutcomesRepo,

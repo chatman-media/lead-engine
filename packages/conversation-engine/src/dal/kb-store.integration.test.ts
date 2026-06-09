@@ -3,13 +3,14 @@
  * insert chunk / dedup-lookup / delete) + поиск (vector / BM25 / hybrid /
  * priority). Требует DATABASE_URL (+ pgvector); без него — graceful-skip.
  */
+import type { IKbStore, KbScope, KbSearchHit } from "@chatman-media/kb";
 import { applyAllMigrations, createIsolatedDb, schema, tryConnectToPg } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres, { type Sql } from "postgres";
-import { DrizzleKbStore } from "./kb-store.ts";
+import { DrizzleKbStore, ScopedKbStore } from "./kb-store.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_kbstore_${Math.random().toString(36).slice(2, 10)}`;
@@ -27,6 +28,63 @@ function vec(pos: number): number[] {
   const v = new Array(1536).fill(0);
   v[pos] = 1;
   return v;
+}
+
+function scopeKey(scope?: KbScope | null): string {
+  if (!scope) return "none";
+  return `${scope.scopeType}:${scope.funnelId ?? ""}:${scope.stageSlug ?? ""}`;
+}
+
+function hit(text: string): KbSearchHit {
+  return {
+    chunk_id: 1,
+    distance: 0,
+    text,
+    document_id: 1,
+    source: "fake",
+    title: "Fake",
+  };
+}
+
+class FakeKbStore implements IKbStore {
+  calls: string[] = [];
+  hits = new Map<string, KbSearchHit[]>();
+
+  async search(
+    _embedding: number[],
+    _k: number,
+    _topic?: string | null,
+    scope?: KbScope | null,
+  ): Promise<KbSearchHit[]> {
+    this.calls.push(scopeKey(scope));
+    return this.hits.get(scopeKey(scope)) ?? [];
+  }
+
+  async hybridSearch(): Promise<KbSearchHit[]> {
+    return [];
+  }
+
+  async prioritySearch(): Promise<KbSearchHit[]> {
+    return [];
+  }
+
+  async getDocumentBySource() {
+    return null;
+  }
+
+  async countChunksForDocument() {
+    return 0;
+  }
+
+  async deleteDocument() {
+    return false;
+  }
+
+  async upsertDocument() {
+    return { id: 1 };
+  }
+
+  async insertChunkWithEmbedding() {}
 }
 
 beforeAll(async () => {
@@ -50,6 +108,40 @@ beforeAll(async () => {
 afterAll(async () => {
   if (sql) await sql.end({ timeout: 0 }).catch(() => {});
 }, 10_000);
+
+describe("ScopedKbStore", () => {
+  it("search uses stage docs before broader scopes", async () => {
+    const inner = new FakeKbStore();
+    const stageHits = [hit("stage doc")];
+    inner.hits.set("stage:7:payment", stageHits);
+    inner.hits.set("funnel:7:", [hit("funnel doc")]);
+    inner.hits.set("global::", [hit("global doc")]);
+
+    const store = new ScopedKbStore(inner, {
+      scopeType: "stage",
+      funnelId: 7,
+      stageSlug: "payment",
+    });
+
+    expect(await store.search(vec(0), 5)).toBe(stageHits);
+    expect(inner.calls).toEqual(["stage:7:payment"]);
+  });
+
+  it("search falls back stage -> funnel -> global", async () => {
+    const inner = new FakeKbStore();
+    const globalHits = [hit("global doc")];
+    inner.hits.set("global::", globalHits);
+
+    const store = new ScopedKbStore(inner, {
+      scopeType: "stage",
+      funnelId: 7,
+      stageSlug: "payment",
+    });
+
+    expect(await store.search(vec(0), 5)).toBe(globalHits);
+    expect(inner.calls).toEqual(["stage:7:payment", "funnel:7:", "global::"]);
+  });
+});
 
 describe("DrizzleKbStore — ingest", () => {
   it("upsertDocument → id, getDocumentBySource находит, dedup на (source,hash)", async () => {

@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
-import { type ChunkOptions, chunkText } from "./chunk.ts";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
+import { type ChunkOptions, chunkText } from "./chunk.ts";
 import { parsePdf } from "./parse-pdf.ts";
-import type { IKbStore } from "./types.ts";
+import type { IKbStore, KbScope } from "./types.ts";
 
 const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf"]);
 
@@ -13,6 +13,7 @@ export interface IngestDeps {
   embedder: EmbeddingClient;
   chunk?: Partial<ChunkOptions>;
   topic?: string | null;
+  scope?: KbScope | null;
   /** Overrides the default `file://<abs>` document source. Callers that
    *  ingest from a throwaway temp path (e.g. an admin upload route) pass a
    *  stable, content-addressed source here so re-uploads dedupe. */
@@ -55,6 +56,7 @@ export async function ingestFile(path: string, deps: IngestDeps): Promise<Ingest
     title,
     contentHash: hash,
     ...(deps.topic !== undefined ? { topic: deps.topic } : {}),
+    ...(deps.scope !== undefined ? { scope: deps.scope } : {}),
   });
 
   const preparedText = ext === ".pdf" ? raw : stripNonContent(raw);
@@ -89,7 +91,7 @@ export async function ingestText(
 ): Promise<IngestFileResult> {
   const raw = input.body;
   const hash = createHash("sha256").update(raw).digest("hex");
-  const source = `inline:${hash.slice(0, 12)}`;
+  const source = deps.source ?? `inline:${scopeSourceSegment(deps.scope)}${hash.slice(0, 12)}`;
   const title = input.title.trim() || "untitled";
 
   const existing = await deps.kb.getDocumentBySource(source);
@@ -110,6 +112,7 @@ export async function ingestText(
     title,
     contentHash: hash,
     ...(deps.topic !== undefined ? { topic: deps.topic } : {}),
+    ...(deps.scope !== undefined ? { scope: deps.scope } : {}),
   });
 
   const chunks = chunkText(stripNonContent(raw), deps.chunk);
@@ -130,6 +133,12 @@ export async function ingestText(
     });
   }
   return { source, documentId: doc.id, chunks: chunks.length, created: true };
+}
+
+function scopeSourceSegment(scope: KbScope | null | undefined): string {
+  if (!scope || scope.scopeType === "global") return "";
+  if (scope.scopeType === "funnel") return `funnel-${scope.funnelId ?? "unknown"}:`;
+  return `stage-${scope.funnelId ?? "unknown"}-${scope.stageSlug ?? "unknown"}:`;
 }
 
 export interface IngestDirectorySummary {

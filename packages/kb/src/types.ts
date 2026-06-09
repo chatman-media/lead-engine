@@ -16,6 +16,14 @@ export interface KbSearchHit {
   title: string;
 }
 
+export type KbScopeType = "global" | "funnel" | "stage";
+
+export interface KbScope {
+  scopeType: KbScopeType;
+  funnelId?: number | null;
+  stageSlug?: string | null;
+}
+
 /**
  * Minimal contract the RAG engine needs from whatever storage backend you
  * plug in. Split into two logical groups:
@@ -31,7 +39,12 @@ export interface IKbStore {
    * Pure vector search (cosine distance via pgvector or equivalent).
    * Returns up to `k` hits, optionally filtered by `topic`.
    */
-  search(embedding: number[], k: number, topic?: string | null): Promise<KbSearchHit[]>;
+  search(
+    embedding: number[],
+    k: number,
+    topic?: string | null,
+    scope?: KbScope | null,
+  ): Promise<KbSearchHit[]>;
 
   /**
    * Hybrid retrieval: fuse vector + BM25 results via Reciprocal Rank Fusion.
@@ -42,6 +55,7 @@ export interface IKbStore {
     query: string;
     k?: number;
     topic?: string | null;
+    scope?: KbScope | null;
   }): Promise<KbSearchHit[]>;
 
   /**
@@ -73,6 +87,7 @@ export interface IKbStore {
     title: string;
     contentHash: string;
     topic?: string | null;
+    scope?: KbScope | null;
   }): Promise<{ id: number }>;
 
   /** Insert one chunk with its embedding vector. */
