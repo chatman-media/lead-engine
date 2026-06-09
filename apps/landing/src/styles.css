@@ -1931,6 +1931,160 @@ img, svg { display: block; }
   font-size: 21px;
 }
 
+/* ─────────────── Early access / alpha ─────────────── */
+.early-access-hero {
+  padding-bottom: 72px;
+}
+.early-access-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(320px, 0.78fr);
+  gap: 34px;
+  align-items: center;
+}
+.early-access-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 24px;
+}
+.early-access-kpis div {
+  min-height: 86px;
+  padding: 14px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  background: rgba(9, 14, 24, 0.72);
+}
+.early-access-kpis strong {
+  display: block;
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 1;
+}
+.early-access-kpis span {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.early-access-form {
+  display: grid;
+  gap: 13px;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid rgba(95, 208, 200, 0.28);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(95, 208, 200, 0.11), rgba(106, 166, 255, 0.05)),
+    var(--panel);
+  box-shadow: var(--shadow);
+}
+.early-access-form label {
+  display: grid;
+  gap: 7px;
+}
+.early-access-form label span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.early-access-form input,
+.early-access-form textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  background: rgba(9, 14, 24, 0.78);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+.early-access-form input {
+  min-height: 46px;
+  padding: 0 13px;
+}
+.early-access-form textarea {
+  min-height: 118px;
+  resize: vertical;
+  padding: 12px 13px;
+  line-height: 1.45;
+}
+.early-access-form input:focus,
+.early-access-form textarea:focus {
+  border-color: rgba(95, 208, 200, 0.62);
+  box-shadow: 0 0 0 3px rgba(95, 208, 200, 0.08);
+}
+.early-access-form button {
+  justify-content: center;
+  width: 100%;
+}
+.early-access-hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.early-access-status {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.early-access-status strong {
+  color: var(--text);
+}
+.early-access-status span,
+.early-access-status a {
+  color: var(--muted);
+}
+.early-access-status.ok {
+  border: 1px solid rgba(145, 217, 144, 0.28);
+  background: rgba(145, 217, 144, 0.1);
+}
+.early-access-status.error {
+  border: 1px solid rgba(248, 113, 113, 0.32);
+  background: rgba(248, 113, 113, 0.09);
+}
+.early-access-card-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+.early-access-card {
+  min-height: 218px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.early-access-card span {
+  color: var(--accent-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+.early-access-card strong {
+  display: block;
+  margin-top: 16px;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 21px;
+  line-height: 1.2;
+}
+.early-access-card p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 /* Requisites */
 .demo-reqs {
   display: grid;
@@ -1980,6 +2134,7 @@ img, svg { display: block; }
   .exchange-hero-grid,
   .service-workflow-grid,
   .vertical-demo-grid,
+  .early-access-grid,
   .exchange-console-grid {
     grid-template-columns: 1fr;
   }
@@ -2004,7 +2159,11 @@ img, svg { display: block; }
   .vertical-special-grid,
   .vertical-stage-row,
   .vertical-execution-grid,
-  .vertical-knowledge-grid {
+  .vertical-knowledge-grid,
+  .early-access-card-grid {
+    grid-template-columns: 1fr;
+  }
+  .early-access-kpis {
     grid-template-columns: 1fr;
   }
   .vertical-stack-row {

@@ -95,6 +95,7 @@ import { makeAdminSimRoutes } from "./routes/admin-sim.ts";
 import { makeAdminTestRoutes } from "./routes/admin-test.ts";
 import { makeMcpRoutes } from "./routes/mcp.ts";
 import { makeAuthRoutes } from "./routes/auth.ts";
+import { makePublicEarlyAccessRoutes } from "./routes/public-early-access.ts";
 import { makeSuperadminRoutes } from "./routes/superadmin.ts";
 import { makeHealthRoutes } from "./routes/health.ts";
 import { makeMetricsRoutes } from "./routes/metrics.ts";
@@ -221,6 +222,9 @@ async function main() {
   // Static: widget bundle + demo HTML. Public routes (без auth), CORS open
   // — widget script загружается с customer-домена.
   app.route("/", makeWidgetStaticRoutes());
+
+  // Public alpha waitlist. No tenant/auth context: requester has no account yet.
+  app.route("/", makePublicEarlyAccessRoutes({ db }));
 
   // Mailer (Resend) — dry-run если RESEND_API_KEY не задан.
   const mailer = new Mailer({

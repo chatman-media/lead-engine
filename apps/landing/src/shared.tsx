@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 export const SIGNUP_URL =
-  (import.meta.env.VITE_APP_URL ?? "https://app.exchanges.agency") + "/signup";
+  (import.meta.env.VITE_SIGNUP_URL as string | undefined) ?? "/early-access";
 export const DEMO_URL =
   (import.meta.env.VITE_DEMO_URL as string | undefined) ??
   "https://calendly.com/exchanges-agency/demo";
