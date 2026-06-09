@@ -824,6 +824,45 @@ export type QualityCoachProposalDecisionStatus = "pending" | "dismissed";
 export type QualityShadowStatus = "running" | "complete" | "failed";
 export type QualityShadowDecision = "keep" | "rollback" | "inconclusive";
 
+export interface QualityTranscriptTurn {
+  role: "candidate" | "salesperson";
+  text: string;
+}
+
+export interface QualitySelfPlayMatch {
+  styleSlug: string;
+  personaSlug: string;
+  turns: number;
+  transcript: QualityTranscriptTurn[];
+  skillsAttributed: string[];
+  verdict: {
+    outcome: QualityOutcome;
+    reason: string | null;
+  };
+  outcome: QualityOutcome;
+  leadId: number;
+  fabricationsCaught: number;
+  matchId: number | null;
+  persisted: boolean;
+  warnings: string[];
+}
+
+export interface QualityPairwiseMatch {
+  styleASlug: string;
+  styleBSlug: string;
+  personaSlug: string;
+  matchA: QualitySelfPlayMatch;
+  matchB: QualitySelfPlayMatch;
+  verdict: {
+    winner: QualityPairwiseWinner;
+    reason: string | null;
+  };
+  eloAAfter: number;
+  eloBAfter: number;
+  pairwiseId: number | null;
+  persisted: boolean;
+}
+
 export interface QualitySelfPlaySummary {
   totals: {
     total: number;
@@ -2125,6 +2164,12 @@ export const saas = {
   },
   getQualityPairwiseSummary() {
     return request<QualityPairwiseSummary>("/api/admin/quality/pairwise/summary");
+  },
+  getQualitySelfPlayMatch(id: number) {
+    return request<{ match: QualitySelfPlayMatch }>(`/api/admin/quality/self-play/matches/${id}`);
+  },
+  getQualityPairwiseMatch(id: number) {
+    return request<{ pairwise: QualityPairwiseMatch }>(`/api/admin/quality/pairwise/matches/${id}`);
   },
   getQualityCoachSummary() {
     return request<QualityCoachSummary>("/api/admin/quality/coach/summary");
