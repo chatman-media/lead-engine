@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.16.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.15.0...@chatman-media/storage-v1.16.0) (2026-06-09)
+
+
+### Features
+
+* **landing:** add alpha early access waitlist ([#343](https://github.com/chatman-media/lead-engine/issues/343)) ([583dba4](https://github.com/chatman-media/lead-engine/commit/583dba4e2c528cd907c6fb91994dad70e2f56320))
+
 # [@chatman-media/storage-v1.15.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.14.0...@chatman-media/storage-v1.15.0) (2026-06-08)
 
 
