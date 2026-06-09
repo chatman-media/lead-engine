@@ -1122,7 +1122,7 @@ export interface QualityShadowPreview {
   };
   missing: {
     reason: "no_pairwise";
-    nextAction: "run_pairwise";
+    nextAction: "run_pairwise" | "run_shadow_eval";
     styleASlug: string;
     styleBSlug: string;
   } | null;
@@ -1136,6 +1136,13 @@ export interface QualityShadowPreviewResult {
 export interface QualityShadowEvaluationOptions {
   pairsPlanned?: number;
   limit?: number;
+  newStyleSlug?: string;
+}
+
+export interface QualityShadowRunOptions {
+  runs?: number;
+  personas?: string[];
+  maxTurns?: number;
   newStyleSlug?: string;
 }
 
@@ -2365,6 +2372,15 @@ export const saas = {
   createQualityShadowEvaluation(id: number, opts: QualityShadowEvaluationOptions = {}) {
     return request<QualityShadowEvaluationResult>(
       `/api/admin/quality/coach/proposals/${id}/shadow-evaluations`,
+      {
+        method: "POST",
+        body: JSON.stringify(opts),
+      },
+    );
+  },
+  runQualityShadowEvaluation(id: number, opts: QualityShadowRunOptions = {}) {
+    return request<QualityShadowEvaluationResult>(
+      `/api/admin/quality/coach/proposals/${id}/shadow-evaluations/run`,
       {
         method: "POST",
         body: JSON.stringify(opts),

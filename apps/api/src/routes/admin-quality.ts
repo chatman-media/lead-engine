@@ -14,6 +14,7 @@ import {
   parseProposal,
   proposeStyleEdits,
   runPairwiseMatch,
+  runShadowEval,
   runSelfPlayMatch,
   type SelfPlayDeps,
   type SelfPlayMatchResult,
@@ -57,6 +58,26 @@ const selfPlayMatchSelect = {
   skillsJson: selfPlayMatches.skillsJson,
   leadId: selfPlayMatches.leadId,
   fabricationsCaught: selfPlayMatches.fabricationsCaught,
+};
+
+const shadowEvaluationResponseSelect = {
+  id: shadowEvaluations.id,
+  proposalId: shadowEvaluations.proposalId,
+  parentStyleSlug: shadowEvaluations.parentStyleSlug,
+  parentStyleId: shadowEvaluations.parentStyleId,
+  newStyleSlug: shadowEvaluations.newStyleSlug,
+  newStyleId: shadowEvaluations.newStyleId,
+  pairsPlanned: shadowEvaluations.pairsPlanned,
+  pairsDone: shadowEvaluations.pairsDone,
+  aWins: shadowEvaluations.aWins,
+  bWins: shadowEvaluations.bWins,
+  draws: shadowEvaluations.draws,
+  winRateLb: shadowEvaluations.winRateLb,
+  status: shadowEvaluations.status,
+  decision: shadowEvaluations.decision,
+  errorMessage: shadowEvaluations.errorMessage,
+  startedAt: shadowEvaluations.startedAt,
+  completedAt: shadowEvaluations.completedAt,
 };
 
 export interface AdminQualityRoutesOpts {
@@ -1013,6 +1034,142 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     return c.json({ ok: true, shadow: result.shadow });
   });
 
+  app.post("/api/admin/quality/coach/proposals/:id/shadow-evaluations/run", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "bad id" }, 400);
+
+    const body = await c.req
+      .json<QualityShadowEvaluationRunBody>()
+      .catch((): QualityShadowEvaluationRunBody => ({}));
+    const runs = parseOptionalBodyInteger(body.runs, 1, 20);
+    if (runs.kind === "invalid") {
+      return c.json({ error: "runs must be an integer between 1 and 20" }, 400);
+    }
+    const maxTurns = parseOptionalBodyInteger(body.maxTurns, 1, 20);
+    if (maxTurns.kind === "invalid") {
+      return c.json({ error: "maxTurns must be an integer between 1 and 20" }, 400);
+    }
+    const newStyleSlugInput = parseOptionalBodyString(body.newStyleSlug);
+    if (newStyleSlugInput.kind === "invalid") {
+      return c.json({ error: "newStyleSlug must be a non-empty string" }, 400);
+    }
+    const reflect = parseOptionalBodyBoolean(body.reflect);
+    if (reflect.kind === "invalid") return c.json({ error: "reflect must be a boolean" }, 400);
+    const personaSlugs = parseOptionalPersonaSlugs(body.personas);
+    if (personaSlugs.kind === "invalid") {
+      return c.json({ error: "personas must be a non-empty array of persona slugs" }, 400);
+    }
+
+    const planResult = await withTenant(opts.db, tenantId, (tx) =>
+      resolveShadowEvaluationPlan(tx, {
+        tenantId,
+        proposalId: id,
+        newStyleSlug: newStyleSlugInput.value,
+        limit: 1,
+      }),
+    );
+    if (planResult.kind === "not_found") return c.json({ error: "coach proposal not found" }, 404);
+    if (planResult.kind === "parent_not_found") return c.json({ error: "parent style not found" }, 404);
+    if (planResult.kind === "candidate_not_found") return c.json({ error: "derived style not found" }, 404);
+    if (planResult.kind === "blocked") return c.json({ error: planResult.error }, 409);
+
+    const parentStyle = parseStyleFromShadowPlanRow(planResult.plan.parentStyle);
+    if (parentStyle.kind === "invalid") {
+      return c.json({ error: "parent style failed schema validation", issues: parentStyle.issues }, 422);
+    }
+    const candidateStyle = parseStyleFromShadowPlanRow(planResult.plan.candidateStyle);
+    if (candidateStyle.kind === "invalid") {
+      return c.json({ error: "candidate style failed schema validation", issues: candidateStyle.issues }, 422);
+    }
+
+    const selectedPersonaSlugs =
+      personaSlugs.value ??
+      (planResult.plan.proposal.personaFilter &&
+      CANDIDATE_BY_SLUG.has(planResult.plan.proposal.personaFilter)
+        ? [planResult.plan.proposal.personaFilter]
+        : CANDIDATE_PERSONAS.map((persona) => persona.slug));
+    const personas = selectedPersonaSlugs.map((slug) => CANDIDATE_BY_SLUG.get(slug));
+    if (personas.some((persona) => !persona)) return c.json({ error: "persona not found" }, 404);
+
+    const depsResult = await buildQualityRunnerDeps(opts, tenantId, reflect.value ?? false);
+    if (depsResult.kind === "unavailable") return c.json({ error: depsResult.error }, 503);
+
+    const resolvedRuns = runs.value ?? 1;
+    const resolvedMaxTurns = maxTurns.value ?? 6;
+    const pairsPlanned = personas.length * resolvedRuns;
+    const now = nowEpoch();
+    const created = await withTenant(opts.db, tenantId, async (tx) => {
+      const [row] = await tx
+        .insert(shadowEvaluations)
+        .values({
+          tenantId,
+          proposalId: planResult.plan.proposal.id,
+          parentStyleSlug: planResult.plan.parentStyle.slug,
+          parentStyleId: planResult.plan.parentStyle.id,
+          newStyleSlug: planResult.plan.candidateStyle.slug,
+          newStyleId: planResult.plan.candidateStyle.id,
+          pairsPlanned,
+          pairsDone: 0,
+          aWins: 0,
+          bWins: 0,
+          draws: 0,
+          winRateLb: null,
+          status: "running",
+          decision: null,
+          errorMessage: null,
+          startedAt: now,
+          completedAt: null,
+        })
+        .returning(shadowEvaluationResponseSelect);
+      return row ?? null;
+    });
+    if (!created) return c.json({ error: "shadow evaluation was not created" }, 500);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "quality.shadow_evaluation.run",
+      targetKind: "coach_proposal",
+      targetId: String(id),
+      details: {
+        shadowEvaluationId: created.id,
+        parentStyleSlug: created.parentStyleSlug,
+        newStyleSlug: created.newStyleSlug,
+        runs: resolvedRuns,
+        maxTurns: resolvedMaxTurns,
+        personas: selectedPersonaSlugs,
+        pairsPlanned,
+      },
+    });
+
+    void runShadowEval(
+      {
+        ...depsResult.deps,
+        shadowRepo: makeShadowEvaluationRepo(opts.db, tenantId),
+      },
+      {
+        evalId: created.id,
+        parentStyle: parentStyle.style,
+        parentStyleId: planResult.plan.parentStyle.id,
+        newStyle: candidateStyle.style,
+        newStyleId: planResult.plan.candidateStyle.id,
+        personas: personas.filter(isPresentPersona),
+        runs: resolvedRuns,
+        maxTurns: resolvedMaxTurns,
+      },
+    ).catch((err) => {
+      console.warn(
+        `[quality-shadow] failed to run shadow eval #${created.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+
+    return c.json({ ok: true, shadow: created }, 202);
+  });
+
   /**
    * GET /api/admin/quality/self-play/export.jsonl
    *
@@ -1197,6 +1354,14 @@ type QualityCoachProposalGenerateBody = {
   sampleSize?: unknown;
   personaSlug?: unknown;
   model?: unknown;
+};
+
+type QualityShadowEvaluationRunBody = {
+  runs?: unknown;
+  personas?: unknown;
+  maxTurns?: unknown;
+  newStyleSlug?: unknown;
+  reflect?: unknown;
 };
 
 type QualityStyleLoadResult =
@@ -1754,6 +1919,85 @@ function parseOptionalBodyBoolean(
   return { kind: "invalid" };
 }
 
+function parseOptionalPersonaSlugs(
+  value: unknown,
+): { kind: "ok"; value: string[] | undefined } | { kind: "invalid" } {
+  if (value === undefined || value === null) return { kind: "ok", value: undefined };
+  if (!Array.isArray(value) || value.length === 0) return { kind: "invalid" };
+  const slugs = value.map((item) => (typeof item === "string" ? item.trim() : ""));
+  if (slugs.some((slug) => !slug)) return { kind: "invalid" };
+  return { kind: "ok", value: [...new Set(slugs)] };
+}
+
+function isPresentPersona<T>(value: T | undefined): value is T {
+  return value !== undefined;
+}
+
+function parseStyleFromShadowPlanRow(row: {
+  slug: string;
+  displayName: string;
+  configJson: string;
+}): { kind: "ok"; style: Style } | { kind: "invalid"; issues: unknown[] } {
+  const raw = parseJsonValue(row.configJson, null);
+  const normalized =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? { ...raw, slug: row.slug, displayName: row.displayName }
+      : raw;
+  const parsed = StyleSchema.safeParse(normalized);
+  if (!parsed.success) {
+    return { kind: "invalid", issues: parsed.error.issues.slice(0, 5) };
+  }
+  return { kind: "ok", style: parsed.data };
+}
+
+function makeShadowEvaluationRepo(db: Db, tenantId: number) {
+  return {
+    update: async (
+      evalId: number,
+      patch: {
+        status?: "running" | "complete" | "failed";
+        decision?: "keep" | "rollback" | "inconclusive";
+        totalPairs?: number;
+        aWins?: number;
+        bWins?: number;
+        draws?: number;
+        winRateLb?: number | null;
+        error?: string;
+      },
+    ): Promise<void> => {
+      const set: {
+        status?: "running" | "complete" | "failed";
+        decision?: "keep" | "rollback" | "inconclusive";
+        pairsDone?: number;
+        aWins?: number;
+        bWins?: number;
+        draws?: number;
+        winRateLb?: number | null;
+        errorMessage?: string;
+        completedAt?: number | null;
+      } = {};
+      if (patch.status !== undefined) set.status = patch.status;
+      if (patch.decision !== undefined) set.decision = patch.decision;
+      if (patch.totalPairs !== undefined) set.pairsDone = patch.totalPairs;
+      if (patch.aWins !== undefined) set.aWins = patch.aWins;
+      if (patch.bWins !== undefined) set.bWins = patch.bWins;
+      if (patch.draws !== undefined) set.draws = patch.draws;
+      if (patch.winRateLb !== undefined) set.winRateLb = patch.winRateLb;
+      if (patch.error !== undefined) set.errorMessage = patch.error;
+      if (patch.status === "complete" || patch.status === "failed") {
+        set.completedAt = nowEpoch();
+      }
+
+      await withTenant(db, tenantId, async (tx) => {
+        await tx
+          .update(shadowEvaluations)
+          .set(set)
+          .where(and(eq(shadowEvaluations.tenantId, tenantId), eq(shadowEvaluations.id, evalId)));
+      });
+    },
+  };
+}
+
 type ShadowEvaluationPairwiseRow = {
   id: number;
   styleASlug: string;
@@ -1766,15 +2010,20 @@ type ShadowEvaluationPlan = {
   proposal: {
     id: number;
     styleSlug: string;
+    personaFilter: string | null;
     status: string;
   };
   parentStyle: {
     id: number;
     slug: string;
+    displayName: string;
+    configJson: string;
   };
   candidateStyle: {
     id: number;
     slug: string;
+    displayName: string;
+    configJson: string;
     parentId: number | null;
   };
   limit: number;
@@ -1808,6 +2057,7 @@ async function resolveShadowEvaluationPlan(
     .select({
       id: coachProposals.id,
       styleSlug: coachProposals.styleSlug,
+      personaFilter: coachProposals.personaFilter,
       status: coachProposals.status,
     })
     .from(coachProposals)
@@ -1826,6 +2076,8 @@ async function resolveShadowEvaluationPlan(
     .select({
       id: styles.id,
       slug: styles.slug,
+      displayName: styles.displayName,
+      configJson: styles.configJson,
     })
     .from(styles)
     .where(
@@ -1847,6 +2099,8 @@ async function resolveShadowEvaluationPlan(
     .select({
       id: styles.id,
       slug: styles.slug,
+      displayName: styles.displayName,
+      configJson: styles.configJson,
       parentId: styles.parentId,
     })
     .from(styles)
@@ -1917,8 +2171,15 @@ function toShadowEvaluationPreview(plan: ShadowEvaluationPlan) {
   return {
     ready,
     proposalId: plan.proposal.id,
-    parentStyle: plan.parentStyle,
-    candidateStyle: plan.candidateStyle,
+    parentStyle: {
+      id: plan.parentStyle.id,
+      slug: plan.parentStyle.slug,
+    },
+    candidateStyle: {
+      id: plan.candidateStyle.id,
+      slug: plan.candidateStyle.slug,
+      parentId: plan.candidateStyle.parentId,
+    },
     pairwise: {
       limit: plan.limit,
       total: plan.pairsDone,
@@ -1934,7 +2195,7 @@ function toShadowEvaluationPreview(plan: ShadowEvaluationPlan) {
       ? null
       : {
           reason: "no_pairwise",
-          nextAction: "run_pairwise",
+          nextAction: "run_shadow_eval",
           styleASlug: plan.parentStyle.slug,
           styleBSlug: plan.candidateStyle.slug,
         },

@@ -111,7 +111,10 @@ export interface IShadowEvaluationsRepo {
       status?: "running" | "complete" | "failed";
       decision?: "keep" | "rollback" | "inconclusive";
       totalPairs?: number;
+      aWins?: number;
       bWins?: number;
+      draws?: number;
+      winRateLb?: number | null;
       error?: string;
     },
   ): Promise<void>;
