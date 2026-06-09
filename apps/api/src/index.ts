@@ -562,6 +562,7 @@ async function main() {
         .catch(() => {});
     },
   );
+  const simChatResolver = makeSimChatResolver(loadedRef);
 
   // Quality lab exports - self-play / eval artifacts for dashboards and CI.
   app.route(
@@ -571,9 +572,13 @@ async function main() {
       onReload: strategyBundle
         ? (tenantId) => strategyBundle.invalidateStyleFor(tenantId)
         : undefined,
+      resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+      resolveCandidateChat: simChatResolver,
+      resolveJudgeChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+      ...(embedderResolver ? { resolveEmbedder: embedderResolver } : {}),
     }),
   );
-  log.info("admin-quality routes enabled (self-play JSONL export)");
+  log.info("admin-quality routes enabled (self-play JSONL export + quality runner)");
 
   // Agentic tool configuration (booking link, etc.).
   app.route(
@@ -709,7 +714,7 @@ async function main() {
   log.info("field extractor enabled (activates per-tenant when chat LLM is configured)");
 
   const serviceCatalogRuntime = makeServiceCatalogRuntime({
-    resolveChat: makeSimChatResolver(loadedRef),
+    resolveChat: simChatResolver,
   });
   log.info("service catalog runtime enabled (routes catalog matches into leads/deals)");
 
@@ -719,7 +724,7 @@ async function main() {
     makeAdminSimRoutes({
       db,
       replyStrategy: replyStrategy ?? null,
-      resolveSimChat: makeSimChatResolver(loadedRef),
+      resolveSimChat: simChatResolver,
       resolveTemplate,
       stageClassifier,
       fieldExtractor,

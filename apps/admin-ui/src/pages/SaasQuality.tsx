@@ -6,6 +6,7 @@ import {
   EyeIcon,
   FlaskConicalIcon,
   LightbulbIcon,
+  PlayIcon,
   RefreshCwIcon,
   RotateCcwIcon,
   TargetIcon,
@@ -29,6 +30,7 @@ import {
   type QualityPairwiseMatch,
   type QualityPairwiseSummary,
   type QualityPairwiseWinner,
+  type QualityRunOptions,
   type QualityShadowDecision,
   type QualityShadowStatus,
   type QualitySelfPlayMatch,
@@ -101,6 +103,12 @@ function parseLimit(raw: string): number | null {
   return parsed;
 }
 
+function parseRunMaxTurns(raw: string): number | null {
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 20) return null;
+  return parsed;
+}
+
 function outcomeBadge(outcome: string) {
   const value = outcome as QualityOutcome;
   return (
@@ -163,12 +171,14 @@ export function SaasQuality() {
   const [summary, setSummary] = useState<QualitySelfPlaySummary | null>(null);
   const [pairwise, setPairwise] = useState<QualityPairwiseSummary | null>(null);
   const [coach, setCoach] = useState<QualityCoachSummary | null>(null);
+  const [runOptions, setRunOptions] = useState<QualityRunOptions | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
   const [pairwiseExporting, setPairwiseExporting] = useState(false);
   const [proposalActionId, setProposalActionId] = useState<number | null>(null);
   const [inspector, setInspector] = useState<QualityInspectorState | null>(null);
+  const [runningKind, setRunningKind] = useState<"self-play" | "pairwise" | null>(null);
 
   const [styleSlug, setStyleSlug] = useState("all");
   const [personaSlug, setPersonaSlug] = useState("all");
@@ -183,11 +193,19 @@ export function SaasQuality() {
   const [pairLimit, setPairLimit] = useState("200");
   const [pairIncludeTranscript, setPairIncludeTranscript] = useState(false);
 
+  const [runStyleSlug, setRunStyleSlug] = useState("");
+  const [runStyleBSlug, setRunStyleBSlug] = useState("");
+  const [runPersonaSlug, setRunPersonaSlug] = useState("");
+  const [runMaxTurns, setRunMaxTurns] = useState("6");
+  const [runReflect, setRunReflect] = useState(false);
+
   const styleOptions = useMemo(() => summary?.byStyle.map((item) => item.styleSlug) ?? [], [summary]);
   const personaOptions = useMemo(
     () => summary?.byPersona.map((item) => item.personaSlug) ?? [],
     [summary],
   );
+  const runStyleOptions = useMemo(() => runOptions?.styles ?? [], [runOptions]);
+  const runPersonaOptions = useMemo(() => runOptions?.personas ?? [], [runOptions]);
   const pairStyleAOptions = useMemo(
     () => [...new Set(pairwise?.byPair.map((item) => item.styleASlug) ?? [])],
     [pairwise],
@@ -208,11 +226,19 @@ export function SaasQuality() {
       saas.getQualitySelfPlaySummary(),
       saas.getQualityPairwiseSummary(),
       saas.getQualityCoachSummary(),
+      saas.getQualityRunOptions(),
     ])
-      .then(([selfPlaySummary, pairwiseSummary, coachSummary]) => {
+      .then(([selfPlaySummary, pairwiseSummary, coachSummary, options]) => {
         setSummary(selfPlaySummary);
         setPairwise(pairwiseSummary);
         setCoach(coachSummary);
+        setRunOptions(options);
+        const firstStyle = options.styles[0]?.slug ?? "";
+        const secondStyle = options.styles.find((style) => style.slug !== firstStyle)?.slug ?? "";
+        const firstPersona = options.personas[0]?.slug ?? "";
+        setRunStyleSlug((current) => current || firstStyle);
+        setRunStyleBSlug((current) => current || secondStyle || firstStyle);
+        setRunPersonaSlug((current) => current || firstPersona);
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) {
@@ -290,6 +316,79 @@ export function SaasQuality() {
       toast.error(err instanceof Error ? err.message : "Не удалось выгрузить pairwise JSONL");
     } finally {
       setPairwiseExporting(false);
+    }
+  }
+
+  async function handleSelfPlayRun() {
+    const maxTurns = parseRunMaxTurns(runMaxTurns);
+    if (maxTurns === null) {
+      toast.error("Max turns: 1-20");
+      return;
+    }
+    if (!runStyleSlug || !runPersonaSlug) {
+      toast.error("Выберите стиль и персону");
+      return;
+    }
+
+    setRunningKind("self-play");
+    try {
+      const result = await saas.runQualitySelfPlay({
+        styleSlug: runStyleSlug,
+        personaSlug: runPersonaSlug,
+        maxTurns,
+        reflect: runReflect,
+      });
+      setInspector({ kind: "self-play", loading: false, match: result.match });
+      load();
+      toast.success(`Self-play: ${OUTCOME_LABEL[result.match.outcome] ?? result.match.outcome}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : "Не удалось запустить self-play");
+    } finally {
+      setRunningKind(null);
+    }
+  }
+
+  async function handlePairwiseRun() {
+    const maxTurns = parseRunMaxTurns(runMaxTurns);
+    if (maxTurns === null) {
+      toast.error("Max turns: 1-20");
+      return;
+    }
+    if (!runStyleSlug || !runStyleBSlug || !runPersonaSlug) {
+      toast.error("Выберите оба стиля и персону");
+      return;
+    }
+    if (runStyleSlug === runStyleBSlug) {
+      toast.error("Для pairwise нужны разные стили");
+      return;
+    }
+
+    setRunningKind("pairwise");
+    try {
+      const result = await saas.runQualityPairwise({
+        styleASlug: runStyleSlug,
+        styleBSlug: runStyleBSlug,
+        personaSlug: runPersonaSlug,
+        maxTurns,
+        reflect: runReflect,
+      });
+      setInspector({ kind: "pairwise", loading: false, pairwise: result.pairwise });
+      load();
+      toast.success(`Pairwise: ${result.pairwise.verdict.winner.toUpperCase()}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : "Не удалось запустить pairwise");
+    } finally {
+      setRunningKind(null);
     }
   }
 
@@ -437,6 +536,107 @@ export function SaasQuality() {
           <MetricCard icon={TimerIcon} label="Shadow running" value={shadowTotals?.running ?? 0} />
         </div>
       )}
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <PlayIcon className="size-4 text-primary" />
+            Запуск quality run
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_110px_140px_160px_160px]">
+            <div className="space-y-1.5">
+              <Label>Style A</Label>
+              <Select value={runStyleSlug} onValueChange={setRunStyleSlug}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {runStyleOptions.map((style) => (
+                    <SelectItem key={style.id} value={style.slug}>
+                      {style.slug}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Style B</Label>
+              <Select value={runStyleBSlug} onValueChange={setRunStyleBSlug}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {runStyleOptions.map((style) => (
+                    <SelectItem key={style.id} value={style.slug}>
+                      {style.slug}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Persona</Label>
+              <Select value={runPersonaSlug} onValueChange={setRunPersonaSlug}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {runPersonaOptions.map((persona) => (
+                    <SelectItem key={persona.slug} value={persona.slug}>
+                      {persona.slug}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="run-max-turns">Turns</Label>
+              <Input
+                id="run-max-turns"
+                inputMode="numeric"
+                className="font-mono"
+                value={runMaxTurns}
+                onChange={(event) => setRunMaxTurns(event.target.value.replace(/\D/g, "").slice(0, 2))}
+              />
+            </div>
+
+            <div className="flex items-end">
+              <div className="flex h-9 w-full items-center justify-between gap-3 rounded-md border px-3 text-sm">
+                <Label htmlFor="quality-run-reflect">Reflect</Label>
+                <Switch id="quality-run-reflect" checked={runReflect} onCheckedChange={setRunReflect} />
+              </div>
+            </div>
+
+            <div className="flex items-end">
+              <Button
+                className="w-full"
+                variant="outline"
+                onClick={() => void handleSelfPlayRun()}
+                disabled={runningKind !== null || runStyleOptions.length === 0 || runPersonaOptions.length === 0}
+              >
+                <FlaskConicalIcon className="size-4" />
+                {runningKind === "self-play" ? "Running…" : "Self-play"}
+              </Button>
+            </div>
+
+            <div className="flex items-end">
+              <Button
+                className="w-full"
+                onClick={() => void handlePairwiseRun()}
+                disabled={runningKind !== null || runStyleOptions.length < 2 || runPersonaOptions.length === 0}
+              >
+                <PlayIcon className="size-4" />
+                {runningKind === "pairwise" ? "Running…" : "Pairwise"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-3">

@@ -1,23 +1,40 @@
-import { type Db, withTenant } from "@chatman-media/conversation-engine";
+import { DrizzleKbStore, type Db, withTenant } from "@chatman-media/conversation-engine";
+import type { ChatClient, EmbeddingClient } from "@chatman-media/llm-router";
+import type { IKbStore } from "@chatman-media/kb";
 import {
   applyEditsToStyle,
+  CANDIDATE_BY_SLUG,
+  CANDIDATE_PERSONAS,
   exportPairwiseMatchJsonl,
   exportSelfPlayMatchJsonl,
   type EloOutcome,
+  type PairwiseDeps,
   type PairwiseMatchResult,
   type PairwiseWinner,
   parseProposal,
+  runPairwiseMatch,
+  runSelfPlayMatch,
+  type SelfPlayDeps,
   type SelfPlayMatchResult,
   shadowDecide,
+  type Style,
   StyleSchema,
   wilsonLowerBound,
 } from "@chatman-media/sales";
 import {
   coachProposals,
+  contacts,
+  conversations,
+  leads,
   pairwiseMatches,
   selfPlayMatches,
   shadowEvaluations,
+  skillOutcomes,
+  skills,
+  styleRatings,
+  styleSkills,
   styles,
+  vacancies,
 } from "@chatman-media/storage";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -44,6 +61,11 @@ const selfPlayMatchSelect = {
 export interface AdminQualityRoutesOpts {
   db: Db;
   onReload?: (tenantId: number) => void;
+  resolveChat?: (tenantId: number) => ChatClient;
+  resolveCandidateChat?: (tenantId: number) => ChatClient | null;
+  resolveJudgeChat?: (tenantId: number) => ChatClient | null;
+  resolveEmbedder?: (tenantId: number) => EmbeddingClient;
+  resolveKb?: (tenantId: number) => IKbStore;
 }
 
 export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
@@ -256,6 +278,150 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     if (!row) return c.json({ error: "pairwise match not found" }, 404);
 
     return c.json({ pairwise: toPairwiseResult(row) });
+  });
+
+  app.get("/api/admin/quality/run-options", async (c) => {
+    const tenantId = c.var.tenantId;
+    const styleRows = await withTenant(opts.db, tenantId, (tx) =>
+      tx
+        .select({
+          id: styles.id,
+          slug: styles.slug,
+          displayName: styles.displayName,
+          isActive: styles.isActive,
+        })
+        .from(styles)
+        .where(and(eq(styles.tenantId, tenantId), eq(styles.isActive, true), sql`${styles.deletedAt} IS NULL`))
+        .orderBy(styles.slug),
+    );
+
+    return c.json({
+      styles: styleRows,
+      personas: CANDIDATE_PERSONAS.map((persona) => ({
+        slug: persona.slug,
+        displayName: persona.displayName,
+        summary: persona.summary,
+      })),
+    });
+  });
+
+  app.post("/api/admin/quality/self-play/matches", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const body = await c.req.json<QualitySelfPlayRunBody>().catch((): QualitySelfPlayRunBody => ({}));
+
+    const styleSlug = parseRequiredBodyString(body.styleSlug);
+    if (styleSlug.kind === "invalid") return c.json({ error: "styleSlug is required" }, 400);
+    const personaSlug = parseRequiredBodyString(body.personaSlug);
+    if (personaSlug.kind === "invalid") return c.json({ error: "personaSlug is required" }, 400);
+    const maxTurns = parseOptionalBodyInteger(body.maxTurns, 1, 20);
+    if (maxTurns.kind === "invalid") {
+      return c.json({ error: "maxTurns must be an integer between 1 and 20" }, 400);
+    }
+    const reflect = parseOptionalBodyBoolean(body.reflect);
+    if (reflect.kind === "invalid") return c.json({ error: "reflect must be a boolean" }, 400);
+
+    const styleResult = await loadQualityStyle(opts.db, tenantId, styleSlug.value);
+    if (styleResult.kind === "not_found") return c.json({ error: "active style not found" }, 404);
+    if (styleResult.kind === "invalid") {
+      return c.json({ error: "style failed schema validation", issues: styleResult.issues }, 422);
+    }
+    const persona = CANDIDATE_BY_SLUG.get(personaSlug.value);
+    if (!persona) return c.json({ error: "persona not found" }, 404);
+
+    const depsResult = await buildQualityRunnerDeps(opts, tenantId, reflect.value);
+    if (depsResult.kind === "unavailable") return c.json({ error: depsResult.error }, 503);
+
+    const match = await runSelfPlayMatch(depsResult.deps, {
+      style: styleResult.style,
+      styleId: styleResult.styleId,
+      persona,
+      ...(maxTurns.value !== undefined ? { maxTurns: maxTurns.value } : {}),
+    });
+    await syncPersistedSelfPlayResult(opts.db, tenantId, match);
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "quality.self_play.run",
+      targetKind: "self_play_match",
+      targetId: String(match.matchId ?? "unpersisted"),
+      details: {
+        styleSlug: match.styleSlug,
+        personaSlug: match.personaSlug,
+        outcome: match.outcome,
+        persisted: match.persisted,
+      },
+    });
+
+    return c.json({ ok: true, match });
+  });
+
+  app.post("/api/admin/quality/pairwise/matches", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const body = await c.req.json<QualityPairwiseRunBody>().catch((): QualityPairwiseRunBody => ({}));
+
+    const styleASlug = parseRequiredBodyString(body.styleASlug);
+    if (styleASlug.kind === "invalid") return c.json({ error: "styleASlug is required" }, 400);
+    const styleBSlug = parseRequiredBodyString(body.styleBSlug);
+    if (styleBSlug.kind === "invalid") return c.json({ error: "styleBSlug is required" }, 400);
+    if (styleASlug.value === styleBSlug.value) {
+      return c.json({ error: "styleASlug and styleBSlug must be different" }, 400);
+    }
+    const personaSlug = parseRequiredBodyString(body.personaSlug);
+    if (personaSlug.kind === "invalid") return c.json({ error: "personaSlug is required" }, 400);
+    const maxTurns = parseOptionalBodyInteger(body.maxTurns, 1, 20);
+    if (maxTurns.kind === "invalid") {
+      return c.json({ error: "maxTurns must be an integer between 1 and 20" }, 400);
+    }
+    const reflect = parseOptionalBodyBoolean(body.reflect);
+    if (reflect.kind === "invalid") return c.json({ error: "reflect must be a boolean" }, 400);
+
+    const [styleAResult, styleBResult] = await Promise.all([
+      loadQualityStyle(opts.db, tenantId, styleASlug.value),
+      loadQualityStyle(opts.db, tenantId, styleBSlug.value),
+    ]);
+    if (styleAResult.kind === "not_found" || styleBResult.kind === "not_found") {
+      return c.json({ error: "active style not found" }, 404);
+    }
+    if (styleAResult.kind === "invalid") {
+      return c.json({ error: "style A failed schema validation", issues: styleAResult.issues }, 422);
+    }
+    if (styleBResult.kind === "invalid") {
+      return c.json({ error: "style B failed schema validation", issues: styleBResult.issues }, 422);
+    }
+    const persona = CANDIDATE_BY_SLUG.get(personaSlug.value);
+    if (!persona) return c.json({ error: "persona not found" }, 404);
+
+    const depsResult = await buildQualityRunnerDeps(opts, tenantId, reflect.value);
+    if (depsResult.kind === "unavailable") return c.json({ error: depsResult.error }, 503);
+
+    const pairwise = await runPairwiseMatch(depsResult.deps, {
+      styleA: styleAResult.style,
+      styleAId: styleAResult.styleId,
+      styleB: styleBResult.style,
+      styleBId: styleBResult.styleId,
+      persona,
+      ...(maxTurns.value !== undefined ? { maxTurns: maxTurns.value } : {}),
+    });
+    await syncPersistedSelfPlayResult(opts.db, tenantId, pairwise.matchA);
+    await syncPersistedSelfPlayResult(opts.db, tenantId, pairwise.matchB);
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "quality.pairwise.run",
+      targetKind: "pairwise_match",
+      targetId: String(pairwise.pairwiseId ?? "unpersisted"),
+      details: {
+        styleASlug: pairwise.styleASlug,
+        styleBSlug: pairwise.styleBSlug,
+        personaSlug: pairwise.personaSlug,
+        winner: pairwise.verdict.winner,
+        persisted: pairwise.persisted,
+      },
+    });
+
+    return c.json({ ok: true, pairwise });
   });
 
   app.get("/api/admin/quality/coach/summary", async (c) => {
@@ -964,6 +1130,487 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
   return app;
 }
 
+type QualitySelfPlayRunBody = {
+  styleSlug?: unknown;
+  personaSlug?: unknown;
+  maxTurns?: unknown;
+  reflect?: unknown;
+};
+
+type QualityPairwiseRunBody = {
+  styleASlug?: unknown;
+  styleBSlug?: unknown;
+  personaSlug?: unknown;
+  maxTurns?: unknown;
+  reflect?: unknown;
+};
+
+type QualityStyleLoadResult =
+  | { kind: "ok"; styleId: number; style: Style }
+  | { kind: "not_found" }
+  | { kind: "invalid"; issues: unknown[] };
+
+async function loadQualityStyle(
+  db: Db,
+  tenantId: number,
+  slug: string,
+): Promise<QualityStyleLoadResult> {
+  const row = await withTenant(db, tenantId, async (tx) => {
+    const [styleRow] = await tx
+      .select({
+        id: styles.id,
+        slug: styles.slug,
+        displayName: styles.displayName,
+        configJson: styles.configJson,
+      })
+      .from(styles)
+      .where(
+        and(
+          eq(styles.tenantId, tenantId),
+          eq(styles.slug, slug),
+          eq(styles.isActive, true),
+          sql`${styles.deletedAt} IS NULL`,
+        ),
+      )
+      .limit(1);
+    return styleRow ?? null;
+  });
+  if (!row) return { kind: "not_found" };
+
+  const raw = parseJsonValue(row.configJson, null);
+  const normalized =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? { ...raw, slug: row.slug, displayName: row.displayName }
+      : raw;
+  const parsed = StyleSchema.safeParse(normalized);
+  if (!parsed.success) {
+    return { kind: "invalid", issues: parsed.error.issues.slice(0, 5) };
+  }
+  return { kind: "ok", styleId: row.id, style: parsed.data };
+}
+
+type QualityRunnerDepsResult =
+  | { kind: "ok"; deps: PairwiseDeps }
+  | { kind: "unavailable"; error: string };
+
+async function buildQualityRunnerDeps(
+  opts: AdminQualityRoutesOpts,
+  tenantId: number,
+  reflect: boolean | undefined,
+): Promise<QualityRunnerDepsResult> {
+  const salesChat = resolveRequiredQualityDep(opts.resolveChat, tenantId);
+  if (!salesChat) return { kind: "unavailable", error: "chat LLM is not configured" };
+
+  const embedder = resolveRequiredQualityDep(opts.resolveEmbedder, tenantId);
+  if (!embedder) return { kind: "unavailable", error: "embed LLM is not configured" };
+
+  const kb =
+    resolveRequiredQualityDep(opts.resolveKb, tenantId) ??
+    makeTenantScopedKbStore(opts.db, tenantId);
+  const candidateChat =
+    resolveOptionalQualityDep(opts.resolveCandidateChat, tenantId) ?? salesChat;
+  const judgeChat = resolveOptionalQualityDep(opts.resolveJudgeChat, tenantId) ?? salesChat;
+  const vacanciesBlock = await buildActiveVacanciesBlock(opts.db, tenantId);
+
+  const deps: PairwiseDeps = {
+    ...makeQualityStorageAdapters(opts.db, tenantId),
+    kb,
+    salesChat,
+    candidateChat,
+    judgeChat,
+    embedder,
+    ...(reflect !== undefined ? { reflect } : {}),
+    ...(vacanciesBlock ? { vacanciesBlock } : {}),
+  };
+  return { kind: "ok", deps };
+}
+
+function resolveRequiredQualityDep<T>(
+  resolver: ((tenantId: number) => T) | undefined,
+  tenantId: number,
+): T | null {
+  if (!resolver) return null;
+  try {
+    return resolver(tenantId);
+  } catch {
+    return null;
+  }
+}
+
+function resolveOptionalQualityDep<T>(
+  resolver: ((tenantId: number) => T | null) | undefined,
+  tenantId: number,
+): T | null {
+  if (!resolver) return null;
+  try {
+    return resolver(tenantId);
+  } catch {
+    return null;
+  }
+}
+
+function makeTenantScopedKbStore(db: Db, tenantId: number): IKbStore {
+  return {
+    search: (embedding, k, topic) =>
+      withTenant(db, tenantId, (tx) =>
+        new DrizzleKbStore({ db: tx as Db, tenantId }).search(embedding, k, topic),
+      ),
+    hybridSearch: (input) =>
+      withTenant(db, tenantId, (tx) =>
+        new DrizzleKbStore({ db: tx as Db, tenantId }).hybridSearch(input),
+      ),
+    prioritySearch: (input) =>
+      withTenant(db, tenantId, (tx) =>
+        new DrizzleKbStore({ db: tx as Db, tenantId }).prioritySearch(input),
+      ),
+  } as IKbStore;
+}
+
+function makeQualityStorageAdapters(
+  db: Db,
+  tenantId: number,
+): Omit<SelfPlayDeps, "kb" | "salesChat" | "candidateChat" | "judgeChat" | "embedder"> &
+  Pick<PairwiseDeps, "pairwiseMatches"> {
+  const styleSlugCache = new Map<number, string>();
+
+  async function styleSlugById(styleId: number): Promise<string | null> {
+    const cached = styleSlugCache.get(styleId);
+    if (cached) return cached;
+    const slug = await withTenant(db, tenantId, async (tx) => {
+      const [row] = await tx
+        .select({ slug: styles.slug })
+        .from(styles)
+        .where(and(eq(styles.tenantId, tenantId), eq(styles.id, styleId)))
+        .limit(1);
+      return row?.slug ?? null;
+    });
+    if (slug) styleSlugCache.set(styleId, slug);
+    return slug;
+  }
+
+  const ratings = {
+    getRating: async (styleId: number): Promise<number> => {
+      const slug = await styleSlugById(styleId);
+      if (!slug) return 1500;
+      return getStyleRatingBySlug(db, tenantId, slug);
+    },
+    setRating: async (styleId: number, rating: number): Promise<void> => {
+      const slug = await styleSlugById(styleId);
+      if (!slug) return;
+      await setStyleRatingBySlug(db, tenantId, slug, rating);
+    },
+  };
+
+  return {
+    users: {
+      upsert: async (input) =>
+        withTenant(db, tenantId, async (tx) => {
+          const now = nowEpoch();
+          const [created] = await tx
+            .insert(contacts)
+            .values({
+              tenantId,
+              displayName: `Self-play ${Math.abs(input.telegramId)}`,
+              attributesJson: JSON.stringify({
+                source: "self_play",
+                telegramId: input.telegramId,
+                ...(input.username ? { username: input.username } : {}),
+              }),
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning({ id: contacts.id });
+          if (!created) throw new Error("self-play contact was not created");
+          return created;
+        }),
+    },
+    conversations: {
+      create: async (input) =>
+        withTenant(db, tenantId, async (tx) => {
+          const now = nowEpoch();
+          const [styleRow] = await tx
+            .select({ id: styles.id })
+            .from(styles)
+            .where(and(eq(styles.tenantId, tenantId), eq(styles.slug, input.styleSlug)))
+            .limit(1);
+          const [created] = await tx
+            .insert(conversations)
+            .values({
+              tenantId,
+              userId: input.userId,
+              source: "self_play",
+              mode: "ai",
+              status: "resolved",
+              styleId: styleRow?.id ?? null,
+              lastMessageAt: now,
+              createdAt: now,
+              metaJson: JSON.stringify({ qualityLab: true, styleSlug: input.styleSlug }),
+            })
+            .returning({ id: conversations.id });
+          if (!created) throw new Error("self-play conversation was not created");
+          return created;
+        }),
+    },
+    leads: {
+      create: async (input) =>
+        withTenant(db, tenantId, async (tx) => {
+          const now = nowEpoch();
+          const [conversation] = await tx
+            .select({ id: conversations.id, userId: conversations.userId })
+            .from(conversations)
+            .where(and(eq(conversations.tenantId, tenantId), eq(conversations.id, input.conversationId)))
+            .limit(1);
+          if (!conversation) throw new Error("self-play conversation not found");
+          const [created] = await tx
+            .insert(leads)
+            .values({
+              tenantId,
+              userId: conversation.userId,
+              state: "self_play",
+              intakeJson: JSON.stringify({ sourceConversationId: conversation.id }),
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning({ id: leads.id });
+          if (!created) throw new Error("self-play lead was not created");
+          return created;
+        }),
+    },
+    skills: {
+      skillsForStyle: async (styleId) =>
+        withTenant(db, tenantId, async (tx) => {
+          const rows = await tx
+            .select({
+              slug: skills.slug,
+              family: skills.family,
+              displayName: skills.displayName,
+              promptFragment: skills.promptFragment,
+              applicableStagesJson: skills.applicableStagesJson,
+              isEnabled: skills.isEnabled,
+            })
+            .from(styleSkills)
+            .innerJoin(skills, eq(styleSkills.skillId, skills.id))
+            .where(
+              and(
+                eq(styleSkills.tenantId, tenantId),
+                eq(styleSkills.styleId, styleId),
+                eq(skills.tenantId, tenantId),
+              ),
+            );
+          return rows.map((row) => ({
+            slug: row.slug,
+            family: row.family,
+            display_name: row.displayName,
+            prompt_fragment: row.promptFragment,
+            applicable_stages: parseStringArray(row.applicableStagesJson),
+            is_enabled: row.isEnabled,
+          }));
+        }),
+    },
+    outcomes: {
+      record: async (input) => {
+        await withTenant(db, tenantId, async (tx) => {
+          await tx
+            .insert(skillOutcomes)
+            .values({
+              tenantId,
+              leadId: input.leadId,
+              styleSlug: input.styleSlug,
+              skillSlug: input.skillSlug,
+              outcome: input.outcome,
+              source: input.source,
+              createdAt: nowEpoch(),
+            })
+            .onConflictDoNothing({
+              target: [skillOutcomes.leadId, skillOutcomes.skillSlug, skillOutcomes.source],
+            });
+        });
+      },
+      aggregates: async (slugs) => {
+        if (slugs.length === 0) return [];
+        return withTenant(db, tenantId, async (tx) => {
+          const rows = await tx
+            .select({
+              skillSlug: skillOutcomes.skillSlug,
+              wins: sql<number>`(count(*) filter (where ${skillOutcomes.outcome} = 'won'))::int`,
+              losses: sql<number>`(count(*) filter (where ${skillOutcomes.outcome} = 'lost'))::int`,
+              draws: sql<number>`(count(*) filter (where ${skillOutcomes.outcome} = 'draw'))::int`,
+              count: sql<number>`count(*)::int`,
+            })
+            .from(skillOutcomes)
+            .where(
+              and(
+                eq(skillOutcomes.tenantId, tenantId),
+                inArray(skillOutcomes.skillSlug, [...slugs]),
+              ),
+            )
+            .groupBy(skillOutcomes.skillSlug);
+          return rows.map((row) => ({
+            skill_slug: row.skillSlug,
+            wins: row.wins,
+            losses: row.losses,
+            draws: row.draws,
+            count: row.count,
+          }));
+        });
+      },
+    },
+    ratings,
+    matches: {
+      insert: async (match) =>
+        withTenant(db, tenantId, async (tx) => {
+          const [created] = await tx
+            .insert(selfPlayMatches)
+            .values({
+              tenantId,
+              styleSlug: match.style_slug,
+              personaSlug: match.persona_slug,
+              outcome: match.outcome,
+              judgeReason: match.judge_reason,
+              transcriptJson: JSON.stringify(match.transcript),
+              turns: Math.ceil(match.transcript.length / 2),
+              skillsJson: JSON.stringify(match.skills),
+              createdAt: nowEpoch(),
+            })
+            .returning({ id: selfPlayMatches.id });
+          if (!created) throw new Error("self-play match was not created");
+          return created.id;
+        }),
+      byId: async (id) =>
+        withTenant(db, tenantId, async (tx) => {
+          const [row] = await tx
+            .select(selfPlayMatchSelect)
+            .from(selfPlayMatches)
+            .where(and(eq(selfPlayMatches.tenantId, tenantId), eq(selfPlayMatches.id, id)))
+            .limit(1);
+          return row ? toSelfPlayRecord(row) : null;
+        }),
+      list: async (input) =>
+        withTenant(db, tenantId, async (tx) => {
+          const filters = [
+            eq(selfPlayMatches.tenantId, tenantId),
+            eq(selfPlayMatches.styleSlug, input.styleSlug),
+          ];
+          if (input.outcome) filters.push(eq(selfPlayMatches.outcome, input.outcome));
+          if (input.personaSlug) filters.push(eq(selfPlayMatches.personaSlug, input.personaSlug));
+          const rows = await tx
+            .select(selfPlayMatchSelect)
+            .from(selfPlayMatches)
+            .where(and(...filters))
+            .orderBy(desc(selfPlayMatches.createdAt), desc(selfPlayMatches.id))
+            .limit(input.limit ?? 50);
+          return rows.map(toSelfPlaySummaryRecord);
+        }),
+    },
+    pairwiseMatches: {
+      insert: async (input) => {
+        const [eloAAfter, eloBAfter] = await Promise.all([
+          getStyleRatingBySlug(db, tenantId, input.styleASlug),
+          getStyleRatingBySlug(db, tenantId, input.styleBSlug),
+        ]);
+        return withTenant(db, tenantId, async (tx) => {
+          const [created] = await tx
+            .insert(pairwiseMatches)
+            .values({
+              tenantId,
+              styleASlug: input.styleASlug,
+              styleBSlug: input.styleBSlug,
+              personaSlug: input.personaSlug,
+              winner: input.winner,
+              judgeReason: input.reason,
+              matchAId: input.matchAId > 0 ? input.matchAId : null,
+              matchBId: input.matchBId > 0 ? input.matchBId : null,
+              eloAAfter,
+              eloBAfter,
+              createdAt: nowEpoch(),
+            })
+            .returning({ id: pairwiseMatches.id });
+          if (!created) throw new Error("pairwise match was not created");
+          return created.id;
+        });
+      },
+    },
+  };
+}
+
+async function getStyleRatingBySlug(db: Db, tenantId: number, styleSlug: string): Promise<number> {
+  return withTenant(db, tenantId, async (tx) => {
+    const [row] = await tx
+      .select({ elo: styleRatings.elo })
+      .from(styleRatings)
+      .where(and(eq(styleRatings.tenantId, tenantId), eq(styleRatings.styleSlug, styleSlug)))
+      .limit(1);
+    return row?.elo ?? 1500;
+  });
+}
+
+async function setStyleRatingBySlug(
+  db: Db,
+  tenantId: number,
+  styleSlug: string,
+  elo: number,
+): Promise<void> {
+  await withTenant(db, tenantId, async (tx) => {
+    await tx
+      .insert(styleRatings)
+      .values({
+        tenantId,
+        styleSlug,
+        elo,
+        updatedAt: nowEpoch(),
+      })
+      .onConflictDoUpdate({
+        target: styleRatings.styleSlug,
+        set: {
+          tenantId,
+          elo,
+          updatedAt: nowEpoch(),
+        },
+      });
+  });
+}
+
+async function buildActiveVacanciesBlock(db: Db, tenantId: number): Promise<string | undefined> {
+  const rows = await withTenant(db, tenantId, (tx) =>
+    tx
+      .select({
+        title: vacancies.title,
+        body: vacancies.body,
+        url: vacancies.url,
+      })
+      .from(vacancies)
+      .where(and(eq(vacancies.tenantId, tenantId), eq(vacancies.isActive, true)))
+      .orderBy(desc(vacancies.updatedAt), desc(vacancies.id))
+      .limit(8),
+  );
+  if (rows.length === 0) return undefined;
+  return rows
+    .map((row, index) => {
+      const url = row.url ? `\nURL: ${row.url}` : "";
+      return `VACANCY ${index + 1}: ${row.title}\n${row.body}${url}`;
+    })
+    .join("\n\n");
+}
+
+async function syncPersistedSelfPlayResult(
+  db: Db,
+  tenantId: number,
+  match: SelfPlayMatchResult,
+): Promise<void> {
+  if (!match.matchId) return;
+  await withTenant(db, tenantId, async (tx) => {
+    await tx
+      .update(selfPlayMatches)
+      .set({
+        leadId: match.leadId > 0 ? match.leadId : null,
+        turns: match.turns,
+        fabricationsCaught: match.fabricationsCaught,
+        skillsJson: JSON.stringify(match.skillsAttributed),
+      })
+      .where(and(eq(selfPlayMatches.tenantId, tenantId), eq(selfPlayMatches.id, match.matchId ?? 0)));
+  });
+}
+
 function withWinRate<T extends { total: number; won: number }>(row: T): T & { winRate: number } {
   return {
     ...row,
@@ -1021,6 +1668,14 @@ function parseOptionalBodyInteger(
   return { kind: "ok", value: parsed };
 }
 
+function parseRequiredBodyString(
+  value: unknown,
+): { kind: "ok"; value: string } | { kind: "invalid" } {
+  const parsed = parseOptionalBodyString(value);
+  if (parsed.kind === "invalid" || !parsed.value) return { kind: "invalid" };
+  return { kind: "ok", value: parsed.value };
+}
+
 function parseOptionalBodyString(
   value: unknown,
 ): { kind: "ok"; value: string | undefined } | { kind: "invalid" } {
@@ -1029,6 +1684,20 @@ function parseOptionalBodyString(
   const trimmed = value.trim();
   if (!trimmed) return { kind: "invalid" };
   return { kind: "ok", value: trimmed };
+}
+
+function parseOptionalBodyBoolean(
+  value: unknown,
+): { kind: "ok"; value: boolean | undefined } | { kind: "invalid" } {
+  if (value === undefined || value === null || value === "") {
+    return { kind: "ok", value: undefined };
+  }
+  if (typeof value === "boolean") return { kind: "ok", value };
+  if (typeof value !== "string") return { kind: "invalid" };
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return { kind: "ok", value: true };
+  if (["0", "false", "no", "off"].includes(normalized)) return { kind: "ok", value: false };
+  return { kind: "invalid" };
 }
 
 function countShadowPairwise<T extends { aWins: number; bWins: number; draws: number }>(
@@ -1237,6 +1906,31 @@ function toSelfPlayResult(row: SelfPlayMatchRow): SelfPlayMatchResult {
     persisted: true,
     warnings: [],
   };
+}
+
+function toSelfPlaySummaryRecord(row: SelfPlayMatchRow) {
+  const outcome = OUTCOMES.has(row.outcome as EloOutcome)
+    ? (row.outcome as EloOutcome)
+    : "draw";
+  return {
+    id: row.id,
+    style_slug: row.styleSlug,
+    persona_slug: row.personaSlug,
+    outcome,
+    skills: parseStringArray(row.skillsJson),
+    judge_reason: row.judgeReason,
+  };
+}
+
+function toSelfPlayRecord(row: SelfPlayMatchRow) {
+  return {
+    ...toSelfPlaySummaryRecord(row),
+    transcript: parseTranscript(row.transcriptJson),
+  };
+}
+
+function nowEpoch(): number {
+  return Math.floor(Date.now() / 1000);
 }
 
 function parseStringArray(raw: string): string[] {
