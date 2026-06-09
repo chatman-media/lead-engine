@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.24.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.23.0...@chatman-media/conversation-engine-v1.24.0) (2026-06-09)
+
+
+### Features
+
+* **conversation-engine:** add operator bot action callbacks ([#436](https://github.com/chatman-media/lead-engine/issues/436)) ([6f8085f](https://github.com/chatman-media/lead-engine/commit/6f8085f8046ed03f5b9278c172272bd7d919fa0c))
+
 # [@chatman-media/conversation-engine-v1.23.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.22.0...@chatman-media/conversation-engine-v1.23.0) (2026-06-09)
 
 
