@@ -260,7 +260,7 @@ async function main() {
   // через UI без env-vars.
   app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
   app.use("/api/superadmin/*", makeRequireAuth({ db: db as never, secret: cfg.authSecret }));
-  app.route("/", makeSuperadminRoutes({ db }));
+  app.route("/", makeSuperadminRoutes({ db, publicUrl: cfg.mailer.appUrl }));
   log.info("superadmin routes enabled");
 
   // Web channel registry — early init чтобы reloader мог его перестраивать

@@ -27,6 +27,40 @@ export interface TenantRow {
   conversationCount: number;
 }
 
+export interface EarlyAccessRequest {
+  id: number;
+  email: string;
+  name: string | null;
+  company: string | null;
+  useCase: string | null;
+  source: string;
+  locale: string;
+  status: string;
+  tenantId: number | null;
+  tenantSlug: string | null;
+  tenantPlan: string | null;
+  inviteId: number | null;
+  inviteUrl: string | null;
+  inviteExpiresAt: number | null;
+  inviteUsedAt: number | null;
+  approvedAt: number | null;
+  approvedByAdminId: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ApproveEarlyAccessResult {
+  ok: boolean;
+  item: EarlyAccessRequest;
+  tenant: { id: number; slug: string; plan: string };
+  invite: {
+    id: number;
+    shareUrl: string;
+    expiresAt: number;
+    usedAt: number | null;
+  };
+}
+
 export interface KbDoc {
   id: number;
   source: string;
@@ -2627,6 +2661,15 @@ export const saas = {
   // ── Superadmin ────────────────────────────────────────────────────────
   listAllTenants() {
     return request<{ items: TenantRow[] }>("/api/superadmin/tenants");
+  },
+  listEarlyAccessRequests() {
+    return request<{ items: EarlyAccessRequest[] }>("/api/superadmin/early-access");
+  },
+  approveEarlyAccess(id: number, input: { plan?: string; tenantSlug?: string } = {}) {
+    return request<ApproveEarlyAccessResult>(`/api/superadmin/early-access/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
   },
   updateTenantPlan(id: number, plan: string) {
     return request<{ id: number; slug: string; plan: string }>(

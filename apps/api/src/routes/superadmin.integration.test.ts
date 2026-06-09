@@ -22,6 +22,7 @@ import postgres, { type Sql } from "postgres";
 import { makeRequireAuth } from "../middleware/require-auth.ts";
 import { makeAdminAdminsRoutes } from "./admin-admins.ts";
 import { makeAuthRoutes } from "./auth.ts";
+import { makePublicEarlyAccessRoutes } from "./public-early-access.ts";
 import { makeSuperadminRoutes } from "./superadmin.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
@@ -58,7 +59,8 @@ beforeAll(
     app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
     app.use("/api/superadmin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
     app.route("/", makeAdminAdminsRoutes({ db, publicUrl: "https://app.test", inviteExpiresSec: 3600 }));
-    app.route("/", makeSuperadminRoutes({ db }));
+    app.route("/", makeSuperadminRoutes({ db, publicUrl: "https://app.test" }));
+    app.route("/", makePublicEarlyAccessRoutes({ db }));
 
     // Signup alice (tenant A)
     const ra = await app.request("/api/auth/signup", {
@@ -153,6 +155,105 @@ describe("GET /api/superadmin/tenants", () => {
     if (!sql) return;
     const res = await app.request("/api/superadmin/tenants");
     expect(res.status).toBe(401);
+  });
+});
+
+describe("alpha early access approve flow", () => {
+  it("superadmin approves a request into a tenant + reusable invite link", async () => {
+    if (!sql) return;
+
+    const request = await app.request("/api/public/early-access", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "founder-alpha@sa-test.io",
+        name: "Founder Alpha",
+        company: "Alpha Ops",
+        useCase: "exchange, transfer, housing workflows",
+      }),
+    });
+    expect(request.status).toBe(200);
+
+    const list = await authReq(aliceToken, "/api/superadmin/early-access");
+    expect(list.status).toBe(200);
+    const listed = (await list.json()) as {
+      items: Array<{ id: number; email: string; status: string; tenantId: number | null }>;
+    };
+    const item = listed.items.find((it) => it.email === "founder-alpha@sa-test.io");
+    expect(item).toBeTruthy();
+    expect(item?.status).toBe("new");
+    expect(item?.tenantId).toBeNull();
+
+    const approve = await authReq(
+      aliceToken,
+      `/api/superadmin/early-access/${item!.id}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify({ plan: "starter" }),
+      },
+    );
+    expect(approve.status).toBe(200);
+    const approved = (await approve.json()) as {
+      ok: boolean;
+      item: { status: string; tenantId: number; inviteId: number; inviteUrl: string };
+      tenant: { id: number; slug: string; plan: string };
+      invite: { id: number; shareUrl: string; expiresAt: number };
+    };
+    expect(approved.ok).toBe(true);
+    expect(approved.item.status).toBe("approved");
+    expect(approved.tenant.plan).toBe("starter");
+    expect(approved.item.tenantId).toBe(approved.tenant.id);
+    expect(approved.item.inviteId).toBe(approved.invite.id);
+    expect(approved.invite.shareUrl.startsWith("https://app.test/accept-invite?token=")).toBe(true);
+
+    const again = await authReq(
+      aliceToken,
+      `/api/superadmin/early-access/${item!.id}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify({ plan: "pro" }),
+      },
+    );
+    expect(again.status).toBe(200);
+    const approvedAgain = (await again.json()) as {
+      tenant: { id: number; plan: string };
+      invite: { id: number; shareUrl: string };
+    };
+    expect(approvedAgain.tenant.id).toBe(approved.tenant.id);
+    expect(approvedAgain.tenant.plan).toBe("starter");
+    expect(approvedAgain.invite.id).toBe(approved.invite.id);
+    expect(approvedAgain.invite.shareUrl).toBe(approved.invite.shareUrl);
+
+    const inviteToken = new URL(approved.invite.shareUrl).searchParams.get("token") ?? "";
+    const accept = await app.request("/api/auth/accept-invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: inviteToken,
+        password: "password-alpha-12345",
+      }),
+    });
+    expect(accept.status).toBe(200);
+    const accepted = (await accept.json()) as {
+      admin: { email: string; role: string; tenantId: number };
+      tenant: { id: number; slug: string; plan: string };
+    };
+    expect(accepted.admin.email).toBe("founder-alpha@sa-test.io");
+    expect(accepted.admin.role).toBe("superadmin");
+    expect(accepted.admin.tenantId).toBe(approved.tenant.id);
+    expect(accepted.tenant.plan).toBe("starter");
+  });
+
+  it("manager cannot list or approve alpha requests", async () => {
+    if (!sql) return;
+    const list = await authReq(carolToken, "/api/superadmin/early-access");
+    expect(list.status).toBe(403);
+
+    const approve = await authReq(carolToken, "/api/superadmin/early-access/1/approve", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    expect(approve.status).toBe(403);
   });
 });
 

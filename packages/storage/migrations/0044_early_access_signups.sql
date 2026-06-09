@@ -10,6 +10,10 @@ CREATE TABLE IF NOT EXISTS "early_access_signups" (
   "source" text NOT NULL DEFAULT 'landing',
   "locale" text NOT NULL DEFAULT 'ru',
   "status" text NOT NULL DEFAULT 'new',
+  "tenant_id" integer REFERENCES "tenants" ("id") ON DELETE SET NULL,
+  "invite_id" integer REFERENCES "admin_invites" ("id") ON DELETE SET NULL,
+  "approved_at" integer,
+  "approved_by_admin_id" integer REFERENCES "admins" ("id") ON DELETE SET NULL,
   "user_agent" text,
   "ip" text,
   "meta_json" text NOT NULL DEFAULT '{}',
@@ -25,3 +29,6 @@ CREATE INDEX IF NOT EXISTS "idx_early_access_status_created"
 
 CREATE INDEX IF NOT EXISTS "idx_early_access_source"
   ON "early_access_signups" ("source");
+
+CREATE INDEX IF NOT EXISTS "idx_early_access_tenant"
+  ON "early_access_signups" ("tenant_id");

@@ -25,6 +25,7 @@ import {
   RocketIcon,
   ScrollTextIcon,
   SendIcon,
+  ShieldCheckIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
   SunIcon,
@@ -66,6 +67,8 @@ interface NavItem {
   exchangeOnly?: boolean;
   /** Скрывать для обменных тенантов (нерелевантно обменнику). */
   hideForExchange?: boolean;
+  /** Показывать только platform/tenant superadmin'ам. */
+  superadminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -115,15 +118,17 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/diagnostics", label: "Диагностика", icon: ActivityIcon },
       { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
       { to: "/referral", label: "Рефкоды", icon: LinkIcon, hideForExchange: true },
+      { to: "/superadmin", label: "Alpha", icon: ShieldCheckIcon, superadminOnly: true },
     ],
   },
 ];
 
 /** Фильтр пунктов по вертикали: exchangeOnly показываем только обменке, hideForExchange — скрываем у обменки. */
-function visibleNavItems(items: NavItem[], isExchange: boolean): NavItem[] {
+function visibleNavItems(items: NavItem[], isExchange: boolean, isSuperadmin: boolean): NavItem[] {
   return items.filter((it) => {
     if (it.exchangeOnly && !isExchange) return false;
     if (it.hideForExchange && isExchange) return false;
+    if (it.superadminOnly && !isSuperadmin) return false;
     return true;
   });
 }
@@ -214,15 +219,17 @@ function NavLinks({
   escalatedCount,
   collapsed,
   isExchange,
+  isSuperadmin,
 }: {
   onNavigate?: () => void;
   escalatedCount?: number;
   collapsed: boolean;
   isExchange?: boolean;
+  isSuperadmin?: boolean;
 }) {
   const groups = NAV_GROUPS.map((g) => ({
     ...g,
-    items: visibleNavItems(g.items, isExchange ?? false),
+    items: visibleNavItems(g.items, isExchange ?? false, isSuperadmin ?? false),
   })).filter((g) => g.items.length > 0);
   return (
     <nav className="flex flex-col gap-4">
@@ -393,6 +400,7 @@ function SidebarBody({
   collapsed,
   onToggleCollapse,
   isExchange,
+  isSuperadmin,
 }: {
   admin: Admin | null;
   tenant: Tenant | null;
@@ -402,6 +410,7 @@ function SidebarBody({
   collapsed: boolean;
   onToggleCollapse?: () => void;
   isExchange?: boolean;
+  isSuperadmin?: boolean;
 }) {
   return (
     <div className="flex h-full flex-col gap-1">
@@ -457,6 +466,7 @@ function SidebarBody({
           escalatedCount={escalatedCount}
           collapsed={collapsed}
           isExchange={isExchange}
+          isSuperadmin={isSuperadmin}
         />
       </div>
 
@@ -581,6 +591,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
             isExchange={isExchange}
+            isSuperadmin={admin?.role === "superadmin"}
           />
         </aside>
 
@@ -602,6 +613,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   escalatedCount={escalatedCount}
                   collapsed={false}
                   isExchange={isExchange}
+                  isSuperadmin={admin?.role === "superadmin"}
                 />
               </SheetContent>
             </Sheet>
