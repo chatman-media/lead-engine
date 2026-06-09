@@ -1643,6 +1643,26 @@ export interface ExchangeTurnover {
   }>;
 }
 
+export interface ExchangeEvalResult {
+  summary: { passed: number; total: number };
+  report: Array<{
+    id: string;
+    displayName: string;
+    conversationId?: number;
+    passed: boolean;
+    reasons?: string[];
+    error?: string;
+    signals?: {
+      reachedQuote: boolean;
+      requisitesIssued: boolean;
+      payoutDelivered: boolean;
+      prematureOperator: boolean;
+      orderStatus?: string | null;
+      assistantTurns?: number;
+    };
+  }>;
+}
+
 export const saas = {
   // ── Auth ────────────────────────────────────────────────────────────
   signup(email: string, password: string, tenantSlug?: string, referralCode?: string) {
@@ -3240,22 +3260,7 @@ export const saas = {
     });
   },
   runExchangeEval(personaIds?: string[], maxTurns?: number) {
-    return request<{
-      summary: { passed: number; total: number };
-      report: Array<{
-        id: string;
-        displayName: string;
-        passed: boolean;
-        reasons?: string[];
-        error?: string;
-        signals?: {
-          reachedQuote: boolean;
-          requisitesIssued: boolean;
-          payoutDelivered: boolean;
-          prematureOperator: boolean;
-        };
-      }>;
-    }>("/api/admin/sim/exchange-eval", {
+    return request<ExchangeEvalResult>("/api/admin/sim/exchange-eval", {
       method: "POST",
       body: JSON.stringify({ personaIds, maxTurns }),
     });
