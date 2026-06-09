@@ -11,17 +11,18 @@ import LandingAnyBusiness from "./LandingAnyBusiness.tsx";
 import LandingExchange from "./LandingExchange.tsx";
 import LandingModeling from "./LandingModeling.tsx";
 import LandingRealEstate from "./LandingRealEstate.tsx";
+import LandingWorkflow from "./LandingWorkflow.tsx";
 import {
   DEMO_URL,
   FaqAccordion,
   Footer,
+  type Lang,
   Nav,
   PLANS_EN,
   PLANS_RU,
   PricingSection,
   SIGNUP_URL,
   TelegramMockup,
-  type Lang,
 } from "./shared.tsx";
 
 // ─── Recruitment landing content ──────────────────────────────────
@@ -308,11 +309,12 @@ function LandingRecruit() {
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<LandingExchange />} />
+      <Route path="/" element={<LandingWorkflow />} />
       <Route path="/early-access" element={<EarlyAccess />} />
       <Route path="/signup" element={<EarlyAccess />} />
       <Route path="/alpha" element={<EarlyAccess />} />
       <Route path="/exchange" element={<LandingExchange />} />
+      <Route path="/workflow" element={<LandingWorkflow />} />
       <Route path="/demo" element={<DemoExchange />} />
       <Route path="/demo/exchange" element={<DemoExchange />} />
       <Route path="/demo/exchange-workflow" element={<DemoExchangeWorkflow />} />

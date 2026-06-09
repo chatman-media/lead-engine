@@ -2023,6 +2023,7 @@ export const saas = {
   listLeads(
     opts: {
       stageId?: number;
+      funnelId?: number;
       state?: string;
       contactId?: number;
       q?: string;
@@ -2032,6 +2033,7 @@ export const saas = {
   ) {
     const p = new URLSearchParams();
     if (opts.stageId) p.set("stageId", String(opts.stageId));
+    if (opts.funnelId) p.set("funnelId", String(opts.funnelId));
     if (opts.state) p.set("state", opts.state);
     if (opts.contactId) p.set("contactId", String(opts.contactId));
     if (opts.q) p.set("q", opts.q);
@@ -2125,6 +2127,9 @@ export const saas = {
   // ── Funnel builder ───────────────────────────────────────────────────
   getFunnel() {
     return request<FunnelData>("/api/admin/funnel");
+  },
+  getPrimaryFunnel() {
+    return request<FunnelData>("/api/admin/funnel?primary=1");
   },
   listFunnels() {
     return request<{ items: FunnelListItem[] }>("/api/admin/funnels");
@@ -2255,6 +2260,9 @@ export const saas = {
     return request<FunnelAnalytics>(
       `/api/admin/funnel/analytics${funnelId ? `?funnelId=${funnelId}` : ""}`,
     );
+  },
+  getPrimaryFunnelAnalytics() {
+    return request<FunnelAnalytics>("/api/admin/funnel/analytics?primary=1");
   },
 
   // ── Skills / Styles / Experiments ────────────────────────────────────

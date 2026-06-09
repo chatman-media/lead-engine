@@ -116,21 +116,29 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
 
   /**
    * GET /api/admin/leads
-   * Query: ?stageId=<id> | ?state=<slug> | ?contactId=<id> | ?q=<text> | ?limit=N | ?offset=N
+   * Query: ?stageId=<id> | ?funnelId=<id> | ?state=<slug> | ?contactId=<id> | ?q=<text> | ?limit=N | ?offset=N
    */
   app.get("/api/admin/leads", async (c) => {
     const tenantId = c.var.tenantId;
     const limit = Math.min(Number(c.req.query("limit") ?? "50"), 200);
     const offset = Math.max(Number(c.req.query("offset") ?? "0"), 0);
     const stageIdParam = c.req.query("stageId");
+    const funnelIdParam = c.req.query("funnelId");
     const stateParam = c.req.query("state");
     const contactIdParam = c.req.query("contactId");
     const qParam = c.req.query("q")?.trim();
+    const funnelId = funnelIdParam ? Number(funnelIdParam) : null;
+    if (funnelIdParam && !Number.isFinite(funnelId)) {
+      return c.json({ error: "bad funnelId" }, 400);
+    }
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
       const conditions = [eq(leads.tenantId, tenantId)];
       if (stageIdParam) {
         conditions.push(eq(leads.stageDefinitionId, Number(stageIdParam)));
+      }
+      if (funnelId !== null) {
+        conditions.push(eq(stageDefinitions.funnelId, funnelId));
       }
       if (stateParam) {
         conditions.push(eq(leads.state, stateParam));

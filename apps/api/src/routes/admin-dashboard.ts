@@ -5,8 +5,9 @@ import {
   messages,
   stageDefinitions,
 } from "@chatman-media/storage";
-import { and, count, eq, gte, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { loadPrimaryActiveFunnel } from "../lib/primary-funnel.ts";
 
 /**
  * GET /api/admin/dashboard
@@ -29,9 +30,11 @@ export function makeAdminDashboardRoutes(opts: AdminDashboardRoutesOpts): Hono {
     const sevenDaysAgo = now - 7 * 86400;
 
     const data = await withTenant(opts.db, tenantId, async (tx) => {
+      const primaryFunnel = await loadPrimaryActiveFunnel(tx, tenantId);
       // Лиды по стадиям
       const byStage = await tx
         .select({
+          id: stageDefinitions.id,
           slug: stageDefinitions.slug,
           displayName: stageDefinitions.displayName,
           kind: stageDefinitions.kind,
@@ -47,7 +50,14 @@ export function makeAdminDashboardRoutes(opts: AdminDashboardRoutesOpts): Hono {
             eq(leads.tenantId, tenantId),
           ),
         )
-        .where(eq(stageDefinitions.tenantId, tenantId))
+        .where(
+          primaryFunnel
+            ? and(
+                eq(stageDefinitions.tenantId, tenantId),
+                eq(stageDefinitions.funnelId, primaryFunnel.id),
+              )
+            : eq(stageDefinitions.tenantId, tenantId),
+        )
         .groupBy(
           stageDefinitions.id,
           stageDefinitions.slug,
@@ -58,10 +68,18 @@ export function makeAdminDashboardRoutes(opts: AdminDashboardRoutesOpts): Hono {
         )
         .orderBy(stageDefinitions.position);
 
+      const primaryStageIds = byStage.map((s) => s.id);
       const [leadsTotal] = await tx
         .select({ total: count(leads.id) })
         .from(leads)
-        .where(eq(leads.tenantId, tenantId));
+        .where(
+          primaryStageIds.length > 0
+            ? and(
+                eq(leads.tenantId, tenantId),
+                inArray(leads.stageDefinitionId, primaryStageIds),
+              )
+            : eq(leads.tenantId, tenantId),
+        );
 
       // Диалоги
       const [convOpen] = await tx

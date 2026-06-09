@@ -31,6 +31,7 @@ import {
 import { SKILLS_CATALOGUE } from "../lib/skills-catalogue.ts";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
+import { loadPrimaryActiveFunnel } from "../lib/primary-funnel.ts";
 
 // ── Seed templates ──────────────────────────────────────────────────────────
 
@@ -4781,14 +4782,19 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
 	 */
 	app.get("/api/admin/funnel", async (c) => {
 		const tenantId = c.var.tenantId;
+		const primary = c.req.query("primary") === "1" || c.req.query("primary") === "true";
 
 		const result = await withTenant(opts.db, tenantId, async (tx) => {
-			const [funnel] = await tx
-				.select()
-				.from(funnels)
-				.where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
-				.orderBy(asc(funnels.id))
-				.limit(1);
+			const funnel = primary
+				? await loadPrimaryActiveFunnel(tx, tenantId)
+				: (
+						await tx
+							.select()
+							.from(funnels)
+							.where(and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)))
+							.orderBy(asc(funnels.id))
+							.limit(1)
+					)[0];
 
 			if (!funnel) return null;
 			return loadFunnelData(tx, tenantId, funnel);
@@ -5282,11 +5288,15 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
 		const tenantId = c.var.tenantId;
 		const funnelIdRaw = c.req.query("funnelId");
 		const funnelId = funnelIdRaw ? Number(funnelIdRaw) : null;
+		const primary = c.req.query("primary") === "1" || c.req.query("primary") === "true";
 		if (funnelIdRaw && !Number.isFinite(funnelId))
 			return c.json({ error: "bad funnelId" }, 400);
 
-		const stages = await withTenant(opts.db, tenantId, async (tx) =>
-			tx
+		const stages = await withTenant(opts.db, tenantId, async (tx) => {
+			const resolvedFunnelId =
+				funnelId ??
+				(primary ? ((await loadPrimaryActiveFunnel(tx, tenantId))?.id ?? null) : null);
+			return tx
 				.select({
 					id: stageDefinitions.id,
 					slug: stageDefinitions.slug,
@@ -5297,17 +5307,19 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
 				})
 				.from(stageDefinitions)
 				.where(
-					funnelId
+					resolvedFunnelId
 						? and(
 								eq(stageDefinitions.tenantId, tenantId),
-								eq(stageDefinitions.funnelId, funnelId),
+								eq(stageDefinitions.funnelId, resolvedFunnelId),
 							)
 						: eq(stageDefinitions.tenantId, tenantId),
 				)
-				.orderBy(asc(stageDefinitions.position)),
-		);
+				.orderBy(asc(stageDefinitions.position));
+		});
 
 		if (stages.length === 0) return c.json({ stages: [] });
+		const stageIds = stages.map((s) => s.id);
+		const stageSlugs = stages.map((s) => s.slug);
 
 		// Leads currently in each stage
 		const currentCounts = await withTenant(opts.db, tenantId, async (tx) =>
@@ -5317,7 +5329,12 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
 					n: count(),
 				})
 				.from(leads)
-				.where(eq(leads.tenantId, tenantId))
+				.where(
+					and(
+						eq(leads.tenantId, tenantId),
+						inArray(leads.stageDefinitionId, stageIds),
+					),
+				)
 				.groupBy(leads.stageDefinitionId),
 		);
 		const currentMap = new Map(
@@ -5329,7 +5346,12 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
 			tx
 				.select({ toState: leadEvents.toState, n: count() })
 				.from(leadEvents)
-				.where(eq(leadEvents.tenantId, tenantId))
+				.where(
+					and(
+						eq(leadEvents.tenantId, tenantId),
+						inArray(leadEvents.toState, stageSlugs),
+					),
+				)
 				.groupBy(leadEvents.toState),
 		);
 		const entryMap = new Map(entryCounts.map((r) => [r.toState, Number(r.n)]));
