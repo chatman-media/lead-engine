@@ -105,6 +105,37 @@ function OnboardingGate({ require }: { require: "done" | "not-done" }) {
   return <Outlet />;
 }
 
+function RequireSuperadmin() {
+  const [state, setState] = useState<"checking" | "allowed" | "forbidden">("checking");
+
+  useEffect(() => {
+    let cancelled = false;
+    saas
+      .me()
+      .then((res) => {
+        if (!cancelled) {
+          setState(res.admin.role === "superadmin" ? "allowed" : "forbidden");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setState("forbidden");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (state === "checking") {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
+      </div>
+    );
+  }
+  if (state === "forbidden") return <Navigate to="/dashboard" replace />;
+  return <Outlet />;
+}
+
 function ShellLayout() {
   useAdminEvents((event) => {
     if (event.type === "new_message") {
@@ -150,34 +181,36 @@ export function App() {
                 <Route path="/dashboard" element={<SaasDashboard />} />
                 <Route path="/leads" element={<SaasLeads />} />
                 <Route path="/leads/:id" element={<SaasLeadDetail />} />
-                <Route path="/outreach" element={<SaasOutreach />} />
-                <Route path="/campaigns" element={<SaasCampaigns />} />
                 <Route path="/conversations" element={<SaasConversations />} />
                 <Route path="/conversations/:id" element={<SaasConversations />} />
-                <Route path="/funnel" element={<SaasFunnel />} />
-                <Route path="/services" element={<SaasServiceCatalog />} />
                 <Route path="/exchange" element={<SaasExchange />} />
-                <Route path="/vacancies" element={<SaasVacancies />} />
-                <Route path="/skills" element={<SaasSkills />} />
-                <Route path="/hooks" element={<SaasHooks />} />
-                <Route path="/styles" element={<SaasStyles />} />
-                <Route path="/experiments" element={<SaasExperiments />} />
-                <Route path="/quality" element={<SaasQuality />} />
-                <Route path="/channels" element={<SaasChannels />} />
-                <Route path="/billing" element={<SaasBilling />} />
-                <Route path="/settings" element={<SaasSettings />} />
-                <Route path="/settings/channels" element={<SaasChannels />} />
                 <Route path="/profile" element={<SaasProfile />} />
-                <Route path="/partners" element={<SaasPartners />} />
-                <Route path="/referral" element={<SaasReferral />} />
-                <Route path="/integrations" element={<SaasIntegrations />} />
-                <Route path="/faq" element={<SaasFaq />} />
-                <Route path="/team" element={<SaasTeam />} />
-                <Route path="/audit" element={<SaasAudit />} />
-                <Route path="/diagnostics" element={<SaasDiagnostics />} />
-                <Route path="/test" element={<SaasTestBot />} />
                 <Route path="/notifications" element={<SaasNotifications />} />
-                <Route path="/superadmin" element={<SaasSuperadmin />} />
+                <Route element={<RequireSuperadmin />}>
+                  <Route path="/outreach" element={<SaasOutreach />} />
+                  <Route path="/campaigns" element={<SaasCampaigns />} />
+                  <Route path="/funnel" element={<SaasFunnel />} />
+                  <Route path="/services" element={<SaasServiceCatalog />} />
+                  <Route path="/vacancies" element={<SaasVacancies />} />
+                  <Route path="/skills" element={<SaasSkills />} />
+                  <Route path="/hooks" element={<SaasHooks />} />
+                  <Route path="/styles" element={<SaasStyles />} />
+                  <Route path="/experiments" element={<SaasExperiments />} />
+                  <Route path="/quality" element={<SaasQuality />} />
+                  <Route path="/channels" element={<SaasChannels />} />
+                  <Route path="/billing" element={<SaasBilling />} />
+                  <Route path="/settings" element={<SaasSettings />} />
+                  <Route path="/settings/channels" element={<SaasChannels />} />
+                  <Route path="/partners" element={<SaasPartners />} />
+                  <Route path="/referral" element={<SaasReferral />} />
+                  <Route path="/integrations" element={<SaasIntegrations />} />
+                  <Route path="/faq" element={<SaasFaq />} />
+                  <Route path="/team" element={<SaasTeam />} />
+                  <Route path="/audit" element={<SaasAudit />} />
+                  <Route path="/diagnostics" element={<SaasDiagnostics />} />
+                  <Route path="/test" element={<SaasTestBot />} />
+                  <Route path="/superadmin" element={<SaasSuperadmin />} />
+                </Route>
               </Route>
             </Route>
           </Route>
