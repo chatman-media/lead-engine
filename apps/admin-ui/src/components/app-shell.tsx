@@ -314,6 +314,11 @@ function AccountDropdown({
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
+          <Link to="/settings/channels">
+            <CableIcon /> Каналы
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <Link to="/team">
             <UsersIcon /> Команда
           </Link>

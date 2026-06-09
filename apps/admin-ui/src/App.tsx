@@ -166,6 +166,7 @@ export function App() {
                 <Route path="/channels" element={<SaasChannels />} />
                 <Route path="/billing" element={<SaasBilling />} />
                 <Route path="/settings" element={<SaasSettings />} />
+                <Route path="/settings/channels" element={<SaasChannels />} />
                 <Route path="/profile" element={<SaasProfile />} />
                 <Route path="/partners" element={<SaasPartners />} />
                 <Route path="/referral" element={<SaasReferral />} />
