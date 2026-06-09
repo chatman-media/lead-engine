@@ -581,6 +581,10 @@ async function main() {
     loadedRef,
     cfg,
     db,
+    {
+      fallbackTemplate: RECRUITMENT_V1,
+      resolveTemplate: resolveTemplateForTenant,
+    },
     metrics,
     recordUsage,
     // A4: rate-guard сработал → алерт владельцу (информер/Telegram), не «тихий» warn.

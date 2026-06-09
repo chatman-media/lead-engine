@@ -1,13 +1,8 @@
 import type { OutboundEnvelope } from "@chatman-media/channel-core";
-import type {
-  ChatClient,
-  ChatMessage,
-  EmbeddingClient as RagEmbeddingClient,
-} from "@chatman-media/llm-router";
 import {
-  answerWithRag,
   type AnswerTelemetry,
   type AnyRagTool,
+  answerWithRag,
   DEFAULT_PERSONA,
   type DirectorHookForPrompt,
   generateSoftFallback,
@@ -20,6 +15,11 @@ import {
   type Style,
   StyleSchema,
 } from "@chatman-media/kb";
+import type {
+  ChatClient,
+  ChatMessage,
+  EmbeddingClient as RagEmbeddingClient,
+} from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { compactConversation } from "../compact-conversation.ts";
 import type { ConversationsRepo } from "../dal/conversations.ts";
@@ -27,11 +27,11 @@ import { ScopedKbStore } from "../dal/kb-store.ts";
 import type { KbSuggestionsRepo } from "../dal/kb-suggestions.ts";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
-import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
 import {
   type ExchangePolicyState,
   guardExchangePolicy,
 } from "./exchange-policy-guard.ts";
+import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
 
 /**
  * RAG-аware ReplyStrategy. На каждый user message:
@@ -50,7 +50,13 @@ import {
  * рефакторе rag (вне scope этого pkg'а).
  */
 export interface RagReplyStrategyOpts {
+  /** Fallback template used when no per-tenant template resolver is configured. */
   template: VerticalTemplate;
+  /**
+   * Optional per-tenant template resolver. Lets apps/api use the tenant's
+   * installed vertical instead of one boot-time hardcoded template.
+   */
+  resolveTemplate?: (tenantId: number) => VerticalTemplate | null | undefined;
   /** Лимит history сообщений (default 12 — answerWithRag сам ужмёт через summary). */
   historyLimit?: number;
   /**
@@ -294,6 +300,7 @@ export class RagReplyStrategy implements ReplyStrategy {
     if (input.userMessageText.length === 0) return null;
 
     const tenantId = input.tenant.tenantId;
+    const template = this.opts.resolveTemplate?.(tenantId) ?? this.opts.template;
 
     if (this.opts.resolveIsSupport) {
       const isSupport = await this.opts.resolveIsSupport({ tenantId, contactId: input.contactId });
@@ -385,7 +392,7 @@ export class RagReplyStrategy implements ReplyStrategy {
       }
     }
 
-    const isExchange = this.opts.template?.slug === "exchange_v1";
+    const isExchange = template?.slug === "exchange_v1";
 
     // Load persuasion skills, director hooks, agentic tools, and reranker in parallel.
     // All are optional — if resolvers not configured, values stay empty/null

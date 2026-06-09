@@ -163,6 +163,37 @@ describe("LlmReplyStrategy", () => {
     expect(system).toContain("status=offer_ready");
   });
 
+  it("uses resolved per-tenant template for the system prompt", async () => {
+    const chat = new CapturingChat("tenant reply");
+    const repo = fakeMessagesRepo([]);
+    const tenantTemplate: VerticalTemplate = {
+      ...TEMPLATE,
+      slug: "tenant_v1",
+      systemPromptFragment: "Ты — tenant-specific бот.",
+    };
+    const strategy = new LlmReplyStrategy(
+      {
+        template: TEMPLATE,
+        resolveTemplate: (tenantId) => (tenantId === 2 ? tenantTemplate : null),
+        resolveChat: () => chat,
+      },
+      () => repo,
+    );
+
+    await strategy.generate({
+      tenant: { tenantId: 2 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 7,
+      inbound: { externalUserId: "u1" },
+      userMessageText: "привет",
+    });
+
+    const system = chat.lastCall?.messages[0]?.content ?? "";
+    expect(system).toContain("Ты — tenant-specific бот.");
+    expect(system).not.toContain("Ты — тестовый бот вертикали.");
+  });
+
   it("пропускает пустой userMessageText (null = бот молчит)", async () => {
     const chat = new CapturingChat("never called");
     const repo = fakeMessagesRepo([]);
@@ -199,6 +230,29 @@ describe("LlmReplyStrategy", () => {
     const repo = fakeMessagesRepo([row(1, "user", "сколько за 335 usdt?")]);
     const strategy = new LlmReplyStrategy(
       { template: EXCHANGE_TEMPLATE, resolveChat: () => chat },
+      () => repo,
+    );
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "сколько за 335 usdt?",
+    });
+    expect(result).not.toBeNull();
+    expect((result![0]!.parts[0] as { text: string }).text).toBe(EXCHANGE_SAFE_FALLBACK);
+  });
+
+  it("exchange: resolved tenant template activates exchange guard", async () => {
+    const chat = new CapturingChat("Курс 31.5, получите 10553 THB.");
+    const repo = fakeMessagesRepo([row(1, "user", "сколько за 335 usdt?")]);
+    const strategy = new LlmReplyStrategy(
+      {
+        template: TEMPLATE,
+        resolveTemplate: () => EXCHANGE_TEMPLATE,
+        resolveChat: () => chat,
+      },
       () => repo,
     );
     const result = await strategy.generate({
