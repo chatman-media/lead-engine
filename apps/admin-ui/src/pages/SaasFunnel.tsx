@@ -1155,7 +1155,7 @@ function StageBehaviourEditor({
     stage.goal ? "цель" : null,
     stage.guidance ? "поведение" : null,
     autoAdvance ? "авто-переход" : null,
-    stage.partnerWebhookUrl ? "партнёр" : null,
+    stage.partnerWebhookUrl ? "webhook" : null,
     (stage.nextStages?.length ?? 0) > 0 ? `${stage.nextStages.length} перех.` : null,
   ].filter(Boolean);
   const dirty =
@@ -1301,32 +1301,44 @@ function StageBehaviourEditor({
         </div>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-[1fr_220px]">
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Партнёрский канал</Label>
-          <Input
-            value={partnerWebhookUrl}
-            onChange={(e) => setPartnerWebhookUrl(e.target.value)}
-            placeholder="tg://123456789 или https://partner.example/webhook"
-            className="h-8 text-sm"
-          />
+      <details className="rounded-md border border-dashed bg-muted/20">
+        <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-sm font-medium marker:text-muted-foreground">
+          <span>Внешняя передача</span>
+          {partnerWebhookUrl ? (
+            <Badge variant="outline" className="text-[10px] font-normal">
+              настроено
+            </Badge>
+          ) : (
+            <span className="text-xs font-normal text-muted-foreground">опционально</span>
+          )}
+        </summary>
+        <div className="grid gap-2 border-t px-3 pb-3 pt-2.5 sm:grid-cols-[1fr_220px]">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Webhook / Telegram</Label>
+            <Input
+              value={partnerWebhookUrl}
+              onChange={(e) => setPartnerWebhookUrl(e.target.value)}
+              placeholder="https://provider.example/webhook или tg://123456789"
+              className="h-8 text-sm"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Режим ответа</Label>
+            <Select
+              value={partnerWebhookMode}
+              onValueChange={(v) => setPartnerWebhookMode(v as typeof partnerWebhookMode)}
+            >
+              <SelectTrigger className="h-8 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fire_and_forget">Отправить и продолжить</SelectItem>
+                <SelectItem value="await_callback">Ждать callback</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Режим</Label>
-          <Select
-            value={partnerWebhookMode}
-            onValueChange={(v) => setPartnerWebhookMode(v as typeof partnerWebhookMode)}
-          >
-            <SelectTrigger className="h-8 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="fire_and_forget">Отправить</SelectItem>
-              <SelectItem value="await_callback">Ждать ответ</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      </details>
 
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={save} disabled={saving || !dirty}>
