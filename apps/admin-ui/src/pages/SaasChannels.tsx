@@ -72,6 +72,7 @@ function ConnectedChannelCard({
   onAskDelete,
   onConfirmDelete,
   onCancelDelete,
+  extraActions,
 }: {
   title: string;
   statusText: string;
@@ -81,6 +82,7 @@ function ConnectedChannelCard({
   onAskDelete: () => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
+  extraActions?: React.ReactNode;
 }) {
   return (
     <div className="space-y-4">
@@ -100,6 +102,7 @@ function ConnectedChannelCard({
         <Button variant="outline" onClick={onReconnect}>
           {reconnectLabel}
         </Button>
+        {extraActions}
         {confirmDelete ? (
           <>
             <span className="self-center text-sm text-muted-foreground">Отключить?</span>
@@ -176,6 +179,7 @@ export function SaasChannels() {
   const [maxBotToken, setMaxBotToken] = useState("");
   const [maxWebhookSecret, setMaxWebhookSecret] = useState("");
   const [maxSubmitting, setMaxSubmitting] = useState(false);
+  const [maxRotating, setMaxRotating] = useState(false);
   const [maxResult, setMaxResult] = useState<CreateMaxChannelResult | null>(null);
 
   const [webBrand, setWebBrand] = useState("");
@@ -491,6 +495,36 @@ export function SaasChannels() {
       }
     } finally {
       setMaxSubmitting(false);
+    }
+  }
+
+  async function handleMaxRotateSecret(id: number) {
+    setError("");
+    setMaxResult(null);
+    setMaxRotating(true);
+    try {
+      const res = await saas.rotateMaxWebhookSecret(id);
+      setMaxResult(res);
+      await refresh();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 401) {
+          clearToken();
+          navigate("/login", { replace: true });
+          return;
+        }
+        if (err.status === 404) {
+          setError("MAX канал не найден — обновите страницу");
+        } else if (err.status === 409) {
+          setError("Для MAX канала нет сохранённых credentials — переподключите Bot token");
+        } else {
+          setError(`Ошибка ${err.status}: ${err.errorCode}`);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setMaxRotating(false);
     }
   }
 
@@ -1313,6 +1347,16 @@ export function SaasChannels() {
                   onAskDelete={() => setConfirmDeleteChannelId(existingMax.id)}
                   onConfirmDelete={() => handleDelete(existingMax.id)}
                   onCancelDelete={() => setConfirmDeleteChannelId(null)}
+                  extraActions={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={maxRotating}
+                      onClick={() => handleMaxRotateSecret(existingMax.id)}
+                    >
+                      {maxRotating ? "Генерируем…" : "Новый webhook secret"}
+                    </Button>
+                  }
                 />
               ) : (
                 <form onSubmit={handleMaxSubmit} className="space-y-3">
@@ -1339,7 +1383,8 @@ export function SaasChannels() {
                   <p className="text-xs text-muted-foreground">
                     После подключения создайте Webhook subscription в MAX: URL из подсказки ниже,
                     secret — в поле webhook secret, update type — message_created. Production
-                    webhook должен быть HTTPS на 443.
+                    webhook должен быть HTTPS на 443. Если secret потерян, сгенерируйте новый и
+                    обновите subscription.
                   </p>
                   <div className="flex gap-2">
                     <Button type="submit" disabled={maxSubmitting || !maxBotToken.trim()}>

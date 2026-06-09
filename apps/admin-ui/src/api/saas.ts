@@ -1714,6 +1714,11 @@ export const saas = {
       body: JSON.stringify(input),
     });
   },
+  rotateMaxWebhookSecret(id: number) {
+    return request<CreateMaxChannelResult>(`/api/admin/channels/max/${id}/rotate-secret`, {
+      method: "POST",
+    });
+  },
   createWebChannel(input: { externalId?: string; brandName?: string; primaryColor?: string } = {}) {
     return request<CreateWebChannelResult>("/api/admin/channels/web", {
       method: "POST",

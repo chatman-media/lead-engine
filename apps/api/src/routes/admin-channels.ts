@@ -1180,7 +1180,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
     const webhookSecret =
       typeof body.webhookSecret === "string" && body.webhookSecret.trim()
         ? body.webhookSecret.trim()
-        : (opts.maxWebhookSecret ?? `max_${randomUUID()}`);
+        : `max_${randomUUID()}`;
 
     if (!botToken) return c.json({ error: "botToken required" }, 400);
     if (webhookSecret.length < 5 || webhookSecret.length > 256) {
@@ -1336,7 +1336,7 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
           .where(eq(tenants.id, tenantId));
         if (tenant) {
           webhookSetupHint = {
-            url: `${opts.publicUrl}/webhook/max/${tenant.slug}`,
+            url: `${opts.publicUrl}/webhook/max/${tenant.slug}/${botId}`,
             secret: webhookSecret,
             updateTypes: ["message_created"],
             requirement: "Production MAX webhooks require HTTPS on port 443.",
@@ -1359,6 +1359,117 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
       }
       throw err;
     }
+  });
+
+  /**
+   * POST /api/admin/channels/max/:id/rotate-secret
+   * Generates a new per-channel MAX webhook secret without requiring bot token
+   * re-entry. The raw secret is returned once so admin can update subscription.
+   */
+  app.post("/api/admin/channels/max/:id/rotate-secret", async (c) => {
+    const tenantId = c.var.tenantId;
+    const id = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return c.json({ error: "invalid id" }, 400);
+    }
+
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const webhookSecret = `max_${randomUUID()}`;
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      const [channel] = await tx
+        .select({
+          id: channels.id,
+          externalId: channels.externalId,
+          credentialsRef: channels.credentialsRef,
+        })
+        .from(channels)
+        .where(
+          and(
+            eq(channels.tenantId, tenantId),
+            eq(channels.id, id),
+            eq(channels.kind, "max"),
+            eq(channels.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!channel) return { kind: "not_found" } as const;
+      if (!channel.credentialsRef) {
+        return { kind: "missing_credentials", botId: channel.externalId } as const;
+      }
+
+      await setEncryptedSecret({
+        db: tx,
+        tenantId,
+        key: maxWebhookSecretKey(channel.credentialsRef),
+        value: webhookSecret,
+        masterKeyHex: opts.masterKeyHex,
+        nowEpoch,
+      });
+      await tx
+        .update(channels)
+        .set({ updatedAt: nowEpoch })
+        .where(and(eq(channels.tenantId, tenantId), eq(channels.id, id)));
+
+      return { kind: "rotated", id: channel.id, botId: channel.externalId } as const;
+    });
+
+    if (result.kind === "not_found") {
+      return c.json({ error: "MAX channel not found" }, 404);
+    }
+    if (result.kind === "missing_credentials") {
+      return c.json(
+        {
+          error: "MAX channel has no credentialsRef; reconnect required",
+          botId: result.botId,
+        },
+        409,
+      );
+    }
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId: c.var.adminId,
+      action: "channel.update",
+      targetKind: "channel",
+      targetId: result.id,
+      details: { kind: "max", botId: result.botId, rotatedWebhookSecret: true },
+    });
+
+    let reloadError: string | undefined;
+    if (opts.onReload) {
+      try {
+        await opts.onReload(tenantId);
+      } catch (err) {
+        reloadError = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    let webhookSetupHint:
+      | { url: string; secret: string; updateTypes: string[]; requirement: string }
+      | undefined;
+    if (opts.publicUrl) {
+      const [tenant] = await opts.db
+        .select({ slug: tenants.slug })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId));
+      if (tenant) {
+        webhookSetupHint = {
+          url: `${opts.publicUrl}/webhook/max/${tenant.slug}/${result.botId}`,
+          secret: webhookSecret,
+          updateTypes: ["message_created"],
+          requirement: "Production MAX webhooks require HTTPS on port 443.",
+        };
+      }
+    }
+
+    return c.json({
+      ok: true,
+      id: result.id,
+      updated: true,
+      botId: result.botId,
+      ...(webhookSetupHint ? { webhookSetupHint } : {}),
+      ...(reloadError ? { reloadError } : {}),
+    });
   });
 
   /**

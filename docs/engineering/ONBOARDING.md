@@ -363,7 +363,7 @@ Response содержит `webhookSetupHint`:
 ```json
 {
   "webhookSetupHint": {
-    "url": "https://api.example.com/webhook/max/acme",
+    "url": "https://api.example.com/webhook/max/acme/778899",
     "secret": "max_...",
     "updateTypes": ["message_created"],
     "requirement": "Production MAX webhooks require HTTPS on port 443."
@@ -373,6 +373,7 @@ Response содержит `webhookSetupHint`:
 
 MAX Webhook subscription:
 - **URL** = `webhookSetupHint.url`
+  (`/webhook/max/<tenantSlug>/<botId>` — `botId` нужен для tenants с несколькими MAX-ботами)
 - **Secret** = `webhookSetupHint.secret`
 - **Update types** = `message_created`
 - Lead Engine проверяет `X-Max-Bot-Api-Secret` до pipeline

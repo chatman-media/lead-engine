@@ -19,7 +19,7 @@ import {
 } from "@chatman-media/conversation-engine";
 import type { PlatformMetrics } from "@chatman-media/observability";
 import type { VerticalTemplate } from "@chatman-media/verticals";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import type { ChannelEntry, ChannelRegistry } from "../channel-registry.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
 import type { FieldExtractor } from "../lib/field-extractor.ts";
@@ -29,7 +29,12 @@ import { runPostInboundAutomation } from "../lib/post-inbound-automation.ts";
 import type { InboundRateLimiter } from "../lib/rate-limiter.ts";
 import type { ServiceCatalogRuntime } from "../lib/service-catalog-runtime.ts";
 
-function matchMaxEntry(entries: ChannelEntry[], secretHeader: string): ChannelEntry | null {
+function matchMaxEntry(
+  entries: ChannelEntry[],
+  secretHeader: string,
+  botId: string,
+): ChannelEntry | null {
+  if (botId) return entries.find((entry) => entry.externalId === botId) ?? null;
   if (secretHeader) {
     const bySecret = entries.find((entry) => entry.maxWebhookSecret === secretHeader);
     if (bySecret) return bySecret;
@@ -66,10 +71,11 @@ export function makeMaxWebhookRoutes(opts: {
 }): Hono {
   const app = new Hono();
 
-  app.post("/webhook/max/:slug", async (c) => {
+  const handleWebhook = async (c: Context) => {
     const startedAt = performance.now();
     const rawBody = await c.req.text();
-    const slug = c.req.param("slug");
+    const slug = c.req.param("slug") ?? "";
+    const botId = c.req.param("botId") ?? "";
     const entries = opts.channels.getMaxByTenant(slug);
     if (entries.length === 0) {
       opts.metrics?.webhookRequests.inc(1, { channel: "max", status: "404" });
@@ -77,7 +83,7 @@ export function makeMaxWebhookRoutes(opts: {
     }
 
     const secretHeader = c.req.header("X-Max-Bot-Api-Secret") ?? "";
-    const entry = matchMaxEntry(entries, secretHeader);
+    const entry = matchMaxEntry(entries, secretHeader, botId);
     if (!entry) {
       opts.metrics?.webhookRequests.inc(1, { channel: "max", status: "404" });
       return c.json({ error: "no matching max channel for webhook secret" }, 404);
@@ -238,7 +244,10 @@ export function makeMaxWebhookRoutes(opts: {
     opts.metrics?.webhookRequests.inc(1, { channel: "max", status: "200" });
 
     return c.json({ ok: true, processed: processedCount });
-  });
+  };
+
+  app.post("/webhook/max/:slug", handleWebhook);
+  app.post("/webhook/max/:slug/:botId", handleWebhook);
 
   return app;
 }

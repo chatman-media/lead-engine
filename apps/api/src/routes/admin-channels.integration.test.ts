@@ -153,6 +153,18 @@ const fakeTelegramFetch = (async (
       );
     }
     if (url === "https://platform-api.max.ru/me") {
+      if (auth.includes("max-second-token")) {
+        return new Response(
+          JSON.stringify({
+            user_id: 889900,
+            name: "Second MAX",
+            username: "second_max_bot",
+            is_bot: true,
+            last_activity_time: 1_700_000_001_000,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
       return new Response(
         JSON.stringify({
           user_id: 778899,
@@ -231,6 +243,7 @@ beforeAll(async () => {
       publicUrl: "https://api.example.test",
       webhookSecret: "test-webhook-secret-12345",
       whatsappVerifyToken: "test-wa-verify-token",
+      maxWebhookSecret: "global-max-secret",
     }),
   );
 
@@ -929,6 +942,8 @@ describe("POST /api/admin/channels/vk", () => {
 });
 
 describe("POST /api/admin/channels/max", () => {
+  let maxChannelId = 0;
+
   it("без auth → 401", async () => {
     if (!sql) return;
     const res = await app.request("/api/admin/channels/max", { method: "POST" });
@@ -975,16 +990,20 @@ describe("POST /api/admin/channels/max", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       ok: boolean;
+      id: number;
       botId: string;
       username?: string;
       botName?: string;
       webhookSetupHint?: { url: string; secret: string; updateTypes: string[] };
     };
     expect(body.ok).toBe(true);
+    expect(body.id).toBeGreaterThan(0);
+    maxChannelId = body.id;
     expect(body.botId).toBe("778899");
     expect(body.username).toBe("acme_max_bot");
     expect(body.botName).toBe("Acme MAX");
     expect(body.webhookSetupHint?.url).toContain("/webhook/max/");
+    expect(body.webhookSetupHint?.url).toContain("/778899");
     expect(body.webhookSetupHint?.secret).toBe("max-secret-123");
     expect(body.webhookSetupHint?.updateTypes).toEqual(["message_created"]);
 
@@ -1001,6 +1020,63 @@ describe("POST /api/admin/channels/max", () => {
     const keys = secrets.map((s) => s.key);
     expect(keys).toContain("channel_max_778899");
     expect(keys).toContain("channel_max_778899_webhook_secret");
+  });
+
+  it("без webhookSecret генерирует per-channel secret и URL с botId", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenB, "/api/admin/channels/max", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ botToken: "max-second-token" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      botId: string;
+      username?: string;
+      botName?: string;
+      webhookSetupHint?: { url: string; secret: string; updateTypes: string[] };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.botId).toBe("889900");
+    expect(body.username).toBe("second_max_bot");
+    expect(body.botName).toBe("Second MAX");
+    expect(body.webhookSetupHint?.url).toContain("/webhook/max/");
+    expect(body.webhookSetupHint?.url).toContain("/889900");
+    expect(body.webhookSetupHint?.secret).toStartWith("max_");
+    expect(body.webhookSetupHint?.secret).not.toBe("global-max-secret");
+    expect(body.webhookSetupHint?.updateTypes).toEqual(["message_created"]);
+  });
+
+  it("rotate-secret создаёт новый MAX webhook secret без bot token", async () => {
+    if (!sql) return;
+    expect(maxChannelId).toBeGreaterThan(0);
+    const res = await authReq(tokenA, `/api/admin/channels/max/${maxChannelId}/rotate-secret`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      id: number;
+      updated: boolean;
+      botId: string;
+      webhookSetupHint?: { url: string; secret: string; updateTypes: string[] };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.id).toBe(maxChannelId);
+    expect(body.updated).toBe(true);
+    expect(body.botId).toBe("778899");
+    expect(body.webhookSetupHint?.url).toContain("/webhook/max/");
+    expect(body.webhookSetupHint?.url).toContain("/778899");
+    expect(body.webhookSetupHint?.secret).toStartWith("max_");
+    expect(body.webhookSetupHint?.secret).not.toBe("max-secret-123");
+    expect(body.webhookSetupHint?.updateTypes).toEqual(["message_created"]);
+
+    const secrets = await db
+      .select({ key: tenantSecrets.key })
+      .from(tenantSecrets)
+      .where(eq(tenantSecrets.tenantId, tenantIdA));
+    expect(secrets.map((s) => s.key)).toContain("channel_max_778899_webhook_secret");
   });
 });
 

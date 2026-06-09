@@ -8,9 +8,12 @@ const SLUG = "max-tenant";
 const BOT_ID = "778899";
 const SECRET = "max-secret";
 
-function seedMax(channels: ChannelRegistry, extra: Partial<ChannelEntry> = {}): void {
-  const adapter = new MaxAdapter({ id: "1", accessToken: "stub" });
-  const entry: ChannelEntry = {
+function makeMaxEntry(extra: Partial<ChannelEntry> = {}): ChannelEntry {
+  const adapter = new MaxAdapter({
+    id: String(extra.channelDbId ?? 1),
+    accessToken: "stub",
+  });
+  return {
     channelDbId: 1,
     tenantId: 1,
     tenantSlug: SLUG,
@@ -21,8 +24,16 @@ function seedMax(channels: ChannelRegistry, extra: Partial<ChannelEntry> = {}): 
     maxWebhookSecret: SECRET,
     ...extra,
   };
+}
+
+function seedMax(channels: ChannelRegistry, extra: Partial<ChannelEntry> = {}): void {
   // biome-ignore lint/suspicious/noExplicitAny: test seed for private map
-  (channels as any).byTenantSlug.set(SLUG, [entry]);
+  (channels as any).byTenantSlug.set(SLUG, [makeMaxEntry(extra)]);
+}
+
+function seedMaxEntries(channels: ChannelRegistry, entries: Partial<ChannelEntry>[]): void {
+  // biome-ignore lint/suspicious/noExplicitAny: test seed for private map
+  (channels as any).byTenantSlug.set(SLUG, entries.map((extra) => makeMaxEntry(extra)));
 }
 
 function buildApp(opts: { seed?: Partial<ChannelEntry> | false; webhookSecret?: string } = {}) {
@@ -72,6 +83,36 @@ describe("webhook-max", () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, processed: 0 });
+  });
+
+  it("botId route selects the matching channel when secrets overlap", async () => {
+    const metrics = makePlatformMetrics();
+    const channels = new ChannelRegistry();
+    seedMaxEntries(channels, [
+      { channelDbId: 1, externalId: "778899", maxWebhookSecret: "shared-secret" },
+      { channelDbId: 2, externalId: "889900", maxWebhookSecret: "shared-secret" },
+    ]);
+    const routes = makeMaxWebhookRoutes({
+      // biome-ignore lint/suspicious/noExplicitAny: db is not used in gate-only tests
+      db: {} as any,
+      channels,
+      metrics,
+    });
+
+    const res = await routes.request(`/webhook/max/${SLUG}/889900`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Max-Bot-Api-Secret": "shared-secret" },
+      body: JSON.stringify({ update_type: "bot_started", timestamp: 1 }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, processed: 0 });
+
+    const missing = await routes.request(`/webhook/max/${SLUG}/000000`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Max-Bot-Api-Secret": "shared-secret" },
+      body: JSON.stringify({ update_type: "bot_started", timestamp: 1 }),
+    });
+    expect(missing.status).toBe(404);
   });
 
   it("message_created with no parsable parts returns ok without touching db", async () => {
