@@ -1071,6 +1071,12 @@ export const earlyAccessSignups = pgTable("early_access_signups", {
   source: text("source").notNull().default("landing"),
   locale: text("locale").notNull().default("ru"),
   status: text("status").notNull().default("new"),
+  tenantId: integer("tenant_id").references(() => tenants.id, { onDelete: "set null" }),
+  inviteId: integer("invite_id").references(() => adminInvites.id, { onDelete: "set null" }),
+  approvedAt: integer("approved_at"),
+  approvedByAdminId: integer("approved_by_admin_id").references(() => admins.id, {
+    onDelete: "set null",
+  }),
   userAgent: text("user_agent"),
   ip: text("ip"),
   metaJson: text("meta_json").notNull().default("{}"),
@@ -1080,6 +1086,7 @@ export const earlyAccessSignups = pgTable("early_access_signups", {
   uniqueIndex("uniq_early_access_email").on(t.email),
   index("idx_early_access_status_created").on(t.status, t.createdAt),
   index("idx_early_access_source").on(t.source),
+  index("idx_early_access_tenant").on(t.tenantId),
 ]);
 
 // Webhook-уведомления при смене стадии лида. Tenant настраивает URL;
