@@ -6,3 +6,14 @@ export {
   type ExchangeReplyGuardInput,
   type ExchangeReplyGuardResult,
 } from "./exchange-reply-guard.ts";
+export {
+  EXCHANGE_KYC_FALLBACK,
+  EXCHANGE_PAYMENT_FALLBACK,
+  EXCHANGE_PAYOUT_FALLBACK,
+  guardExchangePolicy,
+  type ExchangeOrderPolicyState,
+  type ExchangePolicyGuardInput,
+  type ExchangePolicyGuardResult,
+  type ExchangePolicyState,
+  type ExchangeVerificationPolicyState,
+} from "./exchange-policy-guard.ts";
