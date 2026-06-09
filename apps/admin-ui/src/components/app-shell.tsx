@@ -37,7 +37,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { type Admin, clearToken, saas, type Tenant } from "@/api/saas";
+import { type Admin, clearToken, type FunnelListItem, saas, type Tenant } from "@/api/saas";
 import { ModeToggle } from "@/components/mode-toggle";
 import { CopilotDock } from "@/components/copilot";
 import { useTheme } from "@/components/theme-provider";
@@ -85,7 +85,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Продажи",
     items: [
-      { to: "/exchange", label: "Обменник", icon: ArrowLeftRightIcon, exchangeOnly: true },
+      { to: "/exchange", label: "Обменка", icon: ArrowLeftRightIcon, exchangeOnly: true },
       { to: "/funnel", label: "Процессы", icon: GitBranchIcon },
       { to: "/services", label: "Услуги", icon: ListChecksIcon },
       { to: "/partners", label: "Партнёры", icon: HandshakeIcon },
@@ -123,12 +123,15 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-/** Фильтр пунктов по вертикали: exchangeOnly показываем только обменке, hideForExchange — скрываем у обменки. */
-function visibleNavItems(items: NavItem[], isExchange: boolean, isSuperadmin: boolean): NavItem[] {
+/** exchangeOnly зависит от workflow, hideForExchange — только от exchange tenant. */
+function visibleNavItems(
+  items: NavItem[],
+  flags: { hasExchangeWorkflow: boolean; isExchangeTenant: boolean; isSuperadmin: boolean },
+): NavItem[] {
   return items.filter((it) => {
-    if (it.exchangeOnly && !isExchange) return false;
-    if (it.hideForExchange && isExchange) return false;
-    if (it.superadminOnly && !isSuperadmin) return false;
+    if (it.exchangeOnly && !flags.hasExchangeWorkflow) return false;
+    if (it.hideForExchange && flags.isExchangeTenant) return false;
+    if (it.superadminOnly && !flags.isSuperadmin) return false;
     return true;
   });
 }
@@ -218,18 +221,24 @@ function NavLinks({
   onNavigate,
   escalatedCount,
   collapsed,
-  isExchange,
+  hasExchangeWorkflow,
+  isExchangeTenant,
   isSuperadmin,
 }: {
   onNavigate?: () => void;
   escalatedCount?: number;
   collapsed: boolean;
-  isExchange?: boolean;
   isSuperadmin?: boolean;
+  hasExchangeWorkflow?: boolean;
+  isExchangeTenant?: boolean;
 }) {
   const groups = NAV_GROUPS.map((g) => ({
     ...g,
-    items: visibleNavItems(g.items, isExchange ?? false, isSuperadmin ?? false),
+    items: visibleNavItems(g.items, {
+      hasExchangeWorkflow: hasExchangeWorkflow ?? false,
+      isExchangeTenant: isExchangeTenant ?? false,
+      isSuperadmin: isSuperadmin ?? false,
+    }),
   })).filter((g) => g.items.length > 0);
   return (
     <nav className="flex flex-col gap-4">
@@ -399,7 +408,8 @@ function SidebarBody({
   escalatedCount,
   collapsed,
   onToggleCollapse,
-  isExchange,
+  hasExchangeWorkflow,
+  isExchangeTenant,
   isSuperadmin,
 }: {
   admin: Admin | null;
@@ -409,7 +419,8 @@ function SidebarBody({
   escalatedCount?: number;
   collapsed: boolean;
   onToggleCollapse?: () => void;
-  isExchange?: boolean;
+  hasExchangeWorkflow?: boolean;
+  isExchangeTenant?: boolean;
   isSuperadmin?: boolean;
 }) {
   return (
@@ -465,7 +476,8 @@ function SidebarBody({
           onNavigate={onNavigate}
           escalatedCount={escalatedCount}
           collapsed={collapsed}
-          isExchange={isExchange}
+          hasExchangeWorkflow={hasExchangeWorkflow}
+          isExchangeTenant={isExchangeTenant}
           isSuperadmin={isSuperadmin}
         />
       </div>
@@ -478,6 +490,51 @@ function SidebarBody({
 }
 
 const COLLAPSED_KEY = "sidebar-collapsed";
+const FUNNELS_UPDATED_EVENT = "lead-engine:funnel-updated";
+
+function hasExchangeMarker(value?: string | null): boolean {
+  const key = value?.toLowerCase() ?? "";
+  return key.includes("exchange") || key.includes("обмен") || key.includes("obmen");
+}
+
+function funnelLooksLikeExchange(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">) {
+  return hasExchangeMarker(item.slug) || hasExchangeMarker(item.verticalTemplateId);
+}
+
+async function getExchangeNavState(): Promise<{
+  hasExchangeWorkflow: boolean;
+  isExchangeTenant: boolean;
+}> {
+  const [statusResult, listResult] = await Promise.allSettled([
+    saas.onboardingStatus(),
+    saas.listFunnels(),
+  ]);
+
+  const isExchangeTenant =
+    statusResult.status === "fulfilled" && statusResult.value.isExchange === true;
+  if (isExchangeTenant) return { hasExchangeWorkflow: true, isExchangeTenant };
+  if (listResult.status !== "fulfilled") return { hasExchangeWorkflow: false, isExchangeTenant };
+
+  const funnels = listResult.value.items;
+  if (funnels.some(funnelLooksLikeExchange)) {
+    return { hasExchangeWorkflow: true, isExchangeTenant };
+  }
+
+  const details = await Promise.allSettled(
+    funnels.map((funnel) => saas.getFunnelById(funnel.id)),
+  );
+  const hasExchangeWorkflow = details.some((result) => {
+    if (result.status !== "fulfilled") return false;
+    return (
+      (result.value.funnel ? funnelLooksLikeExchange(result.value.funnel) : false) ||
+      result.value.stages.some(
+        (stage) => hasExchangeMarker(stage.slug) || hasExchangeMarker(stage.displayName),
+      )
+    );
+  });
+
+  return { hasExchangeWorkflow, isExchangeTenant };
+}
 
 // Страницы без max-width кап-а контента — занимают всю ширину области <main>.
 const FULL_WIDTH_PATHS = new Set(["/faq"]);
@@ -488,7 +545,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const fullWidth = FULL_WIDTH_PATHS.has(pathname);
   const [admin, setAdmin] = useState<Admin | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
-  const [isExchange, setIsExchange] = useState(false);
+  const [hasExchangeWorkflow, setHasExchangeWorkflow] = useState(false);
+  const [isExchangeTenant, setIsExchangeTenant] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [escalatedCount, setEscalatedCount] = useState(0);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === "true");
@@ -510,13 +568,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setTenant(res.tenant);
       })
       .catch(() => {});
-    // Вертикаль тенанта (для скрытия нерелевантных пунктов меню у обменки).
-    saas
-      .onboardingStatus()
-      .then((s) => {
-        if (!cancelled) setIsExchange(s.isExchange === true);
-      })
-      .catch(() => {});
+    async function refreshExchangeWorkflowFlag() {
+      try {
+        const next = await getExchangeNavState();
+        if (!cancelled) {
+          setHasExchangeWorkflow(next.hasExchangeWorkflow);
+          setIsExchangeTenant(next.isExchangeTenant);
+        }
+      } catch {
+        // Leave the previous value on transient API errors.
+      }
+    }
+    void refreshExchangeWorkflowFlag();
+    const onFunnelsUpdated = () => {
+      void refreshExchangeWorkflowFlag();
+    };
+    window.addEventListener(FUNNELS_UPDATED_EVENT, onFunnelsUpdated);
     // Профиль обновился (имя) — обновляем сразу, без перезагрузки.
     const onProfileUpdated = (e: Event) => {
       const next = (e as CustomEvent<Admin>).detail;
@@ -525,6 +592,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     window.addEventListener("admin-profile-updated", onProfileUpdated);
     return () => {
       cancelled = true;
+      window.removeEventListener(FUNNELS_UPDATED_EVENT, onFunnelsUpdated);
       window.removeEventListener("admin-profile-updated", onProfileUpdated);
     };
   }, []);
@@ -590,7 +658,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             escalatedCount={escalatedCount}
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
-            isExchange={isExchange}
+            hasExchangeWorkflow={hasExchangeWorkflow}
+            isExchangeTenant={isExchangeTenant}
             isSuperadmin={admin?.role === "superadmin"}
           />
         </aside>
@@ -612,7 +681,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   onNavigate={() => setMobileOpen(false)}
                   escalatedCount={escalatedCount}
                   collapsed={false}
-                  isExchange={isExchange}
+                  hasExchangeWorkflow={hasExchangeWorkflow}
+                  isExchangeTenant={isExchangeTenant}
                   isSuperadmin={admin?.role === "superadmin"}
                 />
               </SheetContent>

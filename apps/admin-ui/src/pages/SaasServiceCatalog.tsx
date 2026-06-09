@@ -94,6 +94,8 @@ const EMPTY_CUSTOM_PROVIDER: CustomProviderForm = {
   requiredFields: "date, address, budget",
 };
 
+const FUNNELS_UPDATED_EVENT = "lead-engine:funnel-updated";
+
 const EXECUTOR_OPTIONS: Array<{
   value: ExecutorType;
   label: string;
@@ -418,6 +420,7 @@ export function SaasServiceCatalog() {
             template,
           });
           funnelId = created.funnelId;
+          window.dispatchEvent(new Event(FUNNELS_UPDATED_EVENT));
         } else {
           funnelId = Number(form.existingFunnelId || 0) || null;
         }

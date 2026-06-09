@@ -84,6 +84,8 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "video", label: "Видео" },
 ];
 
+const FUNNELS_UPDATED_EVENT = "lead-engine:funnel-updated";
+
 /** Иконка по типу стадии (для визуальной читаемости шага). */
 const STAGE_TYPE_ICON: Record<StageType, LucideIcon> = {
   form_fill: ClipboardListIcon,
@@ -287,8 +289,11 @@ export function SaasFunnel() {
       setNewFunnelSlug("");
       setAddingFunnel(false);
       await reload(created.funnelId, { refreshTemplates: false });
+      window.dispatchEvent(new Event(FUNNELS_UPDATED_EVENT));
     } catch (err) {
-      if (!onAuthError(err)) setError(err instanceof Error ? err.message : "Не удалось создать процесс");
+      if (!onAuthError(err)) {
+        setError(err instanceof Error ? err.message : "Не удалось создать процесс");
+      }
     }
   }
 
