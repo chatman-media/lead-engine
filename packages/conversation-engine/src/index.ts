@@ -11,10 +11,15 @@ export {
   type AgentToolCallRow,
   type AgentToolCallSource,
   AgentToolCallsRepo,
+  ACTIVE_SERVICE_ORDER_STATUSES,
+  assertProviderRequestTransition,
+  assertServiceOrderTransition,
   ContactsRepo,
   type ContactRow,
   ConversationsRepo,
   type ConversationRow,
+  canTransitionProviderRequest,
+  canTransitionServiceOrder,
   type Db,
   DrizzleKbStore,
   KbSuggestionsRepo,
@@ -27,9 +32,18 @@ export {
   type MessageRow,
   OutboundQueueRepo,
   type OutboundQueueRow,
+  type OrderEventActorType,
+  type OrderEventRow,
+  PROVIDER_REQUEST_STATUSES,
+  ProviderRelayRepo,
+  type ProviderRequestRow,
+  type ProviderRequestStatus,
   parseAllocation,
   type RepoCtx,
+  SERVICE_ORDER_STATUSES,
   ScopedKbStore,
+  type ServiceOrderRow,
+  type ServiceOrderStatus,
   type SkillAggregateRow,
   type SkillOutcomeRow,
   SkillOutcomesRepo,
@@ -88,6 +102,18 @@ export {
   type LeadHookContext,
   transitionLeadState,
 } from "./lead-lifecycle.ts";
+export {
+  type CustomerOfferAccepted,
+  type CustomerOfferDraft,
+  CustomerOfferFlow,
+  formatCustomerOrderContext,
+  type RecordPaymentSuccessInput,
+  type RecordPaymentSuccessResult,
+  renderCustomerOffer,
+  renderProviderConfirmation,
+  type SendCustomerOfferInput,
+  type SendCustomerOfferResult,
+} from "./customer-offer-flow.ts";
 export { loadExperimentVariants } from "./experiment-router.ts";
 export { compactConversation } from "./compact-conversation.ts";
 export {
@@ -124,6 +150,40 @@ export {
   type TranscribeInboundVoiceDeps,
 } from "./process-inbound.ts";
 export type { ITranscriber } from "./transcriber.ts";
+export {
+  type ProviderChannelIdentity,
+  ProviderRelayOrchestrator,
+  type ProviderRelayStartFailureReason,
+  type ProviderRelayStartInput,
+  type ProviderRelayStartResult,
+} from "./provider-relay-orchestrator.ts";
+export {
+  type CreatePaymentIntentInput,
+  type PaymentLedgerResult,
+  ProviderPaymentLedger,
+  type RecordPaymentWebhookInput,
+  type ServiceOrderCommissionRow,
+  type ServiceOrderCommissionStatus,
+  type ServiceOrderPaymentRow,
+  type ServiceOrderPaymentStatus,
+} from "./provider-payment-ledger.ts";
+export {
+  extractProviderResponseMediaParts,
+  extractProviderResponseText,
+  type ProviderResponseHandleResult,
+  ProviderResponseHandler,
+  type ProviderResponseHandlerInput,
+  type ProviderResponseMediaPart,
+  type ProviderResponseParse,
+  parseProviderResponse,
+} from "./provider-response-handler.ts";
+export {
+  type ProviderRouteCandidate,
+  ProviderRouter,
+  type ProviderRoutingFailureReason,
+  type ProviderRoutingInput,
+  type ProviderRoutingResult,
+} from "./provider-routing.ts";
 export {
   EXCHANGE_SAFE_FALLBACK,
   guardExchangeReply,

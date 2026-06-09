@@ -122,6 +122,15 @@ export interface RagReplyStrategyOpts {
     contactId: number;
   }) => Promise<string | null>;
   /**
+   * Optional factual brokered-order context for the current customer. Merged
+   * into requestContext for prompt grounding; it must not mutate order state.
+   */
+  resolveServiceOrderContext?: (input: {
+    tenantId: number;
+    conversationId: number;
+    contactId: number;
+  }) => Promise<string | null> | string | null;
+  /**
    * Опциональный resolver «лид ждёт оператора» (R5): true → в промпт идёт блок
    * «ОЖИДАНИЕ ОПЕРАТОРА» (бот держит, не выдумывает цену). false/absent → нет.
    */
@@ -366,7 +375,7 @@ export class RagReplyStrategy implements ReplyStrategy {
     // Load persuasion skills, director hooks, agentic tools, and reranker in parallel.
     // All are optional — if resolvers not configured, values stay empty/null
     // and the pipeline silently skips those blocks.
-    const [skills, directorHooks, tools, reranker, stageGuidance, requestContext, awaitingOperator] = await Promise.all([
+    const [skills, directorHooks, tools, reranker, stageGuidance, requestContext, serviceOrderContext, awaitingOperator] = await Promise.all([
       this.opts.resolveSkills ? this.opts.resolveSkills({ tenantId }) : Promise.resolve([]),
       this.opts.resolveDirectorHooks
         ? this.opts.resolveDirectorHooks({ tenantId })
@@ -387,10 +396,25 @@ export class RagReplyStrategy implements ReplyStrategy {
       this.opts.resolveRequestContext
         ? this.opts.resolveRequestContext({ tenantId, contactId: input.contactId })
         : Promise.resolve(null),
+      this.opts.resolveServiceOrderContext
+        ? Promise.resolve(
+            this.opts.resolveServiceOrderContext({
+              tenantId,
+              conversationId: input.conversationId,
+              contactId: input.contactId,
+            }),
+          )
+        : Promise.resolve(null),
       this.opts.resolveAwaitingOperator
         ? this.opts.resolveAwaitingOperator({ tenantId, contactId: input.contactId })
         : Promise.resolve(false),
     ]);
+    const combinedRequestContext =
+      [requestContext, serviceOrderContext]
+        .map((value) => value?.trim())
+        .filter(Boolean)
+        .join("\n\n") || null;
+    const serviceOrderGrounding = serviceOrderContext?.trim() || null;
 
     const isExchange = this.opts.template?.slug === "exchange_v1";
     // answerWithRag принимает rag's ChatClient/EmbeddingClient. Структурно
@@ -418,7 +442,10 @@ export class RagReplyStrategy implements ReplyStrategy {
       ...(reranker ? { reranker } : {}),
       ...(conversationSummary ? { conversationSummary } : {}),
       ...(stageGuidance ? { stageOverride: stageGuidance } : {}),
-      ...(requestContext ? { requestContext } : {}),
+      ...(combinedRequestContext ? { requestContext: combinedRequestContext } : {}),
+      ...(serviceOrderGrounding
+        ? { vacanciesBlock: serviceOrderGrounding, vacancyGuard: false }
+        : {}),
       ...(awaitingOperator ? { awaitingOperator } : {}),
     });
 

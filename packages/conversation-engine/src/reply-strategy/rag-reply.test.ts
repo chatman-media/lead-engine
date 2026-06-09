@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { makeBookingLinkTool } from "@chatman-media/kb";
-import type { ChatClient } from "@chatman-media/llm-router";
+import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { RagReplyStrategy, type RagReplyStrategyOpts } from "./rag-reply.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
@@ -18,6 +18,17 @@ const QUESTION = "расскажи про условия обмена usdt на 
 
 function chatReturning(reply: string): ChatClient {
   return { complete: async () => reply } as unknown as ChatClient;
+}
+
+class CapturingRagChat implements ChatClient {
+  lastCall: { messages: ChatMessage[]; opts: unknown } | null = null;
+
+  constructor(public readonly reply: string) {}
+
+  async complete(messages: ChatMessage[], opts?: unknown): Promise<string> {
+    this.lastCall = { messages, opts };
+    return this.reply;
+  }
 }
 
 function chatThenFactCheck(reply: string, verdict: Record<string, unknown>): ChatClient {
@@ -138,6 +149,29 @@ describe("RagReplyStrategy.generate", () => {
     const part = r![0]!.parts[0] as { kind: string; text: string };
     expect(part.kind).toBe("text");
     expect(part.text.toLowerCase()).toContain("курс");
+  });
+
+  it("injects brokered order context into RAG request context", async () => {
+    const chat = new CapturingRagChat("По заявке есть предложение.");
+    const s = mk(
+      {
+        resolveChat: () => chat,
+        resolveEmbed: embed,
+        resolveKb: kbWith([HIT]),
+        rewriteQueryBeforeRetrieval: false,
+        reflect: false,
+        resolveServiceOrderContext: () =>
+          "BROKERED ORDER CONTEXT\n- order #12 service=massage status=offer_ready amount=1,200 THB",
+      },
+      fakeMessagesRepo(),
+    );
+
+    await s.generate({ ...baseInput(), userMessageText: "что по заявке?" });
+
+    const system = chat.lastCall?.messages[0]?.content ?? "";
+    expect(system).toContain("BROKERED ORDER CONTEXT");
+    expect(system).toContain("order #12");
+    expect(system).toContain("status=offer_ready");
   });
 
   it("uses resolved KB scope for RAG retrieval", async () => {

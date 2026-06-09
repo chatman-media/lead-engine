@@ -53,6 +53,16 @@ export interface LlmReplyStrategyOpts {
   /** Если возвращает true — стадия лида помечена supportMode, бот молчит. */
   resolveIsSupport?: (input: { tenantId: number; contactId: number }) => Promise<boolean>;
   /**
+   * Optional factual brokered-order context for the current customer. This is
+   * prompt-only grounding; order status changes are handled by deterministic
+   * customer offer services.
+   */
+  resolveServiceOrderContext?: (input: {
+    tenantId: number;
+    conversationId: number;
+    contactId: number;
+  }) => Promise<string | null> | string | null;
+  /**
    * Опциональный резолвер agentic-инструментов (напр. расчёт курса обмена).
    * Если задан и вернул непустой список, а ChatClient умеет completeWithTools —
    * strategy прогоняет tool-loop, чтобы бот мог дать конкретный ответ
@@ -142,6 +152,15 @@ export class LlmReplyStrategy implements ReplyStrategy {
       }
     }
     const toolsActive = tools.length > 0 && typeof chat.completeWithTools === "function";
+    const serviceOrderContext = this.opts.resolveServiceOrderContext
+      ? await Promise.resolve(
+          this.opts.resolveServiceOrderContext({
+            tenantId: input.tenant.tenantId,
+            conversationId: input.conversationId,
+            contactId: input.contactId,
+          }),
+        )
+      : null;
 
     const systemPrompt = [
       BASE_SYSTEM_PROMPT,
@@ -150,6 +169,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
           "ОБЯЗАТЕЛЬНО вызови его и дай конкретные числа. Не отсылай к оператору, если можешь " +
           "ответить инструментом."
         : "",
+      serviceOrderContext?.trim(),
       this.opts.template.systemPromptFragment,
     ]
       .filter(Boolean)
