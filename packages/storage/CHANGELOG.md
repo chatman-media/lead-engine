@@ -1,3 +1,11 @@
+# [@chatman-media/storage-v1.24.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.23.0...@chatman-media/storage-v1.24.0) (2026-06-09)
+
+
+### Features
+
+* **funnel:** add version history and rollback ([#439](https://github.com/chatman-media/lead-engine/issues/439)) ([ed51267](https://github.com/chatman-media/lead-engine/commit/ed51267af3d19e49f5fb47dcbd0b406f1171669c))
+* **quality:** persist tool improvement proposals ([#433](https://github.com/chatman-media/lead-engine/issues/433)) ([ad3e1a7](https://github.com/chatman-media/lead-engine/commit/ad3e1a79c76320fe2446943d4145c8cdc71b97ae))
+
 # [@chatman-media/storage-v1.23.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.22.0...@chatman-media/storage-v1.23.0) (2026-06-09)
 
 
