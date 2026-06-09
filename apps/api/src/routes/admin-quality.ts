@@ -18,6 +18,7 @@ import { Hono } from "hono";
 
 const OUTCOMES = new Set<EloOutcome>(["won", "lost", "draw"]);
 const PAIRWISE_WINNERS = new Set<PairwiseWinner>(["a", "b", "draw"]);
+const COACH_PROPOSAL_DECISIONS = new Set(["pending", "dismissed"]);
 
 export interface AdminQualityRoutesOpts {
   db: Db;
@@ -268,16 +269,84 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
             lastShadowAt: null,
           },
         },
-        proposals: proposals.map((row) => ({
-          ...row,
-          edits: parseJsonValue(row.editsJson, {}),
-          rationale: parseStringArray(row.rationaleJson),
-        })),
+        proposals: proposals.map(toCoachProposalResponse),
         shadows,
       };
     });
 
     return c.json(summary);
+  });
+
+  app.patch("/api/admin/quality/coach/proposals/:id/status", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "bad id" }, 400);
+
+    const body = await c.req.json<{ status?: unknown }>().catch(() => null);
+    const status = body?.status;
+    if (typeof status !== "string" || !COACH_PROPOSAL_DECISIONS.has(status)) {
+      return c.json({ error: "status must be one of: pending, dismissed" }, 400);
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      const [proposal] = await tx
+        .select({
+          id: coachProposals.id,
+          styleSlug: coachProposals.styleSlug,
+          sampleSize: coachProposals.sampleSize,
+          personaFilter: coachProposals.personaFilter,
+          summary: coachProposals.summary,
+          editsJson: coachProposals.editsJson,
+          rationaleJson: coachProposals.rationaleJson,
+          rawOutput: coachProposals.rawOutput,
+          status: coachProposals.status,
+          createdAt: coachProposals.createdAt,
+          decidedAt: coachProposals.decidedAt,
+          decidedByAdminId: coachProposals.decidedByAdminId,
+        })
+        .from(coachProposals)
+        .where(and(eq(coachProposals.id, id), eq(coachProposals.tenantId, tenantId)))
+        .limit(1);
+
+      if (!proposal) return { kind: "not_found" as const };
+      if (proposal.status === "applied") {
+        return { kind: "blocked" as const, error: "applied proposals cannot be changed here" };
+      }
+      if (proposal.status === status) {
+        return { kind: "ok" as const, proposal: toCoachProposalResponse(proposal) };
+      }
+
+      const [updated] = await tx
+        .update(coachProposals)
+        .set({
+          status,
+          decidedAt: status === "dismissed" ? now : null,
+          decidedByAdminId: status === "dismissed" ? (adminId ?? null) : null,
+        })
+        .where(and(eq(coachProposals.id, id), eq(coachProposals.tenantId, tenantId)))
+        .returning({
+          id: coachProposals.id,
+          styleSlug: coachProposals.styleSlug,
+          sampleSize: coachProposals.sampleSize,
+          personaFilter: coachProposals.personaFilter,
+          summary: coachProposals.summary,
+          editsJson: coachProposals.editsJson,
+          rationaleJson: coachProposals.rationaleJson,
+          rawOutput: coachProposals.rawOutput,
+          status: coachProposals.status,
+          createdAt: coachProposals.createdAt,
+          decidedAt: coachProposals.decidedAt,
+          decidedByAdminId: coachProposals.decidedByAdminId,
+        });
+
+      return { kind: "ok" as const, proposal: toCoachProposalResponse(updated ?? proposal) };
+    });
+
+    if (result.kind === "not_found") return c.json({ error: "coach proposal not found" }, 404);
+    if (result.kind === "blocked") return c.json({ error: result.error }, 409);
+    return c.json({ ok: true, proposal: result.proposal });
   });
 
   /**
@@ -517,6 +586,29 @@ type PairwiseMatchRow = {
   matchA?: SelfPlayMatchRow;
   matchB?: SelfPlayMatchRow;
 };
+
+type CoachProposalRow = {
+  id: number;
+  styleSlug: string;
+  sampleSize: number;
+  personaFilter: string | null;
+  summary: string;
+  editsJson: string;
+  rationaleJson: string;
+  rawOutput: string | null;
+  status: string;
+  createdAt: number;
+  decidedAt: number | null;
+  decidedByAdminId: number | null;
+};
+
+function toCoachProposalResponse(row: CoachProposalRow) {
+  return {
+    ...row,
+    edits: parseJsonValue(row.editsJson, {}),
+    rationale: parseStringArray(row.rationaleJson),
+  };
+}
 
 function toPairwiseResult(row: PairwiseMatchRow): PairwiseMatchResult {
   const winner = PAIRWISE_WINNERS.has(row.winner as PairwiseWinner)

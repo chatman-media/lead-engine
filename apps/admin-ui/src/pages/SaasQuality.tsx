@@ -4,9 +4,11 @@ import {
   DownloadIcon,
   LightbulbIcon,
   RefreshCwIcon,
+  RotateCcwIcon,
   TargetIcon,
   TimerIcon,
   TrophyIcon,
+  XCircleIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -15,6 +17,7 @@ import { toast } from "sonner";
 import {
   ApiError,
   clearToken,
+  type QualityCoachProposalDecisionStatus,
   type QualityCoachProposalStatus,
   type QualityCoachSummary,
   type QualityExportOptions,
@@ -157,6 +160,7 @@ export function SaasQuality() {
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
   const [pairwiseExporting, setPairwiseExporting] = useState(false);
+  const [proposalActionId, setProposalActionId] = useState<number | null>(null);
 
   const [styleSlug, setStyleSlug] = useState("all");
   const [personaSlug, setPersonaSlug] = useState("all");
@@ -278,6 +282,24 @@ export function SaasQuality() {
       toast.error(err instanceof Error ? err.message : "Не удалось выгрузить pairwise JSONL");
     } finally {
       setPairwiseExporting(false);
+    }
+  }
+
+  async function handleProposalStatus(id: number, status: QualityCoachProposalDecisionStatus) {
+    setProposalActionId(id);
+    try {
+      await saas.setQualityCoachProposalStatus(id, status);
+      setCoach(await saas.getQualityCoachSummary());
+      toast.success(status === "dismissed" ? "Proposal dismissed" : "Proposal restored");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : "Не удалось обновить proposal");
+    } finally {
+      setProposalActionId(null);
     }
   }
 
@@ -702,12 +724,13 @@ export function SaasQuality() {
                   <TableHead>Summary</TableHead>
                   <TableHead>Edits</TableHead>
                   <TableHead className="text-right">When</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {(coach?.proposals ?? []).length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                       Coach proposals пока нет
                     </TableCell>
                   </TableRow>
@@ -724,6 +747,35 @@ export function SaasQuality() {
                     </TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground">
                       {formatDate(item.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {item.status === "pending" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 gap-1.5 px-2 text-xs text-muted-foreground hover:text-destructive"
+                          disabled={proposalActionId === item.id}
+                          onClick={() => void handleProposalStatus(item.id, "dismissed")}
+                        >
+                          <XCircleIcon className="size-3.5" />
+                          Dismiss
+                        </Button>
+                      )}
+                      {item.status === "dismissed" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 gap-1.5 px-2 text-xs"
+                          disabled={proposalActionId === item.id}
+                          onClick={() => void handleProposalStatus(item.id, "pending")}
+                        >
+                          <RotateCcwIcon className="size-3.5" />
+                          Restore
+                        </Button>
+                      )}
+                      {item.status === "applied" && (
+                        <span className="text-xs text-muted-foreground">locked</span>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
