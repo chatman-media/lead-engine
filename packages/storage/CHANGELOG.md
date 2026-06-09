@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.20.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.19.0...@chatman-media/storage-v1.20.0) (2026-06-09)
+
+
+### Features
+
+* **api:** persist agentic tool telemetry ([#405](https://github.com/chatman-media/lead-engine/issues/405)) ([a27c336](https://github.com/chatman-media/lead-engine/commit/a27c336b25f55c7b74f9926eee5f3bab043e3a6b))
+
 # [@chatman-media/storage-v1.19.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.18.0...@chatman-media/storage-v1.19.0) (2026-06-09)
 
 
