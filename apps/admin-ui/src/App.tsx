@@ -187,6 +187,7 @@ export function App() {
                 <Route path="/exchange" element={<SaasExchange />} />
                 <Route path="/profile" element={<SaasProfile />} />
                 <Route path="/notifications" element={<SaasNotifications />} />
+                <Route path="/quality" element={<SaasQuality />} />
                 <Route element={<RequireSuperadmin />}>
                   <Route path="/outreach" element={<SaasOutreach />} />
                   <Route path="/campaigns" element={<SaasCampaigns />} />
@@ -197,7 +198,6 @@ export function App() {
                   <Route path="/hooks" element={<SaasHooks />} />
                   <Route path="/styles" element={<SaasStyles />} />
                   <Route path="/experiments" element={<SaasExperiments />} />
-                  <Route path="/quality" element={<SaasQuality />} />
                   <Route path="/channels" element={<SaasChannels />} />
                   <Route path="/billing" element={<SaasBilling />} />
                   <Route path="/settings" element={<SaasSettings />} />
