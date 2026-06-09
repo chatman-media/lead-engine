@@ -1,3 +1,10 @@
+# [@chatman-media/sales-v1.3.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/sales-v1.2.0...@chatman-media/sales-v1.3.0) (2026-06-09)
+
+
+### Features
+
+* **api:** run quality shadow evaluations ([#354](https://github.com/chatman-media/lead-engine/issues/354)) ([b09b675](https://github.com/chatman-media/lead-engine/commit/b09b675cb597598e7af9b1eeff4574719cbf6ba8))
+
 # [@chatman-media/sales-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/sales-v1.1.2...@chatman-media/sales-v1.2.0) (2026-06-08)
 
 

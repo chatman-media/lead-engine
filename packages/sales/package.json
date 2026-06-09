@@ -1,6 +1,6 @@
 {
   "name": "@chatman-media/sales",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "LLM-powered sales funnel engine — persona composition, A/B testing, ELO rating, self-play evaluation for conversational bots.",
   "type": "module",
   "main": "./dist/index.js",
