@@ -12,6 +12,7 @@ import {
   type PairwiseMatchResult,
   type PairwiseWinner,
   parseProposal,
+  proposeStyleEdits,
   runPairwiseMatch,
   runSelfPlayMatch,
   type SelfPlayDeps,
@@ -422,6 +423,104 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     });
 
     return c.json({ ok: true, pairwise });
+  });
+
+  app.post("/api/admin/quality/coach/proposals", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const body = await c.req
+      .json<QualityCoachProposalGenerateBody>()
+      .catch((): QualityCoachProposalGenerateBody => ({}));
+
+    const styleSlug = parseRequiredBodyString(body.styleSlug);
+    if (styleSlug.kind === "invalid") return c.json({ error: "styleSlug is required" }, 400);
+    const sampleSize = parseOptionalBodyInteger(body.sampleSize, 1, 50);
+    if (sampleSize.kind === "invalid") {
+      return c.json({ error: "sampleSize must be an integer between 1 and 50" }, 400);
+    }
+    const personaSlug = parseOptionalBodyString(body.personaSlug);
+    if (personaSlug.kind === "invalid") {
+      return c.json({ error: "personaSlug must be a non-empty string" }, 400);
+    }
+    const model = parseOptionalBodyString(body.model);
+    if (model.kind === "invalid") return c.json({ error: "model must be a non-empty string" }, 400);
+
+    if (personaSlug.value && !CANDIDATE_BY_SLUG.has(personaSlug.value)) {
+      return c.json({ error: "persona not found" }, 404);
+    }
+
+    const chat = resolveRequiredQualityDep(opts.resolveChat, tenantId);
+    if (!chat) return c.json({ error: "chat LLM is not configured" }, 503);
+
+    const styleResult = await loadQualityStyle(opts.db, tenantId, styleSlug.value);
+    if (styleResult.kind === "not_found") return c.json({ error: "active style not found" }, 404);
+    if (styleResult.kind === "invalid") {
+      return c.json({ error: "style failed schema validation", issues: styleResult.issues }, 422);
+    }
+
+    const adapters = makeQualityStorageAdapters(opts.db, tenantId);
+    const attachedSkills = await adapters.skills.skillsForStyle(styleResult.styleId);
+    const resolvedSampleSize = sampleSize.value ?? 8;
+    const proposal = await proposeStyleEdits({
+      style: styleResult.style,
+      matchesRepo: adapters.matches,
+      chat,
+      sampleSize: resolvedSampleSize,
+      currentSkills: attachedSkills.map((skill) => skill.slug),
+      ...(personaSlug.value ? { personaSlug: personaSlug.value } : {}),
+      ...(model.value ? { model: model.value } : {}),
+    });
+
+    const now = nowEpoch();
+    const created = await withTenant(opts.db, tenantId, async (tx) => {
+      const [row] = await tx
+        .insert(coachProposals)
+        .values({
+          tenantId,
+          styleSlug: styleResult.style.slug,
+          sampleSize: resolvedSampleSize,
+          personaFilter: personaSlug.value ?? null,
+          summary: proposal.summary,
+          editsJson: JSON.stringify(proposal.edits),
+          rationaleJson: JSON.stringify(proposal.rationale),
+          rawOutput: proposal.raw ?? null,
+          status: "pending",
+          createdAt: now,
+        })
+        .returning({
+          id: coachProposals.id,
+          styleSlug: coachProposals.styleSlug,
+          sampleSize: coachProposals.sampleSize,
+          personaFilter: coachProposals.personaFilter,
+          summary: coachProposals.summary,
+          editsJson: coachProposals.editsJson,
+          rationaleJson: coachProposals.rationaleJson,
+          rawOutput: coachProposals.rawOutput,
+          status: coachProposals.status,
+          createdAt: coachProposals.createdAt,
+          decidedAt: coachProposals.decidedAt,
+          decidedByAdminId: coachProposals.decidedByAdminId,
+        });
+      return row ?? null;
+    });
+
+    if (!created) return c.json({ error: "coach proposal was not created" }, 500);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "quality.coach_proposal.generate",
+      targetKind: "coach_proposal",
+      targetId: String(created.id),
+      details: {
+        styleSlug: created.styleSlug,
+        sampleSize: created.sampleSize,
+        personaFilter: created.personaFilter,
+        editKeys: Object.keys(proposal.edits),
+      },
+    });
+
+    return c.json({ ok: true, proposal: toCoachProposalResponse(created) });
   });
 
   app.get("/api/admin/quality/coach/summary", async (c) => {
@@ -1091,6 +1190,13 @@ type QualityPairwiseRunBody = {
   personaSlug?: unknown;
   maxTurns?: unknown;
   reflect?: unknown;
+};
+
+type QualityCoachProposalGenerateBody = {
+  styleSlug?: unknown;
+  sampleSize?: unknown;
+  personaSlug?: unknown;
+  model?: unknown;
 };
 
 type QualityStyleLoadResult =

@@ -109,6 +109,12 @@ function parseRunMaxTurns(raw: string): number | null {
   return parsed;
 }
 
+function parseCoachSampleSize(raw: string): number | null {
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50) return null;
+  return parsed;
+}
+
 function outcomeBadge(outcome: string) {
   const value = outcome as QualityOutcome;
   return (
@@ -179,6 +185,7 @@ export function SaasQuality() {
   const [proposalActionId, setProposalActionId] = useState<number | null>(null);
   const [inspector, setInspector] = useState<QualityInspectorState | null>(null);
   const [runningKind, setRunningKind] = useState<"self-play" | "pairwise" | null>(null);
+  const [generatingCoach, setGeneratingCoach] = useState(false);
 
   const [styleSlug, setStyleSlug] = useState("all");
   const [personaSlug, setPersonaSlug] = useState("all");
@@ -198,6 +205,9 @@ export function SaasQuality() {
   const [runPersonaSlug, setRunPersonaSlug] = useState("");
   const [runMaxTurns, setRunMaxTurns] = useState("6");
   const [runReflect, setRunReflect] = useState(false);
+  const [coachStyleSlug, setCoachStyleSlug] = useState("");
+  const [coachPersonaSlug, setCoachPersonaSlug] = useState("all");
+  const [coachSampleSize, setCoachSampleSize] = useState("8");
 
   const styleOptions = useMemo(() => summary?.byStyle.map((item) => item.styleSlug) ?? [], [summary]);
   const personaOptions = useMemo(
@@ -239,6 +249,7 @@ export function SaasQuality() {
         setRunStyleSlug((current) => current || firstStyle);
         setRunStyleBSlug((current) => current || secondStyle || firstStyle);
         setRunPersonaSlug((current) => current || firstPersona);
+        setCoachStyleSlug((current) => current || firstStyle);
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) {
@@ -389,6 +400,38 @@ export function SaasQuality() {
       toast.error(err instanceof Error ? err.message : "Не удалось запустить pairwise");
     } finally {
       setRunningKind(null);
+    }
+  }
+
+  async function handleCoachGenerate() {
+    const sampleSize = parseCoachSampleSize(coachSampleSize);
+    if (sampleSize === null) {
+      toast.error("Sample: 1-50");
+      return;
+    }
+    if (!coachStyleSlug) {
+      toast.error("Выберите стиль для coach proposal");
+      return;
+    }
+
+    setGeneratingCoach(true);
+    try {
+      const result = await saas.generateQualityCoachProposal({
+        styleSlug: coachStyleSlug,
+        sampleSize,
+        ...(coachPersonaSlug !== "all" ? { personaSlug: coachPersonaSlug } : {}),
+      });
+      setCoach(await saas.getQualityCoachSummary());
+      toast.success(`Coach proposal: ${result.proposal.summary}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : "Не удалось сгенерировать coach proposal");
+    } finally {
+      setGeneratingCoach(false);
     }
   }
 
@@ -643,6 +686,75 @@ export function SaasQuality() {
               >
                 <PlayIcon className="size-4" />
                 {runningKind === "pairwise" ? "Running…" : "Pairwise"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <LightbulbIcon className="size-4 text-amber-500" />
+            Coach proposal
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_110px_180px]">
+            <div className="space-y-1.5">
+              <Label>Style</Label>
+              <Select value={coachStyleSlug} onValueChange={setCoachStyleSlug}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {runStyleOptions.map((style) => (
+                    <SelectItem key={style.id} value={style.slug}>
+                      {style.slug}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Persona</Label>
+              <Select value={coachPersonaSlug} onValueChange={setCoachPersonaSlug}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все персоны</SelectItem>
+                  {runPersonaOptions.map((persona) => (
+                    <SelectItem key={persona.slug} value={persona.slug}>
+                      {persona.slug}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="coach-sample-size">Sample</Label>
+              <Input
+                id="coach-sample-size"
+                inputMode="numeric"
+                className="font-mono"
+                value={coachSampleSize}
+                onChange={(event) =>
+                  setCoachSampleSize(event.target.value.replace(/\D/g, "").slice(0, 2))
+                }
+              />
+            </div>
+
+            <div className="flex items-end">
+              <Button
+                className="w-full"
+                onClick={() => void handleCoachGenerate()}
+                disabled={generatingCoach || runStyleOptions.length === 0}
+              >
+                <LightbulbIcon className="size-4" />
+                {generatingCoach ? "Generating…" : "Generate"}
               </Button>
             </div>
           </div>
