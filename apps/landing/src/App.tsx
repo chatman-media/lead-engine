@@ -4,6 +4,7 @@ import DemoConcierge from "./DemoConcierge.tsx";
 import DemoExchange from "./DemoExchange.tsx";
 import DemoExchangeWorkflow from "./DemoExchangeWorkflow.tsx";
 import DemoServiceWorkflow from "./DemoServiceWorkflow.tsx";
+import DemoVerticals from "./DemoVerticals.tsx";
 import DemoVisa from "./DemoVisa.tsx";
 import LandingAnyBusiness from "./LandingAnyBusiness.tsx";
 import LandingExchange from "./LandingExchange.tsx";
@@ -318,6 +319,13 @@ export default function App() {
       <Route path="/demo/workflows/beauty" element={<DemoServiceWorkflow workflowKey="beauty" />} />
       <Route path="/demo/workflows/housing" element={<DemoServiceWorkflow workflowKey="housing" />} />
       <Route path="/demo/workflows/custom" element={<DemoServiceWorkflow workflowKey="custom" />} />
+      <Route path="/demo/verticals" element={<DemoVerticals />} />
+      <Route path="/demo/verticals/recruitment" element={<DemoVerticals verticalKey="recruitment" />} />
+      <Route path="/demo/verticals/real-estate" element={<DemoVerticals verticalKey="real-estate" />} />
+      <Route path="/demo/verticals/visa" element={<DemoVerticals verticalKey="visa" />} />
+      <Route path="/demo/verticals/scooter" element={<DemoVerticals verticalKey="scooter" />} />
+      <Route path="/demo/verticals/modeling" element={<DemoVerticals verticalKey="modeling" />} />
+      <Route path="/demo/verticals/video" element={<DemoVerticals verticalKey="video" />} />
       <Route path="/demo/services" element={<DemoConcierge />} />
       <Route path="/demo/concierge" element={<DemoConcierge />} />
       <Route path="/demo/visa" element={<DemoVisa />} />

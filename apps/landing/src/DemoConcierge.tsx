@@ -132,6 +132,7 @@ const SERVICE_STRIP: (L & { href: string })[] = [
 	},
 	{ ru: "exchange", en: "exchange", href: "/demo/workflows/exchange" },
 	{ ru: "custom offer", en: "custom offer", href: "/demo/workflows/custom" },
+	{ ru: "vertical demos", en: "vertical demos", href: "/demo/verticals" },
 ];
 
 const KPIS: { value: string; label: L; trend?: string }[] = [
