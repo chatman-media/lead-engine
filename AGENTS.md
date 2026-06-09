@@ -169,14 +169,17 @@ Never hardcode channel configs or LLM keys — always read through the router/re
 
 ```
 packages/
-  storage            — Drizzle schema (34 tenant-scoped tables), migrations, RLS helpers
-  llm-router         — ChatClient / EmbeddingClient / per-tenant config (BYOK)
+  storage            — Drizzle schema, migrations, RLS helpers
+  llm-router         — ChatClient / EmbeddingClient / per-tenant config (BYOK + purpose routing)
   kb                 — RAG pipeline: hybrid search, ingest, answer, reranker, MMR, multi-query
   sales              — CoachAnalyzer, StageClassifier, ELO ranking
   conversation-engine — processInbound pipeline, withTenant, DAL
   channel-core       — ChannelAdapter contract, Inbound, OutboundEnvelope
   channel-telegram   — BotAPI + MTProto userbot (GramJS)
   channel-whatsapp   — Meta Graph API
+  channel-facebook   — Meta Messenger Send API
+  channel-vk         — VK Callback API + messages.send
+  channel-max        — MAX Bot API webhook + messages.send
   channel-web        — WebSocket chat widget
   observability      — JsonLogger, PlatformMetrics
   verticals          — VerticalTemplate registry + funnel phase backbone (phases.ts)
@@ -187,9 +190,9 @@ apps/
   admin-ui           — React 19 + Vite SPA (Tailwind v4 + shadcn/ui)
   widget             — Embed script < 50KB gzip
   landing            — Marketing site
-  vertical-*         — Vertical template packages: exchange (exchange_v1),
-                       real-estate (real_estate_v1), recruitment (recruitment_v1),
-                       saas (saas_v1), video (video_v1)
+  vertical-*         — Vertical template packages: exchange, concierge,
+                       modeling, real-estate, recruitment, saas, scooter,
+                       video, visa
 ```
 
 **Dependency direction (acyclic):**
@@ -199,7 +202,7 @@ kb                  → llm-router
 sales               → kb, llm-router
 channel-*           → channel-core
 apps/api            → conversation-engine, channel-*, sales, kb, llm-router
-apps/worker         → conversation-engine, channel-telegram
+apps/worker         → conversation-engine, channel-*
 ```
 
 ---
@@ -211,7 +214,7 @@ tenants             — slug, plan, status (active/suspended)
 admins              — email, role (superadmin/manager), tenantId
 admin_invites       — email, token, role, expiresAt, usedAt
 password_resets     — adminId, token (64 hex), expiresAt, usedAt
-channels            — tenantId, kind (telegram_bot/telegram_userbot/whatsapp/web), status
+channels            — tenantId, kind (telegram_bot/telegram_userbot/whatsapp/facebook/vk/max/web), status
 contacts            — tenantId (channel-agnostic person)
 channel_identities  — contactId, channelId, externalUserId
 conversations       — tenantId, contactId, channelId, mode (ai/human)
@@ -231,6 +234,11 @@ referral_codes      — tenantId, code, usageCount
 exchange_rates      — tenantId, asset, network, baseRate, marginPct, feeFixedThb (обменник)
 exchange_rate_tiers — tenantId, targetThb, displayRate, marketRate (approved объёмные ступени)
 exchange_orders     — tenantId, leadId, status, amounts, payment rails
+service_catalog_items — tenantId, slug, routeType (manual/funnel/partner_service/webhook), target refs
+partners            — tenantId, provider/partner contact data, defaultCommissionPct, settlementCurrency
+partner_services    — tenantId, partnerId, name, category, funnel/stage refs, commissionPct
+partner_deals       — tenantId, partnerId, serviceId, leadId, status, gross/commission, handoff mode
+partner_settlements — tenantId, partnerId, period, totals, status
 ```
 
 **`stage_definitions.kind` enum:** only `'intake' | 'active' | 'terminal_won' | 'terminal_lost'` — CHECK constraint will reject anything else.
@@ -238,6 +246,8 @@ exchange_orders     — tenantId, leadId, status, amounts, payment rails
 **`stage_definitions.phase`:** NULL for anchors (intake/terminal); for `active` stages ∈ `'qualify' | 'offer' | 'clear' | 'fulfill'` (CHECK). `validateBackbone()` in `packages/verticals` enforces phase monotonicity + mandatory `qualify`/`offer` — funnel `apply` returns `400` on violation.
 
 **`conversations.source` enum:** only `'bot' | 'userbot' | 'self_play'` — CHECK constraint.
+
+**`service_catalog_items.route_type` enum:** only `'manual' | 'funnel' | 'partner_service' | 'webhook'`. A curated marketplace provider install creates/links `partners`, `partner_services`, and `service_catalog_items`; custom providers follow the same path. See [docs/engineering/SERVICE_CATALOG.md](docs/engineering/SERVICE_CATALOG.md).
 
 ---
 
@@ -268,11 +278,13 @@ All stages are opt-in via `AnswerInput` fields. See `packages/kb/README.md` for 
 |---|---|---|
 | Query outside `withTenant` | RLS returns empty (silent) | Always wrap in `withTenant(db, tenantId, fn)` |
 | `stage_definitions` with `kind='regular'` | CHECK constraint violation | Use `'active'` |
-| `conversations.source='web'` | CHECK constraint violation | Use `'bot'` for web/whatsapp channel-initiated convos |
+| `conversations.source='web'` | CHECK constraint violation | Use `'bot'` for web/whatsapp/facebook/vk/max channel-initiated convos |
 | Missing `funnelId` in `stage_definitions` | NOT NULL violation | Insert funnel first, use returned id |
 | `constructor.name` checks in tests | Returns `"Object"` in CI (minification) | Use `instanceof` after matching import |
 | Direct `postgres()` without `onnotice` | Noisy test output | Pass `{ onnotice: () => {} }` in test setups |
 | LLM key not encrypted | Stored in plaintext in `tenant_secrets` | Use `setEncryptedSecret` / `getDecryptedSecret` |
+| Provider/channel credential in notes/metadata | Leaks secrets through API/audit/logs | Store credentials in `tenant_secrets`; metadata may contain only marker/config data |
+| `service_catalog_items.route_type='partner_service'` without `partnerServiceId` | Runtime cannot create provider handoff/deal | Create/link `partner_services` first, or use `manual`/`funnel` |
 | Reranker without extra candidates | Reranker sees only topK → no improvement | Set candidateK=topK×3 before reranker call |
 
 ---
@@ -329,4 +341,9 @@ PLATFORM_MASTER_KEY=<openssl rand -hex 32>    # required — AES-256-GCM for sec
 TELEGRAM_WEBHOOK_SECRET=dev-tg-secret         # any string for local dev
 ```
 
-Everything else is optional for local dev. For production see the full table in [README.md#deployment](README.md#deployment).
+Everything else is optional for local dev. WhatsApp, Facebook, and MAX can use
+global fallback webhook envs (`WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET`,
+`FACEBOOK_VERIFY_TOKEN` / `FACEBOOK_APP_SECRET`, `MAX_WEBHOOK_SECRET`) but SaaS
+channel credentials should be saved per tenant through `/channels`. VK
+credentials are per-tenant only. For production see the full table in
+[README.md#deployment](README.md#deployment).

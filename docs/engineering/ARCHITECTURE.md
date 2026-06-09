@@ -12,7 +12,7 @@ hot-reload, secrets. Для high-level introduction — см.
                      ┌─────────────────────────────────────┐
                      │           Customer (end-user)       │
                      │  Telegram / WhatsApp / Messenger /  │
-                     │  Web widget                         │
+                     │  VK / MAX / Web widget              │
                      └─────────────────┬───────────────────┘
                                        │
                                        ▼
@@ -22,6 +22,8 @@ hot-reload, secrets. Для high-level introduction — см.
        │  │  /webhook/telegram/:slug      ←  Telegram       │  │
        │  │  /webhook/whatsapp/:slug      ←  Meta Cloud     │  │
        │  │  /webhook/facebook/:slug      ←  Meta Messenger │  │
+       │  │  /webhook/vk/:slug            ←  VK Callback    │  │
+       │  │  /webhook/max/:slug/:botId    ←  MAX Bot API    │  │
        │  │  /ws/:slug?user=X             ←  Web widget     │  │
        │  │  /api/auth/*  /api/admin/*    ←  Admin UI       │  │
        │  └────────────────────────────────────────────────┘  │
@@ -39,15 +41,17 @@ hot-reload, secrets. Для high-level introduction — см.
        │                          │    │  - OutboundDispatcher │
        │  tenants                 │    │    (SKIP LOCKED)      │
        │  channels                │    │  - Telegram BotAPI    │
-       │  conversations, messages │    │    + MTProto userbot  │
+       │  conversations, messages │    │    outbound           │
        │  kb_documents, kb_chunks │    │  - WhatsApp / Messenger│
-       │                          │    │    send (Meta Graph)  │
-       │  llm_provider_configs    │    │  - Periodic channel   │
-       │  tenant_secrets (AES-256)│    │    reload (30s poll)  │
-       │  outbound_queue          │    │  - Cron jobs          │
-       │  audit_log               │    └──────────────────────┘
+       │  service_catalog_items   │    │    send (Meta Graph)   │
+       │  partners, partner_deals │    │  - VK messages.send    │
+       │  llm_provider_configs    │    │  - MAX POST /messages  │
+       │  tenant_secrets (AES-256)│    │  - Periodic channel   │
+       │  outbound_queue          │    │    reload (30s poll)  │
+       │  audit_log               │    │  - Cron jobs          │
+       │                          │    └──────────────────────┘
        │                          │
-       │  RLS FORCE ON 34 tables  │
+       │  FORCE RLS on tenant data│
        └──────────────────────────┘
                         ▲
                         │ (psql / migrations as bypass-role)
@@ -57,7 +61,7 @@ hot-reload, secrets. Для high-level introduction — см.
        │  login / accept-invite   │
        │  /onboarding (gated)     │
        │  /channels  /settings    │
-       │  /leads  /funnel         │
+       │  /leads  /funnel /catalog│
        │  /exchange (обменник)    │
        │  /conversations  /audit  │
        │  /diagnostics  /superadmin│
@@ -82,7 +86,9 @@ CASCADE`). Repo-методы из `packages/conversation-engine/src/dal/`
 
 ### Layer 3: FORCE ROW LEVEL SECURITY
 
-Миграция `0004_enable_rls.sql` включает RLS на 34 таблицах с policy:
+Миграция `0004_enable_rls.sql` включает RLS на tenant-scoped таблицах с policy;
+последующие миграции добавляют RLS для новых tenant-таблиц (`service_catalog`,
+`partner_deals`, etc.):
 
 ```sql
 CREATE POLICY tenant_isolation ON conversations
@@ -165,25 +171,25 @@ ALTER TABLE conversations FORCE ROW LEVEL SECURITY;
 1. apps/worker dispatcher poll'ит outbound_queue (1s default):
    SELECT id FROM outbound_queue
      WHERE status = 'pending' AND scheduled_at <= now()
-     AND kind IN ('telegram_bot', 'whatsapp', 'facebook', 'telegram_userbot')
+     AND kind IN ('telegram_bot', 'whatsapp', 'facebook', 'vk', 'max')
      ORDER BY scheduled_at
      FOR UPDATE SKIP LOCKED
      LIMIT $batchSize
 
 2. WorkerChannelRegistry.byChannelId(channelId) → adapter
 
-3. adapter.send(envelope) — Telegram BotAPI HTTPS POST или Meta Graph
+3. adapter.send(envelope) — Telegram BotAPI, Meta Graph, VK API или MAX API
 
 4. On success: UPDATE outbound_queue SET status='sent', external_message_id=...
 
 5. On failure: SET status='failed', last_error=..., attempt++ (retry policy TBD)
 ```
 
-**Web canal** — особенный: pinned WebSocket-connection живёт в
-`apps/api`, поэтому отдельный `WebOutboundDispatcher` (in-process) с
-фильтром `kind='web'` крутится в api-процессе. Worker дисптачер
-фильтрует `claimKinds: ['telegram_bot', 'whatsapp', 'facebook']`
-чтобы не grab'ить web-rows которые он не может отправить.
+**Web и Telegram userbot** — особенные: pinned WebSocket/MTProto-состояние
+живёт в `apps/api`, поэтому отдельные in-process dispatchers фильтруют
+`kind='web'` и `kind='telegram_userbot'`. Worker дисптачер фильтрует
+`claimKinds: ['telegram_bot', 'whatsapp', 'facebook', 'vk', 'max']`, чтобы не
+grab'ить rows, которые он не может отправить.
 
 ---
 
@@ -206,7 +212,8 @@ Routes вызывают callback после успешного PUT/POST/DELETE:
 |---|---|
 | `PUT /api/admin/llm-configs/:purpose` | `router.invalidate(tenantId)` + setConfig + mutate `LoadedRef.current.byTenant` |
 | `DELETE /api/admin/llm-configs/:purpose` | то же — purpose удалён из snapshot'а |
-| `POST /api/admin/channels/{telegram,whatsapp,facebook}` | `ChannelRegistry.reloadTenant(tenantId, slug)` — close old adapter, instantiate new |
+| `POST /api/admin/channels/{telegram,whatsapp,facebook,vk,max,web}` | `ChannelRegistry.reloadTenant(tenantId, slug)` — close old adapter, instantiate new |
+| `POST /api/admin/channels/userbot/*` | сохраняет MTProto session/creds, reloadTenant + in-process userbot dispatcher |
 | `DELETE /api/admin/channels/:id` | то же |
 | `PUT /api/admin/tenant/status` | reloadChannels (evict при pause, restore при resume) |
 
@@ -270,6 +277,15 @@ getDecryptedSecret({ db, tenantId, key, masterKeyHex })
 - `channel_facebook_<page_id>` — Messenger Page Access Token
 - `facebook_verify_token` / `facebook_app_secret` — Meta webhook креды
   (fallback env `FACEBOOK_VERIFY_TOKEN` / `FACEBOOK_APP_SECRET`)
+- `channel_vk_<group_id>` — VK community access token
+- `vk_confirmation_code_<group_id>` / `vk_secret_key_<group_id>` — VK Callback
+  API confirmation/secret values
+- `channel_max_<bot_id>` — MAX bot token (fallback env
+  `MAX_BOT_TOKEN_<SLUG>` / `MAX_BOT_TOKEN`)
+- `channel_max_<bot_id>_webhook_secret` — MAX `X-Max-Bot-Api-Secret`
+  (fallback env `MAX_WEBHOOK_SECRET`)
+- web-channel секреты и snippet metadata — через `channels.metadata_json` и,
+  если нужен shared auth, env `WEB_WS_AUTH_SECRET`
 
 LLM (по purpose):
 
@@ -277,6 +293,12 @@ LLM (по purpose):
   (photo-processor: классификация фото + OCR паспортов) /
   `llm_judge_apikey` (ELO-grading skills) / `llm_reranker_apikey` /
   `llm_transcribe_apikey`
+
+Marketplace / партнёры:
+
+- provider credentials должны храниться через `tenant_secrets` или
+  provider-specific encrypted keys; audit/details хранят только marker metadata,
+  SLA, coverage, commission and route hints.
 
 Обменник (allowlist в `apps/api/src/lib/exchange/requisite-keys.ts`):
 
@@ -301,7 +323,9 @@ LoadedRef {
 
 `InMemoryLlmRouter` (из `packages/llm-router`) — `setConfig({ tenantId,
 purpose, provider, model, apiKey, ... })`. На `resolveChat(tenantId,
-purpose)` → cached `ChatClient` (OpenAI / Anthropic / Ollama).
+purpose)` → cached `ChatClient` (base router: OpenAI / OpenRouter / Ollama).
+Purpose-specific app resolvers дополнительно читают DB-конфиги для
+`reranker` (Jina/Cohere) и `transcribe` (OpenRouter/OpenAI-compatible).
 
 `router.invalidate(tenantId)` сбрасывает все cached clients этого
 tenant'а — следующий resolve пересоберёт с новым config'ом.
@@ -335,9 +359,9 @@ Unknown plan → fallback на `free` с warning hook.
 
 **Quota enforcement** — `apps/api/src/lib/quota.ts`:
 
-- `canAddChannel({ db, tenantId })` — вызывается в `POST /api/admin/channels/telegram`
-  , `/whatsapp` и `/facebook` **только** на new-channel path. Token rotation для существующего
-  channel bypass'ит quota.
+- `canAddChannel({ db, tenantId })` — вызывается в `POST /api/admin/channels/*`
+  на new-channel path (Telegram, userbot, WhatsApp, Facebook, VK, MAX, Web). Token
+  rotation для существующего channel bypass'ит quota.
 - `canAddKbDocument({ db, tenantId })` — вызывается в `POST /api/admin/kb/documents`.
   Dedup по `content_hash` работает orthogonally — same-content re-upload не
   увеличивает count.
@@ -355,6 +379,40 @@ Unknown plan → fallback на `free` с warning hook.
   "upgradeHint": "Перейдите на план Starter ($99/мес) для большего числа каналов"
 }
 ```
+
+---
+
+## Service catalog + provider marketplace
+
+Каталог услуг — tenant-scoped routing layer для бизнесов, где один бот продаёт
+несколько услуг. UI: `/catalog`; API: `admin-service-catalog.ts`,
+`admin-provider-marketplace.ts`, `admin-partners.ts`.
+
+### Main tables
+
+| Table | Purpose |
+|---|---|
+| `service_catalog_items` | Витрина услуг tenant'а: name/category/description + route target |
+| `partners` | Исполнители/партнёры, contact data, default commission, settlement currency |
+| `partner_services` | Конкретная услуга партнёра, category, stage/funnel hints, commission |
+| `partner_deals` | Handoff ledger: sent/accepted/completed/cancelled/settled + gross/commission |
+
+### Route types
+
+| `service_catalog_items.route_type` | Target | Runtime meaning |
+|---|---|---|
+| `funnel` | `funnel_id` | Lead Engine ведёт заявку через обычную воронку |
+| `partner_service` | `partner_service_id` | Оператор/AI передаёт заявку провайдеру, deal ledger трекает статус |
+| `webhook` | `webhook_url` | Extension point для внешней provider-системы |
+| `manual` | none | Оператор обрабатывает руками |
+
+Curated provider install (`POST /api/admin/provider-marketplace/:key/install`)
+идемпотентно создаёт `partner` + `partner_service` + `service_catalog_item`.
+Custom provider (`POST /api/admin/provider-marketplace/custom`) делает то же,
+но из данных формы. Metadata содержит `source`, `providerKey`, `coverage`,
+`sla`, `pricingMode`, `requiredFields`, `handoffMode`, `installedAt`.
+
+Технический reference: [SERVICE_CATALOG.md](SERVICE_CATALOG.md).
 
 ---
 
@@ -433,7 +491,7 @@ Fail-quiet: ошибка audit'а не валит request. Записи живу
 ```
 auth.signup                       — tenant + admin создан
 llm_config.create / update / delete
-channel.create / update / delete  — kind='telegram_bot' | 'whatsapp'
+channel.create / update / delete  — telegram_bot/userbot/whatsapp/facebook/vk/max/web
 conversation.reply                — operator отправил message с role='human'
 conversation.mode.takeover        — mode 'ai' → 'human'
 conversation.mode.return_to_ai    — mode 'human' → 'ai'
@@ -441,6 +499,11 @@ tenant.pause                      — tenant.status 'active' → 'suspended'
 tenant.resume                     — tenant.status 'suspended' → 'active'
 billing.checkout_started          — POST /checkout, details: { plan, priceId, customerId }
 lead.send_photo                   — оператор отправил фото/QR клиенту через admin-UI
+provider_marketplace.install      — curated provider installed into catalog
+provider_marketplace.custom_create — custom provider + service + catalog item
+service_catalog.create / update / delete
+partner.create / update
+partner_service.create
 ```
 
 Raw secrets / tokens / apiKey НИКОГДА не попадают в `details` — verified
@@ -509,9 +572,25 @@ Defaults: 60 msg/min, 600 msg/hour per tenant. Configurable через env.
 0029_llm_transcribe_purpose.sql    — purpose='transcribe'
 0030_admins_name.sql               — admins.name
 0031_stage_phase.sql               — stage_definitions.phase (костяк воронки)
+0032_leads_request_type.sql        — concierge/multi-request leads.request_type
+0033_channels_facebook_kind.sql    — channels.kind='facebook'
+0034_stage_goal_guidance.sql       — per-stage goal/guidance for runtime prompts
+0035_exchange_settings.sql         — exchange tenant settings
+0036_admin_informer.sql            — admin/operator informer
+0037_informer_quiet_hours.sql      — quiet hours for informer
+0038_exchange_payout_code_ttl.sql  — payout code TTL
+0039_outreach_campaigns.sql        — outreach campaign tables
+0040_stage_partner_webhook.sql     — stage partner webhook routing
+0041_partner_billing.sql           — partners, partner_services, partner_deals
+0042_service_catalog.sql           — service_catalog_items
+0043_exchange_remove_intent_stage.sql — cleanup legacy exchange/concierge stage
+0044_channels_vk_kind.sql          — channels.kind='vk'
+0044_early_access_signups.sql      — public early access waitlist
+0045_channels_max_kind.sql         — channels.kind='max'
 ```
 
-(Файл `0016` отсутствует намеренно — номер пропущен.) Migrations run
+(Файл `0016` отсутствует намеренно — номер пропущен. Номер `0044` сейчас
+использован двумя независимыми файлами.) Migrations run
 раздельно от app process под superuser/owner role. Apps запускаются под
 `NOSUPERUSER NOBYPASSRLS`.
 
@@ -554,6 +633,13 @@ lead_engine_llm_errors_total{provider, purpose, kind} — error rates
 | Require-auth middleware | `apps/api/src/middleware/require-auth.ts` |
 | Channel registry (api) | `apps/api/src/channel-registry.ts` |
 | Channel registry (worker) | `apps/worker/src/channel-registry.ts` |
+| Channel adapter contract | `packages/channel-core/src/types.ts` + `packages/channel-core/src/adapter.ts` |
+| Telegram adapter | `packages/channel-telegram` |
+| WhatsApp adapter | `packages/channel-whatsapp` |
+| Facebook Messenger adapter | `packages/channel-facebook` |
+| VK adapter | `packages/channel-vk` |
+| MAX adapter | `packages/channel-max` |
+| Web adapter | `packages/channel-web` |
 | LLM bootstrap (factories) | `apps/api/src/llm-bootstrap.ts` |
 | LLM config loader | `apps/api/src/lib/llm-config-loader.ts` |
 | Tenant reloader (hot-reload bus) | `apps/api/src/lib/tenant-reloader.ts` |
@@ -563,6 +649,9 @@ lead_engine_llm_errors_total{provider, purpose, kind} — error rates
 | Rate limiter | `apps/api/src/lib/rate-limiter.ts` |
 | Plan tiers (PlanLimits) | `apps/api/src/lib/plans.ts` |
 | Quota helpers | `apps/api/src/lib/quota.ts` |
+| Service catalog routes | `apps/api/src/routes/admin-service-catalog.ts` |
+| Provider marketplace routes/data | `apps/api/src/routes/admin-provider-marketplace.ts` + `apps/api/src/lib/provider-marketplace.ts` |
+| Partners / partner deals | `apps/api/src/routes/admin-partners.ts` |
 | Stripe API wrapper | `apps/api/src/lib/stripe-api.ts` |
 | Stripe signature verification | `apps/api/src/lib/stripe-signature.ts` |
 | Secrets (AES-256-GCM) | `packages/conversation-engine/src/secrets.ts` |

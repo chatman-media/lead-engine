@@ -14,6 +14,7 @@
 | [engineering/ONBOARDING.md](engineering/ONBOARDING.md) | Путь тенанта: закрытая регистрация → обязательный визард → каналы/LLM/KB/обменник (UI + curl) |
 | [engineering/CONFIGURATION.md](engineering/CONFIGURATION.md) | Полный референс env-переменных (all vars, required/optional, fallback/per-tenant) |
 | [engineering/EXCHANGE.md](engineering/EXCHANGE.md) | Обменная вертикаль: воронка, курсы/тиры, guardrails, ops-watch, реквизиты, orders CRM |
+| [engineering/SERVICE_CATALOG.md](engineering/SERVICE_CATALOG.md) | Каталог услуг + marketplace провайдеров: curated/custom providers, routes (`funnel`/`partner_service`/`webhook`/`manual`), partners/deals |
 | [engineering/NOTIFICATIONS.md](engineering/NOTIFICATIONS.md) | Stage webhooks + правила/шаблоны уведомлений + operator settings + Telegram-группы + ops-алерты |
 | [engineering/AGENTIC_TOOLS.md](engineering/AGENTIC_TOOLS.md) | Tool-loop: контракт инструмента, встроенные (booking), подключение в pipeline, кастомный инструмент |
 | [engineering/COPILOT.md](engineering/COPILOT.md) | Page-aware AI-ассистент кабинета: эндпоинт, action-allowlist, advice+confirm, BYOK |
@@ -42,6 +43,14 @@
 | Док | О чём |
 |---|---|
 | [gtm/sales-bot/SETUP.md](gtm/sales-bot/SETUP.md) | Мета-демо: бот, продающий Lead Engine рекрутёрам (setup + KB + system prompt) |
+
+Кодовые demo-витрины:
+
+| Путь | О чём |
+|---|---|
+| [`../apps/landing`](../apps/landing) | Public demos: exchange, concierge/service desk, provider marketplace, visa, vertical library |
+| [`../apps/api/demo/web-chat.html`](../apps/api/demo/web-chat.html) | Standalone HTML-клиент для web-channel `/ws/:slug` |
+| [`../apps/api/scripts/seed-modeling-demo.ts`](../apps/api/scripts/seed-modeling-demo.ts) | Демо-данные для modeling vertical |
 
 ## 🗄 Archive
 

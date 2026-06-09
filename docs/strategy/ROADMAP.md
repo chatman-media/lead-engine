@@ -127,7 +127,7 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
 
 ### Foundation (этапы 1–7 из легаси-плана)
 
-- ✅ Drizzle schema unification (34 tenant-scoped таблицы)
+- ✅ Drizzle schema unification (tenant-scoped tables + FORCE RLS)
 - ✅ Channel-core контракт + channel-telegram / channel-whatsapp / channel-facebook / channel-vk / channel-web adapters
 - ✅ llm-router с per-tenant configs (OpenAI / OpenRouter / Anthropic / Ollama)
 - ✅ conversation-engine pipeline (`processInbound` с 3-фазным tx split)
@@ -362,7 +362,8 @@ critical channel coverage.
 
 ### ✅ M1. Stripe billing wire-up — DONE (PR #37 M1a + PR #38 M1b + PR #41 re-price)
 
-- ✅ Plan tiers: `free` (1 канал, 50 docs, 30/min), `starter` **$99/мес** (3/500/60),
+- ✅ Plan tiers: `free` (текущий self-host/exchange-focused режим с generous
+  limits: 100 channels / 100K docs / 120 min), `starter` **$99/мес** (3/500/60),
   `pro` **$199/мес** (10/10K/120), `enterprise` (100/100K/600, self-host)
   _(re-priced PR #41: $49→$99, $149→$199 — recruitment ICP ARPU $99–299)_
 - ✅ `POST /api/admin/billing/checkout` — создаёт Stripe Checkout Session
@@ -661,8 +662,9 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
 **Где мы сейчас (PR #160, июнь 2026):**
 
 - Self-service onboarding end-to-end без env vars / рестартов
-- Channels: TG bot + TG userbot + WhatsApp + Facebook + VK + web widget — все через UI
-- LLM: BYOK OpenAI/Anthropic/OpenRouter/Ollama, hot-reload
+- Channels: TG bot + TG userbot + WhatsApp + Facebook + VK + MAX + web widget — все через UI
+- LLM: BYOK provider slots (OpenAI / OpenRouter / Ollama, optional
+  purpose-specific Jina/Cohere reranker and transcription), hot-reload
 - KB: file/text upload + RAG, dedup по content_hash, **quota enforcement**
 - **Stripe billing wired** — 14-day trial, customer portal, 402 quota enforcement
 - Operator inbox: auto-poll 5s, mode-toggle takeover, audit log, pause/resume
@@ -678,11 +680,13 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
   пер-стадийное поведение бота + оператор-handoff. Phase 2 behavior-слой завершён
 - **Exchange vertical (`exchange_v1`):** крипто/RUB → THB для обменников Пхукета, approved rate-card, exchange orders CRM, exchange e2e mocks
 - **QR/photo delivery:** оператор отправляет cardless-withdrawal QR клиенту через admin-UI
-- **6 вертикальных шаблонов:** UAE + generic + RE + SaaS + video + exchange
+- **9 vertical templates:** exchange + concierge + recruitment + modeling +
+  real_estate + saas + video + visa + scooter
 - **Универсальный костяк воронки (`phase`):** общая ось фаз над всеми
   вертикалями + валидация + phase-stats
 - **Закрытая регистрация + gated vertical-aware онбординг:** invite-flow,
-  обязательный визард, per-tenant креды каналов (TG MTProto + WhatsApp)
+  обязательный визард, per-tenant креды каналов (TG MTProto + WhatsApp +
+  Facebook + VK + MAX)
 - **Admin copilot:** page-aware AI-ассистент на всех страницах (BYOK, advice+confirm)
 - **Надёжность обменника:** guardrails курсов + ops-алерты владельцу
 - **CI-безопасность:** CodeQL + Dependabot + Codecov
