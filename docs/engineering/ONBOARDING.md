@@ -14,9 +14,11 @@ Self-service через **обязательный onboarding-визард**, б
 2. `PLATFORM_PUBLIC_URL` задан в env apps/api (например `https://api.acme.com`)
    — нужен чтобы auto-setWebhook работал
 3. У бизнеса есть:
-   - OpenAI / Anthropic / OpenRouter API key (BYOK)
+   - API key нужного AI-провайдера (BYOK): OpenAI / OpenRouter / Anthropic /
+     Jina / Cohere или локальная Ollama
    - Telegram bot token (через `@BotFather` за 30 секунд) — или личный
-     аккаунт для userbot (MTProto), или WhatsApp Cloud API
+     аккаунт для userbot (MTProto), или WhatsApp / Facebook Messenger / VK /
+     MAX / web-виджет
    - (опц.) document'ы с информацией бизнеса для KB (тарифы, FAQ, политика)
 
 ---
@@ -100,7 +102,10 @@ done = channelConnected && chatLlmConfigured && (!isExchange || exchangeReady)
 http://localhost:5173/channels
 ```
 
-UI имеет две вкладки: **Telegram** и **WhatsApp**.
+В onboarding-визарде базовый путь ведёт через Telegram bot/userbot, а полный
+экран `/channels` имеет семь вкладок: **Telegram**, **Личный аккаунт**,
+**WhatsApp**, **Messenger**, **VK**, **MAX**, **Web**. Канал можно подключить в визарде
+или перейти по ссылке "Все типы каналов" на `/channels`.
 
 ### 2a. Telegram (auto-setWebhook)
 
@@ -409,12 +414,25 @@ POST /api/admin/channels/userbot/2fa    { loginId, password } → SRP → кан
 
 ### 2d. Per-tenant креды каналов
 
-WhatsApp `verify_token` / `app_secret` тоже **per-tenant** (`tenant_secrets`,
-ключи в `requisite-keys`/channel-секретах) с fallback на env
-`WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET`. Передаются в
-`POST /api/admin/channels/whatsapp { verifyToken?, appSecret? }` и сохраняются,
-если указаны. То есть один деплой обслуживает разных тенантов с их
-собственными Meta-приложениями без общих env.
+Channel credentials хранятся **per-tenant** в `tenant_secrets` с fallback на
+env, где это нужно:
+
+- WhatsApp `verify_token` / `app_secret`: fallback
+  `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET`, передаются в
+  `POST /api/admin/channels/whatsapp { verifyToken?, appSecret? }`.
+- Facebook Messenger `verify_token` / `app_secret`: fallback
+  `FACEBOOK_VERIFY_TOKEN` / `FACEBOOK_APP_SECRET`, передаются в
+  `POST /api/admin/channels/facebook { verifyToken?, appSecret? }`.
+- VK `accessToken`, `confirmationCode`, `secretKey`: хранятся per-tenant;
+  глобальный env-фолбэк не используется.
+- MAX `botToken`, `webhookSecret`: хранятся per-channel в `tenant_secrets`;
+  fallback для локального/legacy bootstrap — `MAX_BOT_TOKEN_<SLUG>` /
+  `MAX_BOT_TOKEN`, webhook fallback — `MAX_WEBHOOK_SECRET`.
+- Web channel настраивается через `/api/admin/channels/web`; опциональный
+  shared-secret для WS — `WEB_WS_AUTH_SECRET`.
+
+То есть один деплой обслуживает разных тенантов с их собственными
+Meta/VK/MAX/Telegram-приложениями без общих секретов между бизнесами.
 
 ---
 
@@ -426,9 +444,9 @@ http://localhost:5173/settings
 
 LLM-шаг визарда — компактный **accordion по всем purpose'ам**: `chat`
 (раскрыт + обязателен) и сворачиваемые опциональные `embed` / `vision` /
-`judge` / `reranker`. Списки провайдеров и плейсхолдер модели адаптируются
-под purpose (например, reranker → jina/cohere; OpenRouter → подсказка
-`google/gemini-2.5-flash`). Каждый purpose сохраняется через
+`judge` / `reranker` / `transcribe`. Списки провайдеров и плейсхолдер модели
+адаптируются под purpose (например, reranker → jina/cohere; OpenRouter →
+подсказка `google/gemini-2.5-flash`). Каждый purpose сохраняется через
 `PUT /api/admin/llm-configs/:purpose`.
 
 ### Chat config
@@ -453,7 +471,7 @@ LLM-шаг визарда — компактный **accordion по всем pur
 Backend (`PUT /api/admin/llm-configs/chat`):
 
 ```
-1. Validate provider ∈ {openai, openrouter, ollama, anthropic}
+1. Validate provider ∈ {openai, openrouter, ollama, anthropic, jina, cohere}
 2. Validate non-ollama → apiKey required (или secret_ref уже есть)
 3. embed purpose → embedDim required
 4. encrypt apiKey → tenant_secrets[llm_chat_apikey]
@@ -663,7 +681,9 @@ http://localhost:5173/diagnostics
 
 Нажать "Запустить проверку" — backend прогоняет:
 
-- **channel.telegram** — `getMe` валиден, токен расшифровывается → OK
+- **channel.telegram** — если подключён Telegram bot, `getMe` валиден и token
+  расшифровывается → OK; если активен другой канал (userbot / WhatsApp /
+  Facebook / VK / MAX / web), диагностика показывает fallback "активен канал"
 - **llm.chat** — config есть, apiKey decryptable → OK
 - **llm.embed** — config + dim → OK (warn если нет)
 - **tenant_secrets** — sanity check

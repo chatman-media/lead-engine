@@ -45,13 +45,16 @@ fallback/per-tenant behaviour.
 
 ## LLM (env fallback)
 
-Per-tenant LLM config lives in the DB (BYOK); these are the boot fallback when a
+Per-tenant LLM config lives in the DB (BYOK); these are boot fallbacks when a
 tenant has no row. Without any LLM the pipeline persists but does not reply.
+The admin UI/API support provider slots for `chat`, `embed`, `vision`, `judge`,
+`reranker`, and `transcribe`; env fallback is intentionally minimal and covers
+the legacy chat/embed path.
 
 | Var | Req | Description |
 |---|---|---|
-| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` / `LLM_BASE_URL` | opt | Chat LLM fallback (`openai` / `openrouter` / `ollama`). |
-| `LLM_EMBED_PROVIDER` / `LLM_EMBED_MODEL` / `LLM_EMBED_API_KEY` / `LLM_EMBED_BASE_URL` / `LLM_EMBED_DIM` | opt | Embedder for RAG. `LLM_EMBED_DIM` default `1536` (KB column); any model is auto-fitted. |
+| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` / `LLM_BASE_URL` | opt | Chat LLM fallback (`openai` / `openrouter` / `ollama`; use DB config for Anthropic/OpenRouter model marketplace setups). |
+| `LLM_EMBED_PROVIDER` / `LLM_EMBED_MODEL` / `LLM_EMBED_API_KEY` / `LLM_EMBED_BASE_URL` / `LLM_EMBED_DIM` | opt | Embedder fallback for RAG. `LLM_EMBED_DIM` default `1536` (KB column); any model is auto-fitted. |
 | `STYLE_SLUG` / `EXPERIMENT_SLUG` / `STAGE_CLASSIFIER` | opt | Sales-engine knobs (default style, A/B experiment, `""`/`regex`/`llm` classifier). |
 
 ## Channels
@@ -59,11 +62,15 @@ tenant has no row. Without any LLM the pipeline persists but does not reply.
 | Var | Req | Description |
 |---|---|---|
 | `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | opt | Meta webhook verify token + App Secret (HMAC-SHA256 of `X-Hub-Signature-256`). **Fallback** — also per-tenant in `tenant_secrets`. Empty app secret → signature check off (boot warning). |
+| `FACEBOOK_VERIFY_TOKEN` / `FACEBOOK_APP_SECRET` | opt | Meta Messenger webhook verify token + App Secret. **Fallback** — also per-tenant in `tenant_secrets`; empty app secret disables signature verification with a boot warning. |
+| VK channel credentials | n/a | VK access token / confirmation code / optional secret key are saved per-tenant through `/channels`; there is no global env fallback for the SaaS path. |
+| `MAX_WEBHOOK_SECRET` | opt | Fallback secret for MAX `X-Max-Bot-Api-Secret`. Prefer per-channel secret saved through `/channels`. |
 | `WEB_WS_AUTH_SECRET` | opt | Shared secret for `/ws/:slug?auth=...` (web widget, pilot stage). |
 | `WEB_DISPATCHER_POLL_MS` / `WEB_DISPATCHER_BATCH` | opt | In-process web outbound dispatcher tuning (default `200` / `32`). |
 | `WEB_WIDGET_SCRIPT_URL` | opt | CDN URL of `/widget.js`. If set, `POST /api/admin/channels/web` returns a production `<script>` snippet; else falls back to `<PLATFORM_PUBLIC_URL>/widget.js`. |
 | `BOT_TOKEN` / `BOT_TOKEN_<SLUG>` | opt | Legacy single-tenant Telegram bot bootstrap. Real tokens go through `tenant_secrets` (encrypted). |
 | `WA_ACCESS_TOKEN` / `WA_ACCESS_TOKEN_<SLUG>` | opt | Same, for WhatsApp. |
+| `MAX_BOT_TOKEN` / `MAX_BOT_TOKEN_<SLUG>` | opt | Same, for MAX. Real SaaS tokens should be encrypted per-channel as `channel_max_<botId>`. |
 
 ## Worker
 
@@ -99,7 +106,9 @@ tenant has no row. Without any LLM the pipeline persists but does not reply.
 - [ ] Postgres role `NOSUPERUSER NOBYPASSRLS` for the apps; migrations under a separate BYPASSRLS (owner) role.
 - [ ] `PLATFORM_MASTER_KEY` set; rotate via `apps/api/scripts/rotate-master-key.ts`.
 - [ ] `PLATFORM_PUBLIC_URL` set (auto-setWebhook UX).
-- [ ] `WHATSAPP_APP_SECRET` / `WEB_WS_AUTH_SECRET` set if those channels are active.
+- [ ] `WHATSAPP_APP_SECRET`, `FACEBOOK_APP_SECRET`, `MAX_WEBHOOK_SECRET`, `WEB_WS_AUTH_SECRET` set if those channels are active and not supplied per-tenant.
+- [ ] VK channel tenants have per-tenant access token, confirmation code and optional secret key saved through `/channels`.
+- [ ] MAX tenants have per-channel bot token and webhook secret saved through `/channels`; `MAX_BOT_TOKEN*` fallback is only for local/legacy bootstrap.
 - [ ] `RATE_LIMIT_*` set (not disabled).
 - [ ] Stripe: secret + price IDs + webhook secret + success/cancel URLs (if billing on).
 - [ ] Boot log shows `"RLS enforced"` (info), not `"RLS not enforced"` (warn).

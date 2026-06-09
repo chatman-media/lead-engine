@@ -4,7 +4,7 @@
 
 # Lead Engine
 
-**多渠道 AI 销售成交助手 — Telegram · WhatsApp · Messenger · 网页挂件**
+**多渠道 AI 销售成交助手 — Telegram · WhatsApp · Messenger · VK · MAX · 网页挂件**
 
 [![CI](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml)
@@ -17,6 +17,8 @@
 [![Telegram](https://img.shields.io/badge/Telegram-bot%20%2B%20userbot-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
 [![WhatsApp](https://img.shields.io/badge/WhatsApp-Cloud%20API-25D366?logo=whatsapp&logoColor=white)](https://developers.facebook.com/docs/whatsapp)
 [![Messenger](https://img.shields.io/badge/Messenger-Send%20API-0084FF?logo=messenger&logoColor=white)](https://developers.facebook.com/docs/messenger-platform)
+[![VK](https://img.shields.io/badge/VK-Callback%20API-0077FF?logo=vk&logoColor=white)](https://dev.vk.com/api/callback/getting-started)
+[![MAX](https://img.shields.io/badge/MAX-Bot%20API-111827)](https://dev.max.ru/docs-api)
 [![Stripe](https://img.shields.io/badge/Stripe-billing-635BFF?logo=stripe&logoColor=white)](https://stripe.com/)
 
 多租户 SaaS · BYOK LLM · 按租户隔离的 RAG · 销售方法论（SPIN / NEPQ / AIDA）· 人工接管
@@ -27,12 +29,13 @@
 
 ---
 
-一个**多租户 SaaS**：在 Telegram、WhatsApp 和网页挂件上约 30 秒内回复进线，
+一个**多租户 SaaS**：在 Telegram、WhatsApp、Messenger、VK、MAX 和网页挂件上约 30 秒内回复进线，
 将客户从「随便看看」推进到提交申请 / 下单，并把高意向线索移交给人工坐席。
 由销售方法论（SPIN、NEPQ、AIDA）驱动，而非 FAQ 机器人。
 
 每个客户都是隔离的 `tenant`，拥有各自的渠道、LLM 配置和知识库——数据隔离
-在 **Postgres RLS** 层强制执行。**BYOK**：使用你自己的 OpenAI / Anthropic 密钥。
+在 **Postgres RLS** 层强制执行。**BYOK**：使用你自己的 AI provider key
+（OpenAI / OpenRouter / Ollama 等；Jina / Cohere 用于 reranker）。
 
 **第一阶段 ICP：** 招聘机构（RU / 独联体 / 中东，Telegram 优先，ARPU
 $99–199/月）。引擎本身与垂类无关——已提供多垂类模板，`exchange`（兑换）已上线。
@@ -48,7 +51,8 @@ $99–199/月）。引擎本身与垂类无关——已提供多垂类模板，`
 |---|---|---|
 | Telegram Bot + Userbot | RAG：pgvector + BM25 + RRF 融合 | 收件箱 + 会话接管 |
 | WhatsApp Cloud API | 多查询扩展 + MMR + 重排序 | 线索流水线（看板） |
-| 网页挂件（WebSocket） | BYOK LLM（OpenAI / Anthropic / Ollama） | 拖拽式漏斗构建器 |
+| Messenger + VK + MAX | Meta / VK / MAX webhook adapters | 服务目录 + provider marketplace |
+| 网页挂件（WebSocket） | BYOK LLM（OpenAI / OpenRouter / Ollama + 可选 reranker） | 拖拽式漏斗构建器 |
 | 自动 setWebhook（60 秒） | SPIN / NEPQ / AIDA 方法论 | A/B 实验 + ELO 排名 |
 | 按租户 RLS 隔离 | 护照 OCR + 图片视觉识别 | 群发触达 + 消息模板 |
 | 通用漏斗 phase 主干 | 幻觉防护 + 语义缓存 | 超管面板 · 邀请 · 审计 |
@@ -65,7 +69,7 @@ $99–199/月）。引擎本身与垂类无关——已提供多垂类模板，`
 /onboarding → 垂类 → 渠道 → LLM →（兑换：汇率 → 收付款信息）→ 知识库 → 完成
 ```
 
-接入 Telegram bot（60 秒自动 `setWebhook`）、WhatsApp 或网页挂件；保存 BYOK
+接入 Telegram bot（60 秒自动 `setWebhook`）、WhatsApp、Messenger、VK、MAX 或网页挂件；保存 BYOK
 LLM 密钥（AES-256-GCM 加密）；上传知识库文档。渠道立即开始接收进线，坐席可
 从收件箱接管任意会话。所有变更通过进程内总线 + ≤30 秒的 worker 轮询**实时生效**。
 完整流程见 [docs/engineering/ONBOARDING.md](docs/engineering/ONBOARDING.md)。
@@ -89,13 +93,13 @@ LLM 密钥（AES-256-GCM 加密）；上传知识库文档。渠道立即开始�
 
 | 应用 | 说明 |
 |---|---|
-| `apps/api` | HTTP 服务：webhook 处理（telegram / whatsapp / stripe）、`/ws/:slug`（网页）、完整 admin API、`/metrics`、`/healthz` |
+| `apps/api` | HTTP 服务：webhook 处理（telegram / whatsapp / facebook / vk / max / stripe）、`/ws/:slug`（网页）、完整 admin API、`/metrics`、`/healthz` |
 | `apps/worker` | 出站派发（`SKIP LOCKED` 队列）、渠道重载轮询、定时任务 |
 | `apps/admin-ui` | React 19 + Vite SPA（Tailwind v4 + shadcn/ui）——引导向导、仪表盘、渠道、会话、线索、漏斗构建器、审计等 |
 | `apps/vertical-*` | 垂类模板（`exchange` 已上线，另有 real-estate / recruitment / saas / video）——经 `packages/verticals` 加载，不单独部署 |
 
 领域逻辑位于 `packages/*`（以 `@chatman-media` 域发布到 npm）：`storage`
-（Drizzle schema + 迁移）、`channel-{core,telegram,whatsapp,facebook,web}`、`llm-router`、
+（Drizzle schema + 迁移）、`channel-{core,telegram,whatsapp,facebook,vk,max,web}`、`llm-router`、
 `kb`（RAG）、`sales`、`conversation-engine`、`verticals`、`observability`。
 依赖图与拆分事务（split-tx）管线详见 [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)。
 
@@ -153,6 +157,9 @@ bun run test                               # 对整个 monorepo 执行 bun test
 | `telegram_bot` | webhook + secret-token 头 | `apps/worker` → Bot API |
 | `telegram_userbot` | MTProto 接收循环（apps/api） | 进程内 |
 | `whatsapp` | webhook + `X-Hub-Signature-256` | `apps/worker` → Meta Graph |
+| `facebook` | Meta webhook + `X-Hub-Signature-256` | `apps/worker` → Messenger Send API |
+| `vk` | VK Callback API | `apps/worker` → VK `messages.send` |
+| `max` | MAX Bot API webhook + `X-Max-Bot-Api-Secret` | `apps/worker` → MAX `POST /messages` |
 | `web` | WebSocket `/ws/:slug` | 进程内 |
 
 进站消息先校验（按渠道验签 → 限流），在 tx1 持久化，经分类与 RAG 生成回复，
@@ -208,13 +215,13 @@ RAG 管线（约 180）、SaaS 路由集成，以及兑换工作流 mock。覆�
 | | **Lead Engine** | Intercom Fin | Chatbase | Decagon |
 |---|:---:|:---:|:---:|:---:|
 | 原生 Telegram | ✅ | ❌ | ❌ | ❌ |
-| WhatsApp / 网页 | ✅ | ✅ | 网页 | 网页 |
+| WhatsApp / Messenger / VK / MAX / 网页 | ✅ | ✅ | 网页 | 网页 |
 | BYOK LLM | ✅ | ❌ | 部分 | ❌ |
 | 人工接管 | ✅ | ✅ | ❌ | ✅ |
 | 线索流水线 + 漏斗构建器 | ✅ | ❌ | ❌ | ❌ |
 | 自托管 / 源码公开 | ✅ | ❌ | ❌ | ❌ |
 
-定位：面向以即时通讯为中心的市场（Telegram / WhatsApp）、AI 优先、支持 BYOK
+定位：面向以即时通讯为中心的市场（Telegram / WhatsApp / Messenger / VK / MAX / Web）、AI 优先、支持 BYOK
 且具备完整坐席工作流的客户服务。完整分析与路线图：
 [docs/strategy/COMPETITORS.md](docs/strategy/COMPETITORS.md) · [docs/strategy/ROADMAP.md](docs/strategy/ROADMAP.md)。
 

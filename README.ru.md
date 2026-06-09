@@ -4,7 +4,7 @@
 
 # Lead Engine
 
-**Мультиканальный AI Sales Closer — Telegram · WhatsApp · Messenger · Web-виджет**
+**AI front office для бизнеса, который живёт в мессенджерах**
 
 [![CI](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml/badge.svg)](https://github.com/chatman-media/lead-engine/actions/workflows/codeql.yml)
@@ -14,12 +14,14 @@
 [![Bun](https://img.shields.io/badge/Bun-1.3-fbf0df?logo=bun&logoColor=black)](https://bun.sh/)
 [![PostgreSQL + RLS](https://img.shields.io/badge/PostgreSQL-RLS%20%2B%20pgvector-336791?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![License: PolyForm NC 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
-[![Telegram](https://img.shields.io/badge/Telegram-bot%20%2B%20userbot-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
+[![Telegram](https://img.shields.io/badge/Telegram-bot%20%2B%20userbot-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/)
 [![WhatsApp](https://img.shields.io/badge/WhatsApp-Cloud%20API-25D366?logo=whatsapp&logoColor=white)](https://developers.facebook.com/docs/whatsapp)
 [![Messenger](https://img.shields.io/badge/Messenger-Send%20API-0084FF?logo=messenger&logoColor=white)](https://developers.facebook.com/docs/messenger-platform)
+[![VK](https://img.shields.io/badge/VK-Callback%20API-0077FF?logo=vk&logoColor=white)](https://dev.vk.com/api/callback/getting-started)
+[![MAX](https://img.shields.io/badge/MAX-Bot%20API-111827)](https://dev.max.ru/docs-api)
 [![Stripe](https://img.shields.io/badge/Stripe-billing-635BFF?logo=stripe&logoColor=white)](https://stripe.com/)
 
-Multi-tenant SaaS · BYOK LLM · per-tenant RAG · методологии продаж (SPIN / NEPQ / AIDA) · перехват оператором
+Telegram Bot + Userbot · WhatsApp · Facebook Messenger · VK · MAX · Web Widget · BYOK LLM · RAG · операторский handoff · marketplace провайдеров
 
 🌐 [🇬🇧 English](README.md) &nbsp;·&nbsp; 🇷🇺 **Русский** &nbsp;·&nbsp; [🇨🇳 中文](README.zh.md)
 
@@ -27,219 +29,320 @@ Multi-tenant SaaS · BYOK LLM · per-tenant RAG · методологии про
 
 ---
 
-**Multi-tenant SaaS**, который отвечает на входящие лиды за ~30 секунд в
-Telegram, WhatsApp и web-виджете — ведёт человека от «просто интересно» до
-заполненной анкеты / заявки и передаёт горячих лидов оператору. В основе —
-методологии продаж (SPIN, NEPQ, AIDA), а не FAQ-бот.
+Lead Engine — это **multi-tenant AI operations platform** для бизнесов, где
+продажи и исполнение идут через Telegram, WhatsApp, Messenger, VK, MAX и web
+widget. Это не FAQ-бот. Он превращает хаотичный входящий чат в структурированные
+заявки, стадии лида, ответы по базе знаний, решения оператора, передачу
+партнёрам и аудит.
 
-Каждый клиент — изолированный `tenant` со своими каналами, конфигом LLM и
-базой знаний; изоляция данных — на уровне **Postgres RLS**. **BYOK**:
-используете собственный ключ OpenAI / Anthropic.
+В текущем продукте есть два marketplace-слоя:
 
-**ICP фазы 1:** рекрутинговые агентства (RU / СНГ / MENA, Telegram-first,
-ARPU $99–199/мес). Сам движок вертикале-агностичен — есть шаблоны под разные
-вертикали, `exchange` (обмен) уже live. *(Фаза 2: недвижимость · Фаза 3: горизонталь.)*
+- **AI provider routing** — BYOK-конфиги на тенанта для назначений `chat`,
+  `embed`, `vision`, `judge`, `reranker`, `transcribe`.
+- **Service provider marketplace** — готовые и кастомные исполнители услуг,
+  которых можно поставить в каталог тенанта и дальше маршрутизировать в
+  воронку, партнёрский handoff, webhook или ручную обработку.
 
-📖 **Docs:** [индекс](docs/README.md) · [Architecture](docs/engineering/ARCHITECTURE.md) · [Onboarding](docs/engineering/ONBOARDING.md) · [Exchange](docs/engineering/EXCHANGE.md) · [Configuration](docs/engineering/CONFIGURATION.md) · [Roadmap](docs/strategy/ROADMAP.md) · [Competitors](docs/strategy/COMPETITORS.md)
+У каждого tenant'а свои каналы, LLM-конфиги, база знаний, воронки, каталог
+услуг, партнёрский ledger и зашифрованные секреты. Изоляция данных enforced на
+уровне **Postgres Row-Level Security**, а не только фильтрами в коде.
+
+📖 **Docs:** [индекс](docs/README.md) · [Architecture](docs/engineering/ARCHITECTURE.md) · [Onboarding](docs/engineering/ONBOARDING.md) · [Service catalog](docs/engineering/SERVICE_CATALOG.md) · [Exchange](docs/engineering/EXCHANGE.md) · [Configuration](docs/engineering/CONFIGURATION.md) · [Roadmap](docs/strategy/ROADMAP.md)
 
 ---
 
-## Коротко о возможностях
+## Что уже есть
 
-| Каналы | AI-движок | Инструменты оператора |
+| Слой | Что работает |
+|---|---|
+| Мессенджеры | Telegram bot, Telegram userbot (MTProto), WhatsApp Cloud API, Facebook Messenger, VK community messages, MAX Bot API, WebSocket web widget |
+| AI routing | Конфиги провайдеров на тенанта, encrypted BYOK keys, hot reload в API, отдельные назначения для chat / embeddings / vision / judge / reranker / voice transcription |
+| Retrieval | Hybrid RAG: pgvector, BM25, RRF, multi-query, dynamic trimming, MMR, Jina/Cohere reranker, hallucination guard |
+| Workflows | Универсальный костяк воронки, AI funnel builder, drag-drop стадии/поля, multi-request concierge, exchange rates/orders, awaiting-operator стадии |
+| Marketplace услуг | Curated Phuket providers, свои провайдеры, service catalog routes, partner services, partner deals, комиссии и handoff modes |
+| Кабинет оператора | Inbox, AI/human takeover, board лидов, каталог, партнёры, уведомления, outreach, шаблоны, аудит, диагностика, admin copilot |
+| Безопасность | Tenant RLS, AES-256-GCM secrets, webhook signatures, rate limiting, audit без raw secrets |
+
+---
+
+## Как устроен продукт
+
+### Мессенджеры
+
+| Kind | Входящие | Исходящие | Детали |
+|---|---|---|---|
+| `telegram_bot` | Bot API webhook + `X-Telegram-Bot-Api-Secret-Token` | worker -> Bot API | Auto-`setWebhook`, если задан `PLATFORM_PUBLIC_URL` |
+| `telegram_userbot` | MTProto receive loop в `apps/api` | in-process userbot dispatcher | Per-tenant `api_id` / `api_hash`, fallback env |
+| `whatsapp` | Meta webhook + `X-Hub-Signature-256` | worker -> Meta Graph | Per-tenant access token, verify token, app secret |
+| `facebook` | Messenger webhook + `X-Hub-Signature-256` | worker -> Messenger Send API | Page Access Token, правило 24h response window |
+| `vk` | VK Callback API | worker -> VK `messages.send` | Сообщения сообщества, text-first MVP |
+| `max` | MAX Bot API webhook + `X-Max-Bot-Api-Secret` | worker -> MAX `POST /messages` | Per-channel bot token и webhook secret, text-first MVP |
+| `web` | WebSocket `/ws/:slug` | in-process web dispatcher | Embed script + standalone demo client |
+
+Входящее валидируется, проходит rate-limit, сохраняется в `tx1`, затем LLM/RAG
+работает **без открытой DB-транзакции**, после чего исходящее кладётся в очередь
+в `tx2`. Worker забирает `outbound_queue` через `FOR UPDATE SKIP LOCKED`; web и
+userbot отправляются in-process, потому что live-соединение живёт в `apps/api`.
+
+### AI-провайдеры
+
+Тенант может собрать свою модельную связку:
+
+| Purpose | Типичные провайдеры | Для чего |
 |---|---|---|
-| Telegram Bot + Userbot | RAG: pgvector + BM25 + RRF-fusion | Inbox + перехват диалога |
-| WhatsApp Cloud API | Multi-query + MMR + reranking | Воронка лидов (Kanban) |
-| Web-виджет (WebSocket) | BYOK LLM (OpenAI / Anthropic / Ollama) | Drag-and-drop конструктор воронки |
-| Auto-setWebhook (60 сек) | SPIN / NEPQ / AIDA | A/B-эксперименты + ELO |
-| Изоляция per-tenant (RLS) | OCR паспорта + vision по фото | Рассылки + шаблоны сообщений |
-| Универсальный «костяк» фаз воронки | Hallucination guard + semantic cache | Superadmin-панель · инвайты · аудит |
-| Шаблоны вертикалей (exchange live) | Per-purpose LLM-роутинг | Admin-копилот (page-aware, BYOK) |
+| `chat` | OpenAI, OpenRouter, Ollama; DB/UI также несёт Anthropic slots | Ответы, extraction, sales reasoning, tools |
+| `embed` | OpenAI / OpenAI-compatible endpoints, Ollama | Индексация KB и retrieval vectors |
+| `vision` | OpenAI, OpenRouter-compatible vision models | Анализ фото/документов, KYC |
+| `judge` | OpenAI, OpenRouter, Anthropic | Quality lab, self-play, evaluation |
+| `reranker` | Jina, Cohere | Cross-encoder после hybrid retrieval |
+| `transcribe` | OpenRouter, OpenAI-compatible APIs | Расшифровка voice notes, включая Groq через custom base URL |
+
+Ключи лежат в `tenant_secrets` под AES-256-GCM. Один ключ можно переиспользовать
+между назначениями одного провайдера. Изменения применяются без рестарта
+`apps/api`.
+
+### Marketplace провайдеров услуг
+
+Каталог — главная поверхность для бизнесов, которые продают не одну услугу, а
+набор операций: трансфер, уборка, массаж, салон, жильё, exchange, кастомные
+офферы и любые услуги тенанта.
+
+Услуга в каталоге ведёт в один из четырёх маршрутов:
+
+| Route type | Значение |
+|---|---|
+| `funnel` | Lead Engine сам ведёт процесс: стадии, поля, AI-поведение, операторские шаги |
+| `partner_service` | Услугу исполняет партнёр/провайдер; платформа трекает handoff и комиссию |
+| `webhook` | Заявка уходит во внешнюю систему |
+| `manual` | Оператор разбирает вручную |
+
+Curated marketplace install создаёт сразу `partners`, `partner_services` и
+`service_catalog_items`. Если нужного исполнителя нет в витрине, его можно
+добавить как кастомного провайдера из UI. Детали:
+[SERVICE_CATALOG.md](docs/engineering/SERVICE_CATALOG.md).
 
 ---
 
-## Онбординг и квоты
+## Vertical packs
 
-Self-service — **без env-переменных и рестартов**. Публичная регистрация
-закрыта по умолчанию (`ALLOW_PUBLIC_SIGNUP=1`, чтобы открыть); первый админ —
-`superadmin`. Доступ к кабинету гейтит обязательный vertical-aware мастер:
+Runtime вертикале-агностичен, но в репозитории уже есть готовые стартовые
+наборы: воронки, поля, промпты и поведение стадий.
 
+| Template | Бизнес | Статус |
+|---|---|---|
+| `exchange_v1` | Crypto/RUB -> THB exchange desk | live, самая активная |
+| `concierge_v1` | Multi-service desk для вилл, expat и hospitality | multi-request, provider handoff |
+| `recruitment_v1` | Рекрутинг и релокация | GTM ICP |
+| `modeling_v1` | Модельные агентства | implemented |
+| `real_estate_v1` | Продажа недвижимости | implemented |
+| `saas_v1` | SaaS sales pipeline | implemented |
+| `video_v1` | Видеопродакшн | implemented |
+| `visa_v1` | Визы и immigration services | implemented |
+| `scooter_v1` | Аренда байков и скутеров | implemented |
+
+Универсальный костяк:
+
+```text
+capture -> qualify -> offer -> [clear] -> [fulfill] -> won / lost
 ```
-/onboarding → вертикаль → канал → LLM → (обмен: курсы → реквизиты) → KB → готово
+
+У активных стадий хранится `phase`; intake и terminal-стадии — якоря. AI builder
+и `/api/admin/workflows/apply` валидируют монотонность фаз и наличие обязательных
+`qualify` / `offer` перед сохранением.
+
+---
+
+## Демо
+
+| Демо | Что показывает |
+|---|---|
+| `apps/landing` | Public demos: exchange, concierge/service desk, provider marketplace, visa, vertical library |
+| `apps/api/demo/web-chat.html` | Standalone web-channel клиент для `/ws/:slug` |
+| `apps/api/scripts/seed-modeling-demo.ts` | Seed/demo data для modeling vertical |
+| `docs/gtm/sales-bot/SETUP.md` | Meta-demo: бот, который продаёт сам Lead Engine |
+| `packages/kb/examples/*` | RAG-примеры с OpenAI или локальной Ollama |
+
+Запустить landing demos:
+
+```bash
+bun run dev:landing
 ```
 
-Подключаете Telegram-бот (auto-`setWebhook` за 60 сек), WhatsApp или
-web-виджет; сохраняете BYOK-ключ LLM (шифруется AES-256-GCM); грузите
-документы в базу знаний. Каналы принимают входящие сразу, оператор может
-перехватить любой диалог из inbox. Всё применяется **на лету** через
-in-process bus + поллинг воркера ≤30 сек. Полный гайд:
-[docs/engineering/ONBOARDING.md](docs/engineering/ONBOARDING.md).
-
-**Квоты по тарифам** (`apps/api/src/lib/plans.ts`):
-
-| Тариф | Каналы | KB-доки | Rate/мин | Цена |
-|---|---|---|---|---|
-| `free` | 100 | 100000 | 120 | $0 |
-| `starter` | 3 | 500 | 60 | $99/мес |
-| `pro` | 10 | 10000 | 120 | $199/мес |
-| `enterprise` | 100 | 100000 | 600 | custom |
-
-> В текущей exchange-/self-host-конфигурации `free` фактически **безлимитен**
-> (SaaS-биллинга нет); `starter`/`pro` остаются в коде под Stripe-биллинг.
-> Превышение лимита → `402` с `{ reason, limit, current, plan, upgradeHint }`.
+Для API/admin stack используйте quick start ниже, затем откройте кабинет и
+поставьте vertical/provider из UI.
 
 ---
 
 ## Архитектура
 
-| Приложение | Что это |
+| App / package | Ответственность |
 |---|---|
-| `apps/api` | HTTP-сервер: webhook-обработчики (telegram / whatsapp / stripe), `/ws/:slug` (web), весь admin API, `/metrics`, `/healthz` |
-| `apps/worker` | Отправка исходящих (`SKIP LOCKED`-очередь), поллинг перезагрузки каналов, cron |
-| `apps/admin-ui` | React 19 + Vite SPA (Tailwind v4 + shadcn/ui) — мастер онбординга, дашборд, каналы, диалоги, лиды, конструктор воронки, аудит, … |
-| `apps/vertical-*` | Шаблоны вертикалей (`exchange` live + real-estate / recruitment / saas / video) — грузятся через `packages/verticals`, не деплоятся |
+| `apps/api` | Hono HTTP server: auth, admin API, webhooks, web widget WS, hot reload, metrics |
+| `apps/worker` | Outbound queue dispatcher, channel reload polling, cron |
+| `apps/admin-ui` | React 19 + Vite cabinet: onboarding, channels, settings, catalog, leads, conversations, quality lab |
+| `apps/landing` | Public demo/marketing site |
+| `apps/vertical-*` | Vertical template packages, загружаются через `packages/verticals` |
+| `packages/storage` | Drizzle schema, migrations, RLS helpers |
+| `packages/channel-*` | Channel adapters за `ChannelAdapter` |
+| `packages/llm-router` | Provider clients и per-tenant routing |
+| `packages/kb` | RAG, ingest, reranking, tools, vision helpers |
+| `packages/sales` | Styles, skills, stage classifier, coach/evaluation |
+| `packages/conversation-engine` | Inbound pipeline, DAL, `withTenant`, reply dispatch |
+| `packages/observability` | JSON logger и Prometheus metrics |
 
-Доменная логика — в `packages/*` (публикуются в npm под `@chatman-media`):
-`storage` (Drizzle-схема + миграции), `channel-{core,telegram,whatsapp,facebook,web}`,
-`llm-router`, `kb` (RAG), `sales`, `conversation-engine`, `verticals`,
-`observability`. Граф зависимостей и split-tx-пайплайн —
-в [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md).
+Граф зависимостей acyclic; приложения собирают конкретные адаптеры и routes,
+а доменные пакеты не знают про UI/HTTP. Детали:
+[ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md).
 
 ---
 
-## Быстрый старт (локально)
+## Быстрый старт
 
-Нужны [Bun](https://bun.sh) 1.3.14+ и Docker (Postgres + pgvector).
+Нужны [Bun](https://bun.sh) 1.3.14+ и Docker.
 
 ```bash
 git clone git@github.com:chatman-media/lead-engine.git
-cd lead-engine && bun install
+cd lead-engine
+bun install
 
 cp .env.example .env
-# Минимум: PLATFORM_MASTER_KEY (openssl rand -hex 32),
-#          TELEGRAM_WEBHOOK_SECRET (любая строка),
-#          PLATFORM_PUBLIC_URL=http://localhost:3000 (для auto-setWebhook)
+# Минимум:
+#   DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine
+#   PLATFORM_MASTER_KEY=<openssl rand -hex 32>
+#   TELEGRAM_WEBHOOK_SECRET=dev-tg-secret
+#   ALLOW_PUBLIC_SIGNUP=1   # только для локалки
 
-bun db:up                                       # postgres @ 5434
-bun run apps/api/scripts/reset-and-migrate.ts   # применить миграции
+bun db:up
+bun run apps/api/scripts/reset-and-migrate.ts
 
-bun run dev          # apps/api  → PORT 3000
-bun run dev:worker   # apps/worker (исходящие + поллинг)
-cd apps/admin-ui && bun run dev   # admin-ui → http://localhost:5173
+bun run dev          # apps/api -> http://localhost:3000
+bun run dev:worker   # outbound worker
+bun run dev:ui       # admin UI -> http://localhost:5173
 ```
 
-Для локалки поставьте `ALLOW_PUBLIC_SIGNUP=1`, откройте admin UI, создайте
-tenant и пройдите мастер.
+После локального signup/reset flow дефолтный логин: `bob@demo.io` /
+`test1234`. Публичный signup закрыт, пока не выставлен `ALLOW_PUBLIC_SIGNUP=1`.
+
+Полезные команды:
 
 ```bash
-bun db:up / db:down / db:reset / db:psql   # хелперы Postgres-контейнера
-bun run typecheck                          # tsc по всем пакетам
-bun run test                               # bun test по монорепо
+bun db:up
+bun db:down
+bun db:reset
+bun db:psql
+
+bun run typecheck
+bun run test
+bun run check
 ```
 
 ---
 
-## Multi-tenant и безопасность
+## Инварианты
 
-Каждый клиент — строка `tenant`; все доменные данные скоупятся по `tenant_id`.
-На tenant-таблицы навешан `FORCE ROW LEVEL SECURITY`, а весь продакшен-код
-оборачивает вызовы репо в `withTenant(db, tenantId, fn)` (выставляет
-`app.tenant_id` на транзакцию). Секреты (ключи LLM, userbot-сессии) хранятся
-в `tenant_secrets` зашифрованными AES-256-GCM.
-
-> **Продакшен:** `apps/api` / `apps/worker` ОБЯЗАНЫ подключаться под ролью
-> Postgres `NOSUPERUSER NOBYPASSRLS`, иначе RLS обходится. Оба логируют
-> `"RLS enforced"` / `"RLS not enforced"` на старте. Миграции — под отдельной
-> owner-ролью. Покрыто RLS- и multi-tenant-интеграционными тестами.
-
----
-
-## Каналы и пайплайн
-
-| Канал | Входящие | Исходящие |
-|---|---|---|
-| `telegram_bot` | webhook + secret-token заголовок | `apps/worker` → Bot API |
-| `telegram_userbot` | MTProto receive-loop (apps/api) | in-process |
-| `whatsapp` | webhook + `X-Hub-Signature-256` | `apps/worker` → Meta Graph |
-| `web` | WebSocket `/ws/:slug` | in-process |
-
-Входящее валидируется (подпись по каналу → rate-limit), сохраняется в tx1,
-классифицируется и получает RAG-ответ, затем исходящее ставится в очередь в
-tx2, а webhook отвечает за <100 мс; `apps/worker` разгребает `outbound_queue`
-через `SKIP LOCKED`. Диаграмма и пошагово:
-[docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md).
+- **RLS обязателен.** Все production reads/writes tenant-таблиц идут через
+  `withTenant(db, tenantId, fn)`. В проде DB role приложения должна быть
+  `NOSUPERUSER NOBYPASSRLS`.
+- **LLM не вызывается внутри долгой транзакции.** `processInbound` сначала
+  persist'ит, отпускает DB connection, вызывает LLM/RAG, затем открывает вторую
+  транзакцию для outbound enqueue.
+- **Hot reload — часть продукта.** LLM configs, channels и tenant status
+  применяются сразу в `apps/api`; worker подхватывает каналы polling'ом.
+- **Secrets не попадают в audit.** LLM keys, channel tokens, userbot sessions,
+  exchange requisites и provider credentials хранятся encrypted в
+  `tenant_secrets`.
 
 ---
 
 ## Admin API
 
-~120 REST-эндпоинтов под `/api/admin/*` (Bearer JWT из `/api/auth/login`):
-auth и инвайты, статус онбординга, каналы, конфиги LLM, KB, диалоги, лиды +
-конструктор воронки, стили, эксперименты, биллинг (Stripe), рассылки и
-superadmin. Смотрите [`apps/api/src/routes/`](apps/api/src/routes); сквозной
-tenant-flow — в [docs/engineering/ONBOARDING.md](docs/engineering/ONBOARDING.md).
+Authenticated endpoints под `/api/admin/*`:
+
+- auth, invites, password reset
+- onboarding status
+- channel CRUD
+- LLM provider configs
+- KB documents
+- conversations и operator takeover
+- funnels, AI workflow builder, leads
+- service catalog, provider marketplace, partners, partner deals
+- exchange rates, requisites, orders
+- notifications, outreach, templates
+- billing, audit, diagnostics, quality lab, superadmin
+
+Route factories и integration tests: [`apps/api/src/routes/`](apps/api/src/routes).
 
 ---
 
 ## Тесты
 
+Тестам нужен Postgres на `5434`.
+
 ```bash
 DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
 ```
 
-950+ тестов по 15 пакетам — multi-tenant E2E через реальный webhook-обработчик,
-контракт «не-обхода» RLS, RAG-пайплайн (~180), интеграционные тесты SaaS-роутов
-и моки exchange-воркфлоу. Покрытие: `bun test --coverage`.
-Подробнее: [docs/engineering/TESTING.md](docs/engineering/TESTING.md).
+Suite покрывает RLS enforcement, multi-tenant route isolation, webhook flows,
+channel adapters, RAG, exchange workflows, service catalog/provider marketplace,
+quality lab и split-transaction pipeline. Подробнее:
+[TESTING.md](docs/engineering/TESTING.md).
 
 ---
 
 ## Деплой
 
-Ключевые env (полный референс в [docs/engineering/CONFIGURATION.md](docs/engineering/CONFIGURATION.md);
-ops — в [docs/operations/SERVER_RUNBOOK.md](docs/operations/SERVER_RUNBOOK.md)):
+Ключевые env vars:
 
-| Переменная | Описание |
+| Var | Описание |
 |---|---|
-| `DATABASE_URL` ✅ | Postgres — **роль NOSUPERUSER NOBYPASSRLS в проде** |
-| `PLATFORM_MASTER_KEY` ✅ | 32-байтный hex для AES-256-GCM (`tenant_secrets`) |
-| `TELEGRAM_WEBHOOK_SECRET` ✅ | заголовок `X-Telegram-Bot-Api-Secret-Token` |
-| `PLATFORM_PUBLIC_URL` | базовый URL apps/api для auto-`setWebhook` |
-| `STRIPE_*` | secret-ключ + price-ID + webhook-секрет (пусто → биллинг выключен) |
-| `RATE_LIMIT_PER_MIN` / `_PER_HOUR` | по умолчанию 60 / 600 (`0` = выкл — не в проде) |
+| `DATABASE_URL` | Postgres connection string; app role в проде должна быть `NOSUPERUSER NOBYPASSRLS` |
+| `PLATFORM_MASTER_KEY` | 32-byte hex key для AES-256-GCM secrets |
+| `PLATFORM_PUBLIC_URL` | Public API URL для webhooks и snippets |
+| `TELEGRAM_WEBHOOK_SECRET` | Telegram webhook secret-token header |
+| `WHATSAPP_VERIFY_TOKEN` / `WHATSAPP_APP_SECRET` | Fallback-креды Meta WhatsApp webhook |
+| `FACEBOOK_VERIFY_TOKEN` / `FACEBOOK_APP_SECRET` | Fallback-креды Meta Messenger webhook |
+| `MAX_WEBHOOK_SECRET` | Optional fallback для MAX webhook; per-channel secret предпочтительнее |
+| `WEB_WS_AUTH_SECRET` | Optional shared secret для web widget |
+| `STRIPE_*` | Optional billing |
+| `RATE_LIMIT_PER_MIN` / `RATE_LIMIT_PER_HOUR` | Inbound tenant rate limits |
 
-Миграции запускайте под owner / BYPASSRLS-ролью, приложения — под
-ограниченной. Полный чеклист прода: [docs/operations/SERVER_RUNBOOK.md](docs/operations/SERVER_RUNBOOK.md).
+Миграции запускаются под owner/BYPASSRLS-ролью, apps — под restricted app role.
+Полные референсы: [CONFIGURATION.md](docs/engineering/CONFIGURATION.md) и
+[SERVER_RUNBOOK.md](docs/operations/SERVER_RUNBOOK.md).
 
 ---
 
 ## Позиционирование
 
-| | **Lead Engine** | Intercom Fin | Chatbase | Decagon |
+| Capability | Lead Engine | Intercom Fin | Chatbase | ManyChat |
 |---|:---:|:---:|:---:|:---:|
-| Нативный Telegram | ✅ | ❌ | ❌ | ❌ |
-| WhatsApp / Web | ✅ | ✅ | web | web |
-| BYOK LLM | ✅ | ❌ | частично | ❌ |
-| Перехват оператором | ✅ | ✅ | ❌ | ✅ |
-| Воронка лидов + конструктор | ✅ | ❌ | ❌ | ❌ |
-| Self-host / source-available | ✅ | ❌ | ❌ | ❌ |
+| Telegram bot + personal account | да | нет | нет | частично |
+| WhatsApp / Messenger / VK / MAX / Web | да | частично | web | да |
+| BYOK LLM на тенанта | да | нет | частично | нет |
+| RAG + workflow stages | да | частично | только RAG | flow-builder |
+| Operator takeover | да | да | нет | да |
+| Service provider marketplace | да | нет | нет | нет |
+| Self-host / source-available | да | нет | нет | нет |
 
-Ниша: AI-first клиентский сервис для messenger-центричных рынков (Telegram /
-WhatsApp) с BYOK и полным workflow оператора. Полный разбор и роадмап:
-[docs/strategy/COMPETITORS.md](docs/strategy/COMPETITORS.md) · [docs/strategy/ROADMAP.md](docs/strategy/ROADMAP.md).
+Ниша: messenger-native AI operations для RU/CIS/MENA и service-heavy бизнесов.
+Не "бот отвечает FAQ", а "мессенджерный диалог превращается в revenue workflow".
 
 ---
 
 ## Контрибьютинг и лицензия
 
-PR приветствуются. Используйте [Conventional Commits](https://www.conventionalcommits.org/)
-(`feat:` / `fix:` / …) — semantic-release выводит версии и публикует
-`@chatman-media/*` в npm на push в `main`. Перед PR прогоните
-`bun run typecheck && bun test` и прочитайте [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md)
-перед правками `apps/api` или пакетов (контракты RLS / `withTenant` и split-tx —
-критичные инварианты).
+Используйте [Conventional Commits](https://www.conventionalcommits.org/).
+Перед отправкой кода:
 
-**Лицензия:** продукт — [PolyForm Noncommercial 1.0.0](LICENSE): любое некоммерческое использование бесплатно; **коммерческое — по платной лицензии** (контакт: [chatman-media](https://github.com/chatman-media)). Переиспользуемые библиотеки в `packages/*` остаются под **MIT**. © Alexander Kireev / chatman-media.
+```bash
+bun run typecheck
+DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine bun test
+```
+
+**Лицензия:** продукт — [PolyForm Noncommercial 1.0.0](LICENSE). Коммерческое
+использование требует платной лицензии от
+[chatman-media](https://github.com/chatman-media). Reusable libraries в
+`packages/*` остаются MIT. © Alexander Kireev / chatman-media.
 
 <div align="center">
 

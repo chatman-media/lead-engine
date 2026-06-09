@@ -91,13 +91,15 @@ Defensible остаётся **вертикаль + дистрибуция в Tel
 
 | Тир | Цена | Включено |
 |-----|------|---------|
-| Free | $0 | 1 канал, 100 AI-ответов/мес, BYOK |
+| Free | $0 | Self-host / exchange-focused режим с generous limits, BYOK |
 | **Starter** | **$99/мес** | 3 канала, 500 KB-документов, 3 оператора, BYOK |
 | **Pro** | **$199/мес** | 10 каналов, 10K документов, без лимита операторов, BYOK |
 | Enterprise | custom | 100+ каналов, self-host, SLA |
 
-**BYOK = клиент платит OpenAI/Anthropic напрямую.** Мы берём только платформенный
-сбор. Против Intercom Fin: при 200 resolutions/мес Fin = $198, мы = $99 + $0 LLM.
+**BYOK = клиент платит AI-провайдеру напрямую** (OpenAI/OpenRouter/Ollama и
+purpose-specific провайдеры вроде Jina/Cohere для reranker). Мы берём только
+платформенный сбор. Против Intercom Fin: при 200 resolutions/мес Fin = $198,
+мы = $99 + прямой usage-cost провайдера.
 
 ---
 
@@ -106,7 +108,7 @@ Defensible остаётся **вертикаль + дистрибуция в Tel
 > Ваши рекрутёры теряют треть лидов пока отвечают на другой чат. Наш AI
 > отвечает в Telegram за 30 секунд, квалифицирует по NEPQ, применяет принципы
 > Cialdini — и передаёт рекрутеру только горячие анкеты. $99/мес, ваш
-> собственный OpenAI ключ. Ни Intercom, ни Tidio, ни ManyChat этого не делают
+> собственный AI-provider key. Ни Intercom, ни Tidio, ни ManyChat этого не делают
 > для Telegram. Мы делаем.
 
 ---

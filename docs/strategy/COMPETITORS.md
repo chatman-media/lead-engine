@@ -115,9 +115,9 @@ passport-OCR, dance-video, 12-state funnel, `recruitment_uae_v1` в проде).
 
 Мы строим **Lead Engine** — multi-tenant SaaS, где бизнес:
 
-1. Регается, подключает **свой** OpenAI / Anthropic API ключ (BYOK).
-2. Подключает каналы: **Telegram first**, потом WhatsApp, web-виджет,
-   позже IG / VK / Avito.
+1. Регается, подключает **свой** AI-provider key (BYOK).
+2. Подключает каналы: **Telegram first**, затем WhatsApp, Facebook Messenger,
+   VK, MAX или web-виджет; позже IG / Avito / OK.
 3. Грузит документы → RAG knowledge base.
 4. AI отвечает на входящие лиды; **оператор** может перехватить
    диалог.
@@ -216,7 +216,7 @@ BYOK + Telegram-native + multi-tenant + operator-handoff + готовность
 
 - Telegram-native (Sierra, Decagon, Ada, Lyro, Helpshift не считают
   Telegram first-class каналом).
-- BYOK — клиент платит OpenAI / Anthropic напрямую, без наценки. Никто
+- BYOK — клиент платит выбранному AI-провайдеру напрямую, без наценки. Никто
   из Chatbase / Tidio / Intercom / Sierra так не делает; они включают
   inference в seat/resolution цену.
 - Multi-tenant agency mode из коробки (один админ, много sub-tenant'ов,
@@ -278,11 +278,11 @@ flat-msg cap с BYOK — чёткий positioning-wedge.
 | Web widget | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | WhatsApp | ✅ | через API | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | через API | ✅ | ❌ | ✅ | ✅ | ✅ |
 | Instagram DM | ⏳ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ | ❌ |
-| Facebook Mess. | ⏳ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Facebook Mess. | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ |
 | Voice | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | partial | ❌ | ✅ | ✅ | ✅ |
 | Email | ⏳ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | partial | ❌ | ✅ | ✅ | ✅ |
 | Slack / Discord | ⏳ | ✅ | ❌ | partial | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | partial | ✅ |
-| VK / Avito / OK | ⏳ moat | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| VK / Avito / OK | ✅ VK; Avito/OK TBD | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 **Telegram-провал реален.** Tidio требует Zapier для Telegram. Intercom
 Fin его не имеет. Sierra / Decagon / Ada / Forethought игнорируют. У
@@ -290,8 +290,8 @@ Crisp и ManyChat он есть, но как один из многих — не
 Для рынков где Telegram = SMS (RU, CIS, IR, UA, KZ, UZ, RS, BY, часть
 MENA, Индонезия, Вьетнам) — это защищаемая ниша.
 
-VK / Avito / OK — бонусный moat; ни один не-российский вендор такого
-не отправит.
+VK уже закрывает локальный moat; Avito / OK остаются будущими каналами. Ни один
+не-российский вендор такой связки не шипает из коробки.
 
 ---
 
