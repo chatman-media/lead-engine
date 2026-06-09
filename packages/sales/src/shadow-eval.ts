@@ -109,6 +109,10 @@ export async function runShadowEval(
       status: "complete",
       decision: "inconclusive",
       totalPairs: 0,
+      aWins: 0,
+      bWins: 0,
+      draws: 0,
+      winRateLb: null,
     });
     return;
   }
@@ -150,9 +154,14 @@ export async function runShadowEval(
       if (result.verdict.winner === "a") aWins++;
       else if (result.verdict.winner === "b") bWins++;
       else draws++;
+      const pairsDone = aWins + bWins + draws;
+      const bAdjusted = bWins + 0.5 * draws;
       await deps.shadowRepo.update(input.evalId, {
-        totalPairs: aWins + bWins + draws,
-        bWins: bWins + 0.5 * draws,
+        totalPairs: pairsDone,
+        aWins,
+        bWins,
+        draws,
+        winRateLb: wilsonLowerBound(bAdjusted, pairsDone),
       });
     }
 
@@ -162,12 +171,22 @@ export async function runShadowEval(
       status: "complete",
       decision,
       totalPairs: total,
-      bWins: bAdjusted,
+      aWins,
+      bWins,
+      draws,
+      winRateLb: wilsonLowerBound(bAdjusted, total),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    const pairsDone = aWins + bWins + draws;
+    const bAdjusted = bWins + 0.5 * draws;
     await deps.shadowRepo.update(input.evalId, {
       status: "failed",
+      totalPairs: pairsDone,
+      aWins,
+      bWins,
+      draws,
+      winRateLb: pairsDone > 0 ? wilsonLowerBound(bAdjusted, pairsDone) : null,
       error: msg,
     });
     console.warn(

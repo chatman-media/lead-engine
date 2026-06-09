@@ -267,6 +267,17 @@ export function SaasQuality() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if ((coach?.totals.shadows.running ?? 0) <= 0) return;
+    const interval = window.setInterval(() => {
+      saas
+        .getQualityCoachSummary()
+        .then(setCoach)
+        .catch(() => {});
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [coach?.totals.shadows.running]);
+
   async function handleExport() {
     const parsedLimit = parseLimit(limit);
     if (parsedLimit === null) {
@@ -475,19 +486,15 @@ export function SaasQuality() {
     setProposalActionId(id);
     try {
       const preview = await saas.getQualityShadowPreview(id, { limit: 200 });
+      let result;
       if (!preview.preview.ready) {
-        const missing = preview.preview.missing;
-        toast.error(
-          missing
-            ? `Нет pairwise для ${missing.styleASlug} vs ${missing.styleBSlug}`
-            : "Недостаточно pairwise для shadow eval",
-        );
-        return;
+        result = await saas.runQualityShadowEvaluation(id, { runs: 1, maxTurns: 6 });
+        toast.success(`Shadow eval запущен: ${result.shadow.pairsPlanned} pairs`);
+      } else {
+        result = await saas.createQualityShadowEvaluation(id, { limit: 200 });
+        toast.success(`Shadow eval: ${result.shadow.decision ?? result.shadow.status}`);
       }
-
-      const result = await saas.createQualityShadowEvaluation(id, { limit: 200 });
       setCoach(await saas.getQualityCoachSummary());
-      toast.success(`Shadow eval: ${result.shadow.decision ?? result.shadow.status}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearToken();

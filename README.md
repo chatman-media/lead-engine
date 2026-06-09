@@ -178,7 +178,9 @@ auth & invites, onboarding status, channels, LLM configs, KB, conversations,
 leads + funnel builder, styles, experiments, billing (Stripe), outreach, and
 superadmin. Quality Lab endpoints include self-play, pairwise, generated coach
 proposals via `POST /api/admin/quality/coach/proposals`, and shadow evaluation
-planning via `GET /api/admin/quality/coach/proposals/:id/shadow-preview`. Browse
+planning via `GET /api/admin/quality/coach/proposals/:id/shadow-preview` plus
+background runs via
+`POST /api/admin/quality/coach/proposals/:id/shadow-evaluations/run`. Browse
 [`apps/api/src/routes/`](apps/api/src/routes); the end-to-end tenant flow is in
 [docs/engineering/ONBOARDING.md](docs/engineering/ONBOARDING.md).
 

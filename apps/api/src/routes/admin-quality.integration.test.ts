@@ -959,7 +959,7 @@ describe("admin quality JSONL export", () => {
       },
       missing: {
         reason: "no_pairwise",
-        nextAction: "run_pairwise",
+        nextAction: "run_shadow_eval",
         styleASlug: parentStyle.slug,
         styleBSlug: candidateStyle.slug,
       },
@@ -1048,6 +1048,139 @@ describe("admin quality JSONL export", () => {
       await authReq(tokenA, "/api/admin/quality/coach/summary")
     ).json()) as QualityCoachSummaryResponse;
     expect(summary.shadows.some((item) => item.newStyleSlug === candidateStyle.slug)).toBe(true);
+  });
+
+  it("starts and completes a background shadow evaluation when pairwise coverage is missing", async () => {
+    if (!sql) return;
+    resetQualityQueues();
+    const now = Math.floor(Date.now() / 1000);
+    const slugSuffix = `shadow-run-${now}`;
+    const [parentStyle] = await db
+      .insert(stylesTable)
+      .values({
+        tenantId: tenantA,
+        slug: `style-parent-${slugSuffix}`,
+        displayName: "Style Parent Background",
+        configJson: JSON.stringify(
+          styleConfig(`style-parent-${slugSuffix}`, "Style Parent Background", "neutral"),
+        ),
+        isActive: true,
+        version: 1,
+        createdAt: now,
+      })
+      .returning({ id: stylesTable.id, slug: stylesTable.slug });
+    expect(parentStyle).toBeTruthy();
+    if (!parentStyle) return;
+
+    const [candidateStyle] = await db
+      .insert(stylesTable)
+      .values({
+        tenantId: tenantA,
+        slug: `style-candidate-${slugSuffix}`,
+        displayName: "Style Candidate Background",
+        configJson: JSON.stringify(
+          styleConfig(`style-candidate-${slugSuffix}`, "Style Candidate Background", "warmer"),
+        ),
+        isActive: false,
+        version: 1,
+        parentId: parentStyle.id,
+        createdAt: now + 1,
+      })
+      .returning({ id: stylesTable.id, slug: stylesTable.slug });
+    expect(candidateStyle).toBeTruthy();
+    if (!candidateStyle) return;
+
+    const [proposal] = await db
+      .insert(coachProposals)
+      .values({
+        tenantId: tenantA,
+        styleSlug: parentStyle.slug,
+        sampleSize: 4,
+        personaFilter: null,
+        summary: "Run fresh shadow eval",
+        editsJson: JSON.stringify({ voice_tone: "warmer" }),
+        rationaleJson: JSON.stringify(["Needs fresh pairwise coverage."]),
+        status: "applied",
+        createdAt: now + 2,
+        decidedAt: now + 2,
+      })
+      .returning({ id: coachProposals.id });
+    expect(proposal).toBeTruthy();
+    if (!proposal) return;
+
+    const invalid = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/coach/proposals/${proposal.id}/shadow-evaluations/run`,
+      { personas: [] },
+    );
+    expect(invalid.status).toBe(400);
+
+    const crossTenant = await authPostJsonReq(
+      tokenB,
+      `/api/admin/quality/coach/proposals/${proposal.id}/shadow-evaluations/run`,
+      { personas: ["skeptic-anya"], runs: 1, maxTurns: 1 },
+    );
+    expect(crossTenant.status).toBe(404);
+
+    salesReplies.push(
+      "A: договор до вылета и сопровождение, можно начать с анкеты",
+      "B: давай оформим анкету сейчас, я покажу договор и условия",
+    );
+    candidateReplies.push("ок, давай анкету", "ок, давай анкету");
+    judgeReplies.push(
+      '{"outcome":"draw","reason":"A did not clearly improve"}',
+      '{"outcome":"won","reason":"B closed the next step"}',
+      '{"winner":"b","reason":"B gave a clearer next step"}',
+    );
+
+    const res = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/coach/proposals/${proposal.id}/shadow-evaluations/run`,
+      { personas: ["skeptic-anya"], runs: 1, maxTurns: 1, reflect: false },
+    );
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as QualityCoachShadowCreateResponse;
+    expect(body.shadow).toMatchObject({
+      proposalId: proposal.id,
+      parentStyleSlug: parentStyle.slug,
+      parentStyleId: parentStyle.id,
+      newStyleSlug: candidateStyle.slug,
+      newStyleId: candidateStyle.id,
+      pairsPlanned: 1,
+      pairsDone: 0,
+      aWins: 0,
+      bWins: 0,
+      draws: 0,
+      status: "running",
+      decision: null,
+    });
+
+    const completed = await waitForShadowEvaluation(body.shadow.id);
+    expect(completed).toMatchObject({
+      tenantId: tenantA,
+      proposalId: proposal.id,
+      status: "complete",
+      pairsPlanned: 1,
+      pairsDone: 1,
+      aWins: 0,
+      bWins: 1,
+      draws: 0,
+    });
+    expect(completed.winRateLb).toBeGreaterThan(0);
+    expect(completed.completedAt).toBeGreaterThanOrEqual(completed.startedAt);
+
+    const [storedPairwise] = await db
+      .select()
+      .from(pairwiseMatches)
+      .where(eq(pairwiseMatches.styleASlug, parentStyle.slug))
+      .limit(1);
+    expect(storedPairwise).toMatchObject({
+      tenantId: tenantA,
+      styleASlug: parentStyle.slug,
+      styleBSlug: candidateStyle.slug,
+      personaSlug: "skeptic-anya",
+      winner: "b",
+    });
   });
 
   it("filters by style/persona/outcome and can omit transcripts", async () => {
@@ -1653,4 +1786,17 @@ function parseJsonl(text: string): QualityRecord[] {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+}
+
+async function waitForShadowEvaluation(id: number) {
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const [row] = await db
+      .select()
+      .from(shadowEvaluations)
+      .where(eq(shadowEvaluations.id, id))
+      .limit(1);
+    if (row && row.status !== "running") return row;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`shadow evaluation ${id} did not finish`);
 }
