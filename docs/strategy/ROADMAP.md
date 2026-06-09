@@ -561,7 +561,7 @@ Remaining product gaps:
 
 - [ ] Production Agent QA dashboard: % escalation, avg time-to-resolve,
   sentiment drift, top fail-patterns.
-- [ ] Close the tool-call feedback loop: aggregate wrong/missing/bad-args labels
+- [x] Close the tool-call feedback loop: aggregate wrong/missing/bad-args labels
   and feed them into coach/outcome analysis.
 - [ ] Move shadow evaluations from API fire-and-forget into a durable worker/job
   queue with stuck recovery.

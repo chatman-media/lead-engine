@@ -9,24 +9,25 @@
 // ─── Coach ───────────────────────────────────────────────────────────────────
 // `proposeStyleEdits` (coach.ts) — LLM coach который читает worst self-play
 // transcripts и предлагает edits для Style spec'а. Out-of-band, admin-trigger.
+export {
+  applyEditsToStyle,
+  type CoachInput,
+  type CoachProposal,
+  type CoachToolFeedbackSignal,
+  parseProposal,
+  proposeStyleEdits,
+} from "./coach.ts";
 // `CoachAnalyzer` (coach-analyzer.ts) — post-hoc grader, который для
 // closed-lead'ов проходит transcript и записывает skill_outcomes (через
 // gradeSkills из kb). Запускается отдельным admin-cron'ом — см.
 // apps/api/scripts/coach-batch.ts.
 export {
-  type AnalyzeLeadOpts,
   type AnalysisResult,
+  type AnalyzeLeadOpts,
   CoachAnalyzer,
   type CoachAnalyzerOpts,
   extractUserAssistantPairs,
 } from "./coach-analyzer.ts";
-export {
-  applyEditsToStyle,
-  type CoachInput,
-  type CoachProposal,
-  parseProposal,
-  proposeStyleEdits,
-} from "./coach.ts";
 // ─── ELO rating ──────────────────────────────────────────────────────────────
 export {
   actualScore,
@@ -53,13 +54,13 @@ export {
   type SkillForPrompt,
 } from "./prompt.ts";
 export {
+  type ExportableSelfPlayMatch,
+  type ExportSelfPlayMatchesQuery,
   exportPairwiseMatchJsonl,
   exportSelfPlayMatchesFromRepoJsonl,
   exportSelfPlayMatchJsonl,
   formatQualityLabJsonl,
   QUALITY_LAB_JSONL_SCHEMA_VERSION,
-  type ExportableSelfPlayMatch,
-  type ExportSelfPlayMatchesQuery,
   type QualityLabExportOptions,
   type QualityLabJsonlRecord,
   type QualityLabPairwiseRecord,
@@ -128,7 +129,10 @@ export {
 // нельзя (живёт в conv-engine для избежания circular dep) — consumers
 // импортят его напрямую из `@chatman-media/conversation-engine`, а конкретные
 // реализации — отсюда.
-export { LlmStageClassifier, RegexStageClassifier } from "./stage-classifier.ts";
+export {
+  LlmStageClassifier,
+  RegexStageClassifier,
+} from "./stage-classifier.ts";
 // ─── Stage routing ───────────────────────────────────────────────────────────
 export { nextStage, type StageInput } from "./stage-router.ts";
 // ─── Storage interfaces ──────────────────────────────────────────────────────

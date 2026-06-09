@@ -1,6 +1,10 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { resolve } from "node:path";
+import type { IKbStore } from "@chatman-media/kb";
+import type { ChatClient, ChatCompletionOpts, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
 import {
-  agentToolCalls,
   admins,
+  agentToolCalls,
   applyAllMigrations,
   coachProposals,
   contacts,
@@ -18,13 +22,9 @@ import {
   styles as stylesTable,
   tryConnectToPg,
 } from "@chatman-media/storage";
-import type { ChatClient, ChatCompletionOpts, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
-import type { IKbStore } from "@chatman-media/kb";
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
-import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
 import { DEFAULT_TOKEN_LIFETIME_SEC, signAuthToken } from "../lib/auth.ts";
 import { ShadowEvalJobRunner } from "../lib/shadow-eval-job-runner.ts";
@@ -424,6 +424,7 @@ beforeAll(async () => {
       userId: toolContactA.id,
       source: "bot",
       mode: "ai",
+      styleId: styleB.id,
       createdAt: now,
       lastMessageAt: now,
     })
@@ -1092,6 +1093,13 @@ describe("admin quality JSONL export", () => {
   it("generates a tenant-scoped coach proposal from self-play failures", async () => {
     if (!sql) return;
     resetQualityQueues();
+    const feedback = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`,
+      { label: "missing_tool", note: "coach should see the verification handoff gap" },
+    );
+    expect(feedback.status).toBe(201);
+
     salesReplies.push(
       JSON.stringify({
         summary: "Coach spotted a price objection gap",
@@ -1132,7 +1140,12 @@ describe("admin quality JSONL export", () => {
     expect(prompt).toContain("currently_attached_skills");
     expect(prompt).toContain("mirroring");
     expect(prompt).toContain("дорого");
+    expect(prompt).toContain("TOOL-CALL FEEDBACK SIGNALS");
+    expect(prompt).toContain("create_exchange_order");
+    expect(prompt).toContain("coach should see the verification handoff gap");
+    expect(prompt).toContain("Label: missing_tool");
     expect(prompt).not.toContain("tenant b only");
+    expect(prompt).not.toContain("999");
 
     const summary = (await (
       await authReq(tokenA, "/api/admin/quality/coach/summary")

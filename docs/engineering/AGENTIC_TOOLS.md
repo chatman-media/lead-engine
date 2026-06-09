@@ -62,8 +62,16 @@ Zod-схема конвертится в OpenAI function-формат (`toolToOp
   `GET /api/admin/quality/tool-calls` фильтрует вызовы по tenant/conversation/
   message/outbound/tool/error/source, а `POST /api/admin/quality/tool-calls/:id/feedback`
   пишет human label в `agent_tool_call_feedback` (`good_reply`, `wrong_tool`,
-  `missing_tool`, `bad_args`, `other`). Это первый явный feedback-сигнал для
-  Hermes-style learning loop без автоизменения промптов.
+  `missing_tool`, `bad_args`, `other`). `GET /api/admin/quality/tool-call-feedback/summary`
+  показывает label counts и top failing tools, `GET /api/admin/quality/tool-call-feedback/proposals`
+  группирует actionable labels (`wrong_tool`, `missing_tool`, `bad_args`) в
+  operator-facing improvement proposals, а JSONL export даёт разметку для
+  offline анализа.
+- Coach proposals (`POST /api/admin/quality/coach/proposals`) подтягивают
+  последние actionable feedback labels по тому же `styleId` и передают их в
+  CoachAnalyzer как human-reviewed defects. Coach не меняет tool contracts
+  автоматически: он выражает эти сигналы через style guidance, examples,
+  skill attach/detach suggestions или rationale для operator follow-up.
 - Резолвер собирается в `apps/api/src/llm-bootstrap.ts`: booking (из секрета
   `tool_booking_url`) + exchange-инструменты (если активны курсы). Кеши
   сбрасываются `invalidateToolsFor(tenantId)` после правок в админке.
