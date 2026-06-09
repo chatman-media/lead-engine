@@ -1011,6 +1011,63 @@ export interface QualityToolCallFeedbackCreateOptions {
   note?: string | null;
 }
 
+export interface QualityToolCallFeedbackSummaryOptions {
+  limit?: number;
+  source?: QualityToolCallSource;
+  toolName?: string;
+  label?: QualityToolCallFeedbackLabel;
+  error?: boolean;
+}
+
+export interface QualityToolCallFeedbackSummary {
+  totals: {
+    total: number;
+    goodReply: number;
+    wrongTool: number;
+    missingTool: number;
+    badArgs: number;
+    other: number;
+    errorCount: number;
+    lastFeedbackAt: number | null;
+  };
+  byLabel: Array<{
+    label: QualityToolCallFeedbackLabel;
+    total: number;
+    lastFeedbackAt: number | null;
+  }>;
+  byTool: Array<{
+    toolName: string;
+    total: number;
+    goodReply: number;
+    wrongTool: number;
+    missingTool: number;
+    badArgs: number;
+    other: number;
+    errorCount: number;
+    lastFeedbackAt: number | null;
+  }>;
+  bySource: Array<{
+    source: QualityToolCallSource;
+    total: number;
+    goodReply: number;
+    wrongTool: number;
+    missingTool: number;
+    badArgs: number;
+    other: number;
+    errorCount: number;
+    lastFeedbackAt: number | null;
+  }>;
+  byError: Array<{
+    error: boolean;
+    total: number;
+    lastFeedbackAt: number | null;
+  }>;
+  recent: Array<{
+    feedback: QualityToolCallFeedback;
+    toolCall: QualityToolCall;
+  }>;
+}
+
 export interface QualityTranscriptTurn {
   role: "candidate" | "salesperson";
   text: string;
@@ -2568,6 +2625,18 @@ export const saas = {
       },
     );
   },
+  getQualityToolCallFeedbackSummary(opts: QualityToolCallFeedbackSummaryOptions = {}) {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.source) params.set("source", opts.source);
+    if (opts.toolName) params.set("toolName", opts.toolName);
+    if (opts.label) params.set("label", opts.label);
+    if (opts.error !== undefined) params.set("error", String(opts.error));
+    const qs = params.toString();
+    return request<QualityToolCallFeedbackSummary>(
+      `/api/admin/quality/tool-call-feedback/summary${qs ? `?${qs}` : ""}`,
+    );
+  },
   runQualitySelfPlay(data: QualitySelfPlayRunOptions) {
     return request<{ ok: boolean; match: QualitySelfPlayMatch }>(
       "/api/admin/quality/self-play/matches",
@@ -2693,6 +2762,36 @@ export const saas = {
     const a = document.createElement("a");
     a.href = url;
     a.download = "pairwise-matches.jsonl";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  async exportQualityToolCallFeedbackJsonl(
+    opts: QualityToolCallFeedbackSummaryOptions = {},
+  ): Promise<void> {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.source) params.set("source", opts.source);
+    if (opts.toolName) params.set("toolName", opts.toolName);
+    if (opts.label) params.set("label", opts.label);
+    if (opts.error !== undefined) params.set("error", String(opts.error));
+
+    const token = getToken();
+    const qs = params.toString();
+    const res = await fetch(
+      `${API_BASE}/api/admin/quality/tool-call-feedback/export.jsonl${qs ? `?${qs}` : ""}`,
+      {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      },
+    );
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      throw new ApiError(res.status, (body.error as string | undefined) ?? res.statusText);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tool-call-feedback.jsonl";
     a.click();
     URL.revokeObjectURL(url);
   },

@@ -40,6 +40,8 @@ import {
   type QualityToolCall,
   type QualityToolCallFeedback,
   type QualityToolCallFeedbackLabel,
+  type QualityToolCallFeedbackSummary,
+  type QualityToolCallFeedbackSummaryOptions,
   type QualityToolCallSource,
   type QualityTranscriptTurn,
   saas,
@@ -142,6 +144,12 @@ function parseRunMaxTurns(raw: string): number | null {
 function parseCoachSampleSize(raw: string): number | null {
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50) return null;
+  return parsed;
+}
+
+function parseFeedbackLimit(raw: string): number | null {
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 200) return null;
   return parsed;
 }
 
@@ -261,6 +269,11 @@ export function SaasQuality() {
   const [toolCalls, setToolCalls] = useState<QualityToolCall[]>([]);
   const [toolCallsLoading, setToolCallsLoading] = useState(false);
   const [toolCallError, setToolCallError] = useState("");
+  const [toolFeedbackSummary, setToolFeedbackSummary] =
+    useState<QualityToolCallFeedbackSummary | null>(null);
+  const [toolFeedbackLoading, setToolFeedbackLoading] = useState(false);
+  const [toolFeedbackError, setToolFeedbackError] = useState("");
+  const [toolFeedbackExporting, setToolFeedbackExporting] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
   const [styleSlug, setStyleSlug] = useState("all");
@@ -290,6 +303,17 @@ export function SaasQuality() {
     "all",
   );
   const [toolCallName, setToolCallName] = useState("");
+  const [toolFeedbackLimit, setToolFeedbackLimit] = useState("25");
+  const [toolFeedbackSource, setToolFeedbackSource] = useState<"all" | QualityToolCallSource>(
+    "all",
+  );
+  const [toolFeedbackLabel, setToolFeedbackLabel] = useState<"all" | QualityToolCallFeedbackLabel>(
+    "all",
+  );
+  const [toolFeedbackErrorFilter, setToolFeedbackErrorFilter] = useState<
+    "all" | "true" | "false"
+  >("all");
+  const [toolFeedbackName, setToolFeedbackName] = useState("");
 
   const styleOptions = useMemo(() => summary?.byStyle.map((item) => item.styleSlug) ?? [], [summary]);
   const personaOptions = useMemo(
@@ -345,10 +369,44 @@ export function SaasQuality() {
     }
   }
 
+  function buildToolFeedbackOptions(): QualityToolCallFeedbackSummaryOptions | null {
+    const parsedLimit = parseFeedbackLimit(toolFeedbackLimit);
+    if (parsedLimit === null) {
+      toast.error("Feedback limit: 1-200");
+      return null;
+    }
+
+    return {
+      limit: parsedLimit,
+      ...(toolFeedbackSource !== "all" ? { source: toolFeedbackSource } : {}),
+      ...(toolFeedbackLabel !== "all" ? { label: toolFeedbackLabel } : {}),
+      ...(toolFeedbackErrorFilter !== "all" ? { error: toolFeedbackErrorFilter === "true" } : {}),
+      ...(toolFeedbackName.trim() ? { toolName: toolFeedbackName.trim() } : {}),
+    };
+  }
+
+  async function loadToolFeedbackSummary() {
+    const opts = buildToolFeedbackOptions();
+    if (!opts) return;
+
+    setToolFeedbackLoading(true);
+    setToolFeedbackError("");
+    try {
+      const result = await saas.getQualityToolCallFeedbackSummary(opts);
+      setToolFeedbackSummary(result);
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      setToolFeedbackError(err instanceof Error ? err.message : "Не удалось загрузить feedback");
+    } finally {
+      setToolFeedbackLoading(false);
+    }
+  }
+
   function load() {
     setLoading(true);
     setError("");
     void loadToolCalls();
+    void loadToolFeedbackSummary();
     Promise.all([
       saas.getQualitySelfPlaySummary(),
       saas.getQualityPairwiseSummary(),
@@ -455,6 +513,22 @@ export function SaasQuality() {
       toast.error(err instanceof Error ? err.message : "Не удалось выгрузить pairwise JSONL");
     } finally {
       setPairwiseExporting(false);
+    }
+  }
+
+  async function handleToolFeedbackExport() {
+    const opts = buildToolFeedbackOptions();
+    if (!opts) return;
+
+    setToolFeedbackExporting(true);
+    try {
+      await saas.exportQualityToolCallFeedbackJsonl(opts);
+      toast.success("Tool-call feedback JSONL выгружен");
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      toast.error(err instanceof Error ? err.message : "Не удалось выгрузить feedback JSONL");
+    } finally {
+      setToolFeedbackExporting(false);
     }
   }
 
@@ -719,6 +793,7 @@ export function SaasQuality() {
           : current,
       );
       toast.success("Tool-call feedback сохранён");
+      void loadToolFeedbackSummary();
     } catch (err) {
       if (redirectOnUnauthorized(err)) return;
       toast.error(err instanceof Error ? err.message : "Не удалось сохранить feedback");
@@ -731,6 +806,7 @@ export function SaasQuality() {
   const pairwiseTotals = pairwise?.totals;
   const proposalTotals = coach?.totals.proposals;
   const shadowTotals = coach?.totals.shadows;
+  const feedbackTotals = toolFeedbackSummary?.totals;
 
   return (
     <div className="space-y-6">
@@ -1282,6 +1358,260 @@ export function SaasQuality() {
                 ))}
               </TableBody>
             </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <MessageSquareTextIcon className="size-4 text-primary" />
+            Tool feedback
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_150px_130px_110px_140px_160px]">
+            <div className="space-y-1.5">
+              <Label htmlFor="tool-feedback-name">Tool</Label>
+              <Input
+                id="tool-feedback-name"
+                className="font-mono"
+                value={toolFeedbackName}
+                onChange={(event) => setToolFeedbackName(event.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Source</Label>
+              <Select
+                value={toolFeedbackSource}
+                onValueChange={(value) =>
+                  setToolFeedbackSource(value as "all" | QualityToolCallSource)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все</SelectItem>
+                  {TOOL_CALL_SOURCES.map((source) => (
+                    <SelectItem key={source} value={source}>
+                      {source}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Label</Label>
+              <Select
+                value={toolFeedbackLabel}
+                onValueChange={(value) =>
+                  setToolFeedbackLabel(value as "all" | QualityToolCallFeedbackLabel)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все</SelectItem>
+                  {TOOL_FEEDBACK_LABELS.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Error</Label>
+              <Select
+                value={toolFeedbackErrorFilter}
+                onValueChange={(value) =>
+                  setToolFeedbackErrorFilter(value as "all" | "true" | "false")
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все</SelectItem>
+                  <SelectItem value="false">OK</SelectItem>
+                  <SelectItem value="true">Error</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="tool-feedback-limit">Limit</Label>
+              <Input
+                id="tool-feedback-limit"
+                inputMode="numeric"
+                className="font-mono"
+                value={toolFeedbackLimit}
+                onChange={(event) =>
+                  setToolFeedbackLimit(event.target.value.replace(/\D/g, "").slice(0, 3))
+                }
+              />
+            </div>
+
+            <div className="flex items-end">
+              <Button
+                className="w-full"
+                variant="outline"
+                onClick={() => void loadToolFeedbackSummary()}
+                disabled={toolFeedbackLoading}
+              >
+                <RefreshCwIcon className={cn("size-4", toolFeedbackLoading && "animate-spin")} />
+                Обновить
+              </Button>
+            </div>
+
+            <div className="flex items-end">
+              <Button
+                className="w-full"
+                onClick={() => void handleToolFeedbackExport()}
+                disabled={toolFeedbackExporting}
+              >
+                <DownloadIcon className="size-4" />
+                {toolFeedbackExporting ? "Экспорт…" : "JSONL"}
+              </Button>
+            </div>
+          </div>
+
+          {toolFeedbackError && (
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {toolFeedbackError}
+            </p>
+          )}
+
+          <div className="grid gap-3 md:grid-cols-5">
+            <FeedbackMetric label="Total" value={feedbackTotals?.total ?? 0} />
+            <FeedbackMetric label="Wrong tool" value={feedbackTotals?.wrongTool ?? 0} />
+            <FeedbackMetric label="Missing tool" value={feedbackTotals?.missingTool ?? 0} />
+            <FeedbackMetric label="Bad args" value={feedbackTotals?.badArgs ?? 0} />
+            <FeedbackMetric label="Errors" value={feedbackTotals?.errorCount ?? 0} />
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {(toolFeedbackSummary?.byLabel ?? []).map((item) => (
+              <span
+                key={item.label}
+                className="inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs"
+              >
+                {feedbackBadge(item.label)}
+                <span className="font-mono">{item.total}</span>
+              </span>
+            ))}
+            {(toolFeedbackSummary?.bySource ?? []).map((item) => (
+              <span
+                key={item.source}
+                className="inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs"
+              >
+                {sourceBadge(item.source)}
+                <span className="font-mono">{item.total}</span>
+              </span>
+            ))}
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tool</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Wrong</TableHead>
+                    <TableHead className="text-right">Missing</TableHead>
+                    <TableHead className="text-right">Args</TableHead>
+                    <TableHead className="text-right">Errors</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {toolFeedbackLoading && !toolFeedbackSummary && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                        Загрузка feedback…
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {!toolFeedbackLoading && (toolFeedbackSummary?.byTool ?? []).length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                        Feedback пока нет
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {toolFeedbackSummary?.byTool.map((item) => (
+                    <TableRow key={item.toolName}>
+                      <TableCell className="max-w-[260px] truncate font-mono text-xs">
+                        {item.toolName}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">{item.total}</TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {item.wrongTool}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {item.missingTool}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {item.badArgs}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {item.errorCount}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Label</TableHead>
+                    <TableHead>Tool</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Note</TableHead>
+                    <TableHead className="text-right">When</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {toolFeedbackLoading && !toolFeedbackSummary && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                        Загрузка feedback…
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {!toolFeedbackLoading && (toolFeedbackSummary?.recent ?? []).length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                        Feedback пока нет
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {toolFeedbackSummary?.recent.map((item) => (
+                    <TableRow key={item.feedback.id}>
+                      <TableCell>{feedbackBadge(item.feedback.label)}</TableCell>
+                      <TableCell className="max-w-[180px] truncate font-mono text-xs">
+                        {item.toolCall.toolName}
+                      </TableCell>
+                      <TableCell>{sourceBadge(item.toolCall.source)}</TableCell>
+                      <TableCell className="max-w-[260px] truncate text-xs">
+                        {item.feedback.note || "нет"}
+                      </TableCell>
+                      <TableCell className="text-right text-xs text-muted-foreground">
+                        {formatDate(item.feedback.createdAt)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -1886,6 +2216,15 @@ function InspectorMetric({ label, value }: { label: string; value: string | numb
     <div className="min-w-0 rounded-md border px-3 py-2">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="truncate font-mono text-xs">{value}</p>
+    </div>
+  );
+}
+
+function FeedbackMetric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="min-w-0 rounded-md border px-3 py-2">
+      <p className="truncate text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 truncate font-mono text-lg font-semibold">{value}</p>
     </div>
   );
 }
