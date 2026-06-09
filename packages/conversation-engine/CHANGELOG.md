@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.20.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.19.0...@chatman-media/conversation-engine-v1.20.0) (2026-06-09)
+
+
+### Features
+
+* **conversation-engine:** add provider relay brokered orders ([#410](https://github.com/chatman-media/lead-engine/issues/410)) ([21305c8](https://github.com/chatman-media/lead-engine/commit/21305c83cbe640ee062b311c736659b28c916de6))
+
 # [@chatman-media/conversation-engine-v1.19.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.18.0...@chatman-media/conversation-engine-v1.19.0) (2026-06-09)
 
 
