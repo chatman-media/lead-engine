@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.15.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.14.0...@chatman-media/conversation-engine-v1.15.0) (2026-06-09)
+
+
+### Features
+
+* **api:** persist experiment style assignments ([#344](https://github.com/chatman-media/lead-engine/issues/344)) ([7d47573](https://github.com/chatman-media/lead-engine/commit/7d4757363b00635288d33a32fdf37c6bab6564de))
+
 # [@chatman-media/conversation-engine-v1.14.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.13.0...@chatman-media/conversation-engine-v1.14.0) (2026-06-08)
 
 
