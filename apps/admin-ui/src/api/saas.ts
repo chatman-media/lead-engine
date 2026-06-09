@@ -1139,6 +1139,33 @@ export interface QualityToolCallFeedbackSummary {
   }>;
 }
 
+export type QualityToolCallImprovementKind =
+  | "schema_fix"
+  | "routing_prompt_fix"
+  | "tool_candidate";
+
+export type QualityToolCallImprovementSeverity = "high" | "medium" | "low";
+
+export interface QualityToolCallImprovementProposal {
+  id: string;
+  kind: QualityToolCallImprovementKind;
+  severity: QualityToolCallImprovementSeverity;
+  title: string;
+  toolName: string;
+  source: QualityToolCallSource;
+  label: QualityToolCallFeedbackLabel;
+  feedbackCount: number;
+  errorCount: number;
+  lastFeedbackAt: number | null;
+  summary: string;
+  rationale: string[];
+  actionItems: string[];
+  examples: Array<{
+    feedback: QualityToolCallFeedback;
+    toolCall: QualityToolCall;
+  }>;
+}
+
 export interface QualityTranscriptTurn {
   role: "candidate" | "salesperson";
   text: string;
@@ -2706,6 +2733,18 @@ export const saas = {
     const qs = params.toString();
     return request<QualityToolCallFeedbackSummary>(
       `/api/admin/quality/tool-call-feedback/summary${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getQualityToolCallFeedbackProposals(opts: QualityToolCallFeedbackSummaryOptions = {}) {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.source) params.set("source", opts.source);
+    if (opts.toolName) params.set("toolName", opts.toolName);
+    if (opts.label) params.set("label", opts.label);
+    if (opts.error !== undefined) params.set("error", String(opts.error));
+    const qs = params.toString();
+    return request<{ items: QualityToolCallImprovementProposal[] }>(
+      `/api/admin/quality/tool-call-feedback/proposals${qs ? `?${qs}` : ""}`,
     );
   },
   runQualitySelfPlay(data: QualitySelfPlayRunOptions) {
