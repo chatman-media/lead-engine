@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.21.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.20.0...@chatman-media/conversation-engine-v1.21.0) (2026-06-09)
+
+
+### Features
+
+* **conversation-engine:** add exchange policy guard ([#426](https://github.com/chatman-media/lead-engine/issues/426)) ([275c411](https://github.com/chatman-media/lead-engine/commit/275c411aa35e3589cbfe539df42b0e72ce0bea90))
+
 # [@chatman-media/conversation-engine-v1.20.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.19.0...@chatman-media/conversation-engine-v1.20.0) (2026-06-09)
 
 
