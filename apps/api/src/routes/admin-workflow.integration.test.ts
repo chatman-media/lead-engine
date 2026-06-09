@@ -10,6 +10,7 @@
 import {
   applyAllMigrations,
   createIsolatedDb,
+  funnelVersions,
   schema,
   skills,
   stageDefinitions,
@@ -289,6 +290,31 @@ describe("admin-workflow /apply", () => {
       to: "qualify",
       when: { type: "all_required_fields_filled" },
     });
+  });
+
+  it("повторный AI apply сохраняет предыдущую воронку как версию", async () => {
+    if (!sql) return;
+    const next = VALID_STAGES.map((stage) =>
+      stage.slug === "qualify" ? { ...stage, displayName: "Квалификация v2" } : stage,
+    );
+    const res = await post(app, APPLY, { stages: next });
+    expect(res.status).toBe(200);
+
+    const versions = await db
+      .select({
+        source: funnelVersions.source,
+        stageCount: funnelVersions.stageCount,
+        snapshotJson: funnelVersions.snapshotJson,
+      })
+      .from(funnelVersions)
+      .where(eq(funnelVersions.tenantId, tenantId));
+    expect(versions.length).toBeGreaterThan(0);
+    expect(versions[0]?.source).toBe("ai_apply");
+    expect(versions[0]?.stageCount).toBe(5);
+    const snapshot = JSON.parse(versions[0]?.snapshotJson ?? "{}") as {
+      stages: Array<{ slug: string; displayName: string }>;
+    };
+    expect(snapshot.stages.find((stage) => stage.slug === "qualify")?.displayName).toBe("Квалификация");
   });
 
   it("валидная, но слабая behavior-конфигурация → ok + warnings", async () => {

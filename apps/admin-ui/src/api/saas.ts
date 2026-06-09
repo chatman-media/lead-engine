@@ -651,6 +651,52 @@ export interface FunnelTemplateInfo {
   }>;
 }
 
+export interface FunnelVersionItem {
+  id: number;
+  funnelId: number;
+  adminId: number | null;
+  source: "ai_apply" | "template_apply" | "manual_edit" | "rollback";
+  note: string | null;
+  stageCount: number;
+  createdAt: number;
+}
+
+export interface FunnelVersionSnapshotStage {
+  slug: string;
+  displayName: string;
+  kind: StageKind;
+  stageType: StageType;
+  phase?: StagePhase | null;
+  position: number;
+  supportMode?: boolean;
+  nextStages: string[];
+  fields: Array<{
+    slug: string;
+    displayName: string;
+    fieldType: FieldType;
+    required: boolean;
+    aiExtractable: boolean;
+    position: number;
+  }>;
+}
+
+export interface FunnelVersionDetail {
+  version: FunnelVersionItem;
+  snapshot: {
+    schemaVersion: 1;
+    funnel: {
+      slug: string;
+      verticalTemplateId: string | null;
+      isActive: boolean;
+    };
+    stages: FunnelVersionSnapshotStage[];
+  };
+  validation: {
+    errors: string[];
+    warnings: string[];
+  };
+}
+
 /** Сквозное распределение лидов по макро-фазам костяка (capture→…→won/lost). */
 export interface PhaseStats {
   phases: Array<{ phase: string; leads: number }>;
@@ -2595,6 +2641,20 @@ export const saas = {
   },
   getFunnelById(id: number) {
     return request<FunnelData>(`/api/admin/funnels/${id}`);
+  },
+  listFunnelVersions(id: number, limit = 20) {
+    return request<{ items: FunnelVersionItem[] }>(
+      `/api/admin/funnels/${id}/versions?limit=${limit}`,
+    );
+  },
+  getFunnelVersion(id: number, versionId: number) {
+    return request<FunnelVersionDetail>(`/api/admin/funnels/${id}/versions/${versionId}`);
+  },
+  rollbackFunnelVersion(id: number, versionId: number) {
+    return request<{ ok: boolean; funnelId: number; stagesCreated: number; warnings: string[] }>(
+      `/api/admin/funnels/${id}/versions/${versionId}/rollback`,
+      { method: "POST" },
+    );
   },
   listFunnelTemplates() {
     return request<{ items: FunnelTemplateInfo[] }>("/api/admin/funnel/templates");

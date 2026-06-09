@@ -5,11 +5,11 @@
 // broken funnels; this test fails loudly instead.
 
 import { describe, expect, it } from "bun:test";
+import { validateFunnel } from "./admin-funnel.ts";
 import {
   normalizeStages,
   type StageDraft,
   SYSTEM_PROMPT,
-  validateFunnel,
 } from "./admin-workflow.ts";
 
 /** Extract each JSON object that starts at `{"reply":` and is a ready funnel. */

@@ -9,6 +9,7 @@ import {
   GaugeIcon,
   GripVerticalIcon,
   HeadphonesIcon,
+  HistoryIcon,
   type LucideIcon,
   CheckIcon,
   PencilIcon,
@@ -31,6 +32,8 @@ import {
   type FunnelData,
   type FunnelListItem,
   type FunnelTemplateInfo,
+  type FunnelVersionDetail,
+  type FunnelVersionItem,
   type StageDefinition,
   type StageField,
   type StageType,
@@ -137,6 +140,33 @@ function fieldCountLabel(count: number): string {
   return `${count} ${pluralRu(count, "поле", "поля", "полей")}`;
 }
 
+const FUNNEL_VERSION_SOURCE_LABEL: Record<FunnelVersionItem["source"], string> = {
+  ai_apply: "AI apply",
+  template_apply: "Шаблон",
+  manual_edit: "Ручная правка",
+  rollback: "Откат",
+};
+
+function formatEpochDate(epoch: number): string {
+  return new Date(epoch * 1000).toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function apiErrorText(error: unknown): string {
+  if (error instanceof ApiError) {
+    const violations = error.extra?.violations;
+    if (Array.isArray(violations) && violations.length > 0) {
+      return violations.map(String).join("\n");
+    }
+    return error.errorCode;
+  }
+  return "Не удалось выполнить действие";
+}
+
 function funnelLabel(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">): string {
   const key = `${item.slug} ${item.verticalTemplateId ?? ""}`.toLowerCase();
   if (key.includes("exchange")) return "Обменка";
@@ -199,6 +229,16 @@ export function SaasFunnel() {
   const [funnelTemplates, setFunnelTemplates] = useState<FunnelTemplateInfo[]>([]);
   const [newFunnelTemplate, setNewFunnelTemplate] = useState("exchange");
   const [newFunnelSlug, setNewFunnelSlug] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [versions, setVersions] = useState<FunnelVersionItem[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versionsError, setVersionsError] = useState("");
+  const [versionPreview, setVersionPreview] = useState<FunnelVersionDetail | null>(null);
+  const [previewLoadingId, setPreviewLoadingId] = useState<number | null>(null);
+  const [rollbackConfirm, setRollbackConfirm] = useState(false);
+  const [rollbackLoading, setRollbackLoading] = useState(false);
+  const [rollbackError, setRollbackError] = useState("");
+  const [rollbackSuccess, setRollbackSuccess] = useState("");
   const [newStage, setNewStage] = useState({
     slug: "",
     displayName: "",
@@ -253,11 +293,80 @@ export function SaasFunnel() {
     void reload(selectedFunnelId, { refreshTemplates: true });
   }, []);
 
+  async function loadFunnelVersions(funnelId = selectedFunnelId) {
+    if (!funnelId) return;
+    setVersionsLoading(true);
+    setVersionsError("");
+    try {
+      const result = await saas.listFunnelVersions(funnelId);
+      setVersions(result.items);
+      if (
+        versionPreview &&
+        !result.items.some((item) => item.id === versionPreview.version.id)
+      ) {
+        setVersionPreview(null);
+      }
+    } catch (err) {
+      if (!onAuthError(err)) setVersionsError(apiErrorText(err));
+    } finally {
+      setVersionsLoading(false);
+    }
+  }
+
+  async function handleOpenHistory() {
+    if (!funnel?.funnel) return;
+    const nextOpen = !historyOpen;
+    setHistoryOpen(nextOpen);
+    setRollbackConfirm(false);
+    setRollbackError("");
+    setRollbackSuccess("");
+    if (nextOpen) await loadFunnelVersions(funnel.funnel.id);
+  }
+
+  async function handlePreviewVersion(versionId: number) {
+    if (!funnel?.funnel) return;
+    setPreviewLoadingId(versionId);
+    setRollbackConfirm(false);
+    setRollbackError("");
+    setRollbackSuccess("");
+    try {
+      const result = await saas.getFunnelVersion(funnel.funnel.id, versionId);
+      setVersionPreview(result);
+    } catch (err) {
+      if (!onAuthError(err)) setVersionsError(apiErrorText(err));
+    } finally {
+      setPreviewLoadingId(null);
+    }
+  }
+
+  async function handleRollbackVersion() {
+    if (!funnel?.funnel || !versionPreview) return;
+    setRollbackLoading(true);
+    setRollbackError("");
+    setRollbackSuccess("");
+    try {
+      await saas.rollbackFunnelVersion(funnel.funnel.id, versionPreview.version.id);
+      await reload(funnel.funnel.id, { refreshTemplates: false });
+      await loadFunnelVersions(funnel.funnel.id);
+      setRollbackConfirm(false);
+      setRollbackSuccess("Воронка восстановлена из выбранной версии");
+    } catch (err) {
+      if (!onAuthError(err)) setRollbackError(apiErrorText(err));
+    } finally {
+      setRollbackLoading(false);
+    }
+  }
+
   async function handleSelectFunnel(id: number) {
     if (id === selectedFunnelId || funnelLoading) return;
     setSelectedFunnelId(id);
     setAddingFunnel(false);
     setNewFunnelSlug("");
+    setHistoryOpen(false);
+    setVersionPreview(null);
+    setRollbackConfirm(false);
+    setRollbackError("");
+    setRollbackSuccess("");
     setFunnelLoading(true);
     setAnalytics(null);
     await reload(id, { refreshTemplates: false });
@@ -424,6 +533,15 @@ export function SaasFunnel() {
             <SparklesIcon className="mr-1.5 size-4" />
             Настроить с AI
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!funnel?.funnel}
+            onClick={() => void handleOpenHistory()}
+          >
+            <HistoryIcon className="mr-1.5 size-4" />
+            История
+          </Button>
           <Button variant="outline" size="sm" asChild>
             <Link to="/leads">← Лиды</Link>
           </Button>
@@ -577,6 +695,223 @@ export function SaasFunnel() {
           )}
         </div>
       </div>
+
+      {historyOpen && funnel?.funnel && (
+        <div className="grid gap-4 rounded-md border p-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
+          <div className="min-w-0">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-semibold">История версий</h2>
+                <p className="text-xs text-muted-foreground">
+                  {funnelLabel({
+                    slug: funnel.funnel.slug,
+                    verticalTemplateId: funnel.funnel.verticalTemplateId ?? null,
+                  })}{" "}
+                  · {versions.length} снимков
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={versionsLoading}
+                onClick={() => void loadFunnelVersions(funnel.funnel?.id)}
+              >
+                {versionsLoading ? "…" : "Обновить"}
+              </Button>
+            </div>
+            {versionsError && (
+              <div className="mb-3 whitespace-pre-line rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                {versionsError}
+              </div>
+            )}
+            <div className="max-h-[28rem] overflow-auto rounded-md bg-muted/30 p-1">
+              {versions.map((version) => {
+                const active = versionPreview?.version.id === version.id;
+                return (
+                  <button
+                    key={version.id}
+                    type="button"
+                    className={cn(
+                      "mb-1 flex min-h-16 w-full items-start gap-2 rounded-sm border px-2 py-2 text-left text-sm last:mb-0",
+                      active
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-transparent bg-background hover:bg-muted",
+                    )}
+                    onClick={() => void handlePreviewVersion(version.id)}
+                  >
+                    <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold">
+                      {version.stageCount}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate font-medium">
+                          {FUNNEL_VERSION_SOURCE_LABEL[version.source] ?? version.source}
+                        </span>
+                        {previewLoadingId === version.id && (
+                          <span className="text-xs text-muted-foreground">загрузка</span>
+                        )}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        {formatEpochDate(version.createdAt)}
+                      </span>
+                      {version.note && (
+                        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                          {version.note}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+              {!versionsLoading && versions.length === 0 && (
+                <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                  Истории пока нет
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="min-w-0">
+            {versionPreview ? (
+              <div className="space-y-4">
+                <div className="flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">
+                        {FUNNEL_VERSION_SOURCE_LABEL[versionPreview.version.source] ??
+                          versionPreview.version.source}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {formatEpochDate(versionPreview.version.createdAt)}
+                      </span>
+                    </div>
+                    <h2 className="mt-2 truncate text-base font-semibold">
+                      {versionPreview.snapshot.funnel.slug}
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      {versionPreview.snapshot.stages.length} стадий ·{" "}
+                      {versionPreview.snapshot.funnel.verticalTemplateId ?? "ручная воронка"}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+                    {!rollbackConfirm ? (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={
+                          rollbackLoading || versionPreview.validation.errors.length > 0
+                        }
+                        onClick={() => setRollbackConfirm(true)}
+                      >
+                        Восстановить
+                      </Button>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={rollbackLoading}
+                          onClick={() => void handleRollbackVersion()}
+                        >
+                          {rollbackLoading ? "Откат…" : "Подтвердить"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={rollbackLoading}
+                          onClick={() => setRollbackConfirm(false)}
+                        >
+                          Отмена
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {rollbackError && (
+                  <div className="whitespace-pre-line rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                    {rollbackError}
+                  </div>
+                )}
+                {rollbackSuccess && (
+                  <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-700">
+                    {rollbackSuccess}
+                  </div>
+                )}
+                {versionPreview.validation.errors.length > 0 && (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                    <div className="mb-1 text-xs font-semibold text-destructive">
+                      Ошибки валидации
+                    </div>
+                    <ul className="space-y-1 text-xs text-destructive">
+                      {versionPreview.validation.errors.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {versionPreview.validation.warnings.length > 0 && (
+                  <div className="rounded-md border bg-muted/40 p-3">
+                    <div className="mb-1 text-xs font-semibold text-muted-foreground">
+                      Предупреждения
+                    </div>
+                    <ul className="space-y-1 text-xs text-muted-foreground">
+                      {versionPreview.validation.warnings.slice(0, 6).map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  {versionPreview.snapshot.stages.map((stage, idx) => {
+                    const meta = kindMeta(stage.kind);
+                    return (
+                      <div
+                        key={`${stage.slug}-${idx}`}
+                        className={cn(
+                          "min-h-20 rounded-md border border-l-4 bg-background p-3",
+                          meta.accent,
+                        )}
+                      >
+                        <div className="flex items-start gap-2">
+                          <span
+                            className={cn(
+                              "flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
+                              meta.num,
+                            )}
+                          >
+                            {idx + 1}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium">
+                              {stage.displayName}
+                            </div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {stage.slug} · {stageTypeLabel(stage.stageType)}
+                              {stage.phase ? ` · ${stage.phase}` : ""}
+                            </div>
+                            <div className="mt-2 text-xs text-muted-foreground">
+                              {fieldCountLabel(stage.fields.length)}
+                              {stage.nextStages.length > 0
+                                ? ` · → ${stage.nextStages.join(", ")}`
+                                : ""}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="flex min-h-64 items-center justify-center rounded-md bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+                Выберите версию слева, чтобы посмотреть снимок стадий
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {funnel?.funnel && (
         <div

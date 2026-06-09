@@ -1,6 +1,6 @@
 # AI Funnel Builder — сборка воронки по описанию бизнеса
 
-_Обновлено: 2026-06-06._
+_Обновлено: 2026-06-10._
 
 **Ключевая возможность платформы:** оператор описывает свой бизнес обычным
 языком, а AI собирает рабочую воронку продаж/квалификации — стадии, поля и фазы —
@@ -26,8 +26,10 @@ SYSTEM_PROMPT ведёт диалог → AI задаёт уточняющие �
   ▼  validateBackbone()  — 1 intake, ≥1 won/lost, qualify+offer, монотонность фаз
   │  → preview (для UI) + backbone (errors/warnings)
   ▼  POST /api/admin/workflows/apply   (повторно normalize+validate на сервере)
+funnel_versions      — immutable snapshot текущей воронки перед заменой
+  │
 applyFunnelStages()  — заменяет активную воронку: stage_definitions + stage_fields
-  │  audit: funnel.ai_apply
+  │  audit: funnel.ai_apply / funnel.rollback
   ▼  воронка готова, лид может идти по стадиям
 ```
 
@@ -41,6 +43,21 @@ applyFunnelStages()  — заменяет активную воронку: stage
 Оба пути идут через **один и тот же** `normalizeStages` → `validateBackbone` →
 `applyFunnelStages`, но имеют **отдельные системные промпты**. Унификация входов —
 в роадмапе (см. ниже).
+
+## Версии и откат
+
+Перед destructive apply/seed/manual-edit текущая воронка сохраняется в
+`funnel_versions` как immutable snapshot (`source=ai_apply|template_apply|manual_edit|rollback`).
+Откат проходит через тот же validation/apply path:
+
+| Endpoint | Что делает |
+|---|---|
+| `GET /api/admin/funnels/:id/versions` | список снимков с source, timestamp, stageCount, note |
+| `GET /api/admin/funnels/:id/versions/:versionId` | preview snapshot + validation errors/warnings |
+| `POST /api/admin/funnels/:id/versions/:versionId/rollback` | валидирует snapshot, сохраняет pre-rollback snapshot, восстанавливает стадии и пишет audit |
+
+UI `/funnel` имеет кнопку **История**: оператор видит список версий, preview стадий и
+подтверждает rollback явно. Snapshot tenant-scoped, таблица под FORCE RLS.
 
 ## Что AI генерит (полный цикл)
 
@@ -84,6 +101,7 @@ AI собирает по описанию бизнеса, а бот исполн
 - `apps/api/src/routes/admin-workflow.ts` — `SYSTEM_PROMPT`, `normalizeStages`, `/ai-chat`, `/apply`
 - `apps/api/src/routes/admin-copilot.ts` — `CopilotAction` (`build_funnel`/`install_vertical`/`navigate`)
 - `apps/api/src/routes/admin-funnel.ts` — `applyFunnelStages`, `SEED_TEMPLATES`, `STAGE_TYPES`/`FIELD_TYPES`
+- `packages/storage/src/schema.ts` / `0051_funnel_versions.sql` — snapshots для истории/rollback
 - `packages/verticals/src/phases.ts` — `validateBackbone`, `buildSkeletonFunnel`, `deriveDefaultPhase`
 - `apps/admin-ui/src/components/AiWorkflowPanel.tsx`, `src/components/copilot/*`, `src/pages/SaasFunnel.tsx`
 
@@ -124,7 +142,6 @@ Eval гоняет линейный, clear/fulfill-heavy exchange и multi-reques
    сущность «заявка/тикет» для мульти-запроса вместо nullable-колонки. См.
    [`CONCIERGE_FUNNEL_CONVERGENCE.md`](CONCIERGE_FUNNEL_CONVERGENCE.md).
 2. **Унификация входов** (panel + copilot на одном бэкенд-промпте).
-3. **Версионирование/откат** воронки (сейчас `apply` замещает без undo).
-4. **Vertical auto-suggest** по описанию + **in-chat валидация** костяка (не только на apply).
+3. **Vertical auto-suggest** по описанию + **in-chat валидация** костяка (не только на apply).
 
 Стратегический контекст — [`../strategy/ROADMAP.md`](../strategy/ROADMAP.md).

@@ -267,6 +267,77 @@ describe("POST /api/admin/funnel/seed", () => {
     expect(getBody.stages).toHaveLength(7);
   });
 
+  it("records funnel versions and rolls back through snapshot preview", async () => {
+    if (!sql) return;
+    const listRes = await authReq(tokenA, `/api/admin/funnels/${funnelId}/versions`);
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as {
+      items: Array<{ id: number; source: string; stageCount: number; createdAt: number }>;
+    };
+    expect(listBody.items.length).toBeGreaterThan(0);
+    expect(listBody.items[0]?.source).toBe("template_apply");
+    expect(listBody.items[0]?.stageCount).toBe(7);
+
+    const versionId = listBody.items[0]!.id;
+    const previewRes = await authReq(tokenA, `/api/admin/funnels/${funnelId}/versions/${versionId}`);
+    expect(previewRes.status).toBe(200);
+    const preview = (await previewRes.json()) as {
+      snapshot: {
+        funnel: { slug: string };
+        stages: Array<{ slug: string; displayName: string; fields: Array<{ slug: string }> }>;
+      };
+      validation: { errors: string[]; warnings: string[] };
+    };
+    expect(preview.snapshot.funnel.slug).toBe("visa");
+    expect(preview.snapshot.stages).toHaveLength(7);
+    expect(preview.snapshot.stages[0]?.slug).toBe("qualification");
+    expect(preview.validation.errors).toEqual([]);
+
+    const currentRes = await authReq(tokenA, `/api/admin/funnels/${funnelId}`);
+    const current = (await currentRes.json()) as {
+      stages: Array<{ id: number; slug: string; displayName: string }>;
+    };
+    const stage = current.stages.find((item) => item.slug === "qualification");
+    expect(stage).toBeDefined();
+    const editedName = `${stage?.displayName} edited`;
+    const patchRes = await authReq(tokenA, `/api/admin/funnel/stages/${stage?.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ displayName: editedName }),
+    });
+    expect(patchRes.status).toBe(200);
+
+    const editedRes = await authReq(tokenA, `/api/admin/funnels/${funnelId}`);
+    const edited = (await editedRes.json()) as {
+      stages: Array<{ slug: string; displayName: string }>;
+    };
+    expect(edited.stages.find((item) => item.slug === "qualification")?.displayName).toBe(editedName);
+
+    const tenantBPreview = await authReq(tokenB, `/api/admin/funnels/${funnelId}/versions/${versionId}`);
+    expect(tenantBPreview.status).toBe(404);
+
+    const rollbackRes = await authReq(tokenA, `/api/admin/funnels/${funnelId}/versions/${versionId}/rollback`, {
+      method: "POST",
+    });
+    expect(rollbackRes.status).toBe(200);
+    const rollback = (await rollbackRes.json()) as { ok: boolean; stagesCreated: number };
+    expect(rollback.ok).toBe(true);
+    expect(rollback.stagesCreated).toBe(7);
+
+    const restoredRes = await authReq(tokenA, `/api/admin/funnels/${funnelId}`);
+    const restored = (await restoredRes.json()) as {
+      stages: Array<{ slug: string; displayName: string }>;
+    };
+    expect(restored.stages.find((item) => item.slug === "qualification")?.displayName).toBe(
+      preview.snapshot.stages[0]?.displayName,
+    );
+
+    const afterRollbackRes = await authReq(tokenA, `/api/admin/funnels/${funnelId}/versions`);
+    const afterRollback = (await afterRollbackRes.json()) as { items: Array<{ source: string }> };
+    expect(afterRollback.items.map((item) => item.source)).toContain("rollback");
+    expect(afterRollback.items.map((item) => item.source)).toContain("manual_edit");
+  });
+
   it("seed with template 'exchange' creates a separate exchange funnel", async () => {
     if (!sql) return;
     const res = await authReq(tokenA, "/api/admin/funnel/seed", {
