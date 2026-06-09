@@ -946,6 +946,13 @@ export interface QualityPairwiseRunOptions {
   reflect?: boolean;
 }
 
+export interface QualityCoachGenerateOptions {
+  styleSlug: string;
+  sampleSize?: number;
+  personaSlug?: string;
+  model?: string;
+}
+
 export interface QualitySelfPlaySummary {
   totals: {
     total: number;
@@ -2322,6 +2329,15 @@ export const saas = {
   },
   getQualityCoachSummary() {
     return request<QualityCoachSummary>("/api/admin/quality/coach/summary");
+  },
+  generateQualityCoachProposal(data: QualityCoachGenerateOptions) {
+    return request<{ ok: boolean; proposal: QualityCoachProposal }>(
+      "/api/admin/quality/coach/proposals",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
   },
   setQualityCoachProposalStatus(id: number, status: QualityCoachProposalDecisionStatus) {
     return request<{ ok: boolean; proposal: QualityCoachProposal }>(

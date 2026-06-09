@@ -589,6 +589,99 @@ describe("admin quality JSONL export", () => {
     expect(JSON.stringify(body)).not.toContain("tenant b coach only");
   });
 
+  it("generates a tenant-scoped coach proposal from self-play failures", async () => {
+    if (!sql) return;
+    resetQualityQueues();
+    salesReplies.push(
+      JSON.stringify({
+        summary: "Coach spotted a price objection gap",
+        edits: {
+          voice_tone: "warmer and more concrete",
+          skills_attach: ["mirroring"],
+        },
+        rationale: ["The candidate objected to price and did not get a concrete value anchor."],
+      }),
+    );
+
+    const crossTenant = await authPostJsonReq(tokenB, "/api/admin/quality/coach/proposals", {
+      styleSlug: "style-b",
+      sampleSize: 3,
+    });
+    expect(crossTenant.status).toBe(404);
+
+    const res = await authPostJsonReq(tokenA, "/api/admin/quality/coach/proposals", {
+      styleSlug: "style-b",
+      sampleSize: 3,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as QualityCoachProposalGenerateResponse;
+    expect(body.proposal).toMatchObject({
+      styleSlug: "style-b",
+      sampleSize: 3,
+      personaFilter: null,
+      summary: "Coach spotted a price objection gap",
+      status: "pending",
+      edits: {
+        voice_tone: "warmer and more concrete",
+        skills_attach: ["mirroring"],
+      },
+      rationale: ["The candidate objected to price and did not get a concrete value anchor."],
+    });
+
+    const prompt = salesCalls.at(-1)?.map((message) => message.content).join("\n") ?? "";
+    expect(prompt).toContain("currently_attached_skills");
+    expect(prompt).toContain("mirroring");
+    expect(prompt).toContain("дорого");
+    expect(prompt).not.toContain("tenant b only");
+
+    const summary = (await (
+      await authReq(tokenA, "/api/admin/quality/coach/summary")
+    ).json()) as QualityCoachSummaryResponse;
+    expect(summary.proposals.some((item) => item.id === body.proposal.id)).toBe(true);
+
+    await db.delete(coachProposals).where(eq(coachProposals.id, body.proposal.id));
+  });
+
+  it("returns 503 when coach proposal generation has no chat LLM", async () => {
+    if (!sql) return;
+    const noChatApp = new Hono();
+    noChatApp.route("/", makeAuthRoutes({ db: db as never, secret: SECRET }));
+    noChatApp.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+    noChatApp.route("/", makeAdminQualityRoutes({ db }));
+
+    const res = await noChatApp.request("/api/admin/quality/coach/proposals", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tokenA}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ styleSlug: "style-b" }),
+    });
+    expect(res.status).toBe(503);
+  });
+
+  it("generates a no-op coach proposal when a style has no lost or draw matches", async () => {
+    if (!sql) return;
+    resetQualityQueues();
+    const beforeCalls = salesCalls.length;
+
+    const res = await authPostJsonReq(tokenA, "/api/admin/quality/coach/proposals", {
+      styleSlug: "style-a",
+      sampleSize: 4,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as QualityCoachProposalGenerateResponse;
+    expect(body.proposal).toMatchObject({
+      styleSlug: "style-a",
+      sampleSize: 4,
+      personaFilter: null,
+      summary: "No lost or draw matches found for this style — nothing to coach on.",
+      edits: {},
+      rationale: [],
+      status: "pending",
+    });
+    expect(salesCalls.length).toBe(beforeCalls);
+
+    await db.delete(coachProposals).where(eq(coachProposals.id, body.proposal.id));
+  });
+
   it("updates coach proposal decision status without crossing tenants", async () => {
     if (!sql) return;
     const before = (await (
@@ -1458,6 +1551,8 @@ type QualityCoachProposalStatusResponse = {
   ok: boolean;
   proposal: QualityCoachSummaryResponse["proposals"][number];
 };
+
+type QualityCoachProposalGenerateResponse = QualityCoachProposalStatusResponse;
 
 type QualityCoachProposalApplyResponse = QualityCoachProposalStatusResponse & {
   style: {
