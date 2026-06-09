@@ -431,6 +431,17 @@ export function SaasQuality() {
   async function handleShadowEvaluationCreate(id: number) {
     setProposalActionId(id);
     try {
+      const preview = await saas.getQualityShadowPreview(id, { limit: 200 });
+      if (!preview.preview.ready) {
+        const missing = preview.preview.missing;
+        toast.error(
+          missing
+            ? `Нет pairwise для ${missing.styleASlug} vs ${missing.styleBSlug}`
+            : "Недостаточно pairwise для shadow eval",
+        );
+        return;
+      }
+
       const result = await saas.createQualityShadowEvaluation(id, { limit: 200 });
       setCoach(await saas.getQualityCoachSummary());
       toast.success(`Shadow eval: ${result.shadow.decision ?? result.shadow.status}`);
