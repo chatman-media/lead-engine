@@ -552,11 +552,21 @@ In-memory rate-limiter уже работает per-tenant. Расширить:
 Forethought выкатил Agent QA в Sep 2025, рынок будет требовать (см.
 [COMPETITORS §7](COMPETITORS.md) trend #5):
 
-- [ ] `sales-package` уже имеет CoachAnalyzer + ELO. Generalize'ить под
-  "is this reply good?" с LLM-judge
-- [ ] UI `/quality` — dashboard: % escalation, avg time-to-resolve,
-  sentiment drift, top fail-patterns
-- [ ] Per-style ELO ranking — какой prompt-style лучше в этом tenant'е
+**Status (2026-06):** first Quality Lab slice is live. Implemented: `/quality`
+UI, self-play checks, pairwise style comparisons, per-style ELO, coach proposals,
+shadow evaluations, exchange answer-quality contracts, and tool-call review with
+human feedback labels.
+
+Remaining product gaps:
+
+- [ ] Production Agent QA dashboard: % escalation, avg time-to-resolve,
+  sentiment drift, top fail-patterns.
+- [ ] Close the tool-call feedback loop: aggregate wrong/missing/bad-args labels
+  and feed them into coach/outcome analysis.
+- [ ] Move shadow evaluations from API fire-and-forget into a durable worker/job
+  queue with stuck recovery.
+- [ ] Add read-only manager access or an explicit product rationale for keeping
+  Quality Lab superadmin-only.
 
 ### M16. Vertical marketplace 2.0 (paid templates)
 
