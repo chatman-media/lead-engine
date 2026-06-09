@@ -33,6 +33,7 @@ import {
 } from "@chatman-media/sales";
 import {
   agentToolCallFeedback,
+  agentToolCallImprovementProposals,
   agentToolCalls,
   coachProposals,
   contacts,
@@ -74,6 +75,11 @@ const ACTIONABLE_TOOL_CALL_FEEDBACK_LABELS: AgentToolCallFeedbackLabel[] = [
   "missing_tool",
   "bad_args",
 ];
+const TOOL_CALL_IMPROVEMENT_STATUSES = new Set<ToolCallImprovementProposalStatus>([
+  "pending",
+  "applied",
+  "dismissed",
+]);
 
 const selfPlayMatchSelect = {
   id: selfPlayMatches.id,
@@ -129,6 +135,29 @@ const toolCallFeedbackJoinedSelect = {
   toolCallIndex: agentToolCalls.toolCallIndex,
   latencyMs: agentToolCalls.latencyMs,
   toolCallCreatedAt: agentToolCalls.createdAt,
+};
+
+const toolCallImprovementProposalSelect = {
+  id: agentToolCallImprovementProposals.id,
+  fingerprint: agentToolCallImprovementProposals.fingerprint,
+  kind: agentToolCallImprovementProposals.kind,
+  status: agentToolCallImprovementProposals.status,
+  severity: agentToolCallImprovementProposals.severity,
+  title: agentToolCallImprovementProposals.title,
+  toolName: agentToolCallImprovementProposals.toolName,
+  source: agentToolCallImprovementProposals.source,
+  label: agentToolCallImprovementProposals.label,
+  summary: agentToolCallImprovementProposals.summary,
+  rationaleJson: agentToolCallImprovementProposals.rationaleJson,
+  actionItemsJson: agentToolCallImprovementProposals.actionItemsJson,
+  examplesJson: agentToolCallImprovementProposals.examplesJson,
+  feedbackCount: agentToolCallImprovementProposals.feedbackCount,
+  errorCount: agentToolCallImprovementProposals.errorCount,
+  lastFeedbackAt: agentToolCallImprovementProposals.lastFeedbackAt,
+  createdAt: agentToolCallImprovementProposals.createdAt,
+  updatedAt: agentToolCallImprovementProposals.updatedAt,
+  decidedAt: agentToolCallImprovementProposals.decidedAt,
+  decidedByAdminId: agentToolCallImprovementProposals.decidedByAdminId,
 };
 
 export interface AdminQualityRoutesOpts {
@@ -446,6 +475,198 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     return c.json({
       items: buildToolCallImprovementProposals(rows),
     });
+  });
+
+  app.get("/api/admin/quality/tool-call-feedback/improvement-proposals", async (c) => {
+    const tenantId = c.var.tenantId;
+    const limit = parsePositiveIntQuery(c.req.query("limit"), 50, 200);
+    if (limit === null) return c.json({ error: "invalid limit" }, 400);
+
+    const statusRaw = c.req.query("status") ?? "pending";
+    const status =
+      statusRaw === "all"
+        ? "all"
+        : TOOL_CALL_IMPROVEMENT_STATUSES.has(statusRaw as ToolCallImprovementProposalStatus)
+          ? (statusRaw as ToolCallImprovementProposalStatus)
+          : null;
+    if (status === null) return c.json({ error: "invalid status" }, 400);
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) => {
+      const conditions: SQL<unknown>[] = [
+        eq(agentToolCallImprovementProposals.tenantId, tenantId),
+      ];
+      if (status !== "all") {
+        conditions.push(eq(agentToolCallImprovementProposals.status, status));
+      }
+      return tx
+        .select(toolCallImprovementProposalSelect)
+        .from(agentToolCallImprovementProposals)
+        .where(and(...conditions))
+        .orderBy(
+          desc(agentToolCallImprovementProposals.updatedAt),
+          desc(agentToolCallImprovementProposals.id),
+        )
+        .limit(limit);
+    });
+
+    return c.json({ items: rows.map(toToolCallImprovementProposalResponse) });
+  });
+
+  app.post(
+    "/api/admin/quality/tool-call-feedback/improvement-proposals/create-from-feedback",
+    async (c) => {
+      const tenantId = c.var.tenantId;
+      const adminId = c.var.adminId as number | undefined;
+
+      let body: QualityToolCallImprovementProposalCreateBody;
+      try {
+        body = (await c.req.json()) as QualityToolCallImprovementProposalCreateBody;
+      } catch {
+        return c.json({ error: "invalid json" }, 400);
+      }
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return c.json({ error: "invalid json" }, 400);
+      }
+
+      const filters = parseToolCallFeedbackBody(body, 100, 500);
+      if (filters.kind === "invalid") return c.json({ error: filters.error }, 400);
+
+      const now = Math.floor(Date.now() / 1000);
+      const rows = await withTenant(opts.db, tenantId, async (tx) => {
+        const feedbackRows = await tx
+          .select(toolCallFeedbackJoinedSelect)
+          .from(agentToolCallFeedback)
+          .innerJoin(agentToolCalls, toolCallFeedbackJoinOn())
+          .where(toolCallFeedbackWhere(tenantId, filters.value, { actionableOnly: true }))
+          .orderBy(desc(agentToolCallFeedback.createdAt), desc(agentToolCallFeedback.id))
+          .limit(filters.value.limit);
+
+        const proposals = buildToolCallImprovementProposals(feedbackRows);
+        const persisted = [];
+        for (const proposal of proposals) {
+          const [row] = await tx
+            .insert(agentToolCallImprovementProposals)
+            .values({
+              tenantId,
+              fingerprint: proposal.fingerprint,
+              kind: proposal.kind,
+              status: "pending",
+              severity: proposal.severity,
+              title: proposal.title,
+              toolName: proposal.toolName,
+              source: proposal.source,
+              label: proposal.label,
+              summary: proposal.summary,
+              rationaleJson: JSON.stringify(proposal.rationale),
+              actionItemsJson: JSON.stringify(proposal.actionItems),
+              examplesJson: JSON.stringify(proposal.examples),
+              feedbackCount: proposal.feedbackCount,
+              errorCount: proposal.errorCount,
+              lastFeedbackAt: proposal.lastFeedbackAt,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .onConflictDoUpdate({
+              target: [
+                agentToolCallImprovementProposals.tenantId,
+                agentToolCallImprovementProposals.fingerprint,
+              ],
+              set: {
+                kind: proposal.kind,
+                severity: proposal.severity,
+                title: proposal.title,
+                toolName: proposal.toolName,
+                source: proposal.source,
+                label: proposal.label,
+                summary: proposal.summary,
+                rationaleJson: JSON.stringify(proposal.rationale),
+                actionItemsJson: JSON.stringify(proposal.actionItems),
+                examplesJson: JSON.stringify(proposal.examples),
+                feedbackCount: proposal.feedbackCount,
+                errorCount: proposal.errorCount,
+                lastFeedbackAt: proposal.lastFeedbackAt,
+                updatedAt: now,
+              },
+            })
+            .returning(toolCallImprovementProposalSelect);
+          if (row) persisted.push(row);
+        }
+        return persisted;
+      });
+
+      await recordAudit(opts.db, {
+        tenantId,
+        adminId,
+        action: "quality.tool_call_improvement_proposals.generate",
+        targetKind: "agent_tool_call_improvement_proposal",
+        details: {
+          count: rows.length,
+          filters: filters.value,
+        },
+      });
+
+      return c.json({ ok: true, items: rows.map(toToolCallImprovementProposalResponse) });
+    },
+  );
+
+  app.patch("/api/admin/quality/tool-call-feedback/improvement-proposals/:id/status", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const id = parsePositiveParamId(c.req.param("id"));
+    if (id === null) return c.json({ error: "invalid id" }, 400);
+
+    let body: QualityToolCallImprovementProposalStatusBody;
+    try {
+      body = (await c.req.json()) as QualityToolCallImprovementProposalStatusBody;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return c.json({ error: "invalid json" }, 400);
+    }
+
+    const statusRaw = typeof body.status === "string" ? body.status.trim() : "";
+    const status = TOOL_CALL_IMPROVEMENT_STATUSES.has(
+      statusRaw as ToolCallImprovementProposalStatus,
+    )
+      ? (statusRaw as ToolCallImprovementProposalStatus)
+      : null;
+    if (!status) {
+      return c.json({
+        error: `status must be one of: ${Array.from(TOOL_CALL_IMPROVEMENT_STATUSES).join(", ")}`,
+      }, 400);
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const [row] = await withTenant(opts.db, tenantId, async (tx) => {
+      return tx
+        .update(agentToolCallImprovementProposals)
+        .set({
+          status,
+          updatedAt: now,
+          decidedAt: status === "pending" ? null : now,
+          decidedByAdminId: status === "pending" ? null : (adminId ?? null),
+        })
+        .where(
+          and(
+            eq(agentToolCallImprovementProposals.tenantId, tenantId),
+            eq(agentToolCallImprovementProposals.id, id),
+          ),
+        )
+        .returning(toolCallImprovementProposalSelect);
+    });
+    if (!row) return c.json({ error: "proposal not found" }, 404);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "quality.tool_call_improvement_proposal.status",
+      targetKind: "agent_tool_call_improvement_proposal",
+      targetId: id,
+      details: { status },
+    });
+
+    return c.json({ ok: true, proposal: toToolCallImprovementProposalResponse(row) });
   });
 
   app.get("/api/admin/quality/self-play/summary", async (c) => {
@@ -2445,6 +2666,60 @@ type ToolCallImprovementProposalKind =
   | "tool_candidate";
 
 type ToolCallImprovementProposalSeverity = "high" | "medium" | "low";
+type ToolCallImprovementProposalStatus = "pending" | "applied" | "dismissed";
+
+type ToolCallImprovementProposalPreview = {
+  id: string;
+  fingerprint: string;
+  kind: ToolCallImprovementProposalKind;
+  severity: ToolCallImprovementProposalSeverity;
+  title: string;
+  toolName: string;
+  source: AgentToolCallSource;
+  label: AgentToolCallFeedbackLabel;
+  feedbackCount: number;
+  errorCount: number;
+  lastFeedbackAt: number | null;
+  summary: string;
+  rationale: string[];
+  actionItems: string[];
+  examples: ReturnType<typeof toToolCallFeedbackJoinedResponse>[];
+};
+
+type ToolCallImprovementProposalRow = {
+  id: number;
+  fingerprint: string;
+  kind: string;
+  status: string;
+  severity: string;
+  title: string;
+  toolName: string;
+  source: string;
+  label: string;
+  summary: string;
+  rationaleJson: string;
+  actionItemsJson: string;
+  examplesJson: string;
+  feedbackCount: number;
+  errorCount: number;
+  lastFeedbackAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  decidedAt: number | null;
+  decidedByAdminId: number | null;
+};
+
+type QualityToolCallImprovementProposalCreateBody = {
+  limit?: unknown;
+  source?: unknown;
+  toolName?: unknown;
+  label?: unknown;
+  error?: unknown;
+};
+
+type QualityToolCallImprovementProposalStatusBody = {
+  status?: unknown;
+};
 
 function parseToolCallFeedbackQuery(
   raw: {
@@ -2499,6 +2774,48 @@ function parseToolCallFeedbackQuery(
   };
 }
 
+function parseToolCallFeedbackBody(
+  raw: QualityToolCallImprovementProposalCreateBody,
+  defaultLimit: number,
+  maxLimit: number,
+): { kind: "ok"; value: ToolCallFeedbackQuery } | { kind: "invalid"; error: string } {
+  const limit = parseOptionalBodyInteger(raw.limit, 1, maxLimit);
+  if (limit.kind === "invalid") return { kind: "invalid", error: "invalid limit" };
+
+  const sourceRaw = parseOptionalBodyString(raw.source);
+  if (sourceRaw.kind === "invalid") return { kind: "invalid", error: "invalid source" };
+  const source =
+    sourceRaw.value && TOOL_CALL_SOURCES.has(sourceRaw.value as AgentToolCallSource)
+      ? (sourceRaw.value as AgentToolCallSource)
+      : undefined;
+  if (sourceRaw.value && !source) return { kind: "invalid", error: "invalid source" };
+
+  const labelRaw = parseOptionalBodyString(raw.label);
+  if (labelRaw.kind === "invalid") return { kind: "invalid", error: "invalid label" };
+  const label =
+    labelRaw.value && TOOL_CALL_FEEDBACK_LABELS.has(labelRaw.value as AgentToolCallFeedbackLabel)
+      ? (labelRaw.value as AgentToolCallFeedbackLabel)
+      : undefined;
+  if (labelRaw.value && !label) return { kind: "invalid", error: "invalid label" };
+
+  const toolName = parseOptionalBodyString(raw.toolName);
+  if (toolName.kind === "invalid") return { kind: "invalid", error: "invalid toolName" };
+
+  const error = parseOptionalBodyBoolean(raw.error);
+  if (error.kind === "invalid") return { kind: "invalid", error: "invalid error" };
+
+  return {
+    kind: "ok",
+    value: {
+      limit: limit.value ?? defaultLimit,
+      ...(source !== undefined ? { source } : {}),
+      ...(toolName.value !== undefined ? { toolName: toolName.value } : {}),
+      ...(label !== undefined ? { label } : {}),
+      ...(error.value !== undefined ? { error: error.value } : {}),
+    },
+  };
+}
+
 function toolCallFeedbackJoinOn() {
   return and(
     eq(agentToolCallFeedback.tenantId, agentToolCalls.tenantId),
@@ -2532,7 +2849,9 @@ function toolCallFeedbackWhere(
   return and(...conditions);
 }
 
-function buildToolCallImprovementProposals(rows: ToolCallFeedbackJoinedRow[]) {
+function buildToolCallImprovementProposals(
+  rows: ToolCallFeedbackJoinedRow[],
+): ToolCallImprovementProposalPreview[] {
   const clusters = new Map<
     string,
     {
@@ -2578,8 +2897,10 @@ function buildToolCallImprovementProposals(rows: ToolCallFeedbackJoinedRow[]) {
     .slice(0, 20)
     .map((cluster) => {
       const kind = proposalKindForToolFeedback(cluster.label);
+      const fingerprint = `${kind}:${cluster.source}:${cluster.toolName}:${cluster.label}`;
       return {
-        id: `${kind}:${cluster.source}:${cluster.toolName}:${cluster.label}`,
+        id: fingerprint,
+        fingerprint,
         kind,
         severity: proposalSeverity(cluster.total, cluster.errorCount),
         title: proposalTitle(kind, cluster.toolName),
@@ -2595,6 +2916,31 @@ function buildToolCallImprovementProposals(rows: ToolCallFeedbackJoinedRow[]) {
         examples: cluster.examples.map(toToolCallFeedbackJoinedResponse),
       };
     });
+}
+
+function toToolCallImprovementProposalResponse(row: ToolCallImprovementProposalRow) {
+  return {
+    id: row.id,
+    fingerprint: row.fingerprint,
+    kind: row.kind as ToolCallImprovementProposalKind,
+    status: row.status as ToolCallImprovementProposalStatus,
+    severity: row.severity as ToolCallImprovementProposalSeverity,
+    title: row.title,
+    toolName: row.toolName,
+    source: row.source as AgentToolCallSource,
+    label: row.label as AgentToolCallFeedbackLabel,
+    feedbackCount: row.feedbackCount,
+    errorCount: row.errorCount,
+    lastFeedbackAt: row.lastFeedbackAt,
+    summary: row.summary,
+    rationale: parseJsonStringArray(row.rationaleJson),
+    actionItems: parseJsonStringArray(row.actionItemsJson),
+    examples: parseJsonArray(row.examplesJson),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    decidedAt: row.decidedAt,
+    decidedByAdminId: row.decidedByAdminId,
+  };
 }
 
 function isActionableToolFeedbackLabel(value: string): value is AgentToolCallFeedbackLabel {
@@ -2814,6 +3160,17 @@ function parseJsonValue(value: string, fallback: unknown): unknown {
   } catch {
     return fallback;
   }
+}
+
+function parseJsonStringArray(value: string): string[] {
+  const parsed = parseJsonValue(value, []);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((item): item is string => typeof item === "string");
+}
+
+function parseJsonArray(value: string): unknown[] {
+  const parsed = parseJsonValue(value, []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 function parseOptionalBodyInteger(

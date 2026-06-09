@@ -1052,6 +1052,58 @@ export const agentToolCallFeedback = pgTable("agent_tool_call_feedback", {
   index("idx_agent_tool_call_feedback_label").on(t.tenantId, t.label, sql`${t.createdAt} DESC`),
 ]);
 
+// Persisted improvement proposals derived from clustered tool-call feedback.
+// Generated proposals are intentionally lightweight workflow records:
+// reviewers can apply/dismiss them and keep the audit trail separate from the
+// raw feedback rows that produced the suggestion.
+export const agentToolCallImprovementProposals = pgTable("agent_tool_call_improvement_proposals", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  fingerprint: text("fingerprint").notNull(),
+  kind: text("kind").notNull(),
+  status: text("status").notNull().default("pending"),
+  severity: text("severity").notNull(),
+  title: text("title").notNull(),
+  toolName: text("tool_name").notNull(),
+  source: text("source").notNull(),
+  label: text("label").notNull(),
+  summary: text("summary").notNull(),
+  rationaleJson: text("rationale_json").notNull().default("[]"),
+  actionItemsJson: text("action_items_json").notNull().default("[]"),
+  examplesJson: text("examples_json").notNull().default("[]"),
+  feedbackCount: integer("feedback_count").notNull().default(0),
+  errorCount: integer("error_count").notNull().default(0),
+  lastFeedbackAt: integer("last_feedback_at"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+  decidedAt: integer("decided_at"),
+  decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+}, (t) => [
+  check(
+    "agent_tool_call_improvement_kind_check",
+    sql`${t.kind} IN ('schema_fix','routing_prompt_fix','tool_candidate')`,
+  ),
+  check(
+    "agent_tool_call_improvement_status_check",
+    sql`${t.status} IN ('pending','applied','dismissed')`,
+  ),
+  check(
+    "agent_tool_call_improvement_severity_check",
+    sql`${t.severity} IN ('high','medium','low')`,
+  ),
+  check(
+    "agent_tool_call_improvement_source_check",
+    sql`${t.source} IN ('rag_reply','llm_reply','admin_sim','self_play')`,
+  ),
+  check(
+    "agent_tool_call_improvement_label_check",
+    sql`${t.label} IN ('wrong_tool','missing_tool','bad_args')`,
+  ),
+  uniqueIndex("uniq_agent_tool_call_improvement_fingerprint").on(t.tenantId, t.fingerprint),
+  index("idx_agent_tool_call_improvement_status").on(t.tenantId, t.status, sql`${t.updatedAt} DESC`),
+  index("idx_agent_tool_call_improvement_tool").on(t.tenantId, t.toolName, sql`${t.updatedAt} DESC`),
+]);
+
 // ---- LLM provider configs (per (tenant, purpose)) ---------------------
 
 // Читается LlmRouter'ом для resolveChat/resolveEmbed (см. packages/llm-router).
