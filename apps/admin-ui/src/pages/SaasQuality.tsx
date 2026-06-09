@@ -42,6 +42,9 @@ import {
   type QualityToolCallFeedbackLabel,
   type QualityToolCallFeedbackSummary,
   type QualityToolCallFeedbackSummaryOptions,
+  type QualityToolCallImprovementKind,
+  type QualityToolCallImprovementProposal,
+  type QualityToolCallImprovementSeverity,
   type QualityToolCallSource,
   type QualityTranscriptTurn,
   saas,
@@ -117,6 +120,18 @@ const TOOL_FEEDBACK_CLASS: Record<QualityToolCallFeedbackLabel, string> = {
   missing_tool: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
   bad_args: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   other: "bg-muted text-muted-foreground",
+};
+
+const TOOL_PROPOSAL_KIND_LABEL: Record<QualityToolCallImprovementKind, string> = {
+  schema_fix: "Schema",
+  routing_prompt_fix: "Routing",
+  tool_candidate: "Tool",
+};
+
+const TOOL_PROPOSAL_SEVERITY_CLASS: Record<QualityToolCallImprovementSeverity, string> = {
+  high: "bg-destructive/10 text-destructive",
+  medium: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  low: "bg-muted text-muted-foreground",
 };
 
 function formatDate(epoch: number | null | undefined): string {
@@ -249,6 +264,27 @@ function feedbackBadge(label: QualityToolCallFeedbackLabel) {
   );
 }
 
+function proposalKindBadge(kind: QualityToolCallImprovementKind) {
+  return (
+    <Badge className="border-transparent bg-blue-500/10 font-mono text-[11px] text-blue-600 dark:text-blue-400">
+      {TOOL_PROPOSAL_KIND_LABEL[kind]}
+    </Badge>
+  );
+}
+
+function proposalSeverityBadge(severity: QualityToolCallImprovementSeverity) {
+  return (
+    <Badge
+      className={cn(
+        "border-transparent font-mono text-[11px]",
+        TOOL_PROPOSAL_SEVERITY_CLASS[severity],
+      )}
+    >
+      {severity}
+    </Badge>
+  );
+}
+
 export function SaasQuality() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<QualitySelfPlaySummary | null>(null);
@@ -271,8 +307,13 @@ export function SaasQuality() {
   const [toolCallError, setToolCallError] = useState("");
   const [toolFeedbackSummary, setToolFeedbackSummary] =
     useState<QualityToolCallFeedbackSummary | null>(null);
+  const [toolFeedbackProposals, setToolFeedbackProposals] = useState<
+    QualityToolCallImprovementProposal[]
+  >([]);
   const [toolFeedbackLoading, setToolFeedbackLoading] = useState(false);
+  const [toolFeedbackProposalsLoading, setToolFeedbackProposalsLoading] = useState(false);
   const [toolFeedbackError, setToolFeedbackError] = useState("");
+  const [toolFeedbackProposalsError, setToolFeedbackProposalsError] = useState("");
   const [toolFeedbackExporting, setToolFeedbackExporting] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
@@ -385,8 +426,8 @@ export function SaasQuality() {
     };
   }
 
-  async function loadToolFeedbackSummary() {
-    const opts = buildToolFeedbackOptions();
+  async function loadToolFeedbackSummary(optsArg?: QualityToolCallFeedbackSummaryOptions) {
+    const opts = optsArg ?? buildToolFeedbackOptions();
     if (!opts) return;
 
     setToolFeedbackLoading(true);
@@ -402,11 +443,37 @@ export function SaasQuality() {
     }
   }
 
+  async function loadToolFeedbackProposals(optsArg?: QualityToolCallFeedbackSummaryOptions) {
+    const opts = optsArg ?? buildToolFeedbackOptions();
+    if (!opts) return;
+
+    setToolFeedbackProposalsLoading(true);
+    setToolFeedbackProposalsError("");
+    try {
+      const result = await saas.getQualityToolCallFeedbackProposals(opts);
+      setToolFeedbackProposals(result.items);
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      setToolFeedbackProposalsError(
+        err instanceof Error ? err.message : "Не удалось загрузить proposals",
+      );
+    } finally {
+      setToolFeedbackProposalsLoading(false);
+    }
+  }
+
+  function loadToolFeedbackInsights() {
+    const opts = buildToolFeedbackOptions();
+    if (!opts) return;
+    void loadToolFeedbackSummary(opts);
+    void loadToolFeedbackProposals(opts);
+  }
+
   function load() {
     setLoading(true);
     setError("");
     void loadToolCalls();
-    void loadToolFeedbackSummary();
+    loadToolFeedbackInsights();
     Promise.all([
       saas.getQualitySelfPlaySummary(),
       saas.getQualityPairwiseSummary(),
@@ -793,7 +860,7 @@ export function SaasQuality() {
           : current,
       );
       toast.success("Tool-call feedback сохранён");
-      void loadToolFeedbackSummary();
+      loadToolFeedbackInsights();
     } catch (err) {
       if (redirectOnUnauthorized(err)) return;
       toast.error(err instanceof Error ? err.message : "Не удалось сохранить feedback");
@@ -1461,10 +1528,15 @@ export function SaasQuality() {
               <Button
                 className="w-full"
                 variant="outline"
-                onClick={() => void loadToolFeedbackSummary()}
-                disabled={toolFeedbackLoading}
+                onClick={loadToolFeedbackInsights}
+                disabled={toolFeedbackLoading || toolFeedbackProposalsLoading}
               >
-                <RefreshCwIcon className={cn("size-4", toolFeedbackLoading && "animate-spin")} />
+                <RefreshCwIcon
+                  className={cn(
+                    "size-4",
+                    (toolFeedbackLoading || toolFeedbackProposalsLoading) && "animate-spin",
+                  )}
+                />
                 Обновить
               </Button>
             </div>
@@ -1612,6 +1684,76 @@ export function SaasQuality() {
                 </TableBody>
               </Table>
             </div>
+          </div>
+
+          {toolFeedbackProposalsError && (
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {toolFeedbackProposalsError}
+            </p>
+          )}
+
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Priority</TableHead>
+                  <TableHead>Kind</TableHead>
+                  <TableHead>Tool</TableHead>
+                  <TableHead>Signal</TableHead>
+                  <TableHead>Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {toolFeedbackProposalsLoading && toolFeedbackProposals.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      Загрузка proposals…
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!toolFeedbackProposalsLoading && toolFeedbackProposals.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      Proposals пока нет
+                    </TableCell>
+                  </TableRow>
+                )}
+                {toolFeedbackProposals.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>{proposalSeverityBadge(item.severity)}</TableCell>
+                    <TableCell>{proposalKindBadge(item.kind)}</TableCell>
+                    <TableCell className="max-w-[220px] truncate font-mono text-xs">
+                      {item.toolName}
+                    </TableCell>
+                    <TableCell className="min-w-[210px]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {feedbackBadge(item.label)}
+                        {sourceBadge(item.source)}
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {item.feedbackCount}/{item.errorCount}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="min-w-[340px] max-w-[620px]">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">{item.title}</p>
+                        <p className="text-xs text-muted-foreground">{item.summary}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {item.actionItems.slice(0, 2).map((action) => (
+                            <span
+                              key={action}
+                              className="rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground"
+                            >
+                              {action}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         </CardContent>
       </Card>

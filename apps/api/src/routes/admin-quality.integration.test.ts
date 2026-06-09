@@ -678,6 +678,65 @@ describe("admin quality JSONL export", () => {
     expect(text).not.toContain("999");
   });
 
+  it("generates actionable tool-call improvement proposals from feedback clusters", async () => {
+    if (!sql) return;
+    const missingTool = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`,
+      { label: "missing_tool", note: "need an explicit verification handoff tool" },
+    );
+    expect(missingTool.status).toBe(201);
+
+    const res = await authReq(tokenA, "/api/admin/quality/tool-call-feedback/proposals?limit=20");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as QualityToolCallFeedbackProposalsResponse;
+    expect(body.items.map((item) => item.kind).sort()).toEqual([
+      "routing_prompt_fix",
+      "schema_fix",
+      "tool_candidate",
+    ]);
+    expect(body.items).toContainEqual(
+      expect.objectContaining({
+        kind: "schema_fix",
+        label: "bad_args",
+        toolName: "create_exchange_order",
+        source: "llm_reply",
+        feedbackCount: 1,
+        errorCount: 1,
+        severity: "medium",
+      }),
+    );
+    expect(body.items).toContainEqual(
+      expect.objectContaining({
+        kind: "routing_prompt_fix",
+        label: "wrong_tool",
+        actionItems: expect.arrayContaining([
+          expect.stringContaining("should and should not be selected"),
+        ]),
+      }),
+    );
+    const missingProposal = body.items.find((item) => item.kind === "tool_candidate");
+    expect(missingProposal?.rationale.join(" ")).toContain("verification handoff tool");
+    expect(missingProposal?.examples[0]?.toolCall.args).toEqual({ quoteId: "q1" });
+    expect(JSON.stringify(body)).not.toContain("999");
+
+    const filtered = (await (
+      await authReq(tokenA, "/api/admin/quality/tool-call-feedback/proposals?label=bad_args")
+    ).json()) as QualityToolCallFeedbackProposalsResponse;
+    expect(filtered.items).toHaveLength(1);
+    expect(filtered.items[0]?.kind).toBe("schema_fix");
+
+    const nonActionable = (await (
+      await authReq(tokenA, "/api/admin/quality/tool-call-feedback/proposals?label=good_reply")
+    ).json()) as QualityToolCallFeedbackProposalsResponse;
+    expect(nonActionable.items).toEqual([]);
+
+    const crossTenant = (await (
+      await authReq(tokenB, "/api/admin/quality/tool-call-feedback/proposals")
+    ).json()) as QualityToolCallFeedbackProposalsResponse;
+    expect(crossTenant.items).toEqual([]);
+  });
+
   it("validates tool-call feedback analytics query params", async () => {
     if (!sql) return;
     expect(
@@ -698,6 +757,12 @@ describe("admin quality JSONL export", () => {
     expect(
       (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/export.jsonl?toolName="))
         .status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/proposals?source=bad")).status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/proposals?limit=0")).status,
     ).toBe(400);
   });
 
@@ -2200,6 +2265,28 @@ type QualityToolCallFeedbackExportRow = {
   toolCallIndex: number;
   latencyMs: number | null;
   toolCallCreatedAt: number;
+};
+
+type QualityToolCallFeedbackProposalsResponse = {
+  items: Array<{
+    id: string;
+    kind: "schema_fix" | "routing_prompt_fix" | "tool_candidate";
+    severity: "high" | "medium" | "low";
+    title: string;
+    toolName: string;
+    source: string;
+    label: string;
+    feedbackCount: number;
+    errorCount: number;
+    lastFeedbackAt: number | null;
+    summary: string;
+    rationale: string[];
+    actionItems: string[];
+    examples: Array<{
+      feedback: QualityToolCallFeedbackResponse;
+      toolCall: QualityToolCallsResponse["items"][number];
+    }>;
+  }>;
 };
 
 type QualitySummaryResponse = {

@@ -69,6 +69,11 @@ const TOOL_CALL_FEEDBACK_LABELS = new Set<AgentToolCallFeedbackLabel>([
   "bad_args",
   "other",
 ]);
+const ACTIONABLE_TOOL_CALL_FEEDBACK_LABELS: AgentToolCallFeedbackLabel[] = [
+  "wrong_tool",
+  "missing_tool",
+  "bad_args",
+];
 
 const selfPlayMatchSelect = {
   id: selfPlayMatches.id,
@@ -410,6 +415,36 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     return c.body(body, 200, {
       "Content-Type": "application/x-ndjson; charset=utf-8",
       "Content-Disposition": 'attachment; filename="tool-call-feedback.jsonl"',
+    });
+  });
+
+  app.get("/api/admin/quality/tool-call-feedback/proposals", async (c) => {
+    const tenantId = c.var.tenantId;
+    const filters = parseToolCallFeedbackQuery(
+      {
+        limit: c.req.query("limit"),
+        source: c.req.query("source"),
+        toolName: c.req.query("toolName"),
+        label: c.req.query("label"),
+        error: c.req.query("error"),
+      },
+      100,
+      500,
+    );
+    if (filters.kind === "invalid") return c.json({ error: filters.error }, 400);
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) => {
+      return tx
+        .select(toolCallFeedbackJoinedSelect)
+        .from(agentToolCallFeedback)
+        .innerJoin(agentToolCalls, toolCallFeedbackJoinOn())
+        .where(toolCallFeedbackWhere(tenantId, filters.value, { actionableOnly: true }))
+        .orderBy(desc(agentToolCallFeedback.createdAt), desc(agentToolCallFeedback.id))
+        .limit(filters.value.limit);
+    });
+
+    return c.json({
+      items: buildToolCallImprovementProposals(rows),
     });
   });
 
@@ -2404,6 +2439,13 @@ type ToolCallFeedbackTotals = {
   lastFeedbackAt: number | null;
 };
 
+type ToolCallImprovementProposalKind =
+  | "schema_fix"
+  | "routing_prompt_fix"
+  | "tool_candidate";
+
+type ToolCallImprovementProposalSeverity = "high" | "medium" | "low";
+
 function parseToolCallFeedbackQuery(
   raw: {
     limit?: string;
@@ -2467,6 +2509,7 @@ function toolCallFeedbackJoinOn() {
 function toolCallFeedbackWhere(
   tenantId: number,
   filters: ToolCallFeedbackQuery,
+  opts: { actionableOnly?: boolean } = {},
 ): SQL<unknown> | undefined {
   const conditions: SQL<unknown>[] = [
     eq(agentToolCallFeedback.tenantId, tenantId),
@@ -2480,11 +2523,176 @@ function toolCallFeedbackWhere(
   }
   if (filters.label !== undefined) {
     conditions.push(eq(agentToolCallFeedback.label, filters.label));
+  } else if (opts.actionableOnly) {
+    conditions.push(inArray(agentToolCallFeedback.label, ACTIONABLE_TOOL_CALL_FEEDBACK_LABELS));
   }
   if (filters.error !== undefined) {
     conditions.push(eq(agentToolCalls.error, filters.error));
   }
   return and(...conditions);
+}
+
+function buildToolCallImprovementProposals(rows: ToolCallFeedbackJoinedRow[]) {
+  const clusters = new Map<
+    string,
+    {
+      label: AgentToolCallFeedbackLabel;
+      toolName: string;
+      source: AgentToolCallSource;
+      total: number;
+      errorCount: number;
+      lastFeedbackAt: number | null;
+      examples: ToolCallFeedbackJoinedRow[];
+    }
+  >();
+
+  for (const row of rows) {
+    if (!isActionableToolFeedbackLabel(row.label)) continue;
+    const toolName = row.toolName || "unknown_tool";
+    const source = toToolCallSource(row.source);
+    const key = `${row.label}:${toolName}:${source}`;
+    const cluster =
+      clusters.get(key) ??
+      {
+        label: row.label,
+        toolName,
+        source,
+        total: 0,
+        errorCount: 0,
+        lastFeedbackAt: null,
+        examples: [],
+      };
+    cluster.total += 1;
+    if (row.error) cluster.errorCount += 1;
+    cluster.lastFeedbackAt = Math.max(cluster.lastFeedbackAt ?? 0, row.feedbackCreatedAt);
+    if (cluster.examples.length < 3) cluster.examples.push(row);
+    clusters.set(key, cluster);
+  }
+
+  return Array.from(clusters.values())
+    .sort((a, b) => {
+      if (b.total !== a.total) return b.total - a.total;
+      if (b.errorCount !== a.errorCount) return b.errorCount - a.errorCount;
+      return (b.lastFeedbackAt ?? 0) - (a.lastFeedbackAt ?? 0);
+    })
+    .slice(0, 20)
+    .map((cluster) => {
+      const kind = proposalKindForToolFeedback(cluster.label);
+      return {
+        id: `${kind}:${cluster.source}:${cluster.toolName}:${cluster.label}`,
+        kind,
+        severity: proposalSeverity(cluster.total, cluster.errorCount),
+        title: proposalTitle(kind, cluster.toolName),
+        toolName: cluster.toolName,
+        source: cluster.source,
+        label: cluster.label,
+        feedbackCount: cluster.total,
+        errorCount: cluster.errorCount,
+        lastFeedbackAt: cluster.lastFeedbackAt,
+        summary: proposalSummary(kind, cluster),
+        rationale: proposalRationale(kind, cluster),
+        actionItems: proposalActionItems(kind, cluster.toolName),
+        examples: cluster.examples.map(toToolCallFeedbackJoinedResponse),
+      };
+    });
+}
+
+function isActionableToolFeedbackLabel(value: string): value is AgentToolCallFeedbackLabel {
+  return ACTIONABLE_TOOL_CALL_FEEDBACK_LABELS.includes(value as AgentToolCallFeedbackLabel);
+}
+
+function toToolCallSource(value: string): AgentToolCallSource {
+  return TOOL_CALL_SOURCES.has(value as AgentToolCallSource)
+    ? (value as AgentToolCallSource)
+    : "llm_reply";
+}
+
+function proposalKindForToolFeedback(
+  label: AgentToolCallFeedbackLabel,
+): ToolCallImprovementProposalKind {
+  if (label === "bad_args") return "schema_fix";
+  if (label === "wrong_tool") return "routing_prompt_fix";
+  return "tool_candidate";
+}
+
+function proposalSeverity(total: number, errorCount: number): ToolCallImprovementProposalSeverity {
+  if (total >= 5 || errorCount >= 3) return "high";
+  if (total >= 2 || errorCount >= 1) return "medium";
+  return "low";
+}
+
+function proposalTitle(kind: ToolCallImprovementProposalKind, toolName: string): string {
+  if (kind === "schema_fix") return `Tighten args for ${toolName}`;
+  if (kind === "routing_prompt_fix") return `Clarify routing for ${toolName}`;
+  return `Review missing tool around ${toolName}`;
+}
+
+function proposalSummary(
+  kind: ToolCallImprovementProposalKind,
+  cluster: {
+    label: AgentToolCallFeedbackLabel;
+    toolName: string;
+    source: AgentToolCallSource;
+    total: number;
+    errorCount: number;
+  },
+): string {
+  const base = `${cluster.total} ${cluster.label} labels on ${cluster.toolName} from ${cluster.source}`;
+  if (kind === "schema_fix") {
+    return `${base}; ${cluster.errorCount} traces are marked as tool errors.`;
+  }
+  if (kind === "routing_prompt_fix") {
+    return `${base}; the agent likely chose this tool in the wrong context.`;
+  }
+  return `${base}; users/admins are signaling an absent capability or missing tool route.`;
+}
+
+function proposalRationale(
+  kind: ToolCallImprovementProposalKind,
+  cluster: {
+    total: number;
+    errorCount: number;
+    examples: ToolCallFeedbackJoinedRow[];
+  },
+): string[] {
+  const notes = cluster.examples
+    .map((example) => example.note?.trim())
+    .filter((note): note is string => Boolean(note));
+  const rationale = [
+    `${cluster.total} recent actionable feedback labels are clustered together.`,
+    `${cluster.errorCount} examples also have tool execution errors.`,
+  ];
+  if (notes.length > 0) rationale.push(`Reviewer notes include: ${notes.slice(0, 2).join(" | ")}`);
+  if (kind === "schema_fix") {
+    rationale.push("Bad args labels usually point to missing validation, defaults, or examples.");
+  } else if (kind === "routing_prompt_fix") {
+    rationale.push("Wrong tool labels usually point to ambiguous tool selection criteria.");
+  } else {
+    rationale.push("Missing tool labels usually point to a capability gap or a routing gap.");
+  }
+  return rationale;
+}
+
+function proposalActionItems(kind: ToolCallImprovementProposalKind, toolName: string): string[] {
+  if (kind === "schema_fix") {
+    return [
+      `Review ${toolName} args schema for required fields, enum constraints, and null handling.`,
+      "Add a regression example from the attached traces.",
+      "Tighten the tool-use prompt with a valid args example.",
+    ];
+  }
+  if (kind === "routing_prompt_fix") {
+    return [
+      `Clarify when ${toolName} should and should not be selected.`,
+      "Add a negative routing example from the attached traces.",
+      "Re-run self-play for the affected source after prompt changes.",
+    ];
+  }
+  return [
+    `Review whether ${toolName} was used as a fallback for a missing capability.`,
+    "Draft a tool contract or explicit no-tool fallback for this scenario.",
+    "Add a routing regression once the missing capability is decided.",
+  ];
 }
 
 function emptyToolCallFeedbackTotals(): ToolCallFeedbackTotals {
