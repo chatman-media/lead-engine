@@ -916,6 +916,55 @@ export type QualityCoachProposalStatus = "pending" | "applied" | "dismissed";
 export type QualityCoachProposalDecisionStatus = "pending" | "dismissed";
 export type QualityShadowStatus = "running" | "complete" | "failed";
 export type QualityShadowDecision = "keep" | "rollback" | "inconclusive";
+export type QualityToolCallSource = "rag_reply" | "llm_reply" | "admin_sim" | "self_play";
+export type QualityToolCallFeedbackLabel =
+  | "good_reply"
+  | "wrong_tool"
+  | "missing_tool"
+  | "bad_args"
+  | "other";
+
+export interface QualityToolCall {
+  id: number;
+  conversationId: number;
+  contactId: number | null;
+  messageId: number | null;
+  outboundQueueId: number | null;
+  source: QualityToolCallSource;
+  toolName: string;
+  args: unknown;
+  result: unknown;
+  error: boolean;
+  cycle: number;
+  toolCallIndex: number;
+  latencyMs: number | null;
+  createdAt: number;
+}
+
+export interface QualityToolCallFeedback {
+  id: number;
+  toolCallId: number;
+  adminId: number | null;
+  label: QualityToolCallFeedbackLabel;
+  note: string | null;
+  createdAt: number;
+}
+
+export interface QualityToolCallListOptions {
+  limit?: number;
+  conversationId?: number;
+  contactId?: number;
+  messageId?: number;
+  outboundQueueId?: number;
+  source?: QualityToolCallSource;
+  toolName?: string;
+  error?: boolean;
+}
+
+export interface QualityToolCallFeedbackCreateOptions {
+  label: QualityToolCallFeedbackLabel;
+  note?: string | null;
+}
 
 export interface QualityTranscriptTurn {
   role: "candidate" | "salesperson";
@@ -2384,6 +2433,35 @@ export const saas = {
   },
   getQualityRunOptions() {
     return request<QualityRunOptions>("/api/admin/quality/run-options");
+  },
+  getQualityToolCalls(opts: QualityToolCallListOptions = {}) {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.conversationId) params.set("conversationId", String(opts.conversationId));
+    if (opts.contactId) params.set("contactId", String(opts.contactId));
+    if (opts.messageId) params.set("messageId", String(opts.messageId));
+    if (opts.outboundQueueId) params.set("outboundQueueId", String(opts.outboundQueueId));
+    if (opts.source) params.set("source", opts.source);
+    if (opts.toolName) params.set("toolName", opts.toolName);
+    if (opts.error !== undefined) params.set("error", String(opts.error));
+    const qs = params.toString();
+    return request<{ items: QualityToolCall[] }>(
+      `/api/admin/quality/tool-calls${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getQualityToolCallFeedback(id: number) {
+    return request<{ items: QualityToolCallFeedback[] }>(
+      `/api/admin/quality/tool-calls/${id}/feedback`,
+    );
+  },
+  createQualityToolCallFeedback(id: number, data: QualityToolCallFeedbackCreateOptions) {
+    return request<{ ok: boolean; feedback: QualityToolCallFeedback }>(
+      `/api/admin/quality/tool-calls/${id}/feedback`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
   },
   runQualitySelfPlay(data: QualitySelfPlayRunOptions) {
     return request<{ ok: boolean; match: QualitySelfPlayMatch }>(

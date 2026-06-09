@@ -6,12 +6,14 @@ import {
   EyeIcon,
   FlaskConicalIcon,
   LightbulbIcon,
+  MessageSquareTextIcon,
   PlayIcon,
   RefreshCwIcon,
   RotateCcwIcon,
   TargetIcon,
   TimerIcon,
   TrophyIcon,
+  WrenchIcon,
   XCircleIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -35,6 +37,10 @@ import {
   type QualityShadowStatus,
   type QualitySelfPlayMatch,
   type QualitySelfPlaySummary,
+  type QualityToolCall,
+  type QualityToolCallFeedback,
+  type QualityToolCallFeedbackLabel,
+  type QualityToolCallSource,
   type QualityTranscriptTurn,
   saas,
 } from "@/api/saas";
@@ -49,6 +55,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 const OUTCOME_LABEL: Record<QualityOutcome, string> = {
@@ -85,6 +92,29 @@ const DECISION_CLASS: Record<QualityShadowDecision, string> = {
   keep: "bg-[color-mix(in_oklch,var(--success)_12%,transparent)] text-[var(--success)]",
   rollback: "bg-destructive/10 text-destructive",
   inconclusive: "bg-muted text-muted-foreground",
+};
+
+const TOOL_CALL_SOURCES: QualityToolCallSource[] = [
+  "rag_reply",
+  "llm_reply",
+  "admin_sim",
+  "self_play",
+];
+
+const TOOL_FEEDBACK_LABELS: Array<{ value: QualityToolCallFeedbackLabel; label: string }> = [
+  { value: "good_reply", label: "Good" },
+  { value: "wrong_tool", label: "Wrong tool" },
+  { value: "missing_tool", label: "Missing tool" },
+  { value: "bad_args", label: "Bad args" },
+  { value: "other", label: "Other" },
+];
+
+const TOOL_FEEDBACK_CLASS: Record<QualityToolCallFeedbackLabel, string> = {
+  good_reply: "bg-[color-mix(in_oklch,var(--success)_12%,transparent)] text-[var(--success)]",
+  wrong_tool: "bg-destructive/10 text-destructive",
+  missing_tool: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  bad_args: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  other: "bg-muted text-muted-foreground",
 };
 
 function formatDate(epoch: number | null | undefined): string {
@@ -172,6 +202,45 @@ function formatPercent(value: number | null): string {
   return `${Math.round(value * 1000) / 10}%`;
 }
 
+function formatLatency(value: number | null): string {
+  return value === null ? "нет" : `${value} ms`;
+}
+
+function formatJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? "null";
+  } catch {
+    return String(value);
+  }
+}
+
+function toolErrorBadge(error: boolean) {
+  return (
+    <Badge
+      className={cn(
+        "border-transparent font-mono text-[11px]",
+        error
+          ? "bg-destructive/10 text-destructive"
+          : "bg-[color-mix(in_oklch,var(--success)_12%,transparent)] text-[var(--success)]",
+      )}
+    >
+      {error ? "error" : "ok"}
+    </Badge>
+  );
+}
+
+function sourceBadge(source: QualityToolCallSource) {
+  return <Badge className="border-transparent bg-muted font-mono text-[11px]">{source}</Badge>;
+}
+
+function feedbackBadge(label: QualityToolCallFeedbackLabel) {
+  return (
+    <Badge className={cn("border-transparent font-mono text-[11px]", TOOL_FEEDBACK_CLASS[label])}>
+      {label}
+    </Badge>
+  );
+}
+
 export function SaasQuality() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<QualitySelfPlaySummary | null>(null);
@@ -184,8 +253,15 @@ export function SaasQuality() {
   const [pairwiseExporting, setPairwiseExporting] = useState(false);
   const [proposalActionId, setProposalActionId] = useState<number | null>(null);
   const [inspector, setInspector] = useState<QualityInspectorState | null>(null);
+  const [toolCallInspector, setToolCallInspector] = useState<QualityToolCallInspectorState | null>(
+    null,
+  );
   const [runningKind, setRunningKind] = useState<"self-play" | "pairwise" | null>(null);
   const [generatingCoach, setGeneratingCoach] = useState(false);
+  const [toolCalls, setToolCalls] = useState<QualityToolCall[]>([]);
+  const [toolCallsLoading, setToolCallsLoading] = useState(false);
+  const [toolCallError, setToolCallError] = useState("");
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
   const [styleSlug, setStyleSlug] = useState("all");
   const [personaSlug, setPersonaSlug] = useState("all");
@@ -208,6 +284,12 @@ export function SaasQuality() {
   const [coachStyleSlug, setCoachStyleSlug] = useState("");
   const [coachPersonaSlug, setCoachPersonaSlug] = useState("all");
   const [coachSampleSize, setCoachSampleSize] = useState("8");
+  const [toolCallLimit, setToolCallLimit] = useState("50");
+  const [toolCallSource, setToolCallSource] = useState<"all" | QualityToolCallSource>("all");
+  const [toolCallErrorFilter, setToolCallErrorFilter] = useState<"all" | "true" | "false">(
+    "all",
+  );
+  const [toolCallName, setToolCallName] = useState("");
 
   const styleOptions = useMemo(() => summary?.byStyle.map((item) => item.styleSlug) ?? [], [summary]);
   const personaOptions = useMemo(
@@ -229,9 +311,44 @@ export function SaasQuality() {
     [pairwise],
   );
 
+  function redirectOnUnauthorized(err: unknown): boolean {
+    if (err instanceof ApiError && err.status === 401) {
+      clearToken();
+      navigate("/login", { replace: true });
+      return true;
+    }
+    return false;
+  }
+
+  async function loadToolCalls() {
+    const parsedLimit = parseLimit(toolCallLimit);
+    if (parsedLimit === null) {
+      toast.error("Tool calls limit: 1-1000");
+      return;
+    }
+
+    setToolCallsLoading(true);
+    setToolCallError("");
+    try {
+      const result = await saas.getQualityToolCalls({
+        limit: parsedLimit,
+        ...(toolCallSource !== "all" ? { source: toolCallSource } : {}),
+        ...(toolCallErrorFilter !== "all" ? { error: toolCallErrorFilter === "true" } : {}),
+        ...(toolCallName.trim() ? { toolName: toolCallName.trim() } : {}),
+      });
+      setToolCalls(result.items);
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      setToolCallError(err instanceof Error ? err.message : "Не удалось загрузить tool calls");
+    } finally {
+      setToolCallsLoading(false);
+    }
+  }
+
   function load() {
     setLoading(true);
     setError("");
+    void loadToolCalls();
     Promise.all([
       saas.getQualitySelfPlaySummary(),
       saas.getQualityPairwiseSummary(),
@@ -542,6 +659,71 @@ export function SaasQuality() {
         loading: false,
         error: err instanceof Error ? err.message : "Не удалось открыть pairwise",
       });
+    }
+  }
+
+  async function handleToolCallInspect(toolCall: QualityToolCall) {
+    setToolCallInspector({
+      toolCall,
+      feedback: [],
+      loading: true,
+      note: "",
+    });
+    try {
+      const result = await saas.getQualityToolCallFeedback(toolCall.id);
+      setToolCallInspector((current) =>
+        current?.toolCall.id === toolCall.id
+          ? {
+              ...current,
+              feedback: result.items,
+              loading: false,
+            }
+          : current,
+      );
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      setToolCallInspector((current) =>
+        current?.toolCall.id === toolCall.id
+          ? {
+              ...current,
+              error: err instanceof Error ? err.message : "Не удалось загрузить feedback",
+              loading: false,
+            }
+          : current,
+      );
+    }
+  }
+
+  function handleToolCallNoteChange(note: string) {
+    setToolCallInspector((current) => (current ? { ...current, note } : current));
+  }
+
+  async function handleToolCallFeedback(label: QualityToolCallFeedbackLabel) {
+    if (!toolCallInspector) return;
+    const toolCallId = toolCallInspector.toolCall.id;
+    const note = toolCallInspector.note.trim();
+
+    setFeedbackSubmitting(true);
+    try {
+      const result = await saas.createQualityToolCallFeedback(toolCallId, {
+        label,
+        ...(note ? { note } : {}),
+      });
+      setToolCallInspector((current) =>
+        current?.toolCall.id === toolCallId
+          ? {
+              ...current,
+              feedback: [result.feedback, ...current.feedback],
+              note: "",
+            }
+          : current,
+      );
+      toast.success("Tool-call feedback сохранён");
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      toast.error(err instanceof Error ? err.message : "Не удалось сохранить feedback");
+    } finally {
+      setFeedbackSubmitting(false);
     }
   }
 
@@ -947,6 +1129,163 @@ export function SaasQuality() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <WrenchIcon className="size-4 text-primary" />
+            Agent tool calls
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_130px_110px_150px]">
+            <div className="space-y-1.5">
+              <Label htmlFor="tool-call-name">Tool</Label>
+              <Input
+                id="tool-call-name"
+                className="font-mono"
+                value={toolCallName}
+                onChange={(event) => setToolCallName(event.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Source</Label>
+              <Select
+                value={toolCallSource}
+                onValueChange={(value) => setToolCallSource(value as "all" | QualityToolCallSource)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все</SelectItem>
+                  {TOOL_CALL_SOURCES.map((source) => (
+                    <SelectItem key={source} value={source}>
+                      {source}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Error</Label>
+              <Select
+                value={toolCallErrorFilter}
+                onValueChange={(value) =>
+                  setToolCallErrorFilter(value as "all" | "true" | "false")
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все</SelectItem>
+                  <SelectItem value="false">OK</SelectItem>
+                  <SelectItem value="true">Error</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="tool-call-limit">Limit</Label>
+              <Input
+                id="tool-call-limit"
+                inputMode="numeric"
+                className="font-mono"
+                value={toolCallLimit}
+                onChange={(event) =>
+                  setToolCallLimit(event.target.value.replace(/\D/g, "").slice(0, 4))
+                }
+              />
+            </div>
+
+            <div className="flex items-end">
+              <Button
+                className="w-full"
+                variant="outline"
+                onClick={() => void loadToolCalls()}
+                disabled={toolCallsLoading}
+              >
+                <RefreshCwIcon className={cn("size-4", toolCallsLoading && "animate-spin")} />
+                Обновить
+              </Button>
+            </div>
+          </div>
+
+          {toolCallError && (
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {toolCallError}
+            </p>
+          )}
+
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Tool</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead className="text-right">Conversation</TableHead>
+                  <TableHead className="text-right">Cycle</TableHead>
+                  <TableHead className="text-right">Latency</TableHead>
+                  <TableHead className="text-right">When</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {toolCallsLoading && toolCalls.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                      Загрузка tool calls…
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!toolCallsLoading && toolCalls.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                      Tool calls пока нет
+                    </TableCell>
+                  </TableRow>
+                )}
+                {toolCalls.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>{toolErrorBadge(item.error)}</TableCell>
+                    <TableCell className="max-w-[260px] truncate font-mono text-xs">
+                      {item.toolName}
+                    </TableCell>
+                    <TableCell>{sourceBadge(item.source)}</TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {item.conversationId}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {item.cycle}.{item.toolCallIndex}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {formatLatency(item.latencyMs)}
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">
+                      {formatDate(item.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 gap-1.5 px-2 text-xs"
+                        onClick={() => void handleToolCallInspect(item)}
+                      >
+                        <EyeIcon className="size-3.5" />
+                        View
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
         <Card>
           <CardHeader className="pb-3">
@@ -1293,6 +1632,13 @@ export function SaasQuality() {
       )}
 
       <QualityInspectorDialog inspector={inspector} onOpenChange={(open) => !open && setInspector(null)} />
+      <ToolCallInspectorDialog
+        inspector={toolCallInspector}
+        submitting={feedbackSubmitting}
+        onFeedback={(label) => void handleToolCallFeedback(label)}
+        onNoteChange={handleToolCallNoteChange}
+        onOpenChange={(open) => !open && setToolCallInspector(null)}
+      />
     </div>
   );
 }
@@ -1310,6 +1656,14 @@ type QualityInspectorState =
       pairwise?: QualityPairwiseMatch;
       error?: string;
     };
+
+type QualityToolCallInspectorState = {
+  toolCall: QualityToolCall;
+  feedback: QualityToolCallFeedback[];
+  loading: boolean;
+  note: string;
+  error?: string;
+};
 
 function QualityInspectorDialog({
   inspector,
@@ -1344,6 +1698,139 @@ function QualityInspectorDialog({
           )}
           {inspector?.kind === "pairwise" && inspector.pairwise && (
             <PairwiseInspector pairwise={inspector.pairwise} />
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ToolCallInspectorDialog({
+  inspector,
+  submitting,
+  onFeedback,
+  onNoteChange,
+  onOpenChange,
+}: {
+  inspector: QualityToolCallInspectorState | null;
+  submitting: boolean;
+  onFeedback: (label: QualityToolCallFeedbackLabel) => void;
+  onNoteChange: (note: string) => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const open = inspector !== null;
+  const toolCall = inspector?.toolCall;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[86vh] max-w-6xl overflow-y-auto p-0">
+        <DialogHeader className="border-b px-5 py-4">
+          <DialogTitle className="flex items-center gap-2">
+            <WrenchIcon className="size-4 text-primary" />
+            {toolCall?.toolName ?? "Tool call detail"}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 px-5 pb-5">
+          {toolCall && (
+            <>
+              <div className="grid gap-3 text-sm md:grid-cols-4">
+                <InspectorMetric label="Status" value={toolCall.error ? "error" : "ok"} />
+                <InspectorMetric label="Source" value={toolCall.source} />
+                <InspectorMetric label="Conversation" value={toolCall.conversationId} />
+                <InspectorMetric label="Contact" value={toolCall.contactId ?? "нет"} />
+                <InspectorMetric label="Message" value={toolCall.messageId ?? "нет"} />
+                <InspectorMetric
+                  label="Outbound"
+                  value={toolCall.outboundQueueId ?? "нет"}
+                />
+                <InspectorMetric
+                  label="Cycle"
+                  value={`${toolCall.cycle}.${toolCall.toolCallIndex}`}
+                />
+                <InspectorMetric label="Latency" value={formatLatency(toolCall.latencyMs)} />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <JsonBlock title="Args" value={toolCall.args} />
+                <JsonBlock title="Result" value={toolCall.result} />
+              </div>
+
+              <div className="rounded-md border">
+                <div className="flex items-center gap-2 border-b px-3 py-2 text-sm font-medium">
+                  <MessageSquareTextIcon className="size-4 text-muted-foreground" />
+                  Feedback
+                </div>
+                <div className="space-y-3 p-3">
+                  {inspector.error && (
+                    <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                      {inspector.error}
+                    </p>
+                  )}
+                  <Textarea
+                    value={inspector.note}
+                    maxLength={2000}
+                    rows={3}
+                    onChange={(event) => onNoteChange(event.target.value)}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    {TOOL_FEEDBACK_LABELS.map((item) => (
+                      <Button
+                        key={item.value}
+                        size="sm"
+                        variant={item.value === "good_reply" ? "default" : "outline"}
+                        disabled={submitting || inspector.loading}
+                        onClick={() => onFeedback(item.value)}
+                      >
+                        {item.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Label</TableHead>
+                      <TableHead>Note</TableHead>
+                      <TableHead className="text-right">Admin</TableHead>
+                      <TableHead className="text-right">When</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {inspector.loading && (
+                      <TableRow>
+                        <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
+                          Загрузка feedback…
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {!inspector.loading && inspector.feedback.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
+                          Feedback пока нет
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {inspector.feedback.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell>{feedbackBadge(item.label)}</TableCell>
+                        <TableCell className="max-w-[520px] whitespace-pre-wrap break-words text-sm">
+                          {item.note || "нет"}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {item.adminId ?? "нет"}
+                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {formatDate(item.createdAt)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </div>
       </DialogContent>
@@ -1429,6 +1916,17 @@ function TranscriptPane({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function JsonBlock({ title, value }: { title: string; value: unknown }) {
+  return (
+    <div className="rounded-md border">
+      <div className="border-b px-3 py-2 text-sm font-medium">{title}</div>
+      <pre className="max-h-[420px] overflow-auto p-3 text-xs leading-relaxed">
+        {formatJson(value)}
+      </pre>
     </div>
   );
 }
