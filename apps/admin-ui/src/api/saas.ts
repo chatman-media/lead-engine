@@ -817,6 +817,26 @@ export interface ExperimentItem {
   createdAt: number;
 }
 
+export interface ExperimentPreview {
+  experiment: {
+    id: number;
+    slug: string;
+    status: ExperimentItem["status"];
+    successMetric: string;
+  };
+  sampleSize: number;
+  canRun: boolean;
+  variants: Array<{
+    styleSlug: string;
+    displayName: string | null;
+    weight: number;
+    targetPct: number;
+    status: "valid" | "missing" | "invalid_config";
+  }>;
+  assignments: Array<{ userId: string; styleSlug: string }>;
+  counts: Array<{ styleSlug: string; count: number; observedPct: number }>;
+}
+
 export type QualityOutcome = "won" | "lost" | "draw";
 export type QualityPairwiseWinner = "a" | "b" | "draw";
 export type QualityCoachProposalStatus = "pending" | "applied" | "dismissed";
@@ -2169,6 +2189,9 @@ export const saas = {
   },
   listExperiments() {
     return request<{ items: ExperimentItem[] }>("/api/admin/experiments");
+  },
+  previewExperiment(id: number, sampleSize = 20) {
+    return request<ExperimentPreview>(`/api/admin/experiments/${id}/preview?sampleSize=${sampleSize}`);
   },
   createExperiment(data: { slug: string; allocationJson: string; successMetric: string }) {
     return request<ExperimentItem>("/api/admin/experiments", {

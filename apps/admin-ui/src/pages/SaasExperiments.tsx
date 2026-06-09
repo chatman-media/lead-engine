@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiError, clearToken, saas, type ExperimentItem, type StyleItem } from "@/api/saas";
+import { ApiError, clearToken, saas, type ExperimentItem, type ExperimentPreview, type StyleItem } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangleIcon, EditIcon, PauseIcon, PlayIcon, PlusIcon, SaveIcon, SquareIcon, XIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  EditIcon,
+  GitBranchIcon,
+  PauseIcon,
+  PlayIcon,
+  PlusIcon,
+  SaveIcon,
+  SquareIcon,
+  XIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -56,6 +66,8 @@ export function SaasExperiments() {
   const [alloc, setAlloc] = useState<AllocEntry[]>([]);
   const [saving, setSaving] = useState(false);
   const [confirmStatus, setConfirmStatus] = useState<{ id: number; status: "running" | "paused" | "done" } | null>(null);
+  const [previews, setPreviews] = useState<Record<number, ExperimentPreview>>({});
+  const [previewingId, setPreviewingId] = useState<number | null>(null);
 
   function load() {
     setLoading(true);
@@ -117,6 +129,11 @@ export function SaasExperiments() {
         toast.success("Эксперимент создан");
       } else if (editingId !== null) {
         await saas.updateExperiment(editingId, { allocationJson, successMetric: metric });
+        setPreviews((prev) => {
+          const next = { ...prev };
+          delete next[editingId];
+          return next;
+        });
         toast.success("Эксперимент обновлён");
       }
       closeForm(); load();
@@ -131,10 +148,28 @@ export function SaasExperiments() {
     try {
       const updated = await saas.setExperimentStatus(id, status);
       setItems((prev) => prev.map((e) => e.id === id ? updated : e));
+      setPreviews((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       toast.success(`Статус: ${STATUS_LABEL[status]}`);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Не удалось изменить статус";
       toast.error(msg);
+    }
+  }
+
+  async function handlePreview(id: number) {
+    setPreviewingId(id);
+    try {
+      const preview = await saas.previewExperiment(id, 24);
+      setPreviews((prev) => ({ ...prev, [id]: preview }));
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Не удалось построить preview";
+      toast.error(msg);
+    } finally {
+      setPreviewingId(null);
     }
   }
 
@@ -264,6 +299,7 @@ export function SaasExperiments() {
           const allocs = parseAlloc(exp.allocationJson);
           const total = totalWeight(allocs);
           const canEdit = exp.status === "draft" || exp.status === "paused";
+          const preview = previews[exp.id];
 
           return (
             <Card key={exp.id}>
@@ -277,6 +313,16 @@ export function SaasExperiments() {
                     <Badge variant="secondary" className="text-xs shrink-0">{METRIC_LABEL[exp.successMetric] ?? exp.successMetric}</Badge>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 gap-1 text-xs"
+                      onClick={() => void handlePreview(exp.id)}
+                      disabled={previewingId === exp.id}
+                    >
+                      <GitBranchIcon className="h-3 w-3" />
+                      {previewingId === exp.id ? "Preview…" : "Preview"}
+                    </Button>
                     {canEdit && (
                       <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(exp)} disabled={editingId !== null}>
                         <EditIcon className="h-3.5 w-3.5" />
@@ -341,6 +387,59 @@ export function SaasExperiments() {
                   {exp.startedAt && <span>Старт: <span className="text-foreground">{formatDate(exp.startedAt)}</span></span>}
                   {exp.endedAt && <span>Конец: <span className="text-foreground">{formatDate(exp.endedAt)}</span></span>}
                 </div>
+                {preview && (
+                  <div className="space-y-3 rounded-md border bg-muted/25 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-xs font-medium">
+                        <GitBranchIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span>Routing preview</span>
+                        <Badge variant="outline" className="font-mono">{preview.sampleSize} ids</Badge>
+                      </div>
+                      <Badge variant={preview.canRun ? "success" : "destructive"}>
+                        {preview.canRun ? "ready" : "blocked"}
+                      </Badge>
+                    </div>
+
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {preview.variants.map((variant) => {
+                        const observed = preview.counts.find((item) => item.styleSlug === variant.styleSlug);
+                        return (
+                          <div key={variant.styleSlug} className="rounded-md border bg-background/70 p-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate font-mono text-xs">{variant.styleSlug}</p>
+                                {variant.displayName && (
+                                  <p className="truncate text-xs text-muted-foreground">{variant.displayName}</p>
+                                )}
+                              </div>
+                              <Badge variant={variant.status === "valid" ? "secondary" : "destructive"}>
+                                {variant.status}
+                              </Badge>
+                            </div>
+                            <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                              <span className="text-muted-foreground">weight <span className="font-mono text-foreground">{variant.weight}</span></span>
+                              <span className="text-muted-foreground">target <span className="font-mono text-foreground">{variant.targetPct}%</span></span>
+                              <span className="text-muted-foreground">sample <span className="font-mono text-foreground">{observed?.observedPct ?? 0}%</span></span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {preview.assignments.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {preview.assignments.slice(0, 12).map((assignment) => (
+                          <span
+                            key={assignment.userId}
+                            className="rounded-md bg-background px-2 py-1 font-mono text-[11px] text-muted-foreground"
+                          >
+                            {assignment.userId.replace("preview-", "#")} → {assignment.styleSlug}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           );

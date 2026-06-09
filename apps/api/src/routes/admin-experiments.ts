@@ -1,4 +1,14 @@
-import { type Db, ExperimentsRepo, withTenant } from "@chatman-media/conversation-engine";
+import {
+  type Db,
+  type ExperimentAllocationEntry,
+  type ExperimentRow,
+  ExperimentsRepo,
+  parseAllocation,
+  parseStyleConfig,
+  StylesRepo,
+  withTenant,
+} from "@chatman-media/conversation-engine";
+import { ABRouter, type Style } from "@chatman-media/kb";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { isUniqueViolation } from "../lib/db-errors.ts";
@@ -18,6 +28,8 @@ export interface AdminExperimentsRoutesOpts {
 
 const VALID_METRICS = ["qualified", "won", "replied_3+"] as const;
 const VALID_STATUSES = ["running", "paused", "done"] as const;
+const DEFAULT_PREVIEW_SAMPLE_SIZE = 20;
+const MAX_PREVIEW_SAMPLE_SIZE = 100;
 
 export function makeAdminExperimentsRoutes(opts: AdminExperimentsRoutesOpts): Hono {
   const app = new Hono();
@@ -29,6 +41,28 @@ export function makeAdminExperimentsRoutes(opts: AdminExperimentsRoutesOpts): Ho
       return repo.listAll();
     });
     return c.json({ items: rows });
+  });
+
+  app.get("/api/admin/experiments/:id/preview", async (c) => {
+    const tenantId = c.var.tenantId;
+    const id = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isFinite(id) || id <= 0) return c.json({ error: "invalid id" }, 400);
+
+    const sampleSize = parsePreviewSampleSize(c.req.query("sampleSize") ?? c.req.query("sample"));
+    const preview = await withTenant(opts.db, tenantId, async (tx) => {
+      const repo = new ExperimentsRepo({ db: tx, tenantId });
+      const experiment = await repo.byId(id);
+      if (!experiment) return null;
+      return buildExperimentPreview({
+        experiment,
+        sampleSize,
+        stylesRepo: new StylesRepo({ db: tx, tenantId }),
+      });
+    });
+
+    if (!preview) return c.json({ error: "experiment not found" }, 404);
+    if ("error" in preview) return c.json({ error: preview.error }, 422);
+    return c.json(preview);
   });
 
   /**
@@ -58,14 +92,8 @@ export function makeAdminExperimentsRoutes(opts: AdminExperimentsRoutesOpts): Ho
     }
 
     const allocationRaw = typeof body.allocationJson === "string" ? body.allocationJson : "";
-    try {
-      const parsed = JSON.parse(allocationRaw);
-      if (!Array.isArray(parsed) || parsed.length < 2) {
-        return c.json({ error: "allocationJson must be array with at least 2 variants" }, 400);
-      }
-    } catch {
-      return c.json({ error: "allocationJson must be valid JSON array" }, 400);
-    }
+    const allocationError = validateAllocationJson(allocationRaw);
+    if (allocationError) return c.json({ error: allocationError }, 400);
 
     let row: Awaited<ReturnType<ExperimentsRepo["create"]>>;
     try {
@@ -114,14 +142,8 @@ export function makeAdminExperimentsRoutes(opts: AdminExperimentsRoutesOpts): Ho
     }
 
     if (typeof body.allocationJson === "string") {
-      try {
-        const parsed = JSON.parse(body.allocationJson);
-        if (!Array.isArray(parsed) || parsed.length < 2) {
-          return c.json({ error: "allocationJson must be array with at least 2 variants" }, 400);
-        }
-      } catch {
-        return c.json({ error: "allocationJson must be valid JSON array" }, 400);
-      }
+      const allocationError = validateAllocationJson(body.allocationJson);
+      if (allocationError) return c.json({ error: allocationError }, 400);
       patch.allocationJson = body.allocationJson;
     }
 
@@ -191,6 +213,17 @@ export function makeAdminExperimentsRoutes(opts: AdminExperimentsRoutesOpts): Ho
       if (!allowed.includes(newStatus as string)) {
         return { error: `cannot transition from '${existing.status}' to '${newStatus as string}'` };
       }
+      if (newStatus === "running") {
+        const preview = await buildExperimentPreview({
+          experiment: existing,
+          sampleSize: DEFAULT_PREVIEW_SAMPLE_SIZE,
+          stylesRepo: new StylesRepo({ db: tx, tenantId }),
+        });
+        if ("error" in preview) return { error: preview.error };
+        if (!preview.canRun) {
+          return { error: "experiment needs at least 2 active valid style variants before running" };
+        }
+      }
       return repo.setStatus(id, newStatus as "running" | "paused" | "done");
     });
 
@@ -206,4 +239,131 @@ export function makeAdminExperimentsRoutes(opts: AdminExperimentsRoutesOpts): Ho
   });
 
   return app;
+}
+
+function validateAllocationJson(allocationJson: string): string | null {
+  let entries: ExperimentAllocationEntry[];
+  try {
+    entries = parseAllocation(allocationJson);
+  } catch {
+    return "allocationJson must be valid JSON array";
+  }
+  if (entries.length < 2) return "allocationJson must include at least 2 valid variants";
+  const uniqueSlugs = new Set(entries.map((entry) => entry.styleSlug));
+  if (uniqueSlugs.size < entries.length) return "allocationJson variants must use unique style slugs";
+  return null;
+}
+
+function parsePreviewSampleSize(raw: string | undefined): number {
+  const parsed = raw ? Number.parseInt(raw, 10) : DEFAULT_PREVIEW_SAMPLE_SIZE;
+  if (!Number.isFinite(parsed)) return DEFAULT_PREVIEW_SAMPLE_SIZE;
+  return Math.min(MAX_PREVIEW_SAMPLE_SIZE, Math.max(1, parsed));
+}
+
+interface BuildExperimentPreviewOpts {
+  experiment: ExperimentRow;
+  sampleSize: number;
+  stylesRepo: StylesRepo;
+}
+
+interface ValidPreviewVariant {
+  style: Style;
+  weight: number;
+}
+
+async function buildExperimentPreview(opts: BuildExperimentPreviewOpts) {
+  let entries: ExperimentAllocationEntry[];
+  try {
+    entries = parseAllocation(opts.experiment.allocationJson);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "allocationJson is invalid" };
+  }
+
+  const totalWeight = entries.reduce((sum, entry) => sum + entry.weight, 0);
+  const variants: Array<{
+    styleSlug: string;
+    displayName: string | null;
+    weight: number;
+    targetPct: number;
+    status: "valid" | "missing" | "invalid_config";
+  }> = [];
+  const validVariants: ValidPreviewVariant[] = [];
+
+  for (const entry of entries) {
+    const row = await opts.stylesRepo.findActiveBySlug(entry.styleSlug);
+    if (!row) {
+      variants.push({
+        styleSlug: entry.styleSlug,
+        displayName: null,
+        weight: entry.weight,
+        targetPct: percent(entry.weight, totalWeight),
+        status: "missing",
+      });
+      continue;
+    }
+
+    const style = parseStyleConfig(row.configJson);
+    if (!style) {
+      variants.push({
+        styleSlug: entry.styleSlug,
+        displayName: row.displayName,
+        weight: entry.weight,
+        targetPct: percent(entry.weight, totalWeight),
+        status: "invalid_config",
+      });
+      continue;
+    }
+
+    validVariants.push({ style, weight: entry.weight });
+    variants.push({
+      styleSlug: entry.styleSlug,
+      displayName: row.displayName,
+      weight: entry.weight,
+      targetPct: percent(entry.weight, totalWeight),
+      status: "valid",
+    });
+  }
+
+  const router = validVariants.length > 0 ? new ABRouter({ variants: validVariants, salt: opts.experiment.slug }) : null;
+  const assignments = router
+    ? Array.from({ length: opts.sampleSize }, (_, index) => {
+        const userId = `preview-${index + 1}`;
+        const assigned = router.assign(userId);
+        return { userId, styleSlug: assigned.variantSlug };
+      })
+    : [];
+  const counts = countAssignments(assignments, opts.sampleSize);
+
+  return {
+    experiment: {
+      id: opts.experiment.id,
+      slug: opts.experiment.slug,
+      status: opts.experiment.status,
+      successMetric: opts.experiment.successMetric,
+    },
+    sampleSize: opts.sampleSize,
+    canRun: validVariants.length >= 2,
+    variants,
+    assignments,
+    counts,
+  };
+}
+
+function countAssignments(assignments: Array<{ styleSlug: string }>, sampleSize: number) {
+  const counts = new Map<string, number>();
+  for (const assignment of assignments) {
+    counts.set(assignment.styleSlug, (counts.get(assignment.styleSlug) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([styleSlug, count]) => ({
+      styleSlug,
+      count,
+      observedPct: percent(count, sampleSize),
+    }))
+    .sort((a, b) => b.count - a.count || a.styleSlug.localeCompare(b.styleSlug));
+}
+
+function percent(value: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.round((value / total) * 1000) / 10;
 }
