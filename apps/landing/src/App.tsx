@@ -6,6 +6,7 @@ import DemoExchangeWorkflow from "./DemoExchangeWorkflow.tsx";
 import DemoServiceWorkflow from "./DemoServiceWorkflow.tsx";
 import DemoVerticals from "./DemoVerticals.tsx";
 import DemoVisa from "./DemoVisa.tsx";
+import EarlyAccess from "./EarlyAccess.tsx";
 import LandingAnyBusiness from "./LandingAnyBusiness.tsx";
 import LandingExchange from "./LandingExchange.tsx";
 import LandingModeling from "./LandingModeling.tsx";
@@ -308,6 +309,9 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingExchange />} />
+      <Route path="/early-access" element={<EarlyAccess />} />
+      <Route path="/signup" element={<EarlyAccess />} />
+      <Route path="/alpha" element={<EarlyAccess />} />
       <Route path="/exchange" element={<LandingExchange />} />
       <Route path="/demo" element={<DemoExchange />} />
       <Route path="/demo/exchange" element={<DemoExchange />} />
