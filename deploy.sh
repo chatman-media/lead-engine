@@ -95,6 +95,8 @@ if [ "$DO_BUILD" -eq 1 ]; then
   bun run build:packages
   log "Сборка admin-ui"
   bun run build:ui
+  log "Сборка landing"
+  bun run build:landing
   log "Сборка widget"
   bun run build:widget
   ok "Сборка завершена"

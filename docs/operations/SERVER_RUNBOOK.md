@@ -55,6 +55,7 @@ CASCADE`. На production/server запускать только с `--keep-data
 bun run typecheck
 bun run build:packages
 bun run build:ui
+bun run build:landing
 bun run build:widget
 ```
 

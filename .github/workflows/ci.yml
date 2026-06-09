@@ -235,7 +235,7 @@ jobs:
           # deploy.sh внутри сам с `set -euo pipefail`; script_stop ловит обрыв
           # ещё на `cd`, если каталога нет. Любой ненулевой код — красный job.
           script_stop: true
-          # install + typecheck + сборка ui/widget/пакетов бывает долгой.
+          # install + typecheck + сборка ui/landing/widget/пакетов бывает долгой.
           command_timeout: 18m
           script: |
             # bun не в PATH у non-interactive SSH (его добавляет ~/.bashrc,
