@@ -280,7 +280,7 @@ export function SaasQuality() {
   const [runStyleBSlug, setRunStyleBSlug] = useState("");
   const [runPersonaSlug, setRunPersonaSlug] = useState("");
   const [runMaxTurns, setRunMaxTurns] = useState("6");
-  const [runReflect, setRunReflect] = useState(false);
+  const [runReflect, setRunReflect] = useState(true);
   const [coachStyleSlug, setCoachStyleSlug] = useState("");
   const [coachPersonaSlug, setCoachPersonaSlug] = useState("all");
   const [coachSampleSize, setCoachSampleSize] = useState("8");
@@ -850,7 +850,7 @@ export function SaasQuality() {
 
             <div className="flex items-end">
               <div className="flex h-9 w-full items-center justify-between gap-3 rounded-md border px-3 text-sm">
-                <Label htmlFor="quality-run-reflect">Reflect</Label>
+                <Label htmlFor="quality-run-reflect">Fact-check</Label>
                 <Switch id="quality-run-reflect" checked={runReflect} onCheckedChange={setRunReflect} />
               </div>
             </div>
