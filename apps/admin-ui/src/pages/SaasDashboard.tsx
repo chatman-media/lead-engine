@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { OnboardingChecklist } from "@/components/OnboardingChecklist";
+import { PipelineMap3d } from "@/components/PipelineMap3d";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,8 @@ import {
   type ExchangeRate,
   type ExchangeTurnover,
   type FunnelAnalytics,
+  type FunnelData,
+  type LeadListItem,
   type OnboardingStatus,
   saas,
   type TenantInfo,
@@ -115,6 +118,8 @@ export function SaasDashboard() {
   const [orders, setOrders] = useState<ExchangeOrder[]>([]);
   const [rates, setRates] = useState<ExchangeRate[]>([]);
   const [funnel, setFunnel] = useState<FunnelAnalytics | null>(null);
+  const [pipelineFunnel, setPipelineFunnel] = useState<FunnelData | null>(null);
+  const [pipelineLeads, setPipelineLeads] = useState<LeadListItem[]>([]);
   const [togglingPause, setTogglingPause] = useState(false);
   const [confirmingPause, setConfirmingPause] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -168,6 +173,19 @@ export function SaasDashboard() {
     }
   }
 
+  async function refreshPipeline() {
+    try {
+      const [funnelRes, leadsRes] = await Promise.all([
+        saas.getFunnel(),
+        saas.listLeads({ limit: 120 }),
+      ]);
+      setPipelineFunnel(funnelRes);
+      setPipelineLeads(leadsRes.items);
+    } catch (err) {
+      onAuthError(err);
+    }
+  }
+
   async function handleTogglePause() {
     if (!tenantInfo) return;
     const newPaused = tenantInfo.status === "active";
@@ -200,6 +218,7 @@ export function SaasDashboard() {
           refreshOnboarding(),
           refreshTenantInfo(),
           refreshExchange(),
+          refreshPipeline(),
           saas
             .getDashboardStats()
             .then(setStats)
@@ -465,6 +484,14 @@ export function SaasDashboard() {
       )}
 
       {onboarding && <OnboardingChecklist status={onboarding} />}
+
+      <PipelineMap3d
+        stages={pipelineFunnel?.stages ?? []}
+        leads={pipelineLeads}
+        onOpenLead={(leadId) => navigate(`/leads/${leadId}`)}
+        onOpenLeads={() => navigate("/leads")}
+        onOpenFunnel={() => navigate("/funnel")}
+      />
 
       {/* ── Операционная сводка обменника ────────────────────────── */}
       {isExchange && (
