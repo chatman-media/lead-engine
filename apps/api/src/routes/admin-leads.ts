@@ -989,6 +989,9 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         )
         .limit(1);
       if (!identity) return { kind: "no_channel" } as const;
+      if (identity.channelKind === "max") {
+        return { kind: "unsupported_channel", channelKind: identity.channelKind } as const;
+      }
 
       const [conv] = await tx
         .select({ id: conversations.id })
@@ -1040,6 +1043,15 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
     if (outcome.kind === "not_found") return c.json({ error: "lead not found" }, 404);
     if (outcome.kind === "no_channel") {
       return c.json({ error: "no active channel for this contact — cannot deliver" }, 409);
+    }
+    if (outcome.kind === "unsupported_channel") {
+      return c.json(
+        {
+          error: "channel does not support photo delivery",
+          channelKind: outcome.channelKind,
+        },
+        409,
+      );
     }
 
     await recordAudit(opts.db, {

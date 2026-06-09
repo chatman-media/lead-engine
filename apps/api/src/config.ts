@@ -68,6 +68,11 @@ export interface ApiConfig {
    */
   vkSecretKey: string;
   /**
+   * Fallback secret для MAX Bot API Webhook header `X-Max-Bot-Api-Secret`.
+   * Обычно хранится per-channel в tenant_secrets после POST /api/admin/channels/max.
+   */
+  maxWebhookSecret: string;
+  /**
    * Stripe webhook signing secret (whsec_...) — опционально. Если пусто,
    * /webhook/stripe не подключается и Stripe-billing просто не работает.
    */
@@ -265,6 +270,7 @@ export function loadApiConfig(): ApiConfig {
     facebookAppSecret: process.env.FACEBOOK_APP_SECRET ?? "",
     vkConfirmationCode: process.env.VK_CONFIRMATION_CODE ?? "",
     vkSecretKey: process.env.VK_SECRET_KEY ?? "",
+    maxWebhookSecret: process.env.MAX_WEBHOOK_SECRET ?? "",
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
     healthCheckTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "2000", 10),
     llm: {

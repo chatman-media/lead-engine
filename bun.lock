@@ -56,6 +56,7 @@
       "dependencies": {
         "@chatman-media/channel-core": "workspace:*",
         "@chatman-media/channel-facebook": "workspace:*",
+        "@chatman-media/channel-max": "workspace:*",
         "@chatman-media/channel-telegram": "workspace:*",
         "@chatman-media/channel-vk": "workspace:*",
         "@chatman-media/channel-web": "workspace:*",
@@ -236,6 +237,7 @@
       "dependencies": {
         "@chatman-media/channel-core": "workspace:*",
         "@chatman-media/channel-facebook": "workspace:*",
+        "@chatman-media/channel-max": "workspace:*",
         "@chatman-media/channel-telegram": "workspace:*",
         "@chatman-media/channel-vk": "workspace:*",
         "@chatman-media/channel-whatsapp": "workspace:*",
@@ -262,6 +264,18 @@
     },
     "packages/channel-facebook": {
       "name": "@chatman-media/channel-facebook",
+      "version": "1.0.0",
+      "dependencies": {
+        "@chatman-media/channel-core": "workspace:*",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "^2.4.16",
+        "@types/bun": "1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
+    "packages/channel-max": {
+      "name": "@chatman-media/channel-max",
       "version": "1.0.0",
       "dependencies": {
         "@chatman-media/channel-core": "workspace:*",
@@ -506,6 +520,8 @@
     "@chatman-media/channel-core": ["@chatman-media/channel-core@workspace:packages/channel-core"],
 
     "@chatman-media/channel-facebook": ["@chatman-media/channel-facebook@workspace:packages/channel-facebook"],
+
+    "@chatman-media/channel-max": ["@chatman-media/channel-max@workspace:packages/channel-max"],
 
     "@chatman-media/channel-telegram": ["@chatman-media/channel-telegram@workspace:packages/channel-telegram"],
 

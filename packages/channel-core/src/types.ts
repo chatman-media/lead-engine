@@ -13,6 +13,7 @@ export type ChannelKind =
   | "whatsapp"
   | "facebook"
   | "vk"
+  | "max"
   | "web";
 
 /**

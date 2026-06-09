@@ -25,6 +25,7 @@ import {
   ApiError,
   type ChannelItem,
   type CreateFacebookChannelResult,
+  type CreateMaxChannelResult,
   type CreateVkChannelResult,
   type CreateWebChannelResult,
   type CreateWhatsAppChannelResult,
@@ -32,7 +33,7 @@ import {
   saas,
 } from "../api/saas.ts";
 
-type ChannelTab = "telegram" | "userbot" | "whatsapp" | "facebook" | "vk" | "web";
+type ChannelTab = "telegram" | "userbot" | "whatsapp" | "facebook" | "vk" | "max" | "web";
 type UserbotStep = "phone" | "code" | "2fa";
 
 const KIND_META: Record<string, { icon: typeof SendIcon; label: string }> = {
@@ -41,6 +42,7 @@ const KIND_META: Record<string, { icon: typeof SendIcon; label: string }> = {
   whatsapp: { icon: MessageCircleIcon, label: "WhatsApp" },
   facebook: { icon: MessagesSquareIcon, label: "Facebook Messenger" },
   vk: { icon: AtSignIcon, label: "VK Messenger" },
+  max: { icon: MessagesSquareIcon, label: "MAX Messenger" },
   web: { icon: GlobeIcon, label: "Web-виджет" },
 };
 
@@ -70,6 +72,7 @@ function ConnectedChannelCard({
   onAskDelete,
   onConfirmDelete,
   onCancelDelete,
+  extraActions,
 }: {
   title: string;
   statusText: string;
@@ -79,6 +82,7 @@ function ConnectedChannelCard({
   onAskDelete: () => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
+  extraActions?: React.ReactNode;
 }) {
   return (
     <div className="space-y-4">
@@ -98,6 +102,7 @@ function ConnectedChannelCard({
         <Button variant="outline" onClick={onReconnect}>
           {reconnectLabel}
         </Button>
+        {extraActions}
         {confirmDelete ? (
           <>
             <span className="self-center text-sm text-muted-foreground">Отключить?</span>
@@ -170,6 +175,12 @@ export function SaasChannels() {
   const [vkSecretKey, setVkSecretKey] = useState("");
   const [vkSubmitting, setVkSubmitting] = useState(false);
   const [vkResult, setVkResult] = useState<CreateVkChannelResult | null>(null);
+
+  const [maxBotToken, setMaxBotToken] = useState("");
+  const [maxWebhookSecret, setMaxWebhookSecret] = useState("");
+  const [maxSubmitting, setMaxSubmitting] = useState(false);
+  const [maxRotating, setMaxRotating] = useState(false);
+  const [maxResult, setMaxResult] = useState<CreateMaxChannelResult | null>(null);
 
   const [webBrand, setWebBrand] = useState("");
   const [webColor, setWebColor] = useState("");
@@ -442,6 +453,81 @@ export function SaasChannels() {
     }
   }
 
+  async function handleMaxSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setMaxResult(null);
+    const botToken = maxBotToken.trim();
+    const webhookSecret = maxWebhookSecret.trim();
+    if (!botToken) {
+      setError("MAX Bot token обязателен");
+      return;
+    }
+    setMaxSubmitting(true);
+    try {
+      const res = await saas.createMaxChannel({
+        botToken,
+        ...(webhookSecret ? { webhookSecret } : {}),
+      });
+      setMaxResult(res);
+      setMaxBotToken("");
+      setReconnectKind(null);
+      await refresh();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 401) {
+          if (err.errorCode.toLowerCase().includes("max")) {
+            setError("MAX отверг Bot token — проверьте токен и доступ чат-бота");
+          } else {
+            clearToken();
+            navigate("/login", { replace: true });
+            return;
+          }
+        } else if (err.status === 402) {
+          setError("Лимит каналов исчерпан — обновите план для добавления MAX");
+        } else if (err.status === 502) {
+          setError("MAX API недоступен или отклонил запрос — попробуйте позже");
+        } else {
+          setError(`Ошибка ${err.status}: ${err.errorCode}`);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setMaxSubmitting(false);
+    }
+  }
+
+  async function handleMaxRotateSecret(id: number) {
+    setError("");
+    setMaxResult(null);
+    setMaxRotating(true);
+    try {
+      const res = await saas.rotateMaxWebhookSecret(id);
+      setMaxResult(res);
+      await refresh();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 401) {
+          clearToken();
+          navigate("/login", { replace: true });
+          return;
+        }
+        if (err.status === 404) {
+          setError("MAX канал не найден — обновите страницу");
+        } else if (err.status === 409) {
+          setError("Для MAX канала нет сохранённых credentials — переподключите Bot token");
+        } else {
+          setError(`Ошибка ${err.status}: ${err.errorCode}`);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setMaxRotating(false);
+    }
+  }
+
   function userbotErrMessage(err: unknown): string {
     if (err instanceof ApiError) {
       if (err.status === 401) {
@@ -562,13 +648,14 @@ export function SaasChannels() {
   const existingWa = channels.find((c) => c.kind === "whatsapp");
   const existingFb = channels.find((c) => c.kind === "facebook");
   const existingVk = channels.find((c) => c.kind === "vk");
+  const existingMax = channels.find((c) => c.kind === "max");
   const existingWeb = channels.find((c) => c.kind === "web");
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Каналы"
-        description="Подключите источники сообщений: Telegram-бот, личный аккаунт, WhatsApp, Facebook, VK или web-виджет."
+        description="Подключите источники сообщений: Telegram-бот, личный аккаунт, WhatsApp, Facebook, VK, MAX или web-виджет."
       />
 
       {error && <ErrorNote>{error}</ErrorNote>}
@@ -598,6 +685,9 @@ export function SaasChannels() {
           </TabsTrigger>
           <TabsTrigger value="vk">
             <AtSignIcon /> VK
+          </TabsTrigger>
+          <TabsTrigger value="max">
+            <MessagesSquareIcon /> MAX
           </TabsTrigger>
           <TabsTrigger value="web">
             <GlobeIcon /> Web
@@ -1230,6 +1320,104 @@ export function SaasChannels() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="max">
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {existingMax && reconnectKind !== "max"
+                  ? "MAX Messenger"
+                  : "Подключить MAX Messenger"}
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                MAX для бизнеса → Чат-боты: вставьте Bot token. Webhook secret можно
+                оставить пустым — платформа сгенерирует значение для subscription.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {existingMax && reconnectKind !== "max" ? (
+                <ConnectedChannelCard
+                  title={`MAX #${existingMax.externalId}`}
+                  statusText="Подключён — входящие обрабатывает ассистент"
+                  reconnectLabel="Переподключить"
+                  onReconnect={() => {
+                    setReconnectKind("max");
+                    setMaxResult(null);
+                  }}
+                  confirmDelete={confirmDeleteChannelId === existingMax.id}
+                  onAskDelete={() => setConfirmDeleteChannelId(existingMax.id)}
+                  onConfirmDelete={() => handleDelete(existingMax.id)}
+                  onCancelDelete={() => setConfirmDeleteChannelId(null)}
+                  extraActions={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={maxRotating}
+                      onClick={() => handleMaxRotateSecret(existingMax.id)}
+                    >
+                      {maxRotating ? "Генерируем…" : "Новый webhook secret"}
+                    </Button>
+                  }
+                />
+              ) : (
+                <form onSubmit={handleMaxSubmit} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label>Bot token</Label>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={maxBotToken}
+                      onChange={(e) => setMaxBotToken(e.target.value)}
+                      placeholder="MAX bot token"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Webhook secret (опц.)</Label>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={maxWebhookSecret}
+                      onChange={(e) => setMaxWebhookSecret(e.target.value)}
+                      placeholder="будет сгенерирован автоматически"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    После подключения создайте Webhook subscription в MAX: URL из подсказки ниже,
+                    secret — в поле webhook secret, update type — message_created. Production
+                    webhook должен быть HTTPS на 443. Если secret потерян, сгенерируйте новый и
+                    обновите subscription.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={maxSubmitting || !maxBotToken.trim()}>
+                      {maxSubmitting ? "Проверяем у MAX…" : "Подключить"}
+                    </Button>
+                    {existingMax && reconnectKind === "max" && (
+                      <Button type="button" variant="ghost" onClick={() => setReconnectKind(null)}>
+                        Отмена
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              )}
+              {maxResult && (
+                <OkNote>
+                  ✓ MAX {maxResult.username ? `@${maxResult.username}` : maxResult.botId} подключён.
+                  {maxResult.webhookSetupHint && (
+                    <span className="mt-2 block font-mono text-xs">
+                      Webhook URL: {maxResult.webhookSetupHint.url}
+                      <br />
+                      Secret: {maxResult.webhookSetupHint.secret}
+                      <br />
+                      Update types: {maxResult.webhookSetupHint.updateTypes.join(", ")}
+                      <br />
+                      {maxResult.webhookSetupHint.requirement}
+                    </span>
+                  )}
+                </OkNote>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="web">
           <Card>
             <CardHeader>
@@ -1339,9 +1527,11 @@ export function SaasChannels() {
                         ? `WhatsApp #${ch.externalId}`
                         : ch.kind === "vk"
                           ? `VK #${ch.externalId}`
-                        : ch.kind === "web"
-                          ? `Web (${ch.externalId})`
-                          : ch.externalId;
+                          : ch.kind === "max"
+                            ? `MAX #${ch.externalId}`
+                            : ch.kind === "web"
+                              ? `Web (${ch.externalId})`
+                              : ch.externalId;
                 return (
                   <li key={ch.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
                     <span className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">

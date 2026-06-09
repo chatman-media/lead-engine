@@ -1198,6 +1198,7 @@ describe("POST /api/admin/leads/import", () => {
 describe("POST /api/admin/leads/:id/send-photo", () => {
   let photoContactId = 0;
   let photoLeadId = 0;
+  let maxLeadId = 0;
   let noChannelLeadId = 0;
 
   beforeAll(async () => {
@@ -1243,6 +1244,47 @@ describe("POST /api/admin/leads/:id/send-photo", () => {
       })
       .returning({ id: leads.id });
     photoLeadId = l!.id;
+
+    const [maxContact] = await db
+      .insert(contacts)
+      .values({ tenantId: tenantA, displayName: "MAX Photo Target" })
+      .returning({ id: contacts.id });
+    const [maxChannel] = await db
+      .insert(channels)
+      .values({
+        tenantId: tenantA,
+        kind: "max",
+        externalId: "max-photo-bot",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: channels.id });
+    await db.insert(channelIdentities).values({
+      contactId: maxContact!.id,
+      channelId: maxChannel!.id,
+      externalUserId: "max-user-555",
+      createdAt: now,
+    });
+    await db.insert(conversations).values({
+      tenantId: tenantA,
+      userId: maxContact!.id,
+      lastMessageAt: now,
+      createdAt: now,
+    });
+    const [maxLead] = await db
+      .insert(leads)
+      .values({
+        tenantId: tenantA,
+        userId: maxContact!.id,
+        state: "intake_pending",
+        stageDefinitionId: stageIdA,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: leads.id });
+    maxLeadId = maxLead!.id;
+
     // lead whose contact has no channel
     const [nc] = await db
       .insert(contacts)
@@ -1306,6 +1348,28 @@ describe("POST /api/admin/leads/:id/send-photo", () => {
       body: JSON.stringify({ photoRef: "file-123" }),
     });
     expect(res.status).toBe(409);
+  });
+
+  it("MAX text-only канал → 409 без enqueue фото", async () => {
+    if (!sql) return;
+    const before = await db
+      .select({ id: outboundQueue.id })
+      .from(outboundQueue)
+      .where(eq(outboundQueue.tenantId, tenantA));
+    const res = await authReq(tokenA, `/api/admin/leads/${maxLeadId}/send-photo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photoRef: "https://example.com/max.jpg", caption: "фото" }),
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string; channelKind?: string };
+    expect(body.error).toBe("channel does not support photo delivery");
+    expect(body.channelKind).toBe("max");
+    const after = await db
+      .select({ id: outboundQueue.id })
+      .from(outboundQueue)
+      .where(eq(outboundQueue.tenantId, tenantA));
+    expect(after.length).toBe(before.length);
   });
 
   it("happy: ставит фото в outbound_queue + пишет сообщение", async () => {
