@@ -12,7 +12,7 @@ export { ChannelIdentitiesRepo, type ChannelIdentityRow } from "./channel-identi
 export { KbSuggestionsRepo } from "./kb-suggestions.ts";
 export { ContactsRepo, type ContactRow } from "./contacts.ts";
 export { ConversationsRepo, type ConversationRow } from "./conversations.ts";
-export { DrizzleKbStore } from "./kb-store.ts";
+export { DrizzleKbStore, ScopedKbStore } from "./kb-store.ts";
 export {
   type ExperimentAllocationEntry,
   ExperimentsRepo,

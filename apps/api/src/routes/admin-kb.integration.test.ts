@@ -2,19 +2,22 @@
 // signup admin → upload doc → list → delete. NullEmbeddingClient (zero vectors)
 // чтобы не зависеть от LLM-provider'а в тестах.
 
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { resolve } from "node:path";
 import { NullEmbeddingClient } from "@chatman-media/llm-router";
 import {
   applyAllMigrations,
   createIsolatedDb,
+  funnels,
   kbSuggestions,
   schema,
+  stageDefinitions,
+  stageFields,
   tryConnectToPg,
 } from "@chatman-media/storage";
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
-import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
 import { makeRequireAuth } from "../middleware/require-auth.ts";
 import { makeAdminKbRoutes } from "./admin-kb.ts";
@@ -168,6 +171,206 @@ describe("admin-kb upload/list/delete flow", () => {
     expect(visa?.topic).toBe("visa");
   });
 
+  it("scoped upload/list + requirements coverage", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [funnel] = await db
+      .insert(funnels)
+      .values({
+        tenantId,
+        slug: "exchange_test",
+        verticalTemplateId: "exchange_v1",
+        stagesJson: "[]",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: funnels.id });
+    const funnelId = funnel?.id;
+    if (!funnelId) throw new Error("expected scoped KB test funnel");
+    const [stage] = await db
+      .insert(stageDefinitions)
+      .values({
+        tenantId,
+        funnelId,
+        slug: "payment",
+        displayName: "Оплата",
+        position: 1,
+        kind: "active",
+        stageType: "payment",
+        phase: "clear",
+        nextStages: ["won", "lost"],
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: stageDefinitions.id });
+    const stageId = stage?.id;
+    if (!stageId) throw new Error("expected scoped KB test stage");
+    await db.insert(stageFields).values({
+      tenantId,
+      stageId,
+      slug: "receipt",
+      displayName: "Чек",
+      fieldType: "photo",
+      required: true,
+      position: 1,
+      createdAt: now,
+    });
+
+    const funnelUpload = await authReq("/api/admin/kb/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "How to pay scoped",
+        body: "Для обмена клиент переводит RUB или USDT и присылает proof оплаты оператору.",
+        topic: "how_to_pay",
+        scopeType: "funnel",
+        funnelId,
+      }),
+    });
+    expect(funnelUpload.status).toBe(200);
+    const funnelBody = (await funnelUpload.json()) as {
+      scopeType: string;
+      funnelId: number | null;
+      stageSlug: string | null;
+    };
+    expect(funnelBody.scopeType).toBe("funnel");
+    expect(funnelBody.funnelId).toBe(funnelId);
+    expect(funnelBody.stageSlug).toBeNull();
+
+    const missingFunnelUpload = await authReq("/api/admin/kb/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Bad scope",
+        body: "Документ не должен загрузиться в несуществующую воронку.",
+        scopeType: "funnel",
+        funnelId: 999_999,
+      }),
+    });
+    expect(missingFunnelUpload.status).toBe(400);
+
+    const missingStageUpload = await authReq("/api/admin/kb/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Bad stage scope",
+        body: "Документ не должен загрузиться в несуществующую стадию.",
+        scopeType: "stage",
+        funnelId,
+        stageSlug: "missing",
+      }),
+    });
+    expect(missingStageUpload.status).toBe(400);
+
+    const stageUpload = await authReq("/api/admin/kb/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Payment stage scoped",
+        body: "На стадии оплаты бот не подтверждает платёж до проверки proof оператором.",
+        topic: "payment",
+        scopeType: "stage",
+        funnelId,
+        stageSlug: "payment",
+      }),
+    });
+    expect(stageUpload.status).toBe(200);
+
+    const funnelListRes = await authReq(
+      `/api/admin/kb/documents?scopeType=funnel&funnelId=${funnelId}`,
+    );
+    const funnelList = (await funnelListRes.json()) as {
+      items: Array<{ title: string; scopeType: string; funnelId: number | null }>;
+    };
+    expect(funnelList.items.some((d) => d.title === "How to pay scoped")).toBe(true);
+    expect(funnelList.items.every((d) => d.scopeType === "funnel" && d.funnelId === funnelId)).toBe(true);
+
+    const allFunnelDocsRes = await authReq(`/api/admin/kb/documents?funnelId=${funnelId}`);
+    const allFunnelDocs = (await allFunnelDocsRes.json()) as {
+      items: Array<{ title: string; scopeType: string; funnelId: number | null }>;
+    };
+    expect(allFunnelDocs.items.some((d) => d.title === "How to pay scoped")).toBe(true);
+    expect(allFunnelDocs.items.some((d) => d.title === "Payment stage scoped")).toBe(true);
+    expect(
+      allFunnelDocs.items.every(
+        (d) => d.funnelId === funnelId && ["funnel", "stage"].includes(d.scopeType),
+      ),
+    ).toBe(true);
+
+    await db.insert(kbSuggestions).values([
+      {
+        tenantId,
+        questionText: "Global unanswered scoped test",
+        status: "pending",
+        scopeType: "global",
+        createdAt: now + 1,
+        updatedAt: now + 1,
+      },
+      {
+        tenantId,
+        questionText: "Funnel unanswered scoped test",
+        status: "pending",
+        scopeType: "funnel",
+        funnelId,
+        createdAt: now + 2,
+        updatedAt: now + 2,
+      },
+      {
+        tenantId,
+        questionText: "Payment unanswered scoped test",
+        status: "pending",
+        scopeType: "stage",
+        funnelId,
+        stageSlug: "payment",
+        createdAt: now + 3,
+        updatedAt: now + 3,
+      },
+    ]);
+
+    const globalSuggestionsRes = await authReq(
+      "/api/admin/kb/suggestions?status=pending&scopeType=global",
+    );
+    const globalSuggestions = (await globalSuggestionsRes.json()) as {
+      items: Array<{ questionText: string; scopeType: string }>;
+      pendingCount: number;
+    };
+    expect(globalSuggestions.items.some((s) => s.questionText === "Global unanswered scoped test")).toBe(true);
+    expect(globalSuggestions.items.every((s) => s.scopeType === "global")).toBe(true);
+    expect(globalSuggestions.pendingCount).toBe(globalSuggestions.items.length);
+
+    const funnelSuggestionsRes = await authReq(
+      `/api/admin/kb/suggestions?status=pending&funnelId=${funnelId}`,
+    );
+    const funnelSuggestions = (await funnelSuggestionsRes.json()) as {
+      items: Array<{ questionText: string; scopeType: string; funnelId: number | null }>;
+      pendingCount: number;
+    };
+    expect(funnelSuggestions.items.some((s) => s.questionText === "Funnel unanswered scoped test")).toBe(true);
+    expect(funnelSuggestions.items.some((s) => s.questionText === "Payment unanswered scoped test")).toBe(true);
+    expect(funnelSuggestions.items.every((s) => s.funnelId === funnelId)).toBe(true);
+    expect(funnelSuggestions.items.some((s) => s.scopeType === "global")).toBe(false);
+    expect(funnelSuggestions.pendingCount).toBe(funnelSuggestions.items.length);
+
+    const stageSuggestionsRes = await authReq(
+      `/api/admin/kb/suggestions?status=pending&funnelId=${funnelId}&stageSlug=payment`,
+    );
+    const stageSuggestions = (await stageSuggestionsRes.json()) as {
+      items: Array<{ questionText: string; scopeType: string; stageSlug: string | null }>;
+    };
+    expect(stageSuggestions.items.map((s) => s.questionText)).toContain("Payment unanswered scoped test");
+    expect(stageSuggestions.items.every((s) => s.scopeType === "stage" && s.stageSlug === "payment")).toBe(true);
+
+    const requirementsRes = await authReq(`/api/admin/kb/requirements?funnelId=${funnelId}`);
+    expect(requirementsRes.status).toBe(200);
+    const requirements = (await requirementsRes.json()) as {
+      funnel: { id: number };
+      items: Array<{ key: string; covered: boolean; matchedDocuments: number }>;
+    };
+    expect(requirements.funnel.id).toBe(funnelId);
+    expect(requirements.items.find((i) => i.key === "exchange_how_to_pay")?.covered).toBe(true);
+    expect(requirements.items.find((i) => i.key === "stage_payment_payment")?.matchedDocuments).toBe(1);
+  });
+
   it("POST empty body → 400", async () => {
     if (!sql) return;
     const res = await authReq("/api/admin/kb/documents", {
@@ -280,7 +483,8 @@ describe("admin-kb suggestions", () => {
         updatedAt: now,
       })
       .returning({ id: kbSuggestions.id });
-    pendingId = p!.id;
+    if (!p) throw new Error("expected pending suggestion");
+    pendingId = p.id;
     const [d] = await db
       .insert(kbSuggestions)
       .values({
@@ -291,7 +495,8 @@ describe("admin-kb suggestions", () => {
         updatedAt: now - 10,
       })
       .returning({ id: kbSuggestions.id });
-    decidedId = d!.id;
+    if (!d) throw new Error("expected decided suggestion");
+    decidedId = d.id;
   });
 
   it("GET без auth → 401", async () => {
@@ -365,8 +570,8 @@ describe("admin-kb suggestions", () => {
       .select({ status: kbSuggestions.status, kbDocumentId: kbSuggestions.kbDocumentId })
       .from(kbSuggestions)
       .where(and(eq(kbSuggestions.id, pendingId), eq(kbSuggestions.tenantId, tenantId)));
-    expect(row!.status).toBe("ingested");
-    expect(row!.kbDocumentId).toBe(body.kbDocumentId);
+    expect(row?.status).toBe("ingested");
+    expect(row?.kbDocumentId).toBe(body.kbDocumentId);
   });
 
   it("PATCH approve пустого answerDraft → 400", async () => {
@@ -376,7 +581,9 @@ describe("admin-kb suggestions", () => {
       .insert(kbSuggestions)
       .values({ tenantId, questionText: "Без ответа", status: "pending", createdAt: now, updatedAt: now })
       .returning({ id: kbSuggestions.id });
-    const res = await authReq(`/api/admin/kb/suggestions/${s!.id}`, {
+    const suggestionId = s?.id;
+    if (!suggestionId) throw new Error("expected empty-draft suggestion");
+    const res = await authReq(`/api/admin/kb/suggestions/${suggestionId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "approve" }),
@@ -391,7 +598,9 @@ describe("admin-kb suggestions", () => {
       .insert(kbSuggestions)
       .values({ tenantId, questionText: "Отклонить", status: "pending", createdAt: now, updatedAt: now })
       .returning({ id: kbSuggestions.id });
-    const res = await authReq(`/api/admin/kb/suggestions/${s!.id}`, {
+    const suggestionId = s?.id;
+    if (!suggestionId) throw new Error("expected reject suggestion");
+    const res = await authReq(`/api/admin/kb/suggestions/${suggestionId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "reject", rejectedReason: "не релевантно" }),
@@ -400,8 +609,8 @@ describe("admin-kb suggestions", () => {
     const [row] = await db
       .select({ status: kbSuggestions.status, reason: kbSuggestions.rejectedReason })
       .from(kbSuggestions)
-      .where(eq(kbSuggestions.id, s!.id));
-    expect(row!.status).toBe("rejected");
-    expect(row!.reason).toBe("не релевантно");
+      .where(eq(kbSuggestions.id, suggestionId));
+    expect(row?.status).toBe("rejected");
+    expect(row?.reason).toBe("не релевантно");
   });
 });

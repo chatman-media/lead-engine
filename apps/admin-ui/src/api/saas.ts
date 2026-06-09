@@ -66,6 +66,9 @@ export interface KbDoc {
   source: string;
   title: string;
   topic: string | null;
+  scopeType: "global" | "funnel" | "stage";
+  funnelId: number | null;
+  stageSlug: string | null;
   createdAt: number;
 }
 
@@ -75,6 +78,9 @@ export interface KbSuggestion {
   questionText: string;
   answerDraft: string | null;
   status: "pending" | "ingested" | "rejected";
+  scopeType: "global" | "funnel" | "stage";
+  funnelId: number | null;
+  stageSlug: string | null;
   sourceConversationId: number | null;
   sourceMessageId: number | null;
   decidedByAdminId: number | null;
@@ -90,6 +96,22 @@ export interface KbUploadResult {
   source: string;
   chunks: number;
   created: boolean;
+  scopeType: "global" | "funnel" | "stage";
+  funnelId: number | null;
+  stageSlug: string | null;
+}
+
+export interface KbRequirement {
+  key: string;
+  title: string;
+  description: string;
+  topic: string;
+  required: boolean;
+  scopeType: "funnel" | "stage";
+  funnelId: number;
+  stageSlug: string | null;
+  covered: boolean;
+  matchedDocuments: number;
 }
 
 export type LlmPurpose = "chat" | "embed" | "vision" | "judge" | "reranker" | "transcribe";
@@ -256,6 +278,29 @@ export interface AdminRow {
   email: string;
   role: "superadmin" | "manager";
   createdAt: number;
+}
+
+export type OperatorOutreachTarget = "all" | "role" | "admins";
+export type OperatorOutreachRole = "superadmin" | "manager";
+export type OperatorOutreachChannel = "in_app" | "telegram";
+export type OperatorOutreachPriority = "normal" | "important" | "critical";
+
+export interface OperatorOutreachInput {
+  text: string;
+  target: OperatorOutreachTarget;
+  role?: OperatorOutreachRole;
+  adminIds?: number[];
+  channels: OperatorOutreachChannel[];
+  priority: OperatorOutreachPriority;
+}
+
+export interface OperatorOutreachResult {
+  ok: boolean;
+  targets: number;
+  inAppDelivered: number;
+  telegramDelivered: number;
+  telegramSkipped: number;
+  telegramFailed: number;
 }
 
 export interface InviteRow {
@@ -1593,20 +1638,50 @@ export const saas = {
   },
 
   // ── KB ──────────────────────────────────────────────────────────────
-  listDocs() {
-    return request<{ items: KbDoc[] }>("/api/admin/kb/documents");
+  listDocs(opts: { scopeType?: KbDoc["scopeType"]; funnelId?: number; stageSlug?: string } = {}) {
+    const p = new URLSearchParams();
+    if (opts.scopeType) p.set("scopeType", opts.scopeType);
+    if (opts.funnelId) p.set("funnelId", String(opts.funnelId));
+    if (opts.stageSlug) p.set("stageSlug", opts.stageSlug);
+    const qs = p.toString();
+    return request<{ items: KbDoc[] }>(`/api/admin/kb/documents${qs ? `?${qs}` : ""}`);
   },
-  uploadJson(input: { title: string; body: string; topic?: string }) {
+  listKbRequirements(funnelId: number) {
+    return request<{
+      funnel: { id: number; slug: string; verticalTemplateId: string | null };
+      items: KbRequirement[];
+    }>(`/api/admin/kb/requirements?funnelId=${funnelId}`);
+  },
+  uploadJson(input: {
+    title: string;
+    body: string;
+    topic?: string;
+    scopeType?: KbDoc["scopeType"];
+    funnelId?: number;
+    stageSlug?: string;
+  }) {
     return request<KbUploadResult>("/api/admin/kb/documents", {
       method: "POST",
       body: JSON.stringify(input),
     });
   },
-  uploadFile(file: File, opts: { title?: string; topic?: string } = {}) {
+  uploadFile(
+    file: File,
+    opts: {
+      title?: string;
+      topic?: string;
+      scopeType?: KbDoc["scopeType"];
+      funnelId?: number;
+      stageSlug?: string;
+    } = {},
+  ) {
     const form = new FormData();
     form.append("file", file);
     if (opts.title) form.append("title", opts.title);
     if (opts.topic) form.append("topic", opts.topic);
+    if (opts.scopeType) form.append("scopeType", opts.scopeType);
+    if (opts.funnelId) form.append("funnelId", String(opts.funnelId));
+    if (opts.stageSlug) form.append("stageSlug", opts.stageSlug);
     return uploadMultipart<KbUploadResult>("/api/admin/kb/documents", form);
   },
   deleteDoc(id: number) {
@@ -1617,12 +1692,22 @@ export const saas = {
 
   // ── KB suggestions ───────────────────────────────────────────────────
   listKbSuggestions(
-    opts: { status?: "pending" | "ingested" | "rejected"; limit?: number; offset?: number } = {},
+    opts: {
+      status?: "pending" | "ingested" | "rejected";
+      limit?: number;
+      offset?: number;
+      scopeType?: KbDoc["scopeType"];
+      funnelId?: number;
+      stageSlug?: string;
+    } = {},
   ) {
     const p = new URLSearchParams();
     if (opts.status) p.set("status", opts.status);
     if (opts.limit) p.set("limit", String(opts.limit));
     if (opts.offset) p.set("offset", String(opts.offset));
+    if (opts.scopeType) p.set("scopeType", opts.scopeType);
+    if (opts.funnelId) p.set("funnelId", String(opts.funnelId));
+    if (opts.stageSlug) p.set("stageSlug", opts.stageSlug);
     return request<{ items: KbSuggestion[]; pendingCount: number; limit: number; offset: number }>(
       `/api/admin/kb/suggestions?${p}`,
     );
@@ -2585,6 +2670,12 @@ export const saas = {
         body: JSON.stringify(body),
       },
     );
+  },
+  sendOperatorOutreach(body: OperatorOutreachInput) {
+    return request<OperatorOutreachResult>("/api/admin/outreach/operators", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   },
 
   // ── Drip campaigns ────────────────────────────────────────────────────

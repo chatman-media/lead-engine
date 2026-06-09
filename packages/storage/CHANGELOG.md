@@ -1,3 +1,15 @@
+# [@chatman-media/storage-v1.21.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.20.0...@chatman-media/storage-v1.21.0) (2026-06-09)
+
+
+### Bug Fixes
+
+* **deploy:** ship early access landing ([#409](https://github.com/chatman-media/lead-engine/issues/409)) ([3a01000](https://github.com/chatman-media/lead-engine/commit/3a010003ff2543b5479f3076e0536fdbd7b767bf))
+
+
+### Features
+
+* **kb:** scope knowledge base by funnel stage ([#408](https://github.com/chatman-media/lead-engine/issues/408)) ([1c7ea02](https://github.com/chatman-media/lead-engine/commit/1c7ea02ca6afc6353eabd071e2c877e4775d65c6))
+
 # [@chatman-media/storage-v1.20.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.19.0...@chatman-media/storage-v1.20.0) (2026-06-09)
 
 

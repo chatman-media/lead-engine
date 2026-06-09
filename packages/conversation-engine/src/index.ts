@@ -41,6 +41,7 @@ export {
   parseAllocation,
   type RepoCtx,
   SERVICE_ORDER_STATUSES,
+  ScopedKbStore,
   type ServiceOrderRow,
   type ServiceOrderStatus,
   type SkillAggregateRow,

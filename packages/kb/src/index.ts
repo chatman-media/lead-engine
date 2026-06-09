@@ -197,7 +197,7 @@ export {
 // ── Topic routing ─────────────────────────────────────────────────────────────
 export { classifyTopic, classifyTopicAll, KNOWN_TOPICS } from "./topic-classifier.ts";
 // ── Storage interfaces & implementations ─────────────────────────────────────
-export type { IKbStore, IKbSuggestionsStore, KbSearchHit } from "./types.ts";
+export type { IKbStore, IKbSuggestionsStore, KbScope, KbScopeType, KbSearchHit } from "./types.ts";
 // ── Utilities ─────────────────────────────────────────────────────────────────
 export { reciprocalRankFusion, sanitizeFtsQuery } from "./utils.ts";
 // ── Vision / photo classification ────────────────────────────────────────────
