@@ -379,6 +379,37 @@ describe("admin quality JSONL export", () => {
     expect(JSON.stringify(records)).not.toContain("tenant b only");
   });
 
+  it("returns tenant-scoped self-play match detail", async () => {
+    if (!sql) return;
+    const summary = (await (
+      await authReq(tokenA, "/api/admin/quality/self-play/summary")
+    ).json()) as QualitySummaryResponse;
+    const matchId = summary.recent[0]?.id;
+    expect(matchId).toBeGreaterThan(0);
+    if (!matchId) return;
+
+    const crossTenant = await authReq(tokenB, `/api/admin/quality/self-play/matches/${matchId}`);
+    expect(crossTenant.status).toBe(404);
+
+    const res = await authReq(tokenA, `/api/admin/quality/self-play/matches/${matchId}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as QualitySelfPlayDetailResponse;
+    expect(body.match).toMatchObject({
+      matchId,
+      styleSlug: "style-a",
+      personaSlug: "skeptic-anya",
+      outcome: "won",
+      verdict: { outcome: "won", reason: "candidate committed" },
+      skillsAttributed: ["mirroring"],
+      fabricationsCaught: 1,
+      persisted: true,
+    });
+    expect(body.match.transcript).toEqual([
+      { role: "candidate", text: "привет" },
+      { role: "salesperson", text: "расскажу коротко" },
+    ]);
+  });
+
   it("returns tenant-scoped pairwise summary", async () => {
     if (!sql) return;
     const res = await authReq(tokenA, "/api/admin/quality/pairwise/summary");
@@ -409,6 +440,37 @@ describe("admin quality JSONL export", () => {
       eloBAfter: 1484,
     });
     expect(JSON.stringify(body)).not.toContain("tenant b pairwise only");
+  });
+
+  it("returns tenant-scoped pairwise match detail with transcripts", async () => {
+    if (!sql) return;
+    const summary = (await (
+      await authReq(tokenA, "/api/admin/quality/pairwise/summary")
+    ).json()) as PairwiseSummaryResponse;
+    const pairwiseId = summary.recent[0]?.id;
+    expect(pairwiseId).toBeGreaterThan(0);
+    if (!pairwiseId) return;
+
+    const crossTenant = await authReq(tokenB, `/api/admin/quality/pairwise/matches/${pairwiseId}`);
+    expect(crossTenant.status).toBe(404);
+
+    const res = await authReq(tokenA, `/api/admin/quality/pairwise/matches/${pairwiseId}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as QualityPairwiseDetailResponse;
+    expect(body.pairwise).toMatchObject({
+      pairwiseId,
+      styleASlug: "style-a",
+      styleBSlug: "style-b",
+      personaSlug: "skeptic-anya",
+      verdict: { winner: "a", reason: "A closed cleaner" },
+      eloAAfter: 1516,
+      eloBAfter: 1484,
+      persisted: true,
+    });
+    expect(body.pairwise.matchA.transcript).toHaveLength(2);
+    expect(body.pairwise.matchB.transcript).toHaveLength(1);
+    expect(body.pairwise.matchA.persisted).toBe(true);
+    expect(body.pairwise.matchB.persisted).toBe(true);
   });
 
   it("returns tenant-scoped coach proposal and shadow summary", async () => {
@@ -939,6 +1001,7 @@ type QualitySummaryResponse = {
     winRate: number;
   }>;
   recent: Array<{
+    id: number;
     styleSlug: string;
     personaSlug: string;
     outcome: string;
@@ -966,6 +1029,7 @@ type PairwiseSummaryResponse = {
     bWinRate: number;
   }>;
   recent: Array<{
+    id: number;
     styleASlug: string;
     styleBSlug: string;
     winner: string;
@@ -973,6 +1037,43 @@ type PairwiseSummaryResponse = {
     eloAAfter: number;
     eloBAfter: number;
   }>;
+};
+
+type QualityTranscriptTurn = {
+  role: "candidate" | "salesperson";
+  text: string;
+};
+
+type QualitySelfPlayDetailResponse = {
+  match: {
+    styleSlug: string;
+    personaSlug: string;
+    turns: number;
+    transcript: QualityTranscriptTurn[];
+    skillsAttributed: string[];
+    verdict: { outcome: string; reason: string | null };
+    outcome: string;
+    leadId: number;
+    fabricationsCaught: number;
+    matchId: number | null;
+    persisted: boolean;
+    warnings: string[];
+  };
+};
+
+type QualityPairwiseDetailResponse = {
+  pairwise: {
+    styleASlug: string;
+    styleBSlug: string;
+    personaSlug: string;
+    matchA: QualitySelfPlayDetailResponse["match"];
+    matchB: QualitySelfPlayDetailResponse["match"];
+    verdict: { winner: string; reason: string | null };
+    eloAAfter: number;
+    eloBAfter: number;
+    pairwiseId: number | null;
+    persisted: boolean;
+  };
 };
 
 type QualityCoachSummaryResponse = {

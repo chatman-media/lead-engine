@@ -28,6 +28,19 @@ const OUTCOMES = new Set<EloOutcome>(["won", "lost", "draw"]);
 const PAIRWISE_WINNERS = new Set<PairwiseWinner>(["a", "b", "draw"]);
 const COACH_PROPOSAL_DECISIONS = new Set(["pending", "dismissed"]);
 
+const selfPlayMatchSelect = {
+  id: selfPlayMatches.id,
+  styleSlug: selfPlayMatches.styleSlug,
+  personaSlug: selfPlayMatches.personaSlug,
+  outcome: selfPlayMatches.outcome,
+  judgeReason: selfPlayMatches.judgeReason,
+  transcriptJson: selfPlayMatches.transcriptJson,
+  turns: selfPlayMatches.turns,
+  skillsJson: selfPlayMatches.skillsJson,
+  leadId: selfPlayMatches.leadId,
+  fabricationsCaught: selfPlayMatches.fabricationsCaught,
+};
+
 export interface AdminQualityRoutesOpts {
   db: Db;
   onReload?: (tenantId: number) => void;
@@ -182,6 +195,67 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     });
 
     return c.json(summary);
+  });
+
+  app.get("/api/admin/quality/self-play/matches/:id", async (c) => {
+    const tenantId = c.var.tenantId;
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "bad id" }, 400);
+
+    const row = await withTenant(opts.db, tenantId, async (tx) => {
+      const [match] = await tx
+        .select(selfPlayMatchSelect)
+        .from(selfPlayMatches)
+        .where(and(eq(selfPlayMatches.id, id), eq(selfPlayMatches.tenantId, tenantId)))
+        .limit(1);
+      return match ?? null;
+    });
+    if (!row) return c.json({ error: "self-play match not found" }, 404);
+
+    return c.json({ match: toSelfPlayResult(row) });
+  });
+
+  app.get("/api/admin/quality/pairwise/matches/:id", async (c) => {
+    const tenantId = c.var.tenantId;
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "bad id" }, 400);
+
+    const row = await withTenant(opts.db, tenantId, async (tx) => {
+      const [pairwise] = await tx
+        .select({
+          id: pairwiseMatches.id,
+          styleASlug: pairwiseMatches.styleASlug,
+          styleBSlug: pairwiseMatches.styleBSlug,
+          personaSlug: pairwiseMatches.personaSlug,
+          winner: pairwiseMatches.winner,
+          judgeReason: pairwiseMatches.judgeReason,
+          matchAId: pairwiseMatches.matchAId,
+          matchBId: pairwiseMatches.matchBId,
+          eloAAfter: pairwiseMatches.eloAAfter,
+          eloBAfter: pairwiseMatches.eloBAfter,
+        })
+        .from(pairwiseMatches)
+        .where(and(eq(pairwiseMatches.id, id), eq(pairwiseMatches.tenantId, tenantId)))
+        .limit(1);
+      if (!pairwise) return null;
+
+      const matchIds = [pairwise.matchAId, pairwise.matchBId].filter(isPresentId);
+      const selfPlayRows = matchIds.length
+        ? await tx
+            .select(selfPlayMatchSelect)
+            .from(selfPlayMatches)
+            .where(and(eq(selfPlayMatches.tenantId, tenantId), inArray(selfPlayMatches.id, matchIds)))
+        : [];
+      const byId = new Map(selfPlayRows.map((match) => [match.id, match]));
+      return {
+        ...pairwise,
+        matchA: pairwise.matchAId ? byId.get(pairwise.matchAId) : undefined,
+        matchB: pairwise.matchBId ? byId.get(pairwise.matchBId) : undefined,
+      };
+    });
+    if (!row) return c.json({ error: "pairwise match not found" }, 404);
+
+    return c.json({ pairwise: toPairwiseResult(row) });
   });
 
   app.get("/api/admin/quality/coach/summary", async (c) => {

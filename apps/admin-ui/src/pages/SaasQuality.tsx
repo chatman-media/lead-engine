@@ -3,6 +3,7 @@ import {
   BugIcon,
   CheckCircleIcon,
   DownloadIcon,
+  EyeIcon,
   FlaskConicalIcon,
   LightbulbIcon,
   RefreshCwIcon,
@@ -25,17 +26,21 @@ import {
   type QualityExportOptions,
   type QualityOutcome,
   type QualityPairwiseExportOptions,
+  type QualityPairwiseMatch,
   type QualityPairwiseSummary,
   type QualityPairwiseWinner,
   type QualityShadowDecision,
   type QualityShadowStatus,
+  type QualitySelfPlayMatch,
   type QualitySelfPlaySummary,
+  type QualityTranscriptTurn,
   saas,
 } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -163,6 +168,7 @@ export function SaasQuality() {
   const [exporting, setExporting] = useState(false);
   const [pairwiseExporting, setPairwiseExporting] = useState(false);
   const [proposalActionId, setProposalActionId] = useState<number | null>(null);
+  const [inspector, setInspector] = useState<QualityInspectorState | null>(null);
 
   const [styleSlug, setStyleSlug] = useState("all");
   const [personaSlug, setPersonaSlug] = useState("all");
@@ -338,6 +344,44 @@ export function SaasQuality() {
       toast.error(err instanceof Error ? err.message : "Не удалось создать shadow eval");
     } finally {
       setProposalActionId(null);
+    }
+  }
+
+  async function handleSelfPlayInspect(id: number) {
+    setInspector({ kind: "self-play", loading: true });
+    try {
+      const result = await saas.getQualitySelfPlayMatch(id);
+      setInspector({ kind: "self-play", loading: false, match: result.match });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+        return;
+      }
+      setInspector({
+        kind: "self-play",
+        loading: false,
+        error: err instanceof Error ? err.message : "Не удалось открыть match",
+      });
+    }
+  }
+
+  async function handlePairwiseInspect(id: number) {
+    setInspector({ kind: "pairwise", loading: true });
+    try {
+      const result = await saas.getQualityPairwiseMatch(id);
+      setInspector({ kind: "pairwise", loading: false, pairwise: result.pairwise });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+        return;
+      }
+      setInspector({
+        kind: "pairwise",
+        loading: false,
+        error: err instanceof Error ? err.message : "Не удалось открыть pairwise",
+      });
     }
   }
 
@@ -629,12 +673,13 @@ export function SaasQuality() {
                   <TableHead>Style</TableHead>
                   <TableHead>Persona</TableHead>
                   <TableHead className="text-right">When</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {(summary?.recent ?? []).length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                       Матчей пока нет
                     </TableCell>
                   </TableRow>
@@ -650,6 +695,17 @@ export function SaasQuality() {
                     </TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground">
                       {formatDate(item.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 gap-1.5 px-2 text-xs"
+                        onClick={() => void handleSelfPlayInspect(item.id)}
+                      >
+                        <EyeIcon className="size-3.5" />
+                        View
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -715,12 +771,13 @@ export function SaasQuality() {
                   <TableHead>Pair</TableHead>
                   <TableHead>Persona</TableHead>
                   <TableHead className="text-right">ELO</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {(pairwise?.recent ?? []).length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                       Pairwise сравнений пока нет
                     </TableCell>
                   </TableRow>
@@ -736,6 +793,17 @@ export function SaasQuality() {
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs">
                       {item.eloAAfter}/{item.eloBAfter}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 gap-1.5 px-2 text-xs"
+                        onClick={() => void handlePairwiseInspect(item.id)}
+                      >
+                        <EyeIcon className="size-3.5" />
+                        View
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -893,6 +961,144 @@ export function SaasQuality() {
           <span>Нет сохранённых self-play матчей для текущего tenant.</span>
         </div>
       )}
+
+      <QualityInspectorDialog inspector={inspector} onOpenChange={(open) => !open && setInspector(null)} />
+    </div>
+  );
+}
+
+type QualityInspectorState =
+  | {
+      kind: "self-play";
+      loading: boolean;
+      match?: QualitySelfPlayMatch;
+      error?: string;
+    }
+  | {
+      kind: "pairwise";
+      loading: boolean;
+      pairwise?: QualityPairwiseMatch;
+      error?: string;
+    };
+
+function QualityInspectorDialog({
+  inspector,
+  onOpenChange,
+}: {
+  inspector: QualityInspectorState | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const open = inspector !== null;
+  const title = inspector?.kind === "pairwise" ? "Pairwise detail" : "Self-play detail";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[86vh] max-w-5xl overflow-y-auto p-0">
+        <DialogHeader className="border-b px-5 py-4">
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 px-5 pb-5">
+          {inspector?.loading && (
+            <div className="space-y-3 py-2">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-32 w-full" />
+            </div>
+          )}
+          {inspector?.error && (
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {inspector.error}
+            </p>
+          )}
+          {inspector?.kind === "self-play" && inspector.match && (
+            <SelfPlayInspector match={inspector.match} />
+          )}
+          {inspector?.kind === "pairwise" && inspector.pairwise && (
+            <PairwiseInspector pairwise={inspector.pairwise} />
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SelfPlayInspector({ match }: { match: QualitySelfPlayMatch }) {
+  return (
+    <>
+      <div className="grid gap-3 text-sm md:grid-cols-4">
+        <InspectorMetric label="Style" value={match.styleSlug} />
+        <InspectorMetric label="Persona" value={match.personaSlug} />
+        <InspectorMetric label="Outcome" value={OUTCOME_LABEL[match.outcome] ?? match.outcome} />
+        <InspectorMetric label="Turns" value={match.turns} />
+      </div>
+      <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+        {match.verdict.reason || "нет reason"}
+      </p>
+      <TranscriptPane title="Transcript" transcript={match.transcript} />
+    </>
+  );
+}
+
+function PairwiseInspector({ pairwise }: { pairwise: QualityPairwiseMatch }) {
+  return (
+    <>
+      <div className="grid gap-3 text-sm md:grid-cols-4">
+        <InspectorMetric label="Winner" value={pairwise.verdict.winner.toUpperCase()} />
+        <InspectorMetric label="Persona" value={pairwise.personaSlug} />
+        <InspectorMetric label="Style A" value={pairwise.styleASlug} />
+        <InspectorMetric label="Style B" value={pairwise.styleBSlug} />
+      </div>
+      <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+        {pairwise.verdict.reason || "нет reason"}
+      </p>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <TranscriptPane
+          title={`A: ${pairwise.styleASlug}`}
+          transcript={pairwise.matchA.transcript}
+        />
+        <TranscriptPane
+          title={`B: ${pairwise.styleBSlug}`}
+          transcript={pairwise.matchB.transcript}
+        />
+      </div>
+    </>
+  );
+}
+
+function InspectorMetric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="min-w-0 rounded-md border px-3 py-2">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="truncate font-mono text-xs">{value}</p>
+    </div>
+  );
+}
+
+function TranscriptPane({
+  title,
+  transcript,
+}: {
+  title: string;
+  transcript: QualityTranscriptTurn[];
+}) {
+  return (
+    <div className="rounded-md border">
+      <div className="border-b px-3 py-2 text-sm font-medium">{title}</div>
+      <div className="max-h-[420px] space-y-2 overflow-y-auto p-3">
+        {transcript.length === 0 && (
+          <p className="text-sm text-muted-foreground">Transcript unavailable</p>
+        )}
+        {transcript.map((turn, index) => (
+          <div
+            key={`${turn.role}-${index}-${turn.text.slice(0, 12)}`}
+            className="rounded-md bg-muted/35 px-3 py-2"
+          >
+            <div className="mb-1 text-[11px] font-medium uppercase text-muted-foreground">
+              {turn.role === "candidate" ? "Candidate" : "Salesperson"}
+            </div>
+            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{turn.text}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
