@@ -8,8 +8,8 @@ import { makeBookingLinkTool } from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { EXCHANGE_PAYMENT_FALLBACK } from "./exchange-policy-guard.ts";
-import { RagReplyStrategy, type RagReplyStrategyOpts } from "./rag-reply.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
+import { RagReplyStrategy, type RagReplyStrategyOpts } from "./rag-reply.ts";
 
 const TENANT = { tenantId: 1 };
 const CHANNEL = { channelId: 10 };
@@ -340,6 +340,23 @@ describe("RagReplyStrategy.generate", () => {
     const s = mk(
       {
         template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chatReturning("Курс 31.5, получите 10553 THB."),
+        resolveEmbed: embed,
+        resolveKb: kbWith([HIT]),
+      },
+      fakeMessagesRepo(),
+    );
+    const r = await s.generate(baseInput());
+    expect(r).not.toBeNull();
+    const part = r![0]!.parts[0] as { text: string };
+    expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
+  });
+
+  it("exchange: resolved tenant template activates exchange guard", async () => {
+    const s = mk(
+      {
+        template: { ...EXCHANGE_TEMPLATE, slug: "fallback_v1" },
+        resolveTemplate: () => EXCHANGE_TEMPLATE,
         resolveChat: () => chatReturning("Курс 31.5, получите 10553 THB."),
         resolveEmbed: embed,
         resolveKb: kbWith([HIT]),

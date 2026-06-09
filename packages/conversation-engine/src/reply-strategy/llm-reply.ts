@@ -35,7 +35,13 @@ import {
  * НЕ ставится в outbound_queue, бот молчит вместо half-формы.
  */
 export interface LlmReplyStrategyOpts {
+  /** Fallback template used when no per-tenant template resolver is configured. */
   template: VerticalTemplate;
+  /**
+   * Optional per-tenant template resolver. Lets apps/api use the tenant's
+   * installed vertical instead of one boot-time hardcoded template.
+   */
+  resolveTemplate?: (tenantId: number) => VerticalTemplate | null | undefined;
   /**
    * Лимит сообщений в history-prompt'е. Default 20.
    * При больших значениях нужен conversation summary (следующая итерация).
@@ -130,20 +136,22 @@ export class LlmReplyStrategy implements ReplyStrategy {
     userMessageText: string;
   }): Promise<OutboundEnvelope[] | null> {
     if (input.userMessageText.length === 0) return null;
+    const tenantId = input.tenant.tenantId;
+    const template = this.opts.resolveTemplate?.(tenantId) ?? this.opts.template;
 
     if (this.opts.resolveIsSupport) {
       const isSupport = await this.opts.resolveIsSupport({
-        tenantId: input.tenant.tenantId,
+        tenantId,
         contactId: input.contactId,
       });
       if (isSupport) return null;
     }
 
-    const messages = this.messagesRepoFor(input.tenant.tenantId);
+    const messages = this.messagesRepoFor(tenantId);
     const history = await messages.recent(input.conversationId, this.opts.historyLimit ?? 20);
     const historyMessages = messagesToChatHistory(history);
 
-    const chat = this.opts.resolveChat(input.tenant.tenantId);
+    const chat = this.opts.resolveChat(tenantId);
     const llmOpts = {
       temperature: this.opts.temperature ?? 0.7,
       numPredict: this.opts.maxOutputTokens ?? 600,
@@ -155,7 +163,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
     if (this.opts.resolveTools) {
       try {
         tools = await this.opts.resolveTools({
-          tenantId: input.tenant.tenantId,
+          tenantId,
           conversationId: input.conversationId,
           contactId: input.contactId,
         });
@@ -167,19 +175,19 @@ export class LlmReplyStrategy implements ReplyStrategy {
     const serviceOrderContext = this.opts.resolveServiceOrderContext
       ? await Promise.resolve(
           this.opts.resolveServiceOrderContext({
-            tenantId: input.tenant.tenantId,
+            tenantId,
             conversationId: input.conversationId,
             contactId: input.contactId,
           }),
         )
       : null;
 
-    const isExchange = this.opts.template.slug === "exchange_v1";
+    const isExchange = template.slug === "exchange_v1";
     const exchangePolicyState =
       isExchange && this.opts.resolveExchangePolicyState
         ? await Promise.resolve(
             this.opts.resolveExchangePolicyState({
-              tenantId: input.tenant.tenantId,
+              tenantId,
               conversationId: input.conversationId,
               contactId: input.contactId,
             }),
@@ -197,7 +205,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
           "ответить инструментом."
         : "",
       serviceOrderContext?.trim(),
-      this.opts.template.systemPromptFragment,
+      template.systemPromptFragment,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -236,13 +244,13 @@ export class LlmReplyStrategy implements ReplyStrategy {
       : { ok: true, text: reply };
     if (!guarded.ok) {
       console.warn(
-        `[exchange-policy-guard] tenant=${input.tenant.tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
+        `[exchange-policy-guard] tenant=${tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
       );
     }
     if (this.opts.recordToolCalls && toolCalls.length > 0) {
       try {
         await this.opts.recordToolCalls({
-          tenantId: input.tenant.tenantId,
+          tenantId,
           conversationId: input.conversationId,
           contactId: input.contactId,
           userMessageText: input.userMessageText,

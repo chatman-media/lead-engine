@@ -1,13 +1,13 @@
 import {
-	AgentToolCallsRepo,
 	type AgentToolCallSource,
+	AgentToolCallsRepo,
 	ConversationsRepo,
 	type Db,
 	DrizzleKbStore,
 	type ExchangeOrderPolicyState,
-	ExperimentsRepo,
 	type ExchangePolicyState,
 	type ExchangeVerificationPolicyState,
+	ExperimentsRepo,
 	getDecryptedSecret,
 	type ITranscriber,
 	KbSuggestionsRepo,
@@ -52,7 +52,7 @@ import {
 	skills,
 	stageDefinitions,
 } from "@chatman-media/storage";
-import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
+import type { VerticalTemplate } from "@chatman-media/verticals";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import type { ApiConfig } from "./config.ts";
 import { findActiveOrder, type OrderRow } from "./lib/exchange/orders.ts";
@@ -63,8 +63,8 @@ import {
 	type RateGuardAlert,
 } from "./lib/exchange/tools.ts";
 import {
-	getExchangeVerificationStatus,
 	type ExchangeVerificationStatus,
+	getExchangeVerificationStatus,
 } from "./lib/exchange/verification.ts";
 import {
 	type OnUsage,
@@ -83,12 +83,12 @@ export type RecordUsage = (
 	event: Parameters<OnUsage>[0],
 ) => void;
 
+import { makeConciergeRequestsTool, REQUEST_TYPE_LABEL, tenantSupportsMultiRequest } from "./lib/concierge-tools.ts";
 import {
 	getConfig,
 	type LoadedLlmConfigs,
 	type ResolvedLlmConfig,
 } from "./lib/llm-config-loader.ts";
-import { makeConciergeRequestsTool, REQUEST_TYPE_LABEL, tenantSupportsMultiRequest } from "./lib/concierge-tools.ts";
 import { OpenRouterTranscriber } from "./lib/openrouter-transcriber.ts";
 import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
 
@@ -561,6 +561,13 @@ export interface ReplyStrategyBundle {
 	invalidateStyleFor: (tenantId: number) => void;
 }
 
+export interface ReplyStrategyTemplateOptions {
+	/** Fallback for tenants without an installed vertical template. */
+	fallbackTemplate: VerticalTemplate;
+	/** Runtime tenant template resolver built from active funnels. */
+	resolveTemplate?: (tenantId: number) => VerticalTemplate | null | undefined;
+}
+
 /**
  * Per-tenant style resolution when no A/B experiment applies. Priority:
  *   1. the configured default slug (global `STYLE_SLUG`), if it resolves;
@@ -956,6 +963,7 @@ export function makeReplyStrategy(
 	ref: LoadedRef,
 	cfg: ApiConfig,
 	db: Db,
+	templates: ReplyStrategyTemplateOptions,
 	metrics?: PlatformMetrics,
 	recordUsage?: RecordUsage,
 	notifyRateGuard?: (alert: RateGuardAlert) => void,
@@ -969,7 +977,7 @@ export function makeReplyStrategy(
 		if (embed) ref.router.setConfig(toRouterConfig(tenantId, "embed", embed));
 	}
 
-	const template = RECRUITMENT_V1;
+	const { fallbackTemplate, resolveTemplate } = templates;
 
 	// resolveTools: см. makeToolsResolver. Определён ДО embed-проверки, чтобы и
 	// LLM-only fallback мог давать боту инструменты (напр. расчёт курса).
@@ -989,7 +997,8 @@ export function makeReplyStrategy(
 		return {
 			strategy: new LlmReplyStrategy(
 				{
-					template,
+					template: fallbackTemplate,
+					resolveTemplate,
 					resolveChat: (tenantId: number) =>
 						ref.router.resolveChat(tenantId, "chat"),
 					resolveIsSupport: makeSupportModeResolver(db),
@@ -1015,7 +1024,8 @@ export function makeReplyStrategy(
 
 	const strategy = new RagReplyStrategy(
 		{
-			template,
+			template: fallbackTemplate,
+			resolveTemplate,
 			resolveChat: (tenantId: number) => {
 				const inner = ref.router.resolveChat(tenantId, "chat");
 				if (!metrics) return inner;

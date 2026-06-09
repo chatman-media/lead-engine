@@ -74,6 +74,15 @@ function buildLoaded(opts: {
 }
 
 const FAKE_DB = {} as Parameters<typeof makeReplyStrategy>[2];
+const FAKE_TEMPLATES = {
+  fallbackTemplate: {
+    slug: "test_v1",
+    displayName: "Test",
+    version: 1,
+    funnelStages: [],
+    systemPromptFragment: "",
+  },
+} satisfies Parameters<typeof makeReplyStrategy>[3];
 const FAKE_CFG = {
   stageClassifier: "off",
   defaultStyleSlug: "",
@@ -83,12 +92,12 @@ const FAKE_CFG = {
 describe("makeReplyStrategy", () => {
   it("no chat config anywhere → null", () => {
     const loaded = refWith({});
-    expect(makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB)).toBeNull();
+    expect(makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB, FAKE_TEMPLATES)).toBeNull();
   });
 
   it("chat only → LlmReplyStrategy", () => {
     const loaded = refWith({ chat: { tenantIds: [1] } });
-    const bundle = makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB);
+    const bundle = makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB, FAKE_TEMPLATES);
     expect(bundle).not.toBeNull();
     expect(bundle?.strategy instanceof LlmReplyStrategy).toBe(true);
   });
@@ -98,7 +107,7 @@ describe("makeReplyStrategy", () => {
       chat: { tenantIds: [1] },
       embed: { tenantIds: [1] },
     });
-    const bundle = makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB);
+    const bundle = makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB, FAKE_TEMPLATES);
     expect(bundle?.strategy instanceof RagReplyStrategy).toBe(true);
   });
 
@@ -107,7 +116,7 @@ describe("makeReplyStrategy", () => {
       chat: { tenantIds: [2] },
       embed: { tenantIds: [1] },
     });
-    expect(makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB)?.strategy instanceof RagReplyStrategy).toBe(true);
+    expect(makeReplyStrategy(loaded, FAKE_CFG, FAKE_DB, FAKE_TEMPLATES)?.strategy instanceof RagReplyStrategy).toBe(true);
   });
 });
 
