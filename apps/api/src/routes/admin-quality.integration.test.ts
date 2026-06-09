@@ -26,6 +26,7 @@ import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
+import { ShadowEvalJobRunner } from "../lib/shadow-eval-job-runner.ts";
 import { makeRequireAuth } from "../middleware/require-auth.ts";
 import { makeAdminQualityRoutes } from "./admin-quality.ts";
 import { makeAuthRoutes } from "./auth.ts";
@@ -53,6 +54,7 @@ let tenantA = 0;
 let tenantB = 0;
 let toolConversationA = 0;
 let toolCallOrderA = 0;
+let shadowRunner: ShadowEvalJobRunner | null = null;
 const reloads: number[] = [];
 const salesReplies: string[] = [];
 const candidateReplies: string[] = [];
@@ -96,6 +98,20 @@ beforeAll(async () => {
   app.route("/", makeAuthRoutes({ db: db as never, secret: SECRET }));
   app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
   reloads.length = 0;
+  shadowRunner = new ShadowEvalJobRunner({
+    db,
+    resolveChat: () => salesChat,
+    resolveCandidateChat: () => candidateChat,
+    resolveJudgeChat: () => judgeChat,
+    resolveEmbedder: () => fakeEmbedder,
+    resolveKb: () => fakeKb,
+    pollMs: 60_000,
+    batchSize: 1,
+    leaseSeconds: 10,
+    staleRunningSeconds: 10,
+    workerId: "quality-test",
+    log: { warn: () => {} },
+  });
   app.route(
     "/",
     makeAdminQualityRoutes({
@@ -106,6 +122,7 @@ beforeAll(async () => {
       resolveJudgeChat: () => judgeChat,
       resolveEmbedder: () => fakeEmbedder,
       resolveKb: () => fakeKb,
+      shadowEvalRunner: shadowRunner,
     }),
   );
 
@@ -475,6 +492,7 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
+  shadowRunner?.stop();
   if (sql) {
     await sql.end({ timeout: 0 }).catch(() => {});
     sql = null;
@@ -1497,6 +1515,247 @@ describe("admin quality JSONL export", () => {
     });
   });
 
+  it("recovers an expired durable shadow evaluation claim", async () => {
+    if (!sql || !shadowRunner) return;
+    resetQualityQueues();
+    const now = Math.floor(Date.now() / 1000);
+    const fixture = await createShadowEvalRunFixture(`shadow-recover-${now}`);
+    const [job] = await db
+      .insert(shadowEvaluations)
+      .values({
+        tenantId: tenantA,
+        proposalId: fixture.proposal.id,
+        parentStyleSlug: fixture.parentStyle.slug,
+        parentStyleId: fixture.parentStyle.id,
+        newStyleSlug: fixture.candidateStyle.slug,
+        newStyleId: fixture.candidateStyle.id,
+        pairsPlanned: 1,
+        pairsDone: 0,
+        aWins: 0,
+        bWins: 0,
+        draws: 0,
+        winRateLb: null,
+        status: "running",
+        decision: null,
+        errorMessage: null,
+        runConfigJson: JSON.stringify({
+          version: 1,
+          runs: 1,
+          maxTurns: 1,
+          reflect: false,
+          personas: ["skeptic-anya"],
+        }),
+        claimToken: "dead-worker",
+        claimedAt: now - 60,
+        leaseExpiresAt: now - 30,
+        attempts: 2,
+        startedAt: now - 50,
+        completedAt: null,
+      })
+      .returning({ id: shadowEvaluations.id });
+    expect(job).toBeTruthy();
+    if (!job) return;
+
+    salesReplies.push(
+      "A: договор до вылета и сопровождение, можно начать с анкеты",
+      "B: давай оформим анкету сейчас, я покажу договор и условия",
+    );
+    candidateReplies.push("ок, давай анкету", "ок, давай анкету");
+    judgeReplies.push(
+      '{"outcome":"draw","reason":"A did not clearly improve"}',
+      '{"outcome":"won","reason":"B closed the next step"}',
+      '{"winner":"b","reason":"B gave a clearer next step"}',
+    );
+
+    const processed = await shadowRunner.runOnce();
+    expect(processed).toBeGreaterThanOrEqual(1);
+
+    const [completed] = await db
+      .select()
+      .from(shadowEvaluations)
+      .where(eq(shadowEvaluations.id, job.id))
+      .limit(1);
+    expect(completed).toMatchObject({
+      tenantId: tenantA,
+      status: "complete",
+      pairsDone: 1,
+      bWins: 1,
+      attempts: 3,
+      claimToken: null,
+      leaseExpiresAt: null,
+    });
+  });
+
+  it("fails unrecoverable legacy running shadow evaluations", async () => {
+    if (!sql || !shadowRunner) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [proposal] = await db
+      .select({ id: coachProposals.id, styleSlug: coachProposals.styleSlug })
+      .from(coachProposals)
+      .where(eq(coachProposals.tenantId, tenantA))
+      .limit(1);
+    expect(proposal).toBeTruthy();
+    if (!proposal) return;
+
+    const [legacyJob] = await db
+      .insert(shadowEvaluations)
+      .values({
+        tenantId: tenantA,
+        proposalId: proposal.id,
+        parentStyleSlug: proposal.styleSlug,
+        parentStyleId: 9001,
+        newStyleSlug: `${proposal.styleSlug}-legacy-shadow`,
+        newStyleId: 9002,
+        pairsPlanned: 2,
+        pairsDone: 0,
+        aWins: 0,
+        bWins: 0,
+        draws: 0,
+        winRateLb: null,
+        status: "running",
+        decision: null,
+        errorMessage: null,
+        runConfigJson: null,
+        claimToken: null,
+        claimedAt: null,
+        leaseExpiresAt: null,
+        attempts: 0,
+        startedAt: now - 120,
+        completedAt: null,
+      })
+      .returning({ id: shadowEvaluations.id });
+    expect(legacyJob).toBeTruthy();
+    if (!legacyJob) return;
+
+    await shadowRunner.runOnce();
+    const [failed] = await db
+      .select()
+      .from(shadowEvaluations)
+      .where(eq(shadowEvaluations.id, legacyJob.id))
+      .limit(1);
+    expect(failed).toMatchObject({
+      status: "failed",
+      errorMessage: "shadow evaluation missing durable run config; start a new run",
+    });
+    expect(failed?.completedAt).toBeGreaterThanOrEqual(now);
+  });
+
+  it("can retry failed and cancel running shadow evaluations", async () => {
+    if (!sql) return;
+    resetQualityQueues();
+    const now = Math.floor(Date.now() / 1000);
+    const fixture = await createShadowEvalRunFixture(`shadow-retry-${now}`);
+    const runConfigJson = JSON.stringify({
+      version: 1,
+      runs: 1,
+      maxTurns: 1,
+      reflect: false,
+      personas: ["skeptic-anya"],
+    });
+    const [failedJob] = await db
+      .insert(shadowEvaluations)
+      .values({
+        tenantId: tenantA,
+        proposalId: fixture.proposal.id,
+        parentStyleSlug: fixture.parentStyle.slug,
+        parentStyleId: fixture.parentStyle.id,
+        newStyleSlug: fixture.candidateStyle.slug,
+        newStyleId: fixture.candidateStyle.id,
+        pairsPlanned: 1,
+        pairsDone: 1,
+        aWins: 1,
+        bWins: 0,
+        draws: 0,
+        winRateLb: null,
+        status: "failed",
+        decision: null,
+        errorMessage: "judge unavailable",
+        runConfigJson,
+        claimToken: null,
+        claimedAt: null,
+        leaseExpiresAt: null,
+        attempts: 2,
+        startedAt: now - 10,
+        completedAt: now - 5,
+      })
+      .returning({ id: shadowEvaluations.id });
+    expect(failedJob).toBeTruthy();
+    if (!failedJob) return;
+
+    salesReplies.push(
+      "A: договор до вылета и сопровождение, можно начать с анкеты",
+      "B: давай оформим анкету сейчас, я покажу договор и условия",
+    );
+    candidateReplies.push("ок, давай анкету", "ок, давай анкету");
+    judgeReplies.push(
+      '{"outcome":"draw","reason":"A did not clearly improve"}',
+      '{"outcome":"won","reason":"B closed the next step"}',
+      '{"winner":"b","reason":"B gave a clearer next step"}',
+    );
+
+    const retry = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/coach/shadow-evaluations/${failedJob.id}/retry`,
+      {},
+    );
+    expect(retry.status).toBe(200);
+    const retryBody = (await retry.json()) as QualityCoachShadowCreateResponse;
+    expect(retryBody.shadow).toMatchObject({
+      id: failedJob.id,
+      status: "running",
+      pairsDone: 0,
+      aWins: 0,
+      bWins: 0,
+      draws: 0,
+      errorMessage: null,
+    });
+    await waitForShadowEvaluation(failedJob.id);
+
+    const [runningJob] = await db
+      .insert(shadowEvaluations)
+      .values({
+        tenantId: tenantA,
+        proposalId: fixture.proposal.id,
+        parentStyleSlug: fixture.parentStyle.slug,
+        parentStyleId: fixture.parentStyle.id,
+        newStyleSlug: fixture.candidateStyle.slug,
+        newStyleId: fixture.candidateStyle.id,
+        pairsPlanned: 1,
+        pairsDone: 0,
+        aWins: 0,
+        bWins: 0,
+        draws: 0,
+        winRateLb: null,
+        status: "running",
+        decision: null,
+        errorMessage: null,
+        runConfigJson,
+        claimToken: "manual-worker",
+        claimedAt: now,
+        leaseExpiresAt: now + 300,
+        attempts: 1,
+        startedAt: now,
+        completedAt: null,
+      })
+      .returning({ id: shadowEvaluations.id });
+    expect(runningJob).toBeTruthy();
+    if (!runningJob) return;
+
+    const cancel = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/coach/shadow-evaluations/${runningJob.id}/cancel`,
+      {},
+    );
+    expect(cancel.status).toBe(200);
+    const cancelBody = (await cancel.json()) as QualityCoachShadowCreateResponse;
+    expect(cancelBody.shadow).toMatchObject({
+      id: runningJob.id,
+      status: "failed",
+      errorMessage: "cancelled by admin",
+      completedAt: expect.any(Number),
+    });
+  });
+
   it("filters by style/persona/outcome and can omit transcripts", async () => {
     if (!sql) return;
     const res = await authReq(
@@ -2179,6 +2438,61 @@ type QualityCoachShadowPreviewResponse = {
     } | null;
   };
 };
+
+async function createShadowEvalRunFixture(slugSuffix: string) {
+  const now = Math.floor(Date.now() / 1000);
+  const [parentStyle] = await db
+    .insert(stylesTable)
+    .values({
+      tenantId: tenantA,
+      slug: `style-parent-${slugSuffix}`,
+      displayName: "Style Parent Shadow Queue",
+      configJson: JSON.stringify(
+        styleConfig(`style-parent-${slugSuffix}`, "Style Parent Shadow Queue", "neutral"),
+      ),
+      isActive: true,
+      version: 1,
+      createdAt: now,
+    })
+    .returning({ id: stylesTable.id, slug: stylesTable.slug });
+  if (!parentStyle) throw new Error("parent style fixture was not created");
+
+  const [candidateStyle] = await db
+    .insert(stylesTable)
+    .values({
+      tenantId: tenantA,
+      slug: `style-candidate-${slugSuffix}`,
+      displayName: "Style Candidate Shadow Queue",
+      configJson: JSON.stringify(
+        styleConfig(`style-candidate-${slugSuffix}`, "Style Candidate Shadow Queue", "warmer"),
+      ),
+      isActive: false,
+      version: 1,
+      parentId: parentStyle.id,
+      createdAt: now + 1,
+    })
+    .returning({ id: stylesTable.id, slug: stylesTable.slug });
+  if (!candidateStyle) throw new Error("candidate style fixture was not created");
+
+  const [proposal] = await db
+    .insert(coachProposals)
+    .values({
+      tenantId: tenantA,
+      styleSlug: parentStyle.slug,
+      sampleSize: 4,
+      personaFilter: null,
+      summary: "Run durable shadow eval",
+      editsJson: JSON.stringify({ voice_tone: "warmer" }),
+      rationaleJson: JSON.stringify(["Needs fresh pairwise coverage."]),
+      status: "applied",
+      createdAt: now + 2,
+      decidedAt: now + 2,
+    })
+    .returning({ id: coachProposals.id });
+  if (!proposal) throw new Error("coach proposal fixture was not created");
+
+  return { parentStyle, candidateStyle, proposal };
+}
 
 function styleConfig(slug: string, displayName: string, tone: string) {
   return {
