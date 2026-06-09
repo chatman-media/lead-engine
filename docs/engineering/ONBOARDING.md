@@ -325,6 +325,67 @@ curl -X POST http://localhost:3000/api/admin/channels/vk \
   -d '{"groupId":"123456789","accessToken":"vk1.a...","confirmationCode":"abcd","secretKey":"optional"}'
 ```
 
+### 2bd. MAX Messenger (Bot API Webhook — manual)
+
+MAX-канал работает как чат-бот организации/ИП: входящие приходят через Bot API
+Webhook, исходящие отправляются через `POST /messages`. MVP поддерживает
+text-only `message_created`; media, rich keyboards и callback buttons — follow-up.
+
+Требования MAX API:
+- бот создаётся в [business.max.ru](https://business.max.ru/) у верифицированного
+  профиля организации/ИП;
+- token передаётся только через header `Authorization: <token>`;
+- production webhook должен быть HTTPS на порту 443;
+- secret из subscription приходит в `X-Max-Bot-Api-Secret`.
+
+1. В business.max.ru открыть **Чат-боты** → **Интеграция**
+2. Скопировать **Bot token**
+3. Во вкладке **MAX** на `/channels` вставить token; webhook secret можно
+   указать вручную или оставить пустым — backend сгенерирует его
+4. В MAX создать Webhook subscription на URL из `webhookSetupHint`
+
+Backend (`POST /api/admin/channels/max`):
+
+```
+1. botToken required → 400 если пусто
+2. MaxClient.getBotInfo() — validate bot token через GET /me:
+   - 401 если bad token / insufficient permissions
+3. Quota check → 402 если over limit
+4. encrypt token → tenant_secrets[channel_max_<botId>]
+5. encrypt webhook secret → tenant_secrets[channel_max_<botId>_webhook_secret]
+6. upsert channels(kind=max, external_id=botId,
+                   metadata: { username, botName })
+7. recordAudit + reloadChannels
+```
+
+Response содержит `webhookSetupHint`:
+
+```json
+{
+  "webhookSetupHint": {
+    "url": "https://api.example.com/webhook/max/acme",
+    "secret": "max_...",
+    "updateTypes": ["message_created"],
+    "requirement": "Production MAX webhooks require HTTPS on port 443."
+  }
+}
+```
+
+MAX Webhook subscription:
+- **URL** = `webhookSetupHint.url`
+- **Secret** = `webhookSetupHint.secret`
+- **Update types** = `message_created`
+- Lead Engine проверяет `X-Max-Bot-Api-Secret` до pipeline
+
+curl:
+
+```sh
+curl -X POST http://localhost:3000/api/admin/channels/max \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"botToken":"max-bot-token","webhookSecret":"optional"}'
+```
+
 ### 2c. Telegram userbot (личный аккаунт, MTProto)
 
 Помимо бота, тенант может подключить **личный аккаунт** (userbot) для

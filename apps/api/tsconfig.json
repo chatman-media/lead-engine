@@ -13,6 +13,7 @@
     "paths": {
       "@chatman-media/channel-core": ["../../packages/channel-core/src/index.ts"],
       "@chatman-media/channel-facebook": ["../../packages/channel-facebook/src/index.ts"],
+      "@chatman-media/channel-max": ["../../packages/channel-max/src/index.ts"],
       "@chatman-media/channel-telegram": ["../../packages/channel-telegram/src/index.ts"],
       "@chatman-media/channel-vk": ["../../packages/channel-vk/src/index.ts"],
       "@chatman-media/channel-web": ["../../packages/channel-web/src/index.ts"],

@@ -84,7 +84,7 @@ async function main() {
     // userbot-dispatcher.ts), которые claim'ят kind='web' / 'telegram_userbot'.
     // Если не отфильтровать — worker grab'нет такую row первым, не найдёт
     // адаптер, mark'нет fail.
-    claimKinds: ["telegram_bot", "whatsapp", "facebook", "vk"],
+    claimKinds: ["telegram_bot", "whatsapp", "facebook", "vk", "max"],
   });
 
   let metricsServer: MetricsServer | null = null;

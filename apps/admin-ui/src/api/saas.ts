@@ -130,6 +130,7 @@ export type ChannelKind =
   | "whatsapp"
   | "facebook"
   | "vk"
+  | "max"
   | "web";
 export type ChannelStatus = "active" | "paused" | "error";
 
@@ -214,6 +215,22 @@ export interface CreateVkChannelResult {
     confirmationCode: string;
     secretKeyHint: string;
     eventTypes: string[];
+  };
+  reloadError?: string;
+}
+
+export interface CreateMaxChannelResult {
+  ok: boolean;
+  id: number;
+  updated: boolean;
+  botId: string;
+  username?: string;
+  botName?: string;
+  webhookSetupHint?: {
+    url: string;
+    secret: string;
+    updateTypes: string[];
+    requirement: string;
   };
   reloadError?: string;
 }
@@ -1687,6 +1704,12 @@ export const saas = {
     secretKey?: string;
   }) {
     return request<CreateVkChannelResult>("/api/admin/channels/vk", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  createMaxChannel(input: { botToken: string; webhookSecret?: string }) {
+    return request<CreateMaxChannelResult>("/api/admin/channels/max", {
       method: "POST",
       body: JSON.stringify(input),
     });

@@ -104,6 +104,7 @@ import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 import { makeWhatsAppWebhookRoutes } from "./routes/webhook-whatsapp.ts";
 import { makeFacebookWebhookRoutes } from "./routes/webhook-facebook.ts";
 import { makeVkWebhookRoutes } from "./routes/webhook-vk.ts";
+import { makeMaxWebhookRoutes } from "./routes/webhook-max.ts";
 import { makeOperatorBotWebhookRoutes } from "./routes/webhook-operator-bot.ts";
 import { makeWestWalletWebhookRoutes } from "./routes/webhook-westwallet.ts";
 import { makeWidgetStaticRoutes } from "./routes/widget-static.ts";
@@ -240,6 +241,7 @@ async function main() {
     ...(cfg.facebookAppSecret ? { facebookAppSecretFallback: cfg.facebookAppSecret } : {}),
     ...(cfg.vkConfirmationCode ? { vkConfirmationCodeFallback: cfg.vkConfirmationCode } : {}),
     ...(cfg.vkSecretKey ? { vkSecretKeyFallback: cfg.vkSecretKey } : {}),
+    ...(cfg.maxWebhookSecret ? { maxWebhookSecretFallback: cfg.maxWebhookSecret } : {}),
   });
 
   const app = new Hono();
@@ -414,6 +416,7 @@ async function main() {
       ...(cfg.facebookVerifyToken ? { facebookVerifyToken: cfg.facebookVerifyToken } : {}),
       ...(cfg.vkConfirmationCode ? { vkConfirmationCode: cfg.vkConfirmationCode } : {}),
       ...(cfg.vkSecretKey ? { vkSecretKey: cfg.vkSecretKey } : {}),
+      ...(cfg.maxWebhookSecret ? { maxWebhookSecret: cfg.maxWebhookSecret } : {}),
       ...(cfg.webWidgetScriptUrl ? { webWidgetScriptUrl: cfg.webWidgetScriptUrl } : {}),
       telegramApiId: cfg.telegramUserbot.apiId,
       telegramApiHash: cfg.telegramUserbot.apiHash,
@@ -926,6 +929,30 @@ async function main() {
   );
   log.info("vk webhook enabled", {
     fallbackSecretCheck: cfg.vkSecretKey ? "enabled" : "off (per-tenant or dev mode)",
+  });
+
+  app.route(
+    "/",
+    makeMaxWebhookRoutes({
+      db,
+      channels,
+      ...(cfg.maxWebhookSecret ? { webhookSecret: cfg.maxWebhookSecret } : {}),
+      replyStrategy,
+      resolveTemplate,
+      memoryExtractor,
+      stageClassifier,
+      notificationService,
+      photoProcessor,
+      fieldExtractor,
+      serviceCatalogRuntime,
+      sink,
+      metrics,
+      ...(rateLimiter ? { rateLimiter } : {}),
+      ...(resolveTranscriber ? { resolveTranscriber } : {}),
+    }),
+  );
+  log.info("max webhook enabled", {
+    fallbackSecretCheck: cfg.maxWebhookSecret ? "enabled" : "off (per-channel or dev mode)",
   });
 
   if (cfg.stripeWebhookSecret) {

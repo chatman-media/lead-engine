@@ -1,4 +1,5 @@
 import { MessengerAdapter } from "@chatman-media/channel-facebook";
+import { MaxAdapter } from "@chatman-media/channel-max";
 import { TelegramBotAdapter } from "@chatman-media/channel-telegram";
 import { type Db, getDecryptedSecret } from "@chatman-media/conversation-engine";
 import { VkAdapter } from "@chatman-media/channel-vk";
@@ -34,6 +35,12 @@ export const FACEBOOK_APP_SECRET_KEY = "facebook_app_secret";
 /** tenant_secrets ключи для per-tenant VK Callback API creds. */
 export const VK_CONFIRMATION_CODE_KEY = "vk_confirmation_code";
 export const VK_SECRET_KEY = "vk_secret_key";
+/** tenant_secrets suffix для per-channel MAX webhook secret. */
+export const MAX_WEBHOOK_SECRET_SUFFIX = "_webhook_secret";
+
+export function maxWebhookSecretKey(credentialsRef: string): string {
+  return `${credentialsRef}${MAX_WEBHOOK_SECRET_SUFFIX}`;
+}
 
 export interface ChannelEntry {
   channelDbId: number;
@@ -41,10 +48,10 @@ export interface ChannelEntry {
   tenantSlug: string;
   /** Plan tier строки из tenants.plan — используется для per-plan rate limits. */
   tenantPlan: string;
-  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "vk" | "web";
+  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "vk" | "max" | "web";
   externalId: string;
   /** Конкретный adapter в зависимости от kind. */
-  adapter: TelegramBotAdapter | WhatsAppCloudAdapter | MessengerAdapter | VkAdapter;
+  adapter: TelegramBotAdapter | WhatsAppCloudAdapter | MessengerAdapter | VkAdapter | MaxAdapter;
   /** WhatsApp: per-tenant verify_token (резолвится при загрузке, фолбэк env). */
   whatsappVerifyToken?: string;
   /** WhatsApp: per-tenant app secret для X-Hub-Signature-256 (фолбэк env). */
@@ -57,6 +64,8 @@ export interface ChannelEntry {
   vkConfirmationCode?: string;
   /** VK: secret key из Callback API settings, валидируется по payload.secret. */
   vkSecretKey?: string;
+  /** MAX: secret для X-Max-Bot-Api-Secret header. */
+  maxWebhookSecret?: string;
 }
 
 export interface LoadFromDbOpts {
@@ -76,6 +85,8 @@ export interface LoadFromDbOpts {
   vkConfirmationCodeFallback?: string;
   /** Env-фолбэк VK Callback API secret key (VK_SECRET_KEY). */
   vkSecretKeyFallback?: string;
+  /** Env-фолбэк MAX webhook secret (MAX_WEBHOOK_SECRET). */
+  maxWebhookSecretFallback?: string;
 }
 
 export class ChannelRegistry {
@@ -251,6 +262,37 @@ export class ChannelRegistry {
     return process.env[envKey] ?? process.env.VK_ACCESS_TOKEN ?? null;
   }
 
+  /** Аналогично VK/Meta: tenant_secrets → env MAX_BOT_TOKEN_<SLUG> → env MAX_BOT_TOKEN. */
+  private async resolveMaxToken(
+    db: Db,
+    tenantId: number,
+    tenantSlug: string,
+    credentialsRef: string | null,
+    masterKeyHex: string | undefined,
+    onWarn: ((msg: string, ctx: Record<string, unknown>) => void) | undefined,
+  ): Promise<string | null> {
+    if (credentialsRef && masterKeyHex) {
+      try {
+        const decrypted = await getDecryptedSecret({
+          db,
+          tenantId,
+          key: credentialsRef,
+          masterKeyHex,
+        });
+        if (decrypted) return decrypted;
+      } catch (err) {
+        onWarn?.("failed to decrypt channel max token", {
+          tenantId,
+          tenantSlug,
+          credentialsRef,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    const envKey = `MAX_BOT_TOKEN_${tenantSlug.toUpperCase().replace(/-/g, "_")}`;
+    return process.env[envKey] ?? process.env.MAX_BOT_TOKEN ?? null;
+  }
+
   /** Резолв per-tenant Facebook webhook creds (verify_token + app_secret). */
   private async resolveFacebookWebhookCreds(
     db: Db,
@@ -322,6 +364,35 @@ export class ChannelRegistry {
     };
   }
 
+  /** Резолв per-channel MAX webhook secret: tenant_secrets[credentialsRef + suffix] → env fallback. */
+  private async resolveMaxWebhookSecret(
+    db: Db,
+    tenantId: number,
+    credentialsRef: string | null,
+  ): Promise<string | undefined> {
+    if (!credentialsRef) return this.loadOpts.maxWebhookSecretFallback || undefined;
+    if (!this.loadOpts.masterKeyHex) return this.loadOpts.maxWebhookSecretFallback || undefined;
+    try {
+      return (
+        (await getDecryptedSecret({
+          db,
+          tenantId,
+          key: maxWebhookSecretKey(credentialsRef),
+          masterKeyHex: this.loadOpts.masterKeyHex,
+        })) ||
+        this.loadOpts.maxWebhookSecretFallback ||
+        undefined
+      );
+    } catch (err) {
+      this.loadOpts.onWarn?.("failed to decrypt max webhook secret", {
+        tenantId,
+        key: maxWebhookSecretKey(credentialsRef),
+        err: err instanceof Error ? err.message : String(err),
+      });
+      return this.loadOpts.maxWebhookSecretFallback || undefined;
+    }
+  }
+
   /** Кеш opts чтобы reloadTenant использовал тот же masterKey + onWarn. */
   private loadOpts: LoadFromDbOpts = {};
   private dbRef: Db | null = null;
@@ -344,8 +415,13 @@ export class ChannelRegistry {
       .where(and(eq(channels.status, "active"), eq(tenants.status, "active")));
 
     for (const row of rows) {
-      let adapter: TelegramBotAdapter | WhatsAppCloudAdapter | MessengerAdapter | VkAdapter | null =
-        null;
+      let adapter:
+        | TelegramBotAdapter
+        | WhatsAppCloudAdapter
+        | MessengerAdapter
+        | VkAdapter
+        | MaxAdapter
+        | null = null;
       let waWebhookCreds: { verifyToken: string | undefined; appSecret: string | undefined } = {
         verifyToken: undefined,
         appSecret: undefined,
@@ -359,6 +435,7 @@ export class ChannelRegistry {
           confirmationCode: undefined,
           secretKey: undefined,
         };
+      let maxWebhookSecret: string | undefined;
       if (row.kind === "telegram_bot") {
         const token = await this.resolveBotToken(
           db,
@@ -413,6 +490,22 @@ export class ChannelRegistry {
         // external_id у vk канала = group_id сообщества.
         adapter = new VkAdapter({ id: String(row.channelId), accessToken: token });
         vkWebhookCreds = await this.resolveVkWebhookCreds(db, row.tenantId);
+      } else if (row.kind === "max") {
+        const token = await this.resolveMaxToken(
+          db,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          opts.masterKeyHex,
+          opts.onWarn,
+        );
+        if (!token) continue;
+        adapter = new MaxAdapter({ id: String(row.channelId), accessToken: token });
+        maxWebhookSecret = await this.resolveMaxWebhookSecret(
+          db,
+          row.tenantId,
+          row.credentialsRef,
+        );
       } else {
         // telegram_userbot и web в apps/api НЕ загружаются — userbot живёт
         // в apps/worker, web обрабатывается через отдельный WS-endpoint.
@@ -434,6 +527,7 @@ export class ChannelRegistry {
           ? { vkConfirmationCode: vkWebhookCreds.confirmationCode }
           : {}),
         ...(vkWebhookCreds.secretKey ? { vkSecretKey: vkWebhookCreds.secretKey } : {}),
+        ...(maxWebhookSecret ? { maxWebhookSecret } : {}),
       };
       const list = this.byTenantSlug.get(row.tenantSlug) ?? [];
       list.push(entry);
@@ -487,8 +581,13 @@ export class ChannelRegistry {
       );
 
     for (const row of rows) {
-      let adapter: TelegramBotAdapter | WhatsAppCloudAdapter | MessengerAdapter | VkAdapter | null =
-        null;
+      let adapter:
+        | TelegramBotAdapter
+        | WhatsAppCloudAdapter
+        | MessengerAdapter
+        | VkAdapter
+        | MaxAdapter
+        | null = null;
       let waWebhookCreds: { verifyToken: string | undefined; appSecret: string | undefined } = {
         verifyToken: undefined,
         appSecret: undefined,
@@ -502,6 +601,7 @@ export class ChannelRegistry {
           confirmationCode: undefined,
           secretKey: undefined,
         };
+      let maxWebhookSecret: string | undefined;
       if (row.kind === "telegram_bot") {
         const token = await this.resolveBotToken(
           this.dbRef,
@@ -553,6 +653,22 @@ export class ChannelRegistry {
         if (!token) continue;
         adapter = new VkAdapter({ id: String(row.channelId), accessToken: token });
         vkWebhookCreds = await this.resolveVkWebhookCreds(this.dbRef, row.tenantId);
+      } else if (row.kind === "max") {
+        const token = await this.resolveMaxToken(
+          this.dbRef,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          this.loadOpts.masterKeyHex,
+          this.loadOpts.onWarn,
+        );
+        if (!token) continue;
+        adapter = new MaxAdapter({ id: String(row.channelId), accessToken: token });
+        maxWebhookSecret = await this.resolveMaxWebhookSecret(
+          this.dbRef,
+          row.tenantId,
+          row.credentialsRef,
+        );
       } else {
         continue;
       }
@@ -572,6 +688,7 @@ export class ChannelRegistry {
           ? { vkConfirmationCode: vkWebhookCreds.confirmationCode }
           : {}),
         ...(vkWebhookCreds.secretKey ? { vkSecretKey: vkWebhookCreds.secretKey } : {}),
+        ...(maxWebhookSecret ? { maxWebhookSecret } : {}),
       };
       const list = this.byTenantSlug.get(row.tenantSlug) ?? [];
       list.push(entry);
@@ -598,6 +715,11 @@ export class ChannelRegistry {
   /** Все VK community каналы для tenant'а. */
   getVkByTenant(tenantSlug: string): ChannelEntry[] {
     return (this.byTenantSlug.get(tenantSlug) ?? []).filter((e) => e.kind === "vk");
+  }
+
+  /** Все MAX bot каналы для tenant'а. */
+  getMaxByTenant(tenantSlug: string): ChannelEntry[] {
+    return (this.byTenantSlug.get(tenantSlug) ?? []).filter((e) => e.kind === "max");
   }
 
   byChannelId(channelId: number): ChannelEntry | undefined {

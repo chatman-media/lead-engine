@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { MessengerApiError, MessengerClient } from "@chatman-media/channel-facebook";
+import { MaxApiError, MaxClient } from "@chatman-media/channel-max";
 import {
   type FinishedUserbotLogin,
   startUserbotLogin,
@@ -18,6 +19,7 @@ import { type Context, Hono } from "hono";
 import {
   FACEBOOK_APP_SECRET_KEY,
   FACEBOOK_VERIFY_TOKEN_KEY,
+  maxWebhookSecretKey,
   VK_CONFIRMATION_CODE_KEY,
   VK_SECRET_KEY,
   WHATSAPP_APP_SECRET_KEY,
@@ -93,6 +95,8 @@ export interface AdminChannelsRoutesOpts {
    */
   vkConfirmationCode?: string;
   vkSecretKey?: string;
+  /** MAX Bot API webhook secret fallback. Prefer generated/per-channel secret. */
+  maxWebhookSecret?: string;
   /**
    * URL CDN-bundle'а виджета. Если задан — POST /web возвращает
    * production-ready `<script src="...">` snippet. Если пусто (текущее
@@ -195,6 +199,13 @@ interface VkCreateBody {
   confirmationCode?: unknown;
   /** Optional Callback API secret key, checked against payload.secret. */
   secretKey?: unknown;
+}
+
+interface MaxCreateBody {
+  /** MAX bot token from business.max.ru. */
+  botToken: unknown;
+  /** Optional Webhook secret checked against X-Max-Bot-Api-Secret. */
+  webhookSecret?: unknown;
 }
 
 interface WebCreateBody {
@@ -1143,6 +1154,208 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
     } catch (err) {
       if (err instanceof Error && /unique|duplicate/i.test(err.message)) {
         return c.json({ error: "channel already exists", groupId }, 409);
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * POST /api/admin/channels/max
+   * Body: { botToken, webhookSecret? }
+   *
+   * MAX messenger bot channel:
+   * validate token via GET /me → encrypt token in tenant_secrets
+   * (channel_max_<botId>) → encrypt per-channel webhook secret
+   * (channel_max_<botId>_webhook_secret) → upsert channels(kind='max').
+   */
+  app.post("/api/admin/channels/max", async (c) => {
+    const tenantId = c.var.tenantId;
+    let body: MaxCreateBody;
+    try {
+      body = (await c.req.json()) as MaxCreateBody;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const botToken = typeof body.botToken === "string" ? body.botToken.trim() : "";
+    const webhookSecret =
+      typeof body.webhookSecret === "string" && body.webhookSecret.trim()
+        ? body.webhookSecret.trim()
+        : (opts.maxWebhookSecret ?? `max_${randomUUID()}`);
+
+    if (!botToken) return c.json({ error: "botToken required" }, 400);
+    if (webhookSecret.length < 5 || webhookSecret.length > 256) {
+      return c.json({ error: "webhookSecret must be 5..256 characters" }, 400);
+    }
+
+    const maxClient = new MaxClient({
+      accessToken: botToken,
+      ...(opts.fetchImpl ? { fetch: opts.fetchImpl } : {}),
+    });
+    let botInfo: Awaited<ReturnType<MaxClient["getBotInfo"]>>;
+    try {
+      botInfo = await maxClient.getBotInfo();
+    } catch (err) {
+      if (err instanceof MaxApiError) {
+        if (err.statusCode === 401 || err.statusCode === 403 || err.code === "verify.token") {
+          return c.json({ error: "MAX rejected token (invalid or insufficient permissions)" }, 401);
+        }
+      }
+      return c.json(
+        {
+          error: "MAX API unreachable or rejected",
+          detail: err instanceof Error ? err.message : String(err),
+        },
+        502,
+      );
+    }
+
+    const botId = String(botInfo.user_id);
+    const botName =
+      botInfo.name ??
+      [botInfo.first_name, botInfo.last_name].filter((part) => typeof part === "string" && part)
+        .join(" ")
+        .trim();
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const secretRef = `channel_max_${botId}`;
+
+    const [maybeExistingMax] = await opts.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(
+        and(
+          eq(channels.tenantId, tenantId),
+          eq(channels.kind, "max"),
+          eq(channels.externalId, botId),
+        ),
+      );
+    if (!maybeExistingMax) {
+      const quota = await canAddChannel({ db: opts.db, tenantId });
+      if (!quota.allowed) {
+        return c.json(
+          {
+            error: "quota_exceeded",
+            reason: quota.reason,
+            limit: quota.limit,
+            current: quota.current,
+            plan: quota.plan,
+            planLabel: quota.planLabel,
+            upgradeHint: "Перейдите на план Starter ($99/мес) для большего числа каналов",
+          },
+          402,
+        );
+      }
+    }
+
+    try {
+      const result = await withTenant(opts.db, tenantId, async (tx) => {
+        const [existing] = await tx
+          .select({ id: channels.id })
+          .from(channels)
+          .where(
+            and(
+              eq(channels.tenantId, tenantId),
+              eq(channels.kind, "max"),
+              eq(channels.externalId, botId),
+            ),
+          );
+
+        await setEncryptedSecret({
+          db: tx,
+          tenantId,
+          key: secretRef,
+          value: botToken,
+          masterKeyHex: opts.masterKeyHex,
+          nowEpoch,
+        });
+        await setEncryptedSecret({
+          db: tx,
+          tenantId,
+          key: maxWebhookSecretKey(secretRef),
+          value: webhookSecret,
+          masterKeyHex: opts.masterKeyHex,
+          nowEpoch,
+        });
+
+        const metadata = JSON.stringify({
+          ...(botInfo.username ? { username: botInfo.username } : {}),
+          ...(botName ? { botName } : {}),
+        });
+        if (existing) {
+          await tx
+            .update(channels)
+            .set({
+              credentialsRef: secretRef,
+              status: "active",
+              metadataJson: metadata,
+              updatedAt: nowEpoch,
+            })
+            .where(eq(channels.id, existing.id));
+          return { id: existing.id, updated: true };
+        }
+        const [inserted] = await tx
+          .insert(channels)
+          .values({
+            tenantId,
+            kind: "max",
+            externalId: botId,
+            credentialsRef: secretRef,
+            status: "active",
+            metadataJson: metadata,
+            createdAt: nowEpoch,
+            updatedAt: nowEpoch,
+          })
+          .returning({ id: channels.id });
+        return { id: inserted!.id, updated: false };
+      });
+
+      await recordAudit(opts.db, {
+        tenantId,
+        adminId: c.var.adminId,
+        action: result.updated ? "channel.update" : "channel.create",
+        targetKind: "channel",
+        targetId: result.id,
+        details: { kind: "max", botId, username: botInfo.username ?? null },
+      });
+
+      let reloadError: string | undefined;
+      if (opts.onReload) {
+        try {
+          await opts.onReload(tenantId);
+        } catch (err) {
+          reloadError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
+      let webhookSetupHint:
+        | { url: string; secret: string; updateTypes: string[]; requirement: string }
+        | undefined;
+      if (opts.publicUrl) {
+        const [tenant] = await opts.db
+          .select({ slug: tenants.slug })
+          .from(tenants)
+          .where(eq(tenants.id, tenantId));
+        if (tenant) {
+          webhookSetupHint = {
+            url: `${opts.publicUrl}/webhook/max/${tenant.slug}`,
+            secret: webhookSecret,
+            updateTypes: ["message_created"],
+            requirement: "Production MAX webhooks require HTTPS on port 443.",
+          };
+        }
+      }
+
+      return c.json({
+        ok: true,
+        ...result,
+        botId,
+        ...(botInfo.username ? { username: botInfo.username } : {}),
+        ...(botName ? { botName } : {}),
+        ...(webhookSetupHint ? { webhookSetupHint } : {}),
+        ...(reloadError ? { reloadError } : {}),
+      });
+    } catch (err) {
+      if (err instanceof Error && /unique|duplicate/i.test(err.message)) {
+        return c.json({ error: "channel already exists", botId }, 409);
       }
       throw err;
     }

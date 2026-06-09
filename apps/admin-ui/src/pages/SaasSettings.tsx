@@ -353,7 +353,7 @@ export function SaasSettings() {
               <CableIcon className="size-4" /> Каналы сообщений
             </h2>
             <p className="text-sm text-muted-foreground">
-              Telegram, WhatsApp, Facebook Messenger и web-виджет.
+              Telegram, WhatsApp, Facebook Messenger, VK, MAX и web-виджет.
             </p>
           </div>
           <Button type="button" variant="outline" onClick={() => navigate("/settings/channels")}>

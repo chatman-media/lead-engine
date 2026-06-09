@@ -19,6 +19,7 @@
   "dependencies": {
     "@chatman-media/channel-core": "workspace:*",
     "@chatman-media/channel-facebook": "workspace:*",
+    "@chatman-media/channel-max": "workspace:*",
     "@chatman-media/channel-telegram": "workspace:*",
     "@chatman-media/channel-vk": "workspace:*",
     "@chatman-media/channel-whatsapp": "workspace:*",

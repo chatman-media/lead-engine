@@ -1,5 +1,6 @@
 import type { ChannelAdapter } from "@chatman-media/channel-core";
 import { MessengerAdapter } from "@chatman-media/channel-facebook";
+import { MaxAdapter } from "@chatman-media/channel-max";
 import { TelegramBotAdapter } from "@chatman-media/channel-telegram";
 import { VkAdapter } from "@chatman-media/channel-vk";
 import { WhatsAppCloudAdapter } from "@chatman-media/channel-whatsapp";
@@ -17,7 +18,7 @@ export interface WorkerChannelEntry {
   channelDbId: number;
   tenantId: number;
   tenantSlug: string;
-  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "vk" | "web";
+  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "vk" | "max" | "web";
   adapter: ChannelAdapter;
 }
 
@@ -174,6 +175,18 @@ export class WorkerChannelRegistry {
         );
         if (!token) continue;
         adapter = new VkAdapter({ id: String(row.channelId), accessToken: token });
+      } else if (row.kind === "max") {
+        const token = await this.resolveCredential(
+          db,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          opts.masterKeyHex,
+          opts.onWarn,
+          "MAX_BOT_TOKEN",
+        );
+        if (!token) continue;
+        adapter = new MaxAdapter({ id: String(row.channelId), accessToken: token });
       } else {
         // telegram_userbot / web держат pinned-соединение в apps/api.
         continue;
