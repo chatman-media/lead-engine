@@ -58,6 +58,21 @@ const EXCHANGE_TEMPLATE = {
   systemPromptFragment: "",
 } as unknown as VerticalTemplate;
 
+type ResolvedStyle = NonNullable<Awaited<ReturnType<NonNullable<RagReplyStrategyOpts["resolveStyle"]>>>>;
+
+const STYLE: ResolvedStyle = {
+  slug: "exch-pro",
+  displayName: "Exchange Pro",
+  persona: { name: "Alex", role: "human", company: "Acme" },
+  voice: { tone: "friendly", language: "ru", forbid: [] },
+  framework: "SPIN",
+  hooks: [],
+  stages: {},
+  fewShot: [],
+  guardrails: { noMinors: true, botDisclosureOnDirectQuestion: true, forbiddenTopics: [] },
+  model: { id: "x", temperature: 0.5, maxTokens: 100 },
+};
+
 /** Минимальный messagesRepo с recent/countByConversation/insert. */
 function fakeMessagesRepo(opts: { recent?: unknown[]; count?: number } = {}) {
   return () =>
@@ -122,6 +137,39 @@ describe("RagReplyStrategy.generate", () => {
     const part = r![0]!.parts[0] as { kind: string; text: string };
     expect(part.kind).toBe("text");
     expect(part.text.toLowerCase()).toContain("курс");
+  });
+
+  it("style assignment metadata сохраняется в conversation", async () => {
+    const saved: Array<{ conversationId: number; styleId?: number | null; experimentId?: number | null }> = [];
+    const s = mk(
+      {
+        resolveChat: () => chatReturning("Курс 36.5 бат за USDT, без комиссии"),
+        resolveEmbed: embed,
+        resolveKb: kbWith([HIT]),
+        resolveStyle: async () => ({
+          ...STYLE,
+          styleId: 7,
+          experimentId: 3,
+          experimentSlug: "exp-a",
+          variantSlug: "exch-pro",
+        }),
+        resolveConversations: () =>
+          ({
+            setAssignment: async (
+              conversationId: number,
+              assignment: { styleId?: number | null; experimentId?: number | null },
+            ) => {
+              saved.push({ conversationId, ...assignment });
+            },
+          }) as never,
+      },
+      fakeMessagesRepo(),
+    );
+
+    const r = await s.generate(baseInput());
+
+    expect(r).not.toBeNull();
+    expect(saved[0]).toEqual({ conversationId: 100, styleId: 7, experimentId: 3 });
   });
 
   it("exchange: неподкреплённый курс заменяется safe fallback", async () => {

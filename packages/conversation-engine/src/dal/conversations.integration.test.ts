@@ -134,6 +134,47 @@ describe("ConversationsRepo", () => {
     expect((await repo().findById(conv.id))?.assignedAdminId).toBeNull();
   });
 
+  it("setAssignment сохраняет styleId/experimentId tenant-scoped", async () => {
+    if (!enabled) return;
+    const [style] = await db
+      .insert(schema.styles)
+      .values({
+        tenantId: t1,
+        slug: `conv-style-${Math.random().toString(36).slice(2, 8)}`,
+        displayName: "Conversation Style",
+        configJson: "{}",
+        isActive: true,
+        version: 1,
+        createdAt: n,
+      })
+      .returning({ id: schema.styles.id });
+    const [experiment] = await db
+      .insert(schema.experiments)
+      .values({
+        tenantId: t1,
+        slug: `conv-exp-${Math.random().toString(36).slice(2, 8)}`,
+        status: "running",
+        allocationJson: "[]",
+        successMetric: "won",
+        createdAt: n,
+      })
+      .returning({ id: schema.experiments.id });
+    if (!style || !experiment) throw new Error("expected style and experiment rows");
+    const conv = await repo().create({ contactId: await freshContact(), source: "bot", nowEpoch: n });
+
+    await new ConversationsRepo({ db, tenantId: t2 }).setAssignment(conv.id, {
+      styleId: style.id,
+      experimentId: experiment.id,
+    });
+    expect((await repo().findById(conv.id))?.styleId).toBeNull();
+
+    await repo().setAssignment(conv.id, { styleId: style.id, experimentId: experiment.id });
+
+    const row = await repo().findById(conv.id);
+    expect(row?.styleId).toBe(style.id);
+    expect(row?.experimentId).toBe(experiment.id);
+  });
+
   it("recent → DESC by last_message_at, ограничено limit", async () => {
     if (!enabled) return;
     const rows = await repo().recent(3);
