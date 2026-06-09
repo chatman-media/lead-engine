@@ -51,6 +51,8 @@ type KbRequirement = {
 type KbDocumentFormat = "text" | "markdown" | "pdf" | "json";
 
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const DEFAULT_SEARCH_LIMIT = 5;
+const MAX_SEARCH_LIMIT = 20;
 
 type StoredKbFile = {
   bytes: Uint8Array;
@@ -216,6 +218,12 @@ function preparedKbText(input: { body: string; fileName: string }): string {
 
 function textContentHash(body: string): string {
   return createHash("sha256").update(body).digest("hex");
+}
+
+function parseSearchLimit(value: unknown): number {
+  const n = parsePositiveInt(value);
+  if (!n) return DEFAULT_SEARCH_LIMIT;
+  return Math.min(n, MAX_SEARCH_LIMIT);
 }
 
 function parsePositiveInt(value: unknown): number | null {
@@ -730,6 +738,138 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
       })),
     };
     return c.json({ item });
+  });
+
+  /**
+   * POST /api/admin/kb/search
+   * Preview retrieval for admins: returns raw chunks the RAG layer would
+   * retrieve for a question in an explicit KB scope.
+   */
+  app.post("/api/admin/kb/search", async (c) => {
+    const tenantId = c.var.tenantId;
+    let payload: {
+      query?: unknown;
+      limit?: unknown;
+      topic?: unknown;
+      scopeType?: unknown;
+      funnelId?: unknown;
+      stageSlug?: unknown;
+    };
+    try {
+      payload = (await c.req.json()) as typeof payload;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+
+    const query = typeof payload.query === "string" ? payload.query.trim() : "";
+    if (!query) return c.json({ error: "query required" }, 400);
+    if (query.length > 2000) return c.json({ error: "query too long" }, 413);
+
+    const parsedScope = parseScope(payload);
+    if ("error" in parsedScope) return c.json({ error: parsedScope.error }, 400);
+    const scope = parsedScope.scope;
+    const limit = parseSearchLimit(payload.limit);
+    const topic =
+      typeof payload.topic === "string" && payload.topic.trim().length > 0
+        ? payload.topic.trim()
+        : null;
+
+    if (scope.scopeType !== "global") {
+      const scopeError = await withTenant(opts.db, tenantId, async (tx) => {
+        const [funnel] = await tx
+          .select({ id: funnels.id })
+          .from(funnels)
+          .where(and(eq(funnels.tenantId, tenantId), eq(funnels.id, scope.funnelId ?? 0)))
+          .limit(1);
+        if (!funnel) return "funnel not found";
+        if (scope.scopeType !== "stage") return null;
+        const [stage] = await tx
+          .select({ id: stageDefinitions.id })
+          .from(stageDefinitions)
+          .where(
+            and(
+              eq(stageDefinitions.tenantId, tenantId),
+              eq(stageDefinitions.funnelId, scope.funnelId ?? 0),
+              eq(stageDefinitions.slug, scope.stageSlug ?? ""),
+            ),
+          )
+          .limit(1);
+        return stage ? null : "stage not found";
+      });
+      if (scopeError) return c.json({ error: scopeError }, 400);
+    }
+
+    let embedder: EmbeddingClient;
+    try {
+      embedder = opts.resolveEmbedder(tenantId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: `embedder not configured: ${msg}` }, 503);
+    }
+
+    const [embedding] = await embedder.embed([query]);
+    if (!embedding) return c.json({ error: "embedder returned no vector" }, 503);
+
+    const hits = await withTenant(opts.db, tenantId, async (tx) => {
+      const kb = new DrizzleKbStore({ db: tx, tenantId });
+      const rawHits = await kb.hybridSearch({
+        embedding,
+        query,
+        k: limit,
+        topic,
+        scope,
+      });
+      const documentIds = [...new Set(rawHits.map((hit) => hit.document_id))];
+      const docRows =
+        documentIds.length > 0
+          ? await tx
+              .select({
+                id: kbDocuments.id,
+                topic: kbDocuments.topic,
+                scopeType: kbDocuments.scopeType,
+                funnelId: kbDocuments.funnelId,
+                stageSlug: kbDocuments.stageSlug,
+                fileName: kbDocuments.fileName,
+                fileMimeType: kbDocuments.fileMimeType,
+                source: kbDocuments.source,
+                title: kbDocuments.title,
+              })
+              .from(kbDocuments)
+              .where(and(eq(kbDocuments.tenantId, tenantId), inArray(kbDocuments.id, documentIds)))
+          : [];
+      const docsById = new Map(docRows.map((doc) => [doc.id, doc]));
+
+      return rawHits.map((hit, index) => {
+        const doc = docsById.get(hit.document_id);
+        return {
+          rank: index + 1,
+          chunkId: hit.chunk_id,
+          documentId: hit.document_id,
+          distance: hit.distance,
+          text: hit.text,
+          source: hit.source,
+          title: hit.title,
+          topic: doc?.topic ?? null,
+          scopeType: doc?.scopeType ?? "global",
+          funnelId: doc?.funnelId ?? null,
+          stageSlug: doc?.stageSlug ?? null,
+          format: inferKbDocumentFormat({
+            source: doc?.source ?? hit.source,
+            title: doc?.title ?? hit.title,
+            fileName: doc?.fileName ?? null,
+            fileMimeType: doc?.fileMimeType ?? null,
+          }),
+        };
+      });
+    });
+
+    return c.json({
+      query,
+      limit,
+      topic,
+      ...scopeToDbFields(scope),
+      items: hits,
+    });
   });
 
   /**

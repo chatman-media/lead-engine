@@ -95,6 +95,31 @@ export interface KbStorageStats {
   maxUploadBytes: number;
 }
 
+export interface KbSearchHit {
+  rank: number;
+  chunkId: number;
+  documentId: number;
+  distance: number;
+  text: string;
+  source: string;
+  title: string;
+  topic: string | null;
+  scopeType: "global" | "funnel" | "stage";
+  funnelId: number | null;
+  stageSlug: string | null;
+  format: KbDocFormat;
+}
+
+export interface KbSearchResponse {
+  query: string;
+  limit: number;
+  topic: string | null;
+  scopeType: "global" | "funnel" | "stage";
+  funnelId: number | null;
+  stageSlug: string | null;
+  items: KbSearchHit[];
+}
+
 export interface KbSuggestion {
   id: number;
   tenantId: number;
@@ -1958,6 +1983,19 @@ export const saas = {
     const form = new FormData();
     form.append("file", file);
     return uploadMultipart<{ item: KbDocDetail }>(`/api/admin/kb/documents/${id}/file`, form);
+  },
+  searchKb(input: {
+    query: string;
+    limit?: number;
+    topic?: string;
+    scopeType?: KbDoc["scopeType"];
+    funnelId?: number;
+    stageSlug?: string;
+  }) {
+    return request<KbSearchResponse>("/api/admin/kb/search", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
   },
   deleteDoc(id: number) {
     return request<{ ok: boolean; deleted: number }>(`/api/admin/kb/documents/${id}`, {
