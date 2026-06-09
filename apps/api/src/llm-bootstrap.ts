@@ -4,7 +4,10 @@ import {
 	ConversationsRepo,
 	type Db,
 	DrizzleKbStore,
+	type ExchangeOrderPolicyState,
 	ExperimentsRepo,
+	type ExchangePolicyState,
+	type ExchangeVerificationPolicyState,
 	getDecryptedSecret,
 	type ITranscriber,
 	KbSuggestionsRepo,
@@ -52,12 +55,17 @@ import {
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import type { ApiConfig } from "./config.ts";
+import { findActiveOrder, type OrderRow } from "./lib/exchange/orders.ts";
 import {
 	hasActiveExchangeRates,
 	isKnownExchangeStage,
 	makeExchangeTools,
 	type RateGuardAlert,
 } from "./lib/exchange/tools.ts";
+import {
+	getExchangeVerificationStatus,
+	type ExchangeVerificationStatus,
+} from "./lib/exchange/verification.ts";
 import {
 	type OnUsage,
 	wrapChatClient,
@@ -455,6 +463,87 @@ async function resolveCurrentExchangeStageSlug(
 	if (current.requestType && current.requestType !== "exchange") return null;
 	const slug = current.slug ?? current.state;
 	return isKnownExchangeStage(slug) ? slug : null;
+}
+
+const PAYMENT_VERIFIED_STATUSES = new Set(["paid", "payout", "completed"]);
+const PAYOUT_READY_STATUSES = new Set(["payout", "completed"]);
+
+function hasJsonPayload(value: string | null): boolean {
+	return typeof value === "string" && value.trim().length > 0;
+}
+
+export function exchangeOrderPolicyStateFromOrder(
+	order: OrderRow,
+): ExchangeOrderPolicyState {
+	return {
+		id: order.id,
+		status: order.status,
+		assetFrom: order.assetFrom,
+		network: order.network,
+		amountMode: order.amountMode,
+		requestedAmount: order.requestedAmount,
+		amountFrom: order.amountFrom,
+		rate: order.rate,
+		amountToThb: order.amountToThb,
+		paymentMethod: order.paymentMethod,
+		paymentRail: order.paymentRail,
+		payoutMethod: order.payoutMethod,
+		payoutLocation: order.payoutLocation,
+		requisitesIssued: hasJsonPayload(order.requisitesJson),
+		paymentProofReceived: hasJsonPayload(order.proofJson),
+		paymentVerified: PAYMENT_VERIFIED_STATUSES.has(order.status),
+		payoutReady: PAYOUT_READY_STATUSES.has(order.status),
+		payoutCompleted: order.status === "completed",
+		payoutCodeIssued: hasJsonPayload(order.payoutCode),
+		verificationId: order.verificationId,
+	};
+}
+
+function exchangeVerificationPolicyStateFromStatus(
+	verification: ExchangeVerificationStatus,
+): ExchangeVerificationPolicyState {
+	return {
+		verified: verification.verified,
+		status: verification.status,
+		needsVerification: verification.needsVerification,
+		verificationId: verification.verificationId,
+	};
+}
+
+export function buildExchangePolicyState(input: {
+	stageSlug?: string | null;
+	verification?: ExchangeVerificationStatus | null;
+	order?: OrderRow | null;
+}): ExchangePolicyState {
+	return {
+		stageSlug: input.stageSlug ?? null,
+		verification: input.verification
+			? exchangeVerificationPolicyStateFromStatus(input.verification)
+			: null,
+		order: input.order ? exchangeOrderPolicyStateFromOrder(input.order) : null,
+	};
+}
+
+export function makeExchangePolicyStateResolver(db: Db) {
+	return async (input: {
+		tenantId: number;
+		conversationId: number;
+		contactId: number;
+	}): Promise<ExchangePolicyState> => {
+		const [stageSlug, verification, order] = await Promise.all([
+			resolveCurrentExchangeStageSlug(db, {
+				tenantId: input.tenantId,
+				contactId: input.contactId,
+			}),
+			getExchangeVerificationStatus(
+				db,
+				input.tenantId,
+				input.conversationId,
+			),
+			findActiveOrder(db, input.tenantId, input.conversationId),
+		]);
+		return buildExchangePolicyState({ stageSlug, verification, order });
+	};
 }
 
 export interface ReplyStrategyBundle {
@@ -889,6 +978,7 @@ export function makeReplyStrategy(
 		masterKeyHex: cfg.masterKeyHex,
 		...(notifyRateGuard ? { notifyRateGuard } : {}),
 	});
+	const resolveExchangePolicyState = makeExchangePolicyStateResolver(db);
 
 	// Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
 	// NB: проверка против initial snapshot'а; если tenant позже добавит embed,
@@ -904,6 +994,7 @@ export function makeReplyStrategy(
 						ref.router.resolveChat(tenantId, "chat"),
 					resolveIsSupport: makeSupportModeResolver(db),
 					resolveTools,
+					resolveExchangePolicyState,
 					recordToolCalls: makeToolCallRecorder(db, "llm_reply"),
 				},
 				(tenantId: number) => new MessagesRepo({ db, tenantId }),
@@ -966,6 +1057,7 @@ export function makeReplyStrategy(
 			resolveSkills,
 			resolveDirectorHooks,
 			resolveTools,
+			resolveExchangePolicyState,
 			resolveReranker,
 			recordToolCalls: makeToolCallRecorder(db, "rag_reply"),
 			resolveSuggestions: (tenantId: number) =>
