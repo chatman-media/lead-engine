@@ -18,12 +18,19 @@ import type { MessageRow, MessagesRepo } from "./dal/messages.ts";
  *   - extractor сам skip'ает LLM call если нет user-сообщений
  */
 export interface MemoryExtractor {
+  /** Сколько последних сообщений нужно для extraction snapshot. */
+  historyLimit?: number;
   /** Извлекает facts; возвращает только новые/обновлённые. Empty = no-op. */
   extract(opts: {
     tenantId: number;
     conversationId: number;
     contactId: number;
     existingFacts: Record<string, string>;
+    /**
+     * Prepared history from a short `withTenant` read. If omitted, extractor
+     * may load history itself (legacy path).
+     */
+    history?: MessageRow[];
   }): Promise<Record<string, string>>;
 }
 
@@ -32,22 +39,31 @@ export interface MemoryExtractor {
  * MessagesRepo — для загрузки history, ChatClient — для LLM-вызова.
  */
 export class LlmMemoryExtractor implements MemoryExtractor {
+  readonly historyLimit: number;
+
   constructor(
     private readonly opts: {
       historyLimit?: number;
       resolveChat: (tenantId: number) => ChatClient;
     },
     private readonly messagesRepoFor: (tenantId: number) => MessagesRepo,
-  ) {}
+  ) {
+    this.historyLimit = opts.historyLimit ?? 10;
+  }
 
   async extract(input: {
     tenantId: number;
     conversationId: number;
     contactId: number;
     existingFacts: Record<string, string>;
+    history?: MessageRow[];
   }): Promise<Record<string, string>> {
-    const messagesRepo = this.messagesRepoFor(input.tenantId);
-    const history = await messagesRepo.recent(input.conversationId, this.opts.historyLimit ?? 10);
+    const history =
+      input.history ??
+      (await this.messagesRepoFor(input.tenantId).recent(
+        input.conversationId,
+        this.historyLimit,
+      ));
     if (history.length === 0) return {};
 
     const llmMessages = mapToRagMessages(history);

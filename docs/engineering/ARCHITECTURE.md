@@ -236,21 +236,27 @@ flowchart TB
    │  - resolveConversation (per channel)                      │
    │  - persist Message (uniq dedup external_message_id)       │
    │  - vertical-template.extractFields() hook                 │
-   │  - stageClassifier (~300ms LLM, BLOCKS tx) → set stage    │
-   │  - memoryExtractor (~500ms LLM, BLOCKS tx) → merge attrs  │
    └──────────────────────────────────────────────────────────┘
 
-   ┌─ Phase 2: NO tx ─────────────────────────────────────────┐
+   ┌─ Phase 2: post-processing split ─────────────────────────┐
+   │  - stageClassifier: classify outside tx                   │
+   │  - memoryExtractor: read RLS snapshot in short tx,        │
+   │    extract facts outside tx                               │
+   │  - withTenant tx1b: apply current_stage, lead advance,    │
+   │    merge contact attrs                                    │
+   └──────────────────────────────────────────────────────────┘
+
+   ┌─ Phase 3: NO tx ─────────────────────────────────────────┐
    │  - replyStrategy.generate() — ~1-2s LLM call              │
    │  - Pool connection FREE на это время (PR #14 split)       │
    └──────────────────────────────────────────────────────────┘
 
-   ┌─ Phase 3: withTenant tx2 (enqueue) ──────────────────────┐
+   ┌─ Phase 4: withTenant tx2 (enqueue) ──────────────────────┐
    │  - outbound_queue INSERT (status=pending, scheduled=now)  │
    │  - idempotencyKey предотвращает дубли                     │
    └──────────────────────────────────────────────────────────┘
 
-   ┌─ Phase 4: async, NO tx (photo classification) ───────────┐
+   ┌─ Phase 5: async, NO tx (photo classification) ───────────┐
    │  Если inbound содержит photo-части И tenant настроил     │
    │  LLM purpose='vision':                                   │
    │  - adapter.downloadMedia(mediaRef) → bytes               │
@@ -262,8 +268,8 @@ flowchart TB
    │  Fire-and-forget — НЕ блокирует webhook response.        │
    └──────────────────────────────────────────────────────────┘
 
-4. apps/api → 200 OK (typical < 100ms если LLM/STT skipped + < 2s с reply
-   LLM; voice adds pre-tx STT latency).
+4. apps/api → 200 OK (typical < 100ms если LLM/STT skipped; reply, stage,
+   memory and voice add outside-tx LLM/STT latency).
 ```
 
 ### Outbound
@@ -317,8 +323,12 @@ sequenceDiagram
   API->>E: normalized / transcribed Inbound
 
   E->>DB: tx1 withTenant persist contact / conversation / message
-  E->>DB: classifier + memory writes inside tx1
   DB-->>E: tx1 committed
+
+  E->>LLM: stage classify + memory extract outside DB transaction
+  LLM-->>E: stage / extracted facts
+  E->>DB: tx1b withTenant apply stage / lead / memory writes
+  DB-->>E: tx1b committed
 
   E->>LLM: generate reply outside DB transaction
   LLM-->>E: assistant response / tool decision

@@ -18,6 +18,7 @@ import {
   type PipelineSink,
   processInbound,
   type ReplyStrategy,
+  runDeferredInboundPostProcessing,
   type StageClassifier,
   transcribeInboundVoice,
   withTenant,
@@ -209,7 +210,7 @@ export function makeWhatsAppWebhookRoutes(opts: {
         ...(opts.sink ? { sink: opts.sink } : {}),
       });
 
-      // ── Phase 1: persist + classify + memory (одна короткая tx) ──
+      // ── Phase 1: persist + cheap DB hooks (одна короткая tx) ──
       // См. webhook-telegram.ts по split-rationale. Для batch'а каждое
       // сообщение получает свою phase1+phase2 пару — если 49-е fail'нёт,
       // первые 48 уже committed.
@@ -227,12 +228,23 @@ export function makeWhatsAppWebhookRoutes(opts: {
           notifications: opts.notificationService,
           reply: opts.replyStrategy ?? null,
           deferReply: true,
+          deferPostProcessing: Boolean(opts.memoryExtractor || opts.stageClassifier),
           ...(template ? { template } : {}),
-          ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
-          ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
           ...(opts.sink ? { sink: opts.sink } : {}),
         });
       });
+
+      if (result.postProcessingDeferred) {
+        await runDeferredInboundPostProcessing({
+          db: opts.db,
+          tenant,
+          result,
+          stageClassifier: opts.stageClassifier,
+          memoryExtractor: opts.memoryExtractor,
+          ...(opts.sink ? { sink: opts.sink } : {}),
+        });
+      }
+
       // ── Phase 2: reply.generate (LLM) ВНЕ tx + enqueue новой короткой tx ──
       if (result.replyDeferred && opts.replyStrategy) {
         const gen = await generateReplyAndEnqueue({

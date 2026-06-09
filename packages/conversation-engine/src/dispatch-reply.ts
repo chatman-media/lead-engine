@@ -18,8 +18,11 @@ import { withTenant } from "./with-tenant.ts";
  *
  * Caller-pattern:
  *   const result = await withTenant(db, tenantId, (tx) =>
- *     processInbound(inbound, { ..., db: tx, deferReply: true })
+ *     processInbound(inbound, { ..., deferReply: true, deferPostProcessing: true })
  *   );
+ *   await runDeferredInboundPostProcessing({
+ *     db, tenant, result, stageClassifier, memoryExtractor, sink,
+ *   });
  *   if (result.replyDeferred && replyStrategy) {
  *     await generateReplyAndEnqueue({
  *       db, tenantId, channelDbId, channel, tenant,

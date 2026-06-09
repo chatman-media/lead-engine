@@ -26,11 +26,11 @@ import {
   ContactsRepo,
   ConversationsRepo,
   type Db,
-  LeadsRepo,
   MessagesRepo,
   OutboundQueueRepo,
   processInbound,
   type ReplyStrategy,
+  runDeferredInboundPostProcessing,
   type StageClassifier,
   withTenant,
 } from "@chatman-media/conversation-engine";
@@ -676,13 +676,22 @@ export function makeAdminSimRoutes(opts: {
           conversations: new ConversationsRepo({ db: tx, tenantId }),
           messages: new MessagesRepo({ db: tx, tenantId }),
           outbound: new OutboundQueueRepo({ db: tx, tenantId }),
-          leads: new LeadsRepo({ db: tx, tenantId }),
           reply: null,
+          deferPostProcessing: Boolean(opts.stageClassifier),
           ...(ctx.template ? { template: ctx.template } : {}),
-          ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
         }),
       );
       if (!pi) return null;
+
+      if (pi.postProcessingDeferred) {
+        await runDeferredInboundPostProcessing({
+          db: opts.db,
+          tenant,
+          result: pi,
+          stageClassifier: opts.stageClassifier,
+          advanceLead: true,
+        });
+      }
 
       // Извлекаем поля лида из реплики (заполняет lead_field_values + двигает
       // стадию по заполненности) — чтобы у sim-лидов был реальный прогресс,

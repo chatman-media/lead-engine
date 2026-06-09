@@ -147,19 +147,19 @@ Inbound handling uses strictly-ordered phases:
 
 ```
 async — optional voice media download + STT, NO open transaction
-tx1  — persist (contact + conversation + message + stageClassifier + memoryExtractor)
+tx1  — persist (contact + conversation + message + cheap extractFields)
        connection returned to pool after tx1
+async — stageClassifier + memoryExtractor, NO open transaction
+tx1b — apply current_stage, lead auto-advance, memory attribute merge
 async — reply.generate() — 1-2s LLM call, NO open transaction
 tx2  — enqueue outbound_queue entries
 async fire-forget — photo classification (never blocks webhook response)
 ```
 
-**Invariant:** media download, STT, reply.generate, outbound HTTP, and photo/OCR
-LLM calls must not run inside `withTenant` transactions. The reply split is
-validated by test: `events.indexOf("llm-call") < events.indexOf("tx-open")`.
-`stageClassifier` and `memoryExtractor` still run inside tx1 today as accepted
-short hooks, even when LLM-backed; keep them under a strict latency budget and
-split them before they become slow or unreliable.
+**Invariant:** media download, STT, stage classification, memory extraction,
+reply.generate, outbound HTTP, and photo/OCR LLM calls must not run inside
+`withTenant` transactions. The reply split is validated by test:
+`events.indexOf("llm-call") < events.indexOf("tx-open")`.
 
 ### 3. Hot-reload (no restarts needed)
 
