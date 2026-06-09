@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.17.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.16.0...@chatman-media/storage-v1.17.0) (2026-06-09)
+
+
+### Features
+
+* **api:** approve alpha early access requests ([#346](https://github.com/chatman-media/lead-engine/issues/346)) ([1f83ed2](https://github.com/chatman-media/lead-engine/commit/1f83ed2e4d5b0d385e1536e70b57e9267ce41c51))
+
 # [@chatman-media/storage-v1.16.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.15.0...@chatman-media/storage-v1.16.0) (2026-06-09)
 
 
