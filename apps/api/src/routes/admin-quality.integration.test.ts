@@ -7,6 +7,7 @@ import {
   schema,
   selfPlayMatches,
   shadowEvaluations,
+  styles as stylesTable,
   tryConnectToPg,
 } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -40,6 +41,7 @@ let tokenA = "";
 let tokenB = "";
 let tenantA = 0;
 let tenantB = 0;
+const reloads: number[] = [];
 
 beforeAll(async () => {
   if (!ownerUrl) return;
@@ -55,7 +57,8 @@ beforeAll(async () => {
   app = new Hono();
   app.route("/", makeAuthRoutes({ db: db as never, secret: SECRET }));
   app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-  app.route("/", makeAdminQualityRoutes({ db }));
+  reloads.length = 0;
+  app.route("/", makeAdminQualityRoutes({ db, onReload: (tenantId) => reloads.push(tenantId) }));
 
   tokenA = await signup("quality-a@demo.io");
   tokenB = await signup("quality-b@demo.io");
@@ -63,6 +66,27 @@ beforeAll(async () => {
   tenantB = await tenantFor("quality-b@demo.io");
 
   const now = Math.floor(Date.now() / 1000);
+  await db.insert(stylesTable).values([
+    {
+      tenantId: tenantA,
+      slug: "style-a",
+      displayName: "Style A",
+      configJson: JSON.stringify(styleConfig("style-a", "Style A", "direct")),
+      isActive: true,
+      version: 1,
+      createdAt: now - 100,
+    },
+    {
+      tenantId: tenantA,
+      slug: "style-b",
+      displayName: "Style B",
+      configJson: JSON.stringify(styleConfig("style-b", "Style B", "neutral")),
+      isActive: true,
+      version: 1,
+      createdAt: now - 90,
+    },
+  ]);
+
   const insertedSelfPlay = await db.insert(selfPlayMatches).values([
     {
       tenantId: tenantA,
@@ -502,6 +526,79 @@ describe("admin quality JSONL export", () => {
     });
   });
 
+  it("applies a pending coach proposal as an inactive derived style", async () => {
+    if (!sql) return;
+    const before = (await (
+      await authReq(tokenA, "/api/admin/quality/coach/summary")
+    ).json()) as QualityCoachSummaryResponse;
+    const pending = before.proposals.find(
+      (item) => item.summary === "Handle price objections earlier",
+    );
+    expect(pending).toBeTruthy();
+    if (!pending) return;
+
+    const crossTenant = await authPostReq(
+      tokenB,
+      `/api/admin/quality/coach/proposals/${pending.id}/apply`,
+    );
+    expect(crossTenant.status).toBe(404);
+
+    const apply = await authPostReq(
+      tokenA,
+      `/api/admin/quality/coach/proposals/${pending.id}/apply`,
+    );
+    expect(apply.status).toBe(200);
+    const body = (await apply.json()) as QualityCoachProposalApplyResponse;
+    expect(body.proposal).toMatchObject({
+      id: pending.id,
+      status: "applied",
+      decidedByAdminId: expect.any(Number),
+    });
+    expect(body.proposal.decidedAt).toBeGreaterThan(0);
+    expect(body.style).toMatchObject({
+      tenantId: tenantA,
+      slug: `style-b-coach-${pending.id}`,
+      displayName: `Style B Coach ${pending.id}`,
+      isActive: false,
+      version: 1,
+    });
+    expect(body.style.parentId).toBeGreaterThan(0);
+
+    const [storedStyle] = await db
+      .select()
+      .from(stylesTable)
+      .where(eq(stylesTable.id, body.style.id))
+      .limit(1);
+    expect(storedStyle).toBeTruthy();
+    const config = JSON.parse(storedStyle?.configJson ?? "{}") as {
+      slug?: string;
+      voice?: { tone?: string };
+      stages?: { objection?: { guidance?: string } };
+    };
+    expect(config.slug).toBe(`style-b-coach-${pending.id}`);
+    expect(config.voice?.tone).toBe("warmer and specific");
+    expect(config.stages?.objection?.guidance).toBe(
+      "Anchor savings before quoting the price.",
+    );
+    expect(reloads).toContain(tenantA);
+
+    const after = (await (
+      await authReq(tokenA, "/api/admin/quality/coach/summary")
+    ).json()) as QualityCoachSummaryResponse;
+    expect(after.totals.proposals).toMatchObject({
+      total: 2,
+      pending: 0,
+      applied: 2,
+      dismissed: 0,
+    });
+
+    const repeat = await authPostReq(
+      tokenA,
+      `/api/admin/quality/coach/proposals/${pending.id}/apply`,
+    );
+    expect(repeat.status).toBe(409);
+  });
+
   it("exports tenant-scoped pairwise matches as JSONL attachment", async () => {
     if (!sql) return;
     const res = await authReq(tokenA, "/api/admin/quality/pairwise/export.jsonl");
@@ -654,6 +751,13 @@ async function authJsonReq(token: string, path: string, body: unknown): Promise<
   });
 }
 
+async function authPostReq(token: string, path: string): Promise<Response> {
+  return await app.request(path, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 type QualityRecord = {
   schemaVersion?: number;
   kind?: string;
@@ -803,6 +907,42 @@ type QualityCoachProposalStatusResponse = {
   ok: boolean;
   proposal: QualityCoachSummaryResponse["proposals"][number];
 };
+
+type QualityCoachProposalApplyResponse = QualityCoachProposalStatusResponse & {
+  style: {
+    id: number;
+    tenantId: number;
+    slug: string;
+    displayName: string;
+    configJson: string;
+    isActive: boolean;
+    version: number;
+    parentId: number | null;
+    createdAt: number;
+    deletedAt: number | null;
+  };
+};
+
+function styleConfig(slug: string, displayName: string, tone: string) {
+  return {
+    slug,
+    displayName,
+    persona: { name: "Manager", role: "human" },
+    voice: { tone, language: "ru", forbid: [] },
+    framework: "SPIN",
+    hooks: [],
+    stages: {
+      opener: { goal: "Open", guidance: "Open clearly.", groundingRequired: false },
+      qualify: { goal: "Qualify", guidance: "Ask relevant questions.", groundingRequired: false },
+      pitch: { goal: "Pitch", guidance: "Explain value.", groundingRequired: false },
+      objection: { goal: "Objection", guidance: "Handle objections.", groundingRequired: false },
+      close: { goal: "Close", guidance: "Close softly.", groundingRequired: false },
+    },
+    fewShot: [],
+    guardrails: {},
+    model: {},
+  };
+}
 
 function parseJsonl(text: string): QualityRecord[] {
   return text

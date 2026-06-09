@@ -888,6 +888,12 @@ export interface QualityCoachProposal {
   rationale: string[];
 }
 
+export interface QualityCoachApplyResult {
+  ok: boolean;
+  proposal: QualityCoachProposal;
+  style: StyleItem;
+}
+
 export interface QualityCoachSummary {
   totals: {
     proposals: {
@@ -2069,6 +2075,11 @@ export const saas = {
         body: JSON.stringify({ status }),
       },
     );
+  },
+  applyQualityCoachProposal(id: number) {
+    return request<QualityCoachApplyResult>(`/api/admin/quality/coach/proposals/${id}/apply`, {
+      method: "POST",
+    });
   },
   async exportQualitySelfPlayJsonl(opts: QualityExportOptions = {}): Promise<void> {
     const params = new URLSearchParams();

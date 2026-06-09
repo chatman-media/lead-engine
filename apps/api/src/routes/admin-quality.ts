@@ -1,20 +1,26 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import {
+  applyEditsToStyle,
   exportPairwiseMatchJsonl,
   exportSelfPlayMatchJsonl,
   type EloOutcome,
   type PairwiseMatchResult,
   type PairwiseWinner,
+  parseProposal,
   type SelfPlayMatchResult,
+  StyleSchema,
 } from "@chatman-media/sales";
 import {
   coachProposals,
   pairwiseMatches,
   selfPlayMatches,
   shadowEvaluations,
+  styles,
 } from "@chatman-media/storage";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { recordAudit } from "../lib/audit.ts";
+import { isUniqueViolation } from "../lib/db-errors.ts";
 
 const OUTCOMES = new Set<EloOutcome>(["won", "lost", "draw"]);
 const PAIRWISE_WINNERS = new Set<PairwiseWinner>(["a", "b", "draw"]);
@@ -22,6 +28,7 @@ const COACH_PROPOSAL_DECISIONS = new Set(["pending", "dismissed"]);
 
 export interface AdminQualityRoutesOpts {
   db: Db;
+  onReload?: (tenantId: number) => void;
 }
 
 export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
@@ -349,6 +356,183 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     return c.json({ ok: true, proposal: result.proposal });
   });
 
+  app.post("/api/admin/quality/coach/proposals/:id/apply", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "bad id" }, 400);
+
+    const now = Math.floor(Date.now() / 1000);
+    let result: ApplyCoachProposalResult;
+    try {
+      result = await withTenant(opts.db, tenantId, async (tx) => {
+        const [proposal] = await tx
+          .select({
+            id: coachProposals.id,
+            styleSlug: coachProposals.styleSlug,
+            sampleSize: coachProposals.sampleSize,
+            personaFilter: coachProposals.personaFilter,
+            summary: coachProposals.summary,
+            editsJson: coachProposals.editsJson,
+            rationaleJson: coachProposals.rationaleJson,
+            rawOutput: coachProposals.rawOutput,
+            status: coachProposals.status,
+            createdAt: coachProposals.createdAt,
+            decidedAt: coachProposals.decidedAt,
+            decidedByAdminId: coachProposals.decidedByAdminId,
+          })
+          .from(coachProposals)
+          .where(and(eq(coachProposals.id, id), eq(coachProposals.tenantId, tenantId)))
+          .limit(1);
+
+        if (!proposal) return { kind: "not_found" as const };
+        if (proposal.status !== "pending") {
+          return {
+            kind: "blocked" as const,
+            error: `only pending proposals can be applied; current status is ${proposal.status}`,
+          };
+        }
+
+        const [parent] = await tx
+          .select({
+            id: styles.id,
+            slug: styles.slug,
+            displayName: styles.displayName,
+            configJson: styles.configJson,
+            version: styles.version,
+          })
+          .from(styles)
+          .where(
+            and(
+              eq(styles.tenantId, tenantId),
+              eq(styles.slug, proposal.styleSlug),
+              eq(styles.isActive, true),
+              sql`${styles.deletedAt} IS NULL`,
+            ),
+          )
+          .limit(1);
+
+        if (!parent) return { kind: "parent_not_found" as const };
+
+        const parentStyleParse = StyleSchema.safeParse(parseJsonValue(parent.configJson, null));
+        if (!parentStyleParse.success) {
+          return {
+            kind: "invalid_parent_style" as const,
+            issues: parentStyleParse.error.issues.slice(0, 5),
+          };
+        }
+
+        const editsProposal = parseProposal(JSON.stringify({
+          summary: proposal.summary,
+          edits: parseJsonValue(proposal.editsJson, {}),
+          rationale: parseStringArray(proposal.rationaleJson),
+        }));
+        const applied = applyEditsToStyle(parentStyleParse.data, editsProposal.edits);
+        const candidateSlug = await nextCoachStyleSlug(tx, parentStyleParse.data.slug, proposal.id);
+        const candidateStyle = StyleSchema.safeParse({
+          ...applied,
+          slug: candidateSlug,
+          displayName: `${parentStyleParse.data.displayName} Coach ${proposal.id}`,
+        });
+        if (!candidateStyle.success) {
+          return {
+            kind: "invalid_candidate_style" as const,
+            issues: candidateStyle.error.issues.slice(0, 5),
+          };
+        }
+
+        const [createdStyle] = await tx
+          .insert(styles)
+          .values({
+            tenantId,
+            slug: candidateStyle.data.slug,
+            displayName: candidateStyle.data.displayName,
+            configJson: JSON.stringify(candidateStyle.data),
+            isActive: false,
+            version: 1,
+            parentId: parent.id,
+            createdAt: now,
+          })
+          .returning({
+            id: styles.id,
+            tenantId: styles.tenantId,
+            slug: styles.slug,
+            displayName: styles.displayName,
+            configJson: styles.configJson,
+            isActive: styles.isActive,
+            version: styles.version,
+            parentId: styles.parentId,
+            createdAt: styles.createdAt,
+            deletedAt: styles.deletedAt,
+          });
+        if (!createdStyle) {
+          return { kind: "style_create_failed" as const, error: "style variant was not created" };
+        }
+
+        const [updatedProposal] = await tx
+          .update(coachProposals)
+          .set({
+            status: "applied",
+            decidedAt: now,
+            decidedByAdminId: adminId ?? null,
+          })
+          .where(and(eq(coachProposals.id, proposal.id), eq(coachProposals.tenantId, tenantId)))
+          .returning({
+            id: coachProposals.id,
+            styleSlug: coachProposals.styleSlug,
+            sampleSize: coachProposals.sampleSize,
+            personaFilter: coachProposals.personaFilter,
+            summary: coachProposals.summary,
+            editsJson: coachProposals.editsJson,
+            rationaleJson: coachProposals.rationaleJson,
+            rawOutput: coachProposals.rawOutput,
+            status: coachProposals.status,
+            createdAt: coachProposals.createdAt,
+            decidedAt: coachProposals.decidedAt,
+            decidedByAdminId: coachProposals.decidedByAdminId,
+          });
+
+        return {
+          kind: "ok" as const,
+          proposal: toCoachProposalResponse(updatedProposal ?? proposal),
+          style: createdStyle,
+          parentStyleId: parent.id,
+        };
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        return c.json({ error: "coach style variant already exists" }, 409);
+      }
+      throw err;
+    }
+
+    if (result.kind === "not_found") return c.json({ error: "coach proposal not found" }, 404);
+    if (result.kind === "parent_not_found") return c.json({ error: "active parent style not found" }, 404);
+    if (result.kind === "blocked") return c.json({ error: result.error }, 409);
+    if (result.kind === "style_create_failed") return c.json({ error: result.error }, 500);
+    if (result.kind === "invalid_parent_style") {
+      return c.json({ error: "parent style failed schema validation", issues: result.issues }, 422);
+    }
+    if (result.kind === "invalid_candidate_style") {
+      return c.json({ error: "candidate style failed schema validation", issues: result.issues }, 422);
+    }
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "quality.coach_proposal.apply",
+      targetKind: "coach_proposal",
+      targetId: String(id),
+      details: {
+        styleId: result.style.id,
+        styleSlug: result.style.slug,
+        parentStyleId: result.parentStyleId,
+      },
+    });
+    opts.onReload?.(tenantId);
+    return c.json({ ok: true, proposal: result.proposal, style: result.style });
+  });
+
   /**
    * GET /api/admin/quality/self-play/export.jsonl
    *
@@ -559,6 +743,33 @@ function parseJsonValue(value: string, fallback: unknown): unknown {
   }
 }
 
+async function nextCoachStyleSlug(
+  tx: Db,
+  parentSlug: string,
+  proposalId: number,
+): Promise<string> {
+  const base = `${sanitizeStyleSlug(parentSlug)}-coach-${proposalId}`.slice(0, 72);
+  for (let i = 0; i < 20; i++) {
+    const candidate = i === 0 ? base : `${base}-${i + 1}`;
+    const [existing] = await tx
+      .select({ id: styles.id })
+      .from(styles)
+      .where(eq(styles.slug, candidate))
+      .limit(1);
+    if (!existing) return candidate;
+  }
+  return `${base}-${Date.now().toString(36)}`.slice(0, 90);
+}
+
+function sanitizeStyleSlug(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return slug || "style";
+}
+
 type SelfPlayMatchRow = {
   id: number;
   styleSlug: string;
@@ -609,6 +820,28 @@ function toCoachProposalResponse(row: CoachProposalRow) {
     rationale: parseStringArray(row.rationaleJson),
   };
 }
+
+type ApplyCoachProposalResult =
+  | { kind: "ok"; proposal: ReturnType<typeof toCoachProposalResponse>; style: StyleResponseRow; parentStyleId: number }
+  | { kind: "not_found" }
+  | { kind: "parent_not_found" }
+  | { kind: "blocked"; error: string }
+  | { kind: "style_create_failed"; error: string }
+  | { kind: "invalid_parent_style"; issues: unknown[] }
+  | { kind: "invalid_candidate_style"; issues: unknown[] };
+
+type StyleResponseRow = {
+  id: number;
+  tenantId: number;
+  slug: string;
+  displayName: string;
+  configJson: string;
+  isActive: boolean;
+  version: number;
+  parentId: number | null;
+  createdAt: number;
+  deletedAt: number | null;
+};
 
 function toPairwiseResult(row: PairwiseMatchRow): PairwiseMatchResult {
   const winner = PAIRWISE_WINNERS.has(row.winner as PairwiseWinner)

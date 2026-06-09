@@ -1,6 +1,7 @@
 import {
   AlertTriangleIcon,
   BugIcon,
+  CheckCircleIcon,
   DownloadIcon,
   LightbulbIcon,
   RefreshCwIcon,
@@ -298,6 +299,24 @@ export function SaasQuality() {
         return;
       }
       toast.error(err instanceof Error ? err.message : "Не удалось обновить proposal");
+    } finally {
+      setProposalActionId(null);
+    }
+  }
+
+  async function handleProposalApply(id: number) {
+    setProposalActionId(id);
+    try {
+      const result = await saas.applyQualityCoachProposal(id);
+      setCoach(await saas.getQualityCoachSummary());
+      toast.success(`Style variant created: ${result.style.slug}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearToken();
+        navigate("/login", { replace: true });
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : "Не удалось применить proposal");
     } finally {
       setProposalActionId(null);
     }
@@ -750,16 +769,28 @@ export function SaasQuality() {
                     </TableCell>
                     <TableCell className="text-right">
                       {item.status === "pending" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 gap-1.5 px-2 text-xs text-muted-foreground hover:text-destructive"
-                          disabled={proposalActionId === item.id}
-                          onClick={() => void handleProposalStatus(item.id, "dismissed")}
-                        >
-                          <XCircleIcon className="size-3.5" />
-                          Dismiss
-                        </Button>
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 gap-1.5 px-2 text-xs"
+                            disabled={proposalActionId === item.id}
+                            onClick={() => void handleProposalApply(item.id)}
+                          >
+                            <CheckCircleIcon className="size-3.5" />
+                            Apply
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 gap-1.5 px-2 text-xs text-muted-foreground hover:text-destructive"
+                            disabled={proposalActionId === item.id}
+                            onClick={() => void handleProposalStatus(item.id, "dismissed")}
+                          >
+                            <XCircleIcon className="size-3.5" />
+                            Dismiss
+                          </Button>
+                        </div>
                       )}
                       {item.status === "dismissed" && (
                         <Button
