@@ -85,6 +85,7 @@ const ROUTE_META: Record<string, { pageId: string; label: string }> = {
   "/tools": { pageId: "tools", label: "Инструменты" },
   "/referral": { pageId: "referral", label: "Партнёры" },
   "/audit": { pageId: "audit", label: "Аудит" },
+  "/settings/channels": { pageId: "channels", label: "Каналы" },
   "/settings": { pageId: "settings", label: "Настройки LLM" },
   "/team": { pageId: "team", label: "Команда" },
   "/billing": { pageId: "billing", label: "Использование LLM" },

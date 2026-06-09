@@ -1,4 +1,4 @@
-import { CheckIcon, KeyRoundIcon, SaveIcon, Trash2Icon } from "lucide-react";
+import { CableIcon, CheckIcon, KeyRoundIcon, SaveIcon, Trash2Icon } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -345,6 +345,22 @@ export function SaasSettings() {
           {error}
         </p>
       )}
+
+      <Card>
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <CableIcon className="size-4" /> Каналы сообщений
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Telegram, WhatsApp, Facebook Messenger и web-виджет.
+            </p>
+          </div>
+          <Button type="button" variant="outline" onClick={() => navigate("/settings/channels")}>
+            <CableIcon className="size-4" /> Открыть каналы
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* ── Ключи провайдеров ── */}
       <div className="space-y-3">

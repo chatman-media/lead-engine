@@ -841,37 +841,38 @@ async function main() {
     });
   }
 
-  if (cfg.facebookVerifyToken) {
-    app.route(
-      "/",
-      makeFacebookWebhookRoutes({
-        db,
-        channels,
-        verifyToken: cfg.facebookVerifyToken,
-        ...(cfg.facebookAppSecret ? { appSecret: cfg.facebookAppSecret } : {}),
-        replyStrategy,
-        resolveTemplate,
-        memoryExtractor,
-        stageClassifier,
-        notificationService,
-        photoProcessor,
-        fieldExtractor,
-        serviceCatalogRuntime,
-        sink,
-        metrics,
-        ...(rateLimiter ? { rateLimiter } : {}),
-        ...(resolveTranscriber ? { resolveTranscriber } : {}),
-      }),
-    );
-    if (!cfg.facebookAppSecret) {
-      log.warn("facebook webhook signature verification disabled", {
-        remediation: "Set FACEBOOK_APP_SECRET env (Meta dashboard → App Settings → Basic)",
-      });
-    }
-    log.info("facebook webhook enabled", {
-      signatureCheck: cfg.facebookAppSecret ? "enabled" : "off (dev mode)",
+  app.route(
+    "/",
+    makeFacebookWebhookRoutes({
+      db,
+      channels,
+      verifyToken: cfg.facebookVerifyToken,
+      ...(cfg.facebookAppSecret ? { appSecret: cfg.facebookAppSecret } : {}),
+      replyStrategy,
+      resolveTemplate,
+      memoryExtractor,
+      stageClassifier,
+      notificationService,
+      photoProcessor,
+      fieldExtractor,
+      serviceCatalogRuntime,
+      sink,
+      metrics,
+      ...(rateLimiter ? { rateLimiter } : {}),
+      ...(resolveTranscriber ? { resolveTranscriber } : {}),
+    }),
+  );
+  if (!cfg.facebookAppSecret) {
+    log.warn("facebook webhook app secret env fallback not set", {
+      impact: "channels without a per-channel App Secret skip signature verification",
+      remediation:
+        "Set FACEBOOK_APP_SECRET env or enter App Secret in Admin → Settings → Channels → Facebook Messenger",
     });
   }
+  log.info("facebook webhook enabled", {
+    verifyToken: cfg.facebookVerifyToken ? "env fallback" : "per-channel only",
+    signatureCheck: cfg.facebookAppSecret ? "env fallback/per-channel" : "per-channel only",
+  });
 
   if (cfg.stripeWebhookSecret) {
     const priceToPlan: Record<string, "starter" | "pro"> = {};

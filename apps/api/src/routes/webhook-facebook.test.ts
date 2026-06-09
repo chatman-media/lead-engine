@@ -39,7 +39,9 @@ function seedFacebook(channels: ChannelRegistry, extra: Partial<ChannelEntry> = 
   (channels as any).byTenantSlug.set(SLUG, [entry]);
 }
 
-function buildApp(opts: { appSecret?: string; seed?: Partial<ChannelEntry> | false } = {}) {
+function buildApp(
+  opts: { appSecret?: string; seed?: Partial<ChannelEntry> | false; verifyToken?: string } = {},
+) {
   const metrics = makePlatformMetrics();
   const channels = new ChannelRegistry();
   if (opts.seed !== false) seedFacebook(channels, opts.seed ?? {});
@@ -47,7 +49,7 @@ function buildApp(opts: { appSecret?: string; seed?: Partial<ChannelEntry> | fal
     // biome-ignore lint/suspicious/noExplicitAny: db не используется в этих тестах
     db: {} as any,
     channels,
-    verifyToken: VERIFY_TOKEN,
+    verifyToken: opts.verifyToken ?? VERIFY_TOKEN,
     ...(opts.appSecret ? { appSecret: opts.appSecret } : {}),
     metrics,
   });
@@ -192,6 +194,16 @@ describe("webhook-facebook signature gating", () => {
 
   it("GET verify handshake — per-tenant verify_token", async () => {
     const { routes } = buildApp({ seed: { facebookVerifyToken: "tenant-vt" } });
+    const res = await routes.request(
+      `/webhook/facebook/${SLUG}?hub.mode=subscribe&hub.verify_token=tenant-vt&hub.challenge=test-123`,
+      { method: "GET" },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("test-123");
+  });
+
+  it("GET verify handshake — работает без глобального verify_token, если токен задан в канале", async () => {
+    const { routes } = buildApp({ seed: { facebookVerifyToken: "tenant-vt" }, verifyToken: "" });
     const res = await routes.request(
       `/webhook/facebook/${SLUG}?hub.mode=subscribe&hub.verify_token=tenant-vt&hub.challenge=test-123`,
       { method: "GET" },
