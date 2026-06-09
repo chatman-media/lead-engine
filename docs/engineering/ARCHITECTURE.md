@@ -86,7 +86,7 @@ flowchart LR
     wh["Webhook routes"]
     ws["WebSocket /ws/:slug"]
     adminApi["Admin API"]
-    registry["ChannelRegistry"]
+    apiRegistry["API ChannelRegistry"]
     llmRouter["InMemoryLlmRouter"]
     rateLimiter["InboundRateLimiter"]
     engine["conversation-engine.processInbound"]
@@ -102,6 +102,7 @@ flowchart LR
   end
 
   subgraph worker["apps/worker"]
+    workerRegistry["WorkerChannelRegistry"]
     dispatcher["OutboundDispatcher: SKIP LOCKED"]
     reload["Channel reload polling"]
     cron["Cron jobs"]
@@ -118,9 +119,9 @@ flowchart LR
   web --> ws
   adminUi --> adminApi
 
-  wh --> rateLimiter --> registry --> engine
+  wh --> rateLimiter --> apiRegistry --> engine
   ws --> engine
-  adminApi --> registry
+  adminApi --> apiRegistry
   adminApi --> llmRouter
 
   engine --> tenantData
@@ -132,12 +133,13 @@ flowchart LR
   adminApi --> tenantData
 
   dispatcher --> queue
-  dispatcher --> tg
-  dispatcher --> wa
-  dispatcher --> fb
-  dispatcher --> vk
-  dispatcher --> mx
-  reload --> registry
+  dispatcher --> workerRegistry
+  workerRegistry --> tg
+  workerRegistry --> wa
+  workerRegistry --> fb
+  workerRegistry --> vk
+  workerRegistry --> mx
+  reload --> workerRegistry
   cron --> tenantData
 
   migrations --> tenantData
@@ -224,7 +226,9 @@ flowchart TB
    ├─ rateLimiter.check(tenantId)                              → 429 если over
    ├─ parse update (TgUpdate)
    ├─ adapter.pushUpdate(update)
-   └─ for await Inbound: processInbound(...)
+   ├─ for await Inbound
+   ├─ [opt] transcribeInboundVoice(): media download + STT, NO tx
+   └─ processInbound(...)
 
 3. processInbound (conversation-engine):
    ┌─ Phase 1: withTenant tx1 (persist) ─────────────────────┐
@@ -258,7 +262,8 @@ flowchart TB
    │  Fire-and-forget — НЕ блокирует webhook response.        │
    └──────────────────────────────────────────────────────────┘
 
-4. apps/api → 200 OK (typical < 100ms если LLM skipped + < 2s с LLM).
+4. apps/api → 200 OK (typical < 100ms если LLM/STT skipped + < 2s с reply
+   LLM; voice adds pre-tx STT latency).
 ```
 
 ### Outbound
@@ -295,6 +300,7 @@ sequenceDiagram
   participant C as Customer channel
   participant API as apps/api webhook
   participant R as ChannelRegistry
+  participant STT as Media API / STT
   participant E as processInbound
   participant DB as Postgres with RLS
   participant LLM as LLM / RAG
@@ -306,7 +312,9 @@ sequenceDiagram
   API->>API: verify signature and rate limit
   API->>R: resolve tenant channel adapter
   R-->>API: adapter + tenant context
-  API->>E: normalized Inbound
+  API->>STT: optional voice download + transcribe, no DB tx
+  STT-->>API: text transcript or original voice part
+  API->>E: normalized / transcribed Inbound
 
   E->>DB: tx1 withTenant persist contact / conversation / message
   E->>DB: classifier + memory writes inside tx1
@@ -547,6 +555,8 @@ Curated provider install (`POST /api/admin/provider-marketplace/:key/install`)
 Custom provider (`POST /api/admin/provider-marketplace/custom`) делает то же,
 но из данных формы. Metadata содержит `source`, `providerKey`, `coverage`,
 `sla`, `pricingMode`, `requiredFields`, `handoffMode`, `installedAt`.
+Runtime сначала создаёт/обновляет `lead` по заявке, а затем route target:
+воронка, partner deal, webhook или manual operator queue.
 
 Технический reference: [SERVICE_CATALOG.md](SERVICE_CATALOG.md).
 
@@ -557,6 +567,7 @@ flowchart LR
   inbound["Inbound request"]
   extractor["field-extractor / service-intent-router"]
   item["service_catalog_items"]
+  lead["leads / lead_field_values"]
 
   funnel["route_type: funnel"]
   partnerService["route_type: partner_service"]
@@ -570,12 +581,12 @@ flowchart LR
   external["External provider system"]
   operator["Operator inbox"]
 
-  inbound --> extractor --> item
-  item --> funnel --> funnelRuntime
-  item --> partnerService --> service --> partner
+  inbound --> extractor --> item --> lead
+  lead --> funnel --> funnelRuntime
+  lead --> partnerService --> service --> partner
   service --> deal
-  item --> webhook --> external
-  item --> manual --> operator
+  lead --> webhook --> external
+  lead --> manual --> operator
   deal --> operator
 ```
 

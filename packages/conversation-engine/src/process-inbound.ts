@@ -1,4 +1,9 @@
-import type { Inbound, OutboundEnvelope } from "@chatman-media/channel-core";
+import type {
+  Inbound,
+  InboundPart,
+  MediaRef,
+  OutboundEnvelope,
+} from "@chatman-media/channel-core";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { resolveContact } from "./contact-resolver.ts";
 import { resolveConversation } from "./conversation-resolver.ts";
@@ -113,15 +118,53 @@ export interface ProcessInboundDeps {
   sink?: PipelineSink;
   clock?: Clock;
   notifications?: NotificationService;
-  /**
-   * Опциональный STT-транскрибер. Если задан и inbound содержит voice-part —
-   * pipeline транскрибирует аудио перед persist'ом. Транскрипт становится
-   * текстом сообщения; остальной pipeline работает без изменений.
-   * downloadVoice должен быть задан вместе с transcriber.
-   */
+}
+
+type VoicePart = Extract<InboundPart, { kind: "voice" }>;
+
+export interface TranscribeInboundVoiceDeps {
+  tenantId: number;
   transcriber?: ITranscriber | null;
-  /** Загружает аудиофайл. Нужен для transcriber. externalUserId нужен userbot-адаптеру. */
-  downloadVoice?: ((mediaRef: import("@chatman-media/channel-core").MediaRef, externalUserId: string) => Promise<Response>) | null;
+  resolveTranscriber?: (() => ITranscriber | null) | null;
+  /** Загружает аудиофайл. externalUserId нужен userbot-адаптеру. */
+  downloadVoice?: ((mediaRef: MediaRef, externalUserId: string) => Promise<Response>) | null;
+  sink?: PipelineSink;
+}
+
+/**
+ * Optional pre-persist STT phase. This helper intentionally does media download
+ * and transcription outside `withTenant`; `processInbound` must stay DB-only.
+ */
+export async function transcribeInboundVoice(
+  inbound: Inbound,
+  deps: TranscribeInboundVoiceDeps,
+): Promise<Inbound> {
+  const voiceParts = inbound.parts.filter((part): part is VoicePart => part.kind === "voice");
+  if (voiceParts.length === 0 || !deps.downloadVoice) return inbound;
+
+  const transcriber = deps.transcriber ?? deps.resolveTranscriber?.() ?? null;
+  if (!transcriber) return inbound;
+
+  for (const part of voiceParts) {
+    try {
+      const res = await deps.downloadVoice(part.mediaRef, inbound.externalUserId);
+      if (res.ok) {
+        const buf = await res.arrayBuffer();
+        const transcript = await transcriber.transcribe(new Uint8Array(buf), "voice.ogg");
+        if (transcript) {
+          const idx = inbound.parts.indexOf(part);
+          inbound.parts[idx] = { kind: "text", text: transcript };
+        }
+      }
+    } catch (err) {
+      deps.sink?.log?.("warn", "voice transcription failed", {
+        tenantId: deps.tenantId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return inbound;
 }
 
 /**
@@ -210,36 +253,8 @@ export async function processInbound(
   });
 
   // 3. Persist message (с дедупом по external_message_id).
-  //    Если есть голосовые части и задан transcriber — транскрибируем сначала.
-  if (deps.transcriber && deps.downloadVoice) {
-    for (const part of inbound.parts) {
-      if (part.kind === "voice") {
-        try {
-          const res = await deps.downloadVoice(part.mediaRef, inbound.externalUserId);
-          if (res.ok) {
-            const buf = await res.arrayBuffer();
-            const transcript = await deps.transcriber.transcribe(
-              new Uint8Array(buf),
-              "voice.ogg",
-            );
-            if (transcript) {
-              // Заменяем voice-part текстовым транскриптом в inbound.parts
-              const idx = inbound.parts.indexOf(part);
-              (inbound.parts as Array<(typeof inbound.parts)[number]>)[idx] = {
-                kind: "text",
-                text: transcript,
-              };
-            }
-          }
-        } catch (err) {
-          deps.sink?.log?.("warn", "voice transcription failed", {
-            tenantId: deps.tenant.tenantId,
-            error: (err as Error).message,
-          });
-        }
-      }
-    }
-  }
+  //    Голосовые parts должны быть транскрибированы до вызова processInbound,
+  //    чтобы media download + STT не держали открытую DB transaction.
   const { text, mediaOnly } = inboundText(inbound);
 
   // Skip persist для callback_query — это не сообщение в диалоге,

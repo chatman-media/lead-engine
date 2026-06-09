@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { Inbound, OutboundEnvelope } from "@chatman-media/channel-core";
 import type { ContactsRepo } from "./dal/index.ts";
-import { processInbound, type ReplyStrategy } from "./process-inbound.ts";
+import {
+	processInbound,
+	transcribeInboundVoice,
+	type ReplyStrategy,
+} from "./process-inbound.ts";
 import {
 	FakeChannelIdentitiesRepo,
 	FakeContactsRepo,
@@ -257,7 +261,7 @@ describe("processInbound", () => {
 		expect(deps._fakes.conversations.all()).toHaveLength(1);
 	});
 
-	// ── Опциональные хуки pipeline (notifications / transcriber / extractFields /
+	// ── Опциональные хуки pipeline (notifications / voice STT / extractFields /
 	//    memoryExtractor / deferReply) — все через фейки, без БД. ──────────────
 	type NotifyEvent = { eventType: string; conversationId: number };
 	function fakeNotifications(events: NotifyEvent[]) {
@@ -310,13 +314,6 @@ describe("processInbound", () => {
 	it("voice part → транскрибируется в текст и персистится", async () => {
 		const d = {
 			...makeDeps(),
-			transcriber: {
-				transcribe: async () => "привет это расшифровка",
-			} as unknown as Parameters<typeof processInbound>[1]["transcriber"],
-			downloadVoice: (async () =>
-				new Response(new Uint8Array([1, 2, 3]))) as unknown as Parameters<
-				typeof processInbound
-			>[1]["downloadVoice"],
 		};
 		const inbound: Inbound = {
 			channelId: "tg-1",
@@ -328,6 +325,13 @@ describe("processInbound", () => {
 			receivedAt: 1700000000,
 			raw: {},
 		};
+		await transcribeInboundVoice(inbound, {
+			tenantId: TENANT.tenantId,
+			transcriber: {
+				transcribe: async () => "привет это расшифровка",
+			},
+			downloadVoice: async () => new Response(new Uint8Array([1, 2, 3])),
+		});
 		const res = await processInbound(inbound, d);
 		expect(res.persisted).toBe(true);
 		// voice-part заменён транскриптом → персистится как текстовое сообщение
@@ -337,15 +341,6 @@ describe("processInbound", () => {
 	it("voice: ошибка транскрипции глотается (pipeline продолжает)", async () => {
 		const d = {
 			...makeDeps(),
-			transcriber: {
-				transcribe: async () => {
-					throw new Error("whisper down");
-				},
-			} as unknown as Parameters<typeof processInbound>[1]["transcriber"],
-			downloadVoice: (async () =>
-				new Response(new Uint8Array([1]))) as unknown as Parameters<
-				typeof processInbound
-			>[1]["downloadVoice"],
 		};
 		const inbound: Inbound = {
 			channelId: "tg-1",
@@ -357,8 +352,40 @@ describe("processInbound", () => {
 			receivedAt: 1700000000,
 			raw: {},
 		};
+		await transcribeInboundVoice(inbound, {
+			tenantId: TENANT.tenantId,
+			transcriber: {
+				transcribe: async () => {
+					throw new Error("whisper down");
+				},
+			},
+			downloadVoice: async () => new Response(new Uint8Array([1])),
+		});
 		const res = await processInbound(inbound, d);
 		expect(res.persisted).toBe(true); // не упало
+	});
+
+	it("voice STT не резолвит transcriber для текстового inbound", async () => {
+		let resolveCalls = 0;
+		const inbound = textInbound({
+			extUserId: "u5",
+			extMessageId: "204",
+			text: "plain text",
+		});
+
+		await transcribeInboundVoice(inbound, {
+			tenantId: TENANT.tenantId,
+			resolveTranscriber: () => {
+				resolveCalls += 1;
+				return {
+					transcribe: async () => "should not run",
+				};
+			},
+			downloadVoice: async () => new Response(new Uint8Array([1])),
+		});
+
+		expect(resolveCalls).toBe(0);
+		expect(inbound.parts).toEqual([{ kind: "text", text: "plain text" }]);
 	});
 
 	it("template.hooks.extractFields → mergeAttributes на contact", async () => {

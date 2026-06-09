@@ -107,6 +107,8 @@ export {
   processInbound,
   type ProcessInboundDeps,
   type ReplyStrategy,
+  transcribeInboundVoice,
+  type TranscribeInboundVoiceDeps,
 } from "./process-inbound.ts";
 export type { ITranscriber } from "./transcriber.ts";
 export {

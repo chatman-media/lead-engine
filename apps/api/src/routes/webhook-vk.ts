@@ -15,6 +15,7 @@ import {
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
+  transcribeInboundVoice,
   withTenant,
 } from "@chatman-media/conversation-engine";
 import type { PlatformMetrics } from "@chatman-media/observability";
@@ -156,6 +157,15 @@ export function makeVkWebhookRoutes(opts: {
         externalId: entry.externalId,
       };
 
+      await transcribeInboundVoice(inbound, {
+        tenantId: entry.tenantId,
+        resolveTranscriber: opts.resolveTranscriber
+          ? () => opts.resolveTranscriber?.(entry.tenantId) ?? null
+          : null,
+        downloadVoice: (mediaRef: MediaRef) => entry.adapter.downloadMedia(mediaRef),
+        ...(opts.sink ? { sink: opts.sink } : {}),
+      });
+
       let result = await withTenant(opts.db, entry.tenantId, async (tx) => {
         const repoCtx = { db: tx, tenantId: entry.tenantId };
         return processInbound(inbound, {
@@ -174,17 +184,6 @@ export function makeVkWebhookRoutes(opts: {
           ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
           ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
           ...(opts.sink ? { sink: opts.sink } : {}),
-          ...(opts.resolveTranscriber
-            ? (() => {
-                const t = opts.resolveTranscriber(entry.tenantId);
-                return t
-                  ? {
-                      transcriber: t,
-                      downloadVoice: (mediaRef: MediaRef) => entry.adapter.downloadMedia(mediaRef),
-                    }
-                  : {};
-              })()
-            : {}),
         });
       });
 
