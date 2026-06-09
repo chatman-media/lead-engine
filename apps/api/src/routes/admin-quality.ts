@@ -2,6 +2,7 @@ import {
   AgentToolCallsRepo,
   type AgentToolCallFeedbackLabel,
   type AgentToolCallFeedbackRow,
+  type AgentToolCallRow,
   type AgentToolCallSource,
   DrizzleKbStore,
   type Db,
@@ -32,6 +33,8 @@ import {
   wilsonLowerBound,
 } from "@chatman-media/sales";
 import {
+  agentToolCallFeedback,
+  agentToolCalls,
   coachProposals,
   contacts,
   conversations,
@@ -46,7 +49,7 @@ import {
   styles,
   vacancies,
 } from "@chatman-media/storage";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { isUniqueViolation } from "../lib/db-errors.ts";
@@ -99,6 +102,29 @@ const shadowEvaluationResponseSelect = {
   errorMessage: shadowEvaluations.errorMessage,
   startedAt: shadowEvaluations.startedAt,
   completedAt: shadowEvaluations.completedAt,
+};
+
+const toolCallFeedbackJoinedSelect = {
+  feedbackId: agentToolCallFeedback.id,
+  feedbackToolCallId: agentToolCallFeedback.toolCallId,
+  adminId: agentToolCallFeedback.adminId,
+  label: agentToolCallFeedback.label,
+  note: agentToolCallFeedback.note,
+  feedbackCreatedAt: agentToolCallFeedback.createdAt,
+  traceId: agentToolCalls.id,
+  conversationId: agentToolCalls.conversationId,
+  contactId: agentToolCalls.contactId,
+  messageId: agentToolCalls.messageId,
+  outboundQueueId: agentToolCalls.outboundQueueId,
+  source: agentToolCalls.source,
+  toolName: agentToolCalls.toolName,
+  argsJson: agentToolCalls.argsJson,
+  resultJson: agentToolCalls.resultJson,
+  error: agentToolCalls.error,
+  cycle: agentToolCalls.cycle,
+  toolCallIndex: agentToolCalls.toolCallIndex,
+  latencyMs: agentToolCalls.latencyMs,
+  toolCallCreatedAt: agentToolCalls.createdAt,
 };
 
 export interface AdminQualityRoutesOpts {
@@ -164,24 +190,7 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
       });
     });
 
-    return c.json({
-      items: rows.map((row) => ({
-        id: row.id,
-        conversationId: row.conversationId,
-        contactId: row.contactId,
-        messageId: row.messageId,
-        outboundQueueId: row.outboundQueueId,
-        source: row.source,
-        toolName: row.toolName,
-        args: parseJsonValue(row.argsJson, null),
-        result: parseJsonValue(row.resultJson, null),
-        error: row.error,
-        cycle: row.cycle,
-        toolCallIndex: row.toolCallIndex,
-        latencyMs: row.latencyMs,
-        createdAt: row.createdAt,
-      })),
-    });
+    return c.json({ items: rows.map(toAgentToolCallResponse) });
   });
 
   app.get("/api/admin/quality/tool-calls/:id/feedback", async (c) => {
@@ -252,6 +261,156 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     });
 
     return c.json({ ok: true, feedback: toAgentToolCallFeedbackResponse(feedback) }, 201);
+  });
+
+  app.get("/api/admin/quality/tool-call-feedback/summary", async (c) => {
+    const tenantId = c.var.tenantId;
+    const filters = parseToolCallFeedbackQuery(
+      {
+        limit: c.req.query("limit"),
+        source: c.req.query("source"),
+        toolName: c.req.query("toolName"),
+        label: c.req.query("label"),
+        error: c.req.query("error"),
+      },
+      25,
+      200,
+    );
+    if (filters.kind === "invalid") return c.json({ error: filters.error }, 400);
+
+    const summary = await withTenant(opts.db, tenantId, async (tx) => {
+      const where = toolCallFeedbackWhere(tenantId, filters.value);
+      const joinOn = toolCallFeedbackJoinOn();
+
+      const [totalsRow] = await tx
+        .select({
+          total: sql<number>`count(*)::int`,
+          goodReply: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'good_reply'))::int`,
+          wrongTool: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'wrong_tool'))::int`,
+          missingTool: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'missing_tool'))::int`,
+          badArgs: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'bad_args'))::int`,
+          other: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'other'))::int`,
+          errorCount: sql<number>`(count(*) filter (where ${agentToolCalls.error} = true))::int`,
+          lastFeedbackAt: sql<number | null>`max(${agentToolCallFeedback.createdAt})::int`,
+        })
+        .from(agentToolCallFeedback)
+        .innerJoin(agentToolCalls, joinOn)
+        .where(where);
+
+      const labelRows = await tx
+        .select({
+          label: agentToolCallFeedback.label,
+          total: sql<number>`count(*)::int`,
+          lastFeedbackAt: sql<number | null>`max(${agentToolCallFeedback.createdAt})::int`,
+        })
+        .from(agentToolCallFeedback)
+        .innerJoin(agentToolCalls, joinOn)
+        .where(where)
+        .groupBy(agentToolCallFeedback.label);
+
+      const byTool = await tx
+        .select({
+          toolName: agentToolCalls.toolName,
+          total: sql<number>`count(*)::int`,
+          goodReply: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'good_reply'))::int`,
+          wrongTool: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'wrong_tool'))::int`,
+          missingTool: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'missing_tool'))::int`,
+          badArgs: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'bad_args'))::int`,
+          other: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'other'))::int`,
+          errorCount: sql<number>`(count(*) filter (where ${agentToolCalls.error} = true))::int`,
+          lastFeedbackAt: sql<number | null>`max(${agentToolCallFeedback.createdAt})::int`,
+        })
+        .from(agentToolCallFeedback)
+        .innerJoin(agentToolCalls, joinOn)
+        .where(where)
+        .groupBy(agentToolCalls.toolName)
+        .orderBy(sql`count(*) desc`, desc(sql`max(${agentToolCallFeedback.createdAt})`))
+        .limit(25);
+
+      const bySource = await tx
+        .select({
+          source: agentToolCalls.source,
+          total: sql<number>`count(*)::int`,
+          goodReply: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'good_reply'))::int`,
+          wrongTool: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'wrong_tool'))::int`,
+          missingTool: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'missing_tool'))::int`,
+          badArgs: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'bad_args'))::int`,
+          other: sql<number>`(count(*) filter (where ${agentToolCallFeedback.label} = 'other'))::int`,
+          errorCount: sql<number>`(count(*) filter (where ${agentToolCalls.error} = true))::int`,
+          lastFeedbackAt: sql<number | null>`max(${agentToolCallFeedback.createdAt})::int`,
+        })
+        .from(agentToolCallFeedback)
+        .innerJoin(agentToolCalls, joinOn)
+        .where(where)
+        .groupBy(agentToolCalls.source)
+        .orderBy(sql`count(*) desc`);
+
+      const byError = await tx
+        .select({
+          error: agentToolCalls.error,
+          total: sql<number>`count(*)::int`,
+          lastFeedbackAt: sql<number | null>`max(${agentToolCallFeedback.createdAt})::int`,
+        })
+        .from(agentToolCallFeedback)
+        .innerJoin(agentToolCalls, joinOn)
+        .where(where)
+        .groupBy(agentToolCalls.error)
+        .orderBy(agentToolCalls.error);
+
+      const recentRows = await tx
+        .select(toolCallFeedbackJoinedSelect)
+        .from(agentToolCallFeedback)
+        .innerJoin(agentToolCalls, joinOn)
+        .where(where)
+        .orderBy(desc(agentToolCallFeedback.createdAt), desc(agentToolCallFeedback.id))
+        .limit(filters.value.limit);
+
+      return {
+        totals: totalsRow ?? emptyToolCallFeedbackTotals(),
+        byLabel: withAllToolFeedbackLabels(labelRows),
+        byTool,
+        bySource,
+        byError,
+        recent: recentRows.map(toToolCallFeedbackJoinedResponse),
+      };
+    });
+
+    return c.json(summary);
+  });
+
+  app.get("/api/admin/quality/tool-call-feedback/export.jsonl", async (c) => {
+    const tenantId = c.var.tenantId;
+    const filters = parseToolCallFeedbackQuery(
+      {
+        limit: c.req.query("limit"),
+        source: c.req.query("source"),
+        toolName: c.req.query("toolName"),
+        label: c.req.query("label"),
+        error: c.req.query("error"),
+      },
+      200,
+      1000,
+    );
+    if (filters.kind === "invalid") return c.json({ error: filters.error }, 400);
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) => {
+      return tx
+        .select(toolCallFeedbackJoinedSelect)
+        .from(agentToolCallFeedback)
+        .innerJoin(agentToolCalls, toolCallFeedbackJoinOn())
+        .where(toolCallFeedbackWhere(tenantId, filters.value))
+        .orderBy(desc(agentToolCallFeedback.createdAt), desc(agentToolCallFeedback.id))
+        .limit(filters.value.limit);
+    });
+
+    const jsonl = rows
+      .map((row) => JSON.stringify(toToolCallFeedbackExportRecord(row)))
+      .join("\n");
+    const body = jsonl ? `${jsonl}\n` : "";
+    return c.body(body, 200, {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="tool-call-feedback.jsonl"',
+    });
   });
 
   app.get("/api/admin/quality/self-play/summary", async (c) => {
@@ -2067,6 +2226,234 @@ function toAgentToolCallFeedbackResponse(row: AgentToolCallFeedbackRow) {
     label: row.label,
     note: row.note,
     createdAt: row.createdAt,
+  };
+}
+
+type ToolCallFeedbackQuery = {
+  limit: number;
+  source?: AgentToolCallSource;
+  toolName?: string;
+  label?: AgentToolCallFeedbackLabel;
+  error?: boolean;
+};
+
+type ToolCallFeedbackJoinedRow = {
+  feedbackId: number;
+  feedbackToolCallId: number;
+  adminId: number | null;
+  label: string;
+  note: string | null;
+  feedbackCreatedAt: number;
+  traceId: number;
+  conversationId: number;
+  contactId: number | null;
+  messageId: number | null;
+  outboundQueueId: number | null;
+  source: string;
+  toolName: string;
+  argsJson: string;
+  resultJson: string;
+  error: boolean;
+  cycle: number;
+  toolCallIndex: number;
+  latencyMs: number | null;
+  toolCallCreatedAt: number;
+};
+
+type ToolCallFeedbackTotals = {
+  total: number;
+  goodReply: number;
+  wrongTool: number;
+  missingTool: number;
+  badArgs: number;
+  other: number;
+  errorCount: number;
+  lastFeedbackAt: number | null;
+};
+
+function parseToolCallFeedbackQuery(
+  raw: {
+    limit?: string;
+    source?: string;
+    toolName?: string;
+    label?: string;
+    error?: string;
+  },
+  defaultLimit: number,
+  maxLimit: number,
+): { kind: "ok"; value: ToolCallFeedbackQuery } | { kind: "invalid"; error: string } {
+  const limit = parsePositiveIntQuery(raw.limit, defaultLimit, maxLimit);
+  if (limit === null) return { kind: "invalid", error: "invalid limit" };
+
+  const source =
+    raw.source && TOOL_CALL_SOURCES.has(raw.source as AgentToolCallSource)
+      ? (raw.source as AgentToolCallSource)
+      : undefined;
+  if (raw.source && !source) return { kind: "invalid", error: "invalid source" };
+
+  const label =
+    raw.label && TOOL_CALL_FEEDBACK_LABELS.has(raw.label as AgentToolCallFeedbackLabel)
+      ? (raw.label as AgentToolCallFeedbackLabel)
+      : undefined;
+  if (raw.label && !label) return { kind: "invalid", error: "invalid label" };
+
+  const error =
+    raw.error === undefined
+      ? undefined
+      : raw.error === "true"
+        ? true
+        : raw.error === "false"
+          ? false
+          : null;
+  if (error === null) return { kind: "invalid", error: "invalid error" };
+
+  const toolName = raw.toolName?.trim();
+  if (toolName !== undefined && toolName.length === 0) {
+    return { kind: "invalid", error: "invalid toolName" };
+  }
+
+  return {
+    kind: "ok",
+    value: {
+      limit,
+      ...(source !== undefined ? { source } : {}),
+      ...(toolName !== undefined ? { toolName } : {}),
+      ...(label !== undefined ? { label } : {}),
+      ...(error !== undefined ? { error } : {}),
+    },
+  };
+}
+
+function toolCallFeedbackJoinOn() {
+  return and(
+    eq(agentToolCallFeedback.tenantId, agentToolCalls.tenantId),
+    eq(agentToolCallFeedback.toolCallId, agentToolCalls.id),
+  );
+}
+
+function toolCallFeedbackWhere(
+  tenantId: number,
+  filters: ToolCallFeedbackQuery,
+): SQL<unknown> | undefined {
+  const conditions: SQL<unknown>[] = [
+    eq(agentToolCallFeedback.tenantId, tenantId),
+    eq(agentToolCalls.tenantId, tenantId),
+  ];
+  if (filters.source !== undefined) {
+    conditions.push(eq(agentToolCalls.source, filters.source));
+  }
+  if (filters.toolName !== undefined) {
+    conditions.push(eq(agentToolCalls.toolName, filters.toolName));
+  }
+  if (filters.label !== undefined) {
+    conditions.push(eq(agentToolCallFeedback.label, filters.label));
+  }
+  if (filters.error !== undefined) {
+    conditions.push(eq(agentToolCalls.error, filters.error));
+  }
+  return and(...conditions);
+}
+
+function emptyToolCallFeedbackTotals(): ToolCallFeedbackTotals {
+  return {
+    total: 0,
+    goodReply: 0,
+    wrongTool: 0,
+    missingTool: 0,
+    badArgs: 0,
+    other: 0,
+    errorCount: 0,
+    lastFeedbackAt: null,
+  };
+}
+
+function withAllToolFeedbackLabels(
+  rows: Array<{
+    label: string;
+    total: number;
+    lastFeedbackAt: number | null;
+  }>,
+) {
+  const byLabel = new Map(rows.map((row) => [row.label, row]));
+  return Array.from(TOOL_CALL_FEEDBACK_LABELS).map((label) => {
+    const row = byLabel.get(label);
+    return {
+      label: label as AgentToolCallFeedbackLabel,
+      total: row?.total ?? 0,
+      lastFeedbackAt: row?.lastFeedbackAt ?? null,
+    };
+  });
+}
+
+function toAgentToolCallResponse(row: AgentToolCallRow) {
+  return {
+    id: row.id,
+    conversationId: row.conversationId,
+    contactId: row.contactId,
+    messageId: row.messageId,
+    outboundQueueId: row.outboundQueueId,
+    source: row.source,
+    toolName: row.toolName,
+    args: parseJsonValue(row.argsJson, null),
+    result: parseJsonValue(row.resultJson, null),
+    error: row.error,
+    cycle: row.cycle,
+    toolCallIndex: row.toolCallIndex,
+    latencyMs: row.latencyMs,
+    createdAt: row.createdAt,
+  };
+}
+
+function toToolCallFeedbackJoinedResponse(row: ToolCallFeedbackJoinedRow) {
+  return {
+    feedback: {
+      id: row.feedbackId,
+      toolCallId: row.feedbackToolCallId,
+      adminId: row.adminId,
+      label: row.label as AgentToolCallFeedbackLabel,
+      note: row.note,
+      createdAt: row.feedbackCreatedAt,
+    },
+    toolCall: {
+      id: row.traceId,
+      conversationId: row.conversationId,
+      contactId: row.contactId,
+      messageId: row.messageId,
+      outboundQueueId: row.outboundQueueId,
+      source: row.source as AgentToolCallSource,
+      toolName: row.toolName,
+      args: parseJsonValue(row.argsJson, null),
+      result: parseJsonValue(row.resultJson, null),
+      error: row.error,
+      cycle: row.cycle,
+      toolCallIndex: row.toolCallIndex,
+      latencyMs: row.latencyMs,
+      createdAt: row.toolCallCreatedAt,
+    },
+  };
+}
+
+function toToolCallFeedbackExportRecord(row: ToolCallFeedbackJoinedRow) {
+  return {
+    id: row.feedbackId,
+    toolCallId: row.traceId,
+    adminId: row.adminId,
+    label: row.label,
+    note: row.note,
+    feedbackCreatedAt: row.feedbackCreatedAt,
+    conversationId: row.conversationId,
+    contactId: row.contactId,
+    messageId: row.messageId,
+    outboundQueueId: row.outboundQueueId,
+    source: row.source,
+    toolName: row.toolName,
+    args: parseJsonValue(row.argsJson, null),
+    result: parseJsonValue(row.resultJson, null),
+    error: row.error,
+    cycle: row.cycle,
+    toolCallIndex: row.toolCallIndex,
+    latencyMs: row.latencyMs,
+    toolCallCreatedAt: row.toolCallCreatedAt,
   };
 }
 

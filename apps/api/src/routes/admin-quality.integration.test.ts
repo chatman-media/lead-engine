@@ -578,6 +578,111 @@ describe("admin quality JSONL export", () => {
     ).toBe(404);
   });
 
+  it("summarizes tool-call feedback with filters and tenant isolation", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/quality/tool-call-feedback/summary?limit=10");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as QualityToolCallFeedbackSummaryResponse;
+
+    expect(body.totals).toMatchObject({
+      total: 2,
+      wrongTool: 1,
+      badArgs: 1,
+      errorCount: 2,
+    });
+    expect(body.byLabel.find((row) => row.label === "bad_args")?.total).toBe(1);
+    expect(body.byLabel.find((row) => row.label === "missing_tool")?.total).toBe(0);
+    expect(body.byTool).toEqual([
+      expect.objectContaining({
+        toolName: "create_exchange_order",
+        total: 2,
+        wrongTool: 1,
+        badArgs: 1,
+        errorCount: 2,
+      }),
+    ]);
+    expect(body.bySource).toEqual([
+      expect.objectContaining({ source: "llm_reply", total: 2 }),
+    ]);
+    expect(body.byError).toEqual([expect.objectContaining({ error: true, total: 2 })]);
+    expect(body.recent.map((item) => item.feedback.label)).toEqual(["wrong_tool", "bad_args"]);
+    expect(body.recent[0]?.toolCall).toMatchObject({
+      id: toolCallOrderA,
+      toolName: "create_exchange_order",
+      error: true,
+      args: { quoteId: "q1" },
+      result: { error: "needs verification" },
+    });
+    expect(JSON.stringify(body)).not.toContain("999");
+
+    const filtered = (await (
+      await authReq(tokenA, "/api/admin/quality/tool-call-feedback/summary?label=bad_args")
+    ).json()) as QualityToolCallFeedbackSummaryResponse;
+    expect(filtered.totals).toMatchObject({ total: 1, badArgs: 1, wrongTool: 0 });
+    expect(filtered.recent).toHaveLength(1);
+
+    const sourceFiltered = (await (
+      await authReq(tokenA, "/api/admin/quality/tool-call-feedback/summary?source=rag_reply")
+    ).json()) as QualityToolCallFeedbackSummaryResponse;
+    expect(sourceFiltered.totals.total).toBe(0);
+
+    const crossTenant = (await (
+      await authReq(tokenB, "/api/admin/quality/tool-call-feedback/summary")
+    ).json()) as QualityToolCallFeedbackSummaryResponse;
+    expect(crossTenant.totals.total).toBe(0);
+    expect(crossTenant.recent).toEqual([]);
+  });
+
+  it("exports filtered tool-call feedback JSONL", async () => {
+    if (!sql) return;
+    const res = await authReq(
+      tokenA,
+      "/api/admin/quality/tool-call-feedback/export.jsonl?label=bad_args&limit=10",
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("application/x-ndjson");
+    expect(res.headers.get("Content-Disposition")).toContain("tool-call-feedback.jsonl");
+
+    const text = await res.text();
+    const lines = text.trim().split("\n");
+    expect(lines).toHaveLength(1);
+    const row = JSON.parse(lines[0] ?? "{}") as QualityToolCallFeedbackExportRow;
+    expect(row).toMatchObject({
+      toolCallId: toolCallOrderA,
+      label: "bad_args",
+      note: "quote id should be verified before order creation",
+      source: "llm_reply",
+      toolName: "create_exchange_order",
+      args: { quoteId: "q1" },
+      result: { error: "needs verification" },
+      error: true,
+    });
+    expect(text).not.toContain("999");
+  });
+
+  it("validates tool-call feedback analytics query params", async () => {
+    if (!sql) return;
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/summary?limit=0")).status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/summary?source=bad")).status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/summary?label=bad")).status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/summary?error=maybe")).status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/export.jsonl?limit=0")).status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/export.jsonl?toolName="))
+        .status,
+    ).toBe(400);
+  });
+
   it("validates tool-call feedback payloads", async () => {
     if (!sql) return;
     expect(
@@ -1766,6 +1871,76 @@ type QualityToolCallFeedbackCreateResponse = {
 
 type QualityToolCallFeedbackListResponse = {
   items: QualityToolCallFeedbackResponse[];
+};
+
+type QualityToolCallFeedbackSummaryResponse = {
+  totals: {
+    total: number;
+    goodReply: number;
+    wrongTool: number;
+    missingTool: number;
+    badArgs: number;
+    other: number;
+    errorCount: number;
+    lastFeedbackAt: number | null;
+  };
+  byLabel: Array<{
+    label: string;
+    total: number;
+    lastFeedbackAt: number | null;
+  }>;
+  byTool: Array<{
+    toolName: string;
+    total: number;
+    goodReply: number;
+    wrongTool: number;
+    missingTool: number;
+    badArgs: number;
+    other: number;
+    errorCount: number;
+    lastFeedbackAt: number | null;
+  }>;
+  bySource: Array<{
+    source: string;
+    total: number;
+    goodReply: number;
+    wrongTool: number;
+    missingTool: number;
+    badArgs: number;
+    other: number;
+    errorCount: number;
+    lastFeedbackAt: number | null;
+  }>;
+  byError: Array<{
+    error: boolean;
+    total: number;
+    lastFeedbackAt: number | null;
+  }>;
+  recent: Array<{
+    feedback: QualityToolCallFeedbackResponse;
+    toolCall: QualityToolCallsResponse["items"][number];
+  }>;
+};
+
+type QualityToolCallFeedbackExportRow = {
+  toolCallId: number;
+  adminId: number | null;
+  label: string;
+  note: string | null;
+  feedbackCreatedAt: number;
+  conversationId: number;
+  contactId: number | null;
+  messageId: number | null;
+  outboundQueueId: number | null;
+  source: string;
+  toolName: string;
+  args: unknown;
+  result: unknown;
+  error: boolean;
+  cycle: number;
+  toolCallIndex: number;
+  latencyMs: number | null;
+  toolCallCreatedAt: number;
 };
 
 type QualitySummaryResponse = {
