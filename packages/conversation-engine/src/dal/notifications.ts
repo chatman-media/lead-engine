@@ -1,12 +1,33 @@
 import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { admins, adminNotifications, notificationRules, operatorSettings, notificationTemplates, notificationGroupTokens, type adminNotifications as anTable, type notificationRules as nrTable, type operatorSettings as osTable, type notificationTemplates as ntTable } from "@chatman-media/storage";
+import {
+  admins,
+  adminNotifications,
+  auditLog,
+  conversations,
+  notificationGroupTokens,
+  notificationRules,
+  notificationTemplates,
+  operatorSettings,
+  type adminNotifications as anTable,
+  type notificationRules as nrTable,
+  type notificationTemplates as ntTable,
+  type operatorSettings as osTable,
+} from "@chatman-media/storage";
+import type { OperatorConversationModeAction } from "../operator-bot-actions.ts";
+import { withTenant } from "../with-tenant.ts";
+import type { Db } from "./types.ts";
 
 export type NotificationRule = typeof nrTable.$inferSelect;
 export type OperatorSettings = typeof osTable.$inferSelect;
 export type NotificationTemplate = typeof ntTable.$inferSelect;
 export type AdminNotificationRow = typeof anTable.$inferSelect;
 export type NewAdminNotification = typeof anTable.$inferInsert;
+
+export type OperatorConversationModeOutcome =
+  | { kind: "not_found" }
+  | { kind: "noop"; mode: "ai" | "human" }
+  | { kind: "changed"; from: string; to: "ai" | "human" };
 
 /** Частичный апдейт informer-настроек владельца (см. миграцию 0032). */
 export type InformerPrefs = Partial<
@@ -284,6 +305,72 @@ export class NotificationsRepo {
       .update(operatorSettings)
       .set({ ...prefs, updatedAt: now })
       .where(eq(operatorSettings.adminId, adminId));
+  }
+
+  /**
+   * Commits a safe operator-bot conversation mode action. The callback payload
+   * carries tenantId, but the linked operator settings decide adminId; this
+   * method still scopes all conversation/audit writes through RLS.
+   */
+  async applyOperatorConversationModeAction(input: {
+    tenantId: number;
+    adminId: number;
+    conversationId: number;
+    action: OperatorConversationModeAction;
+  }): Promise<OperatorConversationModeOutcome> {
+    const newMode = input.action === "takeover" ? "human" : "ai";
+    const now = Math.floor(Date.now() / 1000);
+    return withTenant(this.db as unknown as Db, input.tenantId, async (tx) => {
+      const [existing] = await tx
+        .select({ mode: conversations.mode })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.tenantId, input.tenantId),
+            eq(conversations.id, input.conversationId),
+          ),
+        )
+        .limit(1);
+      if (!existing) return { kind: "not_found" };
+      if (existing.mode === newMode) {
+        return { kind: "noop", mode: newMode };
+      }
+
+      await tx
+        .update(conversations)
+        .set({
+          mode: newMode,
+          lastMessageAt: now,
+          ...(input.action === "takeover"
+            ? { assignedAdminId: input.adminId, unreadCount: 0 }
+            : {}),
+        })
+        .where(
+          and(
+            eq(conversations.tenantId, input.tenantId),
+            eq(conversations.id, input.conversationId),
+          ),
+        );
+
+      await tx.insert(auditLog).values({
+        tenantId: input.tenantId,
+        adminId: input.adminId,
+        action:
+          input.action === "takeover"
+            ? "conversation.mode.takeover"
+            : "conversation.mode.return_to_ai",
+        targetKind: "conversation",
+        targetId: String(input.conversationId),
+        detailsJson: JSON.stringify({
+          from: existing.mode,
+          to: newMode,
+          source: "operator_bot",
+        }),
+        createdAt: now,
+      });
+
+      return { kind: "changed", from: existing.mode, to: newMode };
+    });
   }
 
   // ── Informer: лента (admin_notifications) ─────────────────────────────

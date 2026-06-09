@@ -75,6 +75,15 @@ describe("TelegramClient методы", () => {
     expect(bodyOf(calls[0]!.init)).toMatchObject({ callback_query_id: "cb", text: "ok", show_alert: true });
   });
 
+  it("answerCallbackQuery — url", async () => {
+    const { fn, calls } = mock(() => envelope(true));
+    await client(fn).answerCallbackQuery({ callbackQueryId: "cb", url: "https://app.test/conversations/7" });
+    expect(bodyOf(calls[0]!.init)).toMatchObject({
+      callback_query_id: "cb",
+      url: "https://app.test/conversations/7",
+    });
+  });
+
   it("sendChatAction", async () => {
     const { fn, calls } = mock(() => envelope(true));
     await client(fn).sendChatAction({ chatId: 1, action: "typing" });
