@@ -1,10 +1,21 @@
-import { CheckIcon, PlusIcon, RefreshCwIcon, SaveIcon, Trash2Icon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  CheckCircleIcon,
+  CheckIcon,
+  Loader2Icon,
+  PlusIcon,
+  RefreshCwIcon,
+  SaveIcon,
+  Trash2Icon,
+  XCircleIcon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ApiError,
   clearToken,
+  type ExchangeEvalResult,
   type ExchangeOrder,
   type ExchangeRate,
   type ExchangeRateCardProposal,
@@ -353,6 +364,8 @@ export function SaasExchange() {
   const [rates, setRates] = useState<ExchangeRate[]>([]);
   const [orders, setOrders] = useState<ExchangeOrder[]>([]);
   const [turnover, setTurnover] = useState<ExchangeTurnover | null>(null);
+  const [exchangeEval, setExchangeEval] = useState<ExchangeEvalResult | null>(null);
+  const [exchangeEvalRunning, setExchangeEvalRunning] = useState(false);
 
   // Курсы — тир-карта от рыночного фида (RUB + USDT), редактируемая
   const [cardProposals, setCardProposals] = useState<ExchangeRateCardProposal[]>([]);
@@ -595,24 +608,19 @@ export function SaasExchange() {
   }
 
   async function runEval() {
+    setExchangeEvalRunning(true);
     const tid = toast.loading("Прогон эмуляции качества…");
     try {
       const r = await saas.runExchangeEval(undefined, 6);
+      setExchangeEval(r);
       toast.success(`Эмуляция: ${r.summary.passed}/${r.summary.total} сценариев прошли сквозняком`, {
         id: tid,
       });
-      // Детали по сценариям — в консоли (pass/fail + причины).
-      console.table(
-        r.report.map((x) => ({
-          scenario: x.id,
-          passed: x.passed,
-          reasons: (x.reasons ?? []).join("; "),
-          error: x.error ?? "",
-        })),
-      );
     } catch (err) {
       if (!handle401(err))
         toast.error("Не удалось прогнать эмуляцию (нужен chat-LLM у тенанта)", { id: tid });
+    } finally {
+      setExchangeEvalRunning(false);
     }
   }
 
@@ -1136,7 +1144,7 @@ export function SaasExchange() {
         </TabsContent>
 
         {/* ── Заявки ─────────────────────────────────────────────── */}
-        <TabsContent value="orders">
+        <TabsContent value="orders" className="space-y-4">
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-start justify-between gap-2">
@@ -1152,9 +1160,15 @@ export function SaasExchange() {
                   size="sm"
                   variant="outline"
                   onClick={runEval}
+                  disabled={exchangeEvalRunning}
                   title="Прогнать exchange-сценарии как живые LLM-диалоги и оценить сквозной поток"
                 >
-                  ▶ Эмуляция качества
+                  {exchangeEvalRunning ? (
+                    <Loader2Icon className="size-4 animate-spin" />
+                  ) : (
+                    <RefreshCwIcon className="size-4" />
+                  )}
+                  {exchangeEvalRunning ? "Проверяем…" : "Эмуляция качества"}
                 </Button>
               </div>
             </CardHeader>
@@ -1195,6 +1209,10 @@ export function SaasExchange() {
               </Table>
             </CardContent>
           </Card>
+
+          {(exchangeEval || exchangeEvalRunning) && (
+            <ExchangeEvalReportCard result={exchangeEval} running={exchangeEvalRunning} />
+          )}
         </TabsContent>
 
         {/* ── Реквизиты ──────────────────────────────────────────── */}
@@ -1287,6 +1305,166 @@ export function SaasExchange() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function ExchangeEvalReportCard({
+  result,
+  running,
+}: {
+  result: ExchangeEvalResult | null;
+  running: boolean;
+}) {
+  const failed = result ? result.summary.total - result.summary.passed : 0;
+  const allPassed = Boolean(result && failed === 0);
+
+  return (
+    <Card
+      className={
+        allPassed
+          ? "border-[var(--success)]/40"
+          : failed > 0
+            ? "border-destructive/40"
+            : undefined
+      }
+    >
+      <CardHeader className="pb-3">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              {running ? (
+                <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+              ) : allPassed ? (
+                <CheckCircleIcon className="size-4 text-[var(--success)]" />
+              ) : (
+                <AlertTriangleIcon className="size-4 text-destructive" />
+              )}
+              Отчёт эмуляции качества
+            </CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Live self-play сценарии exchange: курс, реквизиты и преждевременный handoff.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={allPassed ? "success" : failed > 0 ? "destructive" : "outline"}>
+              {result ? `${result.summary.passed}/${result.summary.total} passed` : "running"}
+            </Badge>
+            {result && (
+              <Badge variant={failed > 0 ? "destructive" : "outline"}>{failed} failed</Badge>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Сценарий</TableHead>
+              <TableHead>Итог</TableHead>
+              <TableHead>Причины</TableHead>
+              <TableHead>Сигналы</TableHead>
+              <TableHead className="text-right">Диалог</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {running && !result && (
+              <TableRow>
+                <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                  Сценарии выполняются синхронно, отчёт появится после завершения прогона
+                </TableCell>
+              </TableRow>
+            )}
+            {result?.report.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell className="max-w-[240px]">
+                  <div className="truncate text-sm font-medium">{item.displayName}</div>
+                  <div className="mt-1 font-mono text-[11px] text-muted-foreground">
+                    {item.id}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={item.passed ? "success" : "destructive"} className="gap-1">
+                    {item.passed ? (
+                      <CheckCircleIcon className="size-3.5" />
+                    ) : (
+                      <XCircleIcon className="size-3.5" />
+                    )}
+                    {item.passed ? "pass" : "fail"}
+                  </Badge>
+                </TableCell>
+                <TableCell className="max-w-[300px] text-xs">
+                  {item.error ? (
+                    <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-destructive">
+                      {item.error}
+                    </div>
+                  ) : item.reasons && item.reasons.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {item.reasons.map((reason) => (
+                        <Badge key={reason} variant="destructive" className="font-normal">
+                          {reason}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">критичных причин нет</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <ExchangeEvalSignals signals={item.signals} />
+                </TableCell>
+                <TableCell className="text-right">
+                  {item.conversationId ? (
+                    <Button asChild size="sm" variant="ghost" className="h-8 px-2 text-xs">
+                      <Link to={`/conversations/${item.conversationId}`}>Открыть</Link>
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExchangeEvalSignals({
+  signals,
+}: {
+  signals?: ExchangeEvalResult["report"][number]["signals"];
+}) {
+  if (!signals) return <span className="text-xs text-muted-foreground">нет данных</span>;
+
+  return (
+    <div className="flex max-w-[360px] flex-wrap gap-1">
+      <SignalBadge ok={signals.reachedQuote} label="курс" />
+      <SignalBadge ok={signals.requisitesIssued} label="реквизиты" />
+      <SignalBadge ok={signals.payoutDelivered} label="выдача" neutral />
+      <SignalBadge ok={!signals.prematureOperator} label="handoff" />
+      {signals.orderStatus && <Badge variant="outline">order: {signals.orderStatus}</Badge>}
+      {signals.assistantTurns !== undefined && (
+        <Badge variant="secondary">{signals.assistantTurns} turns</Badge>
+      )}
+    </div>
+  );
+}
+
+function SignalBadge({
+  ok,
+  label,
+  neutral = false,
+}: {
+  ok: boolean;
+  label: string;
+  neutral?: boolean;
+}) {
+  return (
+    <Badge variant={neutral ? "outline" : ok ? "success" : "destructive"} className="gap-1">
+      {ok ? <CheckCircleIcon className="size-3" /> : <XCircleIcon className="size-3" />}
+      {label}
+    </Badge>
   );
 }
 
