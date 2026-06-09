@@ -96,6 +96,25 @@ AI собирает по описанию бизнеса, а бот исполн
 LLM подменяется фейковым `resolveChat` (детерминированный `complete()`), поэтому тесты
 проверяют нашу логику парсинга/нормализации/валидации, а не модель.
 
+Опциональная live-проверка модели (не CI, стоит токены):
+
+```bash
+LLM_PROVIDER=openai LLM_MODEL=gpt-4o-mini LLM_API_KEY=sk-... \
+  bun run --cwd apps/api eval:funnel-builder --output=tmp/funnel-eval.json
+```
+
+Или через tenant BYOK-конфиг:
+
+```bash
+DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine \
+PLATFORM_MASTER_KEY=<hex> \
+  bun run --cwd apps/api eval:funnel-builder --tenant=<slug>
+```
+
+Eval гоняет линейный, clear/fulfill-heavy exchange и multi-request concierge
+сценарии, скорит backbone/branch contract/поля/goal+guidance и сохраняет
+конкретные невалидные outputs без секретов.
+
 ## Дальше
 
 Поведенческий слой Phase 2 и мульти-запрос — **готовы** (см. выше). Открытые направления:
