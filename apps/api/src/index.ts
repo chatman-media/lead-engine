@@ -480,10 +480,6 @@ async function main() {
   app.route("/", makeAdminDashboardRoutes({ db }));
   log.info("admin-dashboard route enabled");
 
-  // Quality lab exports - self-play / eval artifacts for dashboards and CI.
-  app.route("/", makeAdminQualityRoutes({ db }));
-  log.info("admin-quality routes enabled (self-play JSONL export)");
-
   // Vacancies CRUD.
   app.route("/", makeAdminVacanciesRoutes({ db }));
   log.info("admin-vacancies routes enabled");
@@ -564,6 +560,18 @@ async function main() {
         .catch(() => {});
     },
   );
+
+  // Quality lab exports - self-play / eval artifacts for dashboards and CI.
+  app.route(
+    "/",
+    makeAdminQualityRoutes({
+      db,
+      onReload: strategyBundle
+        ? (tenantId) => strategyBundle.invalidateStyleFor(tenantId)
+        : undefined,
+    }),
+  );
+  log.info("admin-quality routes enabled (self-play JSONL export)");
 
   // Agentic tool configuration (booking link, etc.).
   app.route(
