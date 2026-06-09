@@ -1,6 +1,7 @@
 import type { ChannelAdapter } from "@chatman-media/channel-core";
 import { MessengerAdapter } from "@chatman-media/channel-facebook";
 import { TelegramBotAdapter } from "@chatman-media/channel-telegram";
+import { VkAdapter } from "@chatman-media/channel-vk";
 import { WhatsAppCloudAdapter } from "@chatman-media/channel-whatsapp";
 import { type Db, getDecryptedSecret } from "@chatman-media/conversation-engine";
 import { channels, tenants } from "@chatman-media/storage";
@@ -16,7 +17,7 @@ export interface WorkerChannelEntry {
   channelDbId: number;
   tenantId: number;
   tenantSlug: string;
-  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "web";
+  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "vk" | "web";
   adapter: ChannelAdapter;
 }
 
@@ -161,6 +162,18 @@ export class WorkerChannelRegistry {
         );
         if (!token) continue;
         adapter = new MessengerAdapter({ id: String(row.channelId), pageAccessToken: token });
+      } else if (row.kind === "vk") {
+        const token = await this.resolveCredential(
+          db,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          opts.masterKeyHex,
+          opts.onWarn,
+          "VK_ACCESS_TOKEN",
+        );
+        if (!token) continue;
+        adapter = new VkAdapter({ id: String(row.channelId), accessToken: token });
       } else {
         // telegram_userbot / web держат pinned-соединение в apps/api.
         continue;

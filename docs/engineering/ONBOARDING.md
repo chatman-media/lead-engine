@@ -267,6 +267,64 @@ curl -X POST http://localhost:3000/api/admin/channels/facebook \
   -d '{"pageAccessToken":"EAAJZB..."}'
 ```
 
+### 2bc. VK Messenger (Callback API — manual)
+
+VK-канал работает как бот сообщества: входящие приходят через Callback API,
+исходящие отправляются через `messages.send`. MVP поддерживает private
+community messages и text-only ответы; личные аккаунты VK, рассылки, клавиатуры
+и media-upload не входят в первый срез.
+
+1. Открыть VK community → **Управление** → **Работа с API**
+2. Создать/скопировать **ключ доступа сообщества** с правами на сообщения
+3. В **Callback API** скопировать **строку, которую должен вернуть сервер**
+   (`confirmationCode`) и, опционально, задать **секретный ключ**
+4. Вставить `Group ID`, access token, confirmation code и secret key во вкладку
+   **VK** на `/channels`
+
+Backend (`POST /api/admin/channels/vk`):
+
+```
+1. groupId/accessToken/confirmationCode required → 400 если пусто
+2. VkClient.getGroupInfo() — validate group/token через VK API:
+   - 401 если bad token / insufficient permissions
+   - 404 если groupId не найден
+3. Quota check → 402 если over limit
+4. encrypt token → tenant_secrets[channel_vk_<groupId>]
+   (+ confirmationCode / secretKey в tenant_secrets)
+5. upsert channels(kind=vk, external_id=groupId,
+                   metadata: { groupName, screenName })
+6. recordAudit + reloadChannels
+```
+
+Response содержит `webhookSetupHint`:
+
+```json
+{
+  "webhookSetupHint": {
+    "url": "https://api.example.com/webhook/vk/acme",
+    "confirmationCode": "<VK_CONFIRMATION_CODE>",
+    "secretKeyHint": "Secret key сохранён — payload.secret будет проверяться",
+    "eventTypes": ["message_new"]
+  }
+}
+```
+
+В VK Callback API settings:
+- **Адрес** = `webhookSetupHint.url`
+- Сервер должен вернуть `webhookSetupHint.confirmationCode` на confirmation
+- Включить event type `message_new`
+- Если задан secret key, VK будет присылать его в `payload.secret`; Lead Engine
+  проверит его до pipeline
+
+curl:
+
+```sh
+curl -X POST http://localhost:3000/api/admin/channels/vk \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"groupId":"123456789","accessToken":"vk1.a...","confirmationCode":"abcd","secretKey":"optional"}'
+```
+
 ### 2c. Telegram userbot (личный аккаунт, MTProto)
 
 Помимо бота, тенант может подключить **личный аккаунт** (userbot) для
@@ -768,6 +826,9 @@ Usage:
 | WhatsApp POST → 401 "Meta rejected" | Bad access token (истёк / нет permissions) | Сгенерировать permanent system user token в Meta dashboard |
 | WhatsApp POST → 404 "phoneNumberId not found" | Опечатка в phoneNumberId или token не от этой WABA | Скопировать `Phone number ID` точно из API Setup |
 | WhatsApp webhook не приходит | Meta dashboard webhook не настроен | Скопировать `webhookSetupHint.url` + `verifyToken` в Meta dashboard → Webhooks |
+| VK POST → 401 "VK rejected" | Bad community token или нет прав на сообщения | Создать новый community access token в VK → Работа с API |
+| VK webhook не проходит confirmation | Неверный Group ID или confirmation code не сохранён | Скопировать `webhookSetupHint.url` + `confirmationCode` в VK Callback API |
+| VK callback → 401 "invalid secret" | Secret key в VK settings не совпадает с сохранённым | Обновить VK secret key на вкладке `/channels` или в VK settings |
 | POST /channels → 402 "quota_exceeded" | План free лимит 1 канал | Upgrade на Starter / Pro через PlanWidget или DELETE старого канала |
 | POST /kb/documents → 402 | Free план — 50 docs cap | Удалить старые docs или upgrade plan |
 | Stripe Checkout → 503 "stripe_not_configured" | `STRIPE_SECRET_KEY` пустой на платформе | Set env STRIPE_SECRET_KEY + STRIPE_PRICE_STARTER + STRIPE_PRICE_PRO |

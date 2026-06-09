@@ -62,6 +62,43 @@ const fakeTelegramFetch = (async (
   init?: RequestInit,
 ): Promise<Response> => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  // ── VK API intercept ─────────────────────────────────────────────────
+  // Pattern: https://api.vk.com/method/groups.getById
+  if (url.startsWith("https://api.vk.com/method/")) {
+    const rawBody = init?.body;
+    const form =
+      rawBody instanceof URLSearchParams
+        ? rawBody
+        : new URLSearchParams(typeof rawBody === "string" ? rawBody : "");
+    const token = form.get("access_token") ?? "";
+    const groupId = form.get("group_id") ?? "";
+    if (token.includes("bad-vk-token")) {
+      return new Response(
+        JSON.stringify({
+          error: { error_code: 5, error_msg: "User authorization failed" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (groupId === "999999") {
+      return new Response(
+        JSON.stringify({ error: { error_code: 100, error_msg: "group not found" } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        response: [
+          {
+            id: Number(groupId),
+            name: "Acme VK",
+            screen_name: "acme_vk",
+          },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
   // ── WhatsApp Meta Graph intercept ────────────────────────────────────
   // Pattern: https://graph.facebook.com/v18.0/<phone_number_id>
   if (url.startsWith("https://graph.facebook.com/")) {
@@ -765,6 +802,106 @@ describe("POST /api/admin/channels/facebook", () => {
       .where(eq(tenantSecrets.tenantId, tenantIdA));
     const keys = secrets.map((s) => s.key);
     expect(keys.some((k) => k.startsWith("channel_facebook_"))).toBe(true);
+  });
+});
+
+describe("POST /api/admin/channels/vk", () => {
+  it("без auth → 401", async () => {
+    if (!sql) return;
+    const res = await app.request("/api/admin/channels/vk", { method: "POST" });
+    expect(res.status).toBe(401);
+  });
+
+  it("invalid json → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/vk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{bad",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("без confirmationCode → 400", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/vk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groupId: "123456", accessToken: "vk-good-token" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("VK отклонил токен → 401", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/vk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        groupId: "123456",
+        accessToken: "bad-vk-token",
+        confirmationCode: "confirm-123",
+      }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("VK не нашёл группу → 404", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/vk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        groupId: "999999",
+        accessToken: "vk-good-token",
+        confirmationCode: "confirm-123",
+      }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("happy: создаёт vk-канал, шифрует токен + callback secrets", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/channels/vk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        groupId: "123456",
+        accessToken: "vk-good-token",
+        confirmationCode: "confirm-123",
+        secretKey: "secret-123",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      groupId: string;
+      groupName?: string;
+      screenName?: string;
+      webhookSetupHint?: { url: string; confirmationCode: string; eventTypes: string[] };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.groupId).toBe("123456");
+    expect(body.groupName).toBe("Acme VK");
+    expect(body.screenName).toBe("acme_vk");
+    expect(body.webhookSetupHint?.url).toContain("/webhook/vk/");
+    expect(body.webhookSetupHint?.confirmationCode).toBe("confirm-123");
+    expect(body.webhookSetupHint?.eventTypes).toEqual(["message_new"]);
+
+    const chRows = await db
+      .select({ kind: channels.kind, externalId: channels.externalId })
+      .from(channels)
+      .where(and(eq(channels.tenantId, tenantIdA), eq(channels.kind, "vk")));
+    expect(chRows.some((r) => r.externalId === "123456")).toBe(true);
+
+    const secrets = await db
+      .select({ key: tenantSecrets.key })
+      .from(tenantSecrets)
+      .where(eq(tenantSecrets.tenantId, tenantIdA));
+    const keys = secrets.map((s) => s.key);
+    expect(keys).toContain("channel_vk_123456");
+    expect(keys).toContain("vk_confirmation_code");
+    expect(keys).toContain("vk_secret_key");
   });
 });
 

@@ -18,6 +18,7 @@
 [![Telegram](https://img.shields.io/badge/Telegram-bot%20%2B%20userbot-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
 [![WhatsApp](https://img.shields.io/badge/WhatsApp-Cloud%20API-25D366?logo=whatsapp&logoColor=white)](https://developers.facebook.com/docs/whatsapp)
 [![Messenger](https://img.shields.io/badge/Messenger-Send%20API-0084FF?logo=messenger&logoColor=white)](https://developers.facebook.com/docs/messenger-platform)
+[![VK](https://img.shields.io/badge/VK-Callback%20API-0077FF?logo=vk&logoColor=white)](https://dev.vk.com/api/callback/getting-started)
 [![Stripe](https://img.shields.io/badge/Stripe-billing-635BFF?logo=stripe&logoColor=white)](https://stripe.com/)
 
 Multi-tenant SaaS · BYOK LLM · per-tenant RAG · sales methodologies (SPIN / NEPQ / AIDA) · operator takeover
@@ -29,7 +30,7 @@ Multi-tenant SaaS · BYOK LLM · per-tenant RAG · sales methodologies (SPIN / N
 ---
 
 A **multi-tenant SaaS** that replies to inbound leads in ~30 seconds across
-Telegram, WhatsApp, Messenger, and a web widget — it walks a person from "just curious"
+Telegram, WhatsApp, Messenger, VK, and a web widget — it walks a person from "just curious"
 to a submitted application/order and hands hot leads off to an operator.
 Driven by sales methodologies (SPIN, NEPQ, AIDA), not a FAQ bot.
 
@@ -95,13 +96,13 @@ Full walkthrough: [docs/engineering/ONBOARDING.md](docs/engineering/ONBOARDING.m
 
 | App | What it is |
 |---|---|
-| `apps/api` | HTTP server: webhook handlers (telegram / whatsapp / stripe), `/ws/:slug` (web), the full admin API, `/metrics`, `/healthz` |
+| `apps/api` | HTTP server: webhook handlers (telegram / whatsapp / facebook / vk / stripe), `/ws/:slug` (web), the full admin API, `/metrics`, `/healthz` |
 | `apps/worker` | Outbound dispatcher (`SKIP LOCKED` queue), channel-reload polling, cron jobs |
 | `apps/admin-ui` | React 19 + Vite SPA (Tailwind v4 + shadcn/ui) — onboarding wizard, dashboard, channels, conversations, leads, funnel builder, audit, … |
 | `apps/vertical-*` | Vertical templates (`exchange` live, plus real-estate / recruitment / saas / video) — loaded via `packages/verticals`, not deployed |
 
 Domain logic lives in `packages/*` (published to npm under `@chatman-media`):
-`storage` (Drizzle schema + migrations), `channel-{core,telegram,whatsapp,facebook,web}`,
+`storage` (Drizzle schema + migrations), `channel-{core,telegram,whatsapp,facebook,vk,web}`,
 `llm-router`, `kb` (RAG), `sales`, `conversation-engine`, `verticals`,
 `observability`. Dependency graph and the split-tx pipeline are documented in
 [docs/engineering/ARCHITECTURE.md](docs/engineering/ARCHITECTURE.md).
@@ -162,6 +163,8 @@ stored AES-256-GCM encrypted in `tenant_secrets`.
 | `telegram_bot` | webhook + secret-token header | `apps/worker` → Bot API |
 | `telegram_userbot` | MTProto receive loop (apps/api) | in-process |
 | `whatsapp` | webhook + `X-Hub-Signature-256` | `apps/worker` → Meta Graph |
+| `facebook` | Meta webhook + `X-Hub-Signature-256` | `apps/worker` → Messenger Send API |
+| `vk` | VK Callback API | `apps/worker` → VK `messages.send` |
 | `web` | WebSocket `/ws/:slug` | in-process |
 
 Inbound is validated (per-channel signature → rate limit), persisted in tx1,
@@ -223,7 +226,7 @@ role. Full production checklist: [docs/operations/SERVER_RUNBOOK.md](docs/operat
 | | **Lead Engine** | Intercom Fin | Chatbase | Decagon |
 |---|:---:|:---:|:---:|:---:|
 | Telegram-native | ✅ | ❌ | ❌ | ❌ |
-| WhatsApp / Web | ✅ | ✅ | web | web |
+| WhatsApp / VK / Web | ✅ | ✅ | web | web |
 | BYOK LLM | ✅ | ❌ | partial | ❌ |
 | Operator takeover | ✅ | ✅ | ❌ | ✅ |
 | Lead pipeline + funnel builder | ✅ | ❌ | ❌ | ❌ |

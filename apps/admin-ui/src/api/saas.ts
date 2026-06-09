@@ -124,7 +124,13 @@ export interface UpsertLlmConfigInput {
   timeoutMs?: number;
 }
 
-export type ChannelKind = "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "web";
+export type ChannelKind =
+  | "telegram_bot"
+  | "telegram_userbot"
+  | "whatsapp"
+  | "facebook"
+  | "vk"
+  | "web";
 export type ChannelStatus = "active" | "paused" | "error";
 
 export interface ChannelItem {
@@ -192,6 +198,22 @@ export interface CreateFacebookChannelResult {
     url: string;
     verifyToken: string;
     appSecretHint: string;
+  };
+  reloadError?: string;
+}
+
+export interface CreateVkChannelResult {
+  ok: boolean;
+  id: number;
+  updated: boolean;
+  groupId: string;
+  groupName?: string;
+  screenName?: string;
+  webhookSetupHint?: {
+    url: string;
+    confirmationCode: string;
+    secretKeyHint: string;
+    eventTypes: string[];
   };
   reloadError?: string;
 }
@@ -1654,6 +1676,17 @@ export const saas = {
     appSecret?: string;
   }) {
     return request<CreateFacebookChannelResult>("/api/admin/channels/facebook", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  createVkChannel(input: {
+    groupId: string;
+    accessToken: string;
+    confirmationCode?: string;
+    secretKey?: string;
+  }) {
+    return request<CreateVkChannelResult>("/api/admin/channels/vk", {
       method: "POST",
       body: JSON.stringify(input),
     });

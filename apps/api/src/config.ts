@@ -58,6 +58,16 @@ export interface ApiConfig {
    */
   facebookAppSecret: string;
   /**
+   * Fallback confirmation code для VK Callback API setup. Обычно хранится
+   * per-tenant в tenant_secrets после POST /api/admin/channels/vk.
+   */
+  vkConfirmationCode: string;
+  /**
+   * Fallback secret key для VK Callback API payload.secret. Пусто — secret
+   * check пропускается для тенантов без per-tenant secret.
+   */
+  vkSecretKey: string;
+  /**
    * Stripe webhook signing secret (whsec_...) — опционально. Если пусто,
    * /webhook/stripe не подключается и Stripe-billing просто не работает.
    */
@@ -253,6 +263,8 @@ export function loadApiConfig(): ApiConfig {
     whatsappAppSecret: process.env.WHATSAPP_APP_SECRET ?? "",
     facebookVerifyToken: process.env.FACEBOOK_VERIFY_TOKEN ?? "",
     facebookAppSecret: process.env.FACEBOOK_APP_SECRET ?? "",
+    vkConfirmationCode: process.env.VK_CONFIRMATION_CODE ?? "",
+    vkSecretKey: process.env.VK_SECRET_KEY ?? "",
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
     healthCheckTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "2000", 10),
     llm: {
