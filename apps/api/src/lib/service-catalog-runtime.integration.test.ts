@@ -17,13 +17,14 @@ import {
 	stageFields,
 	tryConnectToPg,
 } from "@chatman-media/storage";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import postgres, { type Sql } from "postgres";
 import { makeAuthRoutes } from "../routes/auth.ts";
 import {
 	deterministicCatalogMatches,
+	extractInboundText,
 	makeServiceCatalogRuntime,
 } from "./service-catalog-runtime.ts";
 
@@ -49,6 +50,8 @@ interface Fixture {
 	contactId: number;
 	stageId: number;
 	transferServiceId: number;
+	transferSlug: string;
+	cleaningSlug: string;
 }
 
 function expectInserted<T>(row: T | undefined, label: string): T {
@@ -92,6 +95,9 @@ afterAll(async () => {
 async function seedFixture(): Promise<Fixture> {
 	return withTenant(db as Db, tenantId, async (tx) => {
 		const now = 1_800_000_000;
+		const suffix = Math.random().toString(36).slice(2, 8);
+		const transferSlug = `transfer_provider_${suffix}`;
+		const cleaningSlug = `cleaning_provider_${suffix}`;
 		const [insertedContact] = await tx
 			.insert(contacts)
 			.values({
@@ -191,7 +197,7 @@ async function seedFixture(): Promise<Fixture> {
 		await tx.insert(serviceCatalogItems).values([
 			{
 				tenantId,
-				slug: "transfer_provider",
+				slug: transferSlug,
 				name: "Трансфер и водитель",
 				category: "Трансфер",
 				routeType: "partner_service",
@@ -207,7 +213,7 @@ async function seedFixture(): Promise<Fixture> {
 			},
 			{
 				tenantId,
-				slug: "cleaning_provider",
+				slug: cleaningSlug,
 				name: "Уборка и laundry",
 				category: "Уборка",
 				routeType: "manual",
@@ -223,11 +229,105 @@ async function seedFixture(): Promise<Fixture> {
 			contactId: contact.id,
 			stageId: stage.id,
 			transferServiceId: transferService.id,
+			transferSlug,
+			cleaningSlug,
 		};
 	});
 }
 
 describe("service catalog runtime", () => {
+	it("extractInboundText combines text and captions", () => {
+		expect(
+			extractInboundText({
+				channelId: "telegram",
+				externalUserId: "u1",
+				externalMessageId: "m1",
+				parts: [
+					{ kind: "text", text: "Нужен трансфер" },
+					{
+						kind: "photo",
+						mediaRef: { channelId: "telegram", externalRef: "file-id" },
+						caption: "из аэропорта завтра",
+					},
+				],
+				receivedAt: 1,
+				raw: {},
+			}),
+		).toBe("Нужен трансфер\nиз аэропорта завтра");
+		expect(
+			extractInboundText({
+				channelId: "telegram",
+				externalUserId: "u1",
+				externalMessageId: "m2",
+				parts: [
+					{
+						kind: "photo",
+						mediaRef: { channelId: "telegram", externalRef: "file-id-2" },
+					},
+				],
+				receivedAt: 1,
+				raw: {},
+			}),
+		).toBe("");
+	});
+
+	it("returns empty result for blank text and tenants without active catalog", async () => {
+		if (!sql) return;
+		const [blankContact] = await withTenant(db as Db, tenantId, (tx) =>
+			tx
+				.insert(contacts)
+				.values({
+					tenantId,
+					displayName: "Blank Text",
+					createdAt: 1_800_000_000,
+					updatedAt: 1_800_000_000,
+				})
+				.returning({ id: contacts.id }),
+		);
+		const runtime = makeServiceCatalogRuntime();
+		await expect(
+			runtime.extract({
+				db: db as Db,
+				tenantId,
+				contactId: expectInserted(blankContact, "blank contact").id,
+				text: "   ",
+			}),
+		).resolves.toEqual({ created: [], skipped: [] });
+
+		const app = new Hono();
+		// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic in test harness
+		app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+		const res = await app.request("/api/auth/signup", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				email: `service-runtime-empty-${Date.now()}@demo.io`,
+				password: "strong-pwd-12345",
+			}),
+		});
+		const body = (await res.json()) as { admin: { tenantId: number } };
+		const emptyTenantId = body.admin.tenantId;
+		const [contact] = await withTenant(db as Db, emptyTenantId, (tx) =>
+			tx
+				.insert(contacts)
+				.values({
+					tenantId: emptyTenantId,
+					displayName: "No Catalog",
+					createdAt: 1_800_000_000,
+					updatedAt: 1_800_000_000,
+				})
+				.returning({ id: contacts.id }),
+		);
+		await expect(
+			runtime.extract({
+				db: db as Db,
+				tenantId: emptyTenantId,
+				contactId: expectInserted(contact, "empty tenant contact").id,
+				text: "нужен трансфер",
+			}),
+		).resolves.toEqual({ created: [], skipped: [] });
+	});
+
 	it("matches multiple services deterministically from one message", () => {
 		const matches = deterministicCatalogMatches(
 			"нужен трансфер из аэропорта и уборка после checkout",
@@ -253,6 +353,33 @@ describe("service catalog runtime", () => {
 		]);
 	});
 
+	it("dedupes catalog matches by request type and ignores generic tokens", () => {
+		const matches = deterministicCatalogMatches("нужен водитель в аэропорт", [
+			{
+				id: 1,
+				slug: "transfer_main",
+				name: "Трансфер",
+				category: "service",
+			},
+			{
+				id: 2,
+				slug: "transfer_backup",
+				name: "Airport pickup",
+				category: "provider",
+			},
+			{
+				id: 3,
+				slug: "generic_service",
+				name: "Custom service provider",
+				category: "services",
+			},
+		]);
+
+		expect(matches).toHaveLength(1);
+		expect(matches[0]?.requestType).toBe("transfer");
+		expect(matches[0]?.serviceSlug).toBe("transfer_main");
+	});
+
 	it("creates one lead per requested service and a partner deal for provider services", async () => {
 		if (!sql) return;
 		const fixture = await seedFixture();
@@ -264,7 +391,7 @@ describe("service catalog runtime", () => {
 						JSON.stringify({
 							requests: [
 								{
-									slug: "transfer_provider",
+									slug: fixture.transferSlug,
 									confidence: 0.99,
 									fields: {
 										route: "HKT airport -> Kata",
@@ -272,7 +399,7 @@ describe("service catalog runtime", () => {
 									},
 								},
 								{
-									slug: "cleaning_provider",
+									slug: fixture.cleaningSlug,
 									confidence: 0.98,
 									fields: { address: "Villa 7" },
 								},
@@ -290,8 +417,8 @@ describe("service catalog runtime", () => {
 		});
 
 		expect(result.created.map((item) => item.serviceSlug).sort()).toEqual([
-			"cleaning_provider",
-			"transfer_provider",
+			fixture.cleaningSlug,
+			fixture.transferSlug,
 		]);
 		expect(result.skipped).toHaveLength(0);
 
@@ -376,5 +503,531 @@ describe("service catalog runtime", () => {
 			"open_request_exists",
 			"open_request_exists",
 		]);
+	});
+
+	it("uses LLM JSON embedded in text, display-name field mapping, and webhook handoff", async () => {
+		if (!sql) return;
+		const fixture = await seedFixture();
+		await withTenant(db as Db, tenantId, async (tx) => {
+			await tx.insert(serviceCatalogItems).values({
+				tenantId,
+				slug: "cleaning_webhook",
+				name: "Webhook cleaning",
+				category: "Уборка",
+				routeType: "webhook",
+				webhookUrl: "https://hooks.example.test/service",
+				metadataJson: JSON.stringify({
+					requiredFields: ["Route", "Pickup time"],
+				}),
+				isActive: true,
+				sortOrder: 5,
+				createdAt: 1_800_000_000,
+				updatedAt: 1_800_000_000,
+			});
+		});
+		const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+		const runtime = makeServiceCatalogRuntime({
+			now: () => 1_800_000_200,
+			fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+				calls.push({
+					url: String(url),
+					body: JSON.parse(String(init?.body ?? "{}")) as Record<
+						string,
+						unknown
+					>,
+				});
+				return new Response("ok");
+			}) as typeof fetch,
+			resolveChat: () =>
+				({
+					complete: async () =>
+						`Ответ:\n${JSON.stringify({
+							requests: [
+								{
+									slug: "cleaning_webhook",
+									confidence: 0.9,
+									fields: {
+										Route: "Villa 7",
+										"Pickup time": "today 15:00",
+										unknown: "ignored",
+									},
+									note: "urgent".repeat(120),
+								},
+							],
+						})}`,
+				}) as never,
+		});
+
+		const result = await runtime.extract({
+			db: db as Db,
+			tenantId,
+			contactId: fixture.contactId,
+			conversationId: 777,
+			text: "нужна уборка сегодня",
+			inbound: {
+				channelId: "telegram",
+				externalUserId: "u1",
+				externalMessageId: "msg-777",
+				parts: [{ kind: "text", text: "нужна уборка сегодня" }],
+				receivedAt: 1_800_000_199,
+				raw: { update_id: 777 },
+			},
+		});
+
+		expect(result.created).toHaveLength(1);
+		expect(result.created[0]?.routeType).toBe("webhook");
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.url).toBe("https://hooks.example.test/service");
+		expect(calls[0]?.body).toMatchObject({
+			event: "service_request.created",
+			tenantId,
+			contactId: fixture.contactId,
+			conversationId: 777,
+			requestType: "cleaning",
+			service: {
+				slug: "cleaning_webhook",
+				category: "Уборка",
+			},
+		});
+
+		const [createdLead] = await withTenant(db as Db, tenantId, (tx) =>
+			tx
+				.select({ id: leads.id, intakeJson: leads.intakeJson })
+				.from(leads)
+				.where(
+					and(
+						eq(leads.tenantId, tenantId),
+						eq(leads.userId, fixture.contactId),
+						eq(leads.requestType, "cleaning"),
+					),
+				)
+				.orderBy(desc(leads.id))
+				.limit(1),
+		);
+		const webhookLead = expectInserted(createdLead, "webhook lead");
+		expect(JSON.parse(webhookLead.intakeJson ?? "{}")).toMatchObject({
+			externalMessageId: "msg-777",
+			conversationId: 777,
+			matchSource: "llm",
+		});
+		const values = await withTenant(db as Db, tenantId, (tx) =>
+			tx
+				.select({
+					slug: stageFields.slug,
+					valueJson: leadFieldValues.valueJson,
+				})
+				.from(leadFieldValues)
+				.innerJoin(stageFields, eq(stageFields.id, leadFieldValues.fieldId))
+				.where(
+					and(
+						eq(leadFieldValues.tenantId, tenantId),
+						eq(leadFieldValues.leadId, webhookLead.id),
+					),
+				),
+		);
+		const bySlug = new Map(
+			values.map((value) => [value.slug, JSON.parse(value.valueJson)]),
+		);
+		expect(bySlug.get("route")).toBe("Villa 7");
+		expect(bySlug.get("pickup_time")).toBe("today 15:00");
+		expect([...bySlug.keys()]).not.toContain("unknown");
+	});
+
+	it("routes funnel services to the first stage of the configured funnel", async () => {
+		if (!sql) return;
+		const fixture = await seedFixture();
+		const now = 1_800_000_300;
+		const [targetFunnel] = await withTenant(db as Db, tenantId, async (tx) => {
+			const [funnel] = await tx
+				.insert(funnels)
+				.values({
+					tenantId,
+					slug: `visa_${Math.random().toString(36).slice(2, 8)}`,
+					stagesJson: "[]",
+					isActive: true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: funnels.id });
+			if (!funnel) throw new Error("funnel insert failed");
+			await tx.insert(stageDefinitions).values({
+				tenantId,
+				funnelId: funnel.id,
+				slug: "visa_intake",
+				displayName: "Visa intake",
+				position: 0,
+				kind: "intake",
+				stageType: "form_fill",
+				nextStages: [],
+				createdAt: now,
+				updatedAt: now,
+			});
+			await tx.insert(serviceCatalogItems).values({
+				tenantId,
+				slug: "visa_service",
+				name: "Visa service",
+				category: "Visa",
+				routeType: "funnel",
+				funnelId: funnel.id,
+				metadataJson: "{}",
+				isActive: true,
+				sortOrder: 1,
+				createdAt: now,
+				updatedAt: now,
+			});
+			return [{ id: funnel.id }];
+		});
+
+		const runtime = makeServiceCatalogRuntime({
+			now: () => now + 1,
+			resolveChat: () =>
+				({
+					complete: async () =>
+						JSON.stringify({
+							requests: [{ slug: "visa_service", confidence: 0.99 }],
+						}),
+				}) as never,
+		});
+		const result = await runtime.extract({
+			db: db as Db,
+			tenantId,
+			contactId: fixture.contactId,
+			text: "нужна помощь с визой",
+		});
+
+		expect(result.created).toHaveLength(1);
+		expect(result.created[0]?.serviceSlug).toBe("visa_service");
+		const [lead] = await withTenant(db as Db, tenantId, (tx) =>
+			tx
+				.select({
+					state: leads.state,
+					stageDefinitionId: leads.stageDefinitionId,
+				})
+				.from(leads)
+				.innerJoin(
+					stageDefinitions,
+					eq(stageDefinitions.id, leads.stageDefinitionId),
+				)
+				.where(
+					and(
+						eq(leads.tenantId, tenantId),
+						eq(leads.userId, fixture.contactId),
+						eq(stageDefinitions.funnelId, targetFunnel.id),
+					),
+				)
+				.limit(1),
+		);
+		expect(lead?.state).toBe("visa_intake");
+		expect(lead?.stageDefinitionId).toBeGreaterThan(0);
+	});
+
+	it("uses partner service stage target before partner funnel fallback", async () => {
+		if (!sql) return;
+		const fixture = await seedFixture();
+		const now = 1_800_000_500;
+		const suffix = Math.random().toString(36).slice(2, 8);
+		const setup = await withTenant(db as Db, tenantId, async (tx) => {
+			const [partner] = await tx
+				.insert(partners)
+				.values({
+					tenantId,
+					name: `Coverage Partner ${suffix}`,
+					status: "active",
+					defaultCommissionPct: 8,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: partners.id });
+			const partnerRow = expectInserted(partner, "partner");
+
+			const [stageFunnel] = await tx
+				.insert(funnels)
+				.values({
+					tenantId,
+					slug: `stage_target_${suffix}`,
+					stagesJson: "[]",
+					isActive: true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: funnels.id });
+			const stageFunnelRow = expectInserted(stageFunnel, "stage target funnel");
+			const [directStage] = await tx
+				.insert(stageDefinitions)
+				.values({
+					tenantId,
+					funnelId: stageFunnelRow.id,
+					slug: `partner_stage_${suffix}`,
+					displayName: "Partner stage target",
+					position: 1,
+					kind: "active",
+					stageType: "external_approval",
+					phase: "offer",
+					nextStages: [],
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: stageDefinitions.id, slug: stageDefinitions.slug });
+			const directStageRow = expectInserted(directStage, "direct stage");
+
+			const [fallbackFunnel] = await tx
+				.insert(funnels)
+				.values({
+					tenantId,
+					slug: `funnel_target_${suffix}`,
+					stagesJson: "[]",
+					isActive: true,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: funnels.id });
+			const fallbackFunnelRow = expectInserted(
+				fallbackFunnel,
+				"fallback funnel",
+			);
+			const [fallbackStage] = await tx
+				.insert(stageDefinitions)
+				.values({
+					tenantId,
+					funnelId: fallbackFunnelRow.id,
+					slug: `partner_funnel_${suffix}`,
+					displayName: "Partner funnel target",
+					position: 1,
+					kind: "active",
+					stageType: "awaiting_operator",
+					phase: "offer",
+					nextStages: [],
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: stageDefinitions.id, slug: stageDefinitions.slug });
+			const fallbackStageRow = expectInserted(fallbackStage, "fallback stage");
+
+			const [stageService] = await tx
+				.insert(partnerServices)
+				.values({
+					tenantId,
+					partnerId: partnerRow.id,
+					name: `Massage approval ${suffix}`,
+					category: "Massage",
+					stageDefinitionId: directStageRow.id,
+					commissionPct: 5,
+					notes: JSON.stringify({
+						handoffUrl: "https://partners.example.test/stage",
+					}),
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: partnerServices.id });
+			const stageServiceRow = expectInserted(stageService, "stage service");
+			const [funnelService] = await tx
+				.insert(partnerServices)
+				.values({
+					tenantId,
+					partnerId: partnerRow.id,
+					name: `Chef dinner ${suffix}`,
+					category: "Food",
+					funnelId: fallbackFunnelRow.id,
+					commissionPct: 6,
+					createdAt: now,
+					updatedAt: now,
+				})
+				.returning({ id: partnerServices.id });
+			const funnelServiceRow = expectInserted(funnelService, "funnel service");
+
+			await tx.insert(serviceCatalogItems).values([
+				{
+					tenantId,
+					slug: `massage_stage_${suffix}`,
+					name: "Массаж с подтверждением",
+					category: "Massage",
+					routeType: "partner_service",
+					partnerServiceId: stageServiceRow.id,
+					metadataJson: "{}",
+					isActive: true,
+					sortOrder: 1,
+					createdAt: now,
+					updatedAt: now,
+				},
+				{
+					tenantId,
+					slug: `chef_dinner_${suffix}`,
+					name: "Шеф ужин",
+					category: "Food",
+					routeType: "partner_service",
+					partnerServiceId: funnelServiceRow.id,
+					metadataJson: "{}",
+					isActive: true,
+					sortOrder: 2,
+					createdAt: now,
+					updatedAt: now,
+				},
+			]);
+
+			return {
+				stageSlug: `massage_stage_${suffix}`,
+				funnelSlug: `chef_dinner_${suffix}`,
+				directStageId: directStageRow.id,
+				directStageSlug: directStageRow.slug,
+				fallbackStageId: fallbackStageRow.id,
+				fallbackStageSlug: fallbackStageRow.slug,
+			};
+		});
+		const runtime = makeServiceCatalogRuntime({
+			now: () => now + 1,
+			resolveChat: () =>
+				({
+					complete: async () =>
+						JSON.stringify({
+							requests: [
+								{ slug: setup.stageSlug, confidence: 0.99 },
+								{ slug: setup.funnelSlug, confidence: 0.99 },
+							],
+						}),
+				}) as never,
+		});
+
+		const result = await runtime.extract({
+			db: db as Db,
+			tenantId,
+			contactId: fixture.contactId,
+			text: "нужен массаж и ужин с шефом",
+		});
+
+		expect(result.created.map((item) => item.serviceSlug).sort()).toEqual([
+			setup.funnelSlug,
+			setup.stageSlug,
+		]);
+		const leadRows = await withTenant(db as Db, tenantId, (tx) =>
+			tx
+				.select({
+					id: leads.id,
+					state: leads.state,
+					stageDefinitionId: leads.stageDefinitionId,
+					requestType: leads.requestType,
+					intakeJson: leads.intakeJson,
+				})
+				.from(leads)
+				.where(
+					and(
+						eq(leads.tenantId, tenantId),
+						eq(leads.userId, fixture.contactId),
+					),
+				),
+		);
+		const bySlug = new Map(
+			leadRows.map((lead) => [
+				JSON.parse(lead.intakeJson ?? "{}").serviceSlug as string,
+				lead,
+			]),
+		);
+		expect(bySlug.get(setup.stageSlug)).toMatchObject({
+			state: setup.directStageSlug,
+			stageDefinitionId: setup.directStageId,
+			requestType: "massage",
+		});
+		expect(bySlug.get(setup.funnelSlug)).toMatchObject({
+			state: setup.fallbackStageSlug,
+			stageDefinitionId: setup.fallbackStageId,
+			requestType: "food",
+		});
+
+		const stageLead = expectInserted(
+			bySlug.get(setup.stageSlug),
+			"stage target lead",
+		);
+		const [deal] = await withTenant(db as Db, tenantId, (tx) =>
+			tx
+				.select({
+					handoffUrl: partnerDeals.handoffUrl,
+					handoffMode: partnerDeals.handoffMode,
+				})
+				.from(partnerDeals)
+				.where(eq(partnerDeals.leadId, stageLead.id))
+				.limit(1),
+		);
+		expect(deal).toMatchObject({
+			handoffUrl: "https://partners.example.test/stage",
+			handoffMode: "fire_and_forget",
+		});
+	});
+
+	it("falls back to heuristic when LLM fails and to synthetic state without stages", async () => {
+		if (!sql) return;
+		const app = new Hono();
+		// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic in test harness
+		app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+		const res = await app.request("/api/auth/signup", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				email: `service-runtime-synthetic-${Date.now()}@demo.io`,
+				password: "strong-pwd-12345",
+			}),
+		});
+		const body = (await res.json()) as { admin: { tenantId: number } };
+		const syntheticTenantId = body.admin.tenantId;
+		const [contact] = await withTenant(
+			db as Db,
+			syntheticTenantId,
+			async (tx) => {
+				const [insertedContact] = await tx
+					.insert(contacts)
+					.values({
+						tenantId: syntheticTenantId,
+						displayName: "Synthetic Stage",
+						createdAt: 1_800_000_400,
+						updatedAt: 1_800_000_400,
+					})
+					.returning({ id: contacts.id });
+				await tx.insert(serviceCatalogItems).values({
+					tenantId: syntheticTenantId,
+					slug: "airport-transfer-long-slug",
+					name: "Airport transfer",
+					category: "Transfer",
+					routeType: "manual",
+					metadataJson: "not-json",
+					isActive: true,
+					sortOrder: 1,
+					createdAt: 1_800_000_400,
+					updatedAt: 1_800_000_400,
+				});
+				return [expectInserted(insertedContact, "synthetic contact")];
+			},
+		);
+		const runtime = makeServiceCatalogRuntime({
+			now: () => 1_800_000_401,
+			resolveChat: () =>
+				({
+					complete: async () => {
+						throw new Error("llm down");
+					},
+				}) as never,
+		});
+
+		const result = await runtime.extract({
+			db: db as Db,
+			tenantId: syntheticTenantId,
+			contactId: contact.id,
+			text: "нужен водитель в аэропорт",
+		});
+		expect(result.created).toHaveLength(1);
+		expect(result.created[0]?.serviceSlug).toBe("airport-transfer-long-slug");
+		const [lead] = await withTenant(db as Db, syntheticTenantId, (tx) =>
+			tx
+				.select({
+					state: leads.state,
+					stageDefinitionId: leads.stageDefinitionId,
+					requestType: leads.requestType,
+				})
+				.from(leads)
+				.where(eq(leads.tenantId, syntheticTenantId))
+				.limit(1),
+		);
+		expect(lead).toMatchObject({
+			state: "service_airport-transfer-long-slug",
+			stageDefinitionId: null,
+			requestType: "transfer",
+		});
 	});
 });
