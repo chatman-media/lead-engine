@@ -810,6 +810,77 @@ export interface PartnerDeal {
   updatedAt: number;
 }
 
+export type RelayProviderStatus = "active" | "paused" | "archived";
+
+export interface RelayProviderIdentity {
+  id: number;
+  contactId: number;
+  channelId: number;
+  externalUserId: string;
+  createdAt: number;
+  channelKind: ChannelKind;
+  channelExternalId: string;
+  channelStatus: ChannelStatus;
+}
+
+export interface RelayProviderService {
+  id: number;
+  tenantId: number;
+  providerId: number;
+  serviceType: string;
+  name: string;
+  serviceArea: string | null;
+  pricingPolicyJson: string;
+  commissionPct: number | null;
+  isActive: boolean;
+  metadataJson: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface RelayProvider {
+  id: number;
+  tenantId: number;
+  contactId: number;
+  name: string;
+  category: string | null;
+  status: RelayProviderStatus;
+  serviceArea: string | null;
+  defaultCommissionPct: number;
+  notes: string | null;
+  metadataJson: string;
+  createdAt: number;
+  updatedAt: number;
+  contactDisplayName: string | null;
+  contactAttributesJson: string | null;
+  identities: RelayProviderIdentity[];
+  services: RelayProviderService[];
+  servicesCount: number;
+  activeServicesCount: number;
+  activeOrdersCount: number;
+}
+
+export interface RelayProviderServiceInput {
+  serviceType: string;
+  name: string;
+  serviceArea?: string | null;
+  commissionPct?: number | null;
+  isActive?: boolean;
+  pricingPolicyJson?: string | Record<string, unknown> | null;
+  metadataJson?: string | Record<string, unknown> | null;
+}
+
+export interface CreateRelayProviderInput {
+  name: string;
+  category?: string | null;
+  serviceArea?: string | null;
+  defaultCommissionPct?: number;
+  notes?: string | null;
+  identity?: { channelId: number; externalUserId: string } | null;
+  services?: RelayProviderServiceInput[];
+  metadataJson?: string | Record<string, unknown> | null;
+}
+
 export interface ProviderMarketplaceInstall {
   partnerId: number;
   partnerName: string;
@@ -3050,6 +3121,49 @@ export const saas = {
   },
   updatePartnerDeal(id: number, patch: Partial<PartnerDeal>) {
     return request<{ item: PartnerDeal }>(`/api/admin/partner-deals/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  },
+
+  // ── Provider relay profiles ─────────────────────────────────────────
+  listProviders() {
+    return request<{ items: RelayProvider[] }>("/api/admin/providers");
+  },
+  createProvider(data: CreateRelayProviderInput) {
+    return request<{ item: RelayProvider }>("/api/admin/providers", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateProvider(
+    id: number,
+    patch: Partial<CreateRelayProviderInput> & { status?: RelayProviderStatus },
+  ) {
+    return request<{ item: RelayProvider }>(`/api/admin/providers/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  },
+  archiveProvider(id: number) {
+    return request<{ item: RelayProvider }>(`/api/admin/providers/${id}/archive`, {
+      method: "POST",
+    });
+  },
+  attachProviderIdentity(id: number, data: { channelId: number; externalUserId: string }) {
+    return request<{ item: RelayProvider }>(`/api/admin/providers/${id}/identities`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  createProviderService(id: number, data: RelayProviderServiceInput) {
+    return request<{ item: RelayProvider }>(`/api/admin/providers/${id}/services`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateProviderService(id: number, patch: Partial<RelayProviderServiceInput>) {
+    return request<{ item: RelayProvider }>(`/api/admin/provider-services/${id}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     });
