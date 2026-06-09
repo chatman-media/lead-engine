@@ -3,6 +3,7 @@ import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { describe, expect, it } from "bun:test";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
+import { EXCHANGE_KYC_FALLBACK } from "./exchange-policy-guard.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
 import { LlmReplyStrategy, type LlmReplyStrategyOpts } from "./llm-reply.ts";
 
@@ -210,6 +211,50 @@ describe("LlmReplyStrategy", () => {
     });
     expect(result).not.toBeNull();
     expect((result![0]!.parts[0] as { text: string }).text).toBe(EXCHANGE_SAFE_FALLBACK);
+  });
+
+  it("exchange: policy guard blocks KYC verification without persisted backing", async () => {
+    const chat = new CapturingChat("KYC подтверждён. Продолжаем оформление.");
+    const repo = fakeMessagesRepo([
+      row(1, "assistant", "Для обмена нужно пройти KYC: пришлите документ и видео."),
+      row(2, "user", "отправил видео"),
+    ]);
+    let resolverInput: unknown = null;
+    const strategy = new LlmReplyStrategy(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chat,
+        resolveExchangePolicyState: (input) => {
+          resolverInput = input;
+          return {
+            stageSlug: "kyc_collection",
+            verification: {
+              verified: false,
+              status: "pending_review",
+              needsVerification: true,
+            },
+          };
+        },
+      },
+      () => repo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "отправил видео",
+    });
+
+    expect(resolverInput).toEqual({
+      tenantId: 1,
+      conversationId: 100,
+      contactId: 1,
+    });
+    expect(result).not.toBeNull();
+    expect((result![0]!.parts[0] as { text: string }).text).toBe(EXCHANGE_KYC_FALLBACK);
   });
 
   it("пишет telemetry hook после generic tool-loop", async () => {

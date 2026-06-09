@@ -10,7 +10,10 @@ import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
-import { guardExchangeReply } from "./exchange-reply-guard.ts";
+import {
+  type ExchangePolicyState,
+  guardExchangePolicy,
+} from "./exchange-policy-guard.ts";
 
 /**
  * Минимальный LLM-based ReplyStrategy. Шаги на каждый inbound:
@@ -62,6 +65,15 @@ export interface LlmReplyStrategyOpts {
     conversationId: number;
     contactId: number;
   }) => Promise<string | null> | string | null;
+  /**
+   * Optional exchange workflow state snapshot for the final policy guard.
+   * Used only for exchange_v1, after LLM generation.
+   */
+  resolveExchangePolicyState?: (input: {
+    tenantId: number;
+    conversationId: number;
+    contactId: number;
+  }) => Promise<ExchangePolicyState | null> | ExchangePolicyState | null;
   /**
    * Опциональный резолвер agentic-инструментов (напр. расчёт курса обмена).
    * Если задан и вернул непустой список, а ChatClient умеет completeWithTools —
@@ -162,6 +174,21 @@ export class LlmReplyStrategy implements ReplyStrategy {
         )
       : null;
 
+    const isExchange = this.opts.template.slug === "exchange_v1";
+    const exchangePolicyState =
+      isExchange && this.opts.resolveExchangePolicyState
+        ? await Promise.resolve(
+            this.opts.resolveExchangePolicyState({
+              tenantId: input.tenant.tenantId,
+              conversationId: input.conversationId,
+              contactId: input.contactId,
+            }),
+          ).catch((err) => {
+            console.warn("[llm-reply] failed to resolve exchange policy state:", err);
+            return null;
+          })
+        : null;
+
     const systemPrompt = [
       BASE_SYSTEM_PROMPT,
       toolsActive
@@ -199,12 +226,17 @@ export class LlmReplyStrategy implements ReplyStrategy {
     }
 
     if (reply.trim().length === 0) return null;
-    const guarded = this.opts.template.slug === "exchange_v1"
-      ? guardExchangeReply({ text: reply, telemetry: buildToolTelemetry(toolCalls) })
+    const guarded = isExchange
+      ? guardExchangePolicy({
+          text: reply,
+          telemetry: buildToolTelemetry(toolCalls),
+          history,
+          state: exchangePolicyState,
+        })
       : { ok: true, text: reply };
     if (!guarded.ok) {
       console.warn(
-        `[exchange-reply-guard] tenant=${input.tenant.tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
+        `[exchange-policy-guard] tenant=${input.tenant.tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
       );
     }
     if (this.opts.recordToolCalls && toolCalls.length > 0) {

@@ -27,7 +27,11 @@ import { ScopedKbStore } from "../dal/kb-store.ts";
 import type { KbSuggestionsRepo } from "../dal/kb-suggestions.ts";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
-import { EXCHANGE_SAFE_FALLBACK, guardExchangeReply } from "./exchange-reply-guard.ts";
+import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
+import {
+  type ExchangePolicyState,
+  guardExchangePolicy,
+} from "./exchange-policy-guard.ts";
 
 /**
  * RAG-аware ReplyStrategy. На каждый user message:
@@ -130,6 +134,15 @@ export interface RagReplyStrategyOpts {
     conversationId: number;
     contactId: number;
   }) => Promise<string | null> | string | null;
+  /**
+   * Optional exchange workflow state snapshot for the final policy guard.
+   * Used only for exchange_v1, after RAG/tool generation.
+   */
+  resolveExchangePolicyState?: (input: {
+    tenantId: number;
+    conversationId: number;
+    contactId: number;
+  }) => Promise<ExchangePolicyState | null> | ExchangePolicyState | null;
   /**
    * Опциональный resolver «лид ждёт оператора» (R5): true → в промпт идёт блок
    * «ОЖИДАНИЕ ОПЕРАТОРА» (бот держит, не выдумывает цену). false/absent → нет.
@@ -372,10 +385,22 @@ export class RagReplyStrategy implements ReplyStrategy {
       }
     }
 
+    const isExchange = this.opts.template?.slug === "exchange_v1";
+
     // Load persuasion skills, director hooks, agentic tools, and reranker in parallel.
     // All are optional — if resolvers not configured, values stay empty/null
     // and the pipeline silently skips those blocks.
-    const [skills, directorHooks, tools, reranker, stageGuidance, requestContext, serviceOrderContext, awaitingOperator] = await Promise.all([
+    const [
+      skills,
+      directorHooks,
+      tools,
+      reranker,
+      stageGuidance,
+      requestContext,
+      serviceOrderContext,
+      awaitingOperator,
+      exchangePolicyState,
+    ] = await Promise.all([
       this.opts.resolveSkills ? this.opts.resolveSkills({ tenantId }) : Promise.resolve([]),
       this.opts.resolveDirectorHooks
         ? this.opts.resolveDirectorHooks({ tenantId })
@@ -408,6 +433,18 @@ export class RagReplyStrategy implements ReplyStrategy {
       this.opts.resolveAwaitingOperator
         ? this.opts.resolveAwaitingOperator({ tenantId, contactId: input.contactId })
         : Promise.resolve(false),
+      isExchange && this.opts.resolveExchangePolicyState
+        ? Promise.resolve(
+            this.opts.resolveExchangePolicyState({
+              tenantId,
+              conversationId: input.conversationId,
+              contactId: input.contactId,
+            }),
+          ).catch((err) => {
+            console.warn("[rag-reply] failed to resolve exchange policy state:", err);
+            return null;
+          })
+        : Promise.resolve(null),
     ]);
     const combinedRequestContext =
       [requestContext, serviceOrderContext]
@@ -416,7 +453,6 @@ export class RagReplyStrategy implements ReplyStrategy {
         .join("\n\n") || null;
     const serviceOrderGrounding = serviceOrderContext?.trim() || null;
 
-    const isExchange = this.opts.template?.slug === "exchange_v1";
     // answerWithRag принимает rag's ChatClient/EmbeddingClient. Структурно
     // наш llm-router'овский ChatClient compatible (rag's ChatMessage.content
     // допускает null — наш string ужe; complete(messages, opts?) совпадает).
@@ -510,11 +546,16 @@ export class RagReplyStrategy implements ReplyStrategy {
     }
 
     const guarded = isExchange
-      ? guardExchangeReply({ text: result.text, telemetry: result.telemetry })
+      ? guardExchangePolicy({
+          text: result.text,
+          telemetry: result.telemetry,
+          history: historyWithoutCurrent,
+          state: exchangePolicyState,
+        })
       : { ok: true, text: result.text };
     if (!guarded.ok) {
       console.warn(
-        `[exchange-reply-guard] tenant=${tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
+        `[exchange-policy-guard] tenant=${tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
       );
     }
 
