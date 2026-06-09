@@ -16,6 +16,7 @@ const KIND_LABEL: Record<string, string> = {
 const GREETING =
   "Привет! Я помогу собрать воронку под ваш бизнес. Расскажите: чем занимаетесь, " +
   "как к вам приходят клиенты и какую информацию нужно от них собрать?";
+const FUNNELS_UPDATED_EVENT = "lead-engine:funnel-updated";
 
 export function AiWorkflowPanel({
   open,
@@ -81,6 +82,7 @@ export function AiWorkflowPanel({
     try {
       await saas.applyWorkflow(pendingStages);
       onApplied();
+      window.dispatchEvent(new Event(FUNNELS_UPDATED_EVENT));
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось применить воронку");
