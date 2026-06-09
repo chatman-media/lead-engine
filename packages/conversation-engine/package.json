@@ -1,6 +1,6 @@
 {
   "name": "@chatman-media/conversation-engine",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "description": "Channel-agnostic pipeline обработки inbound сообщений: contact-resolve → conversation lookup → mode routing → AI-reply / queued / human → outbound. Сердце data plane.",
   "type": "module",
   "main": "./dist/index.js",

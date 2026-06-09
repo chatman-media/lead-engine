@@ -1,3 +1,16 @@
+# [@chatman-media/conversation-engine-v1.19.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.18.0...@chatman-media/conversation-engine-v1.19.0) (2026-06-09)
+
+
+### Bug Fixes
+
+* **api:** split inbound post-processing transactions ([#406](https://github.com/chatman-media/lead-engine/issues/406)) ([74c563d](https://github.com/chatman-media/lead-engine/commit/74c563d5b83890c5dce0d157be354cc91a7456a3))
+
+
+### Features
+
+* **kb:** scope knowledge base by funnel stage ([#408](https://github.com/chatman-media/lead-engine/issues/408)) ([1c7ea02](https://github.com/chatman-media/lead-engine/commit/1c7ea02ca6afc6353eabd071e2c877e4775d65c6))
+* **outreach:** add operator broadcasts ([#407](https://github.com/chatman-media/lead-engine/issues/407)) ([914dd30](https://github.com/chatman-media/lead-engine/commit/914dd30a037aa44d2df44c1684c899812933ce72))
+
 # [@chatman-media/conversation-engine-v1.18.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.17.1...@chatman-media/conversation-engine-v1.18.0) (2026-06-09)
 
 
