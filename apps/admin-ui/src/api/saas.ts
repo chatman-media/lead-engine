@@ -863,6 +863,35 @@ export interface QualityPairwiseMatch {
   persisted: boolean;
 }
 
+export interface QualityRunOptions {
+  styles: Array<{
+    id: number;
+    slug: string;
+    displayName: string;
+    isActive: boolean;
+  }>;
+  personas: Array<{
+    slug: string;
+    displayName: string;
+    summary: string;
+  }>;
+}
+
+export interface QualitySelfPlayRunOptions {
+  styleSlug: string;
+  personaSlug: string;
+  maxTurns?: number;
+  reflect?: boolean;
+}
+
+export interface QualityPairwiseRunOptions {
+  styleASlug: string;
+  styleBSlug: string;
+  personaSlug: string;
+  maxTurns?: number;
+  reflect?: boolean;
+}
+
 export interface QualitySelfPlaySummary {
   totals: {
     total: number;
@@ -2170,6 +2199,27 @@ export const saas = {
   },
   getQualityPairwiseMatch(id: number) {
     return request<{ pairwise: QualityPairwiseMatch }>(`/api/admin/quality/pairwise/matches/${id}`);
+  },
+  getQualityRunOptions() {
+    return request<QualityRunOptions>("/api/admin/quality/run-options");
+  },
+  runQualitySelfPlay(data: QualitySelfPlayRunOptions) {
+    return request<{ ok: boolean; match: QualitySelfPlayMatch }>(
+      "/api/admin/quality/self-play/matches",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
+  },
+  runQualityPairwise(data: QualityPairwiseRunOptions) {
+    return request<{ ok: boolean; pairwise: QualityPairwiseMatch }>(
+      "/api/admin/quality/pairwise/matches",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
   },
   getQualityCoachSummary() {
     return request<QualityCoachSummary>("/api/admin/quality/coach/summary");

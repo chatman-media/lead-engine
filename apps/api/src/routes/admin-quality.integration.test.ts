@@ -2,14 +2,23 @@ import {
   admins,
   applyAllMigrations,
   coachProposals,
+  contacts,
+  conversations,
   createIsolatedDb,
+  leads,
   pairwiseMatches,
   schema,
   selfPlayMatches,
   shadowEvaluations,
+  skillOutcomes,
+  skills as skillsTable,
+  styleRatings,
+  styleSkills,
   styles as stylesTable,
   tryConnectToPg,
 } from "@chatman-media/storage";
+import type { ChatClient, ChatCompletionOpts, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
+import type { IKbStore } from "@chatman-media/kb";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -42,6 +51,32 @@ let tokenB = "";
 let tenantA = 0;
 let tenantB = 0;
 const reloads: number[] = [];
+const salesReplies: string[] = [];
+const candidateReplies: string[] = [];
+const judgeReplies: string[] = [];
+const salesCalls: ChatMessage[][] = [];
+
+const salesChat: ChatClient = {
+  complete: async (messages: ChatMessage[], _opts?: ChatCompletionOpts) => {
+    salesCalls.push(messages);
+    return salesReplies.shift() ?? "расскажу коротко";
+  },
+};
+const candidateChat: ChatClient = {
+  complete: async () => candidateReplies.shift() ?? "ок, давай оформляться",
+};
+const judgeChat: ChatClient = {
+  complete: async () => judgeReplies.shift() ?? '{"outcome":"draw","reason":"no queued verdict"}',
+};
+const fakeEmbedder: EmbeddingClient = {
+  dim: 1536,
+  embed: async (inputs: string[]) => inputs.map(() => Array.from({ length: 1536 }, () => 0)),
+};
+const fakeKb = {
+  search: async () => [],
+  hybridSearch: async () => [],
+  prioritySearch: async () => [],
+} as unknown as IKbStore;
 
 beforeAll(async () => {
   if (!ownerUrl) return;
@@ -58,7 +93,18 @@ beforeAll(async () => {
   app.route("/", makeAuthRoutes({ db: db as never, secret: SECRET }));
   app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
   reloads.length = 0;
-  app.route("/", makeAdminQualityRoutes({ db, onReload: (tenantId) => reloads.push(tenantId) }));
+  app.route(
+    "/",
+    makeAdminQualityRoutes({
+      db,
+      onReload: (tenantId) => reloads.push(tenantId),
+      resolveChat: () => salesChat,
+      resolveCandidateChat: () => candidateChat,
+      resolveJudgeChat: () => judgeChat,
+      resolveEmbedder: () => fakeEmbedder,
+      resolveKb: () => fakeKb,
+    }),
+  );
 
   tokenA = await signup("quality-a@demo.io");
   tokenB = await signup("quality-b@demo.io");
@@ -66,7 +112,7 @@ beforeAll(async () => {
   tenantB = await tenantFor("quality-b@demo.io");
 
   const now = Math.floor(Date.now() / 1000);
-  await db.insert(stylesTable).values([
+  const insertedStyles = await db.insert(stylesTable).values([
     {
       tenantId: tenantA,
       slug: "style-a",
@@ -85,6 +131,32 @@ beforeAll(async () => {
       version: 1,
       createdAt: now - 90,
     },
+  ]).returning({ id: stylesTable.id, slug: stylesTable.slug });
+
+  const styleA = insertedStyles.find((style) => style.slug === "style-a");
+  const styleB = insertedStyles.find((style) => style.slug === "style-b");
+  if (!styleA || !styleB) throw new Error("style fixture mismatch");
+
+  const [skill] = await db
+    .insert(skillsTable)
+    .values({
+      tenantId: tenantA,
+      slug: "mirroring",
+      family: "rapport",
+      displayName: "Mirroring",
+      description: "Repeat the candidate concern in their own words.",
+      promptFragment: "Mirror the candidate concern before answering.",
+      applicableStagesJson: JSON.stringify(["qualify", "offer"]),
+      intent: "quality_lab",
+      isEnabled: true,
+      createdAt: now - 80,
+      updatedAt: now - 80,
+    })
+    .returning({ id: skillsTable.id });
+  if (!skill) throw new Error("skill fixture mismatch");
+  await db.insert(styleSkills).values([
+    { tenantId: tenantA, styleId: styleA.id, skillId: skill.id },
+    { tenantId: tenantA, styleId: styleB.id, skillId: skill.id },
   ]);
 
   const insertedSelfPlay = await db.insert(selfPlayMatches).values([
@@ -849,6 +921,180 @@ describe("admin quality JSONL export", () => {
     ).toBe(400);
   });
 
+  it("returns quality runner options", async () => {
+    if (!sql) return;
+    const res = await authReq(tokenA, "/api/admin/quality/run-options");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      styles: Array<{ id: number; slug: string; displayName: string }>;
+      personas: Array<{ slug: string; displayName: string; summary: string }>;
+    };
+    expect(body.styles.map((style) => style.slug)).toContain("style-a");
+    expect(body.styles.map((style) => style.slug)).toContain("style-b");
+    expect(body.personas.map((persona) => persona.slug)).toContain("skeptic-anya");
+  });
+
+  it("runs and persists a tenant-scoped self-play match", async () => {
+    if (!sql) return;
+    resetQualityQueues();
+    salesReplies.push("не развод: договор до вылета, паспорт у тебя. давай анкету?");
+    candidateReplies.push("ок, я согласна, давай оформляться");
+    judgeReplies.push('["mirroring"]', '{"outcome":"won","reason":"runner candidate committed"}');
+
+    const res = await authPostJsonReq(tokenA, "/api/admin/quality/self-play/matches", {
+      styleSlug: "style-a",
+      personaSlug: "skeptic-anya",
+      maxTurns: 1,
+      reflect: false,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as QualitySelfPlayRunResponse;
+    expect(body.match).toMatchObject({
+      styleSlug: "style-a",
+      personaSlug: "skeptic-anya",
+      outcome: "won",
+      skillsAttributed: ["mirroring"],
+      verdict: { outcome: "won", reason: "runner candidate committed" },
+      persisted: true,
+    });
+    expect(body.match.matchId).toBeGreaterThan(0);
+    expect(body.match.leadId).toBeGreaterThan(0);
+    expect(body.match.transcript.map((turn) => turn.role)).toEqual([
+      "candidate",
+      "salesperson",
+      "candidate",
+    ]);
+
+    const crossTenant = await authReq(
+      tokenB,
+      `/api/admin/quality/self-play/matches/${body.match.matchId}`,
+    );
+    expect(crossTenant.status).toBe(404);
+
+    const [storedMatch] = await db
+      .select({
+        tenantId: selfPlayMatches.tenantId,
+        leadId: selfPlayMatches.leadId,
+        skillsJson: selfPlayMatches.skillsJson,
+      })
+      .from(selfPlayMatches)
+      .where(eq(selfPlayMatches.id, body.match.matchId ?? 0))
+      .limit(1);
+    expect(storedMatch).toMatchObject({
+      tenantId: tenantA,
+      leadId: body.match.leadId,
+      skillsJson: JSON.stringify(["mirroring"]),
+    });
+
+    const [storedLead] = await db
+      .select()
+      .from(leads)
+      .where(eq(leads.id, body.match.leadId))
+      .limit(1);
+    expect(storedLead).toMatchObject({ tenantId: tenantA, state: "self_play" });
+
+    const [storedContact] = await db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.id, storedLead?.userId ?? 0))
+      .limit(1);
+    expect(storedContact?.attributesJson).toContain("self_play");
+
+    const [storedConversation] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.userId, storedLead?.userId ?? 0))
+      .limit(1);
+    expect(storedConversation).toMatchObject({ tenantId: tenantA, source: "self_play" });
+
+    const outcomes = await db
+      .select()
+      .from(skillOutcomes)
+      .where(eq(skillOutcomes.leadId, body.match.leadId));
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({
+      tenantId: tenantA,
+      styleSlug: "style-a",
+      skillSlug: "mirroring",
+      outcome: "won",
+      source: "self_play",
+    });
+  });
+
+  it("runs and persists a tenant-scoped pairwise match", async () => {
+    if (!sql) return;
+    resetQualityQueues();
+    salesReplies.push(
+      "A: договор до вылета и сопровождение, можно начать с анкеты",
+      "B: напишите потом, если интересно",
+    );
+    candidateReplies.push("ок, давай анкету", "нет, мне не подходит");
+    judgeReplies.push(
+      '["mirroring"]',
+      '{"outcome":"won","reason":"A solo closed"}',
+      '["mirroring"]',
+      '{"outcome":"lost","reason":"B solo lost"}',
+      '{"winner":"a","reason":"A handled the objection better"}',
+    );
+
+    const res = await authPostJsonReq(tokenA, "/api/admin/quality/pairwise/matches", {
+      styleASlug: "style-a",
+      styleBSlug: "style-b",
+      personaSlug: "skeptic-anya",
+      maxTurns: 1,
+      reflect: false,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as QualityPairwiseRunResponse;
+    expect(body.pairwise).toMatchObject({
+      styleASlug: "style-a",
+      styleBSlug: "style-b",
+      personaSlug: "skeptic-anya",
+      verdict: { winner: "a", reason: "A handled the objection better" },
+      persisted: true,
+    });
+    expect(body.pairwise.pairwiseId).toBeGreaterThan(0);
+    expect(body.pairwise.matchA.persisted).toBe(true);
+    expect(body.pairwise.matchB.persisted).toBe(true);
+    expect(body.pairwise.matchA.matchId).toBeGreaterThan(0);
+    expect(body.pairwise.matchB.matchId).toBeGreaterThan(0);
+
+    const crossTenant = await authReq(
+      tokenB,
+      `/api/admin/quality/pairwise/matches/${body.pairwise.pairwiseId}`,
+    );
+    expect(crossTenant.status).toBe(404);
+
+    const [storedPairwise] = await db
+      .select()
+      .from(pairwiseMatches)
+      .where(eq(pairwiseMatches.id, body.pairwise.pairwiseId ?? 0))
+      .limit(1);
+    expect(storedPairwise).toMatchObject({
+      tenantId: tenantA,
+      winner: "a",
+      judgeReason: "A handled the objection better",
+    });
+    expect(storedPairwise?.matchAId).toBe(body.pairwise.matchA.matchId);
+    expect(storedPairwise?.matchBId).toBe(body.pairwise.matchB.matchId);
+
+    const ratings = await db
+      .select()
+      .from(styleRatings)
+      .where(eq(styleRatings.tenantId, tenantA));
+    expect(ratings.some((rating) => rating.styleSlug === "style-a")).toBe(true);
+    expect(ratings.some((rating) => rating.styleSlug === "style-b")).toBe(true);
+
+    const invalid = await authPostJsonReq(tokenA, "/api/admin/quality/pairwise/matches", {
+      styleASlug: "style-a",
+      styleBSlug: "style-a",
+      personaSlug: "skeptic-anya",
+      maxTurns: 1,
+      reflect: false,
+    });
+    expect(invalid.status).toBe(400);
+  });
+
   it("keeps another tenant isolated", async () => {
     if (!sql) return;
     const records = parseJsonl(
@@ -936,6 +1182,13 @@ async function authPostJsonReq(token: string, path: string, body: unknown): Prom
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+function resetQualityQueues() {
+  salesReplies.length = 0;
+  candidateReplies.length = 0;
+  judgeReplies.length = 0;
+  salesCalls.length = 0;
 }
 
 type QualityRecord = {
@@ -1061,6 +1314,11 @@ type QualitySelfPlayDetailResponse = {
   };
 };
 
+type QualitySelfPlayRunResponse = {
+  ok: boolean;
+  match: QualitySelfPlayDetailResponse["match"];
+};
+
 type QualityPairwiseDetailResponse = {
   pairwise: {
     styleASlug: string;
@@ -1074,6 +1332,11 @@ type QualityPairwiseDetailResponse = {
     pairwiseId: number | null;
     persisted: boolean;
   };
+};
+
+type QualityPairwiseRunResponse = {
+  ok: boolean;
+  pairwise: QualityPairwiseDetailResponse["pairwise"];
 };
 
 type QualityCoachSummaryResponse = {
