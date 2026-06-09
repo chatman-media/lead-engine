@@ -41,6 +41,23 @@ describe("parseUpdatePayload (MAX)", () => {
 		expect(out[0]?.externalUserId).toBe("chat:999");
 	});
 
+	it("falls back to user recipient and generated message id", () => {
+		const out = parseUpdatePayload(CH, {
+			update_type: "message_created",
+			timestamp: 123,
+			message: {
+				sender: { user_id: 42, is_bot: false },
+				recipient: { chat_id: null, chat_type: "channel" },
+				timestamp: 456,
+				body: { text: "fallback" },
+			},
+		} as unknown as MaxUpdate);
+		expect(out).toHaveLength(1);
+		expect(out[0]?.externalUserId).toBe("user:42");
+		expect(out[0]?.externalMessageId).toBe("user:42:456");
+		expect(out[0]?.receivedAt).toBe(456);
+	});
+
 	it("skips non-message, bot echo and empty text", () => {
 		expect(
 			parseUpdatePayload(CH, {
@@ -69,6 +86,40 @@ describe("parseUpdatePayload (MAX)", () => {
 					recipient: { chat_id: 1, chat_type: "dialog" },
 					timestamp: 1,
 					body: { mid: "m", text: "" },
+				},
+			}),
+		).toEqual([]);
+	});
+
+	it("skips malformed message_created payloads without sender or body", () => {
+		expect(
+			parseUpdatePayload(CH, {
+				update_type: "message_created",
+				timestamp: 1,
+				message: null,
+			} as unknown as MaxUpdate),
+		).toEqual([]);
+		expect(
+			parseUpdatePayload(CH, {
+				update_type: "message_created",
+				timestamp: 1,
+				message: {
+					sender: null,
+					recipient: { chat_id: null, chat_type: "dialog" },
+					timestamp: 1,
+					body: { mid: "m", text: "no recipient" },
+				},
+			}),
+		).toEqual([]);
+		expect(
+			parseUpdatePayload(CH, {
+				update_type: "message_created",
+				timestamp: 1,
+				message: {
+					sender: { user_id: 1, is_bot: false },
+					recipient: { chat_id: 1, chat_type: "dialog" },
+					timestamp: 1,
+					body: null,
 				},
 			}),
 		).toEqual([]);
