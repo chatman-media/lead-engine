@@ -1,21 +1,32 @@
 import {
   CheckIcon,
+  ExternalLinkIcon,
+  EyeIcon,
   FileTextIcon,
   LightbulbIcon,
   Trash2Icon,
   UploadIcon,
   XIcon,
 } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { FunnelListItem, KbRequirement } from "../api/saas.ts";
-import { ApiError, clearToken, type KbDoc, type KbSuggestion, saas } from "../api/saas.ts";
+import {
+  ApiError,
+  clearToken,
+  type KbDoc,
+  type KbDocDetail,
+  type KbDocFormat,
+  type KbSuggestion,
+  saas,
+} from "../api/saas.ts";
 
 type KbUploadScope =
   | { scopeType: "global" }
@@ -45,6 +56,20 @@ export function SaasFaq() {
   const [suggestions, setSuggestions] = useState<KbSuggestion[]>([]);
   const [suggestionDrafts, setSuggestionDrafts] = useState<Record<number, string>>({});
   const [decidingId, setDecidingId] = useState<number | null>(null);
+  const [fileUploadNotice, setFileUploadNotice] = useState("");
+  const [viewingDoc, setViewingDoc] = useState<KbDocDetail | null>(null);
+  const [viewingDocId, setViewingDocId] = useState<number | null>(null);
+  const [viewError, setViewError] = useState("");
+  const [viewMode, setViewMode] = useState<"rendered" | "raw">("rendered");
+  const [originalFileUrl, setOriginalFileUrl] = useState<string | null>(null);
+  const [originalFileText, setOriginalFileText] = useState<string | null>(null);
+  const [originalFileError, setOriginalFileError] = useState("");
+
+  useEffect(() => {
+    return () => {
+      if (originalFileUrl) URL.revokeObjectURL(originalFileUrl);
+    };
+  }, [originalFileUrl]);
 
   function onAuthError(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
@@ -166,6 +191,7 @@ export function SaasFaq() {
     if (!pasteBody.trim()) return;
     setUploading(true);
     setError("");
+    setFileUploadNotice("");
     try {
       await saas.uploadJson({
         title: pasteTitle.trim() || "untitled",
@@ -190,30 +216,78 @@ export function SaasFaq() {
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.currentTarget;
     const file = e.target.files?.[0];
     if (!file) return;
+    const scope = uploadScope();
+    const currentScopeLabel = scopeLabel(scope);
     setUploading(true);
     setError("");
+    setFileUploadNotice(`Загружаем ${file.name} в область «${currentScopeLabel}»...`);
     try {
-      await saas.uploadFile(file, uploadScope());
+      await saas.uploadFile(file, scope);
       await Promise.all([refreshDocs(), refreshRequirements()]);
+      setFileUploadNotice(`Загружено: ${file.name} -> «${currentScopeLabel}».`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
         setError((err.extra?.upgradeHint as string) ?? "Лимит документов исчерпан");
       } else if (!onAuthError(err)) {
         setError(err instanceof Error ? err.message : String(err));
       }
+      setFileUploadNotice(`Не удалось загрузить: ${file.name}.`);
     } finally {
       setUploading(false);
+      input.value = "";
     }
   }
 
   async function handleDelete(id: number) {
     try {
+      const shouldCloseViewer = viewingDoc?.id === id;
       await saas.deleteDoc(id);
+      if (shouldCloseViewer) closeViewer();
       await Promise.all([refreshDocs(), refreshRequirements()]);
     } catch (err) {
       onAuthError(err);
+    }
+  }
+
+  function closeViewer() {
+    if (originalFileUrl) URL.revokeObjectURL(originalFileUrl);
+    setViewingDoc(null);
+    setViewError("");
+    setOriginalFileUrl(null);
+    setOriginalFileText(null);
+    setOriginalFileError("");
+  }
+
+  async function handleViewDoc(doc: KbDoc) {
+    closeViewer();
+    setViewingDocId(doc.id);
+    setViewError("");
+    setViewMode(doc.format === "markdown" ? "rendered" : "raw");
+    try {
+      const res = await saas.getDoc(doc.id);
+      setViewingDoc(res.item);
+      setViewMode(res.item.format === "markdown" ? "rendered" : "raw");
+      if (res.item.hasStoredFile) {
+        try {
+          const blob = await saas.getDocFile(doc.id);
+          const url = URL.createObjectURL(blob);
+          setOriginalFileUrl(url);
+          if (res.item.format !== "pdf") {
+            setOriginalFileText(await blob.text());
+          }
+        } catch (fileErr) {
+          setOriginalFileError(fileErr instanceof Error ? fileErr.message : String(fileErr));
+        }
+      }
+    } catch (err) {
+      if (!onAuthError(err)) {
+        setViewError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setViewingDocId(null);
     }
   }
 
@@ -327,6 +401,10 @@ export function SaasFaq() {
                 </span>
                 <span className="text-sm font-medium">Загрузить файл</span>
                 <span className="text-xs text-muted-foreground">.txt, .md, .json, .pdf</span>
+                <span className="text-xs text-muted-foreground">оригинал сохраняется на сервере</span>
+                {fileUploadNotice && (
+                  <span className="max-w-full truncate text-xs text-primary">{fileUploadNotice}</span>
+                )}
                 <input
                   type="file"
                   accept=".txt,.md,.json,.pdf"
@@ -399,6 +477,8 @@ export function SaasFaq() {
                         <p className="truncate text-sm font-medium">{d.title}</p>
                         <p className="flex items-center gap-2 text-xs text-muted-foreground">
                           <Badge variant="secondary">{scopeLabel(d)}</Badge>
+                          <Badge variant="outline">{formatLabel(d.format)}</Badge>
+                          {d.hasStoredFile && <Badge variant="outline">оригинал</Badge>}
                           {d.topic && <Badge variant="outline">{d.topic}</Badge>}
                           <span className="font-mono">{d.source}</span>
                           <span>· {new Date(d.createdAt * 1000).toLocaleDateString("ru")}</span>
@@ -407,7 +487,18 @@ export function SaasFaq() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="text-muted-foreground hover:text-foreground"
+                        disabled={viewingDocId === d.id}
+                        aria-label={`Открыть документ ${d.title}`}
+                        onClick={() => handleViewDoc(d)}
+                      >
+                        <EyeIcon className="size-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="text-muted-foreground hover:text-destructive"
+                        aria-label={`Удалить документ ${d.title}`}
                         onClick={() => handleDelete(d.id)}
                       >
                         <Trash2Icon className="size-4" />
@@ -480,6 +571,251 @@ export function SaasFaq() {
           </Card>
         )}
       </div>
+
+      <Dialog open={viewingDoc !== null || viewError.length > 0} onOpenChange={(open) => {
+        if (!open) {
+          closeViewer();
+        }
+      }}>
+        <DialogContent className="max-h-[86vh] max-w-4xl overflow-hidden p-0">
+          <DialogHeader className="border-b px-5 py-4">
+            <DialogTitle>{viewingDoc?.title ?? "Документ"}</DialogTitle>
+          </DialogHeader>
+          {viewError ? (
+            <p className="px-5 py-4 text-sm text-destructive">{viewError}</p>
+          ) : viewingDoc ? (
+            <div className="flex max-h-[calc(86vh-76px)] flex-col">
+              <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3 text-xs text-muted-foreground">
+                <Badge variant="secondary">{scopeLabel(viewingDoc)}</Badge>
+                <Badge variant="outline">{formatLabel(viewingDoc.format)}</Badge>
+                {viewingDoc.hasStoredFile ? (
+                  <Badge variant="outline">оригинал</Badge>
+                ) : (
+                  <Badge variant="outline">без оригинала</Badge>
+                )}
+                {viewingDoc.topic && <Badge variant="outline">{viewingDoc.topic}</Badge>}
+                <span className="font-mono">{viewingDoc.source}</span>
+                <span>{viewingDoc.chunks.length} chunks</span>
+                {viewingDoc.fileSizeBytes !== null && <span>{formatBytes(viewingDoc.fileSizeBytes)}</span>}
+                {viewingDoc.hasStoredFile && originalFileUrl && (
+                  <a
+                    href={originalFileUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline"
+                  >
+                    <ExternalLinkIcon className="size-3.5" />
+                    Открыть оригинал
+                  </a>
+                )}
+                {viewingDoc.format === "pdf" && !viewingDoc.hasStoredFile && (
+                  <span className="basis-full text-muted-foreground">
+                    Старый документ: оригинальный PDF не был сохранён, показываем извлечённый текст.
+                  </span>
+                )}
+                {originalFileError && (
+                  <span className="basis-full text-destructive">{originalFileError}</span>
+                )}
+                {viewingDoc.format === "markdown" && (
+                  <div className="ml-auto flex rounded-md border bg-background p-0.5">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={viewMode === "rendered" ? "secondary" : "ghost"}
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setViewMode("rendered")}
+                    >
+                      Просмотр
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={viewMode === "raw" ? "secondary" : "ghost"}
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setViewMode("raw")}
+                    >
+                      Markdown
+                    </Button>
+                  </div>
+                )}
+              </div>
+              {viewingDoc.format === "pdf" && originalFileUrl ? (
+                <iframe
+                  title={viewingDoc.title}
+                  src={originalFileUrl}
+                  className="min-h-[60vh] flex-1 border-0 bg-muted/20"
+                />
+              ) : viewingDoc.format === "markdown" && viewMode === "rendered" ? (
+                <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+                  <MarkdownPreview text={originalFileText ?? viewingDoc.text} />
+                </div>
+              ) : (
+                <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-5 py-4 font-mono text-sm leading-6">
+                  {(originalFileText ?? viewingDoc.text) || "Текст документа пуст."}
+                </pre>
+              )}
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+function formatLabel(format: KbDocFormat): string {
+  switch (format) {
+    case "markdown":
+      return "Markdown";
+    case "pdf":
+      return "PDF";
+    case "json":
+      return "JSON";
+    case "text":
+      return "Text";
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function MarkdownPreview({ text }: { text: string }) {
+  const lines = text.split(/\r?\n/);
+  const blocks: ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    if (line.startsWith("```")) {
+      const code: string[] = [];
+      i++;
+      while (i < lines.length && !(lines[i] ?? "").startsWith("```")) {
+        code.push(lines[i] ?? "");
+        i++;
+      }
+      if (i < lines.length) i++;
+      blocks.push(
+        <pre key={blocks.length} className="overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs">
+          {code.join("\n")}
+        </pre>,
+      );
+      continue;
+    }
+
+    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+    if (heading) {
+      const level = heading[1]!.length;
+      const content = renderInline(heading[2]!);
+      const className =
+        level === 1
+          ? "text-xl font-semibold"
+          : level === 2
+            ? "text-lg font-semibold"
+            : "text-base font-semibold";
+      blocks.push(
+        <div key={blocks.length} className={`${className} mt-4 first:mt-0`}>
+          {content}
+        </div>,
+      );
+      i++;
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^[-*]\s+/.test(lines[i] ?? "")) {
+        items.push((lines[i] ?? "").replace(/^[-*]\s+/, ""));
+        i++;
+      }
+      blocks.push(
+        <ul key={blocks.length} className="ml-5 list-disc space-y-1 text-sm leading-6">
+          {items.map((item, idx) => (
+            <li key={idx}>{renderInline(item)}</li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i] ?? "")) {
+        items.push((lines[i] ?? "").replace(/^\d+\.\s+/, ""));
+        i++;
+      }
+      blocks.push(
+        <ol key={blocks.length} className="ml-5 list-decimal space-y-1 text-sm leading-6">
+          {items.map((item, idx) => (
+            <li key={idx}>{renderInline(item)}</li>
+          ))}
+        </ol>,
+      );
+      continue;
+    }
+
+    if (/^>\s?/.test(line)) {
+      const quote: string[] = [];
+      while (i < lines.length && /^>\s?/.test(lines[i] ?? "")) {
+        quote.push((lines[i] ?? "").replace(/^>\s?/, ""));
+        i++;
+      }
+      blocks.push(
+        <blockquote key={blocks.length} className="border-l-2 pl-3 text-sm leading-6 text-muted-foreground">
+          {quote.map((part, idx) => (
+            <p key={idx}>{renderInline(part)}</p>
+          ))}
+        </blockquote>,
+      );
+      continue;
+    }
+
+    const paragraph: string[] = [line];
+    i++;
+    while (
+      i < lines.length &&
+      (lines[i] ?? "").trim() &&
+      !/^(#{1,4})\s+/.test(lines[i] ?? "") &&
+      !/^[-*]\s+/.test(lines[i] ?? "") &&
+      !/^\d+\.\s+/.test(lines[i] ?? "") &&
+      !/^>\s?/.test(lines[i] ?? "") &&
+      !(lines[i] ?? "").startsWith("```")
+    ) {
+      paragraph.push(lines[i] ?? "");
+      i++;
+    }
+    blocks.push(
+      <p key={blocks.length} className="text-sm leading-6">
+        {renderInline(paragraph.join(" "))}
+      </p>,
+    );
+  }
+
+  return <div className="space-y-3">{blocks.length > 0 ? blocks : "Текст документа пуст."}</div>;
+}
+
+function renderInline(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  for (const [idx, part] of parts.entries()) {
+    if (!part) continue;
+    if (part.startsWith("`") && part.endsWith("`")) {
+      out.push(
+        <code key={idx} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.9em]">
+          {part.slice(1, -1)}
+        </code>,
+      );
+    } else if (part.startsWith("**") && part.endsWith("**")) {
+      out.push(<strong key={idx}>{part.slice(2, -2)}</strong>);
+    } else {
+      out.push(part);
+    }
+  }
+  return out;
 }

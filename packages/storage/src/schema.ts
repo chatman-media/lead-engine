@@ -173,6 +173,11 @@ export const kbDocuments = pgTable("kb_documents", {
   scopeType: text("scope_type").notNull().default("global"),
   funnelId: integer("funnel_id"),
   stageSlug: text("stage_slug"),
+  fileStorageKey: text("file_storage_key"),
+  fileName: text("file_name"),
+  fileMimeType: text("file_mime_type"),
+  fileSizeBytes: integer("file_size_bytes"),
+  fileUploadedAt: integer("file_uploaded_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
 }, (t) => [
   check("kb_documents_scope_type_check", sql`${t.scopeType} IN ('global','funnel','stage')`),
@@ -184,7 +189,9 @@ export const kbDocuments = pgTable("kb_documents", {
       OR (${t.scopeType} = 'stage' AND ${t.funnelId} IS NOT NULL AND ${t.stageSlug} IS NOT NULL)
     )`,
   ),
+  check("kb_documents_file_size_check", sql`${t.fileSizeBytes} IS NULL OR ${t.fileSizeBytes} >= 0`),
   uniqueIndex("uniq_kb_source_hash").on(t.source, t.contentHash),
+  uniqueIndex("uniq_kb_docs_file_storage_key").on(t.fileStorageKey).where(sql`file_storage_key IS NOT NULL`),
   index("idx_kb_docs_topic").on(t.topic).where(sql`topic IS NOT NULL`),
   index("idx_kb_docs_scope").on(t.tenantId, t.scopeType, t.funnelId, t.stageSlug),
 ]);

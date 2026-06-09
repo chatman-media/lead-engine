@@ -57,6 +57,13 @@ the legacy chat/embed path.
 | `LLM_EMBED_PROVIDER` / `LLM_EMBED_MODEL` / `LLM_EMBED_API_KEY` / `LLM_EMBED_BASE_URL` / `LLM_EMBED_DIM` | opt | Embedder fallback for RAG. `LLM_EMBED_DIM` default `1536` (KB column); any model is auto-fitted. |
 | `STYLE_SLUG` / `EXPERIMENT_SLUG` / `STAGE_CLASSIFIER` | opt | Sales-engine knobs (default style, A/B experiment, `""`/`regex`/`llm` classifier). |
 
+## Knowledge base files
+
+| Var | Req | Description |
+|---|---|---|
+| `KB_UPLOAD_DIR` | opt | Directory where apps/api stores original KB uploads (`.pdf`, `.md`, `.txt`, `.json`). Default: `data/kb-files` under the API working directory. In production this should be a persistent volume. |
+| `KB_MAX_UPLOAD_BYTES` | opt | Maximum original upload file size. Default: `26214400` (25 MiB). |
+
 ## Channels
 
 | Var | Req | Description |

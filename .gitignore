@@ -6,6 +6,7 @@ data/
 .env.*.local
 dist/
 **/dist/
+.preview/
 playwright-report/
 test-results/
 coverage/

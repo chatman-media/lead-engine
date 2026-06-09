@@ -303,6 +303,7 @@ quality lab и split-transaction pipeline. Подробнее:
 | `FACEBOOK_VERIFY_TOKEN` / `FACEBOOK_APP_SECRET` | Fallback-креды Meta Messenger webhook |
 | `MAX_WEBHOOK_SECRET` | Optional fallback для MAX webhook; per-channel secret предпочтительнее |
 | `WEB_WS_AUTH_SECRET` | Optional shared secret для web widget |
+| `KB_UPLOAD_DIR` / `KB_MAX_UPLOAD_BYTES` | Путь хранения оригиналов KB-файлов и лимит файла; в prod нужен persistent storage |
 | `STRIPE_*` | Optional billing |
 | `RATE_LIMIT_PER_MIN` / `RATE_LIMIT_PER_HOUR` | Inbound tenant rate limits |
 
