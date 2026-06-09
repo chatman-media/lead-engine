@@ -470,6 +470,7 @@ async function main() {
   // Leads pipeline (list, create, stage transition, field values).
   app.route("/", makeAdminLeadsRoutes({
     db,
+    ...(embedderResolver ? { resolveEmbedder: embedderResolver } : {}),
     notificationService,
     partnerPing: {
       appUrl: cfg.mailer.appUrl,

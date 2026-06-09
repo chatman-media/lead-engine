@@ -848,6 +848,52 @@ export interface LeadDetail {
   partnerDeals?: PartnerDeal[];
 }
 
+export interface LeadKbGuidance {
+  leadId: number;
+  contact: { id: number; displayName: string | null } | null;
+  stage: {
+    id: number;
+    funnelId: number;
+    slug: string;
+    displayName: string;
+    stageType: StageType;
+    phase: StagePhase | null;
+    goal: string | null;
+    guidance: string | null;
+  } | null;
+  query: string;
+  kbAvailable: boolean;
+  warning: string | null;
+  requiredFields: Array<{
+    id: number;
+    slug: string;
+    displayName: string;
+    fieldType: FieldType;
+    filled: boolean;
+  }>;
+  missingRequiredFields: Array<{
+    id: number;
+    slug: string;
+    displayName: string;
+    fieldType: FieldType;
+    filled: boolean;
+  }>;
+  nextActions: string[];
+  hits: Array<{
+    rank: number;
+    chunkId: number;
+    documentId: number;
+    distance: number;
+    text: string;
+    source: string;
+    title: string;
+    topic: string | null;
+    scopeType: "global" | "funnel" | "stage";
+    funnelId: number | null;
+    stageSlug: string | null;
+  }>;
+}
+
 export interface Partner {
   id: number;
   name: string;
@@ -2568,6 +2614,9 @@ export const saas = {
   },
   getLead(id: number) {
     return request<LeadDetail>(`/api/admin/leads/${id}`);
+  },
+  getLeadKbGuidance(id: number) {
+    return request<LeadKbGuidance>(`/api/admin/leads/${id}/kb-guidance`);
   },
   moveLeadStage(id: number, stageDefinitionId: number) {
     return request<{ ok: boolean }>(`/api/admin/leads/${id}/stage`, {
