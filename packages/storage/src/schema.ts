@@ -1057,6 +1057,31 @@ export const referralCodes = pgTable("referral_codes", {
   index("idx_referral_codes_tenant").on(t.tenantId),
 ]);
 
+// ---- Early access waitlist ----------------------------------------------
+//
+// Публичные заявки на alpha/early-access. Таблица БЕЗ RLS: на момент заявки
+// tenant ещё не существует. API пишет только нормализованный email + контекст,
+// чтение в продуктовую админку можно добавить отдельным superadmin route.
+export const earlyAccessSignups = pgTable("early_access_signups", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  name: text("name"),
+  company: text("company"),
+  useCase: text("use_case"),
+  source: text("source").notNull().default("landing"),
+  locale: text("locale").notNull().default("ru"),
+  status: text("status").notNull().default("new"),
+  userAgent: text("user_agent"),
+  ip: text("ip"),
+  metaJson: text("meta_json").notNull().default("{}"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  uniqueIndex("uniq_early_access_email").on(t.email),
+  index("idx_early_access_status_created").on(t.status, t.createdAt),
+  index("idx_early_access_source").on(t.source),
+]);
+
 // Webhook-уведомления при смене стадии лида. Tenant настраивает URL;
 // при каждом lead.stage_changed мы шлём POST с JSON-payload и опциональной
 // HMAC-подписью (X-Signature: sha256=<hex>).
