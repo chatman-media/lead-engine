@@ -158,6 +158,27 @@ export class ConversationsRepo {
       );
   }
 
+  /** Persist the style / experiment chosen for this conversation turn. */
+  async setAssignment(
+    conversationId: number,
+    assignment: { styleId?: number | null; experimentId?: number | null },
+  ): Promise<void> {
+    const updates: Partial<typeof conversationsTable.$inferInsert> = {};
+    if (assignment.styleId !== undefined) updates.styleId = assignment.styleId;
+    if (assignment.experimentId !== undefined) updates.experimentId = assignment.experimentId;
+    if (Object.keys(updates).length === 0) return;
+
+    await this.ctx.db
+      .update(conversationsTable)
+      .set(updates)
+      .where(
+        and(
+          eq(conversationsTable.id, conversationId),
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+        ),
+      );
+  }
+
   /** Сохранить сжатое резюме диалога (conversation compaction). */
   async setSummaryJson(conversationId: number, summaryJson: string): Promise<void> {
     await this.ctx.db

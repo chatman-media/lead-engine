@@ -73,14 +73,14 @@ export interface RagReplyStrategyOpts {
    * Опциональный sales-style resolver. Если задан и возвращает Style —
    * answerWithRag использует его для построения system-prompt (persona,
    * sales framework, hooks, skills). При null/undefined — rag fallback'нет
-   * на DEFAULT_PERSONA. Лёгкое расширение для A/B routing в будущем:
-   * resolveStyle может смотреть на conversation.style_id или experiment_id.
+   * на DEFAULT_PERSONA. Если resolver возвращает styleId/experimentId,
+   * assignment сохраняется в conversations для coach/eval attribution.
    */
   resolveStyle?: (input: {
     tenantId: number;
     conversationId: number;
     contactId: number;
-  }) => Promise<Style | null> | Style | null;
+  }) => Promise<ResolvedStyleAssignment | null> | ResolvedStyleAssignment | null;
   /**
    * Опциональная проверка support-mode. Если возвращает true — стадия лида
    * помечена как supportMode и бот не отвечает (возвращает null). Оператор
@@ -220,6 +220,17 @@ export function parseStyleConfig(configJson: string): Style | null {
   }
 }
 
+export type ResolvedStyleAssignment = Style & {
+  styleId?: number | null;
+  experimentId?: number | null;
+  experimentSlug?: string | null;
+  variantSlug?: string | null;
+};
+
+function hasAssignmentMetadata(style: ResolvedStyleAssignment | null): boolean {
+  return style?.styleId !== undefined || style?.experimentId !== undefined;
+}
+
 export class RagReplyStrategy implements ReplyStrategy {
   constructor(
     private readonly opts: RagReplyStrategyOpts,
@@ -308,6 +319,17 @@ export class RagReplyStrategy implements ReplyStrategy {
           contactId: input.contactId,
         })
       : null;
+    if (style && hasAssignmentMetadata(style)) {
+      const convsRepo = this.opts.resolveConversations?.(tenantId);
+      if (convsRepo) {
+        await convsRepo
+          .setAssignment(input.conversationId, {
+            ...(style.styleId !== undefined ? { styleId: style.styleId } : {}),
+            ...(style.experimentId !== undefined ? { experimentId: style.experimentId } : {}),
+          })
+          .catch((err) => console.warn("[rag-reply] failed to save style assignment:", err));
+      }
+    }
 
     // Load persuasion skills, director hooks, agentic tools, and reranker in parallel.
     // All are optional — if resolvers not configured, values stay empty/null

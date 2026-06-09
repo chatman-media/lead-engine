@@ -40,18 +40,22 @@ import {
 
 const MASTER_KEY = "0".repeat(64);
 
-const VALID_STYLE = JSON.stringify({
-  slug: "exch-pro",
-  displayName: "Обменник Про",
-  persona: { name: "Алекс", role: "human", company: "Acme" },
-  voice: { tone: "дружелюбный", language: "ru", forbid: [] },
-  framework: "SPIN",
-  hooks: [],
-  stages: { qualify: { goal: "понять сумму", groundingRequired: false } },
-  fewShot: [],
-  guardrails: { noMinors: true, botDisclosureOnDirectQuestion: true, forbiddenTopics: [] },
-  model: { id: "x", temperature: 0.5, maxTokens: 100 },
-});
+function validStyle(slug = "exch-pro") {
+  return JSON.stringify({
+    slug,
+    displayName: "Обменник Про",
+    persona: { name: "Алекс", role: "human", company: "Acme" },
+    voice: { tone: "дружелюбный", language: "ru", forbid: [] },
+    framework: "SPIN",
+    hooks: [],
+    stages: { qualify: { goal: "понять сумму", groundingRequired: false } },
+    fewShot: [],
+    guardrails: { noMinors: true, botDisclosureOnDirectQuestion: true, forbiddenTopics: [] },
+    model: { id: "x", temperature: 0.5, maxTokens: 100 },
+  });
+}
+
+const VALID_STYLE = validStyle();
 
 describe("resolveTenantStyle (фейк-repo)", () => {
   it("default slug найден → парсит стиль", async () => {
@@ -321,18 +325,82 @@ describe("makeStyleResolver", () => {
   it("default slug → активный стиль тенанта", async () => {
     if (!enabled) return;
     const [t] = await db.insert(tenants).values({ slug: `st-${n}` }).returning({ id: tenants.id });
-    await db.insert(styles).values({
-      tenantId: t!.id,
-      slug: "exch-pro",
-      displayName: "Pro",
-      configJson: VALID_STYLE,
-      isActive: true,
-      version: 1,
-      createdAt: n,
-    });
+    const [styleRow] = await db
+      .insert(styles)
+      .values({
+        tenantId: t!.id,
+        slug: "exch-pro",
+        displayName: "Pro",
+        configJson: VALID_STYLE,
+        isActive: true,
+        version: 1,
+        createdAt: n,
+      })
+      .returning({ id: styles.id });
     const { resolveStyle } = makeStyleResolver(db, { defaultSlug: "exch-pro", experimentSlug: "" });
     const style = await resolveStyle({ tenantId: t!.id, contactId: 1 });
     expect(style?.slug).toBe("exch-pro");
+    expect(style?.styleId).toBe(styleRow?.id);
+    expect(style?.experimentId).toBeNull();
+  });
+
+  it("running experiment → deterministic variant с styleId/experimentId", async () => {
+    if (!enabled) return;
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const [t] = await db.insert(tenants).values({ slug: `st-exp-${suffix}` }).returning({ id: tenants.id });
+    const [styleA, styleB] = await db
+      .insert(styles)
+      .values([
+        {
+          tenantId: t!.id,
+          slug: `exch-a-${suffix}`,
+          displayName: "A",
+          configJson: validStyle(`exch-a-${suffix}`),
+          isActive: true,
+          version: 1,
+          createdAt: n,
+        },
+        {
+          tenantId: t!.id,
+          slug: `exch-b-${suffix}`,
+          displayName: "B",
+          configJson: validStyle(`exch-b-${suffix}`),
+          isActive: true,
+          version: 1,
+          createdAt: n + 1,
+        },
+      ])
+      .returning({ id: styles.id, slug: styles.slug });
+    if (!styleA || !styleB) throw new Error("expected style variants");
+    const [exp] = await db
+      .insert(schema.experiments)
+      .values({
+        tenantId: t!.id,
+        slug: `runtime-exp-${suffix}`,
+        status: "running",
+        allocationJson: JSON.stringify([
+          { style_slug: styleA.slug, weight: 1 },
+          { style_slug: styleB.slug, weight: 1 },
+        ]),
+        successMetric: "won",
+        startedAt: n,
+        createdAt: n,
+      })
+      .returning({ id: schema.experiments.id, slug: schema.experiments.slug });
+    if (!exp) throw new Error("expected experiment row");
+    const { resolveStyle } = makeStyleResolver(db, { defaultSlug: "", experimentSlug: exp.slug });
+
+    const first = await resolveStyle({ tenantId: t!.id, contactId: 123 });
+    const second = await resolveStyle({ tenantId: t!.id, contactId: 123 });
+
+    if (!first || !second) throw new Error("expected experiment style assignment");
+    if (first.styleId == null) throw new Error("expected experiment styleId assignment");
+    expect(first.slug).toBe(second.slug);
+    expect([styleA.slug, styleB.slug]).toContain(first.slug);
+    expect([styleA.id, styleB.id]).toContain(first.styleId);
+    expect(first.experimentId).toBe(exp.id);
+    expect(first.experimentSlug).toBe(exp.slug);
+    expect(first.variantSlug).toBe(first.slug);
   });
 
   it("нет стилей → null; invalidateStyle сбрасывает кеш", async () => {

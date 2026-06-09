@@ -1,7 +1,6 @@
-import type { Style } from "@chatman-media/kb";
 import type { ExperimentRow, StylesRepo } from "./dal/index.ts";
 import { parseAllocation } from "./dal/experiments.ts";
-import { parseStyleConfig } from "./reply-strategy/rag-reply.ts";
+import { parseStyleConfig, type ResolvedStyleAssignment } from "./reply-strategy/rag-reply.ts";
 
 /**
  * Загружает variants эксперимента: парсит allocation_json + резолвит каждый
@@ -14,9 +13,9 @@ import { parseStyleConfig } from "./reply-strategy/rag-reply.ts";
 export async function loadExperimentVariants(
   experiment: ExperimentRow,
   stylesRepo: StylesRepo,
-): Promise<Array<{ style: Style; weight: number }> | null> {
+): Promise<Array<{ style: ResolvedStyleAssignment; weight: number }> | null> {
   const entries = parseAllocation(experiment.allocationJson);
-  const variants: Array<{ style: Style; weight: number }> = [];
+  const variants: Array<{ style: ResolvedStyleAssignment; weight: number }> = [];
   for (const entry of entries) {
     const row = await stylesRepo.findActiveBySlug(entry.styleSlug);
     if (!row) {
@@ -32,9 +31,8 @@ export async function loadExperimentVariants(
       );
       continue;
     }
-    variants.push({ style, weight: entry.weight });
+    variants.push({ style: { ...style, styleId: row.id }, weight: entry.weight });
   }
   if (variants.length === 0) return null;
   return variants;
 }
-

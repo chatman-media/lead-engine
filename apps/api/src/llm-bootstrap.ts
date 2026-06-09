@@ -1,4 +1,5 @@
 import {
+	ConversationsRepo,
 	type Db,
 	DrizzleKbStore,
 	ExperimentsRepo,
@@ -76,6 +77,13 @@ import {
 import { makeConciergeRequestsTool, REQUEST_TYPE_LABEL, tenantSupportsMultiRequest } from "./lib/concierge-tools.ts";
 import { OpenRouterTranscriber } from "./lib/openrouter-transcriber.ts";
 import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
+
+type ResolvedStyleAssignment = Style & {
+	styleId?: number | null;
+	experimentId?: number | null;
+	experimentSlug?: string | null;
+	variantSlug?: string | null;
+};
 
 /**
  * Bootstrap LlmRouter + ReplyStrategy. Per-tenant configs приходят из
@@ -436,6 +444,24 @@ export async function resolveTenantStyle(
 	return parseStyleConfig(latest.configJson);
 }
 
+async function resolveTenantStyleAssignment(
+	repo: Pick<StylesRepo, "findActiveBySlug" | "listActive">,
+	defaultSlug: string,
+): Promise<ResolvedStyleAssignment | null> {
+	if (defaultSlug) {
+		const row = await repo.findActiveBySlug(defaultSlug);
+		if (row) {
+			const parsed = parseStyleConfig(row.configJson);
+			if (parsed) return { ...parsed, styleId: row.id, experimentId: null };
+		}
+	}
+	const actives = await repo.listActive();
+	if (actives.length === 0) return null;
+	const latest = actives.reduce((a, b) => (b.createdAt > a.createdAt ? b : a));
+	const parsed = parseStyleConfig(latest.configJson);
+	return parsed ? { ...parsed, styleId: latest.id, experimentId: null } : null;
+}
+
 /**
  * resolveSkills: загружает enabled-навыки тенанта (кеш per-tenant). Stage-kind
  * фильтрация — внутри composeSystemPrompt. Вынесено из makeReplyStrategy для
@@ -582,16 +608,22 @@ export function makeStyleResolver(
 	db: Db,
 	opts: { defaultSlug: string; experimentSlug: string },
 ): {
-	resolveStyle: (input: { tenantId: number; contactId: number }) => Promise<Style | null>;
+	resolveStyle: (input: {
+		tenantId: number;
+		contactId: number;
+	}) => Promise<ResolvedStyleAssignment | null>;
 	invalidateStyle: (tenantId: number) => void;
 } {
-	const styleCache = new Map<number, Style | null>();
-	const experimentCache = new Map<number, ABRouter | "absent">();
+	const styleCache = new Map<number, ResolvedStyleAssignment | null>();
+	const experimentCache = new Map<
+		number,
+		{ router: ABRouter; experimentId: number; experimentSlug: string } | "absent"
+	>();
 	const { defaultSlug, experimentSlug } = opts;
 	const resolveStyle = async (input: {
 		tenantId: number;
 		contactId: number;
-	}): Promise<Style | null> => {
+	}): Promise<ResolvedStyleAssignment | null> => {
 		if (experimentSlug) {
 			let abRouter = experimentCache.get(input.tenantId);
 			if (abRouter === undefined) {
@@ -601,7 +633,11 @@ export function makeStyleResolver(
 				if (exp) {
 					const variants = await loadExperimentVariants(exp, stylesRepo);
 					if (variants) {
-						abRouter = new ABRouter({ variants, salt: exp.slug });
+						abRouter = {
+							router: new ABRouter({ variants, salt: exp.slug }),
+							experimentId: exp.id,
+							experimentSlug: exp.slug,
+						};
 						experimentCache.set(input.tenantId, abRouter);
 					} else {
 						experimentCache.set(input.tenantId, "absent");
@@ -613,13 +649,21 @@ export function makeStyleResolver(
 				}
 			}
 			if (abRouter !== "absent") {
-				return abRouter.assign(String(input.contactId)).style;
+				const assigned = abRouter.router.assign(String(input.contactId));
+				const assignedStyle = assigned.style as ResolvedStyleAssignment;
+				return {
+					...assignedStyle,
+					styleId: assignedStyle.styleId ?? null,
+					experimentId: abRouter.experimentId,
+					experimentSlug: abRouter.experimentSlug,
+					variantSlug: assigned.variantSlug,
+				};
 			}
 		}
 		const cached = styleCache.get(input.tenantId);
 		if (cached !== undefined) return cached;
 		const repo = new StylesRepo({ db, tenantId: input.tenantId });
-		const parsed = await resolveTenantStyle(repo, defaultSlug);
+		const parsed = await resolveTenantStyleAssignment(repo, defaultSlug);
 		styleCache.set(input.tenantId, parsed);
 		return parsed;
 	};
@@ -827,6 +871,8 @@ export function makeReplyStrategy(
 			resolveDirectorHooks,
 			resolveTools,
 			resolveReranker,
+			resolveConversations: (tenantId: number) =>
+				new ConversationsRepo({ db, tenantId }),
 			// Если основной ответ пуст (модель «промолчала», нет KB-контекста) —
 			// генерируем мягкий ответ в персоне, а не молчим.
 			softFallback: true,
