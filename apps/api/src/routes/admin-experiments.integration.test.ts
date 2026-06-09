@@ -2,12 +2,15 @@
 // Isolated DB + real auth. Coverage epic #187 — apps/api untested routes.
 
 import {
+  admins,
   applyAllMigrations,
   createIsolatedDb,
   schema,
+  styles as stylesTable,
   tryConnectToPg,
 } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
@@ -25,6 +28,7 @@ let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
 let app: Hono;
 let token = "";
+let secondToken = "";
 
 const BASE = "/api/admin/experiments";
 const ALLOC = JSON.stringify([
@@ -55,6 +59,38 @@ beforeAll(
       body: JSON.stringify({ email: "exp@demo.io", password: "strong-pwd-12345" }),
     });
     token = ((await sa.json()) as { token: string }).token;
+    const [owner] = await db
+      .select({ tenantId: admins.tenantId })
+      .from(admins)
+      .where(eq(admins.email, "exp@demo.io"));
+    if (!owner) throw new Error("experiment owner fixture missing");
+    await db.insert(stylesTable).values([
+      {
+        tenantId: owner.tenantId,
+        slug: "a",
+        displayName: "Style A",
+        configJson: JSON.stringify(styleConfig("a", "Style A")),
+        isActive: true,
+        version: 1,
+        createdAt: 1,
+      },
+      {
+        tenantId: owner.tenantId,
+        slug: "b",
+        displayName: "Style B",
+        configJson: JSON.stringify(styleConfig("b", "Style B")),
+        isActive: true,
+        version: 1,
+        createdAt: 1,
+      },
+    ]);
+
+    const sb = await app.request("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "exp-other@demo.io", password: "strong-pwd-12345" }),
+    });
+    secondToken = ((await sb.json()) as { token: string }).token;
   },
   30_000,
 );
@@ -78,7 +114,20 @@ async function req(method: string, path: string, body?: unknown, withAuth = true
 }
 
 async function firstId(): Promise<number> {
-  return ((await (await req("GET", BASE)).json()) as { items: Array<{ id: number }> }).items[0]!.id;
+  const rows = ((await (await req("GET", BASE)).json()) as { items: Array<{ id: number; slug: string }> }).items;
+  const row = rows.find((item) => item.slug === "exp-a");
+  if (!row) throw new Error("primary experiment fixture missing");
+  return row.id;
+}
+
+async function secondTenantReq(method: string, path: string): Promise<Response> {
+  return app.request(path, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${secondToken}`,
+    },
+  });
 }
 
 describe("admin-experiments", () => {
@@ -106,6 +155,50 @@ describe("admin-experiments", () => {
     expect(res.status).toBe(201);
     expect(((await res.json()) as { slug: string }).slug).toBe("exp-a");
     expect((await req("POST", BASE, { slug: "exp-a", successMetric: "won", allocationJson: ALLOC })).status).toBe(409);
+  });
+
+  it("GET preview → валидирует variants и показывает deterministic assignment", async () => {
+    if (!sql) return;
+    const id = await firstId();
+    const res = await req("GET", `${BASE}/${id}/preview?sample=12`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ExperimentPreviewResponse;
+    expect(body.experiment.slug).toBe("exp-a");
+    expect(body.sampleSize).toBe(12);
+    expect(body.canRun).toBe(true);
+    expect(body.variants).toEqual([
+      { styleSlug: "a", displayName: "Style A", weight: 50, targetPct: 50, status: "valid" },
+      { styleSlug: "b", displayName: "Style B", weight: 50, targetPct: 50, status: "valid" },
+    ]);
+    expect(body.assignments).toHaveLength(12);
+    expect(body.counts.reduce((sum, item) => sum + item.count, 0)).toBe(12);
+
+    const again = (await (await req("GET", `${BASE}/${id}/preview?sample=12`)).json()) as ExperimentPreviewResponse;
+    expect(again.assignments).toEqual(body.assignments);
+    expect((await secondTenantReq("GET", `${BASE}/${id}/preview`)).status).toBe(404);
+    expect((await req("GET", `${BASE}/0/preview`)).status).toBe(400);
+  });
+
+  it("GET preview marks missing styles and status running rejects broken allocation", async () => {
+    if (!sql) return;
+    const allocationJson = JSON.stringify([
+      { style_slug: "a", weight: 1 },
+      { style_slug: "missing", weight: 1 },
+    ]);
+    const created = await req("POST", BASE, { slug: "exp-missing", successMetric: "won", allocationJson });
+    expect(created.status).toBe(201);
+    const id = ((await created.json()) as { id: number }).id;
+
+    const preview = (await (await req("GET", `${BASE}/${id}/preview?sample=8`)).json()) as ExperimentPreviewResponse;
+    expect(preview.canRun).toBe(false);
+    expect(preview.variants).toContainEqual({
+      styleSlug: "missing",
+      displayName: null,
+      weight: 1,
+      targetPct: 50,
+      status: "missing",
+    });
+    expect((await req("PUT", `${BASE}/${id}/status`, { status: "running" })).status).toBe(409);
   });
 
   it("PATCH: bad id → 400; nothing → 400; not found → 404; draft → 200", async () => {
@@ -143,3 +236,37 @@ describe("admin-experiments", () => {
     expect((await req("PATCH", `${BASE}/${id}`, { successMetric: "won" })).status).toBe(409);
   });
 });
+
+interface ExperimentPreviewResponse {
+  experiment: { id: number; slug: string; status: string; successMetric: string };
+  sampleSize: number;
+  canRun: boolean;
+  variants: Array<{
+    styleSlug: string;
+    displayName: string | null;
+    weight: number;
+    targetPct: number;
+    status: "valid" | "missing" | "invalid_config";
+  }>;
+  assignments: Array<{ userId: string; styleSlug: string }>;
+  counts: Array<{ styleSlug: string; count: number; observedPct: number }>;
+}
+
+function styleConfig(slug: string, displayName: string) {
+  return {
+    slug,
+    displayName,
+    persona: { name: displayName, role: "assistant" },
+    voice: { tone: "neutral", language: "ru", forbid: [] },
+    framework: "SPIN",
+    hooks: [],
+    stages: { opener: { goal: "Поздороваться" } },
+    fewShot: [],
+    guardrails: {
+      noMinors: true,
+      botDisclosureOnDirectQuestion: true,
+      forbiddenTopics: [],
+    },
+    model: { id: "mock", temperature: 0.2, maxTokens: 128 },
+  };
+}
