@@ -132,6 +132,52 @@ const trimmed = applyDynamicThreshold(hits, { threshold: 0.4, minHits: 1 });
 const diverse = mmrDiversify(hits, { lambda: 0.6, topK: 5 });
 ```
 
+### Golden RAG evals
+
+Use `evaluateRagGoldenCases` when you need an end-to-end regression harness
+around retrieval, answer grounding, persona/stage expectations and ablations.
+It runs the normal `answerWithRag` pipeline and scores each JSONL case against
+expected sources, required facts, forbidden claims and telemetry path.
+By default the scorer is deterministic (substring/source matching), so it can
+run in CI without live LLM calls. For semantic groundedness checks, pass
+`judge: makeRagGoldenLlmJudge({ chat: judgeChat })`.
+
+```ts
+import {
+  defaultRagGoldenAblations,
+  evaluateRagGoldenCases,
+  formatRagGoldenFailures,
+  parseRagGoldenJsonl,
+} from "@chatman-media/kb";
+
+const cases = parseRagGoldenJsonl(await Bun.file("packages/kb/evals/generic-rag.jsonl").text());
+
+const report = await evaluateRagGoldenCases({
+  cases,
+  makeInput: (item) => ({
+    question: item.question,
+    kb,
+    embedder,
+    chat,
+    hybridSearch: true,
+    multiQuery: true,
+    mmr: true,
+  }),
+  ablations: defaultRagGoldenAblations(),
+});
+
+const failures = formatRagGoldenFailures(report);
+if (failures) throw new Error(failures);
+```
+
+For a deterministic local/CI smoke run without external LLM or DB calls:
+
+```bash
+bun run apps/api/scripts/eval-rag.ts --ablate
+bun run apps/api/scripts/eval-rag.ts --vertical=exchange --baseline=rag-baseline.json
+bun run apps/api/scripts/eval-rag.ts --update-baseline=rag-baseline.json --json
+```
+
 ### Vision
 
 ```ts
