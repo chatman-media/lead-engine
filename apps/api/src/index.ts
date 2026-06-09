@@ -79,6 +79,7 @@ import { makeAdminStageWebhooksRoutes } from "./routes/admin-stage-webhooks.ts";
 import { makePartnerCallbackRoutes } from "./routes/webhook-partner-callback.ts";
 import { makeAdminPartnersRoutes } from "./routes/admin-partners.ts";
 import { makeAdminQualityRoutes } from "./routes/admin-quality.ts";
+import { makeAdminProviderMarketplaceRoutes } from "./routes/admin-provider-marketplace.ts";
 import { makeAdminServiceCatalogRoutes } from "./routes/admin-service-catalog.ts";
 import { makeAdminStylesRoutes } from "./routes/admin-styles.ts";
 import { makeAdminToolsRoutes } from "./routes/admin-tools.ts";
@@ -452,6 +453,7 @@ async function main() {
   app.route("/", makeAdminFunnelRoutes({ db }));
   app.route("/", makeAdminReferralRoutes({ db }));
   app.route("/", makeAdminPartnersRoutes({ db }));
+  app.route("/", makeAdminProviderMarketplaceRoutes({ db }));
   app.route("/", makeAdminServiceCatalogRoutes({ db }));
   log.info("admin-funnel routes enabled");
 

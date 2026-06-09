@@ -15,7 +15,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
 interface StageOption {
@@ -27,6 +33,18 @@ interface StageOption {
 function money(value: number | null | undefined, currency = "THB") {
   if (value == null) return "—";
   return `${Number(value).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ${currency}`;
+}
+
+function marketplaceSourceLabel(notes: string | null | undefined): string | null {
+  if (!notes) return null;
+  try {
+    const parsed = JSON.parse(notes) as { source?: string };
+    if (parsed.source === "provider_marketplace") return "Marketplace";
+    if (parsed.source === "provider_marketplace_custom") return "Custom provider";
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function funnelLabel(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">): string {
@@ -81,7 +99,8 @@ export function SaasPartners() {
         funnelRes.items.map((f) => saas.getFunnelById(f.id).catch(() => null)),
       );
       setFunnelData(loadedFunnels.filter(Boolean) as FunnelData[]);
-      if (!servicePartnerId && partnerRes.items[0]) setServicePartnerId(String(partnerRes.items[0].id));
+      if (!servicePartnerId && partnerRes.items[0])
+        setServicePartnerId(String(partnerRes.items[0].id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить партнёров");
     } finally {
@@ -126,17 +145,18 @@ export function SaasPartners() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <PageHeader
-          title="Партнёры"
-          description="Передача заявок, оборот партнёров и комиссия"
-        />
+        <PageHeader title="Партнёры" description="Передача заявок, оборот партнёров и комиссия" />
         <Button variant="outline" size="sm" onClick={() => void reload()}>
           <RefreshCwIcon className="size-4" />
           Обновить
         </Button>
       </div>
 
-      {error && <p className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">{error}</p>}
+      {error && (
+        <p className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
@@ -146,11 +166,19 @@ export function SaasPartners() {
           <CardContent className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
             <div className="space-y-1">
               <Label className="text-xs">Название</Label>
-              <Input value={partnerName} onChange={(e) => setPartnerName(e.target.value)} placeholder="Agency Phuket" />
+              <Input
+                value={partnerName}
+                onChange={(e) => setPartnerName(e.target.value)}
+                placeholder="Agency Phuket"
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Комиссия, %</Label>
-              <Input type="number" value={partnerPct} onChange={(e) => setPartnerPct(e.target.value)} />
+              <Input
+                type="number"
+                value={partnerPct}
+                onChange={(e) => setPartnerPct(e.target.value)}
+              />
             </div>
             <Button className="self-end" onClick={createPartner} disabled={!partnerName.trim()}>
               <PlusIcon className="size-4" />
@@ -167,29 +195,49 @@ export function SaasPartners() {
             <div className="space-y-1">
               <Label className="text-xs">Партнёр</Label>
               <Select value={servicePartnerId} onValueChange={setServicePartnerId}>
-                <SelectTrigger><SelectValue placeholder="Выбрать" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Выбрать" />
+                </SelectTrigger>
                 <SelectContent>
-                  {partners.map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}
+                  {partners.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Название услуги</Label>
-              <Input value={serviceName} onChange={(e) => setServiceName(e.target.value)} placeholder="Недвижимость: подбор" />
+              <Input
+                value={serviceName}
+                onChange={(e) => setServiceName(e.target.value)}
+                placeholder="Недвижимость: подбор"
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Стадия handoff</Label>
               <Select value={serviceStageId} onValueChange={setServiceStageId}>
-                <SelectTrigger><SelectValue placeholder="Не привязано" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Не привязано" />
+                </SelectTrigger>
                 <SelectContent>
-                  {stageOptions.map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.label}</SelectItem>)}
+                  {stageOptions.map((s) => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      {s.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="flex items-end gap-2">
               <div className="flex-1 space-y-1">
                 <Label className="text-xs">Комиссия, %</Label>
-                <Input type="number" value={servicePct} onChange={(e) => setServicePct(e.target.value)} />
+                <Input
+                  type="number"
+                  value={servicePct}
+                  onChange={(e) => setServicePct(e.target.value)}
+                />
               </div>
               <Button onClick={createService} disabled={!servicePartnerId || !serviceName.trim()}>
                 Создать
@@ -209,7 +257,9 @@ export function SaasPartners() {
               <div key={p.id} className="rounded-md border p-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="font-medium">{p.name}</div>
-                  <Badge variant={p.status === "active" ? "secondary" : "outline"}>{p.status}</Badge>
+                  <Badge variant={p.status === "active" ? "secondary" : "outline"}>
+                    {p.status}
+                  </Badge>
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
                   <span>{p.servicesCount ?? 0} услуг</span>
@@ -218,7 +268,9 @@ export function SaasPartners() {
                 </div>
               </div>
             ))}
-            {partners.length === 0 && <p className="text-sm text-muted-foreground">Партнёров пока нет</p>}
+            {partners.length === 0 && (
+              <p className="text-sm text-muted-foreground">Партнёров пока нет</p>
+            )}
           </CardContent>
         </Card>
 
@@ -228,7 +280,9 @@ export function SaasPartners() {
             <Badge variant="outline">{deals.length}</Badge>
           </CardHeader>
           <CardContent className="space-y-3">
-            {deals.map((deal) => <DealRow key={deal.id} deal={deal} onSaved={reload} />)}
+            {deals.map((deal) => (
+              <DealRow key={deal.id} deal={deal} onSaved={reload} />
+            ))}
             {deals.length === 0 && (
               <div className="flex items-center gap-2 rounded-md border border-dashed p-6 text-sm text-muted-foreground">
                 <HandshakeIcon className="size-4" />
@@ -247,8 +301,12 @@ export function SaasPartners() {
           {services.map((s) => (
             <div key={s.id} className="rounded-md border p-3 text-sm">
               <div className="font-medium">{s.name}</div>
-              <div className="mt-1 text-xs text-muted-foreground">{s.partnerName ?? "Партнёр"} · {s.commissionPct}%</div>
-              <div className="mt-2 text-xs">{s.stageName ? `Стадия: ${s.stageName}` : "Без привязки к стадии"}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {s.partnerName ?? "Партнёр"} · {s.commissionPct}%
+              </div>
+              <div className="mt-2 text-xs">
+                {s.stageName ? `Стадия: ${s.stageName}` : "Без привязки к стадии"}
+              </div>
             </div>
           ))}
           {services.length === 0 && <p className="text-sm text-muted-foreground">Услуг пока нет</p>}
@@ -264,6 +322,7 @@ function DealRow({ deal, onSaved }: { deal: PartnerDeal; onSaved: () => void | P
   const [currency, setCurrency] = useState(deal.currency);
   const [notes, setNotes] = useState(deal.notes ?? "");
   const [saving, setSaving] = useState(false);
+  const sourceLabel = marketplaceSourceLabel(deal.partnerServiceNotes);
 
   async function save() {
     setSaving(true);
@@ -285,16 +344,24 @@ function DealRow({ deal, onSaved }: { deal: PartnerDeal; onSaved: () => void | P
     <div className="rounded-md border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="font-medium">#{deal.id} · {deal.partnerName ?? "Партнёр не выбран"}</div>
+          <div className="font-medium">
+            #{deal.id} · {deal.partnerName ?? "Партнёр не выбран"}
+          </div>
           <div className="text-xs text-muted-foreground">
-            {deal.serviceName ?? "Услуга"} · лид {deal.leadId ?? "—"} · {deal.stageName ?? "стадия не указана"}
+            {deal.serviceName ?? "Услуга"} · лид {deal.leadId ?? "—"} ·{" "}
+            {deal.stageName ?? "стадия не указана"}
           </div>
         </div>
-        <Badge variant={status === "completed" ? "secondary" : "outline"}>{status}</Badge>
+        <div className="flex items-center gap-2">
+          {sourceLabel && <Badge variant="secondary">{sourceLabel}</Badge>}
+          <Badge variant={status === "completed" ? "secondary" : "outline"}>{status}</Badge>
+        </div>
       </div>
       <div className="mt-3 grid gap-2 md:grid-cols-[160px_120px_120px_1fr_auto]">
         <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="sent">sent</SelectItem>
             <SelectItem value="accepted">accepted</SelectItem>
@@ -305,9 +372,19 @@ function DealRow({ deal, onSaved }: { deal: PartnerDeal; onSaved: () => void | P
             <SelectItem value="settled">settled</SelectItem>
           </SelectContent>
         </Select>
-        <Input type="number" value={gross} onChange={(e) => setGross(e.target.value)} placeholder="Оборот" />
+        <Input
+          type="number"
+          value={gross}
+          onChange={(e) => setGross(e.target.value)}
+          placeholder="Оборот"
+        />
         <Input value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
-        <Textarea rows={1} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Комментарий" />
+        <Textarea
+          rows={1}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Комментарий"
+        />
         <Button onClick={save} disabled={saving}>
           {saving ? "…" : "Сохранить"}
         </Button>

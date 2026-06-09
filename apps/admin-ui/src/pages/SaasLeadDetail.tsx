@@ -96,6 +96,18 @@ function renderFieldValue(field: StageField, valueJson: string): string {
   }
 }
 
+function marketplaceSourceLabel(notes: string | null | undefined): string | null {
+  if (!notes) return null;
+  try {
+    const parsed = JSON.parse(notes) as { source?: string };
+    if (parsed.source === "provider_marketplace") return "Marketplace";
+    if (parsed.source === "provider_marketplace_custom") return "Custom provider";
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 interface FieldEditorProps {
   field: StageField;
   initialJson: string;
@@ -558,7 +570,9 @@ export function SaasLeadDetail() {
                       <span
                         className={`size-1.5 rounded-full ${ORDER_STATUS[o.status]?.dot ?? "bg-muted-foreground/40"}`}
                       />
-                      <span className="text-muted-foreground">{ORDER_STATUS[o.status]?.label ?? o.status}</span>
+                      <span className="text-muted-foreground">
+                        {ORDER_STATUS[o.status]?.label ?? o.status}
+                      </span>
                     </span>
                   </div>
                 ))}
@@ -684,26 +698,42 @@ export function SaasLeadDetail() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {(data.partnerDeals ?? []).map((deal) => (
-                  <div key={deal.id} className="rounded-md border p-2 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-medium">
-                        #{deal.id} · {deal.partnerName ?? "Партнёр не выбран"}
-                      </span>
-                      <Badge variant={deal.status === "completed" ? "secondary" : "outline"}>
-                        {deal.status}
-                      </Badge>
+                {(data.partnerDeals ?? []).map((deal) => {
+                  const sourceLabel = marketplaceSourceLabel(deal.partnerServiceNotes);
+                  return (
+                    <div key={deal.id} className="rounded-md border p-2 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-medium">
+                          #{deal.id} · {deal.partnerName ?? "Партнёр не выбран"}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {sourceLabel && <Badge variant="secondary">{sourceLabel}</Badge>}
+                          <Badge variant={deal.status === "completed" ? "secondary" : "outline"}>
+                            {deal.status}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {deal.serviceName ?? "Услуга"} · {deal.handoffUrl ?? "ручная сделка"} ·{" "}
+                        {deal.handoffMode}
+                      </div>
+                      <div className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
+                        <span>
+                          Оборот:{" "}
+                          {deal.grossAmount == null
+                            ? "—"
+                            : `${Number(deal.grossAmount).toLocaleString("ru")} ${deal.currency}`}
+                        </span>
+                        <span>Комиссия: {deal.commissionPct}%</span>
+                        <span>
+                          {deal.commissionAmount == null
+                            ? "—"
+                            : `${Number(deal.commissionAmount).toLocaleString("ru")} ${deal.currency}`}
+                        </span>
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {deal.serviceName ?? "Услуга"} · {deal.handoffUrl ?? "ручная сделка"}
-                    </div>
-                    <div className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
-                      <span>Оборот: {deal.grossAmount == null ? "—" : `${Number(deal.grossAmount).toLocaleString("ru")} ${deal.currency}`}</span>
-                      <span>Комиссия: {deal.commissionPct}%</span>
-                      <span>{deal.commissionAmount == null ? "—" : `${Number(deal.commissionAmount).toLocaleString("ru")} ${deal.currency}`}</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </CardContent>
             </Card>
           )}
@@ -1024,7 +1054,11 @@ function PipelineStepper({
               onClick={() => handleClick(stage.id)}
               title={stage.displayName}
               className={`group relative flex min-w-[84px] flex-1 shrink-0 flex-col items-center gap-1.5 px-1 ${
-                isCurrent ? "cursor-default" : movingStage ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                isCurrent
+                  ? "cursor-default"
+                  : movingStage
+                    ? "cursor-not-allowed opacity-60"
+                    : "cursor-pointer"
               }`}
             >
               {/* connector behind the node */}
@@ -1057,7 +1091,11 @@ function PipelineStepper({
               </span>
               <span
                 className={`max-w-[88px] overflow-hidden text-ellipsis whitespace-nowrap text-center text-[10px] leading-tight ${
-                  isCurrent ? "font-semibold text-foreground" : isDone ? "text-foreground/70" : "text-muted-foreground/60"
+                  isCurrent
+                    ? "font-semibold text-foreground"
+                    : isDone
+                      ? "text-foreground/70"
+                      : "text-muted-foreground/60"
                 }`}
               >
                 {stage.displayName}

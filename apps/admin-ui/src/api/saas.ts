@@ -90,12 +90,7 @@ export interface UpsertLlmConfigInput {
   timeoutMs?: number;
 }
 
-export type ChannelKind =
-  | "telegram_bot"
-  | "telegram_userbot"
-  | "whatsapp"
-  | "facebook"
-  | "web";
+export type ChannelKind = "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "web";
 export type ChannelStatus = "active" | "paused" | "error";
 
 export interface ChannelItem {
@@ -447,7 +442,12 @@ export interface StageDefinition {
 }
 
 export interface FunnelData {
-  funnel: { id: number; slug: string; verticalTemplateId?: string | null; isActive: boolean } | null;
+  funnel: {
+    id: number;
+    slug: string;
+    verticalTemplateId?: string | null;
+    isActive: boolean;
+  } | null;
   stages: StageDefinition[];
 }
 
@@ -671,6 +671,7 @@ export interface PartnerDeal {
   partnerName?: string | null;
   serviceId: number | null;
   serviceName?: string | null;
+  partnerServiceNotes?: string | null;
   leadId: number | null;
   stageDefinitionId: number | null;
   stageName?: string | null;
@@ -689,6 +690,54 @@ export interface PartnerDeal {
   settledAt?: number | null;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface ProviderMarketplaceInstall {
+  partnerId: number;
+  partnerName: string;
+  partnerServiceId: number;
+  serviceName: string;
+  serviceCatalogItemId: number;
+  serviceCatalogSlug: string;
+  installedAt: number | null;
+}
+
+export interface ProviderMarketplaceItem {
+  key: string;
+  category: string;
+  name: string;
+  description: string;
+  coverage: string;
+  sla: string;
+  pricingMode: string;
+  commissionPct: number;
+  commissionHint: string;
+  requiredFields: string[];
+  defaultServiceName: string;
+  serviceSlug: string;
+  handoffMode: "fire_and_forget" | "await_callback";
+  installed: ProviderMarketplaceInstall | null;
+}
+
+export interface CustomProviderMarketplaceItem {
+  key: string;
+  category: string;
+  name: string;
+  serviceName: string;
+  description: string | null;
+  installed: ProviderMarketplaceInstall;
+}
+
+export interface CustomProviderMarketplaceInput {
+  providerName: string;
+  serviceName: string;
+  category?: string | null;
+  description?: string | null;
+  coverage?: string | null;
+  sla?: string | null;
+  pricingMode?: string | null;
+  commissionPct?: number;
+  requiredFields?: string | string[];
 }
 
 export type ServiceCatalogRouteType = "manual" | "funnel" | "partner_service" | "webhook";
@@ -1408,7 +1457,11 @@ export const saas = {
       body: JSON.stringify(input),
     });
   },
-  createFacebookChannel(input: { pageAccessToken: string; verifyToken?: string; appSecret?: string }) {
+  createFacebookChannel(input: {
+    pageAccessToken: string;
+    verifyToken?: string;
+    appSecret?: string;
+  }) {
     return request<CreateFacebookChannelResult>("/api/admin/channels/facebook", {
       method: "POST",
       body: JSON.stringify(input),
@@ -1975,7 +2028,9 @@ export const saas = {
   },
 
   getFunnelAnalytics(funnelId?: number) {
-    return request<FunnelAnalytics>(`/api/admin/funnel/analytics${funnelId ? `?funnelId=${funnelId}` : ""}`);
+    return request<FunnelAnalytics>(
+      `/api/admin/funnel/analytics${funnelId ? `?funnelId=${funnelId}` : ""}`,
+    );
   },
 
   // ── Skills / Styles / Experiments ────────────────────────────────────
@@ -2132,7 +2187,6 @@ export const saas = {
   getDashboardStats() {
     return request<DashboardStats>("/api/admin/dashboard");
   },
-
 
   // ── Vacancies ────────────────────────────────────────────────────────
   listVacancies() {
@@ -2382,6 +2436,29 @@ export const saas = {
     });
   },
 
+  // ── Provider marketplace ─────────────────────────────────────────────
+  listProviderMarketplace() {
+    return request<{
+      items: ProviderMarketplaceItem[];
+      customProviders: CustomProviderMarketplaceItem[];
+    }>("/api/admin/provider-marketplace");
+  },
+  installMarketplaceProvider(providerKey: string) {
+    return request<{ provider: ProviderMarketplaceItem; created: boolean }>(
+      `/api/admin/provider-marketplace/${providerKey}/install`,
+      { method: "POST" },
+    );
+  },
+  createCustomMarketplaceProvider(data: CustomProviderMarketplaceInput) {
+    return request<{ provider: CustomProviderMarketplaceItem; created: boolean }>(
+      "/api/admin/provider-marketplace/custom",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
+  },
+
   // ── Service catalog ──────────────────────────────────────────────────
   listServiceCatalog() {
     return request<{ items: ServiceCatalogItem[] }>("/api/admin/service-catalog");
@@ -2570,10 +2647,10 @@ export const saas = {
     return request<ExchangeSettings>("/api/admin/exchange/settings");
   },
   saveExchangeSettings(input: ExchangeSettings) {
-    return request<{ ok: boolean; settings: ExchangeSettings }>(
-      "/api/admin/exchange/settings",
-      { method: "PUT", body: JSON.stringify(input) },
-    );
+    return request<{ ok: boolean; settings: ExchangeSettings }>("/api/admin/exchange/settings", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
   },
   previewExchangeRateCard() {
     return request<{ ok: boolean; proposals: ExchangeRateCardProposal[]; message: string }>(
