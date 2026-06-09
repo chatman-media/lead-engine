@@ -894,6 +894,31 @@ export interface QualityCoachApplyResult {
   style: StyleItem;
 }
 
+export interface QualityShadowEvaluation {
+  id: number;
+  proposalId: number;
+  parentStyleSlug: string;
+  parentStyleId: number;
+  newStyleSlug: string;
+  newStyleId: number;
+  pairsPlanned: number;
+  pairsDone: number;
+  aWins: number;
+  bWins: number;
+  draws: number;
+  winRateLb: number | null;
+  status: QualityShadowStatus;
+  decision: QualityShadowDecision | null;
+  errorMessage: string | null;
+  startedAt: number;
+  completedAt: number | null;
+}
+
+export interface QualityShadowEvaluationResult {
+  ok: boolean;
+  shadow: QualityShadowEvaluation;
+}
+
 export interface QualityCoachSummary {
   totals: {
     proposals: {
@@ -915,25 +940,7 @@ export interface QualityCoachSummary {
     };
   };
   proposals: QualityCoachProposal[];
-  shadows: Array<{
-    id: number;
-    proposalId: number;
-    parentStyleSlug: string;
-    parentStyleId: number;
-    newStyleSlug: string;
-    newStyleId: number;
-    pairsPlanned: number;
-    pairsDone: number;
-    aWins: number;
-    bWins: number;
-    draws: number;
-    winRateLb: number | null;
-    status: QualityShadowStatus;
-    decision: QualityShadowDecision | null;
-    errorMessage: string | null;
-    startedAt: number;
-    completedAt: number | null;
-  }>;
+  shadows: QualityShadowEvaluation[];
 }
 
 export interface VacancyItem {
@@ -2080,6 +2087,15 @@ export const saas = {
     return request<QualityCoachApplyResult>(`/api/admin/quality/coach/proposals/${id}/apply`, {
       method: "POST",
     });
+  },
+  createQualityShadowEvaluation(id: number, opts: { pairsPlanned?: number; limit?: number } = {}) {
+    return request<QualityShadowEvaluationResult>(
+      `/api/admin/quality/coach/proposals/${id}/shadow-evaluations`,
+      {
+        method: "POST",
+        body: JSON.stringify(opts),
+      },
+    );
   },
   async exportQualitySelfPlayJsonl(opts: QualityExportOptions = {}): Promise<void> {
     const params = new URLSearchParams();

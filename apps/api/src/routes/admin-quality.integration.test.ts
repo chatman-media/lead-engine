@@ -644,6 +644,116 @@ describe("admin quality JSONL export", () => {
     expect(records[0]?.matchB?.transcript).toBeUndefined();
   });
 
+  it("creates a tenant-scoped shadow evaluation from existing pairwise matches", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const slugSuffix = `shadow-${now}`;
+    const [parentStyle] = await db
+      .insert(stylesTable)
+      .values({
+        tenantId: tenantA,
+        slug: `style-parent-${slugSuffix}`,
+        displayName: "Style Parent Shadow",
+        configJson: JSON.stringify(
+          styleConfig(`style-parent-${slugSuffix}`, "Style Parent Shadow", "neutral"),
+        ),
+        isActive: true,
+        version: 1,
+        createdAt: now,
+      })
+      .returning({ id: stylesTable.id, slug: stylesTable.slug });
+    expect(parentStyle).toBeTruthy();
+    if (!parentStyle) return;
+
+    const [candidateStyle] = await db
+      .insert(stylesTable)
+      .values({
+        tenantId: tenantA,
+        slug: `style-candidate-${slugSuffix}`,
+        displayName: "Style Candidate Shadow",
+        configJson: JSON.stringify(
+          styleConfig(`style-candidate-${slugSuffix}`, "Style Candidate Shadow", "warmer"),
+        ),
+        isActive: false,
+        version: 1,
+        parentId: parentStyle.id,
+        createdAt: now + 1,
+      })
+      .returning({ id: stylesTable.id, slug: stylesTable.slug });
+    expect(candidateStyle).toBeTruthy();
+    if (!candidateStyle) return;
+
+    const [proposal] = await db
+      .insert(coachProposals)
+      .values({
+        tenantId: tenantA,
+        styleSlug: parentStyle.slug,
+        sampleSize: 10,
+        personaFilter: null,
+        summary: "Shadow eval candidate",
+        editsJson: JSON.stringify({ voice_tone: "warmer" }),
+        rationaleJson: JSON.stringify(["candidate won recent pairwise checks"]),
+        status: "applied",
+        createdAt: now + 2,
+        decidedAt: now + 2,
+      })
+      .returning({ id: coachProposals.id });
+    expect(proposal).toBeTruthy();
+    if (!proposal) return;
+
+    await db.insert(pairwiseMatches).values(
+      Array.from({ length: 10 }, (_, index) => ({
+        tenantId: tenantA,
+        styleASlug: index % 2 === 0 ? parentStyle.slug : candidateStyle.slug,
+        styleBSlug: index % 2 === 0 ? candidateStyle.slug : parentStyle.slug,
+        personaSlug: `shadow-persona-${index}`,
+        winner: index % 2 === 0 ? "b" : "a",
+        judgeReason: "candidate style won",
+        matchAId: null,
+        matchBId: null,
+        eloAAfter: 1500 - index,
+        eloBAfter: 1500 + index,
+        createdAt: now + 10 + index,
+      })),
+    );
+
+    const crossTenant = await authPostJsonReq(
+      tokenB,
+      `/api/admin/quality/coach/proposals/${proposal.id}/shadow-evaluations`,
+      { pairsPlanned: 12 },
+    );
+    expect(crossTenant.status).toBe(404);
+
+    const res = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/coach/proposals/${proposal.id}/shadow-evaluations`,
+      { pairsPlanned: 12, limit: 10 },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as QualityCoachShadowCreateResponse;
+    expect(body.shadow).toMatchObject({
+      proposalId: proposal.id,
+      parentStyleSlug: parentStyle.slug,
+      parentStyleId: parentStyle.id,
+      newStyleSlug: candidateStyle.slug,
+      newStyleId: candidateStyle.id,
+      pairsPlanned: 10,
+      pairsDone: 10,
+      aWins: 0,
+      bWins: 10,
+      draws: 0,
+      status: "complete",
+      decision: "keep",
+    });
+    expect(body.shadow.winRateLb).toBeGreaterThan(0.55);
+    expect(body.shadow.completedAt).toBeGreaterThanOrEqual(body.shadow.startedAt);
+
+    const summary = (await (
+      await authReq(tokenA, "/api/admin/quality/coach/summary")
+    ).json()) as QualityCoachSummaryResponse;
+    expect(summary.shadows.some((item) => item.newStyleSlug === candidateStyle.slug)).toBe(true);
+  });
+
   it("filters by style/persona/outcome and can omit transcripts", async () => {
     if (!sql) return;
     const res = await authReq(
@@ -755,6 +865,14 @@ async function authPostReq(token: string, path: string): Promise<Response> {
   return await app.request(path, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+async function authPostJsonReq(token: string, path: string, body: unknown): Promise<Response> {
+  return await app.request(path, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }
 
@@ -920,6 +1038,29 @@ type QualityCoachProposalApplyResponse = QualityCoachProposalStatusResponse & {
     parentId: number | null;
     createdAt: number;
     deletedAt: number | null;
+  };
+};
+
+type QualityCoachShadowCreateResponse = {
+  ok: boolean;
+  shadow: {
+    id: number;
+    proposalId: number;
+    parentStyleSlug: string;
+    parentStyleId: number;
+    newStyleSlug: string;
+    newStyleId: number;
+    pairsPlanned: number;
+    pairsDone: number;
+    aWins: number;
+    bWins: number;
+    draws: number;
+    winRateLb: number | null;
+    status: string;
+    decision: string | null;
+    errorMessage: string | null;
+    startedAt: number;
+    completedAt: number | null;
   };
 };
 
