@@ -292,6 +292,7 @@ function AccountDropdown({
   // Показываем имя (если задано), иначе email.
   const displayName = admin?.name?.trim() || admin?.email || "—";
   const initials = (admin?.name?.trim() || admin?.email || "?").slice(0, 2).toUpperCase();
+  const isSuperadmin = admin?.role === "superadmin";
 
   const menuContent = (
     <DropdownMenuContent align="start" side={collapsed ? "right" : "top"} className="w-56">
@@ -308,21 +309,25 @@ function AccountDropdown({
             <UserCircleIcon /> Профиль
           </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/settings">
-            <SlidersHorizontalIcon /> Настройки LLM
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/settings/channels">
-            <CableIcon /> Каналы
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/team">
-            <UsersIcon /> Команда
-          </Link>
-        </DropdownMenuItem>
+        {isSuperadmin && (
+          <>
+            <DropdownMenuItem asChild>
+              <Link to="/settings">
+                <SlidersHorizontalIcon /> Настройки LLM
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/settings/channels">
+                <CableIcon /> Каналы
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/team">
+                <UsersIcon /> Команда
+              </Link>
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuGroup>
       <DropdownMenuSeparator />
       <DropdownMenuSub>
@@ -502,7 +507,9 @@ function hasExchangeMarker(value?: string | null): boolean {
   return key.includes("exchange") || key.includes("обмен") || key.includes("obmen");
 }
 
-function funnelLooksLikeExchange(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">) {
+function funnelLooksLikeExchange(
+  item: Pick<FunnelListItem, "slug"> & { verticalTemplateId?: string | null },
+) {
   return hasExchangeMarker(item.slug) || hasExchangeMarker(item.verticalTemplateId);
 }
 
