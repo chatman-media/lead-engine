@@ -162,7 +162,7 @@ export function SaasDashboard() {
         saas.exchangeTurnover(),
         saas.exchangeOrders(undefined, 500),
         saas.exchangeRates(),
-        saas.getFunnelAnalytics().catch(() => null),
+        saas.getPrimaryFunnelAnalytics().catch(() => null),
       ]);
       setTurnover(t);
       setOrders(o.orders);
@@ -175,10 +175,11 @@ export function SaasDashboard() {
 
   async function refreshPipeline() {
     try {
-      const [funnelRes, leadsRes] = await Promise.all([
-        saas.getFunnel(),
-        saas.listLeads({ limit: 120 }),
-      ]);
+      const funnelRes = await saas.getPrimaryFunnel();
+      const leadsRes = await saas.listLeads({
+        limit: 120,
+        ...(funnelRes.funnel?.id ? { funnelId: funnelRes.funnel.id } : {}),
+      });
       setPipelineFunnel(funnelRes);
       setPipelineLeads(leadsRes.items);
     } catch (err) {

@@ -4,8 +4,10 @@
 import { withTenant } from "@chatman-media/conversation-engine";
 import {
   applyAllMigrations,
+  contacts,
   createIsolatedDb,
   funnels,
+  leads,
   schema,
   stageDefinitions,
   tryConnectToPg,
@@ -118,5 +120,86 @@ describe("admin-dashboard", () => {
     expect(d.leads.byStage.length).toBe(1);
     expect(d.leads.byStage[0]?.slug).toBe("intake");
     expect(d.leads.byStage[0]?.count).toBe(0);
+  });
+
+  it("несколько активных funnel → dashboard показывает primary exchange, а не все стадии тенанта", async () => {
+    if (!sql) return;
+    await withTenant(db, tenantId, async (tx) => {
+      const now = Math.floor(Date.now() / 1000);
+      const [exchangeFunnel] = await tx
+        .insert(funnels)
+        .values({
+          tenantId,
+          slug: "exchange",
+          verticalTemplateId: "exchange_v1",
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+      const [saasFunnel] = await tx
+        .insert(funnels)
+        .values({
+          tenantId,
+          slug: "saas",
+          verticalTemplateId: "saas_v1",
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+
+      const [exchangeStage] = await tx
+        .insert(stageDefinitions)
+        .values({
+          tenantId,
+          funnelId: exchangeFunnel!.id,
+          slug: "exchange_request",
+          displayName: "Параметры обмена",
+          kind: "intake",
+          position: 0,
+        })
+        .returning();
+      const [saasStage] = await tx
+        .insert(stageDefinitions)
+        .values({
+          tenantId,
+          funnelId: saasFunnel!.id,
+          slug: "qualified",
+          displayName: "Квалифицирован",
+          kind: "active",
+          phase: "qualify",
+          position: 0,
+        })
+        .returning();
+      const [contact] = await tx
+        .insert(contacts)
+        .values({ tenantId, displayName: "Dashboard Client" })
+        .returning({ id: contacts.id });
+
+      await tx.insert(leads).values({
+        tenantId,
+        userId: contact!.id,
+        state: "exchange_request",
+        stageDefinitionId: exchangeStage!.id,
+        requestType: "exchange",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await tx.insert(leads).values({
+        tenantId,
+        userId: contact!.id,
+        state: "qualified",
+        stageDefinitionId: saasStage!.id,
+        requestType: "saas",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+
+    const d = (await (await get()).json()) as Dash;
+    expect(d.leads.total).toBe(1);
+    expect(d.leads.byStage.map((s) => s.slug)).toEqual(["exchange_request"]);
+    expect(d.leads.byStage[0]?.count).toBe(1);
   });
 });

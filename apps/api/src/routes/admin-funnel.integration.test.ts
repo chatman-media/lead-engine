@@ -308,6 +308,23 @@ describe("POST /api/admin/funnel/seed", () => {
         ?.supportMode,
     ).toBe(true);
 
+    const activeRes = await authReq(tokenA, "/api/admin/funnel?primary=1");
+    const activeBody = (await activeRes.json()) as {
+      funnel: { slug: string; verticalTemplateId: string | null };
+      stages: Array<{ slug: string }>;
+    };
+    expect(activeBody.funnel.slug).toBe("exchange");
+    expect(activeBody.funnel.verticalTemplateId).toBe("exchange_v1");
+    expect(activeBody.stages.map((stage) => stage.slug)).toEqual(
+      getBody.stages.map((stage) => stage.slug),
+    );
+
+    const analyticsRes = await authReq(tokenA, "/api/admin/funnel/analytics?primary=1");
+    const analyticsBody = (await analyticsRes.json()) as { stages: Array<{ slug: string }> };
+    expect(analyticsBody.stages.map((stage) => stage.slug)).toEqual(
+      getBody.stages.map((stage) => stage.slug),
+    );
+
     const reset = await authReq(tokenA, "/api/admin/funnel/seed", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
