@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.17.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.17.0...@chatman-media/conversation-engine-v1.17.1) (2026-06-09)
+
+
+### Bug Fixes
+
+* **api:** transcribe voice before tenant transactions ([#401](https://github.com/chatman-media/lead-engine/issues/401)) ([81abacf](https://github.com/chatman-media/lead-engine/commit/81abacfb7c30fd8999f63ecc76838348b439f96e))
+
 # [@chatman-media/conversation-engine-v1.17.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.16.0...@chatman-media/conversation-engine-v1.17.0) (2026-06-09)
 
 
