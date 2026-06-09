@@ -9,8 +9,10 @@ import { InMemoryLlmRouter } from "@chatman-media/llm-router";
 import {
   applyAllMigrations,
   contacts,
+  conversations,
   createIsolatedDb,
   directorHooks,
+  exchangeOrders,
   funnels,
   leads,
   llmProviderConfigs,
@@ -22,6 +24,7 @@ import {
   tryConnectToPg,
 } from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
@@ -29,6 +32,7 @@ import {
   type LoadedRef,
   makeAwaitingOperatorResolver,
   makeDirectorHooksResolver,
+  makeExchangePolicyStateResolver,
   makeRequestContextResolver,
   makeRerankerResolver,
   makeSimChatResolver,
@@ -131,6 +135,8 @@ let tenantId = 0;
 let opContactId = 0;
 let exchContactId = 0;
 let plainContactId = 0;
+let policyContactId = 0;
+let policyConversationId = 0;
 
 async function stage(funnelId: number, slug: string, kind: string, stageType: string, pos: number) {
   const [s] = await db
@@ -186,9 +192,57 @@ beforeAll(async () => {
     .returning({ id: funnels.id });
   const opStage = await stage(f!.id, "op", "active", "awaiting_operator", 1);
   const normStage = await stage(f!.id, "norm", "active", "form_fill", 2);
+  const policyStage = await stage(f!.id, "payment_verified", "active", "payment", 3);
   opContactId = await contactWithLead(opStage, "exchange");
   exchContactId = await contactWithLead(normStage, "transfer");
   plainContactId = await contactWithLead(normStage, null);
+  policyContactId = await contactWithLead(policyStage, "exchange");
+  await db
+    .update(contacts)
+    .set({
+      attributesJson: JSON.stringify({
+        exchangeKyc: { status: "verified", verificationId: "kyc-policy" },
+      }),
+      updatedAt: n,
+    })
+    .where(eq(contacts.id, policyContactId));
+  const [conversation] = await db
+    .insert(conversations)
+    .values({
+      tenantId,
+      userId: policyContactId,
+      source: "bot",
+      mode: "ai",
+      status: "open",
+      createdAt: n,
+    })
+    .returning({ id: conversations.id });
+  policyConversationId = conversation!.id;
+  await db.insert(exchangeOrders).values({
+    tenantId,
+    contactId: policyContactId,
+    conversationId: policyConversationId,
+    telegramId: "tg-policy",
+    verificationId: "kyc-policy",
+    direction: "sell_crypto",
+    assetFrom: "USDT",
+    network: "trc20",
+    amountMode: "source_amount",
+    requestedAmount: 100,
+    amountFrom: 100,
+    rate: 36.5,
+    amountToThb: 3650,
+    paymentMethod: "crypto_transfer",
+    paymentRail: "trc20",
+    payoutMethod: "office_cash",
+    payoutLocation: "Bang Tao",
+    status: "payout",
+    requisitesJson: "{}",
+    proofJson: "{\"tx\":\"abc\"}",
+    payoutCode: "CODE-1",
+    createdAt: n,
+    updatedAt: n,
+  });
 }, 30_000);
 
 afterAll(async () => {
@@ -221,6 +275,47 @@ describe("makeAwaitingOperatorResolver", () => {
     if (!enabled) return;
     const r = makeAwaitingOperatorResolver(db);
     expect(await r({ tenantId, contactId: plainContactId })).toBe(false);
+  });
+});
+
+describe("makeExchangePolicyStateResolver", () => {
+  it("собирает stage, KYC и active exchange order для guard", async () => {
+    if (!enabled) return;
+    const resolve = makeExchangePolicyStateResolver(db);
+    const state = await resolve({
+      tenantId,
+      conversationId: policyConversationId,
+      contactId: policyContactId,
+    });
+
+    expect(state.stageSlug).toBe("payment_verified");
+    expect(state.verification).toEqual({
+      verified: true,
+      verificationId: "kyc-policy",
+      status: "verified",
+      needsVerification: false,
+    });
+    expect(state.order).toMatchObject({
+      status: "payout",
+      assetFrom: "USDT",
+      network: "trc20",
+      amountMode: "source_amount",
+      requestedAmount: 100,
+      amountFrom: 100,
+      rate: 36.5,
+      amountToThb: 3650,
+      paymentMethod: "crypto_transfer",
+      paymentRail: "trc20",
+      payoutMethod: "office_cash",
+      payoutLocation: "Bang Tao",
+      requisitesIssued: true,
+      paymentProofReceived: true,
+      paymentVerified: true,
+      payoutReady: true,
+      payoutCompleted: false,
+      payoutCodeIssued: true,
+      verificationId: "kyc-policy",
+    });
   });
 });
 
