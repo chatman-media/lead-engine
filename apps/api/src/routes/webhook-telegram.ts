@@ -1,3 +1,4 @@
+import type { MediaRef } from "@chatman-media/channel-core";
 import type { TelegramBotAdapter, TgUpdate } from "@chatman-media/channel-telegram";
 import {
   ChannelIdentitiesRepo,
@@ -15,6 +16,7 @@ import {
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
+  transcribeInboundVoice,
   withTenant,
 } from "@chatman-media/conversation-engine";
 import type { PlatformMetrics } from "@chatman-media/observability";
@@ -43,11 +45,13 @@ import type { ServiceCatalogRuntime } from "../lib/service-catalog-runtime.ts";
  *   3. Парсим payload как TgUpdate.
  *   4. Дёргаем adapter.pushUpdate(update) — это конвертит в Inbound и
  *      кладёт в внутреннюю очередь адаптера.
- *   5. Дёргаем processInbound() — persist + reply-strategy (если зарегистрирована).
- *   6. 200 ack Telegram'у быстро (<100ms typical).
+ *   5. Если есть voice-part — download + STT до DB transaction.
+ *   6. Дёргаем processInbound() — persist/classify/memory.
+ *   7. Генерируем reply вне DB transaction и enqueue'им outbound.
+ *   8. 200 ack Telegram'у после обработки текущего inbound.
  *
- * Heavy work (LLM, outbound HTTP) делается в apps/worker — handler не
- * блокирует Telegram retry'ями.
+ * Outbound HTTP delivery делается в apps/worker; reply LLM/STT выполняются
+ * в apps/api, но без открытой Postgres transaction.
  */
 export function makeTelegramWebhookRoutes(opts: {
   db: Db;
@@ -204,6 +208,18 @@ export function makeTelegramWebhookRoutes(opts: {
       externalId: entry.externalId,
     };
 
+    // ── Phase 0: optional voice download + STT (NO tx) ───────────────────
+    // `processInbound` ниже остаётся DB-only: media API + transcribe не держат
+    // Postgres connection и не расширяют RLS transaction.
+    await transcribeInboundVoice(inbound, {
+      tenantId: entry.tenantId,
+      resolveTranscriber: opts.resolveTranscriber
+        ? () => opts.resolveTranscriber?.(entry.tenantId) ?? null
+        : null,
+      downloadVoice: (mediaRef: MediaRef) => adapter.rawClient.downloadFile(mediaRef.externalRef),
+      ...(opts.sink ? { sink: opts.sink } : {}),
+    });
+
     // ── Phase 1: persist + classify + memory extract (одна короткая tx) ──
     // Все DB-операции (Contact / ChannelIdentity / Conversation / Message /
     // applyClassifiedStage / mergeAttributes) живут в одной atomic tx с
@@ -238,14 +254,6 @@ export function makeTelegramWebhookRoutes(opts: {
         ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
         ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
         ...(opts.sink ? { sink: opts.sink } : {}),
-        ...(opts.resolveTranscriber
-          ? (() => {
-              const t = opts.resolveTranscriber(entry.tenantId);
-              return t
-                ? { transcriber: t, downloadVoice: (mediaRef: import("@chatman-media/channel-core").MediaRef) => adapter.rawClient.downloadFile(mediaRef.externalRef) }
-                : {};
-            })()
-          : {}),
       });
     });
 

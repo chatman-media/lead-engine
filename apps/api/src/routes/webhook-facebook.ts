@@ -1,3 +1,4 @@
+import type { MediaRef } from "@chatman-media/channel-core";
 import {
   type FbWebhookPayload,
   type MessengerAdapter,
@@ -18,6 +19,7 @@ import {
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
+  transcribeInboundVoice,
   withTenant,
 } from "@chatman-media/conversation-engine";
 import type { PlatformMetrics } from "@chatman-media/observability";
@@ -181,6 +183,16 @@ export function makeFacebookWebhookRoutes(opts: {
         kind: entry.kind,
         externalId: entry.externalId,
       };
+
+      await transcribeInboundVoice(inbound, {
+        tenantId: entry.tenantId,
+        resolveTranscriber: opts.resolveTranscriber
+          ? () => opts.resolveTranscriber?.(entry.tenantId) ?? null
+          : null,
+        downloadVoice: (mediaRef: MediaRef) => entry.adapter.downloadMedia(mediaRef),
+        ...(opts.sink ? { sink: opts.sink } : {}),
+      });
+
       // ── Phase 1: persist + classify + memory (одна короткая tx) ──
       let result = await withTenant(opts.db, entry.tenantId, async (tx) => {
         const repoCtx = { db: tx, tenantId: entry.tenantId };
@@ -200,18 +212,6 @@ export function makeFacebookWebhookRoutes(opts: {
           ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
           ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
           ...(opts.sink ? { sink: opts.sink } : {}),
-          ...(opts.resolveTranscriber
-            ? (() => {
-                const t = opts.resolveTranscriber(entry.tenantId);
-                return t
-                  ? {
-                      transcriber: t,
-                      downloadVoice: (mediaRef: import("@chatman-media/channel-core").MediaRef) =>
-                        entry.adapter.downloadMedia(mediaRef),
-                    }
-                  : {};
-              })()
-            : {}),
         });
       });
       // ── Phase 2: reply.generate (LLM) ВНЕ tx + enqueue новой короткой tx ──

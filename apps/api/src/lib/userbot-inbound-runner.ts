@@ -1,3 +1,4 @@
+import type { MediaRef } from "@chatman-media/channel-core";
 import {
   ChannelIdentitiesRepo,
   ContactsRepo,
@@ -13,6 +14,7 @@ import {
   processInbound,
   type ReplyStrategy,
   type StageClassifier,
+  transcribeInboundVoice,
   withTenant,
 } from "@chatman-media/conversation-engine";
 import type { JsonLogger, PlatformMetrics } from "@chatman-media/observability";
@@ -75,6 +77,17 @@ export function startUserbotInboundRunner(opts: {
             kind: "telegram_userbot" as const,
             externalId: entry.externalId,
           };
+
+          await transcribeInboundVoice(inbound, {
+            tenantId: entry.tenantId,
+            resolveTranscriber: opts.resolveTranscriber
+              ? () => opts.resolveTranscriber?.(entry.tenantId) ?? null
+              : null,
+            downloadVoice: (mediaRef: MediaRef, externalUserId: string) =>
+              entry.adapter.downloadMedia(mediaRef, { externalUserId }),
+            ...(opts.sink ? { sink: opts.sink } : {}),
+          });
+
           let result = await withTenant(db, entry.tenantId, async (tx) => {
             const repoCtx = { db: tx, tenantId: entry.tenantId };
             return processInbound(inbound, {
@@ -93,18 +106,6 @@ export function startUserbotInboundRunner(opts: {
               ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
               ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
               ...(opts.sink ? { sink: opts.sink } : {}),
-              ...(opts.resolveTranscriber
-                ? (() => {
-                    const t = opts.resolveTranscriber(entry.tenantId);
-                    return t
-                      ? {
-                          transcriber: t,
-                          downloadVoice: (mediaRef: import("@chatman-media/channel-core").MediaRef, externalUserId: string) =>
-                            entry.adapter.downloadMedia(mediaRef, { externalUserId }),
-                        }
-                      : {};
-                  })()
-                : {}),
             });
           });
           if (result.replyDeferred && opts.replyStrategy) {
