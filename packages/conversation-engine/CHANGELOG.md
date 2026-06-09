@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.17.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.16.0...@chatman-media/conversation-engine-v1.17.0) (2026-06-09)
+
+
+### Features
+
+* **channels:** add MAX messenger channel ([#360](https://github.com/chatman-media/lead-engine/issues/360)) ([3e57973](https://github.com/chatman-media/lead-engine/commit/3e579739840407462055fd809e43181dc0534445))
+
 # [@chatman-media/conversation-engine-v1.16.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.15.0...@chatman-media/conversation-engine-v1.16.0) (2026-06-09)
 
 
