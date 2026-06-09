@@ -1,11 +1,10 @@
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { ActivePhase } from "@chatman-media/verticals";
-import type { SeedStage } from "../routes/admin-funnel.ts";
+import { type SeedStage, validateFunnel } from "../routes/admin-funnel.ts";
 import {
 	normalizeStages,
 	type StageDraft,
 	SYSTEM_PROMPT,
-	validateFunnel,
 } from "../routes/admin-workflow.ts";
 
 export interface FunnelEvalScenario {

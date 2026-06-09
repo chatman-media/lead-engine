@@ -6,7 +6,6 @@ import {
 	type ActivePhase,
 	deriveDefaultPhase,
 	isActivePhase,
-	validateBackbone,
 } from "@chatman-media/verticals";
 import { and, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
@@ -15,13 +14,12 @@ import { SKILLS_CATALOGUE } from "../lib/skills-catalogue.ts";
 import {
 	applyFunnelStages,
 	FIELD_TYPES,
+	normalizeSeedStageConfigJson,
 	type SeedStage,
 	STAGE_KINDS,
 	STAGE_TYPES,
-	normalizeSeedStageConfigJson,
-	parseAutoAdvanceConditionType,
-	stageWorkflowTransitions,
 	seedSkillsCatalogue,
+	validateFunnel,
 } from "./admin-funnel.ts";
 
 /**
@@ -187,7 +185,10 @@ function sanitizeSlug(s: string): string {
  * маршрутизации request_type, терялись бы); options принимает строки или
  * объекты {value,label}. value всегда латинский snake_case (slug ветки).
  */
-function normalizeOptions(fieldType: string, f: FieldDraft): string | undefined {
+function normalizeOptions(
+	fieldType: string,
+	f: FieldDraft,
+): string | undefined {
 	if (fieldType !== "select" && fieldType !== "multiselect") return undefined;
 	if (typeof f.optionsJson === "string" && f.optionsJson.trim())
 		return f.optionsJson;
@@ -213,7 +214,8 @@ function shouldInferAutoAdvanceCondition(opts: {
 	hasExplicitCondition: boolean;
 }): boolean {
 	if (opts.hasExplicitCondition) return false;
-	if (opts.kind === "terminal_won" || opts.kind === "terminal_lost") return false;
+	if (opts.kind === "terminal_won" || opts.kind === "terminal_lost")
+		return false;
 	if (opts.stageType === "awaiting_operator" || opts.supportMode) return false;
 	if (opts.nextStages.length === 0) return false;
 	return opts.fields.some((field) => field.required);
@@ -282,13 +284,13 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 		const autoAdvanceCondition = hasExplicitCondition
 			? d.autoAdvanceCondition
 			: shouldInferAutoAdvanceCondition({
-					kind,
-					stageType,
-					supportMode,
-					nextStages,
-					fields,
-					hasExplicitCondition,
-				})
+						kind,
+						stageType,
+						supportMode,
+						nextStages,
+						fields,
+						hasExplicitCondition,
+					})
 				? JSON.stringify({ type: "all_required_fields_filled" })
 				: undefined;
 		const configJson = normalizeSeedStageConfigJson({
@@ -326,90 +328,6 @@ export function normalizeStages(draft: StageDraft[]): SeedStage[] {
 		s.nextStages = s.nextStages.filter((n) => known.has(n) && n !== s.slug);
 	}
 	return stages;
-}
-
-/**
- * Контракт мульти-запроса (ветвление по request_type): если intake имеет
- * select-поле request_type, каждое его значение <X> обязано иметь ветку,
- * достижимую из intake (стадия <X>_request / любой <X>_*) — иначе рантайм
- * (field-extractor.selectNextStage) не сможет увести лид в нужную ветку.
- * Для линейных воронок (нет поля request_type) — пусто.
- */
-export function multiRequestBranchErrors(stages: SeedStage[]): string[] {
-	const errors: string[] = [];
-	const intake = stages.find((s) => s.kind === "intake");
-	if (!intake) return errors;
-	const rt = intake.fields.find((f) => f.slug === "request_type");
-	if (!rt) return errors; // линейная воронка — не мульти-запрос
-	let values: string[] = [];
-	if (rt.optionsJson) {
-		try {
-			values = (JSON.parse(rt.optionsJson) as Array<{ value?: unknown }>)
-				.map((o) => String(o.value ?? ""))
-				.filter(Boolean);
-		} catch {
-			// невалидный optionsJson — отдадим «нет опций» ниже
-		}
-	}
-	if (values.length === 0) {
-		errors.push("Мультизапрос: у поля request_type на intake нет валидных опций.");
-		return errors;
-	}
-	const next = intake.nextStages ?? [];
-	for (const v of values) {
-		const hasBranch = next.some(
-			(n) => n === `${v}_request` || n.startsWith(`${v}_`),
-		);
-		if (!hasBranch)
-			errors.push(
-				`Мультизапрос: для типа "${v}" нет ветки — добавь стадию "${v}_request" и укажи её в nextStages intake.`,
-			);
-	}
-	return errors;
-}
-
-/** validateBackbone + контракт мульти-запроса — общий gate для AI-builder. */
-export function validateFunnel(stages: SeedStage[]): {
-	errors: string[];
-	warnings: string[];
-} {
-	const base = validateBackbone(stages);
-	return {
-		errors: [...base.errors, ...multiRequestBranchErrors(stages)],
-		warnings: [...base.warnings, ...workflowBehaviorWarnings(stages)],
-	};
-}
-
-export function workflowBehaviorWarnings(stages: SeedStage[]): string[] {
-	const warnings: string[] = [];
-	for (const stage of stages) {
-		if (stage.kind !== "active") continue;
-		if (!stage.goal?.trim()) {
-			warnings.push(`Стадия "${stage.slug}": нет goal — добавь цель стадии.`);
-		}
-		if (!stage.guidance?.trim()) {
-			warnings.push(
-				`Стадия "${stage.slug}": нет guidance — добавь правила диалога и следующий вопрос/CTA.`,
-			);
-		}
-		if (stage.nextStages.length === 0) {
-			warnings.push(
-				`Стадия "${stage.slug}": нет nextStages — стадия не знает следующий шаг.`,
-			);
-		}
-		const hasExecutableExit =
-			stageWorkflowTransitions(stage.configJson).length > 0 ||
-			parseAutoAdvanceConditionType(stage.autoAdvanceCondition) ===
-				"all_required_fields_filled" ||
-			stage.stageType === "awaiting_operator" ||
-			stage.supportMode === true;
-		if (!hasExecutableExit && stage.nextStages.length > 0) {
-			warnings.push(
-				`Стадия "${stage.slug}": нет transition/exit rule — добавь autoAdvanceCondition или configJson.workflow.transitions.`,
-			);
-		}
-	}
-	return [...new Set(warnings)];
 }
 
 /** true, если модель явно пыталась вернуть JSON воронки, а не текст-реплику. */
@@ -485,7 +403,11 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 		}
 
 		const stripFence = (s: string) => s.replace(/```(?:json)?\n?/g, "").trim();
-		type Parsed = { reply?: unknown; readyToGenerate?: unknown; stages?: unknown };
+		type Parsed = {
+			reply?: unknown;
+			readyToGenerate?: unknown;
+			stages?: unknown;
+		};
 		const tryParse = (s: string): Parsed | null => {
 			try {
 				const v = JSON.parse(stripFence(s));
@@ -539,7 +461,11 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 			unwrapGuard < 3
 		) {
 			const inner = tryParse(parsed.reply);
-			if (inner && (typeof inner.readyToGenerate === "boolean" || Array.isArray(inner.stages))) {
+			if (
+				inner &&
+				(typeof inner.readyToGenerate === "boolean" ||
+					Array.isArray(inner.stages))
+			) {
 				parsed = inner;
 				unwrapGuard += 1;
 			} else break;
@@ -623,6 +549,13 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 			tenantId,
 			stages,
 			"ai_workflow",
+			{
+				snapshot: {
+					source: "ai_apply",
+					adminId,
+					note: "Before applying AI-generated funnel",
+				},
+			},
 		);
 
 		await recordAudit(opts.db, {
@@ -631,7 +564,10 @@ export function makeAdminWorkflowRoutes(opts: AdminWorkflowRoutesOpts): Hono {
 			action: "funnel.ai_apply",
 			targetKind: "funnel",
 			targetId: String(result.funnelId),
-			details: { stagesCreated: result.stagesCreated, warnings: backbone.warnings },
+			details: {
+				stagesCreated: result.stagesCreated,
+				warnings: backbone.warnings,
+			},
 		});
 
 		return c.json({

@@ -976,6 +976,21 @@ export const funnels = pgTable("funnels", {
   index("idx_funnels_tenant_active").on(t.tenantId, t.isActive),
 ]);
 
+export const funnelVersions = pgTable("funnel_versions", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  funnelId: integer("funnel_id").notNull().references(() => funnels.id, { onDelete: "cascade" }),
+  adminId: integer("admin_id").references(() => admins.id, { onDelete: "set null" }),
+  source: text("source").notNull(),
+  note: text("note"),
+  stageCount: integer("stage_count").notNull().default(0),
+  snapshotJson: text("snapshot_json").notNull(),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  check("funnel_versions_source_check", sql`${t.source} IN ('ai_apply','template_apply','manual_edit','rollback')`),
+  index("idx_funnel_versions_funnel_created").on(t.tenantId, t.funnelId, sql`${t.createdAt} DESC`),
+]);
+
 // ---- Outbound queue (единая, channel-agnostic) ------------------------
 
 // Заменяет userbot_send_queue в multi-tenant + multi-channel мире. Worker
