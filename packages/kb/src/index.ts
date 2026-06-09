@@ -54,6 +54,31 @@ export {
 // ── Retrieval evaluation ──────────────────────────────────────────────────────
 export type { EvalQuery, EvalResult, QueryMetrics } from "./eval.ts";
 export { evalRetrieval } from "./eval.ts";
+export type {
+  RagGoldenAblation,
+  RagGoldenCase,
+  RagGoldenCaseResult,
+  RagGoldenFailure,
+  RagGoldenJudge,
+  RagGoldenJudgeInput,
+  RagGoldenJudgeResult,
+  RagGoldenMakeInputContext,
+  RagGoldenMetrics,
+  RagGoldenReport,
+  RagGoldenReportDelta,
+  RagGoldenRunInput,
+  RagGoldenThresholds,
+  RagGoldenVariantSummary,
+} from "./golden-eval.ts";
+export {
+  compareRagGoldenReports,
+  defaultRagGoldenAblations,
+  evaluateRagGoldenCases,
+  formatRagGoldenFailures,
+  makeRagGoldenLlmJudge,
+  parseRagGoldenJudgeResult,
+  parseRagGoldenJsonl,
+} from "./golden-eval.ts";
 export type { ExtractFactsInput } from "./extract-user-facts.ts";
 // ── Memory & conversation management ─────────────────────────────────────────
 export { extractUserFacts, parseFactsFromLlmOutput } from "./extract-user-facts.ts";

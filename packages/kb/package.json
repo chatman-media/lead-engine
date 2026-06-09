@@ -15,6 +15,7 @@
   },
   "files": [
     "dist",
+    "evals",
     "src",
     "README.md",
     "LICENSE"
