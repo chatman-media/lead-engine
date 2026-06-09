@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.8.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.7.0...@chatman-media/kb-v1.8.0) (2026-06-09)
+
+
+### Features
+
+* **kb:** add rag golden eval harness ([#355](https://github.com/chatman-media/lead-engine/issues/355)) ([d2cd5af](https://github.com/chatman-media/lead-engine/commit/d2cd5af1a0c1691ffe9ddffcb14fac8cf7717a98))
+
 # [@chatman-media/kb-v1.7.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.6.0...@chatman-media/kb-v1.7.0) (2026-06-08)
 
 
