@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v1.23.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.22.0...@chatman-media/conversation-engine-v1.23.0) (2026-06-09)
+
+
+### Features
+
+* **api:** route reply templates per tenant ([#437](https://github.com/chatman-media/lead-engine/issues/437)) ([86082e8](https://github.com/chatman-media/lead-engine/commit/86082e81fd16e1cc8539b18b15692a2c7df8eaa3))
+
 # [@chatman-media/conversation-engine-v1.22.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v1.21.0...@chatman-media/conversation-engine-v1.22.0) (2026-06-09)
 
 
