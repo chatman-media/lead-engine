@@ -61,15 +61,32 @@ export interface ApproveEarlyAccessResult {
   };
 }
 
+export type KbDocFormat = "text" | "markdown" | "pdf" | "json";
+
 export interface KbDoc {
   id: number;
   source: string;
   title: string;
   topic: string | null;
+  format: KbDocFormat;
+  hasStoredFile: boolean;
+  fileName: string | null;
+  fileMimeType: string | null;
+  fileSizeBytes: number | null;
+  fileUploadedAt: number | null;
   scopeType: "global" | "funnel" | "stage";
   funnelId: number | null;
   stageSlug: string | null;
   createdAt: number;
+}
+
+export interface KbDocDetail extends KbDoc {
+  text: string;
+  chunks: Array<{
+    chunkIndex: number;
+    text: string;
+    tokenCount: number;
+  }>;
 }
 
 export interface KbSuggestion {
@@ -96,6 +113,11 @@ export interface KbUploadResult {
   source: string;
   chunks: number;
   created: boolean;
+  hasStoredFile?: boolean;
+  fileName?: string | null;
+  fileMimeType?: string | null;
+  fileSizeBytes?: number | null;
+  fileUploadedAt?: number | null;
   scopeType: "global" | "funnel" | "stage";
   funnelId: number | null;
   stageSlug: string | null;
@@ -1645,6 +1667,22 @@ export const saas = {
     if (opts.stageSlug) p.set("stageSlug", opts.stageSlug);
     const qs = p.toString();
     return request<{ items: KbDoc[] }>(`/api/admin/kb/documents${qs ? `?${qs}` : ""}`);
+  },
+  getDoc(id: number) {
+    return request<{ item: KbDocDetail }>(`/api/admin/kb/documents/${id}`);
+  },
+  async getDocFile(id: number) {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/api/admin/kb/documents/${id}/file`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      const errorCode = (body.error as string | undefined) ?? res.statusText;
+      const { error: _e, ...extra } = body;
+      throw new ApiError(res.status, errorCode, Object.keys(extra).length > 0 ? extra : undefined);
+    }
+    return res.blob();
   },
   listKbRequirements(funnelId: number) {
     return request<{

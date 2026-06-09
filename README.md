@@ -304,6 +304,7 @@ Core env vars:
 | `FACEBOOK_VERIFY_TOKEN` / `FACEBOOK_APP_SECRET` | Meta Messenger webhook fallback credentials |
 | `MAX_WEBHOOK_SECRET` | Optional MAX webhook secret fallback; per-channel secret is preferred |
 | `WEB_WS_AUTH_SECRET` | Optional web widget shared secret |
+| `KB_UPLOAD_DIR` / `KB_MAX_UPLOAD_BYTES` | Original KB upload storage path and per-file limit; use persistent storage in prod |
 | `STRIPE_*` | Optional billing |
 | `RATE_LIMIT_PER_MIN` / `RATE_LIMIT_PER_HOUR` | Inbound tenant rate limits |
 
