@@ -258,6 +258,29 @@ export interface AdminRow {
   createdAt: number;
 }
 
+export type OperatorOutreachTarget = "all" | "role" | "admins";
+export type OperatorOutreachRole = "superadmin" | "manager";
+export type OperatorOutreachChannel = "in_app" | "telegram";
+export type OperatorOutreachPriority = "normal" | "important" | "critical";
+
+export interface OperatorOutreachInput {
+  text: string;
+  target: OperatorOutreachTarget;
+  role?: OperatorOutreachRole;
+  adminIds?: number[];
+  channels: OperatorOutreachChannel[];
+  priority: OperatorOutreachPriority;
+}
+
+export interface OperatorOutreachResult {
+  ok: boolean;
+  targets: number;
+  inAppDelivered: number;
+  telegramDelivered: number;
+  telegramSkipped: number;
+  telegramFailed: number;
+}
+
 export interface InviteRow {
   id: number;
   email: string;
@@ -2585,6 +2608,12 @@ export const saas = {
         body: JSON.stringify(body),
       },
     );
+  },
+  sendOperatorOutreach(body: OperatorOutreachInput) {
+    return request<OperatorOutreachResult>("/api/admin/outreach/operators", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   },
 
   // ── Drip campaigns ────────────────────────────────────────────────────

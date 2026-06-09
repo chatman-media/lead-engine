@@ -97,6 +97,19 @@ export class NotificationService {
     }
   }
 
+  async sendDirectMessage(
+    chatId: string,
+    htmlText: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (!this.client) return { ok: false, error: "Бот не настроен (нет токена)" };
+    try {
+      await this.sendMessage(chatId, htmlText, null);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   private async sendMessage(
     chatId: string,
     text: string,

@@ -534,7 +534,7 @@ async function main() {
   log.info("admin SSE events enabled at GET /api/admin/events");
 
   // Outreach campaigns — batch message sending to leads.
-  app.route("/", makeAdminOutreachRoutes({ db }));
+  app.route("/", makeAdminOutreachRoutes({ db, notificationService }));
   app.route("/", makeAdminOutreachCampaignsRoutes({ db }));
   log.info("admin-outreach routes enabled");
 

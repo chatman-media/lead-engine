@@ -10,6 +10,8 @@
 //   - Валидация: text required, leadIds или stageSlug required
 
 import {
+  adminNotifications,
+  admins,
   applyAllMigrations,
   channelIdentities,
   channels,
@@ -17,6 +19,7 @@ import {
   createIsolatedDb,
   funnels,
   leads,
+  operatorSettings,
   outboundQueue,
   schema,
   stageDefinitions,
@@ -28,6 +31,7 @@ import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
+import { signAuthToken } from "../lib/auth.ts";
 import { makeRequireAuth } from "../middleware/require-auth.ts";
 import { makeAdminOutreachRoutes } from "./admin-outreach.ts";
 import { makeAuthRoutes } from "./auth.ts";
@@ -41,7 +45,10 @@ let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
 let app: Hono;
 let token = "";
+let managerToken = "";
 let tenantId = 0;
+let superAdminId = 0;
+let managerAdminId = 0;
 
 // Созданные в beforeAll
 let leadWithChannel = 0;    // лид с channel_identity → должен быть enqueued
@@ -49,6 +56,13 @@ let leadWithoutChannel = 0; // лид без channel_identity → skipped
 let stageId = 0;            // stage_definition.id
 
 const now = Math.floor(Date.now() / 1000);
+const sentTelegram: Array<{ chatId: string; htmlText: string }> = [];
+const fakeNotificationService = {
+  async sendDirectMessage(chatId: string, htmlText: string) {
+    sentTelegram.push({ chatId, htmlText });
+    return { ok: true };
+  },
+};
 
 beforeAll(
   async () => {
@@ -65,7 +79,7 @@ beforeAll(
     // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
     app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
     app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
-    app.route("/", makeAdminOutreachRoutes({ db }));
+    app.route("/", makeAdminOutreachRoutes({ db, notificationService: fakeNotificationService }));
 
     // Signup
     const signupRes = await app.request("/api/auth/signup", {
@@ -73,9 +87,35 @@ beforeAll(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "outreach-test@demo.io", password: "strong-pwd-12345" }),
     });
-    const signup = (await signupRes.json()) as { token: string; admin: { tenantId: number } };
+    const signup = (await signupRes.json()) as {
+      token: string;
+      admin: { id: number; tenantId: number };
+    };
     token = signup.token;
     tenantId = signup.admin.tenantId;
+    superAdminId = signup.admin.id;
+
+    const [manager] = await db.insert(admins).values({
+      tenantId,
+      email: "outreach-manager@demo.io",
+      passwordHash: "test-hash",
+      role: "manager",
+      createdAt: now,
+    }).returning({ id: admins.id });
+    if (!manager) throw new Error("manager insert returned no row");
+    managerAdminId = manager.id;
+    managerToken = signAuthToken({
+      adminId: managerAdminId,
+      tenantId,
+      role: "manager",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    }, SECRET);
+    await db.insert(operatorSettings).values({
+      tenantId,
+      adminId: managerAdminId,
+      telegramChatId: "telegram-manager-1",
+      updatedAt: now,
+    });
 
     // Создаём telegram_bot channel (status=active).
     // source="bot" — единственное значение для bot-initiated каналов.
@@ -152,9 +192,13 @@ afterAll(async () => {
 }, 10_000);
 
 function post(path: string, body: unknown) {
+  return postWithToken(path, body, token);
+}
+
+function postWithToken(path: string, body: unknown, authToken: string) {
   return app.request(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
     body: JSON.stringify(body),
   });
 }
@@ -323,5 +367,119 @@ describe("POST /api/admin/outreach — scheduledAt", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { scheduledAt: null };
     expect(body.scheduledAt).toBeNull();
+  });
+});
+
+describe("POST /api/admin/outreach/operators", () => {
+  it("superadmin отправляет операторам в ленту и Telegram", async () => {
+    if (!sql) return;
+    sentTelegram.length = 0;
+    const before = await db
+      .select()
+      .from(adminNotifications)
+      .where(eq(adminNotifications.tenantId, tenantId));
+
+    const res = await post("/api/admin/outreach/operators", {
+      text: "Важное обновление смены",
+      target: "all",
+      channels: ["in_app", "telegram"],
+      priority: "important",
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      targets: number;
+      inAppDelivered: number;
+      telegramDelivered: number;
+      telegramSkipped: number;
+      telegramFailed: number;
+    };
+    expect(body.targets).toBeGreaterThanOrEqual(2);
+    expect(body.inAppDelivered).toBeGreaterThanOrEqual(2);
+    expect(body.telegramDelivered).toBe(1);
+    expect(body.telegramSkipped).toBeGreaterThanOrEqual(1);
+    expect(body.telegramFailed).toBe(0);
+    expect(sentTelegram).toEqual([
+      {
+        chatId: "telegram-manager-1",
+        htmlText: "<b>Важное сообщение руководителя</b>\n\nВажное обновление смены",
+      },
+    ]);
+
+    const after = await db
+      .select()
+      .from(adminNotifications)
+      .where(eq(adminNotifications.tenantId, tenantId));
+    const inserted = after.slice(before.length);
+    expect(inserted.some((row) => row.kind === "operator_broadcast")).toBe(true);
+    expect(inserted.some((row) => row.adminId === managerAdminId)).toBe(true);
+  });
+
+  it("manager не может отправлять операторские рассылки", async () => {
+    if (!sql) return;
+    const res = await postWithToken(
+      "/api/admin/outreach/operators",
+      { text: "Нельзя", target: "all" },
+      managerToken,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("role=manager выбирает только менеджеров", async () => {
+    if (!sql) return;
+    const before = await db
+      .select()
+      .from(adminNotifications)
+      .where(eq(adminNotifications.tenantId, tenantId));
+
+    const res = await post("/api/admin/outreach/operators", {
+      text: "Сообщение менеджерам",
+      target: "role",
+      role: "manager",
+      channels: ["in_app"],
+      priority: "normal",
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { targets: number; inAppDelivered: number };
+    expect(body.targets).toBe(1);
+    expect(body.inAppDelivered).toBe(1);
+
+    const after = await db
+      .select()
+      .from(adminNotifications)
+      .where(eq(adminNotifications.tenantId, tenantId));
+    const inserted = after.slice(before.length);
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]?.adminId).toBe(managerAdminId);
+  });
+
+  it("telegram-only без привязанного чата сохраняет fallback в ленту", async () => {
+    if (!sql) return;
+    const res = await post("/api/admin/outreach/operators", {
+      text: "Только владельцу",
+      target: "admins",
+      adminIds: [superAdminId],
+      channels: ["telegram"],
+      priority: "critical",
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      targets: number;
+      inAppDelivered: number;
+      telegramDelivered: number;
+      telegramSkipped: number;
+    };
+    expect(body.targets).toBe(1);
+    expect(body.inAppDelivered).toBe(1);
+    expect(body.telegramDelivered).toBe(0);
+    expect(body.telegramSkipped).toBe(1);
+  });
+
+  it("пустой text → 400", async () => {
+    if (!sql) return;
+    const res = await post("/api/admin/outreach/operators", { text: "  ", target: "all" });
+    expect(res.status).toBe(400);
   });
 });
