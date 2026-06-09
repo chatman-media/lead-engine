@@ -145,6 +145,17 @@ export interface AdminQualityRoutesOpts {
 export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
   const app = new Hono();
 
+  app.use("/api/admin/quality/*", async (c, next) => {
+    if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS") {
+      await next();
+      return;
+    }
+    if (c.var.role !== "superadmin") {
+      return c.json({ error: "quality write access requires superadmin" }, 403);
+    }
+    await next();
+  });
+
   app.get("/api/admin/quality/tool-calls", async (c) => {
     const tenantId = c.var.tenantId;
     const limit = parsePositiveIntQuery(c.req.query("limit"), 100, 1000);
