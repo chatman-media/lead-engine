@@ -69,6 +69,81 @@ hot-reload, secrets. Для high-level introduction — см.
        └──────────────────────────┘
 ```
 
+### Visual system map
+
+```mermaid
+flowchart LR
+  subgraph clients["Customer channels"]
+    tg["Telegram bot / userbot"]
+    wa["WhatsApp Cloud API"]
+    fb["Facebook Messenger"]
+    vk["VK Callback API"]
+    mx["MAX Bot API"]
+    web["Web widget"]
+  end
+
+  subgraph api["apps/api: Hono HTTP server"]
+    wh["Webhook routes"]
+    ws["WebSocket /ws/:slug"]
+    adminApi["Admin API"]
+    registry["ChannelRegistry"]
+    llmRouter["InMemoryLlmRouter"]
+    rateLimiter["InboundRateLimiter"]
+    engine["conversation-engine.processInbound"]
+  end
+
+  subgraph db["Postgres + pgvector"]
+    tenantData["Tenant-scoped tables"]
+    kb["kb_documents / kb_chunks"]
+    catalog["service_catalog_items / partners / partner_deals"]
+    secrets["tenant_secrets"]
+    queue["outbound_queue"]
+    audit["audit_log"]
+  end
+
+  subgraph worker["apps/worker"]
+    dispatcher["OutboundDispatcher: SKIP LOCKED"]
+    reload["Channel reload polling"]
+    cron["Cron jobs"]
+  end
+
+  adminUi["apps/admin-ui"]
+  migrations["Migrations: owner / BYPASSRLS role"]
+
+  tg --> wh
+  wa --> wh
+  fb --> wh
+  vk --> wh
+  mx --> wh
+  web --> ws
+  adminUi --> adminApi
+
+  wh --> rateLimiter --> registry --> engine
+  ws --> engine
+  adminApi --> registry
+  adminApi --> llmRouter
+
+  engine --> tenantData
+  engine --> kb
+  engine --> catalog
+  engine --> queue
+  engine --> audit
+  adminApi --> secrets
+  adminApi --> tenantData
+
+  dispatcher --> queue
+  dispatcher --> tg
+  dispatcher --> wa
+  dispatcher --> fb
+  dispatcher --> vk
+  dispatcher --> mx
+  reload --> registry
+  cron --> tenantData
+
+  migrations --> tenantData
+  migrations --> secrets
+```
+
 ---
 
 ## Multi-tenant isolation
@@ -111,6 +186,27 @@ ALTER TABLE conversations FORCE ROW LEVEL SECURITY;
 **Validated by** `packages/storage/src/rls.integration.test.ts` — тесты
 создают role с `NOBYPASSRLS` и проверяют что вне `withTenant` запросы
 видят 0 rows.
+
+### RLS visual
+
+```mermaid
+flowchart TB
+  request["Admin route / pipeline code"]
+  withTenant["withTenant(db, tenantId, fn)"]
+  tx["Postgres transaction"]
+  setLocal["SET LOCAL app.tenant_id = tenantId"]
+  query["Tenant table query"]
+  rls["FORCE ROW LEVEL SECURITY policy"]
+  rows["Only rows where tenant_id = app.tenant_id"]
+  empty["Outside withTenant: empty result / rejected write"]
+  appRole["App role: NOSUPERUSER + NOBYPASSRLS"]
+  owner["Migration role: owner / BYPASSRLS"]
+
+  request --> withTenant --> tx --> setLocal --> query --> rls --> rows
+  appRole --> query
+  query -. "without SET LOCAL" .-> empty
+  owner -. "migrations only" .-> query
+```
 
 ---
 
@@ -190,6 +286,46 @@ ALTER TABLE conversations FORCE ROW LEVEL SECURITY;
 `kind='web'` и `kind='telegram_userbot'`. Worker дисптачер фильтрует
 `claimKinds: ['telegram_bot', 'whatsapp', 'facebook', 'vk', 'max']`, чтобы не
 grab'ить rows, которые он не может отправить.
+
+### Inbound / outbound sequence
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as Customer channel
+  participant API as apps/api webhook
+  participant R as ChannelRegistry
+  participant E as processInbound
+  participant DB as Postgres with RLS
+  participant LLM as LLM / RAG
+  participant Q as outbound_queue
+  participant W as apps/worker
+  participant A as Channel adapter
+
+  C->>API: inbound message / webhook
+  API->>API: verify signature and rate limit
+  API->>R: resolve tenant channel adapter
+  R-->>API: adapter + tenant context
+  API->>E: normalized Inbound
+
+  E->>DB: tx1 withTenant persist contact / conversation / message
+  E->>DB: classifier + memory writes inside tx1
+  DB-->>E: tx1 committed
+
+  E->>LLM: generate reply outside DB transaction
+  LLM-->>E: assistant response / tool decision
+
+  E->>DB: tx2 withTenant enqueue outbound
+  DB->>Q: insert pending envelope
+  DB-->>E: tx2 committed
+  API-->>C: 200 OK
+
+  W->>Q: claim pending rows with SKIP LOCKED
+  Q-->>W: outbound envelope
+  W->>A: send envelope
+  A-->>C: platform API message
+  W->>DB: mark sent / failed
+```
 
 ---
 
@@ -413,6 +549,35 @@ Custom provider (`POST /api/admin/provider-marketplace/custom`) делает т�
 `sla`, `pricingMode`, `requiredFields`, `handoffMode`, `installedAt`.
 
 Технический reference: [SERVICE_CATALOG.md](SERVICE_CATALOG.md).
+
+### Catalog routing visual
+
+```mermaid
+flowchart LR
+  inbound["Inbound request"]
+  extractor["field-extractor / service-intent-router"]
+  item["service_catalog_items"]
+
+  funnel["route_type: funnel"]
+  partnerService["route_type: partner_service"]
+  webhook["route_type: webhook"]
+  manual["route_type: manual"]
+
+  funnelRuntime["Lead Engine funnel stages"]
+  partner["partners"]
+  service["partner_services"]
+  deal["partner_deals ledger"]
+  external["External provider system"]
+  operator["Operator inbox"]
+
+  inbound --> extractor --> item
+  item --> funnel --> funnelRuntime
+  item --> partnerService --> service --> partner
+  service --> deal
+  item --> webhook --> external
+  item --> manual --> operator
+  deal --> operator
+```
 
 ---
 
