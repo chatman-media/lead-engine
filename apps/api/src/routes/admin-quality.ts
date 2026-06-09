@@ -1,4 +1,12 @@
-import { DrizzleKbStore, type Db, withTenant } from "@chatman-media/conversation-engine";
+import {
+  AgentToolCallsRepo,
+  type AgentToolCallFeedbackLabel,
+  type AgentToolCallFeedbackRow,
+  type AgentToolCallSource,
+  DrizzleKbStore,
+  type Db,
+  withTenant,
+} from "@chatman-media/conversation-engine";
 import type { ChatClient, EmbeddingClient } from "@chatman-media/llm-router";
 import type { IKbStore } from "@chatman-media/kb";
 import {
@@ -46,6 +54,19 @@ import { isUniqueViolation } from "../lib/db-errors.ts";
 const OUTCOMES = new Set<EloOutcome>(["won", "lost", "draw"]);
 const PAIRWISE_WINNERS = new Set<PairwiseWinner>(["a", "b", "draw"]);
 const COACH_PROPOSAL_DECISIONS = new Set(["pending", "dismissed"]);
+const TOOL_CALL_SOURCES = new Set<AgentToolCallSource>([
+  "rag_reply",
+  "llm_reply",
+  "admin_sim",
+  "self_play",
+]);
+const TOOL_CALL_FEEDBACK_LABELS = new Set<AgentToolCallFeedbackLabel>([
+  "good_reply",
+  "wrong_tool",
+  "missing_tool",
+  "bad_args",
+  "other",
+]);
 
 const selfPlayMatchSelect = {
   id: selfPlayMatches.id,
@@ -92,6 +113,146 @@ export interface AdminQualityRoutesOpts {
 
 export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
   const app = new Hono();
+
+  app.get("/api/admin/quality/tool-calls", async (c) => {
+    const tenantId = c.var.tenantId;
+    const limit = parsePositiveIntQuery(c.req.query("limit"), 100, 1000);
+    if (limit === null) return c.json({ error: "invalid limit" }, 400);
+
+    const conversationId = parseOptionalPositiveIntQuery(c.req.query("conversationId"));
+    if (conversationId === null) return c.json({ error: "invalid conversationId" }, 400);
+    const contactId = parseOptionalPositiveIntQuery(c.req.query("contactId"));
+    if (contactId === null) return c.json({ error: "invalid contactId" }, 400);
+    const messageId = parseOptionalPositiveIntQuery(c.req.query("messageId"));
+    if (messageId === null) return c.json({ error: "invalid messageId" }, 400);
+    const outboundQueueId = parseOptionalPositiveIntQuery(c.req.query("outboundQueueId"));
+    if (outboundQueueId === null) return c.json({ error: "invalid outboundQueueId" }, 400);
+
+    const sourceRaw = c.req.query("source");
+    const source =
+      sourceRaw && TOOL_CALL_SOURCES.has(sourceRaw as AgentToolCallSource)
+        ? (sourceRaw as AgentToolCallSource)
+        : undefined;
+    if (sourceRaw && !source) return c.json({ error: "invalid source" }, 400);
+
+    const errorRaw = c.req.query("error");
+    const error =
+      errorRaw === undefined
+        ? undefined
+        : errorRaw === "true"
+          ? true
+          : errorRaw === "false"
+            ? false
+            : null;
+    if (error === null) return c.json({ error: "invalid error" }, 400);
+
+    const toolName = c.req.query("toolName")?.trim();
+    if (toolName !== undefined && toolName.length === 0) {
+      return c.json({ error: "invalid toolName" }, 400);
+    }
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) => {
+      return new AgentToolCallsRepo({ db: tx, tenantId }).list({
+        ...(conversationId !== undefined ? { conversationId } : {}),
+        ...(contactId !== undefined ? { contactId } : {}),
+        ...(messageId !== undefined ? { messageId } : {}),
+        ...(outboundQueueId !== undefined ? { outboundQueueId } : {}),
+        ...(source !== undefined ? { source } : {}),
+        ...(toolName !== undefined ? { toolName } : {}),
+        ...(error !== undefined ? { error } : {}),
+        limit,
+      });
+    });
+
+    return c.json({
+      items: rows.map((row) => ({
+        id: row.id,
+        conversationId: row.conversationId,
+        contactId: row.contactId,
+        messageId: row.messageId,
+        outboundQueueId: row.outboundQueueId,
+        source: row.source,
+        toolName: row.toolName,
+        args: parseJsonValue(row.argsJson, null),
+        result: parseJsonValue(row.resultJson, null),
+        error: row.error,
+        cycle: row.cycle,
+        toolCallIndex: row.toolCallIndex,
+        latencyMs: row.latencyMs,
+        createdAt: row.createdAt,
+      })),
+    });
+  });
+
+  app.get("/api/admin/quality/tool-calls/:id/feedback", async (c) => {
+    const tenantId = c.var.tenantId;
+    const id = parsePositiveParamId(c.req.param("id"));
+    if (id === null) return c.json({ error: "invalid id" }, 400);
+
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      const repo = new AgentToolCallsRepo({ db: tx, tenantId });
+      const toolCall = await repo.byId(id);
+      if (!toolCall) return null;
+      return repo.feedbackForToolCall(id);
+    });
+    if (result === null) return c.json({ error: "tool call not found" }, 404);
+
+    return c.json({ items: result.map(toAgentToolCallFeedbackResponse) });
+  });
+
+  app.post("/api/admin/quality/tool-calls/:id/feedback", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const id = parsePositiveParamId(c.req.param("id"));
+    if (id === null) return c.json({ error: "invalid id" }, 400);
+
+    let body: QualityToolCallFeedbackBody;
+    try {
+      body = (await c.req.json()) as QualityToolCallFeedbackBody;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+
+    const labelRaw = typeof body.label === "string" ? body.label.trim() : "";
+    const label = TOOL_CALL_FEEDBACK_LABELS.has(labelRaw as AgentToolCallFeedbackLabel)
+      ? (labelRaw as AgentToolCallFeedbackLabel)
+      : null;
+    if (!label) {
+      return c.json({
+        error: `label must be one of: ${Array.from(TOOL_CALL_FEEDBACK_LABELS).join(", ")}`,
+      }, 400);
+    }
+
+    const note = parseOptionalToolFeedbackNote(body.note);
+    if (note.kind === "invalid") {
+      return c.json({ error: "note must be a string up to 2000 characters" }, 400);
+    }
+
+    const feedback = await withTenant(opts.db, tenantId, async (tx) => {
+      return new AgentToolCallsRepo({ db: tx, tenantId }).recordFeedback({
+        toolCallId: id,
+        adminId,
+        label,
+        note: note.value,
+        nowEpoch: Math.floor(Date.now() / 1000),
+      });
+    });
+    if (!feedback) return c.json({ error: "tool call not found" }, 404);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "quality.tool_call_feedback.create",
+      targetKind: "agent_tool_call",
+      targetId: id,
+      details: {
+        label,
+        hasNote: Boolean(note.value),
+      },
+    });
+
+    return c.json({ ok: true, feedback: toAgentToolCallFeedbackResponse(feedback) }, 201);
+  });
 
   app.get("/api/admin/quality/self-play/summary", async (c) => {
     const tenantId = c.var.tenantId;
@@ -1862,6 +2023,57 @@ function parseLimit(value: string | undefined): number | null {
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1000) return null;
   return parsed;
 }
+
+function parsePositiveIntQuery(
+  raw: string | undefined,
+  fallback: number,
+  max: number,
+): number | null {
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > max) return null;
+  return n;
+}
+
+function parsePositiveParamId(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return null;
+  return n;
+}
+
+function parseOptionalPositiveIntQuery(raw: string | undefined): number | null | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return null;
+  return n;
+}
+
+function parseOptionalToolFeedbackNote(
+  value: unknown,
+): { kind: "ok"; value: string | null } | { kind: "invalid" } {
+  if (value === undefined || value === null) return { kind: "ok", value: null };
+  if (typeof value !== "string") return { kind: "invalid" };
+  const trimmed = value.trim();
+  if (trimmed.length > 2000) return { kind: "invalid" };
+  return { kind: "ok", value: trimmed || null };
+}
+
+function toAgentToolCallFeedbackResponse(row: AgentToolCallFeedbackRow) {
+  return {
+    id: row.id,
+    toolCallId: row.toolCallId,
+    adminId: row.adminId,
+    label: row.label,
+    note: row.note,
+    createdAt: row.createdAt,
+  };
+}
+
+type QualityToolCallFeedbackBody = {
+  label?: unknown;
+  note?: unknown;
+};
 
 function parseIncludeTranscript(value: string | undefined): boolean {
   if (!value) return true;

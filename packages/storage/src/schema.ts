@@ -967,6 +967,57 @@ export const outboundQueue = pgTable("outbound_queue", {
     .where(sql`idempotency_key IS NOT NULL`),
 ]);
 
+// ---- Agentic tool-call traces -----------------------------------------
+
+// First-class audit trail for tool-loop decisions. This is the raw substrate
+// for later self-learning: join tool calls to conversations/leads/orders and
+// decide whether a tool helped, failed, or should have been called differently.
+export const agentToolCalls = pgTable("agent_tool_calls", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  conversationId: integer("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  contactId: integer("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+  messageId: integer("message_id").references(() => messages.id, { onDelete: "set null" }),
+  outboundQueueId: integer("outbound_queue_id").references(() => outboundQueue.id, { onDelete: "set null" }),
+  source: text("source").notNull(),
+  toolName: text("tool_name").notNull(),
+  argsJson: text("args_json").notNull().default("{}"),
+  resultJson: text("result_json").notNull().default("null"),
+  error: boolean("error").notNull().default(false),
+  cycle: integer("cycle").notNull().default(0),
+  toolCallIndex: integer("tool_call_index").notNull().default(0),
+  latencyMs: integer("latency_ms"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  check(
+    "agent_tool_calls_source_check",
+    sql`${t.source} IN ('rag_reply','llm_reply','admin_sim','self_play')`,
+  ),
+  index("idx_agent_tool_calls_conversation").on(t.tenantId, t.conversationId, sql`${t.createdAt} DESC`),
+  index("idx_agent_tool_calls_tool").on(t.tenantId, t.toolName, sql`${t.createdAt} DESC`),
+  index("idx_agent_tool_calls_error").on(t.tenantId, t.error, sql`${t.createdAt} DESC`),
+  index("idx_agent_tool_calls_outbound").on(t.outboundQueueId),
+]);
+
+// Human feedback on tool-call quality. This is intentionally separate from the
+// immutable trace row, so reviewers can add multiple labels over time.
+export const agentToolCallFeedback = pgTable("agent_tool_call_feedback", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  toolCallId: integer("tool_call_id").notNull().references(() => agentToolCalls.id, { onDelete: "cascade" }),
+  adminId: integer("admin_id").references(() => admins.id, { onDelete: "set null" }),
+  label: text("label").notNull(),
+  note: text("note"),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+}, (t) => [
+  check(
+    "agent_tool_call_feedback_label_check",
+    sql`${t.label} IN ('good_reply','wrong_tool','missing_tool','bad_args','other')`,
+  ),
+  index("idx_agent_tool_call_feedback_call").on(t.tenantId, t.toolCallId, sql`${t.createdAt} DESC`),
+  index("idx_agent_tool_call_feedback_label").on(t.tenantId, t.label, sql`${t.createdAt} DESC`),
+]);
+
 // ---- LLM provider configs (per (tenant, purpose)) ---------------------
 
 // Читается LlmRouter'ом для resolveChat/resolveEmbed (см. packages/llm-router).

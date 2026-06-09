@@ -1,9 +1,10 @@
+import { makeBookingLinkTool } from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { describe, expect, it } from "bun:test";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
-import { LlmReplyStrategy } from "./llm-reply.ts";
+import { LlmReplyStrategy, type LlmReplyStrategyOpts } from "./llm-reply.ts";
 
 const TEMPLATE: VerticalTemplate = {
   slug: "test_v1",
@@ -24,6 +25,32 @@ class CapturingChat implements ChatClient {
   async complete(messages: ChatMessage[], opts?: unknown): Promise<string> {
     this.lastCall = { messages, opts };
     return this.reply;
+  }
+}
+
+class ToolLoopChat implements ChatClient {
+  calls = 0;
+  async complete(): Promise<string> {
+    return "Вот ссылка для записи: https://calendly.example/demo";
+  }
+  async completeWithTools(): Promise<{
+    content: string | null;
+    toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
+  }> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      return {
+        content: null,
+        toolCalls: [
+          {
+            id: "q1",
+            name: "offer_booking_link",
+            args: {},
+          },
+        ],
+      };
+    }
+    return { content: "Вот ссылка для записи: https://calendly.example/demo", toolCalls: [] };
   }
 }
 
@@ -155,6 +182,49 @@ describe("LlmReplyStrategy", () => {
     });
     expect(result).not.toBeNull();
     expect((result![0]!.parts[0] as { text: string }).text).toBe(EXCHANGE_SAFE_FALLBACK);
+  });
+
+  it("пишет telemetry hook после generic tool-loop", async () => {
+    const chat = new ToolLoopChat();
+    const repo = fakeMessagesRepo([row(1, "user", "сколько за 100 usdt?")]);
+    const tool = makeBookingLinkTool("https://calendly.example/demo");
+    const recorded: Array<Parameters<NonNullable<LlmReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const strategy = new LlmReplyStrategy(
+      {
+        template: TEMPLATE,
+        resolveChat: () => chat,
+        resolveTools: () => [tool],
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+      () => repo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "сколько за 100 usdt?",
+    });
+
+    expect(result).not.toBeNull();
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      tenantId: 1,
+      conversationId: 100,
+      contactId: 1,
+      userMessageText: "сколько за 100 usdt?",
+      assistantText: "Вот ссылка для записи: https://calendly.example/demo",
+    });
+    expect(recorded[0]?.toolCalls[0]).toMatchObject({
+      name: "offer_booking_link",
+      args: {},
+      result: { url: "https://calendly.example/demo" },
+      cycle: 0,
+    });
   });
 
   it("резолвит ChatClient per-call с tenantId — позволяет invalidate router", async () => {

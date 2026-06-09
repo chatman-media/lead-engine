@@ -16,6 +16,7 @@ import {
 import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres, { type Sql } from "postgres";
+import { AgentToolCallsRepo } from "./agent-tool-calls.ts";
 import { ContactsRepo } from "./contacts.ts";
 import { LeadsRepo } from "./leads.ts";
 import { MessagesRepo } from "./messages.ts";
@@ -43,6 +44,7 @@ const contactsRepo = () => new ContactsRepo({ db, tenantId });
 const leadsRepo = () => new LeadsRepo({ db, tenantId });
 const messagesRepo = () => new MessagesRepo({ db, tenantId });
 const outcomesRepo = () => new SkillOutcomesRepo({ db, tenantId });
+const agentToolCallsRepo = () => new AgentToolCallsRepo({ db, tenantId });
 
 beforeAll(async () => {
 	if (!ownerUrl) return;
@@ -273,5 +275,139 @@ describe("SkillOutcomesRepo", () => {
 		expect(aggregates.find((row) => row.skillSlug === "empathy")).toMatchObject(
 			{ wins: 0, losses: 0, draws: 1, total: 1 },
 		);
+	});
+});
+
+describe("AgentToolCallsRepo", () => {
+	it("recordMany persists tool traces and feedback stays tenant-scoped", async () => {
+		if (!enabled) return;
+		const contact = await contactsRepo().create({
+			displayName: "Tool trace contact",
+		});
+		const [conversation] = await db
+			.insert(schema.conversations)
+			.values({
+				tenantId,
+				userId: contact.id,
+				source: "bot",
+				mode: "ai",
+				createdAt: now,
+				lastMessageAt: now,
+			})
+			.returning({ id: schema.conversations.id });
+		if (!conversation) throw new Error("conversation insert returned no row");
+
+		const rows = await agentToolCallsRepo().recordMany([
+			{
+				conversationId: conversation.id,
+				contactId: contact.id,
+				source: "rag_reply",
+				toolName: "quote_exchange",
+				args: { asset: "USDT", amount: 100 },
+				result: { ok: true, amountToThb: 3150 },
+				cycle: 0,
+				toolCallIndex: 0,
+				nowEpoch: now,
+			},
+			{
+				conversationId: conversation.id,
+				contactId: contact.id,
+				source: "rag_reply",
+				toolName: "create_exchange_order",
+				args: { quoteId: "q1" },
+				result: { error: "needs verification" },
+				error: true,
+				cycle: 1,
+				toolCallIndex: 1,
+				nowEpoch: now + 1,
+			},
+			{
+				conversationId: conversation.id,
+				contactId: contact.id,
+				source: "llm_reply",
+				toolName: "quote_exchange",
+				args: { asset: "USDT", amount: 200 },
+				result: { ok: true, amountToThb: 6300 },
+				cycle: 0,
+				toolCallIndex: 2,
+				nowEpoch: now + 2,
+			},
+		]);
+
+		expect(rows).toHaveLength(3);
+		expect(JSON.parse(rows[0]!.argsJson)).toEqual({
+			asset: "USDT",
+			amount: 100,
+		});
+		expect((await agentToolCallsRepo().byId(rows[1]!.id))?.toolName).toBe(
+			"create_exchange_order",
+		);
+
+		const byConversation = await agentToolCallsRepo().byConversation(
+			conversation.id,
+		);
+		expect(byConversation.map((row) => row.toolName)).toEqual([
+			"quote_exchange",
+			"create_exchange_order",
+			"quote_exchange",
+		]);
+		expect(
+			(
+				await agentToolCallsRepo().list({
+					conversationId: conversation.id,
+					toolName: "quote_exchange",
+				})
+			).map((row) => row.source),
+		).toEqual(["llm_reply", "rag_reply"]);
+		expect(
+			(
+				await agentToolCallsRepo().list({
+					conversationId: conversation.id,
+					error: true,
+				})
+			).map((row) => row.toolName),
+		).toEqual(["create_exchange_order"]);
+		expect(
+			(
+				await agentToolCallsRepo().list({
+					source: "llm_reply",
+					limit: 1,
+				})
+			).map((row) => row.toolName),
+		).toEqual(["quote_exchange"]);
+
+		const otherRepo = new AgentToolCallsRepo({ db, tenantId: otherTenantId });
+		expect(await otherRepo.byConversation(conversation.id)).toEqual([]);
+		expect(await otherRepo.byId(rows[1]!.id)).toBeNull();
+
+		const firstFeedback = await agentToolCallsRepo().recordFeedback({
+			toolCallId: rows[1]!.id,
+			label: "bad_args",
+			note: "quote id should be verified before order creation",
+			nowEpoch: now + 3,
+		});
+		expect(firstFeedback).toMatchObject({
+			toolCallId: rows[1]!.id,
+			label: "bad_args",
+			note: "quote id should be verified before order creation",
+		});
+		await agentToolCallsRepo().recordFeedback({
+			toolCallId: rows[1]!.id,
+			label: "wrong_tool",
+			note: null,
+			nowEpoch: now + 4,
+		});
+		expect(
+			(await agentToolCallsRepo().feedbackForToolCall(rows[1]!.id)).map(
+				(row) => row.label,
+			),
+		).toEqual(["wrong_tool", "bad_args"]);
+		expect(
+			await otherRepo.recordFeedback({
+				toolCallId: rows[1]!.id,
+				label: "good_reply",
+				nowEpoch: now + 5,
+			}),
+		).toBeNull();
 	});
 });

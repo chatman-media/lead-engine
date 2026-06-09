@@ -6,6 +6,7 @@ import type {
 } from "@chatman-media/llm-router";
 import {
   answerWithRag,
+  type AnswerTelemetry,
   type AnyRagTool,
   DEFAULT_PERSONA,
   type DirectorHookForPrompt,
@@ -190,6 +191,18 @@ export interface RagReplyStrategyOpts {
   resolveReranker?: (input: {
     tenantId: number;
   }) => Promise<Reranker | null> | Reranker | null;
+  /**
+   * Optional post-generation telemetry sink for agentic tool calls. Called only
+   * after the LLM/tool loop finishes, so it never wraps an LLM call in a DB tx.
+   */
+  recordToolCalls?: (input: {
+    tenantId: number;
+    conversationId: number;
+    contactId: number;
+    userMessageText: string;
+    assistantText: string;
+    telemetry: AnswerTelemetry;
+  }) => Promise<void> | void;
 }
 
 function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
@@ -456,6 +469,24 @@ export class RagReplyStrategy implements ReplyStrategy {
       console.warn(
         `[exchange-reply-guard] tenant=${tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
       );
+    }
+
+    if (
+      this.opts.recordToolCalls &&
+      ((result.telemetry.toolCalls?.length ?? 0) > 0 || result.telemetry.toolCall)
+    ) {
+      try {
+        await this.opts.recordToolCalls({
+          tenantId,
+          conversationId: input.conversationId,
+          contactId: input.contactId,
+          userMessageText: input.userMessageText,
+          assistantText: guarded.text,
+          telemetry: result.telemetry,
+        });
+      } catch (err) {
+        console.warn("[rag-reply] failed to record tool calls:", err);
+      }
     }
 
     return [

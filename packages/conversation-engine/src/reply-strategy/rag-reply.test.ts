@@ -4,6 +4,7 @@
 // kb/answer.test). Без БД и сети.
 
 import { describe, expect, it } from "bun:test";
+import { makeBookingLinkTool } from "@chatman-media/kb";
 import type { ChatClient } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { RagReplyStrategy, type RagReplyStrategyOpts } from "./rag-reply.ts";
@@ -137,6 +138,61 @@ describe("RagReplyStrategy.generate", () => {
     const part = r![0]!.parts[0] as { kind: string; text: string };
     expect(part.kind).toBe("text");
     expect(part.text.toLowerCase()).toContain("курс");
+  });
+
+  it("tool-loop telemetry пробрасывается в recordToolCalls", async () => {
+    let toolLoopCalls = 0;
+    const chat = {
+      complete: async () => "Вот ссылка для записи: https://calendly.example/demo",
+      completeWithTools: async () => {
+        toolLoopCalls += 1;
+        if (toolLoopCalls === 1) {
+          return {
+            content: null,
+            toolCalls: [
+              {
+                id: "q1",
+                name: "offer_booking_link",
+                args: {},
+              },
+            ],
+          };
+        }
+        return { content: "Вот ссылка для записи: https://calendly.example/demo", toolCalls: [] };
+      },
+    } as unknown as ChatClient;
+    const tool = makeBookingLinkTool("https://calendly.example/demo");
+    const recorded: Array<Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const s = mk(
+      {
+        resolveChat: () => chat,
+        resolveEmbed: embed,
+        resolveKb: kbWith([HIT]),
+        resolveTools: () => [tool],
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+      fakeMessagesRepo(),
+    );
+
+    const r = await s.generate(baseInput());
+
+    expect(r).not.toBeNull();
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      tenantId: 1,
+      conversationId: 100,
+      contactId: 5,
+      userMessageText: QUESTION,
+      assistantText: "Вот ссылка для записи: https://calendly.example/demo",
+    });
+    expect(recorded[0]?.telemetry.toolCalls?.[0]).toMatchObject({
+      name: "offer_booking_link",
+      args: {},
+      result: { url: "https://calendly.example/demo" },
+      cycle: 0,
+    });
   });
 
   it("style assignment metadata сохраняется в conversation", async () => {
