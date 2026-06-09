@@ -775,6 +775,32 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     return c.json({ ok: true, proposal: result.proposal, style: result.style });
   });
 
+  app.get("/api/admin/quality/coach/proposals/:id/shadow-preview", async (c) => {
+    const tenantId = c.var.tenantId;
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "bad id" }, 400);
+
+    const limit = parseLimit(c.req.query("limit"));
+    if (limit === null) return c.json({ error: "limit must be an integer between 1 and 1000" }, 400);
+    const newStyleSlug = optionalQuery(c.req.query("newStyleSlug"));
+
+    const result = await withTenant(opts.db, tenantId, (tx) =>
+      resolveShadowEvaluationPlan(tx, {
+        tenantId,
+        proposalId: id,
+        newStyleSlug,
+        limit,
+      }),
+    );
+
+    if (result.kind === "not_found") return c.json({ error: "coach proposal not found" }, 404);
+    if (result.kind === "parent_not_found") return c.json({ error: "parent style not found" }, 404);
+    if (result.kind === "candidate_not_found") return c.json({ error: "derived style not found" }, 404);
+    if (result.kind === "blocked") return c.json({ error: result.error }, 409);
+
+    return c.json({ ok: true, preview: toShadowEvaluationPreview(result.plan) });
+  });
+
   app.post("/api/admin/quality/coach/proposals/:id/shadow-evaluations", async (c) => {
     const tenantId = c.var.tenantId;
     const adminId = c.var.adminId as number | undefined;
@@ -802,116 +828,34 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
 
     const now = Math.floor(Date.now() / 1000);
     const result = await withTenant(opts.db, tenantId, async (tx) => {
-      const [proposal] = await tx
-        .select({
-          id: coachProposals.id,
-          styleSlug: coachProposals.styleSlug,
-          status: coachProposals.status,
-        })
-        .from(coachProposals)
-        .where(and(eq(coachProposals.id, id), eq(coachProposals.tenantId, tenantId)))
-        .limit(1);
+      const planResult = await resolveShadowEvaluationPlan(tx, {
+        tenantId,
+        proposalId: id,
+        newStyleSlug: newStyleSlugInput.value,
+        limit: limitInput.value ?? pairsPlannedInput.value ?? 200,
+      });
 
-      if (!proposal) return { kind: "not_found" as const };
-      if (proposal.status !== "applied") {
-        return {
-          kind: "blocked" as const,
-          error: `only applied proposals can start shadow evaluation; current status is ${proposal.status}`,
-        };
-      }
-
-      const [parent] = await tx
-        .select({
-          id: styles.id,
-          slug: styles.slug,
-        })
-        .from(styles)
-        .where(
-          and(
-            eq(styles.tenantId, tenantId),
-            eq(styles.slug, proposal.styleSlug),
-            sql`${styles.deletedAt} IS NULL`,
-          ),
-        )
-        .limit(1);
-      if (!parent) return { kind: "parent_not_found" as const };
-
-      const candidateFilters = [
-        eq(styles.tenantId, tenantId),
-        sql`${styles.deletedAt} IS NULL`,
-        newStyleSlugInput.value
-          ? eq(styles.slug, newStyleSlugInput.value)
-          : eq(styles.parentId, parent.id),
-      ];
-      const [candidate] = await tx
-        .select({
-          id: styles.id,
-          slug: styles.slug,
-          parentId: styles.parentId,
-        })
-        .from(styles)
-        .where(and(...candidateFilters))
-        .orderBy(desc(styles.createdAt), desc(styles.id))
-        .limit(1);
-      if (!candidate || candidate.id === parent.id) return { kind: "candidate_not_found" as const };
-
-      const pairLimit = limitInput.value ?? pairsPlannedInput.value ?? 200;
-      const pairwiseRows = await tx
-        .select({
-          id: pairwiseMatches.id,
-          styleASlug: pairwiseMatches.styleASlug,
-          styleBSlug: pairwiseMatches.styleBSlug,
-          winner: pairwiseMatches.winner,
-          createdAt: pairwiseMatches.createdAt,
-        })
-        .from(pairwiseMatches)
-        .where(
-          and(
-            eq(pairwiseMatches.tenantId, tenantId),
-            or(
-              and(
-                eq(pairwiseMatches.styleASlug, parent.slug),
-                eq(pairwiseMatches.styleBSlug, candidate.slug),
-              ),
-              and(
-                eq(pairwiseMatches.styleASlug, candidate.slug),
-                eq(pairwiseMatches.styleBSlug, parent.slug),
-              ),
-            ),
-          ),
-        )
-        .orderBy(desc(pairwiseMatches.createdAt), desc(pairwiseMatches.id))
-        .limit(pairLimit);
-
-      if (pairwiseRows.length === 0) return { kind: "no_pairwise" as const };
-
-      const counts = pairwiseRows.reduce(
-        (acc, row) => countShadowPairwise(acc, row, parent.slug, candidate.slug),
-        { aWins: 0, bWins: 0, draws: 0 },
-      );
-      const pairsDone = pairwiseRows.length;
-      const pairsPlanned = pairsDone;
-      const bWinsAdjusted = counts.bWins + 0.5 * counts.draws;
-      const winRateLb = wilsonLowerBound(bWinsAdjusted, pairsDone);
-      const decision = shadowDecide(bWinsAdjusted, pairsDone);
+      if (planResult.kind !== "ok") return planResult;
+      const { plan } = planResult;
+      if (plan.pairsDone === 0) return { kind: "no_pairwise" as const, plan };
 
       const [created] = await tx
         .insert(shadowEvaluations)
         .values({
           tenantId,
-          proposalId: proposal.id,
-          parentStyleSlug: parent.slug,
-          parentStyleId: parent.id,
-          newStyleSlug: candidate.slug,
-          newStyleId: candidate.id,
-          pairsPlanned,
-          pairsDone,
-          aWins: counts.aWins,
-          bWins: counts.bWins,
-          draws: counts.draws,
-          winRateLb,
+          proposalId: plan.proposal.id,
+          parentStyleSlug: plan.parentStyle.slug,
+          parentStyleId: plan.parentStyle.id,
+          newStyleSlug: plan.candidateStyle.slug,
+          newStyleId: plan.candidateStyle.id,
+          pairsPlanned: plan.pairsDone,
+          pairsDone: plan.pairsDone,
+          aWins: plan.aWins,
+          bWins: plan.bWins,
+          draws: plan.draws,
+          winRateLb: plan.winRateLb,
           status: "complete",
-          decision,
+          decision: plan.decision,
           startedAt: now,
           completedAt: now,
         })
@@ -935,7 +879,11 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
           completedAt: shadowEvaluations.completedAt,
         });
 
-      return { kind: "ok" as const, shadow: created, pairwiseIds: pairwiseRows.map((row) => row.id) };
+      return {
+        kind: "ok" as const,
+        shadow: created,
+        pairwiseIds: plan.pairwiseRows.map((row) => row.id),
+      };
     });
 
     if (result.kind === "not_found") return c.json({ error: "coach proposal not found" }, 404);
@@ -1698,6 +1646,193 @@ function parseOptionalBodyBoolean(
   if (["1", "true", "yes", "on"].includes(normalized)) return { kind: "ok", value: true };
   if (["0", "false", "no", "off"].includes(normalized)) return { kind: "ok", value: false };
   return { kind: "invalid" };
+}
+
+type ShadowEvaluationPairwiseRow = {
+  id: number;
+  styleASlug: string;
+  styleBSlug: string;
+  winner: string;
+  createdAt: number;
+};
+
+type ShadowEvaluationPlan = {
+  proposal: {
+    id: number;
+    styleSlug: string;
+    status: string;
+  };
+  parentStyle: {
+    id: number;
+    slug: string;
+  };
+  candidateStyle: {
+    id: number;
+    slug: string;
+    parentId: number | null;
+  };
+  limit: number;
+  pairwiseRows: ShadowEvaluationPairwiseRow[];
+  pairsDone: number;
+  aWins: number;
+  bWins: number;
+  draws: number;
+  bWinsAdjusted: number;
+  winRateLb: number | null;
+  decision: ReturnType<typeof shadowDecide> | null;
+};
+
+type ShadowEvaluationPlanResult =
+  | { kind: "ok"; plan: ShadowEvaluationPlan }
+  | { kind: "not_found" }
+  | { kind: "parent_not_found" }
+  | { kind: "candidate_not_found" }
+  | { kind: "blocked"; error: string };
+
+async function resolveShadowEvaluationPlan(
+  tx: Db,
+  input: {
+    tenantId: number;
+    proposalId: number;
+    newStyleSlug?: string;
+    limit: number;
+  },
+): Promise<ShadowEvaluationPlanResult> {
+  const [proposal] = await tx
+    .select({
+      id: coachProposals.id,
+      styleSlug: coachProposals.styleSlug,
+      status: coachProposals.status,
+    })
+    .from(coachProposals)
+    .where(and(eq(coachProposals.id, input.proposalId), eq(coachProposals.tenantId, input.tenantId)))
+    .limit(1);
+
+  if (!proposal) return { kind: "not_found" };
+  if (proposal.status !== "applied") {
+    return {
+      kind: "blocked",
+      error: `only applied proposals can start shadow evaluation; current status is ${proposal.status}`,
+    };
+  }
+
+  const [parentStyle] = await tx
+    .select({
+      id: styles.id,
+      slug: styles.slug,
+    })
+    .from(styles)
+    .where(
+      and(
+        eq(styles.tenantId, input.tenantId),
+        eq(styles.slug, proposal.styleSlug),
+        sql`${styles.deletedAt} IS NULL`,
+      ),
+    )
+    .limit(1);
+  if (!parentStyle) return { kind: "parent_not_found" };
+
+  const candidateFilters = [
+    eq(styles.tenantId, input.tenantId),
+    sql`${styles.deletedAt} IS NULL`,
+    input.newStyleSlug ? eq(styles.slug, input.newStyleSlug) : eq(styles.parentId, parentStyle.id),
+  ];
+  const [candidateStyle] = await tx
+    .select({
+      id: styles.id,
+      slug: styles.slug,
+      parentId: styles.parentId,
+    })
+    .from(styles)
+    .where(and(...candidateFilters))
+    .orderBy(desc(styles.createdAt), desc(styles.id))
+    .limit(1);
+  if (!candidateStyle || candidateStyle.id === parentStyle.id) {
+    return { kind: "candidate_not_found" };
+  }
+
+  const pairwiseRows = await tx
+    .select({
+      id: pairwiseMatches.id,
+      styleASlug: pairwiseMatches.styleASlug,
+      styleBSlug: pairwiseMatches.styleBSlug,
+      winner: pairwiseMatches.winner,
+      createdAt: pairwiseMatches.createdAt,
+    })
+    .from(pairwiseMatches)
+    .where(
+      and(
+        eq(pairwiseMatches.tenantId, input.tenantId),
+        or(
+          and(
+            eq(pairwiseMatches.styleASlug, parentStyle.slug),
+            eq(pairwiseMatches.styleBSlug, candidateStyle.slug),
+          ),
+          and(
+            eq(pairwiseMatches.styleASlug, candidateStyle.slug),
+            eq(pairwiseMatches.styleBSlug, parentStyle.slug),
+          ),
+        ),
+      ),
+    )
+    .orderBy(desc(pairwiseMatches.createdAt), desc(pairwiseMatches.id))
+    .limit(input.limit);
+
+  const counts = pairwiseRows.reduce(
+    (acc, row) => countShadowPairwise(acc, row, parentStyle.slug, candidateStyle.slug),
+    { aWins: 0, bWins: 0, draws: 0 },
+  );
+  const pairsDone = pairwiseRows.length;
+  const bWinsAdjusted = counts.bWins + 0.5 * counts.draws;
+  const winRateLb = pairsDone > 0 ? wilsonLowerBound(bWinsAdjusted, pairsDone) : null;
+  const decision = pairsDone > 0 ? shadowDecide(bWinsAdjusted, pairsDone) : null;
+
+  return {
+    kind: "ok",
+    plan: {
+      proposal,
+      parentStyle,
+      candidateStyle,
+      limit: input.limit,
+      pairwiseRows,
+      pairsDone,
+      aWins: counts.aWins,
+      bWins: counts.bWins,
+      draws: counts.draws,
+      bWinsAdjusted,
+      winRateLb,
+      decision,
+    },
+  };
+}
+
+function toShadowEvaluationPreview(plan: ShadowEvaluationPlan) {
+  const ready = plan.pairsDone > 0;
+  return {
+    ready,
+    proposalId: plan.proposal.id,
+    parentStyle: plan.parentStyle,
+    candidateStyle: plan.candidateStyle,
+    pairwise: {
+      limit: plan.limit,
+      total: plan.pairsDone,
+      aWins: plan.aWins,
+      bWins: plan.bWins,
+      draws: plan.draws,
+      bWinsAdjusted: plan.bWinsAdjusted,
+      winRateLb: plan.winRateLb,
+      decision: plan.decision,
+      recentIds: plan.pairwiseRows.map((row) => row.id),
+    },
+    missing: ready
+      ? null
+      : {
+          reason: "no_pairwise",
+          nextAction: "run_pairwise",
+          styleASlug: plan.parentStyle.slug,
+          styleBSlug: plan.candidateStyle.slug,
+        },
+  };
 }
 
 function countShadowPairwise<T extends { aWins: number; bWins: number; draws: number }>(

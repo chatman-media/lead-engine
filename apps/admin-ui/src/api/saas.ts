@@ -1056,6 +1056,48 @@ export interface QualityShadowEvaluationResult {
   shadow: QualityShadowEvaluation;
 }
 
+export interface QualityShadowPreview {
+  ready: boolean;
+  proposalId: number;
+  parentStyle: {
+    id: number;
+    slug: string;
+  };
+  candidateStyle: {
+    id: number;
+    slug: string;
+    parentId: number | null;
+  };
+  pairwise: {
+    limit: number;
+    total: number;
+    aWins: number;
+    bWins: number;
+    draws: number;
+    bWinsAdjusted: number;
+    winRateLb: number | null;
+    decision: QualityShadowDecision | null;
+    recentIds: number[];
+  };
+  missing: {
+    reason: "no_pairwise";
+    nextAction: "run_pairwise";
+    styleASlug: string;
+    styleBSlug: string;
+  } | null;
+}
+
+export interface QualityShadowPreviewResult {
+  ok: boolean;
+  preview: QualityShadowPreview;
+}
+
+export interface QualityShadowEvaluationOptions {
+  pairsPlanned?: number;
+  limit?: number;
+  newStyleSlug?: string;
+}
+
 export interface QualityCoachSummary {
   totals: {
     proposals: {
@@ -2261,7 +2303,16 @@ export const saas = {
       method: "POST",
     });
   },
-  createQualityShadowEvaluation(id: number, opts: { pairsPlanned?: number; limit?: number } = {}) {
+  getQualityShadowPreview(id: number, opts: Omit<QualityShadowEvaluationOptions, "pairsPlanned"> = {}) {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.newStyleSlug) params.set("newStyleSlug", opts.newStyleSlug);
+    const qs = params.toString();
+    return request<QualityShadowPreviewResult>(
+      `/api/admin/quality/coach/proposals/${id}/shadow-preview${qs ? `?${qs}` : ""}`,
+    );
+  },
+  createQualityShadowEvaluation(id: number, opts: QualityShadowEvaluationOptions = {}) {
     return request<QualityShadowEvaluationResult>(
       `/api/admin/quality/coach/proposals/${id}/shadow-evaluations`,
       {

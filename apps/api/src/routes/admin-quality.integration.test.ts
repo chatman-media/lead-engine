@@ -835,6 +835,43 @@ describe("admin quality JSONL export", () => {
     expect(proposal).toBeTruthy();
     if (!proposal) return;
 
+    const emptyPreviewRes = await authReq(
+      tokenA,
+      `/api/admin/quality/coach/proposals/${proposal.id}/shadow-preview?limit=10`,
+    );
+    expect(emptyPreviewRes.status).toBe(200);
+    const emptyPreview = (await emptyPreviewRes.json()) as QualityCoachShadowPreviewResponse;
+    expect(emptyPreview.preview).toMatchObject({
+      ready: false,
+      proposalId: proposal.id,
+      parentStyle: {
+        id: parentStyle.id,
+        slug: parentStyle.slug,
+      },
+      candidateStyle: {
+        id: candidateStyle.id,
+        slug: candidateStyle.slug,
+        parentId: parentStyle.id,
+      },
+      pairwise: {
+        limit: 10,
+        total: 0,
+        aWins: 0,
+        bWins: 0,
+        draws: 0,
+        bWinsAdjusted: 0,
+        winRateLb: null,
+        decision: null,
+        recentIds: [],
+      },
+      missing: {
+        reason: "no_pairwise",
+        nextAction: "run_pairwise",
+        styleASlug: parentStyle.slug,
+        styleBSlug: candidateStyle.slug,
+      },
+    });
+
     await db.insert(pairwiseMatches).values(
       Array.from({ length: 10 }, (_, index) => ({
         tenantId: tenantA,
@@ -850,6 +887,38 @@ describe("admin quality JSONL export", () => {
         createdAt: now + 10 + index,
       })),
     );
+
+    const previewRes = await authReq(
+      tokenA,
+      `/api/admin/quality/coach/proposals/${proposal.id}/shadow-preview?limit=10`,
+    );
+    expect(previewRes.status).toBe(200);
+    const preview = (await previewRes.json()) as QualityCoachShadowPreviewResponse;
+    expect(preview.preview).toMatchObject({
+      ready: true,
+      proposalId: proposal.id,
+      parentStyle: {
+        id: parentStyle.id,
+        slug: parentStyle.slug,
+      },
+      candidateStyle: {
+        id: candidateStyle.id,
+        slug: candidateStyle.slug,
+        parentId: parentStyle.id,
+      },
+      pairwise: {
+        limit: 10,
+        total: 10,
+        aWins: 0,
+        bWins: 10,
+        draws: 0,
+        bWinsAdjusted: 10,
+        decision: "keep",
+      },
+      missing: null,
+    });
+    expect(preview.preview.pairwise.recentIds).toHaveLength(10);
+    expect(preview.preview.pairwise.winRateLb).toBeGreaterThan(0.55);
 
     const crossTenant = await authPostJsonReq(
       tokenB,
@@ -1425,6 +1494,40 @@ type QualityCoachShadowCreateResponse = {
     errorMessage: string | null;
     startedAt: number;
     completedAt: number | null;
+  };
+};
+
+type QualityCoachShadowPreviewResponse = {
+  ok: boolean;
+  preview: {
+    ready: boolean;
+    proposalId: number;
+    parentStyle: {
+      id: number;
+      slug: string;
+    };
+    candidateStyle: {
+      id: number;
+      slug: string;
+      parentId: number | null;
+    };
+    pairwise: {
+      limit: number;
+      total: number;
+      aWins: number;
+      bWins: number;
+      draws: number;
+      bWinsAdjusted: number;
+      winRateLb: number | null;
+      decision: string | null;
+      recentIds: number[];
+    };
+    missing: {
+      reason: string;
+      nextAction: string;
+      styleASlug: string;
+      styleBSlug: string;
+    } | null;
   };
 };
 
