@@ -80,6 +80,43 @@ describe("LlmMemoryExtractor", () => {
     expect(facts).toEqual({});
     expect(chat.lastMessages).toBeNull();
   });
+
+  it("prepared history → не читает MessagesRepo вне caller snapshot", async () => {
+    const chat = new FakeChatClient('{"city":"Bangkok"}');
+    const extractor = new LlmMemoryExtractor({ resolveChat: () => chat }, () => ({
+      recent: async () => {
+        throw new Error("repo should not be called");
+      },
+    } as unknown as MessagesRepo));
+
+    const facts = await extractor.extract({
+      tenantId: 1,
+      conversationId: 100,
+      contactId: 1,
+      existingFacts: {},
+      history: [
+        {
+          id: 1,
+          tenantId: 1,
+          conversationId: 100,
+          role: "user",
+          text: "Я сейчас в Бангкоке",
+          tgMessageId: null,
+          metaJson: null,
+          createdAt: 1700000000,
+          stage: null,
+          deletedAt: null,
+        },
+      ],
+    });
+
+    expect(facts).toEqual({ city: "Bangkok" });
+    expect(
+      chat.lastMessages?.some(
+        (m) => typeof m.content === "string" && m.content.includes("Бангкоке"),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("runMemoryExtraction", () => {

@@ -49,6 +49,16 @@ export interface ProcessInboundResult {
   /** True если только media без caption (бот не должен отвечать). */
   mediaOnly?: boolean;
   /**
+   * True если stage classifier / memory extractor были отложены, потому что
+   * caller попросил split-pipeline. Caller должен завершить этот шаг до
+   * reply.generate, чтобы ответ видел свежие stage/memory writes.
+   */
+  postProcessingDeferred?: boolean;
+  /** current_stage до deferred stage-classifier; нужно для classifier input/log. */
+  previousStage?: string | null;
+  /** Conversation была создана на этом inbound turn. */
+  conversationCreated?: boolean;
+  /**
    * True если processInbound пропустил reply.generate (deferReply=true) —
    * caller должен вызвать `generateReplyAndEnqueue` чтобы завершить
    * pipeline. False (или undefined) = pipeline отработал полностью.

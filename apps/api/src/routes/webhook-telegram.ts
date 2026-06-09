@@ -7,7 +7,6 @@ import {
   type Db,
   generateReplyAndEnqueue,
   type ITranscriber,
-  LeadsRepo,
   type MemoryExtractor,
   MessagesRepo,
   type NotificationService,
@@ -15,6 +14,7 @@ import {
   type PipelineSink,
   processInbound,
   type ReplyStrategy,
+  runDeferredInboundPostProcessing,
   type StageClassifier,
   transcribeInboundVoice,
   withTenant,
@@ -46,9 +46,10 @@ import type { ServiceCatalogRuntime } from "../lib/service-catalog-runtime.ts";
  *   4. Дёргаем adapter.pushUpdate(update) — это конвертит в Inbound и
  *      кладёт в внутреннюю очередь адаптера.
  *   5. Если есть voice-part — download + STT до DB transaction.
- *   6. Дёргаем processInbound() — persist/classify/memory.
- *   7. Генерируем reply вне DB transaction и enqueue'им outbound.
- *   8. 200 ack Telegram'у после обработки текущего inbound.
+ *   6. Дёргаем processInbound() — persist + cheap DB hooks.
+ *   7. Делаем stage/memory post-processing: LLM outside tx, writes in short tx.
+ *   8. Генерируем reply вне DB transaction и enqueue'им outbound.
+ *   9. 200 ack Telegram'у после обработки текущего inbound.
  *
  * Outbound HTTP delivery делается в apps/worker; reply LLM/STT выполняются
  * в apps/api, но без открытой Postgres transaction.
@@ -220,17 +221,10 @@ export function makeTelegramWebhookRoutes(opts: {
       ...(opts.sink ? { sink: opts.sink } : {}),
     });
 
-    // ── Phase 1: persist + classify + memory extract (одна короткая tx) ──
+    // ── Phase 1: persist + cheap DB hooks (одна короткая tx) ─────────────
     // Все DB-операции (Contact / ChannelIdentity / Conversation / Message /
-    // applyClassifiedStage / mergeAttributes) живут в одной atomic tx с
-    // SET LOCAL app.tenant_id (RLS-correct под non-bypass role'ю).
-    //
-    // Stage classifier + memory extractor (LLM ~300-500ms каждый) пока
-    // ОСТАЮТСЯ inside tx — они быстрые относительно reply.generate, split
-    // их добавил бы значительную сложность за маленький win.
-    //
-    // `reply.generate` (1-2s LLM) НЕ вызывается здесь — deferReply=true
-    // прерывает pipeline перед reply step'ом.
+    // extractFields) живут в atomic tx с SET LOCAL app.tenant_id.
+    // Stage classifier, memory extractor и reply.generate НЕ вызываются здесь.
     let result = await withTenant(opts.db, entry.tenantId, async (tx) => {
       const repoCtx = { db: tx, tenantId: entry.tenantId };
       return processInbound(inbound, {
@@ -242,7 +236,6 @@ export function makeTelegramWebhookRoutes(opts: {
         conversations: new ConversationsRepo(repoCtx),
         messages: new MessagesRepo(repoCtx),
         outbound: new OutboundQueueRepo(repoCtx),
-        leads: new LeadsRepo(repoCtx),
         notifications: opts.notificationService,
         // reply остаётся для conv-engine'а как gate — но НЕ вызывается
         // при deferReply, processInbound вернётся раньше.
@@ -250,14 +243,27 @@ export function makeTelegramWebhookRoutes(opts: {
           ? wrapWithConciergeButtons(opts.replyStrategy, opts.db)
           : null,
         deferReply: true,
+        deferPostProcessing: Boolean(opts.memoryExtractor || opts.stageClassifier),
         ...(template ? { template } : {}),
-        ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
-        ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
         ...(opts.sink ? { sink: opts.sink } : {}),
       });
     });
 
-    // ── Phase 2: reply.generate (LLM ВНЕ tx) + enqueue в новой короткой tx ──
+    // ── Phase 2: stage/memory post-processing ───────────────────────────
+    // Classifier/extractor LLM calls run outside tx; DB writes use short txs.
+    if (result.postProcessingDeferred) {
+      await runDeferredInboundPostProcessing({
+        db: opts.db,
+        tenant,
+        result,
+        stageClassifier: opts.stageClassifier,
+        memoryExtractor: opts.memoryExtractor,
+        advanceLead: true,
+        ...(opts.sink ? { sink: opts.sink } : {}),
+      });
+    }
+
+    // ── Phase 3: reply.generate (LLM ВНЕ tx) + enqueue в новой короткой tx ──
     // Освобождает Postgres pool connection на время LLM call'а (~1-2s).
     // Pool=10, под нагрузкой это устраняет typical bottleneck.
     if (result.replyDeferred && opts.replyStrategy) {

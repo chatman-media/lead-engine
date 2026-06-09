@@ -512,6 +512,45 @@ describe("processInbound", () => {
 		});
 	});
 
+	it("deferPostProcessing → не вызывает classifier/memory внутри processInbound", async () => {
+		let classifierCalled = false;
+		let memoryCalled = false;
+		const d = {
+			...makeDeps(),
+			deferPostProcessing: true,
+			db: {} as Parameters<typeof processInbound>[1]["db"],
+			stageClassifier: {
+				classify: async () => {
+					classifierCalled = true;
+					return "qualified" as never;
+				},
+			} as Parameters<typeof processInbound>[1]["stageClassifier"],
+			memoryExtractor: {
+				extract: async () => {
+					memoryCalled = true;
+					return { city: "Bangkok" };
+				},
+			} as unknown as Parameters<typeof processInbound>[1]["memoryExtractor"],
+		};
+
+		const res = await processInbound(
+			textInbound({
+				extUserId: "u-post",
+				extMessageId: "306",
+				text: "qualify and remember me",
+			}),
+			d,
+		);
+
+		expect(res.persisted).toBe(true);
+		expect(res.postProcessingDeferred).toBe(true);
+		expect(res.userMessageText).toBe("qualify and remember me");
+		expect(res.previousStage).toBeNull();
+		expect(res.conversationCreated).toBe(true);
+		expect(classifierCalled).toBe(false);
+		expect(memoryCalled).toBe(false);
+	});
+
 	it("deferReply → возвращается до reply.generate (replyDeferred)", async () => {
 		let replyCalled = false;
 		const reply: ReplyStrategy = {

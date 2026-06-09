@@ -110,6 +110,10 @@ export {
   type GenerateReplyAndEnqueueDeps,
   type GenerateReplyResult,
 } from "./dispatch-reply.ts";
+export {
+  runDeferredInboundPostProcessing,
+  type RunDeferredInboundPostProcessingDeps,
+} from "./deferred-post-processing.ts";
 export { dispatchOutbound } from "./outbound-dispatch.ts";
 export {
   processInbound,

@@ -13,6 +13,7 @@ import {
   type PipelineSink,
   processInbound,
   type ReplyStrategy,
+  runDeferredInboundPostProcessing,
   type StageClassifier,
   transcribeInboundVoice,
   withTenant,
@@ -102,12 +103,21 @@ export function startUserbotInboundRunner(opts: {
               notifications: opts.notifications,
               reply: opts.replyStrategy ?? null,
               deferReply: true,
+              deferPostProcessing: Boolean(opts.memoryExtractor || opts.stageClassifier),
               ...(template ? { template } : {}),
-              ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
-              ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
               ...(opts.sink ? { sink: opts.sink } : {}),
             });
           });
+          if (result.postProcessingDeferred) {
+            await runDeferredInboundPostProcessing({
+              db,
+              tenant,
+              result,
+              stageClassifier: opts.stageClassifier,
+              memoryExtractor: opts.memoryExtractor,
+              ...(opts.sink ? { sink: opts.sink } : {}),
+            });
+          }
           if (result.replyDeferred && opts.replyStrategy) {
             const gen = await generateReplyAndEnqueue({
               db,

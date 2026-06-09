@@ -84,6 +84,10 @@ export interface ProcessInboundDeps {
    * user-message pipeline вытащит из истории facts через
    * extractUserFacts и merge'нёт в contact.attributes_json. Дополняет
    * template.hooks.extractFields (тот — regex; этот — LLM).
+   *
+   * Если `deferPostProcessing=true`, processInbound НЕ вызывает extractor
+   * внутри текущей DB transaction; caller должен вызвать
+   * runDeferredInboundPostProcessing(...) перед reply.generate.
    */
   memoryExtractor?: MemoryExtractor;
   /**
@@ -94,6 +98,10 @@ export interface ProcessInboundDeps {
    * Sales-engine использует current_stage для выбора stage-specific
    * промптов в composeSystemPrompt; admin-UI — для отображения позиции
    * кандидата в воронке.
+   *
+   * Если `deferPostProcessing=true`, processInbound НЕ вызывает classifier
+   * внутри текущей DB transaction; caller должен вызвать
+   * runDeferredInboundPostProcessing(...) перед reply.generate.
    */
   stageClassifier?: StageClassifier;
   /**
@@ -102,8 +110,8 @@ export interface ProcessInboundDeps {
    */
   db?: import("./dal/types.ts").Db;
   /**
-   * Когда true — pipeline ЗАВЕРШАЕТСЯ после persist + classify + memory
-   * extract БЕЗ вызова `reply.generate` и enqueue outbound. Result содержит
+   * Когда true — pipeline ЗАВЕРШАЕТСЯ после persist/post-processing boundary
+   * БЕЗ вызова `reply.generate` и enqueue outbound. Result содержит
    * `replyDeferred: true`, `userMessageText`, `mediaOnly` — caller должен
    * затем вызвать `generateReplyAndEnqueue(...)` ВНЕ открытой Postgres-tx.
    *
@@ -115,6 +123,16 @@ export interface ProcessInboundDeps {
    * Default false (legacy single-tx path для existing callers).
    */
   deferReply?: boolean;
+  /**
+   * Когда true — stageClassifier + memoryExtractor не вызываются внутри
+   * текущей transaction. Используется webhook/runner split-pipeline:
+   *
+   *   tx1 persist → outside tx classify/extract → tx1b write stage/memory →
+   *   outside tx reply.generate → tx2 enqueue
+   *
+   * Default false сохраняет legacy single-call behavior.
+   */
+  deferPostProcessing?: boolean;
   sink?: PipelineSink;
   clock?: Clock;
   notifications?: NotificationService;
@@ -273,6 +291,8 @@ export async function processInbound(
     conversation.id,
     inbound.externalMessageId,
   );
+  const postProcessingDeferred =
+    Boolean(deps.deferPostProcessing) && !existingMsg && text.length > 0;
   let messageId: number;
   if (existingMsg) {
     deps.sink?.log?.("debug", "inbound dedup hit", {
@@ -380,7 +400,13 @@ export async function processInbound(
   // 5a-bis. Stage classification (если classifier задан). Идёт ПОСЛЕ
   // extractFields и ПЕРЕД memory + reply: новая current_stage будет
   // прочитана reply-strategy'ей если она инжектит её в composeSystemPrompt.
-  if (deps.stageClassifier && deps.db && !existingMsg && text.length > 0) {
+  if (
+    !postProcessingDeferred &&
+    deps.stageClassifier &&
+    deps.db &&
+    !existingMsg &&
+    text.length > 0
+  ) {
     try {
       const newStage = await deps.stageClassifier.classify({
         tenantId: deps.tenant.tenantId,
@@ -445,7 +471,7 @@ export async function processInbound(
   // 5b. LLM-based memory extraction (если extractor задан и не dedup).
   // Дополняет vertical-template extractFields: тот — regex (узкие шаблоны),
   // этот — LLM (русский NER, импликации). Exception → log, продолжаем.
-  if (deps.memoryExtractor && !existingMsg && text.length > 0) {
+  if (!postProcessingDeferred && deps.memoryExtractor && !existingMsg && text.length > 0) {
     try {
       const extracted = await runMemoryExtraction({
         extractor: deps.memoryExtractor,
@@ -485,6 +511,9 @@ export async function processInbound(
       outboundEnqueued: 0,
       userMessageText: text,
       mediaOnly,
+      postProcessingDeferred,
+      previousStage: conversation.currentStage,
+      conversationCreated,
       replyDeferred: true,
     };
   }
@@ -537,5 +566,14 @@ export async function processInbound(
     conversationId: conversation.id,
     persisted: !existingMsg,
     outboundEnqueued: outboundCount,
+    ...(deps.deferPostProcessing
+      ? {
+          userMessageText: text,
+          mediaOnly,
+          postProcessingDeferred,
+          previousStage: conversation.currentStage,
+          conversationCreated,
+        }
+      : {}),
   };
 }

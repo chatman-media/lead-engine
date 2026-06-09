@@ -18,6 +18,7 @@ import {
   type PipelineSink,
   processInbound,
   type ReplyStrategy,
+  runDeferredInboundPostProcessing,
   type StageClassifier,
   transcribeInboundVoice,
   withTenant,
@@ -193,7 +194,7 @@ export function makeFacebookWebhookRoutes(opts: {
         ...(opts.sink ? { sink: opts.sink } : {}),
       });
 
-      // ── Phase 1: persist + classify + memory (одна короткая tx) ──
+      // ── Phase 1: persist + cheap DB hooks (одна короткая tx) ──
       let result = await withTenant(opts.db, entry.tenantId, async (tx) => {
         const repoCtx = { db: tx, tenantId: entry.tenantId };
         return processInbound(inbound, {
@@ -208,12 +209,23 @@ export function makeFacebookWebhookRoutes(opts: {
           notifications: opts.notificationService,
           reply: opts.replyStrategy ?? null,
           deferReply: true,
+          deferPostProcessing: Boolean(opts.memoryExtractor || opts.stageClassifier),
           ...(template ? { template } : {}),
-          ...(opts.memoryExtractor ? { memoryExtractor: opts.memoryExtractor } : {}),
-          ...(opts.stageClassifier ? { stageClassifier: opts.stageClassifier, db: tx } : {}),
           ...(opts.sink ? { sink: opts.sink } : {}),
         });
       });
+
+      if (result.postProcessingDeferred) {
+        await runDeferredInboundPostProcessing({
+          db: opts.db,
+          tenant,
+          result,
+          stageClassifier: opts.stageClassifier,
+          memoryExtractor: opts.memoryExtractor,
+          ...(opts.sink ? { sink: opts.sink } : {}),
+        });
+      }
+
       // ── Phase 2: reply.generate (LLM) ВНЕ tx + enqueue новой короткой tx ──
       if (result.replyDeferred && opts.replyStrategy) {
         const gen = await generateReplyAndEnqueue({
