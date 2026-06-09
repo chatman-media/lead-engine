@@ -885,10 +885,25 @@ describe("admin quality JSONL export", () => {
     expect(first).toBeDefined();
     if (!first) return;
 
-    const applied = await authJsonReq(
+    const applyWithoutResolution = await authJsonReq(
       tokenA,
       `/api/admin/quality/tool-call-feedback/improvement-proposals/${first.id}/status`,
       { status: "applied" },
+    );
+    expect(applyWithoutResolution.status).toBe(400);
+
+    const applied = await authJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-call-feedback/improvement-proposals/${first.id}/status`,
+      {
+        status: "applied",
+        resolution: {
+          kind: "pull_request",
+          ref: "PR-433",
+          url: "https://github.com/chatman-media/lead-engine/pull/433",
+          note: "Added tracked proposal state and regression coverage.",
+        },
+      },
     );
     expect(applied.status).toBe(200);
     const appliedBody = (await applied.json()) as QualityToolCallImprovementProposalStatusResponse;
@@ -896,6 +911,12 @@ describe("admin quality JSONL export", () => {
       id: first.id,
       status: "applied",
       decidedByAdminId: expect.any(Number),
+      resolution: {
+        kind: "pull_request",
+        ref: "PR-433",
+        url: "https://github.com/chatman-media/lead-engine/pull/433",
+        note: "Added tracked proposal state and regression coverage.",
+      },
     });
     expect(appliedBody.proposal.decidedAt).toBeGreaterThan(0);
 
@@ -907,7 +928,14 @@ describe("admin quality JSONL export", () => {
     const all = (await (
       await authReq(tokenA, "/api/admin/quality/tool-call-feedback/improvement-proposals?status=all")
     ).json()) as QualityToolCallImprovementProposalsResponse;
-    expect(all.items.some((item) => item.id === first.id && item.status === "applied")).toBe(true);
+    expect(
+      all.items.some(
+        (item) =>
+          item.id === first.id &&
+          item.status === "applied" &&
+          item.resolution?.kind === "pull_request",
+      ),
+    ).toBe(true);
 
     const crossTenantStatus = await authJsonReq(
       tokenB,
@@ -922,6 +950,16 @@ describe("admin quality JSONL export", () => {
       { status: "done" },
     );
     expect(invalidStatus.status).toBe(400);
+
+    const invalidResolution = await authJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-call-feedback/improvement-proposals/${first.id}/status`,
+      {
+        status: "applied",
+        resolution: { kind: "pull_request", ref: "PR-433", url: "ftp://example.test" },
+      },
+    );
+    expect(invalidResolution.status).toBe(400);
   });
 
   it("validates tool-call feedback analytics query params", async () => {
@@ -2545,6 +2583,20 @@ type QualityToolCallImprovementProposalResponse = {
   updatedAt: number;
   decidedAt: number | null;
   decidedByAdminId: number | null;
+  resolution: {
+    kind:
+      | "prompt_patch"
+      | "tool_schema_patch"
+      | "regression_case"
+      | "coach_proposal"
+      | "shadow_eval"
+      | "pull_request"
+      | "other"
+      | null;
+    ref: string | null;
+    url: string | null;
+    note: string | null;
+  } | null;
 };
 
 type QualityToolCallImprovementProposalsResponse = {

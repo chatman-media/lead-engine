@@ -45,6 +45,7 @@ import {
   type QualityToolCallFeedbackSummaryOptions,
   type QualityToolCallImprovementKind,
   type QualityToolCallImprovementProposal,
+  type QualityToolCallImprovementResolutionKind,
   type QualityToolCallImprovementSeverity,
   type QualityToolCallImprovementStatus,
   type QualityToolCallSource,
@@ -141,6 +142,23 @@ const TOOL_PROPOSAL_STATUS_CLASS: Record<QualityToolCallImprovementStatus, strin
   applied: "bg-[color-mix(in_oklch,var(--success)_12%,transparent)] text-[var(--success)]",
   dismissed: "bg-muted text-muted-foreground",
 };
+
+const TOOL_PROPOSAL_RESOLUTION_KIND_LABEL: Record<
+  QualityToolCallImprovementResolutionKind,
+  string
+> = {
+  prompt_patch: "Prompt patch",
+  tool_schema_patch: "Tool schema",
+  regression_case: "Regression",
+  coach_proposal: "Coach proposal",
+  shadow_eval: "Shadow eval",
+  pull_request: "Pull request",
+  other: "Other",
+};
+
+const TOOL_PROPOSAL_RESOLUTION_KINDS = Object.keys(
+  TOOL_PROPOSAL_RESOLUTION_KIND_LABEL,
+) as QualityToolCallImprovementResolutionKind[];
 
 function formatDate(epoch: number | null | undefined): string {
   if (!epoch) return "нет";
@@ -346,6 +364,8 @@ export function SaasQuality() {
   const [trackedToolProposalActionId, setTrackedToolProposalActionId] = useState<number | null>(
     null,
   );
+  const [trackedToolProposalApply, setTrackedToolProposalApply] =
+    useState<ToolProposalApplyDialogState | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
   const [styleSlug, setStyleSlug] = useState("all");
@@ -678,6 +698,11 @@ export function SaasQuality() {
   }
 
   async function handleTrackedToolProposalCreate() {
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
+
     const opts = buildToolFeedbackOptions();
     if (!opts) return;
 
@@ -698,6 +723,11 @@ export function SaasQuality() {
     id: number,
     status: QualityToolCallImprovementStatus,
   ) {
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
+
     setTrackedToolProposalActionId(id);
     try {
       await saas.setQualityTrackedToolCallImprovementProposalStatus(id, status);
@@ -706,6 +736,56 @@ export function SaasQuality() {
     } catch (err) {
       if (redirectOnUnauthorized(err)) return;
       toast.error(err instanceof Error ? err.message : "Не удалось обновить tracked proposal");
+    } finally {
+      setTrackedToolProposalActionId(null);
+    }
+  }
+
+  function openTrackedToolProposalApply(proposal: QualityPersistedToolCallImprovementProposal) {
+    setTrackedToolProposalApply({
+      proposal,
+      kind: proposal.resolution?.kind ?? "pull_request",
+      ref: proposal.resolution?.ref ?? "",
+      url: proposal.resolution?.url ?? "",
+      note: proposal.resolution?.note ?? "",
+    });
+  }
+
+  async function handleTrackedToolProposalApply() {
+    if (!trackedToolProposalApply) return;
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
+
+    const ref = trackedToolProposalApply.ref.trim();
+    const url = trackedToolProposalApply.url.trim();
+    const note = trackedToolProposalApply.note.trim();
+    if (!ref && !url) {
+      toast.error("Укажите artifact ref или URL");
+      return;
+    }
+
+    setTrackedToolProposalActionId(trackedToolProposalApply.proposal.id);
+    try {
+      await saas.setQualityTrackedToolCallImprovementProposalStatus(
+        trackedToolProposalApply.proposal.id,
+        "applied",
+        {
+          resolution: {
+            kind: trackedToolProposalApply.kind,
+            ref: ref || null,
+            url: url || null,
+            note: note || null,
+          },
+        },
+      );
+      setTrackedToolProposalApply(null);
+      await loadTrackedToolProposals(trackedToolProposalStatus);
+      toast.success("Proposal applied");
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      toast.error(err instanceof Error ? err.message : "Не удалось применить tracked proposal");
     } finally {
       setTrackedToolProposalActionId(null);
     }
@@ -1868,7 +1948,7 @@ export function SaasQuality() {
             </div>
             <Button
               onClick={() => void handleTrackedToolProposalCreate()}
-              disabled={trackedToolProposalCreating}
+              disabled={trackedToolProposalCreating || !canWriteQuality}
             >
               <LightbulbIcon className="size-4" />
               {trackedToolProposalCreating ? "Creating…" : "Create tracked"}
@@ -1944,41 +2024,53 @@ export function SaasQuality() {
                     </TableCell>
                     <TableCell className="min-w-[180px] text-right">
                       {item.status === "pending" ? (
-                        <div className="flex justify-end gap-1.5">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 gap-1.5 px-2 text-xs"
-                            disabled={trackedToolProposalActionId === item.id}
-                            onClick={() => void handleTrackedToolProposalStatus(item.id, "applied")}
-                          >
-                            <CheckCircleIcon className="size-3.5" />
-                            Apply
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-8 gap-1.5 px-2 text-xs"
-                            disabled={trackedToolProposalActionId === item.id}
-                            onClick={() =>
-                              void handleTrackedToolProposalStatus(item.id, "dismissed")
-                            }
-                          >
-                            <XCircleIcon className="size-3.5" />
-                            Dismiss
-                          </Button>
+                        <div className="space-y-1.5">
+                          {item.resolution && <ToolProposalResolutionLine proposal={item} />}
+                          {canWriteQuality && (
+                            <div className="flex justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 gap-1.5 px-2 text-xs"
+                                disabled={trackedToolProposalActionId === item.id}
+                                onClick={() => openTrackedToolProposalApply(item)}
+                              >
+                                <CheckCircleIcon className="size-3.5" />
+                                Apply
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 gap-1.5 px-2 text-xs"
+                                disabled={trackedToolProposalActionId === item.id}
+                                onClick={() =>
+                                  void handleTrackedToolProposalStatus(item.id, "dismissed")
+                                }
+                              >
+                                <XCircleIcon className="size-3.5" />
+                                Dismiss
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 gap-1.5 px-2 text-xs"
-                          disabled={trackedToolProposalActionId === item.id}
-                          onClick={() => void handleTrackedToolProposalStatus(item.id, "pending")}
-                        >
-                          <RotateCcwIcon className="size-3.5" />
-                          Restore
-                        </Button>
+                        <div className="space-y-1.5">
+                          {item.resolution && <ToolProposalResolutionLine proposal={item} />}
+                          {canWriteQuality && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 gap-1.5 px-2 text-xs"
+                              disabled={trackedToolProposalActionId === item.id}
+                              onClick={() =>
+                                void handleTrackedToolProposalStatus(item.id, "pending")
+                              }
+                            >
+                              <RotateCcwIcon className="size-3.5" />
+                              Restore
+                            </Button>
+                          )}
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>
@@ -2398,6 +2490,17 @@ export function SaasQuality() {
         </div>
       )}
 
+      <ToolProposalApplyDialog
+        state={trackedToolProposalApply}
+        submitting={trackedToolProposalActionId === trackedToolProposalApply?.proposal.id}
+        onChange={(patch) =>
+          setTrackedToolProposalApply((current) =>
+            current ? { ...current, ...patch } : current,
+          )
+        }
+        onSubmit={() => void handleTrackedToolProposalApply()}
+        onOpenChange={(open) => !open && setTrackedToolProposalApply(null)}
+      />
       <QualityInspectorDialog inspector={inspector} onOpenChange={(open) => !open && setInspector(null)} />
       <ToolCallInspectorDialog
         inspector={toolCallInspector}
@@ -2432,6 +2535,144 @@ type QualityToolCallInspectorState = {
   note: string;
   error?: string;
 };
+
+type ToolProposalApplyDialogState = {
+  proposal: QualityPersistedToolCallImprovementProposal;
+  kind: QualityToolCallImprovementResolutionKind;
+  ref: string;
+  url: string;
+  note: string;
+};
+
+function ToolProposalResolutionLine({
+  proposal,
+}: {
+  proposal: QualityPersistedToolCallImprovementProposal;
+}) {
+  const resolution = proposal.resolution;
+  if (!resolution) return null;
+
+  const label = resolution.kind
+    ? TOOL_PROPOSAL_RESOLUTION_KIND_LABEL[resolution.kind]
+    : "Resolution";
+  const target = resolution.ref ?? resolution.url ?? resolution.note ?? "saved";
+
+  return (
+    <div className="text-right text-[11px] leading-snug text-muted-foreground">
+      <span className="font-medium">{label}:</span>{" "}
+      {resolution.url ? (
+        <a
+          href={resolution.url}
+          target="_blank"
+          rel="noreferrer"
+          className="underline underline-offset-2"
+        >
+          {resolution.ref || resolution.url}
+        </a>
+      ) : (
+        <span>{target}</span>
+      )}
+      {resolution.note && <div className="line-clamp-2">{resolution.note}</div>}
+    </div>
+  );
+}
+
+function ToolProposalApplyDialog({
+  state,
+  submitting,
+  onChange,
+  onSubmit,
+  onOpenChange,
+}: {
+  state: ToolProposalApplyDialogState | null;
+  submitting: boolean;
+  onChange: (
+    patch: Partial<Pick<ToolProposalApplyDialogState, "kind" | "ref" | "url" | "note">>,
+  ) => void;
+  onSubmit: () => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const open = state !== null;
+  const hasTarget = Boolean(state?.ref.trim() || state?.url.trim());
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Apply tool proposal</DialogTitle>
+        </DialogHeader>
+        {state && (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="tool-proposal-resolution-kind">Artifact type</Label>
+              <Select
+                value={state.kind}
+                onValueChange={(value) =>
+                  onChange({ kind: value as QualityToolCallImprovementResolutionKind })
+                }
+              >
+                <SelectTrigger id="tool-proposal-resolution-kind">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TOOL_PROPOSAL_RESOLUTION_KINDS.map((kind) => (
+                    <SelectItem key={kind} value={kind}>
+                      {TOOL_PROPOSAL_RESOLUTION_KIND_LABEL[kind]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="tool-proposal-resolution-ref">Artifact ref</Label>
+                <Input
+                  id="tool-proposal-resolution-ref"
+                  value={state.ref}
+                  maxLength={240}
+                  onChange={(event) => onChange({ ref: event.target.value })}
+                  placeholder="PR-433"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tool-proposal-resolution-url">URL</Label>
+                <Input
+                  id="tool-proposal-resolution-url"
+                  type="url"
+                  value={state.url}
+                  maxLength={2000}
+                  onChange={(event) => onChange({ url: event.target.value })}
+                  placeholder="https://github.com/..."
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="tool-proposal-resolution-note">Note</Label>
+              <Textarea
+                id="tool-proposal-resolution-note"
+                value={state.note}
+                maxLength={2000}
+                rows={3}
+                onChange={(event) => onChange({ note: event.target.value })}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button onClick={onSubmit} disabled={submitting || !hasTarget}>
+                {submitting ? "Applying…" : "Apply"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function QualityInspectorDialog({
   inspector,

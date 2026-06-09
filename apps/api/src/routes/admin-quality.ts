@@ -81,6 +81,15 @@ const TOOL_CALL_IMPROVEMENT_STATUSES = new Set<ToolCallImprovementProposalStatus
   "applied",
   "dismissed",
 ]);
+const TOOL_CALL_IMPROVEMENT_RESOLUTION_KINDS = new Set<ToolCallImprovementResolutionKind>([
+  "prompt_patch",
+  "tool_schema_patch",
+  "regression_case",
+  "coach_proposal",
+  "shadow_eval",
+  "pull_request",
+  "other",
+]);
 
 const selfPlayMatchSelect = {
   id: selfPlayMatches.id,
@@ -159,6 +168,10 @@ const toolCallImprovementProposalSelect = {
   updatedAt: agentToolCallImprovementProposals.updatedAt,
   decidedAt: agentToolCallImprovementProposals.decidedAt,
   decidedByAdminId: agentToolCallImprovementProposals.decidedByAdminId,
+  resolutionKind: agentToolCallImprovementProposals.resolutionKind,
+  resolutionRef: agentToolCallImprovementProposals.resolutionRef,
+  resolutionUrl: agentToolCallImprovementProposals.resolutionUrl,
+  resolutionNote: agentToolCallImprovementProposals.resolutionNote,
 };
 
 export interface AdminQualityRoutesOpts {
@@ -648,8 +661,18 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
         error: `status must be one of: ${Array.from(TOOL_CALL_IMPROVEMENT_STATUSES).join(", ")}`,
       }, 400);
     }
+    const resolution = parseToolCallImprovementResolutionInput(body.resolution);
+    if (resolution.kind === "invalid") {
+      return c.json({ error: resolution.error }, 400);
+    }
+    if (status === "applied" && !hasConcreteToolCallImprovementResolution(resolution.value)) {
+      return c.json({
+        error: "resolution with kind and ref or url is required when applying a proposal",
+      }, 400);
+    }
 
     const now = Math.floor(Date.now() / 1000);
+    const resolutionPatch = toolCallImprovementResolutionPatch(status, resolution.value);
     const [row] = await withTenant(opts.db, tenantId, async (tx) => {
       return tx
         .update(agentToolCallImprovementProposals)
@@ -658,6 +681,7 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
           updatedAt: now,
           decidedAt: status === "pending" ? null : now,
           decidedByAdminId: status === "pending" ? null : (adminId ?? null),
+          ...resolutionPatch,
         })
         .where(
           and(
@@ -675,7 +699,7 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
       action: "quality.tool_call_improvement_proposal.status",
       targetKind: "agent_tool_call_improvement_proposal",
       targetId: id,
-      details: { status },
+      details: { status, resolution: resolution.value },
     });
 
     return c.json({ ok: true, proposal: toToolCallImprovementProposalResponse(row) });
@@ -2686,6 +2710,21 @@ type ToolCallImprovementProposalKind =
 
 type ToolCallImprovementProposalSeverity = "high" | "medium" | "low";
 type ToolCallImprovementProposalStatus = "pending" | "applied" | "dismissed";
+type ToolCallImprovementResolutionKind =
+  | "prompt_patch"
+  | "tool_schema_patch"
+  | "regression_case"
+  | "coach_proposal"
+  | "shadow_eval"
+  | "pull_request"
+  | "other";
+
+type ToolCallImprovementResolution = {
+  kind: ToolCallImprovementResolutionKind | null;
+  ref: string | null;
+  url: string | null;
+  note: string | null;
+};
 
 type ToolCallImprovementProposalPreview = {
   id: string;
@@ -2726,6 +2765,10 @@ type ToolCallImprovementProposalRow = {
   updatedAt: number;
   decidedAt: number | null;
   decidedByAdminId: number | null;
+  resolutionKind: string | null;
+  resolutionRef: string | null;
+  resolutionUrl: string | null;
+  resolutionNote: string | null;
 };
 
 type QualityToolCallImprovementProposalCreateBody = {
@@ -2738,6 +2781,7 @@ type QualityToolCallImprovementProposalCreateBody = {
 
 type QualityToolCallImprovementProposalStatusBody = {
   status?: unknown;
+  resolution?: unknown;
 };
 
 function parseToolCallFeedbackQuery(
@@ -2832,6 +2876,105 @@ function parseToolCallFeedbackBody(
       ...(label !== undefined ? { label } : {}),
       ...(error.value !== undefined ? { error: error.value } : {}),
     },
+  };
+}
+
+function parseToolCallImprovementResolutionInput(
+  value: unknown,
+): { kind: "ok"; value: ToolCallImprovementResolution } | { kind: "invalid"; error: string } {
+  if (value === undefined || value === null) {
+    return { kind: "ok", value: emptyToolCallImprovementResolution() };
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { kind: "invalid", error: "resolution must be an object" };
+  }
+
+  const raw = value as Record<string, unknown>;
+  const kindRaw = parseNullableLimitedString(raw.kind, 64, "resolution.kind");
+  if (kindRaw.kind === "invalid") return { kind: "invalid", error: kindRaw.error };
+  const resolutionKind =
+    kindRaw.value &&
+    TOOL_CALL_IMPROVEMENT_RESOLUTION_KINDS.has(kindRaw.value as ToolCallImprovementResolutionKind)
+      ? (kindRaw.value as ToolCallImprovementResolutionKind)
+      : null;
+  if (kindRaw.value && !resolutionKind) {
+    return { kind: "invalid", error: "invalid resolution.kind" };
+  }
+
+  const ref = parseNullableLimitedString(raw.ref, 500, "resolution.ref");
+  if (ref.kind === "invalid") return { kind: "invalid", error: ref.error };
+  const url = parseNullableLimitedString(raw.url, 1000, "resolution.url");
+  if (url.kind === "invalid") return { kind: "invalid", error: url.error };
+  if (url.value && !isHttpUrl(url.value)) {
+    return { kind: "invalid", error: "resolution.url must be an http(s) URL" };
+  }
+  const note = parseNullableLimitedString(raw.note, 2000, "resolution.note");
+  if (note.kind === "invalid") return { kind: "invalid", error: note.error };
+
+  return {
+    kind: "ok",
+    value: {
+      kind: resolutionKind,
+      ref: ref.value,
+      url: url.value,
+      note: note.value,
+    },
+  };
+}
+
+function parseNullableLimitedString(
+  value: unknown,
+  maxLength: number,
+  fieldName: string,
+): { kind: "ok"; value: string | null } | { kind: "invalid"; error: string } {
+  if (value === undefined || value === null) return { kind: "ok", value: null };
+  if (typeof value !== "string") {
+    return { kind: "invalid", error: `${fieldName} must be a string` };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return { kind: "ok", value: null };
+  if (trimmed.length > maxLength) {
+    return { kind: "invalid", error: `${fieldName} must be at most ${maxLength} characters` };
+  }
+  return { kind: "ok", value: trimmed };
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function emptyToolCallImprovementResolution(): ToolCallImprovementResolution {
+  return { kind: null, ref: null, url: null, note: null };
+}
+
+function hasConcreteToolCallImprovementResolution(
+  resolution: ToolCallImprovementResolution,
+): boolean {
+  return Boolean(resolution.kind && (resolution.ref || resolution.url));
+}
+
+function toolCallImprovementResolutionPatch(
+  status: ToolCallImprovementProposalStatus,
+  resolution: ToolCallImprovementResolution,
+) {
+  if (status === "pending") {
+    return {
+      resolutionKind: null,
+      resolutionRef: null,
+      resolutionUrl: null,
+      resolutionNote: null,
+    };
+  }
+  return {
+    resolutionKind: resolution.kind,
+    resolutionRef: resolution.ref,
+    resolutionUrl: resolution.url,
+    resolutionNote: resolution.note,
   };
 }
 
@@ -3008,6 +3151,19 @@ function toToolCallImprovementProposalResponse(row: ToolCallImprovementProposalR
     updatedAt: row.updatedAt,
     decidedAt: row.decidedAt,
     decidedByAdminId: row.decidedByAdminId,
+    resolution: toToolCallImprovementResolutionResponse(row),
+  };
+}
+
+function toToolCallImprovementResolutionResponse(row: ToolCallImprovementProposalRow) {
+  if (!row.resolutionKind && !row.resolutionRef && !row.resolutionUrl && !row.resolutionNote) {
+    return null;
+  }
+  return {
+    kind: row.resolutionKind as ToolCallImprovementResolutionKind | null,
+    ref: row.resolutionRef,
+    url: row.resolutionUrl,
+    note: row.resolutionNote,
   };
 }
 
