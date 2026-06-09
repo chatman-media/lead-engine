@@ -3,9 +3,19 @@
  * group-tokens, лента admin_notifications, resolveOwnerSettings. Требует
  * DATABASE_URL; без него — graceful-skip.
  */
-import { admins, applyAllMigrations, createIsolatedDb, operatorSettings, schema, tryConnectToPg } from "@chatman-media/storage";
+import {
+  admins,
+  applyAllMigrations,
+  auditLog,
+  contacts,
+  conversations,
+  createIsolatedDb,
+  operatorSettings,
+  schema,
+  tryConnectToPg,
+} from "@chatman-media/storage";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -20,8 +30,11 @@ let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
 let repo: NotificationsRepo;
 let tenantId = 0;
+let otherTenantId = 0;
 let adminId = 0;
 let admin2 = 0;
+let conversationId = 0;
+let otherConversationId = 0;
 let enabled = false;
 
 beforeAll(async () => {
@@ -37,6 +50,11 @@ beforeAll(async () => {
   const now = Math.floor(Date.now() / 1000);
   const [t] = await db.insert(schema.tenants).values({ slug: `notif-${now}` }).returning({ id: schema.tenants.id });
   tenantId = t!.id;
+  const [otherTenant] = await db
+    .insert(schema.tenants)
+    .values({ slug: `notif-other-${now}` })
+    .returning({ id: schema.tenants.id });
+  otherTenantId = otherTenant!.id;
   const [a] = await db
     .insert(admins)
     .values({ tenantId, email: `owner-${now}@t.io`, passwordHash: "x", role: "superadmin" })
@@ -47,6 +65,31 @@ beforeAll(async () => {
     .values({ tenantId, email: `mgr-${now}@t.io`, passwordHash: "x", role: "manager" })
     .returning({ id: admins.id });
   admin2 = a2!.id;
+  const [contact] = await db
+    .insert(contacts)
+    .values({ tenantId, displayName: "Operator Bot Fixture" })
+    .returning({ id: contacts.id });
+  const [conversation] = await db
+    .insert(conversations)
+    .values({ tenantId, userId: contact!.id, source: "bot", mode: "ai", lastMessageAt: now })
+    .returning({ id: conversations.id });
+  conversationId = conversation!.id;
+
+  const [otherContact] = await db
+    .insert(contacts)
+    .values({ tenantId: otherTenantId, displayName: "Other Tenant" })
+    .returning({ id: contacts.id });
+  const [otherConversation] = await db
+    .insert(conversations)
+    .values({
+      tenantId: otherTenantId,
+      userId: otherContact!.id,
+      source: "bot",
+      mode: "ai",
+      lastMessageAt: now,
+    })
+    .returning({ id: conversations.id });
+  otherConversationId = otherConversation!.id;
 }, 30_000);
 
 afterAll(async () => {
@@ -139,6 +182,78 @@ describe("NotificationsRepo: group tokens", () => {
     expect(found).toMatchObject({ tenantId, adminId, eventType: "high_value_deal" });
     await repo.deleteGroupLinkToken(token);
     expect(await repo.findGroupLinkToken(token)).toBeUndefined();
+  });
+});
+
+describe("NotificationsRepo: operator conversation mode actions", () => {
+  it("takeover/return_ai are tenant-scoped, audited, and idempotent", async () => {
+    if (!enabled) return;
+
+    const takeover = await repo.applyOperatorConversationModeAction({
+      tenantId,
+      adminId,
+      conversationId,
+      action: "takeover",
+    });
+    expect(takeover).toMatchObject({ kind: "changed", from: "ai", to: "human" });
+    const [afterTakeover] = await db
+      .select({
+        mode: conversations.mode,
+        assignedAdminId: conversations.assignedAdminId,
+        unreadCount: conversations.unreadCount,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    expect(afterTakeover).toMatchObject({
+      mode: "human",
+      assignedAdminId: adminId,
+      unreadCount: 0,
+    });
+
+    const repeated = await repo.applyOperatorConversationModeAction({
+      tenantId,
+      adminId,
+      conversationId,
+      action: "takeover",
+    });
+    expect(repeated).toEqual({ kind: "noop", mode: "human" });
+
+    const crossTenant = await repo.applyOperatorConversationModeAction({
+      tenantId,
+      adminId,
+      conversationId: otherConversationId,
+      action: "takeover",
+    });
+    expect(crossTenant).toEqual({ kind: "not_found" });
+    const [other] = await db
+      .select({ mode: conversations.mode })
+      .from(conversations)
+      .where(eq(conversations.id, otherConversationId));
+    expect(other?.mode).toBe("ai");
+
+    const returnAi = await repo.applyOperatorConversationModeAction({
+      tenantId,
+      adminId,
+      conversationId,
+      action: "return_ai",
+    });
+    expect(returnAi).toMatchObject({ kind: "changed", from: "human", to: "ai" });
+
+    const rows = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.tenantId, tenantId),
+          eq(auditLog.targetKind, "conversation"),
+          eq(auditLog.targetId, String(conversationId)),
+        ),
+      );
+    expect(rows.map((row) => row.action).sort()).toEqual([
+      "conversation.mode.return_to_ai",
+      "conversation.mode.takeover",
+    ]);
+    expect(rows.every((row) => row.detailsJson?.includes('"source":"operator_bot"'))).toBe(true);
   });
 });
 

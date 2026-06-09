@@ -1,6 +1,10 @@
 import { TelegramClient } from "@chatman-media/channel-telegram";
 import type { AdminInformer } from "./admin-informer.ts";
 import type { NotificationRule, NotificationsRepo } from "./dal/notifications.ts";
+import {
+  buildOperatorActionCallbackData,
+  isOperatorHandoffEvent,
+} from "./operator-bot-actions.ts";
 
 export interface NotificationEvent {
   tenantId: number;
@@ -113,13 +117,13 @@ export class NotificationService {
   private async sendMessage(
     chatId: string,
     text: string,
-    buttons: Array<{ text: string; url: string }> | null,
+    buttons: Array<Array<{ text: string; url?: string; callback_data?: string }>> | null,
   ): Promise<void> {
     await this.client!.sendMessage({
       chatId,
       text,
       parseMode: "HTML",
-      replyMarkup: buttons ? { inline_keyboard: [buttons] } : undefined,
+      replyMarkup: buttons ? { inline_keyboard: buttons } : undefined,
     });
   }
 
@@ -172,12 +176,47 @@ export class NotificationService {
     return msg;
   }
 
-  private formatButtons(event: NotificationEvent): Array<{ text: string; url: string }> | null {
+  private formatButtons(
+    event: NotificationEvent,
+  ): Array<Array<{ text: string; url?: string; callback_data?: string }>> | null {
+    if (isOperatorHandoffEvent(event)) {
+      const conversationId = event.conversationId as number;
+      return [
+        [
+          {
+            text: "👁 Открыть чат",
+            callback_data: buildOperatorActionCallbackData({
+              action: "open_chat",
+              tenantId: event.tenantId,
+              conversationId,
+            }),
+          },
+        ],
+        [
+          {
+            text: "🙋 Взять в работу",
+            callback_data: buildOperatorActionCallbackData({
+              action: "takeover",
+              tenantId: event.tenantId,
+              conversationId,
+            }),
+          },
+          {
+            text: "🤖 Вернуть AI",
+            callback_data: buildOperatorActionCallbackData({
+              action: "return_ai",
+              tenantId: event.tenantId,
+              conversationId,
+            }),
+          },
+        ],
+      ];
+    }
     if (event.leadId) {
-      return [{ text: "👁 Посмотреть", url: `${this.appUrl}/leads/${event.leadId}` }];
+      return [[{ text: "👁 Посмотреть", url: `${this.appUrl}/leads/${event.leadId}` }]];
     }
     if (event.conversationId) {
-      return [{ text: "👁 Чат", url: `${this.appUrl}/conversations/${event.conversationId}` }];
+      return [[{ text: "👁 Чат", url: `${this.appUrl}/conversations/${event.conversationId}` }]];
     }
     return null;
   }
@@ -191,6 +230,7 @@ export class NotificationService {
       high_value_deal: "💎",
       lead_stale: "⏰",
       operator_confirm_needed: "✋",
+      operator_handoff_required: "✋",
     };
     return map[type] ?? "🔔";
   }
@@ -204,6 +244,7 @@ export class NotificationService {
       high_value_deal: "Крупная сделка",
       lead_stale: "Лид завис",
       operator_confirm_needed: "Нужно подтверждение оператора",
+      operator_handoff_required: "Нужно действие оператора",
     };
     return map[type] ?? "Уведомление";
   }

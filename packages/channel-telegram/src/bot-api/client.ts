@@ -230,12 +230,14 @@ export class TelegramClient {
     callbackQueryId: string;
     text?: string;
     showAlert?: boolean;
+    url?: string;
   }): Promise<true> {
     const params: Record<string, unknown> = {
       callback_query_id: input.callbackQueryId,
     };
     if (input.text) params.text = input.text;
     if (input.showAlert) params.show_alert = input.showAlert;
+    if (input.url) params.url = input.url;
     return this.call<true>("answerCallbackQuery", params);
   }
 

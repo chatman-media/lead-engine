@@ -4,7 +4,11 @@ import {
   type TgReplyMarkup,
   type TgUpdate,
 } from "@chatman-media/channel-telegram";
-import type { NotificationsRepo } from "./dal/notifications.ts";
+import type { NotificationsRepo, OperatorSettings } from "./dal/notifications.ts";
+import {
+  type OperatorActionPayload,
+  parseOperatorActionCallbackData,
+} from "./operator-bot-actions.ts";
 
 // ── Информер: справочники для команд ────────────────────────────────────────
 
@@ -55,11 +59,14 @@ export function parseMuteSeconds(arg: string): number | null {
 
 export class OperatorBotHandler {
   private client: TelegramClient | null = null;
+  private readonly appUrl: string;
 
   constructor(
     private readonly repo: NotificationsRepo,
     private readonly botToken: string,
+    opts: { appUrl?: string } = {},
   ) {
+    this.appUrl = (opts.appUrl ?? "").replace(/\/$/, "");
     if (botToken) {
       this.client = new TelegramClient({ token: botToken });
     }
@@ -237,6 +244,21 @@ export class OperatorBotHandler {
       await this.client.answerCallbackQuery({ callbackQueryId: cq.id, text: "Аккаунт не привязан" });
       return;
     }
+
+    const operatorAction = parseOperatorActionCallbackData(cq.data);
+    if (operatorAction.ok) {
+      await this.handleOperatorAction(cq, s, operatorAction.payload);
+      return;
+    }
+    if (operatorAction.reason === "malformed") {
+      await this.client.answerCallbackQuery({
+        callbackQueryId: cq.id,
+        text: "Кнопка устарела",
+        showAlert: true,
+      });
+      return;
+    }
+
     const [kind, val] = (cq.data ?? "").split(":");
 
     if (kind === "lvl" && (LEVELS as readonly string[]).includes(val ?? "")) {
@@ -263,6 +285,62 @@ export class OperatorBotHandler {
       return;
     }
     await this.client.answerCallbackQuery({ callbackQueryId: cq.id });
+  }
+
+  private async handleOperatorAction(
+    cq: TgCallbackQuery,
+    settings: OperatorSettings,
+    payload: OperatorActionPayload,
+  ): Promise<void> {
+    if (!this.client) return;
+    if (payload.tenantId !== settings.tenantId) {
+      await this.client.answerCallbackQuery({
+        callbackQueryId: cq.id,
+        text: "Нет доступа к этому чату",
+        showAlert: true,
+      });
+      return;
+    }
+
+    if (payload.action === "open_chat") {
+      const url = this.conversationUrl(payload.conversationId);
+      await this.client.answerCallbackQuery(
+        url
+          ? { callbackQueryId: cq.id, url }
+          : {
+              callbackQueryId: cq.id,
+              text: `Откройте чат #${payload.conversationId} в админке`,
+              showAlert: true,
+            },
+      );
+      return;
+    }
+
+    const outcome = await this.repo.applyOperatorConversationModeAction({
+      tenantId: payload.tenantId,
+      adminId: settings.adminId,
+      conversationId: payload.conversationId,
+      action: payload.action,
+    });
+    if (outcome.kind === "not_found") {
+      await this.client.answerCallbackQuery({
+        callbackQueryId: cq.id,
+        text: "Чат не найден или уже недоступен",
+        showAlert: true,
+      });
+      return;
+    }
+
+    const modeLabel = payload.action === "takeover" ? "оператор" : "AI";
+    await this.client.answerCallbackQuery({
+      callbackQueryId: cq.id,
+      text: outcome.kind === "noop" ? `Уже в режиме: ${modeLabel}` : `Готово: режим ${modeLabel}`,
+    });
+  }
+
+  private conversationUrl(conversationId: number): string | null {
+    if (!this.appUrl) return null;
+    return `${this.appUrl}/conversations/${conversationId}`;
   }
 
   private async editKeyboard(

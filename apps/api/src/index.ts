@@ -362,7 +362,9 @@ async function main() {
     cfg.mailer.appUrl,
     adminInformer,
   );
-  const operatorBotHandler = new OperatorBotHandler(notificationsRepo, cfg.operatorBotToken);
+  const operatorBotHandler = new OperatorBotHandler(notificationsRepo, cfg.operatorBotToken, {
+    appUrl: cfg.mailer.appUrl,
+  });
   if (cfg.operatorBotToken) {
     log.info("operator notification bot enabled");
   }

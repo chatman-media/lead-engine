@@ -231,6 +231,26 @@ describe("NotificationService.notify", () => {
     expect(texts[0]).toBe("Новая стадия: qualified");
   });
 
+  it("renders operator handoff callback card", async () => {
+    const sent: Array<{ chatId: string; replyMarkup?: any }> = [];
+    const svc = new NotificationService(makeRepo([makeRule({ eventType: "operator_handoff_required" })]), "fake-token", "http://app");
+    // @ts-expect-error patch private client
+    svc.client = { sendMessage: async (opts: { chatId: string; replyMarkup?: any }) => { sent.push(opts); } };
+    await svc.notify({
+      tenantId: 1,
+      eventType: "operator_handoff_required",
+      conversationId: 42,
+      data: { displayName: "Client" },
+    });
+    expect(sent[0]?.replyMarkup?.inline_keyboard).toEqual([
+      [{ text: "👁 Открыть чат", callback_data: "op:v1:open_chat:1:42" }],
+      [
+        { text: "🙋 Взять в работу", callback_data: "op:v1:takeover:1:42" },
+        { text: "🤖 Вернуть AI", callback_data: "op:v1:return_ai:1:42" },
+      ],
+    ]);
+  });
+
   it("with informer: skips owner in per-operator loop, still notifies other operators + calls informer", async () => {
     const sent: string[] = [];
     let emitted = 0;

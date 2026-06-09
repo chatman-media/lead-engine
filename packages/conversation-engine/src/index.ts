@@ -86,6 +86,16 @@ export {
   topicEnabled,
 } from "./admin-informer.ts";
 export { OperatorBotHandler } from "./operator-bot-handler.ts";
+export {
+  buildOperatorActionCallbackData,
+  isOperatorHandoffEvent,
+  OPERATOR_ACTION_CALLBACK_PREFIX,
+  OPERATOR_BOT_ACTIONS,
+  parseOperatorActionCallbackData,
+  type OperatorActionPayload,
+  type OperatorBotAction,
+  type OperatorConversationModeAction,
+} from "./operator-bot-actions.ts";
 // CoachAnalyzer переехал в @chatman-media/sales (sales-domain code).
 // Back-compat re-export невозможен — создал бы circular dep (sales импортит
 // conv-engine для DAL-типов). Consumer'ы должны импортировать напрямую

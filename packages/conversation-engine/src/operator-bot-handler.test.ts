@@ -2,6 +2,10 @@ import { describe, expect, it } from "bun:test";
 import type { TgUpdate } from "@chatman-media/channel-telegram";
 import type { NotificationsRepo, OperatorSettings } from "./dal/notifications.ts";
 import { OperatorBotHandler, parseMuteSeconds } from "./operator-bot-handler.ts";
+import {
+  buildOperatorActionCallbackData,
+  parseOperatorActionCallbackData,
+} from "./operator-bot-actions.ts";
 
 // ── Fakes ──────────────────────────────────────────────────────────────────────
 
@@ -21,7 +25,16 @@ function makeSettings(overrides: Partial<OperatorSettings> = {}): OperatorSettin
 class FakeRepo implements Partial<NotificationsRepo> {
   linked: Array<{ adminId: number; chatId: string }> = [];
   prefs: Array<{ adminId: number } & Record<string, unknown>> = [];
+  actions: Array<Record<string, unknown>> = [];
   recent: any[] = [];
+  modeOutcome:
+    | { kind: "not_found" }
+    | { kind: "noop"; mode: "ai" | "human" }
+    | { kind: "changed"; from: string; to: "ai" | "human" } = {
+    kind: "changed",
+    from: "ai",
+    to: "human",
+  };
   private settings: OperatorSettings | undefined;
 
   constructor(settings?: OperatorSettings) {
@@ -37,20 +50,31 @@ class FakeRepo implements Partial<NotificationsRepo> {
     this.prefs.push({ adminId, ...p });
   }
   async listRecentNotifications() { return this.recent; }
+  async applyOperatorConversationModeAction(input: Record<string, unknown>) {
+    this.actions.push(input);
+    return this.modeOutcome;
+  }
 }
 
 class FakeClient {
   sent: Array<{ chatId: string; text: string; replyMarkup?: any }> = [];
   edits: Array<{ messageId: number; text: string }> = [];
   answered: string[] = [];
+  answers: Array<{ callbackQueryId: string; text?: string; showAlert?: boolean; url?: string }> = [];
   async sendMessage(opts: { chatId: string; text: string; replyMarkup?: any }) {
     this.sent.push(opts);
   }
   async editMessageText(opts: { messageId: number; text: string }) {
     this.edits.push(opts);
   }
-  async answerCallbackQuery(opts: { callbackQueryId: string }) {
+  async answerCallbackQuery(opts: {
+    callbackQueryId: string;
+    text?: string;
+    showAlert?: boolean;
+    url?: string;
+  }) {
     this.answered.push(opts.callbackQueryId);
+    this.answers.push(opts);
   }
 }
 
@@ -65,6 +89,18 @@ function makeUpdate(text: string, chatId = 1000, isGroup = false): TgUpdate {
       text,
     },
   } as TgUpdate;
+}
+
+function makeCallback(data: string, chatId = 777): TgUpdate {
+  return {
+    update_id: 2,
+    callback_query: {
+      id: "cb-op",
+      from: { id: 5 },
+      data,
+      message: { message_id: 9, date: 0, chat: { id: chatId, type: "private" } },
+    },
+  } as unknown as TgUpdate;
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -175,6 +211,32 @@ describe("parseMuteSeconds", () => {
   });
 });
 
+describe("operator action callback payload", () => {
+  it("builds and parses compact v1 payloads", () => {
+    const data = buildOperatorActionCallbackData({
+      action: "takeover",
+      tenantId: 12,
+      conversationId: 34,
+    });
+    expect(data).toBe("op:v1:takeover:12:34");
+    expect(parseOperatorActionCallbackData(data)).toEqual({
+      ok: true,
+      payload: { action: "takeover", tenantId: 12, conversationId: 34 },
+    });
+  });
+
+  it("rejects malformed operator callback payloads", () => {
+    expect(parseOperatorActionCallbackData("lvl:all")).toEqual({
+      ok: false,
+      reason: "not_operator_action",
+    });
+    expect(parseOperatorActionCallbackData("op:v1:takeover:0:34")).toEqual({
+      ok: false,
+      reason: "malformed",
+    });
+  });
+});
+
 describe("informer commands", () => {
   function wire(settings?: OperatorSettings) {
     const repo = new FakeRepo(settings);
@@ -246,6 +308,83 @@ describe("informer commands", () => {
     await handler.handleUpdate(cb);
     // дефолт all-on → первый тогл выключает orders
     expect(repo.prefs[0]?.informerTopics).toBe('{"leads":true,"escalation":true,"orders":false,"system":true}');
+  });
+
+  it("callback open_chat returns admin URL", async () => {
+    const data = buildOperatorActionCallbackData({
+      action: "open_chat",
+      tenantId: 1,
+      conversationId: 42,
+    });
+    const { repo, handler, client } = wire(makeSettings({ telegramChatId: "777", tenantId: 1 }));
+    // @ts-expect-error set private appUrl for test
+    handler.appUrl = "https://app.test";
+    await handler.handleUpdate(makeCallback(data));
+    expect(repo.actions).toEqual([]);
+    expect(client.answers[0]).toMatchObject({
+      callbackQueryId: "cb-op",
+      url: "https://app.test/conversations/42",
+    });
+  });
+
+  it("callback takeover is tenant-scoped and commits mode action", async () => {
+    const data = buildOperatorActionCallbackData({
+      action: "takeover",
+      tenantId: 1,
+      conversationId: 42,
+    });
+    const { repo, handler, client } = wire(makeSettings({ adminId: 10, telegramChatId: "777", tenantId: 1 }));
+    await handler.handleUpdate(makeCallback(data));
+    expect(repo.actions[0]).toMatchObject({
+      tenantId: 1,
+      adminId: 10,
+      conversationId: 42,
+      action: "takeover",
+    });
+    expect(client.answers[0]?.text).toContain("режим оператор");
+  });
+
+  it("callback return_ai reports idempotent noop", async () => {
+    const data = buildOperatorActionCallbackData({
+      action: "return_ai",
+      tenantId: 1,
+      conversationId: 42,
+    });
+    const { repo, handler, client } = wire(makeSettings({ adminId: 10, telegramChatId: "777", tenantId: 1 }));
+    repo.modeOutcome = { kind: "noop", mode: "ai" };
+    await handler.handleUpdate(makeCallback(data));
+    expect(repo.actions[0]).toMatchObject({ action: "return_ai" });
+    expect(client.answers[0]?.text).toContain("Уже в режиме: AI");
+  });
+
+  it("callback action with another tenant is denied before commit", async () => {
+    const data = buildOperatorActionCallbackData({
+      action: "takeover",
+      tenantId: 99,
+      conversationId: 42,
+    });
+    const { repo, handler, client } = wire(makeSettings({ telegramChatId: "777", tenantId: 1 }));
+    await handler.handleUpdate(makeCallback(data));
+    expect(repo.actions).toEqual([]);
+    expect(client.answers[0]).toMatchObject({
+      text: "Нет доступа к этому чату",
+      showAlert: true,
+    });
+  });
+
+  it("callback action not_found returns a safe alert", async () => {
+    const data = buildOperatorActionCallbackData({
+      action: "takeover",
+      tenantId: 1,
+      conversationId: 404,
+    });
+    const { repo, handler, client } = wire(makeSettings({ telegramChatId: "777", tenantId: 1 }));
+    repo.modeOutcome = { kind: "not_found" };
+    await handler.handleUpdate(makeCallback(data));
+    expect(client.answers[0]).toMatchObject({
+      text: "Чат не найден или уже недоступен",
+      showAlert: true,
+    });
   });
 
   it("/status показывает уровень, дайджест и темы", async () => {
