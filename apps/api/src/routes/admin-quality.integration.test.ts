@@ -841,6 +841,89 @@ describe("admin quality JSONL export", () => {
     expect(crossTenant.items).toEqual([]);
   });
 
+  it("persists and tracks tool-call improvement proposal status", async () => {
+    if (!sql) return;
+    const create = await authPostJsonReq(
+      tokenA,
+      "/api/admin/quality/tool-call-feedback/improvement-proposals/create-from-feedback",
+      { limit: 20 },
+    );
+    expect(create.status).toBe(200);
+    const created = (await create.json()) as QualityToolCallImprovementProposalsResponse;
+    expect(created.items.map((item) => item.kind).sort()).toEqual([
+      "routing_prompt_fix",
+      "schema_fix",
+      "tool_candidate",
+    ]);
+    expect(created.items.every((item) => item.status === "pending")).toBe(true);
+    expect(created.items.every((item) => item.fingerprint.length > 0)).toBe(true);
+    expect(created.items.every((item) => item.examples.length > 0)).toBe(true);
+    expect(JSON.stringify(created)).not.toContain("999");
+
+    const secondCreate = await authPostJsonReq(
+      tokenA,
+      "/api/admin/quality/tool-call-feedback/improvement-proposals/create-from-feedback",
+      { limit: 20 },
+    );
+    expect(secondCreate.status).toBe(200);
+    const secondBody = (await secondCreate.json()) as QualityToolCallImprovementProposalsResponse;
+    expect(secondBody.items.map((item) => item.fingerprint).sort()).toEqual(
+      created.items.map((item) => item.fingerprint).sort(),
+    );
+
+    const pending = (await (
+      await authReq(tokenA, "/api/admin/quality/tool-call-feedback/improvement-proposals")
+    ).json()) as QualityToolCallImprovementProposalsResponse;
+    expect(pending.items).toHaveLength(3);
+
+    const crossTenant = (await (
+      await authReq(tokenB, "/api/admin/quality/tool-call-feedback/improvement-proposals")
+    ).json()) as QualityToolCallImprovementProposalsResponse;
+    expect(crossTenant.items).toEqual([]);
+
+    const first = pending.items[0];
+    expect(first).toBeDefined();
+    if (!first) return;
+
+    const applied = await authJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-call-feedback/improvement-proposals/${first.id}/status`,
+      { status: "applied" },
+    );
+    expect(applied.status).toBe(200);
+    const appliedBody = (await applied.json()) as QualityToolCallImprovementProposalStatusResponse;
+    expect(appliedBody.proposal).toMatchObject({
+      id: first.id,
+      status: "applied",
+      decidedByAdminId: expect.any(Number),
+    });
+    expect(appliedBody.proposal.decidedAt).toBeGreaterThan(0);
+
+    const pendingAfterApply = (await (
+      await authReq(tokenA, "/api/admin/quality/tool-call-feedback/improvement-proposals")
+    ).json()) as QualityToolCallImprovementProposalsResponse;
+    expect(pendingAfterApply.items.some((item) => item.id === first.id)).toBe(false);
+
+    const all = (await (
+      await authReq(tokenA, "/api/admin/quality/tool-call-feedback/improvement-proposals?status=all")
+    ).json()) as QualityToolCallImprovementProposalsResponse;
+    expect(all.items.some((item) => item.id === first.id && item.status === "applied")).toBe(true);
+
+    const crossTenantStatus = await authJsonReq(
+      tokenB,
+      `/api/admin/quality/tool-call-feedback/improvement-proposals/${first.id}/status`,
+      { status: "dismissed" },
+    );
+    expect(crossTenantStatus.status).toBe(404);
+
+    const invalidStatus = await authJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-call-feedback/improvement-proposals/${first.id}/status`,
+      { status: "done" },
+    );
+    expect(invalidStatus.status).toBe(400);
+  });
+
   it("validates tool-call feedback analytics query params", async () => {
     if (!sql) return;
     expect(
@@ -867,6 +950,14 @@ describe("admin quality JSONL export", () => {
     ).toBe(400);
     expect(
       (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/proposals?limit=0")).status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/improvement-proposals?status=bad"))
+        .status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/improvement-proposals?limit=0"))
+        .status,
     ).toBe(400);
   });
 
@@ -2410,6 +2501,7 @@ type QualityToolCallFeedbackExportRow = {
 type QualityToolCallFeedbackProposalsResponse = {
   items: Array<{
     id: string;
+    fingerprint: string;
     kind: "schema_fix" | "routing_prompt_fix" | "tool_candidate";
     severity: "high" | "medium" | "low";
     title: string;
@@ -2427,6 +2519,41 @@ type QualityToolCallFeedbackProposalsResponse = {
       toolCall: QualityToolCallsResponse["items"][number];
     }>;
   }>;
+};
+
+type QualityToolCallImprovementProposalResponse = {
+  id: number;
+  fingerprint: string;
+  kind: "schema_fix" | "routing_prompt_fix" | "tool_candidate";
+  status: "pending" | "applied" | "dismissed";
+  severity: "high" | "medium" | "low";
+  title: string;
+  toolName: string;
+  source: string;
+  label: string;
+  feedbackCount: number;
+  errorCount: number;
+  lastFeedbackAt: number | null;
+  summary: string;
+  rationale: string[];
+  actionItems: string[];
+  examples: Array<{
+    feedback: QualityToolCallFeedbackResponse;
+    toolCall: QualityToolCallsResponse["items"][number];
+  }>;
+  createdAt: number;
+  updatedAt: number;
+  decidedAt: number | null;
+  decidedByAdminId: number | null;
+};
+
+type QualityToolCallImprovementProposalsResponse = {
+  items: QualityToolCallImprovementProposalResponse[];
+};
+
+type QualityToolCallImprovementProposalStatusResponse = {
+  ok: true;
+  proposal: QualityToolCallImprovementProposalResponse;
 };
 
 type QualitySummaryResponse = {

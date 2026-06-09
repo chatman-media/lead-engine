@@ -1198,9 +1198,11 @@ export type QualityToolCallImprovementKind =
   | "tool_candidate";
 
 export type QualityToolCallImprovementSeverity = "high" | "medium" | "low";
+export type QualityToolCallImprovementStatus = "pending" | "applied" | "dismissed";
 
 export interface QualityToolCallImprovementProposal {
   id: string;
+  fingerprint: string;
   kind: QualityToolCallImprovementKind;
   severity: QualityToolCallImprovementSeverity;
   title: string;
@@ -1217,6 +1219,37 @@ export interface QualityToolCallImprovementProposal {
     feedback: QualityToolCallFeedback;
     toolCall: QualityToolCall;
   }>;
+}
+
+export interface QualityPersistedToolCallImprovementProposal {
+  id: number;
+  fingerprint: string;
+  kind: QualityToolCallImprovementKind;
+  status: QualityToolCallImprovementStatus;
+  severity: QualityToolCallImprovementSeverity;
+  title: string;
+  toolName: string;
+  source: QualityToolCallSource;
+  label: QualityToolCallFeedbackLabel;
+  feedbackCount: number;
+  errorCount: number;
+  lastFeedbackAt: number | null;
+  summary: string;
+  rationale: string[];
+  actionItems: string[];
+  examples: Array<{
+    feedback: QualityToolCallFeedback;
+    toolCall: QualityToolCall;
+  }>;
+  createdAt: number;
+  updatedAt: number;
+  decidedAt: number | null;
+  decidedByAdminId: number | null;
+}
+
+export interface QualityToolCallImprovementProposalListOptions {
+  status?: QualityToolCallImprovementStatus | "all";
+  limit?: number;
 }
 
 export interface QualityTranscriptTurn {
@@ -2835,6 +2868,40 @@ export const saas = {
     return request<{ items: QualityToolCallImprovementProposal[] }>(
       `/api/admin/quality/tool-call-feedback/proposals${qs ? `?${qs}` : ""}`,
     );
+  },
+  getQualityTrackedToolCallImprovementProposals(
+    opts: QualityToolCallImprovementProposalListOptions = {},
+  ) {
+    const params = new URLSearchParams();
+    if (opts.status) params.set("status", opts.status);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return request<{ items: QualityPersistedToolCallImprovementProposal[] }>(
+      `/api/admin/quality/tool-call-feedback/improvement-proposals${qs ? `?${qs}` : ""}`,
+    );
+  },
+  createQualityTrackedToolCallImprovementProposals(
+    opts: QualityToolCallFeedbackSummaryOptions = {},
+  ) {
+    return request<{ ok: boolean; items: QualityPersistedToolCallImprovementProposal[] }>(
+      "/api/admin/quality/tool-call-feedback/improvement-proposals/create-from-feedback",
+      {
+        method: "POST",
+        body: JSON.stringify(opts),
+      },
+    );
+  },
+  setQualityTrackedToolCallImprovementProposalStatus(
+    id: number,
+    status: QualityToolCallImprovementStatus,
+  ) {
+    return request<{
+      ok: boolean;
+      proposal: QualityPersistedToolCallImprovementProposal;
+    }>(`/api/admin/quality/tool-call-feedback/improvement-proposals/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
   },
   runQualitySelfPlay(data: QualitySelfPlayRunOptions) {
     return request<{ ok: boolean; match: QualitySelfPlayMatch }>(

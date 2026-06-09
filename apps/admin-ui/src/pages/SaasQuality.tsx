@@ -32,6 +32,7 @@ import {
   type QualityPairwiseMatch,
   type QualityPairwiseSummary,
   type QualityPairwiseWinner,
+  type QualityPersistedToolCallImprovementProposal,
   type QualityRunOptions,
   type QualityShadowDecision,
   type QualityShadowStatus,
@@ -45,6 +46,7 @@ import {
   type QualityToolCallImprovementKind,
   type QualityToolCallImprovementProposal,
   type QualityToolCallImprovementSeverity,
+  type QualityToolCallImprovementStatus,
   type QualityToolCallSource,
   type QualityTranscriptTurn,
   saas,
@@ -132,6 +134,12 @@ const TOOL_PROPOSAL_SEVERITY_CLASS: Record<QualityToolCallImprovementSeverity, s
   high: "bg-destructive/10 text-destructive",
   medium: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
   low: "bg-muted text-muted-foreground",
+};
+
+const TOOL_PROPOSAL_STATUS_CLASS: Record<QualityToolCallImprovementStatus, string> = {
+  pending: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  applied: "bg-[color-mix(in_oklch,var(--success)_12%,transparent)] text-[var(--success)]",
+  dismissed: "bg-muted text-muted-foreground",
 };
 
 function formatDate(epoch: number | null | undefined): string {
@@ -285,6 +293,19 @@ function proposalSeverityBadge(severity: QualityToolCallImprovementSeverity) {
   );
 }
 
+function proposalStatusBadge(status: QualityToolCallImprovementStatus) {
+  return (
+    <Badge
+      className={cn(
+        "border-transparent font-mono text-[11px]",
+        TOOL_PROPOSAL_STATUS_CLASS[status],
+      )}
+    >
+      {status}
+    </Badge>
+  );
+}
+
 export function SaasQuality() {
   const navigate = useNavigate();
   const [adminRole, setAdminRole] = useState<"superadmin" | "manager" | null>(null);
@@ -311,11 +332,20 @@ export function SaasQuality() {
   const [toolFeedbackProposals, setToolFeedbackProposals] = useState<
     QualityToolCallImprovementProposal[]
   >([]);
+  const [trackedToolProposals, setTrackedToolProposals] = useState<
+    QualityPersistedToolCallImprovementProposal[]
+  >([]);
   const [toolFeedbackLoading, setToolFeedbackLoading] = useState(false);
   const [toolFeedbackProposalsLoading, setToolFeedbackProposalsLoading] = useState(false);
+  const [trackedToolProposalsLoading, setTrackedToolProposalsLoading] = useState(false);
   const [toolFeedbackError, setToolFeedbackError] = useState("");
   const [toolFeedbackProposalsError, setToolFeedbackProposalsError] = useState("");
+  const [trackedToolProposalsError, setTrackedToolProposalsError] = useState("");
   const [toolFeedbackExporting, setToolFeedbackExporting] = useState(false);
+  const [trackedToolProposalCreating, setTrackedToolProposalCreating] = useState(false);
+  const [trackedToolProposalActionId, setTrackedToolProposalActionId] = useState<number | null>(
+    null,
+  );
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
   const [styleSlug, setStyleSlug] = useState("all");
@@ -356,6 +386,9 @@ export function SaasQuality() {
     "all" | "true" | "false"
   >("all");
   const [toolFeedbackName, setToolFeedbackName] = useState("");
+  const [trackedToolProposalStatus, setTrackedToolProposalStatus] = useState<
+    "all" | QualityToolCallImprovementStatus
+  >("pending");
 
   const styleOptions = useMemo(() => summary?.byStyle.map((item) => item.styleSlug) ?? [], [summary]);
   const personaOptions = useMemo(
@@ -464,11 +497,33 @@ export function SaasQuality() {
     }
   }
 
+  async function loadTrackedToolProposals(
+    status: "all" | QualityToolCallImprovementStatus = trackedToolProposalStatus,
+  ) {
+    setTrackedToolProposalsLoading(true);
+    setTrackedToolProposalsError("");
+    try {
+      const result = await saas.getQualityTrackedToolCallImprovementProposals({
+        status,
+        limit: 100,
+      });
+      setTrackedToolProposals(result.items);
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      setTrackedToolProposalsError(
+        err instanceof Error ? err.message : "Не удалось загрузить tracked proposals",
+      );
+    } finally {
+      setTrackedToolProposalsLoading(false);
+    }
+  }
+
   function loadToolFeedbackInsights() {
     const opts = buildToolFeedbackOptions();
     if (!opts) return;
     void loadToolFeedbackSummary(opts);
     void loadToolFeedbackProposals(opts);
+    void loadTrackedToolProposals();
   }
 
   function load() {
@@ -619,6 +674,40 @@ export function SaasQuality() {
       toast.error(err instanceof Error ? err.message : "Не удалось выгрузить feedback JSONL");
     } finally {
       setToolFeedbackExporting(false);
+    }
+  }
+
+  async function handleTrackedToolProposalCreate() {
+    const opts = buildToolFeedbackOptions();
+    if (!opts) return;
+
+    setTrackedToolProposalCreating(true);
+    try {
+      const result = await saas.createQualityTrackedToolCallImprovementProposals(opts);
+      await loadTrackedToolProposals(trackedToolProposalStatus);
+      toast.success(`Tracked proposals: ${result.items.length}`);
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      toast.error(err instanceof Error ? err.message : "Не удалось создать tracked proposals");
+    } finally {
+      setTrackedToolProposalCreating(false);
+    }
+  }
+
+  async function handleTrackedToolProposalStatus(
+    id: number,
+    status: QualityToolCallImprovementStatus,
+  ) {
+    setTrackedToolProposalActionId(id);
+    try {
+      await saas.setQualityTrackedToolCallImprovementProposalStatus(id, status);
+      await loadTrackedToolProposals(trackedToolProposalStatus);
+      toast.success(status === "pending" ? "Proposal restored" : `Proposal ${status}`);
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      toast.error(err instanceof Error ? err.message : "Не удалось обновить tracked proposal");
+    } finally {
+      setTrackedToolProposalActionId(null);
     }
   }
 
@@ -1742,6 +1831,161 @@ export function SaasQuality() {
               {toolFeedbackProposalsError}
             </p>
           )}
+
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="w-[180px] space-y-1.5">
+                <Label>Tracked status</Label>
+                <Select
+                  value={trackedToolProposalStatus}
+                  onValueChange={(value) => {
+                    const next = value as "all" | QualityToolCallImprovementStatus;
+                    setTrackedToolProposalStatus(next);
+                    void loadTrackedToolProposals(next);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">pending</SelectItem>
+                    <SelectItem value="applied">applied</SelectItem>
+                    <SelectItem value="dismissed">dismissed</SelectItem>
+                    <SelectItem value="all">all</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => void loadTrackedToolProposals(trackedToolProposalStatus)}
+                disabled={trackedToolProposalsLoading}
+              >
+                <RefreshCwIcon
+                  className={cn("size-4", trackedToolProposalsLoading && "animate-spin")}
+                />
+                Tracked
+              </Button>
+            </div>
+            <Button
+              onClick={() => void handleTrackedToolProposalCreate()}
+              disabled={trackedToolProposalCreating}
+            >
+              <LightbulbIcon className="size-4" />
+              {trackedToolProposalCreating ? "Creating…" : "Create tracked"}
+            </Button>
+          </div>
+
+          {trackedToolProposalsError && (
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {trackedToolProposalsError}
+            </p>
+          )}
+
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Priority</TableHead>
+                  <TableHead>Kind</TableHead>
+                  <TableHead>Tool</TableHead>
+                  <TableHead>Signal</TableHead>
+                  <TableHead>Action</TableHead>
+                  <TableHead className="text-right">Decision</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {trackedToolProposalsLoading && trackedToolProposals.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                      Загрузка tracked proposals…
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!trackedToolProposalsLoading && trackedToolProposals.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                      Tracked proposals пока нет
+                    </TableCell>
+                  </TableRow>
+                )}
+                {trackedToolProposals.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>{proposalStatusBadge(item.status)}</TableCell>
+                    <TableCell>{proposalSeverityBadge(item.severity)}</TableCell>
+                    <TableCell>{proposalKindBadge(item.kind)}</TableCell>
+                    <TableCell className="max-w-[220px] truncate font-mono text-xs">
+                      {item.toolName}
+                    </TableCell>
+                    <TableCell className="min-w-[210px]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {feedbackBadge(item.label)}
+                        {sourceBadge(item.source)}
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {item.feedbackCount}/{item.errorCount}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="min-w-[340px] max-w-[620px]">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">{item.title}</p>
+                        <p className="text-xs text-muted-foreground">{item.summary}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {item.actionItems.slice(0, 2).map((action) => (
+                            <span
+                              key={action}
+                              className="rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground"
+                            >
+                              {action}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className="min-w-[180px] text-right">
+                      {item.status === "pending" ? (
+                        <div className="flex justify-end gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 gap-1.5 px-2 text-xs"
+                            disabled={trackedToolProposalActionId === item.id}
+                            onClick={() => void handleTrackedToolProposalStatus(item.id, "applied")}
+                          >
+                            <CheckCircleIcon className="size-3.5" />
+                            Apply
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 gap-1.5 px-2 text-xs"
+                            disabled={trackedToolProposalActionId === item.id}
+                            onClick={() =>
+                              void handleTrackedToolProposalStatus(item.id, "dismissed")
+                            }
+                          >
+                            <XCircleIcon className="size-3.5" />
+                            Dismiss
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 gap-1.5 px-2 text-xs"
+                          disabled={trackedToolProposalActionId === item.id}
+                          onClick={() => void handleTrackedToolProposalStatus(item.id, "pending")}
+                        >
+                          <RotateCcwIcon className="size-3.5" />
+                          Restore
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
 
           <div className="overflow-x-auto rounded-md border">
             <Table>
