@@ -226,6 +226,7 @@ export function makeAdminPartnersRoutes(opts: { db: Db }): Hono {
           partnerName: partners.name,
           serviceId: partnerDeals.serviceId,
           serviceName: partnerServices.name,
+          partnerServiceNotes: partnerServices.notes,
           leadId: partnerDeals.leadId,
           stageDefinitionId: partnerDeals.stageDefinitionId,
           stageName: stageDefinitions.displayName,

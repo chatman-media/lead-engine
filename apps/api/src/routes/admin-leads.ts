@@ -593,6 +593,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
           partnerName: partners.name,
           serviceId: partnerDeals.serviceId,
           serviceName: partnerServices.name,
+          partnerServiceNotes: partnerServices.notes,
           stageDefinitionId: partnerDeals.stageDefinitionId,
           status: partnerDeals.status,
           handoffUrl: partnerDeals.handoffUrl,

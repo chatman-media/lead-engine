@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import DemoConcierge from "./DemoConcierge.tsx";
 import DemoExchange from "./DemoExchange.tsx";
+import DemoExchangeWorkflow from "./DemoExchangeWorkflow.tsx";
+import DemoServiceWorkflow from "./DemoServiceWorkflow.tsx";
 import DemoVisa from "./DemoVisa.tsx";
 import LandingAnyBusiness from "./LandingAnyBusiness.tsx";
 import LandingExchange from "./LandingExchange.tsx";
@@ -308,6 +310,15 @@ export default function App() {
       <Route path="/exchange" element={<LandingExchange />} />
       <Route path="/demo" element={<DemoExchange />} />
       <Route path="/demo/exchange" element={<DemoExchange />} />
+      <Route path="/demo/exchange-workflow" element={<DemoExchangeWorkflow />} />
+      <Route path="/demo/workflows/exchange" element={<DemoExchangeWorkflow />} />
+      <Route path="/demo/workflows/transfer" element={<DemoServiceWorkflow workflowKey="transfer" />} />
+      <Route path="/demo/workflows/cleaning" element={<DemoServiceWorkflow workflowKey="cleaning" />} />
+      <Route path="/demo/workflows/massage" element={<DemoServiceWorkflow workflowKey="massage" />} />
+      <Route path="/demo/workflows/beauty" element={<DemoServiceWorkflow workflowKey="beauty" />} />
+      <Route path="/demo/workflows/housing" element={<DemoServiceWorkflow workflowKey="housing" />} />
+      <Route path="/demo/workflows/custom" element={<DemoServiceWorkflow workflowKey="custom" />} />
+      <Route path="/demo/services" element={<DemoConcierge />} />
       <Route path="/demo/concierge" element={<DemoConcierge />} />
       <Route path="/demo/visa" element={<DemoVisa />} />
       <Route path="/recruit" element={<LandingRecruit />} />

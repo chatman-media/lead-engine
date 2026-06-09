@@ -1,10 +1,11 @@
 import {
   BriefcaseBusinessIcon,
-  GitBranchIcon,
+  CheckCircle2Icon,
   HandshakeIcon,
   LinkIcon,
   PlusIcon,
   RefreshCwIcon,
+  StoreIcon,
   Trash2Icon,
   UserCircleIcon,
 } from "lucide-react";
@@ -12,12 +13,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  type CustomProviderMarketplaceItem,
   type FunnelListItem,
   type FunnelTemplateInfo,
   type PartnerService,
-  saas,
+  type ProviderMarketplaceItem,
   type ServiceCatalogItem,
   type ServiceCatalogRouteType,
+  saas,
 } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -25,9 +28,22 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +63,15 @@ interface OfferForm {
   webhookUrl: string;
 }
 
+interface CustomProviderForm {
+  providerName: string;
+  serviceName: string;
+  category: string;
+  description: string;
+  commissionPct: string;
+  requiredFields: string;
+}
+
 const EMPTY_FORM: OfferForm = {
   section: "Основное",
   name: "",
@@ -58,6 +83,15 @@ const EMPTY_FORM: OfferForm = {
   newFunnelSlug: "",
   partnerServiceId: "",
   webhookUrl: "",
+};
+
+const EMPTY_CUSTOM_PROVIDER: CustomProviderForm = {
+  providerName: "",
+  serviceName: "",
+  category: "Custom offer",
+  description: "",
+  commissionPct: "10",
+  requiredFields: "date, address, budget",
 };
 
 const EXECUTOR_OPTIONS: Array<{
@@ -119,7 +153,8 @@ function targetLabel(item: ServiceCatalogItem): string {
       : "Процесс не выбран";
   }
   if (item.routeType === "partner_service") {
-    if (item.partnerName && item.partnerServiceName) return `${item.partnerName} · ${item.partnerServiceName}`;
+    if (item.partnerName && item.partnerServiceName)
+      return `${item.partnerName} · ${item.partnerServiceName}`;
     return item.partnerServiceName ?? "Провайдер не выбран";
   }
   return item.webhookUrl ?? "Webhook не задан";
@@ -168,10 +203,39 @@ function availableTemplates(
 
 function transliterate(value: string): string {
   const map: Record<string, string> = {
-    а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i",
-    й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t",
-    у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sch", ы: "y", э: "e",
-    ю: "yu", я: "ya", ъ: "", ь: "",
+    а: "a",
+    б: "b",
+    в: "v",
+    г: "g",
+    д: "d",
+    е: "e",
+    ё: "e",
+    ж: "zh",
+    з: "z",
+    и: "i",
+    й: "y",
+    к: "k",
+    л: "l",
+    м: "m",
+    н: "n",
+    о: "o",
+    п: "p",
+    р: "r",
+    с: "s",
+    т: "t",
+    у: "u",
+    ф: "f",
+    х: "h",
+    ц: "c",
+    ч: "ch",
+    ш: "sh",
+    щ: "sch",
+    ы: "y",
+    э: "e",
+    ю: "yu",
+    я: "ya",
+    ъ: "",
+    ь: "",
   };
   return value
     .toLowerCase()
@@ -185,10 +249,17 @@ export function SaasServiceCatalog() {
   const [funnels, setFunnels] = useState<FunnelListItem[]>([]);
   const [templates, setTemplates] = useState<FunnelTemplateInfo[]>([]);
   const [partnerServices, setPartnerServices] = useState<PartnerService[]>([]);
+  const [marketplace, setMarketplace] = useState<ProviderMarketplaceItem[]>([]);
+  const [customProviders, setCustomProviders] = useState<CustomProviderMarketplaceItem[]>([]);
+  const [marketplaceCategory, setMarketplaceCategory] = useState("Все");
   const [form, setForm] = useState<OfferForm>(EMPTY_FORM);
+  const [customProviderForm, setCustomProviderForm] =
+    useState<CustomProviderForm>(EMPTY_CUSTOM_PROVIDER);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [installingProvider, setInstallingProvider] = useState<string | null>(null);
+  const [savingCustomProvider, setSavingCustomProvider] = useState(false);
   const [error, setError] = useState("");
 
   const sections = useMemo(() => {
@@ -212,7 +283,6 @@ export function SaasServiceCatalog() {
   }, [items]);
 
   const activeCount = useMemo(() => items.filter((item) => item.isActive).length, [items]);
-  const selectedExecutor = EXECUTOR_OPTIONS.find((option) => option.value === form.executor) ?? EXECUTOR_OPTIONS[0]!;
   const selectableTemplates = useMemo(
     () => availableTemplates(templates, funnels),
     [templates, funnels],
@@ -227,20 +297,45 @@ export function SaasServiceCatalog() {
         : { ...prev, newFunnelTemplate: fallbackTemplate.key },
     );
   }, [selectableTemplates]);
+  const marketplaceCategories = useMemo(
+    () => [
+      "Все",
+      ...[...new Set(marketplace.map((provider) => provider.category))].sort((a, b) =>
+        a.localeCompare(b, "ru"),
+      ),
+    ],
+    [marketplace],
+  );
+  const visibleMarketplace = useMemo(
+    () =>
+      marketplaceCategory === "Все"
+        ? marketplace
+        : marketplace.filter((provider) => provider.category === marketplaceCategory),
+    [marketplace, marketplaceCategory],
+  );
+  const installedMarketplaceCount = useMemo(
+    () => marketplace.filter((provider) => provider.installed).length + customProviders.length,
+    [marketplace, customProviders],
+  );
+  const selectedExecutor =
+    EXECUTOR_OPTIONS.find((option) => option.value === form.executor) ?? EXECUTOR_OPTIONS[0]!;
 
   async function reload() {
     setError("");
     try {
-      const [catalogRes, funnelRes, templateRes, serviceRes] = await Promise.all([
+      const [catalogRes, funnelRes, templateRes, serviceRes, marketplaceRes] = await Promise.all([
         saas.listServiceCatalog(),
         saas.listFunnels(),
         saas.listFunnelTemplates().catch(() => ({ items: [] as FunnelTemplateInfo[] })),
         saas.listPartnerServices(),
+        saas.listProviderMarketplace(),
       ]);
       setItems(catalogRes.items);
       setFunnels(funnelRes.items);
       setTemplates(templateRes.items);
       setPartnerServices(serviceRes.items);
+      setMarketplace(marketplaceRes.items);
+      setCustomProviders(marketplaceRes.customProviders);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить каталог");
     } finally {
@@ -260,6 +355,46 @@ export function SaasServiceCatalog() {
       }
       return next;
     });
+  }
+
+  function updateCustomProviderForm(patch: Partial<CustomProviderForm>) {
+    setCustomProviderForm((prev) => ({ ...prev, ...patch }));
+  }
+
+  async function installProvider(provider: ProviderMarketplaceItem) {
+    if (provider.installed) return;
+    setInstallingProvider(provider.key);
+    try {
+      await saas.installMarketplaceProvider(provider.key);
+      toast.success("Провайдер добавлен в каталог");
+      await reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось добавить провайдера");
+    } finally {
+      setInstallingProvider(null);
+    }
+  }
+
+  async function createCustomProvider() {
+    if (!customProviderForm.providerName.trim() || !customProviderForm.serviceName.trim()) return;
+    setSavingCustomProvider(true);
+    try {
+      await saas.createCustomMarketplaceProvider({
+        providerName: customProviderForm.providerName.trim(),
+        serviceName: customProviderForm.serviceName.trim(),
+        category: customProviderForm.category.trim() || "Custom offer",
+        description: customProviderForm.description.trim() || null,
+        commissionPct: Number(customProviderForm.commissionPct || 0),
+        requiredFields: customProviderForm.requiredFields,
+      });
+      toast.success("Свой провайдер добавлен в каталог");
+      setCustomProviderForm(EMPTY_CUSTOM_PROVIDER);
+      await reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось добавить своего провайдера");
+    } finally {
+      setSavingCustomProvider(false);
+    }
   }
 
   async function createOffer() {
@@ -326,7 +461,7 @@ export function SaasServiceCatalog() {
     setSavingId(item.id);
     try {
       await saas.updateServiceCatalogItem(item.id, { isActive });
-      setItems((prev) => prev.map((row) => row.id === item.id ? { ...row, isActive } : row));
+      setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, isActive } : row)));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Не удалось обновить услугу");
     } finally {
@@ -363,7 +498,198 @@ export function SaasServiceCatalog() {
         </Button>
       </div>
 
-      {error && <p className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">{error}</p>}
+      {error && (
+        <p className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <StoreIcon className="size-4" />
+              Marketplace провайдеров
+            </CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Добавляйте исполнителей услуг в каталог: AI будет заводить заявку, собирать поля и
+              отдавать handoff провайдеру.
+            </p>
+          </div>
+          <Badge variant="outline">{installedMarketplaceCount} installed</Badge>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="flex flex-wrap gap-2">
+            {marketplaceCategories.map((category) => (
+              <Button
+                key={category}
+                size="sm"
+                variant={marketplaceCategory === category ? "default" : "outline"}
+                onClick={() => setMarketplaceCategory(category)}
+              >
+                {category}
+              </Button>
+            ))}
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-3">
+            {visibleMarketplace.map((provider) => (
+              <div key={provider.key} className="rounded-md border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <Badge variant="secondary">{provider.category}</Badge>
+                    <h3 className="mt-3 text-sm font-semibold">{provider.name}</h3>
+                  </div>
+                  {provider.installed && (
+                    <Badge variant="outline" className="gap-1 text-emerald-600">
+                      <CheckCircle2Icon className="size-3" />
+                      installed
+                    </Badge>
+                  )}
+                </div>
+                <p className="mt-2 min-h-[42px] text-xs leading-5 text-muted-foreground">
+                  {provider.description}
+                </p>
+                <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
+                  <div className="flex justify-between gap-3">
+                    <span>Coverage</span>
+                    <span className="text-right text-foreground">{provider.coverage}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span>SLA</span>
+                    <span className="text-right text-foreground">{provider.sla}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span>Pricing</span>
+                    <span className="text-right text-foreground">{provider.pricingMode}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span>Commission</span>
+                    <span className="text-right text-foreground">{provider.commissionHint}</span>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {provider.requiredFields.slice(0, 4).map((field) => (
+                    <span
+                      key={field}
+                      className="rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground"
+                    >
+                      {field}
+                    </span>
+                  ))}
+                </div>
+                <Button
+                  className="mt-4 w-full"
+                  size="sm"
+                  variant={provider.installed ? "outline" : "default"}
+                  disabled={Boolean(provider.installed) || installingProvider === provider.key}
+                  onClick={() => void installProvider(provider)}
+                >
+                  {provider.installed
+                    ? `В каталоге: /${provider.installed.serviceCatalogSlug}`
+                    : installingProvider === provider.key
+                      ? "Добавляем..."
+                      : "Добавить в каталог"}
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          {customProviders.length > 0 && (
+            <div className="rounded-md border border-dashed p-3">
+              <div className="mb-2 text-xs font-medium text-muted-foreground">Свои провайдеры</div>
+              <div className="flex flex-wrap gap-2">
+                {customProviders.map((provider) => (
+                  <Badge key={provider.key} variant="outline">
+                    {provider.name} · {provider.serviceName} · /
+                    {provider.installed.serviceCatalogSlug}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-md border bg-muted/20 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium">Свой провайдер</div>
+                <p className="text-xs text-muted-foreground">
+                  Если нужного исполнителя нет в витрине, добавьте его как partner service и сразу
+                  включите в каталог.
+                </p>
+              </div>
+              <HandshakeIcon className="size-4 text-muted-foreground" />
+            </div>
+            <div className="grid gap-3 lg:grid-cols-[1fr_1fr_180px]">
+              <div className="space-y-1">
+                <Label className="text-xs">Провайдер</Label>
+                <Input
+                  value={customProviderForm.providerName}
+                  onChange={(e) => updateCustomProviderForm({ providerName: e.target.value })}
+                  placeholder="Chef Sasha"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Услуга</Label>
+                <Input
+                  value={customProviderForm.serviceName}
+                  onChange={(e) => updateCustomProviderForm({ serviceName: e.target.value })}
+                  placeholder="Private dinner"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Комиссия, %</Label>
+                <Input
+                  value={customProviderForm.commissionPct}
+                  onChange={(e) => updateCustomProviderForm({ commissionPct: e.target.value })}
+                  inputMode="decimal"
+                />
+              </div>
+            </div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-[220px_1fr]">
+              <div className="space-y-1">
+                <Label className="text-xs">Категория</Label>
+                <Input
+                  value={customProviderForm.category}
+                  onChange={(e) => updateCustomProviderForm({ category: e.target.value })}
+                  placeholder="Custom offer"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Поля заявки</Label>
+                <Input
+                  value={customProviderForm.requiredFields}
+                  onChange={(e) => updateCustomProviderForm({ requiredFields: e.target.value })}
+                  placeholder="date, address, budget"
+                />
+              </div>
+            </div>
+            <div className="mt-3 space-y-1">
+              <Label className="text-xs">Описание</Label>
+              <Textarea
+                value={customProviderForm.description}
+                onChange={(e) => updateCustomProviderForm({ description: e.target.value })}
+                placeholder="Что делает провайдер и где оператор должен подтвердить условия"
+                rows={2}
+              />
+            </div>
+            <div className="mt-4 flex justify-end">
+              <Button
+                size="sm"
+                onClick={() => void createCustomProvider()}
+                disabled={
+                  savingCustomProvider ||
+                  !customProviderForm.providerName.trim() ||
+                  !customProviderForm.serviceName.trim()
+                }
+              >
+                <PlusIcon className="size-4" />
+                {savingCustomProvider ? "Добавляем..." : "Добавить своего"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -446,7 +772,9 @@ export function SaasServiceCatalog() {
                     onClick={() => updateForm({ processMode: "new" })}
                     className={cn(
                       "rounded-md border p-3 text-left text-sm",
-                      form.processMode === "new" ? "border-primary bg-primary/10" : "hover:bg-muted",
+                      form.processMode === "new"
+                        ? "border-primary bg-primary/10"
+                        : "hover:bg-muted",
                     )}
                   >
                     <div className="font-medium">Создать новый процесс</div>
@@ -459,7 +787,9 @@ export function SaasServiceCatalog() {
                     onClick={() => updateForm({ processMode: "existing" })}
                     className={cn(
                       "rounded-md border p-3 text-left text-sm",
-                      form.processMode === "existing" ? "border-primary bg-primary/10" : "hover:bg-muted",
+                      form.processMode === "existing"
+                        ? "border-primary bg-primary/10"
+                        : "hover:bg-muted",
                     )}
                   >
                     <div className="font-medium">Использовать существующий</div>
@@ -496,7 +826,9 @@ export function SaasServiceCatalog() {
                       <Label className="text-xs">Код процесса</Label>
                       <Input
                         value={form.newFunnelSlug}
-                        onChange={(e) => updateForm({ newFunnelSlug: normalizeSlug(e.target.value) })}
+                        onChange={(e) =>
+                          updateForm({ newFunnelSlug: normalizeSlug(e.target.value) })
+                        }
                         placeholder="real_estate_sales"
                       />
                     </div>
@@ -538,7 +870,8 @@ export function SaasServiceCatalog() {
                     <SelectContent>
                       {partnerServices.map((service) => (
                         <SelectItem key={service.id} value={String(service.id)}>
-                          {service.partnerName ? `${service.partnerName} · ` : ""}{service.name}
+                          {service.partnerName ? `${service.partnerName} · ` : ""}
+                          {service.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -547,7 +880,10 @@ export function SaasServiceCatalog() {
                 {partnerServices.length === 0 && (
                   <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
                     Сначала добавьте партнёра и его услугу на странице{" "}
-                    <Link className="text-primary underline-offset-2 hover:underline" to="/partners">
+                    <Link
+                      className="text-primary underline-offset-2 hover:underline"
+                      to="/partners"
+                    >
                       Партнёры
                     </Link>
                     .
@@ -569,7 +905,8 @@ export function SaasServiceCatalog() {
 
             {form.executor === "manual" && (
               <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                Заявка появится у оператора без автоматической передачи. Процесс можно добавить позже.
+                Заявка появится у оператора без автоматической передачи. Процесс можно добавить
+                позже.
               </div>
             )}
           </div>
@@ -586,7 +923,9 @@ export function SaasServiceCatalog() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-sm">Разделы каталога</CardTitle>
-          <Badge variant="outline">{activeCount} активных из {items.length}</Badge>
+          <Badge variant="outline">
+            {activeCount} активных из {items.length}
+          </Badge>
         </CardHeader>
         <CardContent className="space-y-5">
           {sections.length === 0 ? (
@@ -621,7 +960,9 @@ export function SaasServiceCatalog() {
                           <div className="font-medium">{item.name}</div>
                           <div className="mt-1 text-xs text-muted-foreground">/{item.slug}</div>
                           {item.description && (
-                            <div className="mt-1 max-w-xl text-xs text-muted-foreground">{item.description}</div>
+                            <div className="mt-1 max-w-xl text-xs text-muted-foreground">
+                              {item.description}
+                            </div>
                           )}
                         </TableCell>
                         <TableCell>
