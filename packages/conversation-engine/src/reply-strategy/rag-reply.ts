@@ -12,6 +12,7 @@ import {
   type DirectorHookForPrompt,
   generateSoftFallback,
   type IKbStore,
+  type KbScope,
   NO_CONTEXT_MARKER,
   type Persona,
   type Reranker,
@@ -22,6 +23,7 @@ import {
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { compactConversation } from "../compact-conversation.ts";
 import type { ConversationsRepo } from "../dal/conversations.ts";
+import { ScopedKbStore } from "../dal/kb-store.ts";
 import type { KbSuggestionsRepo } from "../dal/kb-suggestions.ts";
 import type { MessageRow, MessagesRepo } from "../dal/messages.ts";
 import type { ReplyStrategy } from "../process-inbound.ts";
@@ -70,6 +72,15 @@ export interface RagReplyStrategyOpts {
   resolveChat: (tenantId: number) => ChatClient;
   resolveEmbed: (tenantId: number) => RagEmbeddingClient;
   resolveKb: (tenantId: number) => IKbStore;
+  /**
+   * Optional KB scope resolver. When provided, retrieval checks the current
+   * stage first, then the funnel, then global docs.
+   */
+  resolveKbScope?: (input: {
+    tenantId: number;
+    conversationId: number;
+    contactId: number;
+  }) => Promise<KbScope | null> | KbScope | null;
   /**
    * Опциональный sales-style resolver. Если задан и возвращает Style —
    * answerWithRag использует его для построения system-prompt (persona,
@@ -324,7 +335,15 @@ export class RagReplyStrategy implements ReplyStrategy {
     const history = messagesToChatHistory(historyWithoutCurrent);
 
     const embedder = this.opts.resolveEmbed(tenantId);
-    const kb = this.opts.resolveKb(tenantId);
+    const baseKb = this.opts.resolveKb(tenantId);
+    const kbScope = this.opts.resolveKbScope
+      ? await this.opts.resolveKbScope({
+          tenantId,
+          conversationId: input.conversationId,
+          contactId: input.contactId,
+        })
+      : null;
+    const kb = kbScope ? new ScopedKbStore(baseKb, kbScope) : baseKb;
     const style = this.opts.resolveStyle
       ? await this.opts.resolveStyle({
           tenantId,
@@ -413,6 +432,7 @@ export class RagReplyStrategy implements ReplyStrategy {
           .log({
             questionText: input.userMessageText,
             sourceConversationId: input.conversationId,
+            ...(kbScope ? { scope: kbScope } : {}),
             nowEpoch,
           })
           .catch((err) => {

@@ -102,7 +102,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/channels", label: "Каналы", icon: CableIcon },
       { to: "/test", label: "Тест бота", icon: TestTube2Icon },
       { to: "/integrations", label: "Интеграции", icon: BlocksIcon },
-      { to: "/faq", label: "FAQ-справочник", icon: BookOpenIcon },
+      { to: "/faq", label: "База знаний", icon: BookOpenIcon },
       { to: "/skills", label: "Навыки", icon: ZapIcon, hideForExchange: true },
       { to: "/hooks", label: "Хуки", icon: SparklesIcon, hideForExchange: true },
       { to: "/styles", label: "Стили", icon: PaletteIcon, hideForExchange: true },

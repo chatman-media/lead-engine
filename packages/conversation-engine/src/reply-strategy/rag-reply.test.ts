@@ -140,6 +140,79 @@ describe("RagReplyStrategy.generate", () => {
     expect(part.text.toLowerCase()).toContain("курс");
   });
 
+  it("uses resolved KB scope for RAG retrieval", async () => {
+    const scopes: string[] = [];
+    const s = mk(
+      {
+        resolveChat: () => chatReturning("Курс 36.5 бат за USDT, без комиссии"),
+        resolveEmbed: embed,
+        resolveKbScope: () => ({
+          scopeType: "stage",
+          funnelId: 77,
+          stageSlug: "payment",
+        }),
+        resolveKb: () =>
+          ({
+            search: async () => [],
+            hybridSearch: async (input: {
+              scope?: {
+                scopeType: string;
+                funnelId?: number | null;
+                stageSlug?: string | null;
+              };
+            }) => {
+              const scope = input.scope;
+              scopes.push(
+                scope
+                  ? `${scope.scopeType}:${scope.funnelId ?? ""}:${scope.stageSlug ?? ""}`
+                  : "none",
+              );
+              return scope?.scopeType === "stage" ? [HIT] : [];
+            },
+            prioritySearch: async () => [],
+          }) as never,
+      },
+      fakeMessagesRepo(),
+    );
+
+    const r = await s.generate(baseInput());
+
+    expect(r).not.toBeNull();
+    expect(scopes).toEqual(["stage:77:payment"]);
+  });
+
+  it("passes resolved KB scope to no-context suggestions", async () => {
+    let loggedScope: unknown = null;
+    const s = mk(
+      {
+        resolveChat: () => chatReturning("Уточню детали и вернусь!"),
+        resolveEmbed: embed,
+        resolveKb: kbWith([]),
+        resolveKbScope: () => ({
+          scopeType: "stage",
+          funnelId: 77,
+          stageSlug: "payment",
+        }),
+        softFallback: true,
+        resolveSuggestions: () =>
+          ({
+            log: async (opts: { scope?: unknown }) => {
+              loggedScope = opts.scope;
+            },
+          }) as never,
+      },
+      fakeMessagesRepo(),
+    );
+
+    await s.generate(baseInput());
+
+    expect(loggedScope).toEqual({
+      scopeType: "stage",
+      funnelId: 77,
+      stageSlug: "payment",
+    });
+  });
+
   it("tool-loop telemetry пробрасывается в recordToolCalls", async () => {
     let toolLoopCalls = 0;
     const chat = {

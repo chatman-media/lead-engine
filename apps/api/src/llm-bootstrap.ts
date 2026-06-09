@@ -7,6 +7,7 @@ import {
 	ExperimentsRepo,
 	getDecryptedSecret,
 	type ITranscriber,
+	KbSuggestionsRepo,
 	LlmMemoryExtractor,
 	LlmReplyStrategy,
 	loadExperimentVariants,
@@ -26,6 +27,7 @@ import {
 	CohereReranker,
 	type DirectorHookForPrompt,
 	JinaReranker,
+	type KbScope,
 	makeBookingLinkTool,
 	type Reranker,
 	type SkillForPrompt,
@@ -374,6 +376,49 @@ export function makeAwaitingOperatorResolver(db: Db) {
 			(r) => r.kind !== "terminal_won" && r.kind !== "terminal_lost",
 		);
 		return open[0]?.stageType === "awaiting_operator";
+	};
+}
+
+function makeKbScopeResolver(db: Db) {
+	return async (input: {
+		tenantId: number;
+		contactId: number;
+	}): Promise<KbScope | null> => {
+		return withTenant(db, input.tenantId, async (tx) => {
+			const rows = await tx
+				.select({
+					funnelId: stageDefinitions.funnelId,
+					stageSlug: stageDefinitions.slug,
+					kind: stageDefinitions.kind,
+				})
+				.from(leads)
+				.leftJoin(
+					stageDefinitions,
+					eq(leads.stageDefinitionId, stageDefinitions.id),
+				)
+				.where(
+					and(
+						eq(leads.tenantId, input.tenantId),
+						eq(leads.userId, input.contactId),
+						isNotNull(leads.stageDefinitionId),
+					),
+				)
+				.orderBy(desc(leads.updatedAt))
+				.limit(5);
+			const current = rows.find(
+				(row) =>
+					row.funnelId !== null &&
+					row.stageSlug !== null &&
+					row.kind !== "terminal_won" &&
+					row.kind !== "terminal_lost",
+			);
+			if (!current?.funnelId || !current.stageSlug) return null;
+			return {
+				scopeType: "stage",
+				funnelId: current.funnelId,
+				stageSlug: current.stageSlug,
+			};
+		});
 	};
 }
 
@@ -912,6 +957,7 @@ export function makeReplyStrategy(
 				return wrapped as unknown as RagEmbeddingClient;
 			},
 			resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
+			resolveKbScope: makeKbScopeResolver(db),
 			resolveStyle,
 			resolveIsSupport: makeSupportModeResolver(db),
 			resolveStageGuidance: makeStageGuidanceResolver(db),
@@ -922,6 +968,8 @@ export function makeReplyStrategy(
 			resolveTools,
 			resolveReranker,
 			recordToolCalls: makeToolCallRecorder(db, "rag_reply"),
+			resolveSuggestions: (tenantId: number) =>
+				new KbSuggestionsRepo({ db, tenantId }),
 			resolveConversations: (tenantId: number) =>
 				new ConversationsRepo({ db, tenantId }),
 			// Если основной ответ пуст (модель «промолчала», нет KB-контекста) —
