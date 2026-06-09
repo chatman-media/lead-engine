@@ -478,13 +478,75 @@ describe("admin-kb upload/list/delete flow", () => {
     const storedPath = join(kbUploadDir, row?.fileStorageKey ?? "");
     expect(await readFile(storedPath, "utf8")).toBe(markdown);
 
+    const listAfterUploadRes = await authReq("/api/admin/kb/documents");
+    const listAfterUpload = (await listAfterUploadRes.json()) as {
+      storage: { storedFiles: number; totalBytes: number; maxUploadBytes: number };
+    };
+    expect(listAfterUpload.storage.storedFiles).toBeGreaterThanOrEqual(1);
+    expect(listAfterUpload.storage.totalBytes).toBeGreaterThanOrEqual(markdown.length);
+    expect(listAfterUpload.storage.maxUploadBytes).toBeGreaterThan(0);
+
+    const replacement = "# Updated rules\n\n- Replaced original file\n- Reindexed text";
+    const replaceForm = new FormData();
+    replaceForm.append(
+      "file",
+      new Blob([replacement], { type: "text/markdown" }),
+      "rules-updated.md",
+    );
+    const replaceRes = await authReq(`/api/admin/kb/documents/${body.documentId}/file`, {
+      method: "POST",
+      body: replaceForm,
+    });
+    expect(replaceRes.status).toBe(200);
+    const replaced = (await replaceRes.json()) as {
+      item: {
+        id: number;
+        hasStoredFile: boolean;
+        fileName: string | null;
+        fileSizeBytes: number | null;
+        text: string;
+      };
+    };
+    expect(replaced.item.id).toBe(body.documentId);
+    expect(replaced.item.hasStoredFile).toBe(true);
+    expect(replaced.item.fileName).toBe("rules-updated.md");
+    expect(replaced.item.fileSizeBytes).toBe(replacement.length);
+    expect(replaced.item.text).toContain("Reindexed text");
+
+    const detailAfterReplaceRes = await authReq(`/api/admin/kb/documents/${body.documentId}`);
+    const detailAfterReplace = (await detailAfterReplaceRes.json()) as {
+      item: { text: string; fileName: string | null };
+    };
+    expect(detailAfterReplace.item.fileName).toBe("rules-updated.md");
+    expect(detailAfterReplace.item.text).toContain("Replaced original file");
+    expect(detailAfterReplace.item.text).not.toContain("Store original file");
+
+    const replacedFileRes = await authReq(`/api/admin/kb/documents/${body.documentId}/file`);
+    expect(await replacedFileRes.text()).toBe(replacement);
+
+    let oldMissing = false;
+    try {
+      await readFile(storedPath);
+    } catch {
+      oldMissing = true;
+    }
+    expect(oldMissing).toBe(true);
+
+    const [replacedRow] = await db
+      .select({ fileStorageKey: kbDocuments.fileStorageKey })
+      .from(kbDocuments)
+      .where(and(eq(kbDocuments.tenantId, tenantId), eq(kbDocuments.id, body.documentId)))
+      .limit(1);
+    const replacedStoredPath = join(kbUploadDir, replacedRow?.fileStorageKey ?? "");
+    expect(await readFile(replacedStoredPath, "utf8")).toBe(replacement);
+
     const deleteRes = await authReq(`/api/admin/kb/documents/${body.documentId}`, {
       method: "DELETE",
     });
     expect(deleteRes.status).toBe(200);
     let missing = false;
     try {
-      await readFile(storedPath);
+      await readFile(replacedStoredPath);
     } catch {
       missing = true;
     }

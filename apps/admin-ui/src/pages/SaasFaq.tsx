@@ -1,5 +1,6 @@
 import {
   CheckIcon,
+  DownloadIcon,
   ExternalLinkIcon,
   EyeIcon,
   FileTextIcon,
@@ -24,6 +25,7 @@ import {
   type KbDoc,
   type KbDocDetail,
   type KbDocFormat,
+  type KbStorageStats,
   type KbSuggestion,
   saas,
 } from "../api/saas.ts";
@@ -42,6 +44,11 @@ type KbUploadScope =
 export function SaasFaq() {
   const navigate = useNavigate();
   const [docs, setDocs] = useState<KbDoc[]>([]);
+  const [storageStats, setStorageStats] = useState<KbStorageStats>({
+    storedFiles: 0,
+    totalBytes: 0,
+    maxUploadBytes: 25 * 1024 * 1024,
+  });
   const [funnels, setFunnels] = useState<FunnelListItem[]>([]);
   const [selectedFunnelId, setSelectedFunnelId] = useState<number | null>(null);
   const [requirements, setRequirements] = useState<KbRequirement[]>([]);
@@ -64,6 +71,7 @@ export function SaasFaq() {
   const [originalFileUrl, setOriginalFileUrl] = useState<string | null>(null);
   const [originalFileText, setOriginalFileText] = useState<string | null>(null);
   const [originalFileError, setOriginalFileError] = useState("");
+  const [replacingOriginalId, setReplacingOriginalId] = useState<number | null>(null);
 
   useEffect(() => {
     return () => {
@@ -86,8 +94,12 @@ export function SaasFaq() {
         selectedFunnelId ? { funnelId: selectedFunnelId } : { scopeType: "global" },
       );
       setDocs(list.items);
+      setStorageStats(list.storage);
     } catch (err) {
-      if (!onAuthError(err)) setDocs([]);
+      if (!onAuthError(err)) {
+        setDocs([]);
+        setStorageStats({ storedFiles: 0, totalBytes: 0, maxUploadBytes: 25 * 1024 * 1024 });
+      }
     }
   }
 
@@ -237,6 +249,33 @@ export function SaasFaq() {
       setFileUploadNotice(`Не удалось загрузить: ${file.name}.`);
     } finally {
       setUploading(false);
+      input.value = "";
+    }
+  }
+
+  async function handleReplaceOriginal(doc: KbDoc, e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.currentTarget;
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setReplacingOriginalId(doc.id);
+    setError("");
+    setFileUploadNotice(
+      `${doc.hasStoredFile ? "Заменяем" : "Привязываем"} оригинал для «${doc.title}»: ${file.name}...`,
+    );
+    try {
+      const res = await saas.replaceDocFile(doc.id, file);
+      await Promise.all([refreshDocs(), refreshRequirements()]);
+      setFileUploadNotice(`Оригинал обновлён: ${file.name}.`);
+      if (viewingDoc?.id === doc.id) {
+        await handleViewDoc(res.item);
+      }
+    } catch (err) {
+      if (!onAuthError(err)) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+      setFileUploadNotice(`Не удалось обновить оригинал: ${file.name}.`);
+    } finally {
+      setReplacingOriginalId(null);
       input.value = "";
     }
   }
@@ -400,7 +439,9 @@ export function SaasFaq() {
                   <UploadIcon className="size-5" />
                 </span>
                 <span className="text-sm font-medium">Загрузить файл</span>
-                <span className="text-xs text-muted-foreground">.txt, .md, .json, .pdf</span>
+                <span className="text-xs text-muted-foreground">
+                  .txt, .md, .json, .pdf · до {formatBytes(storageStats.maxUploadBytes)}
+                </span>
                 <span className="text-xs text-muted-foreground">оригинал сохраняется на сервере</span>
                 {fileUploadNotice && (
                   <span className="max-w-full truncate text-xs text-primary">{fileUploadNotice}</span>
@@ -459,7 +500,12 @@ export function SaasFaq() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle>Материалы</CardTitle>
-              <Badge variant="secondary">{docs.length}</Badge>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Badge variant="secondary">{docs.length}</Badge>
+                <Badge variant="outline">
+                  {storageStats.storedFiles} оригиналов · {formatBytes(storageStats.totalBytes)}
+                </Badge>
+              </div>
             </CardHeader>
             <CardContent>
               {docs.length === 0 ? (
@@ -493,6 +539,25 @@ export function SaasFaq() {
                         onClick={() => handleViewDoc(d)}
                       >
                         <EyeIcon className="size-4" />
+                      </Button>
+                      <input
+                        id={`kb-original-${d.id}`}
+                        type="file"
+                        accept=".txt,.md,.json,.pdf"
+                        className="sr-only"
+                        disabled={replacingOriginalId === d.id}
+                        onChange={(e) => handleReplaceOriginal(d, e)}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-foreground"
+                        disabled={replacingOriginalId === d.id}
+                        aria-label={`${d.hasStoredFile ? "Заменить" : "Загрузить"} оригинал ${d.title}`}
+                        onClick={() => document.getElementById(`kb-original-${d.id}`)?.click()}
+                      >
+                        <UploadIcon className="size-4" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -598,15 +663,25 @@ export function SaasFaq() {
                 <span>{viewingDoc.chunks.length} chunks</span>
                 {viewingDoc.fileSizeBytes !== null && <span>{formatBytes(viewingDoc.fileSizeBytes)}</span>}
                 {viewingDoc.hasStoredFile && originalFileUrl && (
-                  <a
-                    href={originalFileUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline"
-                  >
-                    <ExternalLinkIcon className="size-3.5" />
-                    Открыть оригинал
-                  </a>
+                  <>
+                    <a
+                      href={originalFileUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline"
+                    >
+                      <ExternalLinkIcon className="size-3.5" />
+                      Открыть оригинал
+                    </a>
+                    <a
+                      href={originalFileUrl}
+                      download={viewingDoc.fileName ?? viewingDoc.title}
+                      className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline"
+                    >
+                      <DownloadIcon className="size-3.5" />
+                      Скачать
+                    </a>
+                  </>
                 )}
                 {viewingDoc.format === "pdf" && !viewingDoc.hasStoredFile && (
                   <span className="basis-full text-muted-foreground">

@@ -89,6 +89,12 @@ export interface KbDocDetail extends KbDoc {
   }>;
 }
 
+export interface KbStorageStats {
+  storedFiles: number;
+  totalBytes: number;
+  maxUploadBytes: number;
+}
+
 export interface KbSuggestion {
   id: number;
   tenantId: number;
@@ -1890,7 +1896,9 @@ export const saas = {
     if (opts.funnelId) p.set("funnelId", String(opts.funnelId));
     if (opts.stageSlug) p.set("stageSlug", opts.stageSlug);
     const qs = p.toString();
-    return request<{ items: KbDoc[] }>(`/api/admin/kb/documents${qs ? `?${qs}` : ""}`);
+    return request<{ items: KbDoc[]; storage: KbStorageStats }>(
+      `/api/admin/kb/documents${qs ? `?${qs}` : ""}`,
+    );
   },
   getDoc(id: number) {
     return request<{ item: KbDocDetail }>(`/api/admin/kb/documents/${id}`);
@@ -1945,6 +1953,11 @@ export const saas = {
     if (opts.funnelId) form.append("funnelId", String(opts.funnelId));
     if (opts.stageSlug) form.append("stageSlug", opts.stageSlug);
     return uploadMultipart<KbUploadResult>("/api/admin/kb/documents", form);
+  },
+  replaceDocFile(id: number, file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return uploadMultipart<{ item: KbDocDetail }>(`/api/admin/kb/documents/${id}/file`, form);
   },
   deleteDoc(id: number) {
     return request<{ ok: boolean; deleted: number }>(`/api/admin/kb/documents/${id}`, {
