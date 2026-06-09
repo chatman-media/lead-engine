@@ -30,6 +30,7 @@ import { SaasOnboarding } from "./pages/SaasOnboarding.tsx";
 import { SaasOutreach } from "./pages/SaasOutreach.tsx";
 import { SaasPartners } from "./pages/SaasPartners.tsx";
 import SaasProfile from "./pages/SaasProfile.tsx";
+import { SaasProviders } from "./pages/SaasProviders.tsx";
 import { SaasQuality } from "./pages/SaasQuality.tsx";
 import { SaasReferral } from "./pages/SaasReferral.tsx";
 import { SaasResetPassword } from "./pages/SaasResetPassword.tsx";
@@ -202,6 +203,7 @@ export function App() {
                   <Route path="/settings" element={<SaasSettings />} />
                   <Route path="/settings/channels" element={<SaasChannels />} />
                   <Route path="/partners" element={<SaasPartners />} />
+                  <Route path="/providers" element={<SaasProviders />} />
                   <Route path="/referral" element={<SaasReferral />} />
                   <Route path="/integrations" element={<SaasIntegrations />} />
                   <Route path="/faq" element={<SaasFaq />} />
