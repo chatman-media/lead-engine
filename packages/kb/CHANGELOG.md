@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.10.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.9.0...@chatman-media/kb-v1.10.0) (2026-06-09)
+
+
+### Features
+
+* **kb:** scope knowledge base by funnel stage ([#408](https://github.com/chatman-media/lead-engine/issues/408)) ([1c7ea02](https://github.com/chatman-media/lead-engine/commit/1c7ea02ca6afc6353eabd071e2c877e4775d65c6))
+
 # [@chatman-media/kb-v1.9.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.8.0...@chatman-media/kb-v1.9.0) (2026-06-09)
 
 
