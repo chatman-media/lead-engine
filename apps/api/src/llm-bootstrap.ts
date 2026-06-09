@@ -1,4 +1,6 @@
 import {
+	AgentToolCallsRepo,
+	type AgentToolCallSource,
 	ConversationsRepo,
 	type Db,
 	DrizzleKbStore,
@@ -19,6 +21,7 @@ import {
 } from "@chatman-media/conversation-engine";
 import {
 	ABRouter,
+	type AnswerTelemetry,
 	type AnyRagTool,
 	CohereReranker,
 	type DirectorHookForPrompt,
@@ -27,6 +30,7 @@ import {
 	type Reranker,
 	type SkillForPrompt,
 	type Style,
+	type ToolCallRecord,
 } from "@chatman-media/kb";
 import type {
 	ChatClient,
@@ -769,6 +773,51 @@ export function makeToolsResolver(opts: {
 	return { resolveTools, invalidateTools };
 }
 
+type RecordedToolCall = Pick<ToolCallRecord, "name" | "args" | "result" | "error" | "cycle">;
+
+function toolCallsFromTelemetry(telemetry: AnswerTelemetry): RecordedToolCall[] {
+	if (telemetry.toolCalls && telemetry.toolCalls.length > 0) return telemetry.toolCalls;
+	if (!telemetry.toolCall) return [];
+	return [
+		{
+			name: telemetry.toolCall.name,
+			args: {},
+			result: telemetry.toolCall.result,
+			cycle: 0,
+		},
+	];
+}
+
+function makeToolCallRecorder(db: Db, source: AgentToolCallSource) {
+	return async (input: {
+		tenantId: number;
+		conversationId: number;
+		contactId: number;
+		telemetry?: AnswerTelemetry;
+		toolCalls?: readonly ToolCallRecord[];
+	}): Promise<void> => {
+		const calls = input.toolCalls ?? (input.telemetry ? toolCallsFromTelemetry(input.telemetry) : []);
+		if (calls.length === 0) return;
+		const nowEpoch = Math.floor(Date.now() / 1000);
+		await withTenant(db, input.tenantId, async (tx) => {
+			await new AgentToolCallsRepo({ db: tx, tenantId: input.tenantId }).recordMany(
+				calls.map((call, index) => ({
+					conversationId: input.conversationId,
+					contactId: input.contactId,
+					source,
+					toolName: call.name,
+					args: call.args,
+					result: call.result,
+					error: call.error ?? false,
+					cycle: call.cycle,
+					toolCallIndex: index,
+					nowEpoch,
+				})),
+			);
+		});
+	};
+}
+
 export function makeReplyStrategy(
 	ref: LoadedRef,
 	cfg: ApiConfig,
@@ -810,6 +859,7 @@ export function makeReplyStrategy(
 						ref.router.resolveChat(tenantId, "chat"),
 					resolveIsSupport: makeSupportModeResolver(db),
 					resolveTools,
+					recordToolCalls: makeToolCallRecorder(db, "llm_reply"),
 				},
 				(tenantId: number) => new MessagesRepo({ db, tenantId }),
 			),
@@ -871,6 +921,7 @@ export function makeReplyStrategy(
 			resolveDirectorHooks,
 			resolveTools,
 			resolveReranker,
+			recordToolCalls: makeToolCallRecorder(db, "rag_reply"),
 			resolveConversations: (tenantId: number) =>
 				new ConversationsRepo({ db, tenantId }),
 			// Если основной ответ пуст (модель «промолчала», нет KB-контекста) —

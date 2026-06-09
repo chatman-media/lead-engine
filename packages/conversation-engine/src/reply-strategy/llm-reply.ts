@@ -63,6 +63,18 @@ export interface LlmReplyStrategyOpts {
     conversationId: number;
     contactId?: number;
   }) => Promise<AnyRagTool[]> | AnyRagTool[];
+  /**
+   * Optional post-generation telemetry sink for agentic tool calls. Called only
+   * after tool execution finishes, outside the split-transaction LLM phase.
+   */
+  recordToolCalls?: (input: {
+    tenantId: number;
+    conversationId: number;
+    contactId: number;
+    userMessageText: string;
+    assistantText: string;
+    toolCalls: readonly ToolCallRecord[];
+  }) => Promise<void> | void;
 }
 
 const BASE_SYSTEM_PROMPT =
@@ -174,6 +186,20 @@ export class LlmReplyStrategy implements ReplyStrategy {
       console.warn(
         `[exchange-reply-guard] tenant=${input.tenant.tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
       );
+    }
+    if (this.opts.recordToolCalls && toolCalls.length > 0) {
+      try {
+        await this.opts.recordToolCalls({
+          tenantId: input.tenant.tenantId,
+          conversationId: input.conversationId,
+          contactId: input.contactId,
+          userMessageText: input.userMessageText,
+          assistantText: guarded.text,
+          toolCalls,
+        });
+      } catch (err) {
+        console.warn("[llm-reply] failed to record tool calls:", err);
+      }
     }
     return [
       {

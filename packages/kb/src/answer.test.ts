@@ -316,6 +316,12 @@ describe("answerWithRag — main paths", () => {
       baseInput({ chat, reflect: true, tools: [tool] as unknown as AnswerInput["tools"] }),
     );
     expect(r.telemetry.path).toBe("ok");
+    expect(r.telemetry.toolCalls?.[0]).toMatchObject({
+      name: "quote",
+      args: { asset: "USDT", amount: 335 },
+      result: { rate: 31.5, amountToThb: 10553 },
+      cycle: 0,
+    });
     expect(r.text).toContain("10553 THB");
     expect(checkerPrompt).toContain("TOOL RESULTS");
     expect(checkerPrompt).toContain("quote");

@@ -1,3 +1,13 @@
+export {
+  type AgentToolCallFeedbackInput,
+  type AgentToolCallFeedbackLabel,
+  type AgentToolCallFeedbackRow,
+  type AgentToolCallInput,
+  type AgentToolCallListOpts,
+  type AgentToolCallRow,
+  type AgentToolCallSource,
+  AgentToolCallsRepo,
+} from "./agent-tool-calls.ts";
 export { ChannelIdentitiesRepo, type ChannelIdentityRow } from "./channel-identities.ts";
 export { KbSuggestionsRepo } from "./kb-suggestions.ts";
 export { ContactsRepo, type ContactRow } from "./contacts.ts";

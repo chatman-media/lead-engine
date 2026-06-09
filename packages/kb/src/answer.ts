@@ -338,6 +338,7 @@ async function answerFromHits(opts: {
       ...baseTelemetry,
       generation_ms: generationMs,
       ...(toolCallTelemetry ? { toolCall: toolCallTelemetry } : {}),
+      ...(multiCycleToolCalls ? { toolCalls: multiCycleToolCalls } : {}),
     };
     const result: AnswerResult = {
       text: rawJson,
@@ -359,6 +360,7 @@ async function answerFromHits(opts: {
     ...baseTelemetry,
     generation_ms: generationMs,
     ...(toolCallTelemetry ? { toolCall: toolCallTelemetry } : {}),
+    ...(multiCycleToolCalls ? { toolCalls: multiCycleToolCalls } : {}),
   };
 
   const runVacancyCheck = vacBlock.length > 0 && input.vacancyGuard !== false;
