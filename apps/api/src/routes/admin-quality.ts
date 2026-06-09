@@ -22,7 +22,6 @@ import {
   parseProposal,
   proposeStyleEdits,
   runPairwiseMatch,
-  runShadowEval,
   runSelfPlayMatch,
   type SelfPlayDeps,
   type SelfPlayMatchResult,
@@ -109,6 +108,7 @@ export interface AdminQualityRoutesOpts {
   resolveJudgeChat?: (tenantId: number) => ChatClient | null;
   resolveEmbedder?: (tenantId: number) => EmbeddingClient;
   resolveKb?: (tenantId: number) => IKbStore;
+  shadowEvalRunner?: { wake: () => void };
 }
 
 export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
@@ -1195,6 +1195,140 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     return c.json({ ok: true, shadow: result.shadow });
   });
 
+  app.post("/api/admin/quality/coach/shadow-evaluations/:id/retry", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "bad id" }, 400);
+
+    const now = nowEpoch();
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      const [existing] = await tx
+        .select({
+          id: shadowEvaluations.id,
+          status: shadowEvaluations.status,
+          runConfigJson: shadowEvaluations.runConfigJson,
+        })
+        .from(shadowEvaluations)
+        .where(and(eq(shadowEvaluations.tenantId, tenantId), eq(shadowEvaluations.id, id)))
+        .limit(1);
+      if (!existing) return { kind: "not_found" as const };
+      if (existing.status === "running") {
+        return { kind: "blocked" as const, error: "shadow evaluation is already running" };
+      }
+      if (!existing.runConfigJson) {
+        return {
+          kind: "blocked" as const,
+          error: "shadow evaluation has no durable run config; start a new run instead",
+        };
+      }
+
+      const [updated] = await tx
+        .update(shadowEvaluations)
+        .set({
+          pairsDone: 0,
+          aWins: 0,
+          bWins: 0,
+          draws: 0,
+          winRateLb: null,
+          status: "running",
+          decision: null,
+          errorMessage: null,
+          claimToken: null,
+          claimedAt: null,
+          leaseExpiresAt: null,
+          attempts: 0,
+          startedAt: now,
+          completedAt: null,
+        })
+        .where(and(eq(shadowEvaluations.tenantId, tenantId), eq(shadowEvaluations.id, id)))
+        .returning(shadowEvaluationResponseSelect);
+
+      return { kind: "ok" as const, shadow: updated };
+    });
+
+    if (result.kind === "not_found") return c.json({ error: "shadow evaluation not found" }, 404);
+    if (result.kind === "blocked") return c.json({ error: result.error }, 409);
+    if (!result.shadow) return c.json({ error: "shadow evaluation was not updated" }, 500);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "quality.shadow_evaluation.retry",
+      targetKind: "shadow_evaluation",
+      targetId: String(id),
+      details: {
+        proposalId: result.shadow.proposalId,
+        parentStyleSlug: result.shadow.parentStyleSlug,
+        newStyleSlug: result.shadow.newStyleSlug,
+      },
+    });
+
+    opts.shadowEvalRunner?.wake();
+    return c.json({ ok: true, shadow: result.shadow });
+  });
+
+  app.post("/api/admin/quality/coach/shadow-evaluations/:id/cancel", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "bad id" }, 400);
+
+    const now = nowEpoch();
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      const [existing] = await tx
+        .select({
+          id: shadowEvaluations.id,
+          status: shadowEvaluations.status,
+        })
+        .from(shadowEvaluations)
+        .where(and(eq(shadowEvaluations.tenantId, tenantId), eq(shadowEvaluations.id, id)))
+        .limit(1);
+      if (!existing) return { kind: "not_found" as const };
+      if (existing.status !== "running") {
+        return {
+          kind: "blocked" as const,
+          error: `only running shadow evaluations can be cancelled; current status is ${existing.status}`,
+        };
+      }
+
+      const [updated] = await tx
+        .update(shadowEvaluations)
+        .set({
+          status: "failed",
+          decision: null,
+          errorMessage: "cancelled by admin",
+          claimToken: null,
+          claimedAt: null,
+          leaseExpiresAt: null,
+          completedAt: now,
+        })
+        .where(and(eq(shadowEvaluations.tenantId, tenantId), eq(shadowEvaluations.id, id)))
+        .returning(shadowEvaluationResponseSelect);
+
+      return { kind: "ok" as const, shadow: updated };
+    });
+
+    if (result.kind === "not_found") return c.json({ error: "shadow evaluation not found" }, 404);
+    if (result.kind === "blocked") return c.json({ error: result.error }, 409);
+    if (!result.shadow) return c.json({ error: "shadow evaluation was not updated" }, 500);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "quality.shadow_evaluation.cancel",
+      targetKind: "shadow_evaluation",
+      targetId: String(id),
+      details: {
+        proposalId: result.shadow.proposalId,
+        parentStyleSlug: result.shadow.parentStyleSlug,
+        newStyleSlug: result.shadow.newStyleSlug,
+      },
+    });
+
+    return c.json({ ok: true, shadow: result.shadow });
+  });
+
   app.post("/api/admin/quality/coach/proposals/:id/shadow-evaluations/run", async (c) => {
     const tenantId = c.var.tenantId;
     const adminId = c.var.adminId as number | undefined;
@@ -1260,6 +1394,13 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     const resolvedRuns = runs.value ?? 1;
     const resolvedMaxTurns = maxTurns.value ?? 6;
     const pairsPlanned = personas.length * resolvedRuns;
+    const runConfig: ShadowEvaluationRunConfig = {
+      version: 1,
+      runs: resolvedRuns,
+      maxTurns: resolvedMaxTurns,
+      reflect: reflect.value ?? false,
+      personas: selectedPersonaSlugs,
+    };
     const now = nowEpoch();
     const created = await withTenant(opts.db, tenantId, async (tx) => {
       const [row] = await tx
@@ -1280,6 +1421,11 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
           status: "running",
           decision: null,
           errorMessage: null,
+          runConfigJson: JSON.stringify(runConfig),
+          claimToken: null,
+          claimedAt: null,
+          leaseExpiresAt: null,
+          attempts: 0,
           startedAt: now,
           completedAt: null,
         })
@@ -1305,28 +1451,7 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
       },
     });
 
-    void runShadowEval(
-      {
-        ...depsResult.deps,
-        shadowRepo: makeShadowEvaluationRepo(opts.db, tenantId),
-      },
-      {
-        evalId: created.id,
-        parentStyle: parentStyle.style,
-        parentStyleId: planResult.plan.parentStyle.id,
-        newStyle: candidateStyle.style,
-        newStyleId: planResult.plan.candidateStyle.id,
-        personas: personas.filter(isPresentPersona),
-        runs: resolvedRuns,
-        maxTurns: resolvedMaxTurns,
-      },
-    ).catch((err) => {
-      console.warn(
-        `[quality-shadow] failed to run shadow eval #${created.id}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    });
+    opts.shadowEvalRunner?.wake();
 
     return c.json({ ok: true, shadow: created }, 202);
   });
@@ -1525,6 +1650,14 @@ type QualityShadowEvaluationRunBody = {
   reflect?: unknown;
 };
 
+export type ShadowEvaluationRunConfig = {
+  version: 1;
+  runs: number;
+  maxTurns: number;
+  reflect: boolean;
+  personas: string[];
+};
+
 type QualityStyleLoadResult =
   | { kind: "ok"; styleId: number; style: Style }
   | { kind: "not_found" }
@@ -1573,7 +1706,7 @@ type QualityRunnerDepsResult =
   | { kind: "ok"; deps: PairwiseDeps }
   | { kind: "unavailable"; error: string };
 
-async function buildQualityRunnerDeps(
+export async function buildQualityRunnerDeps(
   opts: AdminQualityRoutesOpts,
   tenantId: number,
   reflect: boolean | undefined,
@@ -2141,11 +2274,11 @@ function parseOptionalPersonaSlugs(
   return { kind: "ok", value: [...new Set(slugs)] };
 }
 
-function isPresentPersona<T>(value: T | undefined): value is T {
+export function isPresentPersona<T>(value: T | undefined): value is T {
   return value !== undefined;
 }
 
-function parseStyleFromShadowPlanRow(row: {
+export function parseStyleFromShadowPlanRow(row: {
   slug: string;
   displayName: string;
   configJson: string;
@@ -2162,7 +2295,11 @@ function parseStyleFromShadowPlanRow(row: {
   return { kind: "ok", style: parsed.data };
 }
 
-function makeShadowEvaluationRepo(db: Db, tenantId: number) {
+export function makeShadowEvaluationRepo(
+  db: Db,
+  tenantId: number,
+  lease?: { claimToken: string; leaseSeconds: number },
+) {
   return {
     update: async (
       evalId: number,
@@ -2187,7 +2324,10 @@ function makeShadowEvaluationRepo(db: Db, tenantId: number) {
         winRateLb?: number | null;
         errorMessage?: string;
         completedAt?: number | null;
+        claimToken?: string | null;
+        leaseExpiresAt?: number | null;
       } = {};
+      const now = nowEpoch();
       if (patch.status !== undefined) set.status = patch.status;
       if (patch.decision !== undefined) set.decision = patch.decision;
       if (patch.totalPairs !== undefined) set.pairsDone = patch.totalPairs;
@@ -2197,14 +2337,21 @@ function makeShadowEvaluationRepo(db: Db, tenantId: number) {
       if (patch.winRateLb !== undefined) set.winRateLb = patch.winRateLb;
       if (patch.error !== undefined) set.errorMessage = patch.error;
       if (patch.status === "complete" || patch.status === "failed") {
-        set.completedAt = nowEpoch();
+        set.completedAt = now;
+        set.claimToken = null;
+        set.leaseExpiresAt = null;
+      } else if (lease) {
+        set.claimToken = lease.claimToken;
+        set.leaseExpiresAt = now + lease.leaseSeconds;
       }
 
       await withTenant(db, tenantId, async (tx) => {
+        const filters = [eq(shadowEvaluations.tenantId, tenantId), eq(shadowEvaluations.id, evalId)];
+        if (lease) filters.push(eq(shadowEvaluations.claimToken, lease.claimToken));
         await tx
           .update(shadowEvaluations)
           .set(set)
-          .where(and(eq(shadowEvaluations.tenantId, tenantId), eq(shadowEvaluations.id, evalId)));
+          .where(and(...filters));
       });
     },
   };

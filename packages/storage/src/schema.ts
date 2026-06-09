@@ -782,6 +782,11 @@ export const shadowEvaluations = pgTable("shadow_evaluations", {
   status: text("status").notNull().default("running"),
   decision: text("decision"),
   errorMessage: text("error_message"),
+  runConfigJson: text("run_config_json"),
+  claimToken: text("claim_token"),
+  claimedAt: integer("claimed_at"),
+  leaseExpiresAt: integer("lease_expires_at"),
+  attempts: integer("attempts").notNull().default(0),
   startedAt: integer("started_at").notNull().default(epochNow()),
   completedAt: integer("completed_at"),
 }, (t) => [
@@ -791,6 +796,9 @@ export const shadowEvaluations = pgTable("shadow_evaluations", {
     sql`${t.decision} IS NULL OR ${t.decision} IN ('keep','rollback','inconclusive')`,
   ),
   index("idx_shadow_evaluations_proposal").on(t.proposalId, sql`${t.startedAt} DESC`),
+  index("idx_shadow_evaluations_running_lease")
+    .on(t.tenantId, t.leaseExpiresAt, t.startedAt)
+    .where(sql`${t.status} = 'running'`),
 ]);
 
 // ---- Userbot outbound queues ------------------------------------------

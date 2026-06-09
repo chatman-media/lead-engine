@@ -4,9 +4,9 @@
  * 95% lower bound on B's win rate to recommend keep / rollback.
  *
  * Runs IN-PROCESS as a background task (no worker queue). The HTTP endpoint
- * inserts the row, then kicks off `runShadowEvalBackground` and returns
- * immediately. UI polls GET /admin/api/coach/:id/shadow-eval until status
- * transitions to complete or failed.
+ * used to fire-and-forget this function directly. Current production code
+ * calls it from a DB-backed queue claim so API restarts can recover stale
+ * `running` rows without losing the operator-visible eval status.
  *
  * Decision thresholds (B's Wilson LB at 95% confidence):
  *   >= 0.55 → keep      (clear improvement)
@@ -64,6 +64,12 @@ export interface ShadowEvalInput {
   personas: readonly CandidatePersona[];
   runs: number;
   maxTurns: number;
+  resume?: {
+    pairsDone: number;
+    aWins: number;
+    bWins: number;
+    draws: number;
+  };
 }
 
 const DECISION_THRESHOLD_KEEP = 0.55;
@@ -117,12 +123,13 @@ export async function runShadowEval(
     return;
   }
 
-  let aWins = 0;
-  let bWins = 0;
-  let draws = 0;
+  const resume = normalizeResume(input.resume, total);
+  let aWins = resume.aWins;
+  let bWins = resume.bWins;
+  let draws = resume.draws;
 
   try {
-    for (const { persona } of pairs) {
+    for (const { persona } of pairs.slice(resume.pairsDone)) {
       const result = await runPairwiseMatch(
         {
           users: deps.users,
@@ -193,4 +200,19 @@ export async function runShadowEval(
       `[shadow-eval] eval #${input.evalId} failed after ${aWins + bWins + draws}/${total} pairs: ${msg}`,
     );
   }
+}
+
+function normalizeResume(
+  resume: ShadowEvalInput["resume"],
+  total: number,
+): { pairsDone: number; aWins: number; bWins: number; draws: number } {
+  if (!resume) return { pairsDone: 0, aWins: 0, bWins: 0, draws: 0 };
+  const pairsDone = Math.max(0, Math.min(total, resume.pairsDone));
+  const aWins = Math.max(0, resume.aWins);
+  const bWins = Math.max(0, resume.bWins);
+  const draws = Math.max(0, resume.draws);
+  if (aWins + bWins + draws !== pairsDone) {
+    return { pairsDone: 0, aWins: 0, bWins: 0, draws: 0 };
+  }
+  return { pairsDone, aWins, bWins, draws };
 }

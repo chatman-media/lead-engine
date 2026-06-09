@@ -29,6 +29,7 @@ import { LlmUsageWriter } from "./lib/llm-usage-writer.ts";
 import { checkUsageAlerts } from "./lib/usage-alerts.ts";
 import { makeMetricsSink } from "./lib/metrics-sink.ts";
 import { InboundRateLimiter } from "./lib/rate-limiter.ts";
+import { ShadowEvalJobRunner } from "./lib/shadow-eval-job-runner.ts";
 import { makeTenantReloader } from "./lib/tenant-reloader.ts";
 import { UserbotChannelRegistry } from "./lib/userbot-channel-registry.ts";
 import { UserbotOutboundDispatcher } from "./lib/userbot-dispatcher.ts";
@@ -599,6 +600,16 @@ async function main() {
     },
   );
   const simChatResolver = makeSimChatResolver(loadedRef);
+  const shadowEvalRunner = new ShadowEvalJobRunner({
+    db,
+    resolveChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    resolveCandidateChat: simChatResolver,
+    resolveJudgeChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
+    ...(embedderResolver ? { resolveEmbedder: embedderResolver } : {}),
+    log: {
+      warn: (message, ctx) => log.warn(message, ctx),
+    },
+  });
 
   // Quality lab exports - self-play / eval artifacts for dashboards and CI.
   app.route(
@@ -612,9 +623,12 @@ async function main() {
       resolveCandidateChat: simChatResolver,
       resolveJudgeChat: (tenantId) => loadedRef.router.resolveChat(tenantId, "chat"),
       ...(embedderResolver ? { resolveEmbedder: embedderResolver } : {}),
+      shadowEvalRunner,
     }),
   );
   log.info("admin-quality routes enabled (self-play JSONL export + quality runner)");
+  shadowEvalRunner.start();
+  log.info("quality shadow-eval queue enabled");
 
   // Agentic tool configuration (booking link, etc.).
   app.route(
@@ -1107,6 +1121,7 @@ async function main() {
     clearTimeout(usageAlertFirstRun);
     if (rateFeedInterval) clearInterval(rateFeedInterval);
     if (dripDispatchInterval) clearInterval(dripDispatchInterval);
+    shadowEvalRunner.stop();
     server.stop();
     webAbort.abort();
     webDispatcher.stop();
