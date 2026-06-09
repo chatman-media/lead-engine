@@ -134,6 +134,34 @@ describe("LlmReplyStrategy", () => {
     expect(sent.find((m) => m.content === "Отвечу через 5 минут")?.role).toBe("assistant");
   });
 
+  it("injects brokered order context into the system prompt", async () => {
+    const chat = new CapturingChat("Контекст учту.");
+    const repo = fakeMessagesRepo([]);
+    const strategy = new LlmReplyStrategy(
+      {
+        template: TEMPLATE,
+        resolveChat: () => chat,
+        resolveServiceOrderContext: () =>
+          "BROKERED ORDER CONTEXT\n- order #12 service=massage status=offer_ready amount=1,200 THB",
+      },
+      () => repo,
+    );
+
+    await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 7,
+      inbound: { externalUserId: "u1" },
+      userMessageText: "что по заявке?",
+    });
+
+    const system = chat.lastCall?.messages[0]?.content ?? "";
+    expect(system).toContain("BROKERED ORDER CONTEXT");
+    expect(system).toContain("order #12");
+    expect(system).toContain("status=offer_ready");
+  });
+
   it("пропускает пустой userMessageText (null = бот молчит)", async () => {
     const chat = new CapturingChat("never called");
     const repo = fakeMessagesRepo([]);

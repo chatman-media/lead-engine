@@ -23,6 +23,22 @@ export { LeadsRepo, type LeadRow } from "./leads.ts";
 export { MessagesRepo, type MessageRow } from "./messages.ts";
 export { OutboundQueueRepo, type OutboundQueueRow } from "./outbound.ts";
 export {
+  ACTIVE_SERVICE_ORDER_STATUSES,
+  assertProviderRequestTransition,
+  assertServiceOrderTransition,
+  canTransitionProviderRequest,
+  canTransitionServiceOrder,
+  type OrderEventActorType,
+  type OrderEventRow,
+  PROVIDER_REQUEST_STATUSES,
+  ProviderRelayRepo,
+  type ProviderRequestRow,
+  type ProviderRequestStatus,
+  SERVICE_ORDER_STATUSES,
+  type ServiceOrderRow,
+  type ServiceOrderStatus,
+} from "./provider-relay.ts";
+export {
   type SkillAggregateRow,
   type SkillOutcomeRow,
   SkillOutcomesRepo,
