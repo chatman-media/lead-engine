@@ -18,13 +18,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import type { FunnelListItem, KbRequirement } from "../api/saas.ts";
+import type { FunnelListItem, KbRequirement, StageDefinition } from "../api/saas.ts";
 import {
   ApiError,
   clearToken,
   type KbDoc,
   type KbDocDetail,
   type KbDocFormat,
+  type KbSearchHit,
   type KbStorageStats,
   type KbSuggestion,
   saas,
@@ -50,6 +51,7 @@ export function SaasFaq() {
     maxUploadBytes: 25 * 1024 * 1024,
   });
   const [funnels, setFunnels] = useState<FunnelListItem[]>([]);
+  const [funnelStages, setFunnelStages] = useState<StageDefinition[]>([]);
   const [selectedFunnelId, setSelectedFunnelId] = useState<number | null>(null);
   const [requirements, setRequirements] = useState<KbRequirement[]>([]);
   const [error, setError] = useState("");
@@ -72,6 +74,11 @@ export function SaasFaq() {
   const [originalFileText, setOriginalFileText] = useState<string | null>(null);
   const [originalFileError, setOriginalFileError] = useState("");
   const [replacingOriginalId, setReplacingOriginalId] = useState<number | null>(null);
+  const [kbSearchQuery, setKbSearchQuery] = useState("");
+  const [kbSearchScope, setKbSearchScope] = useState<KbUploadScope | null>(null);
+  const [kbSearchHits, setKbSearchHits] = useState<KbSearchHit[] | null>(null);
+  const [kbSearchError, setKbSearchError] = useState("");
+  const [kbSearching, setKbSearching] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -109,6 +116,19 @@ export function SaasFaq() {
       setFunnels(res.items);
     } catch {
       setFunnels([]);
+    }
+  }
+
+  async function refreshFunnelStages() {
+    if (!selectedFunnelId) {
+      setFunnelStages([]);
+      return;
+    }
+    try {
+      const res = await saas.getFunnelById(selectedFunnelId);
+      setFunnelStages(res.stages);
+    } catch {
+      setFunnelStages([]);
     }
   }
 
@@ -151,7 +171,10 @@ export function SaasFaq() {
 
   useEffect(() => {
     setPasteScope(null);
+    setKbSearchScope(null);
+    setKbSearchHits(null);
     refreshDocs();
+    refreshFunnelStages();
     refreshRequirements();
     refreshSuggestions();
   }, [selectedFunnelId]);
@@ -164,6 +187,33 @@ export function SaasFaq() {
 
   function uploadScope(): KbUploadScope {
     return pasteScope ?? defaultUploadScope();
+  }
+
+  function defaultSearchScope(): KbUploadScope {
+    return defaultUploadScope();
+  }
+
+  function searchScope(): KbUploadScope {
+    return kbSearchScope ?? defaultSearchScope();
+  }
+
+  function scopeValue(scope: KbUploadScope): string {
+    if (scope.scopeType === "global") return "global";
+    if (scope.scopeType === "funnel") return `funnel:${scope.funnelId}`;
+    return `stage:${scope.funnelId}:${scope.stageSlug}`;
+  }
+
+  function parseScopeValue(value: string): KbUploadScope {
+    if (value === "global") return { scopeType: "global" };
+    const [type, funnelIdRaw, stageSlug] = value.split(":");
+    const funnelId = Number(funnelIdRaw);
+    if (type === "stage" && Number.isFinite(funnelId) && stageSlug) {
+      return { scopeType: "stage", funnelId, stageSlug };
+    }
+    if (type === "funnel" && Number.isFinite(funnelId)) {
+      return { scopeType: "funnel", funnelId };
+    }
+    return defaultSearchScope();
   }
 
   function scopeLabel(scope: {
@@ -277,6 +327,29 @@ export function SaasFaq() {
     } finally {
       setReplacingOriginalId(null);
       input.value = "";
+    }
+  }
+
+  async function handleKbSearch(e: FormEvent) {
+    e.preventDefault();
+    const query = kbSearchQuery.trim();
+    if (!query) return;
+    setKbSearching(true);
+    setKbSearchError("");
+    try {
+      const res = await saas.searchKb({
+        query,
+        limit: 5,
+        ...searchScope(),
+      });
+      setKbSearchHits(res.items);
+    } catch (err) {
+      if (!onAuthError(err)) {
+        setKbSearchError(err instanceof Error ? err.message : String(err));
+        setKbSearchHits([]);
+      }
+    } finally {
+      setKbSearching(false);
     }
   }
 
@@ -494,6 +567,73 @@ export function SaasFaq() {
                   {uploading ? "Загружаем…" : "Добавить материал"}
                 </Button>
               </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Проверка поиска</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <form onSubmit={handleKbSearch} className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-[220px_1fr_auto]">
+                  <select
+                    value={scopeValue(searchScope())}
+                    onChange={(e) => {
+                      setKbSearchScope(parseScopeValue(e.target.value));
+                      setKbSearchHits(null);
+                    }}
+                    className="h-10 rounded-md border bg-background px-3 text-sm"
+                  >
+                    <option value="global">Общая база</option>
+                    {selectedFunnelId && (
+                      <option value={`funnel:${selectedFunnelId}`}>
+                        Воронка {scopeLabel({ scopeType: "funnel", funnelId: selectedFunnelId })}
+                      </option>
+                    )}
+                    {selectedFunnelId &&
+                      funnelStages.map((stage) => (
+                        <option key={stage.slug} value={`stage:${selectedFunnelId}:${stage.slug}`}>
+                          Этап {stage.displayName}
+                        </option>
+                      ))}
+                  </select>
+                  <Input
+                    placeholder="Вопрос клиента"
+                    value={kbSearchQuery}
+                    onChange={(e) => setKbSearchQuery(e.target.value)}
+                  />
+                  <Button type="submit" disabled={kbSearching || !kbSearchQuery.trim()}>
+                    {kbSearching ? "Ищем…" : "Найти"}
+                  </Button>
+                </div>
+              </form>
+              {kbSearchError && <p className="text-sm text-destructive">{kbSearchError}</p>}
+              {kbSearchHits && (
+                <div className="space-y-3">
+                  {kbSearchHits.length === 0 ? (
+                    <p className="rounded-md border bg-muted/20 px-3 py-4 text-sm text-muted-foreground">
+                      Ничего не найдено.
+                    </p>
+                  ) : (
+                    kbSearchHits.map((hit) => (
+                      <div key={`${hit.chunkId}-${hit.rank}`} className="rounded-md border px-3 py-3">
+                        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <Badge variant="secondary">#{hit.rank}</Badge>
+                          <Badge variant="outline">{scopeLabel(hit)}</Badge>
+                          <Badge variant="outline">{formatLabel(hit.format)}</Badge>
+                          {hit.topic && <Badge variant="outline">{hit.topic}</Badge>}
+                          <span className="font-mono">distance {formatDistance(hit.distance)}</span>
+                        </div>
+                        <p className="mb-1 text-sm font-medium">{hit.title}</p>
+                        <p className="max-h-36 overflow-auto whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                          {hit.text}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -754,6 +894,11 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDistance(distance: number): string {
+  if (!Number.isFinite(distance)) return "n/a";
+  return distance.toFixed(4);
 }
 
 function MarkdownPreview({ text }: { text: string }) {

@@ -389,6 +389,59 @@ describe("admin-kb upload/list/delete flow", () => {
     expect(requirements.funnel.id).toBe(funnelId);
     expect(requirements.items.find((i) => i.key === "exchange_how_to_pay")?.covered).toBe(true);
     expect(requirements.items.find((i) => i.key === "stage_payment_payment")?.matchedDocuments).toBe(1);
+
+    const funnelSearchRes = await authReq("/api/admin/kb/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: "proof оплаты для обмена",
+        scopeType: "funnel",
+        funnelId,
+        limit: 5,
+      }),
+    });
+    expect(funnelSearchRes.status).toBe(200);
+    const funnelSearch = (await funnelSearchRes.json()) as {
+      scopeType: string;
+      funnelId: number | null;
+      items: Array<{
+        rank: number;
+        title: string;
+        text: string;
+        scopeType: string;
+        funnelId: number | null;
+        stageSlug: string | null;
+      }>;
+    };
+    expect(funnelSearch.scopeType).toBe("funnel");
+    expect(funnelSearch.funnelId).toBe(funnelId);
+    expect(funnelSearch.items.some((hit) => hit.title === "How to pay scoped")).toBe(true);
+    expect(funnelSearch.items.every((hit) => hit.scopeType === "funnel")).toBe(true);
+    expect(funnelSearch.items[0]?.rank).toBe(1);
+
+    const stageSearchRes = await authReq("/api/admin/kb/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: "платёж проверяет оператор",
+        scopeType: "stage",
+        funnelId,
+        stageSlug: "payment",
+        limit: 5,
+      }),
+    });
+    expect(stageSearchRes.status).toBe(200);
+    const stageSearch = (await stageSearchRes.json()) as {
+      scopeType: string;
+      funnelId: number | null;
+      stageSlug: string | null;
+      items: Array<{ title: string; scopeType: string; stageSlug: string | null }>;
+    };
+    expect(stageSearch.scopeType).toBe("stage");
+    expect(stageSearch.funnelId).toBe(funnelId);
+    expect(stageSearch.stageSlug).toBe("payment");
+    expect(stageSearch.items.some((hit) => hit.title === "Payment stage scoped")).toBe(true);
+    expect(stageSearch.items.every((hit) => hit.scopeType === "stage" && hit.stageSlug === "payment")).toBe(true);
   });
 
   it("POST empty body → 400", async () => {
