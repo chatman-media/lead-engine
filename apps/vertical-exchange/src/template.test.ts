@@ -6,7 +6,7 @@ import "./index.ts";
 describe("exchange_v1 template", () => {
 	it("регистрируется в defaultRegistry при import", () => {
 		const t = defaultRegistry.load("exchange_v1");
-		expect(t.displayName).toBe("Обменный пункт (Пхукет) — v1");
+		expect(t.displayName).toBe("Обмен валют — v1");
 		expect(t.version).toBe(2);
 	});
 

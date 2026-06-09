@@ -16,7 +16,10 @@ type VerticalKey =
 	| "visa"
 	| "scooter"
 	| "modeling"
-	| "video";
+	| "video"
+	| "dental"
+	| "auto-service"
+	| "online-school";
 
 const t = (value: L, lang: Lang) => value[lang];
 
@@ -132,6 +135,9 @@ const VERTICAL_ORDER: VerticalKey[] = [
 	"scooter",
 	"modeling",
 	"video",
+	"dental",
+	"auto-service",
+	"online-school",
 ];
 
 const VERTICALS: Record<
@@ -1231,6 +1237,552 @@ const VERTICALS: Record<
 				{
 					from: "bot",
 					text: "Brief is ready. Producer will check calendar and quote for the deadline, then I will send offer.",
+					cta: true,
+				},
+			],
+		},
+	},
+	dental: {
+		label: { ru: "Стоматология", en: "Dental clinic" },
+		template: "dental_v1",
+		href: "/demo/verticals/dental",
+		tone: "cyan",
+		title: {
+			ru: "Стоматология: жалоба, страховка, запись на приём и напоминания",
+			en: "Dental clinic: complaint, insurance, appointment and reminders",
+		},
+		sub: {
+			ru: "AI собирает жалобу, срочность, страховку и удобное время, предлагает свободные слоты и подтверждает запись. Администратор получает заполненную карточку пациента, а не телефонную очередь.",
+			en: "AI collects complaint, urgency, insurance and preferred time, offers free slots and confirms the visit. Front desk receives a complete patient card instead of a phone queue.",
+		},
+		inbound: {
+			ru: "«Болит зуб справа внизу третий день, есть полис ДМС, можно сегодня вечером?»",
+			en: "“Lower right tooth hurts for 3 days, have insurance, any slot tonight?”",
+		},
+		kpis: [
+			{ value: "14", label: { ru: "записей сегодня", en: "bookings today" } },
+			{ value: "92%", label: { ru: "доходимость", en: "show-up rate" } },
+			{ value: "2", label: { ru: "срочных кейса", en: "urgent cases" } },
+		],
+		fields: [
+			"complaint",
+			"pain_level",
+			"urgency",
+			"insurance_provider",
+			"policy_number",
+			"preferred_time",
+			"doctor",
+			"last_visit",
+		],
+		stages: [
+			{
+				phase: "capture",
+				title: { ru: "Жалоба", en: "Complaint" },
+				desc: {
+					ru: "Симптом, локализация, давность, уровень боли.",
+					en: "Symptom, location, duration, pain level.",
+				},
+				owner: "AI",
+			},
+			{
+				phase: "qualify",
+				title: { ru: "Triage", en: "Triage" },
+				desc: {
+					ru: "Срочность, страховка, история визитов.",
+					en: "Urgency, insurance, visit history.",
+				},
+				owner: "AI",
+			},
+			{
+				phase: "offer",
+				title: { ru: "Слоты", en: "Slots" },
+				desc: {
+					ru: "Врач, кабинет, свободное время из расписания.",
+					en: "Doctor, room, free time from the schedule.",
+				},
+				owner: "system",
+			},
+			{
+				phase: "clear",
+				title: { ru: "Запись", en: "Booking" },
+				desc: {
+					ru: "Подтверждение, полис, предоплата если нужна.",
+					en: "Confirmation, policy, prepayment if required.",
+				},
+				owner: "patient",
+			},
+			{
+				phase: "fulfill",
+				title: { ru: "Приём", en: "Visit" },
+				desc: {
+					ru: "Reminder за день и за 2 часа, перенос, no-show flow.",
+					en: "Reminder one day and 2 hours before, reschedule, no-show flow.",
+				},
+				owner: "operator",
+			},
+		],
+		ops: [
+			{
+				title: { ru: "Triage result", en: "Triage result" },
+				desc: {
+					ru: "Острая боль 3 дня, не экстренный, но слот нужен сегодня.",
+					en: "Acute pain for 3 days, not emergency, but needs slot today.",
+				},
+				status: { ru: "urgent", en: "urgent" },
+			},
+			{
+				title: { ru: "Insurance check", en: "Insurance check" },
+				desc: {
+					ru: "ДМС принят, нужен номер полиса до подтверждения.",
+					en: "Insurance accepted, policy number needed before confirmation.",
+				},
+				status: { ru: "collecting", en: "collecting" },
+			},
+			{
+				title: { ru: "Front desk handoff", en: "Front desk handoff" },
+				desc: {
+					ru: "Администратор подтверждает слот 19:30 и кабинет.",
+					en: "Front desk confirms the 19:30 slot and room.",
+				},
+				status: { ru: "handoff", en: "handoff" },
+			},
+		],
+		knowledge: [
+			{
+				title: { ru: "Услуги и цены", en: "Services and prices" },
+				desc: {
+					ru: "AI отвечает по лечению, имплантации, гигиене и ценам из KB.",
+					en: "AI answers treatment, implants, hygiene and prices from KB.",
+				},
+			},
+			{
+				title: { ru: "Insurance rules", en: "Insurance rules" },
+				desc: {
+					ru: "Какие полисы приняты, что покрыто, когда нужна доплата.",
+					en: "Accepted policies, coverage, when co-payment applies.",
+				},
+			},
+			{
+				title: { ru: "Medical guardrails", en: "Medical guardrails" },
+				desc: {
+					ru: "AI не ставит диагноз: симптомы фиксирует, решение за врачом.",
+					en: "AI never diagnoses: it records symptoms, doctor decides.",
+				},
+			},
+		],
+		handoff: {
+			title: {
+				ru: "Где нужен администратор",
+				en: "Where front desk is needed",
+			},
+			desc: {
+				ru: "AI собрал жалобу, страховку и выбранный слот. Администратор подтверждает запись, решает спорные случаи по полису и ведёт переносы.",
+				en: "AI collected complaint, insurance and chosen slot. Front desk confirms the booking, resolves policy edge cases and handles reschedules.",
+			},
+			decision: { ru: "подтвердить запись", en: "confirm booking" },
+		},
+		messages: {
+			ru: [
+				{
+					from: "user",
+					text: "Болит зуб справа внизу третий день, есть полис ДМС, можно сегодня вечером?",
+				},
+				{
+					from: "bot",
+					text: "Зафиксировал: острая боль, нижняя правая сторона, 3 дня. Оцените боль от 1 до 10 и назовите страховую?",
+				},
+				{ from: "user", text: "Боль 7, страховая — Ингосстрах." },
+				{
+					from: "bot",
+					text: "Полис принимаем. Свободны слоты у терапевта: сегодня 19:30 или завтра 10:00. Какой удобнее?",
+				},
+				{ from: "user", text: "Сегодня 19:30." },
+				{
+					from: "bot",
+					text: "Записал на 19:30, кабинет 3. Пришлите номер полиса — администратор подтвердит запись и пришлёт напоминание за 2 часа.",
+					cta: true,
+				},
+			],
+			en: [
+				{
+					from: "user",
+					text: "Lower right tooth hurts for 3 days, have insurance, any slot tonight?",
+				},
+				{
+					from: "bot",
+					text: "Recorded: acute pain, lower right side, 3 days. Rate the pain 1-10 and name your insurance provider?",
+				},
+				{ from: "user", text: "Pain is 7, provider is Allianz." },
+				{
+					from: "bot",
+					text: "Policy accepted. Free dentist slots: today 19:30 or tomorrow 10:00. Which works?",
+				},
+				{ from: "user", text: "Today 19:30." },
+				{
+					from: "bot",
+					text: "Booked for 19:30, room 3. Send your policy number — front desk will confirm and you will get a reminder 2 hours before.",
+					cta: true,
+				},
+			],
+		},
+	},
+	"auto-service": {
+		label: { ru: "Автосервис", en: "Auto service" },
+		template: "auto_service_v1",
+		href: "/demo/verticals/auto-service",
+		tone: "amber",
+		title: {
+			ru: "Автосервис: машина, проблема, фото, оценка и запись в бокс",
+			en: "Auto service: car, problem, photos, estimate and bay booking",
+		},
+		sub: {
+			ru: "AI собирает марку, модель, год, пробег, описание проблемы и фото. Клиент получает предварительную вилку по цене и слот в бокс, мастер — готовую карточку вместо «алло, у меня что-то стучит».",
+			en: "AI collects make, model, year, mileage, problem description and photos. Client gets a preliminary price range and a bay slot, mechanic gets a complete card instead of “hi, something is knocking”.",
+		},
+		inbound: {
+			ru: "«Camry 2019, при торможении бьёт руль, пробег 95 тыс., когда можно заехать?»",
+			en: "“Camry 2019, steering wheel shakes when braking, 95k km, when can I come?”",
+		},
+		kpis: [
+			{ value: "27", label: { ru: "заявок сегодня", en: "requests today" } },
+			{ value: "4", label: { ru: "бокса свободно", en: "bays free" } },
+			{ value: "85%", label: { ru: "смета согласована", en: "estimates approved" } },
+		],
+		fields: [
+			"make",
+			"model",
+			"year",
+			"mileage",
+			"problem_description",
+			"photos",
+			"preliminary_estimate",
+			"bay_slot",
+		],
+		stages: [
+			{
+				phase: "capture",
+				title: { ru: "Заявка", en: "Inquiry" },
+				desc: {
+					ru: "Марка, модель, год, пробег, симптом.",
+					en: "Make, model, year, mileage, symptom.",
+				},
+				owner: "AI",
+			},
+			{
+				phase: "qualify",
+				title: { ru: "Диагностика по описанию", en: "Remote diagnosis" },
+				desc: {
+					ru: "Уточняющие вопросы, фото/видео проблемы.",
+					en: "Clarifying questions, photos/video of the issue.",
+				},
+				owner: "AI",
+			},
+			{
+				phase: "offer",
+				title: { ru: "Предварительная оценка", en: "Preliminary estimate" },
+				desc: {
+					ru: "Вилка по работам и запчастям из прайса KB.",
+					en: "Range for labor and parts from KB price list.",
+				},
+				owner: "AI",
+			},
+			{
+				phase: "clear",
+				title: { ru: "Запись в бокс", en: "Bay booking" },
+				desc: {
+					ru: "Слот, бокс, мастер, подтверждение клиента.",
+					en: "Slot, bay, mechanic, client confirmation.",
+				},
+				owner: "client",
+			},
+			{
+				phase: "fulfill",
+				title: { ru: "Согласование работ", en: "Work approval" },
+				desc: {
+					ru: "Финальная смета после осмотра, approve в чате, статус ремонта.",
+					en: "Final estimate after inspection, in-chat approval, repair status.",
+				},
+				owner: "operator",
+			},
+		],
+		ops: [
+			{
+				title: { ru: "Symptom match", en: "Symptom match" },
+				desc: {
+					ru: "Биение при торможении: вероятно диски, нужна проходка подвески.",
+					en: "Shaking under braking: likely rotors, suspension check needed.",
+				},
+				status: { ru: "qualified", en: "qualified" },
+			},
+			{
+				title: { ru: "Estimate range", en: "Estimate range" },
+				desc: {
+					ru: "Замена дисков и колодок: 12–18 тыс. с работой по прайсу.",
+					en: "Rotors and pads replacement: $150-220 with labor per price list.",
+				},
+				status: { ru: "sent", en: "sent" },
+			},
+			{
+				title: { ru: "Master handoff", en: "Mechanic handoff" },
+				desc: {
+					ru: "После осмотра мастер шлёт финальную смету на согласование.",
+					en: "After inspection mechanic sends final estimate for approval.",
+				},
+				status: { ru: "handoff", en: "handoff" },
+			},
+		],
+		knowledge: [
+			{
+				title: { ru: "Прайс работ", en: "Labor price list" },
+				desc: {
+					ru: "Нормо-часы, типовые работы, запчасти, сроки поставки.",
+					en: "Labor hours, common jobs, parts, delivery timelines.",
+				},
+			},
+			{
+				title: { ru: "Estimate guardrails", en: "Estimate guardrails" },
+				desc: {
+					ru: "AI даёт только вилку: финальная цена после осмотра в боксе.",
+					en: "AI gives only a range: final price comes after bay inspection.",
+				},
+			},
+			{
+				title: { ru: "Approval flow", en: "Approval flow" },
+				desc: {
+					ru: "Доп. работы не начинаются без согласия клиента в чате.",
+					en: "Extra work never starts without client approval in chat.",
+				},
+			},
+		],
+		handoff: {
+			title: { ru: "Где нужен мастер", en: "Where mechanic is needed" },
+			desc: {
+				ru: "AI собрал машину, симптом, фото и записал в бокс. Мастер осматривает, выставляет финальную смету и согласует доп. работы через ту же карточку.",
+				en: "AI collected the car, symptom, photos and booked the bay. Mechanic inspects, issues the final estimate and approves extra work through the same card.",
+			},
+			decision: { ru: "финальная смета", en: "final estimate" },
+		},
+		messages: {
+			ru: [
+				{
+					from: "user",
+					text: "Camry 2019, при торможении бьёт руль, пробег 95 тыс. Когда можно заехать?",
+				},
+				{
+					from: "bot",
+					text: "Принял: Camry 2019, 95 тыс., биение при торможении. Вибрация на любой скорости или только на высокой? Фото дисков, если есть.",
+				},
+				{ from: "user", text: "Сильнее после 80 км/ч. Фото скину вечером." },
+				{
+					from: "bot",
+					text: "Похоже на передние диски. Предварительно: диски + колодки 12–18 тыс. с работой. Точно скажем после осмотра.",
+				},
+				{ from: "user", text: "Ок, давайте завтра утром." },
+				{
+					from: "bot",
+					text: "Записал: завтра 9:00, бокс 2, мастер Сергей. После осмотра пришлём финальную смету на согласование прямо сюда.",
+					cta: true,
+				},
+			],
+			en: [
+				{
+					from: "user",
+					text: "Camry 2019, steering wheel shakes when braking, 95k km. When can I come?",
+				},
+				{
+					from: "bot",
+					text: "Captured: Camry 2019, 95k km, shaking under braking. Does it vibrate at any speed or only at higher speed? Send rotor photos if you have them.",
+				},
+				{ from: "user", text: "Worse above 80 km/h. Photos tonight." },
+				{
+					from: "bot",
+					text: "Sounds like front rotors. Preliminary range: rotors + pads $150-220 with labor. Exact price after inspection.",
+				},
+				{ from: "user", text: "Ok, tomorrow morning works." },
+				{
+					from: "bot",
+					text: "Booked: tomorrow 9:00, bay 2, mechanic Sergey. After inspection we will send the final estimate for approval right here.",
+					cta: true,
+				},
+			],
+		},
+	},
+	"online-school": {
+		label: { ru: "Онлайн-школа", en: "Online school" },
+		template: "online_school_v1",
+		href: "/demo/verticals/online-school",
+		tone: "violet",
+		title: {
+			ru: "Онлайн-школа: курс, уровень, цель, оплата и follow-up неактивных",
+			en: "Online school: course, level, goal, payment and inactive follow-up",
+		},
+		sub: {
+			ru: "AI подбирает курс под уровень и цель, отвечает по программе из базы знаний, выставляет счёт и выдаёт доступ. Дальше воронка не заканчивается: система возвращает тех, кто перестал учиться.",
+			en: "AI matches a course to level and goal, answers program questions from KB, issues an invoice and grants access. The funnel does not stop there: the system re-engages students who went inactive.",
+		},
+		inbound: {
+			ru: "«Хочу выучить английский до B2 за полгода для работы, занимался давно, сколько стоит?»",
+			en: "“Want English up to B2 in six months for work, studied long ago, how much?”",
+		},
+		kpis: [
+			{ value: "38", label: { ru: "лидов за день", en: "leads today" } },
+			{ value: "64%", label: { ru: "оплата после теста", en: "pay after test" } },
+			{ value: "9", label: { ru: "возвращено follow-up", en: "won back by follow-up" } },
+		],
+		fields: [
+			"course",
+			"current_level",
+			"goal",
+			"deadline",
+			"schedule_preference",
+			"payment_plan",
+			"access_status",
+			"last_activity",
+		],
+		stages: [
+			{
+				phase: "capture",
+				title: { ru: "Запрос", en: "Inquiry" },
+				desc: {
+					ru: "Курс, цель, дедлайн, прошлый опыт.",
+					en: "Course, goal, deadline, past experience.",
+				},
+				owner: "AI",
+			},
+			{
+				phase: "qualify",
+				title: { ru: "Уровень", en: "Level check" },
+				desc: {
+					ru: "Placement-тест и рекомендация группы.",
+					en: "Placement test and group recommendation.",
+				},
+				owner: "AI",
+			},
+			{
+				phase: "offer",
+				title: { ru: "Подбор курса", en: "Course match" },
+				desc: {
+					ru: "Программа, тариф, расписание из KB.",
+					en: "Program, plan, schedule from KB.",
+				},
+				owner: "AI",
+			},
+			{
+				phase: "clear",
+				title: { ru: "Оплата", en: "Payment" },
+				desc: {
+					ru: "Счёт, рассрочка, подтверждение оплаты.",
+					en: "Invoice, installments, payment confirmation.",
+				},
+				owner: "client",
+			},
+			{
+				phase: "fulfill",
+				title: { ru: "Доступ + retention", en: "Access + retention" },
+				desc: {
+					ru: "Выдача материалов, прогресс, follow-up неактивных.",
+					en: "Materials access, progress, inactive follow-up.",
+				},
+				owner: "system",
+			},
+		],
+		ops: [
+			{
+				title: { ru: "Placement result", en: "Placement result" },
+				desc: {
+					ru: "Уровень A2+, цель B2 за 6 месяцев — реалистично в интенсиве.",
+					en: "Level A2+, B2 goal in 6 months is realistic on intensive track.",
+				},
+				status: { ru: "qualified", en: "qualified" },
+			},
+			{
+				title: { ru: "Payment pending", en: "Payment pending" },
+				desc: {
+					ru: "Счёт отправлен, рассрочка 3 платежа, ждём оплату.",
+					en: "Invoice sent, 3-installment plan, awaiting payment.",
+				},
+				status: { ru: "invoice", en: "invoice" },
+			},
+			{
+				title: { ru: "Inactive follow-up", en: "Inactive follow-up" },
+				desc: {
+					ru: "Нет активности 7 дней: серия возврата, потом куратор.",
+					en: "No activity for 7 days: win-back sequence, then curator.",
+				},
+				status: { ru: "re-engage", en: "re-engage" },
+			},
+		],
+		knowledge: [
+			{
+				title: { ru: "Программы курсов", en: "Course programs" },
+				desc: {
+					ru: "Уровни, модули, расписание, тарифы и рассрочка из KB.",
+					en: "Levels, modules, schedule, plans and installments from KB.",
+				},
+			},
+			{
+				title: { ru: "Honest promises", en: "Honest promises" },
+				desc: {
+					ru: "AI не обещает «B2 за месяц»: сроки только из методологии.",
+					en: "AI never promises “B2 in a month”: timelines come from methodology.",
+				},
+			},
+			{
+				title: { ru: "Retention rules", en: "Retention rules" },
+				desc: {
+					ru: "Триггеры неактивности, серия сообщений, эскалация куратору.",
+					en: "Inactivity triggers, message sequence, curator escalation.",
+				},
+			},
+		],
+		handoff: {
+			title: { ru: "Где нужен куратор", en: "Where curator is needed" },
+			desc: {
+				ru: "AI довёл до оплаты и выдал доступ. Куратор подключается на спорные возвраты, смену тарифа и студентов, которых не вернула автоматическая серия.",
+				en: "AI closed the payment and granted access. Curator steps in for disputed refunds, plan changes and students the automated sequence could not win back.",
+			},
+			decision: { ru: "звонок куратора", en: "curator call" },
+		},
+		messages: {
+			ru: [
+				{
+					from: "user",
+					text: "Хочу выучить английский до B2 за полгода для работы, занимался давно. Сколько стоит?",
+				},
+				{
+					from: "bot",
+					text: "Цель понял: B2 за 6 месяцев для работы. Чтобы подобрать группу, пройдите короткий тест на уровень — 10 минут.",
+				},
+				{ from: "user", text: "Прошёл, получилось A2+." },
+				{
+					from: "bot",
+					text: "С A2+ до B2 за 6 месяцев — интенсив, 3 занятия в неделю. Тариф 24 000 ₽/мес или рассрочка на 3 платежа. Утро или вечер?",
+				},
+				{ from: "user", text: "Вечер, и давайте рассрочку." },
+				{
+					from: "bot",
+					text: "Отправил счёт на первый платёж. После оплаты открою доступ к платформе и поставлю в вечернюю группу со вторника.",
+					cta: true,
+				},
+			],
+			en: [
+				{
+					from: "user",
+					text: "Want English up to B2 in six months for work, studied long ago. How much?",
+				},
+				{
+					from: "bot",
+					text: "Goal captured: B2 in 6 months for work. To match a group, take a short placement test — 10 minutes.",
+				},
+				{ from: "user", text: "Done, got A2+." },
+				{
+					from: "bot",
+					text: "A2+ to B2 in 6 months means the intensive track, 3 lessons a week. $240/month or a 3-installment plan. Morning or evening group?",
+				},
+				{ from: "user", text: "Evening, and the installment plan please." },
+				{
+					from: "bot",
+					text: "Invoice for the first installment sent. After payment I will open platform access and place you in the evening group starting Tuesday.",
 					cta: true,
 				},
 			],

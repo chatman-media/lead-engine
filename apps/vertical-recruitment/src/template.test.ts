@@ -6,7 +6,7 @@ import "./index.ts";
 describe("recruitment_v1 template", () => {
   it("регистрируется в defaultRegistry при import", () => {
     const t = defaultRegistry.load("recruitment_v1");
-    expect(t.displayName).toBe("Найм (рекрутинг артисток) — v1");
+    expect(t.displayName).toBe("Рекрутинг и найм — v1");
     expect(t.version).toBe(1);
   });
 

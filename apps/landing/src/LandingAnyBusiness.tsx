@@ -88,6 +88,7 @@ const CONTENT = {
     ],
     usecasesLabel: "Подходит для любой ниши",
     usecasesTitle: "Уже работает в десятках ниш",
+    usecasesCta: "Смотреть живые демо вертикалей →",
     usecases: [
       { icon: "🏠", title: "Недвижимость", desc: "Квалификация покупателей, запись на просмотр, сбор документов" },
       { icon: "🩺", title: "Медицина / стоматология", desc: "Запись на приём, сбор жалоб, предварительная анкета" },
@@ -202,6 +203,7 @@ const CONTENT = {
     ],
     usecasesLabel: "Works for Any Niche",
     usecasesTitle: "Already running in dozens of verticals",
+    usecasesCta: "See live vertical demos →",
     usecases: [
       { icon: "🏠", title: "Real Estate", desc: "Buyer qualification, viewing bookings, document collection" },
       { icon: "🩺", title: "Healthcare / Dentistry", desc: "Appointment booking, symptom collection, pre-intake" },
@@ -307,6 +309,9 @@ export default function LandingAnyBusiness() {
                 <p className="moat-desc">{u.desc}</p>
               </div>
             ))}
+          </div>
+          <div style={{ marginTop: "2rem", textAlign: "center" }}>
+            <a href="/demo/verticals" className="btn btn-secondary">{c.usecasesCta}</a>
           </div>
         </div>
       </section>

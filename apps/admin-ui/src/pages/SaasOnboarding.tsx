@@ -4,6 +4,7 @@ import {
   ChevronDownIcon,
   RocketIcon,
   SendIcon,
+  SparklesIcon,
   TriangleAlertIcon,
   UploadIcon,
   UserIcon,
@@ -26,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { AiWorkflowPanel } from "@/components/AiWorkflowPanel";
 import { CopilotDock, useCopilot, usePageCopilot } from "@/components/copilot";
 import {
   ApiError,
@@ -219,11 +221,18 @@ type StepId =
   | "vertical"
   | "channel"
   | "llm"
+  | "ai_funnel"
   | "ex_rates"
   | "ex_requisites"
   | "kb"
   | "ex_business"
   | "done";
+
+/**
+ * Выбор AI-пути («опиши бизнес — AI соберёт воронку») на шаге «Бизнес».
+ * Переживает перезагрузку страницы, пока воронка ещё не применена.
+ */
+const AI_PATH_LS_KEY = "lead-engine.onboarding.ai-path";
 
 interface StepDef {
   id: StepId;
@@ -381,6 +390,10 @@ export function SaasOnboarding() {
   const [verticals, setVerticals] = useState<VerticalInfo[]>([]);
   const [installingVertical, setInstallingVertical] = useState<string | null>(null);
   const [installedVertical, setInstalledVertical] = useState<string | null>(null);
+  const [aiPath, setAiPath] = useState<boolean>(
+    () => localStorage.getItem(AI_PATH_LS_KEY) === "1",
+  );
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
 
   // Exchange — курсы (тир-карта от рыночного фида: RUB + USDT)
   const [rates, setRates] = useState<ExchangeRate[]>([]);
@@ -418,6 +431,9 @@ export function SaasOnboarding() {
 
   // Completion-предикаты (зеркалят серверный `done`).
   const verticalDone = !!installedVertical || !!status?.funnelInstalled;
+  // Шаг «Бизнес» закрыт выбором пути: установлен шаблон ИЛИ выбран AI-путь
+  // (воронка соберётся на шаге «AI-воронка» после подключения LLM).
+  const businessChosen = verticalDone || aiPath;
   // Только активные каналы — зеркалит серверный onboarding-status (paused не считается).
   const channelDone = channels.some((c) => c.status === "active");
   const chatDone = configReady(chatCfg); // chat обязателен; embed — опционально
@@ -426,9 +442,16 @@ export function SaasOnboarding() {
   const kbDone = docs.length > 0;
 
   const allSteps: StepDef[] = [
-    { id: "vertical", label: "Бизнес", required: true, done: verticalDone, visible: true },
+    { id: "vertical", label: "Бизнес", required: true, done: businessChosen, visible: true },
     { id: "channel", label: "Канал", required: true, done: channelDone, visible: true },
     { id: "llm", label: "LLM", required: true, done: chatDone, visible: true },
+    {
+      id: "ai_funnel",
+      label: "AI-воронка",
+      required: true,
+      done: !!status?.funnelInstalled,
+      visible: aiPath && !installedVertical,
+    },
     { id: "ex_rates", label: "Курсы", required: true, done: ratesDone, visible: isExchange },
     {
       id: "ex_requisites",
@@ -589,7 +612,7 @@ export function SaasOnboarding() {
               id: "vertical",
               label: "",
               required: true,
-              done: !!res.status?.funnelInstalled,
+              done: !!res.status?.funnelInstalled || aiPath,
               visible: true,
             },
             {
@@ -605,6 +628,13 @@ export function SaasOnboarding() {
               required: true,
               done: configReady(res.cfg.find((c) => c.purpose === "chat")),
               visible: true,
+            },
+            {
+              id: "ai_funnel",
+              label: "",
+              required: true,
+              done: !!res.status?.funnelInstalled,
+              visible: aiPath && !res.status?.vertical,
             },
             {
               id: "ex_rates",
@@ -1100,15 +1130,55 @@ export function SaasOnboarding() {
         {currentId === "vertical" && (
           <Card>
             <CardHeader>
-              <CardTitle>Тип бизнеса</CardTitle>
+              <CardTitle>Ваш бизнес</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Выберите шаблон — он настроит этапы воронки, навыки, стили продаж и стартовую базу
-                знаний. Для обменного пункта выберите «Обменник».
+                Lead Engine работает с любым бизнесом, где есть лиды. Соберите воронку с AI под
+                себя — или начните с готового примера. Всё можно изменить позже.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
+              <button
+                type="button"
+                aria-pressed={aiPath && !installedVertical}
+                disabled={installingVertical !== null}
+                onClick={() => {
+                  setAiPath(true);
+                  localStorage.setItem(AI_PATH_LS_KEY, "1");
+                  setError("");
+                }}
+                className={cn(
+                  "flex w-full flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors disabled:opacity-60",
+                  aiPath && !installedVertical
+                    ? "border-primary bg-primary/5 ring-1 ring-primary"
+                    : "border-border hover:border-primary/50 hover:bg-muted/50",
+                )}
+              >
+                <div className="flex w-full items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 font-medium">
+                    <SparklesIcon className="size-4 text-primary" />
+                    Собрать воронку с AI
+                  </span>
+                  {aiPath && !installedVertical && (
+                    <CheckIcon className="size-4 shrink-0 text-primary" />
+                  )}
+                </div>
+                <span className="text-sm text-muted-foreground">
+                  Опишите бизнес своими словами — AI спроектирует этапы воронки, вопросы для
+                  квалификации и поля анкеты. Конструктор откроется после подключения канала и
+                  LLM-ключа.
+                </span>
+              </button>
+
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-border" />
+                <span className="text-xs text-muted-foreground">
+                  или начните с готового примера
+                </span>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+
               {verticals.length === 0 && (
-                <p className="text-sm text-muted-foreground">Список шаблонов недоступен.</p>
+                <p className="text-sm text-muted-foreground">Список примеров недоступен.</p>
               )}
               <div className="grid gap-2 sm:grid-cols-2">
                 {verticals.map((v) => {
@@ -1131,6 +1201,8 @@ export function SaasOnboarding() {
                         try {
                           await saas.installVertical(v.slug);
                           setInstalledVertical(v.slug);
+                          setAiPath(false);
+                          localStorage.removeItem(AI_PATH_LS_KEY);
                           await loadState();
                         } catch (err) {
                           if (!handleAuthError(err)) {
@@ -1172,7 +1244,7 @@ export function SaasOnboarding() {
                   Шаблон установлен <Badge variant="success">готово</Badge>
                 </p>
               )}
-              {verticalDone && <NextButton label="Далее: канал" />}
+              {businessChosen && <NextButton label="Далее: канал" />}
             </CardContent>
           </Card>
         )}
@@ -1572,6 +1644,38 @@ export function SaasOnboarding() {
                 </Link>
               </p>
               {chatDone && <NextButton label="Далее" />}
+            </CardContent>
+          </Card>
+        )}
+
+        {currentId === "ai_funnel" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Соберите воронку с AI</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Опишите бизнес своими словами: чем занимаетесь, как приходят клиенты и что нужно от
+                них узнать. AI спроектирует этапы воронки и поля анкеты — вы увидите предпросмотр и
+                подтвердите перед применением.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {status?.funnelInstalled ? (
+                <>
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    Воронка собрана <Badge variant="success">готово</Badge>
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" onClick={() => setAiPanelOpen(true)}>
+                      <SparklesIcon className="size-4" /> Уточнить воронку
+                    </Button>
+                    <NextButton label="Далее: база знаний" />
+                  </div>
+                </>
+              ) : (
+                <Button onClick={() => setAiPanelOpen(true)}>
+                  <SparklesIcon className="size-4" /> Открыть AI-конструктор
+                </Button>
+              )}
             </CardContent>
           </Card>
         )}
@@ -2008,6 +2112,13 @@ export function SaasOnboarding() {
       </div>
       </div>
       <CopilotDock underHeader />
+      <AiWorkflowPanel
+        open={aiPanelOpen}
+        onOpenChange={setAiPanelOpen}
+        onApplied={() => {
+          loadState().catch(() => {});
+        }}
+      />
       </div>
     </div>
   );

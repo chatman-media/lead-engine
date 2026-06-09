@@ -21,7 +21,7 @@ import { REAL_ESTATE_STYLES } from "./styles/index.ts";
  */
 export const REAL_ESTATE_V1: VerticalTemplate = {
 	slug: "real_estate_v1",
-	displayName: "Недвижимость (Дубай) — v1",
+	displayName: "Недвижимость — v1",
 	version: 1,
 	funnelStages: REAL_ESTATE_FUNNEL_STAGES,
 	questionnaire: REAL_ESTATE_INTAKE,

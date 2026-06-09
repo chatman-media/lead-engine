@@ -6,7 +6,7 @@ import "./index.ts";
 describe("real_estate_v1 template", () => {
   it("регистрируется в defaultRegistry при import", () => {
     const t = defaultRegistry.load("real_estate_v1");
-    expect(t.displayName).toBe("Недвижимость (Дубай) — v1");
+    expect(t.displayName).toBe("Недвижимость — v1");
     expect(t.version).toBe(1);
   });
 

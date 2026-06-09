@@ -6,7 +6,7 @@ import "./index.ts";
 describe("concierge_v1 template", () => {
   it("регистрируется в defaultRegistry при import", () => {
     const t = defaultRegistry.load("concierge_v1");
-    expect(t.displayName).toBe("Консьерж-сервис (вилла) — v1");
+    expect(t.displayName).toBe("Консьерж-сервис — v1");
     expect(t.version).toBe(1);
     expect(t.funnelSeedKey).toBe("concierge");
   });

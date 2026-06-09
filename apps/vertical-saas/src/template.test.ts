@@ -6,7 +6,7 @@ import "./index.ts";
 describe("saas_v1 template", () => {
   it("регистрируется в defaultRegistry при import", () => {
     const t = defaultRegistry.load("saas_v1");
-    expect(t.displayName).toBe("SaaS-продажи (Lead Engine) — v1");
+    expect(t.displayName).toBe("SaaS-продажи — v1");
     expect(t.version).toBe(1);
   });
 

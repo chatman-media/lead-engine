@@ -309,7 +309,7 @@ function LandingRecruit() {
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<LandingWorkflow />} />
+      <Route path="/" element={<LandingAnyBusiness />} />
       <Route path="/early-access" element={<EarlyAccess />} />
       <Route path="/signup" element={<EarlyAccess />} />
       <Route path="/alpha" element={<EarlyAccess />} />
@@ -332,6 +332,9 @@ export default function App() {
       <Route path="/demo/verticals/scooter" element={<DemoVerticals verticalKey="scooter" />} />
       <Route path="/demo/verticals/modeling" element={<DemoVerticals verticalKey="modeling" />} />
       <Route path="/demo/verticals/video" element={<DemoVerticals verticalKey="video" />} />
+      <Route path="/demo/verticals/dental" element={<DemoVerticals verticalKey="dental" />} />
+      <Route path="/demo/verticals/auto-service" element={<DemoVerticals verticalKey="auto-service" />} />
+      <Route path="/demo/verticals/online-school" element={<DemoVerticals verticalKey="online-school" />} />
       <Route path="/demo/services" element={<DemoConcierge />} />
       <Route path="/demo/concierge" element={<DemoConcierge />} />
       <Route path="/demo/visa" element={<DemoVisa />} />
