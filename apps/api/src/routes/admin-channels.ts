@@ -9,6 +9,7 @@ import {
   TelegramClient,
   UserbotLoginError,
 } from "@chatman-media/channel-telegram";
+import { VkApiError, VkClient } from "@chatman-media/channel-vk";
 import { WhatsAppApiError, WhatsAppClient } from "@chatman-media/channel-whatsapp";
 import { type Db, setEncryptedSecret, withTenant } from "@chatman-media/conversation-engine";
 import { channels, tenants } from "@chatman-media/storage";
@@ -17,6 +18,8 @@ import { type Context, Hono } from "hono";
 import {
   FACEBOOK_APP_SECRET_KEY,
   FACEBOOK_VERIFY_TOKEN_KEY,
+  VK_CONFIRMATION_CODE_KEY,
+  VK_SECRET_KEY,
   WHATSAPP_APP_SECRET_KEY,
   WHATSAPP_VERIFY_TOKEN_KEY,
 } from "../channel-registry.ts";
@@ -84,6 +87,12 @@ export interface AdminChannelsRoutesOpts {
    * configuration).
    */
   facebookVerifyToken?: string;
+  /**
+   * VK Callback API fallback confirmation code/secret. Prefer per-tenant values
+   * posted via /api/admin/channels/vk; env fallback is for legacy/dev.
+   */
+  vkConfirmationCode?: string;
+  vkSecretKey?: string;
   /**
    * URL CDN-bundle'а виджета. Если задан — POST /web возвращает
    * production-ready `<script src="...">` snippet. Если пусто (текущее
@@ -175,6 +184,17 @@ interface FacebookCreateBody {
   verifyToken?: unknown;
   /** Per-tenant Meta app secret (опц.) — фолбэк на env FACEBOOK_APP_SECRET. */
   appSecret?: unknown;
+}
+
+interface VkCreateBody {
+  /** Numeric community/group id. */
+  groupId: unknown;
+  /** Community access token with messages permission. */
+  accessToken: unknown;
+  /** Callback API confirmation code for this community. */
+  confirmationCode?: unknown;
+  /** Optional Callback API secret key, checked against payload.secret. */
+  secretKey?: unknown;
 }
 
 interface WebCreateBody {
@@ -896,6 +916,233 @@ export function makeAdminChannelsRoutes(opts: AdminChannelsRoutesOpts): Hono {
     } catch (err) {
       if (err instanceof Error && /unique|duplicate/i.test(err.message)) {
         return c.json({ error: "channel already exists", pageId }, 409);
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * POST /api/admin/channels/vk
+   * Body: { groupId, accessToken, confirmationCode?, secretKey? }
+   *
+   * VK community channel via Callback API. Mirrors the Meta webhook channels:
+   * validate token/group → encrypt tenant secrets → upsert channels(kind='vk')
+   * → return webhookSetupHint for VK community settings.
+   */
+  app.post("/api/admin/channels/vk", async (c) => {
+    const tenantId = c.var.tenantId;
+    let body: VkCreateBody;
+    try {
+      body = (await c.req.json()) as VkCreateBody;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const groupId =
+      typeof body.groupId === "string"
+        ? body.groupId.trim()
+        : typeof body.groupId === "number" && Number.isFinite(body.groupId)
+          ? String(Math.trunc(body.groupId))
+          : "";
+    const accessToken = typeof body.accessToken === "string" ? body.accessToken.trim() : "";
+    const confirmationCode =
+      typeof body.confirmationCode === "string" && body.confirmationCode.trim()
+        ? body.confirmationCode.trim()
+        : (opts.vkConfirmationCode ?? "");
+    const secretKey =
+      typeof body.secretKey === "string" && body.secretKey.trim()
+        ? body.secretKey.trim()
+        : (opts.vkSecretKey ?? "");
+
+    if (!groupId) return c.json({ error: "groupId required" }, 400);
+    if (!/^\d{1,20}$/.test(groupId)) {
+      return c.json({ error: "groupId must be numeric VK community id" }, 400);
+    }
+    if (!accessToken) return c.json({ error: "accessToken required" }, 400);
+    if (!confirmationCode) {
+      return c.json({ error: "confirmationCode required" }, 400);
+    }
+
+    const vkClient = new VkClient({
+      accessToken,
+      ...(opts.fetchImpl ? { fetch: opts.fetchImpl } : {}),
+    });
+    let groupInfo: Awaited<ReturnType<VkClient["getGroupInfo"]>>;
+    try {
+      groupInfo = await vkClient.getGroupInfo(groupId);
+    } catch (err) {
+      if (err instanceof VkApiError) {
+        if (err.code === 5 || err.code === 15 || err.statusCode === 401 || err.statusCode === 403) {
+          return c.json({ error: "VK rejected token (invalid or insufficient permissions)" }, 401);
+        }
+        if (err.code === 100 || /not found/i.test(err.description)) {
+          return c.json({ error: "groupId not found" }, 404);
+        }
+      }
+      return c.json(
+        {
+          error: "VK API unreachable or rejected",
+          detail: err instanceof Error ? err.message : String(err),
+        },
+        502,
+      );
+    }
+    if (String(groupInfo.id) !== groupId) {
+      return c.json({ error: "VK returned unexpected group id" }, 502);
+    }
+
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    const secretRef = `channel_vk_${groupId}`;
+
+    const [maybeExistingVk] = await opts.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(
+        and(
+          eq(channels.tenantId, tenantId),
+          eq(channels.kind, "vk"),
+          eq(channels.externalId, groupId),
+        ),
+      );
+    if (!maybeExistingVk) {
+      const quota = await canAddChannel({ db: opts.db, tenantId });
+      if (!quota.allowed) {
+        return c.json(
+          {
+            error: "quota_exceeded",
+            reason: quota.reason,
+            limit: quota.limit,
+            current: quota.current,
+            plan: quota.plan,
+            planLabel: quota.planLabel,
+            upgradeHint: "Перейдите на план Starter ($99/мес) для большего числа каналов",
+          },
+          402,
+        );
+      }
+    }
+
+    try {
+      const result = await withTenant(opts.db, tenantId, async (tx) => {
+        const [existing] = await tx
+          .select({ id: channels.id })
+          .from(channels)
+          .where(
+            and(
+              eq(channels.tenantId, tenantId),
+              eq(channels.kind, "vk"),
+              eq(channels.externalId, groupId),
+            ),
+          );
+
+        await setEncryptedSecret({
+          db: tx,
+          tenantId,
+          key: secretRef,
+          value: accessToken,
+          masterKeyHex: opts.masterKeyHex,
+          nowEpoch,
+        });
+        await setEncryptedSecret({
+          db: tx,
+          tenantId,
+          key: VK_CONFIRMATION_CODE_KEY,
+          value: confirmationCode,
+          masterKeyHex: opts.masterKeyHex,
+          nowEpoch,
+        });
+        if (secretKey) {
+          await setEncryptedSecret({
+            db: tx,
+            tenantId,
+            key: VK_SECRET_KEY,
+            value: secretKey,
+            masterKeyHex: opts.masterKeyHex,
+            nowEpoch,
+          });
+        }
+
+        const metadata = JSON.stringify({
+          ...(groupInfo.name ? { groupName: groupInfo.name } : {}),
+          ...(groupInfo.screenName ? { screenName: groupInfo.screenName } : {}),
+        });
+        if (existing) {
+          await tx
+            .update(channels)
+            .set({
+              credentialsRef: secretRef,
+              status: "active",
+              metadataJson: metadata,
+              updatedAt: nowEpoch,
+            })
+            .where(eq(channels.id, existing.id));
+          return { id: existing.id, updated: true };
+        }
+        const [inserted] = await tx
+          .insert(channels)
+          .values({
+            tenantId,
+            kind: "vk",
+            externalId: groupId,
+            credentialsRef: secretRef,
+            status: "active",
+            metadataJson: metadata,
+            createdAt: nowEpoch,
+            updatedAt: nowEpoch,
+          })
+          .returning({ id: channels.id });
+        return { id: inserted!.id, updated: false };
+      });
+
+      await recordAudit(opts.db, {
+        tenantId,
+        adminId: c.var.adminId,
+        action: result.updated ? "channel.update" : "channel.create",
+        targetKind: "channel",
+        targetId: result.id,
+        details: { kind: "vk", groupId, groupName: groupInfo.name ?? null },
+      });
+
+      let reloadError: string | undefined;
+      if (opts.onReload) {
+        try {
+          await opts.onReload(tenantId);
+        } catch (err) {
+          reloadError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
+      let webhookSetupHint:
+        | { url: string; confirmationCode: string; secretKeyHint: string; eventTypes: string[] }
+        | undefined;
+      if (opts.publicUrl) {
+        const [tenant] = await opts.db
+          .select({ slug: tenants.slug })
+          .from(tenants)
+          .where(eq(tenants.id, tenantId));
+        if (tenant) {
+          webhookSetupHint = {
+            url: `${opts.publicUrl}/webhook/vk/${tenant.slug}`,
+            confirmationCode,
+            secretKeyHint: secretKey
+              ? "Secret key сохранён — payload.secret будет проверяться"
+              : "VK community → Callback API → Secret key (укажите в форме или env VK_SECRET_KEY)",
+            eventTypes: ["message_new"],
+          };
+        }
+      }
+
+      return c.json({
+        ok: true,
+        ...result,
+        groupId,
+        ...(groupInfo.name ? { groupName: groupInfo.name } : {}),
+        ...(groupInfo.screenName ? { screenName: groupInfo.screenName } : {}),
+        ...(webhookSetupHint ? { webhookSetupHint } : {}),
+        ...(reloadError ? { reloadError } : {}),
+      });
+    } catch (err) {
+      if (err instanceof Error && /unique|duplicate/i.test(err.message)) {
+        return c.json({ error: "channel already exists", groupId }, 409);
       }
       throw err;
     }

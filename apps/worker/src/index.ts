@@ -78,13 +78,13 @@ async function main() {
     pollMs: cfg.dispatcherPollMs,
     batchSize: cfg.dispatcherBatchSize,
     metrics,
-    // Worker делает push-доставку: bot-API HTTP / WhatsApp Cloud.
+    // Worker делает push-доставку: bot-API HTTP / WhatsApp Cloud / VK.
     // Web и telegram_userbot держат pinned-соединение (WS / MTProto) в
     // apps/api — у них отдельные in-process dispatcher'ы (web-dispatcher.ts /
     // userbot-dispatcher.ts), которые claim'ят kind='web' / 'telegram_userbot'.
     // Если не отфильтровать — worker grab'нет такую row первым, не найдёт
     // адаптер, mark'нет fail.
-    claimKinds: ["telegram_bot", "whatsapp", "facebook"],
+    claimKinds: ["telegram_bot", "whatsapp", "facebook", "vk"],
   });
 
   let metricsServer: MetricsServer | null = null;

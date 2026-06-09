@@ -1,4 +1,5 @@
 import {
+  AtSignIcon,
   CheckIcon,
   CopyIcon,
   GlobeIcon,
@@ -24,13 +25,14 @@ import {
   ApiError,
   type ChannelItem,
   type CreateFacebookChannelResult,
+  type CreateVkChannelResult,
   type CreateWebChannelResult,
   type CreateWhatsAppChannelResult,
   clearToken,
   saas,
 } from "../api/saas.ts";
 
-type ChannelTab = "telegram" | "userbot" | "whatsapp" | "facebook" | "web";
+type ChannelTab = "telegram" | "userbot" | "whatsapp" | "facebook" | "vk" | "web";
 type UserbotStep = "phone" | "code" | "2fa";
 
 const KIND_META: Record<string, { icon: typeof SendIcon; label: string }> = {
@@ -38,6 +40,7 @@ const KIND_META: Record<string, { icon: typeof SendIcon; label: string }> = {
   telegram_userbot: { icon: UserIcon, label: "Личный аккаунт" },
   whatsapp: { icon: MessageCircleIcon, label: "WhatsApp" },
   facebook: { icon: MessagesSquareIcon, label: "Facebook Messenger" },
+  vk: { icon: AtSignIcon, label: "VK Messenger" },
   web: { icon: GlobeIcon, label: "Web-виджет" },
 };
 
@@ -160,6 +163,13 @@ export function SaasChannels() {
   const [fbAppSecret, setFbAppSecret] = useState("");
   const [fbSubmitting, setFbSubmitting] = useState(false);
   const [fbResult, setFbResult] = useState<CreateFacebookChannelResult | null>(null);
+
+  const [vkGroupId, setVkGroupId] = useState("");
+  const [vkAccessToken, setVkAccessToken] = useState("");
+  const [vkConfirmationCode, setVkConfirmationCode] = useState("");
+  const [vkSecretKey, setVkSecretKey] = useState("");
+  const [vkSubmitting, setVkSubmitting] = useState(false);
+  const [vkResult, setVkResult] = useState<CreateVkChannelResult | null>(null);
 
   const [webBrand, setWebBrand] = useState("");
   const [webColor, setWebColor] = useState("");
@@ -382,6 +392,56 @@ export function SaasChannels() {
     }
   }
 
+  async function handleVkSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setVkResult(null);
+    const groupId = vkGroupId.trim();
+    const accessToken = vkAccessToken.trim();
+    const confirmationCode = vkConfirmationCode.trim();
+    if (!groupId || !accessToken || !confirmationCode) {
+      setError("Group ID, access token и confirmation code обязательны");
+      return;
+    }
+    setVkSubmitting(true);
+    try {
+      const res = await saas.createVkChannel({
+        groupId,
+        accessToken,
+        confirmationCode,
+        ...(vkSecretKey.trim() ? { secretKey: vkSecretKey.trim() } : {}),
+      });
+      setVkResult(res);
+      setVkAccessToken("");
+      setReconnectKind(null);
+      await refresh();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 401) {
+          if (err.errorCode.toLowerCase().includes("vk")) {
+            setError("VK отверг access token — проверьте права сообщества и срок действия");
+          } else {
+            clearToken();
+            navigate("/login", { replace: true });
+            return;
+          }
+        } else if (err.status === 404) {
+          setError("VK community не найден — проверьте Group ID");
+        } else if (err.status === 402) {
+          setError("Лимит каналов исчерпан — обновите план для добавления VK");
+        } else if (err.status === 502) {
+          setError("VK API недоступен или отклонил запрос — попробуйте позже");
+        } else {
+          setError(`Ошибка ${err.status}: ${err.errorCode}`);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setVkSubmitting(false);
+    }
+  }
+
   function userbotErrMessage(err: unknown): string {
     if (err instanceof ApiError) {
       if (err.status === 401) {
@@ -485,7 +545,7 @@ export function SaasChannels() {
         </div>
         <div className="space-y-2">
           <div className="flex gap-2">
-            {Array.from({ length: 4 }).map((_, i) => (
+            {Array.from({ length: 6 }).map((_, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: skeleton
               <Skeleton key={i} className="h-9 w-24 rounded-md" />
             ))}
@@ -501,13 +561,14 @@ export function SaasChannels() {
   const existingBot = channels.find((c) => c.kind === "telegram_bot");
   const existingWa = channels.find((c) => c.kind === "whatsapp");
   const existingFb = channels.find((c) => c.kind === "facebook");
+  const existingVk = channels.find((c) => c.kind === "vk");
   const existingWeb = channels.find((c) => c.kind === "web");
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Каналы"
-        description="Подключите источники сообщений: Telegram-бот, личный аккаунт, WhatsApp или web-виджет."
+        description="Подключите источники сообщений: Telegram-бот, личный аккаунт, WhatsApp, Facebook, VK или web-виджет."
       />
 
       {error && <ErrorNote>{error}</ErrorNote>}
@@ -534,6 +595,9 @@ export function SaasChannels() {
           </TabsTrigger>
           <TabsTrigger value="facebook">
             <MessagesSquareIcon /> Facebook
+          </TabsTrigger>
+          <TabsTrigger value="vk">
+            <AtSignIcon /> VK
           </TabsTrigger>
           <TabsTrigger value="web">
             <GlobeIcon /> Web
@@ -1053,6 +1117,119 @@ export function SaasChannels() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="vk">
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {existingVk && reconnectKind !== "vk"
+                  ? "VK Messenger"
+                  : "Подключить VK Messenger"}
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                VK community → Управление → Работа с API: укажите Group ID, ключ доступа
+                сообщества и confirmation code из Callback API.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {existingVk && reconnectKind !== "vk" ? (
+                <ConnectedChannelCard
+                  title={`VK #${existingVk.externalId}`}
+                  statusText="Подключён — входящие обрабатывает ассистент"
+                  reconnectLabel="Переподключить"
+                  onReconnect={() => {
+                    setReconnectKind("vk");
+                    setVkResult(null);
+                  }}
+                  confirmDelete={confirmDeleteChannelId === existingVk.id}
+                  onAskDelete={() => setConfirmDeleteChannelId(existingVk.id)}
+                  onConfirmDelete={() => handleDelete(existingVk.id)}
+                  onCancelDelete={() => setConfirmDeleteChannelId(null)}
+                />
+              ) : (
+                <form onSubmit={handleVkSubmit} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label>Group ID</Label>
+                    <Input
+                      inputMode="numeric"
+                      value={vkGroupId}
+                      onChange={(e) => setVkGroupId(e.target.value)}
+                      placeholder="123456789"
+                      pattern="\d{1,20}"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Community access token</Label>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={vkAccessToken}
+                      onChange={(e) => setVkAccessToken(e.target.value)}
+                      placeholder="vk1.a.xxxxx…"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Confirmation code</Label>
+                      <Input
+                        autoComplete="off"
+                        value={vkConfirmationCode}
+                        onChange={(e) => setVkConfirmationCode(e.target.value)}
+                        placeholder="строка из Callback API"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Secret key (опц.)</Label>
+                      <Input
+                        type="password"
+                        autoComplete="off"
+                        value={vkSecretKey}
+                        onChange={(e) => setVkSecretKey(e.target.value)}
+                        placeholder="Callback API secret"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    После подключения вставьте URL ниже в Callback API settings и включите event
+                    type message_new. Secret key включает проверку payload.secret.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="submit"
+                      disabled={
+                        vkSubmitting ||
+                        !vkGroupId.trim() ||
+                        !vkAccessToken.trim() ||
+                        !vkConfirmationCode.trim()
+                      }
+                    >
+                      {vkSubmitting ? "Проверяем у VK…" : "Подключить"}
+                    </Button>
+                    {existingVk && reconnectKind === "vk" && (
+                      <Button type="button" variant="ghost" onClick={() => setReconnectKind(null)}>
+                        Отмена
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              )}
+              {vkResult && (
+                <OkNote>
+                  ✓ VK {vkResult.groupName ?? vkResult.groupId} подключён.
+                  {vkResult.webhookSetupHint && (
+                    <span className="mt-2 block font-mono text-xs">
+                      Callback URL: {vkResult.webhookSetupHint.url}
+                      <br />
+                      Confirmation code: {vkResult.webhookSetupHint.confirmationCode}
+                      <br />
+                      Events: {vkResult.webhookSetupHint.eventTypes.join(", ")}
+                    </span>
+                  )}
+                </OkNote>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="web">
           <Card>
             <CardHeader>
@@ -1160,6 +1337,8 @@ export function SaasChannels() {
                       ? `@${ch.externalId}`
                       : ch.kind === "whatsapp"
                         ? `WhatsApp #${ch.externalId}`
+                        : ch.kind === "vk"
+                          ? `VK #${ch.externalId}`
                         : ch.kind === "web"
                           ? `Web (${ch.externalId})`
                           : ch.externalId;

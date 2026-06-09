@@ -1,6 +1,7 @@
 import { MessengerAdapter } from "@chatman-media/channel-facebook";
 import { TelegramBotAdapter } from "@chatman-media/channel-telegram";
 import { type Db, getDecryptedSecret } from "@chatman-media/conversation-engine";
+import { VkAdapter } from "@chatman-media/channel-vk";
 import { WhatsAppCloudAdapter } from "@chatman-media/channel-whatsapp";
 import { channels, tenants } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
@@ -30,6 +31,9 @@ export const WHATSAPP_APP_SECRET_KEY = "whatsapp_app_secret";
 /** tenant_secrets ключи для per-tenant Facebook Messenger webhook creds. */
 export const FACEBOOK_VERIFY_TOKEN_KEY = "facebook_verify_token";
 export const FACEBOOK_APP_SECRET_KEY = "facebook_app_secret";
+/** tenant_secrets ключи для per-tenant VK Callback API creds. */
+export const VK_CONFIRMATION_CODE_KEY = "vk_confirmation_code";
+export const VK_SECRET_KEY = "vk_secret_key";
 
 export interface ChannelEntry {
   channelDbId: number;
@@ -37,10 +41,10 @@ export interface ChannelEntry {
   tenantSlug: string;
   /** Plan tier строки из tenants.plan — используется для per-plan rate limits. */
   tenantPlan: string;
-  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "web";
+  kind: "telegram_bot" | "telegram_userbot" | "whatsapp" | "facebook" | "vk" | "web";
   externalId: string;
   /** Конкретный adapter в зависимости от kind. */
-  adapter: TelegramBotAdapter | WhatsAppCloudAdapter | MessengerAdapter;
+  adapter: TelegramBotAdapter | WhatsAppCloudAdapter | MessengerAdapter | VkAdapter;
   /** WhatsApp: per-tenant verify_token (резолвится при загрузке, фолбэк env). */
   whatsappVerifyToken?: string;
   /** WhatsApp: per-tenant app secret для X-Hub-Signature-256 (фолбэк env). */
@@ -49,6 +53,10 @@ export interface ChannelEntry {
   facebookVerifyToken?: string;
   /** Facebook: per-tenant app secret для X-Hub-Signature-256 (фолбэк env). */
   facebookAppSecret?: string;
+  /** VK: confirmation code для Callback API setup. */
+  vkConfirmationCode?: string;
+  /** VK: secret key из Callback API settings, валидируется по payload.secret. */
+  vkSecretKey?: string;
 }
 
 export interface LoadFromDbOpts {
@@ -64,6 +72,10 @@ export interface LoadFromDbOpts {
   facebookVerifyTokenFallback?: string;
   /** Env-фолбэк Facebook app secret (FACEBOOK_APP_SECRET). */
   facebookAppSecretFallback?: string;
+  /** Env-фолбэк VK confirmation code (VK_CONFIRMATION_CODE). */
+  vkConfirmationCodeFallback?: string;
+  /** Env-фолбэк VK Callback API secret key (VK_SECRET_KEY). */
+  vkSecretKeyFallback?: string;
 }
 
 export class ChannelRegistry {
@@ -208,6 +220,37 @@ export class ChannelRegistry {
     return process.env[envKey] ?? process.env.FB_PAGE_TOKEN ?? null;
   }
 
+  /** Аналогично Meta-каналам: tenant_secrets → env VK_ACCESS_TOKEN_<SLUG> → env VK_ACCESS_TOKEN. */
+  private async resolveVkToken(
+    db: Db,
+    tenantId: number,
+    tenantSlug: string,
+    credentialsRef: string | null,
+    masterKeyHex: string | undefined,
+    onWarn: ((msg: string, ctx: Record<string, unknown>) => void) | undefined,
+  ): Promise<string | null> {
+    if (credentialsRef && masterKeyHex) {
+      try {
+        const decrypted = await getDecryptedSecret({
+          db,
+          tenantId,
+          key: credentialsRef,
+          masterKeyHex,
+        });
+        if (decrypted) return decrypted;
+      } catch (err) {
+        onWarn?.("failed to decrypt channel vk token", {
+          tenantId,
+          tenantSlug,
+          credentialsRef,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    const envKey = `VK_ACCESS_TOKEN_${tenantSlug.toUpperCase().replace(/-/g, "_")}`;
+    return process.env[envKey] ?? process.env.VK_ACCESS_TOKEN ?? null;
+  }
+
   /** Резолв per-tenant Facebook webhook creds (verify_token + app_secret). */
   private async resolveFacebookWebhookCreds(
     db: Db,
@@ -243,6 +286,42 @@ export class ChannelRegistry {
     };
   }
 
+  /** Резолв per-tenant VK Callback API creds (confirmation_code + secret_key). */
+  private async resolveVkWebhookCreds(
+    db: Db,
+    tenantId: number,
+  ): Promise<{ confirmationCode: string | undefined; secretKey: string | undefined }> {
+    const read = async (key: string): Promise<string | undefined> => {
+      if (!this.loadOpts.masterKeyHex) return undefined;
+      try {
+        return (
+          (await getDecryptedSecret({
+            db,
+            tenantId,
+            key,
+            masterKeyHex: this.loadOpts.masterKeyHex,
+          })) ?? undefined
+        );
+      } catch (err) {
+        this.loadOpts.onWarn?.("failed to decrypt vk webhook creds", {
+          tenantId,
+          key,
+          err: err instanceof Error ? err.message : String(err),
+        });
+        return undefined;
+      }
+    };
+    const [confirmationCode, secretKey] = await Promise.all([
+      read(VK_CONFIRMATION_CODE_KEY),
+      read(VK_SECRET_KEY),
+    ]);
+    return {
+      confirmationCode:
+        confirmationCode || this.loadOpts.vkConfirmationCodeFallback || undefined,
+      secretKey: secretKey || this.loadOpts.vkSecretKeyFallback || undefined,
+    };
+  }
+
   /** Кеш opts чтобы reloadTenant использовал тот же masterKey + onWarn. */
   private loadOpts: LoadFromDbOpts = {};
   private dbRef: Db | null = null;
@@ -265,7 +344,8 @@ export class ChannelRegistry {
       .where(and(eq(channels.status, "active"), eq(tenants.status, "active")));
 
     for (const row of rows) {
-      let adapter: TelegramBotAdapter | WhatsAppCloudAdapter | MessengerAdapter | null = null;
+      let adapter: TelegramBotAdapter | WhatsAppCloudAdapter | MessengerAdapter | VkAdapter | null =
+        null;
       let waWebhookCreds: { verifyToken: string | undefined; appSecret: string | undefined } = {
         verifyToken: undefined,
         appSecret: undefined,
@@ -274,6 +354,11 @@ export class ChannelRegistry {
         verifyToken: undefined,
         appSecret: undefined,
       };
+      let vkWebhookCreds: { confirmationCode: string | undefined; secretKey: string | undefined } =
+        {
+          confirmationCode: undefined,
+          secretKey: undefined,
+        };
       if (row.kind === "telegram_bot") {
         const token = await this.resolveBotToken(
           db,
@@ -315,6 +400,19 @@ export class ChannelRegistry {
         // external_id у facebook канала = Page ID (Meta).
         adapter = new MessengerAdapter({ id: String(row.channelId), pageAccessToken: token });
         fbWebhookCreds = await this.resolveFacebookWebhookCreds(db, row.tenantId);
+      } else if (row.kind === "vk") {
+        const token = await this.resolveVkToken(
+          db,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          opts.masterKeyHex,
+          opts.onWarn,
+        );
+        if (!token) continue;
+        // external_id у vk канала = group_id сообщества.
+        adapter = new VkAdapter({ id: String(row.channelId), accessToken: token });
+        vkWebhookCreds = await this.resolveVkWebhookCreds(db, row.tenantId);
       } else {
         // telegram_userbot и web в apps/api НЕ загружаются — userbot живёт
         // в apps/worker, web обрабатывается через отдельный WS-endpoint.
@@ -332,6 +430,10 @@ export class ChannelRegistry {
         ...(waWebhookCreds.appSecret ? { whatsappAppSecret: waWebhookCreds.appSecret } : {}),
         ...(fbWebhookCreds.verifyToken ? { facebookVerifyToken: fbWebhookCreds.verifyToken } : {}),
         ...(fbWebhookCreds.appSecret ? { facebookAppSecret: fbWebhookCreds.appSecret } : {}),
+        ...(vkWebhookCreds.confirmationCode
+          ? { vkConfirmationCode: vkWebhookCreds.confirmationCode }
+          : {}),
+        ...(vkWebhookCreds.secretKey ? { vkSecretKey: vkWebhookCreds.secretKey } : {}),
       };
       const list = this.byTenantSlug.get(row.tenantSlug) ?? [];
       list.push(entry);
@@ -385,7 +487,8 @@ export class ChannelRegistry {
       );
 
     for (const row of rows) {
-      let adapter: TelegramBotAdapter | WhatsAppCloudAdapter | MessengerAdapter | null = null;
+      let adapter: TelegramBotAdapter | WhatsAppCloudAdapter | MessengerAdapter | VkAdapter | null =
+        null;
       let waWebhookCreds: { verifyToken: string | undefined; appSecret: string | undefined } = {
         verifyToken: undefined,
         appSecret: undefined,
@@ -394,6 +497,11 @@ export class ChannelRegistry {
         verifyToken: undefined,
         appSecret: undefined,
       };
+      let vkWebhookCreds: { confirmationCode: string | undefined; secretKey: string | undefined } =
+        {
+          confirmationCode: undefined,
+          secretKey: undefined,
+        };
       if (row.kind === "telegram_bot") {
         const token = await this.resolveBotToken(
           this.dbRef,
@@ -433,6 +541,18 @@ export class ChannelRegistry {
         if (!token) continue;
         adapter = new MessengerAdapter({ id: String(row.channelId), pageAccessToken: token });
         fbWebhookCreds = await this.resolveFacebookWebhookCreds(this.dbRef, row.tenantId);
+      } else if (row.kind === "vk") {
+        const token = await this.resolveVkToken(
+          this.dbRef,
+          row.tenantId,
+          row.tenantSlug,
+          row.credentialsRef,
+          this.loadOpts.masterKeyHex,
+          this.loadOpts.onWarn,
+        );
+        if (!token) continue;
+        adapter = new VkAdapter({ id: String(row.channelId), accessToken: token });
+        vkWebhookCreds = await this.resolveVkWebhookCreds(this.dbRef, row.tenantId);
       } else {
         continue;
       }
@@ -448,6 +568,10 @@ export class ChannelRegistry {
         ...(waWebhookCreds.appSecret ? { whatsappAppSecret: waWebhookCreds.appSecret } : {}),
         ...(fbWebhookCreds.verifyToken ? { facebookVerifyToken: fbWebhookCreds.verifyToken } : {}),
         ...(fbWebhookCreds.appSecret ? { facebookAppSecret: fbWebhookCreds.appSecret } : {}),
+        ...(vkWebhookCreds.confirmationCode
+          ? { vkConfirmationCode: vkWebhookCreds.confirmationCode }
+          : {}),
+        ...(vkWebhookCreds.secretKey ? { vkSecretKey: vkWebhookCreds.secretKey } : {}),
       };
       const list = this.byTenantSlug.get(row.tenantSlug) ?? [];
       list.push(entry);
@@ -469,6 +593,11 @@ export class ChannelRegistry {
   /** Все Facebook Messenger каналы для tenant'а. */
   getFacebookByTenant(tenantSlug: string): ChannelEntry[] {
     return (this.byTenantSlug.get(tenantSlug) ?? []).filter((e) => e.kind === "facebook");
+  }
+
+  /** Все VK community каналы для tenant'а. */
+  getVkByTenant(tenantSlug: string): ChannelEntry[] {
+    return (this.byTenantSlug.get(tenantSlug) ?? []).filter((e) => e.kind === "vk");
   }
 
   byChannelId(channelId: number): ChannelEntry | undefined {

@@ -103,6 +103,7 @@ import { makeStripeWebhookRoutes } from "./routes/webhook-stripe.ts";
 import { makeTelegramWebhookRoutes } from "./routes/webhook-telegram.ts";
 import { makeWhatsAppWebhookRoutes } from "./routes/webhook-whatsapp.ts";
 import { makeFacebookWebhookRoutes } from "./routes/webhook-facebook.ts";
+import { makeVkWebhookRoutes } from "./routes/webhook-vk.ts";
 import { makeOperatorBotWebhookRoutes } from "./routes/webhook-operator-bot.ts";
 import { makeWestWalletWebhookRoutes } from "./routes/webhook-westwallet.ts";
 import { makeWidgetStaticRoutes } from "./routes/widget-static.ts";
@@ -119,6 +120,18 @@ const KNOWN_TEMPLATES: Record<string, VerticalTemplate> = {
   recruitment_v1: RECRUITMENT_V1,
   saas_v1: SAAS_V1,
   video_v1: VIDEO_V1,
+};
+
+const TEMPLATE_PRIORITY: Record<string, number> = {
+  exchange_v1: 100,
+  concierge_v1: 90,
+  real_estate_v1: 80,
+  scooter_v1: 70,
+  visa_v1: 60,
+  modeling_v1: 50,
+  recruitment_v1: 40,
+  saas_v1: 30,
+  video_v1: 20,
 };
 
 async function main() {
@@ -162,6 +175,7 @@ async function main() {
   // Строим mapping tenantSlug → VerticalTemplate из funnels.vertical_template_id.
   // На старте читаем один раз; новый tenant требует рестарта (acceptable trade-off).
   const templateByTenantSlug: Record<string, VerticalTemplate> = {};
+  const templatePriorityByTenantSlug = new Map<string, number>();
   if (activeTenantRows.length > 0) {
     const funnelRows = await db
       .select({ tenantId: funnels.tenantId, verticalTemplateId: funnels.verticalTemplateId })
@@ -173,7 +187,13 @@ async function main() {
       const slug = tenantIdToSlug.get(row.tenantId);
       if (!slug) continue;
       const tpl = KNOWN_TEMPLATES[row.verticalTemplateId];
-      if (tpl) templateByTenantSlug[slug] = tpl;
+      if (!tpl) continue;
+      const priority = TEMPLATE_PRIORITY[row.verticalTemplateId] ?? 0;
+      const currentPriority = templatePriorityByTenantSlug.get(slug) ?? -1;
+      if (priority > currentPriority) {
+        templateByTenantSlug[slug] = tpl;
+        templatePriorityByTenantSlug.set(slug, priority);
+      }
     }
   }
   // Hardcoded fallback for the legacy tenant if not already covered.
@@ -182,6 +202,11 @@ async function main() {
   }
   const resolveTemplate = (tenantSlug: string): VerticalTemplate | undefined =>
     templateByTenantSlug[tenantSlug];
+  const tenantSlugById = new Map(activeTenantRows.map((r) => [r.id, r.slug]));
+  const resolveTemplateForTenant = (tenantId: number): VerticalTemplate | undefined => {
+    const tenantSlug = tenantSlugById.get(tenantId);
+    return tenantSlug ? resolveTemplate(tenantSlug) : undefined;
+  };
 
   // Per-tenant LLM configs: DB + env fallback. LoadedRef shared между
   // фабриками + tenant-reloader (mutable; reload через admin API меняет
@@ -213,6 +238,8 @@ async function main() {
     ...(cfg.whatsappAppSecret ? { whatsappAppSecretFallback: cfg.whatsappAppSecret } : {}),
     ...(cfg.facebookVerifyToken ? { facebookVerifyTokenFallback: cfg.facebookVerifyToken } : {}),
     ...(cfg.facebookAppSecret ? { facebookAppSecretFallback: cfg.facebookAppSecret } : {}),
+    ...(cfg.vkConfirmationCode ? { vkConfirmationCodeFallback: cfg.vkConfirmationCode } : {}),
+    ...(cfg.vkSecretKey ? { vkSecretKeyFallback: cfg.vkSecretKey } : {}),
   });
 
   const app = new Hono();
@@ -385,6 +412,8 @@ async function main() {
       webhookSecret: cfg.telegramWebhookSecret,
       ...(cfg.whatsappVerifyToken ? { whatsappVerifyToken: cfg.whatsappVerifyToken } : {}),
       ...(cfg.facebookVerifyToken ? { facebookVerifyToken: cfg.facebookVerifyToken } : {}),
+      ...(cfg.vkConfirmationCode ? { vkConfirmationCode: cfg.vkConfirmationCode } : {}),
+      ...(cfg.vkSecretKey ? { vkSecretKey: cfg.vkSecretKey } : {}),
       ...(cfg.webWidgetScriptUrl ? { webWidgetScriptUrl: cfg.webWidgetScriptUrl } : {}),
       telegramApiId: cfg.telegramUserbot.apiId,
       telegramApiHash: cfg.telegramUserbot.apiHash,
@@ -872,6 +901,31 @@ async function main() {
   log.info("facebook webhook enabled", {
     verifyToken: cfg.facebookVerifyToken ? "env fallback" : "per-channel only",
     signatureCheck: cfg.facebookAppSecret ? "env fallback/per-channel" : "per-channel only",
+  });
+
+  app.route(
+    "/",
+    makeVkWebhookRoutes({
+      db,
+      channels,
+      ...(cfg.vkConfirmationCode ? { confirmationCode: cfg.vkConfirmationCode } : {}),
+      ...(cfg.vkSecretKey ? { secretKey: cfg.vkSecretKey } : {}),
+      replyStrategy,
+      resolveTemplate,
+      memoryExtractor,
+      stageClassifier,
+      notificationService,
+      photoProcessor,
+      fieldExtractor,
+      serviceCatalogRuntime,
+      sink,
+      metrics,
+      ...(rateLimiter ? { rateLimiter } : {}),
+      ...(resolveTranscriber ? { resolveTranscriber } : {}),
+    }),
+  );
+  log.info("vk webhook enabled", {
+    fallbackSecretCheck: cfg.vkSecretKey ? "enabled" : "off (per-tenant or dev mode)",
   });
 
   if (cfg.stripeWebhookSecret) {

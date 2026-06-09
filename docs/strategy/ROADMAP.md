@@ -128,7 +128,7 @@ $99/мес, BYOK, без кода. Кейс: UAE-агентство закрыв
 ### Foundation (этапы 1–7 из легаси-плана)
 
 - ✅ Drizzle schema unification (34 tenant-scoped таблицы)
-- ✅ Channel-core контракт + channel-telegram / channel-whatsapp / channel-web adapters
+- ✅ Channel-core контракт + channel-telegram / channel-whatsapp / channel-facebook / channel-vk / channel-web adapters
 - ✅ llm-router с per-tenant configs (OpenAI / OpenRouter / Anthropic / Ollama)
 - ✅ conversation-engine pipeline (`processInbound` с 3-фазным tx split)
 - ✅ `apps/api` + `apps/worker` процессы (out-of-process outbound)
@@ -661,7 +661,7 @@ Pricing pivot ✅. GTM-инфра ✅ (рефкоды, generic template, dashboa
 **Где мы сейчас (PR #160, июнь 2026):**
 
 - Self-service onboarding end-to-end без env vars / рестартов
-- Channels: TG bot + TG userbot + WhatsApp + web widget — все через UI
+- Channels: TG bot + TG userbot + WhatsApp + Facebook + VK + web widget — все через UI
 - LLM: BYOK OpenAI/Anthropic/OpenRouter/Ollama, hot-reload
 - KB: file/text upload + RAG, dedup по content_hash, **quota enforcement**
 - **Stripe billing wired** — 14-day trial, customer portal, 402 quota enforcement
