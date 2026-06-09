@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { type Db, DrizzleKbStore, withTenant } from "@chatman-media/conversation-engine";
-import { ingestText, type KbScope, parsePdfBuffer } from "@chatman-media/kb";
+import { chunkText, ingestText, type KbScope, parsePdfBuffer, stripNonContent } from "@chatman-media/kb";
 import type { EmbeddingClient } from "@chatman-media/llm-router";
 import { funnels, kbChunks, kbDocuments, kbSuggestions, stageDefinitions, stageFields } from "@chatman-media/storage";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
@@ -59,8 +59,28 @@ type StoredKbFile = {
   sizeBytes: number;
 };
 
-function inferKbDocumentFormat(input: { source: string; title: string }): KbDocumentFormat {
-  const value = `${input.title} ${input.source}`.toLowerCase();
+class KbUploadHttpError extends Error {
+  constructor(
+    public readonly status: 413 | 422,
+    message: string,
+  ) {
+    super(message);
+    this.name = "KbUploadHttpError";
+  }
+}
+
+function inferKbDocumentFormat(input: {
+  source: string;
+  title: string;
+  fileName?: string | null;
+  fileMimeType?: string | null;
+}): KbDocumentFormat {
+  const mime = input.fileMimeType?.toLowerCase() ?? "";
+  if (mime.includes("pdf")) return "pdf";
+  if (mime.includes("markdown")) return "markdown";
+  if (mime.includes("json")) return "json";
+
+  const value = `${input.title} ${input.source} ${input.fileName ?? ""}`.toLowerCase();
   if (/\.(pdf)(\?|#|\s|$)/.test(value)) return "pdf";
   if (/\.(md|markdown)(\?|#|\s|$)/.test(value)) return "markdown";
   if (/\.(json)(\?|#|\s|$)/.test(value)) return "json";
@@ -153,6 +173,49 @@ function docFileFields(doc: {
     fileSizeBytes: doc.fileSizeBytes,
     fileUploadedAt: doc.fileUploadedAt,
   };
+}
+
+async function readUploadFile(file: File): Promise<{ body: string; originalFile: StoredKbFile }> {
+  const fileName = file.name || "upload";
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.byteLength > maxKbUploadBytes()) {
+    throw new KbUploadHttpError(413, "file too large");
+  }
+  const originalFile = {
+    // Some parsers can detach/move the input ArrayBuffer. Keep an
+    // independent copy for hashing and durable file storage.
+    bytes: new Uint8Array(bytes),
+    fileName,
+    mimeType: file.type || "application/octet-stream",
+    sizeBytes: bytes.byteLength,
+  };
+  if (fileName.toLowerCase().endsWith(".pdf")) {
+    let body: string;
+    try {
+      body = await parsePdfBuffer(bytes);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new KbUploadHttpError(422, `PDF parse failed: ${msg}`);
+    }
+    if (body.length === 0) {
+      throw new KbUploadHttpError(
+        422,
+        "PDF contains no extractable text (possibly scanned image — use OCR first)",
+      );
+    }
+    return { body, originalFile };
+  }
+  return { body: new TextDecoder("utf-8").decode(bytes), originalFile };
+}
+
+function preparedKbText(input: { body: string; fileName: string }): string {
+  return input.fileName.toLowerCase().endsWith(".pdf")
+    ? input.body
+    : stripNonContent(input.body);
+}
+
+function textContentHash(body: string): string {
+  return createHash("sha256").update(body).digest("hex");
 }
 
 function parsePositiveInt(value: unknown): number | null {
@@ -376,8 +439,8 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
     if (!scopeTypeParam && stageFilter && !funnelFilter) {
       return c.json({ error: "funnelId required for stageSlug filter" }, 400);
     }
-    const rows = await withTenant(opts.db, tenantId, async (tx) => {
-      return tx
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      const rows = await tx
         .select({
           id: kbDocuments.id,
           source: kbDocuments.source,
@@ -418,14 +481,30 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
         )
         .orderBy(desc(kbDocuments.createdAt))
         .limit(200);
+      const [storage] = await tx
+        .select({
+          storedFiles: sql<number>`count(${kbDocuments.fileStorageKey})::int`,
+          totalBytes: sql<number>`coalesce(sum(${kbDocuments.fileSizeBytes}), 0)::int`,
+        })
+        .from(kbDocuments)
+        .where(eq(kbDocuments.tenantId, tenantId));
+      return {
+        rows,
+        storage: {
+          storedFiles: storage?.storedFiles ?? 0,
+          totalBytes: storage?.totalBytes ?? 0,
+          maxUploadBytes: maxKbUploadBytes(),
+        },
+      };
     });
     return c.json({
-      items: rows.map((row) => ({
+      items: result.rows.map((row) => ({
         ...row,
         format: inferKbDocumentFormat(row),
         ...docFileFields(row),
         fileStorageKey: undefined,
       })),
+      storage: result.storage,
     });
   });
 
@@ -520,6 +599,137 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
         ...(doc.fileSizeBytes !== null ? { "Content-Length": String(doc.fileSizeBytes) } : {}),
       },
     });
+  });
+
+  /**
+   * POST /api/admin/kb/documents/:id/file
+   * Replaces the original stored upload and re-indexes chunks in-place so
+   * document id, scope and topic remain stable.
+   */
+  app.post("/api/admin/kb/documents/:id/file", async (c) => {
+    const tenantId = c.var.tenantId;
+    const id = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isFinite(id) || id <= 0) return c.json({ error: "bad id" }, 400);
+    const contentType = c.req.header("Content-Type") ?? "";
+    if (!contentType.startsWith("multipart/form-data")) {
+      return c.json({ error: "expected multipart/form-data" }, 415);
+    }
+
+    const form = await c.req.formData();
+    const fileField = form.get("file");
+    if (!fileField || typeof fileField === "string") {
+      return c.json({ error: "missing file field" }, 400);
+    }
+
+    let parsed: Awaited<ReturnType<typeof readUploadFile>>;
+    try {
+      parsed = await readUploadFile(fileField as File);
+    } catch (err) {
+      if (err instanceof KbUploadHttpError) return c.json({ error: err.message }, err.status);
+      throw err;
+    }
+    if (parsed.body.length === 0) return c.json({ error: "empty body" }, 400);
+    if (parsed.body.length > 5_000_000) {
+      return c.json({ error: "body too large (>5MB)" }, 413);
+    }
+
+    const existing = await withTenant(opts.db, tenantId, async (tx) => {
+      const [doc] = await tx
+        .select({
+          id: kbDocuments.id,
+          source: kbDocuments.source,
+          title: kbDocuments.title,
+          topic: kbDocuments.topic,
+          scopeType: kbDocuments.scopeType,
+          funnelId: kbDocuments.funnelId,
+          stageSlug: kbDocuments.stageSlug,
+          fileStorageKey: kbDocuments.fileStorageKey,
+          createdAt: kbDocuments.createdAt,
+        })
+        .from(kbDocuments)
+        .where(and(eq(kbDocuments.tenantId, tenantId), eq(kbDocuments.id, id)))
+        .limit(1);
+      return doc ?? null;
+    });
+    if (!existing) return c.json({ error: "document not found" }, 404);
+
+    let embedder: EmbeddingClient;
+    try {
+      embedder = opts.resolveEmbedder(tenantId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: `embedder not configured: ${msg}` }, 503);
+    }
+
+    const preparedText = preparedKbText({
+      body: parsed.body,
+      fileName: parsed.originalFile.fileName,
+    });
+    const chunks = chunkText(preparedText);
+    let vectors: number[][] = [];
+    if (chunks.length > 0) {
+      vectors = await embedder.embed(chunks.map((chunk) => chunk.text));
+    }
+
+    const fileMeta = await saveStoredKbFile({
+      tenantId,
+      documentId: id,
+      file: parsed.originalFile,
+    });
+    let committed = false;
+    try {
+      await withTenant(opts.db, tenantId, async (tx) => {
+        await tx
+          .delete(kbChunks)
+          .where(and(eq(kbChunks.tenantId, tenantId), eq(kbChunks.documentId, id)));
+        await tx
+          .update(kbDocuments)
+          .set({
+            contentHash: textContentHash(parsed.body),
+            ...fileMeta,
+          })
+          .where(and(eq(kbDocuments.tenantId, tenantId), eq(kbDocuments.id, id)));
+        const kb = new DrizzleKbStore({ db: tx, tenantId });
+        for (const [index, chunk] of chunks.entries()) {
+          const vec = vectors[index];
+          if (!vec) throw new Error(`embedder returned no vector for chunk ${index}`);
+          await kb.insertChunkWithEmbedding({
+            documentId: id,
+            chunkIndex: chunk.index,
+            text: chunk.text,
+            tokenCount: chunk.tokenCount,
+            embedding: vec,
+          });
+        }
+      });
+      committed = true;
+    } finally {
+      if (!committed) {
+        await deleteStoredKbFile(fileMeta.fileStorageKey);
+      }
+    }
+    if (existing.fileStorageKey && existing.fileStorageKey !== fileMeta.fileStorageKey) {
+      await deleteStoredKbFile(existing.fileStorageKey);
+    }
+
+    const item = {
+      ...existing,
+      ...fileMeta,
+      format: inferKbDocumentFormat({
+        ...existing,
+        fileName: fileMeta.fileName,
+        fileMimeType: fileMeta.fileMimeType,
+      }),
+      ...docFileFields(fileMeta),
+      fileStorageKey: undefined,
+      text: chunks.map((chunk) => chunk.text).join("\n\n"),
+      chunks: chunks.map((chunk) => ({
+        chunkIndex: chunk.index,
+        text: chunk.text,
+        tokenCount: chunk.tokenCount,
+      })),
+    };
+    return c.json({ item });
   });
 
   /**
@@ -663,33 +873,13 @@ export function makeAdminKbRoutes(opts: AdminKbRoutesOpts): Hono {
       }
       const file = fileField as File;
       const fileName = file.name || "upload";
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      if (bytes.byteLength > maxKbUploadBytes()) {
-        return c.json({ error: "file too large" }, 413);
-      }
-      originalFile = {
-        // Some parsers can detach/move the input ArrayBuffer. Keep an
-        // independent copy for hashing and durable file storage.
-        bytes: new Uint8Array(bytes),
-        fileName,
-        mimeType: file.type || "application/octet-stream",
-        sizeBytes: bytes.byteLength,
-      };
-      if (fileName.toLowerCase().endsWith(".pdf")) {
-        try {
-          body = await parsePdfBuffer(bytes);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return c.json({ error: `PDF parse failed: ${msg}` }, 422);
-        }
-        if (body.length === 0) {
-          return c.json(
-            { error: "PDF contains no extractable text (possibly scanned image — use OCR first)" },
-            422,
-          );
-        }
-      } else {
-        body = new TextDecoder("utf-8").decode(bytes);
+      try {
+        const parsed = await readUploadFile(file);
+        body = parsed.body;
+        originalFile = parsed.originalFile;
+      } catch (err) {
+        if (err instanceof KbUploadHttpError) return c.json({ error: err.message }, err.status);
+        throw err;
       }
       const titleField = form.get("title");
       title = typeof titleField === "string" && titleField.length > 0 ? titleField : fileName;
