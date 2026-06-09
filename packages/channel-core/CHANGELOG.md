@@ -1,3 +1,10 @@
+# [@chatman-media/channel-core-v1.3.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.2.0...@chatman-media/channel-core-v1.3.0) (2026-06-09)
+
+
+### Features
+
+* **channels:** add vk messenger channel ([#359](https://github.com/chatman-media/lead-engine/issues/359)) ([d4a43cc](https://github.com/chatman-media/lead-engine/commit/d4a43cc5ea653f523820bdc26a15f10b7294ce0e))
+
 # [@chatman-media/channel-core-v1.2.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/channel-core-v1.1.0...@chatman-media/channel-core-v1.2.0) (2026-06-05)
 
 
