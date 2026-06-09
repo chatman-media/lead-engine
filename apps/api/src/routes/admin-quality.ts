@@ -1,22 +1,23 @@
 import {
-  AgentToolCallsRepo,
   type AgentToolCallFeedbackLabel,
   type AgentToolCallFeedbackRow,
   type AgentToolCallRow,
   type AgentToolCallSource,
-  DrizzleKbStore,
+  AgentToolCallsRepo,
   type Db,
+  DrizzleKbStore,
   withTenant,
 } from "@chatman-media/conversation-engine";
-import type { ChatClient, EmbeddingClient } from "@chatman-media/llm-router";
 import type { IKbStore } from "@chatman-media/kb";
+import type { ChatClient, EmbeddingClient } from "@chatman-media/llm-router";
 import {
   applyEditsToStyle,
   CANDIDATE_BY_SLUG,
   CANDIDATE_PERSONAS,
+  type CoachToolFeedbackSignal,
+  type EloOutcome,
   exportPairwiseMatchJsonl,
   exportSelfPlayMatchJsonl,
-  type EloOutcome,
   type PairwiseDeps,
   type PairwiseMatchResult,
   type PairwiseWinner,
@@ -26,9 +27,9 @@ import {
   runSelfPlayMatch,
   type SelfPlayDeps,
   type SelfPlayMatchResult,
-  shadowDecide,
   type Style,
   StyleSchema,
+  shadowDecide,
   wilsonLowerBound,
 } from "@chatman-media/sales";
 import {
@@ -49,7 +50,7 @@ import {
   styles,
   vacancies,
 } from "@chatman-media/storage";
-import { and, desc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { isUniqueViolation } from "../lib/db-errors.ts";
@@ -173,6 +174,17 @@ export interface AdminQualityRoutesOpts {
 
 export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
   const app = new Hono();
+
+  app.use("/api/admin/quality/*", async (c, next) => {
+    if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS") {
+      await next();
+      return;
+    }
+    if (c.var.role !== "superadmin") {
+      return c.json({ error: "quality write access requires superadmin" }, 403);
+    }
+    await next();
+  });
 
   app.get("/api/admin/quality/tool-calls", async (c) => {
     const tenantId = c.var.tenantId;
@@ -1058,12 +1070,18 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     const adapters = makeQualityStorageAdapters(opts.db, tenantId);
     const attachedSkills = await adapters.skills.skillsForStyle(styleResult.styleId);
     const resolvedSampleSize = sampleSize.value ?? 8;
+    const toolFeedbackSignals = await loadCoachToolFeedbackSignals(opts.db, {
+      tenantId,
+      styleId: styleResult.styleId,
+      limit: 12,
+    });
     const proposal = await proposeStyleEdits({
       style: styleResult.style,
       matchesRepo: adapters.matches,
       chat,
       sampleSize: resolvedSampleSize,
       currentSkills: attachedSkills.map((skill) => skill.slug),
+      toolFeedbackSignals,
       ...(personaSlug.value ? { personaSlug: personaSlug.value } : {}),
       ...(model.value ? { model: model.value } : {}),
     });
@@ -1113,6 +1131,7 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
         styleSlug: created.styleSlug,
         sampleSize: created.sampleSize,
         personaFilter: created.personaFilter,
+        toolFeedbackSignals: toolFeedbackSignals.length,
         editKeys: Object.keys(proposal.edits),
       },
     });
@@ -2847,6 +2866,55 @@ function toolCallFeedbackWhere(
     conditions.push(eq(agentToolCalls.error, filters.error));
   }
   return and(...conditions);
+}
+
+async function loadCoachToolFeedbackSignals(
+  db: Db,
+  opts: { tenantId: number; styleId: number; limit: number },
+): Promise<CoachToolFeedbackSignal[]> {
+  const rows = await withTenant(db, opts.tenantId, async (tx) => {
+    return tx
+      .select({
+        toolName: agentToolCalls.toolName,
+        source: agentToolCalls.source,
+        label: agentToolCallFeedback.label,
+        error: agentToolCalls.error,
+        note: agentToolCallFeedback.note,
+        argsJson: agentToolCalls.argsJson,
+        resultJson: agentToolCalls.resultJson,
+        createdAt: agentToolCallFeedback.createdAt,
+      })
+      .from(agentToolCallFeedback)
+      .innerJoin(agentToolCalls, toolCallFeedbackJoinOn())
+      .innerJoin(
+        conversations,
+        and(
+          eq(conversations.tenantId, opts.tenantId),
+          eq(conversations.id, agentToolCalls.conversationId),
+          eq(conversations.styleId, opts.styleId),
+        ),
+      )
+      .where(
+        and(
+          eq(agentToolCallFeedback.tenantId, opts.tenantId),
+          eq(agentToolCalls.tenantId, opts.tenantId),
+          inArray(agentToolCallFeedback.label, ACTIONABLE_TOOL_CALL_FEEDBACK_LABELS),
+        ),
+      )
+      .orderBy(desc(agentToolCallFeedback.createdAt), desc(agentToolCallFeedback.id))
+      .limit(opts.limit);
+  });
+
+  return rows.map((row) => ({
+    toolName: row.toolName,
+    source: row.source,
+    label: row.label as CoachToolFeedbackSignal["label"],
+    error: row.error,
+    note: row.note,
+    args: parseJsonValue(row.argsJson, null),
+    result: parseJsonValue(row.resultJson, null),
+    createdAt: row.createdAt,
+  }));
 }
 
 function buildToolCallImprovementProposals(

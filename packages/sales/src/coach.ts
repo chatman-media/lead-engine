@@ -20,6 +20,7 @@ import type { ISelfPlayMatchesRepo } from "./store.ts";
  *   - 5-10 worst transcripts (judge_reason + full conversation)
  *   - the candidate persona summaries (so it knows what archetypes the
  *     style is losing to)
+ *   - actionable human feedback on tool calls linked to the same style
  *
  * Cost: 1 LLM call per coach run. Run weekly or on-demand, not per match.
  */
@@ -56,6 +57,17 @@ export interface CoachProposal {
   raw?: string;
 }
 
+export interface CoachToolFeedbackSignal {
+  toolName: string;
+  source: string;
+  label: "wrong_tool" | "missing_tool" | "bad_args" | "good_reply" | "other";
+  error: boolean;
+  note?: string | null;
+  args?: unknown;
+  result?: unknown;
+  createdAt?: number | null;
+}
+
 export interface CoachInput {
   style: Style;
   matchesRepo: ISelfPlayMatchesRepo;
@@ -66,6 +78,8 @@ export interface CoachInput {
   personaSlug?: string;
   /** Currently-attached skill slugs (to inform attach/detach suggestions). */
   currentSkills?: readonly string[];
+  /** Recent human labels on tool calls for this style. Used as an auxiliary coach signal. */
+  toolFeedbackSignals?: readonly CoachToolFeedbackSignal[];
   /** Override the model id (e.g. use a stronger model than the bot's). */
   model?: string;
 }
@@ -79,6 +93,8 @@ const COACH_SYSTEM = `You are a sales coach analyzing failed conversations betwe
 Be SPECIFIC. Vague advice ("be more empathetic") is useless. Quote the moment in the transcript that decided the loss, then suggest the exact phrase / hook / guidance that would have changed it.
 
 Be CONSERVATIVE. Don't suggest a complete rewrite. Pick 1-3 highest-leverage changes. Each change must point to a concrete observation in the transcripts.
+
+If TOOL-CALL FEEDBACK is present, treat wrong_tool / missing_tool / bad_args labels as operator-reviewed defects. Tie those defects back to stage guidance, examples, or skill changes. Do not invent new tool contracts in the JSON schema; express the needed behavior as style guidance, few-shot examples, or rationale for operator follow-up.
 
 VALID skill slugs you can suggest in skills_attach / skills_detach (subset only — don't invent):
   cialdini family: social-proof-stat, scarcity-spots-left, authority-license, liking-genuine-compliment, reciprocity-free-info, commitment-microyes, unity-belonging
@@ -121,6 +137,7 @@ export async function proposeStyleEdits(
   input: CoachInput,
 ): Promise<CoachProposal> {
   const sampleSize = input.sampleSize ?? 8;
+  const toolFeedbackSignals = input.toolFeedbackSignals?.slice(0, 12) ?? [];
 
   // Pull losses first, then draws to fill the sample. Wins are uninformative
   // for coaching — we only learn from failure.
@@ -143,7 +160,7 @@ export async function proposeStyleEdits(
       : [];
 
   const sample = [...losses, ...draws];
-  if (sample.length === 0) {
+  if (sample.length === 0 && toolFeedbackSignals.length === 0) {
     return {
       summary:
         "No lost or draw matches found for this style — nothing to coach on.",
@@ -157,19 +174,22 @@ export async function proposeStyleEdits(
     await Promise.all(sample.map((s) => input.matchesRepo.byId(s.id)))
   ).filter((m): m is NonNullable<typeof m> => m !== null);
 
-  const transcriptsBlock = fullMatches
-    .map((m) => {
-      const persona = PERSONA_LOOKUP.get(m.persona_slug);
-      return (
-        `### Match #${m.id} — outcome: ${m.outcome.toUpperCase()}\n` +
-        `Persona: ${persona?.displayName ?? m.persona_slug} ` +
-        `(${persona?.summary ?? ""})\n` +
-        `Judge reason: "${m.judge_reason ?? "(none)"}"\n` +
-        `Skills used in this match: ${m.skills.length > 0 ? m.skills.join(", ") : "(none recorded)"}\n` +
-        `Transcript:\n${transcriptToText(m.transcript)}`
-      );
-    })
-    .join("\n\n");
+  const transcriptsBlock =
+    fullMatches.length > 0
+      ? fullMatches
+          .map((m) => {
+            const persona = PERSONA_LOOKUP.get(m.persona_slug);
+            return (
+              `### Match #${m.id} — outcome: ${m.outcome.toUpperCase()}\n` +
+              `Persona: ${persona?.displayName ?? m.persona_slug} ` +
+              `(${persona?.summary ?? ""})\n` +
+              `Judge reason: "${m.judge_reason ?? "(none)"}"\n` +
+              `Skills used in this match: ${m.skills.length > 0 ? m.skills.join(", ") : "(none recorded)"}\n` +
+              `Transcript:\n${transcriptToText(m.transcript)}`
+            );
+          })
+          .join("\n\n")
+      : "(none)";
 
   const styleBlock = JSON.stringify(
     {
@@ -190,6 +210,7 @@ export async function proposeStyleEdits(
   const userMessage =
     `CURRENT STYLE:\n${styleBlock}\n\n` +
     `SAMPLE OF ${fullMatches.length} LOST/DRAW MATCHES:\n${transcriptsBlock}\n\n` +
+    `TOOL-CALL FEEDBACK SIGNALS (${toolFeedbackSignals.length}):\n${toolFeedbackToText(toolFeedbackSignals)}\n\n` +
     `Return the JSON proposal now.`;
 
   const messages: ChatMessage[] = [
@@ -213,6 +234,43 @@ export async function proposeStyleEdits(
   }
 
   return parseProposal(raw);
+}
+
+function toolFeedbackToText(
+  signals: readonly CoachToolFeedbackSignal[],
+): string {
+  if (signals.length === 0) return "(none)";
+  return signals
+    .map((signal, index) => {
+      const note = signal.note?.trim()
+        ? `\nReviewer note: ${signal.note.trim()}`
+        : "";
+      const args =
+        signal.args === undefined ? "" : `\nArgs: ${safeJson(signal.args)}`;
+      const result =
+        signal.result === undefined
+          ? ""
+          : `\nResult: ${safeJson(signal.result)}`;
+      return (
+        `### Tool feedback #${index + 1}\n` +
+        `Tool: ${signal.toolName}\n` +
+        `Source: ${signal.source}\n` +
+        `Label: ${signal.label}\n` +
+        `Execution error: ${signal.error ? "yes" : "no"}` +
+        note +
+        args +
+        result
+      );
+    })
+    .join("\n\n");
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '"<unserializable>"';
+  }
 }
 
 /**

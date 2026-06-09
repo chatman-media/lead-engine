@@ -10,6 +10,7 @@ import { describe, expect, it } from "bun:test";
 import type { ApiConfig } from "./config.ts";
 import type { LoadedLlmConfigs } from "./lib/llm-config-loader.ts";
 import {
+  buildExchangePolicyState,
   type LoadedRef,
   makeEmbedderResolver,
   makeMemoryExtractor,
@@ -157,6 +158,115 @@ describe("makeEmbedderResolver", () => {
     if (!r) throw new Error("expected resolver");
     expect(() => r(1)).toThrow(/LLM config not set/);
     expect(r(2)).toBeDefined();
+  });
+});
+
+describe("buildExchangePolicyState", () => {
+  it("maps KYC and active payout order into deterministic guard state", () => {
+    const state = buildExchangePolicyState({
+      stageSlug: "payment_verified",
+      verification: {
+        verified: true,
+        verificationId: "kyc-7",
+        status: "verified",
+        needsVerification: false,
+      },
+      order: {
+        id: 7,
+        status: "payout",
+        direction: "sell_crypto",
+        assetFrom: "USDT",
+        network: "trc20",
+        amountMode: "source_amount",
+        requestedAmount: 100,
+        amountFrom: 100,
+        rate: 36.5,
+        amountToThb: 3650,
+        paymentMethod: "crypto_transfer",
+        paymentRail: "trc20",
+        sourceBank: null,
+        payerName: null,
+        thirdPartyApproved: false,
+        payoutMethod: "office_cash",
+        payoutLocation: "Bang Tao",
+        payoutDestinationJson: null,
+        payoutCode: "CODE-7",
+        payoutCodeExpiresAt: null,
+        requisitesJson: "{}",
+        proofJson: "{\"tx\":\"abc\"}",
+        verificationId: "kyc-7",
+        rateExpiresAt: null,
+        idempotencyKey: "idem-7",
+      },
+    });
+
+    expect(state.stageSlug).toBe("payment_verified");
+    expect(state.verification).toEqual({
+      verified: true,
+      verificationId: "kyc-7",
+      status: "verified",
+      needsVerification: false,
+    });
+    expect(state.order).toMatchObject({
+      id: 7,
+      status: "payout",
+      requisitesIssued: true,
+      paymentProofReceived: true,
+      paymentVerified: true,
+      payoutReady: true,
+      payoutCompleted: false,
+      payoutCodeIssued: true,
+      verificationId: "kyc-7",
+    });
+  });
+
+  it("does not infer verification from awaiting_payment order", () => {
+    const state = buildExchangePolicyState({
+      stageSlug: "requisites_sent",
+      verification: {
+        verified: false,
+        verificationId: null,
+        status: "missing",
+        needsVerification: true,
+      },
+      order: {
+        id: 8,
+        status: "awaiting_payment",
+        direction: "sell_crypto",
+        assetFrom: "USDT",
+        network: "trc20",
+        amountMode: "source_amount",
+        requestedAmount: 100,
+        amountFrom: 100,
+        rate: 36.5,
+        amountToThb: 3650,
+        paymentMethod: "crypto_transfer",
+        paymentRail: "trc20",
+        sourceBank: null,
+        payerName: null,
+        thirdPartyApproved: false,
+        payoutMethod: null,
+        payoutLocation: null,
+        payoutDestinationJson: null,
+        payoutCode: null,
+        payoutCodeExpiresAt: null,
+        requisitesJson: "{}",
+        proofJson: null,
+        verificationId: null,
+        rateExpiresAt: null,
+        idempotencyKey: "idem-8",
+      },
+    });
+
+    expect(state.order).toMatchObject({
+      requisitesIssued: true,
+      paymentProofReceived: false,
+      paymentVerified: false,
+      payoutReady: false,
+      payoutCompleted: false,
+      payoutCodeIssued: false,
+    });
+    expect(state.verification?.needsVerification).toBe(true);
   });
 });
 

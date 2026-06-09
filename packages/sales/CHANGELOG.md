@@ -1,3 +1,10 @@
+# [@chatman-media/sales-v1.3.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/sales-v1.3.0...@chatman-media/sales-v1.3.1) (2026-06-09)
+
+
+### Bug Fixes
+
+* **api:** make shadow eval queue durable ([#428](https://github.com/chatman-media/lead-engine/issues/428)) ([f3fba14](https://github.com/chatman-media/lead-engine/commit/f3fba148f06598a77063f9d2c1a83ebd302bf8c1))
+
 # [@chatman-media/sales-v1.3.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/sales-v1.2.0...@chatman-media/sales-v1.3.0) (2026-06-09)
 
 

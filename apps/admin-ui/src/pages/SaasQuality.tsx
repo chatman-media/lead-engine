@@ -308,6 +308,7 @@ function proposalStatusBadge(status: QualityToolCallImprovementStatus) {
 
 export function SaasQuality() {
   const navigate = useNavigate();
+  const [adminRole, setAdminRole] = useState<"superadmin" | "manager" | null>(null);
   const [summary, setSummary] = useState<QualitySelfPlaySummary | null>(null);
   const [pairwise, setPairwise] = useState<QualityPairwiseSummary | null>(null);
   const [coach, setCoach] = useState<QualityCoachSummary | null>(null);
@@ -408,6 +409,7 @@ export function SaasQuality() {
     () => [...new Set(pairwise?.recent.map((item) => item.personaSlug) ?? [])],
     [pairwise],
   );
+  const canWriteQuality = adminRole === "superadmin";
 
   function redirectOnUnauthorized(err: unknown): boolean {
     if (err instanceof ApiError && err.status === 401) {
@@ -565,6 +567,27 @@ export function SaasQuality() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    saas
+      .me()
+      .then((res) => {
+        if (!cancelled) setAdminRole(res.admin.role);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 401) {
+          clearToken();
+          navigate("/login", { replace: true });
+          return;
+        }
+        setAdminRole("manager");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
+  useEffect(() => {
     if ((coach?.totals.shadows.running ?? 0) <= 0) return;
     const interval = window.setInterval(() => {
       saas
@@ -689,6 +712,10 @@ export function SaasQuality() {
   }
 
   async function handleSelfPlayRun() {
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
     const maxTurns = parseRunMaxTurns(runMaxTurns);
     if (maxTurns === null) {
       toast.error("Max turns: 1-20");
@@ -723,6 +750,10 @@ export function SaasQuality() {
   }
 
   async function handlePairwiseRun() {
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
     const maxTurns = parseRunMaxTurns(runMaxTurns);
     if (maxTurns === null) {
       toast.error("Max turns: 1-20");
@@ -762,6 +793,10 @@ export function SaasQuality() {
   }
 
   async function handleCoachGenerate() {
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
     const sampleSize = parseCoachSampleSize(coachSampleSize);
     if (sampleSize === null) {
       toast.error("Sample: 1-50");
@@ -794,6 +829,10 @@ export function SaasQuality() {
   }
 
   async function handleProposalStatus(id: number, status: QualityCoachProposalDecisionStatus) {
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
     setProposalActionId(id);
     try {
       await saas.setQualityCoachProposalStatus(id, status);
@@ -812,6 +851,10 @@ export function SaasQuality() {
   }
 
   async function handleProposalApply(id: number) {
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
     setProposalActionId(id);
     try {
       const result = await saas.applyQualityCoachProposal(id);
@@ -830,15 +873,18 @@ export function SaasQuality() {
   }
 
   async function handleShadowEvaluationCreate(id: number) {
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
     setProposalActionId(id);
     try {
       const preview = await saas.getQualityShadowPreview(id, { limit: 200 });
-      let result;
       if (!preview.preview.ready) {
-        result = await saas.runQualityShadowEvaluation(id, { runs: 1, maxTurns: 6 });
+        const result = await saas.runQualityShadowEvaluation(id, { runs: 1, maxTurns: 6 });
         toast.success(`Shadow eval запущен: ${result.shadow.pairsPlanned} pairs`);
       } else {
-        result = await saas.createQualityShadowEvaluation(id, { limit: 200 });
+        const result = await saas.createQualityShadowEvaluation(id, { limit: 200 });
         toast.success(`Shadow eval: ${result.shadow.decision ?? result.shadow.status}`);
       }
       setCoach(await saas.getQualityCoachSummary());
@@ -929,6 +975,10 @@ export function SaasQuality() {
   }
 
   async function handleToolCallFeedback(label: QualityToolCallFeedbackLabel) {
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
     if (!toolCallInspector) return;
     const toolCallId = toolCallInspector.toolCall.id;
     const note = toolCallInspector.note.trim();
@@ -971,6 +1021,7 @@ export function SaasQuality() {
         description="Self-play, pairwise сравнения, coach proposals и JSONL выгрузка."
         actions={
           <>
+            {adminRole === "manager" && <Badge variant="outline">только просмотр</Badge>}
             <Button variant="outline" onClick={load} disabled={loading}>
               <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} />
               Обновить
@@ -1012,7 +1063,7 @@ export function SaasQuality() {
         </div>
       )}
 
-      <Card>
+      <Card hidden={!canWriteQuality}>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-sm">
             <PlayIcon className="size-4 text-primary" />
@@ -1113,7 +1164,7 @@ export function SaasQuality() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card hidden={!canWriteQuality}>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-sm">
             <LightbulbIcon className="size-4 text-amber-500" />
@@ -1249,10 +1300,10 @@ export function SaasQuality() {
             </div>
 
             <div className="flex items-end">
-              <label className="flex h-9 w-full items-center justify-between gap-3 rounded-md border px-3 text-sm">
+              <div className="flex h-9 w-full items-center justify-between gap-3 rounded-md border px-3 text-sm">
                 <span>Transcript</span>
                 <Switch checked={includeTranscript} onCheckedChange={setIncludeTranscript} />
-              </label>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -1345,10 +1396,10 @@ export function SaasQuality() {
             </div>
 
             <div className="flex items-end">
-              <label className="flex h-9 w-full items-center justify-between gap-3 rounded-md border px-3 text-sm">
+              <div className="flex h-9 w-full items-center justify-between gap-3 rounded-md border px-3 text-sm">
                 <span>Transcript</span>
                 <Switch checked={pairIncludeTranscript} onCheckedChange={setPairIncludeTranscript} />
-              </label>
+              </div>
             </div>
 
             <div className="flex items-end">
@@ -2240,7 +2291,7 @@ export function SaasQuality() {
                       {formatDate(item.createdAt)}
                     </TableCell>
                     <TableCell className="text-right">
-                      {item.status === "pending" && (
+                      {item.status === "pending" && canWriteQuality && (
                         <div className="flex justify-end gap-1">
                           <Button
                             size="sm"
@@ -2264,7 +2315,7 @@ export function SaasQuality() {
                           </Button>
                         </div>
                       )}
-                      {item.status === "dismissed" && (
+                      {item.status === "dismissed" && canWriteQuality && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -2276,7 +2327,7 @@ export function SaasQuality() {
                           Restore
                         </Button>
                       )}
-                      {item.status === "applied" && (
+                      {item.status === "applied" && canWriteQuality && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -2350,6 +2401,7 @@ export function SaasQuality() {
       <QualityInspectorDialog inspector={inspector} onOpenChange={(open) => !open && setInspector(null)} />
       <ToolCallInspectorDialog
         inspector={toolCallInspector}
+        canSubmitFeedback={canWriteQuality}
         submitting={feedbackSubmitting}
         onFeedback={(label) => void handleToolCallFeedback(label)}
         onNoteChange={handleToolCallNoteChange}
@@ -2423,12 +2475,14 @@ function QualityInspectorDialog({
 
 function ToolCallInspectorDialog({
   inspector,
+  canSubmitFeedback,
   submitting,
   onFeedback,
   onNoteChange,
   onOpenChange,
 }: {
   inspector: QualityToolCallInspectorState | null;
+  canSubmitFeedback: boolean;
   submitting: boolean;
   onFeedback: (label: QualityToolCallFeedbackLabel) => void;
   onNoteChange: (note: string) => void;
@@ -2482,25 +2536,29 @@ function ToolCallInspectorDialog({
                       {inspector.error}
                     </p>
                   )}
-                  <Textarea
-                    value={inspector.note}
-                    maxLength={2000}
-                    rows={3}
-                    onChange={(event) => onNoteChange(event.target.value)}
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    {TOOL_FEEDBACK_LABELS.map((item) => (
-                      <Button
-                        key={item.value}
-                        size="sm"
-                        variant={item.value === "good_reply" ? "default" : "outline"}
-                        disabled={submitting || inspector.loading}
-                        onClick={() => onFeedback(item.value)}
-                      >
-                        {item.label}
-                      </Button>
-                    ))}
-                  </div>
+                  {canSubmitFeedback && (
+                    <>
+                      <Textarea
+                        value={inspector.note}
+                        maxLength={2000}
+                        rows={3}
+                        onChange={(event) => onNoteChange(event.target.value)}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        {TOOL_FEEDBACK_LABELS.map((item) => (
+                          <Button
+                            key={item.value}
+                            size="sm"
+                            variant={item.value === "good_reply" ? "default" : "outline"}
+                            disabled={submitting || inspector.loading}
+                            onClick={() => onFeedback(item.value)}
+                          >
+                            {item.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -2629,11 +2687,8 @@ function TranscriptPane({
         {transcript.length === 0 && (
           <p className="text-sm text-muted-foreground">Transcript unavailable</p>
         )}
-        {transcript.map((turn, index) => (
-          <div
-            key={`${turn.role}-${index}-${turn.text.slice(0, 12)}`}
-            className="rounded-md bg-muted/35 px-3 py-2"
-          >
+        {transcript.map((turn) => (
+          <div key={`${turn.role}-${turn.text}`} className="rounded-md bg-muted/35 px-3 py-2">
             <div className="mb-1 text-[11px] font-medium uppercase text-muted-foreground">
               {turn.role === "candidate" ? "Candidate" : "Salesperson"}
             </div>

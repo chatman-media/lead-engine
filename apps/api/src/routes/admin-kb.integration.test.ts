@@ -3,12 +3,15 @@
 // чтобы не зависеть от LLM-provider'а в тестах.
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { NullEmbeddingClient } from "@chatman-media/llm-router";
 import {
   applyAllMigrations,
   createIsolatedDb,
   funnels,
+  kbDocuments,
   kbSuggestions,
   schema,
   stageDefinitions,
@@ -33,10 +36,15 @@ let db: PostgresJsDatabase<typeof schema>;
 let app: Hono;
 let token = "";
 let tenantId = 0;
+let kbUploadDir = "";
+let previousKbUploadDir: string | undefined;
 
 beforeAll(
   async () => {
     if (!ownerUrl) return;
+    previousKbUploadDir = process.env.KB_UPLOAD_DIR;
+    kbUploadDir = await mkdtemp(join(tmpdir(), "lead-engine-kb-files-"));
+    process.env.KB_UPLOAD_DIR = kbUploadDir;
     const probe = await tryConnectToPg(ownerUrl);
     if (!probe) return;
     await probe.end({ timeout: 0 });
@@ -79,6 +87,14 @@ afterAll(async () => {
   if (sql) {
     await sql.end({ timeout: 0 }).catch(() => {});
     sql = null;
+  }
+  if (kbUploadDir) {
+    await rm(kbUploadDir, { recursive: true, force: true });
+  }
+  if (previousKbUploadDir === undefined) {
+    delete process.env.KB_UPLOAD_DIR;
+  } else {
+    process.env.KB_UPLOAD_DIR = previousKbUploadDir;
   }
 }, 10_000);
 
@@ -127,11 +143,15 @@ describe("admin-kb upload/list/delete flow", () => {
       source: string;
       chunks: number;
       created: boolean;
+      hasStoredFile: boolean;
+      fileName: string | null;
     };
     expect(body.documentId).toBeGreaterThan(0);
     expect(body.source).toMatch(/^inline:/);
     expect(body.chunks).toBeGreaterThan(0);
     expect(body.created).toBe(true);
+    expect(body.hasStoredFile).toBe(true);
+    expect(body.fileName).toBe("Test doc.txt");
   });
 
   it("dedup: same body → same source, не дублируется", async () => {
@@ -411,6 +431,64 @@ describe("admin-kb upload/list/delete flow", () => {
     const body = (await res.json()) as { source: string; chunks: number };
     expect(body.source).toMatch(/^inline:/);
     expect(body.chunks).toBeGreaterThan(0);
+  });
+
+  it("POST multipart .md → сохраняет исходник и отдаёт через /file", async () => {
+    if (!sql) return;
+    const markdown = "# Rules\n\n- Store original file\n- Keep indexed text";
+    const form = new FormData();
+    form.append("file", new Blob([markdown], { type: "text/markdown" }), "rules.md");
+    const res = await authReq("/api/admin/kb/documents", {
+      method: "POST",
+      body: form,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      documentId: number;
+      hasStoredFile: boolean;
+      fileName: string | null;
+      fileMimeType: string | null;
+      fileSizeBytes: number | null;
+    };
+    expect(body.hasStoredFile).toBe(true);
+    expect(body.fileName).toBe("rules.md");
+    expect(body.fileMimeType).toBe("text/markdown");
+    expect(body.fileSizeBytes).toBe(markdown.length);
+
+    const detailRes = await authReq(`/api/admin/kb/documents/${body.documentId}`);
+    expect(detailRes.status).toBe(200);
+    const detail = (await detailRes.json()) as {
+      item: { hasStoredFile: boolean; fileName: string | null; text: string };
+    };
+    expect(detail.item.hasStoredFile).toBe(true);
+    expect(detail.item.fileName).toBe("rules.md");
+    expect(detail.item.text).toContain("Store original file");
+
+    const fileRes = await authReq(`/api/admin/kb/documents/${body.documentId}/file`);
+    expect(fileRes.status).toBe(200);
+    expect(fileRes.headers.get("content-type")).toContain("text/markdown");
+    expect(await fileRes.text()).toBe(markdown);
+
+    const [row] = await db
+      .select({ fileStorageKey: kbDocuments.fileStorageKey })
+      .from(kbDocuments)
+      .where(and(eq(kbDocuments.tenantId, tenantId), eq(kbDocuments.id, body.documentId)))
+      .limit(1);
+    expect(row?.fileStorageKey).toContain(`tenant-${tenantId}/doc-${body.documentId}-`);
+    const storedPath = join(kbUploadDir, row?.fileStorageKey ?? "");
+    expect(await readFile(storedPath, "utf8")).toBe(markdown);
+
+    const deleteRes = await authReq(`/api/admin/kb/documents/${body.documentId}`, {
+      method: "DELETE",
+    });
+    expect(deleteRes.status).toBe(200);
+    let missing = false;
+    try {
+      await readFile(storedPath);
+    } catch {
+      missing = true;
+    }
+    expect(missing).toBe(true);
   });
 
   it("DELETE /api/admin/kb/documents/:id → 200 + isolated", async () => {

@@ -1,6 +1,10 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { resolve } from "node:path";
+import type { IKbStore } from "@chatman-media/kb";
+import type { ChatClient, ChatCompletionOpts, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
 import {
-  agentToolCalls,
   admins,
+  agentToolCalls,
   applyAllMigrations,
   coachProposals,
   contacts,
@@ -18,14 +22,11 @@ import {
   styles as stylesTable,
   tryConnectToPg,
 } from "@chatman-media/storage";
-import type { ChatClient, ChatCompletionOpts, ChatMessage, EmbeddingClient } from "@chatman-media/llm-router";
-import type { IKbStore } from "@chatman-media/kb";
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
-import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
+import { DEFAULT_TOKEN_LIFETIME_SEC, signAuthToken } from "../lib/auth.ts";
 import { ShadowEvalJobRunner } from "../lib/shadow-eval-job-runner.ts";
 import { makeRequireAuth } from "../middleware/require-auth.ts";
 import { makeAdminQualityRoutes } from "./admin-quality.ts";
@@ -50,6 +51,7 @@ let db: PostgresJsDatabase<typeof schema>;
 let app: Hono;
 let tokenA = "";
 let tokenB = "";
+let managerTokenA = "";
 let tenantA = 0;
 let tenantB = 0;
 let toolConversationA = 0;
@@ -130,6 +132,7 @@ beforeAll(async () => {
   tokenB = await signup("quality-b@demo.io");
   tenantA = await tenantFor("quality-a@demo.io");
   tenantB = await tenantFor("quality-b@demo.io");
+  managerTokenA = await createManagerToken("quality-manager@demo.io", tenantA);
 
   const now = Math.floor(Date.now() / 1000);
   const insertedStyles = await db.insert(stylesTable).values([
@@ -421,6 +424,7 @@ beforeAll(async () => {
       userId: toolContactA.id,
       source: "bot",
       mode: "ai",
+      styleId: styleB.id,
       createdAt: now,
       lastMessageAt: now,
     })
@@ -504,6 +508,106 @@ describe("admin quality JSONL export", () => {
     if (!sql) return;
     const res = await app.request("/api/admin/quality/self-play/export.jsonl");
     expect(res.status).toBe(401);
+  });
+
+  it("allows managers to read quality data but blocks quality writes", async () => {
+    if (!sql) return;
+    expect((await authReq(managerTokenA, "/api/admin/quality/self-play/summary")).status).toBe(200);
+    expect((await authReq(managerTokenA, "/api/admin/quality/pairwise/summary")).status).toBe(200);
+    expect((await authReq(managerTokenA, "/api/admin/quality/coach/summary")).status).toBe(200);
+    expect((await authReq(managerTokenA, "/api/admin/quality/run-options")).status).toBe(200);
+    expect((await authReq(managerTokenA, "/api/admin/quality/tool-call-feedback/summary")).status).toBe(200);
+    expect((await authReq(managerTokenA, "/api/admin/quality/self-play/export.jsonl")).status).toBe(200);
+    expect((await authReq(managerTokenA, "/api/admin/quality/pairwise/export.jsonl")).status).toBe(200);
+    expect((await authReq(managerTokenA, "/api/admin/quality/tool-call-feedback/export.jsonl")).status).toBe(200);
+    expect((await authReq(managerTokenA, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`)).status).toBe(200);
+    expect((await authReq(managerTokenA, "/api/admin/quality/tool-calls?limit=10")).status).toBe(200);
+
+    const coachSummary = (await (
+      await authReq(managerTokenA, "/api/admin/quality/coach/summary")
+    ).json()) as QualityCoachSummaryResponse;
+    const proposalId = coachSummary.proposals[0]?.id;
+    const [shadow] = await db
+      .select({ id: shadowEvaluations.id })
+      .from(shadowEvaluations)
+      .where(eq(shadowEvaluations.tenantId, tenantA))
+      .limit(1);
+    const shadowId = shadow?.id;
+    expect(proposalId).toBeGreaterThan(0);
+    expect(shadowId).toBeGreaterThan(0);
+    if (!proposalId || !shadowId) return;
+
+    expect(
+      (
+        await authPostJsonReq(
+          managerTokenA,
+          `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`,
+          { label: "good_reply" },
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await authPostJsonReq(managerTokenA, "/api/admin/quality/self-play/matches", {
+          styleSlug: "style-a",
+          personaSlug: "skeptic-anya",
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await authPostJsonReq(managerTokenA, "/api/admin/quality/pairwise/matches", {
+          styleASlug: "style-a",
+          styleBSlug: "style-b",
+          personaSlug: "skeptic-anya",
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await authPostJsonReq(managerTokenA, "/api/admin/quality/coach/proposals", {
+          styleSlug: "style-a",
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await authJsonReq(
+          managerTokenA,
+          `/api/admin/quality/coach/proposals/${proposalId}/status`,
+          { status: "dismissed" },
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (await authPostReq(managerTokenA, `/api/admin/quality/coach/proposals/${proposalId}/apply`)).status,
+    ).toBe(403);
+    expect(
+      (
+        await authPostJsonReq(
+          managerTokenA,
+          `/api/admin/quality/coach/proposals/${proposalId}/shadow-evaluations`,
+          { limit: 10 },
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await authPostJsonReq(
+          managerTokenA,
+          `/api/admin/quality/coach/proposals/${proposalId}/shadow-evaluations/run`,
+          { runs: 1, maxTurns: 1 },
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (await authPostReq(managerTokenA, `/api/admin/quality/coach/shadow-evaluations/${shadowId}/retry`))
+        .status,
+    ).toBe(403);
+    expect(
+      (await authPostReq(managerTokenA, `/api/admin/quality/coach/shadow-evaluations/${shadowId}/cancel`))
+        .status,
+    ).toBe(403);
   });
 
   it("returns tenant-scoped agentic tool-call traces with filters", async () => {
@@ -1080,6 +1184,13 @@ describe("admin quality JSONL export", () => {
   it("generates a tenant-scoped coach proposal from self-play failures", async () => {
     if (!sql) return;
     resetQualityQueues();
+    const feedback = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`,
+      { label: "missing_tool", note: "coach should see the verification handoff gap" },
+    );
+    expect(feedback.status).toBe(201);
+
     salesReplies.push(
       JSON.stringify({
         summary: "Coach spotted a price objection gap",
@@ -1120,7 +1231,12 @@ describe("admin quality JSONL export", () => {
     expect(prompt).toContain("currently_attached_skills");
     expect(prompt).toContain("mirroring");
     expect(prompt).toContain("дорого");
+    expect(prompt).toContain("TOOL-CALL FEEDBACK SIGNALS");
+    expect(prompt).toContain("create_exchange_order");
+    expect(prompt).toContain("coach should see the verification handoff gap");
+    expect(prompt).toContain("Label: missing_tool");
     expect(prompt).not.toContain("tenant b only");
+    expect(prompt).not.toContain("999");
 
     const summary = (await (
       await authReq(tokenA, "/api/admin/quality/coach/summary")
@@ -2177,6 +2293,30 @@ async function tenantFor(email: string): Promise<number> {
     .limit(1);
   if (!admin) throw new Error(`admin not found: ${email}`);
   return admin.tenantId;
+}
+
+async function createManagerToken(email: string, tenantId: number): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const [admin] = await db
+    .insert(admins)
+    .values({
+      tenantId,
+      email,
+      passwordHash: "unused-manager-password-hash",
+      role: "manager",
+      createdAt: now,
+    })
+    .returning({ id: admins.id, tenantId: admins.tenantId });
+  if (!admin) throw new Error(`manager not created: ${email}`);
+  return signAuthToken(
+    {
+      adminId: admin.id,
+      tenantId: admin.tenantId,
+      role: "manager",
+      exp: now + DEFAULT_TOKEN_LIFETIME_SEC,
+    },
+    SECRET,
+  );
 }
 
 async function authReq(token: string, path: string): Promise<Response> {
