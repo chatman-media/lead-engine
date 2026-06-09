@@ -7,6 +7,7 @@ import { describe, expect, it } from "bun:test";
 import { makeBookingLinkTool } from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
+import { EXCHANGE_PAYMENT_FALLBACK } from "./exchange-policy-guard.ts";
 import { RagReplyStrategy, type RagReplyStrategyOpts } from "./rag-reply.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
 
@@ -349,6 +350,39 @@ describe("RagReplyStrategy.generate", () => {
     expect(r).not.toBeNull();
     const part = r![0]!.parts[0] as { text: string };
     expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
+  });
+
+  it("exchange: policy guard blocks payment confirmation without verified payment state", async () => {
+    const s = mk(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chatReturning("Оплата получена и подтверждена, готовлю выдачу."),
+        resolveEmbed: embed,
+        resolveKb: kbWith([HIT]),
+        rewriteQueryBeforeRetrieval: false,
+        reflect: false,
+        resolveExchangePolicyState: () => ({
+          stageSlug: "payment_review",
+          order: {
+            id: 9,
+            status: "awaiting_payment",
+            requisitesIssued: true,
+            paymentProofReceived: true,
+            paymentVerified: false,
+            payoutReady: false,
+            payoutCompleted: false,
+            payoutCodeIssued: false,
+          },
+        }),
+      },
+      fakeMessagesRepo(),
+    );
+
+    const r = await s.generate(baseInput());
+
+    expect(r).not.toBeNull();
+    const part = r![0]!.parts[0] as { text: string };
+    expect(part.text).toBe(EXCHANGE_PAYMENT_FALLBACK);
   });
 
   it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
