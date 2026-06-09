@@ -1435,6 +1435,59 @@ export const adminNotifications = pgTable("admin_notifications", {
   ),
 ]);
 
+// Durable pending previews for reactive operator bot actions. Telegram callback
+// data only carries draft_key; full text and authorization live tenant-scoped here.
+export const operatorActionDrafts = pgTable(
+  "operator_action_drafts",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    adminId: integer("admin_id").references(() => admins.id, {
+      onDelete: "set null",
+    }),
+    conversationId: integer("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    draftKey: text("draft_key").notNull(),
+    chatId: text("chat_id").notNull(),
+    kind: text("kind").notNull().default("client_reply"),
+    status: text("status").notNull().default("pending"),
+    text: text("text").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    messageId: integer("message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    outboundQueueId: integer("outbound_queue_id").references(() => outboundQueue.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+    expiresAt: integer("expires_at").notNull(),
+    handledAt: integer("handled_at"),
+    updatedAt: integer("updated_at").notNull().default(epochNow()),
+  },
+  (t) => [
+    check(
+      "operator_action_drafts_kind_check",
+      sql`${t.kind} IN ('client_reply')`,
+    ),
+    check(
+      "operator_action_drafts_status_check",
+      sql`${t.status} IN ('pending','sent','cancelled','expired','failed')`,
+    ),
+    uniqueIndex("uniq_operator_action_drafts_key").on(t.tenantId, t.draftKey),
+    index("idx_operator_action_drafts_conversation").on(
+      t.tenantId,
+      t.conversationId,
+      sql`${t.createdAt} DESC`,
+    ),
+    index("idx_operator_action_drafts_pending")
+      .on(t.tenantId, t.status, t.expiresAt)
+      .where(sql`status = 'pending'`),
+  ],
+);
+
 // ---- Exchange (обменный пункт) ----------------------------------------
 // Курсы + формула. Итоговый курс = base_rate * (1 - margin_pct/100), минус
 // fee_fixed_thb из итога. Один активный ряд на (tenant, asset, quote, network).

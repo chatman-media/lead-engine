@@ -429,6 +429,17 @@ export interface MessageRow {
   deletedAt: number | null;
 }
 
+export interface OperatorHandoffNotification {
+  id: number;
+  kind: string;
+  title: string;
+  body: string;
+  severity: "critical" | "important" | "info";
+  deliveredAt: number | null;
+  readAt: number | null;
+  createdAt: number;
+}
+
 export type DiagnosticStatus = "pass" | "warn" | "fail" | "skip";
 
 export interface DiagnosticCheck {
@@ -2270,6 +2281,11 @@ export const saas = {
       conversation: ConversationDetail;
       messages: MessageRow[];
     }>(`/api/admin/conversations/${id}`);
+  },
+  getConversationOperatorHandoffs(id: number) {
+    return request<{ items: OperatorHandoffNotification[] }>(
+      `/api/admin/conversations/${id}/operator-handoffs`,
+    );
   },
   // ── Dialog simulator (dev/test) ──────────────────────────────────────────
   listSimPersonas() {

@@ -3,6 +3,7 @@
 // tenant isolation, 404 on missing, message ordering chronological.
 
 import {
+  adminNotifications,
   applyAllMigrations,
   channelIdentities,
   channels,
@@ -261,6 +262,56 @@ describe("admin-conversations", () => {
     // user/assistant alternates
     expect(body.messages[0]!.role).toBe("user");
     expect(body.messages[1]!.role).toBe("assistant");
+  });
+
+  it("GET /:id/operator-handoffs → returns only current tenant operator events", async () => {
+    if (!sql) return;
+    const id = conversationIdsA[0]!;
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(adminNotifications).values([
+      {
+        tenantId: tenantA,
+        topic: "escalation",
+        severity: "important",
+        kind: "operator_handoff_required",
+        title: "Проверить KYC",
+        body: "Клиент прислал видео.",
+        dedupKey: `operator_handoff_required:${id}`,
+        createdAt: now,
+      },
+      {
+        tenantId: tenantA,
+        topic: "leads",
+        severity: "info",
+        kind: "stage_changed",
+        title: "Не handoff",
+        body: "",
+        dedupKey: `stage_changed:${id}`,
+        createdAt: now,
+      },
+      {
+        tenantId: tenantB,
+        topic: "escalation",
+        severity: "important",
+        kind: "operator_handoff_required",
+        title: "Чужой tenant",
+        body: "",
+        dedupKey: `operator_handoff_required:${id}`,
+        createdAt: now,
+      },
+    ]);
+
+    const res = await authReq(tokenA, `/api/admin/conversations/${id}/operator-handoffs`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: Array<{ title: string; kind: string; body: string }>;
+    };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({
+      kind: "operator_handoff_required",
+      title: "Проверить KYC",
+      body: "Клиент прислал видео.",
+    });
   });
 
   it("GET /:id для чужого conversation → 404 (cross-tenant)", async () => {

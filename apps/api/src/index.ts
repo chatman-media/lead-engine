@@ -363,6 +363,7 @@ async function main() {
     adminInformer,
   );
   const operatorBotHandler = new OperatorBotHandler(notificationsRepo, cfg.operatorBotToken, {
+    db: db as never,
     appUrl: cfg.mailer.appUrl,
   });
   if (cfg.operatorBotToken) {

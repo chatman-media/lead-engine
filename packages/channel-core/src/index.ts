@@ -7,6 +7,7 @@ export type {
   Inbound,
   InboundPart,
   MediaRef,
+  OperatorHandoffMeta,
   OutboundEnvelope,
   OutboundPart,
   ReplyMarkup,

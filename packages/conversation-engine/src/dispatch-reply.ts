@@ -3,6 +3,8 @@ import { OutboundQueueRepo } from "./dal/outbound.ts";
 import type { Db } from "./dal/types.ts";
 import { dispatchOutbound } from "./outbound-dispatch.ts";
 import { type ReplyStrategy } from "./process-inbound.ts";
+import type { NotificationService } from "./notifications.ts";
+import { emitOperatorHandoffNotifications } from "./operator-handoff.ts";
 import { systemClock } from "./types.ts";
 import type { ChannelContext, PipelineSink, ProcessInboundResult, TenantContext } from "./types.ts";
 import { withTenant } from "./with-tenant.ts";
@@ -42,6 +44,7 @@ export interface GenerateReplyAndEnqueueDeps {
   /** Результат processInbound с deferReply=true. */
   result: ProcessInboundResult;
   replyStrategy: ReplyStrategy;
+  notifications?: NotificationService | null;
   sink?: PipelineSink;
   clock?: { nowEpoch: () => number };
 }
@@ -105,6 +108,17 @@ export async function generateReplyAndEnqueue(
         envelope: env,
       });
     }
+  });
+  await emitOperatorHandoffNotifications({
+    tenantId: tenant.tenantId,
+    conversationId: result.conversationId,
+    contactId: result.contactId,
+    contactDisplayName: result.contactDisplayName,
+    userMessageText: text,
+    inbound,
+    envelopes,
+    notifications: deps.notifications ?? null,
+    ...(deps.sink ? { sink: deps.sink } : {}),
   });
   return { outboundEnqueued: count };
 }

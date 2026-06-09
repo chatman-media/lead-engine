@@ -82,6 +82,29 @@ export interface ReplyMarkup {
   inlineButtons?: Array<Array<{ label: string; callbackData: string }>>;
 }
 
+export interface OperatorHandoffMeta {
+  reason:
+    | "kyc_review"
+    | "payment_review"
+    | "office_payout"
+    | "payout_review"
+    | "operator_request";
+  title: string;
+  action: string;
+  contractId?: string;
+  priority?: "low" | "normal" | "high";
+  orderId?: number;
+  stageSlug?: string;
+  accepted?: string;
+  pending?: string;
+  reviewPath?: string;
+  context?: string;
+  urgency?: string;
+  amount?: string;
+  rail?: string;
+  network?: string;
+}
+
 export type OutboundPart =
   | { kind: "text"; text: string; parseMode?: "markdown" | "html" }
   | { kind: "photo"; mediaRef: MediaRef; caption?: string }
@@ -100,6 +123,8 @@ export interface OutboundEnvelope {
   replyMarkup?: ReplyMarkup;
   /** Опционально — для дедупликации повторных send-попыток. */
   idempotencyKey?: string;
+  /** Operator-facing action card emitted alongside the client reply. */
+  operatorHandoff?: OperatorHandoffMeta;
 }
 
 /** Результат успешной отправки. */

@@ -127,6 +127,7 @@ export function startUserbotInboundRunner(opts: {
               inbound,
               result,
               replyStrategy: opts.replyStrategy,
+              notifications: opts.notifications,
               ...(opts.sink ? { sink: opts.sink } : {}),
             });
             result = { ...result, outboundEnqueued: gen.outboundEnqueued };

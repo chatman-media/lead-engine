@@ -18,6 +18,10 @@ import type {
 import { ensureAndAdvanceLeadByPhase } from "./lead-advance.ts";
 import { type MemoryExtractor, runMemoryExtraction } from "./memory-extractor.ts";
 import { dispatchOutbound } from "./outbound-dispatch.ts";
+import {
+  emitOperatorHandoffNotifications,
+  operatorMediaNotificationData,
+} from "./operator-handoff.ts";
 import { applyClassifiedStage, type StageClassifier } from "./stage-classifier.ts";
 import type { ITranscriber } from "./transcriber.ts";
 import type { NotificationService } from "./notifications.ts";
@@ -358,6 +362,9 @@ export async function processInbound(
         data: {
           displayName: contact.displayName || "Без имени",
           text: text || "(Видео-кружок для верификации)",
+          action:
+            "Необходимо верифицировать клиента и документы перед выдачей реквизитов.",
+          ...operatorMediaNotificationData(inbound),
         },
       });
     } else if (hasMedia) {
@@ -368,6 +375,9 @@ export async function processInbound(
         contactId: contact.id,
         data: {
           displayName: contact.displayName || "Без имени",
+          text: text || "(Клиент загрузил документ/медиа)",
+          action: "Проверьте документ и сопоставьте его с заявкой клиента.",
+          ...operatorMediaNotificationData(inbound),
         },
       });
     }
@@ -506,6 +516,7 @@ export async function processInbound(
     void messageId;
     return {
       contactId: contact.id,
+      contactDisplayName: contact.displayName,
       conversationId: conversation.id,
       persisted: !existingMsg,
       outboundEnqueued: 0,
@@ -557,12 +568,24 @@ export async function processInbound(
           envelope: env,
         });
       }
+      await emitOperatorHandoffNotifications({
+        tenantId: deps.tenant.tenantId,
+        conversationId: conversation.id,
+        contactId: contact.id,
+        contactDisplayName: contact.displayName,
+        userMessageText: text,
+        inbound,
+        envelopes,
+        notifications: deps.notifications ?? null,
+        ...(deps.sink ? { sink: deps.sink } : {}),
+      });
     }
   }
 
   void messageId;
   return {
     contactId: contact.id,
+    contactDisplayName: contact.displayName,
     conversationId: conversation.id,
     persisted: !existingMsg,
     outboundEnqueued: outboundCount,

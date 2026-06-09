@@ -1,4 +1,10 @@
-import { ExternalLinkIcon, SearchIcon, SendHorizontalIcon, Trash2Icon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  ExternalLinkIcon,
+  SearchIcon,
+  SendHorizontalIcon,
+  Trash2Icon,
+} from "lucide-react";
 import React, { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -25,6 +31,7 @@ import {
   type FunnelListItem,
   type LeadListItem,
   type MessageRow,
+  type OperatorHandoffNotification,
   saas,
   type ServiceCatalogItem,
 } from "../api/saas.ts";
@@ -59,6 +66,28 @@ const STATE_RU: Record<string, string> = {
   terminal_lost: "закрыт ✗",
 };
 
+type MessageMeta = {
+  adminId?: number;
+  exchangeAction?: string;
+  orderId?: number | string;
+  parts?: Array<{ kind: string; durationSec?: number }>;
+  payoutCode?: string;
+  sentVia?: string;
+  source?: string;
+};
+
+const OPERATOR_BOT_ACTION_RU: Record<string, string> = {
+  kyc_approved: "KYC OK",
+  kyc_request_materials: "KYC: дослать",
+  kyc_rejected: "KYC отклонён",
+  payment_under_review: "Оплата проверяется",
+  payment_confirmed: "Оплата OK",
+  payment_problem: "Проблема оплаты",
+  payout_ready: "Выдача готова",
+  office_details: "Офис/время",
+  operator_reply: "Ответ оператора",
+};
+
 const FUNNEL_VERTICAL_RU: Record<string, string> = {
   exchange_v1: "Обменка",
   real_estate_v1: "Продажа недвижимости",
@@ -78,6 +107,28 @@ function fmtTime(epoch: number | null): string {
 }
 function fmtShortTime(epoch: number): string {
   return new Date(epoch * 1000).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+}
+
+function parseMessageMeta(metaJson: string | null): MessageMeta | null {
+  if (!metaJson) return null;
+  try {
+    const parsed = JSON.parse(metaJson) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as MessageMeta;
+  } catch {
+    return null;
+  }
+}
+
+function operatorBotLabel(meta: MessageMeta): string | null {
+  if (meta.sentVia === "operator-bot-preview") return "Operator bot";
+  if (meta.source === "operator_bot_exchange_action") return "Operator bot";
+  return null;
+}
+
+function operatorActionLabel(action: string | undefined): string | null {
+  if (!action) return null;
+  return OPERATOR_BOT_ACTION_RU[action] ?? action.replaceAll("_", " ");
 }
 
 function funnelLabel(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">): string {
@@ -127,6 +178,7 @@ export function SaasConversations() {
   const [confirmingTakeover, setConfirmingTakeover] = useState(false);
   const [contactLead, setContactLead] = useState<LeadListItem | null>(null);
   const [admins, setAdmins] = useState<import("../api/saas.ts").AdminRow[]>([]);
+  const [operatorHandoffs, setOperatorHandoffs] = useState<OperatorHandoffNotification[]>([]);
 
   // Dialog simulator (dev/test)
   const [simOpen, setSimOpen] = useState(false);
@@ -289,7 +341,12 @@ export function SaasConversations() {
 
   async function refreshDetail(id: number) {
     try {
-      setDetail(await saas.getConversation(id));
+      const conversationDetail = await saas.getConversation(id);
+      setDetail(conversationDetail);
+      saas
+        .getConversationOperatorHandoffs(id)
+        .then((res) => setOperatorHandoffs(res.items))
+        .catch(() => setOperatorHandoffs([]));
     } catch (err) {
       if (handleAuthError(err)) return;
       if (err instanceof ApiError && err.status === 404) {
@@ -304,6 +361,7 @@ export function SaasConversations() {
   useEffect(() => {
     if (!selectedId) {
       setDetail(null);
+      setOperatorHandoffs([]);
       return;
     }
     let cancelled = false;
@@ -791,6 +849,34 @@ export function SaasConversations() {
                 )}
               </div>
 
+              {operatorHandoffs.length > 0 && (
+                <div className="border-b bg-amber-500/10 px-4 py-3">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <AlertTriangleIcon className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                        <span className="text-sm font-semibold">Нужно действие оператора</span>
+                        <Badge variant="warning">{operatorHandoffs.length}</Badge>
+                      </div>
+                      <div className="space-y-1">
+                        {operatorHandoffs.slice(0, 2).map((item) => (
+                          <div key={item.id} className="text-xs text-muted-foreground">
+                            <span className="font-medium text-foreground">{item.title}</span>
+                            {item.body ? ` · ${item.body}` : ""}
+                            <span className="ml-1 font-mono">{fmtTime(item.createdAt)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {detail.conversation.mode !== "human" && (
+                      <Button size="sm" variant="outline" onClick={handleToggleMode}>
+                        Перехватить
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
                 {detail.messages.length === 0 ? (
                   <p className="text-center text-sm text-muted-foreground">Сообщений нет</p>
@@ -799,6 +885,9 @@ export function SaasConversations() {
                     const mine = m.role === "assistant" || m.role === "human";
                     const system = m.role === "system";
                     const showLabel = m.role !== "user";
+                    const meta = parseMessageMeta(m.metaJson);
+                    const operatorBot = meta ? operatorBotLabel(meta) : null;
+                    const operatorAction = meta ? operatorActionLabel(meta.exchangeAction) : null;
                     const labelColor =
                       m.role === "assistant" ? "text-primary" :
                       m.role === "human" ? "text-[var(--success)]" :
@@ -842,11 +931,8 @@ export function SaasConversations() {
                         >
                           {(() => {
                             let voiceDuration: number | undefined;
-                            try {
-                              const meta = m.metaJson ? JSON.parse(m.metaJson) as { parts?: Array<{ kind: string; durationSec?: number }> } : null;
-                              const voice = meta?.parts?.find((p) => p.kind === "voice");
-                              if (voice) voiceDuration = voice.durationSec;
-                            } catch { /* ignore */ }
+                            const voice = meta?.parts?.find((p) => p.kind === "voice");
+                            if (voice) voiceDuration = voice.durationSec;
 
                             if (voiceDuration !== undefined || (!m.text && m.metaJson?.includes('"voice"'))) {
                               return (
@@ -863,6 +949,24 @@ export function SaasConversations() {
                               : <span className="italic text-muted-foreground">—</span>;
                           })()}
                         </div>
+                        {(operatorBot || operatorAction || meta?.orderId || meta?.payoutCode) && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {operatorBot && (
+                              <Badge variant="outline" className="border-[var(--success)]/30 text-[var(--success)]">
+                                {operatorBot}
+                              </Badge>
+                            )}
+                            {operatorAction && (
+                              <Badge variant="secondary">{operatorAction}</Badge>
+                            )}
+                            {meta?.orderId && (
+                              <Badge variant="outline">Заявка #{meta.orderId}</Badge>
+                            )}
+                            {meta?.payoutCode && (
+                              <Badge variant="warning">Код {meta.payoutCode}</Badge>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })
