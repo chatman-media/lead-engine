@@ -15,6 +15,7 @@
     "check": "biome check ./src",
     "format": "biome format --write ./src",
     "eval:funnel-builder": "bun run scripts/eval-funnel-builder.ts",
+    "rehearse:exchange-demo": "bun run scripts/rehearse-exchange-demo.ts",
     "seed:exchange-demo": "bun run scripts/seed-exchange-demo.ts",
     "seed:exchange-fixtures": "bun run scripts/seed-exchange-fixtures.ts",
     "test": "bun test"
