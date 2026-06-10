@@ -45,6 +45,7 @@
 | Док | О чём |
 |---|---|
 | [gtm/sales-bot/SETUP.md](gtm/sales-bot/SETUP.md) | Мета-демо: бот, продающий Lead Engine рекрутёрам (setup + KB + system prompt) |
+| [gtm/exchange/README.md](gtm/exchange/README.md) | Exchange GTM pack: one-pager, demo script, screen sequence, objections, alpha trial flow и live-demo runbook |
 
 Кодовые demo-витрины:
 
@@ -52,6 +53,8 @@
 |---|---|
 | [`../apps/landing`](../apps/landing) | Public demos: exchange, concierge/service desk, provider marketplace, visa, vertical library |
 | [`../apps/api/demo/web-chat.html`](../apps/api/demo/web-chat.html) | Standalone HTML-клиент для web-channel `/ws/:slug` |
+| [`../apps/api/scripts/seed-exchange-demo.ts`](../apps/api/scripts/seed-exchange-demo.ts) | Демо-tenant обменки: exchange_v1 funnel, fixtures, KB, лиды/диалоги/orders |
+| [`../apps/api/scripts/rehearse-exchange-demo.ts`](../apps/api/scripts/rehearse-exchange-demo.ts) | Rehearsal runner для exchange demo через `/api/admin/sim/exchange-eval` |
 | [`../apps/api/scripts/seed-modeling-demo.ts`](../apps/api/scripts/seed-modeling-demo.ts) | Демо-данные для modeling vertical |
 
 ## 🗄 Archive

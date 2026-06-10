@@ -59,7 +59,9 @@ BYOK: можно использовать свой LLM-ключ OpenAI/OpenRoute
 Alpha после демо: первый exchange trial заводится через invite, без публичной
 регистрации и без карты в первый день. Клиент подключает свой Telegram-бот,
 BYOK-ключ, курсы и реквизиты; через 60 минут должен быть первый живой ответ
-бота. Детальный runbook: [`trial-flow.md`](trial-flow.md).
+бота. Детальный alpha setup flow: [`trial-flow.md`](trial-flow.md). Внутренний
+runbook для назначения и фиксации двух живых демо:
+[`live-demo-runbook.md`](live-demo-runbook.md).
 
 ## Безопасность
 

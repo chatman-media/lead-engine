@@ -25,7 +25,7 @@ Self-service через **обязательный onboarding-визард**, б
 
 ## Шаг 1. Доступ и onboarding-визард
 
-Для пост-демо exchange alpha есть отдельный GTM-runbook:
+Для пост-демо exchange alpha есть отдельный alpha-trial runbook:
 [`../gtm/exchange/trial-flow.md`](../gtm/exchange/trial-flow.md). Он фиксирует
 ручной 14-day alpha через superadmin, invite-only вход, BYOK-инструкцию и
 60-минутный dry run до отвечающего бота.

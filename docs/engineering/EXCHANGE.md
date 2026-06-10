@@ -147,6 +147,10 @@ bun run --cwd apps/api seed:exchange-demo -- --set-telegram-webhook
 Telegram token сид оставляет web-канал и все кабинетные данные готовыми, но live
 Telegram webhook нужно подключить отдельно.
 
+GTM-документы для показа обменнику живут в
+[`../gtm/exchange/README.md`](../gtm/exchange/README.md): demo script,
+screen sequence, objections, alpha trial flow и live-demo runbook для #495.
+
 ## Orders CRM
 
 `exchange_orders` — заявки с привязкой к лиду, статусом, суммами и платёжными
