@@ -1,0 +1,193 @@
+name: Tool-call Regressions
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_base:
+        description: "Quality API base URL. Falls back to QUALITY_TOOL_REGRESSION_API_BASE repo variable."
+        required: false
+        type: string
+      status:
+        description: "Regression case status filter"
+        required: false
+        default: active
+        type: choice
+        options:
+          - active
+          - archived
+          - all
+      limit:
+        description: "Maximum exported cases, 1-1000"
+        required: false
+        default: "500"
+        type: string
+      supported_tools:
+        description: "Optional comma-separated tool allowlist"
+        required: false
+        type: string
+      skip_unsupported:
+        description: "Skip cases outside supported_tools instead of failing"
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    # Daily staging-quality check. The job no-ops until repo vars/secrets are configured.
+    - cron: "23 3 * * *"
+
+concurrency:
+  group: tool-regressions-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: "1.3.14"
+
+jobs:
+  tool-regressions:
+    name: tool-call regression corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      QUALITY_LAB_TOKEN: ${{ secrets.QUALITY_LAB_TOKEN }}
+      CONFIGURED_API_BASE: ${{ vars.QUALITY_TOOL_REGRESSION_API_BASE }}
+      CONFIGURED_STATUS: ${{ vars.QUALITY_TOOL_REGRESSION_STATUS }}
+      CONFIGURED_LIMIT: ${{ vars.QUALITY_TOOL_REGRESSION_LIMIT }}
+      CONFIGURED_SUPPORTED_TOOLS: ${{ vars.QUALITY_TOOL_REGRESSION_TOOLS }}
+      CONFIGURED_SKIP_UNSUPPORTED: ${{ vars.QUALITY_TOOL_REGRESSION_SKIP_UNSUPPORTED }}
+      INPUT_API_BASE: ${{ github.event.inputs.api_base }}
+      INPUT_STATUS: ${{ github.event.inputs.status }}
+      INPUT_LIMIT: ${{ github.event.inputs.limit }}
+      INPUT_SUPPORTED_TOOLS: ${{ github.event.inputs.supported_tools }}
+      INPUT_SKIP_UNSUPPORTED: ${{ github.event.inputs.skip_unsupported }}
+
+    steps:
+      - name: Resolve runner config
+        id: config
+        run: |
+          set -euo pipefail
+
+          api_base="${CONFIGURED_API_BASE:-}"
+          status="${CONFIGURED_STATUS:-active}"
+          limit="${CONFIGURED_LIMIT:-500}"
+          supported_tools="${CONFIGURED_SUPPORTED_TOOLS:-}"
+          skip_unsupported="${CONFIGURED_SKIP_UNSUPPORTED:-false}"
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            api_base="${INPUT_API_BASE:-$api_base}"
+            status="${INPUT_STATUS:-$status}"
+            limit="${INPUT_LIMIT:-$limit}"
+            supported_tools="${INPUT_SUPPORTED_TOOLS:-$supported_tools}"
+            skip_unsupported="${INPUT_SKIP_UNSUPPORTED:-$skip_unsupported}"
+          fi
+
+          if [[ -z "$api_base" ]]; then
+            echo "::notice::QUALITY_TOOL_REGRESSION_API_BASE is not configured; skipping tool-call regressions."
+            echo "run_regressions=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -z "${QUALITY_LAB_TOKEN:-}" ]]; then
+            echo "::notice::QUALITY_LAB_TOKEN secret is not configured; skipping tool-call regressions."
+            echo "run_regressions=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          case "$status" in
+            active|archived|all) ;;
+            *)
+              echo "::error::Invalid status '$status'. Use active, archived, or all."
+              exit 1
+              ;;
+          esac
+
+          if ! [[ "$limit" =~ ^[0-9]+$ ]] || (( limit < 1 || limit > 1000 )); then
+            echo "::error::Invalid limit '$limit'. Use an integer from 1 to 1000."
+            exit 1
+          fi
+
+          echo "run_regressions=true" >> "$GITHUB_OUTPUT"
+          echo "api_base=$api_base" >> "$GITHUB_OUTPUT"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "limit=$limit" >> "$GITHUB_OUTPUT"
+          echo "supported_tools=$supported_tools" >> "$GITHUB_OUTPUT"
+          echo "skip_unsupported=$skip_unsupported" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v6
+        if: steps.config.outputs.run_regressions == 'true'
+        with:
+          fetch-depth: 1
+
+      - name: Setup Bun
+        if: steps.config.outputs.run_regressions == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun + node_modules
+        if: steps.config.outputs.run_regressions == 'true'
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: bun-tool-regressions-${{ runner.os }}-${{ hashFiles('bun.lock', '.github/workflows/tool-regressions.yml') }}
+          restore-keys: bun-tool-regressions-${{ runner.os }}-
+
+      - name: Install deps (workspace)
+        if: steps.config.outputs.run_regressions == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Run tool-call regressions
+        if: steps.config.outputs.run_regressions == 'true'
+        env:
+          QUALITY_LAB_TOKEN: ${{ secrets.QUALITY_LAB_TOKEN }}
+          API_BASE: ${{ steps.config.outputs.api_base }}
+          STATUS: ${{ steps.config.outputs.status }}
+          LIMIT: ${{ steps.config.outputs.limit }}
+          SUPPORTED_TOOLS: ${{ steps.config.outputs.supported_tools }}
+          SKIP_UNSUPPORTED: ${{ steps.config.outputs.skip_unsupported }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+
+          cmd=(
+            bun run apps/api/scripts/run-tool-regressions.ts
+            --api-base "$API_BASE"
+            --status "$STATUS"
+            --limit "$LIMIT"
+            --json
+          )
+
+          if [[ -n "$SUPPORTED_TOOLS" ]]; then
+            cmd+=(--tools "$SUPPORTED_TOOLS")
+          fi
+          if [[ "$SKIP_UNSUPPORTED" == "true" || "$SKIP_UNSUPPORTED" == "1" ]]; then
+            cmd+=(--skip-unsupported)
+          fi
+
+          "${cmd[@]}" | tee artifacts/tool-call-regressions.json
+
+      - name: Regression summary
+        if: always() && steps.config.outputs.run_regressions == 'true'
+        run: |
+          if [[ ! -s artifacts/tool-call-regressions.json ]]; then
+            echo "No regression report was produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "## Tool-call regression report"
+            echo ""
+            echo '```json'
+            jq '.summary' artifacts/tool-call-regressions.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload regression report
+        if: always() && steps.config.outputs.run_regressions == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tool-call-regressions
+          path: artifacts/tool-call-regressions.json
+          if-no-files-found: ignore

@@ -127,6 +127,21 @@ QUALITY_LAB_TOKEN=<admin-bearer-token> \
 history. По умолчанию API-mode берёт `status=active&limit=500` с
 `/api/admin/quality/tool-call-regression-cases/export.jsonl`.
 
+GitHub Actions workflow `Tool-call Regressions`
+(`.github/workflows/tool-regressions.yml`) запускает тот же runner вручную
+(`workflow_dispatch`) или ежедневно по schedule. Для scheduled runs настройте:
+
+- secret `QUALITY_LAB_TOKEN` — bearer token админа/сервисного админа;
+- repo variable `QUALITY_TOOL_REGRESSION_API_BASE` — например
+  `https://api.example.com`;
+- optional variables: `QUALITY_TOOL_REGRESSION_STATUS`,
+  `QUALITY_TOOL_REGRESSION_LIMIT`, `QUALITY_TOOL_REGRESSION_TOOLS`,
+  `QUALITY_TOOL_REGRESSION_SKIP_UNSUPPORTED`.
+
+Если token/base не настроены, workflow завершается skip-ом с notice. Когда
+runner выполняется, он загружает JSON report artifact `tool-call-regressions`;
+regression failures дают красный job.
+
 Archived cases по умолчанию не валидируются, а явно считаются skipped. Если
 нужно проверить весь local export:
 
