@@ -754,12 +754,16 @@ async function main() {
     log.info("LLM not configured for any tenant — bot will persist messages but stay silent");
   }
 
+  const photoProcessor = makePhotoProcessor(loadedRef);
+  log.info("photo processor enabled (activates per-tenant when vision LLM is configured)");
+
   // Bot Tester — simulate inbound messages through the full pipeline.
   app.route(
     "/",
     makeAdminTestRoutes({
       db,
       replyStrategy: replyStrategy ?? null,
+      photoProcessor,
     }),
   );
   log.info("admin-test routes enabled (bot tester)");
@@ -771,9 +775,6 @@ async function main() {
   if (stageClassifier) {
     log.info("stage classifier enabled", { kind: cfg.stageClassifier });
   }
-
-  const photoProcessor = makePhotoProcessor(loadedRef);
-  log.info("photo processor enabled (activates per-tenant when vision LLM is configured)");
 
   const fieldExtractor = makeFieldExtractor(loadedRef, notificationService);
   log.info("field extractor enabled (activates per-tenant when chat LLM is configured)");

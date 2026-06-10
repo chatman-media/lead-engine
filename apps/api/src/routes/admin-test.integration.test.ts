@@ -3,7 +3,7 @@
 // app. Covers scenarios / session / send (guards + happy with & without reply).
 // Coverage epic #187 — apps/api untested routes.
 
-import { withTenant } from "@chatman-media/conversation-engine";
+import { type ReplyStrategy, withTenant } from "@chatman-media/conversation-engine";
 import {
   applyAllMigrations,
   channels,
@@ -16,6 +16,7 @@ import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
+import type { PhotoProcessor } from "../lib/photo-processor.ts";
 import { makeRequireAuth } from "../middleware/require-auth.ts";
 import { makeAdminTestRoutes } from "./admin-test.ts";
 import { makeAuthRoutes } from "./auth.ts";
@@ -29,8 +30,10 @@ let sql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
 let app: Hono; // без replyStrategy
 let appReply: Hono; // с фейковым replyStrategy
+let appMedia: Hono; // с фейковым photoProcessor
 let token = "";
 let tenantId = 0;
+const mediaProcessorCalls: Array<{ externalRef: string; caption: string | null; bytes: number }> = [];
 
 beforeAll(
   async () => {
@@ -51,18 +54,35 @@ beforeAll(
 
     appReply = new Hono();
     appReply.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+    const replyStrategy: ReplyStrategy = {
+      generate: async () => [
+        { channelId: "x", externalUserId: "u", parts: [{ kind: "text", text: "бот ответ" }] },
+      ],
+    };
     appReply.route(
       "/",
       makeAdminTestRoutes({
         db,
-        // biome-ignore lint/suspicious/noExplicitAny: reply-strategy fake
-        replyStrategy: {
-          generate: async () => [
-            { channelId: "x", externalUserId: "u", parts: [{ kind: "text", text: "бот ответ" }] },
-          ],
-        } as any,
+        replyStrategy,
       }),
     );
+
+    appMedia = new Hono();
+    appMedia.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+    const photoProcessor: PhotoProcessor = {
+      async process({ inbound, adapter }) {
+        const part = inbound.parts.find((item) => item.kind === "photo");
+        if (part?.kind !== "photo") throw new Error("expected photo part");
+        const res = await adapter.downloadMedia(part.mediaRef);
+        const bytes = await res.arrayBuffer();
+        mediaProcessorCalls.push({
+          externalRef: part.mediaRef.externalRef,
+          caption: part.caption ?? null,
+          bytes: bytes.byteLength,
+        });
+      },
+    };
+    appMedia.route("/", makeAdminTestRoutes({ db, photoProcessor }));
 
     const sa = await app.request("/api/auth/signup", {
       method: "POST",
@@ -99,7 +119,23 @@ describe("admin-test bot-tester", () => {
     if (!sql) return;
     const res = await req("GET", "/api/admin/test/scenarios");
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { scenarios: unknown[] }).scenarios.length).toBeGreaterThan(0);
+    const body = (await res.json()) as {
+      scenarios: Array<{
+        id: string;
+        steps: Array<{ mediaUrl?: string; mediaType?: string; caption?: string }>;
+      }>;
+    };
+    expect(body.scenarios.length).toBeGreaterThan(0);
+    expect(
+      body.scenarios
+        .find((scenario) => scenario.id === "exchange_rub")
+        ?.steps.some((step) => step.mediaUrl === "asset:receipt-sber.png" && step.mediaType === "photo"),
+    ).toBe(true);
+    expect(
+      body.scenarios
+        .find((scenario) => scenario.id === "exchange_kyc_passport")
+        ?.steps.some((step) => step.mediaUrl === "asset:passport-demo.png" && step.caption),
+    ).toBe(true);
   });
 
   it("POST /send без text/media → 400", async () => {
@@ -145,6 +181,31 @@ describe("admin-test bot-tester", () => {
     expect(bad.status).toBe(400);
     const media = await req("POST", SEND, { mediaUrl: "https://x.io/i.jpg", mediaType: "photo", caption: "чек" });
     expect(media.status).toBe(200);
+  });
+
+  it("POST /send asset photo → photoProcessor получает локальный демо-файл", async () => {
+    if (!sql) return;
+    await withTenant(db, tenantId, async (tx) =>
+      tx.insert(channels).values({ tenantId, kind: "telegram_bot", externalId: "@bottest-media", status: "active" }),
+    );
+    mediaProcessorCalls.length = 0;
+
+    const media = await req(
+      "POST",
+      SEND,
+      {
+        mediaUrl: "asset:receipt-sber.png",
+        mediaType: "photo",
+        caption: "Оплатил, вот чек",
+      },
+      appMedia,
+    );
+
+    expect(media.status).toBe(200);
+    expect(mediaProcessorCalls).toHaveLength(1);
+    expect(mediaProcessorCalls[0]?.externalRef).toBe("asset:receipt-sber.png");
+    expect(mediaProcessorCalls[0]?.caption).toBe("Оплатил, вот чек");
+    expect(mediaProcessorCalls[0]?.bytes).toBeGreaterThan(1000);
   });
 
   it("DELETE /session (есть канал+контакт) → ok", async () => {
