@@ -214,6 +214,41 @@ describe("ProviderRelayOrchestrator", () => {
 		}
 	});
 
+	it("fails closed for manual provider request when tenant flag is disabled", async () => {
+		if (!enabled) return;
+		const existing = await relayRepo().createServiceOrder({
+			customerContactId,
+			requestType: "massage",
+			status: "provider_declined",
+			summary: "Manual retry should stay gated",
+			metadata: { serviceArea: "Chaweng" },
+			nowEpoch: now + 4,
+		});
+		await db
+			.update(schema.tenantFeatureFlags)
+			.set({ enabled: false, updatedAt: now + 5 })
+			.where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
+		const requestsBefore = await tableCount("provider_requests");
+		const outboundBefore = await tableCount("outbound_queue");
+
+		try {
+			const result = await orchestrator().sendProviderRequestForOrder({
+				orderId: existing.id,
+				providerIdOverride: providerId,
+				nowEpoch: now + 6,
+			});
+
+			expect(result).toEqual({ ok: false, reason: "provider_relay_disabled" });
+			expect(await tableCount("provider_requests")).toBe(requestsBefore);
+			expect(await tableCount("outbound_queue")).toBe(outboundBefore);
+		} finally {
+			await db
+				.update(schema.tenantFeatureFlags)
+				.set({ enabled: true, updatedAt: now + 7 })
+				.where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
+		}
+	});
+
 	it("creates order/request, enqueues provider outbound, and records sent events", async () => {
 		if (!enabled) return;
 		const result = await orchestrator().startProviderOutreach({

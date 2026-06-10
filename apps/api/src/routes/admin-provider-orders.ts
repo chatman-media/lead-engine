@@ -2,14 +2,15 @@ import {
 	canTransitionServiceOrder,
 	CustomerOfferFlow,
 	type Db,
+	PROVIDER_RELAY_FEATURE_KEY,
 	ProviderRelayOrchestrator,
 	ProviderRelayRepo,
 	type ProviderRequestStatus,
 	type ServiceOrderStatus,
+	TenantFeatureFlagRepo,
 	withTenant,
 } from "@chatman-media/conversation-engine";
 import {
-	appSettings,
 	channelIdentities,
 	channels,
 	contacts,
@@ -20,10 +21,11 @@ import {
 	providerRequests,
 	providerServices,
 	serviceOrders,
+	tenantFeatureFlags,
 } from "@chatman-media/storage";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { type Context, Hono } from "hono";
-import { recordAudit } from "../lib/audit.ts";
+import { type AuditEntry, recordAudit } from "../lib/audit.ts";
 
 type ActionBody = {
 	providerId?: unknown;
@@ -262,7 +264,7 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 			body.enabled,
 			epochNow(),
 		);
-		await recordAudit(opts.db, {
+		await recordProviderOrderAudit(opts.db, {
 			tenantId,
 			adminId,
 			action: "provider_relay.settings_update",
@@ -334,7 +336,7 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 			return { order: updated };
 		});
 		if ("error" in result) return c.json({ error: result.error }, result.status);
-		await recordAudit(opts.db, {
+		await recordProviderOrderAudit(opts.db, {
 			tenantId,
 			adminId,
 			action: "provider_order.assign_provider",
@@ -379,7 +381,7 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 				result.reason === "order_not_found" ? 404 : 409,
 			);
 		}
-		await recordAudit(opts.db, {
+		await recordProviderOrderAudit(opts.db, {
 			tenantId,
 			adminId,
 			action: "provider_order.send_provider_request",
@@ -432,7 +434,7 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 			return { providerRequest: accepted };
 		});
 		if ("error" in result) return c.json({ error: result.error }, result.status);
-		await recordAudit(opts.db, {
+		await recordProviderOrderAudit(opts.db, {
 			tenantId,
 			adminId,
 			action: "provider_order.approve_quote",
@@ -473,7 +475,7 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 				result.reason === "order_not_found" ? 404 : 409,
 			);
 		}
-		await recordAudit(opts.db, {
+		await recordProviderOrderAudit(opts.db, {
 			tenantId,
 			adminId,
 			action: "provider_order.send_customer_offer",
@@ -488,7 +490,7 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 			},
 		});
 		if (offerTextOverride) {
-			await recordAudit(opts.db, {
+			await recordProviderOrderAudit(opts.db, {
 				tenantId,
 				adminId,
 				action: "provider_order.manual_offer_override",
@@ -543,7 +545,7 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 			return { order: cancelled };
 		});
 		if ("error" in result) return c.json({ error: result.error }, result.status);
-		await recordAudit(opts.db, {
+		await recordProviderOrderAudit(opts.db, {
 			tenantId,
 			adminId,
 			action: "provider_order.cancel",
@@ -598,7 +600,7 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 			return { order: fulfilled, transitions };
 		});
 		if ("error" in result) return c.json({ error: result.error }, result.status);
-		await recordAudit(opts.db, {
+		await recordProviderOrderAudit(opts.db, {
 			tenantId,
 			adminId,
 			action: "provider_order.mark_fulfilled",
@@ -607,7 +609,7 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 			details: { transitions: result.transitions ?? [] },
 		});
 		if (result.transitions && result.transitions.length > 0) {
-			await recordAudit(opts.db, {
+			await recordProviderOrderAudit(opts.db, {
 				tenantId,
 				adminId,
 				action: "provider_order.payment_transition",
@@ -622,9 +624,15 @@ export function makeAdminProviderOrdersRoutes(opts: { db: Db }): Hono {
 	return app;
 }
 
+async function recordProviderOrderAudit(db: Db, entry: AuditEntry): Promise<void> {
+	await withTenant(db, entry.tenantId, async (tx) => {
+		await recordAudit(tx as Db, entry);
+	});
+}
+
 type ProviderRelaySettings = {
 	enabled: boolean;
-	source: "default" | "setting";
+	source: "default" | "flag";
 	updatedAt: number | null;
 };
 
@@ -653,7 +661,7 @@ type ProviderRelayMetrics = {
 	};
 };
 
-const PROVIDER_RELAY_FLAG_DEFAULT = true;
+const PROVIDER_RELAY_FLAG_DEFAULT = false;
 
 const activeOrderStatuses = new Set([
 	"intake",
@@ -670,20 +678,23 @@ const responseProviderRequestStatuses = new Set(["quoted", "accepted", "declined
 
 const openProviderRequestStatuses = new Set(["sent", "seen", "quoted"]);
 
-function providerRelayEnabledKey(tenantId: number): string {
-	return `tenant:${tenantId}:provider_relay_enabled`;
-}
-
 async function loadProviderRelaySettings(
 	db: Db,
 	tenantId: number,
 ): Promise<ProviderRelaySettings> {
-	const key = providerRelayEnabledKey(tenantId);
 	const rows = await withTenant(db, tenantId, (tx) =>
 		tx
-			.select({ value: appSettings.value, updatedAt: appSettings.updatedAt })
-			.from(appSettings)
-			.where(and(eq(appSettings.tenantId, tenantId), eq(appSettings.key, key)))
+			.select({
+				enabled: tenantFeatureFlags.enabled,
+				updatedAt: tenantFeatureFlags.updatedAt,
+			})
+			.from(tenantFeatureFlags)
+			.where(
+				and(
+					eq(tenantFeatureFlags.tenantId, tenantId),
+					eq(tenantFeatureFlags.featureKey, PROVIDER_RELAY_FEATURE_KEY),
+				),
+			)
 			.limit(1),
 	);
 	const row = rows[0];
@@ -695,8 +706,8 @@ async function loadProviderRelaySettings(
 		};
 	}
 	return {
-		enabled: row.value !== "false",
-		source: "setting",
+		enabled: row.enabled,
+		source: "flag",
 		updatedAt: row.updatedAt,
 	};
 }
@@ -707,18 +718,15 @@ async function setProviderRelayEnabled(
 	enabled: boolean,
 	now: number,
 ): Promise<ProviderRelaySettings> {
-	const key = providerRelayEnabledKey(tenantId);
-	const value = enabled ? "true" : "false";
-	await withTenant(db, tenantId, (tx) =>
-		tx
-			.insert(appSettings)
-			.values({ tenantId, key, value, updatedAt: now })
-			.onConflictDoUpdate({
-				target: appSettings.key,
-				set: { value, updatedAt: now },
-			}),
+	const row = await withTenant(db, tenantId, (tx) =>
+		new TenantFeatureFlagRepo({ db: tx, tenantId }).setEnabled({
+			featureKey: PROVIDER_RELAY_FEATURE_KEY,
+			enabled,
+			nowEpoch: now,
+			metadata: { source: "provider_order_console" },
+		}),
 	);
-	return { enabled, source: "setting", updatedAt: now };
+	return { enabled: row.enabled, source: "flag", updatedAt: row.updatedAt };
 }
 
 async function rejectIfProviderRelayDisabled(
