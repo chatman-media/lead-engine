@@ -66,6 +66,10 @@ ignore:
   - "apps/admin-ui/**"
   - "apps/landing/**"
   - "apps/widget/**"
+  # Live-eval CLI (#515): main()-флоу строит реальные LLM-клиенты из БД/секретов
+  # под import.meta.main и из тестов недостижим; экспортированные чистые функции
+  # покрыты. Сосед run-tool-regressions.ts остаётся в учёте (99%+).
+  - "apps/api/scripts/run-answer-step-eval.ts"
   - "**/*.test.ts"
   - "**/*.spec.ts"
   - "**/dist/**"
