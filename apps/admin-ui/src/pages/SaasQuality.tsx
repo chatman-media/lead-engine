@@ -49,6 +49,7 @@ import {
   type QualityToolCallImprovementSeverity,
   type QualityToolCallImprovementStatus,
   type QualityToolCallRegressionCase,
+  type QualityToolCallRegressionCaseStatus,
   type QualityToolCallSource,
   type QualityTranscriptTurn,
   saas,
@@ -424,6 +425,11 @@ export function SaasQuality() {
   const [trackedToolProposalStatus, setTrackedToolProposalStatus] = useState<
     "all" | QualityToolCallImprovementStatus
   >("pending");
+  const [toolRegressionCaseStatus, setToolRegressionCaseStatus] = useState<
+    "all" | QualityToolCallRegressionCaseStatus
+  >("active");
+  const [toolRegressionCasesExporting, setToolRegressionCasesExporting] = useState(false);
+  const [toolRegressionCaseActionId, setToolRegressionCaseActionId] = useState<number | null>(null);
 
   const styleOptions = useMemo(() => summary?.byStyle.map((item) => item.styleSlug) ?? [], [summary]);
   const personaOptions = useMemo(
@@ -553,11 +559,13 @@ export function SaasQuality() {
     }
   }
 
-  async function loadToolRegressionCases() {
+  async function loadToolRegressionCases(
+    status: "all" | QualityToolCallRegressionCaseStatus = toolRegressionCaseStatus,
+  ) {
     setToolRegressionCasesLoading(true);
     setToolRegressionCasesError("");
     try {
-      const result = await saas.getQualityToolCallRegressionCases({ status: "active", limit: 50 });
+      const result = await saas.getQualityToolCallRegressionCases({ status, limit: 50 });
       setToolRegressionCases(result.items);
     } catch (err) {
       if (redirectOnUnauthorized(err)) return;
@@ -844,6 +852,44 @@ export function SaasQuality() {
       toast.error(err instanceof Error ? err.message : "Не удалось создать regression case");
     } finally {
       setTrackedToolProposalActionId(null);
+    }
+  }
+
+  async function handleToolRegressionCasesExport() {
+    setToolRegressionCasesExporting(true);
+    try {
+      await saas.exportQualityToolCallRegressionCasesJsonl({
+        status: toolRegressionCaseStatus,
+        limit: 500,
+      });
+      toast.success("Regression cases JSONL выгружен");
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      toast.error(err instanceof Error ? err.message : "Не удалось выгрузить regression cases");
+    } finally {
+      setToolRegressionCasesExporting(false);
+    }
+  }
+
+  async function handleToolRegressionCaseStatus(
+    item: QualityToolCallRegressionCase,
+    status: QualityToolCallRegressionCaseStatus,
+  ) {
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
+
+    setToolRegressionCaseActionId(item.id);
+    try {
+      await saas.setQualityToolCallRegressionCaseStatus(item.id, { status });
+      await loadToolRegressionCases(toolRegressionCaseStatus);
+      toast.success(status === "archived" ? "Regression case archived" : "Regression case restored");
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      toast.error(err instanceof Error ? err.message : "Не удалось обновить regression case");
+    } finally {
+      setToolRegressionCaseActionId(null);
     }
   }
 
@@ -2152,20 +2198,49 @@ export function SaasQuality() {
           )}
 
           <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-sm font-medium">Regression cases</h3>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 px-2 text-xs"
-                onClick={() => void loadToolRegressionCases()}
-                disabled={toolRegressionCasesLoading}
-              >
-                <RefreshCwIcon
-                  className={cn("size-3.5", toolRegressionCasesLoading && "animate-spin")}
-                />
-                Cases
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={toolRegressionCaseStatus}
+                  onValueChange={(value) => {
+                    const next = value as "all" | QualityToolCallRegressionCaseStatus;
+                    setToolRegressionCaseStatus(next);
+                    void loadToolRegressionCases(next);
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[130px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">active</SelectItem>
+                    <SelectItem value="archived">archived</SelectItem>
+                    <SelectItem value="all">all</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 gap-1.5 px-2 text-xs"
+                  onClick={() => void handleToolRegressionCasesExport()}
+                  disabled={toolRegressionCasesExporting}
+                >
+                  <DownloadIcon className="size-3.5" />
+                  JSONL
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 gap-1.5 px-2 text-xs"
+                  onClick={() => void loadToolRegressionCases()}
+                  disabled={toolRegressionCasesLoading}
+                >
+                  <RefreshCwIcon
+                    className={cn("size-3.5", toolRegressionCasesLoading && "animate-spin")}
+                  />
+                  Cases
+                </Button>
+              </div>
             </div>
             <div className="overflow-x-auto rounded-md border">
               <Table>
@@ -2176,19 +2251,20 @@ export function SaasQuality() {
                     <TableHead>Signal</TableHead>
                     <TableHead>Expected</TableHead>
                     <TableHead className="text-right">When</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {toolRegressionCasesLoading && toolRegressionCases.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                         Загрузка regression cases…
                       </TableCell>
                     </TableRow>
                   )}
                   {!toolRegressionCasesLoading && toolRegressionCases.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                         Regression cases пока нет
                       </TableCell>
                     </TableRow>
@@ -2221,6 +2297,29 @@ export function SaasQuality() {
                       </TableCell>
                       <TableCell className="text-right text-xs text-muted-foreground">
                         {formatDate(item.createdAt)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {canWriteQuality && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 gap-1.5 px-2 text-xs"
+                            disabled={toolRegressionCaseActionId === item.id}
+                            onClick={() =>
+                              void handleToolRegressionCaseStatus(
+                                item,
+                                item.status === "archived" ? "active" : "archived",
+                              )
+                            }
+                          >
+                            {item.status === "archived" ? (
+                              <RotateCcwIcon className="size-3.5" />
+                            ) : (
+                              <XCircleIcon className="size-3.5" />
+                            )}
+                            {item.status === "archived" ? "Restore" : "Archive"}
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

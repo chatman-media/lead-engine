@@ -561,32 +561,65 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
 
   app.get("/api/admin/quality/tool-call-regression-cases", async (c) => {
     const tenantId = c.var.tenantId;
-    const limit = parsePositiveIntQuery(c.req.query("limit"), 50, 200);
-    if (limit === null) return c.json({ error: "invalid limit" }, 400);
-
-    const statusRaw = c.req.query("status") ?? "active";
-    const status =
-      statusRaw === "all"
-        ? "all"
-        : TOOL_CALL_REGRESSION_CASE_STATUSES.has(statusRaw as ToolCallRegressionCaseStatus)
-          ? (statusRaw as ToolCallRegressionCaseStatus)
-          : null;
-    if (status === null) return c.json({ error: "invalid status" }, 400);
+    const filters = parseToolCallRegressionCaseListQuery(
+      {
+        status: c.req.query("status"),
+        limit: c.req.query("limit"),
+      },
+      50,
+      200,
+    );
+    if (filters.kind === "invalid") return c.json({ error: filters.error }, 400);
 
     const rows = await withTenant(opts.db, tenantId, async (tx) => {
       const conditions: SQL<unknown>[] = [eq(agentToolCallRegressionCases.tenantId, tenantId)];
-      if (status !== "all") {
-        conditions.push(eq(agentToolCallRegressionCases.status, status));
+      if (filters.value.status !== "all") {
+        conditions.push(eq(agentToolCallRegressionCases.status, filters.value.status));
       }
       return tx
         .select(toolCallRegressionCaseSelect)
         .from(agentToolCallRegressionCases)
         .where(and(...conditions))
         .orderBy(desc(agentToolCallRegressionCases.updatedAt), desc(agentToolCallRegressionCases.id))
-        .limit(limit);
+        .limit(filters.value.limit);
     });
 
     return c.json({ items: rows.map(toToolCallRegressionCaseResponse) });
+  });
+
+  app.get("/api/admin/quality/tool-call-regression-cases/export.jsonl", async (c) => {
+    const tenantId = c.var.tenantId;
+    const filters = parseToolCallRegressionCaseListQuery(
+      {
+        status: c.req.query("status"),
+        limit: c.req.query("limit"),
+      },
+      200,
+      1000,
+    );
+    if (filters.kind === "invalid") return c.json({ error: filters.error }, 400);
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) => {
+      const conditions: SQL<unknown>[] = [eq(agentToolCallRegressionCases.tenantId, tenantId)];
+      if (filters.value.status !== "all") {
+        conditions.push(eq(agentToolCallRegressionCases.status, filters.value.status));
+      }
+      return tx
+        .select(toolCallRegressionCaseSelect)
+        .from(agentToolCallRegressionCases)
+        .where(and(...conditions))
+        .orderBy(desc(agentToolCallRegressionCases.updatedAt), desc(agentToolCallRegressionCases.id))
+        .limit(filters.value.limit);
+    });
+
+    const jsonl = rows
+      .map((row) => JSON.stringify(toToolCallRegressionCaseExportRecord(row)))
+      .join("\n");
+    const body = jsonl ? `${jsonl}\n` : "";
+    return c.body(body, 200, {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="tool-call-regression-cases.jsonl"',
+    });
   });
 
   app.post(
@@ -755,6 +788,59 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     });
 
     return c.json({ ok: true, proposal: toToolCallImprovementProposalResponse(row) });
+  });
+
+  app.patch("/api/admin/quality/tool-call-regression-cases/:id/status", async (c) => {
+    const tenantId = c.var.tenantId;
+    const adminId = c.var.adminId as number | undefined;
+    const id = parsePositiveParamId(c.req.param("id"));
+    if (id === null) return c.json({ error: "invalid id" }, 400);
+
+    let body: QualityToolCallRegressionCaseStatusBody;
+    try {
+      body = (await c.req.json()) as QualityToolCallRegressionCaseStatusBody;
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return c.json({ error: "invalid json" }, 400);
+    }
+
+    const statusRaw = typeof body.status === "string" ? body.status.trim() : "";
+    const status = TOOL_CALL_REGRESSION_CASE_STATUSES.has(statusRaw as ToolCallRegressionCaseStatus)
+      ? (statusRaw as ToolCallRegressionCaseStatus)
+      : null;
+    if (!status) {
+      return c.json({
+        error: `status must be one of: ${Array.from(TOOL_CALL_REGRESSION_CASE_STATUSES).join(", ")}`,
+      }, 400);
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const [row] = await withTenant(opts.db, tenantId, async (tx) => {
+      return tx
+        .update(agentToolCallRegressionCases)
+        .set({ status, updatedAt: now })
+        .where(
+          and(
+            eq(agentToolCallRegressionCases.tenantId, tenantId),
+            eq(agentToolCallRegressionCases.id, id),
+          ),
+        )
+        .returning(toolCallRegressionCaseSelect);
+    });
+    if (!row) return c.json({ error: "regression case not found" }, 404);
+
+    await recordAudit(opts.db, {
+      tenantId,
+      adminId,
+      action: "quality.tool_call_regression_case.status",
+      targetKind: "agent_tool_call_regression_case",
+      targetId: id,
+      details: { status },
+    });
+
+    return c.json({ ok: true, case: toToolCallRegressionCaseResponse(row) });
   });
 
   app.post(
@@ -2826,6 +2912,11 @@ type ToolCallFeedbackQuery = {
   error?: boolean;
 };
 
+type ToolCallRegressionCaseListQuery = {
+  status: ToolCallRegressionCaseStatus | "all";
+  limit: number;
+};
+
 type ToolCallFeedbackJoinedRow = {
   feedbackId: number;
   feedbackToolCallId: number;
@@ -2965,6 +3056,10 @@ type QualityToolCallRegressionCaseCreateBody = {
   expectedBehavior?: unknown;
 };
 
+type QualityToolCallRegressionCaseStatusBody = {
+  status?: unknown;
+};
+
 type ToolCallRegressionCaseCreateInput = {
   exampleIndex: number;
   title: string | null;
@@ -3064,6 +3159,29 @@ function parseToolCallFeedbackBody(
       ...(error.value !== undefined ? { error: error.value } : {}),
     },
   };
+}
+
+function parseToolCallRegressionCaseListQuery(
+  raw: {
+    status?: string;
+    limit?: string;
+  },
+  defaultLimit: number,
+  maxLimit: number,
+): { kind: "ok"; value: ToolCallRegressionCaseListQuery } | { kind: "invalid"; error: string } {
+  const limit = parsePositiveIntQuery(raw.limit, defaultLimit, maxLimit);
+  if (limit === null) return { kind: "invalid", error: "invalid limit" };
+
+  const statusRaw = raw.status ?? "active";
+  const status =
+    statusRaw === "all"
+      ? "all"
+      : TOOL_CALL_REGRESSION_CASE_STATUSES.has(statusRaw as ToolCallRegressionCaseStatus)
+        ? (statusRaw as ToolCallRegressionCaseStatus)
+        : null;
+  if (status === null) return { kind: "invalid", error: "invalid status" };
+
+  return { kind: "ok", value: { status, limit } };
 }
 
 function parseToolCallImprovementResolutionInput(
@@ -3389,6 +3507,13 @@ function toToolCallRegressionCaseResponse(row: ToolCallRegressionCaseRow) {
     createdByAdminId: row.createdByAdminId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+function toToolCallRegressionCaseExportRecord(row: ToolCallRegressionCaseRow) {
+  return {
+    recordType: "tool_call_regression_case",
+    ...toToolCallRegressionCaseResponse(row),
   };
 }
 

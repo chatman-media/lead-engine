@@ -1045,10 +1045,79 @@ describe("admin quality JSONL export", () => {
     ).json()) as QualityToolCallRegressionCasesResponse;
     expect(cases.items.some((item) => item.id === promotedBody.case.id)).toBe(true);
 
+    const exported = await authReq(
+      tokenA,
+      "/api/admin/quality/tool-call-regression-cases/export.jsonl?limit=10",
+    );
+    expect(exported.status).toBe(200);
+    expect(exported.headers.get("Content-Type")).toContain("application/x-ndjson");
+    expect(exported.headers.get("Content-Disposition")).toContain(
+      "tool-call-regression-cases.jsonl",
+    );
+    const exportedLines = (await exported.text()).trim().split("\n");
+    const exportedRow = JSON.parse(exportedLines[0] ?? "{}") as QualityToolCallRegressionCaseResponse & {
+      recordType?: string;
+    };
+    expect(exportedRow).toMatchObject({
+      recordType: "tool_call_regression_case",
+      id: promotedBody.case.id,
+      input: expect.objectContaining({ args: { quoteId: "q1" } }),
+      expected: expect.objectContaining({
+        behavior: "The agent must require a verified quote before order creation.",
+      }),
+    });
+
     const tenantBCases = (await (
       await authReq(tokenB, "/api/admin/quality/tool-call-regression-cases?status=all")
     ).json()) as QualityToolCallRegressionCasesResponse;
     expect(tenantBCases.items).toEqual([]);
+
+    const managerStatus = await authJsonReq(
+      managerTokenA,
+      `/api/admin/quality/tool-call-regression-cases/${promotedBody.case.id}/status`,
+      { status: "archived" },
+    );
+    expect(managerStatus.status).toBe(403);
+
+    const crossTenantStatus = await authJsonReq(
+      tokenB,
+      `/api/admin/quality/tool-call-regression-cases/${promotedBody.case.id}/status`,
+      { status: "archived" },
+    );
+    expect(crossTenantStatus.status).toBe(404);
+
+    const invalidStatus = await authJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-call-regression-cases/${promotedBody.case.id}/status`,
+      { status: "deleted" },
+    );
+    expect(invalidStatus.status).toBe(400);
+
+    const archived = await authJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-call-regression-cases/${promotedBody.case.id}/status`,
+      { status: "archived" },
+    );
+    expect(archived.status).toBe(200);
+    const archivedBody = (await archived.json()) as QualityToolCallRegressionCaseStatusResponse;
+    expect(archivedBody.case.status).toBe("archived");
+
+    const activeAfterArchive = (await (
+      await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases?status=active")
+    ).json()) as QualityToolCallRegressionCasesResponse;
+    expect(activeAfterArchive.items.some((item) => item.id === promotedBody.case.id)).toBe(false);
+
+    const archivedCases = (await (
+      await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases?status=archived")
+    ).json()) as QualityToolCallRegressionCasesResponse;
+    expect(archivedCases.items.some((item) => item.id === promotedBody.case.id)).toBe(true);
+
+    const restored = await authJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-call-regression-cases/${promotedBody.case.id}/status`,
+      { status: "active" },
+    );
+    expect(restored.status).toBe(200);
   });
 
   it("validates tool-call feedback analytics query params", async () => {
@@ -1090,6 +1159,14 @@ describe("admin quality JSONL export", () => {
       .toBe(400);
     expect((await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases?limit=0")).status)
       .toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases/export.jsonl?status=bad"))
+        .status,
+    ).toBe(400);
+    expect(
+      (await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases/export.jsonl?limit=0"))
+        .status,
+    ).toBe(400);
   });
 
   it("validates tool-call feedback payloads", async () => {
@@ -2726,6 +2803,11 @@ type QualityToolCallRegressionCaseCreateResponse = {
   ok: true;
   case: QualityToolCallRegressionCaseResponse;
   proposal: QualityToolCallImprovementProposalResponse;
+};
+
+type QualityToolCallRegressionCaseStatusResponse = {
+  ok: true;
+  case: QualityToolCallRegressionCaseResponse;
 };
 
 type QualitySummaryResponse = {
