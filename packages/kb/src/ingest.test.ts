@@ -137,6 +137,16 @@ describe("ingestText", () => {
     expect(second.documentId).toBe(first.documentId);
   });
 
+  it("существующий док с тем же hash, но 0 чанков → пересоздаётся", async () => {
+    const state = newState();
+    const deps: IngestDeps = { kb: fakeStore(state), embedder };
+    const first = await ingestText({ title: "D", body: "stable text payload" }, deps);
+    // chunkCount остаётся 0 → dedup short-circuit НЕ срабатывает
+    const second = await ingestText({ title: "D", body: "stable text payload" }, deps);
+    expect(second.created).toBe(true);
+    expect(state.deleted).toEqual([first.documentId]);
+  });
+
   it("существующий док с другим hash → удаляется и пересоздаётся", async () => {
     const state = newState();
     const deps: IngestDeps = { kb: fakeStore(state), embedder, topic: "t" };
@@ -175,6 +185,59 @@ describe("ingestFile", () => {
       title: "Nice Title",
     });
     expect(r.source).toBe("upload:abc");
+  });
+
+  it("повторный ingest того же файла → dedup (created:false)", async () => {
+    const dir = tmp();
+    const file = join(dir, "doc.md");
+    writeFileSync(file, "Stable file content for dedup.", "utf8");
+    const state = newState();
+    const deps: IngestDeps = { kb: fakeStore(state), embedder };
+    const first = await ingestFile(file, deps);
+    for (const d of state.docs.values()) d.chunkCount = first.chunks;
+    const second = await ingestFile(file, deps);
+    expect(second.created).toBe(false);
+    expect(second.documentId).toBe(first.documentId);
+    expect(second.chunks).toBe(first.chunks);
+    expect(state.deleted).toEqual([]);
+  });
+
+  it("тот же hash, но 0 чанков в базе → файл пересоздаётся", async () => {
+    const dir = tmp();
+    const file = join(dir, "doc.md");
+    writeFileSync(file, "Stable file content, zero chunks stored.", "utf8");
+    const state = newState();
+    const deps: IngestDeps = { kb: fakeStore(state), embedder };
+    const first = await ingestFile(file, deps);
+    // chunkCount остаётся 0 → dedup short-circuit НЕ срабатывает
+    const second = await ingestFile(file, deps);
+    expect(second.created).toBe(true);
+    expect(state.deleted).toEqual([first.documentId]);
+  });
+
+  it("файл изменился (другой hash) → старый док удаляется", async () => {
+    const dir = tmp();
+    const file = join(dir, "doc.md");
+    writeFileSync(file, "Version one of the file.", "utf8");
+    const state = newState();
+    const deps: IngestDeps = { kb: fakeStore(state), embedder };
+    const first = await ingestFile(file, deps);
+    for (const d of state.docs.values()) d.chunkCount = first.chunks;
+    writeFileSync(file, "Version two of the file.", "utf8");
+    const second = await ingestFile(file, deps);
+    expect(second.created).toBe(true);
+    expect(state.deleted).toEqual([first.documentId]);
+  });
+
+  it("файл только из frontmatter → 0 чанков, created:true", async () => {
+    const dir = tmp();
+    const file = join(dir, "empty.md");
+    writeFileSync(file, "---\ntitle: x\n---\n", "utf8");
+    const state = newState();
+    const r = await ingestFile(file, { kb: fakeStore(state), embedder });
+    expect(r.chunks).toBe(0);
+    expect(r.created).toBe(true);
+    expect(state.inserted).toBe(0);
   });
 });
 

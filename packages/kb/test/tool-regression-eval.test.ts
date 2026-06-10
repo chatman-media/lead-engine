@@ -134,4 +134,150 @@ describe("tool-call regression eval", () => {
     expect(skipped.results[0]?.skipReason).toBe("unsupported_tool");
     expect(toolCallRegressionExitCode(skipped)).toBe(0);
   });
+
+  test("fails a JSON line that is not an object", () => {
+    const report = runToolCallRegressionCases({ raw: "[1,2,3]\n42\n" });
+    expect(report.summary.failed).toBe(2);
+    const formatted = formatToolCallRegressionFailures(report);
+    expect(formatted).toContain("path=$");
+    expect(formatted).toContain("expected=object");
+  });
+
+  test("reports every invalid header field with its path", () => {
+    const report = runToolCallRegressionCases({
+      raw: jsonl({
+        recordType: "wrong_type",
+        id: 0,
+        source: "manual",
+        toolName: "  ",
+        label: "typo_label",
+        title: "",
+        status: "draft",
+      }),
+    });
+
+    expect(report.summary.failed).toBe(1);
+    const paths = report.results[0]?.failures.map((failure) => failure.path).sort();
+    expect(paths).toEqual(["id", "label", "recordType", "source", "status", "title", "toolName"]);
+    // identity could not be derived from the malformed header
+    expect(report.results[0]?.caseId).toBeNull();
+    expect(report.results[0]?.toolName).toBeNull();
+  });
+
+  test("reports every invalid body field with its path", () => {
+    const report = runToolCallRegressionCases({
+      raw: jsonl(
+        validRecord({
+          proposalId: 0,
+          toolCallId: "eleven",
+          input: "not-an-object",
+          expected: {
+            behavior: "ok behavior",
+            actionItems: [1, 2],
+            proposalKind: "  ",
+          },
+          context: "not-an-object",
+          createdByAdminId: -1,
+          createdAt: 0,
+          updatedAt: 1.5,
+        }),
+      ),
+    });
+
+    const paths = report.results[0]?.failures.map((failure) => failure.path).sort();
+    expect(paths).toEqual([
+      "context",
+      "createdAt",
+      "createdByAdminId",
+      "expected.actionItems",
+      "expected.proposalKind",
+      "input",
+      "proposalId",
+      "toolCallId",
+      "updatedAt",
+    ]);
+  });
+
+  test("fails a non-object expected block", () => {
+    const report = runToolCallRegressionCases({
+      raw: jsonl(validRecord({ expected: "do the right thing" })),
+    });
+    const failure = report.results[0]?.failures.find((item) => item.path === "expected");
+    expect(failure?.expected).toBe("object");
+    expect(failure?.actual).toBe("do the right thing");
+  });
+
+  test("validates input.source and feedback shape", () => {
+    const nonObjectFeedback = runToolCallRegressionCases({
+      raw: jsonl(
+        validRecord({
+          input: {
+            source: "   ",
+            toolName: "create_exchange_order",
+            args: null,
+            feedback: "nope",
+          },
+        }),
+      ),
+    });
+    const paths1 = nonObjectFeedback.results[0]?.failures.map((failure) => failure.path).sort();
+    expect(paths1).toEqual(["input.feedback", "input.source"]);
+
+    const badFeedbackFields = runToolCallRegressionCases({
+      raw: jsonl(
+        validRecord({
+          input: {
+            toolName: "create_exchange_order",
+            args: { quoteId: "q1" },
+            feedback: { label: "wrong_tool", note: 42 },
+          },
+        }),
+      ),
+    });
+    const paths2 = badFeedbackFields.results[0]?.failures.map((failure) => failure.path).sort();
+    expect(paths2).toEqual(["input.feedback.label", "input.feedback.note"]);
+  });
+
+  test("validates context.toolCall shape and field types", () => {
+    const nonObject = runToolCallRegressionCases({
+      raw: jsonl(validRecord({ context: { toolCall: "oops" } })),
+    });
+    expect(nonObject.results[0]?.failures.map((failure) => failure.path)).toEqual([
+      "context.toolCall",
+    ]);
+
+    const badFields = runToolCallRegressionCases({
+      raw: jsonl(
+        validRecord({
+          context: {
+            toolCall: {
+              error: "false",
+              cycle: "one",
+              toolCallIndex: 0.5,
+              latencyMs: "fast",
+            },
+          },
+        }),
+      ),
+    });
+    const paths = badFields.results[0]?.failures.map((failure) => failure.path).sort();
+    expect(paths).toEqual([
+      "context.toolCall.cycle",
+      "context.toolCall.error",
+      "context.toolCall.latencyMs",
+      "context.toolCall.result",
+      "context.toolCall.toolCallIndex",
+    ]);
+    // context.toolCall omitted entirely is fine
+    const noToolCall = runToolCallRegressionCases({ raw: jsonl(validRecord({ context: {} })) });
+    expect(noToolCall.summary.passed).toBe(1);
+  });
+
+  test("non-string failure values are JSON-serialized in the report", () => {
+    const report = runToolCallRegressionCases({
+      raw: jsonl(validRecord({ id: ["not", "an", "int"] })),
+    });
+    const failure = report.results[0]?.failures.find((item) => item.path === "id");
+    expect(failure?.actual).toBe('["not","an","int"]');
+  });
 });
