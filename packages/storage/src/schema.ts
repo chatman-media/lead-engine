@@ -1135,6 +1135,47 @@ export const agentToolCallImprovementProposals = pgTable("agent_tool_call_improv
   index("idx_agent_tool_call_improvement_resolution").on(t.tenantId, t.resolutionKind, sql`${t.updatedAt} DESC`),
 ]);
 
+// Regression cases promoted from applied tool-call improvement proposals.
+// These records make the quality loop concrete before a generic eval-suite
+// runner exists: the original trace input, reviewer expectation, and proposal
+// context are persisted as tenant-scoped artifacts.
+export const agentToolCallRegressionCases = pgTable("agent_tool_call_regression_cases", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  proposalId: integer("proposal_id").references(() => agentToolCallImprovementProposals.id, {
+    onDelete: "set null",
+  }),
+  toolCallId: integer("tool_call_id").references(() => agentToolCalls.id, { onDelete: "set null" }),
+  source: text("source").notNull().default("tool_call_feedback"),
+  toolName: text("tool_name").notNull(),
+  label: text("label").notNull(),
+  title: text("title").notNull(),
+  inputJson: text("input_json").notNull().default("{}"),
+  expectedJson: text("expected_json").notNull().default("{}"),
+  contextJson: text("context_json").notNull().default("{}"),
+  status: text("status").notNull().default("active"),
+  createdByAdminId: integer("created_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+  createdAt: integer("created_at").notNull().default(epochNow()),
+  updatedAt: integer("updated_at").notNull().default(epochNow()),
+}, (t) => [
+  check(
+    "agent_tool_call_regression_source_check",
+    sql`${t.source} IN ('tool_call_feedback')`,
+  ),
+  check(
+    "agent_tool_call_regression_label_check",
+    sql`${t.label} IN ('wrong_tool','missing_tool','bad_args')`,
+  ),
+  check(
+    "agent_tool_call_regression_status_check",
+    sql`${t.status} IN ('active','archived')`,
+  ),
+  index("idx_agent_tool_call_regression_status").on(t.tenantId, t.status, sql`${t.updatedAt} DESC`),
+  index("idx_agent_tool_call_regression_tool").on(t.tenantId, t.toolName, sql`${t.updatedAt} DESC`),
+  index("idx_agent_tool_call_regression_proposal").on(t.tenantId, t.proposalId),
+  index("idx_agent_tool_call_regression_tool_call").on(t.toolCallId),
+]);
+
 // ---- LLM provider configs (per (tenant, purpose)) ---------------------
 
 // Читается LlmRouter'ом для resolveChat/resolveEmbed (см. packages/llm-router).

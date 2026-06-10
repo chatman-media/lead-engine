@@ -1375,6 +1375,36 @@ export interface QualityToolCallImprovementProposalStatusOptions {
   resolution?: QualityToolCallImprovementResolution;
 }
 
+export type QualityToolCallRegressionCaseStatus = "active" | "archived";
+
+export interface QualityToolCallRegressionCase {
+  id: number;
+  proposalId: number | null;
+  toolCallId: number | null;
+  source: "tool_call_feedback";
+  toolName: string;
+  label: QualityToolCallFeedbackLabel;
+  title: string;
+  input: unknown;
+  expected: unknown;
+  context: unknown;
+  status: QualityToolCallRegressionCaseStatus;
+  createdByAdminId: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface QualityToolCallRegressionCaseListOptions {
+  status?: QualityToolCallRegressionCaseStatus | "all";
+  limit?: number;
+}
+
+export interface QualityToolCallRegressionCaseCreateOptions {
+  exampleIndex?: number;
+  title?: string | null;
+  expectedBehavior?: string | null;
+}
+
 export interface QualityTranscriptTurn {
   role: "candidate" | "salesperson";
   text: string;
@@ -3047,6 +3077,28 @@ export const saas = {
     }>(`/api/admin/quality/tool-call-feedback/improvement-proposals/${id}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status, ...(opts.resolution ? { resolution: opts.resolution } : {}) }),
+    });
+  },
+  getQualityToolCallRegressionCases(opts: QualityToolCallRegressionCaseListOptions = {}) {
+    const params = new URLSearchParams();
+    if (opts.status) params.set("status", opts.status);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return request<{ items: QualityToolCallRegressionCase[] }>(
+      `/api/admin/quality/tool-call-regression-cases${qs ? `?${qs}` : ""}`,
+    );
+  },
+  createQualityToolCallRegressionCase(
+    proposalId: number,
+    opts: QualityToolCallRegressionCaseCreateOptions = {},
+  ) {
+    return request<{
+      ok: boolean;
+      case: QualityToolCallRegressionCase;
+      proposal: QualityPersistedToolCallImprovementProposal;
+    }>(`/api/admin/quality/tool-call-feedback/improvement-proposals/${proposalId}/regression-cases`, {
+      method: "POST",
+      body: JSON.stringify(opts),
     });
   },
   runQualitySelfPlay(data: QualitySelfPlayRunOptions) {

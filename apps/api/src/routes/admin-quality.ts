@@ -35,6 +35,7 @@ import {
 import {
   agentToolCallFeedback,
   agentToolCallImprovementProposals,
+  agentToolCallRegressionCases,
   agentToolCalls,
   coachProposals,
   contacts,
@@ -89,6 +90,10 @@ const TOOL_CALL_IMPROVEMENT_RESOLUTION_KINDS = new Set<ToolCallImprovementResolu
   "shadow_eval",
   "pull_request",
   "other",
+]);
+const TOOL_CALL_REGRESSION_CASE_STATUSES = new Set<ToolCallRegressionCaseStatus>([
+  "active",
+  "archived",
 ]);
 
 const selfPlayMatchSelect = {
@@ -172,6 +177,23 @@ const toolCallImprovementProposalSelect = {
   resolutionRef: agentToolCallImprovementProposals.resolutionRef,
   resolutionUrl: agentToolCallImprovementProposals.resolutionUrl,
   resolutionNote: agentToolCallImprovementProposals.resolutionNote,
+};
+
+const toolCallRegressionCaseSelect = {
+  id: agentToolCallRegressionCases.id,
+  proposalId: agentToolCallRegressionCases.proposalId,
+  toolCallId: agentToolCallRegressionCases.toolCallId,
+  source: agentToolCallRegressionCases.source,
+  toolName: agentToolCallRegressionCases.toolName,
+  label: agentToolCallRegressionCases.label,
+  title: agentToolCallRegressionCases.title,
+  inputJson: agentToolCallRegressionCases.inputJson,
+  expectedJson: agentToolCallRegressionCases.expectedJson,
+  contextJson: agentToolCallRegressionCases.contextJson,
+  status: agentToolCallRegressionCases.status,
+  createdByAdminId: agentToolCallRegressionCases.createdByAdminId,
+  createdAt: agentToolCallRegressionCases.createdAt,
+  updatedAt: agentToolCallRegressionCases.updatedAt,
 };
 
 export interface AdminQualityRoutesOpts {
@@ -537,6 +559,36 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
     return c.json({ items: rows.map(toToolCallImprovementProposalResponse) });
   });
 
+  app.get("/api/admin/quality/tool-call-regression-cases", async (c) => {
+    const tenantId = c.var.tenantId;
+    const limit = parsePositiveIntQuery(c.req.query("limit"), 50, 200);
+    if (limit === null) return c.json({ error: "invalid limit" }, 400);
+
+    const statusRaw = c.req.query("status") ?? "active";
+    const status =
+      statusRaw === "all"
+        ? "all"
+        : TOOL_CALL_REGRESSION_CASE_STATUSES.has(statusRaw as ToolCallRegressionCaseStatus)
+          ? (statusRaw as ToolCallRegressionCaseStatus)
+          : null;
+    if (status === null) return c.json({ error: "invalid status" }, 400);
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) => {
+      const conditions: SQL<unknown>[] = [eq(agentToolCallRegressionCases.tenantId, tenantId)];
+      if (status !== "all") {
+        conditions.push(eq(agentToolCallRegressionCases.status, status));
+      }
+      return tx
+        .select(toolCallRegressionCaseSelect)
+        .from(agentToolCallRegressionCases)
+        .where(and(...conditions))
+        .orderBy(desc(agentToolCallRegressionCases.updatedAt), desc(agentToolCallRegressionCases.id))
+        .limit(limit);
+    });
+
+    return c.json({ items: rows.map(toToolCallRegressionCaseResponse) });
+  });
+
   app.post(
     "/api/admin/quality/tool-call-feedback/improvement-proposals/create-from-feedback",
     async (c) => {
@@ -704,6 +756,111 @@ export function makeAdminQualityRoutes(opts: AdminQualityRoutesOpts): Hono {
 
     return c.json({ ok: true, proposal: toToolCallImprovementProposalResponse(row) });
   });
+
+  app.post(
+    "/api/admin/quality/tool-call-feedback/improvement-proposals/:id/regression-cases",
+    async (c) => {
+      const tenantId = c.var.tenantId;
+      const adminId = c.var.adminId as number | undefined;
+      const id = parsePositiveParamId(c.req.param("id"));
+      if (id === null) return c.json({ error: "invalid id" }, 400);
+
+      let body: QualityToolCallRegressionCaseCreateBody;
+      try {
+        body = (await c.req.json()) as QualityToolCallRegressionCaseCreateBody;
+      } catch {
+        return c.json({ error: "invalid json" }, 400);
+      }
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return c.json({ error: "invalid json" }, 400);
+      }
+
+      const input = parseToolCallRegressionCaseCreateInput(body);
+      if (input.kind === "invalid") return c.json({ error: input.error }, 400);
+
+      const now = Math.floor(Date.now() / 1000);
+      const result = await withTenant(opts.db, tenantId, async (tx) => {
+        const [proposal] = await tx
+          .select(toolCallImprovementProposalSelect)
+          .from(agentToolCallImprovementProposals)
+          .where(
+            and(
+              eq(agentToolCallImprovementProposals.tenantId, tenantId),
+              eq(agentToolCallImprovementProposals.id, id),
+            ),
+          )
+          .limit(1);
+        if (!proposal) return { kind: "not_found" as const };
+
+        const values = buildToolCallRegressionCaseInsert({
+          tenantId,
+          adminId,
+          now,
+          proposal,
+          input: input.value,
+        });
+        if (values.kind === "invalid") {
+          return { kind: "invalid" as const, error: values.error };
+        }
+
+        const [regressionCase] = await tx
+          .insert(agentToolCallRegressionCases)
+          .values(values.value)
+          .returning(toolCallRegressionCaseSelect);
+        if (!regressionCase) {
+          return { kind: "invalid" as const, error: "failed to create regression case" };
+        }
+
+        const resolution: ToolCallImprovementResolution = {
+          kind: "regression_case",
+          ref: `REG-${regressionCase.id}`,
+          url: null,
+          note: regressionCase.title,
+        };
+        const [updatedProposal] = await tx
+          .update(agentToolCallImprovementProposals)
+          .set({
+            status: "applied",
+            updatedAt: now,
+            decidedAt: now,
+            decidedByAdminId: adminId ?? null,
+            ...toolCallImprovementResolutionPatch("applied", resolution),
+          })
+          .where(
+            and(
+              eq(agentToolCallImprovementProposals.tenantId, tenantId),
+              eq(agentToolCallImprovementProposals.id, id),
+            ),
+          )
+          .returning(toolCallImprovementProposalSelect);
+
+        if (!updatedProposal) return { kind: "not_found" as const };
+        return { kind: "ok" as const, regressionCase, proposal: updatedProposal };
+      });
+
+      if (result.kind === "not_found") return c.json({ error: "proposal not found" }, 404);
+      if (result.kind === "invalid") return c.json({ error: result.error }, 400);
+
+      await recordAudit(opts.db, {
+        tenantId,
+        adminId,
+        action: "quality.tool_call_regression_case.create",
+        targetKind: "agent_tool_call_regression_case",
+        targetId: result.regressionCase.id,
+        details: {
+          proposalId: id,
+          toolName: result.regressionCase.toolName,
+          label: result.regressionCase.label,
+        },
+      });
+
+      return c.json({
+        ok: true,
+        case: toToolCallRegressionCaseResponse(result.regressionCase),
+        proposal: toToolCallImprovementProposalResponse(result.proposal),
+      }, 201);
+    },
+  );
 
   app.get("/api/admin/quality/self-play/summary", async (c) => {
     const tenantId = c.var.tenantId;
@@ -2725,6 +2882,7 @@ type ToolCallImprovementResolution = {
   url: string | null;
   note: string | null;
 };
+type ToolCallRegressionCaseStatus = "active" | "archived";
 
 type ToolCallImprovementProposalPreview = {
   id: string;
@@ -2771,6 +2929,23 @@ type ToolCallImprovementProposalRow = {
   resolutionNote: string | null;
 };
 
+type ToolCallRegressionCaseRow = {
+  id: number;
+  proposalId: number | null;
+  toolCallId: number | null;
+  source: string;
+  toolName: string;
+  label: string;
+  title: string;
+  inputJson: string;
+  expectedJson: string;
+  contextJson: string;
+  status: string;
+  createdByAdminId: number | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
 type QualityToolCallImprovementProposalCreateBody = {
   limit?: unknown;
   source?: unknown;
@@ -2782,6 +2957,18 @@ type QualityToolCallImprovementProposalCreateBody = {
 type QualityToolCallImprovementProposalStatusBody = {
   status?: unknown;
   resolution?: unknown;
+};
+
+type QualityToolCallRegressionCaseCreateBody = {
+  exampleIndex?: unknown;
+  title?: unknown;
+  expectedBehavior?: unknown;
+};
+
+type ToolCallRegressionCaseCreateInput = {
+  exampleIndex: number;
+  title: string | null;
+  expectedBehavior: string | null;
 };
 
 function parseToolCallFeedbackQuery(
@@ -2918,6 +3105,25 @@ function parseToolCallImprovementResolutionInput(
       ref: ref.value,
       url: url.value,
       note: note.value,
+    },
+  };
+}
+
+function parseToolCallRegressionCaseCreateInput(
+  raw: QualityToolCallRegressionCaseCreateBody,
+): { kind: "ok"; value: ToolCallRegressionCaseCreateInput } | { kind: "invalid"; error: string } {
+  const exampleIndex = parseOptionalBodyInteger(raw.exampleIndex, 0, 20);
+  if (exampleIndex.kind === "invalid") return { kind: "invalid", error: "invalid exampleIndex" };
+  const title = parseNullableLimitedString(raw.title, 240, "title");
+  if (title.kind === "invalid") return { kind: "invalid", error: title.error };
+  const expectedBehavior = parseNullableLimitedString(raw.expectedBehavior, 2000, "expectedBehavior");
+  if (expectedBehavior.kind === "invalid") return { kind: "invalid", error: expectedBehavior.error };
+  return {
+    kind: "ok",
+    value: {
+      exampleIndex: exampleIndex.value ?? 0,
+      title: title.value,
+      expectedBehavior: expectedBehavior.value,
     },
   };
 }
@@ -3167,6 +3373,158 @@ function toToolCallImprovementResolutionResponse(row: ToolCallImprovementProposa
   };
 }
 
+function toToolCallRegressionCaseResponse(row: ToolCallRegressionCaseRow) {
+  return {
+    id: row.id,
+    proposalId: row.proposalId,
+    toolCallId: row.toolCallId,
+    source: row.source,
+    toolName: row.toolName,
+    label: row.label as AgentToolCallFeedbackLabel,
+    title: row.title,
+    input: parseJsonValue(row.inputJson, {}),
+    expected: parseJsonValue(row.expectedJson, {}),
+    context: parseJsonValue(row.contextJson, {}),
+    status: row.status as ToolCallRegressionCaseStatus,
+    createdByAdminId: row.createdByAdminId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function buildToolCallRegressionCaseInsert(opts: {
+  tenantId: number;
+  adminId: number | undefined;
+  now: number;
+  proposal: ToolCallImprovementProposalRow;
+  input: ToolCallRegressionCaseCreateInput;
+}): {
+  kind: "ok";
+  value: typeof agentToolCallRegressionCases.$inferInsert;
+} | { kind: "invalid"; error: string } {
+  const examples = parseJsonArray(opts.proposal.examplesJson);
+  if (examples.length === 0) {
+    return { kind: "invalid", error: "proposal has no examples" };
+  }
+  if (opts.input.exampleIndex >= examples.length) {
+    return { kind: "invalid", error: "exampleIndex out of range" };
+  }
+
+  const example = parseToolCallRegressionExample(examples[opts.input.exampleIndex]);
+  if (!example) {
+    return { kind: "invalid", error: "proposal example is malformed" };
+  }
+
+  const exampleLabel = readString(example.feedback, "label");
+  const proposalLabel = opts.proposal.label;
+  const label =
+    exampleLabel && isActionableToolFeedbackLabel(exampleLabel)
+      ? exampleLabel
+      : isActionableToolFeedbackLabel(proposalLabel)
+        ? proposalLabel
+        : null;
+  if (!label) {
+    return { kind: "invalid", error: "proposal label is not actionable" };
+  }
+
+  const toolName = readString(example.toolCall, "toolName") ?? opts.proposal.toolName;
+  const toolCallId = readPositiveInteger(example.toolCall, "id");
+  const title = opts.input.title ?? `REG: ${opts.proposal.title}`;
+  const expectedBehavior =
+    opts.input.expectedBehavior ??
+    defaultToolCallRegressionExpectedBehavior(
+      opts.proposal.kind as ToolCallImprovementProposalKind,
+      label,
+      toolName,
+    );
+
+  const inputJson = {
+    source: readString(example.toolCall, "source") ?? opts.proposal.source,
+    toolName,
+    args: example.toolCall.args ?? null,
+    feedback: {
+      label,
+      note: readNullableString(example.feedback, "note"),
+    },
+  };
+  const expectedJson = {
+    behavior: expectedBehavior,
+    proposalKind: opts.proposal.kind,
+    actionItems: parseJsonStringArray(opts.proposal.actionItemsJson),
+  };
+  const contextJson = {
+    proposal: {
+      id: opts.proposal.id,
+      fingerprint: opts.proposal.fingerprint,
+      title: opts.proposal.title,
+      summary: opts.proposal.summary,
+      rationale: parseJsonStringArray(opts.proposal.rationaleJson),
+    },
+    exampleIndex: opts.input.exampleIndex,
+    feedback: {
+      id: readPositiveInteger(example.feedback, "id"),
+      createdAt: readPositiveInteger(example.feedback, "createdAt"),
+    },
+    toolCall: {
+      id: toolCallId,
+      conversationId: readPositiveInteger(example.toolCall, "conversationId"),
+      contactId: readNullablePositiveInteger(example.toolCall, "contactId"),
+      messageId: readNullablePositiveInteger(example.toolCall, "messageId"),
+      outboundQueueId: readNullablePositiveInteger(example.toolCall, "outboundQueueId"),
+      result: example.toolCall.result ?? null,
+      error: readBoolean(example.toolCall, "error"),
+      cycle: readInteger(example.toolCall, "cycle"),
+      toolCallIndex: readInteger(example.toolCall, "toolCallIndex"),
+      latencyMs: readNullableInteger(example.toolCall, "latencyMs"),
+      createdAt: readPositiveInteger(example.toolCall, "createdAt"),
+    },
+  };
+
+  return {
+    kind: "ok",
+    value: {
+      tenantId: opts.tenantId,
+      proposalId: opts.proposal.id,
+      toolCallId,
+      source: "tool_call_feedback",
+      toolName,
+      label,
+      title,
+      inputJson: JSON.stringify(inputJson),
+      expectedJson: JSON.stringify(expectedJson),
+      contextJson: JSON.stringify(contextJson),
+      status: "active",
+      createdByAdminId: opts.adminId ?? null,
+      createdAt: opts.now,
+      updatedAt: opts.now,
+    },
+  };
+}
+
+function parseToolCallRegressionExample(
+  value: unknown,
+): { feedback: Record<string, unknown>; toolCall: Record<string, unknown> } | null {
+  if (!isRecord(value)) return null;
+  const feedback = value.feedback;
+  const toolCall = value.toolCall;
+  if (!isRecord(feedback) || !isRecord(toolCall)) return null;
+  return { feedback, toolCall };
+}
+
+function defaultToolCallRegressionExpectedBehavior(
+  kind: ToolCallImprovementProposalKind,
+  label: AgentToolCallFeedbackLabel,
+  toolName: string,
+): string {
+  if (kind === "schema_fix" || label === "bad_args") {
+    return `${toolName} rejects or repairs invalid arguments before execution.`;
+  }
+  if (kind === "routing_prompt_fix" || label === "wrong_tool") {
+    return `${toolName} is selected only in contexts that match its documented contract.`;
+  }
+  return "The agent either routes to an explicit capability or avoids pretending that a missing tool exists.";
+}
+
 function isActionableToolFeedbackLabel(value: string): value is AgentToolCallFeedbackLabel {
   return ACTIONABLE_TOOL_CALL_FEEDBACK_LABELS.includes(value as AgentToolCallFeedbackLabel);
 }
@@ -3395,6 +3753,48 @@ function parseJsonStringArray(value: string): string[] {
 function parseJsonArray(value: string): unknown[] {
   const parsed = parseJsonValue(value, []);
   return Array.isArray(parsed) ? parsed : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(value: Record<string, unknown>, key: string): string | null {
+  const raw = value[key];
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed || null;
+}
+
+function readNullableString(value: Record<string, unknown>, key: string): string | null {
+  const raw = value[key];
+  return typeof raw === "string" ? raw : null;
+}
+
+function readInteger(value: Record<string, unknown>, key: string): number | null {
+  const raw = value[key];
+  return typeof raw === "number" && Number.isInteger(raw) ? raw : null;
+}
+
+function readPositiveInteger(value: Record<string, unknown>, key: string): number | null {
+  const raw = readInteger(value, key);
+  return raw !== null && raw > 0 ? raw : null;
+}
+
+function readNullableInteger(value: Record<string, unknown>, key: string): number | null {
+  const raw = value[key];
+  if (raw === null || raw === undefined) return null;
+  return typeof raw === "number" && Number.isInteger(raw) ? raw : null;
+}
+
+function readNullablePositiveInteger(value: Record<string, unknown>, key: string): number | null {
+  const raw = readNullableInteger(value, key);
+  return raw !== null && raw > 0 ? raw : null;
+}
+
+function readBoolean(value: Record<string, unknown>, key: string): boolean | null {
+  const raw = value[key];
+  return typeof raw === "boolean" ? raw : null;
 }
 
 function parseOptionalBodyInteger(

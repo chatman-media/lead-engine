@@ -48,6 +48,7 @@ import {
   type QualityToolCallImprovementResolutionKind,
   type QualityToolCallImprovementSeverity,
   type QualityToolCallImprovementStatus,
+  type QualityToolCallRegressionCase,
   type QualityToolCallSource,
   type QualityTranscriptTurn,
   saas,
@@ -263,6 +264,15 @@ function formatJson(value: unknown): string {
   }
 }
 
+function regressionCaseExpectedLabel(item: QualityToolCallRegressionCase): string {
+  const expected = item.expected;
+  if (expected && typeof expected === "object" && !Array.isArray(expected)) {
+    const behavior = (expected as { behavior?: unknown }).behavior;
+    if (typeof behavior === "string" && behavior.trim()) return behavior;
+  }
+  return "saved expectation";
+}
+
 function toolErrorBadge(error: boolean) {
   return (
     <Badge
@@ -353,12 +363,17 @@ export function SaasQuality() {
   const [trackedToolProposals, setTrackedToolProposals] = useState<
     QualityPersistedToolCallImprovementProposal[]
   >([]);
+  const [toolRegressionCases, setToolRegressionCases] = useState<QualityToolCallRegressionCase[]>(
+    [],
+  );
   const [toolFeedbackLoading, setToolFeedbackLoading] = useState(false);
   const [toolFeedbackProposalsLoading, setToolFeedbackProposalsLoading] = useState(false);
   const [trackedToolProposalsLoading, setTrackedToolProposalsLoading] = useState(false);
+  const [toolRegressionCasesLoading, setToolRegressionCasesLoading] = useState(false);
   const [toolFeedbackError, setToolFeedbackError] = useState("");
   const [toolFeedbackProposalsError, setToolFeedbackProposalsError] = useState("");
   const [trackedToolProposalsError, setTrackedToolProposalsError] = useState("");
+  const [toolRegressionCasesError, setToolRegressionCasesError] = useState("");
   const [toolFeedbackExporting, setToolFeedbackExporting] = useState(false);
   const [trackedToolProposalCreating, setTrackedToolProposalCreating] = useState(false);
   const [trackedToolProposalActionId, setTrackedToolProposalActionId] = useState<number | null>(
@@ -538,12 +553,29 @@ export function SaasQuality() {
     }
   }
 
+  async function loadToolRegressionCases() {
+    setToolRegressionCasesLoading(true);
+    setToolRegressionCasesError("");
+    try {
+      const result = await saas.getQualityToolCallRegressionCases({ status: "active", limit: 50 });
+      setToolRegressionCases(result.items);
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      setToolRegressionCasesError(
+        err instanceof Error ? err.message : "Не удалось загрузить regression cases",
+      );
+    } finally {
+      setToolRegressionCasesLoading(false);
+    }
+  }
+
   function loadToolFeedbackInsights() {
     const opts = buildToolFeedbackOptions();
     if (!opts) return;
     void loadToolFeedbackSummary(opts);
     void loadToolFeedbackProposals(opts);
     void loadTrackedToolProposals();
+    void loadToolRegressionCases();
   }
 
   function load() {
@@ -786,6 +818,30 @@ export function SaasQuality() {
     } catch (err) {
       if (redirectOnUnauthorized(err)) return;
       toast.error(err instanceof Error ? err.message : "Не удалось применить tracked proposal");
+    } finally {
+      setTrackedToolProposalActionId(null);
+    }
+  }
+
+  async function handleToolRegressionCaseCreate(
+    proposal: QualityPersistedToolCallImprovementProposal,
+  ) {
+    if (!canWriteQuality) {
+      toast.error("Quality Lab доступен только для просмотра");
+      return;
+    }
+
+    setTrackedToolProposalActionId(proposal.id);
+    try {
+      const result = await saas.createQualityToolCallRegressionCase(proposal.id);
+      await Promise.all([
+        loadTrackedToolProposals(trackedToolProposalStatus),
+        loadToolRegressionCases(),
+      ]);
+      toast.success(`Regression case ${result.case.id} создан`);
+    } catch (err) {
+      if (redirectOnUnauthorized(err)) return;
+      toast.error(err instanceof Error ? err.message : "Не удалось создать regression case");
     } finally {
       setTrackedToolProposalActionId(null);
     }
@@ -2033,6 +2089,16 @@ export function SaasQuality() {
                                 variant="ghost"
                                 className="h-8 gap-1.5 px-2 text-xs"
                                 disabled={trackedToolProposalActionId === item.id}
+                                onClick={() => void handleToolRegressionCaseCreate(item)}
+                              >
+                                <BugIcon className="size-3.5" />
+                                Case
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 gap-1.5 px-2 text-xs"
+                                disabled={trackedToolProposalActionId === item.id}
                                 onClick={() => openTrackedToolProposalApply(item)}
                               >
                                 <CheckCircleIcon className="size-3.5" />
@@ -2077,6 +2143,90 @@ export function SaasQuality() {
                 ))}
               </TableBody>
             </Table>
+          </div>
+
+          {toolRegressionCasesError && (
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {toolRegressionCasesError}
+            </p>
+          )}
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-medium">Regression cases</h3>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 px-2 text-xs"
+                onClick={() => void loadToolRegressionCases()}
+                disabled={toolRegressionCasesLoading}
+              >
+                <RefreshCwIcon
+                  className={cn("size-3.5", toolRegressionCasesLoading && "animate-spin")}
+                />
+                Cases
+              </Button>
+            </div>
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Case</TableHead>
+                    <TableHead>Tool</TableHead>
+                    <TableHead>Signal</TableHead>
+                    <TableHead>Expected</TableHead>
+                    <TableHead className="text-right">When</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {toolRegressionCasesLoading && toolRegressionCases.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                        Загрузка regression cases…
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {!toolRegressionCasesLoading && toolRegressionCases.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                        Regression cases пока нет
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {toolRegressionCases.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="min-w-[170px]">
+                        <div className="space-y-0.5">
+                          <div className="font-mono text-xs">REG-{item.id}</div>
+                          <div className="line-clamp-1 text-xs text-muted-foreground">
+                            {item.title}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-[220px] truncate font-mono text-xs">
+                        {item.toolName}
+                      </TableCell>
+                      <TableCell className="min-w-[160px]">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {feedbackBadge(item.label)}
+                          <Badge className="border-transparent bg-muted font-mono text-[11px]">
+                            {item.status}
+                          </Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell className="min-w-[320px] max-w-[620px]">
+                        <p className="line-clamp-2 text-xs text-muted-foreground">
+                          {regressionCaseExpectedLabel(item)}
+                        </p>
+                      </TableCell>
+                      <TableCell className="text-right text-xs text-muted-foreground">
+                        {formatDate(item.createdAt)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
 
           <div className="overflow-x-auto rounded-md border">
