@@ -32,6 +32,7 @@ import { makeAuthRoutes } from "../routes/auth.ts";
 import {
 	CONCIERGE_CATALOG_KEY,
 	type ConciergeCatalog,
+	loadConciergeCatalog,
 	makeConciergeDomainTools,
 } from "./concierge-domain-tools.ts";
 import {
@@ -563,6 +564,167 @@ describe("concierge domain tools (Фаза 3 — каталог и квоты)",
 		expect(booked.total).toBe(2700);
 		expect(booked.duration).toBe("6h");
 		expect(booked.notes).toBe("English guide");
+	});
+});
+
+describe("concierge domain tools — fallback-ветки", () => {
+	async function signupTenant(email: string): Promise<number> {
+		const sa = await app.request("/api/auth/signup", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ email, password: "strong-pwd-12345" }),
+		});
+		return ((await sa.json()) as { admin: { tenantId: number } }).admin
+			.tenantId;
+	}
+
+	async function makeBareConversation(forTenantId: number): Promise<number> {
+		const [c] = await db
+			.insert(contacts)
+			.values({ tenantId: forTenantId })
+			.returning({ id: contacts.id });
+		if (!c) throw new Error("contact insert returned no row");
+		const [conv] = await db
+			.insert(conversations)
+			.values({ tenantId: forTenantId, userId: c.id, source: "bot" })
+			.returning({ id: conversations.id });
+		if (!conv) throw new Error("conversation insert returned no row");
+		return conv.id;
+	}
+
+	it("loadConciergeCatalog: нет секрета → null, битый JSON → null", async () => {
+		if (!sql) return;
+		const t = await signupTenant("ctools-broken-catalog@demo.io");
+		expect(await loadConciergeCatalog(db as never, t, MASTER_KEY)).toBeNull();
+		await setEncryptedSecret({
+			db: db as never,
+			tenantId: t,
+			key: CONCIERGE_CATALOG_KEY,
+			value: "{not valid json",
+			masterKeyHex: MASTER_KEY,
+			nowEpoch: baseNow,
+		});
+		expect(await loadConciergeCatalog(db as never, t, MASTER_KEY)).toBeNull();
+	});
+
+	it("каталог не настроен → все 8 инструментов отдают needsOperator", async () => {
+		if (!sql) return;
+		const t = await signupTenant("ctools-empty-catalog@demo.io");
+		const convId = await makeBareConversation(t);
+		const tools = makeConciergeDomainTools({
+			db: db as never,
+			tenantId: t,
+			conversationId: convId,
+			masterKeyHex: MASTER_KEY,
+		});
+		const calls: Array<[string, Record<string, unknown>]> = [
+			["get_transfer_options", {}],
+			[
+				"confirm_transfer_booking",
+				{
+					classId: "sedan",
+					pickup: "BKK",
+					dropoff: "Kata",
+					datetime: "tomorrow",
+				},
+			],
+			["get_food_menu", {}],
+			["confirm_food_order", { items: [{ id: "pizza", qty: 1 }] }],
+			["get_housekeeping_options", {}],
+			["confirm_housekeeping_booking", { date: "2026-06-12", hours: 2 }],
+			["get_tour_options", {}],
+			[
+				"confirm_tour_booking",
+				{ tourId: "island", date: "2026-06-12", participants: 2 },
+			],
+		];
+		for (const [name, args] of calls) {
+			const out = (await toolByName(tools, name).execute(args)) as {
+				needsOperator?: boolean;
+				note?: string;
+			};
+			expect(out.needsOperator).toBe(true);
+			expect(out.note).toBeTruthy();
+		}
+	});
+
+	it("food/housekeeping/tour инструменты отказывают на transfer-запросе", async () => {
+		if (!sql) return;
+		// Главный conversationId привязан к contact'у с открытым transfer-лидом.
+		const tools = makeConciergeDomainTools({
+			db: db as never,
+			tenantId,
+			conversationId,
+			masterKeyHex: MASTER_KEY,
+		});
+		const calls: Array<[string, Record<string, unknown>]> = [
+			["get_food_menu", {}],
+			["confirm_food_order", { items: [{ id: "pizza", qty: 1 }] }],
+			["get_housekeeping_options", {}],
+			["confirm_housekeeping_booking", { date: "2026-06-12", hours: 2 }],
+			["get_tour_options", {}],
+			[
+				"confirm_tour_booking",
+				{ tourId: "island", date: "2026-06-12", participants: 2 },
+			],
+		];
+		for (const [name, args] of calls) {
+			const out = (await toolByName(tools, name).execute(args)) as {
+				error?: string;
+			};
+			expect(out.error).toContain("не применим");
+		}
+	});
+
+	it("confirm_transfer_booking отказывает на food-запросе", async () => {
+		if (!sql) return;
+		const foodConversationId = await makeConversationFor(
+			"food",
+			"food_request",
+		);
+		const tools = makeConciergeDomainTools({
+			db: db as never,
+			tenantId,
+			conversationId: foodConversationId,
+			masterKeyHex: MASTER_KEY,
+		});
+		const out = (await toolByName(tools, "confirm_transfer_booking").execute({
+			classId: "sedan",
+			pickup: "BKK",
+			dropoff: "Kata",
+			datetime: "tomorrow",
+		})) as { error?: string };
+		expect(out.error).toContain("не применим");
+	});
+
+	it("confirm_tour_booking: превышение maxParticipants и неизвестный тур", async () => {
+		if (!sql) return;
+		const tourConversationId = await makeConversationFor(
+			"tour",
+			"tour_request",
+		);
+		const tools = makeConciergeDomainTools({
+			db: db as never,
+			tenantId,
+			conversationId: tourConversationId,
+			masterKeyHex: MASTER_KEY,
+		});
+		const tooMany = (await toolByName(tools, "confirm_tour_booking").execute({
+			tourId: "island",
+			date: "2026-06-12",
+			participants: 5,
+		})) as { error?: string };
+		expect(tooMany.error).toContain("Максимальное");
+
+		const unknownTour = (await toolByName(
+			tools,
+			"confirm_tour_booking",
+		).execute({
+			tourId: "ghost-tour",
+			date: "2026-06-12",
+			participants: 2,
+		})) as { needsOperator?: boolean };
+		expect(unknownTour.needsOperator).toBe(true);
 	});
 });
 
