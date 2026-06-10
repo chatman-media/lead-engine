@@ -158,6 +158,8 @@ export {
 	type ProviderRelayStartFailureReason,
 	type ProviderRelayStartInput,
 	type ProviderRelayStartResult,
+	type ProviderRelaySendProviderRequestInput,
+	type ProviderRelaySendProviderRequestResult,
 } from "./provider-relay-orchestrator.ts";
 export {
 	type CreatePaymentIntentInput,

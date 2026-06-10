@@ -10,6 +10,7 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ClipboardListIcon,
   FlaskConicalIcon,
   GitBranchIcon,
   HandshakeIcon,
@@ -92,6 +93,7 @@ const VISIBLE_NAV_GROUPS: NavGroup[] = [
       { to: "/exchange", label: "Обменка", icon: ArrowLeftRightIcon, exchangeOnly: true },
       { to: "/leads", label: "Лиды", icon: UserCircleIcon },
       { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
+      { to: "/orders", label: "Заказы", icon: ClipboardListIcon },
     ],
   },
   {
