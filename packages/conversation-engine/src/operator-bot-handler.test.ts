@@ -77,6 +77,10 @@ class FakeRepo implements Partial<NotificationsRepo> {
 		this.settings = settings;
 	}
 
+	setSettings(settings?: OperatorSettings) {
+		this.settings = settings;
+	}
+
 	async findByLinkToken(_token: string) {
 		return this.settings;
 	}
@@ -121,6 +125,7 @@ class FakeClient {
 		callbackQueryId: string;
 		text?: string;
 		showAlert?: boolean;
+		url?: string;
 	}> = [];
 	async sendMessage(opts: {
 		chatId: string;
@@ -136,6 +141,7 @@ class FakeClient {
 		callbackQueryId: string;
 		text?: string;
 		showAlert?: boolean;
+		url?: string;
 	}) {
 		this.answered.push(opts);
 	}
@@ -170,9 +176,11 @@ function makeSendDraftDb(
 		};
 		conversationId?: number;
 		contactId?: number;
+		draftStatus?: "pending" | "sent" | "cancelled" | "expired" | "failed";
 	} = {},
 ) {
 	let contactAttributesJson = opts.contactAttributesJson ?? null;
+	let draftStatus = opts.draftStatus ?? "pending";
 	const order = opts.order ? { ...opts.order } : null;
 	const conversationId = opts.conversationId ?? 109;
 	const contactId = opts.contactId ?? 55;
@@ -255,10 +263,14 @@ function makeSendDraftDb(
 				}
 				return {
 					where: () => ({
-						returning: async () =>
-							table === operatorActionDrafts && values.status === "sent"
-								? [{ id: 700 }]
-								: [],
+						returning: async () => {
+							if (table === operatorActionDrafts && values.status === "sent") {
+								if (draftStatus !== "pending") return [];
+								draftStatus = "sent";
+								return [{ id: 700 }];
+							}
+							return [];
+						},
 					}),
 				};
 			},
@@ -286,6 +298,7 @@ function makeSendDraftDb(
 		inserts,
 		order,
 		updates,
+		draftStatus: () => draftStatus,
 		contactAttributes: () =>
 			JSON.parse(contactAttributesJson ?? "{}") as Record<string, unknown>,
 	};
@@ -545,6 +558,146 @@ describe("operator action callbacks", () => {
 		expect(JSON.stringify(client.sent[0]?.replyMarkup)).toContain(
 			"https://app.example/conversations/109",
 		);
+
+		await handler.handleUpdate({
+			update_id: 6,
+			callback_query: {
+				id: "cb-op-again",
+				from: { id: 5 },
+				data: "op:take:109",
+				message: {
+					message_id: 10,
+					date: 0,
+					chat: { id: 777, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(writes).toHaveLength(1);
+		expect(audits).toHaveLength(1);
+		expect(client.answered.at(-1)).toMatchObject({
+			callbackQueryId: "cb-op-again",
+			text: "Уже актуально",
+		});
+		expect(client.sent.at(-1)?.text).toContain("уже в работе оператора");
+	});
+
+	it("tenant-scoped operator callbacks reject mismatched tenant before db writes", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		let transactionCalls = 0;
+		const db = {
+			transaction: async () => {
+				transactionCalls++;
+				throw new Error("db should not be touched for wrong tenant callback");
+			},
+		};
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				appUrl: "https://app.example",
+			},
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 6,
+			callback_query: {
+				id: "cb-wrong-tenant",
+				from: { id: 5 },
+				data: "op:v1:takeover:99:109",
+				message: {
+					message_id: 10,
+					date: 0,
+					chat: { id: 777, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(transactionCalls).toBe(0);
+		expect(client.answered[0]).toMatchObject({
+			callbackQueryId: "cb-wrong-tenant",
+			text: "Нет доступа к этому чату",
+			showAlert: true,
+		});
+		expect(client.sent).toHaveLength(0);
+	});
+
+	it("return_ai callback is idempotent when conversation is already in AI mode", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const writes: Array<Record<string, unknown>> = [];
+		const audits: Array<Record<string, unknown>> = [];
+		const tx = {
+			execute: async () => {},
+			select: () => ({
+				from: () => ({
+					where: () => ({
+						limit: async () => [{ mode: "ai" }],
+					}),
+				}),
+			}),
+			update: () => ({
+				set: (values: Record<string, unknown>) => {
+					writes.push(values);
+					return { where: async () => [] };
+				},
+			}),
+			insert: () => ({
+				values: async (values: Record<string, unknown>) => {
+					audits.push(values);
+				},
+			}),
+		};
+		const db = {
+			transaction: async (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx),
+		};
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				appUrl: "https://app.example",
+				nowEpoch: () => 123,
+			},
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 7,
+			callback_query: {
+				id: "cb-ai-noop",
+				from: { id: 5 },
+				data: "op:v1:return_ai:3:109",
+				message: {
+					message_id: 11,
+					date: 0,
+					chat: { id: 777, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(writes).toHaveLength(0);
+		expect(audits).toHaveLength(0);
+		expect(client.answered[0]).toMatchObject({
+			callbackQueryId: "cb-ai-noop",
+			text: "Уже актуально",
+		});
+		expect(client.sent[0]?.text).toContain("уже под управлением AI");
 	});
 
 	it("reply to an action card creates preview and send confirmation enqueues client message", async () => {
@@ -767,6 +920,202 @@ describe("operator action callbacks", () => {
 			text: "Отменено",
 		});
 		expect(client.sent.at(-1)?.text).toContain("ничего не отправлено");
+	});
+
+	it("preview confirm is scoped to the original operator chat and admin", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{ nowEpoch: () => 123 },
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 10,
+			message: {
+				message_id: 20,
+				date: 0,
+				chat: { id: 777, type: "private" },
+				from: { id: 5, is_bot: false, first_name: "Operator" },
+				text: "Ответить клиенту.",
+				reply_to_message: {
+					message_id: 9,
+					date: 0,
+					chat: { id: 777, type: "private" },
+					reply_markup: {
+						inline_keyboard: [
+							[{ text: "Взять", callback_data: "op:take:109" }],
+						],
+					},
+				},
+			},
+		} as unknown as TgUpdate);
+		const sendCallback = client.sent[0]?.replyMarkup?.inline_keyboard?.[0]?.[0]
+			?.callback_data as string;
+
+		await handler.handleUpdate({
+			update_id: 11,
+			callback_query: {
+				id: "cb-wrong-chat",
+				from: { id: 5 },
+				data: sendCallback,
+				message: {
+					message_id: 21,
+					date: 0,
+					chat: { id: 888, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(client.answered.at(-1)).toMatchObject({
+			callbackQueryId: "cb-wrong-chat",
+			text: "Preview истёк или уже обработан",
+			showAlert: true,
+		});
+		expect(client.sent).toHaveLength(1);
+
+		repo.setSettings(
+			makeSettings({
+				adminId: 11,
+				tenantId: 3,
+				telegramChatId: "777",
+			}),
+		);
+		await handler.handleUpdate({
+			update_id: 12,
+			callback_query: {
+				id: "cb-wrong-admin",
+				from: { id: 5 },
+				data: sendCallback,
+				message: {
+					message_id: 22,
+					date: 0,
+					chat: { id: 777, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(client.answered.at(-1)).toMatchObject({
+			callbackQueryId: "cb-wrong-admin",
+			text: "Preview истёк или уже обработан",
+			showAlert: true,
+		});
+		expect(client.sent).toHaveLength(1);
+	});
+
+	it("expired preview confirm fails safely and sends nothing", async () => {
+		let now = 123;
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{ nowEpoch: () => now },
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 13,
+			message: {
+				message_id: 20,
+				date: 0,
+				chat: { id: 777, type: "private" },
+				from: { id: 5, is_bot: false, first_name: "Operator" },
+				text: "Истекающий preview.",
+				reply_to_message: {
+					message_id: 9,
+					date: 0,
+					chat: { id: 777, type: "private" },
+					reply_markup: {
+						inline_keyboard: [
+							[{ text: "Взять", callback_data: "op:take:109" }],
+						],
+					},
+				},
+			},
+		} as unknown as TgUpdate);
+		const sendCallback = client.sent[0]?.replyMarkup?.inline_keyboard?.[0]?.[0]
+			?.callback_data as string;
+		now = 723;
+
+		await handler.handleUpdate({
+			update_id: 14,
+			callback_query: {
+				id: "cb-expired",
+				from: { id: 5 },
+				data: sendCallback,
+				message: {
+					message_id: 21,
+					date: 0,
+					chat: { id: 777, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(client.answered.at(-1)).toMatchObject({
+			callbackQueryId: "cb-expired",
+			text: "Preview истёк или уже обработан",
+			showAlert: true,
+		});
+		expect(client.sent).toHaveLength(1);
+	});
+
+	it("durable draft double confirm sends only one client message and outbound entry", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const { db, draftStatus, inserts } = makeSendDraftDb();
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				nowEpoch: () => 123,
+			},
+		);
+		const draft = {
+			draftId: "abc123",
+			dbId: 700,
+			tenantId: 3,
+			adminId: 10,
+			chatId: "777",
+			conversationId: 109,
+			text: "Отправить один раз.",
+			metadata: { source: "telegram_reply_preview" },
+			createdAt: 123,
+			expiresAt: 723,
+		};
+
+		// @ts-expect-error private method
+		const first = await handler.sendDraftToClient(draft);
+		// @ts-expect-error private method
+		const second = await handler.sendDraftToClient(draft);
+
+		expect(first.kind).toBe("sent");
+		expect(second.kind).toBe("already_handled");
+		expect(draftStatus()).toBe("sent");
+		expect(inserts.filter((row) => row.table === "messages")).toHaveLength(1);
+		expect(
+			inserts.filter((row) => row.table === "outbound_queue"),
+		).toHaveLength(1);
+		expect(inserts.filter((row) => row.table === "audit_log")).toHaveLength(1);
 	});
 
 	it("exchange quick action creates a send/cancel preview draft", async () => {
