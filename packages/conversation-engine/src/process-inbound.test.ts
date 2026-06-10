@@ -138,6 +138,7 @@ describe("processInbound", () => {
 		// Создаём Conversation вручную с mode='queued'.
 		await deps._fakes.conversations.create({
 			contactId: 1,
+			channelId: CHANNEL.channelId,
 			source: "bot",
 			mode: "queued",
 			nowEpoch: 1700000000,
@@ -169,6 +170,7 @@ describe("processInbound", () => {
 		};
 		await d._fakes.conversations.create({
 			contactId: 1,
+			channelId: CHANNEL.channelId,
 			source: "bot",
 			mode: "human",
 			nowEpoch: 1700000000,

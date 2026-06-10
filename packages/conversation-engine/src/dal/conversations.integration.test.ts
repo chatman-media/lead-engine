@@ -37,6 +37,11 @@ let contact1 = 0;
 
 const repo = () => new ConversationsRepo({ db, tenantId: t1 });
 
+function returnedId(row: { id: number } | undefined, label: string): number {
+	if (!row) throw new Error(`${label} insert returned no row`);
+	return row.id;
+}
+
 beforeAll(async () => {
 	if (!ownerUrl) return;
 	const probe = await tryConnectToPg(ownerUrl);
@@ -58,13 +63,13 @@ beforeAll(async () => {
 		.insert(schema.tenants)
 		.values({ slug: `conv-b-${n}` })
 		.returning({ id: schema.tenants.id });
-	t1 = a!.id;
-	t2 = b!.id;
+	t1 = returnedId(a, "tenant a");
+	t2 = returnedId(b, "tenant b");
 	const [c] = await db
 		.insert(schema.contacts)
 		.values({ tenantId: t1, displayName: "Conv Contact", createdAt: n })
 		.returning({ id: schema.contacts.id });
-	contact1 = c!.id;
+	contact1 = returnedId(c, "contact");
 }, 30_000);
 
 afterAll(async () => {
@@ -82,7 +87,25 @@ async function freshContact(): Promise<number> {
 			createdAt: n,
 		})
 		.returning({ id: schema.contacts.id });
-	return c!.id;
+	return returnedId(c, "fresh contact");
+}
+
+async function freshChannel(
+	kind: "telegram_bot" | "whatsapp" | "web",
+): Promise<number> {
+	const [c] = await db
+		.insert(schema.channels)
+		.values({
+			tenantId: t1,
+			kind,
+			externalId: `${kind}-${Math.random().toString(36).slice(2, 8)}`,
+			status: "active",
+			createdAt: n,
+			updatedAt: n,
+		})
+		.returning({ id: schema.channels.id });
+	if (!c) throw new Error("channel insert returned no row");
+	return c.id;
 }
 
 describe("ConversationsRepo", () => {
@@ -122,6 +145,39 @@ describe("ConversationsRepo", () => {
 		expect(
 			await repo().findByContactAndSource(contact1, "self_play"),
 		).toBeNull();
+	});
+
+	it("channelId keeps bot-sourced channels as separate conversations", async () => {
+		if (!enabled) return;
+		const contactId = await freshContact();
+		const telegramChannelId = await freshChannel("telegram_bot");
+		const whatsappChannelId = await freshChannel("whatsapp");
+		const webChannelId = await freshChannel("web");
+
+		const tg = await repo().create({
+			contactId,
+			channelId: telegramChannelId,
+			source: "bot",
+			nowEpoch: n,
+		});
+		const wa = await repo().create({
+			contactId,
+			channelId: whatsappChannelId,
+			source: "bot",
+			nowEpoch: n + 1,
+		});
+		const web = await repo().create({
+			contactId,
+			channelId: webChannelId,
+			source: "bot",
+			nowEpoch: n + 2,
+		});
+
+		expect(new Set([tg.id, wa.id, web.id]).size).toBe(3);
+		expect(
+			(await repo().findByContactAndChannel(contactId, whatsappChannelId))?.id,
+		).toBe(wa.id);
+		expect(await repo().findByContactAndSource(contactId, "bot")).toBeNull();
 	});
 
 	it("touchLastMessageAt обновляет таймстамп", async () => {
@@ -238,8 +294,11 @@ describe("ConversationsRepo", () => {
 		const rows = await repo().recent(3);
 		expect(rows.length).toBeLessThanOrEqual(3);
 		for (let i = 0; i < rows.length - 1; i++) {
-			const a = rows[i]!.lastMessageAt ?? 0;
-			const b = rows[i + 1]!.lastMessageAt ?? 0;
+			const current = rows[i];
+			const next = rows[i + 1];
+			if (!current || !next) throw new Error("recent returned sparse rows");
+			const a = current.lastMessageAt ?? 0;
+			const b = next.lastMessageAt ?? 0;
 			expect(a).toBeGreaterThanOrEqual(b);
 		}
 	});

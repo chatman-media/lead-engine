@@ -213,6 +213,7 @@ export async function processInbound(
 	const { conversation, created: conversationCreated } =
 		await resolveConversation({
 			contactId: contact.id,
+			channelId: deps.channel.channelId,
 			channelKind: deps.channel.kind,
 			conversations: deps.conversations,
 			nowEpoch: now,
@@ -499,10 +500,10 @@ export async function processInbound(
 	if (deps.deferReply) {
 		void messageId;
 		return {
-				contactId: contact.id,
-				contactDisplayName: contact.displayName,
-				conversationId: conversation.id,
-				persisted: !existingMsg,
+			contactId: contact.id,
+			contactDisplayName: contact.displayName,
+			conversationId: conversation.id,
+			persisted: !existingMsg,
 			outboundEnqueued: 0,
 			userMessageText: text,
 			mediaOnly,

@@ -1,5 +1,5 @@
 import { conversations as conversationsTable } from "@chatman-media/storage";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
 export interface ConversationRow {
@@ -7,6 +7,7 @@ export interface ConversationRow {
 	tenantId: number;
 	userId: number;
 	source: string;
+	channelId: number | null;
 	mode: "ai" | "queued" | "human";
 	status: "open" | "pending" | "resolved";
 	unreadCount: number;
@@ -29,9 +30,9 @@ export interface ConversationRow {
  * После Этапа 8 (миграция users → contacts) переименуем колонку в
  * contact_id.
  *
- * `source` — legacy enum 'bot|userbot|self_play'. В будущей миграции
- * заменяется на channel_id напрямую (FK на channels). Сейчас contactId
- * прокидывается дополнительно — каждая conversation per (contact_id, source).
+ * `source` — legacy enum 'bot|userbot|self_play'. New code should pass
+ * channelId so conversations are keyed per real channel; source remains for
+ * compatibility with inbox filters and historical rows.
  */
 export class ConversationsRepo {
 	constructor(private readonly ctx: RepoCtx) {}
@@ -52,6 +53,29 @@ export class ConversationsRepo {
 					eq(conversationsTable.tenantId, this.ctx.tenantId),
 					eq(conversationsTable.userId, contactId),
 					eq(conversationsTable.source, source),
+					isNull(conversationsTable.channelId),
+				),
+			);
+		return (row as ConversationRow) ?? null;
+	}
+
+	/**
+	 * Найти conversation per real channel. This is the relay-safe path: WhatsApp,
+	 * web, Facebook, VK, and Telegram bot channels no longer collapse into
+	 * legacy source='bot'.
+	 */
+	async findByContactAndChannel(
+		contactId: number,
+		channelId: number,
+	): Promise<ConversationRow | null> {
+		const [row] = await this.ctx.db
+			.select()
+			.from(conversationsTable)
+			.where(
+				and(
+					eq(conversationsTable.tenantId, this.ctx.tenantId),
+					eq(conversationsTable.userId, contactId),
+					eq(conversationsTable.channelId, channelId),
 				),
 			);
 		return (row as ConversationRow) ?? null;
@@ -60,6 +84,7 @@ export class ConversationsRepo {
 	async create(opts: {
 		contactId: number;
 		source: string;
+		channelId?: number | null;
 		mode?: "ai" | "queued" | "human";
 		styleId?: number | null;
 		experimentId?: number | null;
@@ -71,6 +96,7 @@ export class ConversationsRepo {
 				tenantId: this.ctx.tenantId,
 				userId: opts.contactId,
 				source: opts.source,
+				...(opts.channelId !== undefined ? { channelId: opts.channelId } : {}),
 				...(opts.mode ? { mode: opts.mode } : {}),
 				...(opts.styleId !== undefined ? { styleId: opts.styleId } : {}),
 				...(opts.experimentId !== undefined

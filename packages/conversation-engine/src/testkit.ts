@@ -105,6 +105,20 @@ export class FakeConversationsRepo {
 				(r) =>
 					r.userId === contactId &&
 					r.source === source &&
+					r.tenantId === this.tenantId &&
+					r.channelId === null,
+			) ?? null
+		);
+	}
+	async findByContactAndChannel(
+		contactId: number,
+		channelId: number,
+	): Promise<ConversationRow | null> {
+		return (
+			this.rows.find(
+				(r) =>
+					r.userId === contactId &&
+					r.channelId === channelId &&
 					r.tenantId === this.tenantId,
 			) ?? null
 		);
@@ -112,6 +126,7 @@ export class FakeConversationsRepo {
 	async create(opts: {
 		contactId: number;
 		source: string;
+		channelId?: number | null;
 		mode?: "ai" | "queued" | "human";
 		nowEpoch: number;
 	}): Promise<ConversationRow> {
@@ -120,6 +135,7 @@ export class FakeConversationsRepo {
 			tenantId: this.tenantId,
 			userId: opts.contactId,
 			source: opts.source,
+			channelId: opts.channelId ?? null,
 			mode: opts.mode ?? "ai",
 			status: "open",
 			unreadCount: 0,
