@@ -499,7 +499,8 @@ Use-case: рекрутеры / sales-teams, чьи лиды пишут на ли
 Готовиться к B2B enterprise sales (см. [COMPETITORS §5](COMPETITORS.md)
 moat #5):
 
-- [ ] Audit log retention policy + export (`GET /api/admin/audit-log/export.csv`)
+- [ ] Audit log retention policy
+- [x] Audit log CSV export (`GET /api/admin/audit-log/export.csv`)
 - [ ] Tenant data export (`POST /api/admin/tenant/export` → S3 link)
 - [ ] Tenant deletion (GDPR right-to-be-forgotten)
 - [ ] DPA template + sub-processor list page
