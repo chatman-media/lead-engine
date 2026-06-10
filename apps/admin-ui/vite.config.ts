@@ -17,7 +17,9 @@ export default defineConfig(({ command }) => ({
       gitService: "github",
     }),
   ],
-  base: command === "build" ? "/admin/" : "/",
+  // ADMIN_UI_BASE=/ — для раздачи с собственного поддомена (client.exchanges.agency);
+  // без env сохраняется прежний путь /admin/ на основном домене.
+  base: command === "build" ? (process.env.ADMIN_UI_BASE ?? "/admin/") : "/",
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
