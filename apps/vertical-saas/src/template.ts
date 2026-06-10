@@ -21,7 +21,7 @@ import { SAAS_STYLES } from "./styles/index.ts";
  */
 export const SAAS_V1: VerticalTemplate = {
   slug: "saas_v1",
-  displayName: "SaaS-продажи (Lead Engine) — v1",
+  displayName: "SaaS-продажи — v1",
   version: 1,
   funnelStages: SAAS_FUNNEL_STAGES,
   questionnaire: SAAS_INTAKE,

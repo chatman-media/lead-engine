@@ -15,7 +15,7 @@ import { SCOOTER_STYLES } from "./styles/index.ts";
  */
 export const SCOOTER_V1: VerticalTemplate = {
   slug: "scooter_v1",
-  displayName: "Аренда байков — v1",
+  displayName: "Аренда транспорта — v1",
   version: 1,
   funnelStages: SCOOTER_FUNNEL_STAGES,
   questionnaire: SCOOTER_INTAKE,

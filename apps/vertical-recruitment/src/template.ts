@@ -24,7 +24,7 @@ import { RECRUITMENT_STYLES } from "./styles/index.ts";
  */
 export const RECRUITMENT_V1: VerticalTemplate = {
   slug: "recruitment_v1",
-  displayName: "Найм (рекрутинг артисток) — v1",
+  displayName: "Рекрутинг и найм — v1",
   version: 1,
   funnelStages: RECRUITMENT_FUNNEL_STAGES,
   questionnaire: RECRUITMENT_INTAKE,

@@ -5,7 +5,7 @@ import "./index.ts";
 describe("scooter_v1 template", () => {
   it("регистрируется в defaultRegistry при import", () => {
     const t = defaultRegistry.load("scooter_v1");
-    expect(t.displayName).toContain("байков");
+    expect(t.displayName).toContain("Аренда транспорта");
     expect(t.version).toBe(1);
   });
 

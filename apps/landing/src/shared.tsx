@@ -15,7 +15,7 @@ export interface TgMessage {
 export function TelegramMockup({
   messages,
   notify,
-  botName = "exchanges·agency",
+  botName = "Lead Engine Bot",
   ctaLabel = "📋 Заполнить анкету →",
 }: {
   messages: TgMessage[];
@@ -111,7 +111,7 @@ export function Nav({
       <div className="container">
         <div className="nav-inner">
           <a href="/" className="nav-logo">
-            exchanges<span>·agency</span>
+            lead<span>·engine</span>
           </a>
           <div className="nav-right">
             <LangToggle lang={lang} setLang={setLang} />
@@ -201,7 +201,7 @@ export function Footer({
       <div className="container">
         <div className="footer-inner">
           <div className="footer-logo">
-            exchanges<span>·agency</span>
+            lead<span>·engine</span>
           </div>
           <div className="footer-links">
             <a href="/privacy">{privacy}</a>

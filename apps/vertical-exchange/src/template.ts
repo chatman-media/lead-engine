@@ -25,7 +25,7 @@ import { EXCHANGE_INTAKE } from "./intake.ts";
  */
 export const EXCHANGE_V1: VerticalTemplate = {
 	slug: "exchange_v1",
-	displayName: "Обменный пункт (Пхукет) — v1",
+	displayName: "Обмен валют — v1",
 	version: 2,
 	funnelStages: EXCHANGE_FUNNEL_STAGES,
 	questionnaire: EXCHANGE_INTAKE,

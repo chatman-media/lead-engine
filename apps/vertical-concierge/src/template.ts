@@ -18,7 +18,7 @@ import { CONCIERGE_INTAKE } from "./intake.ts";
  */
 export const CONCIERGE_V1: VerticalTemplate = {
   slug: "concierge_v1",
-  displayName: "Консьерж-сервис (вилла) — v1",
+  displayName: "Консьерж-сервис — v1",
   version: 1,
   funnelStages: CONCIERGE_FUNNEL_STAGES,
   questionnaire: CONCIERGE_INTAKE,
