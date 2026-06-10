@@ -308,7 +308,11 @@ describe("processInbound", () => {
 
 	// ── Опциональные хуки pipeline (notifications / voice STT / extractFields /
 	//    memoryExtractor / deferReply) — все через фейки, без БД. ──────────────
-	type NotifyEvent = { eventType: string; conversationId: number };
+	type NotifyEvent = {
+		eventType: string;
+		conversationId: number;
+		data?: Record<string, unknown>;
+	};
 	function fakeNotifications(events: NotifyEvent[]) {
 		return {
 			notify: async (e: NotifyEvent) => {
@@ -354,6 +358,58 @@ describe("processInbound", () => {
 		};
 		await processInbound(inbound, d);
 		expect(events.some((e) => e.eventType === "document_uploaded")).toBe(true);
+	});
+
+	it("exchange media-only inbound creates actionable operator handoff with media refs", async () => {
+		const events: NotifyEvent[] = [];
+		const d = {
+			...makeDeps(),
+			template: {
+				slug: "exchange_v1",
+				displayName: "Exchange",
+				version: 1,
+				funnelStages: [],
+				systemPromptFragment: "",
+			},
+			notifications: fakeNotifications(events),
+		};
+		const inbound: Inbound = {
+			channelId: "tg-1",
+			externalMessageId: "202",
+			externalUserId: "u3",
+			parts: [
+				{
+					kind: "video_note",
+					mediaRef: { channelId: "tg-1", externalRef: "vn1" },
+					durationSec: 8,
+				},
+				{
+					kind: "document",
+					mediaRef: { channelId: "tg-1", externalRef: "doc1" },
+					fileName: "passport.pdf",
+					mimeType: "application/pdf",
+				},
+			],
+			receivedAt: 1700000000,
+			raw: {},
+		};
+
+		await processInbound(inbound, d);
+
+		const handoff = events.find(
+			(e) => e.eventType === "operator_handoff_required",
+		);
+		expect(handoff?.data).toMatchObject({
+			reason: "kyc_review",
+			title: "Проверить KYC клиента",
+			pending: "operator_kyc_decision",
+			mediaCount: 2,
+		});
+		expect(String(handoff?.data?.mediaSummary)).toContain("video_note");
+		expect(String(handoff?.data?.mediaSummary)).toContain("passport.pdf");
+		expect(events.some((e) => e.eventType === "verification_requested")).toBe(
+			false,
+		);
 	});
 
 	it("voice part → транскрибируется в текст и персистится", async () => {

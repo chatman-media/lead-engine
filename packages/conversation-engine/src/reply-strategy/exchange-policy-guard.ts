@@ -58,6 +58,7 @@ export interface ExchangeOrderPolicyState {
 	paymentRail?: string | null;
 	payoutMethod?: string | null;
 	payoutLocation?: string | null;
+	payoutDestinationJson?: string | null;
 	requisitesIssued: boolean;
 	paymentProofReceived: boolean;
 	paymentVerified: boolean;

@@ -31,6 +31,7 @@ import {
   type ExchangePolicyState,
   guardExchangePolicy,
 } from "./exchange-policy-guard.ts";
+import { buildExchangeOperatorHandoff } from "./exchange-operator-handoff.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
 
 /**
@@ -447,11 +448,20 @@ export class RagReplyStrategy implements ReplyStrategy {
       }
     }
 
+    const operatorHandoff = isExchange
+      ? buildExchangeOperatorHandoff({
+          text: guarded.text,
+          telemetry: result.telemetry,
+          state: exchangePolicyState,
+        })
+      : null;
+
     return [
       {
         channelId: String(input.channel.channelId),
         externalUserId: input.inbound.externalUserId,
         parts: [{ kind: "text", text: guarded.text }],
+        ...(operatorHandoff ? { operatorHandoff } : {}),
       },
     ];
   }

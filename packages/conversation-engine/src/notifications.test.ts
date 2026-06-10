@@ -424,6 +424,35 @@ describe("NotificationService.notify", () => {
 		expect(markup).toContain("opx:paybad:110:77");
 	});
 
+	it("office payout handoff notification includes office confirmation quick actions", async () => {
+		const sent: SendMessageInput[] = [];
+		const svc = new NotificationService(
+			makeRepo([], [makeOperatorSettings({ telegramChatId: "operator-chat" })]),
+			"fake-token",
+			"https://app.example",
+		);
+		// @ts-expect-error patch private client
+		svc.client = fakeTelegramClient((input) => sent.push(input));
+
+		await svc.notify({
+			tenantId: 1,
+			eventType: "operator_handoff_required",
+			conversationId: 111,
+			contactId: 9,
+			data: {
+				displayName: "Игорь",
+				reason: "office_payout",
+				title: "Подтвердить выдачу в офисе",
+				action: "Подтвердить офис и время.",
+				orderId: 78,
+			},
+		});
+
+		const markup = JSON.stringify(sent[0]?.replyMarkup);
+		expect(markup).toContain("opx:office:111:78");
+		expect(markup).toContain("opx:payout:111:78");
+	});
+
 	it("with informer: skips owner in per-operator loop, still notifies other operators + calls informer", async () => {
 		const sent: string[] = [];
 		let emitted = 0;

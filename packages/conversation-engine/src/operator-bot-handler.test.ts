@@ -186,6 +186,9 @@ function makeSendDraftDb(
 			verificationId: string | null;
 			payoutCode: string | null;
 			payoutCodeExpiresAt: number | null;
+			payoutMethod?: string | null;
+			payoutLocation?: string | null;
+			payoutDestinationJson?: string | null;
 		};
 		conversationId?: number;
 		contactId?: number;
@@ -1722,6 +1725,95 @@ describe("operator action callbacks", () => {
 		expect(client.sent.at(-1)?.text).toContain("Заявка: #77");
 	});
 
+	it("office quick action previews selected office and pickup window", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const drafts: Array<Record<string, unknown>> = [];
+		const tx = {
+			execute: async () => {},
+			select: () => ({
+				from: (table: unknown) => {
+					if (table === exchangeOrders) {
+						return {
+							where: () => ({
+								limit: async () => [
+									{
+										id: 77,
+										payoutMethod: "office_cash",
+										payoutLocation: "Bangkok Asok",
+										payoutDestinationJson: JSON.stringify({
+											pickupWindow: "15:00-16:00",
+										}),
+									},
+								],
+							}),
+						};
+					}
+					return {
+						where: () => ({
+							limit: async () => [{ id: 109 }],
+						}),
+					};
+				},
+			}),
+			insert: () => ({
+				values: (values: Record<string, unknown>) => {
+					drafts.push(values);
+					return { returning: async () => [{ id: 702 }] };
+				},
+			}),
+		};
+		const db = {
+			transaction: async (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx),
+		};
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				nowEpoch: () => 123,
+			},
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 13,
+			callback_query: {
+				id: "cb-office",
+				from: { id: 5 },
+				data: "opx:office:109:77",
+				message: {
+					message_id: 25,
+					date: 0,
+					chat: { id: 777, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(client.answered.at(-1)).toMatchObject({
+			callbackQueryId: "cb-office",
+			text: "Preview готов",
+		});
+		expect(drafts[0]?.text).toContain("Bangkok Asok");
+		expect(drafts[0]?.text).toContain("15:00-16:00");
+		expect(JSON.parse(String(drafts[0]?.metadataJson))).toMatchObject({
+			source: "operator_bot_exchange_action",
+			exchangeAction: "office_details",
+			orderId: 77,
+			payoutMethod: "office_cash",
+			payoutLocation: "Bangkok Asok",
+			pickupWindow: "15:00-16:00",
+		});
+		expect(client.sent.at(-1)?.text).toContain("Офис и время");
+		expect(client.sent.at(-1)?.text).toContain("Заявка: #77");
+	});
+
 	it("confirmed KYC OK preview persists verified contact state", async () => {
 		const settings = makeSettings({
 			adminId: 10,
@@ -1870,6 +1962,71 @@ describe("operator action callbacks", () => {
 			});
 			expect(order?.verificationId).toBeNull();
 		}
+	});
+
+	it("confirmed office details preview records operator confirmation activity", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const { audits, db } = makeSendDraftDb({
+			order: {
+				id: 77,
+				status: "paid",
+				verificationId: "operator-bot-109-120",
+				payoutCode: null,
+				payoutCodeExpiresAt: null,
+				payoutMethod: "office_cash",
+				payoutLocation: "Bangkok Asok",
+				payoutDestinationJson: JSON.stringify({
+					pickupWindow: "15:00-16:00",
+				}),
+			},
+		});
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				nowEpoch: () => 123,
+			},
+		);
+
+		// @ts-expect-error private method
+		const result = await handler.sendDraftToClient({
+			draftId: "office123",
+			dbId: 700,
+			tenantId: 3,
+			adminId: 10,
+			chatId: "777",
+			conversationId: 109,
+			text: "🏢 Получение в офисе: Bangkok Asok. Окно получения: 15:00-16:00.",
+			metadata: {
+				source: "operator_bot_exchange_action",
+				exchangeAction: "office_details",
+				orderId: 77,
+				pickupWindow: "15:00-16:00",
+			},
+			createdAt: 123,
+			expiresAt: 723,
+		});
+
+		expect(result.kind).toBe("sent");
+		const details = JSON.parse(String(audits[0]?.detailsJson)) as Record<
+			string,
+			unknown
+		>;
+		expect(details.exchangeSideEffects).toMatchObject({
+			action: "office_details",
+			orderId: 77,
+			confirmationState: "operator_confirmed",
+			payoutMethod: "office_cash",
+			payoutLocation: "Bangkok Asok",
+			pickupWindow: "15:00-16:00",
+			statusPatched: false,
+		});
 	});
 });
 

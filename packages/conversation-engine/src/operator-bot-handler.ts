@@ -173,6 +173,26 @@ function objectValue(value: unknown): Record<string, unknown> {
 		: {};
 }
 
+function pickupWindowFromDestination(
+	value: string | null | undefined,
+): string | null {
+	if (!value?.trim()) return null;
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		const obj = objectValue(parsed);
+		return (
+			stringValue(obj.pickupWindow) ??
+			stringValue(obj.pickup_window) ??
+			stringValue(obj.window) ??
+			stringValue(obj.timeWindow) ??
+			stringValue(obj.time_window) ??
+			stringValue(obj.slot)
+		);
+	} catch {
+		return null;
+	}
+}
+
 /** "2h" / "30m" / "1d" → секунды; "off"/"0"/"" → 0; мусор → null. */
 export function parseMuteSeconds(arg: string): number | null {
 	const a = arg.trim().toLowerCase();
@@ -650,10 +670,62 @@ export class OperatorBotHandler {
 		| { kind: "ready"; quickReply: ExchangeQuickReplyDraft }
 		| { kind: "blocked"; toast: string }
 	> {
-		if (input.action !== "payout_ready" || !input.orderId || !this.actions.db) {
+		if (!input.orderId || !this.actions.db) {
 			return { kind: "ready", quickReply: input.quickReply };
 		}
 		const orderId = input.orderId;
+
+		if (input.action === "office_details") {
+			const [order] = await withTenant(
+				this.actions.db,
+				input.tenantId,
+				async (tx) =>
+					tx
+						.select({
+							id: exchangeOrders.id,
+							payoutMethod: exchangeOrders.payoutMethod,
+							payoutLocation: exchangeOrders.payoutLocation,
+							payoutDestinationJson: exchangeOrders.payoutDestinationJson,
+						})
+						.from(exchangeOrders)
+						.where(
+							and(
+								eq(exchangeOrders.tenantId, input.tenantId),
+								eq(exchangeOrders.conversationId, input.conversationId),
+								eq(exchangeOrders.id, orderId),
+							),
+						)
+						.limit(1),
+			);
+			if (!order) return { kind: "blocked", toast: "Заявка не найдена" };
+			const location = order.payoutLocation?.trim() || "выбранный офис";
+			const pickupWindow = pickupWindowFromDestination(
+				order.payoutDestinationJson,
+			);
+			return {
+				kind: "ready",
+				quickReply: {
+					title: "Офис и время",
+					text:
+						`🏢 Получение в офисе: ${location}. ` +
+						(pickupWindow
+							? `Окно получения: ${pickupWindow}. `
+							: "Окно получения подтвердит оператор. ") +
+						"Оператор фиксирует готовность и отправит финальные инструкции здесь.",
+					metadata: {
+						...input.quickReply.metadata,
+						orderId: order.id,
+						payoutMethod: order.payoutMethod,
+						payoutLocation: order.payoutLocation,
+						...(pickupWindow ? { pickupWindow } : {}),
+					},
+				},
+			};
+		}
+
+		if (input.action !== "payout_ready") {
+			return { kind: "ready", quickReply: input.quickReply };
+		}
 
 		const [order] = await withTenant(
 			this.actions.db,
@@ -1054,6 +1126,9 @@ export class OperatorBotHandler {
 		if (action === "payout_ready") {
 			return this.applyPayoutReadySideEffect(tx, draft, now);
 		}
+		if (action === "office_details") {
+			return this.applyOfficeDetailsSideEffect(tx, draft);
+		}
 		return null;
 	}
 
@@ -1066,6 +1141,9 @@ export class OperatorBotHandler {
 		payoutCode: string | null;
 		payoutCodeExpiresAt: number | null;
 		verificationId: string | null;
+		payoutMethod: string | null;
+		payoutLocation: string | null;
+		payoutDestinationJson: string | null;
 	} | null> {
 		const orderId = this.metadataOrderId(draft.metadata);
 		const selection = {
@@ -1074,6 +1152,9 @@ export class OperatorBotHandler {
 			payoutCode: exchangeOrders.payoutCode,
 			payoutCodeExpiresAt: exchangeOrders.payoutCodeExpiresAt,
 			verificationId: exchangeOrders.verificationId,
+			payoutMethod: exchangeOrders.payoutMethod,
+			payoutLocation: exchangeOrders.payoutLocation,
+			payoutDestinationJson: exchangeOrders.payoutDestinationJson,
 		};
 		if (orderId) {
 			const [order] = await tx
@@ -1325,6 +1406,34 @@ export class OperatorBotHandler {
 			nextStatus: "payout",
 			payoutCodeIssued: true,
 			statusPatched: order.status !== "payout",
+		};
+	}
+
+	private async applyOfficeDetailsSideEffect(
+		tx: Db,
+		draft: PendingOperatorDraft,
+	): Promise<Record<string, unknown>> {
+		const orderId = this.metadataOrderId(draft.metadata);
+		const order = await this.findExchangeOrderForDraft(tx, draft);
+		if (!order) {
+			return {
+				action: "office_details",
+				...(orderId ? { orderId } : {}),
+				orderFound: false,
+				confirmationState: "not_recorded",
+			};
+		}
+		const pickupWindow =
+			stringValue(draft.metadata?.pickupWindow) ??
+			pickupWindowFromDestination(order.payoutDestinationJson);
+		return {
+			action: "office_details",
+			orderId: order.id,
+			confirmationState: "operator_confirmed",
+			payoutMethod: order.payoutMethod,
+			payoutLocation: order.payoutLocation,
+			...(pickupWindow ? { pickupWindow } : {}),
+			statusPatched: false,
 		};
 	}
 
