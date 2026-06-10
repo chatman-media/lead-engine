@@ -1160,6 +1160,41 @@ img, svg { display: block; }
   border-color: rgba(95, 208, 200, 0.58);
   color: var(--text);
 }
+.exchange-scenario-tags a.active {
+  border-color: rgba(95, 208, 200, 0.72);
+  background: rgba(95, 208, 200, 0.12);
+  color: var(--text);
+}
+.exchange-active-scenario {
+  margin-top: 22px;
+  padding: 14px;
+  border: 1px solid rgba(95, 208, 200, 0.22);
+  border-radius: var(--radius);
+  background: rgba(95, 208, 200, 0.06);
+}
+.exchange-active-scenario span,
+.exchange-dialog-scenario span {
+  color: var(--accent-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.exchange-active-scenario strong,
+.exchange-dialog-scenario strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1.25;
+}
+.exchange-active-scenario p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
 .exchange-console {
   overflow: hidden;
   border: 1px solid rgba(106, 166, 255, 0.24);
@@ -1311,6 +1346,12 @@ img, svg { display: block; }
   font-size: 10px;
   line-height: 1.35;
 }
+.exchange-mini-card.is-active {
+  background:
+    linear-gradient(180deg, rgba(95, 208, 200, 0.12), rgba(106, 166, 255, 0.06)),
+    rgba(9, 14, 24, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(95, 208, 200, 0.22);
+}
 .exchange-order-panel {
   min-width: 0;
   padding: 13px;
@@ -1383,6 +1424,12 @@ img, svg { display: block; }
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
+.exchange-scenario-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 16px;
+  margin-top: 16px;
+}
 .exchange-layer {
   min-height: 150px;
   padding: 18px;
@@ -1394,6 +1441,8 @@ img, svg { display: block; }
 .exchange-case-top span,
 .exchange-tool-card span,
 .exchange-handoff span,
+.exchange-scenario-panel span,
+.exchange-qa-panel span,
 .service-provider-scene span,
 .service-inbound span {
   color: var(--accent-2);
@@ -1409,6 +1458,51 @@ img, svg { display: block; }
   color: var(--text);
   font-size: 16px;
   line-height: 1.5;
+}
+.exchange-scenario-panel,
+.exchange-qa-panel {
+  min-height: 210px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.exchange-scenario-panel strong,
+.exchange-qa-panel strong {
+  display: block;
+  margin: 12px 0 14px;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 1.2;
+}
+.exchange-qa-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.exchange-qa-grid div {
+  min-height: 68px;
+  padding: 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  background: rgba(9, 14, 24, 0.72);
+}
+.exchange-qa-grid em {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+.exchange-qa-grid b {
+  display: block;
+  margin-top: 6px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  word-break: break-word;
 }
 .exchange-case-grid,
 .exchange-tool-grid,
@@ -1435,6 +1529,14 @@ img, svg { display: block; }
   gap: 14px;
   min-height: 328px;
   padding: 18px;
+  color: inherit;
+  text-decoration: none;
+}
+.exchange-case.is-active {
+  background:
+    linear-gradient(180deg, rgba(95, 208, 200, 0.1), rgba(106, 166, 255, 0.05)),
+    var(--panel);
+  box-shadow: inset 0 0 0 1px rgba(95, 208, 200, 0.24);
 }
 .exchange-case.tone-blue { border-color: rgba(106, 166, 255, 0.34); }
 .exchange-case.tone-green { border-color: rgba(145, 217, 144, 0.34); }
@@ -1532,6 +1634,13 @@ img, svg { display: block; }
   color: var(--text);
   font-family: var(--font-display);
   font-size: 20px;
+}
+.exchange-dialog-scenario {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
 /* ─────────────── Service workflow detail demos ─────────────── */
@@ -2148,6 +2257,7 @@ img, svg { display: block; }
     padding-bottom: 8px;
   }
   .exchange-money-layers,
+  .exchange-scenario-grid,
   .exchange-case-grid,
   .exchange-tool-grid,
   .exchange-handoff-grid,
@@ -2171,6 +2281,14 @@ img, svg { display: block; }
   }
   .vertical-stack-row em {
     grid-column: 2;
+  }
+  .exchange-scenario-tags a {
+    flex: 1 1 190px;
+    justify-content: center;
+    text-align: center;
+  }
+  .exchange-qa-grid {
+    grid-template-columns: 1fr;
   }
   .vertical-panel-head {
     display: grid;
