@@ -5,8 +5,8 @@ exchange owners, record the outcome, and move each qualified prospect into the
 alpha trial path.
 
 This is not a product QA checklist. Technical readiness is already covered by
-the exchange demo script, fixture seed, rehearsal runner, and QA epic. This file
-is the operating checklist for the sales call itself.
+the exchange demo script, fixture seed, rehearsal runner, and completed QA epic
+#483. This file is the operating checklist for the sales call itself.
 
 ## Done definition
 
@@ -14,8 +14,8 @@ Close #495 only when both rows in this table have a real outcome.
 
 | Slot | Customer | Scheduled | Demo done | Outcome | Next step | Owner |
 |---|---|---:|---:|---|---|---|
-| Demo 1 | TBD | TBD | No | TBD | Trial tenant / decision date / no-fit | Lead Engine |
-| Demo 2 | TBD | TBD | No | TBD | Trial tenant / decision date / no-fit | Lead Engine |
+| Demo 1 | TBD | TBD | No | TBD | trial_tenant / decision_date / no_fit | Lead Engine |
+| Demo 2 | TBD | TBD | No | TBD | trial_tenant / decision_date / no_fit | Lead Engine |
 
 Allowed outcomes:
 
@@ -66,6 +66,8 @@ Run this before every customer call.
 5. Confirm the demo tenant is seeded and login works:
 
 ```sh
+bun db:up
+
 DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine \
 PLATFORM_MASTER_KEY=<64hex> \
 bun run --cwd apps/api seed:exchange-demo
@@ -74,9 +76,15 @@ bun run --cwd apps/api seed:exchange-demo
 6. Start API/UI if using a local screen-share environment:
 
 ```sh
+DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine \
+PLATFORM_MASTER_KEY=<64hex> \
 bun run dev
+
 bun run dev:ui
 ```
+
+If using a deployed stand instead, verify the exact admin URL and API base from
+`AGENTS.md` / `docs/operations/CD_SETUP.md` before the call.
 
 7. Run the rehearsal runner against the active API:
 
