@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.28.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.27.0...@chatman-media/storage-v1.28.0) (2026-06-10)
+
+
+### Features
+
+* **provider-relay:** add rollout observability controls ([#471](https://github.com/chatman-media/lead-engine/issues/471)) ([207cd35](https://github.com/chatman-media/lead-engine/commit/207cd359eb095e70a08d6b31b9fb67e8f0dc8477))
+
 # [@chatman-media/storage-v1.27.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.26.0...@chatman-media/storage-v1.27.0) (2026-06-10)
 
 
