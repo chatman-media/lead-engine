@@ -17,6 +17,12 @@
  *   PLATFORM_MASTER_KEY=<64hex> \
  *   bun run --cwd apps/api seed:exchange-demo
  *
+ * With tenant-scoped chat LLM config for dialog simulator:
+ *   EXCHANGE_DEMO_LLM_PROVIDER=openrouter \
+ *   EXCHANGE_DEMO_LLM_MODEL=openai/gpt-4o-mini \
+ *   EXCHANGE_DEMO_LLM_API_KEY=<openrouter-key> \
+ *   bun run --cwd apps/api seed:exchange-demo
+ *
  * With Telegram channel row + encrypted token:
  *   EXCHANGE_DEMO_TELEGRAM_BOT_TOKEN=123:ABC... \
  *   EXCHANGE_DEMO_TELEGRAM_BOT_USERNAME=my_demo_bot \
@@ -65,11 +71,14 @@ const DEFAULT_SLUG = "exchange-demo";
 const DEFAULT_OWNER_EMAIL = "owner@exchange.demo";
 const DEFAULT_OPERATOR_EMAIL = "operator@exchange.demo";
 const DEFAULT_PASSWORD = "test1234";
+const DEFAULT_LLM_PROVIDER = "openai";
+const DEFAULT_LLM_MODEL = "gpt-4o-mini";
 const DEMO_SEED = "exchange-demo";
 const MASTER_KEY_PLACEHOLDER = "<64hex>";
 
 type Role = "superadmin" | "manager";
 type MessageRole = "user" | "assistant" | "human";
+type LlmProvider = "openai" | "openrouter" | "ollama" | "anthropic";
 
 interface Args {
 	slug: string;
@@ -78,6 +87,10 @@ interface Args {
 	password: string;
 	telegramBotToken: string | null;
 	telegramBotUsername: string | null;
+	llmProvider: LlmProvider;
+	llmModel: string;
+	llmApiKey: string | null;
+	llmBaseUrl: string | null;
 	publicUrl: string | null;
 	setTelegramWebhook: boolean;
 }
@@ -356,6 +369,20 @@ function parseArgs(): Args {
 		telegramBotToken: process.env.EXCHANGE_DEMO_TELEGRAM_BOT_TOKEN ?? null,
 		telegramBotUsername:
 			process.env.EXCHANGE_DEMO_TELEGRAM_BOT_USERNAME ?? null,
+		llmProvider:
+			process.env.EXCHANGE_DEMO_LLM_PROVIDER ??
+			process.env.LLM_PROVIDER ??
+			DEFAULT_LLM_PROVIDER,
+		llmModel:
+			process.env.EXCHANGE_DEMO_LLM_MODEL ??
+			process.env.LLM_MODEL ??
+			DEFAULT_LLM_MODEL,
+		llmApiKey:
+			process.env.EXCHANGE_DEMO_LLM_API_KEY ?? process.env.LLM_API_KEY ?? null,
+		llmBaseUrl:
+			process.env.EXCHANGE_DEMO_LLM_BASE_URL ??
+			process.env.LLM_BASE_URL ??
+			null,
 		publicUrl: process.env.PLATFORM_PUBLIC_URL ?? null,
 		setTelegramWebhook: false,
 	};
@@ -375,8 +402,18 @@ function parseArgs(): Args {
 		else if (rawKey === "telegram-bot-token") out.telegramBotToken = value;
 		else if (rawKey === "telegram-bot-username")
 			out.telegramBotUsername = value;
+		else if (rawKey === "llm-provider") out.llmProvider = value;
+		else if (rawKey === "llm-model") out.llmModel = value;
+		else if (rawKey === "llm-api-key") out.llmApiKey = value;
+		else if (rawKey === "llm-base-url") out.llmBaseUrl = value;
 		else if (rawKey === "public-url") out.publicUrl = value;
 	}
+
+	const llmProvider = normalizeLlmProvider(
+		out.llmProvider ?? DEFAULT_LLM_PROVIDER,
+	);
+	const llmModel = String(out.llmModel ?? DEFAULT_LLM_MODEL).trim();
+	if (!llmModel) throw new Error("LLM model cannot be empty");
 
 	return {
 		slug: out.slug ?? DEFAULT_SLUG,
@@ -387,6 +424,10 @@ function parseArgs(): Args {
 		telegramBotUsername: normalizeTelegramUsername(
 			out.telegramBotUsername ?? null,
 		),
+		llmProvider,
+		llmModel,
+		llmApiKey: normalizeOptional(out.llmApiKey ?? null),
+		llmBaseUrl: normalizePublicUrl(out.llmBaseUrl ?? null),
 		publicUrl: normalizePublicUrl(out.publicUrl ?? null),
 		setTelegramWebhook: out.setTelegramWebhook ?? false,
 	};
@@ -400,6 +441,26 @@ function requiredEnv(name: string): string {
 
 function normalizeTelegramUsername(value: string | null): string | null {
 	const trimmed = value?.trim().replace(/^@/, "") ?? "";
+	return trimmed ? trimmed : null;
+}
+
+function normalizeLlmProvider(value: string): LlmProvider {
+	const provider = value.trim().toLowerCase();
+	if (
+		provider === "openai" ||
+		provider === "openrouter" ||
+		provider === "ollama" ||
+		provider === "anthropic"
+	) {
+		return provider;
+	}
+	throw new Error(
+		"LLM provider must be one of: openai, openrouter, ollama, anthropic",
+	);
+}
+
+function normalizeOptional(value: string | null): string | null {
+	const trimmed = value?.trim() ?? "";
 	return trimmed ? trimmed : null;
 }
 
@@ -503,6 +564,7 @@ async function seedChannelsAndLlm(input: {
 	webChannelId: number;
 	telegramChannelId: number | null;
 	telegramUsername: string | null;
+	llmHasSecret: boolean;
 }> {
 	return withTenant(input.db, input.tenantId, async (tx) => {
 		const [web] = await tx
@@ -582,21 +644,48 @@ async function seedChannelsAndLlm(input: {
 			telegramChannelId = telegram.id;
 		}
 
+		const [existingChatLlm] = await tx
+			.select({ secretRef: llmProviderConfigs.secretRef })
+			.from(llmProviderConfigs)
+			.where(
+				and(
+					eq(llmProviderConfigs.tenantId, input.tenantId),
+					eq(llmProviderConfigs.purpose, "chat"),
+				),
+			)
+			.limit(1);
+		let chatSecretRef = existingChatLlm?.secretRef ?? null;
+		if (input.args.llmApiKey) {
+			chatSecretRef = "llm_chat_apikey";
+			await setEncryptedSecret({
+				db: tx as Db,
+				tenantId: input.tenantId,
+				key: chatSecretRef,
+				value: input.args.llmApiKey,
+				masterKeyHex: input.masterKeyHex,
+				nowEpoch: input.now,
+			});
+		}
+
 		await tx
 			.insert(llmProviderConfigs)
 			.values({
 				tenantId: input.tenantId,
 				purpose: "chat",
-				provider: "openai",
-				model: "gpt-4o-mini",
+				provider: input.args.llmProvider,
+				model: input.args.llmModel,
+				secretRef: chatSecretRef,
+				baseUrl: input.args.llmBaseUrl,
 				createdAt: input.now,
 				updatedAt: input.now,
 			})
 			.onConflictDoUpdate({
 				target: [llmProviderConfigs.tenantId, llmProviderConfigs.purpose],
 				set: {
-					provider: "openai",
-					model: "gpt-4o-mini",
+					provider: input.args.llmProvider,
+					model: input.args.llmModel,
+					secretRef: chatSecretRef,
+					baseUrl: input.args.llmBaseUrl,
 					updatedAt: input.now,
 				},
 			});
@@ -605,6 +694,8 @@ async function seedChannelsAndLlm(input: {
 			webChannelId: web.id,
 			telegramChannelId,
 			telegramUsername,
+			llmHasSecret:
+				input.args.llmProvider === "ollama" || chatSecretRef != null,
 		};
 	});
 }
@@ -1122,6 +1213,12 @@ async function main() {
 						operator: args.operatorEmail,
 						credentialNote:
 							"password is set from EXCHANGE_DEMO_PASSWORD or the script default; not printed",
+					},
+					llm: {
+						provider: args.llmProvider,
+						model: args.llmModel,
+						baseUrl: args.llmBaseUrl,
+						hasSecret: channelResult.llmHasSecret,
 					},
 					channels: {
 						webChannelId: channelResult.webChannelId,
