@@ -20,12 +20,15 @@ const PAYOUT_TOOLS = new Set(["issue_exchange_payout"]);
 
 const NUMBER_RE =
   /(?<![A-Za-zА-Яа-я0-9])(?:\d{1,3}(?:[ .,]\d{3})+|\d+)(?:[.,]\d+)?(?![A-Za-zА-Яа-я0-9])/u;
+const NUMBER_SCAN_RE =
+  /(?<![A-Za-zА-Яа-я0-9])(?:\d{1,3}(?:[ .,]\d{3})+|\d+)(?:[.,]\d+)?(?![A-Za-zА-Яа-я0-9])/gu;
 const QUOTE_RE =
-  /(?:курс|rate|отда[её]те|получа(?:ете|ешь)|итог(?:овая)?\s+сумм|thb|бат|bhat|rub|руб|usdt|btc|eth|usd|eur)/iu;
+  /(?:курс|rate|отда[её]те|получ(?:а(?:ете|ешь)|ите|у|ится|ить)|итог(?:овая)?\s+сумм|thb|бат|bhat)/iu;
+const SOURCE_ASSET_RE = /(?:usdt|btc|eth|usd|eur|rub|юсдт|битк|эфир|доллар|евро|руб|₽)/iu;
 const REQUISITES_RE =
-  /(?:реквизит|кошел[её]к|wallet|адрес\s+(?:кошелька|для\s+оплаты)|оплат\w*|перев(?:од|ести)|sbp|сбп|qr|карта|card|binance\s*id|trc20|erc20|bep20)/iu;
+  /(?:реквизит|кошел[её]к|wallet|адрес\s+(?:кошелька|для\s+оплаты)|оплат\w*|перев(?:од|ести)|sbp|сбп|qr|карта|card|binance\s*id)/iu;
 const PAYOUT_RE =
-  /(?:код\s+(?:выдачи|снятия|получения)|payout\s*code|cardless|без\s+карты|банкомат|atm)/iu;
+  /(?:код\s+(?:выдачи|снятия|получения)|payout\s*code)/iu;
 const RATE_NEGOTIATION_RE =
   /(?:договор(?:имся|иться)|скидк|лучше\s+курс|курс\s+лучше|сдела(?:ю|ем)\s+курс|подвин(?:у|ем)\s+курс)/iu;
 
@@ -64,7 +67,9 @@ function hasAny(names: Set<string>, allowed: Set<string>): boolean {
 }
 
 function hasConcreteQuoteClaim(text: string): boolean {
-  return NUMBER_RE.test(text) && QUOTE_RE.test(text);
+  if (!NUMBER_RE.test(text)) return false;
+  if (QUOTE_RE.test(text)) return true;
+  return SOURCE_ASSET_RE.test(text) && [...text.matchAll(NUMBER_SCAN_RE)].length >= 2;
 }
 
 function hasConcreteRequisitesClaim(text: string): boolean {

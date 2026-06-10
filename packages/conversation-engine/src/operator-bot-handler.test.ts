@@ -81,8 +81,12 @@ class FakeRepo implements Partial<NotificationsRepo> {
 			: [];
 	}
 
-	setSettings(settings?: OperatorSettings) {
-		this.settings = settings;
+	setSettings(settings?: OperatorSettings | OperatorSettings[]) {
+		this.settings = settings
+			? Array.isArray(settings)
+				? settings
+				: [settings]
+			: [];
 	}
 
 	async findByLinkToken(_token: string) {

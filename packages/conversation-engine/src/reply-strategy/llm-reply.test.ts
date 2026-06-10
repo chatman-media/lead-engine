@@ -1,4 +1,4 @@
-import { makeBookingLinkTool } from "@chatman-media/kb";
+import { type AnyRagTool, makeBookingLinkTool } from "@chatman-media/kb";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import { describe, expect, it } from "bun:test";
@@ -77,6 +77,23 @@ function row(
     createdAt: 1700000000 + id,
     stage: null,
     deletedAt: null,
+  };
+}
+
+function exchangeQuoteTool(): AnyRagTool {
+  return {
+    name: "compute_exchange_quote",
+    description: "Compute exchange quote",
+    parameters: {} as AnyRagTool["parameters"],
+    execute: async (args: Record<string, unknown>) => ({
+      direction: `${args.asset}->THB`,
+      asset: args.asset,
+      network: args.network ?? "TRC20",
+      amountMode: "source_amount",
+      amountFrom: args.amount,
+      rate: 31.5,
+      amountToThb: 15750,
+    }),
   };
 }
 
@@ -242,6 +259,150 @@ describe("LlmReplyStrategy", () => {
     });
     expect(result).not.toBeNull();
     expect((result![0]!.parts[0] as { text: string }).text).toBe(EXCHANGE_SAFE_FALLBACK);
+  });
+
+  it("exchange: явный запрос курса принудительно считает через compute_exchange_quote", async () => {
+    const chat = new CapturingChat("Сейчас уточню у оператора.");
+    const repo = fakeMessagesRepo([row(1, "user", "500 USDT TRC20 на баты, какой курс?")]);
+    const recorded: Array<Parameters<NonNullable<LlmReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const strategy = new LlmReplyStrategy(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chat,
+        resolveTools: () => [exchangeQuoteTool()],
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+      () => repo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "500 USDT TRC20 на баты, какой курс?",
+    });
+
+    expect(result).not.toBeNull();
+    const text = (result![0]!.parts[0] as { text: string }).text;
+    expect(text).toContain("Курс: 31.5.");
+    expect(text).toContain("За 500 USDT (TRC20) получите 15750 THB.");
+    expect(chat.lastCall).toBeNull();
+    expect(recorded[0]?.toolCalls[0]).toMatchObject({
+      name: "compute_exchange_quote",
+      args: { asset: "USDT", amount: 500, network: "TRC20" },
+      cycle: 0,
+    });
+  });
+
+  it("exchange: в follow-up выбирает source amount рядом с asset, а не THB total", async () => {
+    const chat = new CapturingChat("Сейчас уточню у оператора.");
+    const repo = fakeMessagesRepo([
+      row(1, "assistant", "Курс: 31.5. За 500 USDT (TRC20) получите 15750 THB."),
+      row(2, "user", "15750 бат за 500 USDT? Точно?"),
+    ]);
+    const recorded: Array<Parameters<NonNullable<LlmReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const strategy = new LlmReplyStrategy(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chat,
+        resolveTools: () => [exchangeQuoteTool()],
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+      () => repo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "15750 бат за 500 USDT? Точно?",
+    });
+
+    expect(result).not.toBeNull();
+    expect((result![0]!.parts[0] as { text: string }).text).toContain(
+      "За 500 USDT (TRC20) получите 15750 THB.",
+    );
+    expect(recorded[0]?.toolCalls[0]?.args).toMatchObject({ asset: "USDT", amount: 500 });
+  });
+
+  it("exchange: KYC follow-up with amount is not forced into another quote", async () => {
+    const chat = new CapturingChat("Да, видео нужно для верификации перед реквизитами.");
+    const repo = fakeMessagesRepo([
+      row(1, "assistant", "Для получения батов сначала нужно пройти верификацию."),
+      row(2, "user", "Видео-кружок? Для обмена 500 USDT?"),
+    ]);
+    const recorded: Array<Parameters<NonNullable<LlmReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const strategy = new LlmReplyStrategy(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chat,
+        resolveTools: () => [exchangeQuoteTool()],
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+      () => repo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "Видео-кружок? Для обмена 500 USDT?",
+    });
+
+    expect(result).not.toBeNull();
+    const text = (result![0]!.parts[0] as { text: string }).text;
+    expect(text).toContain("Перед реквизитами нужна верификация клиента.");
+    expect(text).toContain("Оператор или внешний сервис проведёт проверку личности.");
+    expect(chat.lastCall).toBeNull();
+    expect(recorded).toHaveLength(0);
+  });
+
+  it("exchange: KYC confirmation wording does not trigger quote preflight", async () => {
+    const chat = new CapturingChat("Да, видео нужно для проверки документов перед оплатой.");
+    const repo = fakeMessagesRepo([
+      row(1, "assistant", "Для обмена нужно пройти KYC: пришлите документ и видео."),
+      row(2, "user", "Точно видео надо для 500 USDT?"),
+    ]);
+    const recorded: Array<Parameters<NonNullable<LlmReplyStrategyOpts["recordToolCalls"]>>[0]> = [];
+    const strategy = new LlmReplyStrategy(
+      {
+        template: EXCHANGE_TEMPLATE,
+        resolveChat: () => chat,
+        resolveTools: () => [exchangeQuoteTool()],
+        recordToolCalls: async (input) => {
+          recorded.push(input);
+        },
+      },
+      () => repo,
+    );
+
+    const result = await strategy.generate({
+      tenant: { tenantId: 1 },
+      channel: { channelId: 10 },
+      conversationId: 100,
+      contactId: 1,
+      inbound: { externalUserId: "u" },
+      userMessageText: "Точно видео надо для 500 USDT?",
+    });
+
+    expect(result).not.toBeNull();
+    const text = (result![0]!.parts[0] as { text: string }).text;
+    expect(text).toContain("Перед реквизитами нужна верификация клиента.");
+    expect(text).toContain("Пришлите короткое видео");
+    expect(chat.lastCall).toBeNull();
+    expect(recorded).toHaveLength(0);
   });
 
   it("exchange: resolved tenant template activates exchange guard", async () => {
