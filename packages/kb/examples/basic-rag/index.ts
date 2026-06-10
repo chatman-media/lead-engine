@@ -29,7 +29,7 @@ interface StoredChunk {
   index: number;
   text: string;
   tokenCount: number;
-  embedding: number[];
+  embedding: number[] | null;
   source: string;
   title: string;
 }
@@ -42,9 +42,10 @@ class InMemoryKbStore implements IKbStore {
 
   async search(embedding: number[], k: number): Promise<KbSearchHit[]> {
     return this.chunks
+      .filter((c) => c.embedding !== null)
       .map((c) => ({
         chunk_id: c.id,
-        distance: cosineDist(embedding, c.embedding),
+        distance: cosineDist(embedding, c.embedding ?? []),
         text: c.text,
         document_id: c.docId,
         source: c.source,
@@ -88,7 +89,7 @@ class InMemoryKbStore implements IKbStore {
   }
 
   async insertChunkWithEmbedding(input: {
-    documentId: number; chunkIndex: number; text: string; tokenCount: number; embedding: number[];
+    documentId: number; chunkIndex: number; text: string; tokenCount: number; embedding: number[] | null;
   }) {
     const doc = this.docs.get(input.documentId);
     this.chunks.push({

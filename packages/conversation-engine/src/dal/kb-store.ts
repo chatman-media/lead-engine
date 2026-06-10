@@ -28,6 +28,11 @@ export class DrizzleKbStore implements IKbStore {
 		return `[${embedding.join(",")}]`;
 	}
 
+	private vecOrNull(embedding: number[] | null) {
+		if (!embedding) return sql`NULL`;
+		return sql`${this.vec(embedding)}::vector`;
+	}
+
 	private scopePredicate(scope?: KbScope | null) {
 		if (!scope) return sql`TRUE`;
 		if (scope.scopeType === "global") return sql`d.scope_type = 'global'`;
@@ -268,13 +273,13 @@ export class DrizzleKbStore implements IKbStore {
 		chunkIndex: number;
 		text: string;
 		tokenCount: number;
-		embedding: number[];
+		embedding: number[] | null;
 	}): Promise<void> {
 		const t = this.ctx.tenantId;
-		const e = this.vec(input.embedding);
+		const e = this.vecOrNull(input.embedding);
 		await this.ctx.db.execute(sql`
       INSERT INTO kb_chunks (tenant_id, document_id, chunk_index, text, token_count, embedding)
-      VALUES (${t}, ${input.documentId}, ${input.chunkIndex}, ${input.text}, ${input.tokenCount}, ${e}::vector)
+      VALUES (${t}, ${input.documentId}, ${input.chunkIndex}, ${input.text}, ${input.tokenCount}, ${e})
     `);
 	}
 }

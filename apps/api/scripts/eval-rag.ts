@@ -210,7 +210,7 @@ class FixtureKbStore implements IKbStore {
 		chunkIndex: number;
 		text: string;
 		tokenCount: number;
-		embedding: number[];
+		embedding: number[] | null;
 	}): Promise<void> {}
 
 	private filtered(topic?: string | null): Required<FixtureChunk>[] {

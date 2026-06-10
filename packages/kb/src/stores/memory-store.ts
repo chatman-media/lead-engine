@@ -15,7 +15,7 @@ interface StoredChunk {
   chunkIndex: number;
   text: string;
   tokenCount: number;
-  embedding: number[];
+  embedding: number[] | null;
 }
 
 /**
@@ -51,11 +51,12 @@ export class InMemoryKbStore implements IKbStore {
   // ── Search ────────────────────────────────────────────────────────────────
 
   async search(embedding: number[], k: number, topic?: string | null): Promise<KbSearchHit[]> {
-    const pool = topic
+    const pool = (topic
       ? this.chunks.filter((c) => this.topicOf(c.documentId) === topic)
-      : this.chunks;
+      : this.chunks
+    ).filter((c) => c.embedding !== null);
     return pool
-      .map((c) => ({ chunk: c, distance: cosineDistance(embedding, c.embedding) }))
+      .map((c) => ({ chunk: c, distance: cosineDistance(embedding, c.embedding ?? []) }))
       .sort((a, b) => a.distance - b.distance)
       .slice(0, k)
       .map(({ chunk, distance }) => this.toHit(chunk, distance));
@@ -73,7 +74,8 @@ export class InMemoryKbStore implements IKbStore {
       : this.chunks;
 
     const vec = pool
-      .map((c) => ({ chunk: c, distance: cosineDistance(input.embedding, c.embedding) }))
+      .filter((c) => c.embedding !== null)
+      .map((c) => ({ chunk: c, distance: cosineDistance(input.embedding, c.embedding ?? []) }))
       .sort((a, b) => a.distance - b.distance)
       .slice(0, k * 2)
       .map(({ chunk, distance }) => this.toHit(chunk, distance));
@@ -147,7 +149,7 @@ export class InMemoryKbStore implements IKbStore {
     chunkIndex: number;
     text: string;
     tokenCount: number;
-    embedding: number[];
+    embedding: number[] | null;
   }): Promise<void> {
     this.chunks.push({
       chunkId: this.nextChunkId++,

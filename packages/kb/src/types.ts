@@ -90,13 +90,13 @@ export interface IKbStore {
     scope?: KbScope | null;
   }): Promise<{ id: number }>;
 
-  /** Insert one chunk with its embedding vector. */
+  /** Insert one chunk with its optional embedding vector. */
   insertChunkWithEmbedding(input: {
     documentId: number;
     chunkIndex: number;
     text: string;
     tokenCount: number;
-    embedding: number[];
+    embedding: number[] | null;
   }): Promise<void>;
 }
 
