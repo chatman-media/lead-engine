@@ -20,7 +20,7 @@ import {
  * в KB. UI рендерит чек-лист + использует `done` для гейтинга кабинета.
  *
  * `done`:
- *  - generic тенант: channel + chat LLM (KB и embed — опциональны).
+ *  - generic тенант: channel + ready chat LLM (KB и embed — опциональны).
  *  - exchange-тенант (funnels.vertical_template_id='exchange'): дополнительно
  *    нужны установленная воронка + ≥1 активный курс + ≥1 реквизит приёма.
  *
@@ -115,15 +115,19 @@ export function makeAdminOnboardingRoutes(opts: AdminOnboardingRoutesOpts): Hono
         requisiteCount = Number(reqRow?.n ?? 0);
       }
 
+      const chatHasSecret = !!chatCfg?.secretRef;
+      const chatLlmReady = !!chatCfg && (chatCfg.provider === "ollama" || chatHasSecret);
+
       return {
         channelConnected: !!chRow,
         ...(chRow ? { channelKind: chRow.kind, channelExternalId: chRow.externalId } : {}),
         chatLlmConfigured: !!chatCfg,
+        chatLlmReady,
         ...(chatCfg
           ? {
               chatProvider: chatCfg.provider,
               chatModel: chatCfg.model,
-              chatHasSecret: chatCfg.secretRef !== null && chatCfg.secretRef !== "",
+              chatHasSecret,
             }
           : {}),
         embedLlmConfigured: !!embedCfg,
@@ -140,7 +144,7 @@ export function makeAdminOnboardingRoutes(opts: AdminOnboardingRoutesOpts): Hono
     const exchangeReady =
       status.funnelInstalled && status.activeRateCount >= 1 && status.requisiteCount >= 1;
     const done =
-      status.channelConnected && status.chatLlmConfigured && (!status.isExchange || exchangeReady);
+      status.channelConnected && status.chatLlmReady && (!status.isExchange || exchangeReady);
 
     return c.json({ ...status, done });
   });

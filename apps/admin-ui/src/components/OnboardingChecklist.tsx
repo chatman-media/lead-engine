@@ -41,7 +41,10 @@ function Step({ done, title, hint }: StepProps) {
 export function OnboardingChecklist({ status, alwaysShow = false }: OnboardingChecklistProps) {
   if (status.done && !alwaysShow) return null;
   const channelDone = status.channelConnected;
-  const llmDone = status.chatLlmConfigured && (status.chatHasSecret ?? false);
+  const llmDone =
+    status.chatLlmReady ??
+    (status.chatLlmConfigured &&
+      (status.chatProvider === "ollama" || (status.chatHasSecret ?? false)));
   const kbDone = status.hasKbDocuments;
 
   return (
