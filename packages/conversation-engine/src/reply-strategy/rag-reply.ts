@@ -34,29 +34,95 @@ import {
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
 
 /**
- * RAG-аware ReplyStrategy. На каждый user message:
- *   1. Загрузить последние N сообщений (history).
- *   2. Эмбеддинг user message → KbStore.hybridSearch → chunks.
- *   3. answerWithRag(chunks + history + system prompt) → text reply.
- *   4. Вернуть OutboundEnvelope.
+ * RAG-aware ReplyStrategy. На каждый user message:
+ *   1. loadTurnContext(input) → все per-tenant/per-conversation данные хода.
+ *   2. Загрузить последние N сообщений (history) + conversation compaction.
+ *   3. Эмбеддинг user message → KbStore.hybridSearch → chunks.
+ *   4. answerWithRag(chunks + history + system prompt) → text reply.
+ *   5. Вернуть OutboundEnvelope.
  *
  * answerWithRag из @chatman-media/kb сам строит system prompt из chunks,
  * делает query rewriting + reflection (если флаги включены) и
  * sanitize'ит output. Мы только инжектим деп'ы и history.
  *
- * Vertical-template'овский systemPromptFragment пробрасывается через
- * persona.role — это не идеально, но answerWithRag не предоставляет
- * прямой override system-промпта; нужная extension-точка появится при
- * рефакторе rag (вне scope этого pkg'а).
+ * Раньше каждый источник данных был отдельным resolve*-колбэком (18 штук) —
+ * scaffolding creep с «тихими» null-фолбэками. Теперь весь контекст хода
+ * загружается одним loadTurnContext (#514); сборка живёт в apps/api.
  */
-export interface RagReplyStrategyOpts {
-  /** Fallback template used when no per-tenant template resolver is configured. */
+
+/** Идентификаторы хода, передаются в loadTurnContext. */
+export interface RagTurnInput {
+  tenantId: number;
+  conversationId: number;
+  contactId: number;
+}
+
+/**
+ * Всё, что нужно стратегии для одного хода диалога. Поля, помеченные `?`,
+ * опциональны: отсутствие поля = фича не сконфигурирована у тенанта, пайплайн
+ * пропускает соответствующий блок (как раньше при отсутствии резолвера).
+ */
+export interface RagTurnContext {
+  /** Vertical template тенанта. Используется для exchange-guard'ов (slug). */
   template: VerticalTemplate;
   /**
-   * Optional per-tenant template resolver. Lets apps/api use the tenant's
-   * installed vertical instead of one boot-time hardcoded template.
+   * true → стадия лида в support-mode: бот молчит (возвращает null), оператор
+   * ведёт диалог вручную. Loader может вернуть минимальный контекст с этим
+   * флагом и не грузить остальное.
    */
-  resolveTemplate?: (tenantId: number) => VerticalTemplate | null | undefined;
+  isSupport?: boolean;
+  chat: ChatClient;
+  embedder: RagEmbeddingClient;
+  kb: IKbStore;
+  /**
+   * Scope для retrieval (stage → funnel → global). Также логируется в
+   * kb_suggestions при no-context fallback'е.
+   */
+  kbScope?: KbScope | null;
+  /**
+   * Sales-style: persona, framework, hooks для system-prompt'а. null →
+   * answerWithRag fallback'нет на DEFAULT_PERSONA. Если содержит
+   * styleId/experimentId — assignment сохраняется в conversations для
+   * coach/eval attribution.
+   */
+  style?: ResolvedStyleAssignment | null;
+  /** Включённые навыки убеждения (уже отфильтрованы по is_enabled). */
+  skills?: readonly SkillForPrompt[];
+  /** Активные директорские хуки тенанта (is_active = true). */
+  directorHooks?: readonly DirectorHookForPrompt[];
+  /** Agentic tools. Пусто/absent → один LLM-вызов без tool-loop'а. */
+  tools?: AnyRagTool[];
+  /** Cross-encoder reranker (Jina/Cohere) или null. */
+  reranker?: Reranker | null;
+  /** Per-стадийные инструкции (goal/guidance) из stage_definitions. */
+  stageGuidance?: { goal: string; guidance?: string } | null;
+  /** Динамический контекст запроса (multi-request / concierge). */
+  requestContext?: string | null;
+  /**
+   * Factual brokered-order context текущего клиента. Мёржится в
+   * requestContext и идёт grounding-блоком; не мутирует order state.
+   */
+  serviceOrderContext?: string | null;
+  /** true → в промпт идёт блок «ОЖИДАНИЕ ОПЕРАТОРА» (бот держит, не выдумывает цену). */
+  awaitingOperator?: boolean;
+  /** Снапшот exchange-workflow state для финального policy guard (только exchange_v1). */
+  exchangePolicyState?: ExchangePolicyState | null;
+  /** Repo для fire-and-forget логирования незакрытых вопросов (softFallback). */
+  suggestions?: KbSuggestionsRepo | null;
+  /** Repo для compaction summary + style assignment. Absent → ничего не персистится. */
+  conversations?: ConversationsRepo | null;
+  messages: MessagesRepo;
+}
+
+export interface RagReplyStrategyOpts {
+  /**
+   * Загрузить контекст хода. Вызывается один раз на каждый входящий message.
+   * Сборка (DB-запросы, кеши, метрики-обёртки) — на стороне приложения;
+   * независимые источники стоит грузить параллельно (Promise.all).
+   */
+  loadTurnContext: (
+    input: RagTurnInput,
+  ) => Promise<RagTurnContext> | RagTurnContext;
   /** Лимит history сообщений (default 12 — answerWithRag сам ужмёт через summary). */
   historyLimit?: number;
   /**
@@ -71,128 +137,12 @@ export interface RagReplyStrategyOpts {
   rewriteQueryBeforeRetrieval?: boolean;
   /**
    * Reflection-guard после генерации (LLM фактчекит chunks vs answer).
-   * Default false — дополнительная LLM-стоимость и latency.
+   * Default: только для exchange_v1 — дополнительная LLM-стоимость и latency.
    */
   reflect?: boolean;
   /** topK chunks для контекста. Default 5. */
   topK?: number;
-  /** Per-call temperature, default 0.7. */
-  temperature?: number;
   maxOutputTokens?: number;
-  resolveChat: (tenantId: number) => ChatClient;
-  resolveEmbed: (tenantId: number) => RagEmbeddingClient;
-  resolveKb: (tenantId: number) => IKbStore;
-  /**
-   * Optional KB scope resolver. When provided, retrieval checks the current
-   * stage first, then the funnel, then global docs.
-   */
-  resolveKbScope?: (input: {
-    tenantId: number;
-    conversationId: number;
-    contactId: number;
-  }) => Promise<KbScope | null> | KbScope | null;
-  /**
-   * Опциональный sales-style resolver. Если задан и возвращает Style —
-   * answerWithRag использует его для построения system-prompt (persona,
-   * sales framework, hooks, skills). При null/undefined — rag fallback'нет
-   * на DEFAULT_PERSONA. Если resolver возвращает styleId/experimentId,
-   * assignment сохраняется в conversations для coach/eval attribution.
-   */
-  resolveStyle?: (input: {
-    tenantId: number;
-    conversationId: number;
-    contactId: number;
-  }) => Promise<ResolvedStyleAssignment | null> | ResolvedStyleAssignment | null;
-  /**
-   * Опциональная проверка support-mode. Если возвращает true — стадия лида
-   * помечена как supportMode и бот не отвечает (возвращает null). Оператор
-   * ведёт диалог вручную пока лид не переведут на другую стадию.
-   */
-  resolveIsSupport?: (input: {
-    tenantId: number;
-    contactId: number;
-  }) => Promise<boolean>;
-  /**
-   * Опциональный resolver пер-стадийных инструкций (Phase 2): goal/guidance
-   * текущей стадии лида из stage_definitions. Если вернёт значение — оно идёт
-   * в composeSystemPrompt (stageOverride) с приоритетом над Style.stages.
-   * null → используется Style.
-   */
-  resolveStageGuidance?: (input: {
-    tenantId: number;
-    contactId: number;
-  }) => Promise<{ goal: string; guidance?: string } | null>;
-  /**
-   * Опциональный resolver динамического контекста запроса (multi-request /
-   * concierge): тип запроса гостя + число открытых. Идёт в composeSystemPrompt
-   * (requestContext). null → блок «ЗАПРОС ГОСТЯ» не добавляется.
-   */
-  resolveRequestContext?: (input: {
-    tenantId: number;
-    contactId: number;
-  }) => Promise<string | null>;
-  /**
-   * Optional factual brokered-order context for the current customer. Merged
-   * into requestContext for prompt grounding; it must not mutate order state.
-   */
-  resolveServiceOrderContext?: (input: {
-    tenantId: number;
-    conversationId: number;
-    contactId: number;
-  }) => Promise<string | null> | string | null;
-  /**
-   * Optional exchange workflow state snapshot for the final policy guard.
-   * Used only for exchange_v1, after RAG/tool generation.
-   */
-  resolveExchangePolicyState?: (input: {
-    tenantId: number;
-    conversationId: number;
-    contactId: number;
-  }) => Promise<ExchangePolicyState | null> | ExchangePolicyState | null;
-  /**
-   * Опциональный resolver «лид ждёт оператора» (R5): true → в промпт идёт блок
-   * «ОЖИДАНИЕ ОПЕРАТОРА» (бот держит, не выдумывает цену). false/absent → нет.
-   */
-  resolveAwaitingOperator?: (input: {
-    tenantId: number;
-    contactId: number;
-  }) => Promise<boolean>;
-  /**
-   * Загрузить включённые навыки убеждения для тенанта. Возвращает список
-   * SkillForPrompt, уже отфильтрованных по is_enabled = true.
-   * Stage-фильтрация (intake/active/always) выполняется внутри
-   * composeSystemPrompt по applicableStages.
-   * Если не задан — навыки не инжектируются (silent fallback).
-   */
-  resolveSkills?: (input: {
-    tenantId: number;
-  }) => Promise<readonly SkillForPrompt[]>;
-  /**
-   * Загрузить активные директорские хуки тенанта (is_active = true).
-   * Если не задан — хуки не инжектируются.
-   */
-  resolveDirectorHooks?: (input: {
-    tenantId: number;
-  }) => Promise<readonly DirectorHookForPrompt[]>;
-  /**
-   * Загрузить активные agentic tools для тенанта.
-   * Вызывается один раз на каждый входящий message.
-   * Если не задан или возвращает пустой массив — tool-loop не запускается
-   * (поведение как раньше: один LLM-вызов без инструментов).
-   *
-   * @example
-   * ```ts
-   * resolveTools: async ({ tenantId }) => {
-   *   const url = await getBookingUrl(tenantId);
-   *   return url ? [makeBookingLinkTool(url)] : [];
-   * }
-   * ```
-   */
-  resolveTools?: (input: {
-    tenantId: number;
-    conversationId: number;
-    contactId?: number;
-  }) => Promise<AnyRagTool[]> | AnyRagTool[];
   /**
    * Если true — когда RAG не находит контекста (NO_CONTEXT_MARKER) бот всё
    * равно отвечает через `generateSoftFallback` (честное «уточню и вернусь»
@@ -202,11 +152,6 @@ export interface RagReplyStrategyOpts {
    */
   softFallback?: boolean;
   /**
-   * Фабрика KbSuggestionsRepo для fire-and-forget логирования незакрытых вопросов.
-   * Используется только если softFallback=true.
-   */
-  resolveSuggestions?: (tenantId: number) => KbSuggestionsRepo;
-  /**
    * Conversation compaction: если кол-во сообщений в диалоге достигает порога —
    * pipeline генерирует резюме и сохраняет его в conversations.summary_json.
    * Резюме передаётся в answerWithRag как conversationSummary, сокращая effective
@@ -215,21 +160,6 @@ export interface RagReplyStrategyOpts {
    * Default: 20. Отключить: 0 или Infinity.
    */
   compactAfterMessages?: number;
-  /**
-   * Фабрика ConversationsRepo для сохранения compaction summary.
-   * Если не задан — compaction происходит в памяти (summary не сохраняется).
-   */
-  resolveConversations?: (tenantId: number) => ConversationsRepo;
-  /**
-   * Optional cross-encoder reranker resolver. Called once per turn — should
-   * return a `Reranker` instance (Jina or Cohere) configured for the tenant,
-   * or null/undefined if no reranker is configured. Results are expected to be
-   * cached by the caller (building a reranker per-call is cheap — the API key
-   * lookup is the expensive part, which the caller should cache).
-   */
-  resolveReranker?: (input: {
-    tenantId: number;
-  }) => Promise<Reranker | null> | Reranker | null;
   /**
    * Optional post-generation telemetry sink for agentic tool calls. Called only
    * after the LLM/tool loop finishes, so it never wraps an LLM call in a DB tx.
@@ -259,7 +189,7 @@ function messagesToChatHistory(history: MessageRow[]): ChatMessage[] {
  * rag's Style через zod StyleSchema. Возвращает null если JSON невалидный —
  * pipeline'у тогда fall back на DEFAULT_PERSONA вместо crash'а.
  *
- * Использовать снаружи (apps/api) при построении resolveStyle hook'а:
+ * Использовать снаружи (apps/api) при построении style-части TurnContext:
  *   const styleRow = await stylesRepo.findActiveBySlug(slug);
  *   return parseStyleConfig(styleRow.configJson);
  */
@@ -284,10 +214,7 @@ function hasAssignmentMetadata(style: ResolvedStyleAssignment | null): boolean {
 }
 
 export class RagReplyStrategy implements ReplyStrategy {
-  constructor(
-    private readonly opts: RagReplyStrategyOpts,
-    private readonly messagesRepoFor: (tenantId: number) => MessagesRepo,
-  ) {}
+  constructor(private readonly opts: RagReplyStrategyOpts) {}
 
   async generate(input: {
     tenant: { tenantId: number };
@@ -300,15 +227,15 @@ export class RagReplyStrategy implements ReplyStrategy {
     if (input.userMessageText.length === 0) return null;
 
     const tenantId = input.tenant.tenantId;
-    const template = this.opts.resolveTemplate?.(tenantId) ?? this.opts.template;
+    const ctx = await this.opts.loadTurnContext({
+      tenantId,
+      conversationId: input.conversationId,
+      contactId: input.contactId,
+    });
 
-    if (this.opts.resolveIsSupport) {
-      const isSupport = await this.opts.resolveIsSupport({ tenantId, contactId: input.contactId });
-      if (isSupport) return null;
-    }
+    if (ctx.isSupport) return null;
 
-    const messagesRepo = this.messagesRepoFor(tenantId);
-    const chat = this.opts.resolveChat(tenantId);
+    const { template, chat, messages: messagesRepo } = ctx;
 
     // ── Conversation compaction ───────────────────────────────────────────────
     // When the conversation grows past the configured threshold, generate a
@@ -324,7 +251,7 @@ export class RagReplyStrategy implements ReplyStrategy {
 
     if (compactThreshold > 0 && totalCount >= compactThreshold) {
       // Try loading a stored summary first (avoid re-compacting every turn).
-      const convsRepo = this.opts.resolveConversations?.(tenantId);
+      const convsRepo = ctx.conversations;
       const convo = convsRepo ? await convsRepo.findById(input.conversationId) : null;
 
       if (convo?.summaryJson) {
@@ -363,25 +290,11 @@ export class RagReplyStrategy implements ReplyStrategy {
     const historyWithoutCurrent = allRecent.filter((m) => m.text !== input.userMessageText);
     const history = messagesToChatHistory(historyWithoutCurrent);
 
-    const embedder = this.opts.resolveEmbed(tenantId);
-    const baseKb = this.opts.resolveKb(tenantId);
-    const kbScope = this.opts.resolveKbScope
-      ? await this.opts.resolveKbScope({
-          tenantId,
-          conversationId: input.conversationId,
-          contactId: input.contactId,
-        })
-      : null;
-    const kb = kbScope ? new ScopedKbStore(baseKb, kbScope) : baseKb;
-    const style = this.opts.resolveStyle
-      ? await this.opts.resolveStyle({
-          tenantId,
-          conversationId: input.conversationId,
-          contactId: input.contactId,
-        })
-      : null;
+    const kbScope = ctx.kbScope ?? null;
+    const kb = kbScope ? new ScopedKbStore(ctx.kb, kbScope) : ctx.kb;
+    const style = ctx.style ?? null;
     if (style && hasAssignmentMetadata(style)) {
-      const convsRepo = this.opts.resolveConversations?.(tenantId);
+      const convsRepo = ctx.conversations;
       if (convsRepo) {
         await convsRepo
           .setAssignment(input.conversationId, {
@@ -394,65 +307,16 @@ export class RagReplyStrategy implements ReplyStrategy {
 
     const isExchange = template?.slug === "exchange_v1";
 
-    // Load persuasion skills, director hooks, agentic tools, and reranker in parallel.
-    // All are optional — if resolvers not configured, values stay empty/null
-    // and the pipeline silently skips those blocks.
-    const [
-      skills,
-      directorHooks,
-      tools,
-      reranker,
-      stageGuidance,
-      requestContext,
-      serviceOrderContext,
-      awaitingOperator,
-      exchangePolicyState,
-    ] = await Promise.all([
-      this.opts.resolveSkills ? this.opts.resolveSkills({ tenantId }) : Promise.resolve([]),
-      this.opts.resolveDirectorHooks
-        ? this.opts.resolveDirectorHooks({ tenantId })
-        : Promise.resolve([]),
-      this.opts.resolveTools
-        ? this.opts.resolveTools({
-            tenantId,
-            conversationId: input.conversationId,
-            contactId: input.contactId,
-          })
-        : Promise.resolve([]),
-      this.opts.resolveReranker
-        ? this.opts.resolveReranker({ tenantId })
-        : Promise.resolve(null),
-      this.opts.resolveStageGuidance
-        ? this.opts.resolveStageGuidance({ tenantId, contactId: input.contactId })
-        : Promise.resolve(null),
-      this.opts.resolveRequestContext
-        ? this.opts.resolveRequestContext({ tenantId, contactId: input.contactId })
-        : Promise.resolve(null),
-      this.opts.resolveServiceOrderContext
-        ? Promise.resolve(
-            this.opts.resolveServiceOrderContext({
-              tenantId,
-              conversationId: input.conversationId,
-              contactId: input.contactId,
-            }),
-          )
-        : Promise.resolve(null),
-      this.opts.resolveAwaitingOperator
-        ? this.opts.resolveAwaitingOperator({ tenantId, contactId: input.contactId })
-        : Promise.resolve(false),
-      isExchange && this.opts.resolveExchangePolicyState
-        ? Promise.resolve(
-            this.opts.resolveExchangePolicyState({
-              tenantId,
-              conversationId: input.conversationId,
-              contactId: input.contactId,
-            }),
-          ).catch((err) => {
-            console.warn("[rag-reply] failed to resolve exchange policy state:", err);
-            return null;
-          })
-        : Promise.resolve(null),
-    ]);
+    const skills = ctx.skills ?? [];
+    const directorHooks = ctx.directorHooks ?? [];
+    const tools = ctx.tools ?? [];
+    const reranker = ctx.reranker ?? null;
+    const stageGuidance = ctx.stageGuidance ?? null;
+    const requestContext = ctx.requestContext ?? null;
+    const serviceOrderContext = ctx.serviceOrderContext ?? null;
+    const awaitingOperator = ctx.awaitingOperator ?? false;
+    const exchangePolicyState = isExchange ? (ctx.exchangePolicyState ?? null) : null;
+
     const combinedRequestContext =
       [requestContext, serviceOrderContext]
         .map((value) => value?.trim())
@@ -467,7 +331,7 @@ export class RagReplyStrategy implements ReplyStrategy {
     const result = await answerWithRag({
       question: input.userMessageText,
       kb,
-      embedder,
+      embedder: ctx.embedder,
       chat: chat as unknown as Parameters<typeof answerWithRag>[0]["chat"],
       history: history as unknown as Parameters<typeof answerWithRag>[0]["history"],
       topK: this.opts.topK ?? 5,
@@ -475,7 +339,7 @@ export class RagReplyStrategy implements ReplyStrategy {
       rewriteQueryBeforeRetrieval: this.opts.rewriteQueryBeforeRetrieval ?? true,
       reflect: this.opts.reflect ?? isExchange,
       numPredict: this.opts.maxOutputTokens ?? 600,
-      // Style: если resolveStyle вернул Style — answerWithRag использует его
+      // Style: если контекст содержит Style — answerWithRag использует его
       // persona, sales framework, hooks, skills для построения system prompt.
       // При null — rag fallback'нет на DEFAULT_PERSONA и базовый промпт.
       ...(style ? { style } : {}),
@@ -495,10 +359,9 @@ export class RagReplyStrategy implements ReplyStrategy {
     // ── Soft fallback when RAG has no context ────────────────────────────────
     if (result.text === NO_CONTEXT_MARKER || !result.text || result.text.trim().length === 0) {
       // Fire-and-forget: log unanswered question for the KB suggestions queue.
-      if (this.opts.resolveSuggestions) {
-        const suggestionsRepo = this.opts.resolveSuggestions(tenantId);
+      if (ctx.suggestions) {
         const nowEpoch = Math.floor(Date.now() / 1000);
-        suggestionsRepo
+        ctx.suggestions
           .log({
             questionText: input.userMessageText,
             sourceConversationId: input.conversationId,

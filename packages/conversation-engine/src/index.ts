@@ -226,6 +226,9 @@ export {
   parseStyleConfig,
   RagReplyStrategy,
   type RagReplyStrategyOpts,
+  type RagTurnContext,
+  type RagTurnInput,
+  type ResolvedStyleAssignment,
 } from "./reply-strategy/index.ts";
 export {
   type ChannelContext,

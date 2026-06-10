@@ -111,7 +111,7 @@ export interface ApiConfig {
   };
   /**
    * Опционально: slug дефолтного sales-style для legacy tenant'а. Если
-   * задан, RagReplyStrategy.resolveStyle подгрузит StylesRepo.findActiveBySlug
+   * задан, style-резолвер (llm-bootstrap loadTurnContext) подгрузит StylesRepo.findActiveBySlug
    * (с парсингом через @chatman-media/kb StyleSchema) и передаст в
    * answerWithRag. Стиль строит system prompt через composeSystemPrompt
    * (persona + sales framework + hooks + skills).
@@ -150,7 +150,7 @@ export interface ApiConfig {
   webWidgetScriptUrl: string;
   /**
    * Slug запущенного эксперимента (status='running' в БД). Если задан,
-   * RagReplyStrategy.resolveStyle использует ABRouter поверх variants
+   * style-резолвер (llm-bootstrap loadTurnContext) использует ABRouter поверх variants
    * из experiments.allocation_json (a/b routing by hash(contactId)).
    * Эксперимент имеет приоритет над defaultStyleSlug.
    */

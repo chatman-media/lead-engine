@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import {
 	EXCHANGE_SAFE_FALLBACK,
 	RagReplyStrategy,
-	type RagReplyStrategyOpts,
+	type RagTurnContext,
 } from "@chatman-media/conversation-engine";
 import type { ChatClient } from "@chatman-media/llm-router";
 import type { AnyRagTool } from "@chatman-media/kb";
@@ -41,18 +41,18 @@ const EXCHANGE_TEMPLATE = {
 	systemPromptFragment: "",
 } as unknown as VerticalTemplate;
 
-const embed: RagReplyStrategyOpts["resolveEmbed"] = () =>
-	({ embed: async (xs: string[]) => xs.map(() => [1, 0, 0]), dim: 3 }) as never;
+const embedder: RagTurnContext["embedder"] = {
+	embed: async (xs: string[]) => xs.map(() => [1, 0, 0]),
+	dim: 3,
+} as never;
 
-const emptyKb: RagReplyStrategyOpts["resolveKb"] = () =>
-	({
-		search: async () => [],
-		hybridSearch: async () => [],
-		prioritySearch: async () => [],
-	}) as never;
+const emptyKb: RagTurnContext["kb"] = {
+	search: async () => [],
+	hybridSearch: async () => [],
+	prioritySearch: async () => [],
+} as never;
 
-const quoteKb: RagReplyStrategyOpts["resolveKb"] = () =>
-	({
+const quoteKb: RagTurnContext["kb"] = ({
 		search: async () => [
 			{
 				chunk_id: 1,
@@ -76,14 +76,11 @@ const quoteKb: RagReplyStrategyOpts["resolveKb"] = () =>
 		prioritySearch: async () => [],
 	}) as never;
 
-function fakeMessagesRepo() {
-	return () =>
-		({
-			recent: async () => [],
-			countByConversation: async () => 0,
-			insert: async () => ({ id: 1 }),
-		}) as never;
-}
+const fakeMessages: RagTurnContext["messages"] = {
+	recent: async () => [],
+	countByConversation: async () => 0,
+	insert: async () => ({ id: 1 }),
+} as never;
 
 function quoteTool(): AnyRagTool {
 	return {
@@ -124,20 +121,20 @@ function chatWithoutTools(finalReply: string): ChatClient {
 async function runRagPipelineSmoke(opts: {
 	chat: ChatClient;
 	tools?: AnyRagTool[];
-	resolveKb?: RagReplyStrategyOpts["resolveKb"];
+	kb?: RagTurnContext["kb"];
 	userMessageText?: string;
 }) {
-	const strategy = new RagReplyStrategy(
-		{
+	const strategy = new RagReplyStrategy({
+		loadTurnContext: () => ({
 			template: EXCHANGE_TEMPLATE,
-			resolveChat: () => opts.chat,
-			resolveEmbed: embed,
-			resolveKb: opts.resolveKb ?? emptyKb,
-			resolveTools: () => opts.tools ?? [],
-			softFallback: false,
-		},
-		fakeMessagesRepo(),
-	);
+			chat: opts.chat,
+			embedder,
+			kb: opts.kb ?? emptyKb,
+			tools: opts.tools ?? [],
+			messages: fakeMessages,
+		}),
+		softFallback: false,
+	});
 	return strategy.generate({
 		tenant: { tenantId: 1 },
 		channel: { channelId: 10 },
@@ -217,7 +214,7 @@ describe("exchange golden eval smoke", () => {
 		const result = await runRagPipelineSmoke({
 			chat: chatWithoutTools("Курс 31.5, получите 10553 THB."),
 			tools: [],
-			resolveKb: quoteKb,
+			kb: quoteKb,
 			userMessageText: loadCases()[0]?.messages[0]?.text,
 		});
 		expect(result).not.toBeNull();
