@@ -19,6 +19,7 @@ import {
   isRateSane,
   isRefreshDue,
   refreshAllActiveTenants,
+  refreshDueTenants,
   refreshTenantRates,
   renderRateCardMessage,
 } from "./rate-feed.ts";
@@ -253,5 +254,110 @@ describe("refreshAllActiveTenants", () => {
     const infos: string[] = [];
     await refreshAllActiveTenants(db, { info: (m) => infos.push(m), warn: () => {} });
     expect(true).toBe(true); // не бросило
+  });
+});
+
+// ── дополнительные ветки: unsupported-asset skip, tick-планировщик, per-tenant catch ──
+
+/** Db-фейк: список тенантов отдаёт, но любая транзакция (withTenant) падает. */
+function fakeDbWithBrokenTransactions(message: string) {
+  return {
+    select: () => ({ from: () => ({ where: async () => [{ id: 424_242 }] }) }),
+    transaction: async () => {
+      throw new Error(message);
+    },
+  } as unknown as Parameters<typeof refreshAllActiveTenants>[0];
+}
+
+describe("refreshTenantRates — актив вне фида", () => {
+  it("фид не поддерживает актив → skipped без anomaly", async () => {
+    if (!enabled) return;
+    const [r] = await db
+      .insert(schema.exchangeRates)
+      .values({
+        tenantId,
+        asset: "TON",
+        quoteAsset: "THB",
+        network: "ton",
+        baseRate: 100,
+        quoteMode: "multiply",
+        autoUpdate: true,
+        isActive: true,
+        createdAt: n,
+        updatedAt: n,
+      })
+      .returning({ id: schema.exchangeRates.id });
+    try {
+      mockFetch({ fx: { THB: 35 }, binance: { BTC: "60100" } });
+      const anomalies: unknown[] = [];
+      const res = await refreshTenantRates(db, tenantId, { warn: () => {} }, (a) =>
+        anomalies.push(a),
+      );
+      expect(res.skipped).toBe(1); // TON не поддержан фидом
+      expect(res.failed).toBe(0);
+      expect(anomalies).toHaveLength(0);
+    } finally {
+      // деактивируем, чтобы не влиять на последующие тесты
+      await db
+        .update(schema.exchangeRates)
+        .set({ isActive: false })
+        .where(eq(schema.exchangeRates.id, r!.id));
+    }
+  });
+});
+
+describe("refreshDueTenants (тик планировщика)", () => {
+  it("рефрешит due-тенантов, помечает lastRefresh и уважает per-tenant интервал", async () => {
+    if (!enabled) return;
+    await db
+      .insert(schema.exchangeSettings)
+      .values({ tenantId, rateRefreshSec: 60 })
+      .onConflictDoNothing();
+    mockFetch({ fx: { THB: 35 }, binance: { BTC: "60000" } });
+    const lastRefreshByTenant = new Map<number, number>();
+    const nowSec = Math.floor(Date.now() / 1000);
+    const infos: string[] = [];
+    await refreshDueTenants(db, {
+      defaultRefreshSec: 180,
+      lastRefreshByTenant,
+      nowSec,
+      log: { info: (m) => infos.push(m), warn: () => {} },
+    });
+    expect(lastRefreshByTenant.get(tenantId)).toBe(nowSec);
+    expect(infos.some((m) => m.includes(`tenant=${tenantId}`))).toBe(true);
+
+    // Второй тик внутри интервала (30с < 60с) — тенант пропущен, отметка не сдвинута.
+    const infos2: string[] = [];
+    await refreshDueTenants(db, {
+      defaultRefreshSec: 180,
+      lastRefreshByTenant,
+      nowSec: nowSec + 30,
+      log: { info: (m) => infos2.push(m) },
+    });
+    expect(lastRefreshByTenant.get(tenantId)).toBe(nowSec);
+    expect(infos2.some((m) => m.includes(`tenant=${tenantId}`))).toBe(false);
+  });
+
+  it("ошибка per-tenant ловится и логируется warn'ом", async () => {
+    const warns: string[] = [];
+    await refreshDueTenants(fakeDbWithBrokenTransactions("boom-tick"), {
+      defaultRefreshSec: 180,
+      lastRefreshByTenant: new Map(),
+      nowSec: 1_000,
+      log: { warn: (m) => warns.push(m) },
+    });
+    expect(warns.some((m) => m.includes("tick tenant=424242") && m.includes("boom-tick"))).toBe(
+      true,
+    );
+  });
+});
+
+describe("refreshAllActiveTenants — per-tenant ошибка", () => {
+  it("ловит исключение refreshTenantRates и продолжает", async () => {
+    const warns: string[] = [];
+    await refreshAllActiveTenants(fakeDbWithBrokenTransactions("boom-all"), {
+      warn: (m) => warns.push(m),
+    });
+    expect(warns.some((m) => m.includes("tenant=424242") && m.includes("boom-all"))).toBe(true);
   });
 });
