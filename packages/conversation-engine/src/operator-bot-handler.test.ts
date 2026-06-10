@@ -71,6 +71,12 @@ class FakeRepo implements Partial<NotificationsRepo> {
 	linked: Array<{ adminId: number; chatId: string }> = [];
 	prefs: Array<{ adminId: number } & Record<string, unknown>> = [];
 	recent: FakeRecentNotification[] = [];
+	groupTokens = new Map<
+		string,
+		{ tenantId: number; adminId: number; eventType: string }
+	>();
+	createdRules: Array<Record<string, unknown>> = [];
+	deletedGroupTokens: string[] = [];
 	private settings: OperatorSettings[];
 
 	constructor(settings?: OperatorSettings | OperatorSettings[]) {
@@ -111,6 +117,23 @@ class FakeRepo implements Partial<NotificationsRepo> {
 	}
 	async updateInformerPrefs(adminId: number, p: Record<string, unknown>) {
 		this.prefs.push({ adminId, ...p });
+	}
+	async findGroupLinkToken(token: string) {
+		return this.groupTokens.get(token);
+	}
+	async createRule(
+		rule: Omit<
+			Parameters<NotificationsRepo["createRule"]>[0],
+			"id" | "createdAt" | "updatedAt"
+		>,
+	) {
+		this.createdRules.push(rule as Record<string, unknown>);
+		return { id: 1, createdAt: 0, updatedAt: 0, ...rule } as Awaited<
+			ReturnType<NotificationsRepo["createRule"]>
+		>;
+	}
+	async deleteGroupLinkToken(token: string) {
+		this.deletedGroupTokens.push(token);
 	}
 	async listRecentNotifications() {
 		return this.recent.map(
@@ -253,7 +276,9 @@ function makeSendDraftDb(
 					};
 				}
 				if (table === exchangeOrders) {
-					const rows = async () => (order ? [order] : []);
+					// Snapshot-семантика как у реального SELECT: дальнейшие UPDATE
+					// мутируют `order`, но уже прочитанная строка не меняется.
+					const rows = async () => (order ? [{ ...order }] : []);
 					return {
 						where: () => ({
 							limit: rows,
@@ -2214,5 +2239,376 @@ describe("informer commands", () => {
 		repo.recent = [];
 		await handler.handleUpdate(makeUpdate("/last", 777));
 		expect(client.sent[0]?.text).toContain("пусто");
+	});
+});
+
+// Структурный двойник приватного PendingOperatorDraft из operator-bot-handler.ts.
+type TestDraft = {
+	draftId: string;
+	dbId?: number;
+	tenantId: number;
+	adminId: number;
+	chatId: string;
+	conversationId: number;
+	text: string;
+	metadata?: Record<string, unknown>;
+	status?: string;
+	createdAt: number;
+	expiresAt: number;
+};
+
+describe("exchange payment/payout side effects", () => {
+	function makeHandler(db: unknown, now = 123) {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		return new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				nowEpoch: () => now,
+			},
+		);
+	}
+
+	function makeDraft(metadata: Record<string, unknown>): TestDraft {
+		return {
+			draftId: "abc123",
+			dbId: 700,
+			tenantId: 3,
+			adminId: 10,
+			chatId: "777",
+			conversationId: 109,
+			text: "Статус обновлён.",
+			metadata: { source: "operator_bot_exchange_action", ...metadata },
+			createdAt: 123,
+			expiresAt: 723,
+		};
+	}
+
+	function auditSideEffects(
+		audits: Array<Record<string, unknown>>,
+	): Record<string, unknown> {
+		const details = JSON.parse(String(audits[0]?.detailsJson)) as Record<
+			string,
+			unknown
+		>;
+		return details.exchangeSideEffects as Record<string, unknown>;
+	}
+
+	it("payment_confirmed переводит активную заявку в paid", async () => {
+		const { audits, db, order } = makeSendDraftDb({
+			order: {
+				id: 77,
+				status: "awaiting_payment",
+				verificationId: null,
+				payoutCode: null,
+				payoutCodeExpiresAt: null,
+			},
+		});
+		const handler = makeHandler(db);
+
+		// @ts-expect-error private method
+		const result = await handler.sendDraftToClient(
+			makeDraft({ exchangeAction: "payment_confirmed", orderId: 77 }),
+		);
+
+		expect(result.kind).toBe("sent");
+		expect(order?.status).toBe("paid");
+		expect(auditSideEffects(audits)).toMatchObject({
+			action: "payment_confirmed",
+			orderId: 77,
+			previousStatus: "awaiting_payment",
+			nextStatus: "paid",
+			statusPatched: true,
+		});
+	});
+
+	it("payment_confirmed без заявки фиксирует orderFound=false", async () => {
+		const { audits, db } = makeSendDraftDb();
+		const handler = makeHandler(db);
+
+		// @ts-expect-error private method
+		const result = await handler.sendDraftToClient(
+			makeDraft({ exchangeAction: "payment_confirmed", orderId: "88" }),
+		);
+
+		expect(result.kind).toBe("sent");
+		expect(auditSideEffects(audits)).toMatchObject({
+			action: "payment_confirmed",
+			orderId: 88,
+			orderFound: false,
+			statusPatched: false,
+		});
+	});
+
+	it("payment_confirmed не трогает терминальную заявку", async () => {
+		const { audits, db, order } = makeSendDraftDb({
+			order: {
+				id: 77,
+				status: "completed",
+				verificationId: null,
+				payoutCode: null,
+				payoutCodeExpiresAt: null,
+			},
+		});
+		const handler = makeHandler(db);
+
+		// @ts-expect-error private method
+		await handler.sendDraftToClient(
+			makeDraft({ exchangeAction: "payment_confirmed", orderId: 77 }),
+		);
+
+		expect(order?.status).toBe("completed");
+		expect(auditSideEffects(audits)).toMatchObject({
+			action: "payment_confirmed",
+			orderId: 77,
+			previousStatus: "completed",
+			statusPatched: false,
+		});
+	});
+
+	it("payout_ready без заявки фиксирует orderFound=false", async () => {
+		const { audits, db } = makeSendDraftDb();
+		const handler = makeHandler(db);
+
+		// @ts-expect-error private method
+		await handler.sendDraftToClient(
+			makeDraft({ exchangeAction: "payout_ready", orderId: 77 }),
+		);
+
+		expect(auditSideEffects(audits)).toMatchObject({
+			action: "payout_ready",
+			orderId: 77,
+			orderFound: false,
+			statusPatched: false,
+		});
+	});
+
+	it("payout_ready из неоплаченного статуса → invalid_status", async () => {
+		const { audits, db, order } = makeSendDraftDb({
+			order: {
+				id: 77,
+				status: "quote",
+				verificationId: null,
+				payoutCode: null,
+				payoutCodeExpiresAt: null,
+			},
+		});
+		const handler = makeHandler(db);
+
+		// @ts-expect-error private method
+		await handler.sendDraftToClient(
+			makeDraft({ exchangeAction: "payout_ready", orderId: 77 }),
+		);
+
+		expect(order?.status).toBe("quote");
+		expect(auditSideEffects(audits)).toMatchObject({
+			action: "payout_ready",
+			orderId: 77,
+			previousStatus: "quote",
+			statusPatched: false,
+			reason: "invalid_status",
+		});
+	});
+
+	it("payout_ready из paid генерирует код и переводит в payout", async () => {
+		const { audits, db, order } = makeSendDraftDb({
+			order: {
+				id: 77,
+				status: "paid",
+				verificationId: null,
+				payoutCode: null,
+				payoutCodeExpiresAt: null,
+			},
+		});
+		const handler = makeHandler(db, 1000);
+
+		// @ts-expect-error private method
+		await handler.sendDraftToClient(
+			makeDraft({ exchangeAction: "payout_ready", orderId: 77 }),
+		);
+
+		expect(order?.status).toBe("payout");
+		expect(String(order?.payoutCode)).toMatch(/^CODE-77-[A-Z0-9]{6}$/);
+		expect(order?.payoutCodeExpiresAt).toBe(1000 + 60 * 60);
+		expect(auditSideEffects(audits)).toMatchObject({
+			action: "payout_ready",
+			orderId: 77,
+			previousStatus: "paid",
+			nextStatus: "payout",
+			payoutCodeIssued: true,
+			statusPatched: true,
+		});
+	});
+
+	it("payout_ready сохраняет действующий код заявки и не дублирует patch", async () => {
+		const { audits, db, order } = makeSendDraftDb({
+			order: {
+				id: 77,
+				status: "payout",
+				verificationId: null,
+				payoutCode: "CODE-77-AAAAAA",
+				payoutCodeExpiresAt: 9999,
+			},
+		});
+		const handler = makeHandler(db, 1000);
+
+		// @ts-expect-error private method
+		await handler.sendDraftToClient(
+			makeDraft({ exchangeAction: "payout_ready", orderId: 77 }),
+		);
+
+		expect(order?.payoutCode).toBe("CODE-77-AAAAAA");
+		expect(order?.payoutCodeExpiresAt).toBe(9999);
+		expect(auditSideEffects(audits)).toMatchObject({
+			action: "payout_ready",
+			previousStatus: "payout",
+			statusPatched: false,
+		});
+	});
+
+	it("payout_ready берёт код и срок из metadata когда заявочный истёк", async () => {
+		const { db, order } = makeSendDraftDb({
+			order: {
+				id: 77,
+				status: "paid",
+				verificationId: null,
+				payoutCode: null,
+				payoutCodeExpiresAt: 100,
+			},
+		});
+		const handler = makeHandler(db, 1000);
+
+		// @ts-expect-error private method
+		await handler.sendDraftToClient(
+			makeDraft({
+				exchangeAction: "payout_ready",
+				orderId: 77,
+				payoutCode: "CODE-77-META11",
+				payoutCodeExpiresAt: "5000",
+			}),
+		);
+
+		expect(order?.status).toBe("payout");
+		expect(order?.payoutCode).toBe("CODE-77-META11");
+		expect(order?.payoutCodeExpiresAt).toBe(5000);
+	});
+});
+
+describe("draft cancel/expire persistence", () => {
+	function draftWithDb(): TestDraft {
+		return {
+			draftId: "abc123",
+			dbId: 700,
+			tenantId: 3,
+			adminId: 10,
+			chatId: "777",
+			conversationId: 109,
+			text: "Черновик.",
+			metadata: {},
+			createdAt: 123,
+			expiresAt: 723,
+		};
+	}
+
+	it("cancelDraft помечает durable-черновик cancelled", async () => {
+		const { db, updates } = makeSendDraftDb();
+		const repo = new FakeRepo(makeSettings({ telegramChatId: "777" }));
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{ db: db as never, nowEpoch: () => 200 },
+		);
+
+		// @ts-expect-error private method
+		await handler.cancelDraft(draftWithDb(), 200);
+
+		const patch = updates.find(
+			(u) => u.table === "operator_action_drafts",
+		)?.values;
+		expect(patch).toMatchObject({
+			status: "cancelled",
+			handledAt: 200,
+			updatedAt: 200,
+		});
+	});
+
+	it("expireDraft помечает durable-черновик expired", async () => {
+		const { db, updates } = makeSendDraftDb();
+		const repo = new FakeRepo(makeSettings({ telegramChatId: "777" }));
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{ db: db as never, nowEpoch: () => 300 },
+		);
+
+		// @ts-expect-error private method
+		await handler.expireDraft(draftWithDb(), 300);
+
+		const patch = updates.find(
+			(u) => u.table === "operator_action_drafts",
+		)?.values;
+		expect(patch).toMatchObject({
+			status: "expired",
+			handledAt: 300,
+			updatedAt: 300,
+		});
+	});
+});
+
+describe("/setup <token> (привязка группы)", () => {
+	function wireGroup() {
+		const repo = new FakeRepo();
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+		return { repo, handler, client };
+	}
+
+	it("в личном чате отказывает", async () => {
+		const { repo, handler, client } = wireGroup();
+		await handler.handleUpdate(makeUpdate("/setup tok-1", 777, false));
+		expect(client.sent[0]?.text).toContain("только в группах");
+		expect(repo.createdRules).toEqual([]);
+	});
+
+	it("неизвестный токен → ошибка", async () => {
+		const { repo, handler, client } = wireGroup();
+		await handler.handleUpdate(makeUpdate("/setup tok-unknown", 500, true));
+		expect(client.sent[0]?.text).toContain("Токен недействителен");
+		expect(repo.createdRules).toEqual([]);
+		expect(repo.deletedGroupTokens).toEqual([]);
+	});
+
+	it("валидный токен создаёт правило и удаляет токен", async () => {
+		const { repo, handler, client } = wireGroup();
+		repo.groupTokens.set("tok-ok", {
+			tenantId: 7,
+			adminId: 10,
+			eventType: "operator_handoff_required",
+		});
+
+		await handler.handleUpdate(makeUpdate("/setup tok-ok", 500, true));
+
+		expect(repo.createdRules[0]).toMatchObject({
+			tenantId: 7,
+			eventType: "operator_handoff_required",
+			channelType: "telegram_group",
+			targetId: "-500",
+			priority: "normal",
+			isActive: true,
+		});
+		expect(repo.deletedGroupTokens).toEqual(["tok-ok"]);
+		expect(client.sent[0]?.text).toContain("Test Group");
+		expect(client.sent[0]?.text).toContain("operator_handoff_required");
 	});
 });
