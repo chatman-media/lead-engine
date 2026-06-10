@@ -680,8 +680,6 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
     ].join(" "),
     parameters: z.object({}),
     execute: async () => {
-      const read = (key: string) =>
-        getDecryptedSecret({ db, tenantId, key, masterKeyHex });
       const [
         workingHours,
         operatorContactLegacy,
@@ -694,19 +692,21 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         amlPolicy,
         kycPolicy,
         officeAddress,
-      ] = await Promise.all([
-        read("exchange_working_hours"),
-        read("exchange_operator_contact"),
-        read("exchange_operator_telegram"),
-        read("exchange_operator_whatsapp"),
-        read("exchange_operator_line"),
-        read("exchange_payout_methods"),
-        read("exchange_payout_bank_methods"),
-        read("exchange_payout_cash_methods"),
-        read("exchange_aml_policy"),
-        read("exchange_kyc_policy"),
-        read("exchange_office_address"),
-      ]);
+      ] = await withTenant(db, tenantId, (tx) =>
+        Promise.all([
+          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_working_hours", masterKeyHex }),
+          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_operator_contact", masterKeyHex }),
+          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_operator_telegram", masterKeyHex }),
+          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_operator_whatsapp", masterKeyHex }),
+          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_operator_line", masterKeyHex }),
+          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_payout_methods", masterKeyHex }),
+          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_payout_bank_methods", masterKeyHex }),
+          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_payout_cash_methods", masterKeyHex }),
+          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_aml_policy", masterKeyHex }),
+          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_kyc_policy", masterKeyHex }),
+          getDecryptedSecret({ db: tx as Db, tenantId, key: "exchange_office_address", masterKeyHex }),
+        ]),
+      );
       const operatorContact =
         compactInfoLines([
           operatorTelegram ? `Telegram: ${operatorTelegram}` : null,

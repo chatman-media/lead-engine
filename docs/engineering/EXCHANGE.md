@@ -80,6 +80,38 @@ SERVER_RUNBOOK. Онбординг обменного тенанта (визар
 - **Бизнес-данные**: `exchange_operator_contact`, `exchange_payout_methods`,
   `exchange_kyc_policy`, `exchange_working_hours`, `exchange_office_address`.
 
+## Deterministic QA fixtures
+
+Для локального preview/eval обменки есть идемпотентный seed:
+
+```sh
+DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine \
+PLATFORM_MASTER_KEY=<64hex> \
+bun run --cwd apps/api seed:exchange-fixtures -- --tenant=<tenant-slug>
+```
+
+Dry-run:
+
+```sh
+bun run --cwd apps/api seed:exchange-fixtures -- --tenant=<tenant-slug> --dry-run
+```
+
+Seed пишет всё tenant-scoped через `withTenant()`:
+
+- offices: `bangkok_asok`, `phuket_central`, `pattaya_terminal_21`,
+  `samui_chaweng`;
+- rates: `USDT/TRC20`, `USDT/ERC20`, `USDT/BEP20`, `RUB`, `USD`;
+- approved tiers для `USDT/TRC20` и `RUB`;
+- encrypted requisites/business secrets: RUB card/SBP, USDT wallets, operator
+  contacts, payout methods, AML/KYC policy, working hours, office list;
+- text-only KB docs for office pickup, RUB payment proof, KYC media, stale
+  rates/order changes, and operator escalation.
+
+Registry and helper live in
+`apps/api/src/lib/exchange/fixtures.ts`. Scenario/eval code should reference the
+exported fixture keys instead of hardcoding addresses, offices, rates, or policy
+copy in every test.
+
 ## Orders CRM
 
 `exchange_orders` — заявки с привязкой к лиду, статусом, суммами и платёжными
