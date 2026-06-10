@@ -13,6 +13,35 @@ Job описан в [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
 Деплоится только реальный `push` в `main` и только после зелёных тестов
 (`needs: workspace`). Деплои не пересекаются (`concurrency: deploy-production`).
 
+## Дев-окружение (dev.exchanges.agency)
+
+Push в ветку **`dev`** → те же тесты → job **`deploy-dev`** → SSH тем же ключом →
+`/opt/lead-engine-dev` (`APP_DIR=/opt/lead-engine-dev ./deploy.sh`). Рабочий цикл:
+фичи → `dev` (смотрим на dev.exchanges.agency) → merge `dev` → `main` (прод).
+
+На сервере дев-инстанс — полная копия прода со своими ресурсами:
+
+| Что              | Прод                          | Дев                                   |
+| ---------------- | ----------------------------- | ------------------------------------- |
+| Каталог          | `/opt/lead-engine`            | `/opt/lead-engine-dev`                |
+| Порт API         | 3000                          | 3001                                  |
+| База             | `lead_engine`                 | `lead_engine_dev` (тот же Postgres)   |
+| systemd          | `lead-engine-api` / `-worker` | `lead-engine-dev-api` / `-dev-worker` |
+| nginx            | `exchanges.agency`            | `dev.exchanges.agency`                |
+
+Ветку и юниты deploy.sh берёт из `/opt/lead-engine-dev/.deploy.env`:
+
+```
+GIT_BRANCH=dev
+API_SERVICE=lead-engine-dev-api
+WORKER_SERVICE=lead-engine-dev-worker
+```
+
+`PLATFORM_PUBLIC_URL=https://dev.exchanges.agency` живёт в `/opt/lead-engine-dev/.env`
+(оттуда же health-check). Новых GitHub-секретов не нужно — сервер и SSH-ключ те же.
+Каналы (Telegram-боты и т.п.) на деве подключать только отдельные: продовый бот,
+подключённый к деву, перетянет вебхук на себя.
+
 ---
 
 ## Разовая настройка

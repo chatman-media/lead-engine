@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 # Отменяем stale runs на том же ref — быстрые pushы не очередят
 # параллельные job'ы. Релиз (push в main) не отменяем — иначе можно
@@ -246,3 +246,34 @@ jobs:
             export PATH="$BUN_INSTALL/bin:$PATH"
             cd /opt/lead-engine
             ./deploy.sh
+
+  deploy-dev:
+    name: Deploy dev — SSH → сервер → /opt/lead-engine-dev
+    needs: workspace
+    runs-on: ubuntu-latest
+    # Push в dev → дев-инстанс (dev.exchanges.agency). Ветка/юниты задаются
+    # на сервере в /opt/lead-engine-dev/.deploy.env (GIT_BRANCH=dev,
+    # API_SERVICE/WORKER_SERVICE=lead-engine-dev-*); APP_DIR передаём явно,
+    # т.к. deploy.sh читает .deploy.env уже из APP_DIR.
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    timeout-minutes: 20
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+    environment:
+      name: dev
+
+    steps:
+      - name: Deploy over SSH (deploy.sh в дев-каталоге)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script_stop: true
+          command_timeout: 18m
+          script: |
+            export BUN_INSTALL="$HOME/.bun"
+            export PATH="$BUN_INSTALL/bin:$PATH"
+            cd /opt/lead-engine-dev
+            APP_DIR=/opt/lead-engine-dev ./deploy.sh
