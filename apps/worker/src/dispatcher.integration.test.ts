@@ -644,4 +644,137 @@ describe("OutboundDispatcher integration", () => {
       .where(eq(outboundQueue.id, row.id));
     expect(unchanged?.status).toBe("pending");
   });
+
+  it("stuck processing row: releaseStuckProcessing возвращает в pending + retry в том же tick'е", async () => {
+    if (!sql) return;
+    const adapter = new FakeAdapter(String(channelDbId));
+    const registry = new TestRegistry();
+    registry.setEntry({
+      channelDbId,
+      tenantId,
+      tenantSlug: "wdt",
+      kind: "telegram_bot",
+      adapter,
+    });
+    // stuckCheckPeriodTicks=0 → проверка зависших на каждом tick'е.
+    const dispatcher = new OutboundDispatcher(db, registry, {
+      pollMs: 50,
+      batchSize: 16,
+      stuckProcessingSec: 300,
+      stuckCheckPeriodTicks: 0,
+    });
+
+    // Row завис в processing (worker умер не дойдя до markSent/markFailed).
+    const now = Math.floor(Date.now() / 1000);
+    const [stuckRow] = await db
+      .insert(outboundQueue)
+      .values({
+        tenantId,
+        channelId: channelDbId,
+        payloadJson: JSON.stringify({
+          channelId: String(channelDbId),
+          externalUserId: "1",
+          parts: [{ kind: "text", text: "stuck-then-retried" }],
+        }),
+        scheduledAt: now - 1000, // старше cutoff (now - 300)
+        status: "processing",
+        createdAt: now - 1000,
+      })
+      .returning();
+    if (!stuckRow) throw new Error("seed: stuck row insert returned no row");
+
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
+
+    // released → pending → claim'нут и доставлен в том же tick'е.
+    expect(adapter.sendCalls).toHaveLength(1);
+    const [updated] = await db
+      .select()
+      .from(outboundQueue)
+      .where(eq(outboundQueue.id, stuckRow.id));
+    expect(updated?.status).toBe("sent");
+  });
+
+  it("provider failure reasons маппятся в метрику lead_engine_provider_failures_total", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [waChannel] = await db
+      .insert(channels)
+      .values({
+        tenantId,
+        kind: "whatsapp",
+        externalId: `wa-reasons-${Math.random()}`,
+        status: "active",
+      })
+      .returning();
+    if (!waChannel) throw new Error("seed: whatsapp channel insert returned no row");
+
+    const adapter = new FakeAdapter(String(waChannel.id), "whatsapp");
+    adapter.shouldFail = true;
+    const registry = new TestRegistry();
+    registry.setEntry({
+      channelDbId: waChannel.id,
+      tenantId,
+      tenantSlug: "wdt",
+      kind: "whatsapp",
+      adapter,
+    });
+    const metrics = makePlatformMetrics();
+    const dispatcher = new OutboundDispatcher(db, registry, {
+      pollMs: 50,
+      batchSize: 16,
+      metrics,
+    });
+
+    // Каждое сообщение об ошибке отправки → своя reason-метка.
+    const cases: Array<{ message: string; reason: string }> = [
+      { message: "template rejected by Meta", reason: "template" },
+      { message: "free-form window closed upstream", reason: "free_form_window" },
+      { message: "no adapter session", reason: "no_adapter" },
+      { message: "payload too large", reason: "bad_payload" },
+      { message: "totally unexpected boom", reason: "send_error" },
+    ];
+    for (const c of cases) {
+      adapter.failureMessage = c.message;
+      const [row] = await db
+        .insert(outboundQueue)
+        .values({
+          tenantId,
+          channelId: waChannel.id,
+          payloadJson: JSON.stringify({
+            channelId: String(waChannel.id),
+            externalUserId: "66999999997",
+            parts: [{ kind: "text", text: `fail: ${c.reason}` }],
+          }),
+          scheduledAt: now,
+          status: "pending",
+          createdAt: now,
+        })
+        .returning();
+      if (!row) throw new Error("seed: outbound row insert returned no row");
+
+      await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
+
+      const [updated] = await db
+        .select()
+        .from(outboundQueue)
+        .where(eq(outboundQueue.id, row.id));
+      expect(updated?.status).toBe("failed");
+      expect(updated?.lastError).toBe(c.message);
+    }
+
+    const providerLines = metrics.registry
+      .format()
+      .split("\n")
+      .filter((l) => l.startsWith("lead_engine_provider_failures_total{"));
+    for (const c of cases) {
+      expect(
+        providerLines.some(
+          (l) =>
+            l.includes(`reason="${c.reason}"`) &&
+            l.includes('channel_kind="whatsapp"') &&
+            l.endsWith(" 1"),
+        ),
+      ).toBe(true);
+    }
+  });
 });
