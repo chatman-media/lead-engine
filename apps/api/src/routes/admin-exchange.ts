@@ -15,6 +15,7 @@ import {
 import {
 	channelIdentities,
 	channels,
+	contacts,
 	conversations,
 	exchangeOrders,
 	exchangeRates,
@@ -24,7 +25,7 @@ import {
 	outboundQueue,
 	tenantSecrets,
 } from "@chatman-media/storage";
-import { and, desc, eq, like, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import {
 	buildDefaultRateCardProposal,
@@ -83,6 +84,66 @@ function serializeExchangeOrder(order: typeof exchangeOrders.$inferSelect) {
 	return {
 		...order,
 		workflowStage: resolveExchangeWorkflowStage(order),
+	};
+}
+
+/** Номер паспорта наружу не отдаём целиком — только последние 4 знака. */
+function maskPassportNumber(raw: unknown): string | null {
+	if (typeof raw !== "string" || !raw.trim()) return null;
+	const compact = raw.replace(/\s+/g, "");
+	return compact.length <= 4 ? `••${compact}` : `•••• ${compact.slice(-4)}`;
+}
+
+/**
+ * Контакт с историей KYC: статус/ID из attributes_json.exchangeKyc (пишет
+ * оператор-бот при confirm) + паспортные поля из vision-OCR (photo-processor).
+ */
+function serializeKycContact(
+	row: { id: number; displayName: string | null; attributesJson: string | null },
+	agg: { ordersCount: number; turnoverThb: number } | null,
+) {
+	let attrs: Record<string, unknown> = {};
+	try {
+		attrs = row.attributesJson
+			? (JSON.parse(row.attributesJson) as Record<string, unknown>)
+			: {};
+	} catch {
+		attrs = {};
+	}
+	const kyc = (attrs.exchangeKyc ?? {}) as Record<string, unknown>;
+	const verified = kyc.verified === true || attrs.isVerified === true;
+	const passportName =
+		[attrs.passport_family_name, attrs.passport_given_name]
+			.filter((v): v is string => typeof v === "string" && v.length > 0)
+			.join(" ") || null;
+	// Прислал документы (OCR что-то распознал), но решения оператора ещё нет.
+	const hasDocuments = Boolean(
+		passportName || attrs.passport_number || attrs.passport_expiry,
+	);
+	return {
+		contactId: row.id,
+		displayName: row.displayName,
+		verified,
+		status:
+			typeof kyc.status === "string"
+				? kyc.status
+				: verified
+					? "verified"
+					: hasDocuments
+						? "documents_received"
+						: "unknown",
+		verificationId:
+			typeof kyc.verificationId === "string" ? kyc.verificationId : null,
+		reviewedAt: typeof kyc.reviewedAt === "number" ? kyc.reviewedAt : null,
+		reviewedByAdminId:
+			typeof kyc.reviewedByAdminId === "number" ? kyc.reviewedByAdminId : null,
+		source: typeof kyc.source === "string" ? kyc.source : null,
+		passportName,
+		passportNumberMasked: maskPassportNumber(attrs.passport_number),
+		passportExpiry:
+			typeof attrs.passport_expiry === "string" ? attrs.passport_expiry : null,
+		ordersCount: agg?.ordersCount ?? 0,
+		turnoverThb: Math.round(agg?.turnoverThb ?? 0),
 	};
 }
 
@@ -618,6 +679,80 @@ export function makeAdminExchangeRoutes(opts: AdminExchangeRoutesOpts): Hono {
 		);
 		if (!row) return c.json({ error: "not found" }, 404);
 		return c.json({ order: serializeExchangeOrder(row) });
+	});
+
+	// ── Реестр верификаций (KYC) ───────────────────────────────────────────
+	// Контакты с историей KYC (#511): решение оператора (exchangeKyc) ИЛИ
+	// присланные документы без решения (passport_* из vision-OCR). Номер
+	// паспорта — маскированный; плюс заявки и оборот по каждому клиенту.
+	app.get("/api/admin/exchange/kyc-contacts", async (c) => {
+		const tenantId = c.var.tenantId;
+		const q = (c.req.query("q") ?? "").trim().toLowerCase();
+		const limit = Math.min(Number(c.req.query("limit") ?? 100) || 100, 500);
+		const offset = Math.max(Number(c.req.query("offset") ?? 0) || 0, 0);
+
+		const page = await withTenant(opts.db, tenantId, async (tx) => {
+			const searchFilter = q
+				? or(
+						ilike(contacts.displayName, `%${q}%`),
+						sql`lower(coalesce(${contacts.attributesJson}, '')) like ${`%${q}%`}`,
+					)
+				: undefined;
+			const rows = await tx
+				.select({
+					id: contacts.id,
+					displayName: contacts.displayName,
+					attributesJson: contacts.attributesJson,
+				})
+				.from(contacts)
+				.where(
+					and(
+						eq(contacts.tenantId, tenantId),
+						or(
+							like(contacts.attributesJson, '%"exchangeKyc"%'),
+							like(contacts.attributesJson, '%"passport_number"%'),
+						),
+						searchFilter,
+					),
+				)
+				.orderBy(desc(contacts.updatedAt))
+				.limit(limit + 1)
+				.offset(offset);
+			if (rows.length === 0) return { items: [], nextOffset: null };
+			const pageRows = rows.slice(0, limit);
+
+			const agg = await tx
+				.select({
+					contactId: exchangeOrders.contactId,
+					ordersCount: sql<number>`count(*)::int`,
+					turnoverThb: sql<number>`coalesce(sum(${exchangeOrders.amountToThb}) filter (where ${exchangeOrders.status} = 'completed'), 0)::float`,
+				})
+				.from(exchangeOrders)
+				.where(
+					and(
+						eq(exchangeOrders.tenantId, tenantId),
+						inArray(
+							exchangeOrders.contactId,
+							pageRows.map((r) => r.id),
+						),
+					),
+				)
+				.groupBy(exchangeOrders.contactId);
+			const byContact = new Map(agg.map((a) => [a.contactId, a]));
+			return {
+				items: pageRows.map((r) =>
+					serializeKycContact(r, byContact.get(r.id) ?? null),
+				),
+				nextOffset: rows.length > limit ? offset + limit : null,
+			};
+		});
+
+		return c.json({
+			contacts: page.items,
+			limit,
+			offset,
+			nextOffset: page.nextOffset,
+		});
 	});
 
 	// Операторские правки заявки: код выдачи, ID верификации, статус, подтверждение оплаты.

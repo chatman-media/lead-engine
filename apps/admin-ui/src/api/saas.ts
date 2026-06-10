@@ -2263,6 +2263,29 @@ export interface ExchangeTurnover {
   }>;
 }
 
+export interface ExchangeKycContact {
+  contactId: number;
+  displayName: string | null;
+  verified: boolean;
+  status: string;
+  verificationId: string | null;
+  reviewedAt: number | null;
+  reviewedByAdminId: number | null;
+  source: string | null;
+  passportName: string | null;
+  passportNumberMasked: string | null;
+  passportExpiry: string | null;
+  ordersCount: number;
+  turnoverThb: number;
+}
+
+export interface ExchangeKycContactsResponse {
+  contacts: ExchangeKycContact[];
+  limit: number;
+  offset: number;
+  nextOffset: number | null;
+}
+
 export interface ExchangeEvalResult {
   summary: { passed: number; total: number };
   report: Array<{
@@ -4235,5 +4258,15 @@ export const saas = {
   },
   exchangeTurnover() {
     return request<ExchangeTurnover>("/api/admin/exchange/turnover");
+  },
+  exchangeKycContacts(opts: { q?: string; limit?: number; offset?: number } = {}) {
+    const params = new URLSearchParams();
+    if (opts.q?.trim()) params.set("q", opts.q.trim());
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.offset) params.set("offset", String(opts.offset));
+    const qs = params.toString();
+    return request<ExchangeKycContactsResponse>(
+      `/api/admin/exchange/kyc-contacts${qs ? `?${qs}` : ""}`,
+    );
   },
 };

@@ -516,6 +516,7 @@ export function SaasLeadDetail() {
   const valueMap = new Map(fieldValues.map((v) => [v.fieldId, v.valueJson]));
 
   const editableFields = fields.filter((f) => f.fieldType !== "file" && f.fieldType !== "photo");
+  const kycBadge = getLeadKycBadge(contact?.attributesJson ?? null);
 
   return (
     <div className="flex flex-col gap-6">
@@ -529,6 +530,12 @@ export function SaasLeadDetail() {
           title={contact?.displayName ?? `Лид #${lead.id}`}
           description={lead.applicationId ? `ID: ${lead.applicationId}` : undefined}
         />
+        {kycBadge && (
+          <Badge variant={kycBadge.variant} className="gap-1">
+            {kycBadge.status === "verified" && <CheckIcon className="size-3" />}
+            {kycBadge.label}
+          </Badge>
+        )}
         <div className="ml-auto">
           {confirmDelete ? (
             <div className="flex items-center gap-1 text-sm">
@@ -984,6 +991,8 @@ export function SaasLeadDetail() {
             </CardContent>
           </Card>
 
+          <LeadVerificationCard attributesJson={contact?.attributesJson ?? null} />
+
           {/* Заметки */}
           <Card>
             <CardHeader className="pb-2">
@@ -1131,5 +1140,123 @@ function PipelineStepper({
         })}
       </div>
     </div>
+  );
+}
+
+// ── Верификация (KYC) контакта — статус + паспорт из vision-OCR (#511) ─────
+
+const LEAD_KYC_STATUS_RU: Record<
+  string,
+  { label: string; variant: "success" | "warning" | "destructive" | "secondary" }
+> = {
+  verified: { label: "Верифицирован", variant: "success" },
+  documents_received: { label: "Прислал документы", variant: "warning" },
+  materials_requested: { label: "Ждём материалы", variant: "warning" },
+  pending_review: { label: "На проверке", variant: "warning" },
+  rejected: { label: "Отклонён", variant: "destructive" },
+};
+
+function getLeadKycBadge(attributesJson: string | null) {
+  if (!attributesJson) return null;
+  let attrs: Record<string, unknown> = {};
+  try {
+    attrs = JSON.parse(attributesJson) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const kyc = (attrs.exchangeKyc ?? {}) as Record<string, unknown>;
+  const status =
+    typeof kyc.status === "string"
+      ? kyc.status
+      : attrs.isVerified === true
+        ? "verified"
+        : attrs.passport_number || attrs.passport_family_name || attrs.passport_given_name
+          ? "documents_received"
+          : null;
+  if (!status) return null;
+  const st = LEAD_KYC_STATUS_RU[status] ?? {
+    label: status,
+    variant: "secondary" as const,
+  };
+  return { status, ...st };
+}
+
+function LeadVerificationCard({ attributesJson }: { attributesJson: string | null }) {
+  if (!attributesJson) return null;
+  let attrs: Record<string, unknown> = {};
+  try {
+    attrs = JSON.parse(attributesJson) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const kyc = (attrs.exchangeKyc ?? {}) as Record<string, unknown>;
+  const passportNumber = typeof attrs.passport_number === "string" ? attrs.passport_number : null;
+  const passportName = [attrs.passport_family_name, attrs.passport_given_name]
+    .filter((v): v is string => typeof v === "string" && v.length > 0)
+    .join(" ");
+  const status = typeof kyc.status === "string" ? kyc.status : null;
+  if (!status && !passportName && !passportNumber) return null;
+
+  // Документы распознаны, но решения оператора ещё нет → «Прислал документы».
+  const st = status
+    ? LEAD_KYC_STATUS_RU[status]
+    : passportName || passportNumber
+      ? LEAD_KYC_STATUS_RU.documents_received
+      : undefined;
+  const masked = passportNumber
+    ? `•••• ${passportNumber.replace(/\s+/g, "").slice(-4)}`
+    : null;
+  const reviewedAt = typeof kyc.reviewedAt === "number" ? kyc.reviewedAt : null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Верификация (KYC)</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1.5 text-sm">
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Статус</span>
+          {st ? <Badge variant={st.variant}>{st.label}</Badge> : <span>—</span>}
+        </div>
+        {typeof kyc.verificationId === "string" && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">ID</span>
+            <span className="font-mono text-xs">{kyc.verificationId}</span>
+          </div>
+        )}
+        {reviewedAt && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Проверен</span>
+            <span>
+              {new Date(reviewedAt * 1000).toLocaleString("ru-RU", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          </div>
+        )}
+        {passportName && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Паспорт (OCR)</span>
+            <span>{passportName}</span>
+          </div>
+        )}
+        {masked && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Номер</span>
+            <span className="font-mono text-xs">{masked}</span>
+          </div>
+        )}
+        {typeof attrs.passport_expiry === "string" && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Действителен до</span>
+            <span>{attrs.passport_expiry}</span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
