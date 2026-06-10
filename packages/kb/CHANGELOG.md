@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.12.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.11.0...@chatman-media/kb-v1.12.0) (2026-06-10)
+
+
+### Features
+
+* **kb:** seed text-only vertical docs ([#462](https://github.com/chatman-media/lead-engine/issues/462)) ([392f591](https://github.com/chatman-media/lead-engine/commit/392f5916baa69b682e979586274d746b138149aa))
+
 # [@chatman-media/kb-v1.11.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.10.0...@chatman-media/kb-v1.11.0) (2026-06-10)
 
 
