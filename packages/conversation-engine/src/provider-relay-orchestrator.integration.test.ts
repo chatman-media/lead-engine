@@ -273,6 +273,45 @@ describe("ProviderRelayOrchestrator", () => {
 		).toHaveLength(1);
 	});
 
+	it("sends a provider request for an existing declined order", async () => {
+		if (!enabled) return;
+		const existing = await relayRepo().createServiceOrder({
+			customerContactId,
+			requestType: "massage",
+			status: "provider_declined",
+			summary: "Manual retry after first provider declined",
+			metadata: { serviceArea: "Chaweng" },
+			nowEpoch: now + 25,
+		});
+
+		const result = await orchestrator().sendProviderRequestForOrder({
+			orderId: existing.id,
+			providerIdOverride: providerId,
+			providerRequestIdempotencyKey: "orch-existing-request",
+			outboundIdempotencyKey: "orch-existing-outbound",
+			nowEpoch: now + 26,
+		});
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected successful provider request");
+		expect(result.order.id).toBe(existing.id);
+		expect(result.order.status).toBe("awaiting_provider");
+		expect(result.providerRequest).toMatchObject({
+			orderId: existing.id,
+			providerId,
+			channelId: whatsappChannelId,
+			status: "sent",
+		});
+		expect(result.envelope.idempotencyKey).toBe("orch-existing-outbound");
+		const payload = JSON.parse(result.outbound.payloadJson);
+		expect(payload.channelMeta.whatsapp.orderId).toBe(existing.id);
+
+		const events = await relayRepo().eventsForOrder(existing.id);
+		expect(new Set(events.map((event) => event.eventType))).toEqual(
+			new Set(["provider_request_created", "provider_request_sent"]),
+		);
+	});
+
 	it("records route failure without creating provider request or outbound rows", async () => {
 		if (!enabled) return;
 		const beforeRequests = await tableCount("provider_requests");

@@ -1101,6 +1101,170 @@ export interface CustomProviderMarketplaceInput {
   requiredFields?: string | string[];
 }
 
+export type ProviderOrderStatus =
+  | "intake"
+  | "matching"
+  | "awaiting_provider"
+  | "provider_declined"
+  | "offer_ready"
+  | "awaiting_customer_payment"
+  | "paid"
+  | "confirmed"
+  | "fulfilled"
+  | "cancelled"
+  | "failed";
+
+export type ProviderRequestStatus =
+  | "draft"
+  | "sent"
+  | "seen"
+  | "quoted"
+  | "accepted"
+  | "declined"
+  | "expired"
+  | "cancelled"
+  | "failed";
+
+export interface ProviderOrderSla {
+  state: "none" | "ok" | "risk" | "breached";
+  dueAt: number | null;
+  secondsLeft: number | null;
+}
+
+export interface ProviderOrderListItem {
+  id: number;
+  status: ProviderOrderStatus;
+  requestType: string;
+  summary: string | null;
+  quotedAmount: number | null;
+  customerAmount: number | null;
+  commissionAmount: number | null;
+  currency: string;
+  paymentStatus: string;
+  expiresAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  customer: { id: number; name: string | null };
+  provider: { id: number; name: string } | null;
+  latestProviderRequest: {
+    id: number;
+    status: ProviderRequestStatus;
+    providerId: number | null;
+    providerName: string | null;
+    quoteExpiresAt: number | null;
+    updatedAt: number;
+  } | null;
+  lastEvent: { eventType: string; createdAt: number } | null;
+  sla: ProviderOrderSla;
+}
+
+export interface ProviderOrderMessage {
+  id: number;
+  conversationId: number;
+  role: string;
+  text: string;
+  metaJson: string | null;
+  createdAt: number;
+  stage: string | null;
+  deletedAt: number | null;
+}
+
+export interface ProviderOrderDetail {
+  order: {
+    id: number;
+    status: ProviderOrderStatus;
+    requestType: string;
+    summary: string | null;
+    leadId: number | null;
+    amounts: {
+      quotedAmount: number | null;
+      customerAmount: number | null;
+      commissionPct: number | null;
+      commissionAmount: number | null;
+      currency: string;
+    };
+    payment: {
+      status: string;
+      provider: string | null;
+      ref: string | null;
+    };
+    metadata: Record<string, unknown>;
+    expiresAt: number | null;
+    confirmedAt: number | null;
+    completedAt: number | null;
+    cancelledAt: number | null;
+    createdAt: number;
+    updatedAt: number;
+  };
+  customer: {
+    id: number;
+    name: string | null;
+    conversationId: number | null;
+    channels: Array<{ channelId: number; channelKind: string; externalUserId: string }>;
+    messages: ProviderOrderMessage[];
+  };
+  provider: { id: number; name: string | null } | null;
+  providerRequests: Array<{
+    id: number;
+    orderId: number;
+    providerId: number | null;
+    providerName: string | null;
+    providerConversationId: number | null;
+    channelId: number | null;
+    channelKind: string | null;
+    outboundQueueId: number | null;
+    outboundStatus: string | null;
+    outboundLastError: string | null;
+    outboundSentAt: number | null;
+    outboundText: string | null;
+    status: ProviderRequestStatus;
+    quotedAmount: number | null;
+    customerAmount: number | null;
+    commissionAmount: number | null;
+    currency: string;
+    availableAt: number | null;
+    quoteExpiresAt: number | null;
+    responseText: string | null;
+    sentAt: number | null;
+    respondedAt: number | null;
+    expiredAt: number | null;
+    cancelledAt: number | null;
+    failedAt: number | null;
+    metadata: Record<string, unknown>;
+    createdAt: number;
+    updatedAt: number;
+    messages: ProviderOrderMessage[];
+  }>;
+  events: Array<{
+    id: number;
+    providerRequestId: number | null;
+    conversationId: number | null;
+    messageId: number | null;
+    actorType: string;
+    eventType: string;
+    dataJson: string;
+    data: Record<string, unknown>;
+    createdAt: number;
+  }>;
+  sla: ProviderOrderSla;
+}
+
+export interface ProviderOrderProviderOption {
+  id: number;
+  name: string;
+  category: string | null;
+  status: string;
+  serviceArea: string | null;
+  defaultCommissionPct: number;
+  services: Array<{
+    id: number;
+    serviceType: string;
+    name: string;
+    serviceArea: string | null;
+    commissionPct: number | null;
+  }>;
+}
+
 export type ServiceCatalogRouteType = "manual" | "funnel" | "partner_service" | "webhook";
 
 export interface ServiceCatalogItem {
@@ -3646,6 +3810,86 @@ export const saas = {
         method: "POST",
         body: JSON.stringify(data),
       },
+    );
+  },
+
+  // ── Provider order console ───────────────────────────────────────────
+  listProviderOrders(opts: { status?: ProviderOrderStatus; limit?: number } = {}) {
+    const p = new URLSearchParams();
+    if (opts.status) p.set("status", opts.status);
+    if (opts.limit) p.set("limit", String(opts.limit));
+    const q = p.toString();
+    return request<{ items: ProviderOrderListItem[] }>(
+      `/api/admin/provider-orders${q ? `?${q}` : ""}`,
+    );
+  },
+  getProviderOrder(id: number) {
+    return request<ProviderOrderDetail>(`/api/admin/provider-orders/${id}`);
+  },
+  listProviderOrderProviders(requestType?: string) {
+    const q = requestType ? `?requestType=${encodeURIComponent(requestType)}` : "";
+    return request<{ items: ProviderOrderProviderOption[] }>(
+      `/api/admin/provider-orders/providers${q}`,
+    );
+  },
+  assignProviderOrder(id: number, providerId: number) {
+    return request<{ ok: boolean; order: unknown }>(
+      `/api/admin/provider-orders/${id}/assign-provider`,
+      {
+        method: "POST",
+        body: JSON.stringify({ providerId }),
+      },
+    );
+  },
+  sendProviderOrderProviderRequest(
+    id: number,
+    data: { providerId?: number; messageText?: string; serviceArea?: string },
+  ) {
+    return request<{
+      ok: boolean;
+      order: unknown;
+      providerRequest: ProviderOrderDetail["providerRequests"][number];
+      outbound: unknown;
+    }>(`/api/admin/provider-orders/${id}/send-provider-request`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  approveProviderOrderQuote(id: number, providerRequestId?: number) {
+    return request<{
+      ok: boolean;
+      providerRequest: ProviderOrderDetail["providerRequests"][number];
+    }>(`/api/admin/provider-orders/${id}/approve-quote`, {
+      method: "POST",
+      body: JSON.stringify(providerRequestId ? { providerRequestId } : {}),
+    });
+  },
+  sendProviderOrderCustomerOffer(
+    id: number,
+    data: {
+      offerText?: string;
+      paymentInstructions?: string;
+      customerChannelId?: number;
+    } = {},
+  ) {
+    return request<{ ok: boolean; order: unknown; providerRequest: unknown; outbound: unknown }>(
+      `/api/admin/provider-orders/${id}/send-customer-offer`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
+  },
+  cancelProviderOrder(id: number, reason?: string) {
+    return request<{ ok: boolean; order: unknown }>(`/api/admin/provider-orders/${id}/cancel`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
+    });
+  },
+  markProviderOrderFulfilled(id: number) {
+    return request<{ ok: boolean; order: unknown }>(
+      `/api/admin/provider-orders/${id}/mark-fulfilled`,
+      { method: "POST" },
     );
   },
 

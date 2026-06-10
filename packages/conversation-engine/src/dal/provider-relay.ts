@@ -76,7 +76,7 @@ const serviceOrderTransitions: Record<
 		"cancelled",
 		"failed",
 	],
-	provider_declined: ["matching", "cancelled", "failed"],
+	provider_declined: ["matching", "awaiting_provider", "cancelled", "failed"],
 	offer_ready: ["awaiting_customer_payment", "cancelled", "failed"],
 	awaiting_customer_payment: ["paid", "cancelled", "failed"],
 	paid: ["confirmed", "cancelled", "failed"],
