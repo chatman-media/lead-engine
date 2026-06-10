@@ -322,6 +322,62 @@ describe("LlmReplyStrategy", () => {
 		});
 	});
 
+	it("exchange: resolveExchangePolicyState упал → guard работает на null-state", async () => {
+		const chat = new CapturingChat("Курс 31.5, получите 10553 THB.");
+		const repo = fakeMessagesRepo([row(1, "user", "сколько за 335 usdt?")]);
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveExchangePolicyState: () =>
+					Promise.reject(new Error("policy state db down")),
+			},
+			() => repo,
+		);
+
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "сколько за 335 usdt?",
+		});
+
+		// Ошибка резолва не роняет ответ; guard на null-state всё равно
+		// отбивает неподкреплённый курс.
+		expect(result).not.toBeNull();
+		const part = result?.[0]?.parts[0] as { text: string } | undefined;
+		expect(part?.text).toBe(EXCHANGE_SAFE_FALLBACK);
+	});
+
+	it("exchange: resolveExchangeResponseGuardEnabled упал → guard включён по умолчанию", async () => {
+		const chat = new CapturingChat("Курс 31.5, получите 10553 THB.");
+		const repo = fakeMessagesRepo([row(1, "user", "сколько за 335 usdt?")]);
+		const strategy = new LlmReplyStrategy(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveExchangeResponseGuardEnabled: () =>
+					Promise.reject(new Error("flag db down")),
+			},
+			() => repo,
+		);
+
+		const result = await strategy.generate({
+			tenant: { tenantId: 1 },
+			channel: { channelId: 10 },
+			conversationId: 100,
+			contactId: 1,
+			inbound: { externalUserId: "u" },
+			userMessageText: "сколько за 335 usdt?",
+		});
+
+		expect(result).not.toBeNull();
+		const part = result?.[0]?.parts[0] as { text: string } | undefined;
+		expect(part?.text).toBe(EXCHANGE_SAFE_FALLBACK);
+	});
+
 	it("exchange: response guard can be disabled by tenant flag", async () => {
 		const unsafeText = "Курс 31.5, получите 10553 THB.";
 		const chat = new CapturingChat(unsafeText);

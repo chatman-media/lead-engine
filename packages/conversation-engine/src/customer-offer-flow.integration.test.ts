@@ -481,4 +481,98 @@ describe("CustomerOfferFlow", () => {
 		expect(context).toContain("amount=1,380 THB");
 		expect(context).toContain("payment=unpaid");
 	});
+
+	it("contact with several identities resolves the most preferred channel kind", async () => {
+		if (!enabled) return;
+		const multiContactId = await createContact("Multi identity customer");
+		await db.insert(schema.channelIdentities).values([
+			{
+				contactId: multiContactId,
+				channelId: whatsappChannelId,
+				externalUserId: "wa-multi-cust",
+				createdAt: now,
+			},
+			{
+				contactId: multiContactId,
+				channelId: telegramChannelId,
+				externalUserId: "tg-multi-cust",
+				createdAt: now,
+			},
+		]);
+
+		// Приватный резолвер — единственное место, где сортировка по
+		// preferredKinds сравнивает >1 кандидата.
+		const resolver = flow() as unknown as {
+			resolveContactChannelIdentity(opts: {
+				contactId: number;
+				preferredKinds: string[];
+			}): Promise<{ channelKind: string; externalUserId: string } | null>;
+		};
+		const identity = await resolver.resolveContactChannelIdentity({
+			contactId: multiContactId,
+			preferredKinds: ["telegram_bot", "whatsapp"],
+		});
+
+		expect(identity?.channelKind).toBe("telegram_bot");
+		expect(identity?.externalUserId).toBe("tg-multi-cust");
+	});
+
+	it("provider with several identities resolves WhatsApp first", async () => {
+		if (!enabled) return;
+		const multiProviderContactId = await createContact(
+			"Multi identity provider",
+		);
+		const [provider] = await db
+			.insert(schema.providerProfiles)
+			.values({
+				tenantId,
+				contactId: multiProviderContactId,
+				name: "Multi Channel Provider",
+				category: "massage",
+				status: "active",
+				defaultCommissionPct: 10,
+				createdAt: now,
+				updatedAt: now,
+			})
+			.returning({ id: schema.providerProfiles.id });
+		if (!provider) throw new Error("provider insert returned no row");
+		await db.insert(schema.channelIdentities).values([
+			{
+				contactId: multiProviderContactId,
+				channelId: telegramChannelId,
+				externalUserId: "tg-multi-prov",
+				createdAt: now,
+			},
+			{
+				contactId: multiProviderContactId,
+				channelId: whatsappChannelId,
+				externalUserId: "wa-multi-prov",
+				createdAt: now,
+			},
+		]);
+
+		const resolver = flow() as unknown as {
+			resolveProviderChannelIdentity(opts: {
+				providerRequest: {
+					providerId: number | null;
+					channelId: number | null;
+				};
+			}): Promise<{ channelKind: string; externalUserId: string } | null>;
+		};
+		// channelId=null → выборка не сужается до одного канала и сортировка
+		// по defaultProviderChannelKinds реально сравнивает кандидатов.
+		const identity = await resolver.resolveProviderChannelIdentity({
+			providerRequest: { providerId: provider.id, channelId: null },
+		});
+
+		expect(identity?.channelKind).toBe("whatsapp");
+		expect(identity?.externalUserId).toBe("wa-multi-prov");
+
+		// providerId=null → ранний выход.
+		expect(
+			await resolver.resolveProviderChannelIdentity({
+				providerRequest: { providerId: null, channelId: null },
+			}),
+		).toBeNull();
+	});
 });

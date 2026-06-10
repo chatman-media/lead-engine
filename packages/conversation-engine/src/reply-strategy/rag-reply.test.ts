@@ -10,6 +10,7 @@ import type { VerticalTemplate } from "@chatman-media/verticals";
 import { EXCHANGE_PAYMENT_FALLBACK } from "./exchange-policy-guard.ts";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
 import {
+  parseStyleConfig,
   RagReplyStrategy,
   type RagReplyStrategyOpts,
   type RagTurnContext,
@@ -553,6 +554,91 @@ describe("RagReplyStrategy.generate", () => {
     expect(await s.generate(baseInput())).toBeNull();
   });
 
+  it("style assignment: setAssignment падает → warn, ответ не ломается", async () => {
+    const s = mk(
+      ctxWith({
+        chat: chatReturning("Курс 36.5 бат за USDT, без комиссии"),
+        kb: kbWith([HIT]),
+        style: { ...STYLE, styleId: 7 },
+        conversations: {
+          setAssignment: async () => {
+            throw new Error("assignment save down");
+          },
+        } as never,
+      }),
+    );
+
+    const r = await s.generate(baseInput());
+
+    expect(r).not.toBeNull();
+    const part = r?.[0]?.parts[0] as { text: string } | undefined;
+    expect(part?.text.toLowerCase()).toContain("курс");
+  });
+
+  it("compaction: ошибка LLM при сжатии глотается, ответ всё равно генерится", async () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      text: `msg ${i}`,
+    }));
+    let calls = 0;
+    const chat = {
+      complete: async () => {
+        calls += 1;
+        // Первый вызов — compactConversation; падает только он.
+        if (calls === 1) throw new Error("compactor down");
+        return "Курс 36.5 бат за USDT, без комиссии";
+      },
+    } as unknown as ChatClient;
+    let summarySaved = false;
+    const s = mk(
+      ctxWith({
+        chat,
+        kb: kbWith([HIT]),
+        messages: fakeMessages({ recent: many, count: 20 }),
+        conversations: {
+          findById: async () => ({ id: 100, summaryJson: null }),
+          setSummaryJson: async () => {
+            summarySaved = true;
+          },
+        } as never,
+      }),
+      { compactAfterMessages: 20 },
+    );
+
+    const r = await s.generate(baseInput());
+
+    expect(r).not.toBeNull();
+    expect(calls).toBeGreaterThan(1);
+    expect(summarySaved).toBe(false); // компакция упала — нечего сохранять
+  });
+
+  it("compaction: setSummaryJson падает → warn, ответ не ломается", async () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      text: `msg ${i}`,
+    }));
+    const s = mk(
+      ctxWith({
+        chat: chatReturning("Курс 36.5 бат за USDT, без комиссии"),
+        kb: kbWith([HIT]),
+        messages: fakeMessages({ recent: many, count: 20 }),
+        conversations: {
+          findById: async () => ({ id: 100, summaryJson: null }),
+          setSummaryJson: async () => {
+            throw new Error("summary save down");
+          },
+        } as never,
+      }),
+      { compactAfterMessages: 20 },
+    );
+
+    const r = await s.generate(baseInput());
+
+    expect(r).not.toBeNull();
+    // fire-and-forget reject обрабатывается catch'ем — даём микротаску добежать
+    await new Promise((res) => setTimeout(res, 0));
+  });
+
   it("compaction: при превышении порога грузит/пересчитывает summary", async () => {
     const many = Array.from({ length: 21 }, (_, i) => ({
       role: i % 2 === 0 ? "user" : "assistant",
@@ -578,5 +664,21 @@ describe("RagReplyStrategy.generate", () => {
     // summary пересчитан и сохранён (fire-and-forget) — даём микротаск завершиться
     await new Promise((res) => setTimeout(res, 0));
     expect(savedSummary).not.toBeNull();
+  });
+});
+
+describe("parseStyleConfig", () => {
+  it("валидный config → типизированный Style", () => {
+    const parsed = parseStyleConfig(JSON.stringify(STYLE));
+    expect(parsed?.slug).toBe("exch-pro");
+    expect(parsed?.persona.name).toBe("Alex");
+  });
+
+  it("битый JSON → null", () => {
+    expect(parseStyleConfig("{nope")).toBeNull();
+  });
+
+  it("валидный JSON, но не Style → null", () => {
+    expect(parseStyleConfig('{"slug":1}')).toBeNull();
   });
 });

@@ -233,4 +233,57 @@ describe("ProviderRouter", () => {
 		expect(result.candidate.activeOrderCount).toBe(1);
 		expect(result.override).toBe(true);
 	});
+
+	it("override: несуществующий провайдер → provider_not_found", async () => {
+		if (!enabled) return;
+		expect(
+			await router().selectProvider({
+				serviceType: "massage",
+				providerIdOverride: 999_999,
+			}),
+		).toEqual({ ok: false, reason: "provider_not_found" });
+	});
+
+	it("override: активный сервис, но не в запрошенном районе → area_unavailable", async () => {
+		if (!enabled) return;
+		const bophut = await createProvider({
+			name: "Bophut Sauna",
+			serviceType: "sauna",
+			serviceArea: "Bophut",
+		});
+
+		expect(
+			await router().selectProvider({
+				serviceType: "sauna",
+				serviceArea: "Lamai",
+				providerIdOverride: bophut.providerId,
+			}),
+		).toEqual({ ok: false, reason: "area_unavailable" });
+	});
+
+	it("override: сервис выключен у провайдера → service_inactive", async () => {
+		if (!enabled) return;
+		const inactive = await createProvider({
+			name: "Inactive Diving",
+			serviceType: "diving",
+			serviceArea: "Chaweng",
+			serviceActive: false,
+		});
+
+		expect(
+			await router().selectProvider({
+				serviceType: "diving",
+				providerIdOverride: inactive.providerId,
+			}),
+		).toEqual({ ok: false, reason: "service_inactive" });
+	});
+
+	it("пустой serviceType → no_provider_available с details", async () => {
+		if (!enabled) return;
+		expect(await router().selectProvider({ serviceType: "  " })).toEqual({
+			ok: false,
+			reason: "no_provider_available",
+			details: "serviceType is empty",
+		});
+	});
 });

@@ -250,4 +250,38 @@ describe("AdminInformer.emit", () => {
     expect(await informer.resolveOwnerAdminId(tenantWith)).toBe(ownerAdminId);
     expect(await informer.resolveOwnerAdminId(999_999)).toBeNull();
   });
+
+  it("markNotificationDelivered падает → warn, доставка не ломается", async () => {
+    if (!enabled) return;
+    await setOwner(tenantWith, { informerLevel: "important" });
+    const tg = new FakeTelegram();
+    const warns: string[] = [];
+    const informer = new AdminInformer({
+      db,
+      botToken: "",
+      appUrl: "http://x",
+      telegram: tg,
+      email: new FakeEmail(),
+      cooldownSec: 3600,
+      log: { warn: (msg) => warns.push(String(msg)) },
+    });
+    // Пост-доставочный апдейт ленты идёт через приватный repo — ломаем его,
+    // чтобы покрыть catch вокруг markNotificationDelivered.
+    (
+      informer as unknown as {
+        repo: { markNotificationDelivered: () => Promise<void> };
+      }
+    ).repo = {
+      markNotificationDelivered: async () => {
+        throw new Error("ledger down");
+      },
+    };
+
+    await informer.emit(ev(tenantWith, { dedupKey: "mark-fail" }));
+
+    expect(tg.sends.length).toBe(1); // реалтайм ушёл
+    expect(warns).toContain("[informer] mark delivered failed");
+    const row = await lastRow(tenantWith, "mark-fail");
+    expect(row?.deliveredAt).toBeNull(); // апдейт не прошёл, событие ждёт дайджеста
+  });
 });
