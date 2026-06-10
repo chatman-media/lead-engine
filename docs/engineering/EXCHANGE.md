@@ -112,6 +112,41 @@ Registry and helper live in
 exported fixture keys instead of hardcoding addresses, offices, rates, or policy
 copy in every test.
 
+## Demo tenant seed
+
+Для клиентского показа есть сид демо-тенанта обменки под ключ:
+
+```sh
+DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine \
+PLATFORM_MASTER_KEY=<64hex> \
+bun run --cwd apps/api seed:exchange-demo
+```
+
+По умолчанию создаётся/обновляется tenant `exchange-demo`, owner
+`owner@exchange.demo`, operator `operator@exchange.demo`, пароль `test1234`.
+Сид поднимает active tenant, web-channel, chat LLM config для onboarding gate,
+воронку `exchange` с `vertical_template_id='exchange_v1'`, deterministic
+fixtures, KB из `apps/api/kb-samples/exchange`, а также демо-лиды/диалоги/заявки
+по стадиям exchange workflow.
+
+Для живого Telegram-демо передайте токен только через env/флаг; он будет
+зашифрован в `tenant_secrets`, а в `channels.credentials_ref` останется только
+ссылка:
+
+```sh
+EXCHANGE_DEMO_TELEGRAM_BOT_TOKEN=123:ABC... \
+EXCHANGE_DEMO_TELEGRAM_BOT_USERNAME=my_demo_bot \
+PLATFORM_PUBLIC_URL=https://api.example.com \
+TELEGRAM_WEBHOOK_SECRET=<secret> \
+DATABASE_URL=postgres://lead:lead@localhost:5434/lead_engine \
+PLATFORM_MASTER_KEY=<64hex> \
+bun run --cwd apps/api seed:exchange-demo -- --set-telegram-webhook
+```
+
+После запуска проверить `/api/admin/diagnostics` от owner-админа. Без реального
+Telegram token сид оставляет web-канал и все кабинетные данные готовыми, но live
+Telegram webhook нужно подключить отдельно.
+
 ## Orders CRM
 
 `exchange_orders` — заявки с привязкой к лиду, статусом, суммами и платёжными
