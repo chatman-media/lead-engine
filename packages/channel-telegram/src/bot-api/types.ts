@@ -100,6 +100,7 @@ export interface TgMessage {
    *  cards (matched by the parent's `message_id` against
    *  `leads.ops_message_id`). */
   reply_to_message?: TgMessage;
+  reply_markup?: TgReplyMarkup;
 }
 
 export interface TgCallbackQuery {

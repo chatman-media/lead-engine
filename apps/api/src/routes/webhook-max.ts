@@ -206,6 +206,7 @@ export function makeMaxWebhookRoutes(opts: {
           inbound,
           result,
           replyStrategy: opts.replyStrategy,
+          notifications: opts.notificationService,
           ...(opts.sink ? { sink: opts.sink } : {}),
         });
         result = { ...result, outboundEnqueued: gen.outboundEnqueued };

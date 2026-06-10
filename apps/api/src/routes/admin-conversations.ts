@@ -1,5 +1,6 @@
 import { type Db, type NotificationService, withTenant } from "@chatman-media/conversation-engine";
 import {
+  adminNotifications,
   admins,
   channelIdentities,
   channels,
@@ -8,7 +9,7 @@ import {
   messages,
   outboundQueue,
 } from "@chatman-media/storage";
-import { and, desc, eq, ilike, isNotNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { recordAudit } from "../lib/audit.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
@@ -36,6 +37,13 @@ export function makeAdminConversationsRoutes(
   opts: AdminConversationsRoutesOpts,
 ): Hono {
   const app = new Hono();
+  const operatorHandoffKinds = [
+    "operator_handoff_required",
+    "operator_confirm_needed",
+    "human_takeover",
+    "verification_requested",
+    "document_uploaded",
+  ] as const;
 
   /**
    * GET /api/admin/conversations
@@ -205,6 +213,43 @@ export function makeAdminConversationsRoutes(
       conversation: result.conversation,
       messages: [...result.messages].reverse(),
     });
+  });
+
+  app.get("/api/admin/conversations/:id/operator-handoffs", async (c) => {
+    const tenantId = c.var.tenantId;
+    const idStr = c.req.param("id");
+    const id = Number.parseInt(idStr, 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return c.json({ error: "invalid conversation id" }, 400);
+    }
+
+    const rows = await withTenant(opts.db, tenantId, async (tx) =>
+      tx
+        .select({
+          id: adminNotifications.id,
+          kind: adminNotifications.kind,
+          title: adminNotifications.title,
+          body: adminNotifications.body,
+          severity: adminNotifications.severity,
+          deliveredAt: adminNotifications.deliveredAt,
+          readAt: adminNotifications.readAt,
+          createdAt: adminNotifications.createdAt,
+        })
+        .from(adminNotifications)
+        .where(
+          and(
+            eq(adminNotifications.tenantId, tenantId),
+            inArray(
+              adminNotifications.dedupKey,
+              operatorHandoffKinds.map((kind) => `${kind}:${id}`),
+            ),
+          ),
+        )
+        .orderBy(desc(adminNotifications.createdAt), desc(adminNotifications.id))
+        .limit(20),
+    );
+
+    return c.json({ items: rows });
   });
 
   /**

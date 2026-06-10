@@ -302,6 +302,7 @@ describe("RLS tenant_isolation policy", () => {
       "funnels",
       "funnel_versions",
       "outbound_queue",
+      "operator_action_drafts",
       "agent_tool_calls",
       "agent_tool_call_feedback",
       "agent_tool_call_improvement_proposals",

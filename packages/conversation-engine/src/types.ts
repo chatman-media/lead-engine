@@ -28,6 +28,7 @@ export interface ChannelContext {
  */
 export interface ProcessInboundResult {
   contactId: number;
+  contactDisplayName?: string | null;
   conversationId: number;
   /**
    * Сообщение записано в messages? Может быть false если inbound полностью

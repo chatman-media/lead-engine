@@ -147,6 +147,16 @@ const NOTIF_MAP: Record<string, NotifMeta> = {
   human_takeover: { topic: "escalation", severity: "important", title: "Нужна помощь оператора" },
   verification_requested: { topic: "escalation", severity: "important", title: "Видео-верификация" },
   document_uploaded: { topic: "escalation", severity: "info", title: "Загружен документ" },
+  operator_handoff_required: {
+    topic: "escalation",
+    severity: "important",
+    title: "Нужно действие оператора",
+  },
+  operator_confirm_needed: {
+    topic: "escalation",
+    severity: "important",
+    title: "Нужно подтверждение оператора",
+  },
   high_value_deal: { topic: "orders", severity: "important", title: "Крупная сделка" },
 };
 
@@ -168,6 +178,18 @@ export function notificationEventToInformer(
   }
   if (event.data.amount !== undefined && event.data.amount !== null) {
     parts.push(`Сумма: ${event.data.amount}`);
+  }
+  if (typeof event.data.title === "string" && event.data.title) {
+    parts.push(event.data.title);
+  }
+  if (typeof event.data.action === "string" && event.data.action) {
+    parts.push(event.data.action);
+  }
+  if (typeof event.data.reason === "string" && event.data.reason) {
+    parts.push(`Причина: ${event.data.reason}`);
+  }
+  if (typeof event.data.mediaSummary === "string" && event.data.mediaSummary) {
+    parts.push("Есть материалы для проверки");
   }
 
   const ref = event.leadId ?? event.conversationId ?? event.contactId ?? 0;
