@@ -48,7 +48,7 @@ let channelDbId = 0;
  * dispatcher mark'нуть failed.
  */
 class FakeAdapter implements ChannelAdapter {
-  readonly kind = "telegram_bot" as const;
+  readonly kind: "telegram_bot" | "whatsapp";
   readonly id: string;
   readonly capabilities: ChannelCapabilities = {
     text: true,
@@ -65,8 +65,9 @@ class FakeAdapter implements ChannelAdapter {
   shouldFail = false;
   failureMessage = "fake-adapter forced failure";
 
-  constructor(id: string) {
+  constructor(id: string, kind: "telegram_bot" | "whatsapp" = "telegram_bot") {
     this.id = id;
+    this.kind = kind;
   }
   receive(): AsyncIterable<Inbound> {
     return { [Symbol.asyncIterator]: () => ({ next: () => Promise.resolve({ value: undefined as unknown as Inbound, done: true }) }) };
@@ -336,6 +337,177 @@ describe("OutboundDispatcher integration", () => {
     expect(metrics.registry.format()).toContain(
       `lead_engine_outbound_failed_total{reason="bad_payload",tenant="${tenantId}"} 1`,
     );
+  });
+
+  it("WhatsApp requires approved template for cold provider outreach", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [waChannel] = await db
+      .insert(channels)
+      .values({
+        tenantId,
+        kind: "whatsapp",
+        externalId: `wa-${Math.random()}`,
+        status: "active",
+      })
+      .returning();
+    if (!waChannel) throw new Error("seed: whatsapp channel insert returned no row");
+
+    const [contact] = await db
+      .insert(schema.contacts)
+      .values({ tenantId, displayName: "Provider customer", createdAt: now, updatedAt: now })
+      .returning({ id: schema.contacts.id });
+    if (!contact) throw new Error("seed: contact insert returned no row");
+    const [order] = await db
+      .insert(schema.serviceOrders)
+      .values({
+        tenantId,
+        customerContactId: contact.id,
+        requestType: "massage",
+        status: "awaiting_provider",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: schema.serviceOrders.id });
+    if (!order) throw new Error("seed: service order insert returned no row");
+
+    const [queueRow] = await db
+      .insert(outboundQueue)
+      .values({
+        tenantId,
+        channelId: waChannel.id,
+        payloadJson: JSON.stringify({
+          channelId: String(waChannel.id),
+          externalUserId: "66999999999",
+          parts: [{ kind: "text", text: "cold provider ping" }],
+          transport: { whatsapp: { requiresTemplate: true } },
+        }),
+        scheduledAt: now,
+        status: "pending",
+        createdAt: now,
+      })
+      .returning();
+    if (!queueRow) throw new Error("seed: outbound insert returned no row");
+    const [providerRequest] = await db
+      .insert(schema.providerRequests)
+      .values({
+        tenantId,
+        orderId: order.id,
+        channelId: waChannel.id,
+        outboundQueueId: queueRow.id,
+        status: "sent",
+        createdAt: now,
+        updatedAt: now,
+        sentAt: now,
+      })
+      .returning({ id: schema.providerRequests.id });
+    if (!providerRequest) throw new Error("seed: provider request insert returned no row");
+
+    const adapter = new FakeAdapter(String(waChannel.id), "whatsapp");
+    const notifications: Array<{ eventType: string; data: Record<string, unknown> }> = [];
+    const registry = new TestRegistry();
+    registry.setEntry({
+      channelDbId: waChannel.id,
+      tenantId,
+      tenantSlug: "wdt",
+      kind: "whatsapp",
+      adapter,
+    });
+    const dispatcher = new OutboundDispatcher(db, registry, {
+      pollMs: 50,
+      batchSize: 16,
+      notifications: {
+        notify: async (event: { eventType: string; data: Record<string, unknown> }) => {
+          notifications.push(event);
+        },
+      } as never,
+    });
+
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
+
+    expect(adapter.sendCalls).toHaveLength(0);
+    const [updatedQueue] = await db
+      .select()
+      .from(outboundQueue)
+      .where(eq(outboundQueue.id, queueRow.id));
+    expect(updatedQueue?.status).toBe("failed");
+    expect(updatedQueue?.lastError).toContain("approved template");
+    const [updatedRequest] = await db
+      .select()
+      .from(schema.providerRequests)
+      .where(eq(schema.providerRequests.id, providerRequest.id));
+    expect(updatedRequest?.status).toBe("failed");
+    const events = await db
+      .select()
+      .from(schema.orderEvents)
+      .where(eq(schema.orderEvents.providerRequestId, providerRequest.id));
+    expect(events.map((event) => event.eventType)).toContain("provider_request_send_failed");
+    expect(notifications).toContainEqual(
+      expect.objectContaining({
+        eventType: "provider_request_send_failed",
+        data: expect.objectContaining({
+          providerRequestId: providerRequest.id,
+          outboundQueueId: queueRow.id,
+        }),
+      }),
+    );
+  });
+
+  it("WhatsApp rejects expired free-form provider outreach without template", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [waChannel] = await db
+      .insert(channels)
+      .values({
+        tenantId,
+        kind: "whatsapp",
+        externalId: `wa-expired-${Math.random()}`,
+        status: "active",
+      })
+      .returning();
+    if (!waChannel) throw new Error("seed: whatsapp channel insert returned no row");
+
+    const [queueRow] = await db
+      .insert(outboundQueue)
+      .values({
+        tenantId,
+        channelId: waChannel.id,
+        payloadJson: JSON.stringify({
+          channelId: String(waChannel.id),
+          externalUserId: "66999999998",
+          parts: [{ kind: "text", text: "window expired" }],
+          transport: { whatsapp: { freeFormWindowUntil: now - 60 } },
+        }),
+        scheduledAt: now,
+        status: "pending",
+        createdAt: now,
+      })
+      .returning();
+    if (!queueRow) throw new Error("seed: outbound insert returned no row");
+
+    const adapter = new FakeAdapter(String(waChannel.id), "whatsapp");
+    const registry = new TestRegistry();
+    registry.setEntry({
+      channelDbId: waChannel.id,
+      tenantId,
+      tenantSlug: "wdt",
+      kind: "whatsapp",
+      adapter,
+    });
+    const dispatcher = new OutboundDispatcher(db, registry, {
+      pollMs: 50,
+      batchSize: 16,
+    });
+
+    await (dispatcher as unknown as { tick: () => Promise<void> }).tick();
+
+    expect(adapter.sendCalls).toHaveLength(0);
+    const [updatedQueue] = await db
+      .select()
+      .from(outboundQueue)
+      .where(eq(outboundQueue.id, queueRow.id));
+    expect(updatedQueue?.status).toBe("failed");
+    expect(updatedQueue?.lastError).toContain("free-form window expired");
   });
 
   it("batch processing: 3 envelope'а в одном tick'е", async () => {

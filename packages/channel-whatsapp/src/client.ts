@@ -5,6 +5,12 @@
 //
 // Auth: Bearer <access_token>. Token приходит из tenant_secrets, не из env.
 
+import type {
+  WhatsAppTemplateComponent,
+  WhatsAppTemplateMessage,
+  WhatsAppTemplateParameter,
+} from "@chatman-media/channel-core";
+
 export type FetchLike = typeof fetch;
 
 export interface WhatsAppClientOptions {
@@ -34,6 +40,27 @@ export interface WhatsAppMessageResponse {
   messaging_product: "whatsapp";
   contacts: Array<{ input: string; wa_id: string }>;
   messages: Array<{ id: string }>;
+}
+
+function toTemplateParameter(param: WhatsAppTemplateParameter): Record<string, unknown> {
+  if (param.type === "image" || param.type === "video" || param.type === "document") {
+    return {
+      type: param.type,
+      [param.type]: { id: param.mediaRef.externalRef },
+    };
+  }
+  return param;
+}
+
+function toTemplateComponent(component: WhatsAppTemplateComponent): Record<string, unknown> {
+  return {
+    type: component.type,
+    ...(component.subType ? { sub_type: component.subType } : {}),
+    ...(component.index ? { index: component.index } : {}),
+    ...(component.parameters
+      ? { parameters: component.parameters.map(toTemplateParameter) }
+      : {}),
+  };
 }
 
 export class WhatsAppClient {
@@ -86,6 +113,39 @@ export class WhatsAppClient {
     const body = (await res.json()) as WhatsAppMessageResponse;
     const id = body.messages?.[0]?.id;
     if (!id) throw new WhatsAppApiError("sendText", res.status, "no message id in response");
+    return { messageId: id };
+  }
+
+  async sendTemplate(input: {
+    to: string;
+    template: WhatsAppTemplateMessage;
+  }): Promise<{ messageId: string }> {
+    const res = await this.fetchImpl(this.url(`/${this.phoneNumberId}/messages`), {
+      method: "POST",
+      headers: { ...this.authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: input.to,
+        type: "template",
+        template: {
+          name: input.template.name,
+          language: { code: input.template.languageCode },
+          ...(input.template.components
+            ? { components: input.template.components.map(toTemplateComponent) }
+            : {}),
+        },
+      }),
+    });
+    if (!res.ok) {
+      throw new WhatsAppApiError(
+        "sendTemplate",
+        res.status,
+        await res.text().catch(() => "no body"),
+      );
+    }
+    const body = (await res.json()) as WhatsAppMessageResponse;
+    const id = body.messages?.[0]?.id;
+    if (!id) throw new WhatsAppApiError("sendTemplate", res.status, "no message id");
     return { messageId: id };
   }
 

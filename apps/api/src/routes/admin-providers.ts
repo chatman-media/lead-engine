@@ -39,6 +39,20 @@ interface ProviderServiceInput {
   metadataJson?: string | Record<string, unknown> | null;
 }
 
+interface ProviderWhatsAppOptInInput {
+  source?: string;
+  acceptedAt?: number;
+  categories?: string[];
+}
+
+interface ProviderWhatsAppTemplateInput {
+  name?: string;
+  languageCode?: string;
+  category?: string;
+  approved?: boolean;
+  components?: unknown[];
+}
+
 interface CreateProviderBody {
   name?: string;
   category?: string | null;
@@ -46,6 +60,8 @@ interface CreateProviderBody {
   defaultCommissionPct?: number;
   notes?: string | null;
   metadataJson?: string | Record<string, unknown> | null;
+  whatsappOptIn?: ProviderWhatsAppOptInInput | null;
+  whatsappProviderRequestTemplate?: ProviderWhatsAppTemplateInput | null;
   identity?: ProviderIdentityInput | null;
   services?: ProviderServiceInput[];
 }
@@ -67,6 +83,62 @@ function jsonText(value: unknown, fallback = "{}"): string {
   }
   if (value && typeof value === "object") return JSON.stringify(value);
   return fallback;
+}
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  if (typeof value === "string" && value.trim().length > 0) {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function providerMetadataText(body: {
+  metadataJson?: string | Record<string, unknown> | null;
+  whatsappOptIn?: ProviderWhatsAppOptInInput | null;
+  whatsappProviderRequestTemplate?: ProviderWhatsAppTemplateInput | null;
+}, fallback = "{}"): string {
+  const metadata = jsonObject(body.metadataJson ?? fallback);
+  const optInSource = cleanText(body.whatsappOptIn?.source);
+  const optInAcceptedAt = body.whatsappOptIn?.acceptedAt;
+  if (
+    optInSource &&
+    typeof optInAcceptedAt === "number" &&
+    Number.isInteger(optInAcceptedAt) &&
+    optInAcceptedAt > 0
+  ) {
+    metadata.whatsappOptIn = {
+      source: optInSource,
+      acceptedAt: optInAcceptedAt,
+      ...(Array.isArray(body.whatsappOptIn?.categories)
+        ? { categories: body.whatsappOptIn.categories.filter((x) => typeof x === "string") }
+        : {}),
+    };
+  }
+  const templateName = cleanText(body.whatsappProviderRequestTemplate?.name);
+  const languageCode = cleanText(body.whatsappProviderRequestTemplate?.languageCode);
+  if (templateName && languageCode) {
+    metadata.whatsappProviderRequestTemplate = {
+      name: templateName,
+      languageCode,
+      ...(cleanText(body.whatsappProviderRequestTemplate?.category)
+        ? { category: cleanText(body.whatsappProviderRequestTemplate?.category) }
+        : {}),
+      approved: body.whatsappProviderRequestTemplate?.approved === true,
+      ...(Array.isArray(body.whatsappProviderRequestTemplate?.components)
+        ? { components: body.whatsappProviderRequestTemplate.components }
+        : {}),
+    };
+  }
+  return JSON.stringify(metadata);
 }
 
 function parsePositiveId(raw: string | undefined): number | null {
@@ -273,7 +345,7 @@ export function makeAdminProvidersRoutes(opts: { db: Db }): Hono {
             serviceArea: cleanText(body.serviceArea),
             defaultCommissionPct: Number(body.defaultCommissionPct ?? 0),
             notes: cleanText(body.notes),
-            metadataJson: jsonText(body.metadataJson),
+            metadataJson: providerMetadataText(body),
             createdAt: now,
             updatedAt: now,
           })
@@ -339,7 +411,10 @@ export function makeAdminProvidersRoutes(opts: { db: Db }): Hono {
     if ("serviceArea" in body) patch.serviceArea = cleanText(body.serviceArea);
     if ("defaultCommissionPct" in body) patch.defaultCommissionPct = Number(body.defaultCommissionPct ?? 0);
     if ("notes" in body) patch.notes = cleanText(body.notes);
-    if ("metadataJson" in body) patch.metadataJson = jsonText(body.metadataJson);
+    const shouldPatchMetadata =
+      "metadataJson" in body ||
+      "whatsappOptIn" in body ||
+      "whatsappProviderRequestTemplate" in body;
     if ("status" in body) {
       if (!body.status || !PROVIDER_STATUSES.has(body.status)) {
         return c.json({ error: "bad status" }, 400);
@@ -348,6 +423,10 @@ export function makeAdminProvidersRoutes(opts: { db: Db }): Hono {
     }
 
     const item = await withTenant(opts.db, tenantId, async (tx) => {
+      if (shouldPatchMetadata) {
+        const existing = await requireProvider(tx, tenantId, id);
+        patch.metadataJson = providerMetadataText(body, existing.metadataJson);
+      }
       const [row] = await tx
         .update(providerProfiles)
         .set(patch)

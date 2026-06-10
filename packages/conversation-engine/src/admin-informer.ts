@@ -157,6 +157,11 @@ const NOTIF_MAP: Record<string, NotifMeta> = {
     severity: "important",
     title: "Нужно подтверждение оператора",
   },
+  provider_request_send_failed: {
+    topic: "orders",
+    severity: "important",
+    title: "Ошибка отправки провайдеру",
+  },
   high_value_deal: { topic: "orders", severity: "important", title: "Крупная сделка" },
 };
 

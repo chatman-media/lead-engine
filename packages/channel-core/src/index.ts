@@ -10,6 +10,13 @@ export type {
   OperatorHandoffMeta,
   OutboundEnvelope,
   OutboundPart,
+  OutboundTransportMeta,
   ReplyMarkup,
   Sent,
+  WhatsAppOptIn,
+  WhatsAppOutboundMeta,
+  WhatsAppTemplateCategory,
+  WhatsAppTemplateComponent,
+  WhatsAppTemplateMessage,
+  WhatsAppTemplateParameter,
 } from "./types.ts";

@@ -1,8 +1,11 @@
 import type { OutboundEnvelope } from "@chatman-media/channel-core";
 import {
   type Db,
+  type NotificationService,
   OutboundQueueRepo,
   type OutboundQueueRow,
+  ProviderRelayOrchestrator,
+  ProviderRelayRepo,
   withTenant,
 } from "@chatman-media/conversation-engine";
 import type { PlatformMetrics } from "@chatman-media/observability";
@@ -38,6 +41,8 @@ export class OutboundDispatcher {
       stuckCheckPeriodTicks?: number;
       /** Опциональный PlatformMetrics для счётчиков outbound_sent/failed/latency. */
       metrics?: PlatformMetrics;
+      /** Optional operator notification sink for provider dispatch failures. */
+      notifications?: NotificationService | null;
       /**
        * Whitelist channels.kind для claim'а. По умолчанию worker
        * обрабатывает push-channels (telegram_*, whatsapp). Web-канал
@@ -141,12 +146,20 @@ export class OutboundDispatcher {
       this.opts.metrics?.outboundFailed.inc(1, { ...tenantLabel, reason: "bad_payload" });
       return;
     }
+    const now = this.nowEpoch();
+    const policyError = this.validateWhatsAppPolicy(entry.kind, envelope, now);
+    if (policyError) {
+      await this.markFailed(row, policyError);
+      await this.recordProviderDispatchFailed(row, entry.kind, envelope, policyError, now);
+      this.opts.metrics?.outboundFailed.inc(1, { ...tenantLabel, reason: "send_policy" });
+      return;
+    }
     const startedAt = performance.now();
     try {
       // Внешний send ВНЕ tx — иначе HTTP/MTProto latency держала бы
       // pool connection (см. doc-comment к tick()).
       const sent = await entry.adapter.send(envelope);
-      const sentAt = Math.floor(Date.now() / 1000);
+      const sentAt = this.nowEpoch();
       await withTenant(this.db, row.tenantId, async (tx) => {
         const txRepo = new OutboundQueueRepo({ db: tx, tenantId: row.tenantId });
         await txRepo.markSent(row.id, sent.externalMessageId, sentAt);
@@ -160,8 +173,91 @@ export class OutboundDispatcher {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await this.markFailed(row, msg);
+      await this.recordProviderDispatchFailed(row, entry.kind, envelope, msg, this.nowEpoch());
       this.opts.metrics?.outboundFailed.inc(1, { ...tenantLabel, reason: "send_error" });
     }
+  }
+
+  private validateWhatsAppPolicy(
+    kind: string,
+    envelope: OutboundEnvelope,
+    nowEpoch: number,
+  ): string | null {
+    if (kind !== "whatsapp") return null;
+    const meta = envelope.transport?.whatsapp;
+    if (!meta) return null;
+    const template = meta.template;
+    if (template) {
+      return template.approved
+        ? null
+        : `whatsapp template "${template.name}" is not marked approved`;
+    }
+    if (meta.requiresTemplate) {
+      return "whatsapp outbound requires an approved template";
+    }
+    if (
+      typeof meta.freeFormWindowUntil === "number" &&
+      meta.freeFormWindowUntil < nowEpoch
+    ) {
+      return "whatsapp free-form window expired; approved template required";
+    }
+    return null;
+  }
+
+  private async recordProviderDispatchFailed(
+    row: OutboundQueueRow,
+    kind: string,
+    envelope: OutboundEnvelope,
+    error: string,
+    nowEpoch: number,
+  ): Promise<void> {
+    if (kind !== "whatsapp" && !envelope.transport?.whatsapp) return;
+    let providerRequestId = envelope.transport?.whatsapp?.providerRequestId ?? null;
+    try {
+      await withTenant(this.db, row.tenantId, async (tx) => {
+        if (!providerRequestId) {
+          const request = await new ProviderRelayRepo({
+            db: tx,
+            tenantId: row.tenantId,
+          }).providerRequestByOutboundQueueId(row.id);
+          providerRequestId = request?.id ?? null;
+        }
+        if (!providerRequestId) return;
+        await new ProviderRelayOrchestrator({
+          db: tx,
+          tenantId: row.tenantId,
+        }).recordDispatchFailed({
+          providerRequestId,
+          error,
+          outboundQueueId: row.id,
+          nowEpoch,
+        });
+      });
+    } catch (err) {
+      console.error("[dispatcher] provider dispatch failure record failed", err);
+    }
+
+    try {
+      if (!providerRequestId) return;
+      await this.opts.notifications?.notify({
+        tenantId: row.tenantId,
+        eventType: "provider_request_send_failed",
+        data: {
+          title: "WhatsApp provider outreach failed",
+          action: "Review provider request",
+          providerRequestId,
+          outboundQueueId: row.id,
+          channelId: row.channelId,
+          reason: error,
+        },
+      });
+    } catch (err) {
+      console.error("[dispatcher] provider dispatch failure notification failed", err);
+    }
+  }
+
+  private nowEpoch(): number {
+    return Math.floor(Date.now() / 1000);
   }
 
   private async markFailed(row: OutboundQueueRow, error: string): Promise<void> {

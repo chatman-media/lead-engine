@@ -56,6 +56,7 @@ async function createProvider(opts: {
 	contactId: number;
 	serviceType: string;
 	serviceArea?: string | null;
+	metadata?: Record<string, unknown>;
 }): Promise<number> {
 	const [provider] = await db
 		.insert(schema.providerProfiles)
@@ -69,6 +70,7 @@ async function createProvider(opts: {
 			defaultCommissionPct: 15,
 			createdAt: now,
 			updatedAt: now,
+			...(opts.metadata ? { metadataJson: JSON.stringify(opts.metadata) } : {}),
 		})
 		.returning({ id: schema.providerProfiles.id });
 	if (!provider) throw new Error("provider insert returned no row");
@@ -127,6 +129,19 @@ beforeAll(async () => {
 		contactId: providerContactId,
 		serviceType: "massage",
 		serviceArea: "Chaweng",
+		metadata: {
+			whatsappOptIn: {
+				source: "admin_import",
+				acceptedAt: now - 60,
+				categories: ["utility"],
+			},
+			whatsappProviderRequestTemplate: {
+				name: "provider_request_v1",
+				languageCode: "en_US",
+				category: "utility",
+				approved: true,
+			},
+		},
 	});
 	providerWithoutChannelId = await createProvider({
 		name: "No Channel Spa",
@@ -196,6 +211,25 @@ describe("ProviderRelayOrchestrator", () => {
 
 		const payload = JSON.parse(result.outbound.payloadJson);
 		expect(payload.parts[0].text).toContain("Massage today around 18:00");
+		expect(payload.transport.whatsapp).toMatchObject({
+			requiresTemplate: true,
+			optIn: {
+				source: "admin_import",
+				acceptedAt: now - 60,
+				categories: ["utility"],
+			},
+			template: {
+				name: "provider_request_v1",
+				languageCode: "en_US",
+				category: "utility",
+				approved: true,
+			},
+		});
+		expect(payload.transport.whatsapp.template.components[0].parameters).toEqual([
+			{ type: "text", text: "massage" },
+			{ type: "text", text: "Chaweng" },
+			{ type: "text", text: "Massage today around 18:00" },
+		]);
 
 		const events = await relayRepo().eventsForOrder(result.order.id);
 		expect(new Set(events.map((event) => event.eventType))).toEqual(
@@ -292,7 +326,7 @@ describe("ProviderRelayOrchestrator", () => {
 		]);
 	});
 
-	it("records retry, failed, and cancelled dispatch events", async () => {
+	it("records retry and failed dispatch events", async () => {
 		if (!enabled) return;
 		const result = await orchestrator().startProviderOutreach({
 			customerContactId,
@@ -313,16 +347,9 @@ describe("ProviderRelayOrchestrator", () => {
 			error: "template rejected",
 			nowEpoch: now + 52,
 		});
-		const cancelled = await orchestrator().cancelProviderOutreach({
-			providerRequestId: result.providerRequest.id,
-			reason: "operator cancelled",
-			nowEpoch: now + 53,
-		});
 
-		expect(cancelled.status).toBe("cancelled");
 		const events = await relayRepo().eventsForOrder(result.order.id);
 		expect(events.map((event) => event.eventType)).toEqual([
-			"provider_request_cancelled",
 			"provider_request_send_failed",
 			"provider_request_retry",
 			"provider_request_sent",
@@ -333,6 +360,32 @@ describe("ProviderRelayOrchestrator", () => {
 			.select({ status: schema.providerRequests.status })
 			.from(schema.providerRequests)
 			.where(eq(schema.providerRequests.id, result.providerRequest.id));
-		expect(stored?.status).toBe("cancelled");
+		expect(stored?.status).toBe("failed");
+	});
+
+	it("records cancelled dispatch event", async () => {
+		if (!enabled) return;
+		const result = await orchestrator().startProviderOutreach({
+			customerContactId,
+			requestType: "massage",
+			serviceArea: "Chaweng",
+			orderIdempotencyKey: "orch-cancel-events",
+			nowEpoch: now + 60,
+		});
+		if (!result.ok) throw new Error("expected successful provider outreach");
+
+		const cancelled = await orchestrator().cancelProviderOutreach({
+			providerRequestId: result.providerRequest.id,
+			reason: "operator cancelled",
+			nowEpoch: now + 61,
+		});
+
+		expect(cancelled.status).toBe("cancelled");
+		const events = await relayRepo().eventsForOrder(result.order.id);
+		expect(events.map((event) => event.eventType)).toEqual([
+			"provider_request_cancelled",
+			"provider_request_sent",
+			"provider_request_created",
+		]);
 	});
 });

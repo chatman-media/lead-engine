@@ -1,6 +1,10 @@
 import type {
 	ChannelKind,
 	OutboundEnvelope,
+	WhatsAppOptIn,
+	WhatsAppOutboundMeta,
+	WhatsAppTemplateCategory,
+	WhatsAppTemplateMessage,
 } from "@chatman-media/channel-core";
 import {
 	channelIdentities,
@@ -16,6 +20,7 @@ import {
 	ProviderRelayRepo,
 	type ProviderRequestRow,
 	type ServiceOrderRow,
+	canTransitionProviderRequest,
 } from "./dal/index.ts";
 import type { RepoCtx } from "./dal/types.ts";
 import {
@@ -42,6 +47,10 @@ export interface ProviderChannelIdentity {
 	channelKind: ChannelKind;
 	channelExternalId: string;
 	externalUserId: string;
+	whatsapp?: {
+		optIn?: WhatsAppOptIn;
+		providerRequestTemplate?: WhatsAppTemplateMessage;
+	};
 }
 
 export interface ProviderRelayStartInput {
@@ -164,22 +173,33 @@ export class ProviderRelayOrchestrator {
 		const outboundKey =
 			input.outboundIdempotencyKey ??
 			`provider-relay:${order.id}:${route.candidate.providerId}:${identity.channelDbId}:initial`;
+		const messageText =
+			input.messageText ??
+			this.defaultProviderMessage({
+				requestType: input.requestType,
+				serviceArea: input.serviceArea,
+				summary: input.summary,
+			});
+		const whatsappMeta =
+			identity.channelKind === "whatsapp"
+				? this.buildWhatsAppProviderOutreachMeta({
+						identity,
+						requestType: input.requestType,
+						serviceArea: input.serviceArea,
+						summary: input.summary,
+					})
+				: null;
 		const envelope: OutboundEnvelope = {
 			channelId: String(identity.channelDbId),
 			externalUserId: identity.externalUserId,
 			parts: [
 				{
 					kind: "text",
-					text:
-						input.messageText ??
-						this.defaultProviderMessage({
-							requestType: input.requestType,
-							serviceArea: input.serviceArea,
-							summary: input.summary,
-						}),
+					text: messageText,
 				},
 			],
 			idempotencyKey: outboundKey,
+			...(whatsappMeta ? { transport: { whatsapp: whatsappMeta } } : {}),
 		};
 
 		const outbound = await this.outbound.enqueue({
@@ -256,6 +276,16 @@ export class ProviderRelayOrchestrator {
 		outboundQueueId?: number | null;
 	}): Promise<OrderEventRow> {
 		const request = await this.requireProviderRequest(opts.providerRequestId);
+		if (
+			request.status !== "failed" &&
+			canTransitionProviderRequest(request.status, "failed")
+		) {
+			await this.relay.transitionProviderRequestStatus(
+				request.id,
+				"failed",
+				opts.nowEpoch,
+			);
+		}
 		return this.relay.appendEvent({
 			orderId: request.orderId,
 			providerRequestId: request.id,
@@ -339,6 +369,7 @@ export class ProviderRelayOrchestrator {
 				channelKind: channels.kind,
 				channelExternalId: channels.externalId,
 				externalUserId: channelIdentities.externalUserId,
+				providerMetadataJson: providerProfiles.metadataJson,
 			})
 			.from(providerProfiles)
 			.innerJoin(
@@ -373,6 +404,38 @@ export class ProviderRelayOrchestrator {
 			channelKind: row.channelKind as ChannelKind,
 			channelExternalId: row.channelExternalId,
 			externalUserId: row.externalUserId,
+			...(row.channelKind === "whatsapp"
+				? { whatsapp: readWhatsAppProviderMetadata(row.providerMetadataJson) }
+				: {}),
+		};
+	}
+
+	private buildWhatsAppProviderOutreachMeta(input: {
+		identity: ProviderChannelIdentity;
+		requestType: string;
+		serviceArea?: string | null;
+		summary?: string | null;
+	}): WhatsAppOutboundMeta {
+		const template = input.identity.whatsapp?.providerRequestTemplate;
+		return {
+			requiresTemplate: true,
+			...(input.identity.whatsapp?.optIn
+				? { optIn: input.identity.whatsapp.optIn }
+				: {}),
+			...(template
+				? {
+						template: {
+							...template,
+							components:
+								template.components ??
+								defaultProviderRequestTemplateComponents({
+									requestType: input.requestType,
+									serviceArea: input.serviceArea,
+									summary: input.summary,
+								}),
+						},
+					}
+				: {}),
 		};
 	}
 
@@ -389,4 +452,117 @@ export class ProviderRelayOrchestrator {
 		].filter((line): line is string => Boolean(line));
 		return lines.join("\n");
 	}
+}
+
+function parseJsonObject(value: string): Record<string, unknown> {
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+			? (parsed as Record<string, unknown>)
+			: {};
+	} catch {
+		return {};
+	}
+}
+
+function cleanString(value: unknown): string | null {
+	return typeof value === "string" && value.trim().length > 0
+		? value.trim()
+		: null;
+}
+
+function positiveInt(value: unknown): number | null {
+	if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+		return null;
+	}
+	return value;
+}
+
+function isWhatsAppTemplateCategory(
+	value: unknown,
+): value is WhatsAppTemplateCategory {
+	return (
+		value === "marketing" ||
+		value === "utility" ||
+		value === "authentication"
+	);
+}
+
+function readWhatsAppProviderMetadata(metadataJson: string): {
+	optIn?: WhatsAppOptIn;
+	providerRequestTemplate?: WhatsAppTemplateMessage;
+} {
+	const metadata = parseJsonObject(metadataJson);
+	const optInRaw = parseJsonRecord(metadata.whatsappOptIn);
+	const optInSource = cleanString(optInRaw.source);
+	const optInAcceptedAt = positiveInt(optInRaw.acceptedAt);
+	const optInCategories = Array.isArray(optInRaw.categories)
+		? optInRaw.categories.filter(isWhatsAppTemplateCategory)
+		: undefined;
+
+	const providerRequestTemplateRaw = parseJsonRecord(
+		metadata.whatsappProviderRequestTemplate,
+	);
+	const legacyTemplateRaw = parseJsonRecord(metadata.whatsappTemplate);
+	const templateRaw =
+		providerRequestTemplateRaw.name || providerRequestTemplateRaw.languageCode
+			? providerRequestTemplateRaw
+			: legacyTemplateRaw;
+	const templateName = cleanString(templateRaw.name);
+	const languageCode = cleanString(templateRaw.languageCode);
+	const category = isWhatsAppTemplateCategory(templateRaw.category)
+		? templateRaw.category
+		: undefined;
+	const approved = templateRaw.approved === true;
+	const components = Array.isArray(templateRaw.components)
+		? (templateRaw.components as WhatsAppTemplateMessage["components"])
+		: undefined;
+
+	return {
+		...(optInSource && optInAcceptedAt
+			? {
+					optIn: {
+						source: optInSource,
+						acceptedAt: optInAcceptedAt,
+						...(optInCategories && optInCategories.length > 0
+							? { categories: optInCategories }
+							: {}),
+					},
+				}
+			: {}),
+		...(templateName && languageCode
+			? {
+					providerRequestTemplate: {
+						name: templateName,
+						languageCode,
+						approved,
+						...(category ? { category } : {}),
+						...(components ? { components } : {}),
+					},
+				}
+			: {}),
+	};
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> {
+	return value && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: {};
+}
+
+function defaultProviderRequestTemplateComponents(input: {
+	requestType: string;
+	serviceArea?: string | null;
+	summary?: string | null;
+}): WhatsAppTemplateMessage["components"] {
+	return [
+		{
+			type: "body",
+			parameters: [
+				{ type: "text", text: input.requestType },
+				{ type: "text", text: input.serviceArea ?? "-" },
+				{ type: "text", text: input.summary ?? "-" },
+			],
+		},
+	];
 }
