@@ -1,3 +1,10 @@
+# [@chatman-media/storage-v1.29.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.28.0...@chatman-media/storage-v1.29.0) (2026-06-10)
+
+
+### Features
+
+* **partners:** partner settlement flow over partner_deals ([#545](https://github.com/chatman-media/lead-engine/issues/545)) ([d4e40a6](https://github.com/chatman-media/lead-engine/commit/d4e40a6e9454581fe32d82399b43eb3736dea8cc))
+
 # [@chatman-media/storage-v1.28.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/storage-v1.27.0...@chatman-media/storage-v1.28.0) (2026-06-10)
 
 
