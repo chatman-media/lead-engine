@@ -32,7 +32,11 @@ import {
 
 // ---- Custom types (vector / tsvector) ----------------------------------
 
-const vector = customType<{ data: number[]; driverData: string; config: { dimensions: number } }>({
+const vector = customType<{
+  data: number[];
+  driverData: string;
+  config: { dimensions: number };
+}>({
   dataType(config) {
     return `vector(${config?.dimensions ?? 1536})`;
   },
@@ -63,20 +67,34 @@ const epochNow = () => sql`EXTRACT(EPOCH FROM NOW())::INTEGER`;
 // на contacts.id. Переименование колонок отложено до отдельной миграции
 // (требует update apps/admin-ui Drizzle типов).
 
-export const questionnaireTokens = pgTable("questionnaire_tokens", {
+export const questionnaireTokens = pgTable(
+  "questionnaire_tokens",
+  {
   token: text("token").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  userId: integer("user_id").notNull().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, {
+        onDelete: "cascade",
+      }),
   expiresAt: integer("expires_at").notNull(),
   usedAt: integer("used_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
-  index("idx_qtokens_user").on(t.userId),
-]);
+  },
+  (t) => [index("idx_qtokens_user").on(t.userId)],
+);
 
-export const styles = pgTable("styles", {
+export const styles = pgTable(
+  "styles",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   slug: text("slug").notNull(),
   displayName: text("display_name").notNull(),
   configJson: text("config_json").notNull(),
@@ -86,15 +104,22 @@ export const styles = pgTable("styles", {
   createdAt: integer("created_at").notNull().default(epochNow()),
   // Soft-delete marker: NULL = live; NOT NULL = operator-retired chain.
   deletedAt: integer("deleted_at"),
-}, (t) => [
+  },
+  (t) => [
   uniqueIndex("uniq_styles_slug_version").on(t.slug, t.version),
   uniqueIndex("uniq_styles_active_slug").on(t.slug).where(sql`is_active = TRUE`),
   index("idx_styles_active").on(t.isActive),
-]);
+  ],
+);
 
-export const experiments = pgTable("experiments", {
+export const experiments = pgTable(
+  "experiments",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   slug: text("slug").notNull().unique(),
   status: text("status").notNull(),
   allocationJson: text("allocation_json").notNull(),
@@ -102,16 +127,33 @@ export const experiments = pgTable("experiments", {
   startedAt: integer("started_at"),
   endedAt: integer("ended_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
-  check("experiments_status_check", sql`${t.status} IN ('draft', 'running', 'paused', 'done')`),
-  check("experiments_success_metric_check", sql`${t.successMetric} IN ('qualified', 'won', 'replied_3+')`),
+  },
+  (t) => [
+    check(
+      "experiments_status_check",
+      sql`${t.status} IN ('draft', 'running', 'paused', 'done')`,
+    ),
+    check(
+      "experiments_success_metric_check",
+      sql`${t.successMetric} IN ('qualified', 'won', 'replied_3+')`,
+    ),
   index("idx_experiments_status").on(t.status),
-]);
+  ],
+);
 
-export const conversations = pgTable("conversations", {
+export const conversations = pgTable(
+  "conversations",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  userId: integer("user_id").notNull().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, {
+        onDelete: "cascade",
+      }),
   // Канал входа: bot (BotAPI, для тестов), userbot (MTProto, реальные лиды),
   // self_play (синтетические диалоги). Тот же кандидат, пишущий в bot и
   // userbot, получает два независимых conversation.
@@ -129,22 +171,40 @@ export const conversations = pgTable("conversations", {
   currentStage: text("current_stage"),
   summaryJson: text("summary_json"),
   metaJson: text("meta_json"),
-}, (t) => [
-  check("conversations_source_check", sql`${t.source} IN ('bot', 'userbot', 'self_play')`),
+  },
+  (t) => [
+    check(
+      "conversations_source_check",
+      sql`${t.source} IN ('bot', 'userbot', 'self_play')`,
+    ),
   check("conversations_mode_check", sql`${t.mode} IN ('ai', 'queued', 'human')`),
-  check("conversations_status_check", sql`${t.status} IN ('open', 'pending', 'resolved')`),
+    check(
+      "conversations_status_check",
+      sql`${t.status} IN ('open', 'pending', 'resolved')`,
+    ),
   uniqueIndex("uniq_conversations_user_source").on(t.userId, t.source),
   index("idx_conv_mode_last").on(t.mode, sql`${t.lastMessageAt} DESC NULLS LAST`),
   index("idx_conv_status_last").on(t.status, sql`${t.lastMessageAt} DESC NULLS LAST`),
-  index("idx_conv_assignee_last").on(t.assignedAdminId, sql`${t.lastMessageAt} DESC NULLS LAST`),
+    index("idx_conv_assignee_last").on(
+      t.assignedAdminId,
+      sql`${t.lastMessageAt} DESC NULLS LAST`,
+    ),
   index("idx_conv_style").on(t.styleId),
   index("idx_conv_experiment").on(t.experimentId),
-]);
+  ],
+);
 
-export const messages = pgTable("messages", {
+export const messages = pgTable(
+  "messages",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  conversationId: integer("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    conversationId: integer("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
   role: text("role").notNull(),
   text: text("text").notNull(),
   tgMessageId: integer("tg_message_id"),
@@ -153,33 +213,68 @@ export const messages = pgTable("messages", {
   stage: text("stage"),
   // Soft-delete для удалённых оператором сообщений (рендерятся struck-through).
   deletedAt: integer("deleted_at"),
-}, (t) => [
-  check("messages_role_check", sql`${t.role} IN ('user', 'assistant', 'human', 'system')`),
+  },
+  (t) => [
+    check(
+      "messages_role_check",
+      sql`${t.role} IN ('user', 'assistant', 'human', 'system')`,
+    ),
   index("idx_msg_conv_created").on(t.conversationId, t.createdAt),
   uniqueIndex("uniq_msg_user_tg")
     .on(t.conversationId, t.tgMessageId)
     .where(sql`role = 'user' AND tg_message_id IS NOT NULL`),
-]);
+  ],
+);
 
 // ---- Knowledge base ----------------------------------------------------
 
-export const kbDocuments = pgTable("kb_documents", {
+export const kbDocuments = pgTable(
+  "kb_documents",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   source: text("source").notNull(),
   title: text("title").notNull(),
   contentHash: text("content_hash").notNull(),
   topic: text("topic"),
+    scopeType: text("scope_type").notNull().default("global"),
+    funnelId: integer("funnel_id"),
+    stageSlug: text("stage_slug"),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
+    check(
+      "kb_documents_scope_type_check",
+      sql`${t.scopeType} IN ('global','funnel','stage')`,
+    ),
+    check(
+      "kb_documents_scope_shape_check",
+      sql`(
+      (${t.scopeType} = 'global' AND ${t.funnelId} IS NULL AND ${t.stageSlug} IS NULL)
+      OR (${t.scopeType} = 'funnel' AND ${t.funnelId} IS NOT NULL AND ${t.stageSlug} IS NULL)
+      OR (${t.scopeType} = 'stage' AND ${t.funnelId} IS NOT NULL AND ${t.stageSlug} IS NOT NULL)
+    )`,
+    ),
   uniqueIndex("uniq_kb_source_hash").on(t.source, t.contentHash),
   index("idx_kb_docs_topic").on(t.topic).where(sql`topic IS NOT NULL`),
-]);
+    index("idx_kb_docs_scope").on(t.tenantId, t.scopeType, t.funnelId, t.stageSlug),
+  ],
+);
 
-export const kbChunks = pgTable("kb_chunks", {
+export const kbChunks = pgTable(
+  "kb_chunks",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  documentId: integer("document_id").notNull().references(() => kbDocuments.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    documentId: integer("document_id")
+      .notNull()
+      .references(() => kbDocuments.id, { onDelete: "cascade" }),
   chunkIndex: integer("chunk_index").notNull(),
   text: text("text").notNull(),
   tokenCount: integer("token_count").notNull().default(0),
@@ -190,17 +285,22 @@ export const kbChunks = pgTable("kb_chunks", {
   // STORED` добавляется в migration вручную.
   fts: tsvector("fts"),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   index("idx_chunks_doc").on(t.documentId),
   // ivfflat и GIN-индексы добавляются в migration вручную — drizzle-kit пока
   // не поддерживает opclass-параметры для индексов (vector_cosine_ops).
-]);
+  ],
+);
 
 // ---- Admins / sessions / app settings ----------------------------------
 
 export const admins = pgTable("admins", {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+  tenantId: integer("tenant_id")
+    .notNull()
+    .default(1)
+    .references(() => tenants.id, { onDelete: "cascade" }),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   // Опциональное отображаемое имя (профиль / приветствия в UI).
@@ -219,9 +319,13 @@ export const admins = pgTable("admins", {
 // Token counts пока не capture'аем — нужен provider-level patch для
 // извлечения `usage` из response.body. Текущий MVP — только counts +
 // latency. Tokens / cost-USD — отдельный PR.
-export const llmUsageEvents = pgTable("llm_usage_events", {
+export const llmUsageEvents = pgTable(
+  "llm_usage_events",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   /** chat | embed | vision | judge — что вызывали. */
   purpose: text("purpose").notNull(),
   /** openai | openrouter | ollama | anthropic — какой provider. */
@@ -239,7 +343,8 @@ export const llmUsageEvents = pgTable("llm_usage_events", {
   /** Опционально completion-токены. Null для embed (там input only). */
   completionTokens: integer("completion_tokens"),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   check(
     "llm_usage_purpose_check",
     sql`${t.purpose} IN ('chat','embed','vision','judge','memory','stage')`,
@@ -247,7 +352,8 @@ export const llmUsageEvents = pgTable("llm_usage_events", {
   // Главный индекс для monthly aggregator: (tenant, created_at).
   index("idx_llm_usage_tenant_ts").on(t.tenantId, sql`${t.createdAt} DESC`),
   index("idx_llm_usage_purpose").on(t.tenantId, t.purpose, sql`${t.createdAt} DESC`),
-]);
+  ],
+);
 
 // Multi-admin invite tokens per tenant. SuperadminB генерит invite-ссылку
 // (POST /api/admin/admins/invite) → передаёт коллеге out-of-band (TG/email/
@@ -257,9 +363,13 @@ export const llmUsageEvents = pgTable("llm_usage_events", {
 // Token — opaque random string (32 hex). Истекает через `expiresAt`. После
 // использования помечается `usedAt` чтобы тот же token нельзя было активировать
 // дважды.
-export const adminInvites = pgTable("admin_invites", {
+export const adminInvites = pgTable(
+  "admin_invites",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   /** Email приглашаемого. Используется для display + dup-detection. */
   email: text("email").notNull(),
   /** Роль для нового админа: 'superadmin' | 'manager'. */
@@ -279,50 +389,66 @@ export const adminInvites = pgTable("admin_invites", {
     onDelete: "set null",
   }),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
-  check(
-    "admin_invites_role_check",
-    sql`${t.role} IN ('superadmin','manager')`,
-  ),
+  },
+  (t) => [
+    check("admin_invites_role_check", sql`${t.role} IN ('superadmin','manager')`),
   index("idx_admin_invites_tenant").on(t.tenantId, sql`${t.createdAt} DESC`),
   index("idx_admin_invites_email").on(t.tenantId, t.email),
-]);
+  ],
+);
 
 // Global key-value store для admin-UI настроек, шарящихся между админами
 // (например, тема light/dark). Не per-admin — одно значение на весь UI.
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+  tenantId: integer("tenant_id")
+    .notNull()
+    .default(1)
+    .references(() => tenants.id, { onDelete: "cascade" }),
   value: text("value").notNull(),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 });
 
-export const sessions = pgTable("sessions", {
+export const sessions = pgTable(
+  "sessions",
+  {
   id: text("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  adminId: integer("admin_id").notNull().references(() => admins.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    adminId: integer("admin_id")
+      .notNull()
+      .references(() => admins.id, { onDelete: "cascade" }),
   expiresAt: integer("expires_at").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
-  index("idx_sessions_admin").on(t.adminId),
-]);
+  },
+  (t) => [index("idx_sessions_admin").on(t.adminId)],
+);
 
 // ---- Vacancies ---------------------------------------------------------
 
-export const vacancies = pgTable("vacancies", {
+export const vacancies = pgTable(
+  "vacancies",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   body: text("body").notNull(),
   url: text("url"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   index("idx_vacancies_active_recency")
     .on(t.isActive, sql`${t.updatedAt} DESC`)
     .where(sql`is_active = TRUE`),
-]);
+  ],
+);
 
 // ---- Universal pipeline: stage definitions & fields --------------------
 
@@ -360,17 +486,34 @@ export const STAGE_PHASES = [
 ] as const;
 
 export const FIELD_TYPES = [
-  "text", "textarea", "number", "date",
-  "select", "multiselect", "boolean",
-  "phone", "email", "file", "photo", "video",
+  "text",
+  "textarea",
+  "number",
+  "date",
+  "select",
+  "multiselect",
+  "boolean",
+  "phone",
+  "email",
+  "file",
+  "photo",
+  "video",
 ] as const;
 
 // Стадии воронки — хранятся в БД, не в коде.
 // Заменяет hardcoded FunnelStageDef из vertical-recruitment.
-export const stageDefinitions = pgTable("stage_definitions", {
+export const stageDefinitions = pgTable(
+  "stage_definitions",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-  funnelId: integer("funnel_id").notNull().references((): import("drizzle-orm/pg-core").AnyPgColumn => funnels.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    funnelId: integer("funnel_id")
+      .notNull()
+      .references((): import("drizzle-orm/pg-core").AnyPgColumn => funnels.id, {
+        onDelete: "cascade",
+      }),
   slug: text("slug").notNull(),
   displayName: text("display_name").notNull(),
   description: text("description"),
@@ -405,20 +548,37 @@ export const stageDefinitions = pgTable("stage_definitions", {
   partnerWebhookMode: text("partner_webhook_mode").notNull().default("fire_and_forget"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("stage_definitions_kind_check", sql`${t.kind} IN ('intake','active','terminal_won','terminal_lost')`),
-  check("stage_definitions_type_check", sql`${t.stageType} IN ('form_fill','document_upload','document_signature','rate_confirmation','external_approval','payment','waiting','awaiting_operator','interaction','assessment','milestone')`),
-  check("stage_definitions_phase_check", sql`${t.phase} IS NULL OR ${t.phase} IN ('qualify','offer','clear','fulfill')`),
+  },
+  (t) => [
+    check(
+      "stage_definitions_kind_check",
+      sql`${t.kind} IN ('intake','active','terminal_won','terminal_lost')`,
+    ),
+    check(
+      "stage_definitions_type_check",
+      sql`${t.stageType} IN ('form_fill','document_upload','document_signature','rate_confirmation','external_approval','payment','waiting','awaiting_operator','interaction','assessment','milestone')`,
+    ),
+    check(
+      "stage_definitions_phase_check",
+      sql`${t.phase} IS NULL OR ${t.phase} IN ('qualify','offer','clear','fulfill')`,
+    ),
   uniqueIndex("uniq_stage_def_funnel_slug").on(t.funnelId, t.slug),
   index("idx_stage_def_funnel_pos").on(t.funnelId, t.position),
-]);
+  ],
+);
 
 // Поля данных, собираемых на стадии.
 // Заменяет intake_json / visa_docs_json — теперь любая стадия имеет произвольные поля.
-export const stageFields = pgTable("stage_fields", {
+export const stageFields = pgTable(
+  "stage_fields",
+  {
   id: serial("id").primaryKey(),
-  stageId: integer("stage_id").notNull().references(() => stageDefinitions.id, { onDelete: "cascade" }),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    stageId: integer("stage_id")
+      .notNull()
+      .references(() => stageDefinitions.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   slug: text("slug").notNull(),
   displayName: text("display_name").notNull(),
   fieldType: text("field_type").notNull().default("text"),
@@ -432,26 +592,43 @@ export const stageFields = pgTable("stage_fields", {
   // может ли LLM автоматически извлекать это поле из диалога
   aiExtractable: boolean("ai_extractable").notNull().default(false),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
-  check("stage_fields_type_check", sql`${t.fieldType} IN ('text','textarea','number','date','select','multiselect','boolean','phone','email','file','photo','video')`),
+  },
+  (t) => [
+    check(
+      "stage_fields_type_check",
+      sql`${t.fieldType} IN ('text','textarea','number','date','select','multiselect','boolean','phone','email','file','photo','video')`,
+    ),
   uniqueIndex("uniq_stage_fields_stage_slug").on(t.stageId, t.slug),
   index("idx_stage_fields_stage_pos").on(t.stageId, t.position),
-]);
+  ],
+);
 
 // ---- Leads & lead lifecycle --------------------------------------------
 
-export const leads = pgTable("leads", {
+export const leads = pgTable(
+  "leads",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   // UNIQUE снят (concierge): один контакт может держать несколько лидов —
   // по одному на активный запрос (request_type). Для одно-воронных вертикалей
   // лид по-прежнему один (на уровне приложения), регресса нет.
-  userId: integer("user_id").notNull().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, {
+        onDelete: "cascade",
+      }),
   // Текстовый slug стадии — legacy для recruitment и новый для динамических воронок.
   // CHECK constraint убран в migration 0011 — валидация на уровне приложения (funnel-machine).
   state: text("state").notNull().default("intake_pending"),
   // Ссылка на динамически созданную стадию. NULL = legacy recruitment lead.
-  stageDefinitionId: integer("stage_definition_id").references(() => stageDefinitions.id, { onDelete: "set null" }),
+    stageDefinitionId: integer("stage_definition_id").references(
+      () => stageDefinitions.id,
+      { onDelete: "set null" },
+    ),
   // Тип запроса (concierge-режим): exchange | transfer | food | … — выбирает,
   // в какой короткой воронке живёт лид. NULL для одно-воронных вертикалей.
   requestType: text("request_type"),
@@ -461,7 +638,9 @@ export const leads = pgTable("leads", {
   opsChatId: bigint("ops_chat_id", { mode: "number" }),
   opsMessageId: integer("ops_message_id"),
   rejectedReason: text("rejected_reason"),
-  decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+    decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, {
+      onDelete: "set null",
+    }),
   decidedAt: integer("decided_at"),
   lastCheckinAt: integer("last_checkin_at"),
   visaInterviewField: text("visa_interview_field"),
@@ -471,21 +650,83 @@ export const leads = pgTable("leads", {
   awaitingToken: text("awaiting_token"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   index("idx_leads_state_recency").on(t.state, sql`${t.updatedAt} DESC`),
-  index("idx_leads_awaiting_token").on(t.awaitingToken).where(sql`${t.awaitingToken} IS NOT NULL`),
+    index("idx_leads_awaiting_token")
+      .on(t.awaitingToken)
+      .where(sql`${t.awaitingToken} IS NOT NULL`),
   index("idx_leads_stage_def").on(t.stageDefinitionId),
   // Резолвинг лидов контакта (concierge: N открытых лидов на гостя).
   index("idx_leads_tenant_user").on(t.tenantId, t.userId),
-]);
+  ],
+);
+
+export const CUSTOMER_REQUEST_STATUSES = ["open", "won", "lost", "cancelled"] as const;
+
+export const customerRequests = pgTable(
+  "customer_requests",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    contactId: integer("contact_id")
+      .notNull()
+      .references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, {
+        onDelete: "cascade",
+      }),
+    conversationId: integer("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
+    leadId: integer("lead_id").references(() => leads.id, { onDelete: "set null" }),
+    funnelId: integer("funnel_id").references(
+      (): import("drizzle-orm/pg-core").AnyPgColumn => funnels.id,
+      { onDelete: "set null" },
+    ),
+    stageDefinitionId: integer("stage_definition_id").references(
+      () => stageDefinitions.id,
+      { onDelete: "set null" },
+    ),
+    requestType: text("request_type").notNull(),
+    status: text("status").notNull().default("open"),
+    title: text("title"),
+    summary: text("summary"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+    updatedAt: integer("updated_at").notNull().default(epochNow()),
+    closedAt: integer("closed_at"),
+  },
+  (t) => [
+    check(
+      "customer_requests_status_check",
+      sql`${t.status} IN ('open','won','lost','cancelled')`,
+    ),
+    uniqueIndex("uniq_customer_requests_lead")
+      .on(t.tenantId, t.leadId)
+      .where(sql`${t.leadId} IS NOT NULL`),
+    index("idx_customer_requests_contact_status").on(
+      t.tenantId,
+      t.contactId,
+      t.status,
+      sql`${t.updatedAt} DESC`,
+    ),
+    index("idx_customer_requests_stage").on(t.tenantId, t.stageDefinitionId),
+    index("idx_customer_requests_conversation").on(t.tenantId, t.conversationId),
+  ],
+);
 
 // Кампания капельной рассылки: список лидов + приветствие + скорость выдачи.
 // Дрип-диспетчер раз в тик отдаёт drip_per_tick лидов в outbound_queue, но не
 // чаще чем раз в drip_interval_sec (last_dripped_at). «Брать по одному с
 // какой-то скоростью» = drip_per_tick=1, drip_interval_sec=60.
-export const outreachCampaigns = pgTable("outreach_campaigns", {
+export const outreachCampaigns = pgTable(
+  "outreach_campaigns",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   // Приветственное сообщение (центральный промпт кампании). Плейсхолдер
   // {name} подставляется именем контакта при отправке.
@@ -496,97 +737,194 @@ export const outreachCampaigns = pgTable("outreach_campaigns", {
   lastDrippedAt: integer("last_dripped_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("outreach_campaigns_status_check", sql`${t.status} IN ('draft','active','paused','completed')`),
-  check("outreach_campaigns_drip_check", sql`${t.dripPerTick} > 0 AND ${t.dripIntervalSec} >= 0`),
+  },
+  (t) => [
+    check(
+      "outreach_campaigns_status_check",
+      sql`${t.status} IN ('draft','active','paused','completed')`,
+    ),
+    check(
+      "outreach_campaigns_drip_check",
+      sql`${t.dripPerTick} > 0 AND ${t.dripIntervalSec} >= 0`,
+    ),
   index("idx_outreach_campaigns_tenant_status").on(t.tenantId, t.status),
-]);
+  ],
+);
 
 // Членство лида в кампании + его статус доставки.
-export const outreachCampaignLeads = pgTable("outreach_campaign_leads", {
+export const outreachCampaignLeads = pgTable(
+  "outreach_campaign_leads",
+  {
   id: serial("id").primaryKey(),
-  campaignId: integer("campaign_id").notNull().references(() => outreachCampaigns.id, { onDelete: "cascade" }),
-  leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    campaignId: integer("campaign_id")
+      .notNull()
+      .references(() => outreachCampaigns.id, { onDelete: "cascade" }),
+    leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("pending"),
   enqueuedAt: integer("enqueued_at"),
   errorReason: text("error_reason"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("outreach_campaign_leads_status_check", sql`${t.status} IN ('pending','enqueued','sent','skipped','failed')`),
+  },
+  (t) => [
+    check(
+      "outreach_campaign_leads_status_check",
+      sql`${t.status} IN ('pending','enqueued','sent','skipped','failed')`,
+    ),
   uniqueIndex("uniq_outreach_campaign_leads").on(t.campaignId, t.leadId),
   index("idx_outreach_campaign_leads_status").on(t.campaignId, t.status),
-]);
+  ],
+);
 
 // Значения полей лида — заменяет intake_json/visa_docs_json для динамических воронок.
-export const leadFieldValues = pgTable("lead_field_values", {
+export const leadFieldValues = pgTable(
+  "lead_field_values",
+  {
   id: serial("id").primaryKey(),
-  leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
-  fieldId: integer("field_id").notNull().references(() => stageFields.id, { onDelete: "cascade" }),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    fieldId: integer("field_id")
+      .notNull()
+      .references(() => stageFields.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   // строка, число, boolean, массив файлов — зависит от field_type
   valueJson: text("value_json").notNull().default("null"),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
   // null если значение установлено AI
-  updatedByAdminId: integer("updated_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
-}, (t) => [
+    updatedByAdminId: integer("updated_by_admin_id").references(() => admins.id, {
+      onDelete: "set null",
+    }),
+  },
+  (t) => [
   uniqueIndex("uniq_lead_field_values").on(t.leadId, t.fieldId),
   index("idx_lead_field_values_lead").on(t.leadId),
-]);
+  ],
+);
 
-export const leadEvents = pgTable("lead_events", {
+export const leadEvents = pgTable(
+  "lead_events",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
   fromState: text("from_state"),
   toState: text("to_state").notNull(),
-  byAdminId: integer("by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+    byAdminId: integer("by_admin_id").references(() => admins.id, {
+      onDelete: "set null",
+    }),
   notes: text("notes"),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
-  index("idx_lead_events_lead_recency").on(t.leadId, t.createdAt),
-]);
+  },
+  (t) => [index("idx_lead_events_lead_recency").on(t.leadId, t.createdAt)],
+);
 
-export const leadNotes = pgTable("lead_notes", {
+export const leadNotes = pgTable(
+  "lead_notes",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
-  byAdminId: integer("by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    byAdminId: integer("by_admin_id").references(() => admins.id, {
+      onDelete: "set null",
+    }),
   body: text("body").notNull(),
   source: text("source"),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
-  index("idx_lead_notes_lead_recency").on(t.leadId, sql`${t.createdAt} DESC`),
-]);
+  },
+  (t) => [index("idx_lead_notes_lead_recency").on(t.leadId, sql`${t.createdAt} DESC`)],
+);
 
 // ---- KB suggestions ----------------------------------------------------
 
-export const kbSuggestions = pgTable("kb_suggestions", {
+export const kbSuggestions = pgTable(
+  "kb_suggestions",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   questionText: text("question_text").notNull(),
   answerDraft: text("answer_draft"),
   status: text("status").notNull().default("pending"),
-  sourceConversationId: integer("source_conversation_id").references(() => conversations.id, { onDelete: "set null" }),
-  sourceMessageId: integer("source_message_id").references(() => messages.id, { onDelete: "set null" }),
-  decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+    scopeType: text("scope_type").notNull().default("global"),
+    funnelId: integer("funnel_id"),
+    stageSlug: text("stage_slug"),
+    sourceConversationId: integer("source_conversation_id").references(
+      () => conversations.id,
+      { onDelete: "set null" },
+    ),
+    sourceMessageId: integer("source_message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, {
+      onDelete: "set null",
+    }),
   decidedAt: integer("decided_at"),
-  kbDocumentId: integer("kb_document_id").references(() => kbDocuments.id, { onDelete: "set null" }),
+    kbDocumentId: integer("kb_document_id").references(() => kbDocuments.id, {
+      onDelete: "set null",
+    }),
   rejectedReason: text("rejected_reason"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("kb_suggestions_status_check", sql`${t.status} IN ('pending','ingested','rejected')`),
+  },
+  (t) => [
+    check(
+      "kb_suggestions_status_check",
+      sql`${t.status} IN ('pending','ingested','rejected')`,
+    ),
+    check(
+      "kb_suggestions_scope_type_check",
+      sql`${t.scopeType} IN ('global','funnel','stage')`,
+    ),
+    check(
+      "kb_suggestions_scope_shape_check",
+      sql`(
+      (${t.scopeType} = 'global' AND ${t.funnelId} IS NULL AND ${t.stageSlug} IS NULL)
+      OR (${t.scopeType} = 'funnel' AND ${t.funnelId} IS NOT NULL AND ${t.stageSlug} IS NULL)
+      OR (${t.scopeType} = 'stage' AND ${t.funnelId} IS NOT NULL AND ${t.stageSlug} IS NOT NULL)
+    )`,
+    ),
   index("idx_kb_suggestions_status").on(t.status, sql`${t.createdAt} DESC`),
   index("idx_kb_suggestions_conv").on(t.sourceConversationId),
-]);
+    index("idx_kb_suggestions_scope").on(
+      t.tenantId,
+      t.scopeType,
+      t.funnelId,
+      t.stageSlug,
+      sql`${t.createdAt} DESC`,
+    ),
+  ],
+);
 
 // ---- Skills / style_skills / skill_outcomes ----------------------------
 
-export const skills = pgTable("skills", {
+export const skills = pgTable(
+  "skills",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   slug: text("slug").notNull(),
   family: text("family").notNull(),
   displayName: text("display_name").notNull(),
@@ -597,33 +935,58 @@ export const skills = pgTable("skills", {
   isEnabled: boolean("is_enabled").notNull().default(true),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   uniqueIndex("skills_tenant_slug_unique").on(t.tenantId, t.slug),
   index("idx_skills_family").on(t.family),
   index("idx_skills_enabled").on(t.isEnabled).where(sql`is_enabled = TRUE`),
-]);
+  ],
+);
 
-export const styleSkills = pgTable("style_skills", {
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  styleId: integer("style_id").notNull().references(() => styles.id, { onDelete: "cascade" }),
-  skillId: integer("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
-}, (t) => [
+export const styleSkills = pgTable(
+  "style_skills",
+  {
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    styleId: integer("style_id")
+      .notNull()
+      .references(() => styles.id, { onDelete: "cascade" }),
+    skillId: integer("skill_id")
+      .notNull()
+      .references(() => skills.id, { onDelete: "cascade" }),
+  },
+  (t) => [
   primaryKey({ columns: [t.styleId, t.skillId] }),
   index("idx_style_skills_skill").on(t.skillId),
-]);
+  ],
+);
 
-export const skillOutcomes = pgTable("skill_outcomes", {
+export const skillOutcomes = pgTable(
+  "skill_outcomes",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
-  conversationId: integer("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
-  messageId: integer("message_id").references(() => messages.id, { onDelete: "set null" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    conversationId: integer("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
+    messageId: integer("message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
   styleSlug: text("style_slug"),
   skillSlug: text("skill_slug").notNull(),
   outcome: text("outcome").notNull(),
   source: text("source").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   check("skill_outcomes_outcome_check", sql`${t.outcome} IN ('won','lost','draw')`),
   check(
     "skill_outcomes_source_check",
@@ -633,13 +996,17 @@ export const skillOutcomes = pgTable("skill_outcomes", {
   index("idx_skill_outcomes_lead").on(t.leadId),
   index("idx_skill_outcomes_recent").on(sql`${t.createdAt} DESC`),
   uniqueIndex("uq_skill_outcomes_idempotency").on(t.leadId, t.skillSlug, t.source),
-]);
+  ],
+);
 
 // ---- ELO / self-play / pairwise ----------------------------------------
 
 export const styleRatings = pgTable("style_ratings", {
   styleSlug: text("style_slug").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+  tenantId: integer("tenant_id")
+    .notNull()
+    .default(1)
+    .references(() => tenants.id, { onDelete: "cascade" }),
   elo: integer("elo").notNull().default(1500),
   wins: integer("wins").notNull().default(0),
   losses: integer("losses").notNull().default(0),
@@ -648,9 +1015,14 @@ export const styleRatings = pgTable("style_ratings", {
   updatedAt: integer("updated_at").notNull().default(epochNow()),
 });
 
-export const selfPlayMatches = pgTable("self_play_matches", {
+export const selfPlayMatches = pgTable(
+  "self_play_matches",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   styleSlug: text("style_slug").notNull(),
   personaSlug: text("persona_slug").notNull(),
   outcome: text("outcome").notNull(),
@@ -661,18 +1033,24 @@ export const selfPlayMatches = pgTable("self_play_matches", {
   leadId: integer("lead_id").references(() => leads.id, { onDelete: "set null" }),
   fabricationsCaught: integer("fabrications_caught").notNull().default(0),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   check("self_play_matches_outcome_check", sql`${t.outcome} IN ('won','lost','draw')`),
   index("idx_self_play_recent").on(sql`${t.createdAt} DESC`),
   index("idx_self_play_style").on(t.styleSlug, sql`${t.createdAt} DESC`),
   index("idx_self_play_persona").on(t.personaSlug, sql`${t.createdAt} DESC`),
-]);
+  ],
+);
 
 // ---- Director hooks (tenant-specific persuasion scripts) -------------------
 
-export const directorHooks = pgTable("director_hooks", {
+export const directorHooks = pgTable(
+  "director_hooks",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   body: text("body").notNull(),
   triggerHint: text("trigger_hint"),
@@ -680,46 +1058,69 @@ export const directorHooks = pgTable("director_hooks", {
   position: integer("position").notNull().default(0),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   index("idx_director_hooks_tenant").on(t.tenantId, t.position),
   index("idx_director_hooks_active").on(t.tenantId).where(sql`is_active = TRUE`),
-]);
+  ],
+);
 
-export const pairwiseMatches = pgTable("pairwise_matches", {
+export const pairwiseMatches = pgTable(
+  "pairwise_matches",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   styleASlug: text("style_a_slug").notNull(),
   styleBSlug: text("style_b_slug").notNull(),
   personaSlug: text("persona_slug").notNull(),
   winner: text("winner").notNull(),
   judgeReason: text("judge_reason"),
-  matchAId: integer("match_a_id").references(() => selfPlayMatches.id, { onDelete: "set null" }),
-  matchBId: integer("match_b_id").references(() => selfPlayMatches.id, { onDelete: "set null" }),
+    matchAId: integer("match_a_id").references(() => selfPlayMatches.id, {
+      onDelete: "set null",
+    }),
+    matchBId: integer("match_b_id").references(() => selfPlayMatches.id, {
+      onDelete: "set null",
+    }),
   eloAAfter: integer("elo_a_after").notNull(),
   eloBAfter: integer("elo_b_after").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   check("pairwise_matches_winner_check", sql`${t.winner} IN ('a','b','draw')`),
   index("idx_pairwise_matches_styles").on(t.styleASlug, t.styleBSlug),
   index("idx_pairwise_matches_created").on(sql`${t.createdAt} DESC`),
-]);
+  ],
+);
 
 // ---- Userbot session ---------------------------------------------------
 
-export const userbotSession = pgTable("userbot_session", {
+export const userbotSession = pgTable(
+  "userbot_session",
+  {
   id: integer("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   sessionString: text("session_string").notNull().default(""),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("userbot_session_id_check", sql`${t.id} = 1`),
-]);
+  },
+  (t) => [check("userbot_session_id_check", sql`${t.id} = 1`)],
+);
 
 // ---- Coach proposals ---------------------------------------------------
 
-export const coachProposals = pgTable("coach_proposals", {
+export const coachProposals = pgTable(
+  "coach_proposals",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   styleSlug: text("style_slug").notNull(),
   sampleSize: integer("sample_size").notNull(),
   personaFilter: text("persona_filter"),
@@ -730,19 +1131,33 @@ export const coachProposals = pgTable("coach_proposals", {
   status: text("status").notNull().default("pending"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   decidedAt: integer("decided_at"),
-  decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
-}, (t) => [
-  check("coach_proposals_status_check", sql`${t.status} IN ('pending','applied','dismissed')`),
+    decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, {
+      onDelete: "set null",
+    }),
+  },
+  (t) => [
+    check(
+      "coach_proposals_status_check",
+      sql`${t.status} IN ('pending','applied','dismissed')`,
+    ),
   index("idx_coach_proposals_style").on(t.styleSlug, sql`${t.createdAt} DESC`),
   index("idx_coach_proposals_status").on(t.status, sql`${t.createdAt} DESC`),
-]);
+  ],
+);
 
 // ---- Shadow evaluations ------------------------------------------------
 
-export const shadowEvaluations = pgTable("shadow_evaluations", {
+export const shadowEvaluations = pgTable(
+  "shadow_evaluations",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
-  proposalId: integer("proposal_id").notNull().references(() => coachProposals.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    proposalId: integer("proposal_id")
+      .notNull()
+      .references(() => coachProposals.id, { onDelete: "cascade" }),
   parentStyleSlug: text("parent_style_slug").notNull(),
   parentStyleId: integer("parent_style_id").notNull(),
   newStyleSlug: text("new_style_slug").notNull(),
@@ -758,20 +1173,30 @@ export const shadowEvaluations = pgTable("shadow_evaluations", {
   errorMessage: text("error_message"),
   startedAt: integer("started_at").notNull().default(epochNow()),
   completedAt: integer("completed_at"),
-}, (t) => [
-  check("shadow_evaluations_status_check", sql`${t.status} IN ('running','complete','failed')`),
+  },
+  (t) => [
+    check(
+      "shadow_evaluations_status_check",
+      sql`${t.status} IN ('running','complete','failed')`,
+    ),
   check(
     "shadow_evaluations_decision_check",
     sql`${t.decision} IS NULL OR ${t.decision} IN ('keep','rollback','inconclusive')`,
   ),
   index("idx_shadow_evaluations_proposal").on(t.proposalId, sql`${t.startedAt} DESC`),
-]);
+  ],
+);
 
 // ---- Userbot outbound queues ------------------------------------------
 
-export const userbotSendQueue = pgTable("userbot_send_queue", {
+export const userbotSendQueue = pgTable(
+  "userbot_send_queue",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   tgUserId: bigint("tg_user_id", { mode: "number" }).notNull(),
   text: text("text").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
@@ -781,41 +1206,53 @@ export const userbotSendQueue = pgTable("userbot_send_queue", {
   // Связывает enqueued admin-reply со строкой в `messages`, чтобы userbot
   // мог проставить tg_message_id обратно после отправки.
   messageId: integer("message_id"),
-}, (t) => [
-  index("idx_userbot_queue_pending").on(t.id).where(sql`sent_at IS NULL`),
-]);
+  },
+  (t) => [index("idx_userbot_queue_pending").on(t.id).where(sql`sent_at IS NULL`)],
+);
 
 // Очередь исходящих, которые оператор попросил удалить из Telegram. Дренируется
 // userbot-подпроцессом (только он может вызвать MTProto deleteMessages).
-export const userbotDeleteQueue = pgTable("userbot_delete_queue", {
+export const userbotDeleteQueue = pgTable(
+  "userbot_delete_queue",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   tgUserId: bigint("tg_user_id", { mode: "number" }).notNull(),
   tgMessageId: integer("tg_message_id").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
   doneAt: integer("done_at"),
   error: text("error"),
   attempts: integer("attempts").notNull().default(0),
-}, (t) => [
-  index("idx_userbot_delete_queue_pending").on(t.id).where(sql`done_at IS NULL`),
-]);
+  },
+  (t) => [index("idx_userbot_delete_queue_pending").on(t.id).where(sql`done_at IS NULL`)],
+);
 
 // ---- Audit log ---------------------------------------------------------
 
-export const auditLog = pgTable("audit_log", {
+export const auditLog = pgTable(
+  "audit_log",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .default(1)
+      .references(() => tenants.id, { onDelete: "cascade" }),
   action: text("action").notNull(),
   adminId: integer("admin_id").references(() => admins.id, { onDelete: "set null" }),
   targetKind: text("target_kind"),
   targetId: text("target_id"),
   detailsJson: text("details_json"),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   index("idx_audit_log_created_at").on(sql`${t.createdAt} DESC`),
   index("idx_audit_log_admin_id").on(t.adminId, sql`${t.createdAt} DESC`),
   index("idx_audit_log_action").on(t.action, sql`${t.createdAt} DESC`),
-]);
+  ],
+);
 
 // ========================================================================
 // MULTI-TENANT ФУНДАМЕНТ (Этап 6 плана re-design)
@@ -829,7 +1266,9 @@ export const auditLog = pgTable("audit_log", {
 
 // ---- Tenants & secrets ------------------------------------------------
 
-export const tenants = pgTable("tenants", {
+export const tenants = pgTable(
+  "tenants",
+  {
   id: serial("id").primaryKey(),
   slug: text("slug").notNull().unique(),
   plan: text("plan").notNull().default("free"),
@@ -840,30 +1279,40 @@ export const tenants = pgTable("tenants", {
   referredByCode: text("referred_by_code"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   check("tenants_status_check", sql`${t.status} IN ('active','suspended','deleted')`),
   check("tenants_llm_billing_check", sql`${t.llmBillingMode} IN ('byok','managed')`),
-]);
+  ],
+);
 
 // Зашифрованные секреты per-tenant: telegram-tokens, OpenAI keys, etc.
 // `encryptedValue` — opaque blob (формат: aes-256-gcm + master key из env).
 // Хранится отдельно от tenants чтобы select * tenants не светил секретов в логи.
-export const tenantSecrets = pgTable("tenant_secrets", {
+export const tenantSecrets = pgTable(
+  "tenant_secrets",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   key: text("key").notNull(),
   encryptedValue: text("encrypted_value").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  uniqueIndex("uniq_tenant_secrets_key").on(t.tenantId, t.key),
-]);
+  },
+  (t) => [uniqueIndex("uniq_tenant_secrets_key").on(t.tenantId, t.key)],
+);
 
 // ---- Channels (Telegram bot/userbot, WhatsApp, web — N на tenant) -----
 
-export const channels = pgTable("channels", {
+export const channels = pgTable(
+  "channels",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   // Должно соответствовать ChannelKind из @chatman-media/channel-core.
   kind: text("kind").notNull(),
   // External id канала в платформе провайдера — bot username, phone number, etc.
@@ -874,15 +1323,21 @@ export const channels = pgTable("channels", {
   metadataJson: text("metadata_json"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   check(
     "channels_kind_check",
     sql`${t.kind} IN ('telegram_bot','telegram_userbot','whatsapp','facebook','vk','web')`,
   ),
   check("channels_status_check", sql`${t.status} IN ('active','paused','error')`),
-  uniqueIndex("uniq_channels_tenant_kind_external").on(t.tenantId, t.kind, t.externalId),
+    uniqueIndex("uniq_channels_tenant_kind_external").on(
+      t.tenantId,
+      t.kind,
+      t.externalId,
+    ),
   index("idx_channels_tenant_status").on(t.tenantId, t.status),
-]);
+  ],
+);
 
 // ---- Channel-agnostic Contact (бывший users, но per-tenant + multi-channel) ----
 
@@ -891,59 +1346,117 @@ export const channels = pgTable("channels", {
 // записей произойдёт в Этапе 8 (onboarding 2-го tenant'а), либо в отдельной
 // data-migration. Это разделение позволяет channels/funnels писать новый код
 // против contacts без блокировки на риск миграции прод-БД.
-export const contacts = pgTable("contacts", {
+export const contacts = pgTable(
+  "contacts",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   displayName: text("display_name"),
   attributesJson: text("attributes_json"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  index("idx_contacts_tenant").on(t.tenantId),
-]);
+  },
+  (t) => [index("idx_contacts_tenant").on(t.tenantId)],
+);
 
 // Маппинг Contact ↔ конкретный мессенджер. Один Contact может иметь несколько
 // channel_identities (Telegram bot + WhatsApp + tg userbot) — даёт unified inbox.
-export const channelIdentities = pgTable("channel_identities", {
+export const channelIdentities = pgTable(
+  "channel_identities",
+  {
   id: serial("id").primaryKey(),
-  contactId: integer("contact_id").notNull().references(() => contacts.id, { onDelete: "cascade" }),
-  channelId: integer("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+    contactId: integer("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    channelId: integer("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
   externalUserId: text("external_user_id").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
-  uniqueIndex("uniq_channel_identities_channel_external").on(t.channelId, t.externalUserId),
+  },
+  (t) => [
+    uniqueIndex("uniq_channel_identities_channel_external").on(
+      t.channelId,
+      t.externalUserId,
+    ),
   index("idx_channel_identities_contact").on(t.contactId),
-]);
+  ],
+);
 
 // ---- Funnels ----------------------------------------------------------
 
-export const funnels = pgTable("funnels", {
+export const funnels = pgTable(
+  "funnels",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   slug: text("slug").notNull(),
   // Опциональный template из packages/verticals (например, 'recruitment_uae_v1').
   // При nullable funnel ведётся "руками" — stages_json задаёт состояния.
   verticalTemplateId: text("vertical_template_id"),
   // jsonb с array состояний: [{ slug, kind, label }]
   stagesJson: text("stages_json").notNull().default("[]"),
-  defaultStyleId: integer("default_style_id").references(() => styles.id, { onDelete: "set null" }),
+    defaultStyleId: integer("default_style_id").references(() => styles.id, {
+      onDelete: "set null",
+    }),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   uniqueIndex("uniq_funnels_tenant_slug").on(t.tenantId, t.slug),
   index("idx_funnels_tenant_active").on(t.tenantId, t.isActive),
-]);
+  ],
+);
+
+export const funnelVersions = pgTable(
+  "funnel_versions",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    funnelId: integer("funnel_id")
+      .notNull()
+      .references(() => funnels.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    note: text("note"),
+    stageCount: integer("stage_count").notNull().default(0),
+    snapshotJson: text("snapshot_json").notNull(),
+    createdByAdminId: integer("created_by_admin_id").references(() => admins.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+  },
+  (t) => [
+    check(
+      "funnel_versions_source_check",
+      sql`${t.source} IN ('ai_apply','seed','template_apply','rollback','manual','system')`,
+    ),
+    index("idx_funnel_versions_funnel_created").on(t.funnelId, sql`${t.createdAt} DESC`),
+    index("idx_funnel_versions_tenant_created").on(t.tenantId, sql`${t.createdAt} DESC`),
+  ],
+);
 
 // ---- Outbound queue (единая, channel-agnostic) ------------------------
 
 // Заменяет userbot_send_queue в multi-tenant + multi-channel мире. Worker
 // читает pending записи в порядке scheduled_at, дёргает ChannelAdapter.send(),
 // записывает результат (external_message_id) и помечает sent.
-export const outboundQueue = pgTable("outbound_queue", {
+export const outboundQueue = pgTable(
+  "outbound_queue",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-  channelId: integer("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    channelId: integer("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
   conversationId: integer("conversation_id"),
   // Сериализованный OutboundEnvelope (см. channel-core).
   payloadJson: text("payload_json").notNull(),
@@ -957,24 +1470,177 @@ export const outboundQueue = pgTable("outbound_queue", {
   externalMessageId: text("external_message_id"),
   sentAt: integer("sent_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
-  check("outbound_status_check", sql`${t.status} IN ('pending','processing','sent','failed','cancelled')`),
+  },
+  (t) => [
+    check(
+      "outbound_status_check",
+      sql`${t.status} IN ('pending','processing','sent','failed','cancelled')`,
+    ),
   // Главный индекс для воркер-полинга: pending ordered by scheduled_at.
-  index("idx_outbound_pending").on(t.status, t.scheduledAt).where(sql`status = 'pending'`),
+    index("idx_outbound_pending")
+      .on(t.status, t.scheduledAt)
+      .where(sql`status = 'pending'`),
   index("idx_outbound_tenant_channel").on(t.tenantId, t.channelId),
   uniqueIndex("uniq_outbound_idempotency")
     .on(t.idempotencyKey)
     .where(sql`idempotency_key IS NOT NULL`),
-]);
+  ],
+);
+
+// ---- Agentic tool-call traces -----------------------------------------
+
+// First-class audit trail for tool-loop decisions. This is the raw substrate
+// for later self-learning: join tool calls to conversations/leads/orders and
+// decide whether a tool helped, failed, or should have been called differently.
+export const agentToolCalls = pgTable(
+  "agent_tool_calls",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    conversationId: integer("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    contactId: integer("contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    messageId: integer("message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    outboundQueueId: integer("outbound_queue_id").references(() => outboundQueue.id, {
+      onDelete: "set null",
+    }),
+    source: text("source").notNull(),
+    toolName: text("tool_name").notNull(),
+    argsJson: text("args_json").notNull().default("{}"),
+    resultJson: text("result_json").notNull().default("null"),
+    error: boolean("error").notNull().default(false),
+    cycle: integer("cycle").notNull().default(0),
+    toolCallIndex: integer("tool_call_index").notNull().default(0),
+    latencyMs: integer("latency_ms"),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+  },
+  (t) => [
+    check(
+      "agent_tool_calls_source_check",
+      sql`${t.source} IN ('rag_reply','llm_reply','admin_sim','self_play')`,
+    ),
+    index("idx_agent_tool_calls_conversation").on(
+      t.tenantId,
+      t.conversationId,
+      sql`${t.createdAt} DESC`,
+    ),
+    index("idx_agent_tool_calls_tool").on(
+      t.tenantId,
+      t.toolName,
+      sql`${t.createdAt} DESC`,
+    ),
+    index("idx_agent_tool_calls_error").on(t.tenantId, t.error, sql`${t.createdAt} DESC`),
+    index("idx_agent_tool_calls_outbound").on(t.outboundQueueId),
+  ],
+);
+
+// Human feedback on tool-call quality. This is intentionally separate from the
+// immutable trace row, so reviewers can add multiple labels over time.
+export const agentToolCallFeedback = pgTable(
+  "agent_tool_call_feedback",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    toolCallId: integer("tool_call_id")
+      .notNull()
+      .references(() => agentToolCalls.id, { onDelete: "cascade" }),
+    adminId: integer("admin_id").references(() => admins.id, { onDelete: "set null" }),
+    label: text("label").notNull(),
+    note: text("note"),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+  },
+  (t) => [
+    check(
+      "agent_tool_call_feedback_label_check",
+      sql`${t.label} IN ('good_reply','wrong_tool','missing_tool','bad_args','other')`,
+    ),
+    index("idx_agent_tool_call_feedback_call").on(
+      t.tenantId,
+      t.toolCallId,
+      sql`${t.createdAt} DESC`,
+    ),
+    index("idx_agent_tool_call_feedback_label").on(
+      t.tenantId,
+      t.label,
+      sql`${t.createdAt} DESC`,
+    ),
+  ],
+);
+
+// Durable state for Telegram operator-bot previews/actions. The callback payload
+// only carries draft_key; the full text and tenant-scoped authorization live here.
+export const operatorActionDrafts = pgTable(
+  "operator_action_drafts",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    adminId: integer("admin_id").references(() => admins.id, {
+      onDelete: "set null",
+    }),
+    conversationId: integer("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    draftKey: text("draft_key").notNull(),
+    chatId: text("chat_id").notNull(),
+    kind: text("kind").notNull().default("client_reply"),
+    status: text("status").notNull().default("pending"),
+    text: text("text").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    messageId: integer("message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    outboundQueueId: integer("outbound_queue_id").references(() => outboundQueue.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+    expiresAt: integer("expires_at").notNull(),
+    handledAt: integer("handled_at"),
+    updatedAt: integer("updated_at").notNull().default(epochNow()),
+  },
+  (t) => [
+    check(
+      "operator_action_drafts_kind_check",
+      sql`${t.kind} IN ('client_reply')`,
+    ),
+    check(
+      "operator_action_drafts_status_check",
+      sql`${t.status} IN ('pending','sent','cancelled','expired','failed')`,
+    ),
+    uniqueIndex("uniq_operator_action_drafts_key").on(t.tenantId, t.draftKey),
+    index("idx_operator_action_drafts_conversation").on(
+      t.tenantId,
+      t.conversationId,
+      sql`${t.createdAt} DESC`,
+    ),
+    index("idx_operator_action_drafts_pending")
+      .on(t.tenantId, t.status, t.expiresAt)
+      .where(sql`status = 'pending'`),
+  ],
+);
 
 // ---- LLM provider configs (per (tenant, purpose)) ---------------------
 
 // Читается LlmRouter'ом для resolveChat/resolveEmbed (см. packages/llm-router).
 // На N tenants × M purposes здесь до N*M строк. secret_ref — ключ в
 // tenant_secrets (там лежит зашифрованный apiKey).
-export const llmProviderConfigs = pgTable("llm_provider_configs", {
+export const llmProviderConfigs = pgTable(
+  "llm_provider_configs",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   purpose: text("purpose").notNull(),
   provider: text("provider").notNull(),
   model: text("model").notNull(),
@@ -985,7 +1651,8 @@ export const llmProviderConfigs = pgTable("llm_provider_configs", {
   timeoutMs: integer("timeout_ms"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   check(
     "llm_configs_purpose_check",
     sql`${t.purpose} IN ('chat','embed','vision','judge','reranker','transcribe')`,
@@ -995,31 +1662,42 @@ export const llmProviderConfigs = pgTable("llm_provider_configs", {
     sql`${t.provider} IN ('openai','openrouter','ollama','anthropic','jina','cohere')`,
   ),
   uniqueIndex("uniq_llm_configs_tenant_purpose").on(t.tenantId, t.purpose),
-]);
+  ],
+);
 
 // ---- Stripe billing (миграция 0006) -----------------------------------
 
 // Tenant ↔ Stripe Customer (1:1). Один tenant в Stripe = одна Customer
 // карточка с своим email + payment methods.
-export const stripeCustomers = pgTable("stripe_customers", {
+export const stripeCustomers = pgTable(
+  "stripe_customers",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   stripeCustomerId: text("stripe_customer_id").notNull(),
   email: text("email"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   uniqueIndex("stripe_customers_tenant_unique").on(t.tenantId),
   uniqueIndex("stripe_customers_external_unique").on(t.stripeCustomerId),
   index("idx_stripe_customers_tenant").on(t.tenantId),
-]);
+  ],
+);
 
 // История подписок tenant'а. Webhook'ом customer.subscription.updated мы
 // UPSERT'им строку (stripe_subscription_id — UNIQUE). Текущая active —
 // одна на tenant'а; canceled/incomplete_expired остаются в истории.
-export const stripeSubscriptions = pgTable("stripe_subscriptions", {
+export const stripeSubscriptions = pgTable(
+  "stripe_subscriptions",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   stripeCustomerId: text("stripe_customer_id").notNull(),
   stripeSubscriptionId: text("stripe_subscription_id").notNull(),
   stripePriceId: text("stripe_price_id").notNull(),
@@ -1030,7 +1708,8 @@ export const stripeSubscriptions = pgTable("stripe_subscriptions", {
   metadataJson: text("metadata_json"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   check(
     "stripe_subscriptions_status_check",
     sql`${t.status} IN ('incomplete','incomplete_expired','trialing','active','past_due','canceled','unpaid','paused')`,
@@ -1038,7 +1717,8 @@ export const stripeSubscriptions = pgTable("stripe_subscriptions", {
   uniqueIndex("stripe_subscriptions_external_unique").on(t.stripeSubscriptionId),
   index("idx_stripe_subscriptions_tenant").on(t.tenantId),
   index("idx_stripe_subscriptions_status").on(t.status),
-]);
+  ],
+);
 
 // ---- Реферальные/партнёрские коды ----------------------------------------
 //
@@ -1046,23 +1726,31 @@ export const stripeSubscriptions = pgTable("stripe_subscriptions", {
 // клиентам при регистрации → tenants.referred_by_code заполняется, uses_count++.
 // Таблица БЕЗ RLS — при регистрации нет контекста tenant_id и нужен
 // cross-tenant lookup по code (аналогично таблице tenants).
-export const referralCodes = pgTable("referral_codes", {
+export const referralCodes = pgTable(
+  "referral_codes",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   code: text("code").notNull(),
   usesCount: integer("uses_count").notNull().default(0),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   uniqueIndex("uniq_referral_codes_code").on(t.code),
   index("idx_referral_codes_tenant").on(t.tenantId),
-]);
+  ],
+);
 
 // ---- Early access waitlist ----------------------------------------------
 //
 // Публичные заявки на alpha/early-access. Таблица БЕЗ RLS: на момент заявки
 // tenant ещё не существует. API пишет только нормализованный email + контекст,
 // чтение в продуктовую админку можно добавить отдельным superadmin route.
-export const earlyAccessSignups = pgTable("early_access_signups", {
+export const earlyAccessSignups = pgTable(
+  "early_access_signups",
+  {
   id: serial("id").primaryKey(),
   email: text("email").notNull(),
   name: text("name"),
@@ -1072,7 +1760,9 @@ export const earlyAccessSignups = pgTable("early_access_signups", {
   locale: text("locale").notNull().default("ru"),
   status: text("status").notNull().default("new"),
   tenantId: integer("tenant_id").references(() => tenants.id, { onDelete: "set null" }),
-  inviteId: integer("invite_id").references(() => adminInvites.id, { onDelete: "set null" }),
+    inviteId: integer("invite_id").references(() => adminInvites.id, {
+      onDelete: "set null",
+    }),
   approvedAt: integer("approved_at"),
   approvedByAdminId: integer("approved_by_admin_id").references(() => admins.id, {
     onDelete: "set null",
@@ -1082,74 +1772,100 @@ export const earlyAccessSignups = pgTable("early_access_signups", {
   metaJson: text("meta_json").notNull().default("{}"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   uniqueIndex("uniq_early_access_email").on(t.email),
   index("idx_early_access_status_created").on(t.status, t.createdAt),
   index("idx_early_access_source").on(t.source),
   index("idx_early_access_tenant").on(t.tenantId),
-]);
+  ],
+);
 
 // Webhook-уведомления при смене стадии лида. Tenant настраивает URL;
 // при каждом lead.stage_changed мы шлём POST с JSON-payload и опциональной
 // HMAC-подписью (X-Signature: sha256=<hex>).
-export const stageWebhooks = pgTable("stage_webhooks", {
+export const stageWebhooks = pgTable(
+  "stage_webhooks",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   url: text("url").notNull(),
   secret: text("secret"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   index("idx_stage_webhooks_tenant").on(t.tenantId),
   index("idx_stage_webhooks_active").on(t.tenantId).where(sql`is_active = TRUE`),
-]);
+  ],
+);
 
 // Шаблоны сообщений для рассылок. Шарятся между всеми менеджерами тенанта.
-export const messageTemplates = pgTable("message_templates", {
+export const messageTemplates = pgTable(
+  "message_templates",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   body: text("body").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  index("idx_message_templates_tenant").on(t.tenantId),
-]);
+  },
+  (t) => [index("idx_message_templates_tenant").on(t.tenantId)],
+);
 
-export const passwordResets = pgTable("password_resets", {
+export const passwordResets = pgTable(
+  "password_resets",
+  {
   id: serial("id").primaryKey(),
-  adminId: integer("admin_id").notNull().references(() => admins.id, { onDelete: "cascade" }),
+    adminId: integer("admin_id")
+      .notNull()
+      .references(() => admins.id, { onDelete: "cascade" }),
   tokenHash: text("token_hash").notNull().unique(),
   expiresAt: integer("expires_at").notNull(),
   usedAt: integer("used_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   index("idx_password_resets_token_hash").on(t.tokenHash),
   index("idx_password_resets_admin").on(t.adminId),
-  uniqueIndex("uniq_password_resets_admin_active").on(t.adminId).where(sql`used_at IS NULL`),
-]);
+    uniqueIndex("uniq_password_resets_admin_active")
+      .on(t.adminId)
+      .where(sql`used_at IS NULL`),
+  ],
+);
 
 // Idempotency для webhook'ов — Stripe at-least-once delivers, иногда
 // дублирует на retry. Перед обработкой смотрим есть ли event.id —
 // если есть, skip с 200.
-export const stripeWebhookEvents = pgTable("stripe_webhook_events", {
+export const stripeWebhookEvents = pgTable(
+  "stripe_webhook_events",
+  {
   stripeEventId: text("stripe_event_id").primaryKey(),
   type: text("type").notNull(),
   tenantId: integer("tenant_id").references(() => tenants.id, { onDelete: "set null" }),
   processedAt: integer("processed_at").notNull().default(epochNow()),
   rawPayload: text("raw_payload").notNull(),
-}, (t) => [
-  index("idx_stripe_webhook_events_type").on(t.type, sql`${t.processedAt} DESC`),
-]);
+  },
+  (t) => [index("idx_stripe_webhook_events_type").on(t.type, sql`${t.processedAt} DESC`)],
+);
 
 // ---- Notifications (Operator Companion Bot) ----------------------------
 
 // Правила уведомлений: КОГДА и КОГО уведомлять.
 // Позволяет гибко настраивать алерты (например, "только VIP-сделки в группу #Sales").
-export const notificationRules = pgTable("notification_rules", {
+export const notificationRules = pgTable(
+  "notification_rules",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   // lead_intake_complete | stage_changed | human_takeover | document_uploaded | high_value_deal | lead_stale
   eventType: text("event_type").notNull(),
   // JSON-фильтры: { toStage: 'awaiting_payment', minAmount: 1000, asset: 'usdt' }
@@ -1163,44 +1879,62 @@ export const notificationRules = pgTable("notification_rules", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   index("idx_notif_rules_tenant").on(t.tenantId, t.isActive),
   index("idx_notif_rules_event").on(t.tenantId, t.eventType),
-]);
+  ],
+);
 
 // Шаблоны уведомлений для операторов.
 // Позволяют менять текст алертов (например, перевести на другой язык или добавить специфику).
-export const notificationTemplates = pgTable("notification_templates", {
+export const notificationTemplates = pgTable(
+  "notification_templates",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   // slug соответствует eventType в notification_rules (stage_changed, human_takeover, etc.)
   slug: text("slug").notNull(),
   // Текст с плейсхолдерами {{displayName}}, {{fromStage}}, {{toStage}}, etc.
   body: text("body").notNull(),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  uniqueIndex("uniq_notif_tpl_tenant_slug").on(t.tenantId, t.slug),
-]);
+  },
+  (t) => [uniqueIndex("uniq_notif_tpl_tenant_slug").on(t.tenantId, t.slug)],
+);
 
 // Одноразовые токены для привязки Telegram-группы к правилу уведомлений.
 // Генерируются в Admin UI, передаются боту через /setup <token> в группе.
-export const notificationGroupTokens = pgTable("notification_group_tokens", {
+export const notificationGroupTokens = pgTable(
+  "notification_group_tokens",
+  {
   id: serial("id").primaryKey(),
   token: text("token").notNull().unique(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-  adminId: integer("admin_id").notNull().references(() => admins.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    adminId: integer("admin_id")
+      .notNull()
+      .references(() => admins.id, { onDelete: "cascade" }),
   eventType: text("event_type").notNull().default("stage_changed"),
   expiresAt: integer("expires_at").notNull(),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
-  index("idx_group_tokens_token").on(t.token),
-]);
+  },
+  (t) => [index("idx_group_tokens_token").on(t.token)],
+);
 
 // Персональные настройки оператора для уведомлений.
-export const operatorSettings = pgTable("operator_settings", {
+export const operatorSettings = pgTable(
+  "operator_settings",
+  {
   id: serial("id").primaryKey(),
-  adminId: integer("admin_id").notNull().references(() => admins.id, { onDelete: "cascade" }),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    adminId: integer("admin_id")
+      .notNull()
+      .references(() => admins.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   // Личный Telegram ID (привязывается через /start у бота)
   telegramChatId: text("telegram_chat_id"),
   // Токен для привязки (генерируется в UI, передаётся в /start)
@@ -1227,7 +1961,8 @@ export const operatorSettings = pgTable("operator_settings", {
   informerQuietFrom: integer("informer_quiet_from"),
   informerQuietTo: integer("informer_quiet_to"),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   uniqueIndex("uniq_op_settings_admin").on(t.adminId),
   index("idx_op_settings_tenant").on(t.tenantId),
   index("idx_op_settings_link_token").on(t.linkToken),
@@ -1239,15 +1974,20 @@ export const operatorSettings = pgTable("operator_settings", {
     "operator_settings_informer_digest_check",
     sql`${t.informerDigest} IN ('off','daily','shift')`,
   ),
-]);
+  ],
+);
 
 // Лента уведомлений владельца (миграция 0032). Источник дайджеста + scrollback
 // для бот-команды «/last» + persisted-дедуп. БЕЗ RLS (как operator_settings):
 // читается из operator-bot webhook без tenant-контекста — изоляция явным
 // tenant_id-фильтром в репозитории.
-export const adminNotifications = pgTable("admin_notifications", {
+export const adminNotifications = pgTable(
+  "admin_notifications",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   // SET NULL при удалении админа — строку истории сохраняем.
   adminId: integer("admin_id").references(() => admins.id, { onDelete: "set null" }),
   topic: text("topic").notNull(), // leads | escalation | orders | system
@@ -1263,7 +2003,8 @@ export const adminNotifications = pgTable("admin_notifications", {
   digestBatchId: integer("digest_batch_id"),
   readAt: integer("read_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   index("idx_admin_notif_tenant_admin_created").on(t.tenantId, t.adminId, t.createdAt),
   index("idx_admin_notif_dedup").on(t.tenantId, t.dedupKey, t.createdAt),
   check(
@@ -1274,14 +2015,19 @@ export const adminNotifications = pgTable("admin_notifications", {
     "admin_notifications_severity_check",
     sql`${t.severity} IN ('critical','important','info')`,
   ),
-]);
+  ],
+);
 
 // ---- Exchange (обменный пункт) ----------------------------------------
 // Курсы + формула. Итоговый курс = base_rate * (1 - margin_pct/100), минус
 // fee_fixed_thb из итога. Один активный ряд на (tenant, asset, quote, network).
-export const exchangeRates = pgTable("exchange_rates", {
+export const exchangeRates = pgTable(
+  "exchange_rates",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   asset: text("asset").notNull(),
   quoteAsset: text("quote_asset").notNull().default("THB"),
   network: text("network").notNull().default(""),
@@ -1295,19 +2041,32 @@ export const exchangeRates = pgTable("exchange_rates", {
   isActive: boolean("is_active").notNull().default(true),
   // base_rate тянется рыночным фидом (worker), маржа/комиссия — ручные.
   autoUpdate: boolean("auto_update").notNull().default(false),
-  updatedByAdminId: integer("updated_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+    updatedByAdminId: integer("updated_by_admin_id").references(() => admins.id, {
+      onDelete: "set null",
+    }),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  uniqueIndex("uniq_exchange_rates_dir").on(t.tenantId, t.asset, t.quoteAsset, t.network),
+  },
+  (t) => [
+    uniqueIndex("uniq_exchange_rates_dir").on(
+      t.tenantId,
+      t.asset,
+      t.quoteAsset,
+      t.network,
+    ),
   index("idx_exchange_rates_tenant_active").on(t.tenantId, t.isActive),
-]);
+  ],
+);
 
 // Одобренные диапазоны публичной rate-card. Это слой поверх базового рыночного
 // курса: система предлагает display_rate по формуле отклонения, админ одобряет.
-export const exchangeRateTiers = pgTable("exchange_rate_tiers", {
+export const exchangeRateTiers = pgTable(
+  "exchange_rate_tiers",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   asset: text("asset").notNull(),
   quoteAsset: text("quote_asset").notNull().default("THB"),
   network: text("network").notNull().default(""),
@@ -1319,39 +2078,73 @@ export const exchangeRateTiers = pgTable("exchange_rate_tiers", {
   deviationPct: doublePrecision("deviation_pct").notNull(),
   formulaJson: text("formula_json"),
   isActive: boolean("is_active").notNull().default(true),
-  approvedByAdminId: integer("approved_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+    approvedByAdminId: integer("approved_by_admin_id").references(() => admins.id, {
+      onDelete: "set null",
+    }),
   approvedAt: integer("approved_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("exchange_rate_tiers_range_basis_check", sql`${t.rangeBasis} IN ('target_thb','source_amount')`),
-  uniqueIndex("uniq_exchange_rate_tier").on(t.tenantId, t.asset, t.quoteAsset, t.network, t.rangeBasis, t.minAmount),
+  },
+  (t) => [
+    check(
+      "exchange_rate_tiers_range_basis_check",
+      sql`${t.rangeBasis} IN ('target_thb','source_amount')`,
+    ),
+    uniqueIndex("uniq_exchange_rate_tier").on(
+      t.tenantId,
+      t.asset,
+      t.quoteAsset,
+      t.network,
+      t.rangeBasis,
+      t.minAmount,
+    ),
   index("idx_exchange_rate_tiers_active").on(t.tenantId, t.asset, t.isActive),
-]);
+  ],
+);
 
 // Per-tenant настройки обменника (нет строки → платформенные дефолты):
 // частота обновления auto-курсов планировщиком + порог «курсы устарели» (ops-watch).
 // last-refresh планировщик держит в памяти процесса (на рестарте рефрешит всех).
-export const exchangeSettings = pgTable("exchange_settings", {
-  tenantId: integer("tenant_id").primaryKey().references(() => tenants.id, { onDelete: "cascade" }),
+export const exchangeSettings = pgTable(
+  "exchange_settings",
+  {
+    tenantId: integer("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   // как часто планировщик обновляет auto-курсы тенанта (сек). 180 = 3 мин.
   rateRefreshSec: integer("rate_refresh_sec").notNull().default(180),
   // порог «курсы устарели» для ops-watch (сек). NULL → авто: max(env, 3 × refresh).
   feedStaleSec: integer("feed_stale_sec"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("exchange_settings_refresh_check", sql`${t.rateRefreshSec} >= 60 AND ${t.rateRefreshSec} <= 86400`),
-  check("exchange_settings_stale_check", sql`${t.feedStaleSec} IS NULL OR ${t.feedStaleSec} >= 60`),
-]);
+  },
+  (t) => [
+    check(
+      "exchange_settings_refresh_check",
+      sql`${t.rateRefreshSec} >= 60 AND ${t.rateRefreshSec} <= 86400`,
+    ),
+    check(
+      "exchange_settings_stale_check",
+      sql`${t.feedStaleSec} IS NULL OR ${t.feedStaleSec} >= 60`,
+    ),
+  ],
+);
 
 // Заявка на обмен. rate/amount_to_thb — снапшот на момент создания заявки.
 // Оборот считается агрегатом SUM(amount_to_thb) по completed.
-export const exchangeOrders = pgTable("exchange_orders", {
+export const exchangeOrders = pgTable(
+  "exchange_orders",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-  contactId: integer("contact_id").references(() => contacts.id, { onDelete: "set null" }),
-  conversationId: integer("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    contactId: integer("contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    conversationId: integer("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
   leadId: integer("lead_id").references(() => leads.id, { onDelete: "set null" }),
   telegramId: text("telegram_id"),
   verificationId: text("verification_id"),
@@ -1383,17 +2176,33 @@ export const exchangeOrders = pgTable("exchange_orders", {
   completedAt: integer("completed_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("exchange_orders_status_check", sql`${t.status} IN ('quote','awaiting_payment','paid','payout','completed','cancelled','expired')`),
-  check("exchange_orders_amount_mode_check", sql`${t.amountMode} IN ('source_amount','target_thb')`),
-  check("exchange_orders_payment_method_check", sql`${t.paymentMethod} IS NULL OR ${t.paymentMethod} IN ('crypto_transfer','sbp_qr','card_transfer','bank_transfer','cash')`),
-  check("exchange_orders_payout_method_check", sql`${t.payoutMethod} IS NULL OR ${t.payoutMethod} IN ('office_cash','cardless_atm','courier_cash','thai_bank_transfer','atm')`),
+  },
+  (t) => [
+    check(
+      "exchange_orders_status_check",
+      sql`${t.status} IN ('quote','awaiting_payment','paid','payout','completed','cancelled','expired')`,
+    ),
+    check(
+      "exchange_orders_amount_mode_check",
+      sql`${t.amountMode} IN ('source_amount','target_thb')`,
+    ),
+    check(
+      "exchange_orders_payment_method_check",
+      sql`${t.paymentMethod} IS NULL OR ${t.paymentMethod} IN ('crypto_transfer','sbp_qr','card_transfer','bank_transfer','cash')`,
+    ),
+    check(
+      "exchange_orders_payout_method_check",
+      sql`${t.payoutMethod} IS NULL OR ${t.payoutMethod} IN ('office_cash','cardless_atm','courier_cash','thai_bank_transfer','atm')`,
+    ),
   uniqueIndex("uniq_exchange_orders_idem").on(t.idempotencyKey),
   index("idx_exchange_orders_tenant_status").on(t.tenantId, t.status),
   index("idx_exchange_orders_tenant_contact").on(t.tenantId, t.contactId),
   index("idx_exchange_orders_tenant_created").on(t.tenantId, t.createdAt),
-  index("idx_exchange_orders_awaiting_ttl").on(t.status, t.rateExpiresAt).where(sql`status = 'awaiting_payment'`),
-]);
+    index("idx_exchange_orders_awaiting_ttl")
+      .on(t.status, t.rateExpiresAt)
+      .where(sql`status = 'awaiting_payment'`),
+  ],
+);
 
 // ---- Partner services & commission ledger ------------------------------
 //
@@ -1401,9 +2210,13 @@ export const exchangeOrders = pgTable("exchange_orders", {
 // a deal, then an admin enters final turnover and the commission is calculated
 // from the service/partner percentage. Partner portal and complex settlements
 // can build on these tables later.
-export const partners = pgTable("partners", {
+export const partners = pgTable(
+  "partners",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   status: text("status").notNull().default("active"),
   contactName: text("contact_name"),
@@ -1414,61 +2227,96 @@ export const partners = pgTable("partners", {
   notes: text("notes"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   check("partners_status_check", sql`${t.status} IN ('active','archived')`),
   index("idx_partners_tenant_status").on(t.tenantId, t.status),
-]);
+  ],
+);
 
-export const partnerServices = pgTable("partner_services", {
+export const partnerServices = pgTable(
+  "partner_services",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    partnerId: integer("partner_id")
+      .notNull()
+      .references(() => partners.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   category: text("category"),
   funnelId: integer("funnel_id").references(() => funnels.id, { onDelete: "set null" }),
-  stageDefinitionId: integer("stage_definition_id").references(() => stageDefinitions.id, { onDelete: "set null" }),
+    stageDefinitionId: integer("stage_definition_id").references(
+      () => stageDefinitions.id,
+      { onDelete: "set null" },
+    ),
   commissionPct: doublePrecision("commission_pct").notNull().default(0),
   isActive: boolean("is_active").notNull().default(true),
   notes: text("notes"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
+  },
+  (t) => [
   uniqueIndex("uniq_partner_services_name").on(t.tenantId, t.partnerId, t.name),
   index("idx_partner_services_tenant_active").on(t.tenantId, t.isActive),
   index("idx_partner_services_stage").on(t.tenantId, t.stageDefinitionId),
-]);
+  ],
+);
 
-export const serviceCatalogItems = pgTable("service_catalog_items", {
+export const serviceCatalogItems = pgTable(
+  "service_catalog_items",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
   slug: text("slug").notNull(),
   name: text("name").notNull(),
   category: text("category"),
   description: text("description"),
   routeType: text("route_type").notNull().default("manual"),
   funnelId: integer("funnel_id").references(() => funnels.id, { onDelete: "set null" }),
-  partnerServiceId: integer("partner_service_id").references(() => partnerServices.id, { onDelete: "set null" }),
+    partnerServiceId: integer("partner_service_id").references(() => partnerServices.id, {
+      onDelete: "set null",
+    }),
   webhookUrl: text("webhook_url"),
   isActive: boolean("is_active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
   metadataJson: text("metadata_json").notNull().default("{}"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("service_catalog_route_type_check", sql`${t.routeType} IN ('manual','funnel','partner_service','webhook')`),
+  },
+  (t) => [
+    check(
+      "service_catalog_route_type_check",
+      sql`${t.routeType} IN ('manual','funnel','partner_service','webhook')`,
+    ),
   uniqueIndex("uniq_service_catalog_slug").on(t.tenantId, t.slug),
   index("idx_service_catalog_tenant_active").on(t.tenantId, t.isActive, t.sortOrder),
   index("idx_service_catalog_funnel").on(t.tenantId, t.funnelId),
   index("idx_service_catalog_partner_service").on(t.tenantId, t.partnerServiceId),
-]);
+  ],
+);
 
-export const partnerDeals = pgTable("partner_deals", {
+export const partnerDeals = pgTable(
+  "partner_deals",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-  partnerId: integer("partner_id").references(() => partners.id, { onDelete: "set null" }),
-  serviceId: integer("service_id").references(() => partnerServices.id, { onDelete: "set null" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    partnerId: integer("partner_id").references(() => partners.id, {
+      onDelete: "set null",
+    }),
+    serviceId: integer("service_id").references(() => partnerServices.id, {
+      onDelete: "set null",
+    }),
   leadId: integer("lead_id").references(() => leads.id, { onDelete: "set null" }),
-  stageDefinitionId: integer("stage_definition_id").references(() => stageDefinitions.id, { onDelete: "set null" }),
+    stageDefinitionId: integer("stage_definition_id").references(
+      () => stageDefinitions.id,
+      { onDelete: "set null" },
+    ),
   status: text("status").notNull().default("sent"),
   handoffUrl: text("handoff_url"),
   handoffMode: text("handoff_mode").notNull().default("fire_and_forget"),
@@ -1485,18 +2333,32 @@ export const partnerDeals = pgTable("partner_deals", {
   settledAt: integer("settled_at"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("partner_deals_status_check", sql`${t.status} IN ('sent','accepted','rejected','completed','cancelled','disputed','settled')`),
-  check("partner_deals_mode_check", sql`${t.handoffMode} IN ('fire_and_forget','await_callback')`),
+  },
+  (t) => [
+    check(
+      "partner_deals_status_check",
+      sql`${t.status} IN ('sent','accepted','rejected','completed','cancelled','disputed','settled')`,
+    ),
+    check(
+      "partner_deals_mode_check",
+      sql`${t.handoffMode} IN ('fire_and_forget','await_callback')`,
+    ),
   index("idx_partner_deals_tenant_status").on(t.tenantId, t.status),
   index("idx_partner_deals_partner").on(t.tenantId, t.partnerId),
   index("idx_partner_deals_lead").on(t.tenantId, t.leadId),
-]);
+  ],
+);
 
-export const partnerSettlements = pgTable("partner_settlements", {
+export const partnerSettlements = pgTable(
+  "partner_settlements",
+  {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
-  partnerId: integer("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    partnerId: integer("partner_id")
+      .notNull()
+      .references(() => partners.id, { onDelete: "cascade" }),
   periodStart: integer("period_start").notNull(),
   periodEnd: integer("period_end").notNull(),
   status: text("status").notNull().default("draft"),
@@ -1507,7 +2369,321 @@ export const partnerSettlements = pgTable("partner_settlements", {
   notes: text("notes"),
   createdAt: integer("created_at").notNull().default(epochNow()),
   updatedAt: integer("updated_at").notNull().default(epochNow()),
-}, (t) => [
-  check("partner_settlements_status_check", sql`${t.status} IN ('draft','issued','paid','cancelled')`),
+  },
+  (t) => [
+    check(
+      "partner_settlements_status_check",
+      sql`${t.status} IN ('draft','issued','paid','cancelled')`,
+    ),
   index("idx_partner_settlements_partner").on(t.tenantId, t.partnerId, t.periodStart),
-]);
+  ],
+);
+
+// ---- Provider relay & brokered orders ----------------------------------
+//
+// Cross-channel broker flow: customer can request a service in one channel,
+// provider can negotiate in another, and the order aggregate mediates status,
+// payment, commission, and what each side is allowed to see.
+export const providerProfiles = pgTable(
+  "provider_profiles",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    contactId: integer("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    category: text("category"),
+    status: text("status").notNull().default("active"),
+    serviceArea: text("service_area"),
+    defaultCommissionPct: doublePrecision("default_commission_pct").notNull().default(0),
+    notes: text("notes"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+    updatedAt: integer("updated_at").notNull().default(epochNow()),
+  },
+  (t) => [
+    check(
+      "provider_profiles_status_check",
+      sql`${t.status} IN ('active','paused','archived')`,
+    ),
+    uniqueIndex("uniq_provider_profiles_contact").on(t.tenantId, t.contactId),
+    index("idx_provider_profiles_tenant_status").on(t.tenantId, t.status),
+    index("idx_provider_profiles_category").on(t.tenantId, t.category),
+  ],
+);
+
+export const providerServices = pgTable(
+  "provider_services",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    providerId: integer("provider_id")
+      .notNull()
+      .references(() => providerProfiles.id, { onDelete: "cascade" }),
+    serviceType: text("service_type").notNull(),
+    name: text("name").notNull(),
+    serviceArea: text("service_area"),
+    pricingPolicyJson: text("pricing_policy_json").notNull().default("{}"),
+    commissionPct: doublePrecision("commission_pct"),
+    isActive: boolean("is_active").notNull().default(true),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+    updatedAt: integer("updated_at").notNull().default(epochNow()),
+  },
+  (t) => [
+    uniqueIndex("uniq_provider_services_name").on(
+      t.tenantId,
+      t.providerId,
+      t.serviceType,
+      t.name,
+    ),
+    index("idx_provider_services_tenant_active").on(t.tenantId, t.isActive),
+    index("idx_provider_services_type").on(t.tenantId, t.serviceType, t.isActive),
+  ],
+);
+
+export const serviceOrders = pgTable(
+  "service_orders",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    customerContactId: integer("customer_contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    customerConversationId: integer("customer_conversation_id").references(
+      () => conversations.id,
+      { onDelete: "set null" },
+    ),
+    leadId: integer("lead_id").references(() => leads.id, { onDelete: "set null" }),
+    assignedProviderId: integer("assigned_provider_id").references(
+      () => providerProfiles.id,
+      { onDelete: "set null" },
+    ),
+    requestType: text("request_type").notNull(),
+    status: text("status").notNull().default("intake"),
+    summary: text("summary"),
+    quotedAmount: doublePrecision("quoted_amount"),
+    customerAmount: doublePrecision("customer_amount"),
+    commissionPct: doublePrecision("commission_pct"),
+    commissionAmount: doublePrecision("commission_amount"),
+    currency: text("currency").notNull().default("THB"),
+    paymentStatus: text("payment_status").notNull().default("unpaid"),
+    paymentProvider: text("payment_provider"),
+    paymentRef: text("payment_ref"),
+    idempotencyKey: text("idempotency_key"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    expiresAt: integer("expires_at"),
+    confirmedAt: integer("confirmed_at"),
+    completedAt: integer("completed_at"),
+    cancelledAt: integer("cancelled_at"),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+    updatedAt: integer("updated_at").notNull().default(epochNow()),
+  },
+  (t) => [
+    check(
+      "service_orders_status_check",
+      sql`${t.status} IN ('intake','matching','awaiting_provider','provider_declined','offer_ready','awaiting_customer_payment','paid','confirmed','fulfilled','cancelled','failed')`,
+    ),
+    check(
+      "service_orders_payment_status_check",
+      sql`${t.paymentStatus} IN ('unpaid','pending','paid','refunded','failed')`,
+    ),
+    uniqueIndex("uniq_service_orders_idem")
+      .on(t.idempotencyKey)
+      .where(sql`idempotency_key IS NOT NULL`),
+    index("idx_service_orders_tenant_status").on(t.tenantId, t.status),
+    index("idx_service_orders_customer").on(t.tenantId, t.customerContactId),
+    index("idx_service_orders_lead").on(t.tenantId, t.leadId),
+    index("idx_service_orders_provider").on(t.tenantId, t.assignedProviderId),
+    index("idx_service_orders_payment").on(t.tenantId, t.paymentStatus),
+  ],
+);
+
+export const providerRequests = pgTable(
+  "provider_requests",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    orderId: integer("order_id")
+      .notNull()
+      .references(() => serviceOrders.id, { onDelete: "cascade" }),
+    providerId: integer("provider_id").references(() => providerProfiles.id, {
+      onDelete: "set null",
+    }),
+    providerConversationId: integer("provider_conversation_id").references(
+      () => conversations.id,
+      { onDelete: "set null" },
+    ),
+    channelId: integer("channel_id").references(() => channels.id, {
+      onDelete: "set null",
+    }),
+    outboundQueueId: integer("outbound_queue_id").references(() => outboundQueue.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").notNull().default("draft"),
+    quotedAmount: doublePrecision("quoted_amount"),
+    customerAmount: doublePrecision("customer_amount"),
+    commissionAmount: doublePrecision("commission_amount"),
+    currency: text("currency").notNull().default("THB"),
+    availableAt: integer("available_at"),
+    quoteExpiresAt: integer("quote_expires_at"),
+    responseText: text("response_text"),
+    idempotencyKey: text("idempotency_key"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    sentAt: integer("sent_at"),
+    respondedAt: integer("responded_at"),
+    expiredAt: integer("expired_at"),
+    cancelledAt: integer("cancelled_at"),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+    updatedAt: integer("updated_at").notNull().default(epochNow()),
+  },
+  (t) => [
+    check(
+      "provider_requests_status_check",
+      sql`${t.status} IN ('draft','sent','seen','quoted','accepted','declined','expired','cancelled')`,
+    ),
+    uniqueIndex("uniq_provider_requests_idem")
+      .on(t.idempotencyKey)
+      .where(sql`idempotency_key IS NOT NULL`),
+    index("idx_provider_requests_order").on(t.tenantId, t.orderId),
+    index("idx_provider_requests_provider_status").on(t.tenantId, t.providerId, t.status),
+    index("idx_provider_requests_tenant_status").on(t.tenantId, t.status),
+    index("idx_provider_requests_quote_ttl")
+      .on(t.status, t.quoteExpiresAt)
+      .where(sql`status = 'quoted'`),
+  ],
+);
+
+export const orderEvents = pgTable(
+  "order_events",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    orderId: integer("order_id")
+      .notNull()
+      .references(() => serviceOrders.id, { onDelete: "cascade" }),
+    providerRequestId: integer("provider_request_id").references(
+      () => providerRequests.id,
+      { onDelete: "set null" },
+    ),
+    conversationId: integer("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
+    messageId: integer("message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    actorType: text("actor_type").notNull().default("system"),
+    eventType: text("event_type").notNull(),
+    dataJson: text("data_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+  },
+  (t) => [
+    check(
+      "order_events_actor_type_check",
+      sql`${t.actorType} IN ('system','customer','provider','operator','payment')`,
+    ),
+    index("idx_order_events_order_created").on(t.tenantId, t.orderId, t.createdAt),
+    index("idx_order_events_provider_request").on(t.tenantId, t.providerRequestId),
+    index("idx_order_events_type").on(t.tenantId, t.eventType),
+  ],
+);
+
+export const serviceOrderPayments = pgTable(
+  "service_order_payments",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    orderId: integer("order_id")
+      .notNull()
+      .references(() => serviceOrders.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    externalIntentId: text("external_intent_id"),
+    externalSessionId: text("external_session_id"),
+    status: text("status").notNull().default("created"),
+    amount: doublePrecision("amount").notNull(),
+    currency: text("currency").notNull().default("THB"),
+    idempotencyKey: text("idempotency_key"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+    updatedAt: integer("updated_at").notNull().default(epochNow()),
+    paidAt: integer("paid_at"),
+    failedAt: integer("failed_at"),
+    cancelledAt: integer("cancelled_at"),
+    refundedAt: integer("refunded_at"),
+  },
+  (t) => [
+    check(
+      "service_order_payments_status_check",
+      sql`${t.status} IN ('created','pending','paid','failed','cancelled','refunded')`,
+    ),
+    uniqueIndex("uniq_service_order_payments_idem")
+      .on(t.tenantId, t.idempotencyKey)
+      .where(sql`idempotency_key IS NOT NULL`),
+    uniqueIndex("uniq_service_order_payments_provider_intent")
+      .on(t.tenantId, t.provider, t.externalIntentId)
+      .where(sql`external_intent_id IS NOT NULL`),
+    uniqueIndex("uniq_service_order_payments_provider_session")
+      .on(t.tenantId, t.provider, t.externalSessionId)
+      .where(sql`external_session_id IS NOT NULL`),
+    index("idx_service_order_payments_order").on(t.tenantId, t.orderId),
+    index("idx_service_order_payments_status").on(t.tenantId, t.status),
+  ],
+);
+
+export const serviceOrderCommissions = pgTable(
+  "service_order_commissions",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    orderId: integer("order_id")
+      .notNull()
+      .references(() => serviceOrders.id, { onDelete: "cascade" }),
+    providerId: integer("provider_id").references(() => providerProfiles.id, {
+      onDelete: "set null",
+    }),
+    paymentId: integer("payment_id").references(() => serviceOrderPayments.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").notNull().default("pending"),
+    grossAmount: doublePrecision("gross_amount").notNull(),
+    commissionPct: doublePrecision("commission_pct").notNull().default(0),
+    commissionAmount: doublePrecision("commission_amount").notNull().default(0),
+    currency: text("currency").notNull().default("THB"),
+    source: text("source").notNull().default("payment"),
+    idempotencyKey: text("idempotency_key"),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    earnedAt: integer("earned_at"),
+    refundedAt: integer("refunded_at"),
+    paidOutAt: integer("paid_out_at"),
+    createdAt: integer("created_at").notNull().default(epochNow()),
+    updatedAt: integer("updated_at").notNull().default(epochNow()),
+  },
+  (t) => [
+    check(
+      "service_order_commissions_status_check",
+      sql`${t.status} IN ('pending','earned','void','refunded','paid_out')`,
+    ),
+    uniqueIndex("uniq_service_order_commissions_idem")
+      .on(t.tenantId, t.idempotencyKey)
+      .where(sql`idempotency_key IS NOT NULL`),
+    index("idx_service_order_commissions_order").on(t.tenantId, t.orderId),
+    index("idx_service_order_commissions_provider").on(t.tenantId, t.providerId),
+    index("idx_service_order_commissions_payment").on(t.tenantId, t.paymentId),
+    index("idx_service_order_commissions_status").on(t.tenantId, t.status),
+  ],
+);

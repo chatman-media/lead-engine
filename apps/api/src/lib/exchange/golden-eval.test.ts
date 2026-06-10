@@ -1,3 +1,4 @@
+import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -5,12 +6,15 @@ import {
 	RagReplyStrategy,
 	type RagReplyStrategyOpts,
 } from "@chatman-media/conversation-engine";
-import type { ChatClient } from "@chatman-media/llm-router";
 import type { AnyRagTool } from "@chatman-media/kb";
+import type { ChatClient } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
-import { describe, expect, it } from "bun:test";
 import { z } from "zod";
 import {
+	EXCHANGE_ANSWER_QUALITY_CASES,
+	EXCHANGE_BAD_DIALOG_REPLAY_CASES,
+	evaluateExchangeAnswerQualityCases,
+	evaluateExchangeBadDialogCases,
 	evaluateExchangeGoldenCases,
 	formatExchangeGoldenFailures,
 	parseExchangeGoldenJsonl,
@@ -162,13 +166,18 @@ describe("exchange golden eval smoke", () => {
 	});
 
 	it("covers quote, requisites, KYC and proof checkpoints", () => {
-		const tokens = new Set(loadCases().flatMap((item) => item.expectedWorkflow));
+		const tokens = new Set(
+			loadCases().flatMap((item) => item.expectedWorkflow),
+		);
 		expect(tokens.has("rate_quote")).toBe(true);
 		expect(tokens.has("kyc_required")).toBe(true);
 		expect(
-			["requisites_qr", "requisites_card", "requisites_crypto_wallet", "requisites_binance_id"].some(
-				(token) => tokens.has(token),
-			),
+			[
+				"requisites_qr",
+				"requisites_card",
+				"requisites_crypto_wallet",
+				"requisites_binance_id",
+			].some((token) => tokens.has(token)),
 		).toBe(true);
 		expect(tokens.has("receipt_request")).toBe(true);
 	});
@@ -178,6 +187,105 @@ describe("exchange golden eval smoke", () => {
 		const failures = formatExchangeGoldenFailures(results);
 		expect(failures).toBe("");
 		expect(results.every((result) => result.passed)).toBe(true);
+	});
+
+	it("passes exchange answer-quality replay cases", () => {
+		const results = evaluateExchangeAnswerQualityCases(
+			EXCHANGE_ANSWER_QUALITY_CASES,
+		);
+		const failures = formatExchangeGoldenFailures(results);
+		expect(failures).toBe("");
+		expect(results.every((result) => result.passed)).toBe(true);
+	});
+
+	it("answer-quality replay covers every response contract", () => {
+		const contracts = new Set(
+			EXCHANGE_ANSWER_QUALITY_CASES.map((item) => item.expectedContract),
+		);
+		const expected = [
+			"quote",
+			"quote_confirmed",
+			"kyc_requested",
+			"kyc_submitted",
+			"payment_requisites",
+			"payment_review",
+			"office_pickup",
+			"payout",
+			"operator_handoff",
+			"cancelled",
+			"general",
+		] as const;
+		for (const contractId of expected) {
+			expect(contracts.has(contractId)).toBe(true);
+		}
+		expect(EXCHANGE_ANSWER_QUALITY_CASES.length).toBeGreaterThanOrEqual(
+			expected.length,
+		);
+	});
+
+	it("passes bad-dialog replay cases without external LLM", () => {
+		const results = evaluateExchangeBadDialogCases(
+			EXCHANGE_BAD_DIALOG_REPLAY_CASES,
+		);
+		const failures = formatExchangeGoldenFailures(results);
+		expect(failures).toBe("");
+		expect(results.every((result) => result.passed)).toBe(true);
+	});
+
+	it("bad-dialog replay covers the known exchange failure modes", () => {
+		const ids = new Set(
+			EXCHANGE_BAD_DIALOG_REPLAY_CASES.map((item) => item.id),
+		);
+		for (const id of [
+			"bad-dialog-quote-accepted-no-repeat",
+			"bad-dialog-kyc-media-submitted",
+			"bad-dialog-why-kyc-needed",
+			"bad-dialog-rub-payment-office-pickup",
+			"bad-dialog-rate-objection",
+			"bad-dialog-payment-proof-submitted",
+			"bad-dialog-operator-required",
+			"bad-dialog-cancel-refuse-kyc",
+		]) {
+			expect(ids.has(id)).toBe(true);
+		}
+	});
+
+	it("bad-dialog failures include the violated guard reason", () => {
+		const source = EXCHANGE_BAD_DIALOG_REPLAY_CASES.find(
+			(item) => item.id === "bad-dialog-kyc-media-submitted",
+		);
+		expect(source).toBeTruthy();
+		const results = evaluateExchangeBadDialogCases([
+			{
+				...source!,
+				unsafeDrafts: [
+					{
+						label: "auto KYC verified",
+						text: "KYC подтверждён, можете оплачивать.",
+						expectedReason: "unbacked_quote",
+					},
+				],
+			},
+		]);
+		const failures = formatExchangeGoldenFailures(results);
+		expect(results[0]?.passed).toBe(false);
+		expect(failures).toContain("blocked with kyc_auto_verified");
+		expect(failures).toContain("expected=unsafe draft");
+	});
+
+	it("answer-quality replay exposes redacted debug trace lines", () => {
+		const results = evaluateExchangeAnswerQualityCases([
+			EXCHANGE_ANSWER_QUALITY_CASES.find(
+				(item) => item.id === "payment-proof-review",
+			)!,
+		]);
+		const trace = results[0]?.trace.join("\n") ?? "";
+		expect(trace).toContain("debug_contract=payment_review");
+		expect(trace).toContain("debug_state");
+		expect(trace).toContain("debug_handoff");
+		expect(trace).toContain("debug_guard ok=yes");
+		expect(trace).not.toContain("2200 7000 1234 5678");
+		expect(trace).not.toContain("https://");
 	});
 
 	it("formats case id, expected behavior, actual result and trace for failures", () => {
@@ -221,6 +329,8 @@ describe("exchange golden eval smoke", () => {
 			userMessageText: loadCases()[0]?.messages[0]?.text,
 		});
 		expect(result).not.toBeNull();
-		expect((result![0]!.parts[0] as { text: string }).text).toBe(EXCHANGE_SAFE_FALLBACK);
+		expect((result![0]!.parts[0] as { text: string }).text).toBe(
+			EXCHANGE_SAFE_FALLBACK,
+		);
 	});
 });

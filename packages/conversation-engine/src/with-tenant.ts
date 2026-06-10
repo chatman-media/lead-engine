@@ -24,14 +24,14 @@ import type { Db } from "./dal/types.ts";
  * (caller responsibility — не делать так без чёткого понимания).
  */
 export async function withTenant<T>(
-  db: Db,
-  tenantId: number,
-  fn: (tx: Db) => Promise<T>,
+	db: Db,
+	tenantId: number,
+	fn: (tx: Db) => Promise<T>,
 ): Promise<T> {
-  return db.transaction(async (tx) => {
-    // SET LOCAL не принимает параметризованный bind в Postgres protocol,
-    // но tenantId — integer (валидируется TS), без SQL-injection risk.
-    await tx.execute(sql.raw(`SET LOCAL app.tenant_id = ${tenantId}`));
-    return fn(tx as unknown as Db);
-  });
+	return db.transaction(async (tx) => {
+		// SET LOCAL не принимает параметризованный bind в Postgres protocol,
+		// но tenantId — integer (валидируется TS), без SQL-injection risk.
+		await tx.execute(sql.raw(`SET LOCAL app.tenant_id = ${tenantId}`));
+		return fn(tx as unknown as Db);
+	});
 }

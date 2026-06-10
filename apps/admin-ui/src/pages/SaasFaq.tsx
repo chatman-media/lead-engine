@@ -14,7 +14,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import type { FunnelListItem, KbRequirement } from "../api/saas.ts";
 import { ApiError, clearToken, type KbDoc, type KbSuggestion, saas } from "../api/saas.ts";
+
+type KbUploadScope =
+  | { scopeType: "global" }
+  | { scopeType: "funnel"; funnelId: number }
+  | { scopeType: "stage"; funnelId: number; stageSlug: string };
 
 /**
  * FAQ-справочник для бота: документы (RAG) и предложенные ботом Q&A.
@@ -25,12 +31,16 @@ import { ApiError, clearToken, type KbDoc, type KbSuggestion, saas } from "../ap
 export function SaasFaq() {
   const navigate = useNavigate();
   const [docs, setDocs] = useState<KbDoc[]>([]);
+  const [funnels, setFunnels] = useState<FunnelListItem[]>([]);
+  const [selectedFunnelId, setSelectedFunnelId] = useState<number | null>(null);
+  const [requirements, setRequirements] = useState<KbRequirement[]>([]);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
 
   const [pasteTitle, setPasteTitle] = useState("");
   const [pasteBody, setPasteBody] = useState("");
   const [pasteTopic, setPasteTopic] = useState("");
+  const [pasteScope, setPasteScope] = useState<KbUploadScope | null>(null);
 
   const [suggestions, setSuggestions] = useState<KbSuggestion[]>([]);
   const [suggestionDrafts, setSuggestionDrafts] = useState<Record<number, string>>({});
@@ -47,16 +57,44 @@ export function SaasFaq() {
 
   async function refreshDocs() {
     try {
-      const list = await saas.listDocs();
+      const list = await saas.listDocs(
+        selectedFunnelId ? { funnelId: selectedFunnelId } : { scopeType: "global" },
+      );
       setDocs(list.items);
     } catch (err) {
       if (!onAuthError(err)) setDocs([]);
     }
   }
 
+  async function refreshFunnels() {
+    try {
+      const res = await saas.listFunnels();
+      setFunnels(res.items);
+    } catch {
+      setFunnels([]);
+    }
+  }
+
+  async function refreshRequirements() {
+    if (!selectedFunnelId) {
+      setRequirements([]);
+      return;
+    }
+    try {
+      const res = await saas.listKbRequirements(selectedFunnelId);
+      setRequirements(res.items);
+    } catch {
+      setRequirements([]);
+    }
+  }
+
   async function refreshSuggestions() {
     try {
-      const res = await saas.listKbSuggestions({ status: "pending", limit: 20 });
+      const res = await saas.listKbSuggestions(
+        selectedFunnelId
+          ? { status: "pending", limit: 20, funnelId: selectedFunnelId }
+          : { status: "pending", limit: 20, scopeType: "global" },
+      );
       setSuggestions(res.items);
       setSuggestionDrafts((prev) => {
         const next = { ...prev };
@@ -71,10 +109,57 @@ export function SaasFaq() {
   }
 
   useEffect(() => {
-    refreshDocs();
-    refreshSuggestions();
-    // biome-ignore lint/correctness/useExhaustiveDependencies: run once
+    refreshFunnels();
   }, []);
+
+  useEffect(() => {
+    setPasteScope(null);
+    refreshDocs();
+    refreshRequirements();
+    refreshSuggestions();
+  }, [selectedFunnelId]);
+
+  function defaultUploadScope(): KbUploadScope {
+    return selectedFunnelId
+      ? { scopeType: "funnel" as const, funnelId: selectedFunnelId }
+      : { scopeType: "global" as const };
+  }
+
+  function uploadScope(): KbUploadScope {
+    return pasteScope ?? defaultUploadScope();
+  }
+
+  function scopeLabel(scope: {
+    scopeType: KbDoc["scopeType"];
+    funnelId?: number | null;
+    stageSlug?: string | null;
+  }): string {
+    if (scope.scopeType === "global") return "общая";
+    if (scope.scopeType === "stage") {
+      return scope.stageSlug ? `этап ${scope.stageSlug}` : "этап";
+    }
+    const f = funnels.find((item) => item.id === scope.funnelId);
+    return f ? f.slug : "процесс";
+  }
+
+  function fillRequirement(req: KbRequirement) {
+    setPasteTitle(req.title);
+    setPasteTopic(req.topic);
+    setPasteScope(
+      req.scopeType === "stage" && req.stageSlug
+        ? { scopeType: "stage", funnelId: req.funnelId, stageSlug: req.stageSlug }
+        : { scopeType: "funnel", funnelId: req.funnelId },
+    );
+    setPasteBody(
+      [
+        `# ${req.title}`,
+        "",
+        req.description,
+        "",
+        "Заполните конкретные правила бизнеса здесь.",
+      ].join("\n"),
+    );
+  }
 
   async function handlePaste(e: FormEvent) {
     e.preventDefault();
@@ -86,11 +171,13 @@ export function SaasFaq() {
         title: pasteTitle.trim() || "untitled",
         body: pasteBody,
         ...(pasteTopic.trim() ? { topic: pasteTopic.trim() } : {}),
+        ...uploadScope(),
       });
       setPasteTitle("");
       setPasteBody("");
       setPasteTopic("");
-      await refreshDocs();
+      setPasteScope(null);
+      await Promise.all([refreshDocs(), refreshRequirements()]);
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
         setError((err.extra?.upgradeHint as string) ?? "Лимит документов исчерпан");
@@ -108,8 +195,8 @@ export function SaasFaq() {
     setUploading(true);
     setError("");
     try {
-      await saas.uploadFile(file);
-      await refreshDocs();
+      await saas.uploadFile(file, uploadScope());
+      await Promise.all([refreshDocs(), refreshRequirements()]);
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
         setError((err.extra?.upgradeHint as string) ?? "Лимит документов исчерпан");
@@ -124,7 +211,7 @@ export function SaasFaq() {
   async function handleDelete(id: number) {
     try {
       await saas.deleteDoc(id);
-      await refreshDocs();
+      await Promise.all([refreshDocs(), refreshRequirements()]);
     } catch (err) {
       onAuthError(err);
     }
@@ -136,7 +223,7 @@ export function SaasFaq() {
       await saas.decideKbSuggestion(id, action, {
         answerDraft: action === "approve" ? suggestionDrafts[id] : undefined,
       });
-      await Promise.all([refreshSuggestions(), refreshDocs()]);
+      await Promise.all([refreshSuggestions(), refreshDocs(), refreshRequirements()]);
     } catch {
       // ignore
     } finally {
@@ -147,8 +234,8 @@ export function SaasFaq() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="FAQ-справочник"
-        description="Документы, по которым бот отвечает на общие вопросы клиентов (часы работы, лимиты, как без карты). Курсы и заявки бот считает сам — это не про документы."
+        title="База знаний"
+        description="Материалы, по которым бот отвечает клиентам. Документы можно хранить общими или привязать к конкретному процессу."
       />
 
       {error && (
@@ -159,6 +246,76 @@ export function SaasFaq() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Область материалов</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={selectedFunnelId === null ? "default" : "outline"}
+                  onClick={() => setSelectedFunnelId(null)}
+                >
+                  Общая база
+                </Button>
+                {funnels.map((funnel) => (
+                  <Button
+                    key={funnel.id}
+                    type="button"
+                    size="sm"
+                    variant={selectedFunnelId === funnel.id ? "default" : "outline"}
+                    onClick={() => setSelectedFunnelId(funnel.id)}
+                  >
+                    {funnel.slug}
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {selectedFunnelId && requirements.length > 0 && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle>Что желательно заполнить</CardTitle>
+                <Badge variant="secondary">
+                  {requirements.filter((r) => r.covered).length}/{requirements.length}
+                </Badge>
+              </CardHeader>
+              <CardContent>
+                <ul className="divide-y">
+                  {requirements.map((req) => (
+                    <li key={req.key} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+                      <span
+                        className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border text-xs ${
+                          req.covered
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {req.covered ? <CheckIcon className="size-3.5" /> : ""}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-medium">{req.title}</p>
+                          {req.required && <Badge variant="outline">нужно</Badge>}
+                          {req.stageSlug && <Badge variant="secondary">{req.stageSlug}</Badge>}
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">{req.description}</p>
+                      </div>
+                      {!req.covered && (
+                        <Button size="sm" variant="outline" onClick={() => fillRequirement(req)}>
+                          Заполнить
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle>Добавить материал</CardTitle>
@@ -191,6 +348,10 @@ export function SaasFaq() {
               </div>
 
               <form onSubmit={handlePaste} className="space-y-3">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Область:</span>
+                  <Badge variant="secondary">{scopeLabel(uploadScope())}</Badge>
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Input
                     placeholder="Заголовок (напр. «Часы работы»)"
@@ -237,6 +398,7 @@ export function SaasFaq() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{d.title}</p>
                         <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Badge variant="secondary">{scopeLabel(d)}</Badge>
                           {d.topic && <Badge variant="outline">{d.topic}</Badge>}
                           <span className="font-mono">{d.source}</span>
                           <span>· {new Date(d.createdAt * 1000).toLocaleDateString("ru")}</span>
@@ -276,6 +438,13 @@ export function SaasFaq() {
                 {suggestions.map((s) => (
                   <li key={s.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
                     <p className="text-sm font-medium">{s.questionText}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {s.scopeType === "global"
+                        ? "общая база"
+                        : s.scopeType === "stage"
+                          ? `этап ${s.stageSlug ?? ""}`
+                          : `процесс #${s.funnelId ?? ""}`}
+                    </p>
                     <textarea
                       className="min-h-[80px] w-full resize-none rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                       placeholder="Ответ для добавления в справочник…"

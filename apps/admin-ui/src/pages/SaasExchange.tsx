@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   ApiError,
   clearToken,
+  type ExchangeAnswerQualityEvalResult,
   type ExchangeOrder,
   type ExchangeRate,
   type ExchangeRateCardProposal,
@@ -374,6 +375,9 @@ export function SaasExchange() {
   >([]);
   const [reqValues, setReqValues] = useState<Record<string, string>>({});
   const [savingReqKey, setSavingReqKey] = useState<string | null>(null);
+  const [answerQualityLoading, setAnswerQualityLoading] = useState(false);
+  const [answerQualityEval, setAnswerQualityEval] =
+    useState<ExchangeAnswerQualityEvalResult | null>(null);
 
   function handle401(err: unknown) {
     if (err instanceof ApiError && err.status === 401) {
@@ -613,6 +617,29 @@ export function SaasExchange() {
     } catch (err) {
       if (!handle401(err))
         toast.error("Не удалось прогнать эмуляцию (нужен chat-LLM у тенанта)", { id: tid });
+    }
+  }
+
+  async function runAnswerQualityEval() {
+    setAnswerQualityLoading(true);
+    const tid = toast.loading("Проверяем exchange answer quality…");
+    try {
+      const result = await saas.runExchangeAnswerQualityEval();
+      setAnswerQualityEval(result);
+      if (result.summary.failed > 0) {
+        toast.error(
+          `Answer Quality: ${result.summary.failed}/${result.summary.total} кейсов требуют внимания`,
+          { id: tid },
+        );
+      } else {
+        toast.success(`Answer Quality: ${result.summary.passed}/${result.summary.total} кейсов прошли`, {
+          id: tid,
+        });
+      }
+    } catch (err) {
+      if (!handle401(err)) toast.error("Не удалось прогнать answer-quality replay", { id: tid });
+    } finally {
+      setAnswerQualityLoading(false);
     }
   }
 
@@ -1136,11 +1163,103 @@ export function SaasExchange() {
         </TabsContent>
 
         {/* ── Заявки ─────────────────────────────────────────────── */}
-        <TabsContent value="orders">
+        <TabsContent value="orders" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <CardTitle className="text-base">Answer Quality Replay</CardTitle>
+                  <p className="text-muted-foreground text-xs">
+                    Быстрая проверка sensitive-моментов: KYC, чек оплаты, получение в офисе,
+                    handoff и policy guard.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={runAnswerQualityEval}
+                  disabled={answerQualityLoading}
+                >
+                  <RefreshCwIcon
+                    className={`size-4 ${answerQualityLoading ? "animate-spin" : ""}`}
+                  />
+                  {answerQualityLoading ? "Проверяем…" : "Прогнать replay"}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {answerQualityEval ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={answerQualityEval.summary.failed === 0 ? "success" : "destructive"}
+                    >
+                      {answerQualityEval.summary.passed}/{answerQualityEval.summary.total} passed
+                    </Badge>
+                    <Badge variant="outline">{answerQualityEval.summary.failed} failed</Badge>
+                    <span className="text-xs text-muted-foreground">
+                      Deterministic contracts + state-pack + guard
+                    </span>
+                  </div>
+                  <div className="grid min-w-0 gap-2 md:grid-cols-2">
+                    {answerQualityEval.report.map((item) => (
+                      <div
+                        key={item.id}
+                        className="min-w-0 rounded-md border bg-muted/20 p-3 text-sm"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">{item.title}</div>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              <Badge variant="secondary">
+                                {item.expectedContract ?? "contract"}
+                              </Badge>
+                              {item.expectedDeterministic && (
+                                <Badge variant="outline">deterministic</Badge>
+                              )}
+                            </div>
+                          </div>
+                          <Badge variant={item.passed ? "success" : "destructive"}>
+                            {item.passed ? "pass" : "fail"}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                          {item.trace.map((line) => (
+                            <div key={line} className="break-words">
+                              {line}
+                            </div>
+                          ))}
+                        </div>
+                        {item.failures.length > 0 && (
+                          <div className="mt-2 space-y-1 text-xs text-destructive">
+                            {item.failures.map((failure) => (
+                              <div
+                                key={`${failure.expected}-${failure.actual}`}
+                                className="break-words"
+                              >
+                                {failure.expected}: {failure.actual}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                  Replay ещё не запускался. Он проверяет локальные answer contracts без создания
+                  тестовых диалогов.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader className="pb-2">
-              <div className="flex items-start justify-between gap-2">
-                <div>
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div className="min-w-0">
                   <CardTitle className="text-base">Заявки обмена</CardTitle>
                   <p className="text-muted-foreground text-xs">
                     Статус — короткий денежный lifecycle заявки. Шаг — бизнес-стадия полной 12-step
@@ -1151,6 +1270,7 @@ export function SaasExchange() {
                   type="button"
                   size="sm"
                   variant="outline"
+                  className="w-fit"
                   onClick={runEval}
                   title="Прогнать exchange-сценарии как живые LLM-диалоги и оценить сквозной поток"
                 >

@@ -1,4 +1,10 @@
-import { ExternalLinkIcon, SearchIcon, SendHorizontalIcon, Trash2Icon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  ExternalLinkIcon,
+  SearchIcon,
+  SendHorizontalIcon,
+  Trash2Icon,
+} from "lucide-react";
 import React, { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -6,9 +12,6 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -17,6 +20,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import {
   ApiError,
   type ConversationDetail,
@@ -25,8 +31,9 @@ import {
   type FunnelListItem,
   type LeadListItem,
   type MessageRow,
-  saas,
+  type OperatorHandoffNotification,
   type ServiceCatalogItem,
+  saas,
 } from "../api/saas.ts";
 
 const POLL_INTERVAL_MS = 5000;
@@ -59,6 +66,60 @@ const STATE_RU: Record<string, string> = {
   terminal_lost: "закрыт ✗",
 };
 
+type MessageMeta = {
+  adminId?: number;
+  exchangeAction?: string;
+  exchangeSideEffects?: {
+    action?: string;
+    contactFound?: boolean;
+    orderFound?: boolean;
+    orderId?: number;
+    orderVerificationPatched?: boolean;
+    payoutCodeIssued?: boolean;
+    previousStatus?: string;
+    reason?: string;
+    status?: string;
+    statusPatched?: boolean;
+    verified?: boolean;
+    nextStatus?: string;
+    paymentReviewStatus?: string;
+    proofPatched?: boolean;
+  };
+  orderId?: number | string;
+  parts?: Array<{ kind: string; durationSec?: number }>;
+  payoutCode?: string;
+  sentVia?: string;
+  source?: string;
+};
+
+type OperatorActivityBadge = {
+  label: string;
+  variant: "outline" | "success" | "warning" | "destructive" | "secondary";
+};
+
+const OPERATOR_BOT_ACTION_RU: Record<string, string> = {
+  kyc_approved: "KYC OK",
+  kyc_request_materials: "KYC: дослать",
+  kyc_rejected: "KYC отклонён",
+  payment_under_review: "Оплата проверяется",
+  payment_confirmed: "Оплата OK",
+  payment_problem: "Проблема оплаты",
+  payout_ready: "Выдача готова",
+  office_details: "Офис/время",
+  operator_reply: "Ответ оператора",
+};
+
+const EXCHANGE_EFFECT_STATUS_RU: Record<string, string> = {
+  verified: "подтверждён",
+  materials_requested: "дослать материалы",
+  rejected: "отклонён",
+  paid: "оплачено",
+  payout: "выдача",
+  completed: "завершено",
+  under_review: "проверяется",
+  problem: "проблема",
+};
+
 const FUNNEL_VERTICAL_RU: Record<string, string> = {
   exchange_v1: "Обменка",
   real_estate_v1: "Продажа недвижимости",
@@ -80,8 +141,101 @@ function fmtShortTime(epoch: number): string {
   return new Date(epoch * 1000).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
 }
 
+function parseMessageMeta(metaJson: string | null): MessageMeta | null {
+  if (!metaJson) return null;
+  try {
+    const parsed = JSON.parse(metaJson) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as MessageMeta;
+  } catch {
+    return null;
+  }
+}
+
+function operatorBotLabel(meta: MessageMeta): string | null {
+  if (meta.sentVia === "operator-bot-preview") return "Operator bot";
+  if (meta.source === "operator_bot_exchange_action") return "Operator bot";
+  return null;
+}
+
+function operatorActionLabel(action: string | undefined): string | null {
+  if (!action) return null;
+  return OPERATOR_BOT_ACTION_RU[action] ?? action.replaceAll("_", " ");
+}
+
+function exchangeEffectStatusLabel(status: string | undefined, fallback: string): string {
+  if (!status) return fallback;
+  return EXCHANGE_EFFECT_STATUS_RU[status] ?? status.replaceAll("_", " ");
+}
+
+function operatorSideEffectBadges(meta: MessageMeta | null): OperatorActivityBadge[] {
+  const effect = meta?.exchangeSideEffects;
+  if (!effect?.action) return [];
+  const out: OperatorActivityBadge[] = [];
+
+  if (effect.action === "kyc_approved") {
+    out.push({
+      label: `KYC: ${exchangeEffectStatusLabel(effect.status, "подтверждён")}`,
+      variant: "success",
+    });
+  } else if (effect.action === "kyc_request_materials") {
+    out.push({
+      label: `KYC: ${exchangeEffectStatusLabel(effect.status, "дослать материалы")}`,
+      variant: "warning",
+    });
+  } else if (effect.action === "kyc_rejected") {
+    out.push({
+      label: `KYC: ${exchangeEffectStatusLabel(effect.status, "отклонён")}`,
+      variant: "destructive",
+    });
+  } else if (effect.action === "payment_confirmed") {
+    out.push({
+      label: effect.nextStatus
+        ? `Статус: ${exchangeEffectStatusLabel(effect.nextStatus, effect.nextStatus)}`
+        : "Оплата без смены статуса",
+      variant: effect.statusPatched === false ? "outline" : "success",
+    });
+  } else if (effect.action === "payment_under_review") {
+    out.push({
+      label: `Оплата: ${exchangeEffectStatusLabel(effect.paymentReviewStatus, "проверяется")}`,
+      variant: "warning",
+    });
+    if (effect.proofPatched) {
+      out.push({ label: "Проверка записана", variant: "outline" });
+    }
+  } else if (effect.action === "payment_problem") {
+    out.push({
+      label: `Оплата: ${exchangeEffectStatusLabel(effect.paymentReviewStatus, "проблема")}`,
+      variant: "destructive",
+    });
+    if (effect.proofPatched) {
+      out.push({ label: "Проблема записана", variant: "outline" });
+    }
+  } else if (effect.action === "payout_ready") {
+    out.push({
+      label: effect.nextStatus
+        ? `Статус: ${exchangeEffectStatusLabel(effect.nextStatus, effect.nextStatus)}`
+        : "Выдача без смены статуса",
+      variant: effect.statusPatched === false ? "outline" : "success",
+    });
+    if (effect.payoutCodeIssued) {
+      out.push({ label: "Код выдачи записан", variant: "success" });
+    }
+  }
+
+  if (effect.orderVerificationPatched) {
+    out.push({ label: "Заявка синхронизирована", variant: "outline" });
+  }
+  if (effect.statusPatched === false && effect.reason) {
+    out.push({ label: `Без изменения: ${effect.reason}`, variant: "outline" });
+  }
+  return out;
+}
+
 function funnelLabel(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">): string {
-  return item.verticalTemplateId ? (FUNNEL_VERTICAL_RU[item.verticalTemplateId] ?? item.slug) : item.slug;
+  return item.verticalTemplateId
+    ? (FUNNEL_VERTICAL_RU[item.verticalTemplateId] ?? item.slug)
+    : item.slug;
 }
 
 function serviceTargetLabel(item: ServiceCatalogItem): string {
@@ -89,7 +243,10 @@ function serviceTargetLabel(item: ServiceCatalogItem): string {
     item.routeType === "partner_service"
       ? item.partnerServiceName || "партнёрская услуга"
       : item.funnelSlug
-        ? funnelLabel({ slug: item.funnelSlug, verticalTemplateId: item.funnelVerticalTemplateId ?? null })
+        ? funnelLabel({
+            slug: item.funnelSlug,
+            verticalTemplateId: item.funnelVerticalTemplateId ?? null,
+          })
         : "авто";
   return `${item.name} → ${target}`;
 }
@@ -127,6 +284,7 @@ export function SaasConversations() {
   const [confirmingTakeover, setConfirmingTakeover] = useState(false);
   const [contactLead, setContactLead] = useState<LeadListItem | null>(null);
   const [admins, setAdmins] = useState<import("../api/saas.ts").AdminRow[]>([]);
+  const [operatorHandoffs, setOperatorHandoffs] = useState<OperatorHandoffNotification[]>([]);
 
   // Dialog simulator (dev/test)
   const [simOpen, setSimOpen] = useState(false);
@@ -157,11 +315,17 @@ export function SaasConversations() {
   }
 
   useEffect(() => {
-    saas.listAdmins().then((r) => setAdmins(r.items)).catch(() => {});
+    saas
+      .listAdmins()
+      .then((r) => setAdmins(r.items))
+      .catch(() => {});
   }, []);
 
   const refreshSimStreams = useCallback(() => {
-    saas.listSimStreams().then((r) => setSimStreams(r.streams)).catch(() => {});
+    saas
+      .listSimStreams()
+      .then((r) => setSimStreams(r.streams))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -176,10 +340,16 @@ export function SaasConversations() {
         .catch(() => {});
     }
     if (simFunnels.length === 0) {
-      saas.listFunnels().then((r) => setSimFunnels(r.items)).catch(() => {});
+      saas
+        .listFunnels()
+        .then((r) => setSimFunnels(r.items))
+        .catch(() => {});
     }
     if (simServices.length === 0) {
-      saas.listServiceCatalog().then((r) => setSimServices(r.items)).catch(() => {});
+      saas
+        .listServiceCatalog()
+        .then((r) => setSimServices(r.items))
+        .catch(() => {});
     }
     refreshSimStreams();
     const t = setInterval(refreshSimStreams, POLL_INTERVAL_MS);
@@ -248,13 +418,16 @@ export function SaasConversations() {
     }
   }
 
-  const buildFilters = useCallback(() => ({
-    status: filterStatus,
-    ...(filterSource ? { source: filterSource } : {}),
-    ...(filterMode ? { mode: filterMode } : {}),
-    ...(filterEscalated ? { escalated: true } : {}),
-    ...(filterQDebounced ? { q: filterQDebounced } : {}),
-  }), [filterStatus, filterSource, filterMode, filterEscalated, filterQDebounced]);
+  const buildFilters = useCallback(
+    () => ({
+      status: filterStatus,
+      ...(filterSource ? { source: filterSource } : {}),
+      ...(filterMode ? { mode: filterMode } : {}),
+      ...(filterEscalated ? { escalated: true } : {}),
+      ...(filterQDebounced ? { q: filterQDebounced } : {}),
+    }),
+    [filterStatus, filterSource, filterMode, filterEscalated, filterQDebounced],
+  );
 
   async function refreshList(limit = 30, filters = buildFilters()) {
     try {
@@ -272,7 +445,11 @@ export function SaasConversations() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const res = await saas.listConversations({ limit: 30, cursor: nextCursor, ...buildFilters() });
+      const res = await saas.listConversations({
+        limit: 30,
+        cursor: nextCursor,
+        ...buildFilters(),
+      });
       setList((prev) => {
         const merged = [...prev, ...res.items];
         loadedCountRef.current = merged.length;
@@ -289,7 +466,12 @@ export function SaasConversations() {
 
   async function refreshDetail(id: number) {
     try {
-      setDetail(await saas.getConversation(id));
+      const conversationDetail = await saas.getConversation(id);
+      setDetail(conversationDetail);
+      saas
+        .getConversationOperatorHandoffs(id)
+        .then((res) => setOperatorHandoffs(res.items))
+        .catch(() => setOperatorHandoffs([]));
     } catch (err) {
       if (handleAuthError(err)) return;
       if (err instanceof ApiError && err.status === 404) {
@@ -304,6 +486,7 @@ export function SaasConversations() {
   useEffect(() => {
     if (!selectedId) {
       setDetail(null);
+      setOperatorHandoffs([]);
       return;
     }
     let cancelled = false;
@@ -323,7 +506,8 @@ export function SaasConversations() {
       setContactLead(null);
       return;
     }
-    saas.listLeads({ contactId: detail.conversation.contactId, limit: 1 })
+    saas
+      .listLeads({ contactId: detail.conversation.contactId, limit: 1 })
       .then((r) => setContactLead(r.items[0] ?? null))
       .catch(() => setContactLead(null));
   }, [detail?.conversation.contactId]);
@@ -332,7 +516,9 @@ export function SaasConversations() {
   useEffect(() => {
     if (filterQTimerRef.current) clearTimeout(filterQTimerRef.current);
     filterQTimerRef.current = setTimeout(() => setFilterQDebounced(filterQ), 350);
-    return () => { if (filterQTimerRef.current) clearTimeout(filterQTimerRef.current); };
+    return () => {
+      if (filterQTimerRef.current) clearTimeout(filterQTimerRef.current);
+    };
   }, [filterQ]);
 
   // Re-fetch when filters change
@@ -406,7 +592,10 @@ export function SaasConversations() {
     }
   }
 
-  async function handleUpdateConversation(patch: { status?: string; assignedAdminId?: number | null }) {
+  async function handleUpdateConversation(patch: {
+    status?: string;
+    assignedAdminId?: number | null;
+  }) {
     if (!selectedId) return;
     try {
       await saas.updateConversation(selectedId, patch);
@@ -523,7 +712,10 @@ export function SaasConversations() {
                 </div>
               </>
             )}
-            <Button onClick={handleStartSim} disabled={simStarting || (!simStream && !simPersonaId)}>
+            <Button
+              onClick={handleStartSim}
+              disabled={simStarting || (!simStream && !simPersonaId)}
+            >
               {simStarting ? "Запуск…" : simStream ? "Запустить поток" : "Запустить"}
             </Button>
             <Button variant="destructive" onClick={handleStopAllStreams}>
@@ -536,8 +728,8 @@ export function SaasConversations() {
               checked={simStream}
               onChange={(e) => setSimStream(e.target.checked)}
             />
-            Поток («боевой режим»): новый клиент каждые N секунд. «Остановить все» глушит и
-            уже идущие диалоги.
+            Поток («боевой режим»): новый клиент каждые N секунд. «Остановить все» глушит и уже
+            идущие диалоги.
           </label>
           {simStreams.length > 0 && (
             <div className="space-y-1 border-t pt-2">
@@ -596,7 +788,10 @@ export function SaasConversations() {
               />
             </div>
             <div className="flex gap-1.5">
-              <Select value={filterSource || "all"} onValueChange={(v) => setFilterSource(v === "all" ? "" : v)}>
+              <Select
+                value={filterSource || "all"}
+                onValueChange={(v) => setFilterSource(v === "all" ? "" : v)}
+              >
                 <SelectTrigger className="h-7 text-xs flex-1">
                   <SelectValue placeholder="Канал" />
                 </SelectTrigger>
@@ -608,7 +803,10 @@ export function SaasConversations() {
                   <SelectItem value="web">Web</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={filterMode || "all"} onValueChange={(v) => setFilterMode(v === "all" ? "" : v)}>
+              <Select
+                value={filterMode || "all"}
+                onValueChange={(v) => setFilterMode(v === "all" ? "" : v)}
+              >
                 <SelectTrigger className="h-7 text-xs flex-1">
                   <SelectValue placeholder="Режим" />
                 </SelectTrigger>
@@ -628,7 +826,8 @@ export function SaasConversations() {
               </Button>
             </div>
             <p className="text-[10px] text-muted-foreground px-0.5">
-              {list.length}{nextCursor ? "+" : ""} диалог{list.length === 1 ? "" : list.length < 5 ? "а" : "ов"}
+              {list.length}
+              {nextCursor ? "+" : ""} диалог{list.length === 1 ? "" : list.length < 5 ? "а" : "ов"}
             </p>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
@@ -744,7 +943,9 @@ export function SaasConversations() {
                     {detail.conversation.contactName ?? `Контакт #${detail.conversation.contactId}`}
                   </p>
                   <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                    <Badge variant="secondary">{SOURCE_RU[detail.conversation.source] ?? detail.conversation.source}</Badge>
+                    <Badge variant="secondary">
+                      {SOURCE_RU[detail.conversation.source] ?? detail.conversation.source}
+                    </Badge>
                     <Badge variant={detail.conversation.mode === "human" ? "warning" : "outline"}>
                       {detail.conversation.mode === "human" ? "оператор" : "AI"}
                     </Badge>
@@ -768,7 +969,12 @@ export function SaasConversations() {
                 {confirmingTakeover ? (
                   <div className="flex items-center gap-1.5 text-sm">
                     <span className="text-muted-foreground">AI замолчит?</span>
-                    <Button size="sm" variant="destructive" onClick={handleToggleMode} disabled={togglingMode}>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={handleToggleMode}
+                      disabled={togglingMode}
+                    >
                       Да
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => setConfirmingTakeover(false)}>
@@ -791,6 +997,34 @@ export function SaasConversations() {
                 )}
               </div>
 
+              {operatorHandoffs.length > 0 && (
+                <div className="border-b bg-amber-500/10 px-4 py-3">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <AlertTriangleIcon className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                        <span className="text-sm font-semibold">Нужно действие оператора</span>
+                        <Badge variant="warning">{operatorHandoffs.length}</Badge>
+                      </div>
+                      <div className="space-y-1">
+                        {operatorHandoffs.slice(0, 2).map((item) => (
+                          <div key={item.id} className="text-xs text-muted-foreground">
+                            <span className="font-medium text-foreground">{item.title}</span>
+                            {item.body ? ` · ${item.body}` : ""}
+                            <span className="ml-1 font-mono">{fmtTime(item.createdAt)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {detail.conversation.mode !== "human" && (
+                      <Button size="sm" variant="outline" onClick={handleToggleMode}>
+                        Перехватить
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
                 {detail.messages.length === 0 ? (
                   <p className="text-center text-sm text-muted-foreground">Сообщений нет</p>
@@ -799,10 +1033,16 @@ export function SaasConversations() {
                     const mine = m.role === "assistant" || m.role === "human";
                     const system = m.role === "system";
                     const showLabel = m.role !== "user";
+                    const meta = parseMessageMeta(m.metaJson);
+                    const operatorBot = meta ? operatorBotLabel(meta) : null;
+                    const operatorAction = meta ? operatorActionLabel(meta.exchangeAction) : null;
+                    const operatorActivity = operatorSideEffectBadges(meta);
                     const labelColor =
-                      m.role === "assistant" ? "text-primary" :
-                      m.role === "human" ? "text-[var(--success)]" :
-                      "text-muted-foreground";
+                      m.role === "assistant"
+                        ? "text-primary"
+                        : m.role === "human"
+                          ? "text-[var(--success)]"
+                          : "text-muted-foreground";
                     return (
                       <div
                         key={m.id}
@@ -818,7 +1058,12 @@ export function SaasConversations() {
                         )}
                       >
                         <div className="mb-1 flex items-center justify-between gap-3">
-                          <span className={cn("text-[11px] font-semibold", showLabel ? labelColor : "text-muted-foreground/50")}>
+                          <span
+                            className={cn(
+                              "text-[11px] font-semibold",
+                              showLabel ? labelColor : "text-muted-foreground/50",
+                            )}
+                          >
                             {showLabel ? (ROLE_RU[m.role] ?? m.role) : ""}
                           </span>
                           <div className="flex items-center gap-1.5">
@@ -831,7 +1076,9 @@ export function SaasConversations() {
                                 <Trash2Icon className="size-3" />
                               </button>
                             )}
-                            <span className="font-mono text-[10px] text-muted-foreground">{fmtShortTime(m.createdAt)}</span>
+                            <span className="font-mono text-[10px] text-muted-foreground">
+                              {fmtShortTime(m.createdAt)}
+                            </span>
                           </div>
                         </div>
                         <div
@@ -842,13 +1089,13 @@ export function SaasConversations() {
                         >
                           {(() => {
                             let voiceDuration: number | undefined;
-                            try {
-                              const meta = m.metaJson ? JSON.parse(m.metaJson) as { parts?: Array<{ kind: string; durationSec?: number }> } : null;
-                              const voice = meta?.parts?.find((p) => p.kind === "voice");
-                              if (voice) voiceDuration = voice.durationSec;
-                            } catch { /* ignore */ }
+                            const voice = meta?.parts?.find((p) => p.kind === "voice");
+                            if (voice) voiceDuration = voice.durationSec;
 
-                            if (voiceDuration !== undefined || (!m.text && m.metaJson?.includes('"voice"'))) {
+                            if (
+                              voiceDuration !== undefined ||
+                              (!m.text && m.metaJson?.includes('"voice"'))
+                            ) {
                               return (
                                 <span className="flex flex-col gap-1">
                                   <span className="text-xs text-muted-foreground italic">
@@ -858,11 +1105,41 @@ export function SaasConversations() {
                                 </span>
                               );
                             }
-                            return m.text
-                              ? <span>{m.text}</span>
-                              : <span className="italic text-muted-foreground">—</span>;
+                            return m.text ? (
+                              <span>{m.text}</span>
+                            ) : (
+                              <span className="italic text-muted-foreground">—</span>
+                            );
                           })()}
                         </div>
+                        {(operatorBot ||
+                          operatorAction ||
+                          meta?.orderId ||
+                          meta?.payoutCode ||
+                          operatorActivity.length > 0) && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {operatorBot && (
+                              <Badge
+                                variant="outline"
+                                className="border-[var(--success)]/30 text-[var(--success)]"
+                              >
+                                {operatorBot}
+                              </Badge>
+                            )}
+                            {operatorAction && <Badge variant="secondary">{operatorAction}</Badge>}
+                            {meta?.orderId && (
+                              <Badge variant="outline">Заявка #{meta.orderId}</Badge>
+                            )}
+                            {meta?.payoutCode && (
+                              <Badge variant="warning">Код {meta.payoutCode}</Badge>
+                            )}
+                            {operatorActivity.map((item) => (
+                              <Badge key={item.label} variant={item.variant}>
+                                {item.label}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })
@@ -903,15 +1180,15 @@ export function SaasConversations() {
         {/* Инфо-панель (Right Sidebar) */}
         <Card className="flex max-h-[72vh] flex-col gap-0 overflow-hidden py-0">
           {!detail ? (
-            <div className="p-4 text-center text-sm text-muted-foreground">
-              Выберите диалог
-            </div>
+            <div className="p-4 text-center text-sm text-muted-foreground">Выберите диалог</div>
           ) : (
             <div className="flex flex-col h-full overflow-y-auto p-4 space-y-6">
               {/* Статус и Назначение */}
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold uppercase text-muted-foreground">Статус</label>
+                  <label className="text-[11px] font-bold uppercase text-muted-foreground">
+                    Статус
+                  </label>
                   <Select
                     value={detail.conversation.status}
                     onValueChange={(v) => handleUpdateConversation({ status: v })}
@@ -928,10 +1205,16 @@ export function SaasConversations() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold uppercase text-muted-foreground">Назначен на</label>
+                  <label className="text-[11px] font-bold uppercase text-muted-foreground">
+                    Назначен на
+                  </label>
                   <Select
                     value={String(detail.conversation.assignedAdminId ?? "none")}
-                    onValueChange={(v) => handleUpdateConversation({ assignedAdminId: v === "none" ? null : Number.parseInt(v, 10) })}
+                    onValueChange={(v) =>
+                      handleUpdateConversation({
+                        assignedAdminId: v === "none" ? null : Number.parseInt(v, 10),
+                      })
+                    }
                   >
                     <SelectTrigger className="h-9">
                       <SelectValue />
@@ -951,9 +1234,15 @@ export function SaasConversations() {
               {/* Контакт и Лид */}
               <div className="space-y-3 border-t pt-4">
                 <div className="space-y-1">
-                  <label className="text-[11px] font-bold uppercase text-muted-foreground">Контакт</label>
-                  <p className="text-sm font-medium">{detail.conversation.contactName || "Без имени"}</p>
-                  <p className="text-[11px] text-muted-foreground">ID: {detail.conversation.contactId}</p>
+                  <label className="text-[11px] font-bold uppercase text-muted-foreground">
+                    Контакт
+                  </label>
+                  <p className="text-sm font-medium">
+                    {detail.conversation.contactName || "Без имени"}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    ID: {detail.conversation.contactId}
+                  </p>
                 </div>
 
                 {contactLead ? (
@@ -966,7 +1255,9 @@ export function SaasConversations() {
                     </div>
                     <div className="space-y-1">
                       <p className="text-[11px] text-muted-foreground">Стадия</p>
-                      <Badge variant="outline" className="text-[10px]">{STATE_RU[contactLead.state] ?? contactLead.state}</Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        {STATE_RU[contactLead.state] ?? contactLead.state}
+                      </Badge>
                     </div>
                     <Button
                       size="sm"
@@ -982,7 +1273,9 @@ export function SaasConversations() {
                           if (r.terminal) setError("");
                         } catch (err) {
                           if (!handleAuthError(err))
-                            setError(err instanceof ApiError ? err.message : "Не удалось продвинуть");
+                            setError(
+                              err instanceof ApiError ? err.message : "Не удалось продвинуть",
+                            );
                         } finally {
                           setAdvancing(false);
                         }
@@ -1003,7 +1296,8 @@ export function SaasConversations() {
                           await saas.createLead(detail.conversation.contactId);
                           await refreshDetail(selectedId!);
                         } catch (err) {
-                          if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
+                          if (!handleAuthError(err))
+                            setError(err instanceof Error ? err.message : String(err));
                         }
                       }}
                     >

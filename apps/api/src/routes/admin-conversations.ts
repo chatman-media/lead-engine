@@ -1,5 +1,6 @@
 import { type Db, type NotificationService, withTenant } from "@chatman-media/conversation-engine";
 import {
+  adminNotifications,
   admins,
   channelIdentities,
   channels,
@@ -205,6 +206,50 @@ export function makeAdminConversationsRoutes(
       conversation: result.conversation,
       messages: [...result.messages].reverse(),
     });
+  });
+
+  app.get("/api/admin/conversations/:id/operator-handoffs", async (c) => {
+    const tenantId = c.var.tenantId;
+    const id = Number.parseInt(c.req.param("id"), 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return c.json({ error: "invalid conversation id" }, 400);
+    }
+
+    const result = await withTenant(opts.db, tenantId, async (tx) => {
+      const [conv] = await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(
+          and(eq(conversations.tenantId, tenantId), eq(conversations.id, id)),
+        )
+        .limit(1);
+      if (!conv) return null;
+
+      return tx
+        .select({
+          id: adminNotifications.id,
+          topic: adminNotifications.topic,
+          severity: adminNotifications.severity,
+          kind: adminNotifications.kind,
+          title: adminNotifications.title,
+          body: adminNotifications.body,
+          deliveredAt: adminNotifications.deliveredAt,
+          createdAt: adminNotifications.createdAt,
+        })
+        .from(adminNotifications)
+        .where(
+          and(
+            eq(adminNotifications.tenantId, tenantId),
+            eq(adminNotifications.kind, "operator_handoff_required"),
+            sql`${adminNotifications.dedupKey} LIKE ${`operator_handoff_required:${id}:%`}`,
+          ),
+        )
+        .orderBy(desc(adminNotifications.createdAt))
+        .limit(10);
+    });
+
+    if (!result) return c.json({ error: "conversation not found" }, 404);
+    return c.json({ items: result });
   });
 
   /**

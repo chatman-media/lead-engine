@@ -262,6 +262,7 @@ export function makeTelegramWebhookRoutes(opts: {
         inbound,
         result,
         replyStrategy: replyStrategyWithButtons,
+        notifications: opts.notificationService ?? null,
         ...(opts.sink ? { sink: opts.sink } : {}),
       });
       result = { ...result, outboundEnqueued: gen.outboundEnqueued };

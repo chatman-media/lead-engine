@@ -3,29 +3,29 @@ import { and, eq, sql } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
 export interface SkillOutcomeRow {
-  id: number;
-  tenantId: number;
-  leadId: number;
-  conversationId: number | null;
-  messageId: number | null;
-  styleSlug: string | null;
-  skillSlug: string;
-  outcome: "won" | "lost" | "draw";
-  source:
-    | "lead_submitted"
-    | "lead_rejected"
-    | "lead_ghosted"
-    | "manual"
-    | "self_play";
-  createdAt: number;
+	id: number;
+	tenantId: number;
+	leadId: number;
+	conversationId: number | null;
+	messageId: number | null;
+	styleSlug: string | null;
+	skillSlug: string;
+	outcome: "won" | "lost" | "draw";
+	source:
+		| "lead_submitted"
+		| "lead_rejected"
+		| "lead_ghosted"
+		| "manual"
+		| "self_play";
+	createdAt: number;
 }
 
 export interface SkillAggregateRow {
-  skillSlug: string;
-  wins: number;
-  losses: number;
-  draws: number;
-  total: number;
+	skillSlug: string;
+	wins: number;
+	losses: number;
+	draws: number;
+	total: number;
 }
 
 /**
@@ -39,24 +39,24 @@ export interface SkillAggregateRow {
  * запись на тройку — повторный coach-batch на тот же lead = no-op.
  */
 export class SkillOutcomesRepo {
-  constructor(private readonly ctx: RepoCtx) {}
+	constructor(private readonly ctx: RepoCtx) {}
 
-  /**
-   * Idempotent insert: ON CONFLICT DO NOTHING на uq_skill_outcomes_idempotency
-   * (lead_id, skill_slug, source). Возвращает true если строка реально
-   * вставлена, false если был conflict.
-   */
-  async record(opts: {
-    leadId: number;
-    skillSlug: string;
-    outcome: "won" | "lost" | "draw";
-    source: SkillOutcomeRow["source"];
-    conversationId?: number | null;
-    messageId?: number | null;
-    styleSlug?: string | null;
-    nowEpoch: number;
-  }): Promise<boolean> {
-    const result = (await this.ctx.db.execute(sql`
+	/**
+	 * Idempotent insert: ON CONFLICT DO NOTHING на uq_skill_outcomes_idempotency
+	 * (lead_id, skill_slug, source). Возвращает true если строка реально
+	 * вставлена, false если был conflict.
+	 */
+	async record(opts: {
+		leadId: number;
+		skillSlug: string;
+		outcome: "won" | "lost" | "draw";
+		source: SkillOutcomeRow["source"];
+		conversationId?: number | null;
+		messageId?: number | null;
+		styleSlug?: string | null;
+		nowEpoch: number;
+	}): Promise<boolean> {
+		const result = (await this.ctx.db.execute(sql`
       INSERT INTO skill_outcomes
         (tenant_id, lead_id, conversation_id, message_id, style_slug,
          skill_slug, outcome, source, created_at)
@@ -68,30 +68,30 @@ export class SkillOutcomesRepo {
       ON CONFLICT (lead_id, skill_slug, source) DO NOTHING
       RETURNING id
     `)) as unknown as Array<{ id: number }>;
-    return result.length > 0;
-  }
+		return result.length > 0;
+	}
 
-  /** Все outcomes по lead'у (для inspect'а в admin-UI). */
-  async byLeadId(leadId: number): Promise<SkillOutcomeRow[]> {
-    const rows = await this.ctx.db
-      .select()
-      .from(skillOutcomesTable)
-      .where(
-        and(
-          eq(skillOutcomesTable.tenantId, this.ctx.tenantId),
-          eq(skillOutcomesTable.leadId, leadId),
-        ),
-      );
-    return rows as SkillOutcomeRow[];
-  }
+	/** Все outcomes по lead'у (для inspect'а в admin-UI). */
+	async byLeadId(leadId: number): Promise<SkillOutcomeRow[]> {
+		const rows = await this.ctx.db
+			.select()
+			.from(skillOutcomesTable)
+			.where(
+				and(
+					eq(skillOutcomesTable.tenantId, this.ctx.tenantId),
+					eq(skillOutcomesTable.leadId, leadId),
+				),
+			);
+		return rows as SkillOutcomeRow[];
+	}
 
-  /**
-   * Aggregate win/loss/draw counts per skill. Без фильтра по style_slug —
-   * стиль-specific агрегаты для shadow-evaluations считаются отдельным
-   * запросом в caller'е через дополнительный WHERE.
-   */
-  async aggregates(): Promise<SkillAggregateRow[]> {
-    const rows = (await this.ctx.db.execute(sql`
+	/**
+	 * Aggregate win/loss/draw counts per skill. Без фильтра по style_slug —
+	 * стиль-specific агрегаты для shadow-evaluations считаются отдельным
+	 * запросом в caller'е через дополнительный WHERE.
+	 */
+	async aggregates(): Promise<SkillAggregateRow[]> {
+		const rows = (await this.ctx.db.execute(sql`
       SELECT
         skill_slug,
         SUM(CASE WHEN outcome='won' THEN 1 ELSE 0 END)::INTEGER  AS wins,
@@ -103,18 +103,18 @@ export class SkillOutcomesRepo {
       GROUP BY skill_slug
       ORDER BY total DESC
     `)) as unknown as Array<{
-      skill_slug: string;
-      wins: number;
-      losses: number;
-      draws: number;
-      total: number;
-    }>;
-    return rows.map((r) => ({
-      skillSlug: r.skill_slug,
-      wins: r.wins,
-      losses: r.losses,
-      draws: r.draws,
-      total: r.total,
-    }));
-  }
+			skill_slug: string;
+			wins: number;
+			losses: number;
+			draws: number;
+			total: number;
+		}>;
+		return rows.map((r) => ({
+			skillSlug: r.skill_slug,
+			wins: r.wins,
+			losses: r.losses,
+			draws: r.draws,
+			total: r.total,
+		}));
+	}
 }

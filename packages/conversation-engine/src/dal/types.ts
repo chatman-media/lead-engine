@@ -23,6 +23,6 @@ export type Db = PostgresJsDatabase<typeof schema>;
  * RLS до этапа 9+. Защита — ESLint-правило на raw SQL в репозиториях.
  */
 export interface RepoCtx {
-  db: Db;
-  tenantId: number;
+	db: Db;
+	tenantId: number;
 }

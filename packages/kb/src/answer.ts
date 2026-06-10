@@ -1,3 +1,4 @@
+import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { z } from "zod";
 import {
   type AnswerInput,
@@ -6,8 +7,8 @@ import {
   NO_CONTEXT_MARKER,
   type Persona,
 } from "./answer-types.ts";
-import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import { checkFacts } from "./fact-checker.ts";
+import { expandQueries } from "./multi-query.ts";
 import {
   botPresenceReply,
   isBotPresenceQuestion,
@@ -17,9 +18,8 @@ import {
   personaSmalltalkReply,
 } from "./persona-shortcuts.ts";
 import { composeSystemPrompt } from "./prompt.ts";
-import { rewriteQuery } from "./rewrite-query.ts";
 import { applyDynamicThreshold, mmrDiversify, rrfMerge } from "./retrieval-utils.ts";
-import { expandQueries } from "./multi-query.ts";
+import { rewriteQuery } from "./rewrite-query.ts";
 import { sanitizeLlmOutput } from "./sanitize.ts";
 import {
   injectJsonInstruction,
@@ -70,7 +70,8 @@ export {
 function toolCallsToGroundingContext(records: ToolCallRecord[] | undefined): string {
   if (!records || records.length === 0) return "";
   const lines = records.map((record, index) => {
-    const result = typeof record.result === "string" ? record.result : JSON.stringify(record.result);
+    const result =
+      typeof record.result === "string" ? record.result : JSON.stringify(record.result);
     return `[#tool-${index + 1}] ${record.name}: ${result ?? ""}`;
   });
   return `TOOL RESULTS:\n${lines.join("\n")}`;
@@ -254,9 +255,10 @@ async function answerFromHits(opts: {
     });
     temperature = input.style.model.temperature;
   } else {
+    const legacyContext = [context, input.requestContext?.trim()].filter(Boolean).join("\n\n");
     systemPrompt = buildSystemPrompt(
       input.persona ?? DEFAULT_PERSONA,
-      context,
+      legacyContext,
       input.userFacts,
       input.conversationSummary,
     );
@@ -338,6 +340,7 @@ async function answerFromHits(opts: {
       ...baseTelemetry,
       generation_ms: generationMs,
       ...(toolCallTelemetry ? { toolCall: toolCallTelemetry } : {}),
+      ...(multiCycleToolCalls ? { toolCalls: multiCycleToolCalls } : {}),
     };
     const result: AnswerResult = {
       text: rawJson,
@@ -359,6 +362,7 @@ async function answerFromHits(opts: {
     ...baseTelemetry,
     generation_ms: generationMs,
     ...(toolCallTelemetry ? { toolCall: toolCallTelemetry } : {}),
+    ...(multiCycleToolCalls ? { toolCalls: multiCycleToolCalls } : {}),
   };
 
   const runVacancyCheck = vacBlock.length > 0 && input.vacancyGuard !== false;
@@ -383,7 +387,9 @@ async function answerFromHits(opts: {
 
   if (runFactCheck) {
     const toolContext = toolCallsToGroundingContext(multiCycleToolCalls);
-    const groundingContext = toolContext ? [context, toolContext].filter(Boolean).join("\n\n") : context;
+    const groundingContext = toolContext
+      ? [context, toolContext].filter(Boolean).join("\n\n")
+      : context;
     const verdict = await checkFacts({
       question: input.question,
       answer: text,
@@ -480,9 +486,8 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
   }
 
   // ── Retrieval ────────────────────────────────────────────────────────────
-  const topK = input.topK ?? 5;
-  const { hits: retrievedHits, retrievalMs, searchQuery, queries } = await retrieveHits(input);
-  let hits = retrievedHits;
+  const { hits: retrievedHits, retrievalMs, searchQuery } = await retrieveHits(input);
+  const hits = retrievedHits;
 
   if (hits.length === 0 && !(input.vacanciesBlock ?? "").trim() && !input.style) {
     input.onTelemetry?.({
@@ -528,9 +533,10 @@ export async function* answerWithRagStream(input: AnswerInput): AsyncIterable<st
     });
     temperature = input.style.model.temperature;
   } else {
+    const legacyContext = [context, input.requestContext?.trim()].filter(Boolean).join("\n\n");
     systemPrompt = buildSystemPrompt(
       input.persona ?? DEFAULT_PERSONA,
-      context,
+      legacyContext,
       input.userFacts,
       input.conversationSummary,
     );
@@ -628,7 +634,6 @@ export async function answerWithRag(input: AnswerInput): Promise<AnswerResult> {
     }
   }
 
-  const topK = input.topK ?? 5;
   // RAG-поиск не критичен: если эмбеддер/векторный поиск недоступен (напр.
   // 429 quota у провайдера эмбеддингов), не роняем весь ответ — отвечаем без
   // KB-контекста (на чате + инструментах). База знаний для бота опциональна.

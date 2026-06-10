@@ -1,6 +1,9 @@
-import type { ExperimentRow, StylesRepo } from "./dal/index.ts";
 import { parseAllocation } from "./dal/experiments.ts";
-import { parseStyleConfig, type ResolvedStyleAssignment } from "./reply-strategy/rag-reply.ts";
+import type { ExperimentRow, StylesRepo } from "./dal/index.ts";
+import {
+	parseStyleConfig,
+	type ResolvedStyleAssignment,
+} from "./reply-strategy/rag-reply.ts";
 
 /**
  * Загружает variants эксперимента: парсит allocation_json + резолвит каждый
@@ -11,28 +14,32 @@ import { parseStyleConfig, type ResolvedStyleAssignment } from "./reply-strategy
  * fall back'нет на default style (или DEFAULT_PERSONA если style тоже нет).
  */
 export async function loadExperimentVariants(
-  experiment: ExperimentRow,
-  stylesRepo: StylesRepo,
+	experiment: ExperimentRow,
+	stylesRepo: StylesRepo,
 ): Promise<Array<{ style: ResolvedStyleAssignment; weight: number }> | null> {
-  const entries = parseAllocation(experiment.allocationJson);
-  const variants: Array<{ style: ResolvedStyleAssignment; weight: number }> = [];
-  for (const entry of entries) {
-    const row = await stylesRepo.findActiveBySlug(entry.styleSlug);
-    if (!row) {
-      console.warn(
-        `[experiment-router] experiment=${experiment.slug}: style=${entry.styleSlug} not found, skipping`,
-      );
-      continue;
-    }
-    const style = parseStyleConfig(row.configJson);
-    if (!style) {
-      console.warn(
-        `[experiment-router] experiment=${experiment.slug}: style=${entry.styleSlug} invalid config_json, skipping`,
-      );
-      continue;
-    }
-    variants.push({ style: { ...style, styleId: row.id }, weight: entry.weight });
-  }
-  if (variants.length === 0) return null;
-  return variants;
+	const entries = parseAllocation(experiment.allocationJson);
+	const variants: Array<{ style: ResolvedStyleAssignment; weight: number }> =
+		[];
+	for (const entry of entries) {
+		const row = await stylesRepo.findActiveBySlug(entry.styleSlug);
+		if (!row) {
+			console.warn(
+				`[experiment-router] experiment=${experiment.slug}: style=${entry.styleSlug} not found, skipping`,
+			);
+			continue;
+		}
+		const style = parseStyleConfig(row.configJson);
+		if (!style) {
+			console.warn(
+				`[experiment-router] experiment=${experiment.slug}: style=${entry.styleSlug} invalid config_json, skipping`,
+			);
+			continue;
+		}
+		variants.push({
+			style: { ...style, styleId: row.id },
+			weight: entry.weight,
+		});
+	}
+	if (variants.length === 0) return null;
+	return variants;
 }

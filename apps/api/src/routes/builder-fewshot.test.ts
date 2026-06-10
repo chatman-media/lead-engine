@@ -5,12 +5,14 @@
 // broken funnels; this test fails loudly instead.
 
 import { describe, expect, it } from "bun:test";
+import { buildCopilotSystemPrompt } from "./admin-copilot.ts";
 import {
   normalizeStages,
   type StageDraft,
   SYSTEM_PROMPT,
   validateFunnel,
 } from "./admin-workflow.ts";
+import { FUNNEL_GENERATION_CONTRACT_PROMPT } from "./funnel-builder-prompt.ts";
 
 /** Extract each JSON object that starts at `{"reply":` and is a ready funnel. */
 function extractFunnelExamples(prompt: string): Array<{ stages: StageDraft[] }> {
@@ -57,5 +59,14 @@ describe("AI-builder few-shot examples in SYSTEM_PROMPT", () => {
       const { errors } = validateFunnel(stages);
       expect(errors, `example errors: ${errors.join("; ")}`).toEqual([]);
     }
+  });
+});
+
+describe("shared funnel generation contract", () => {
+  it("is embedded in both workflow builder and copilot prompts", () => {
+    expect(SYSTEM_PROMPT).toContain(FUNNEL_GENERATION_CONTRACT_PROMPT);
+    expect(buildCopilotSystemPrompt("funnel", null)).toContain(
+      FUNNEL_GENERATION_CONTRACT_PROMPT,
+    );
   });
 });

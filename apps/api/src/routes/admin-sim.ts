@@ -6,6 +6,7 @@
  * DELETE /api/admin/sim/stream/:id   — остановить поток (отменить ещё не запущенных)
  * GET    /api/admin/sim/streams      — активные потоки
  * GET    /api/admin/sim/personas     — список готовых персон/сценариев
+ * POST   /api/admin/sim/exchange-answer-quality-eval — быстрый replay answer-quality кейсов
  * DELETE /api/admin/sim/:id          — удалить симулированный диалог
  *
  * Идея: оператор сидит в обычном инбоксе (SaasConversations) и наблюдает,
@@ -37,6 +38,13 @@ import {
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { FieldExtractor } from "../lib/field-extractor.ts";
 import { scoreExchangeDialog } from "../lib/exchange/eval.ts";
+import {
+  EXCHANGE_ANSWER_QUALITY_CASES,
+  EXCHANGE_BAD_DIALOG_REPLAY_CASES,
+  evaluateExchangeAnswerQualityCases,
+  evaluateExchangeBadDialogCases,
+  formatExchangeGoldenFailures,
+} from "../lib/exchange/golden-eval.ts";
 import type { VerticalTemplate } from "@chatman-media/verticals";
 import type { Inbound, OutboundPart } from "@chatman-media/channel-core";
 import {
@@ -753,6 +761,7 @@ export function makeAdminSimRoutes(opts: {
     if (!firstUser) throw new Error("persona produced no message");
     const first = await runExchange(firstUser);
     if (!first) throw new Error("pipeline produced no conversation");
+    if (!first.botReply.trim()) return first.conversationId;
     exchanges.push({ user: firstUser, bot: first.botReply });
 
     const runRest = async () => {
@@ -761,7 +770,7 @@ export function makeAdminSimRoutes(opts: {
         const userText = await nextUserMessage();
         if (!userText || aborted()) break;
         const res = await runExchange(userText);
-        if (!res) break;
+        if (!res || !res.botReply.trim()) break;
         exchanges.push({ user: userText, bot: res.botReply });
       }
     };
@@ -825,6 +834,60 @@ export function makeAdminSimRoutes(opts: {
     for (const t of st.timers) clearTimeout(t);
     st.timers = [];
     return c.json({ ok: true, spawned: st.spawned, total: st.total });
+  });
+
+  // ── POST /api/admin/sim/exchange-answer-quality-eval ──────────────────
+  // Быстрый deterministic replay без LLM/каналов/БД-записей: проверяет
+  // exchange answer contracts, state-pack, sensitive replies и policy guard.
+  app.post("/api/admin/sim/exchange-answer-quality-eval", async (c) => {
+    const body = await c.req.json().catch(() => ({}) as Record<string, unknown>);
+    const ids = Array.isArray(body.caseIds) ? (body.caseIds as string[]) : undefined;
+    const contractCases = EXCHANGE_ANSWER_QUALITY_CASES.filter(
+      (item) => !ids || ids.includes(item.id),
+    );
+    const dialogCases = EXCHANGE_BAD_DIALOG_REPLAY_CASES.filter(
+      (item) => !ids || ids.includes(item.id),
+    );
+    if (contractCases.length === 0 && dialogCases.length === 0) {
+      return c.json({ error: "no answer-quality cases" }, 400);
+    }
+
+    const results = [
+      ...evaluateExchangeAnswerQualityCases(contractCases),
+      ...evaluateExchangeBadDialogCases(dialogCases),
+    ];
+    const casesById = new Map<
+      string,
+      {
+        suite: "contract" | "bad_dialog";
+        item: (typeof contractCases)[number] | (typeof dialogCases)[number];
+      }
+    >();
+    for (const item of contractCases) casesById.set(item.id, { suite: "contract", item });
+    for (const item of dialogCases) casesById.set(item.id, { suite: "bad_dialog", item });
+    const passed = results.filter((result) => result.passed).length;
+    return c.json({
+      summary: {
+        passed,
+        total: results.length,
+        failed: results.length - passed,
+      },
+      failuresText: formatExchangeGoldenFailures(results),
+      report: results.map((result) => {
+        const entry = casesById.get(result.caseId);
+        const item = entry?.item;
+        return {
+          id: result.caseId,
+          title: item?.title ?? result.caseId,
+          suite: entry?.suite ?? null,
+          passed: result.passed,
+          expectedContract: item?.expectedContract ?? null,
+          expectedDeterministic: item?.expectedDeterministic ?? null,
+          trace: result.trace,
+          failures: result.failures,
+        };
+      }),
+    });
   });
 
   // ── POST /api/admin/sim/exchange-eval ──────────────────────────────────

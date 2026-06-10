@@ -2,8 +2,9 @@ import type { Db } from "@chatman-media/conversation-engine";
 import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import { defaultRegistry } from "@chatman-media/verticals";
 import { Hono } from "hono";
-import { FIELD_TYPES, type SeedStage, STAGE_KINDS, STAGE_TYPES } from "./admin-funnel.ts";
+import type { SeedStage } from "./admin-funnel.ts";
 import { normalizeStages, type StageDraft } from "./admin-workflow.ts";
+import { buildCopilotBuildFunnelActionPrompt } from "./funnel-builder-prompt.ts";
 
 /**
  * AI-ассистент админки (copilot). Встроенный чат: отвечает по данным текущей
@@ -64,7 +65,7 @@ const PAGE_HINTS: Record<string, string> = {
   superadmin: "Платформенная панель аккаунтов (суперадмин). Помогай по тенантам.",
 };
 
-function buildSystemPrompt(page: string, contextJson: string | null): string {
+export function buildCopilotSystemPrompt(page: string, contextJson: string | null): string {
   const pageHint = PAGE_HINTS[page] ?? `Текущая страница админки: «${page}».`;
   return `Ты — встроенный AI-ассистент SaaS-платформы lead-engine (админка бота-продавца).
 Помогаешь оператору: отвечаешь на вопросы ПО ДАННЫМ ТЕКУЩЕЙ СТРАНИЦЫ и помогаешь настроить кабинет.
@@ -82,19 +83,7 @@ ${contextJson ? `ДАННЫЕ СТРАНИЦЫ (JSON, может быть обр
 1) Установить готовую воронку (вертикаль) — slug бери из списка доступных вертикалей в данных страницы:
    { "type": "install_vertical", "slug": "<slug>" }
 
-2) Собрать кастомную воронку (когда собрал достаточно информации):
-   { "type": "build_funnel", "stages": [ <стадии> ] }
-   Схема стадии:
-   { "slug": "snake_case", "displayName": "Название",
-     "kind": один из ${JSON.stringify(STAGE_KINDS)},
-     "stageType": один из ${JSON.stringify(STAGE_TYPES)},
-     "supportMode": true|false (опц.), "nextStages": ["slug", ...],
-     "fields": [ { "slug": "snake_case", "displayName": "...",
-       "fieldType": один из ${JSON.stringify(FIELD_TYPES)},
-       "required": true|false, "aiExtractable": true|false,
-       "options": ["..."] (только для select/multiselect) } ] }
-   Правила: ровно одна стадия kind "intake", минимум одна "terminal_won" и одна "terminal_lost";
-   4–8 стадий; slug'и уникальны; nextStages ссылаются только на существующие slug'и.
+${buildCopilotBuildFunnelActionPrompt()}
 
 3) Перейти/подсказать шаг (без записи):
    { "type": "navigate", "to": "/funnel" }  или  { "type": "navigate", "step": 1 }
@@ -231,7 +220,7 @@ export function makeAdminCopilotRoutes(opts: AdminCopilotRoutesOpts): Hono {
     }
 
     const llmMessages: ChatMessage[] = [
-      { role: "system", content: buildSystemPrompt(page, contextJson) },
+      { role: "system", content: buildCopilotSystemPrompt(page, contextJson) },
       ...turns.map((t) => ({ role: t.role, content: t.content }) as ChatMessage),
     ];
 

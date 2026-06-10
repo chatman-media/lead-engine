@@ -14,6 +14,7 @@ import {
 	contacts,
 	conversations,
 	createIsolatedDb,
+	customerRequests,
 	leads,
 	schema,
 	stageDefinitions,
@@ -303,6 +304,53 @@ describe("concierge tools (Фаза 2 — статус гостя)", () => {
 			contactId: cid,
 		});
 		expect(reqs).toEqual([]);
+	});
+
+	it("listOpenRequests предпочитает first-class customer_requests", async () => {
+		if (!sql) return;
+		const [freshContact] = await db
+			.insert(contacts)
+			.values({ tenantId })
+			.returning({ id: contacts.id });
+		if (!freshContact) throw new Error("contact insert returned no row");
+		const cid = freshContact.id;
+		const now = Math.floor(Date.parse("2026-06-06T01:30:00Z") / 1000);
+		await db.insert(leads).values({
+			tenantId,
+			userId: cid,
+			state: "transfer_request",
+			stageDefinitionId: await stageId("transfer_request"),
+			requestType: "transfer",
+			createdAt: now,
+			updatedAt: now,
+		});
+		await db.insert(customerRequests).values([
+			{
+				tenantId,
+				contactId: cid,
+				requestType: "food",
+				status: "open",
+				stageDefinitionId: await stageId("food_request"),
+				createdAt: now + 1,
+				updatedAt: now + 1,
+			},
+			{
+				tenantId,
+				contactId: cid,
+				requestType: "tour",
+				status: "cancelled",
+				stageDefinitionId: await stageId("tour_request"),
+				createdAt: now + 2,
+				updatedAt: now + 2,
+				closedAt: now + 2,
+			},
+		]);
+		const reqs = await listOpenRequests({
+			db: db as never,
+			tenantId,
+			contactId: cid,
+		});
+		expect(reqs).toEqual([{ type: "Еда", stage: "Еда: заказ" }]);
 	});
 });
 
@@ -607,6 +655,39 @@ describe("makeRequestContextResolver (R4 — request_type в промпт)", () 
 		const resolve = makeRequestContextResolver(db as never);
 		const ctx = await resolve({ tenantId, contactId: multiId });
 		expect(ctx).toContain("Всего открытых запросов у гостя: 2");
+	});
+
+	it("читает first-class customer_requests перед legacy leads", async () => {
+		if (!sql) return;
+		const [c] = await db
+			.insert(contacts)
+			.values({ tenantId })
+			.returning({ id: contacts.id });
+		if (!c) throw new Error("contact insert returned no row");
+		const firstClassId = c.id;
+		const now = Math.floor(Date.parse("2026-06-06T02:30:00Z") / 1000);
+		await db.insert(leads).values({
+			tenantId,
+			userId: firstClassId,
+			state: "transfer_request",
+			stageDefinitionId: await stageId("transfer_request"),
+			requestType: "transfer",
+			createdAt: now,
+			updatedAt: now,
+		});
+		await db.insert(customerRequests).values({
+			tenantId,
+			contactId: firstClassId,
+			requestType: "food",
+			status: "open",
+			stageDefinitionId: await stageId("food_request"),
+			createdAt: now + 1,
+			updatedAt: now + 1,
+		});
+		const resolve = makeRequestContextResolver(db as never);
+		const ctx = await resolve({ tenantId, contactId: firstClassId });
+		expect(ctx).toContain("«Еда»");
+		expect(ctx).not.toContain("«Трансфер»");
 	});
 
 	it("нет открытых (только терминальный) → null", async () => {

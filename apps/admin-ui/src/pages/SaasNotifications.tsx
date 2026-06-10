@@ -52,6 +52,7 @@ const EVENT_TYPES: Record<string, string> = {
   stage_changed: "Смена стадии",
   lead_intake_complete: "Анкета заполнена",
   human_takeover: "Запрос оператора",
+  operator_handoff_required: "Нужно действие оператора",
   document_uploaded: "Документ загружен",
   high_value_deal: "Сделка VIP",
   lead_stale: "Лид без активности",

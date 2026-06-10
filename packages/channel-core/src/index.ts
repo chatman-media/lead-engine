@@ -6,9 +6,10 @@ export type {
   EditOpts,
   Inbound,
   InboundPart,
-  MediaRef,
-  OutboundEnvelope,
-  OutboundPart,
+	MediaRef,
+	OperatorHandoffMeta,
+	OutboundEnvelope,
+	OutboundPart,
   ReplyMarkup,
   Sent,
 } from "./types.ts";

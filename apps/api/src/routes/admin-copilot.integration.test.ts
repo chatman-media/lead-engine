@@ -12,7 +12,7 @@ import {
   schema,
   tryConnectToPg,
 } from "@chatman-media/storage";
-import type { ChatClient } from "@chatman-media/llm-router";
+import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 // Импорт ради side-effect: регистрирует EXCHANGE_V1 в defaultRegistry, по
 // которому install_vertical валидирует slug.
 import { EXCHANGE_V1 } from "@chatman-media/vertical-exchange";
@@ -23,6 +23,7 @@ import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
 import { makeRequireAuth } from "../middleware/require-auth.ts";
 import { makeAdminCopilotRoutes } from "./admin-copilot.ts";
+import { normalizeStages, type StageDraft } from "./admin-workflow.ts";
 import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
@@ -38,7 +39,13 @@ let token = "";
 
 // Фейковый chat-клиент: complete() отдаёт `nextRaw` (что бы «вернула модель»).
 let nextRaw = "";
-const fakeClient = { complete: async () => nextRaw } as unknown as ChatClient;
+let lastMessages: ChatMessage[] = [];
+const fakeClient = {
+  complete: async (messages: ChatMessage[]) => {
+    lastMessages = messages;
+    return nextRaw;
+  },
+} as unknown as ChatClient;
 const resolveChat = () => fakeClient;
 
 beforeAll(
@@ -129,6 +136,19 @@ describe("admin-copilot /chat", () => {
     expect(body.action).toBeNull();
   });
 
+  it("system prompt содержит общий контракт сборки воронки", async () => {
+    if (!sql) return;
+    nextRaw = JSON.stringify({ reply: "Ок", action: null });
+    const res = await chat(app, { page: "funnel", messages: MSGS });
+    expect(res.status).toBe(200);
+    const system = lastMessages[0]?.content ?? "";
+    expect(system).toContain("Используй тот же контракт стадий");
+    expect(system).toContain('"phase"');
+    expect(system).toContain('"goal"');
+    expect(system).toContain("request_type");
+    expect(system).toContain("awaiting_operator");
+  });
+
   it("не-JSON ответ модели → весь текст как reply, action=null", async () => {
     if (!sql) return;
     nextRaw = "просто текст без json";
@@ -169,41 +189,83 @@ describe("admin-copilot /chat", () => {
 
   it("build_funnel → нормализованные stages + preview", async () => {
     if (!sql) return;
+    const draft: StageDraft[] = [
+      {
+        slug: "intake",
+        displayName: "Заявка",
+        kind: "intake",
+        stageType: "form_fill",
+        nextStages: ["qualify"],
+        fields: [
+          {
+            slug: "service_type",
+            displayName: "Тип услуги",
+            fieldType: "select",
+            required: true,
+            aiExtractable: true,
+            options: [{ value: "consulting", label: "Консультация" }],
+          },
+        ],
+      },
+      {
+        slug: "qualify",
+        displayName: "Квалификация",
+        kind: "active",
+        stageType: "form_fill",
+        phase: "qualify",
+        goal: "Понять задачу и бюджет клиента.",
+        guidance: "Уточни цель, сроки и бюджет, затем веди к офферу.",
+        nextStages: ["offer", "lost"],
+        fields: [],
+      },
+      {
+        slug: "offer",
+        displayName: "Оффер",
+        kind: "active",
+        stageType: "awaiting_operator",
+        phase: "offer",
+        goal: "Передать персональные условия и получить подтверждение.",
+        guidance: "Условия даёт оператор, не выдумывай цену.",
+        nextStages: ["won", "lost"],
+        fields: [],
+      },
+      {
+        slug: "won",
+        displayName: "Успех",
+        kind: "terminal_won",
+        stageType: "milestone",
+        nextStages: [],
+        fields: [],
+      },
+      {
+        slug: "lost",
+        displayName: "Отказ",
+        kind: "terminal_lost",
+        stageType: "milestone",
+        nextStages: [],
+        fields: [],
+      },
+    ];
     nextRaw = JSON.stringify({
       reply: "Вот воронка",
       action: {
         type: "build_funnel",
-        stages: [
-          {
-            slug: "intake",
-            displayName: "Заявка",
-            kind: "intake",
-            stageType: "form_fill",
-            nextStages: ["work"],
-            fields: [
-              {
-                slug: "name",
-                displayName: "Имя",
-                fieldType: "text",
-                required: true,
-                aiExtractable: true,
-              },
-            ],
-          },
-          { slug: "work", displayName: "Работа", kind: "active", stageType: "form_fill", nextStages: ["won", "lost"], fields: [] },
-          { slug: "won", displayName: "Успех", kind: "terminal_won", stageType: "form_fill", nextStages: [], fields: [] },
-          { slug: "lost", displayName: "Отказ", kind: "terminal_lost", stageType: "form_fill", nextStages: [], fields: [] },
-        ],
+        stages: draft,
       },
     });
     const res = await chat(app, { page: "funnel", messages: MSGS });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      action: { type: string; stages: unknown[]; preview: Array<{ kind: string }> } | null;
+      action: {
+        type: string;
+        stages: unknown[];
+        preview: Array<{ kind: string; stageType: string }>;
+      } | null;
     };
     expect(body.action?.type).toBe("build_funnel");
-    expect(body.action?.stages.length).toBe(4);
-    expect(body.action?.preview.length).toBe(4);
+    expect(body.action?.stages).toEqual(normalizeStages(draft));
+    expect(body.action?.preview.length).toBe(5);
     expect(body.action?.preview.some((s) => s.kind === "intake")).toBe(true);
+    expect(body.action?.preview.some((s) => s.stageType === "awaiting_operator")).toBe(true);
   });
 });

@@ -1,10 +1,14 @@
 import {
+	type AgentToolCallSource,
+	AgentToolCallsRepo,
 	ConversationsRepo,
 	type Db,
 	DrizzleKbStore,
+	type ExchangePolicyState,
 	ExperimentsRepo,
 	getDecryptedSecret,
 	type ITranscriber,
+	KbSuggestionsRepo,
 	LlmMemoryExtractor,
 	LlmReplyStrategy,
 	loadExperimentVariants,
@@ -12,6 +16,7 @@ import {
 	MessagesRepo,
 	parseStyleConfig,
 	RagReplyStrategy,
+	type RagReplyStrategyOpts,
 	type ReplyStrategy,
 	type StageClassifier,
 	StylesRepo,
@@ -23,6 +28,7 @@ import {
 	CohereReranker,
 	type DirectorHookForPrompt,
 	JinaReranker,
+	type KbScope,
 	makeBookingLinkTool,
 	type Reranker,
 	type SkillForPrompt,
@@ -37,14 +43,26 @@ import type {
 import type { PlatformMetrics } from "@chatman-media/observability";
 import { LlmStageClassifier, RegexStageClassifier } from "@chatman-media/sales";
 import {
+	customerRequests,
 	directorHooks,
+	exchangeOrders,
 	leads,
 	llmProviderConfigs,
 	skills,
 	stageDefinitions,
 } from "@chatman-media/storage";
 import { RECRUITMENT_V1 } from "@chatman-media/vertical-recruitment";
-import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
+import type { VerticalTemplate } from "@chatman-media/verticals";
+import {
+	and,
+	asc,
+	desc,
+	eq,
+	isNotNull,
+	isNull,
+	notInArray,
+	or,
+} from "drizzle-orm";
 import type { ApiConfig } from "./config.ts";
 import {
 	hasActiveExchangeRates,
@@ -52,6 +70,7 @@ import {
 	makeExchangeTools,
 	type RateGuardAlert,
 } from "./lib/exchange/tools.ts";
+import { getExchangeVerificationStatus } from "./lib/exchange/verification.ts";
 import {
 	type OnUsage,
 	wrapChatClient,
@@ -70,11 +89,15 @@ export type RecordUsage = (
 ) => void;
 
 import {
+	makeConciergeRequestsTool,
+	REQUEST_TYPE_LABEL,
+	tenantSupportsMultiRequest,
+} from "./lib/concierge-tools.ts";
+import {
 	getConfig,
 	type LoadedLlmConfigs,
 	type ResolvedLlmConfig,
 } from "./lib/llm-config-loader.ts";
-import { makeConciergeRequestsTool, REQUEST_TYPE_LABEL, tenantSupportsMultiRequest } from "./lib/concierge-tools.ts";
 import { OpenRouterTranscriber } from "./lib/openrouter-transcriber.ts";
 import { WhisperTranscriber } from "./lib/whisper-transcriber.ts";
 
@@ -84,6 +107,49 @@ type ResolvedStyleAssignment = Style & {
 	experimentSlug?: string | null;
 	variantSlug?: string | null;
 };
+
+function makeToolCallRecorder(
+	db: Db,
+	source: AgentToolCallSource,
+): NonNullable<RagReplyStrategyOpts["recordToolCalls"]> {
+	return async (input) => {
+		const calls =
+			input.telemetry.toolCalls ??
+			(input.telemetry.toolCall
+				? [
+						{
+							name: input.telemetry.toolCall.name,
+							args: {},
+							result: input.telemetry.toolCall.result,
+							cycle: 0,
+						},
+					]
+				: []);
+		if (calls.length === 0) return;
+
+		const nowEpoch = Math.floor(Date.now() / 1000);
+		await withTenant(db, input.tenantId, async (tx) => {
+			const repo = new AgentToolCallsRepo({
+				db: tx,
+				tenantId: input.tenantId,
+			});
+			await repo.recordMany(
+				calls.map((call, index) => ({
+					conversationId: input.conversationId,
+					contactId: input.contactId,
+					source,
+					toolName: call.name,
+					args: call.args ?? {},
+					result: call.result,
+					error: call.error ?? false,
+					cycle: call.cycle ?? 0,
+					toolCallIndex: index,
+					nowEpoch,
+				})),
+			);
+		});
+	};
+}
 
 /**
  * Bootstrap LlmRouter + ReplyStrategy. Per-tenant configs приходят из
@@ -308,6 +374,42 @@ export function makeRequestContextResolver(db: Db) {
 		tenantId: number;
 		contactId: number;
 	}): Promise<string | null> => {
+		const requestRows = await db
+			.select({
+				requestType: customerRequests.requestType,
+				kind: stageDefinitions.kind,
+			})
+			.from(customerRequests)
+			.leftJoin(
+				stageDefinitions,
+				eq(customerRequests.stageDefinitionId, stageDefinitions.id),
+			)
+			.where(
+				and(
+					eq(customerRequests.tenantId, input.tenantId),
+					eq(customerRequests.contactId, input.contactId),
+					eq(customerRequests.status, "open"),
+					or(
+						isNull(stageDefinitions.kind),
+						notInArray(stageDefinitions.kind, [
+							"terminal_won",
+							"terminal_lost",
+						]),
+					),
+				),
+			)
+			.orderBy(desc(customerRequests.updatedAt));
+		if (requestRows.length > 0) {
+			const rt = requestRows[0]?.requestType;
+			if (!rt) return null;
+			const label = REQUEST_TYPE_LABEL[rt] ?? rt;
+			const more =
+				requestRows.length > 1
+					? ` Всего открытых запросов у гостя: ${requestRows.length} — не путай их детали.`
+					: "";
+			return `гость сейчас ведёт запрос «${label}».${more}`;
+		}
+
 		const rows = await db
 			.select({
 				requestType: leads.requestType,
@@ -373,6 +475,49 @@ export function makeAwaitingOperatorResolver(db: Db) {
 	};
 }
 
+function makeKbScopeResolver(db: Db) {
+	return async (input: {
+		tenantId: number;
+		contactId: number;
+	}): Promise<KbScope | null> => {
+		return withTenant(db, input.tenantId, async (tx) => {
+			const rows = await tx
+				.select({
+					funnelId: stageDefinitions.funnelId,
+					stageSlug: stageDefinitions.slug,
+					kind: stageDefinitions.kind,
+				})
+				.from(leads)
+				.leftJoin(
+					stageDefinitions,
+					eq(leads.stageDefinitionId, stageDefinitions.id),
+				)
+				.where(
+					and(
+						eq(leads.tenantId, input.tenantId),
+						eq(leads.userId, input.contactId),
+						isNotNull(leads.stageDefinitionId),
+					),
+				)
+				.orderBy(desc(leads.updatedAt))
+				.limit(5);
+			const current = rows.find(
+				(row) =>
+					row.funnelId !== null &&
+					row.stageSlug !== null &&
+					row.kind !== "terminal_won" &&
+					row.kind !== "terminal_lost",
+			);
+			if (!current?.funnelId || !current.stageSlug) return null;
+			return {
+				scopeType: "stage",
+				funnelId: current.funnelId,
+				stageSlug: current.stageSlug,
+			};
+		});
+	};
+}
+
 async function resolveCurrentExchangeStageSlug(
 	db: Db,
 	input: { tenantId: number; contactId: number },
@@ -406,6 +551,113 @@ async function resolveCurrentExchangeStageSlug(
 	if (current.requestType && current.requestType !== "exchange") return null;
 	const slug = current.slug ?? current.state;
 	return isKnownExchangeStage(slug) ? slug : null;
+}
+
+function proofLooksVerified(proofJson: string | null): boolean {
+	if (!proofJson) return false;
+	try {
+		const parsed = JSON.parse(proofJson) as Record<string, unknown>;
+		return parsed.verifiedOk === true;
+	} catch {
+		return false;
+	}
+}
+
+function makeExchangePolicyStateResolver(
+	db: Db,
+): (input: {
+	tenantId: number;
+	conversationId: number;
+	contactId: number;
+}) => Promise<ExchangePolicyState | null> {
+	return async (input) => {
+		const [stageSlug, verification, order] = await Promise.all([
+			resolveCurrentExchangeStageSlug(db, {
+				tenantId: input.tenantId,
+				contactId: input.contactId,
+			}).catch(() => null),
+			getExchangeVerificationStatus(
+				db,
+				input.tenantId,
+				input.conversationId,
+			).catch(() => null),
+			withTenant(db, input.tenantId, async (tx) => {
+				const [row] = await tx
+					.select({
+						id: exchangeOrders.id,
+						status: exchangeOrders.status,
+						assetFrom: exchangeOrders.assetFrom,
+						network: exchangeOrders.network,
+						amountMode: exchangeOrders.amountMode,
+						requestedAmount: exchangeOrders.requestedAmount,
+						amountFrom: exchangeOrders.amountFrom,
+						rate: exchangeOrders.rate,
+						amountToThb: exchangeOrders.amountToThb,
+						paymentMethod: exchangeOrders.paymentMethod,
+						paymentRail: exchangeOrders.paymentRail,
+						payoutMethod: exchangeOrders.payoutMethod,
+						payoutLocation: exchangeOrders.payoutLocation,
+						requisitesJson: exchangeOrders.requisitesJson,
+						proofJson: exchangeOrders.proofJson,
+						payoutCode: exchangeOrders.payoutCode,
+						verificationId: exchangeOrders.verificationId,
+					})
+					.from(exchangeOrders)
+					.where(
+						and(
+							eq(exchangeOrders.tenantId, input.tenantId),
+							eq(exchangeOrders.conversationId, input.conversationId),
+						),
+					)
+					.orderBy(desc(exchangeOrders.id))
+					.limit(1);
+				return row ?? null;
+			}).catch(() => null),
+		]);
+
+		const status = order?.status ?? null;
+		const paymentVerified =
+			status === "paid" ||
+			status === "payout" ||
+			status === "completed" ||
+			proofLooksVerified(order?.proofJson ?? null);
+
+		return {
+			stageSlug,
+			verification: verification
+				? {
+						verified: verification.verified,
+						status: verification.status,
+						needsVerification: verification.needsVerification,
+						verificationId: verification.verificationId,
+					}
+				: null,
+			order: order
+				? {
+						id: order.id,
+						status: order.status,
+						assetFrom: order.assetFrom,
+						network: order.network,
+						amountMode: order.amountMode,
+						requestedAmount: order.requestedAmount,
+						amountFrom: order.amountFrom,
+						rate: order.rate,
+						amountToThb: order.amountToThb,
+						paymentMethod: order.paymentMethod,
+						paymentRail: order.paymentRail,
+						payoutMethod: order.payoutMethod,
+						payoutLocation: order.payoutLocation,
+						requisitesIssued: !!order.requisitesJson,
+						paymentProofReceived: !!order.proofJson,
+						paymentVerified,
+						payoutReady: !!order.payoutCode || status === "completed",
+						payoutCompleted: status === "completed",
+						payoutCodeIssued: !!order.payoutCode,
+						verificationId: order.verificationId,
+					}
+				: null,
+		};
+	};
 }
 
 export interface ReplyStrategyBundle {
@@ -471,7 +723,9 @@ export function makeSkillsResolver(
 	db: Db,
 ): (input: { tenantId: number }) => Promise<readonly SkillForPrompt[]> {
 	const cache = new Map<number, readonly SkillForPrompt[]>();
-	return async (input: { tenantId: number }): Promise<readonly SkillForPrompt[]> => {
+	return async (input: {
+		tenantId: number;
+	}): Promise<readonly SkillForPrompt[]> => {
 		const cached = cache.get(input.tenantId);
 		if (cached !== undefined) return cached;
 		const rows = await db
@@ -482,7 +736,9 @@ export function makeSkillsResolver(
 				applicableStagesJson: skills.applicableStagesJson,
 			})
 			.from(skills)
-			.where(and(eq(skills.tenantId, input.tenantId), eq(skills.isEnabled, true)))
+			.where(
+				and(eq(skills.tenantId, input.tenantId), eq(skills.isEnabled, true)),
+			)
 			.orderBy(asc(skills.family), asc(skills.displayName));
 		const result: SkillForPrompt[] = rows.map((r) => ({
 			slug: r.slug,
@@ -508,7 +764,9 @@ export function makeSkillsResolver(
 export function makeDirectorHooksResolver(
 	db: Db,
 ): (input: { tenantId: number }) => Promise<readonly DirectorHookForPrompt[]> {
-	return async (input: { tenantId: number }): Promise<readonly DirectorHookForPrompt[]> => {
+	return async (input: {
+		tenantId: number;
+	}): Promise<readonly DirectorHookForPrompt[]> => {
 		const rows = await db
 			.select({
 				name: directorHooks.name,
@@ -516,7 +774,12 @@ export function makeDirectorHooksResolver(
 				triggerHint: directorHooks.triggerHint,
 			})
 			.from(directorHooks)
-			.where(and(eq(directorHooks.tenantId, input.tenantId), eq(directorHooks.isActive, true)))
+			.where(
+				and(
+					eq(directorHooks.tenantId, input.tenantId),
+					eq(directorHooks.isActive, true),
+				),
+			)
 			.orderBy(asc(directorHooks.position), asc(directorHooks.id));
 		return rows;
 	};
@@ -550,7 +813,7 @@ export function makeRerankerResolver(
 			)
 			.limit(1);
 
-		if (!row || !row.secretRef) {
+		if (!row?.secretRef) {
 			cache.set(input.tenantId, null);
 			return null;
 		}
@@ -564,7 +827,10 @@ export function makeRerankerResolver(
 				masterKeyHex,
 			});
 		} catch (err) {
-			console.warn(`[reranker] failed to decrypt API key for tenant ${input.tenantId}:`, err);
+			console.warn(
+				`[reranker] failed to decrypt API key for tenant ${input.tenantId}:`,
+				err,
+			);
 			cache.set(input.tenantId, null);
 			return null;
 		}
@@ -617,7 +883,8 @@ export function makeStyleResolver(
 	const styleCache = new Map<number, ResolvedStyleAssignment | null>();
 	const experimentCache = new Map<
 		number,
-		{ router: ABRouter; experimentId: number; experimentSlug: string } | "absent"
+		| { router: ABRouter; experimentId: number; experimentSlug: string }
+		| "absent"
 	>();
 	const { defaultSlug, experimentSlug } = opts;
 	const resolveStyle = async (input: {
@@ -718,7 +985,9 @@ export function makeToolsResolver(opts: {
 
 		let exchangeEnabled = exchangeEnabledCache.get(input.tenantId);
 		if (exchangeEnabled === undefined) {
-			exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(() => false);
+			exchangeEnabled = await hasActiveExchangeRates(db, input.tenantId).catch(
+				() => false,
+			);
 			exchangeEnabledCache.set(input.tenantId, exchangeEnabled);
 		}
 		if (exchangeEnabled) {
@@ -742,9 +1011,10 @@ export function makeToolsResolver(opts: {
 
 		let multiRequestEnabled = multiRequestToolCache.get(input.tenantId);
 		if (multiRequestEnabled === undefined) {
-			multiRequestEnabled = await tenantSupportsMultiRequest(db, input.tenantId).catch(
-				() => false,
-			);
+			multiRequestEnabled = await tenantSupportsMultiRequest(
+				db,
+				input.tenantId,
+			).catch(() => false);
 			multiRequestToolCache.set(input.tenantId, multiRequestEnabled);
 		}
 		if (multiRequestEnabled) {
@@ -757,7 +1027,9 @@ export function makeToolsResolver(opts: {
 			);
 		}
 
-		return conversationBound.length > 0 ? [...base, ...conversationBound] : base;
+		return conversationBound.length > 0
+			? [...base, ...conversationBound]
+			: base;
 	}
 
 	const invalidateTools = (tenantId: number) => {
@@ -776,6 +1048,7 @@ export function makeReplyStrategy(
 	metrics?: PlatformMetrics,
 	recordUsage?: RecordUsage,
 	notifyRateGuard?: (alert: RateGuardAlert) => void,
+	resolveTemplate?: (tenantId: number) => VerticalTemplate | undefined,
 ): ReplyStrategyBundle | null {
 	if (!ref.current.anyTenantHasChat) return null;
 
@@ -795,6 +1068,7 @@ export function makeReplyStrategy(
 		masterKeyHex: cfg.masterKeyHex,
 		...(notifyRateGuard ? { notifyRateGuard } : {}),
 	});
+	const resolveExchangePolicyState = makeExchangePolicyStateResolver(db);
 
 	// Если ни один tenant не имеет embed config'а — fall back на LlmReplyStrategy.
 	// NB: проверка против initial snapshot'а; если tenant позже добавит embed,
@@ -806,10 +1080,13 @@ export function makeReplyStrategy(
 			strategy: new LlmReplyStrategy(
 				{
 					template,
+					...(resolveTemplate ? { resolveTemplate } : {}),
 					resolveChat: (tenantId: number) =>
 						ref.router.resolveChat(tenantId, "chat"),
 					resolveIsSupport: makeSupportModeResolver(db),
 					resolveTools,
+					recordToolCalls: makeToolCallRecorder(db, "llm_reply"),
+					resolveExchangePolicyState,
 				},
 				(tenantId: number) => new MessagesRepo({ db, tenantId }),
 			),
@@ -862,6 +1139,8 @@ export function makeReplyStrategy(
 				return wrapped as unknown as RagEmbeddingClient;
 			},
 			resolveKb: (tenantId: number) => new DrizzleKbStore({ db, tenantId }),
+			resolveKbScope: makeKbScopeResolver(db),
+			...(resolveTemplate ? { resolveTemplate } : {}),
 			resolveStyle,
 			resolveIsSupport: makeSupportModeResolver(db),
 			resolveStageGuidance: makeStageGuidanceResolver(db),
@@ -870,7 +1149,11 @@ export function makeReplyStrategy(
 			resolveSkills,
 			resolveDirectorHooks,
 			resolveTools,
+			recordToolCalls: makeToolCallRecorder(db, "rag_reply"),
+			resolveExchangePolicyState,
 			resolveReranker,
+			resolveSuggestions: (tenantId: number) =>
+				new KbSuggestionsRepo({ db, tenantId }),
 			resolveConversations: (tenantId: number) =>
 				new ConversationsRepo({ db, tenantId }),
 			// Если основной ответ пуст (модель «промолчала», нет KB-контекста) —

@@ -84,6 +84,7 @@ export interface TgMessage {
   chat: TgChat;
   date: number;
   text?: string;
+  reply_markup?: TgReplyMarkup;
   /** Caption that can accompany media uploads (photo / video / document /
    *  voice). Treated as the message's "text" by the persistence layer
    *  so RAG / extractors see the candidate's words. */

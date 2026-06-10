@@ -1,10 +1,17 @@
 import type { Inbound, OutboundEnvelope } from "@chatman-media/channel-core";
 import { OutboundQueueRepo } from "./dal/outbound.ts";
 import type { Db } from "./dal/types.ts";
+import type { NotificationService } from "./notifications.ts";
+import { emitOperatorHandoffNotifications } from "./operator-handoff.ts";
 import { dispatchOutbound } from "./outbound-dispatch.ts";
-import { type ReplyStrategy } from "./process-inbound.ts";
+import type { ReplyStrategy } from "./process-inbound.ts";
+import type {
+	ChannelContext,
+	PipelineSink,
+	ProcessInboundResult,
+	TenantContext,
+} from "./types.ts";
 import { systemClock } from "./types.ts";
-import type { ChannelContext, PipelineSink, ProcessInboundResult, TenantContext } from "./types.ts";
 import { withTenant } from "./with-tenant.ts";
 
 /**
@@ -31,77 +38,92 @@ import { withTenant } from "./with-tenant.ts";
  * вызывать эту функцию (processInbound уже отработал полностью single-tx).
  */
 export interface GenerateReplyAndEnqueueDeps {
-  db: Db;
-  tenant: TenantContext;
-  channel: ChannelContext;
-  channelDbId: number;
-  inbound: Inbound;
-  /** Результат processInbound с deferReply=true. */
-  result: ProcessInboundResult;
-  replyStrategy: ReplyStrategy;
-  sink?: PipelineSink;
-  clock?: { nowEpoch: () => number };
+	db: Db;
+	tenant: TenantContext;
+	channel: ChannelContext;
+	channelDbId: number;
+	inbound: Inbound;
+	/** Результат processInbound с deferReply=true. */
+	result: ProcessInboundResult;
+	replyStrategy: ReplyStrategy;
+	notifications?: NotificationService | null;
+	sink?: PipelineSink;
+	clock?: { nowEpoch: () => number };
 }
 
 export interface GenerateReplyResult {
-  /** Кол-во envelope'ов поставлено в outbound_queue. 0 если reply пустой
-   *  или mediaOnly или conversation.mode != 'ai' (но проверка mode не
-   *  делается тут — caller сам решает по результату processInbound). */
-  outboundEnqueued: number;
+	/** Кол-во envelope'ов поставлено в outbound_queue. 0 если reply пустой
+	 *  или mediaOnly или conversation.mode != 'ai' (но проверка mode не
+	 *  делается тут — caller сам решает по результату processInbound). */
+	outboundEnqueued: number;
 }
 
 export async function generateReplyAndEnqueue(
-  deps: GenerateReplyAndEnqueueDeps,
+	deps: GenerateReplyAndEnqueueDeps,
 ): Promise<GenerateReplyResult> {
-  const clock = deps.clock ?? systemClock;
-  const { result, replyStrategy, inbound, tenant, channel, channelDbId } = deps;
+	const clock = deps.clock ?? systemClock;
+	const { result, replyStrategy, inbound, tenant, channel, channelDbId } = deps;
 
-  // Если pipeline пометил mediaOnly — reply не генерируем (бот не отвечает
-  // на чистые media без caption).
-  if (result.mediaOnly) {
-    return { outboundEnqueued: 0 };
-  }
+	// Если pipeline пометил mediaOnly — reply не генерируем (бот не отвечает
+	// на чистые media без caption).
+	if (result.mediaOnly) {
+		return { outboundEnqueued: 0 };
+	}
 
-  // userMessageText заполняется processInbound'ом при deferReply=true.
-  // Если undefined — caller ошибся в orchestration'е; возвращаем 0.
-  const text = result.userMessageText ?? "";
-  if (text.length === 0) return { outboundEnqueued: 0 };
+	// userMessageText заполняется processInbound'ом при deferReply=true.
+	// Если undefined — caller ошибся в orchestration'е; возвращаем 0.
+	const text = result.userMessageText ?? "";
+	if (text.length === 0) return { outboundEnqueued: 0 };
 
-  // ── Phase 2A: LLM call ВНЕ tx ────────────────────────────────────────
-  const envelopes = await replyStrategy.generate({
-    tenant,
-    channel,
-    conversationId: result.conversationId,
-    contactId: result.contactId,
-    inbound,
-    userMessageText: text,
-  });
-  if (!envelopes || envelopes.length === 0) {
-    return { outboundEnqueued: 0 };
-  }
+	// ── Phase 2A: LLM call ВНЕ tx ────────────────────────────────────────
+	const envelopes = await replyStrategy.generate({
+		tenant,
+		channel,
+		conversationId: result.conversationId,
+		contactId: result.contactId,
+		inbound,
+		userMessageText: text,
+	});
+	if (!envelopes || envelopes.length === 0) {
+		return { outboundEnqueued: 0 };
+	}
 
-  // ── Phase 2B: enqueue в новой короткой tx ────────────────────────────
-  const now = clock.nowEpoch();
-  let count = 0;
-  await withTenant(deps.db, tenant.tenantId, async (tx) => {
-    const outbound = new OutboundQueueRepo({ db: tx, tenantId: tenant.tenantId });
-    for (const env of envelopes as OutboundEnvelope[]) {
-      const queued = await dispatchOutbound({
-        channelDbId,
-        conversationId: result.conversationId,
-        envelope: env,
-        outbound,
-        nowEpoch: now,
-      });
-      count += 1;
-      deps.sink?.emit?.({
-        type: "outbound-enqueued",
-        tenantId: tenant.tenantId,
-        conversationId: result.conversationId,
-        queueItemId: queued.id,
-        envelope: env,
-      });
-    }
-  });
-  return { outboundEnqueued: count };
+	// ── Phase 2B: enqueue в новой короткой tx ────────────────────────────
+	const now = clock.nowEpoch();
+	let count = 0;
+	await withTenant(deps.db, tenant.tenantId, async (tx) => {
+		const outbound = new OutboundQueueRepo({
+			db: tx,
+			tenantId: tenant.tenantId,
+		});
+		for (const env of envelopes as OutboundEnvelope[]) {
+			const queued = await dispatchOutbound({
+				channelDbId,
+				conversationId: result.conversationId,
+				envelope: env,
+				outbound,
+				nowEpoch: now,
+			});
+			count += 1;
+			deps.sink?.emit?.({
+				type: "outbound-enqueued",
+				tenantId: tenant.tenantId,
+				conversationId: result.conversationId,
+				queueItemId: queued.id,
+				envelope: env,
+			});
+		}
+	});
+	await emitOperatorHandoffNotifications({
+		tenantId: tenant.tenantId,
+		conversationId: result.conversationId,
+		contactId: result.contactId,
+		contactDisplayName: result.contactDisplayName,
+		userMessageText: text,
+		inbound,
+		envelopes,
+		notifications: deps.notifications ?? null,
+		...(deps.sink ? { sink: deps.sink } : {}),
+	});
+	return { outboundEnqueued: count };
 }

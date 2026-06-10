@@ -268,6 +268,7 @@ export function SaasDashboard() {
   }
 
   const paused = tenantInfo?.status === "suspended";
+  const isSuperadmin = admin?.role === "superadmin";
   const isExchange = onboarding?.isExchange === true || turnover !== null;
   const escalated = stats?.conversations.escalated ?? 0;
   const activeRates = rates.filter((r) => r.isActive);
@@ -434,7 +435,8 @@ export function SaasDashboard() {
         title={greeting(admin?.name?.trim() || admin?.email?.split("@")[0] || "")}
         description="Обзор обменника: заявки, диалоги и оборот за сегодня"
         actions={
-          tenantInfo && (
+          tenantInfo &&
+          isSuperadmin && (
             <div className="flex items-center gap-2">
               {confirmingPause && (
                 <>

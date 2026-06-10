@@ -1,4 +1,7 @@
-import type { FunnelStageDef, VerticalTemplate } from "@chatman-media/verticals";
+import type {
+	FunnelStageDef,
+	VerticalTemplate,
+} from "@chatman-media/verticals";
 
 /**
  * Валидация state-machine переходов лида. Источник истины — template.funnelStages:
@@ -10,22 +13,25 @@ import type { FunnelStageDef, VerticalTemplate } from "@chatman-media/verticals"
  * проверять переход до того, как сделать UPDATE leads.state.
  */
 export class FunnelTransitionError extends Error {
-  constructor(
-    public readonly fromState: string,
-    public readonly toState: string,
-    public readonly templateSlug: string,
-    reason: string,
-  ) {
-    super(
-      `funnel transition rejected: ${fromState} → ${toState} ` +
-        `(template=${templateSlug}, ${reason})`,
-    );
-    this.name = "FunnelTransitionError";
-  }
+	constructor(
+		public readonly fromState: string,
+		public readonly toState: string,
+		public readonly templateSlug: string,
+		reason: string,
+	) {
+		super(
+			`funnel transition rejected: ${fromState} → ${toState} ` +
+				`(template=${templateSlug}, ${reason})`,
+		);
+		this.name = "FunnelTransitionError";
+	}
 }
 
-function findStage(template: VerticalTemplate, slug: string): FunnelStageDef | undefined {
-  return template.funnelStages.find((s) => s.slug === slug);
+function findStage(
+	template: VerticalTemplate,
+	slug: string,
+): FunnelStageDef | undefined {
+	return template.funnelStages.find((s) => s.slug === slug);
 }
 
 /**
@@ -34,11 +40,13 @@ function findStage(template: VerticalTemplate, slug: string): FunnelStageDef | u
  * этому stage.
  */
 export function getInitialStage(template: VerticalTemplate): FunnelStageDef {
-  const first = template.funnelStages[0];
-  if (!first) {
-    throw new Error(`funnel-machine: template "${template.slug}" has no funnelStages`);
-  }
-  return first;
+	const first = template.funnelStages[0];
+	if (!first) {
+		throw new Error(
+			`funnel-machine: template "${template.slug}" has no funnelStages`,
+		);
+	}
+	return first;
 }
 
 /**
@@ -51,51 +59,59 @@ export function getInitialStage(template: VerticalTemplate): FunnelStageDef {
  *     для реактивации создаётся новый Lead через operator-action)
  */
 export function validateTransition(
-  template: VerticalTemplate,
-  fromState: string,
-  toState: string,
+	template: VerticalTemplate,
+	fromState: string,
+	toState: string,
 ): void {
-  if (fromState === toState) return;
+	if (fromState === toState) return;
 
-  const from = findStage(template, fromState);
-  if (!from) {
-    throw new FunnelTransitionError(
-      fromState,
-      toState,
-      template.slug,
-      `from-state not in template`,
-    );
-  }
-  const to = findStage(template, toState);
-  if (!to) {
-    throw new FunnelTransitionError(fromState, toState, template.slug, `to-state not in template`);
-  }
-  if (from.kind === "terminal") {
-    throw new FunnelTransitionError(
-      fromState,
-      toState,
-      template.slug,
-      `terminal stage cannot transition`,
-    );
-  }
-  if (!from.next || !from.next.includes(toState)) {
-    throw new FunnelTransitionError(
-      fromState,
-      toState,
-      template.slug,
-      `not in from.next [${(from.next ?? []).join(", ")}]`,
-    );
-  }
+	const from = findStage(template, fromState);
+	if (!from) {
+		throw new FunnelTransitionError(
+			fromState,
+			toState,
+			template.slug,
+			`from-state not in template`,
+		);
+	}
+	const to = findStage(template, toState);
+	if (!to) {
+		throw new FunnelTransitionError(
+			fromState,
+			toState,
+			template.slug,
+			`to-state not in template`,
+		);
+	}
+	if (from.kind === "terminal") {
+		throw new FunnelTransitionError(
+			fromState,
+			toState,
+			template.slug,
+			`terminal stage cannot transition`,
+		);
+	}
+	if (!from.next || !from.next.includes(toState)) {
+		throw new FunnelTransitionError(
+			fromState,
+			toState,
+			template.slug,
+			`not in from.next [${(from.next ?? []).join(", ")}]`,
+		);
+	}
 }
 
 /**
  * Все валидные следующие stages из текущего. Используется UI'ем для
  * рендера кнопок-переходов на lead-карточке.
  */
-export function allowedTransitions(template: VerticalTemplate, fromState: string): string[] {
-  const from = findStage(template, fromState);
-  if (!from || from.kind === "terminal") return [];
-  return [...(from.next ?? [])];
+export function allowedTransitions(
+	template: VerticalTemplate,
+	fromState: string,
+): string[] {
+	const from = findStage(template, fromState);
+	if (!from || from.kind === "terminal") return [];
+	return [...(from.next ?? [])];
 }
 
 /**
@@ -103,5 +119,5 @@ export function allowedTransitions(template: VerticalTemplate, fromState: string
  * карточку как "архивную".
  */
 export function isTerminal(template: VerticalTemplate, state: string): boolean {
-  return findStage(template, state)?.kind === "terminal";
+	return findStage(template, state)?.kind === "terminal";
 }

@@ -1,6 +1,7 @@
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import {
 	experiments,
+	funnelVersions,
 	funnels,
 	leadEvents,
 	leads,
@@ -16,6 +17,7 @@ import {
 	effectivePhase,
 	FUNNEL_PHASES,
 	type FunnelPhase,
+	validateBackbone,
 } from "@chatman-media/verticals";
 import {
 	and,
@@ -43,7 +45,9 @@ type SeedStage = {
 	/** Макро-фаза костяка — только для active; intake/terminal не задаются. */
 	phase?: ActivePhase;
 	position: number;
+	description?: string;
 	color?: string;
+	icon?: string;
 	staleTimeoutDays?: number;
 	checkinIntervalDays?: number;
 	supportMode?: boolean;
@@ -52,6 +56,8 @@ type SeedStage = {
 	configJson?: string;
 	goal?: string;
 	guidance?: string;
+	partnerWebhookUrl?: string | null;
+	partnerWebhookMode?: string;
 	fields: Array<{
 		slug: string;
 		displayName: string;
@@ -60,6 +66,7 @@ type SeedStage = {
 		aiExtractable: boolean;
 		hint?: string;
 		optionsJson?: string;
+		validationJson?: string;
 		position: number;
 	}>;
 };
@@ -4091,6 +4098,11 @@ export async function seedFunnelByKey(
 	if (!stages) return { error: `unknown template key: ${templateKey}` };
 	return applyFunnelStages(db, tenantId, stages, templateKey, {
 		targetSlug: templateKey,
+		snapshot: {
+			source: "template_apply",
+			adminId,
+			note: `before applying template ${templateKey}`,
+		},
 	});
 }
 
@@ -4207,6 +4219,222 @@ export function resolveSeedPhase(
 	return stage.phase ?? deriveDefaultPhase(stage.stageType, prevPhase);
 }
 
+type FunnelVersionSource =
+	| "ai_apply"
+	| "seed"
+	| "template_apply"
+	| "rollback"
+	| "manual"
+	| "system";
+
+interface FunnelVersionSnapshot {
+	schemaVersion: 1;
+	funnel: {
+		id: number;
+		slug: string;
+		verticalTemplateId: string | null;
+		stagesJson: string;
+		defaultStyleId: number | null;
+		isActive: boolean;
+	};
+	stages: SeedStage[];
+}
+
+interface CreateFunnelSnapshotOpts {
+	source: FunnelVersionSource;
+	adminId?: number;
+	note?: string;
+}
+
+function rowsToSeedStages(
+	stages: Array<typeof stageDefinitions.$inferSelect>,
+	fields: Array<typeof stageFields.$inferSelect>,
+): SeedStage[] {
+	const fieldsByStage = fields.reduce<Record<number, typeof fields>>((acc, f) => {
+		(acc[f.stageId] ??= []).push(f);
+		return acc;
+	}, {});
+
+	let prevPhase: ActivePhase | null = null;
+	return stages.map((s) => {
+		const kind = s.kind as SeedStage["kind"];
+		const explicitPhase = s.phase ? (s.phase as ActivePhase) : undefined;
+		const phase = resolveSeedPhase(
+			{ kind, stageType: s.stageType, phase: explicitPhase },
+			prevPhase,
+		);
+		if (phase) prevPhase = phase;
+		return {
+			slug: s.slug,
+			displayName: s.displayName,
+			kind,
+			stageType: s.stageType,
+			...(phase ? { phase } : {}),
+			position: s.position,
+			...(s.description ? { description: s.description } : {}),
+			...(s.color ? { color: s.color } : {}),
+			...(s.icon ? { icon: s.icon } : {}),
+			...(s.staleTimeoutDays !== null
+				? { staleTimeoutDays: s.staleTimeoutDays }
+				: {}),
+			...(s.checkinIntervalDays !== null
+				? { checkinIntervalDays: s.checkinIntervalDays }
+				: {}),
+			...(s.supportMode ? { supportMode: s.supportMode } : {}),
+			nextStages: s.nextStages,
+			...(s.autoAdvanceCondition
+				? { autoAdvanceCondition: s.autoAdvanceCondition }
+				: {}),
+			...(s.configJson && s.configJson !== "{}" ? { configJson: s.configJson } : {}),
+			...(s.goal ? { goal: s.goal } : {}),
+			...(s.guidance ? { guidance: s.guidance } : {}),
+			...(s.partnerWebhookUrl
+				? { partnerWebhookUrl: s.partnerWebhookUrl }
+				: {}),
+			...(s.partnerWebhookMode
+				? { partnerWebhookMode: s.partnerWebhookMode }
+				: {}),
+			fields: (fieldsByStage[s.id] ?? []).map((f) => ({
+				slug: f.slug,
+				displayName: f.displayName,
+				fieldType: f.fieldType,
+				required: f.required,
+				aiExtractable: f.aiExtractable,
+				...(f.hint ? { hint: f.hint } : {}),
+				...(f.optionsJson && f.optionsJson !== "[]"
+					? { optionsJson: f.optionsJson }
+					: {}),
+				...(f.validationJson && f.validationJson !== "{}"
+					? { validationJson: f.validationJson }
+					: {}),
+				position: f.position,
+			})),
+		};
+	});
+}
+
+async function loadFunnelSnapshot(
+	tx: Db,
+	tenantId: number,
+	funnel: FunnelRow,
+): Promise<FunnelVersionSnapshot> {
+	const stages = await tx
+		.select()
+		.from(stageDefinitions)
+		.where(
+			and(
+				eq(stageDefinitions.tenantId, tenantId),
+				eq(stageDefinitions.funnelId, funnel.id),
+			),
+		)
+		.orderBy(asc(stageDefinitions.position));
+
+	const fields =
+		stages.length > 0
+			? await tx
+					.select()
+					.from(stageFields)
+					.where(
+						and(
+							eq(stageFields.tenantId, tenantId),
+							inArray(
+								stageFields.stageId,
+								stages.map((s) => s.id),
+							),
+						),
+					)
+					.orderBy(asc(stageFields.position))
+			: [];
+
+	return {
+		schemaVersion: 1,
+		funnel: {
+			id: funnel.id,
+			slug: funnel.slug,
+			verticalTemplateId: funnel.verticalTemplateId,
+			stagesJson: funnel.stagesJson,
+			defaultStyleId: funnel.defaultStyleId,
+			isActive: funnel.isActive,
+		},
+		stages: rowsToSeedStages(stages, fields),
+	};
+}
+
+async function createFunnelVersionSnapshot(
+	tx: Db,
+	tenantId: number,
+	funnel: FunnelRow,
+	opts: CreateFunnelSnapshotOpts,
+): Promise<number | null> {
+	const snapshot = await loadFunnelSnapshot(tx, tenantId, funnel);
+	if (snapshot.stages.length === 0) return null;
+	const [version] = await tx
+		.insert(funnelVersions)
+		.values({
+			tenantId,
+			funnelId: funnel.id,
+			source: opts.source,
+			note: opts.note ?? null,
+			stageCount: snapshot.stages.length,
+			snapshotJson: JSON.stringify(snapshot),
+			createdByAdminId: opts.adminId ?? null,
+			createdAt: Math.floor(Date.now() / 1000),
+		})
+		.returning({ id: funnelVersions.id });
+	return version?.id ?? null;
+}
+
+function parseFunnelVersionSnapshot(raw: string): FunnelVersionSnapshot | null {
+	try {
+		const parsed = JSON.parse(raw) as Partial<FunnelVersionSnapshot>;
+		if (
+			parsed.schemaVersion !== 1 ||
+			!parsed.funnel ||
+			!Array.isArray(parsed.stages)
+		) {
+			return null;
+		}
+		return parsed as FunnelVersionSnapshot;
+	} catch {
+		return null;
+	}
+}
+
+function multiRequestSnapshotBranchErrors(stages: SeedStage[]): string[] {
+	const intake = stages.find((s) => s.kind === "intake");
+	const rt = intake?.fields.find((f) => f.slug === "request_type");
+	if (!intake || !rt) return [];
+	let values: string[] = [];
+	if (rt.optionsJson) {
+		try {
+			values = (JSON.parse(rt.optionsJson) as Array<{ value?: unknown }>)
+				.map((o) => String(o.value ?? ""))
+				.filter(Boolean);
+		} catch {
+			values = [];
+		}
+	}
+	if (values.length === 0)
+		return ["Мультизапрос: у поля request_type на intake нет валидных опций."];
+
+	return values
+		.filter(
+			(v) =>
+				!intake.nextStages.some(
+					(n) => n === `${v}_request` || n.startsWith(`${v}_`),
+				),
+		)
+		.map(
+			(v) =>
+				`Мультизапрос: для типа "${v}" нет ветки — добавь стадию "${v}_request" и укажи её в nextStages intake.`,
+		);
+}
+
+function validateSnapshotStages(stages: SeedStage[]): string[] {
+	const backbone = validateBackbone(stages);
+	return [...backbone.errors, ...multiRequestSnapshotBranchErrors(stages)];
+}
+
 /**
  * Создаёт воронку из набора стадий (заменяя текущую активную воронку тенанта).
  * Используется и seed-шаблонами вертикалей, и AI workflow builder'ом.
@@ -4216,20 +4444,31 @@ export async function applyFunnelStages(
 	tenantId: number,
 	stages: SeedStage[],
 	funnelSlug: string,
-	opts: { targetSlug?: string } = {},
+	opts: {
+		targetSlug?: string;
+		targetFunnelId?: number;
+		snapshot?: CreateFunnelSnapshotOpts;
+	} = {},
 ): Promise<{ funnelId: number; stagesCreated: number }> {
 	const now = Math.floor(Date.now() / 1000);
 	return withTenant(db, tenantId, async (tx) => {
 		const targetSlug = opts.targetSlug ?? null;
+		const targetFunnelId = opts.targetFunnelId ?? null;
 		let [funnel] = await tx
 			.select()
 			.from(funnels)
 			.where(
-				targetSlug
+				targetFunnelId
+					? and(eq(funnels.tenantId, tenantId), eq(funnels.id, targetFunnelId))
+					: targetSlug
 					? and(eq(funnels.tenantId, tenantId), eq(funnels.slug, targetSlug))
 					: and(eq(funnels.tenantId, tenantId), eq(funnels.isActive, true)),
 			)
 			.limit(1);
+
+		if (!funnel && targetFunnelId) {
+			throw new Error(`funnel not found: ${targetFunnelId}`);
+		}
 
 		if (!funnel) {
 			const [created] = await tx
@@ -4243,6 +4482,8 @@ export async function applyFunnelStages(
 				})
 				.returning();
 			funnel = created!;
+		} else if (opts.snapshot) {
+			await createFunnelVersionSnapshot(tx, tenantId, funnel, opts.snapshot);
 		}
 
 		const existingStages = await tx
@@ -4312,18 +4553,24 @@ export async function applyFunnelStages(
 					funnelId: funnel.id,
 					slug: stageData.slug,
 					displayName: stageData.displayName,
+					description: stageData.description ?? null,
 					kind: stageData.kind,
 					stageType: stageData.stageType,
 					phase,
 					position: stageData.position,
 					color: stageData.color ?? null,
+					icon: stageData.icon ?? null,
 					staleTimeoutDays: stageData.staleTimeoutDays ?? null,
+					checkinIntervalDays: stageData.checkinIntervalDays ?? null,
 					nextStages: stageData.nextStages,
 					autoAdvanceCondition: stageData.autoAdvanceCondition ?? null,
 					configJson,
 					goal: stageData.goal ?? null,
 					guidance: stageData.guidance ?? null,
 					supportMode: stageData.supportMode ?? false,
+					partnerWebhookUrl: stageData.partnerWebhookUrl ?? null,
+					partnerWebhookMode:
+						stageData.partnerWebhookMode ?? "fire_and_forget",
 					createdAt: now,
 					updatedAt: now,
 				})
@@ -4353,6 +4600,9 @@ export async function applyFunnelStages(
 					hint: fieldTpl.hint ?? null,
 					...(fieldTpl.optionsJson
 						? { optionsJson: fieldTpl.optionsJson }
+						: {}),
+					...(fieldTpl.validationJson
+						? { validationJson: fieldTpl.validationJson }
 						: {}),
 					position: fieldTpl.position,
 					createdAt: now,
@@ -4405,6 +4655,11 @@ export async function applyFunnelStages(
 					.where(and(eq(leads.tenantId, tenantId), inArray(leads.id, ids)));
 			}
 		}
+
+		await tx
+			.update(funnels)
+			.set({ updatedAt: now })
+			.where(and(eq(funnels.tenantId, tenantId), eq(funnels.id, funnel.id)));
 
 		return { funnelId: funnel.id, stagesCreated };
 	});
@@ -4629,6 +4884,194 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
 
 		if (!result) return c.json({ error: "funnel not found" }, 404);
 		return c.json(result);
+	});
+
+	/**
+	 * GET /api/admin/funnels/:id/versions
+	 * Returns immutable snapshots captured before destructive funnel replacements.
+	 */
+	app.get("/api/admin/funnels/:id/versions", async (c) => {
+		const tenantId = c.var.tenantId;
+		const id = Number(c.req.param("id"));
+		if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+		const limitRaw = Number(c.req.query("limit") ?? 50);
+		const limit = Number.isFinite(limitRaw)
+			? Math.max(1, Math.min(100, Math.floor(limitRaw)))
+			: 50;
+
+		const result = await withTenant(opts.db, tenantId, async (tx) => {
+			const [funnel] = await tx
+				.select({ id: funnels.id })
+				.from(funnels)
+				.where(and(eq(funnels.tenantId, tenantId), eq(funnels.id, id)))
+				.limit(1);
+			if (!funnel) return null;
+			const rows = await tx
+				.select({
+					id: funnelVersions.id,
+					source: funnelVersions.source,
+					note: funnelVersions.note,
+					stageCount: funnelVersions.stageCount,
+					createdByAdminId: funnelVersions.createdByAdminId,
+					createdAt: funnelVersions.createdAt,
+				})
+				.from(funnelVersions)
+				.where(
+					and(
+						eq(funnelVersions.tenantId, tenantId),
+						eq(funnelVersions.funnelId, id),
+					),
+				)
+				.orderBy(desc(funnelVersions.createdAt), desc(funnelVersions.id))
+				.limit(limit);
+			return rows;
+		});
+
+		if (!result) return c.json({ error: "funnel not found" }, 404);
+		return c.json({ items: result });
+	});
+
+	/**
+	 * GET /api/admin/funnels/:id/versions/:versionId
+	 * Full snapshot preview for rollback confirmation.
+	 */
+	app.get("/api/admin/funnels/:id/versions/:versionId", async (c) => {
+		const tenantId = c.var.tenantId;
+		const id = Number(c.req.param("id"));
+		const versionId = Number(c.req.param("versionId"));
+		if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+		if (!Number.isFinite(versionId))
+			return c.json({ error: "bad versionId" }, 400);
+
+		const row = await withTenant(opts.db, tenantId, async (tx) => {
+			const [version] = await tx
+				.select()
+				.from(funnelVersions)
+				.where(
+					and(
+						eq(funnelVersions.tenantId, tenantId),
+						eq(funnelVersions.funnelId, id),
+						eq(funnelVersions.id, versionId),
+					),
+				)
+				.limit(1);
+			return version ?? null;
+		});
+		if (!row) return c.json({ error: "version not found" }, 404);
+
+		const snapshot = parseFunnelVersionSnapshot(row.snapshotJson);
+		if (!snapshot) return c.json({ error: "invalid snapshot" }, 500);
+		return c.json({
+			version: {
+				id: row.id,
+				source: row.source,
+				note: row.note,
+				stageCount: row.stageCount,
+				createdByAdminId: row.createdByAdminId,
+				createdAt: row.createdAt,
+			},
+			snapshot,
+			validation: { errors: validateSnapshotStages(snapshot.stages) },
+		});
+	});
+
+	/**
+	 * POST /api/admin/funnels/:id/versions/:versionId/rollback
+	 * Restores stages from a snapshot through applyFunnelStages, with validation.
+	 */
+	app.post("/api/admin/funnels/:id/versions/:versionId/rollback", async (c) => {
+		const tenantId = c.var.tenantId;
+		const adminId = (c.var.adminId as number | null) ?? undefined;
+		const id = Number(c.req.param("id"));
+		const versionId = Number(c.req.param("versionId"));
+		if (!Number.isFinite(id)) return c.json({ error: "bad id" }, 400);
+		if (!Number.isFinite(versionId))
+			return c.json({ error: "bad versionId" }, 400);
+
+		const loaded = await withTenant(opts.db, tenantId, async (tx) => {
+			const [funnel] = await tx
+				.select()
+				.from(funnels)
+				.where(and(eq(funnels.tenantId, tenantId), eq(funnels.id, id)))
+				.limit(1);
+			if (!funnel) return { error: "funnel not found" as const };
+			const [version] = await tx
+				.select()
+				.from(funnelVersions)
+				.where(
+					and(
+						eq(funnelVersions.tenantId, tenantId),
+						eq(funnelVersions.funnelId, id),
+						eq(funnelVersions.id, versionId),
+					),
+				)
+				.limit(1);
+			if (!version) return { error: "version not found" as const };
+			return { funnel, version };
+		});
+
+		if ("error" in loaded) return c.json({ error: loaded.error }, 404);
+		const snapshot = parseFunnelVersionSnapshot(loaded.version.snapshotJson);
+		if (!snapshot) return c.json({ error: "invalid snapshot" }, 500);
+		const violations = validateSnapshotStages(snapshot.stages);
+		if (violations.length > 0) {
+			return c.json(
+				{
+					error: "snapshot failed validation",
+					violations,
+				},
+				400,
+			);
+		}
+
+		const result = await applyFunnelStages(
+			opts.db,
+			tenantId,
+			snapshot.stages,
+			loaded.funnel.slug,
+			{
+				targetFunnelId: id,
+				snapshot: {
+					source: "rollback",
+					adminId,
+					note: `before rollback to version ${versionId}`,
+				},
+			},
+		);
+
+		const now = Math.floor(Date.now() / 1000);
+		await withTenant(opts.db, tenantId, (tx) =>
+			tx
+				.update(funnels)
+				.set({
+					verticalTemplateId: snapshot.funnel.verticalTemplateId,
+					stagesJson: snapshot.funnel.stagesJson,
+					defaultStyleId: snapshot.funnel.defaultStyleId,
+					isActive: snapshot.funnel.isActive,
+					updatedAt: now,
+				})
+				.where(and(eq(funnels.tenantId, tenantId), eq(funnels.id, id))),
+		);
+
+		await recordAudit(opts.db, {
+			tenantId,
+			adminId,
+			action: "funnel.rollback",
+			targetKind: "funnel",
+			targetId: String(id),
+			details: {
+				versionId,
+				sourceVersionSource: loaded.version.source,
+				stagesCreated: result.stagesCreated,
+			},
+		});
+
+		return c.json({
+			ok: true,
+			funnelId: id,
+			versionId,
+			stageCount: result.stagesCreated,
+		});
 	});
 
 	/**
@@ -5203,6 +5646,14 @@ export function makeAdminFunnelRoutes(opts: AdminFunnelRoutesOpts): Hono {
 				.select({ id: stageDefinitions.id })
 				.from(stageDefinitions)
 				.where(eq(stageDefinitions.funnelId, funnel.id));
+
+			if (existingStages.length > 0) {
+				await createFunnelVersionSnapshot(tx, tenantId, funnel, {
+					source: "seed",
+					adminId,
+					note: `before seed template ${body.template}`,
+				});
+			}
 
 			for (const s of existingStages) {
 				await tx.delete(stageFields).where(eq(stageFields.stageId, s.id));

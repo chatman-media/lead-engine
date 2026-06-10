@@ -81,6 +81,37 @@ export interface ReplyMarkup {
   inlineButtons?: Array<Array<{ label: string; callbackData: string }>>;
 }
 
+export interface OperatorHandoffMeta {
+  reason:
+    | "kyc_review"
+    | "payment_review"
+    | "office_payout"
+    | "payout_review"
+    | "operator_request";
+  title: string;
+  action: string;
+  contractId?: string;
+  orderId?: number;
+  stageSlug?: string;
+  priority?: "normal" | "high";
+  /** Customer input accepted by the bot before escalation, safe for UI/logs. */
+  accepted?: string;
+  /** What is still pending and must not be skipped. */
+  pending?: string;
+  /** Explicit review path so external services are distinguishable from manual review. */
+  reviewPath?:
+    | "manual_operator"
+    | "operator_or_external_kyc"
+    | "operator_or_payment_service"
+    | "operator_or_payout_service";
+  /** Safe operational context: no secrets, requisites, or raw document contents. */
+  context?: string;
+  urgency?: string;
+  amount?: string;
+  rail?: string;
+  network?: string;
+}
+
 export type OutboundPart =
   | { kind: "text"; text: string; parseMode?: "markdown" | "html" }
   | { kind: "photo"; mediaRef: MediaRef; caption?: string }
@@ -95,6 +126,8 @@ export interface OutboundEnvelope {
   channelId: string;
   externalUserId: string;
   parts: OutboundPart[];
+  /** Internal metadata for admin/operator workflows. Channel adapters ignore it. */
+  operatorHandoff?: OperatorHandoffMeta;
   replyToExternalMessageId?: string;
   replyMarkup?: ReplyMarkup;
   /** Опционально — для дедупликации повторных send-попыток. */

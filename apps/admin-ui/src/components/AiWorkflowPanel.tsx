@@ -1,6 +1,11 @@
-import { CheckIcon, SendIcon, SparklesIcon } from "lucide-react";
+import { CheckIcon, LayersIcon, SendIcon, SparklesIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { saas, type WorkflowChatMessage, type WorkflowPreviewStage } from "@/api/saas";
+import {
+  saas,
+  type WorkflowChatMessage,
+  type WorkflowPreviewStage,
+  type WorkflowVerticalSuggestion,
+} from "@/api/saas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -33,6 +38,9 @@ export function AiWorkflowPanel({
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<WorkflowPreviewStage[] | null>(null);
   const [pendingStages, setPendingStages] = useState<unknown[] | null>(null);
+  const [verticalSuggestions, setVerticalSuggestions] = useState<WorkflowVerticalSuggestion[]>([]);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [installingSlug, setInstallingSlug] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -44,12 +52,18 @@ export function AiWorkflowPanel({
       setError("");
       setPreview(null);
       setPendingStages(null);
+      setVerticalSuggestions([]);
+      setValidationErrors([]);
+      setInstallingSlug(null);
     }
   }, [open]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, preview]);
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages, preview, verticalSuggestions, validationErrors]);
 
   async function send() {
     const text = input.trim();
@@ -61,9 +75,13 @@ export function AiWorkflowPanel({
     setBusy(true);
     setPreview(null);
     setPendingStages(null);
+    setVerticalSuggestions([]);
+    setValidationErrors([]);
     try {
       const res = await saas.aiWorkflowChat(next);
       setMessages([...next, { role: "assistant", content: res.reply }]);
+      setVerticalSuggestions(res.verticalSuggestions ?? []);
+      setValidationErrors(res.backbone?.errors ?? []);
       if (res.readyToGenerate && res.preview && res.stages) {
         setPreview(res.preview);
         setPendingStages(res.stages);
@@ -72,6 +90,21 @@ export function AiWorkflowPanel({
       setError(err instanceof Error ? err.message : "Ошибка запроса к AI");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function installVertical(slug: string) {
+    setInstallingSlug(slug);
+    setError("");
+    try {
+      await saas.installVertical(slug);
+      onApplied();
+      window.dispatchEvent(new Event(FUNNELS_UPDATED_EVENT));
+      onOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось установить шаблон");
+    } finally {
+      setInstallingSlug(null);
     }
   }
 
@@ -120,6 +153,59 @@ export function AiWorkflowPanel({
           {busy && (
             <div className="max-w-[85%] rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
               AI печатает…
+            </div>
+          )}
+
+          {verticalSuggestions.length > 0 && (
+            <div className="space-y-2 rounded-lg border bg-card p-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <LayersIcon className="size-4 text-primary" />
+                Подходит готовый шаблон
+              </div>
+              <div className="space-y-2">
+                {verticalSuggestions.slice(0, 2).map((item) => (
+                  <div key={item.slug} className="rounded-md border bg-background px-2.5 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-sm">{item.displayName}</span>
+                      <Badge variant="secondary" className="text-xs">
+                        {Math.round(item.confidence * 100)}%
+                      </Badge>
+                      {item.hasStyles && (
+                        <Badge variant="outline" className="text-xs">
+                          стили
+                        </Badge>
+                      )}
+                      {item.hasKbDocuments && (
+                        <Badge variant="outline" className="text-xs">
+                          KB
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{item.reason}</p>
+                    <Button
+                      className="mt-2 w-full"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => installVertical(item.slug)}
+                      disabled={busy || installingSlug !== null}
+                    >
+                      <CheckIcon className="mr-1.5 size-4" />
+                      {installingSlug === item.slug ? "Устанавливаю…" : "Установить шаблон"}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {validationErrors.length > 0 && (
+            <div className="space-y-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+              <p className="text-sm font-medium text-destructive">Нужно поправить костяк</p>
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                {validationErrors.slice(0, 4).map((item) => (
+                  <li key={item}>• {item}</li>
+                ))}
+              </ul>
             </div>
           )}
 

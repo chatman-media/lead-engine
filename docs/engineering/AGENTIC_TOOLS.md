@@ -52,6 +52,18 @@ Zod-схема конвертится в OpenAI function-формат (`toolToOp
   (`packages/conversation-engine/src/reply-strategy/rag-reply.ts`) вызывается
   раз на входящее сообщение и возвращает список `RagTool[]`; они передаются в
   `answerWithRag()`. Нет резолвера → пустой список → tool-loop не активен.
+- Если tool-loop реально вызвал инструменты, `RagReplyStrategy.recordToolCalls`
+  и `LlmReplyStrategy.recordToolCalls` сохраняют trace в `agent_tool_calls`
+  через `AgentToolCallsRepo`: tool name, args/result JSON, error flag,
+  cycle/index, conversation/contact. Это основа для self-learning/coach/outcome
+  анализа; запись идёт после LLM/tool execution через отдельную короткую
+  `withTenant` транзакцию.
+- Admin quality API даёт read/review слой поверх traces:
+  `GET /api/admin/quality/tool-calls` фильтрует вызовы по tenant/conversation/
+  message/outbound/tool/error/source, а `POST /api/admin/quality/tool-calls/:id/feedback`
+  пишет human label в `agent_tool_call_feedback` (`good_reply`, `wrong_tool`,
+  `missing_tool`, `bad_args`, `other`). Это первый явный feedback-сигнал для
+  Hermes-style learning loop без автоизменения промптов.
 - Резолвер собирается в `apps/api/src/llm-bootstrap.ts`: booking (из секрета
   `tool_booking_url`) + exchange-инструменты (если активны курсы). Кеши
   сбрасываются `invalidateToolsFor(tenantId)` после правок в админке.

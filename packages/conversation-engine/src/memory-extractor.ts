@@ -1,5 +1,8 @@
-import type { ChatClient, ChatMessage as LlmChatMessage } from "@chatman-media/llm-router";
 import { extractUserFacts } from "@chatman-media/kb";
+import type {
+	ChatClient,
+	ChatMessage as LlmChatMessage,
+} from "@chatman-media/llm-router";
 import type { ContactsRepo } from "./dal/contacts.ts";
 import type { MessageRow, MessagesRepo } from "./dal/messages.ts";
 
@@ -18,13 +21,13 @@ import type { MessageRow, MessagesRepo } from "./dal/messages.ts";
  *   - extractor сам skip'ает LLM call если нет user-сообщений
  */
 export interface MemoryExtractor {
-  /** Извлекает facts; возвращает только новые/обновлённые. Empty = no-op. */
-  extract(opts: {
-    tenantId: number;
-    conversationId: number;
-    contactId: number;
-    existingFacts: Record<string, string>;
-  }): Promise<Record<string, string>>;
+	/** Извлекает facts; возвращает только новые/обновлённые. Empty = no-op. */
+	extract(opts: {
+		tenantId: number;
+		conversationId: number;
+		contactId: number;
+		existingFacts: Record<string, string>;
+	}): Promise<Record<string, string>>;
 }
 
 /**
@@ -32,44 +35,49 @@ export interface MemoryExtractor {
  * MessagesRepo — для загрузки history, ChatClient — для LLM-вызова.
  */
 export class LlmMemoryExtractor implements MemoryExtractor {
-  constructor(
-    private readonly opts: {
-      historyLimit?: number;
-      resolveChat: (tenantId: number) => ChatClient;
-    },
-    private readonly messagesRepoFor: (tenantId: number) => MessagesRepo,
-  ) {}
+	constructor(
+		private readonly opts: {
+			historyLimit?: number;
+			resolveChat: (tenantId: number) => ChatClient;
+		},
+		private readonly messagesRepoFor: (tenantId: number) => MessagesRepo,
+	) {}
 
-  async extract(input: {
-    tenantId: number;
-    conversationId: number;
-    contactId: number;
-    existingFacts: Record<string, string>;
-  }): Promise<Record<string, string>> {
-    const messagesRepo = this.messagesRepoFor(input.tenantId);
-    const history = await messagesRepo.recent(input.conversationId, this.opts.historyLimit ?? 10);
-    if (history.length === 0) return {};
+	async extract(input: {
+		tenantId: number;
+		conversationId: number;
+		contactId: number;
+		existingFacts: Record<string, string>;
+	}): Promise<Record<string, string>> {
+		const messagesRepo = this.messagesRepoFor(input.tenantId);
+		const history = await messagesRepo.recent(
+			input.conversationId,
+			this.opts.historyLimit ?? 10,
+		);
+		if (history.length === 0) return {};
 
-    const llmMessages = mapToRagMessages(history);
-    if (llmMessages.length === 0) return {};
+		const llmMessages = mapToRagMessages(history);
+		if (llmMessages.length === 0) return {};
 
-    const chat = this.opts.resolveChat(input.tenantId);
-    return extractUserFacts({
-      messages: llmMessages as unknown as Parameters<typeof extractUserFacts>[0]["messages"],
-      chat: chat as unknown as Parameters<typeof extractUserFacts>[0]["chat"],
-      existingFacts: input.existingFacts,
-    });
-  }
+		const chat = this.opts.resolveChat(input.tenantId);
+		return extractUserFacts({
+			messages: llmMessages as unknown as Parameters<
+				typeof extractUserFacts
+			>[0]["messages"],
+			chat: chat as unknown as Parameters<typeof extractUserFacts>[0]["chat"],
+			existingFacts: input.existingFacts,
+		});
+	}
 }
 
 function mapToRagMessages(history: MessageRow[]): LlmChatMessage[] {
-  const out: LlmChatMessage[] = [];
-  for (const m of history) {
-    if (m.role === "user") out.push({ role: "user", content: m.text });
-    else if (m.role === "assistant" || m.role === "human")
-      out.push({ role: "assistant", content: m.text });
-  }
-  return out;
+	const out: LlmChatMessage[] = [];
+	for (const m of history) {
+		if (m.role === "user") out.push({ role: "user", content: m.text });
+		else if (m.role === "assistant" || m.role === "human")
+			out.push({ role: "assistant", content: m.text });
+	}
+	return out;
 }
 
 // ---- Pipeline-side helper ----------------------------------------------
@@ -84,30 +92,37 @@ function mapToRagMessages(history: MessageRow[]): LlmChatMessage[] {
  * как-есть.
  */
 export async function runMemoryExtraction(opts: {
-  extractor: MemoryExtractor;
-  tenantId: number;
-  conversationId: number;
-  contactId: number;
-  contacts: ContactsRepo;
-  nowEpoch: number;
+	extractor: MemoryExtractor;
+	tenantId: number;
+	conversationId: number;
+	contactId: number;
+	contacts: ContactsRepo;
+	nowEpoch: number;
 }): Promise<Record<string, string>> {
-  const contact = await opts.contacts.byId(opts.contactId);
-  if (!contact) return {};
-  const existing: Record<string, string> = {};
-  if (contact.attributesJson) {
-    const parsed = JSON.parse(contact.attributesJson) as Record<string, unknown>;
-    for (const [k, v] of Object.entries(parsed)) {
-      if (typeof v === "string") existing[k] = v;
-    }
-  }
-  const newFacts = await opts.extractor.extract({
-    tenantId: opts.tenantId,
-    conversationId: opts.conversationId,
-    contactId: opts.contactId,
-    existingFacts: existing,
-  });
-  if (Object.keys(newFacts).length > 0) {
-    await opts.contacts.mergeAttributes(opts.contactId, newFacts, opts.nowEpoch);
-  }
-  return newFacts;
+	const contact = await opts.contacts.byId(opts.contactId);
+	if (!contact) return {};
+	const existing: Record<string, string> = {};
+	if (contact.attributesJson) {
+		const parsed = JSON.parse(contact.attributesJson) as Record<
+			string,
+			unknown
+		>;
+		for (const [k, v] of Object.entries(parsed)) {
+			if (typeof v === "string") existing[k] = v;
+		}
+	}
+	const newFacts = await opts.extractor.extract({
+		tenantId: opts.tenantId,
+		conversationId: opts.conversationId,
+		contactId: opts.contactId,
+		existingFacts: existing,
+	});
+	if (Object.keys(newFacts).length > 0) {
+		await opts.contacts.mergeAttributes(
+			opts.contactId,
+			newFacts,
+			opts.nowEpoch,
+		);
+	}
+	return newFacts;
 }

@@ -1,4 +1,5 @@
 import {
+  agentToolCalls,
   admins,
   applyAllMigrations,
   coachProposals,
@@ -50,6 +51,8 @@ let tokenA = "";
 let tokenB = "";
 let tenantA = 0;
 let tenantB = 0;
+let toolConversationA = 0;
+let toolCallOrderA = 0;
 const reloads: number[] = [];
 const salesReplies: string[] = [];
 const candidateReplies: string[] = [];
@@ -373,6 +376,103 @@ beforeAll(async () => {
       completedAt: now + 1,
     },
   ]);
+
+  const [toolContactA] = await db
+    .insert(contacts)
+    .values({
+      tenantId: tenantA,
+      displayName: "Tool Trace A",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: contacts.id });
+  const [toolContactB] = await db
+    .insert(contacts)
+    .values({
+      tenantId: tenantB,
+      displayName: "Tool Trace B",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: contacts.id });
+  if (!toolContactA || !toolContactB) throw new Error("tool contact fixture mismatch");
+
+  const [toolConvA] = await db
+    .insert(conversations)
+    .values({
+      tenantId: tenantA,
+      userId: toolContactA.id,
+      source: "bot",
+      mode: "ai",
+      createdAt: now,
+      lastMessageAt: now,
+    })
+    .returning({ id: conversations.id });
+  const [toolConvB] = await db
+    .insert(conversations)
+    .values({
+      tenantId: tenantB,
+      userId: toolContactB.id,
+      source: "bot",
+      mode: "ai",
+      createdAt: now,
+      lastMessageAt: now,
+    })
+    .returning({ id: conversations.id });
+  if (!toolConvA || !toolConvB) throw new Error("tool conversation fixture mismatch");
+  toolConversationA = toolConvA.id;
+
+  const insertedToolCalls = await db.insert(agentToolCalls).values([
+    {
+      tenantId: tenantA,
+      conversationId: toolConvA.id,
+      contactId: toolContactA.id,
+      source: "rag_reply",
+      toolName: "compute_exchange_quote",
+      argsJson: JSON.stringify({ asset: "USDT", amount: 100 }),
+      resultJson: JSON.stringify({ ok: true, amountToThb: 3150 }),
+      error: false,
+      cycle: 0,
+      toolCallIndex: 0,
+      createdAt: now + 30,
+    },
+    {
+      tenantId: tenantA,
+      conversationId: toolConvA.id,
+      contactId: toolContactA.id,
+      source: "llm_reply",
+      toolName: "create_exchange_order",
+      argsJson: JSON.stringify({ quoteId: "q1" }),
+      resultJson: JSON.stringify({ error: "needs verification" }),
+      error: true,
+      cycle: 1,
+      toolCallIndex: 1,
+      createdAt: now + 31,
+    },
+    {
+      tenantId: tenantB,
+      conversationId: toolConvB.id,
+      contactId: toolContactB.id,
+      source: "rag_reply",
+      toolName: "compute_exchange_quote",
+      argsJson: JSON.stringify({ asset: "USDT", amount: 999 }),
+      resultJson: JSON.stringify({ ok: true, amountToThb: 1 }),
+      error: false,
+      cycle: 0,
+      toolCallIndex: 0,
+      createdAt: now + 32,
+    },
+  ]).returning({
+    id: agentToolCalls.id,
+    tenantId: agentToolCalls.tenantId,
+    toolName: agentToolCalls.toolName,
+    error: agentToolCalls.error,
+  });
+  const orderToolCall = insertedToolCalls.find(
+    (row) => row.tenantId === tenantA && row.toolName === "create_exchange_order",
+  );
+  if (!orderToolCall) throw new Error("tool call fixture mismatch");
+  toolCallOrderA = orderToolCall.id;
 }, 30_000);
 
 afterAll(async () => {
@@ -387,6 +487,116 @@ describe("admin quality JSONL export", () => {
     if (!sql) return;
     const res = await app.request("/api/admin/quality/self-play/export.jsonl");
     expect(res.status).toBe(401);
+  });
+
+  it("returns tenant-scoped agentic tool-call traces with filters", async () => {
+    if (!sql) return;
+    const res = await authReq(
+      tokenA,
+      `/api/admin/quality/tool-calls?conversationId=${toolConversationA}&limit=10`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as QualityToolCallsResponse;
+    expect(body.items.map((item) => item.toolName)).toEqual([
+      "create_exchange_order",
+      "compute_exchange_quote",
+    ]);
+    expect(body.items[0]).toMatchObject({
+      source: "llm_reply",
+      error: true,
+      args: { quoteId: "q1" },
+      result: { error: "needs verification" },
+      cycle: 1,
+      toolCallIndex: 1,
+    });
+    expect(JSON.stringify(body)).not.toContain("999");
+
+    const filtered = (await (
+      await authReq(
+        tokenA,
+        `/api/admin/quality/tool-calls?conversationId=${toolConversationA}&toolName=compute_exchange_quote&error=false`,
+      )
+    ).json()) as QualityToolCallsResponse;
+    expect(filtered.items).toHaveLength(1);
+    expect(filtered.items[0]?.source).toBe("rag_reply");
+
+    const crossTenant = (await (
+      await authReq(
+        tokenB,
+        `/api/admin/quality/tool-calls?conversationId=${toolConversationA}`,
+      )
+    ).json()) as QualityToolCallsResponse;
+    expect(crossTenant.items).toEqual([]);
+  });
+
+  it("validates tool-call query params", async () => {
+    if (!sql) return;
+    expect((await authReq(tokenA, "/api/admin/quality/tool-calls?limit=0")).status).toBe(400);
+    expect((await authReq(tokenA, "/api/admin/quality/tool-calls?source=bad")).status).toBe(400);
+    expect((await authReq(tokenA, "/api/admin/quality/tool-calls?error=maybe")).status).toBe(400);
+  });
+
+  it("records tenant-scoped feedback labels for tool-call traces", async () => {
+    if (!sql) return;
+    const created = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`,
+      { label: "bad_args", note: "quote id should be verified before order creation" },
+    );
+    expect(created.status).toBe(201);
+    const createdBody = (await created.json()) as QualityToolCallFeedbackCreateResponse;
+    expect(createdBody.feedback).toMatchObject({
+      toolCallId: toolCallOrderA,
+      label: "bad_args",
+      note: "quote id should be verified before order creation",
+    });
+
+    const second = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`,
+      { label: "wrong_tool", note: "" },
+    );
+    expect(second.status).toBe(201);
+
+    const list = await authReq(
+      tokenA,
+      `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`,
+    );
+    expect(list.status).toBe(200);
+    const listBody = (await list.json()) as QualityToolCallFeedbackListResponse;
+    expect(listBody.items.map((item) => item.label)).toEqual(["wrong_tool", "bad_args"]);
+    expect(listBody.items[0]?.note).toBeNull();
+
+    expect(
+      (await authReq(tokenB, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`)).status,
+    ).toBe(404);
+    expect(
+      (
+        await authPostJsonReq(tokenB, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`, {
+          label: "good_reply",
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it("validates tool-call feedback payloads", async () => {
+    if (!sql) return;
+    expect(
+      (await authPostJsonReq(tokenA, "/api/admin/quality/tool-calls/0/feedback", {
+        label: "good_reply",
+      })).status,
+    ).toBe(400);
+    expect(
+      (await authPostJsonReq(tokenA, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`, {
+        label: "unknown",
+      })).status,
+    ).toBe(400);
+    expect(
+      (await authPostJsonReq(tokenA, `/api/admin/quality/tool-calls/${toolCallOrderA}/feedback`, {
+        label: "good_reply",
+        note: 123,
+      })).status,
+    ).toBe(400);
   });
 
   it("returns tenant-scoped self-play summary", async () => {
@@ -1520,6 +1730,43 @@ type QualityRecord = {
     persisted?: boolean;
     transcript?: unknown[];
   };
+};
+
+type QualityToolCallsResponse = {
+  items: Array<{
+    id: number;
+    conversationId: number;
+    contactId: number | null;
+    messageId: number | null;
+    outboundQueueId: number | null;
+    source: string;
+    toolName: string;
+    args: unknown;
+    result: unknown;
+    error: boolean;
+    cycle: number;
+    toolCallIndex: number;
+    latencyMs: number | null;
+    createdAt: number;
+  }>;
+};
+
+type QualityToolCallFeedbackResponse = {
+  id: number;
+  toolCallId: number;
+  adminId: number | null;
+  label: string;
+  note: string | null;
+  createdAt: number;
+};
+
+type QualityToolCallFeedbackCreateResponse = {
+  ok: true;
+  feedback: QualityToolCallFeedbackResponse;
+};
+
+type QualityToolCallFeedbackListResponse = {
+  items: QualityToolCallFeedbackResponse[];
 };
 
 type QualitySummaryResponse = {

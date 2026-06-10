@@ -105,7 +105,84 @@ async function evalReq(app: Hono): Promise<Response> {
   });
 }
 
+async function answerQualityReq(app: Hono, body: Record<string, unknown> = {}): Promise<Response> {
+  return app.request("/api/admin/sim/exchange-answer-quality-eval", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("exchange-eval harness", () => {
+  it("answer-quality replay returns deterministic report without running dialogs", async () => {
+    if (!sql) return;
+    const res = await answerQualityReq(appGood);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      summary: { passed: number; total: number; failed: number };
+      failuresText: string;
+      report: Array<{
+        id: string;
+        title: string;
+        passed: boolean;
+        expectedContract: string;
+        expectedDeterministic: boolean;
+        trace: string[];
+      }>;
+    };
+    expect(body.summary.total).toBeGreaterThanOrEqual(4);
+    expect(body.summary.failed).toBe(0);
+    expect(body.summary.passed).toBe(body.summary.total);
+    expect(body.failuresText).toBe("");
+    expect(body.report.some((item) => item.id === "payment-proof-review")).toBe(true);
+    expect(body.report.every((item) => item.passed)).toBe(true);
+    expect(body.report[0]?.trace.join(" ")).toContain("contract=");
+  });
+
+  it("answer-quality replay can filter by case id", async () => {
+    if (!sql) return;
+    const res = await answerQualityReq(appGood, { caseIds: ["kyc-video-handoff"] });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      summary: { passed: number; total: number };
+      report: Array<{ id: string; expectedContract: string }>;
+    };
+    expect(body.summary.total).toBe(1);
+    expect(body.summary.passed).toBe(1);
+    expect(body.report[0]?.id).toBe("kyc-video-handoff");
+    expect(body.report[0]?.expectedContract).toBe("kyc_submitted");
+  });
+
+  it("answer-quality replay can filter bad-dialog replay cases", async () => {
+    if (!sql) return;
+    const res = await answerQualityReq(appGood, {
+      caseIds: ["bad-dialog-rub-payment-office-pickup"],
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      summary: { passed: number; total: number };
+      report: Array<{ id: string; suite: string; expectedContract: string; trace: string[] }>;
+    };
+    expect(body.summary.total).toBe(1);
+    expect(body.summary.passed).toBe(1);
+    expect(body.report[0]?.id).toBe("bad-dialog-rub-payment-office-pickup");
+    expect(body.report[0]?.suite).toBe("bad_dialog");
+    expect(body.report[0]?.expectedContract).toBe("payment_review");
+    expect(body.report[0]?.trace.join(" ")).toContain("unsafe_draft");
+  });
+
+  it("answer-quality replay works even when chat LLM is not configured", async () => {
+    if (!sql) return;
+    const noChat = new Hono();
+    noChat.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+    noChat.route("/", makeAdminSimRoutes({ db, replyStrategy: null, resolveSimChat: () => null }));
+    const res = await answerQualityReq(noChat, { caseIds: ["payment-proof-review"] });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { summary: { passed: number; total: number } };
+    expect(body.summary.total).toBe(1);
+    expect(body.summary.passed).toBe(1);
+  });
+
   it("good dialog (курс + реквизиты) scores as passed", async () => {
     if (!sql) return;
     const res = await evalReq(appGood);

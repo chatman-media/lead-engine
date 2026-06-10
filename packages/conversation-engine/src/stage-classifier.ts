@@ -1,6 +1,6 @@
+import type { FunnelStage } from "@chatman-media/kb";
 import { conversations as conversationsTable } from "@chatman-media/storage";
 import { and, eq, sql } from "drizzle-orm";
-import type { FunnelStage } from "@chatman-media/kb";
 import type { Db } from "./dal/types.ts";
 
 /**
@@ -18,22 +18,22 @@ import type { Db } from "./dal/types.ts";
  *   - conversation.current_stage: micro-state диалога продажи (per turn)
  */
 export interface StageClassifier {
-  /**
-   * Классифицирует stage по тексту user-message + опц. контексту.
-   * Возвращает FunnelStage или null если уверенности нет.
-   */
-  classify(input: {
-    /**
-     * Tenant контекст — нужен LLM-based реализациям для resolveChat
-     * (per-tenant LLM-config). Regex-impl игнорирует, но в interface
-     * required чтобы pipeline call-site всегда передавал реальный
-     * tenantId из processInbound deps.
-     */
-    tenantId: number;
-    userMessageText: string;
-    previousStage: string | null;
-    isFirstUserMessage: boolean;
-  }): Promise<FunnelStage | null> | FunnelStage | null;
+	/**
+	 * Классифицирует stage по тексту user-message + опц. контексту.
+	 * Возвращает FunnelStage или null если уверенности нет.
+	 */
+	classify(input: {
+		/**
+		 * Tenant контекст — нужен LLM-based реализациям для resolveChat
+		 * (per-tenant LLM-config). Regex-impl игнорирует, но в interface
+		 * required чтобы pipeline call-site всегда передавал реальный
+		 * tenantId из processInbound deps.
+		 */
+		tenantId: number;
+		userMessageText: string;
+		previousStage: string | null;
+		isFirstUserMessage: boolean;
+	}): Promise<FunnelStage | null> | FunnelStage | null;
 }
 
 // ---- Pipeline-side helper ----------------------------------------------
@@ -46,32 +46,32 @@ export interface StageClassifier {
  * conv-engine берёт результат и применяет через applyClassifiedStage.
  */
 export async function applyClassifiedStage(opts: {
-  db: Db;
-  tenantId: number;
-  conversationId: number;
-  newStage: FunnelStage | null;
+	db: Db;
+	tenantId: number;
+	conversationId: number;
+	newStage: FunnelStage | null;
 }): Promise<boolean> {
-  if (!opts.newStage) return false;
-  const [row] = await opts.db
-    .select({ stage: conversationsTable.currentStage })
-    .from(conversationsTable)
-    .where(
-      and(
-        eq(conversationsTable.id, opts.conversationId),
-        eq(conversationsTable.tenantId, opts.tenantId),
-      ),
-    );
-  if (!row || row.stage === opts.newStage) return false;
-  await opts.db
-    .update(conversationsTable)
-    .set({ currentStage: opts.newStage })
-    .where(
-      and(
-        eq(conversationsTable.id, opts.conversationId),
-        eq(conversationsTable.tenantId, opts.tenantId),
-      ),
-    );
-  return true;
+	if (!opts.newStage) return false;
+	const [row] = await opts.db
+		.select({ stage: conversationsTable.currentStage })
+		.from(conversationsTable)
+		.where(
+			and(
+				eq(conversationsTable.id, opts.conversationId),
+				eq(conversationsTable.tenantId, opts.tenantId),
+			),
+		);
+	if (!row || row.stage === opts.newStage) return false;
+	await opts.db
+		.update(conversationsTable)
+		.set({ currentStage: opts.newStage })
+		.where(
+			and(
+				eq(conversationsTable.id, opts.conversationId),
+				eq(conversationsTable.tenantId, opts.tenantId),
+			),
+		);
+	return true;
 }
 
 // Silence unused sql import warning когда consumer не использует raw SQL.

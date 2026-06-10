@@ -3,6 +3,10 @@ import type { Inbound, OutboundEnvelope } from "@chatman-media/channel-core";
 import type { ContactsRepo } from "./dal/index.ts";
 import { processInbound, type ReplyStrategy } from "./process-inbound.ts";
 import {
+	buildExchangeAnswerQualityContext,
+	exchangeOperatorHandoffForContext,
+} from "./reply-strategy/exchange-answer-quality.ts";
+import {
 	FakeChannelIdentitiesRepo,
 	FakeContactsRepo,
 	FakeConversationsRepo,
@@ -259,7 +263,11 @@ describe("processInbound", () => {
 
 	// ── Опциональные хуки pipeline (notifications / transcriber / extractFields /
 	//    memoryExtractor / deferReply) — все через фейки, без БД. ──────────────
-	type NotifyEvent = { eventType: string; conversationId: number };
+	type NotifyEvent = {
+		eventType: string;
+		conversationId: number;
+		data?: Record<string, unknown>;
+	};
 	function fakeNotifications(events: NotifyEvent[]) {
 		return {
 			notify: async (e: NotifyEvent) => {
@@ -285,8 +293,189 @@ describe("processInbound", () => {
 			raw: {},
 		};
 		await processInbound(inbound, d);
-		expect(events.some((e) => e.eventType === "verification_requested")).toBe(
-			true,
+		const event = events.find((e) => e.eventType === "verification_requested");
+		expect(event).toBeDefined();
+		expect(event?.data?.action).toContain("верифицировать клиента");
+		expect(event?.data?.mediaSummary).toContain("video_note");
+		expect(event?.data?.mediaSummary).toContain("tg-1:vn1");
+		expect(event?.data?.mediaRefsJson).toContain("vn1");
+	});
+
+	it("KYC media with caption → deterministic handoff reply is enqueued", async () => {
+		const events: NotifyEvent[] = [];
+		let replyText: string | undefined;
+		const reply: ReplyStrategy = {
+			generate: async (opts) => {
+				const context = buildExchangeAnswerQualityContext({
+					state: {
+						stageSlug: "verification_check",
+						verification: {
+							verified: false,
+							status: "pending",
+							needsVerification: true,
+						},
+					},
+					userMessageText: opts.userMessageText,
+				});
+				replyText = context.deterministicReply ?? undefined;
+				return [
+					{
+						channelId: String(opts.channel.channelId),
+						externalUserId: opts.inbound.externalUserId,
+						parts: [{ kind: "text", text: context.deterministicReply ?? "" }],
+						operatorHandoff:
+							exchangeOperatorHandoffForContext(context) ?? undefined,
+					},
+				];
+			},
+		};
+		const d = {
+			...makeDeps(reply),
+			notifications: fakeNotifications(events),
+		};
+		const inbound: Inbound = {
+			channelId: "tg-1",
+			externalMessageId: "205",
+			externalUserId: "u-kyc-media",
+			parts: [
+				{
+					kind: "video",
+					mediaRef: { channelId: "tg-1", externalRef: "video-kyc" },
+					caption: "Вот видео.",
+				},
+				{
+					kind: "document",
+					mediaRef: { channelId: "tg-1", externalRef: "passport-doc" },
+					mimeType: "image/jpeg",
+					fileName: "passport.jpg",
+				},
+			],
+			receivedAt: 1700000000,
+			raw: {},
+		};
+
+		const result = await processInbound(inbound, d);
+
+		expect(result.outboundEnqueued).toBe(1);
+		expect(d._fakes.messages.all()[0]?.text).toBe("Вот видео.");
+		expect(d._fakes.messages.all()[0]?.metaJson).toContain("passport-doc");
+		expect(replyText ?? "").toContain("Принял документ/видео");
+		const payload = JSON.parse(d._fakes.outbound.all()[0]?.payloadJson ?? "{}");
+		expect(payload.operatorHandoff).toMatchObject({
+			reason: "kyc_review",
+			contractId: "kyc_submitted",
+			title: "KYC: проверить документ/видео",
+			reviewPath: "operator_or_external_kyc",
+			accepted: "Клиент отправил KYC-материалы: документ/фото/видео.",
+		});
+		const handoffEvent = events.find(
+			(event) => event.eventType === "operator_handoff_required",
+		);
+		expect(handoffEvent?.data).toMatchObject({
+			reason: "kyc_review",
+			title: "KYC: проверить документ/видео",
+			reviewPath: "operator_or_external_kyc",
+			accepted: "Клиент отправил KYC-материалы: документ/фото/видео.",
+		});
+		expect(String(handoffEvent?.data?.action ?? "")).toContain(
+			"внешний KYC-сервис",
+		);
+		expect(String(handoffEvent?.data?.context ?? "")).toContain(
+			"media=document/video",
+		);
+	});
+
+	it("payment proof media with caption → payment-review handoff notification", async () => {
+		const events: NotifyEvent[] = [];
+		const reply: ReplyStrategy = {
+			generate: async (opts) => {
+				const context = buildExchangeAnswerQualityContext({
+					state: {
+						stageSlug: "payment_proof_waiting",
+						verification: {
+							verified: true,
+							status: "verified",
+							needsVerification: false,
+							verificationId: "ver_1",
+						},
+						order: {
+							id: 77,
+							status: "awaiting_payment",
+							assetFrom: "RUB",
+							amountFrom: 100000,
+							amountToThb: 40000,
+							paymentMethod: "card_transfer",
+							payoutMethod: "office_cash",
+							requisitesIssued: true,
+							paymentProofReceived: false,
+							paymentVerified: false,
+							payoutReady: false,
+							payoutCompleted: false,
+							payoutCodeIssued: false,
+							verificationId: "ver_1",
+						},
+					},
+					userMessageText: opts.userMessageText,
+				});
+				return [
+					{
+						channelId: String(opts.channel.channelId),
+						externalUserId: opts.inbound.externalUserId,
+						parts: [{ kind: "text", text: context.deterministicReply ?? "" }],
+						operatorHandoff:
+							exchangeOperatorHandoffForContext(context) ?? undefined,
+					},
+				];
+			},
+		};
+		const d = {
+			...makeDeps(reply),
+			notifications: fakeNotifications(events),
+		};
+		const inbound: Inbound = {
+			channelId: "tg-1",
+			externalMessageId: "206",
+			externalUserId: "u-payment-proof",
+			parts: [
+				{
+					kind: "photo",
+					mediaRef: { channelId: "tg-1", externalRef: "receipt-photo" },
+					caption: "Вот чек оплаты.",
+				},
+			],
+			receivedAt: 1700000000,
+			raw: {},
+		};
+
+		const result = await processInbound(inbound, d);
+
+		expect(result.outboundEnqueued).toBe(1);
+		const payload = JSON.parse(d._fakes.outbound.all()[0]?.payloadJson ?? "{}");
+		expect(payload.operatorHandoff).toMatchObject({
+			reason: "payment_review",
+			contractId: "payment_review",
+			title: "Оплата: проверить чек/скрин",
+			reviewPath: "operator_or_payment_service",
+			orderId: 77,
+			amount: "100000 RUB -> 40000 THB",
+			rail: "card transfer",
+		});
+		const handoffEvent = events.find(
+			(event) => event.eventType === "operator_handoff_required",
+		);
+		expect(handoffEvent?.data).toMatchObject({
+			reason: "payment_review",
+			title: "Оплата: проверить чек/скрин",
+			reviewPath: "operator_or_payment_service",
+			orderId: 77,
+			amount: "100000 RUB -> 40000 THB",
+			rail: "card transfer",
+		});
+		expect(String(handoffEvent?.data?.action ?? "")).toContain(
+			"платёжный сервис",
+		);
+		expect(String(handoffEvent?.data?.pending ?? "")).toContain(
+			"paymentVerified=true",
 		);
 	});
 
@@ -304,7 +493,12 @@ describe("processInbound", () => {
 			raw: {},
 		};
 		await processInbound(inbound, d);
-		expect(events.some((e) => e.eventType === "document_uploaded")).toBe(true);
+		const event = events.find((e) => e.eventType === "document_uploaded");
+		expect(event).toBeDefined();
+		expect(event?.data?.action).toContain("Проверьте документ");
+		expect(event?.data?.mediaSummary).toContain("photo");
+		expect(event?.data?.mediaSummary).toContain("tg-1:ph1");
+		expect(event?.data?.mediaRefsJson).toContain("ph1");
 	});
 
 	it("voice part → транскрибируется в текст и персистится", async () => {

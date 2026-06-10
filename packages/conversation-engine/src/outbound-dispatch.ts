@@ -9,16 +9,16 @@ import type { OutboundQueueRepo, OutboundQueueRow } from "./dal/index.ts";
  * Рекомендованный формат ключа — `${channelId}:${externalUserId}:${reasonHash}`.
  */
 export async function dispatchOutbound(opts: {
-  channelDbId: number;
-  conversationId: number | null;
-  envelope: OutboundEnvelope;
-  outbound: OutboundQueueRepo;
-  nowEpoch: number;
+	channelDbId: number;
+	conversationId: number | null;
+	envelope: OutboundEnvelope;
+	outbound: OutboundQueueRepo;
+	nowEpoch: number;
 }): Promise<OutboundQueueRow> {
-  return opts.outbound.enqueue({
-    channelId: opts.channelDbId,
-    conversationId: opts.conversationId,
-    envelope: opts.envelope,
-    nowEpoch: opts.nowEpoch,
-  });
+	return opts.outbound.enqueue({
+		channelId: opts.channelDbId,
+		conversationId: opts.conversationId,
+		envelope: opts.envelope,
+		nowEpoch: opts.nowEpoch,
+	});
 }

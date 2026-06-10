@@ -4,10 +4,11 @@
 // kb/answer.test). Без БД и сети.
 
 import { describe, expect, it } from "bun:test";
-import type { ChatClient } from "@chatman-media/llm-router";
+import type { ChatClient, ChatMessage } from "@chatman-media/llm-router";
 import type { VerticalTemplate } from "@chatman-media/verticals";
-import { RagReplyStrategy, type RagReplyStrategyOpts } from "./rag-reply.ts";
+import { z } from "zod";
 import { EXCHANGE_SAFE_FALLBACK } from "./exchange-reply-guard.ts";
+import { RagReplyStrategy, type RagReplyStrategyOpts } from "./rag-reply.ts";
 
 const TENANT = { tenantId: 1 };
 const CHANNEL = { channelId: 10 };
@@ -16,279 +17,545 @@ const CHANNEL = { channelId: 10 };
 const QUESTION = "расскажи про условия обмена usdt на баты";
 
 function chatReturning(reply: string): ChatClient {
-  return { complete: async () => reply } as unknown as ChatClient;
+	return { complete: async () => reply } as unknown as ChatClient;
 }
 
-function chatThenFactCheck(reply: string, verdict: Record<string, unknown>): ChatClient {
-  let calls = 0;
-  return {
-    complete: async () => {
-      calls += 1;
-      return calls === 1 ? reply : JSON.stringify(verdict);
-    },
-  } as unknown as ChatClient;
+class CapturingRagChat implements ChatClient {
+	lastCall: { messages: ChatMessage[]; opts: unknown } | null = null;
+	constructor(public readonly reply: string) {}
+	async complete(messages: ChatMessage[], opts?: unknown): Promise<string> {
+		this.lastCall = { messages, opts };
+		return this.reply;
+	}
+}
+
+function chatThenFactCheck(
+	reply: string,
+	verdict: Record<string, unknown>,
+): ChatClient {
+	let calls = 0;
+	return {
+		complete: async () => {
+			calls += 1;
+			return calls === 1 ? reply : JSON.stringify(verdict);
+		},
+	} as unknown as ChatClient;
 }
 
 const embed: RagReplyStrategyOpts["resolveEmbed"] = () =>
-  ({ embed: async (xs: string[]) => xs.map(() => [1, 0, 0]), dim: 3 }) as never;
+	({ embed: async (xs: string[]) => xs.map(() => [1, 0, 0]), dim: 3 }) as never;
 
 function kbWith(hits: unknown[]): RagReplyStrategyOpts["resolveKb"] {
-  return () =>
-    ({
-      search: async () => hits,
-      hybridSearch: async () => hits,
-      prioritySearch: async () => hits,
-    }) as never;
+	return () =>
+		({
+			search: async () => hits,
+			hybridSearch: async () => hits,
+			prioritySearch: async () => hits,
+		}) as never;
 }
 
 const HIT = {
-  chunk_id: 1,
-  distance: 0.1,
-  text: "USDT меняем по курсу 36.5 бат без комиссии",
-  document_id: 1,
-  source: "kb",
-  title: "Курсы",
+	chunk_id: 1,
+	distance: 0.1,
+	text: "USDT меняем по курсу 36.5 бат без комиссии",
+	document_id: 1,
+	source: "kb",
+	title: "Курсы",
 };
 
 const EXCHANGE_TEMPLATE = {
-  slug: "exchange_v1",
-  displayName: "Exchange",
-  version: 1,
-  funnelStages: [],
-  systemPromptFragment: "",
+	slug: "exchange_v1",
+	displayName: "Exchange",
+	version: 1,
+	funnelStages: [],
+	systemPromptFragment: "",
 } as unknown as VerticalTemplate;
 
-type ResolvedStyle = NonNullable<Awaited<ReturnType<NonNullable<RagReplyStrategyOpts["resolveStyle"]>>>>;
+type ResolvedStyle = NonNullable<
+	Awaited<ReturnType<NonNullable<RagReplyStrategyOpts["resolveStyle"]>>>
+>;
 
 const STYLE: ResolvedStyle = {
-  slug: "exch-pro",
-  displayName: "Exchange Pro",
-  persona: { name: "Alex", role: "human", company: "Acme" },
-  voice: { tone: "friendly", language: "ru", forbid: [] },
-  framework: "SPIN",
-  hooks: [],
-  stages: {},
-  fewShot: [],
-  guardrails: { noMinors: true, botDisclosureOnDirectQuestion: true, forbiddenTopics: [] },
-  model: { id: "x", temperature: 0.5, maxTokens: 100 },
+	slug: "exch-pro",
+	displayName: "Exchange Pro",
+	persona: { name: "Alex", role: "human", company: "Acme" },
+	voice: { tone: "friendly", language: "ru", forbid: [] },
+	framework: "SPIN",
+	hooks: [],
+	stages: {},
+	fewShot: [],
+	guardrails: {
+		noMinors: true,
+		botDisclosureOnDirectQuestion: true,
+		forbiddenTopics: [],
+	},
+	model: { id: "x", temperature: 0.5, maxTokens: 100 },
 };
 
 /** Минимальный messagesRepo с recent/countByConversation/insert. */
 function fakeMessagesRepo(opts: { recent?: unknown[]; count?: number } = {}) {
-  return () =>
-    ({
-      recent: async () => opts.recent ?? [],
-      countByConversation: async () => opts.count ?? 0,
-      insert: async () => ({ id: 1 }),
-    }) as never;
+	return () =>
+		({
+			recent: async () => opts.recent ?? [],
+			countByConversation: async () => opts.count ?? 0,
+			insert: async () => ({ id: 1 }),
+		}) as never;
 }
 
 const baseInput = () => ({
-  tenant: TENANT,
-  channel: CHANNEL,
-  conversationId: 100,
-  contactId: 5,
-  inbound: { externalUserId: "u1" },
-  userMessageText: QUESTION,
+	tenant: TENANT,
+	channel: CHANNEL,
+	conversationId: 100,
+	contactId: 5,
+	inbound: { externalUserId: "u1" },
+	userMessageText: QUESTION,
 });
 
 type Repo = ConstructorParameters<typeof RagReplyStrategy>[1];
 function mk(opts: Partial<RagReplyStrategyOpts>, repo: Repo): RagReplyStrategy {
-  return new RagReplyStrategy(opts as RagReplyStrategyOpts, repo);
+	return new RagReplyStrategy(opts as RagReplyStrategyOpts, repo);
 }
 
 describe("RagReplyStrategy.generate", () => {
-  it("пустой userMessageText → null", async () => {
-    const s = mk(
-      { resolveChat: () => chatReturning("x"), resolveEmbed: embed, resolveKb: kbWith([]) },
-      fakeMessagesRepo(),
-    );
-    const r = await s.generate({ ...baseInput(), userMessageText: "" });
-    expect(r).toBeNull();
-  });
+	it("пустой userMessageText → null", async () => {
+		const s = mk(
+			{
+				resolveChat: () => chatReturning("x"),
+				resolveEmbed: embed,
+				resolveKb: kbWith([]),
+			},
+			fakeMessagesRepo(),
+		);
+		const r = await s.generate({ ...baseInput(), userMessageText: "" });
+		expect(r).toBeNull();
+	});
 
-  it("resolveIsSupport=true → null (оператор ведёт вручную)", async () => {
-    const s = mk(
-      {
-        resolveChat: () => chatReturning("x"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-        resolveIsSupport: async () => true,
-      },
-      fakeMessagesRepo(),
-    );
-    expect(await s.generate(baseInput())).toBeNull();
-  });
+	it("resolveIsSupport=true → null (оператор ведёт вручную)", async () => {
+		const s = mk(
+			{
+				resolveChat: () => chatReturning("x"),
+				resolveEmbed: embed,
+				resolveKb: kbWith([HIT]),
+				resolveIsSupport: async () => true,
+			},
+			fakeMessagesRepo(),
+		);
+		expect(await s.generate(baseInput())).toBeNull();
+	});
 
-  it("happy: KB-хит → envelope с текстом ответа", async () => {
-    const s = mk(
-      {
-        resolveChat: () => chatReturning("Курс 36.5 бат за USDT, без комиссии"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-      },
-      fakeMessagesRepo(),
-    );
-    const r = await s.generate(baseInput());
-    expect(r).not.toBeNull();
-    expect(r).toHaveLength(1);
-    expect(r![0]!.channelId).toBe("10");
-    expect(r![0]!.externalUserId).toBe("u1");
-    const part = r![0]!.parts[0] as { kind: string; text: string };
-    expect(part.kind).toBe("text");
-    expect(part.text.toLowerCase()).toContain("курс");
-  });
+	it("happy: KB-хит → envelope с текстом ответа", async () => {
+		const s = mk(
+			{
+				resolveChat: () => chatReturning("Курс 36.5 бат за USDT, без комиссии"),
+				resolveEmbed: embed,
+				resolveKb: kbWith([HIT]),
+			},
+			fakeMessagesRepo(),
+		);
+		const r = await s.generate(baseInput());
+		expect(r).not.toBeNull();
+		expect(r).toHaveLength(1);
+		expect(r![0]!.channelId).toBe("10");
+		expect(r![0]!.externalUserId).toBe("u1");
+		const part = r![0]!.parts[0] as { kind: string; text: string };
+		expect(part.kind).toBe("text");
+		expect(part.text.toLowerCase()).toContain("курс");
+	});
 
-  it("style assignment metadata сохраняется в conversation", async () => {
-    const saved: Array<{ conversationId: number; styleId?: number | null; experimentId?: number | null }> = [];
-    const s = mk(
-      {
-        resolveChat: () => chatReturning("Курс 36.5 бат за USDT, без комиссии"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-        resolveStyle: async () => ({
-          ...STYLE,
-          styleId: 7,
-          experimentId: 3,
-          experimentSlug: "exp-a",
-          variantSlug: "exch-pro",
-        }),
-        resolveConversations: () =>
-          ({
-            setAssignment: async (
-              conversationId: number,
-              assignment: { styleId?: number | null; experimentId?: number | null },
-            ) => {
-              saved.push({ conversationId, ...assignment });
-            },
-          }) as never,
-      },
-      fakeMessagesRepo(),
-    );
+	it("records tool-call telemetry when the RAG tool-loop uses a tool", async () => {
+		let toolLoops = 0;
+		const chat = {
+			completeWithTools: async () => {
+				toolLoops += 1;
+				if (toolLoops === 1) {
+					return {
+						content: null,
+						toolCalls: [
+							{
+								id: "call-1",
+								name: "quote_exchange",
+								args: { asset: "USDT", amount: 100 },
+							},
+						],
+					};
+				}
+				return { content: "ignored final", toolCalls: [] };
+			},
+			complete: async () => "За 100 USDT получите 3150 THB.",
+		} as unknown as ChatClient;
+		const recorded: Array<
+			Parameters<NonNullable<RagReplyStrategyOpts["recordToolCalls"]>>[0]
+		> = [];
+		const s = mk(
+			{
+				resolveChat: () => chat,
+				resolveEmbed: embed,
+				resolveKb: kbWith([HIT]),
+				resolveTools: () => [
+					{
+						name: "quote_exchange",
+						description: "quote",
+						parameters: z.object({
+							asset: z.string(),
+							amount: z.number(),
+						}),
+						execute: async (args) => ({ ok: true, ...args, amountToThb: 3150 }),
+					},
+				],
+				recordToolCalls: async (input) => {
+					recorded.push(input);
+				},
+			},
+			fakeMessagesRepo(),
+		);
 
-    const r = await s.generate(baseInput());
+		const r = await s.generate(baseInput());
 
-    expect(r).not.toBeNull();
-    expect(saved[0]).toEqual({ conversationId: 100, styleId: 7, experimentId: 3 });
-  });
+		expect(r).not.toBeNull();
+		expect(recorded).toHaveLength(1);
+		expect(recorded[0]).toMatchObject({
+			tenantId: 1,
+			conversationId: 100,
+			contactId: 5,
+			assistantText: "За 100 USDT получите 3150 THB.",
+		});
+		expect(recorded[0]?.telemetry.toolCalls?.[0]).toMatchObject({
+			name: "quote_exchange",
+			args: { asset: "USDT", amount: 100 },
+			result: { ok: true, asset: "USDT", amount: 100, amountToThb: 3150 },
+			cycle: 0,
+		});
+	});
 
-  it("exchange: неподкреплённый курс заменяется safe fallback", async () => {
-    const s = mk(
-      {
-        template: EXCHANGE_TEMPLATE,
-        resolveChat: () => chatReturning("Курс 31.5, получите 10553 THB."),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-      },
-      fakeMessagesRepo(),
-    );
-    const r = await s.generate(baseInput());
-    expect(r).not.toBeNull();
-    const part = r![0]!.parts[0] as { text: string };
-    expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
-  });
+	it("uses resolved KB scope for RAG retrieval", async () => {
+		const scopes: string[] = [];
+		const s = mk(
+			{
+				resolveChat: () => chatReturning("Курс 36.5 бат за USDT, без комиссии"),
+				resolveEmbed: embed,
+				resolveKbScope: () => ({
+					scopeType: "stage",
+					funnelId: 77,
+					stageSlug: "payment",
+				}),
+				resolveKb: () =>
+					({
+						search: async () => [],
+						hybridSearch: async (input: {
+							scope?: {
+								scopeType: string;
+								funnelId?: number | null;
+								stageSlug?: string | null;
+							};
+						}) => {
+							const scope = input.scope;
+							scopes.push(
+								scope
+									? `${scope.scopeType}:${scope.funnelId ?? ""}:${scope.stageSlug ?? ""}`
+									: "none",
+							);
+							return scope?.scopeType === "stage" ? [HIT] : [];
+						},
+						prioritySearch: async () => [],
+					}) as never,
+			},
+			fakeMessagesRepo(),
+		);
 
-  it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
-    const s = mk(
-      {
-        template: EXCHANGE_TEMPLATE,
-        resolveChat: () => chatReturning("ответ"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([]),
-        softFallback: false,
-      },
-      fakeMessagesRepo(),
-    );
-    const r = await s.generate(baseInput());
-    expect(r).not.toBeNull();
-    const part = r![0]!.parts[0] as { text: string };
-    expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
-  });
+		const r = await s.generate(baseInput());
 
-  it("exchange: reflect срезает неподкреплённый статус и возвращает safe fallback", async () => {
-    const s = mk(
-      {
-        template: EXCHANGE_TEMPLATE,
-        resolveChat: () =>
-          chatThenFactCheck("Курьер будет через 10 минут.", {
-            grounded: false,
-            vacancyOk: true,
-            reason: "delivery ETA not in context",
-          }),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-      },
-      fakeMessagesRepo(),
-    );
-    const r = await s.generate(baseInput());
-    expect(r).not.toBeNull();
-    const part = r![0]!.parts[0] as { text: string };
-    expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
-  });
+		expect(r).not.toBeNull();
+		expect(scopes).toEqual(["stage:77:payment"]);
+	});
 
-  it("no-context + softFallback → envelope с fallback-текстом + лог в suggestions", async () => {
-    let logged = false;
-    const s = mk(
-      {
-        resolveChat: () => chatReturning("Уточню детали и вернусь!"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([]), // нет хитов → NO_CONTEXT
-        softFallback: true,
-        resolveSuggestions: () =>
-          ({
-            log: async () => {
-              logged = true;
-            },
-          }) as never,
-      },
-      fakeMessagesRepo(),
-    );
-    const r = await s.generate(baseInput());
-    expect(r).not.toBeNull();
-    const part = r![0]!.parts[0] as { text: string };
-    expect(part.text.length).toBeGreaterThan(0);
-    expect(logged).toBe(true);
-  });
+	it("passes resolved KB scope to no-context suggestions", async () => {
+		let loggedScope: unknown = null;
+		const s = mk(
+			{
+				resolveChat: () => chatReturning("Уточню детали и вернусь!"),
+				resolveEmbed: embed,
+				resolveKb: kbWith([]),
+				resolveKbScope: () => ({
+					scopeType: "stage",
+					funnelId: 77,
+					stageSlug: "payment",
+				}),
+				softFallback: true,
+				resolveSuggestions: () =>
+					({
+						log: async (opts: { scope?: unknown }) => {
+							loggedScope = opts.scope;
+						},
+					}) as never,
+			},
+			fakeMessagesRepo(),
+		);
 
-  it("no-context без softFallback → null", async () => {
-    const s = mk(
-      {
-        resolveChat: () => chatReturning("ответ"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([]),
-        softFallback: false,
-      },
-      fakeMessagesRepo(),
-    );
-    expect(await s.generate(baseInput())).toBeNull();
-  });
+		await s.generate(baseInput());
 
-  it("compaction: при превышении порога грузит/пересчитывает summary", async () => {
-    const many = Array.from({ length: 21 }, (_, i) => ({
-      role: i % 2 === 0 ? "user" : "assistant",
-      text: `msg ${i}`,
-    }));
-    let savedSummary: string | null = null;
-    const s = mk(
-      {
-        resolveChat: () => chatReturning("краткое резюме диалога"),
-        resolveEmbed: embed,
-        resolveKb: kbWith([HIT]),
-        compactAfterMessages: 20,
-        resolveConversations: () =>
-          ({
-            findById: async () => ({ id: 100, summaryJson: null }),
-            setSummaryJson: async (_id: number, json: string) => {
-              savedSummary = json;
-            },
-          }) as never,
-      },
-      fakeMessagesRepo({ recent: many, count: 21 }),
-    );
-    const r = await s.generate(baseInput());
-    expect(r).not.toBeNull();
-    // summary пересчитан и сохранён (fire-and-forget) — даём микротаск завершиться
-    await new Promise((res) => setTimeout(res, 0));
-    expect(savedSummary).not.toBeNull();
-  });
+		expect(loggedScope).toEqual({
+			scopeType: "stage",
+			funnelId: 77,
+			stageSlug: "payment",
+		});
+	});
+
+	it("style assignment metadata сохраняется в conversation", async () => {
+		const saved: Array<{
+			conversationId: number;
+			styleId?: number | null;
+			experimentId?: number | null;
+		}> = [];
+		const s = mk(
+			{
+				resolveChat: () => chatReturning("Курс 36.5 бат за USDT, без комиссии"),
+				resolveEmbed: embed,
+				resolveKb: kbWith([HIT]),
+				resolveStyle: async () => ({
+					...STYLE,
+					styleId: 7,
+					experimentId: 3,
+					experimentSlug: "exp-a",
+					variantSlug: "exch-pro",
+				}),
+				resolveConversations: () =>
+					({
+						setAssignment: async (
+							conversationId: number,
+							assignment: {
+								styleId?: number | null;
+								experimentId?: number | null;
+							},
+						) => {
+							saved.push({ conversationId, ...assignment });
+						},
+					}) as never,
+			},
+			fakeMessagesRepo(),
+		);
+
+		const r = await s.generate(baseInput());
+
+		expect(r).not.toBeNull();
+		expect(saved[0]).toEqual({
+			conversationId: 100,
+			styleId: 7,
+			experimentId: 3,
+		});
+	});
+
+	it("exchange: неподкреплённый курс заменяется safe fallback", async () => {
+		const s = mk(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chatReturning("Курс 31.5, получите 10553 THB."),
+				resolveEmbed: embed,
+				resolveKb: kbWith([HIT]),
+			},
+			fakeMessagesRepo(),
+		);
+		const r = await s.generate(baseInput());
+		expect(r).not.toBeNull();
+		const part = r![0]!.parts[0] as { text: string };
+		expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
+	});
+
+	it("exchange: resolveTemplate включает exchange-guardrails под RAG", async () => {
+		const s = mk(
+			{
+				resolveTemplate: () => EXCHANGE_TEMPLATE,
+				resolveChat: () => chatReturning("Курс 31.5, получите 10553 THB."),
+				resolveEmbed: embed,
+				resolveKb: kbWith([HIT]),
+			},
+			fakeMessagesRepo(),
+		);
+		const r = await s.generate(baseInput());
+		expect(r).not.toBeNull();
+		const part = r![0]!.parts[0] as { text: string };
+		expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
+	});
+
+	it("exchange: no-context без softFallback возвращает safe fallback вместо null", async () => {
+		const s = mk(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chatReturning("ответ"),
+				resolveEmbed: embed,
+				resolveKb: kbWith([]),
+				softFallback: false,
+			},
+			fakeMessagesRepo(),
+		);
+		const r = await s.generate(baseInput());
+		expect(r).not.toBeNull();
+		const part = r![0]!.parts[0] as { text: string };
+		expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
+	});
+
+	it("exchange: reflect срезает неподкреплённый статус и возвращает safe fallback", async () => {
+		const s = mk(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () =>
+					chatThenFactCheck("Курьер будет через 10 минут.", {
+						grounded: false,
+						vacancyOk: true,
+						reason: "delivery ETA not in context",
+					}),
+				resolveEmbed: embed,
+				resolveKb: kbWith([HIT]),
+			},
+			fakeMessagesRepo(),
+		);
+		const r = await s.generate(baseInput());
+		expect(r).not.toBeNull();
+		const part = r![0]!.parts[0] as { text: string };
+		expect(part.text).toBe(EXCHANGE_SAFE_FALLBACK);
+	});
+
+	it("exchange: injects state pack as grounding context for RAG", async () => {
+		const chat = new CapturingRagChat("Передаю оператору, он проверит заявку.");
+		const s = mk(
+			{
+				template: EXCHANGE_TEMPLATE,
+				resolveChat: () => chat,
+				resolveEmbed: embed,
+				resolveKb: kbWith([]),
+				rewriteQueryBeforeRetrieval: false,
+				reflect: false,
+				resolveExchangePolicyState: () => ({
+					stageSlug: "payment",
+					verification: {
+						verified: true,
+						status: "verified",
+						needsVerification: false,
+						verificationId: "ver_1",
+					},
+					order: {
+						id: 42,
+						status: "awaiting_payment",
+						assetFrom: "RUB",
+						amountFrom: 100000,
+						amountToThb: 40000,
+						paymentMethod: "card_transfer",
+						payoutMethod: "office_cash",
+						requisitesIssued: true,
+						paymentProofReceived: false,
+						paymentVerified: false,
+						payoutReady: false,
+						payoutCompleted: false,
+						payoutCodeIssued: false,
+						verificationId: "ver_1",
+					},
+				}),
+			},
+			fakeMessagesRepo(),
+		);
+
+		await s.generate({ ...baseInput(), userMessageText: "что по заявке?" });
+
+		const system = chat.lastCall!.messages[0]!.content;
+		expect(system).toContain("EXCHANGE OPS STATE PACK");
+		expect(system).toContain("response_contract: payment_requisites");
+		expect(system).toContain("order: #42 status=awaiting_payment");
+		expect(system).toContain("pair=100000 RUB -> 40000 THB");
+		expect(system).toContain("known_fields:");
+		expect(system).toContain("paymentVerified=no");
+		expect(system).toContain("missing_fields:");
+		expect(system).toContain("payment_proof");
+		expect(system).toContain("allowed_next_actions:");
+		expect(system).toContain("request_payment_proof");
+		expect(system).toContain("forbidden_claims:");
+		expect(system).toContain("payment_verified_without_state");
+	});
+
+	it("injects brokered order context into RAG request context", async () => {
+		const chat = new CapturingRagChat("По заявке есть предложение.");
+		const s = mk(
+			{
+				resolveChat: () => chat,
+				resolveEmbed: embed,
+				resolveKb: kbWith([HIT]),
+				rewriteQueryBeforeRetrieval: false,
+				reflect: false,
+				resolveServiceOrderContext: () =>
+					"BROKERED ORDER CONTEXT\n- order #12 service=massage status=offer_ready amount=1,200 THB",
+			},
+			fakeMessagesRepo(),
+		);
+
+		await s.generate({ ...baseInput(), userMessageText: "что по заявке?" });
+
+		const system = chat.lastCall?.messages[0]?.content ?? "";
+		expect(system).toContain("BROKERED ORDER CONTEXT");
+		expect(system).toContain("order #12");
+		expect(system).toContain("status=offer_ready");
+	});
+
+	it("no-context + softFallback → envelope с fallback-текстом + лог в suggestions", async () => {
+		let logged = false;
+		const s = mk(
+			{
+				resolveChat: () => chatReturning("Уточню детали и вернусь!"),
+				resolveEmbed: embed,
+				resolveKb: kbWith([]), // нет хитов → NO_CONTEXT
+				softFallback: true,
+				resolveSuggestions: () =>
+					({
+						log: async () => {
+							logged = true;
+						},
+					}) as never,
+			},
+			fakeMessagesRepo(),
+		);
+		const r = await s.generate(baseInput());
+		expect(r).not.toBeNull();
+		const part = r![0]!.parts[0] as { text: string };
+		expect(part.text.length).toBeGreaterThan(0);
+		expect(logged).toBe(true);
+	});
+
+	it("no-context без softFallback → null", async () => {
+		const s = mk(
+			{
+				resolveChat: () => chatReturning("ответ"),
+				resolveEmbed: embed,
+				resolveKb: kbWith([]),
+				softFallback: false,
+			},
+			fakeMessagesRepo(),
+		);
+		expect(await s.generate(baseInput())).toBeNull();
+	});
+
+	it("compaction: при превышении порога грузит/пересчитывает summary", async () => {
+		const many = Array.from({ length: 21 }, (_, i) => ({
+			role: i % 2 === 0 ? "user" : "assistant",
+			text: `msg ${i}`,
+		}));
+		let savedSummary: string | null = null;
+		const s = mk(
+			{
+				resolveChat: () => chatReturning("краткое резюме диалога"),
+				resolveEmbed: embed,
+				resolveKb: kbWith([HIT]),
+				compactAfterMessages: 20,
+				resolveConversations: () =>
+					({
+						findById: async () => ({ id: 100, summaryJson: null }),
+						setSummaryJson: async (_id: number, json: string) => {
+							savedSummary = json;
+						},
+					}) as never,
+			},
+			fakeMessagesRepo({ recent: many, count: 21 }),
+		);
+		const r = await s.generate(baseInput());
+		expect(r).not.toBeNull();
+		// summary пересчитан и сохранён (fire-and-forget) — даём микротаск завершиться
+		await new Promise((res) => setTimeout(res, 0));
+		expect(savedSummary).not.toBeNull();
+	});
 });

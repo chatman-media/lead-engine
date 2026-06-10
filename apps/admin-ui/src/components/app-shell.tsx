@@ -7,6 +7,7 @@ import {
   BookOpenIcon,
   BriefcaseIcon,
   CableIcon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   FlaskConicalIcon,
@@ -21,6 +22,7 @@ import {
   MessagesSquareIcon,
   MonitorIcon,
   MoonIcon,
+  MoreHorizontalIcon,
   PaletteIcon,
   RocketIcon,
   ScrollTextIcon,
@@ -38,8 +40,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { type Admin, clearToken, type FunnelListItem, saas, type Tenant } from "@/api/saas";
-import { ModeToggle } from "@/components/mode-toggle";
 import { CopilotDock } from "@/components/copilot";
+import { ModeToggle } from "@/components/mode-toggle";
 import { useTheme } from "@/components/theme-provider";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -78,46 +80,102 @@ interface NavGroup {
 
 const TOP_NAV_ITEM: NavItem = { to: "/dashboard", label: "Главная", icon: LayoutDashboardIcon };
 
-// Компоновка «Обмен во главе»: ядро бизнеса (Обменник/Процессы) сверху, затем
-// клиенты, бот/каналы, система. Пункты с hideForExchange скрываются у обменки,
-// exchangeOnly — показываются только ей.
-const NAV_GROUPS: NavGroup[] = [
+// Сайдбар строится по частоте использования:
+// - "Работа" — каждый день/каждая смена, доступно оператору.
+// - "Настройка" — меняется редко, только владелец.
+// - "Контроль" — регулярный контроль владельца + личные уведомления оператора.
+const VISIBLE_NAV_GROUPS: NavGroup[] = [
   {
-    label: "Продажи",
+    label: "Работа",
     items: [
+      TOP_NAV_ITEM,
       { to: "/exchange", label: "Обменка", icon: ArrowLeftRightIcon, exchangeOnly: true },
-      { to: "/funnel", label: "Процессы", icon: GitBranchIcon },
-      { to: "/services", label: "Услуги", icon: ListChecksIcon },
-      { to: "/partners", label: "Партнёры", icon: HandshakeIcon },
       { to: "/leads", label: "Лиды", icon: UserCircleIcon },
       { to: "/conversations", label: "Диалоги", icon: MessagesSquareIcon },
-      { to: "/outreach", label: "Рассылка", icon: SendIcon },
-      { to: "/campaigns", label: "Кампании", icon: RocketIcon },
-      { to: "/vacancies", label: "Каталог", icon: BriefcaseIcon, hideForExchange: true },
     ],
   },
   {
-    label: "Бот",
+    label: "Настройка",
     items: [
-      { to: "/channels", label: "Каналы", icon: CableIcon },
-      { to: "/test", label: "Тест бота", icon: TestTube2Icon },
-      { to: "/integrations", label: "Интеграции", icon: BlocksIcon },
-      { to: "/faq", label: "FAQ-справочник", icon: BookOpenIcon },
-      { to: "/skills", label: "Навыки", icon: ZapIcon, hideForExchange: true },
-      { to: "/hooks", label: "Хуки", icon: SparklesIcon, hideForExchange: true },
-      { to: "/styles", label: "Стили", icon: PaletteIcon, hideForExchange: true },
-      { to: "/experiments", label: "Эксперименты", icon: FlaskConicalIcon, hideForExchange: true },
-      { to: "/quality", label: "Качество", icon: ActivityIcon },
+      { to: "/funnel", label: "Процессы", icon: GitBranchIcon, superadminOnly: true },
+      { to: "/services", label: "Услуги", icon: ListChecksIcon, superadminOnly: true },
+      { to: "/channels", label: "Каналы", icon: CableIcon, superadminOnly: true },
+      { to: "/faq", label: "База знаний", icon: BookOpenIcon, superadminOnly: true },
+    ],
+  },
+  {
+    label: "Контроль",
+    items: [
+      { to: "/quality", label: "Проверка бота", icon: ActivityIcon, superadminOnly: true },
+      { to: "/notifications", label: "Уведомления", icon: BellIcon },
+    ],
+  },
+];
+
+const MORE_NAV_GROUPS: NavGroup[] = [
+  {
+    label: "Продажи",
+    items: [
+      { to: "/outreach", label: "Рассылка", icon: SendIcon, superadminOnly: true },
+      { to: "/partners", label: "Партнёры", icon: HandshakeIcon, superadminOnly: true },
+      { to: "/campaigns", label: "Кампании", icon: RocketIcon, superadminOnly: true },
+      {
+        to: "/vacancies",
+        label: "Каталог",
+        icon: BriefcaseIcon,
+        hideForExchange: true,
+        superadminOnly: true,
+      },
+    ],
+  },
+  {
+    label: "Бот и знания",
+    items: [
+      { to: "/test", label: "Тест бота", icon: TestTube2Icon, superadminOnly: true },
+      { to: "/integrations", label: "Интеграции", icon: BlocksIcon, superadminOnly: true },
+      {
+        to: "/skills",
+        label: "Навыки",
+        icon: ZapIcon,
+        hideForExchange: true,
+        superadminOnly: true,
+      },
+      {
+        to: "/hooks",
+        label: "Хуки",
+        icon: SparklesIcon,
+        hideForExchange: true,
+        superadminOnly: true,
+      },
+      {
+        to: "/styles",
+        label: "Стили",
+        icon: PaletteIcon,
+        hideForExchange: true,
+        superadminOnly: true,
+      },
+      {
+        to: "/experiments",
+        label: "Эксперименты",
+        icon: FlaskConicalIcon,
+        hideForExchange: true,
+        superadminOnly: true,
+      },
     ],
   },
   {
     label: "Система",
     items: [
-      { to: "/notifications", label: "Уведомления", icon: BellIcon },
-      { to: "/billing", label: "LLM-использование", icon: BarChart2Icon },
-      { to: "/diagnostics", label: "Диагностика", icon: ActivityIcon },
-      { to: "/audit", label: "Аудит", icon: ScrollTextIcon },
-      { to: "/referral", label: "Рефкоды", icon: LinkIcon, hideForExchange: true },
+      { to: "/billing", label: "LLM-использование", icon: BarChart2Icon, superadminOnly: true },
+      { to: "/diagnostics", label: "Диагностика", icon: ActivityIcon, superadminOnly: true },
+      { to: "/audit", label: "Аудит", icon: ScrollTextIcon, superadminOnly: true },
+      {
+        to: "/referral",
+        label: "Рефкоды",
+        icon: LinkIcon,
+        hideForExchange: true,
+        superadminOnly: true,
+      },
       { to: "/superadmin", label: "Alpha", icon: ShieldCheckIcon, superadminOnly: true },
     ],
   },
@@ -134,6 +192,10 @@ function visibleNavItems(
     if (it.superadminOnly && !flags.isSuperadmin) return false;
     return true;
   });
+}
+
+function isNavItemActive(pathname: string, to: string): boolean {
+  return pathname === to || pathname.startsWith(`${to}/`);
 }
 
 function Brand({ collapsed }: { collapsed?: boolean }) {
@@ -169,13 +231,14 @@ function NavItemLink({
   onNavigate?: () => void;
 }) {
   const { pathname } = useLocation();
-  const active = pathname === item.to || pathname.startsWith(`${item.to}/`);
+  const active = isNavItemActive(pathname, item.to);
   const { icon: Icon, label, to } = item;
 
   const link = (
     <NavLink
       to={to}
       onClick={onNavigate}
+      aria-label={collapsed ? label : undefined}
       className={cn(
         "group relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
         collapsed ? "justify-center px-2" : "",
@@ -217,6 +280,108 @@ function NavItemLink({
   );
 }
 
+function NavMoreMenu({
+  groups,
+  collapsed,
+  onNavigate,
+}: {
+  groups: NavGroup[];
+  collapsed: boolean;
+  onNavigate?: () => void;
+}) {
+  const { pathname } = useLocation();
+  const active = groups.some((group) =>
+    group.items.some((item) => isNavItemActive(pathname, item.to)),
+  );
+  const [open, setOpen] = useState(active);
+
+  useEffect(() => {
+    if (active) setOpen(true);
+  }, [active]);
+
+  const triggerButton = (
+    <button
+      type="button"
+      aria-label={collapsed ? "Ещё" : undefined}
+      aria-expanded={open}
+      onClick={() => setOpen((value) => !value)}
+      className={cn(
+        "group relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
+        collapsed ? "justify-center px-2" : "",
+        active
+          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+          : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+      )}
+    >
+      {active && !collapsed && (
+        <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary" />
+      )}
+      <MoreHorizontalIcon className="size-4 shrink-0" />
+      {!collapsed && (
+        <>
+          <span className="flex-1 text-left">Ещё</span>
+          <ChevronDownIcon
+            className={cn("size-4 shrink-0 transition-transform", open && "rotate-180")}
+          />
+        </>
+      )}
+    </button>
+  );
+
+  return (
+    <div className="flex flex-col gap-1">
+      {collapsed ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
+          <TooltipContent side="right" className="text-xs">
+            Ещё
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        triggerButton
+      )}
+
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
+          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+        )}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className={cn("flex flex-col", collapsed ? "gap-0.5 pt-1" : "gap-2 pt-1.5")}>
+            {groups.map((group, index) => (
+              <div
+                key={group.label}
+                className={cn(
+                  "flex flex-col gap-0.5",
+                  !collapsed && index > 0 && "border-t border-sidebar-border/60 pt-2",
+                )}
+              >
+                {!collapsed && (
+                  <p className="px-2.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                    {group.label}
+                  </p>
+                )}
+                {collapsed && index > 0 && (
+                  <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />
+                )}
+                {group.items.map((item) => (
+                  <NavItemLink
+                    key={item.to}
+                    item={item}
+                    collapsed={collapsed}
+                    onNavigate={onNavigate}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NavLinks({
   onNavigate,
   escalatedCount,
@@ -232,30 +397,30 @@ function NavLinks({
   hasExchangeWorkflow?: boolean;
   isExchangeTenant?: boolean;
 }) {
-  const groups = NAV_GROUPS.map((g) => ({
-    ...g,
-    items: visibleNavItems(g.items, {
-      hasExchangeWorkflow: hasExchangeWorkflow ?? false,
-      isExchangeTenant: isExchangeTenant ?? false,
-      isSuperadmin: isSuperadmin ?? false,
-    }),
+  const flags = {
+    hasExchangeWorkflow: hasExchangeWorkflow ?? false,
+    isExchangeTenant: isExchangeTenant ?? false,
+    isSuperadmin: isSuperadmin ?? false,
+  };
+  const visibleGroups = VISIBLE_NAV_GROUPS.map((group) => ({
+    ...group,
+    items: visibleNavItems(group.items, flags),
+  })).filter((group) => group.items.length > 0);
+  const moreGroups = MORE_NAV_GROUPS.map((group) => ({
+    ...group,
+    items: visibleNavItems(group.items, flags),
   })).filter((g) => g.items.length > 0);
-  return (
-    <nav className="flex flex-col gap-4">
-      <div className="flex flex-col gap-0.5">
-        {collapsed && <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />}
-        <NavItemLink item={TOP_NAV_ITEM} collapsed={collapsed} onNavigate={onNavigate} />
-      </div>
 
-      {groups.map((group) => (
+  return (
+    <nav className="flex flex-col gap-3">
+      {visibleGroups.map((group, index) => (
         <div key={group.label} className="flex flex-col gap-0.5">
           {!collapsed && (
             <p className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
               {group.label}
             </p>
           )}
-          {collapsed && <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />}
-
+          {collapsed && index > 0 && <div className="mx-auto h-px w-6 bg-sidebar-border my-1" />}
           {group.items.map((item) => (
             <NavItemLink
               key={item.to}
@@ -267,6 +432,11 @@ function NavLinks({
           ))}
         </div>
       ))}
+      {moreGroups.length > 0 && (
+        <div className="border-t border-sidebar-border/80 pt-2">
+          <NavMoreMenu groups={moreGroups} collapsed={collapsed} onNavigate={onNavigate} />
+        </div>
+      )}
     </nav>
   );
 }
@@ -292,6 +462,7 @@ function AccountDropdown({
   // Показываем имя (если задано), иначе email.
   const displayName = admin?.name?.trim() || admin?.email || "—";
   const initials = (admin?.name?.trim() || admin?.email || "?").slice(0, 2).toUpperCase();
+  const isSuperadmin = admin?.role === "superadmin";
 
   const menuContent = (
     <DropdownMenuContent align="start" side={collapsed ? "right" : "top"} className="w-56">
@@ -308,21 +479,25 @@ function AccountDropdown({
             <UserCircleIcon /> Профиль
           </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/settings">
-            <SlidersHorizontalIcon /> Настройки LLM
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/settings/channels">
-            <CableIcon /> Каналы
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/team">
-            <UsersIcon /> Команда
-          </Link>
-        </DropdownMenuItem>
+        {isSuperadmin && (
+          <>
+            <DropdownMenuItem asChild>
+              <Link to="/settings">
+                <SlidersHorizontalIcon /> Настройки LLM
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/settings/channels">
+                <CableIcon /> Каналы
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/team">
+                <UsersIcon /> Команда
+              </Link>
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuGroup>
       <DropdownMenuSeparator />
       <DropdownMenuSub>
@@ -502,7 +677,9 @@ function hasExchangeMarker(value?: string | null): boolean {
   return key.includes("exchange") || key.includes("обмен") || key.includes("obmen");
 }
 
-function funnelLooksLikeExchange(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">) {
+function funnelLooksLikeExchange(
+  item: Pick<FunnelListItem, "slug"> & { verticalTemplateId?: string | null },
+) {
   return hasExchangeMarker(item.slug) || hasExchangeMarker(item.verticalTemplateId);
 }
 
@@ -525,9 +702,7 @@ async function getExchangeNavState(): Promise<{
     return { hasExchangeWorkflow: true, isExchangeTenant };
   }
 
-  const details = await Promise.allSettled(
-    funnels.map((funnel) => saas.getFunnelById(funnel.id)),
-  );
+  const details = await Promise.allSettled(funnels.map((funnel) => saas.getFunnelById(funnel.id)));
   const hasExchangeWorkflow = details.some((result) => {
     if (result.status !== "fulfilled") return false;
     return (
@@ -542,7 +717,7 @@ async function getExchangeNavState(): Promise<{
 }
 
 // Страницы без max-width кап-а контента — занимают всю ширину области <main>.
-const FULL_WIDTH_PATHS = new Set(["/faq"]);
+const FULL_WIDTH_PATHS = new Set(["/faq", "/quality"]);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
@@ -634,7 +809,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       cancelled = true;
       clearInterval(id);
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: navigate is stable
   }, []);
 
   async function handleLogout() {
@@ -653,7 +827,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <aside
           className={cn(
             "bg-sidebar text-sidebar-foreground sticky top-0 hidden h-screen shrink-0 border-r border-sidebar-border md:block transition-all duration-200",
-            collapsed ? "w-[52px]" : "w-64",
+            collapsed ? "w-[3.25rem]" : "w-64",
           )}
         >
           <SidebarBody

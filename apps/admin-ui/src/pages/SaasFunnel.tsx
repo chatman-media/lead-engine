@@ -1,4 +1,5 @@
 import {
+  AlertTriangleIcon,
   BadgePercentIcon,
   BarChart2Icon,
   ChevronDownIcon,
@@ -9,6 +10,8 @@ import {
   GaugeIcon,
   GripVerticalIcon,
   HeadphonesIcon,
+  HistoryIcon,
+  Loader2Icon,
   type LucideIcon,
   CheckIcon,
   PencilIcon,
@@ -16,6 +19,8 @@ import {
   XIcon,
   PhoneIcon,
   PlusIcon,
+  RefreshCwIcon,
+  RotateCcwIcon,
   ShieldCheckIcon,
   SparklesIcon,
   Trash2Icon,
@@ -23,6 +28,7 @@ import {
 } from "lucide-react";
 import { type DragEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import {
   ApiError,
   clearToken,
@@ -31,6 +37,9 @@ import {
   type FunnelData,
   type FunnelListItem,
   type FunnelTemplateInfo,
+  type FunnelVersionListItem,
+  type FunnelVersionPreview,
+  type FunnelVersionSnapshotStage,
   type StageDefinition,
   type StageField,
   type StageType,
@@ -41,6 +50,13 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -137,6 +153,39 @@ function fieldCountLabel(count: number): string {
   return `${count} ${pluralRu(count, "поле", "поля", "полей")}`;
 }
 
+function formatVersionTime(value: number): string {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value * 1000));
+}
+
+function versionSourceLabel(source: string): string {
+  const labels: Record<string, string> = {
+    ai_apply: "AI apply",
+    seed: "Seed",
+    template_apply: "Шаблон",
+    rollback: "Rollback backup",
+  };
+  return labels[source] ?? source;
+}
+
+function apiErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) return err.errorCode;
+  if (err instanceof Error) return err.message;
+  return fallback;
+}
+
+function apiViolations(err: unknown): string[] {
+  if (!(err instanceof ApiError)) return [];
+  const raw = err.extra?.violations;
+  return Array.isArray(raw) ? raw.map((item) => String(item)) : [];
+}
+
 function funnelLabel(item: Pick<FunnelListItem, "slug" | "verticalTemplateId">): string {
   const key = `${item.slug} ${item.verticalTemplateId ?? ""}`.toLowerCase();
   if (key.includes("exchange")) return "Обменка";
@@ -195,6 +244,7 @@ export function SaasFunnel() {
   const [analytics, setAnalytics] = useState<FunnelAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
   const [addingFunnel, setAddingFunnel] = useState(false);
   const [funnelTemplates, setFunnelTemplates] = useState<FunnelTemplateInfo[]>([]);
   const [newFunnelTemplate, setNewFunnelTemplate] = useState("exchange");
@@ -424,6 +474,15 @@ export function SaasFunnel() {
             <SparklesIcon className="mr-1.5 size-4" />
             Настроить с AI
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!funnel?.funnel}
+            onClick={() => setVersionHistoryOpen((open) => !open)}
+          >
+            <HistoryIcon className="mr-1.5 size-4" />
+            История
+          </Button>
           <Button variant="outline" size="sm" asChild>
             <Link to="/leads">← Лиды</Link>
           </Button>
@@ -577,6 +636,19 @@ export function SaasFunnel() {
           )}
         </div>
       </div>
+
+      {funnel?.funnel && versionHistoryOpen && (
+        <FunnelVersionHistory
+          key={funnel.funnel.id}
+          funnelId={funnel.funnel.id}
+          currentStageCount={funnel.stages.length}
+          onAuthError={onAuthError}
+          onRestored={async (funnelId) => {
+            await reload(funnelId, { refreshTemplates: false });
+            window.dispatchEvent(new Event(FUNNELS_UPDATED_EVENT));
+          }}
+        />
+      )}
 
       {funnel?.funnel && (
         <div
@@ -798,6 +870,367 @@ export function SaasFunnel() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function FunnelVersionHistory({
+  funnelId,
+  currentStageCount,
+  onAuthError,
+  onRestored,
+}: {
+  funnelId: number;
+  currentStageCount: number;
+  onAuthError: (err: unknown) => boolean;
+  onRestored: (funnelId: number) => Promise<void>;
+}) {
+  const [versions, setVersions] = useState<FunnelVersionListItem[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(true);
+  const [versionsError, setVersionsError] = useState("");
+  const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
+  const [preview, setPreview] = useState<FunnelVersionPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [rollbackLoading, setRollbackLoading] = useState(false);
+  const [rollbackErrors, setRollbackErrors] = useState<string[]>([]);
+
+  async function loadPreview(versionId: number) {
+    setSelectedVersionId(versionId);
+    setPreviewLoading(true);
+    setPreviewError("");
+    setRollbackErrors([]);
+    try {
+      const next = await saas.getFunnelVersion(funnelId, versionId);
+      setPreview(next);
+    } catch (err) {
+      if (!onAuthError(err)) {
+        setPreview(null);
+        setPreviewError(apiErrorMessage(err, "Не удалось загрузить версию"));
+      }
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function loadVersions(options: { preferLatest?: boolean } = {}) {
+    setVersionsLoading(true);
+    setVersionsError("");
+    try {
+      const result = await saas.listFunnelVersions(funnelId);
+      setVersions(result.items);
+      const currentStillExists =
+        selectedVersionId && result.items.some((version) => version.id === selectedVersionId);
+      const nextVersionId = options.preferLatest
+        ? (result.items[0]?.id ?? null)
+        : currentStillExists
+          ? selectedVersionId
+          : (result.items[0]?.id ?? null);
+      if (nextVersionId) await loadPreview(nextVersionId);
+      else {
+        setSelectedVersionId(null);
+        setPreview(null);
+      }
+    } catch (err) {
+      if (!onAuthError(err)) {
+        setVersionsError(apiErrorMessage(err, "Не удалось загрузить историю"));
+      }
+    } finally {
+      setVersionsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadVersions({ preferLatest: true });
+  }, [funnelId]);
+
+  const validationErrors = preview?.validation.errors ?? [];
+  const canRollback = !!preview && !previewLoading && validationErrors.length === 0;
+
+  async function handleRollback() {
+    if (!preview || !canRollback) return;
+    setRollbackLoading(true);
+    setRollbackErrors([]);
+    try {
+      const result = await saas.rollbackFunnelVersion(funnelId, preview.version.id);
+      toast.success(`Воронка восстановлена: ${result.stageCount} стадий`);
+      setConfirmOpen(false);
+      await onRestored(result.funnelId);
+      await loadVersions({ preferLatest: true });
+    } catch (err) {
+      if (!onAuthError(err)) {
+        const violations = apiViolations(err);
+        setRollbackErrors(
+          violations.length > 0
+            ? violations
+            : [apiErrorMessage(err, "Не удалось откатить версию")],
+        );
+        toast.error("Не удалось откатить версию");
+      }
+    } finally {
+      setRollbackLoading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border p-3">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <HistoryIcon className="size-4 text-muted-foreground" />
+          <span className="text-sm font-medium">История версий</span>
+          <Badge variant="outline">{versions.length} снимков</Badge>
+          <Badge variant="secondary">{currentStageCount} стадий сейчас</Badge>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={versionsLoading}
+          onClick={() => void loadVersions()}
+        >
+          {versionsLoading ? (
+            <Loader2Icon className="size-4 animate-spin" />
+          ) : (
+            <RefreshCwIcon className="size-4" />
+          )}
+          Обновить
+        </Button>
+      </div>
+
+      {versionsError && (
+        <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {versionsError}
+        </div>
+      )}
+
+      <div className="grid gap-3 lg:grid-cols-[19rem_minmax(0,1fr)]">
+        <div className="max-h-[28rem] overflow-auto rounded-md border bg-background p-2">
+          {versionsLoading && versions.length === 0 && (
+            <div className="space-y-2 p-1">
+              {[0, 1, 2].map((item) => (
+                <Skeleton key={item} className="h-16 w-full" />
+              ))}
+            </div>
+          )}
+          {!versionsLoading && versions.length === 0 && (
+            <p className="px-2 py-6 text-center text-sm text-muted-foreground">
+              Истории пока нет
+            </p>
+          )}
+          <div className="space-y-1.5">
+            {versions.map((version) => (
+              <VersionListButton
+                key={version.id}
+                version={version}
+                selected={version.id === selectedVersionId}
+                disabled={previewLoading || rollbackLoading}
+                onClick={() => void loadPreview(version.id)}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="min-h-[18rem] rounded-md border bg-background p-3">
+          {previewLoading && (
+            <div className="space-y-3">
+              <Skeleton className="h-5 w-48" />
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-20 w-full" />
+            </div>
+          )}
+
+          {!previewLoading && previewError && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {previewError}
+            </div>
+          )}
+
+          {!previewLoading && !previewError && preview && (
+            <div className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold">
+                      Версия #{preview.version.id}
+                    </span>
+                    <Badge variant="outline">{versionSourceLabel(preview.version.source)}</Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {formatVersionTime(preview.version.createdAt)}
+                    </span>
+                  </div>
+                  {preview.version.note && (
+                    <p className="mt-1 text-xs text-muted-foreground">{preview.version.note}</p>
+                  )}
+                </div>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={!canRollback || rollbackLoading}
+                  onClick={() => {
+                    setRollbackErrors([]);
+                    setConfirmOpen(true);
+                  }}
+                >
+                  <RotateCcwIcon className="size-4" />
+                  Откатить
+                </Button>
+              </div>
+
+              {validationErrors.length > 0 && (
+                <ValidationErrors title="Snapshot не проходит проверку" errors={validationErrors} />
+              )}
+
+              <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {preview.snapshot.stages.length} стадий
+                </span>
+                {preview.snapshot.funnel.verticalTemplateId
+                  ? ` · ${preview.snapshot.funnel.verticalTemplateId}`
+                  : ""}
+              </div>
+
+              <div className="max-h-[24rem] overflow-auto pr-1">
+                <div className="space-y-2">
+                  {preview.snapshot.stages.map((stage, index) => (
+                    <SnapshotStageRow key={`${stage.slug}-${index}`} stage={stage} index={index} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Dialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          if (!rollbackLoading) setConfirmOpen(open);
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Откатить воронку к версии #{preview?.version.id}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              Текущие стадии будут заменены snapshot’ом из выбранной версии. Перед откатом сервер
+              повторно проверит костяк воронки.
+            </p>
+            {preview && (
+              <div className="rounded-md bg-muted/50 px-3 py-2 text-xs">
+                <div className="font-medium text-foreground">
+                  {versionSourceLabel(preview.version.source)} ·{" "}
+                  {formatVersionTime(preview.version.createdAt)}
+                </div>
+                <div className="text-muted-foreground">
+                  {preview.snapshot.stages.length} стадий
+                  {preview.version.note ? ` · ${preview.version.note}` : ""}
+                </div>
+              </div>
+            )}
+            {rollbackErrors.length > 0 && (
+              <ValidationErrors title="Rollback отклонён" errors={rollbackErrors} />
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" disabled={rollbackLoading} onClick={() => setConfirmOpen(false)}>
+              Отмена
+            </Button>
+            <Button variant="destructive" disabled={!canRollback || rollbackLoading} onClick={handleRollback}>
+              {rollbackLoading ? (
+                <Loader2Icon className="size-4 animate-spin" />
+              ) : (
+                <RotateCcwIcon className="size-4" />
+              )}
+              Подтвердить откат
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function VersionListButton({
+  version,
+  selected,
+  disabled,
+  onClick,
+}: {
+  version: FunnelVersionListItem;
+  selected: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "w-full rounded-md border px-3 py-2 text-left transition-colors disabled:cursor-wait disabled:opacity-70",
+        selected ? "border-primary bg-primary/10" : "hover:bg-muted",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-sm font-medium">{versionSourceLabel(version.source)}</span>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {version.stageCount}
+        </span>
+      </div>
+      <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>{formatVersionTime(version.createdAt)}</span>
+        {version.createdByAdminId && <span>admin #{version.createdByAdminId}</span>}
+      </div>
+      {version.note && <p className="mt-1 truncate text-xs text-muted-foreground">{version.note}</p>}
+    </button>
+  );
+}
+
+function SnapshotStageRow({ stage, index }: { stage: FunnelVersionSnapshotStage; index: number }) {
+  const kind = kindMeta(stage.kind);
+  const fieldsCount = stage.fields?.length ?? 0;
+  const nextCount = stage.nextStages?.length ?? 0;
+
+  return (
+    <div className="flex min-h-14 gap-3 rounded-md border px-3 py-2">
+      <span
+        className={cn(
+          "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+          kind.num,
+        )}
+      >
+        {index + 1}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-sm font-medium">{stage.displayName}</span>
+          <Badge variant="outline" className="text-xs">
+            {kind.label}
+          </Badge>
+        </div>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          <span className="font-mono">{stage.slug}</span> · {stageTypeLabel(stage.stageType)}
+          {stage.phase ? ` · ${stage.phase}` : ""} · {fieldCountLabel(fieldsCount)}
+          {nextCount > 0 ? ` · ${nextCount} переходов` : ""}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ValidationErrors({ title, errors }: { title: string; errors: string[] }) {
+  return (
+    <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+      <div className="mb-1 flex items-center gap-2 font-medium">
+        <AlertTriangleIcon className="size-4" />
+        {title}
+      </div>
+      <ul className="list-disc space-y-1 pl-5">
+        {errors.map((error) => (
+          <li key={error}>{error}</li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -66,6 +66,9 @@ export interface KbDoc {
   source: string;
   title: string;
   topic: string | null;
+  scopeType: "global" | "funnel" | "stage";
+  funnelId: number | null;
+  stageSlug: string | null;
   createdAt: number;
 }
 
@@ -75,6 +78,9 @@ export interface KbSuggestion {
   questionText: string;
   answerDraft: string | null;
   status: "pending" | "ingested" | "rejected";
+  scopeType: "global" | "funnel" | "stage";
+  funnelId: number | null;
+  stageSlug: string | null;
   sourceConversationId: number | null;
   sourceMessageId: number | null;
   decidedByAdminId: number | null;
@@ -90,6 +96,22 @@ export interface KbUploadResult {
   source: string;
   chunks: number;
   created: boolean;
+  scopeType: "global" | "funnel" | "stage";
+  funnelId: number | null;
+  stageSlug: string | null;
+}
+
+export interface KbRequirement {
+  key: string;
+  title: string;
+  description: string;
+  topic: string;
+  required: boolean;
+  scopeType: "funnel" | "stage";
+  funnelId: number;
+  stageSlug: string | null;
+  covered: boolean;
+  matchedDocuments: number;
 }
 
 export type LlmPurpose = "chat" | "embed" | "vision" | "judge" | "reranker" | "transcribe";
@@ -239,6 +261,29 @@ export interface AdminRow {
   email: string;
   role: "superadmin" | "manager";
   createdAt: number;
+}
+
+export type OperatorOutreachTarget = "all" | "role" | "admins";
+export type OperatorOutreachRole = "superadmin" | "manager";
+export type OperatorOutreachChannel = "in_app" | "telegram";
+export type OperatorOutreachPriority = "normal" | "important" | "critical";
+
+export interface OperatorOutreachInput {
+  text: string;
+  target: OperatorOutreachTarget;
+  role?: OperatorOutreachRole;
+  adminIds?: number[];
+  channels: OperatorOutreachChannel[];
+  priority: OperatorOutreachPriority;
+}
+
+export interface OperatorOutreachResult {
+  ok: boolean;
+  targets: number;
+  inAppDelivered: number;
+  telegramDelivered: number;
+  telegramSkipped: number;
+  telegramFailed: number;
 }
 
 export interface InviteRow {
@@ -536,6 +581,50 @@ export interface FunnelTemplateInfo {
   }>;
 }
 
+export interface FunnelVersionListItem {
+  id: number;
+  source: string;
+  note: string | null;
+  stageCount: number;
+  createdByAdminId: number | null;
+  createdAt: number;
+}
+
+export interface FunnelVersionSnapshotStage {
+  slug: string;
+  displayName: string;
+  description?: string | null;
+  kind: StageKind;
+  stageType: StageType;
+  phase?: StagePhase | null;
+  fields?: Array<{
+    slug: string;
+    displayName: string;
+    fieldType?: FieldType;
+    required?: boolean;
+  }>;
+  nextStages?: string[];
+}
+
+export interface FunnelVersionSnapshot {
+  schemaVersion: number;
+  funnel: {
+    id: number;
+    slug: string;
+    verticalTemplateId?: string | null;
+    stagesJson?: string | null;
+    defaultStyleId?: number | null;
+    isActive?: boolean;
+  };
+  stages: FunnelVersionSnapshotStage[];
+}
+
+export interface FunnelVersionPreview {
+  version: FunnelVersionListItem;
+  snapshot: FunnelVersionSnapshot;
+  validation: { errors: string[] };
+}
+
 /** Сквозное распределение лидов по макро-фазам костяка (capture→…→won/lost). */
 export interface PhaseStats {
   phases: Array<{ phase: string; leads: number }>;
@@ -565,6 +654,21 @@ export interface WorkflowPreviewStage {
   fields: WorkflowPreviewField[];
 }
 
+export interface WorkflowVerticalSuggestion {
+  slug: string;
+  displayName: string;
+  confidence: number;
+  reason: string;
+  funnelSeedKey: string | null;
+  hasStyles: boolean;
+  hasKbDocuments: boolean;
+}
+
+export interface WorkflowBackboneValidation {
+  errors: string[];
+  warnings: string[];
+}
+
 export interface WorkflowChatResponse {
   reply: string;
   readyToGenerate: boolean;
@@ -572,6 +676,10 @@ export interface WorkflowChatResponse {
   stages?: unknown[];
   /** Компактный preview для отображения. */
   preview?: WorkflowPreviewStage[];
+  /** Детерминированные подсказки готовых вертикалей по описанию бизнеса. */
+  verticalSuggestions?: WorkflowVerticalSuggestion[];
+  /** Результат ранней проверки костяка, если модель уже пыталась собрать воронку. */
+  backbone?: WorkflowBackboneValidation;
 }
 
 // ── AI-ассистент (copilot) ───────────────────────────────────────────────
@@ -1358,6 +1466,8 @@ export interface InformerNotification {
   createdAt: number;
 }
 
+export type OperatorHandoffNotification = InformerNotification;
+
 // ── Audit entry (for audit log page) ────────────────────────────────────
 
 const TOKEN_KEY = "lead_engine_token";
@@ -1532,6 +1642,25 @@ export interface ExchangeTurnover {
   }>;
 }
 
+export interface ExchangeAnswerQualityEvalResult {
+  summary: { passed: number; total: number; failed: number };
+  failuresText: string;
+  report: Array<{
+    id: string;
+    title: string;
+    passed: boolean;
+    expectedContract: string | null;
+    expectedDeterministic: boolean | null;
+    trace: string[];
+    failures: Array<{
+      caseId: string;
+      expected: string;
+      actual: string;
+      trace: string[];
+    }>;
+  }>;
+}
+
 export const saas = {
   // ── Auth ────────────────────────────────────────────────────────────
   signup(email: string, password: string, tenantSlug?: string, referralCode?: string) {
@@ -1576,20 +1705,50 @@ export const saas = {
   },
 
   // ── KB ──────────────────────────────────────────────────────────────
-  listDocs() {
-    return request<{ items: KbDoc[] }>("/api/admin/kb/documents");
+  listDocs(opts: { scopeType?: KbDoc["scopeType"]; funnelId?: number; stageSlug?: string } = {}) {
+    const p = new URLSearchParams();
+    if (opts.scopeType) p.set("scopeType", opts.scopeType);
+    if (opts.funnelId) p.set("funnelId", String(opts.funnelId));
+    if (opts.stageSlug) p.set("stageSlug", opts.stageSlug);
+    const qs = p.toString();
+    return request<{ items: KbDoc[] }>(`/api/admin/kb/documents${qs ? `?${qs}` : ""}`);
   },
-  uploadJson(input: { title: string; body: string; topic?: string }) {
+  listKbRequirements(funnelId: number) {
+    return request<{
+      funnel: { id: number; slug: string; verticalTemplateId: string | null };
+      items: KbRequirement[];
+    }>(`/api/admin/kb/requirements?funnelId=${funnelId}`);
+  },
+  uploadJson(input: {
+    title: string;
+    body: string;
+    topic?: string;
+    scopeType?: KbDoc["scopeType"];
+    funnelId?: number;
+    stageSlug?: string;
+  }) {
     return request<KbUploadResult>("/api/admin/kb/documents", {
       method: "POST",
       body: JSON.stringify(input),
     });
   },
-  uploadFile(file: File, opts: { title?: string; topic?: string } = {}) {
+  uploadFile(
+    file: File,
+    opts: {
+      title?: string;
+      topic?: string;
+      scopeType?: KbDoc["scopeType"];
+      funnelId?: number;
+      stageSlug?: string;
+    } = {},
+  ) {
     const form = new FormData();
     form.append("file", file);
     if (opts.title) form.append("title", opts.title);
     if (opts.topic) form.append("topic", opts.topic);
+    if (opts.scopeType) form.append("scopeType", opts.scopeType);
+    if (opts.funnelId) form.append("funnelId", String(opts.funnelId));
+    if (opts.stageSlug) form.append("stageSlug", opts.stageSlug);
     return uploadMultipart<KbUploadResult>("/api/admin/kb/documents", form);
   },
   deleteDoc(id: number) {
@@ -1600,12 +1759,22 @@ export const saas = {
 
   // ── KB suggestions ───────────────────────────────────────────────────
   listKbSuggestions(
-    opts: { status?: "pending" | "ingested" | "rejected"; limit?: number; offset?: number } = {},
+    opts: {
+      status?: "pending" | "ingested" | "rejected";
+      limit?: number;
+      offset?: number;
+      scopeType?: KbDoc["scopeType"];
+      funnelId?: number;
+      stageSlug?: string;
+    } = {},
   ) {
     const p = new URLSearchParams();
     if (opts.status) p.set("status", opts.status);
     if (opts.limit) p.set("limit", String(opts.limit));
     if (opts.offset) p.set("offset", String(opts.offset));
+    if (opts.scopeType) p.set("scopeType", opts.scopeType);
+    if (opts.funnelId) p.set("funnelId", String(opts.funnelId));
+    if (opts.stageSlug) p.set("stageSlug", opts.stageSlug);
     return request<{ items: KbSuggestion[]; pendingCount: number; limit: number; offset: number }>(
       `/api/admin/kb/suggestions?${p}`,
     );
@@ -1766,6 +1935,11 @@ export const saas = {
       messages: MessageRow[];
     }>(`/api/admin/conversations/${id}`);
   },
+  getConversationOperatorHandoffs(id: number) {
+    return request<{ items: OperatorHandoffNotification[] }>(
+      `/api/admin/conversations/${id}/operator-handoffs`,
+    );
+  },
   // ── Dialog simulator (dev/test) ──────────────────────────────────────────
   listSimPersonas() {
     return request<{
@@ -1808,10 +1982,7 @@ export const saas = {
       intervalSec: number;
       targetFunnelId?: number;
       targetCatalogItemId?: number;
-    }>(
-      "/api/admin/sim/stream",
-      { method: "POST", body: JSON.stringify(opts) },
-    );
+    }>("/api/admin/sim/stream", { method: "POST", body: JSON.stringify(opts) });
   },
   listSimStreams() {
     return request<{
@@ -1830,17 +2001,14 @@ export const saas = {
     });
   },
   walkSim(count = 1, displayName?: string, funnelId?: number) {
-    return request<{ ok: boolean; leads: number[]; finalStage: string }>(
-      "/api/admin/sim/walk",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          count,
-          ...(displayName ? { displayName } : {}),
-          ...(funnelId ? { funnelId } : {}),
-        }),
-      },
-    );
+    return request<{ ok: boolean; leads: number[]; finalStage: string }>("/api/admin/sim/walk", {
+      method: "POST",
+      body: JSON.stringify({
+        count,
+        ...(displayName ? { displayName } : {}),
+        ...(funnelId ? { funnelId } : {}),
+      }),
+    });
   },
   advanceConversation(id: number, text?: string) {
     return request<{
@@ -2140,6 +2308,20 @@ export const saas = {
   listFunnelTemplates() {
     return request<{ items: FunnelTemplateInfo[] }>("/api/admin/funnel/templates");
   },
+  listFunnelVersions(id: number, limit = 20) {
+    return request<{ items: FunnelVersionListItem[] }>(
+      `/api/admin/funnels/${id}/versions?limit=${limit}`,
+    );
+  },
+  getFunnelVersion(id: number, versionId: number) {
+    return request<FunnelVersionPreview>(`/api/admin/funnels/${id}/versions/${versionId}`);
+  },
+  rollbackFunnelVersion(id: number, versionId: number) {
+    return request<{ ok: boolean; funnelId: number; versionId: number; stageCount: number }>(
+      `/api/admin/funnels/${id}/versions/${versionId}/rollback`,
+      { method: "POST" },
+    );
+  },
   createFunnel(data: { slug: string; template?: string }) {
     return request<{
       ok: boolean;
@@ -2322,7 +2504,9 @@ export const saas = {
     return request<{ items: ExperimentItem[] }>("/api/admin/experiments");
   },
   previewExperiment(id: number, sampleSize = 20) {
-    return request<ExperimentPreview>(`/api/admin/experiments/${id}/preview?sampleSize=${sampleSize}`);
+    return request<ExperimentPreview>(
+      `/api/admin/experiments/${id}/preview?sampleSize=${sampleSize}`,
+    );
   },
   createExperiment(data: { slug: string; allocationJson: string; successMetric: string }) {
     return request<ExperimentItem>("/api/admin/experiments", {
@@ -2401,7 +2585,10 @@ export const saas = {
       method: "POST",
     });
   },
-  getQualityShadowPreview(id: number, opts: Omit<QualityShadowEvaluationOptions, "pairsPlanned"> = {}) {
+  getQualityShadowPreview(
+    id: number,
+    opts: Omit<QualityShadowEvaluationOptions, "pairsPlanned"> = {},
+  ) {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.newStyleSlug) params.set("newStyleSlug", opts.newStyleSlug);
@@ -2557,6 +2744,12 @@ export const saas = {
         body: JSON.stringify(body),
       },
     );
+  },
+  sendOperatorOutreach(body: OperatorOutreachInput) {
+    return request<OperatorOutreachResult>("/api/admin/outreach/operators", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   },
 
   // ── Drip campaigns ────────────────────────────────────────────────────
@@ -2983,9 +3176,9 @@ export const saas = {
     });
   },
   exchangeRequisites() {
-    return request<{ items: Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }> }>(
-      "/api/admin/exchange/requisites",
-    );
+    return request<{
+      items: Array<{ key: string; value: string; hasValue?: boolean; sensitive?: boolean }>;
+    }>("/api/admin/exchange/requisites");
   },
   exchangeOrders(status?: string, limit?: number) {
     const p = new URLSearchParams();
@@ -3061,6 +3254,12 @@ export const saas = {
     }>("/api/admin/sim/exchange-eval", {
       method: "POST",
       body: JSON.stringify({ personaIds, maxTurns }),
+    });
+  },
+  runExchangeAnswerQualityEval(caseIds?: string[]) {
+    return request<ExchangeAnswerQualityEvalResult>("/api/admin/sim/exchange-answer-quality-eval", {
+      method: "POST",
+      body: JSON.stringify({ caseIds }),
     });
   },
   exchangeTurnover() {

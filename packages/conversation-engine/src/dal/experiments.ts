@@ -3,15 +3,15 @@ import { and, desc, eq } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
 export interface ExperimentRow {
-  id: number;
-  tenantId: number;
-  slug: string;
-  status: string;
-  allocationJson: string;
-  successMetric: string;
-  startedAt: number | null;
-  endedAt: number | null;
-  createdAt: number;
+	id: number;
+	tenantId: number;
+	slug: string;
+	status: string;
+	allocationJson: string;
+	successMetric: string;
+	startedAt: number | null;
+	endedAt: number | null;
+	createdAt: number;
 }
 
 /**
@@ -20,126 +20,139 @@ export interface ExperimentRow {
  * status — enum 'draft|running|paused|done' (storage CHECK).
  */
 export class ExperimentsRepo {
-  constructor(private readonly ctx: RepoCtx) {}
+	constructor(private readonly ctx: RepoCtx) {}
 
-  async byId(id: number): Promise<ExperimentRow | null> {
-    const [row] = await this.ctx.db
-      .select()
-      .from(experimentsTable)
-      .where(
-        and(
-          eq(experimentsTable.id, id),
-          eq(experimentsTable.tenantId, this.ctx.tenantId),
-        ),
-      );
-    return (row as ExperimentRow) ?? null;
-  }
+	async byId(id: number): Promise<ExperimentRow | null> {
+		const [row] = await this.ctx.db
+			.select()
+			.from(experimentsTable)
+			.where(
+				and(
+					eq(experimentsTable.id, id),
+					eq(experimentsTable.tenantId, this.ctx.tenantId),
+				),
+			);
+		return (row as ExperimentRow) ?? null;
+	}
 
-  async findRunningBySlug(slug: string): Promise<ExperimentRow | null> {
-    const [row] = await this.ctx.db
-      .select()
-      .from(experimentsTable)
-      .where(
-        and(
-          eq(experimentsTable.tenantId, this.ctx.tenantId),
-          eq(experimentsTable.slug, slug),
-          eq(experimentsTable.status, "running"),
-        ),
-      );
-    return (row as ExperimentRow) ?? null;
-  }
+	async findRunningBySlug(slug: string): Promise<ExperimentRow | null> {
+		const [row] = await this.ctx.db
+			.select()
+			.from(experimentsTable)
+			.where(
+				and(
+					eq(experimentsTable.tenantId, this.ctx.tenantId),
+					eq(experimentsTable.slug, slug),
+					eq(experimentsTable.status, "running"),
+				),
+			);
+		return (row as ExperimentRow) ?? null;
+	}
 
-  /**
-   * Все experiments tenant'а (для admin-UI list view, включая draft/done).
-   * Sorted DESC by created_at — recent first.
-   */
-  async listAll(): Promise<ExperimentRow[]> {
-    const rows = await this.ctx.db
-      .select()
-      .from(experimentsTable)
-      .where(eq(experimentsTable.tenantId, this.ctx.tenantId))
-      .orderBy(desc(experimentsTable.createdAt));
-    return rows as ExperimentRow[];
-  }
+	/**
+	 * Все experiments tenant'а (для admin-UI list view, включая draft/done).
+	 * Sorted DESC by created_at — recent first.
+	 */
+	async listAll(): Promise<ExperimentRow[]> {
+		const rows = await this.ctx.db
+			.select()
+			.from(experimentsTable)
+			.where(eq(experimentsTable.tenantId, this.ctx.tenantId))
+			.orderBy(desc(experimentsTable.createdAt));
+		return rows as ExperimentRow[];
+	}
 
-  async create(data: {
-    slug: string;
-    allocationJson: string;
-    successMetric: string;
-  }): Promise<ExperimentRow> {
-    const nowEpoch = Math.floor(Date.now() / 1000);
-    const [row] = await this.ctx.db
-      .insert(experimentsTable)
-      .values({
-        tenantId: this.ctx.tenantId,
-        slug: data.slug,
-        status: "draft",
-        allocationJson: data.allocationJson,
-        successMetric: data.successMetric,
-        createdAt: nowEpoch,
-      })
-      .returning();
-    return row as ExperimentRow;
-  }
+	async create(data: {
+		slug: string;
+		allocationJson: string;
+		successMetric: string;
+	}): Promise<ExperimentRow> {
+		const nowEpoch = Math.floor(Date.now() / 1000);
+		const [row] = await this.ctx.db
+			.insert(experimentsTable)
+			.values({
+				tenantId: this.ctx.tenantId,
+				slug: data.slug,
+				status: "draft",
+				allocationJson: data.allocationJson,
+				successMetric: data.successMetric,
+				createdAt: nowEpoch,
+			})
+			.returning();
+		return row as ExperimentRow;
+	}
 
-  async update(
-    id: number,
-    data: Partial<{ allocationJson: string; successMetric: string }>,
-  ): Promise<ExperimentRow | null> {
-    const [row] = await this.ctx.db
-      .update(experimentsTable)
-      .set(data)
-      .where(and(eq(experimentsTable.id, id), eq(experimentsTable.tenantId, this.ctx.tenantId)))
-      .returning();
-    return (row as ExperimentRow) ?? null;
-  }
+	async update(
+		id: number,
+		data: Partial<{ allocationJson: string; successMetric: string }>,
+	): Promise<ExperimentRow | null> {
+		const [row] = await this.ctx.db
+			.update(experimentsTable)
+			.set(data)
+			.where(
+				and(
+					eq(experimentsTable.id, id),
+					eq(experimentsTable.tenantId, this.ctx.tenantId),
+				),
+			)
+			.returning();
+		return (row as ExperimentRow) ?? null;
+	}
 
-  async setStatus(
-    id: number,
-    status: "running" | "paused" | "done",
-  ): Promise<ExperimentRow | null> {
-    const nowEpoch = Math.floor(Date.now() / 1000);
-    const extra: Record<string, unknown> = {};
-    if (status === "running") extra.startedAt = nowEpoch;
-    if (status === "done") extra.endedAt = nowEpoch;
-    const [row] = await this.ctx.db
-      .update(experimentsTable)
-      .set({ status, ...extra })
-      .where(and(eq(experimentsTable.id, id), eq(experimentsTable.tenantId, this.ctx.tenantId)))
-      .returning();
-    return (row as ExperimentRow) ?? null;
-  }
+	async setStatus(
+		id: number,
+		status: "running" | "paused" | "done",
+	): Promise<ExperimentRow | null> {
+		const nowEpoch = Math.floor(Date.now() / 1000);
+		const extra: Record<string, unknown> = {};
+		if (status === "running") extra.startedAt = nowEpoch;
+		if (status === "done") extra.endedAt = nowEpoch;
+		const [row] = await this.ctx.db
+			.update(experimentsTable)
+			.set({ status, ...extra })
+			.where(
+				and(
+					eq(experimentsTable.id, id),
+					eq(experimentsTable.tenantId, this.ctx.tenantId),
+				),
+			)
+			.returning();
+		return (row as ExperimentRow) ?? null;
+	}
 }
 
 /**
  * Parsed единица allocation_json. Weight default 1 если не указан.
  */
 export interface ExperimentAllocationEntry {
-  styleSlug: string;
-  weight: number;
+	styleSlug: string;
+	weight: number;
 }
 
-export function parseAllocation(allocationJson: string): ExperimentAllocationEntry[] {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(allocationJson);
-  } catch {
-    throw new Error(`experiments.allocation_json invalid: not JSON`);
-  }
-  if (!Array.isArray(raw)) {
-    throw new Error("experiments.allocation_json must be array");
-  }
-  const out: ExperimentAllocationEntry[] = [];
-  for (const item of raw) {
-    if (typeof item !== "object" || item === null) continue;
-    const obj = item as Record<string, unknown>;
-    const slug = obj.style_slug ?? obj.styleSlug;
-    if (typeof slug !== "string") continue;
-    const weight = typeof obj.weight === "number" && obj.weight > 0 ? obj.weight : 1;
-    out.push({ styleSlug: slug, weight });
-  }
-  if (out.length === 0) {
-    throw new Error("experiments.allocation_json contains no valid entries");
-  }
-  return out;
+export function parseAllocation(
+	allocationJson: string,
+): ExperimentAllocationEntry[] {
+	let raw: unknown;
+	try {
+		raw = JSON.parse(allocationJson);
+	} catch {
+		throw new Error(`experiments.allocation_json invalid: not JSON`);
+	}
+	if (!Array.isArray(raw)) {
+		throw new Error("experiments.allocation_json must be array");
+	}
+	const out: ExperimentAllocationEntry[] = [];
+	for (const item of raw) {
+		if (typeof item !== "object" || item === null) continue;
+		const obj = item as Record<string, unknown>;
+		const slug = obj.style_slug ?? obj.styleSlug;
+		if (typeof slug !== "string") continue;
+		const weight =
+			typeof obj.weight === "number" && obj.weight > 0 ? obj.weight : 1;
+		out.push({ styleSlug: slug, weight });
+	}
+	if (out.length === 0) {
+		throw new Error("experiments.allocation_json contains no valid entries");
+	}
+	return out;
 }

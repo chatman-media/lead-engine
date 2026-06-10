@@ -16,7 +16,9 @@ import {
 import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres, { type Sql } from "postgres";
+import { AgentToolCallsRepo } from "./agent-tool-calls.ts";
 import { ContactsRepo } from "./contacts.ts";
+import { CustomerRequestsRepo } from "./customer-requests.ts";
 import { LeadsRepo } from "./leads.ts";
 import { MessagesRepo } from "./messages.ts";
 import { SkillOutcomesRepo } from "./skill-outcomes.ts";
@@ -40,9 +42,11 @@ let otherTenantId = 0;
 let now = 0;
 
 const contactsRepo = () => new ContactsRepo({ db, tenantId });
+const customerRequestsRepo = () => new CustomerRequestsRepo({ db, tenantId });
 const leadsRepo = () => new LeadsRepo({ db, tenantId });
 const messagesRepo = () => new MessagesRepo({ db, tenantId });
 const outcomesRepo = () => new SkillOutcomesRepo({ db, tenantId });
+const agentToolCallsRepo = () => new AgentToolCallsRepo({ db, tenantId });
 
 beforeAll(async () => {
 	if (!ownerUrl) return;
@@ -153,6 +157,54 @@ describe("LeadsRepo", () => {
 
 		await leadsRepo().updateState(transfer.id, "transfer_offer", now + 20);
 		expect((await leadsRepo().byId(transfer.id))?.state).toBe("transfer_offer");
+	});
+});
+
+describe("CustomerRequestsRepo", () => {
+	it("models parallel requests independently and filters closed requests", async () => {
+		if (!enabled) return;
+		const contact = await contactsRepo().create({
+			displayName: "Request contact",
+		});
+		const transfer = await customerRequestsRepo().create({
+			contactId: contact.id,
+			requestType: "transfer",
+			title: "Airport transfer",
+			nowEpoch: now,
+		});
+		const food = await customerRequestsRepo().create({
+			contactId: contact.id,
+			requestType: "food",
+			title: "Dinner order",
+			nowEpoch: now + 10,
+		});
+
+		expect((await customerRequestsRepo().byId(transfer.id))?.title).toBe(
+			"Airport transfer",
+		);
+		expect(
+			await new CustomerRequestsRepo({
+				db,
+				tenantId: otherTenantId,
+			}).byId(transfer.id),
+		).toBeNull();
+		expect(
+			(await customerRequestsRepo().listOpenByContact(contact.id)).map(
+				(r) => r.id,
+			),
+		).toEqual([food.id, transfer.id]);
+
+		const closed = await customerRequestsRepo().transitionStatus(
+			food.id,
+			"won",
+			now + 20,
+		);
+		expect(closed?.closedAt).toBe(now + 20);
+		expect(
+			(await customerRequestsRepo().listOpenByContact(contact.id)).map(
+				(r) => r.id,
+			),
+		).toEqual([transfer.id]);
 	});
 });
 
@@ -273,5 +325,155 @@ describe("SkillOutcomesRepo", () => {
 		expect(aggregates.find((row) => row.skillSlug === "empathy")).toMatchObject(
 			{ wins: 0, losses: 0, draws: 1, total: 1 },
 		);
+	});
+});
+
+describe("AgentToolCallsRepo", () => {
+	it("recordMany persists tool traces and byConversation is tenant-scoped", async () => {
+		if (!enabled) return;
+		const contact = await contactsRepo().create({
+			displayName: "Tool trace contact",
+		});
+		const [conversation] = await db
+			.insert(schema.conversations)
+			.values({
+				tenantId,
+				userId: contact.id,
+				source: "bot",
+				mode: "ai",
+				createdAt: now,
+				lastMessageAt: now,
+			})
+			.returning({ id: schema.conversations.id });
+		if (!conversation) throw new Error("conversation insert returned no row");
+
+		const rows = await agentToolCallsRepo().recordMany([
+			{
+				conversationId: conversation.id,
+				contactId: contact.id,
+				source: "rag_reply",
+				toolName: "quote_exchange",
+				args: { asset: "USDT", amount: 100 },
+				result: { ok: true, amountToThb: 3150 },
+				cycle: 0,
+				toolCallIndex: 0,
+				nowEpoch: now,
+			},
+			{
+				conversationId: conversation.id,
+				contactId: contact.id,
+				source: "rag_reply",
+				toolName: "create_exchange_order",
+				args: { quoteId: "q1" },
+				result: { error: "needs verification" },
+				error: true,
+				cycle: 1,
+				toolCallIndex: 1,
+				nowEpoch: now + 1,
+			},
+			{
+				conversationId: conversation.id,
+				contactId: contact.id,
+				source: "llm_reply",
+				toolName: "quote_exchange",
+				args: { asset: "USDT", amount: 200 },
+				result: { ok: true, amountToThb: 6300 },
+				cycle: 0,
+				toolCallIndex: 2,
+				nowEpoch: now + 2,
+			},
+		]);
+
+		expect(rows).toHaveLength(3);
+		const [firstToolCall, secondToolCall] = rows;
+		if (!firstToolCall || !secondToolCall) {
+			throw new Error("agent tool calls insert returned too few rows");
+		}
+		expect(JSON.parse(firstToolCall.argsJson)).toEqual({
+			asset: "USDT",
+			amount: 100,
+		});
+
+		const byConversation = await agentToolCallsRepo().byConversation(
+			conversation.id,
+		);
+		expect(byConversation.map((row) => row.toolName)).toEqual([
+			"quote_exchange",
+			"create_exchange_order",
+			"quote_exchange",
+		]);
+		expect(byConversation[1]?.error).toBe(true);
+		expect(
+			(
+				await agentToolCallsRepo().list({
+					conversationId: conversation.id,
+					toolName: "quote_exchange",
+				})
+			).map((row) => row.source),
+		).toEqual(["llm_reply", "rag_reply"]);
+		expect(
+			(
+				await agentToolCallsRepo().list({
+					conversationId: conversation.id,
+					error: true,
+				})
+			).map((row) => row.toolName),
+		).toEqual(["create_exchange_order"]);
+		expect(
+			(
+				await agentToolCallsRepo().list({
+					source: "llm_reply",
+					limit: 1,
+				})
+			).map((row) => row.toolName),
+		).toEqual(["quote_exchange"]);
+		expect(
+			await new AgentToolCallsRepo({
+				db,
+				tenantId: otherTenantId,
+			}).byConversation(conversation.id),
+		).toEqual([]);
+		expect((await agentToolCallsRepo().byId(secondToolCall.id))?.toolName).toBe(
+			"create_exchange_order",
+		);
+		expect(
+			await new AgentToolCallsRepo({
+				db,
+				tenantId: otherTenantId,
+			}).byId(secondToolCall.id),
+		).toBeNull();
+
+		const firstFeedback = await agentToolCallsRepo().recordFeedback({
+			toolCallId: secondToolCall.id,
+			label: "bad_args",
+			note: "quote id should be verified before order creation",
+			nowEpoch: now + 3,
+		});
+		expect(firstFeedback).toMatchObject({
+			toolCallId: secondToolCall.id,
+			label: "bad_args",
+			note: "quote id should be verified before order creation",
+		});
+		await agentToolCallsRepo().recordFeedback({
+			toolCallId: secondToolCall.id,
+			label: "wrong_tool",
+			note: null,
+			nowEpoch: now + 4,
+		});
+		expect(
+			(await agentToolCallsRepo().feedbackForToolCall(secondToolCall.id)).map(
+				(row) => row.label,
+			),
+		).toEqual(["wrong_tool", "bad_args"]);
+		expect(
+			await new AgentToolCallsRepo({
+				db,
+				tenantId: otherTenantId,
+			}).recordFeedback({
+				toolCallId: secondToolCall.id,
+				label: "good_reply",
+				nowEpoch: now + 5,
+			}),
+		).toBeNull();
 	});
 });
