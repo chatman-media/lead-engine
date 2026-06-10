@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.0.0...@chatman-media/conversation-engine-v3.1.0) (2026-06-10)
+
+
+### Features
+
+* **exchange:** add runtime response guard contract ([#526](https://github.com/chatman-media/lead-engine/issues/526)) ([438d99e](https://github.com/chatman-media/lead-engine/commit/438d99eb464e99d101428d2488daf2d1437237bd))
+
 # [@chatman-media/conversation-engine-v3.0.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v2.1.0...@chatman-media/conversation-engine-v3.0.0) (2026-06-10)
 
 
