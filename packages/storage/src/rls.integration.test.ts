@@ -306,6 +306,7 @@ describe("RLS tenant_isolation policy", () => {
       "agent_tool_calls",
       "agent_tool_call_feedback",
       "agent_tool_call_improvement_proposals",
+      "agent_tool_call_regression_cases",
       "llm_provider_configs",
     ];
 

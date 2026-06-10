@@ -67,6 +67,14 @@ Zod-схема конвертится в OpenAI function-формат (`toolToOp
   группирует actionable labels (`wrong_tool`, `missing_tool`, `bad_args`) в
   operator-facing improvement proposals, а JSONL export даёт разметку для
   offline анализа.
+- Tracked improvement proposals живут в
+  `agent_tool_call_improvement_proposals`: оператор может оставить proposal
+  pending, dismiss, apply с конкретным artifact reference (`pull_request`,
+  `prompt_patch`, `tool_schema_patch`, `regression_case`, и т.д.) или нажать
+  **Case**, чтобы сохранить пример в `agent_tool_call_regression_cases`.
+  Regression case фиксирует исходные args/result, reviewer label, expected
+  behavior и context; proposal при этом закрывается как `applied` с
+  `resolution.ref = REG-<id>`.
 - Coach proposals (`POST /api/admin/quality/coach/proposals`) подтягивают
   последние actionable feedback labels по тому же `styleId` и передают их в
   CoachAnalyzer как human-reviewed defects. Coach не меняет tool contracts

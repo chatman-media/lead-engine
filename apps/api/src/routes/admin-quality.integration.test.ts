@@ -962,6 +962,95 @@ describe("admin quality JSONL export", () => {
     expect(invalidResolution.status).toBe(400);
   });
 
+  it("promotes a tracked tool-call proposal into a tenant-scoped regression case", async () => {
+    if (!sql) return;
+
+    const create = await authPostJsonReq(
+      tokenA,
+      "/api/admin/quality/tool-call-feedback/improvement-proposals/create-from-feedback",
+      { limit: 20 },
+    );
+    expect(create.status).toBe(200);
+
+    const pending = (await (
+      await authReq(tokenA, "/api/admin/quality/tool-call-feedback/improvement-proposals")
+    ).json()) as QualityToolCallImprovementProposalsResponse;
+    const proposal = pending.items.find((item) => item.kind === "schema_fix") ?? pending.items[0];
+    expect(proposal).toBeDefined();
+    if (!proposal) return;
+
+    const invalidExample = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-call-feedback/improvement-proposals/${proposal.id}/regression-cases`,
+      { exampleIndex: 99 },
+    );
+    expect(invalidExample.status).toBe(400);
+
+    const crossTenant = await authPostJsonReq(
+      tokenB,
+      `/api/admin/quality/tool-call-feedback/improvement-proposals/${proposal.id}/regression-cases`,
+      {},
+    );
+    expect(crossTenant.status).toBe(404);
+
+    const managerAttempt = await authPostJsonReq(
+      managerTokenA,
+      `/api/admin/quality/tool-call-feedback/improvement-proposals/${proposal.id}/regression-cases`,
+      {},
+    );
+    expect(managerAttempt.status).toBe(403);
+
+    const promoted = await authPostJsonReq(
+      tokenA,
+      `/api/admin/quality/tool-call-feedback/improvement-proposals/${proposal.id}/regression-cases`,
+      { expectedBehavior: "The agent must require a verified quote before order creation." },
+    );
+    expect(promoted.status).toBe(201);
+    const promotedBody = (await promoted.json()) as QualityToolCallRegressionCaseCreateResponse;
+    expect(promotedBody.case).toMatchObject({
+      proposalId: proposal.id,
+      toolCallId: toolCallOrderA,
+      source: "tool_call_feedback",
+      toolName: proposal.toolName,
+      label: proposal.label,
+      status: "active",
+      createdByAdminId: expect.any(Number),
+    });
+    expect(promotedBody.case.input).toMatchObject({
+      toolName: proposal.toolName,
+      args: { quoteId: "q1" },
+      feedback: expect.objectContaining({ label: proposal.label }),
+    });
+    expect(promotedBody.case.expected).toMatchObject({
+      behavior: "The agent must require a verified quote before order creation.",
+      proposalKind: proposal.kind,
+    });
+    expect(promotedBody.case.context).toMatchObject({
+      proposal: expect.objectContaining({ id: proposal.id, fingerprint: proposal.fingerprint }),
+      toolCall: expect.objectContaining({ id: toolCallOrderA }),
+    });
+    expect(promotedBody.proposal).toMatchObject({
+      id: proposal.id,
+      status: "applied",
+      resolution: {
+        kind: "regression_case",
+        ref: `REG-${promotedBody.case.id}`,
+        url: null,
+        note: promotedBody.case.title,
+      },
+    });
+
+    const cases = (await (
+      await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases?limit=10")
+    ).json()) as QualityToolCallRegressionCasesResponse;
+    expect(cases.items.some((item) => item.id === promotedBody.case.id)).toBe(true);
+
+    const tenantBCases = (await (
+      await authReq(tokenB, "/api/admin/quality/tool-call-regression-cases?status=all")
+    ).json()) as QualityToolCallRegressionCasesResponse;
+    expect(tenantBCases.items).toEqual([]);
+  });
+
   it("validates tool-call feedback analytics query params", async () => {
     if (!sql) return;
     expect(
@@ -997,6 +1086,10 @@ describe("admin quality JSONL export", () => {
       (await authReq(tokenA, "/api/admin/quality/tool-call-feedback/improvement-proposals?limit=0"))
         .status,
     ).toBe(400);
+    expect((await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases?status=bad")).status)
+      .toBe(400);
+    expect((await authReq(tokenA, "/api/admin/quality/tool-call-regression-cases?limit=0")).status)
+      .toBe(400);
   });
 
   it("validates tool-call feedback payloads", async () => {
@@ -2605,6 +2698,33 @@ type QualityToolCallImprovementProposalsResponse = {
 
 type QualityToolCallImprovementProposalStatusResponse = {
   ok: true;
+  proposal: QualityToolCallImprovementProposalResponse;
+};
+
+type QualityToolCallRegressionCaseResponse = {
+  id: number;
+  proposalId: number | null;
+  toolCallId: number | null;
+  source: string;
+  toolName: string;
+  label: string;
+  title: string;
+  input: unknown;
+  expected: unknown;
+  context: unknown;
+  status: "active" | "archived";
+  createdByAdminId: number | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type QualityToolCallRegressionCasesResponse = {
+  items: QualityToolCallRegressionCaseResponse[];
+};
+
+type QualityToolCallRegressionCaseCreateResponse = {
+  ok: true;
+  case: QualityToolCallRegressionCaseResponse;
   proposal: QualityToolCallImprovementProposalResponse;
 };
 
