@@ -1471,6 +1471,11 @@ export function SaasOnboarding() {
                 vision (фото/документы), judge (оценка/сравнение), reranker (точность поиска). Для
                 Ollama API-ключ не нужен.
               </p>
+              <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                Для alpha быстрее всего OpenRouter: создайте key в openrouter.ai, поставьте лимит
+                бюджета и вставьте его в Chat. Ключ хранится зашифрованным; не отправляйте его в
+                Telegram или WhatsApp.
+              </p>
             </CardHeader>
             <CardContent className="space-y-2">
               {ALL_PURPOSES.map((purpose) => {
