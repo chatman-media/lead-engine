@@ -8,6 +8,7 @@ import {
 import React, { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import { LeadKbGuidanceCard } from "@/components/LeadKbGuidanceCard";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ import {
   type ConversationListItem,
   clearToken,
   type FunnelListItem,
+  type LeadKbGuidance,
   type LeadListItem,
   type MessageRow,
   type OperatorHandoffNotification,
@@ -177,6 +179,9 @@ export function SaasConversations() {
   const [advancing, setAdvancing] = useState(false);
   const [confirmingTakeover, setConfirmingTakeover] = useState(false);
   const [contactLead, setContactLead] = useState<LeadListItem | null>(null);
+  const [kbGuidance, setKbGuidance] = useState<LeadKbGuidance | null>(null);
+  const [kbGuidanceLoading, setKbGuidanceLoading] = useState(false);
+  const [kbGuidanceError, setKbGuidanceError] = useState("");
   const [admins, setAdmins] = useState<import("../api/saas.ts").AdminRow[]>([]);
   const [operatorHandoffs, setOperatorHandoffs] = useState<OperatorHandoffNotification[]>([]);
 
@@ -358,6 +363,38 @@ export function SaasConversations() {
     }
   }
 
+  async function refreshContactLead(contactId: number) {
+    try {
+      const res = await saas.listLeads({ contactId, limit: 1 });
+      const lead = res.items[0] ?? null;
+      setContactLead(lead);
+      return lead;
+    } catch (err) {
+      if (!handleAuthError(err)) setContactLead(null);
+      return null;
+    }
+  }
+
+  async function refreshKbGuidance(leadId?: number | null) {
+    const resolvedLeadId = leadId ?? contactLead?.id ?? null;
+    if (!resolvedLeadId) {
+      setKbGuidance(null);
+      setKbGuidanceError("");
+      setKbGuidanceLoading(false);
+      return;
+    }
+    setKbGuidanceLoading(true);
+    setKbGuidanceError("");
+    try {
+      const guidance = await saas.getLeadKbGuidance(resolvedLeadId);
+      setKbGuidance(guidance);
+    } catch (err) {
+      if (!handleAuthError(err)) setKbGuidanceError("Не удалось загрузить подсказки");
+    } finally {
+      setKbGuidanceLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!selectedId) {
       setDetail(null);
@@ -381,10 +418,20 @@ export function SaasConversations() {
       setContactLead(null);
       return;
     }
-    saas.listLeads({ contactId: detail.conversation.contactId, limit: 1 })
-      .then((r) => setContactLead(r.items[0] ?? null))
-      .catch(() => setContactLead(null));
-  }, [detail?.conversation.contactId]);
+    void refreshContactLead(detail.conversation.contactId);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: refresh when selected contact/stage changes
+  }, [detail?.conversation.contactId, detail?.conversation.currentStage]);
+
+  useEffect(() => {
+    if (!contactLead) {
+      setKbGuidance(null);
+      setKbGuidanceError("");
+      setKbGuidanceLoading(false);
+      return;
+    }
+    void refreshKbGuidance(contactLead.id);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: derived from current lead only
+  }, [contactLead?.id, contactLead?.stageDefinitionId]);
 
   // Debounce search query
   useEffect(() => {
@@ -452,6 +499,15 @@ export function SaasConversations() {
     } finally {
       setSending(false);
     }
+  }
+
+  function appendReplyDraft(text: string) {
+    const clean = text.trim();
+    if (!clean) return;
+    setReplyText((prev) => {
+      const current = prev.trim();
+      return current ? `${current}\n${clean}` : clean;
+    });
   }
 
   async function handleDeleteMessage(messageId: number) {
@@ -1061,40 +1117,55 @@ export function SaasConversations() {
                 </div>
 
                 {contactLead ? (
-                  <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold">Лид</span>
-                      <Link to={`/leads/${contactLead.id}`} className="text-primary">
-                        <ExternalLinkIcon className="size-3.5" />
-                      </Link>
+                  <>
+                    <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold">Лид</span>
+                        <Link to={`/leads/${contactLead.id}`} className="text-primary">
+                          <ExternalLinkIcon className="size-3.5" />
+                        </Link>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[11px] text-muted-foreground">Стадия</p>
+                        <Badge variant="outline" className="text-[10px]">
+                          {STATE_RU[contactLead.state] ?? contactLead.state}
+                        </Badge>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="w-full"
+                        disabled={advancing}
+                        onClick={async () => {
+                          setAdvancing(true);
+                          setError("");
+                          try {
+                            const r = await saas.advanceConversation(detail.conversation.id);
+                            await refreshDetail(detail.conversation.id);
+                            await refreshList();
+                            const nextLead = await refreshContactLead(detail.conversation.contactId);
+                            await refreshKbGuidance(nextLead?.id ?? null);
+                            if (r.terminal) setError("");
+                          } catch (err) {
+                            if (!handleAuthError(err))
+                              setError(err instanceof ApiError ? err.message : "Не удалось продвинуть");
+                          } finally {
+                            setAdvancing(false);
+                          }
+                        }}
+                      >
+                        {advancing ? "…" : "✅ Подтвердить · дальше"}
+                      </Button>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-[11px] text-muted-foreground">Стадия</p>
-                      <Badge variant="outline" className="text-[10px]">{STATE_RU[contactLead.state] ?? contactLead.state}</Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      className="w-full"
-                      disabled={advancing}
-                      onClick={async () => {
-                        setAdvancing(true);
-                        setError("");
-                        try {
-                          const r = await saas.advanceConversation(detail.conversation.id);
-                          await refreshDetail(detail.conversation.id);
-                          await refreshList();
-                          if (r.terminal) setError("");
-                        } catch (err) {
-                          if (!handleAuthError(err))
-                            setError(err instanceof ApiError ? err.message : "Не удалось продвинуть");
-                        } finally {
-                          setAdvancing(false);
-                        }
-                      }}
-                    >
-                      {advancing ? "…" : "✅ Подтвердить · дальше"}
-                    </Button>
-                  </div>
+                    <LeadKbGuidanceCard
+                      guidance={kbGuidance}
+                      loading={kbGuidanceLoading}
+                      error={kbGuidanceError}
+                      onRefresh={() => void refreshKbGuidance(contactLead.id)}
+                      variant="section"
+                      onUseAction={appendReplyDraft}
+                      actionButtonLabel="В ответ"
+                    />
+                  </>
                 ) : (
                   <div className="rounded-lg border border-dashed p-3 text-center">
                     <p className="text-xs text-muted-foreground">Лид не создан</p>
@@ -1105,7 +1176,9 @@ export function SaasConversations() {
                       onClick={async () => {
                         try {
                           await saas.createLead(detail.conversation.contactId);
-                          await refreshDetail(selectedId!);
+                          await refreshDetail(detail.conversation.id);
+                          const nextLead = await refreshContactLead(detail.conversation.contactId);
+                          await refreshKbGuidance(nextLead?.id ?? null);
                         } catch (err) {
                           if (!handleAuthError(err)) setError(err instanceof Error ? err.message : String(err));
                         }
