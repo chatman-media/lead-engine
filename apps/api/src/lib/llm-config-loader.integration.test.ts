@@ -20,7 +20,11 @@ import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
 import type { ApiConfig } from "../config.ts";
-import { loadTenantLlmConfigs } from "./llm-config-loader.ts";
+import {
+  getConfig,
+  loadTenantLlmConfigs,
+  tenantsWithPurpose,
+} from "./llm-config-loader.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_llmload_${Math.random().toString(36).slice(2, 10)}`;
@@ -257,5 +261,99 @@ describe("loadTenantLlmConfigs", () => {
     expect(cfg?.apiKey).toBeUndefined();
     expect(cfg?.baseUrl).toBe("http://localhost:11434");
     expect(cfg?.source).toBe("db");
+  });
+
+  it("non-Ollama DB config без apiKey → onError 'missing apiKey' + env fallback", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    const [d] = await db
+      .insert(tenants)
+      .values({ slug: "tenant-d-noapikey", plan: "free", status: "active" })
+      .returning({ id: tenants.id });
+    const tenantD = d!.id;
+    // provider=openai требует apiKey, а secret_ref нет → конфиг дропается.
+    await db.insert(llmProviderConfigs).values({
+      tenantId: tenantD,
+      purpose: "chat",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const errors: { msg: string; ctx: Record<string, unknown> }[] = [];
+    const loaded = await loadTenantLlmConfigs({
+      db,
+      tenantIds: [tenantD],
+      envFallback: makeEnvCfg(),
+      masterKeyHex: MASTER_KEY,
+      onError: (msg, ctx) => errors.push({ msg, ctx }),
+    });
+    expect(errors.some((e) => e.msg.includes("missing apiKey"))).toBe(true);
+    expect(errors[0]!.ctx).toMatchObject({
+      tenantId: tenantD,
+      provider: "openai",
+      hasSecretRef: false,
+    });
+    const chat = loaded.byTenant.get(tenantD)?.get("chat");
+    expect(chat?.source).toBe("env");
+    expect(chat?.model).toBe("gpt-env-fallback");
+  });
+
+  it("vision/judge purposes грузятся из DB; tenantsWithPurpose/getConfig работают", async () => {
+    if (!sql) return;
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(llmProviderConfigs).values([
+      {
+        tenantId: tenantA,
+        purpose: "vision",
+        provider: "ollama",
+        model: "llava",
+        baseUrl: "http://localhost:11434",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        tenantId: tenantA,
+        purpose: "judge",
+        provider: "openai",
+        model: "gpt-judge",
+        secretRef: "llm_chat_apikey",
+        timeoutMs: 9_000,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    const loaded = await loadTenantLlmConfigs({
+      db,
+      tenantIds: [tenantA, tenantB],
+      envFallback: makeEnvCfg(),
+      masterKeyHex: MASTER_KEY,
+    });
+
+    expect(tenantsWithPurpose(loaded, "vision")).toEqual([tenantA]);
+    expect(tenantsWithPurpose(loaded, "judge")).toEqual([tenantA]);
+    expect(tenantsWithPurpose(loaded, "chat").sort()).toEqual(
+      [tenantA, tenantB].sort(),
+    );
+    expect(tenantsWithPurpose(loaded, "transcribe")).toEqual([]);
+
+    expect(getConfig(loaded, tenantA, "vision")).toMatchObject({
+      provider: "ollama",
+      model: "llava",
+      baseUrl: "http://localhost:11434",
+      source: "db",
+    });
+    const judge = getConfig(loaded, tenantA, "judge");
+    expect(judge).toMatchObject({
+      provider: "openai",
+      model: "gpt-judge",
+      timeoutMs: 9_000,
+      source: "db",
+    });
+    expect(judge?.apiKey).toBe("sk-tenant-a-chat-key");
+    // vision/judge не падают в env fallback: у tenantB их нет.
+    expect(getConfig(loaded, tenantB, "vision")).toBeNull();
+    // Неизвестный tenant → null.
+    expect(getConfig(loaded, 999_999, "chat")).toBeNull();
   });
 });

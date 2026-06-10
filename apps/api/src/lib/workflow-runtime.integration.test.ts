@@ -16,7 +16,7 @@ import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { resolve } from "node:path";
 import postgres, { type Sql } from "postgres";
-import { autoAdvanceLead } from "./workflow-runtime.ts";
+import { autoAdvanceLead, WorkflowRuntime } from "./workflow-runtime.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_workflow_rt_${Math.random().toString(36).slice(2, 10)}`;
@@ -219,5 +219,85 @@ describe("autoAdvanceLead workflow runtime", () => {
     });
     const [lead] = await db.select({ state: leads.state }).from(leads).where(eq(leads.id, leadId));
     expect(lead!.state).toBe("partner_waiting");
+  });
+
+  it("WorkflowRuntime.handleFieldUpdated wraps withTenant and advances the lead", async () => {
+    if (!sql) return;
+    const [intake] = await db
+      .insert(stageDefinitions)
+      .values({
+        tenantId,
+        funnelId,
+        slug: "rt_class_intake",
+        displayName: "RT Class Intake",
+        kind: "intake",
+        stageType: "form_fill",
+        position: 30,
+        nextStages: ["rt_class_offer"],
+        autoAdvanceCondition: '{"type":"all_required_fields_filled"}',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: stageDefinitions.id });
+    await db.insert(stageDefinitions).values({
+      tenantId,
+      funnelId,
+      slug: "rt_class_offer",
+      displayName: "RT Class Offer",
+      kind: "active",
+      stageType: "awaiting_operator",
+      phase: "offer",
+      position: 31,
+      nextStages: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    const [field] = await db
+      .insert(stageFields)
+      .values({
+        tenantId,
+        stageId: intake!.id,
+        slug: "need",
+        displayName: "Need",
+        fieldType: "text",
+        required: true,
+        position: 0,
+        createdAt: now,
+      })
+      .returning({ id: stageFields.id });
+    const leadId = await leadAtStage(intake!.id, "rt_class_intake");
+    await db.insert(leadFieldValues).values({
+      tenantId,
+      leadId,
+      fieldId: field!.id,
+      valueJson: '"filled"',
+      updatedAt: now,
+    });
+
+    const runtime = new WorkflowRuntime({ db });
+    const result = await runtime.handleFieldUpdated({
+      tenantId,
+      leadId,
+      eventType: "field_updated",
+      now,
+    });
+
+    expect(result).toMatchObject({
+      advanced: true,
+      to: "rt_class_offer",
+      awaitingOperator: true,
+      awaitingPartner: false,
+    });
+    const [lead] = await db.select({ state: leads.state }).from(leads).where(eq(leads.id, leadId));
+    expect(lead!.state).toBe("rt_class_offer");
+
+    // Default branch: event без now → берётся текущее время.
+    const idleLeadId = await leadAtStage(intake!.id, "rt_class_intake");
+    const idleResult = await runtime.handleFieldUpdated({
+      tenantId,
+      leadId: idleLeadId,
+      eventType: "field_updated",
+    });
+    expect(idleResult.advanced).toBe(false);
   });
 });

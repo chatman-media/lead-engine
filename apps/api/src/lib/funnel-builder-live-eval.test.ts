@@ -3,6 +3,7 @@ import type { ChatClient } from "@chatman-media/llm-router";
 import {
 	type FunnelEvalScenario,
 	formatFunnelEvalSummary,
+	parseFunnelBuilderOutput,
 	runLiveFunnelEval,
 	scoreFunnelOutput,
 } from "./funnel-builder-live-eval.ts";
@@ -159,6 +160,31 @@ describe("funnel-builder live eval scoring", () => {
 		);
 		expect(result.passed).toBe(true);
 		expect(result.metrics.branchValid).toBe(true);
+	});
+
+	it("JSON без stages → parseError 'stages array missing', reply сохраняется", () => {
+		const parsed = parseFunnelBuilderOutput(
+			'{"reply":"расскажи подробнее про бизнес"}',
+		);
+		expect(parsed.parseError).toBe("stages array missing");
+		expect(parsed.reply).toBe("расскажи подробнее про бизнес");
+		expect(parsed.stages).toEqual([]);
+
+		const result = scoreFunnelOutput(
+			linearScenario,
+			'{"reply":"мало данных"}',
+		);
+		expect(result.passed).toBe(false);
+		expect(result.errors).toContain("Parse: stages array missing");
+	});
+
+	it("битый JSON внутри фигурных скобок → parseError из JSON.parse", () => {
+		const parsed = parseFunnelBuilderOutput("Вот воронка: {oops, not: json}");
+		expect(parsed.stages).toEqual([]);
+		expect(parsed.reply).toBe("");
+		expect(parsed.parseError).toBeTruthy();
+		expect(parsed.parseError).not.toBe("no JSON object found");
+		expect(parsed.parseError).not.toBe("stages array missing");
 	});
 
 	it("live runner retries repair prompts", async () => {
