@@ -259,7 +259,7 @@ export function SaasDashboard() {
             </Card>
           ))}
         </div>
-        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <Skeleton className="h-64 rounded-xl" />
           <Skeleton className="h-40 rounded-xl" />
         </div>
