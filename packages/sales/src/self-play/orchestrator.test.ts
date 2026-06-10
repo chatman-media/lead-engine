@@ -9,8 +9,16 @@ import type { ChatClient, ChatMessage, EmbeddingClient } from "@chatman-media/ll
 import type { IKbStore } from "@chatman-media/kb";
 import { runPairwiseMatch } from "./pairwise.ts";
 import { runShadowEval } from "../shadow-eval.ts";
-import { runSelfPlayMatch, type SelfPlayDeps } from "./orchestrator.ts";
+import {
+  _testCandidateConcluded,
+  runSelfPlayMatch,
+  type SelfPlayDeps,
+} from "./orchestrator.ts";
 import type { CandidatePersona } from "./personas.ts";
+import {
+  SELF_PLAY_DEFAULT_STALL_REPLY,
+  SELF_PLAY_STALL_CTA_FALLBACK,
+} from "../prompts/orchestrator.ts";
 import { StyleSchema, type Style } from "../types.ts";
 
 const STYLE_A: Style = StyleSchema.parse({
@@ -176,6 +184,109 @@ describe("runSelfPlayMatch", () => {
     expect(deps._state.outcomes.length).toBe(0);
   });
 
+  it("ungrounded-ответы подменяются stall, 3 подряд → CTA-фолбэк", async () => {
+    // salesChat и для генерации, и для fact-check: генерация выдаёт «факт»,
+    // checkFacts (детектим по блоку АКТУАЛЬНЫЕ ВАКАНСИИ в промпте) валит vacancyOk.
+    const fabricatingSales: ChatClient = {
+      complete: async (msgs: ChatMessage[]) => {
+        const last = String(msgs[msgs.length - 1]?.content ?? "");
+        if (last.includes("АКТУАЛЬНЫЕ ВАКАНСИИ")) {
+          return '{"grounded":true,"vacancyOk":false,"reason":"salary mismatch"}';
+        }
+        return "Зарплата 9000 евро в день, гарантирую.";
+      },
+    } as unknown as ChatClient;
+    const candidateKeepsAsking: ChatClient = {
+      complete: async () => "понятно, а какой график работы?",
+    } as unknown as ChatClient;
+    const deps = makeDeps({
+      salesChat: fabricatingSales,
+      candidateChat: candidateKeepsAsking,
+      reflect: true,
+      vacanciesBlock: "Вакансия: хостес, Париж, 2000 EUR",
+    });
+    const r = await runSelfPlayMatch(deps, {
+      style: STYLE_A,
+      styleId: 1,
+      persona: PERSONA,
+      maxTurns: 3,
+    });
+    const sales = r.transcript
+      .filter((m) => m.role === "salesperson")
+      .map((m) => m.text);
+    expect(sales).toEqual([
+      SELF_PLAY_DEFAULT_STALL_REPLY,
+      SELF_PLAY_DEFAULT_STALL_REPLY,
+      SELF_PLAY_STALL_CTA_FALLBACK,
+    ]);
+    expect(r.fabricationsCaught).toBe(3);
+  });
+
+  it("stallCtaReply стиля приоритетнее CTA-фолбэка, кастомный stallReply из deps", async () => {
+    const styleWithCta: Style = StyleSchema.parse({
+      ...STYLE_A,
+      slug: "style-cta",
+      voice: {
+        tone: "дружелюбный",
+        language: "ru",
+        stallCtaReply: "Запишемся на звонок?",
+      },
+    });
+    const fabricatingSales: ChatClient = {
+      complete: async (msgs: ChatMessage[]) => {
+        const last = String(msgs[msgs.length - 1]?.content ?? "");
+        if (last.includes("АКТУАЛЬНЫЕ ВАКАНСИИ")) {
+          return '{"grounded":true,"vacancyOk":false,"reason":"city mismatch"}';
+        }
+        return "Работа в Лондоне, жильё бесплатно.";
+      },
+    } as unknown as ChatClient;
+    const deps = makeDeps({
+      salesChat: fabricatingSales,
+      candidateChat: {
+        complete: async () => "а можно подробнее про условия?",
+      } as unknown as ChatClient,
+      reflect: true,
+      vacanciesBlock: "Вакансия: хостес, Париж, 2000 EUR",
+      stallReply: "Минутку, проверю по базе.",
+    });
+    const r = await runSelfPlayMatch(deps, {
+      style: styleWithCta,
+      styleId: 9,
+      persona: PERSONA,
+      maxTurns: 3,
+    });
+    const sales = r.transcript
+      .filter((m) => m.role === "salesperson")
+      .map((m) => m.text);
+    expect(sales).toEqual([
+      "Минутку, проверю по базе.",
+      "Минутку, проверю по базе.",
+      "Запишемся на звонок?",
+    ]);
+  });
+
+  it("ошибка skill-грейдинга → warning, матч продолжается до вердикта", async () => {
+    const working = judgeChat();
+    const deps = makeDeps();
+    let judgeAccess = 0;
+    Object.defineProperty(deps, "judgeChat", {
+      configurable: true,
+      get() {
+        judgeAccess += 1;
+        if (judgeAccess === 1) throw new Error("grader down");
+        return working;
+      },
+    });
+    const r = await runSelfPlayMatch(deps, {
+      style: STYLE_A,
+      styleId: 1,
+      persona: PERSONA,
+    });
+    expect(r.warnings).toEqual(["turn 1 skill grading: grader down"]);
+    expect(r.outcome).toBe("won");
+  });
+
   it("persist match падает → persisted=false, matchId=null", async () => {
     const deps = makeDeps({
       matches: {
@@ -189,6 +300,19 @@ describe("runSelfPlayMatch", () => {
     const r = await runSelfPlayMatch(deps, { style: STYLE_A, styleId: 1, persona: PERSONA });
     expect(r.persisted).toBe(false);
     expect(r.matchId).toBeNull();
+  });
+});
+
+describe("_testCandidateConcluded", () => {
+  it("распознаёт согласие, отказ и нейтральные реплики", () => {
+    expect(_testCandidateConcluded("давай оформим анкету")).toBe(true);
+    expect(_testCandidateConcluded("я согласна, оформляйте")).toBe(true);
+    expect(_testCandidateConcluded("ок, давай оформим заявку")).toBe(true);
+    expect(_testCandidateConcluded("мне это не интересно")).toBe(true);
+    expect(_testCandidateConcluded("отстаньте от меня, это развод")).toBe(true);
+    expect(_testCandidateConcluded("сколько платят и какой график?")).toBe(
+      false,
+    );
   });
 });
 

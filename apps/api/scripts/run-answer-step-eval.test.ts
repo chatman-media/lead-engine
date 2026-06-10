@@ -48,6 +48,22 @@ describe("parseCliArgs", () => {
 		expect("error" in parseCliArgs(["--repeats", "0"])).toBe(true);
 		expect("error" in parseCliArgs(["--wat"])).toBe(true);
 	});
+
+	it("булевы флаги --env / --shared-kb / --help", () => {
+		const args = parseCliArgs(["--env", "--shared-kb", "--help"]);
+		if ("error" in args) throw new Error(args.error);
+		expect(args.envClients).toBe(true);
+		expect(args.sharedKb).toBe(true);
+		expect(args.help).toBe(true);
+	});
+
+	it("флаги без значения и значения вне диапазона → error", () => {
+		expect("error" in parseCliArgs(["--dataset"])).toBe(true);
+		expect("error" in parseCliArgs(["--out-md"])).toBe(true);
+		expect("error" in parseCliArgs(["--out-json"])).toBe(true);
+		expect("error" in parseCliArgs(["--repeats", "11"])).toBe(true);
+		expect("error" in parseCliArgs(["--tenant", "-2"])).toBe(true);
+	});
 });
 
 describe("buildAblations", () => {
