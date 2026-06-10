@@ -293,6 +293,14 @@ quality lab, and the split-transaction pipeline. More:
 
 ## Deployment
 
+Current hosted environments:
+
+| Environment | URL | Notes |
+|---|---|---|
+| Production | `https://exchanges.agency` | landing, API/webhooks, `/healthz`, `/widget.js` |
+| Production admin | `https://client.exchanges.agency` | admin-ui on the subdomain root; `https://exchanges.agency/admin` redirects here |
+| Development | `https://dev.exchanges.agency` | separate dev instance; admin-ui remains under `/admin/` |
+
 Core env vars:
 
 | Var | Description |
