@@ -25,6 +25,11 @@ Self-service через **обязательный onboarding-визард**, б
 
 ## Шаг 1. Доступ и onboarding-визард
 
+Для пост-демо exchange alpha есть отдельный GTM-runbook:
+[`../gtm/exchange/trial-flow.md`](../gtm/exchange/trial-flow.md). Он фиксирует
+ручной 14-day alpha через superadmin, invite-only вход, BYOK-инструкцию и
+60-минутный dry run до отвечающего бота.
+
 ### 1a. Регистрация закрыта по умолчанию
 
 Публичный self-service signup **закрыт**: `POST /api/auth/signup` → `403
