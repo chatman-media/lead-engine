@@ -17,6 +17,7 @@
  *   5. Возвращает parts[] с текстом/медиа ответа в admin-UI.
  */
 
+import { resolve } from "node:path";
 import {
   ChannelIdentitiesRepo,
   ContactsRepo,
@@ -28,7 +29,8 @@ import {
   type ReplyStrategy,
   withTenant,
 } from "@chatman-media/conversation-engine";
-import type { Inbound, InboundPart, OutboundPart } from "@chatman-media/channel-core";
+import type { ChannelAdapter, Inbound, InboundPart, OutboundPart } from "@chatman-media/channel-core";
+import type { PhotoProcessor } from "../lib/photo-processor.ts";
 import {
   channelIdentities,
   channels,
@@ -41,11 +43,20 @@ import { Hono } from "hono";
 
 // ── Predefined test scenarios ──────────────────────────────────────────────
 
+export interface TestScenarioStep {
+  text?: string;
+  /** `asset:<file>` — встроенный тестовый файл из apps/api/assets/bot-test, либо http(s)-URL. */
+  mediaUrl?: string;
+  mediaType?: "photo" | "video";
+  caption?: string;
+  hint?: string;
+}
+
 export interface TestScenario {
   id: string;
   name: string;
   vertical: string;
-  steps: Array<{ text: string; hint?: string }>;
+  steps: TestScenarioStep[];
 }
 
 const SCENARIOS: TestScenario[] = [
@@ -69,7 +80,28 @@ const SCENARIOS: TestScenario[] = [
       { text: "Хочу перевести рубли на THB, 40000", hint: "Запрос обмена" },
       { text: "Перевод на Сбер", hint: "Способ оплаты" },
       { text: "Подтверждаю", hint: "Подтверждение курса" },
-      { text: "Перевод сделал, вот скрин", hint: "Скрин перевода (без файла)" },
+      {
+        mediaUrl: "asset:receipt-sber.png",
+        mediaType: "photo",
+        caption: "Оплатил, вот чек",
+        hint: "Фото чека (Сбер, 40 000 ₽)",
+      },
+    ],
+  },
+  {
+    id: "exchange_kyc_passport",
+    name: "Обменник — крупная сумма, KYC с фото паспорта",
+    vertical: "exchange_v1",
+    steps: [
+      { text: "Хочу поменять 150000 рублей на баты", hint: "Крупная сумма → KYC" },
+      { text: "Перевод на Сбер", hint: "Способ оплаты" },
+      { text: "Подтверждаю курс", hint: "Подтверждение" },
+      {
+        mediaUrl: "asset:passport-demo.png",
+        mediaType: "photo",
+        caption: "Вот фото паспорта",
+        hint: "Фото паспорта (демо-образец)",
+      },
     ],
   },
   {
@@ -114,6 +146,8 @@ const SCENARIOS: TestScenario[] = [
 export function makeAdminTestRoutes(opts: {
   db: Db;
   replyStrategy?: ReplyStrategy | null;
+  /** Vision-обработка фото (классификация + паспортный OCR), как в боевых каналах. */
+  photoProcessor?: PhotoProcessor | null;
 }): Hono {
   const app = new Hono();
 
@@ -266,6 +300,31 @@ export function makeAdminTestRoutes(opts: {
       return c.json({ parts: [] });
     }
 
+    // 4b. Vision-обработка фото, как в боевых каналах. `asset:<file>` резолвится
+    // в локальный тестовый файл из apps/api/assets/bot-test, http(s) — скачивается.
+    if (opts.photoProcessor && mediaUrl && (body.mediaType ?? "photo") === "photo") {
+      const adapter = {
+        downloadMedia: async (ref: { externalRef: string }) => {
+          if (ref.externalRef.startsWith("asset:")) {
+            const name = ref.externalRef.slice("asset:".length);
+            if (!/^[a-zA-Z0-9._-]+$/.test(name) || name.includes("..")) {
+              throw new Error("bad asset name");
+            }
+            const path = resolve(import.meta.dir, "..", "..", "assets", "bot-test", name);
+            return new Response(await Bun.file(path).arrayBuffer());
+          }
+          return fetch(ref.externalRef);
+        },
+      } as unknown as ChannelAdapter;
+      await opts.photoProcessor.process({
+        tenantId,
+        inbound,
+        adapter,
+        contactId: piResult.contactId,
+        db: opts.db,
+      });
+    }
+
     // 5. Нет replyStrategy — вернуть пустой ответ
     if (!opts.replyStrategy) {
       return c.json({
@@ -283,7 +342,11 @@ export function makeAdminTestRoutes(opts: {
         conversationId: piResult.conversationId,
         contactId: piResult.contactId,
         inbound,
-        userMessageText: text || (mediaUrl ? `[${body.mediaType ?? "photo"}]` : ""),
+        userMessageText:
+          text ||
+          (mediaUrl
+            ? `[${body.mediaType ?? "photo"}]${body.caption ? ` ${body.caption}` : ""}`
+            : ""),
       });
       responseParts = envelopes?.flatMap((e) => e.parts) ?? [];
     } catch (err) {
