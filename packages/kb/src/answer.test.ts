@@ -14,7 +14,9 @@ import {
   NO_CONTEXT_MARKER,
   retrieveHits,
 } from "./answer.ts";
-import type { AnswerInput } from "./answer-types.ts";
+import type { AnswerInput, AnswerTelemetry } from "./answer-types.ts";
+import type { Reranker } from "./reranker.ts";
+import type { Style } from "./styles.ts";
 import type { KbSearchHit } from "./types.ts";
 
 const hit = (id: number, over: Partial<KbSearchHit> = {}): KbSearchHit => ({
@@ -75,6 +77,21 @@ function fakeChat(
   };
   return c;
 }
+
+/** Minimal Style fixture for the composeSystemPrompt branches in answer.ts. */
+const makeStyle = (over: Partial<Style> = {}): Style => ({
+  slug: "test-style",
+  displayName: "Test",
+  persona: { name: "Аня", role: "human", company: "Acme " },
+  voice: { tone: "friendly", language: "ru", forbid: [] },
+  framework: "SPIN",
+  hooks: [],
+  stages: { qualify: { goal: "STYLE_GOAL", groundingRequired: false } },
+  fewShot: [],
+  guardrails: { noMinors: true, botDisclosureOnDirectQuestion: true, forbiddenTopics: [] },
+  model: { id: "x", temperature: 0.42, maxTokens: 64 },
+  ...over,
+});
 
 const baseInput = (over: Partial<AnswerInput> = {}): AnswerInput => {
   const { store } = fakeKb();
@@ -150,6 +167,83 @@ describe("retrieveHits", () => {
   it("embedder без вектора → throw", async () => {
     const empty: EmbeddingClient = { embed: async () => [], dim: 3 };
     await expect(retrieveHits(baseInput({ embedder: empty }))).rejects.toThrow(/no vector/);
+  });
+
+  it("rewriteQueryBeforeRetrieval: короткий follow-up с историей → запрос переписан", async () => {
+    const { store } = fakeKb();
+    const r = await retrieveHits(
+      baseInput({
+        kb: store,
+        question: "а там сколько?",
+        history: [{ role: "user", content: "расскажи про Дубай" }],
+        rewriteQueryBeforeRetrieval: true,
+        chat: fakeChat("зарплата моделей в Дубае"),
+      }),
+    );
+    expect(r.searchQuery).toBe("зарплата моделей в Дубае");
+  });
+
+  it("multiQuery + hybridSearch → kb.hybridSearch на каждый вариант + RRF", async () => {
+    const { store, calls } = fakeKb();
+    const r = await retrieveHits(
+      baseInput({
+        kb: store,
+        multiQuery: true,
+        hybridSearch: true,
+        chat: fakeChat("вариант про зарплату\nвариант про условия"),
+      }),
+    );
+    expect(r.queries).toHaveLength(3);
+    expect(calls.hybrid).toBe(3);
+  });
+
+  it("topicRouting: topic классифицирован, но 0 хитов → повторный global-поиск", async () => {
+    const topics: Array<string | null> = [];
+    const store = {
+      search: async (_e: number[], _k: number, topic?: string | null) => {
+        topics.push(topic ?? null);
+        return topic ? [] : [hit(3)];
+      },
+      hybridSearch: async () => [],
+      prioritySearch: async () => [],
+    } as unknown as AnswerInput["kb"];
+    const r = await retrieveHits(
+      baseInput({ kb: store, topicRouting: true, question: "какая ставка?" }),
+    );
+    expect(topics).toEqual(["payment", null]);
+    expect(r.usedTopic).toBeNull();
+    expect(r.hits.map((h) => h.chunk_id)).toEqual([3]);
+  });
+
+  it("autoTrimDistance: динамический порог отсекает далёкие хиты", async () => {
+    const { store } = fakeKb({}, [hit(1, { distance: 0.1 }), hit(2, { distance: 0.95 })]);
+    const r = await retrieveHits(baseInput({ kb: store, autoTrimDistance: true }));
+    expect(r.hits.map((h) => h.chunk_id)).toEqual([1]);
+  });
+
+  it("mmr: диверсификация режет до topK", async () => {
+    const { store } = fakeKb({}, [
+      hit(1, { text: "дубай зарплата модели" }),
+      hit(2, { text: "дубай зарплата модели" }),
+      hit(3, { text: "виза документы оформление" }),
+    ]);
+    const r = await retrieveHits(baseInput({ kb: store, mmr: true, topK: 2 }));
+    expect(r.hits.length).toBeLessThanOrEqual(2);
+    expect(r.hits.length).toBeGreaterThan(0);
+  });
+
+  it("reranker: получает кандидатов topK*3 и возвращает topK", async () => {
+    const { store } = fakeKb({}, [hit(1), hit(2), hit(3), hit(4)]);
+    let rerankQuery = "";
+    const reranker: Reranker = {
+      rerank: async (query, hits, topK) => {
+        rerankQuery = query;
+        return hits.slice(0, topK ?? hits.length).reverse();
+      },
+    };
+    const r = await retrieveHits(baseInput({ kb: store, reranker, topK: 2 }));
+    expect(r.hits).toHaveLength(2);
+    expect(rerankQuery).toContain("вакансию");
   });
 });
 
@@ -327,6 +421,48 @@ describe("answerWithRag — main paths", () => {
     expect(checkerPrompt).toContain("quote");
     expect(checkerPrompt).toContain("10553");
   });
+
+  it("style: composeSystemPrompt со всеми опциональными блоками + температура из style.model", async () => {
+    let sys = "";
+    let temp: number | undefined;
+    const chat: ChatClient = {
+      complete: async (messages, opts) => {
+        sys = messages[0]?.content ?? "";
+        temp = opts?.temperature;
+        return "ответ по стилю";
+      },
+    };
+    const r = await answerWithRag(
+      baseInput({
+        chat,
+        style: makeStyle(),
+        stage: "pitch",
+        userFacts: { имя: "Иван" },
+        conversationSummary: "обсудили условия",
+        skills: [
+          { slug: "tone", displayName: "Tone", promptFragment: "будь мягче", applicableStages: [] },
+        ],
+        directorHooks: [{ name: "hook1", body: "дави на сроки", triggerHint: null }],
+        supportPhase: "docs",
+        stageOverride: { goal: "OVERRIDE_GOAL", guidance: "веди к оплате" },
+        requestContext: "открытых заявок: 2",
+        awaitingOperator: true,
+      }),
+    );
+    expect(r.telemetry.path).toBe("ok");
+    expect(temp).toBe(0.42);
+    // persona из style (company триммится из "Acme ")
+    expect(sys).toContain("Аня");
+    expect(sys).toContain("Acme");
+  });
+
+  it("LLM вернул NO_CONTEXT_MARKER при наличии hits → path=no_context", async () => {
+    const r = await answerWithRag(baseInput({ chat: fakeChat(NO_CONTEXT_MARKER) }));
+    expect(r.text).toBe(NO_CONTEXT_MARKER);
+    expect(r.telemetry.path).toBe("no_context");
+    // hits сохраняются в результате даже при no_context из LLM
+    expect(r.usedChunkIds).toEqual([1]);
+  });
 });
 
 describe("answerWithRagStream", () => {
@@ -367,6 +503,103 @@ describe("answerWithRagStream", () => {
     const out = await collect(answerWithRagStream(baseInput({ chat: fakeChat("полный ответ") })));
     // complete() fallback runs sanitizeLlmOutput (capitalises the first letter)
     expect(out.toLowerCase()).toBe("полный ответ");
+  });
+
+  it("bot-presence shortcut → yield + telemetry smalltalk", async () => {
+    const tel: AnswerTelemetry[] = [];
+    const out = await collect(
+      answerWithRagStream(baseInput({ question: "ты бот?", onTelemetry: (t) => tel.push(t) })),
+    );
+    expect(out.length).toBeGreaterThan(0);
+    expect(tel[0]?.path).toBe("smalltalk");
+  });
+
+  it("persona-fact shortcut → yield факт + telemetry persona_fact", async () => {
+    const tel: AnswerTelemetry[] = [];
+    const out = await collect(
+      answerWithRagStream(
+        baseInput({
+          question: "где ты живёшь?",
+          persona: { name: "Аня", role: "human", facts: { city: "Москва" } },
+          onTelemetry: (t) => tel.push(t),
+        }),
+      ),
+    );
+    expect(out).toContain("Москва");
+    expect(tel[0]?.path).toBe("persona_fact");
+  });
+
+  it("persona-fact вопрос без настроенного факта → fall-through в RAG", async () => {
+    const tel: AnswerTelemetry[] = [];
+    const out = await collect(
+      answerWithRagStream(
+        baseInput({
+          question: "где ты живёшь?",
+          persona: { name: "Аня", role: "human" }, // facts не настроены
+          chat: fakeChat("обычный ответ"),
+          onTelemetry: (t) => tel.push(t),
+        }),
+      ),
+    );
+    expect(out.toLowerCase()).toBe("обычный ответ");
+    expect(tel[0]?.path).toBe("ok");
+  });
+
+  it("style + vacanciesBlock → composeSystemPrompt c вакансиями, persona из style", async () => {
+    let sys = "";
+    const chat = fakeChat((m) => {
+      sys = m[0]?.content ?? "";
+      return "ответ по стилю";
+    });
+    const tel: AnswerTelemetry[] = [];
+    const out = await collect(
+      answerWithRagStream(
+        baseInput({
+          chat,
+          style: makeStyle({ persona: { name: "Лена", role: "human", company: "" } }),
+          stage: "qualify",
+          vacanciesBlock: "Вакансия: модель, Дубай",
+          userFacts: { имя: "Иван" },
+          conversationSummary: "итог",
+          skills: [{ slug: "s", displayName: "S", promptFragment: "frag", applicableStages: [] }],
+          directorHooks: [{ name: "h", body: "b" }],
+          stageOverride: { goal: "G" },
+          requestContext: "ctx",
+          awaitingOperator: true,
+          onTelemetry: (t) => tel.push(t),
+        }),
+      ),
+    );
+    expect(out.toLowerCase()).toContain("ответ по стилю");
+    expect(sys).toContain("Вакансия: модель, Дубай");
+    expect(sys).toContain("Лена");
+    expect(tel[0]?.path).toBe("ok");
+  });
+
+  it("hybrid + rewrite → телеметрия с hybrid и original/rewritten query", async () => {
+    const chat = fakeChat((m) => {
+      const user = m[m.length - 1]?.content ?? "";
+      // rewriteQuery шлёт "вопрос: ...\nответ:" — отличаем его от финального ответа
+      return user.includes("вопрос:") ? "зарплата в Дубае" : "финальный ответ";
+    });
+    const tel: AnswerTelemetry[] = [];
+    const out = await collect(
+      answerWithRagStream(
+        baseInput({
+          chat,
+          question: "а там сколько?",
+          history: [{ role: "user", content: "расскажи про Дубай" }],
+          rewriteQueryBeforeRetrieval: true,
+          hybridSearch: true,
+          onTelemetry: (t) => tel.push(t),
+        }),
+      ),
+    );
+    expect(out.toLowerCase()).toContain("финальный ответ");
+    expect(tel[0]?.path).toBe("ok");
+    expect(tel[0]?.hybrid).toBe(true);
+    expect(tel[0]?.original_query).toBe("а там сколько?");
+    expect(tel[0]?.rewritten_query).toBe("зарплата в Дубае");
   });
 });
 

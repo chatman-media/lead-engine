@@ -73,6 +73,23 @@ describe("personaFactReply", () => {
     expect(personaFactReply(persona, "age")).toBe("26 лет.");
   });
 
+  test("age value that already contains words is returned with just a period", () => {
+    const p: Persona = { name: "Анна", role: "human", facts: { age: "26 лет" } };
+    expect(personaFactReply(p, "age")).toBe("26 лет.");
+  });
+
+  test("phone value is wrapped in a natural sentence", () => {
+    const p: Persona = { name: "Анна", role: "human", facts: { phone: "+7 900 000-00-00" } };
+    const reply = personaFactReply(p, "phone");
+    expect(reply).toContain("Мой номер: +7 900 000-00-00");
+    expect(reply).toContain("WhatsApp");
+  });
+
+  test("status/experience values are returned verbatim", () => {
+    const p: Persona = { name: "Анна", role: "human", facts: { status: "Не замужем." } };
+    expect(personaFactReply(p, "status")).toBe("Не замужем.");
+  });
+
   test("returns null when the fact is not configured", () => {
     expect(personaFactReply(persona, "status")).toBeNull();
   });
@@ -81,6 +98,20 @@ describe("personaFactReply", () => {
 describe("personaSmalltalkReply", () => {
   test("introduces a human persona by name", () => {
     expect(personaSmalltalkReply(human).startsWith("Меня зовут Анна")).toBe(true);
+  });
+
+  test("human persona without a company introduces by bare name", () => {
+    const p: Persona = { name: "Анна", role: "human" };
+    for (let i = 0; i < 20; i++) {
+      const reply = personaSmalltalkReply(p);
+      expect(reply.startsWith("Меня зовут Анна.")).toBe(true);
+      expect(reply).not.toContain("Acme");
+    }
+  });
+
+  test("assistant persona with a company mentions the agency", () => {
+    const p: Persona = { name: "Бот", role: "assistant", company: "Acme" };
+    expect(personaSmalltalkReply(p)).toBe("Я Бот, помощник агентства Acme.");
   });
 
   test("introduces an assistant persona by name", () => {

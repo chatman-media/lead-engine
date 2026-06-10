@@ -56,6 +56,106 @@ describe("InMemoryKbStore.hybridSearch", () => {
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0]?.text).toBe("Visa requirements guide");
   });
+
+  test("falls back to vector-only ranking when BM25 finds nothing", async () => {
+    const hits = await kb.hybridSearch({ embedding: [1, 0], query: "zzzz qqqq", k: 1 });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.text).toBe("Dubai salary information");
+  });
+
+  test("defaults k to 5 and filters by topic", async () => {
+    const hits = await kb.hybridSearch({ embedding: [1, 0], query: "salary", topic: "missing" });
+    expect(hits).toEqual([]);
+  });
+});
+
+describe("InMemoryKbStore.prioritySearch", () => {
+  async function addBooksDoc() {
+    const { id } = await kb.upsertDocument({
+      source: "books",
+      title: "Books",
+      contentHash: "hash-books",
+      topic: "books",
+    });
+    await kb.insertChunkWithEmbedding({
+      documentId: id,
+      chunkIndex: 0,
+      text: "book about visa rules",
+      tokenCount: 4,
+      embedding: [1, 1],
+    });
+  }
+
+  test("vectorOnly: returns books hits when the topic has matches", async () => {
+    await addBooksDoc();
+    const hits = await kb.prioritySearch({ embedding: [1, 1], query: "visa", vectorOnly: true });
+    expect(hits.map((h) => h.text)).toEqual(["book about visa rules"]);
+  });
+
+  test("vectorOnly: falls back to a global search when no books exist", async () => {
+    const hits = await kb.prioritySearch({
+      embedding: [1, 0],
+      query: "salary",
+      k: 1,
+      vectorOnly: true,
+    });
+    expect(hits.map((h) => h.text)).toEqual(["Dubai salary information"]);
+  });
+
+  test("hybrid mode: books first, then global fallback", async () => {
+    await addBooksDoc();
+    const booksHits = await kb.prioritySearch({ embedding: [1, 1], query: "visa book" });
+    expect(booksHits[0]?.text).toBe("book about visa rules");
+
+    const fresh = new InMemoryKbStore();
+    const { id } = await fresh.upsertDocument({ source: "d", title: "D", contentHash: "h" });
+    await fresh.insertChunkWithEmbedding({
+      documentId: id,
+      chunkIndex: 0,
+      text: "global only content",
+      tokenCount: 3,
+      embedding: [1, 0],
+    });
+    const fallback = await fresh.prioritySearch({ embedding: [1, 0], query: "global content" });
+    expect(fallback.map((h) => h.text)).toEqual(["global only content"]);
+  });
+});
+
+describe("InMemoryKbStore edge cases", () => {
+  test("search skips chunks without embeddings and zero-norm vectors rank last", async () => {
+    await kb.insertChunkWithEmbedding({
+      documentId: docId,
+      chunkIndex: 2,
+      text: "text-only chunk",
+      tokenCount: 3,
+      embedding: null,
+    });
+    await kb.insertChunkWithEmbedding({
+      documentId: docId,
+      chunkIndex: 3,
+      text: "zero norm chunk",
+      tokenCount: 3,
+      embedding: [0, 0],
+    });
+    const hits = await kb.search([1, 0], 10);
+    expect(hits.map((h) => h.text)).not.toContain("text-only chunk");
+    // zero-norm embedding → distance 1 (worst)
+    expect(hits[hits.length - 1]?.text).toBe("zero norm chunk");
+  });
+
+  test("toHit falls back to empty source/title for an orphaned chunk", async () => {
+    await kb.insertChunkWithEmbedding({
+      documentId: 999, // no such document
+      chunkIndex: 0,
+      text: "orphan",
+      tokenCount: 1,
+      embedding: [1, 0],
+    });
+    const hits = await kb.search([1, 0], 10);
+    const orphan = hits.find((h) => h.text === "orphan");
+    expect(orphan?.source).toBe("");
+    expect(orphan?.title).toBe("");
+  });
 });
 
 describe("InMemoryKbStore topic filtering", () => {
