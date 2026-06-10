@@ -1,3 +1,10 @@
+# [@chatman-media/conversation-engine-v3.1.1](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.1.0...@chatman-media/conversation-engine-v3.1.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **storage:** scope uniq_kb_source_hash per tenant ([#548](https://github.com/chatman-media/lead-engine/issues/548)) ([286f33e](https://github.com/chatman-media/lead-engine/commit/286f33ea9bc05de0e5a7fbf81781eb17ce6827a5))
+
 # [@chatman-media/conversation-engine-v3.1.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/conversation-engine-v3.0.0...@chatman-media/conversation-engine-v3.1.0) (2026-06-10)
 
 
