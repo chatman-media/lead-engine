@@ -13,6 +13,15 @@ function kbScopeLabel(scopeType: LeadKbGuidance["hits"][number]["scopeType"]) {
   return "общая";
 }
 
+function faqRequirementLink(req: LeadKbGuidance["kbRequirements"][number]): string {
+  const params = new URLSearchParams({
+    funnelId: String(req.funnelId),
+    requirementKey: req.key,
+  });
+  if (req.stageSlug) params.set("stageSlug", req.stageSlug);
+  return `/faq?${params.toString()}`;
+}
+
 interface LeadKbGuidanceCardProps {
   guidance: LeadKbGuidance | null;
   loading: boolean;
@@ -128,6 +137,12 @@ export function LeadKbGuidanceCard({
                         <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
                           {req.description}
                         </p>
+                        <Link
+                          to={faqRequirementLink(req)}
+                          className="mt-1 inline-flex text-[11px] text-primary hover:underline"
+                        >
+                          Заполнить в БЗ →
+                        </Link>
                       </div>
                     ))}
                   </div>
@@ -207,7 +222,7 @@ export function LeadKbGuidanceCard({
               )}
             </div>
 
-            <Link to="/admin/faq" className="inline-flex text-xs text-primary hover:underline">
+            <Link to="/faq" className="inline-flex text-xs text-primary hover:underline">
               Открыть базу знаний →
             </Link>
           </>

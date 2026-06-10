@@ -11,7 +11,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,7 @@ type KbUploadScope =
  */
 export function SaasFaq() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [storageStats, setStorageStats] = useState<KbStorageStats>({
     storedFiles: 0,
@@ -82,6 +83,11 @@ export function SaasFaq() {
   const [kbSearchMode, setKbSearchMode] = useState<"hybrid" | "text" | null>(null);
   const [kbSearchError, setKbSearchError] = useState("");
   const [kbSearching, setKbSearching] = useState(false);
+  const [appliedPrefillKey, setAppliedPrefillKey] = useState("");
+
+  const queryFunnelId = Number(searchParams.get("funnelId") ?? "");
+  const queryRequirementKey = searchParams.get("requirementKey")?.trim() ?? "";
+  const queryStageSlug = searchParams.get("stageSlug")?.trim() ?? "";
 
   useEffect(() => {
     return () => {
@@ -173,6 +179,11 @@ export function SaasFaq() {
   }, []);
 
   useEffect(() => {
+    if (!Number.isFinite(queryFunnelId) || queryFunnelId <= 0) return;
+    if (selectedFunnelId !== queryFunnelId) setSelectedFunnelId(queryFunnelId);
+  }, [queryFunnelId, selectedFunnelId]);
+
+  useEffect(() => {
     setPasteScope(null);
     setKbSearchScope(null);
     setKbSearchHits(null);
@@ -182,6 +193,23 @@ export function SaasFaq() {
     refreshRequirements();
     refreshSuggestions();
   }, [selectedFunnelId]);
+
+  useEffect(() => {
+    if (!selectedFunnelId || !queryRequirementKey || requirements.length === 0) return;
+    const marker = `${selectedFunnelId}:${queryRequirementKey}:${queryStageSlug}`;
+    if (appliedPrefillKey === marker) return;
+
+    const req =
+      requirements.find(
+        (item) =>
+          item.key === queryRequirementKey &&
+          (!queryStageSlug || item.stageSlug === queryStageSlug),
+      ) ?? requirements.find((item) => item.key === queryRequirementKey);
+    if (!req) return;
+
+    fillRequirement(req);
+    setAppliedPrefillKey(marker);
+  }, [selectedFunnelId, queryRequirementKey, queryStageSlug, requirements, appliedPrefillKey]);
 
   function defaultUploadScope(): KbUploadScope {
     return selectedFunnelId
