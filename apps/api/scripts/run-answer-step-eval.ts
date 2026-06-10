@@ -47,6 +47,11 @@ export interface CliArgs {
 	repeats: number;
 	/** true → клиенты из LLM_*-переменных env (локальный Ollama и т.п.), без БД и секретов. */
 	envClients: boolean;
+	/**
+	 * true → все корпуса кейсов в ОДНОМ общем KbStore (перекрёстные дистракторы,
+	 * ближе к продовому KB). false → у каждого кейса свой изолированный мини-стор.
+	 */
+	sharedKb: boolean;
 	outMd?: string;
 	outJson?: string;
 	help: boolean;
@@ -60,6 +65,7 @@ export function parseCliArgs(argv: string[]): CliArgs | { error: string } {
 		dataset: DEFAULT_DATASET,
 		repeats: 2,
 		envClients: false,
+		sharedKb: false,
 		help: false,
 	};
 	for (let i = 0; i < argv.length; i += 1) {
@@ -72,6 +78,7 @@ export function parseCliArgs(argv: string[]): CliArgs | { error: string } {
 		};
 		if (raw === "--help" || raw === "-h") args.help = true;
 		else if (raw === "--env") args.envClients = true;
+		else if (raw === "--shared-kb") args.sharedKb = true;
 		else if (raw === "--tenant") {
 			const value = Number(next());
 			if (!Number.isInteger(value) || value <= 0) return { error: "--tenant требует положительный id" };
@@ -422,10 +429,12 @@ function makeCachingEmbedder(inner: EmbeddingClient): EmbeddingClient {
 async function buildCaseStores(
 	cases: CaseWithKb[],
 	embedder: EmbeddingClient,
+	sharedKb: boolean,
 ): Promise<Map<string, InMemoryKbStore>> {
 	const stores = new Map<string, InMemoryKbStore>();
+	const sharedStore = sharedKb ? new InMemoryKbStore() : null;
 	for (const item of cases) {
-		const store = new InMemoryKbStore();
+		const store = sharedStore ?? new InMemoryKbStore();
 		for (const doc of item.kb ?? []) {
 			const { id } = await store.upsertDocument({
 				source: doc.source,
@@ -481,8 +490,10 @@ async function main(): Promise<number> {
 	console.log(`[answer-step-eval] chat=${chatLabel} embed=${embedLabel}`);
 
 	const cachingEmbedder = makeCachingEmbedder(embedder);
-	const stores = await buildCaseStores(cases, cachingEmbedder);
-	console.log(`[answer-step-eval] корпуса проиндексированы (${stores.size} kb-store)`);
+	const stores = await buildCaseStores(cases, cachingEmbedder, parsed.sharedKb);
+	console.log(
+		`[answer-step-eval] корпуса проиндексированы (${parsed.sharedKb ? "общий kb-store" : `${stores.size} kb-store`})`,
+	);
 
 	// Инструментация: makeInput вызывается в начале каждой ячейки (кейс×вариант),
 	// выполнение строго последовательное — обёртка пишет вызовы в текущую ячейку.
