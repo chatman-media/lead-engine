@@ -71,10 +71,14 @@ class FakeRepo implements Partial<NotificationsRepo> {
 	linked: Array<{ adminId: number; chatId: string }> = [];
 	prefs: Array<{ adminId: number } & Record<string, unknown>> = [];
 	recent: FakeRecentNotification[] = [];
-	private settings: OperatorSettings | undefined;
+	private settings: OperatorSettings[];
 
-	constructor(settings?: OperatorSettings) {
-		this.settings = settings;
+	constructor(settings?: OperatorSettings | OperatorSettings[]) {
+		this.settings = settings
+			? Array.isArray(settings)
+				? settings
+				: [settings]
+			: [];
 	}
 
 	setSettings(settings?: OperatorSettings) {
@@ -82,19 +86,24 @@ class FakeRepo implements Partial<NotificationsRepo> {
 	}
 
 	async findByLinkToken(_token: string) {
-		return this.settings;
+		return this.settings[0];
 	}
 	async linkChat(adminId: number, chatId: string) {
 		this.linked.push({ adminId, chatId });
 	}
-	async findOperatorSettings(_adminId: number) {
-		return this.settings;
+	async findOperatorSettings(adminId: number) {
+		return this.settings.find((item) => item.adminId === adminId);
 	}
 	async upsertOperatorSettings(
 		_s: Parameters<NotificationsRepo["upsertOperatorSettings"]>[0],
 	) {}
-	async findOperatorSettingsByChatId(_chatId: string) {
-		return this.settings;
+	async findOperatorSettingsByChatId(chatId: string) {
+		return (
+			this.settings.find((item) => item.telegramChatId === chatId) ??
+			(this.settings.length === 1 && !this.settings[0]?.telegramChatId
+				? this.settings[0]
+				: undefined)
+		);
 	}
 	async updateInformerPrefs(adminId: number, p: Record<string, unknown>) {
 		this.prefs.push({ adminId, ...p });
@@ -700,6 +709,208 @@ describe("operator action callbacks", () => {
 		expect(client.sent[0]?.text).toContain("уже под управлением AI");
 	});
 
+	it("callback with mismatched tenant payload is rejected before db writes", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const writes: Array<Record<string, unknown>> = [];
+		const tx = {
+			execute: async () => {},
+			select: () => ({
+				from: () => ({
+					where: () => ({
+						limit: async () => [{ mode: "ai" }],
+					}),
+				}),
+			}),
+			update: () => ({
+				set: (values: Record<string, unknown>) => {
+					writes.push(values);
+					return { where: async () => [] };
+				},
+			}),
+			insert: () => ({
+				values: async (values: Record<string, unknown>) => {
+					writes.push(values);
+				},
+			}),
+		};
+		const db = {
+			transaction: async (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx),
+		};
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{ db: db as never },
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 6,
+			callback_query: {
+				id: "cb-wrong-tenant",
+				from: { id: 5 },
+				data: "op:v1:takeover:999:109",
+				message: {
+					message_id: 10,
+					date: 0,
+					chat: { id: 777, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(writes).toEqual([]);
+		expect(client.answered[0]).toMatchObject({
+			callbackQueryId: "cb-wrong-tenant",
+			text: "Нет доступа к этому чату",
+			showAlert: true,
+		});
+		expect(client.sent).toEqual([]);
+	});
+
+	it("repeated takeover callback is a noop without duplicate audit", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const updates: Array<Record<string, unknown>> = [];
+		const audits: Array<Record<string, unknown>> = [];
+		const tx = {
+			execute: async () => {},
+			select: () => ({
+				from: () => ({
+					where: () => ({
+						limit: async () => [{ mode: "human" }],
+					}),
+				}),
+			}),
+			update: () => ({
+				set: (values: Record<string, unknown>) => {
+					updates.push(values);
+					return { where: async () => [] };
+				},
+			}),
+			insert: () => ({
+				values: async (values: Record<string, unknown>) => {
+					audits.push(values);
+				},
+			}),
+		};
+		const db = {
+			transaction: async (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx),
+		};
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				appUrl: "https://app.example",
+				nowEpoch: () => 123,
+			},
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 7,
+			callback_query: {
+				id: "cb-noop",
+				from: { id: 5 },
+				data: "op:take:109",
+				message: {
+					message_id: 11,
+					date: 0,
+					chat: { id: 777, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(updates).toEqual([]);
+		expect(audits).toEqual([]);
+		expect(client.answered[0]).toMatchObject({
+			callbackQueryId: "cb-noop",
+			text: "Уже актуально",
+		});
+		expect(client.sent[0]?.text).toContain("уже в работе оператора");
+	});
+
+	it("repeated return-AI callback is a noop without duplicate audit", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const updates: Array<Record<string, unknown>> = [];
+		const audits: Array<Record<string, unknown>> = [];
+		const tx = {
+			execute: async () => {},
+			select: () => ({
+				from: () => ({
+					where: () => ({
+						limit: async () => [{ mode: "ai" }],
+					}),
+				}),
+			}),
+			update: () => ({
+				set: (values: Record<string, unknown>) => {
+					updates.push(values);
+					return { where: async () => [] };
+				},
+			}),
+			insert: () => ({
+				values: async (values: Record<string, unknown>) => {
+					audits.push(values);
+				},
+			}),
+		};
+		const db = {
+			transaction: async (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx),
+		};
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				appUrl: "https://app.example",
+				nowEpoch: () => 123,
+			},
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 8,
+			callback_query: {
+				id: "cb-return-ai-noop",
+				from: { id: 5 },
+				data: "op:ai:109",
+				message: {
+					message_id: 12,
+					date: 0,
+					chat: { id: 777, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(updates).toEqual([]);
+		expect(audits).toEqual([]);
+		expect(client.answered[0]).toMatchObject({
+			callbackQueryId: "cb-return-ai-noop",
+			text: "Уже актуально",
+		});
+		expect(client.sent[0]?.text).toContain("уже под управлением AI");
+	});
+
 	it("reply to an action card creates preview and send confirmation enqueues client message", async () => {
 		const settings = makeSettings({
 			adminId: 10,
@@ -859,6 +1070,124 @@ describe("operator action callbacks", () => {
 			text: "Отправлено клиенту",
 		});
 		expect(client.sent.at(-1)?.text).toContain("Отправлено клиенту");
+
+		const insertsAfterFirstConfirm = inserts.length;
+		await handler.handleUpdate({
+			update_id: 8,
+			callback_query: {
+				id: "cb-send-again",
+				from: { id: 5 },
+				data: sendCallback,
+				message: {
+					message_id: 22,
+					date: 0,
+					chat: { id: 777, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(inserts).toHaveLength(insertsAfterFirstConfirm);
+		expect(updates.filter((row) => row.status === "sent")).toHaveLength(1);
+		expect(client.answered.at(-1)).toMatchObject({
+			callbackQueryId: "cb-send-again",
+			text: "Preview истёк или уже обработан",
+			showAlert: true,
+		});
+	});
+
+	it("durable preview send is scoped to original admin and chat", async () => {
+		const repo = new FakeRepo([
+			makeSettings({
+				adminId: 10,
+				tenantId: 3,
+				telegramChatId: "777",
+			}),
+			makeSettings({
+				adminId: 20,
+				tenantId: 3,
+				telegramChatId: "888",
+			}),
+		]);
+		const writes: Array<Record<string, unknown>> = [];
+		const draftRow = {
+			id: 700,
+			tenantId: 3,
+			adminId: 10,
+			conversationId: 109,
+			draftKey: "abc123",
+			chatId: "777",
+			status: "pending",
+			text: "Не должен уйти клиенту",
+			metadataJson: "{}",
+			createdAt: 123,
+			expiresAt: 723,
+		};
+		const tx = {
+			execute: async () => {},
+			select: () => ({
+				from: (table: unknown) => {
+					if (table === operatorActionDrafts) {
+						return {
+							where: () => ({
+								limit: async () => [draftRow],
+							}),
+						};
+					}
+					return {
+						where: () => ({
+							limit: async () => [],
+						}),
+					};
+				},
+			}),
+			update: () => ({
+				set: (values: Record<string, unknown>) => {
+					writes.push(values);
+					return { where: () => ({ returning: async () => [] }) };
+				},
+			}),
+			insert: () => ({
+				values: async (values: Record<string, unknown>) => {
+					writes.push(values);
+				},
+			}),
+		};
+		const db = {
+			transaction: async (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx),
+		};
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				nowEpoch: () => 123,
+			},
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 9,
+			callback_query: {
+				id: "cb-cross-admin-send",
+				from: { id: 5 },
+				data: "opm:s:abc123",
+				message: {
+					message_id: 23,
+					date: 0,
+					chat: { id: 888, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(writes).toEqual([]);
+		expect(client.answered[0]).toMatchObject({
+			callbackQueryId: "cb-cross-admin-send",
+			text: "Preview истёк или уже обработан",
+			showAlert: true,
+		});
+		expect(client.sent).toEqual([]);
 	});
 
 	it("reply preview can be cancelled without sending to client", async () => {
@@ -1162,6 +1491,68 @@ describe("operator action callbacks", () => {
 		).toMatch(/^opm:s:/);
 	});
 
+	it("exchange quick action with db blocks inaccessible conversations before preview", async () => {
+		const settings = makeSettings({
+			adminId: 10,
+			tenantId: 3,
+			telegramChatId: "777",
+		});
+		const repo = new FakeRepo(settings);
+		const drafts: Array<Record<string, unknown>> = [];
+		const tx = {
+			execute: async () => {},
+			select: () => ({
+				from: () => ({
+					where: () => ({
+						limit: async () => [],
+					}),
+				}),
+			}),
+			insert: () => ({
+				values: (values: Record<string, unknown>) => {
+					drafts.push(values);
+					return { returning: async () => [{ id: 700 }] };
+				},
+			}),
+		};
+		const db = {
+			transaction: async (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx),
+		};
+		const handler = new OperatorBotHandler(
+			repo as unknown as NotificationsRepo,
+			"token",
+			{
+				db: db as never,
+				nowEpoch: () => 123,
+			},
+		);
+		const client = new FakeClient();
+		// @ts-expect-error patch private
+		handler.client = client;
+
+		await handler.handleUpdate({
+			update_id: 11,
+			callback_query: {
+				id: "cb-exchange-missing-conversation",
+				from: { id: 5 },
+				data: "opx:payok:999:77",
+				message: {
+					message_id: 23,
+					date: 0,
+					chat: { id: 777, type: "private" },
+				},
+			},
+		} as unknown as TgUpdate);
+
+		expect(drafts).toEqual([]);
+		expect(client.answered.at(-1)).toMatchObject({
+			callbackQueryId: "cb-exchange-missing-conversation",
+			text: "Диалог не найден",
+			showAlert: true,
+		});
+		expect(client.sent).toEqual([]);
+	});
+
 	it("exchange quick action persists order-scoped draft metadata when db is configured", async () => {
 		const settings = makeSettings({
 			adminId: 10,
@@ -1172,6 +1563,22 @@ describe("operator action callbacks", () => {
 		const drafts: Array<Record<string, unknown>> = [];
 		const tx = {
 			execute: async () => {},
+			select: () => ({
+				from: (table: unknown) => {
+					if (table === exchangeOrders) {
+						return {
+							where: () => ({
+								limit: async () => [{ id: 77 }],
+							}),
+						};
+					}
+					return {
+						where: () => ({
+							limit: async () => [{ id: 109 }],
+						}),
+					};
+				},
+			}),
 			insert: () => ({
 				values: (values: Record<string, unknown>) => {
 					drafts.push(values);
