@@ -81,8 +81,12 @@ class FakeRepo implements Partial<NotificationsRepo> {
 			: [];
 	}
 
-	setSettings(settings?: OperatorSettings) {
-		this.settings = settings ? [settings] : [];
+	setSettings(settings?: OperatorSettings | OperatorSettings[]) {
+		this.settings = settings
+			? Array.isArray(settings)
+				? settings
+				: [settings]
+			: [];
 	}
 
 	async findByLinkToken(_token: string) {
@@ -1257,7 +1261,14 @@ describe("operator action callbacks", () => {
 			tenantId: 3,
 			telegramChatId: "777",
 		});
-		const repo = new FakeRepo(settings);
+		const repo = new FakeRepo([
+			settings,
+			makeSettings({
+				adminId: 10,
+				tenantId: 3,
+				telegramChatId: "888",
+			}),
+		]);
 		const handler = new OperatorBotHandler(
 			repo as unknown as NotificationsRepo,
 			"token",
