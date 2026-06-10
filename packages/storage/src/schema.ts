@@ -1757,6 +1757,7 @@ export const partnerDeals = pgTable("partner_deals", {
   commissionAmount: doublePrecision("commission_amount"),
   proofJson: text("proof_json"),
   notes: text("notes"),
+  settlementId: integer("settlement_id").references(() => partnerSettlements.id, { onDelete: "set null" }),
   sentAt: integer("sent_at"),
   acceptedAt: integer("accepted_at"),
   completedAt: integer("completed_at"),
@@ -1770,6 +1771,7 @@ export const partnerDeals = pgTable("partner_deals", {
   index("idx_partner_deals_tenant_status").on(t.tenantId, t.status),
   index("idx_partner_deals_partner").on(t.tenantId, t.partnerId),
   index("idx_partner_deals_lead").on(t.tenantId, t.leadId),
+  index("idx_partner_deals_settlement").on(t.tenantId, t.settlementId),
 ]);
 
 export const partnerSettlements = pgTable("partner_settlements", {
