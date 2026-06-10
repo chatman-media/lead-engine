@@ -1267,6 +1267,42 @@ export interface ProviderOrderProviderOption {
   }>;
 }
 
+export interface ProviderRelayOpsSettings {
+  enabled: boolean;
+  source: "default" | "flag";
+  updatedAt: number | null;
+}
+
+export interface ProviderRelayOpsMetrics {
+  generatedAt: number;
+  ordersCreated: number;
+  ordersByStatus: Record<string, number>;
+  providerRequestsSent: number;
+  providerRequestsByStatus: Record<string, number>;
+  providerResponseRatePct: number | null;
+  avgTimeToQuoteSec: number | null;
+  paidOrders: number;
+  commissionAmountTotal: number;
+  paidCommissionAmount: number;
+  failuresByChannel: Record<string, number>;
+  failedDispatches: number;
+  stuckOrders: {
+    count: number;
+    items: Array<{
+      id: number;
+      status: string;
+      requestType: string;
+      reason: "order_expired" | "quote_expired";
+      dueAt: number;
+    }>;
+  };
+}
+
+export interface ProviderRelayOps {
+  settings: ProviderRelayOpsSettings;
+  metrics: ProviderRelayOpsMetrics;
+}
+
 export type ServiceCatalogRouteType = "manual" | "funnel" | "partner_service" | "webhook";
 
 export interface ServiceCatalogItem {
@@ -3892,6 +3928,18 @@ export const saas = {
     return request<{ ok: boolean; order: unknown }>(
       `/api/admin/provider-orders/${id}/mark-fulfilled`,
       { method: "POST" },
+    );
+  },
+  getProviderOrderOps() {
+    return request<ProviderRelayOps>("/api/admin/provider-orders/ops");
+  },
+  updateProviderOrderOpsSettings(enabled: boolean) {
+    return request<{ ok: boolean; settings: ProviderRelayOpsSettings }>(
+      "/api/admin/provider-orders/ops/settings",
+      {
+        method: "PUT",
+        body: JSON.stringify({ enabled }),
+      },
     );
   },
 
