@@ -1,9 +1,11 @@
 // Integration test для admin-tenant pause/resume endpoint.
 
 import {
+  auditLog,
   applyAllMigrations,
   createIsolatedDb,
   schema,
+  tenantFeatureFlags,
   tenants,
   tryConnectToPg,
 } from "@chatman-media/storage";
@@ -194,6 +196,50 @@ describe("admin-tenant", () => {
       body: "not-json",
     });
     expect(res.status).toBe(400);
+  });
+
+  it("GET/PUT /features/provider-relay управляет tenant rollout-флагом", async () => {
+    if (!sql) return;
+
+    const initial = await authReq("/api/admin/tenant/features");
+    expect(initial.status).toBe(200);
+    expect(await initial.json()).toEqual({ features: { providerRelay: false } });
+
+    const enabled = await authReq("/api/admin/tenant/features/provider-relay", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(enabled.status).toBe(200);
+    expect(await enabled.json()).toEqual({
+      ok: true,
+      feature: "providerRelay",
+      enabled: true,
+    });
+
+    const [flag] = await db
+      .select()
+      .from(tenantFeatureFlags)
+      .where(eq(tenantFeatureFlags.tenantId, tenantId));
+    expect(flag?.featureKey).toBe("provider_relay");
+    expect(flag?.enabled).toBe(true);
+
+    const [audit] = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, "tenant_feature.update"));
+    expect(audit?.targetId).toBe("provider_relay");
+
+    const after = await authReq("/api/admin/tenant/features");
+    expect(after.status).toBe(200);
+    expect(await after.json()).toEqual({ features: { providerRelay: true } });
+
+    const invalid = await authReq("/api/admin/tenant/features/provider-relay", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: "yes" }),
+    });
+    expect(invalid.status).toBe(400);
   });
 
   it("PUT /status для deleted tenant → 409", async () => {

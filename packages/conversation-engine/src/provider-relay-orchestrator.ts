@@ -26,10 +26,19 @@ import {
 } from "./dal/index.ts";
 import type { RepoCtx } from "./dal/types.ts";
 import {
+	type ProviderRelayMetrics,
+	normalizeMetricLabel,
+	providerRelayTenantLabels,
+} from "./provider-relay-metrics.ts";
+import {
 	type ProviderRouteCandidate,
 	ProviderRouter,
 	type ProviderRoutingFailureReason,
 } from "./provider-routing.ts";
+import {
+	PROVIDER_RELAY_FEATURE_KEY,
+	TenantFeatureFlagRepo,
+} from "./tenant-feature-flags.ts";
 
 const defaultProviderChannelKinds: ChannelKind[] = [
 	"whatsapp",
@@ -41,6 +50,7 @@ const defaultProviderChannelKinds: ChannelKind[] = [
 ];
 
 export type ProviderRelayStartFailureReason =
+	| "provider_relay_disabled"
 	| "routing_failed"
 	| "provider_channel_missing";
 
@@ -86,7 +96,14 @@ export type ProviderRelayStartResult =
 	  }
 	| {
 			ok: false;
-			reason: ProviderRelayStartFailureReason;
+			reason: "provider_relay_disabled";
+	  }
+	| {
+			ok: false;
+			reason: Exclude<
+				ProviderRelayStartFailureReason,
+				"provider_relay_disabled"
+			>;
 			order: ServiceOrderRow;
 			routingReason?: ProviderRoutingFailureReason;
 			providerId?: number;
@@ -133,16 +150,26 @@ export class ProviderRelayOrchestrator {
 	private readonly relay: ProviderRelayRepo;
 	private readonly router: ProviderRouter;
 	private readonly outbound: OutboundQueueRepo;
+	private readonly flags: TenantFeatureFlagRepo;
 
-	constructor(private readonly ctx: RepoCtx) {
+	constructor(
+		private readonly ctx: RepoCtx,
+		private readonly opts: { metrics?: ProviderRelayMetrics } = {},
+	) {
 		this.relay = new ProviderRelayRepo(ctx);
 		this.router = new ProviderRouter(ctx);
 		this.outbound = new OutboundQueueRepo(ctx);
+		this.flags = new TenantFeatureFlagRepo(ctx);
 	}
 
 	async startProviderOutreach(
 		input: ProviderRelayStartInput,
 	): Promise<ProviderRelayStartResult> {
+		if (!(await this.flags.isEnabled(PROVIDER_RELAY_FEATURE_KEY))) {
+			this.recordFailureMetric("none", "provider_relay_disabled");
+			return { ok: false, reason: "provider_relay_disabled" };
+		}
+
 		const order = await this.relay.createServiceOrder({
 			customerContactId: input.customerContactId,
 			customerConversationId: input.customerConversationId,
@@ -159,6 +186,10 @@ export class ProviderRelayOrchestrator {
 						}
 					: undefined,
 			nowEpoch: input.nowEpoch,
+		});
+		this.opts.metrics?.providerOrdersCreated.inc(1, {
+			...providerRelayTenantLabels(this.ctx.tenantId),
+			request_type: normalizeMetricLabel(input.requestType),
 		});
 
 		return this.enqueueProviderRequestForOrder({
@@ -252,6 +283,7 @@ export class ProviderRelayOrchestrator {
 				},
 				nowEpoch: input.nowEpoch,
 			});
+			this.recordFailureMetric("none", route.reason);
 			return {
 				ok: false,
 				reason: "routing_failed",
@@ -278,6 +310,7 @@ export class ProviderRelayOrchestrator {
 				},
 				nowEpoch: input.nowEpoch,
 			});
+			this.recordFailureMetric("none", "provider_channel_missing");
 			return {
 				ok: false,
 				reason: "provider_channel_missing",
@@ -353,6 +386,11 @@ export class ProviderRelayOrchestrator {
 			},
 			nowEpoch: input.nowEpoch,
 		});
+		this.opts.metrics?.providerRequests.inc(1, {
+			...providerRelayTenantLabels(this.ctx.tenantId),
+			channel_kind: identity.channelKind,
+			status: providerRequest.status,
+		});
 
 		const updatedOrder = await this.relay.orderById(order.id);
 		return {
@@ -364,6 +402,14 @@ export class ProviderRelayOrchestrator {
 			candidate: route.candidate,
 			identity,
 		};
+	}
+
+	private recordFailureMetric(channelKind: string, reason: string): void {
+		this.opts.metrics?.providerFailures.inc(1, {
+			...providerRelayTenantLabels(this.ctx.tenantId),
+			channel_kind: normalizeMetricLabel(channelKind),
+			reason: normalizeMetricLabel(reason),
+		});
 	}
 
 	async recordDispatchRetry(opts: {

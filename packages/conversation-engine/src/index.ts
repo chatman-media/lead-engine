@@ -161,6 +161,11 @@ export {
 } from "./process-inbound.ts";
 export type { ITranscriber } from "./transcriber.ts";
 export {
+  normalizeMetricLabel,
+  type ProviderRelayMetrics,
+  providerRelayTenantLabels,
+} from "./provider-relay-metrics.ts";
+export {
   type ProviderChannelIdentity,
   ProviderRelayOrchestrator,
   type ProviderRelayStartFailureReason,
@@ -169,6 +174,12 @@ export {
   type ProviderRelaySendProviderRequestInput,
   type ProviderRelaySendProviderRequestResult,
 } from "./provider-relay-orchestrator.ts";
+export {
+  PROVIDER_RELAY_FEATURE_KEY,
+  TenantFeatureFlagRepo,
+  type TenantFeatureFlagRow,
+  type TenantFeatureKey,
+} from "./tenant-feature-flags.ts";
 export {
   type CreatePaymentIntentInput,
   type PaymentLedgerResult,

@@ -89,7 +89,122 @@ sudo systemctl status lead-engine-worker --no-pager
 curl -fsS "$PLATFORM_PUBLIC_URL/healthz"
 ```
 
-## 6. Обновить exchange funnel для tenant
+## 6. Provider relay rollout и инциденты
+
+Provider relay fail-closed: tenant не создаёт provider outreach, пока флаг
+`provider_relay` явно не включён.
+
+Включить/выключить для tenant:
+
+```bash
+TOKEN="<admin-jwt>"
+
+curl -fsS -X PUT "$PLATFORM_PUBLIC_URL/api/admin/tenant/features/provider-relay" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":true}'
+
+curl -fsS "$PLATFORM_PUBLIC_URL/api/admin/tenant/features" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Ключевые метрики в `/metrics`:
+
+- `lead_engine_provider_orders_created_total`
+- `lead_engine_provider_requests_total`
+- `lead_engine_provider_responses_total`
+- `lead_engine_provider_time_to_quote_seconds`
+- `lead_engine_provider_paid_orders_total`
+- `lead_engine_provider_commission_earned_total`
+- `lead_engine_provider_failures_total`
+
+### Stuck provider orders
+
+Симптомы: заказы долго остаются в `matching`, `awaiting_provider`,
+`offer_ready` или `awaiting_customer_payment`; provider request не получает
+quote/decline; customer offer не уходит.
+
+Проверить активные заказы tenant'а:
+
+```sql
+BEGIN;
+SET LOCAL app.tenant_id = :tenant_id;
+
+SELECT id, request_type, status, payment_status, assigned_provider_id,
+       created_at, updated_at
+FROM service_orders
+WHERE tenant_id = :tenant_id
+  AND status IN ('matching','awaiting_provider','offer_ready','awaiting_customer_payment','paid','confirmed')
+ORDER BY updated_at ASC
+LIMIT 50;
+
+SELECT pr.id, pr.order_id, pr.provider_id, pr.channel_id, pr.outbound_queue_id,
+       pr.status, pr.sent_at, pr.responded_at, oq.status AS outbound_status,
+       oq.last_error
+FROM provider_requests pr
+LEFT JOIN outbound_queue oq ON oq.id = pr.outbound_queue_id
+WHERE pr.tenant_id = :tenant_id
+  AND pr.status IN ('sent','seen','quoted','accepted','failed')
+ORDER BY pr.updated_at ASC
+LIMIT 50;
+
+SELECT event_type, actor_type, data_json, created_at
+FROM order_events
+WHERE tenant_id = :tenant_id AND order_id = :order_id
+ORDER BY created_at ASC, id ASC;
+
+COMMIT;
+```
+
+Что делать:
+
+- `outbound_queue.status='processing'` старше 5 минут: проверить worker logs;
+  dispatcher должен вернуть stuck rows в `pending` через
+  `releaseStuckProcessing`.
+- `provider_requests.status='sent'`, но нет ответа: связаться с provider или
+  назначить другого вручную; событие останется в `order_events`.
+- `offer_ready` без customer offer: оператор должен approve/send offer, либо
+  отменить order с причиной.
+- `awaiting_customer_payment` без оплаты: проверить payment provider webhook и
+  `service_order_payments`.
+
+### WhatsApp provider send failures
+
+Симптомы: растёт
+`lead_engine_provider_failures_total{channel_kind="whatsapp",...}` или в order
+timeline есть `provider_request_send_failed`.
+
+Проверить последнюю ошибку:
+
+```sql
+BEGIN;
+SET LOCAL app.tenant_id = :tenant_id;
+
+SELECT pr.id, pr.order_id, pr.provider_id, pr.status, oq.last_error,
+       pp.metadata_json
+FROM provider_requests pr
+JOIN provider_profiles pp ON pp.id = pr.provider_id
+LEFT JOIN outbound_queue oq ON oq.id = pr.outbound_queue_id
+WHERE pr.tenant_id = :tenant_id
+  AND pr.status = 'failed'
+ORDER BY pr.updated_at DESC
+LIMIT 20;
+
+COMMIT;
+```
+
+Чеклист:
+
+- provider profile содержит `whatsappOptIn.acceptedAt` и разрешённые категории;
+- `whatsappProviderRequestTemplate.name/languageCode` заполнены;
+- `whatsappProviderRequestTemplate.approved=true`;
+- Meta template реально approved в WhatsApp Manager и совпадает по language/name;
+- `WA_ACCESS_TOKEN` / tenant secret действителен, phone number id совпадает с
+  `channels.external_id`;
+- после исправления шаблона создать новый provider request или manual override;
+  старый failed request не должен молча переотправляться без operator decision.
+
+## 7. Обновить exchange funnel для tenant
 
 После изменений exchange workflow нужно переустановить шаблон `exchange`, чтобы
 в админке появились все бизнес-шаги:
@@ -121,7 +236,7 @@ curl -fsS "$PLATFORM_PUBLIC_URL/api/admin/funnel" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-## 7. Проверить exchange CRM
+## 8. Проверить exchange CRM
 
 В админке открыть `/exchange` и проверить:
 

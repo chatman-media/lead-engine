@@ -174,6 +174,13 @@ beforeAll(async () => {
 		.returning({ id: schema.tenants.id });
 	if (!tenant) throw new Error("tenant insert returned no row");
 	tenantId = tenant.id;
+	await db.insert(schema.tenantFeatureFlags).values({
+		tenantId,
+		featureKey: "provider_relay",
+		enabled: true,
+		createdAt: now,
+		updatedAt: now,
+	});
 
 	customerContactId = await createContact("Customer offer contact");
 	providerContactId = await createContact("Provider offer contact");

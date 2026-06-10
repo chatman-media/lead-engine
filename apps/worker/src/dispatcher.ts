@@ -2,6 +2,7 @@ import type { OutboundEnvelope } from "@chatman-media/channel-core";
 import {
   type Db,
   type NotificationService,
+  normalizeMetricLabel,
   OutboundQueueRepo,
   type OutboundQueueRow,
   ProviderRelayOrchestrator,
@@ -212,6 +213,11 @@ export class OutboundDispatcher {
     nowEpoch: number,
   ): Promise<void> {
     if (kind !== "whatsapp" && !envelope.transport?.whatsapp) return;
+    this.opts.metrics?.providerFailures.inc(1, {
+      tenant: String(row.tenantId),
+      channel_kind: normalizeMetricLabel(kind),
+      reason: providerDispatchFailureReason(error),
+    });
     let providerRequestId = envelope.transport?.whatsapp?.providerRequestId ?? null;
     try {
       await withTenant(this.db, row.tenantId, async (tx) => {
@@ -266,4 +272,13 @@ export class OutboundDispatcher {
       await txRepo.markFailed(row.id, error);
     });
   }
+}
+
+function providerDispatchFailureReason(error: string): string {
+  const value = error.toLowerCase();
+  if (value.includes("template")) return "template";
+  if (value.includes("free-form")) return "free_form_window";
+  if (value.includes("adapter")) return "no_adapter";
+  if (value.includes("payload")) return "bad_payload";
+  return "send_error";
 }
