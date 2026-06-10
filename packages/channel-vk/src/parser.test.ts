@@ -45,6 +45,16 @@ describe("parseCallbackPayload (VK)", () => {
 		expect(out[0]?.externalUserId).toBe("2000000001");
 	});
 
+	it("falls back to peer:date when neither id nor conversation_message_id", () => {
+		const out = parseCallbackPayload(CH, {
+			type: "message_new",
+			object: {
+				message: { date: 1_700_000_005, peer_id: 42, text: "anon" },
+			},
+		});
+		expect(out[0]?.externalMessageId).toBe("42:1700000005");
+	});
+
 	it("skips confirmation and non-message events", () => {
 		expect(
 			parseCallbackPayload(CH, { type: "confirmation", group_id: 1 }),

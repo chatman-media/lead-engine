@@ -152,6 +152,120 @@ describe("WebChannelAdapter", () => {
     expect(ws2.closed?.code).toBe(1001);
   });
 
+  it("send с replyToExternalMessageId → frame с replyTo", async () => {
+    const a = new WebChannelAdapter({ id: "web1" });
+    const ws = new FakeWs();
+    a.acceptConnection(ws, "user-A");
+    ws.sent.length = 0;
+    await a.send({
+      channelId: "web1",
+      externalUserId: "user-A",
+      parts: [{ kind: "text", text: "ответ" }],
+      replyToExternalMessageId: "msg-42",
+    });
+    const frame = JSON.parse(ws.sent[0]!);
+    expect(frame.replyTo).toBe("msg-42");
+  });
+
+  it("send с пустыми parts → throws non-empty", async () => {
+    const a = new WebChannelAdapter({ id: "web1" });
+    const ws = new FakeWs();
+    a.acceptConnection(ws, "user-A");
+    await expect(
+      a.send({ channelId: "web1", externalUserId: "user-A", parts: [] }),
+    ).rejects.toThrow(/non-empty/);
+  });
+
+  it("edit/delete/downloadMedia → not supported; signalTyping — no-op", async () => {
+    const a = new WebChannelAdapter({ id: "web1" });
+    await expect(
+      a.edit({ channelId: "web1", externalUserId: "u", externalMessageId: "m", text: "x" }),
+    ).rejects.toThrow(/edit not supported/);
+    await expect(
+      a.delete({ channelId: "web1", externalUserId: "u", externalMessageId: "m" }),
+    ).rejects.toThrow(/delete not supported/);
+    await expect(
+      a.downloadMedia({ channelId: "web1", externalRef: "x" }),
+    ).rejects.toThrow(/downloadMedia not supported/);
+    await a.signalTyping("u"); // no-op, не бросает
+  });
+
+  it("acceptConnection: бросающий close у старого соединения проглатывается", () => {
+    const a = new WebChannelAdapter({ id: "web1" });
+    const throwingWs: IWebSocket = {
+      readyState: 1,
+      send: () => {},
+      close: () => {
+        throw new Error("boom");
+      },
+    };
+    a.acceptConnection(throwingWs, "user-A");
+    const ws2 = new FakeWs();
+    a.acceptConnection(ws2, "user-A"); // не бросает
+    expect(ws2.sent[0]).toContain('"ready"');
+  });
+
+  it("close(): бросающий close у соединения проглатывается", () => {
+    const a = new WebChannelAdapter({ id: "web1" });
+    const throwingWs: IWebSocket = {
+      readyState: 1,
+      send: () => {},
+      close: () => {
+        throw new Error("boom");
+      },
+    };
+    a.acceptConnection(throwingWs, "user-A");
+    a.close(); // не бросает
+  });
+
+  it("onClientFrame с битым frame без активного ws → silent drop", () => {
+    const a = new WebChannelAdapter({ id: "web1" });
+    a.onClientFrame("ghost-user", "{ malformed"); // не бросает, ничего не шлёт
+  });
+
+  it("onClientFrame при ожидающем receive() резолвит waiter напрямую", async () => {
+    const a = new WebChannelAdapter({ id: "web1" });
+    const ws = new FakeWs();
+    a.acceptConnection(ws, "user-A");
+    const iter = a.receive()[Symbol.asyncIterator]();
+    const pending = iter.next();
+    a.onClientFrame("user-A", JSON.stringify({ type: "user_text", id: "w1", text: "ждали" }));
+    const next = await pending;
+    expect(next.done).toBe(false);
+    expect((next.value as Inbound).parts).toEqual([{ kind: "text", text: "ждали" }]);
+  });
+
+  it("receive: уже aborted signal → done; abort во время ожидания → done", async () => {
+    const a = new WebChannelAdapter({ id: "web1" });
+    const aborted = new AbortController();
+    aborted.abort();
+    expect((await a.receive(aborted.signal)[Symbol.asyncIterator]().next()).done).toBe(true);
+
+    const ctrl = new AbortController();
+    const iter = a.receive(ctrl.signal)[Symbol.asyncIterator]();
+    const pending = iter.next();
+    ctrl.abort();
+    expect((await pending).done).toBe(true);
+  });
+
+  it("receive после close() сразу done", async () => {
+    const a = new WebChannelAdapter({ id: "web1" });
+    a.close();
+    expect((await a.receive()[Symbol.asyncIterator]().next()).done).toBe(true);
+  });
+
+  it("валидный JSON, но неизвестный type / не-объект → bad_frame error", () => {
+    const a = new WebChannelAdapter({ id: "web1" });
+    const ws = new FakeWs();
+    a.acceptConnection(ws, "user-A");
+    ws.sent.length = 0;
+    a.onClientFrame("user-A", JSON.stringify({ type: "ping" }));
+    expect(ws.sent[0]).toContain('"error"');
+    ws.sent.length = 0;
+    a.onClientFrame("user-A", "42");
+    expect(ws.sent[0]).toContain('"error"');
+  });
+
   it("text слишком длинный (> 8000) → bad_frame error", () => {
     const a = new WebChannelAdapter({ id: "web1" });
     const ws = new FakeWs();
