@@ -1302,6 +1302,21 @@ export type QualityToolCallImprovementKind =
 
 export type QualityToolCallImprovementSeverity = "high" | "medium" | "low";
 export type QualityToolCallImprovementStatus = "pending" | "applied" | "dismissed";
+export type QualityToolCallImprovementResolutionKind =
+  | "prompt_patch"
+  | "tool_schema_patch"
+  | "regression_case"
+  | "coach_proposal"
+  | "shadow_eval"
+  | "pull_request"
+  | "other";
+
+export interface QualityToolCallImprovementResolution {
+  kind: QualityToolCallImprovementResolutionKind | null;
+  ref: string | null;
+  url: string | null;
+  note: string | null;
+}
 
 export interface QualityToolCallImprovementProposal {
   id: string;
@@ -1348,11 +1363,16 @@ export interface QualityPersistedToolCallImprovementProposal {
   updatedAt: number;
   decidedAt: number | null;
   decidedByAdminId: number | null;
+  resolution: QualityToolCallImprovementResolution | null;
 }
 
 export interface QualityToolCallImprovementProposalListOptions {
   status?: QualityToolCallImprovementStatus | "all";
   limit?: number;
+}
+
+export interface QualityToolCallImprovementProposalStatusOptions {
+  resolution?: QualityToolCallImprovementResolution;
 }
 
 export interface QualityTranscriptTurn {
@@ -3019,13 +3039,14 @@ export const saas = {
   setQualityTrackedToolCallImprovementProposalStatus(
     id: number,
     status: QualityToolCallImprovementStatus,
+    opts: QualityToolCallImprovementProposalStatusOptions = {},
   ) {
     return request<{
       ok: boolean;
       proposal: QualityPersistedToolCallImprovementProposal;
     }>(`/api/admin/quality/tool-call-feedback/improvement-proposals/${id}/status`, {
       method: "PATCH",
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, ...(opts.resolution ? { resolution: opts.resolution } : {}) }),
     });
   },
   runQualitySelfPlay(data: QualitySelfPlayRunOptions) {

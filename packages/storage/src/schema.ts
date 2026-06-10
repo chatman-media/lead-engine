@@ -1100,6 +1100,10 @@ export const agentToolCallImprovementProposals = pgTable("agent_tool_call_improv
   updatedAt: integer("updated_at").notNull().default(epochNow()),
   decidedAt: integer("decided_at"),
   decidedByAdminId: integer("decided_by_admin_id").references(() => admins.id, { onDelete: "set null" }),
+  resolutionKind: text("resolution_kind"),
+  resolutionRef: text("resolution_ref"),
+  resolutionUrl: text("resolution_url"),
+  resolutionNote: text("resolution_note"),
 }, (t) => [
   check(
     "agent_tool_call_improvement_kind_check",
@@ -1121,9 +1125,14 @@ export const agentToolCallImprovementProposals = pgTable("agent_tool_call_improv
     "agent_tool_call_improvement_label_check",
     sql`${t.label} IN ('wrong_tool','missing_tool','bad_args')`,
   ),
+  check(
+    "agent_tool_call_improvement_resolution_kind_check",
+    sql`${t.resolutionKind} IS NULL OR ${t.resolutionKind} IN ('prompt_patch','tool_schema_patch','regression_case','coach_proposal','shadow_eval','pull_request','other')`,
+  ),
   uniqueIndex("uniq_agent_tool_call_improvement_fingerprint").on(t.tenantId, t.fingerprint),
   index("idx_agent_tool_call_improvement_status").on(t.tenantId, t.status, sql`${t.updatedAt} DESC`),
   index("idx_agent_tool_call_improvement_tool").on(t.tenantId, t.toolName, sql`${t.updatedAt} DESC`),
+  index("idx_agent_tool_call_improvement_resolution").on(t.tenantId, t.resolutionKind, sql`${t.updatedAt} DESC`),
 ]);
 
 // ---- LLM provider configs (per (tenant, purpose)) ---------------------
