@@ -94,6 +94,112 @@ describe("VkAdapter", () => {
 		a.close();
 	});
 
+	it("rawClient отдаёт нижележащий VkClient", () => {
+		const { fetch } = fakeFetch([]);
+		const a = adapter(fetch);
+		expect(a.rawClient).toBeDefined();
+		expect(typeof a.rawClient.sendText).toBe("function");
+	});
+
+	it("send: пустые parts → throws", async () => {
+		const { fetch } = fakeFetch([]);
+		await expect(
+			adapter(fetch).send({ channelId: "vk1", externalUserId: "1", parts: [] }),
+		).rejects.toThrow(/non-empty/);
+	});
+
+	it("edit/delete → not supported", async () => {
+		const { fetch } = fakeFetch([]);
+		const a = adapter(fetch);
+		await expect(
+			a.edit({
+				channelId: "vk1",
+				externalUserId: "1",
+				externalMessageId: "2",
+				text: "x",
+			}),
+		).rejects.toThrow(/edit not supported/);
+		await expect(
+			a.delete({
+				channelId: "vk1",
+				externalUserId: "1",
+				externalMessageId: "2",
+			}),
+		).rejects.toThrow(/delete not supported/);
+	});
+
+	it("downloadMedia проксирует в client.downloadMedia по externalRef-URL", async () => {
+		const urls: string[] = [];
+		const fn = (async (url: string | URL | Request) => {
+			urls.push(String(url));
+			return new Response("BYTES", { status: 200 });
+		}) as unknown as typeof fetch;
+		const a = adapter(fn);
+		const res = await a.downloadMedia({
+			channelId: "vk1",
+			externalRef: "https://cdn.vk.com/file.jpg",
+		});
+		expect(await res.text()).toBe("BYTES");
+		expect(urls).toEqual(["https://cdn.vk.com/file.jpg"]);
+	});
+
+	it("signalTyping — no-op, не бросает", async () => {
+		const { fetch } = fakeFetch([]);
+		await adapter(fetch).signalTyping("555");
+	});
+
+	it("pushUpdate при ожидающем receive() резолвит waiter напрямую", async () => {
+		const { fetch } = fakeFetch([]);
+		const a = adapter(fetch);
+		const iter = a.receive()[Symbol.asyncIterator]();
+		const pending = iter.next();
+		a.pushUpdate({
+			type: "message_new",
+			group_id: 1,
+			object: {
+				message: {
+					id: 2,
+					date: 1_700_000_000,
+					peer_id: 7,
+					from_id: 7,
+					text: "ждали",
+				},
+			},
+		});
+		const next = await pending;
+		expect(next.done).toBe(false);
+		expect(next.value.parts).toEqual([{ kind: "text", text: "ждали" }]);
+	});
+
+	it("receive: уже aborted signal → done сразу", async () => {
+		const { fetch } = fakeFetch([]);
+		const a = adapter(fetch);
+		const ctrl = new AbortController();
+		ctrl.abort();
+		const iter = a.receive(ctrl.signal)[Symbol.asyncIterator]();
+		expect((await iter.next()).done).toBe(true);
+	});
+
+	it("receive: abort во время ожидания → done", async () => {
+		const { fetch } = fakeFetch([]);
+		const a = adapter(fetch);
+		const ctrl = new AbortController();
+		const iter = a.receive(ctrl.signal)[Symbol.asyncIterator]();
+		const pending = iter.next();
+		ctrl.abort();
+		expect((await pending).done).toBe(true);
+	});
+
+	it("close() при ожидающем receive() → done; после close receive сразу done", async () => {
+		const { fetch } = fakeFetch([]);
+		const a = adapter(fetch);
+		const iter = a.receive()[Symbol.asyncIterator]();
+		const pending = iter.next();
+		a.close();
+		expect((await pending).done).toBe(true);
+		expect((await iter.next()).done).toBe(true);
+	});
+
 	it("capabilities are text-only for MVP", () => {
 		const a = adapter(
 			(async () => new Response("{}")) as unknown as typeof fetch,

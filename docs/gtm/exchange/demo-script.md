@@ -307,4 +307,5 @@ Use the failed persona id from `rehearse:exchange-demo`:
 - if no requisites: inspect order stage and tenant secrets/requisites;
 - if premature operator: add a case to the exchange self-play corpus and adjust
   prompt/tool policy;
-- if KYC/proof path is unclear: turn it into a QA case under #484/#487.
+- if KYC/proof path is unclear: open a new exchange QA issue and link the
+  completed QA epic #483.

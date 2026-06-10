@@ -248,4 +248,122 @@ describe("RAG golden eval", () => {
     expect(deltas[0]?.passRateDelta).toBe(1);
     expect(deltas[0]?.groundednessDelta).toBe(1);
   });
+
+  test("compare treats an unknown variant as a zero baseline", async () => {
+    const current = await evaluateRagGoldenCases({
+      cases: [{ id: "case", question: "Need pricing policy", expectedFacts: ["operator review"] }],
+      makeInput: (item) => makeInput(item),
+    });
+    const deltas = compareRagGoldenReports(current, { ...current, variants: [] });
+    expect(deltas[0]?.passRateDelta).toBe(1);
+    expect(deltas[0]?.retrievalRecallDelta).toBe(1);
+    expect(deltas[0]?.personaConsistencyDelta).toBe(1);
+  });
+
+  test("every default ablation mutates the answer input", async () => {
+    const reranker = { rerank: async (_q: string, hits: KbSearchHit[]) => hits };
+    const base = {
+      ...makeInput({ id: "x", question: "q" }),
+      rewriteQueryBeforeRetrieval: true,
+      multiQuery: true,
+      topicRouting: true,
+      mmr: true,
+      reflect: true,
+      reranker,
+    };
+    const byId = new Map(defaultRagGoldenAblations().map((item) => [item.id, item]));
+    expect([...byId.keys()].sort()).toEqual([
+      "no_hybrid",
+      "no_mmr",
+      "no_multi_query",
+      "no_reflect",
+      "no_reranker",
+      "no_rewrite",
+      "no_topic_routing",
+    ]);
+    const item: RagGoldenCase = { id: "x", question: "q" };
+    const mutate = async (id: string) => byId.get(id)?.mutateInput(base, item);
+    expect((await mutate("no_rewrite"))?.rewriteQueryBeforeRetrieval).toBe(false);
+    expect((await mutate("no_multi_query"))?.multiQuery).toBe(false);
+    expect((await mutate("no_hybrid"))?.hybridSearch).toBe(false);
+    expect((await mutate("no_topic_routing"))?.topicRouting).toBe(false);
+    expect((await mutate("no_mmr"))?.mmr).toBe(false);
+    expect((await mutate("no_reflect"))?.reflect).toBe(false);
+    const noReranker = await mutate("no_reranker");
+    expect(noReranker && "reranker" in noReranker).toBe(false);
+  });
+
+  test("judge result parsing returns {} on missing or broken JSON", () => {
+    expect(parseRagGoldenJudgeResult("no json here")).toEqual({});
+    // braces present but invalid JSON inside → JSON.parse throws → {}
+    expect(parseRagGoldenJudgeResult("{broken: json,}")).toEqual({});
+  });
+
+  test("judge result parsing survives an unclosed <think> block", () => {
+    // text BEFORE the unclosed think tag is kept, the tail is dropped
+    const parsed = parseRagGoldenJudgeResult('{"groundedness":0.5}<think>still reasoning');
+    expect(parsed).toEqual({ groundedness: 0.5 });
+    // nothing before the unclosed tag → no JSON at all
+    expect(parseRagGoldenJudgeResult("<think>only reasoning")).toEqual({});
+    // input that ENDS with a closed think block (loop drains to empty rest)
+    expect(parseRagGoldenJudgeResult('{"groundedness":0.5}<think>tail</think>')).toEqual({
+      groundedness: 0.5,
+    });
+  });
+
+  test("answerWithRag throw → failed case with zeroed metrics", async () => {
+    const report = await evaluateRagGoldenCases({
+      cases: [
+        { id: "boom", question: "Need pricing policy" },
+        { id: "boom-string", question: "Need pricing policy" },
+      ],
+      makeInput: (item) => ({
+        ...makeInput(item),
+        chat: {
+          complete: async () => {
+            if (item.id === "boom-string") throw "string failure";
+            throw new Error("llm down");
+          },
+        },
+      }),
+    });
+
+    expect(report.results).toHaveLength(2);
+    for (const result of report.results) expect(result.passed).toBe(false);
+    expect(report.results[0]?.metrics).toEqual({
+      retrievalRecall: 0,
+      groundedness: 0,
+      personaConsistency: 0,
+      forbiddenViolations: 0,
+    });
+    expect(report.results[0]?.failures[0]?.expected).toBe("answerWithRag completes");
+    expect(report.results[0]?.failures[0]?.actual).toBe("llm down");
+    expect(report.results[1]?.failures[0]?.actual).toBe("string failure");
+    expect(report.results[0]?.telemetry.path).toBe("no_context");
+  });
+
+  test("persona, answerIncludes and expectedPath failures are reported with details", async () => {
+    const longAnswer = `Prices are confirmed after operator review. ${"filler ".repeat(40)}end`;
+    const report = await evaluateRagGoldenCases({
+      cases: [
+        {
+          id: "persona-path",
+          question: "Need pricing policy",
+          personaExpectations: ["plain language"],
+          answerIncludes: ["money-back guarantee"],
+          expectedPath: "smalltalk",
+        },
+      ],
+      makeInput: (item) => makeInput(item, { answer: longAnswer }),
+    });
+
+    const formatted = formatRagGoldenFailures(report);
+    expect(report.results[0]?.passed).toBe(false);
+    expect(formatted).toContain("personaConsistency");
+    expect(formatted).toContain("missing persona expectations: plain language");
+    expect(formatted).toContain('answer includes "money-back guarantee"');
+    // the long answer is summarized to 160 chars with an ellipsis
+    expect(formatted).toContain("...");
+    expect(formatted).toContain("telemetry.path=smalltalk");
+  });
 });

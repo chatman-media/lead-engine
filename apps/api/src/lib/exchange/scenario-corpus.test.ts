@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { parseExchangeGoldenJsonl } from "./golden-eval.ts";
 import {
 	EXCHANGE_SELF_PLAY_SCENARIOS,
+	type ExchangeSelfPlayScenario,
 	type ExchangeSelfPlayScenarioTag,
 	formatExchangeSelfPlayScenarioReport,
 	runExchangeSelfPlayScenarioCorpus,
@@ -139,5 +140,63 @@ describe("exchange self-play scenario corpus", () => {
 		expect(formatted).toContain("tags=rub,office_pickup,payment_proof");
 		expect(formatted).toContain("handoffs=payment_review,office_payout");
 		expect(formatted).toContain("order=payout");
+	});
+
+	it("reports scenarios whose source fixture is missing and renders failures", () => {
+		// Пустой список фикстур: каждый сценарий с sourceFixtureId «теряет» источник.
+		const report = runExchangeSelfPlayScenarioCorpus({ fixtureCases: [] });
+		expect(report.ok).toBe(false);
+		const fixtureFailures = report.failures.filter(
+			(failure) =>
+				failure.actual === "fixture id not found in exchange-workflows.jsonl",
+		);
+		expect(fixtureFailures.length).toBeGreaterThan(0);
+		expect(fixtureFailures[0]?.expected).toStartWith("fixture ");
+
+		const formatted = formatExchangeSelfPlayScenarioReport(report);
+		expect(formatted).toContain("exchange self-play corpus: failed");
+		expect(formatted).toContain("failures:");
+		expect(formatted).toContain("actual=fixture id not found");
+	});
+
+	it("flags duplicate ids and structurally empty scenarios (corpus self-checks)", () => {
+		// Эти ветки недостижимы на здоровом корпусе — временно «портим» корпус
+		// (только на время теста, с восстановлением в finally).
+		const corpus = EXCHANGE_SELF_PLAY_SCENARIOS as ExchangeSelfPlayScenario[];
+		const broken: ExchangeSelfPlayScenario = {
+			id: "coverage-broken-scenario",
+			title: "Broken scenario for corpus self-checks",
+			tags: ["exception"],
+			clientScript: [],
+			expectedWorkflow: [],
+			expectedFields: [{ key: "asset", required: false, source: "client" }],
+			expectedStages: [],
+			expectedHandoffs: [],
+			criticalReplyAssertions: [],
+			debugHint: "coverage only",
+		};
+		const duplicate = { ...corpus[0]! };
+		corpus.push(broken, duplicate);
+		try {
+			const report = runExchangeSelfPlayScenarioCorpus({
+				scenarioId: "coverage-broken-scenario",
+			});
+			expect(report.ok).toBe(false);
+			const expectations = report.failures.map((failure) => failure.expected);
+			expect(expectations).toContain("unique scenario id");
+			expect(expectations).toContain("at least one deterministic client turn");
+			expect(expectations).toContain("required field expectations");
+			expect(expectations).toContain("expected workflow stages");
+			expect(expectations).toContain("critical reply assertions");
+			expect(
+				report.failures.find((failure) => failure.expected === "unique scenario id")
+					?.scenarioId,
+			).toBe(duplicate.id);
+		} finally {
+			corpus.splice(corpus.indexOf(broken), 1);
+			corpus.splice(corpus.indexOf(duplicate), 1);
+		}
+		// Корпус восстановлен — повторный прогон снова зелёный.
+		expect(runExchangeSelfPlayScenarioCorpus({ fixtureCases: loadCases() }).ok).toBe(true);
 	});
 });

@@ -136,6 +136,67 @@ describe("wrapEmbeddingClient", () => {
       'lead_engine_llm_errors_total{kind="TypeError",provider="openai",purpose="embed"} 1',
     );
   });
+
+  it("onComplete success=true + model label на успешном embed", async () => {
+    const metrics = makePlatformMetrics();
+    const calls: Array<{ success: boolean; model?: string; latencyMs: number }> = [];
+    const wrapped = wrapEmbeddingClient(
+      fakeEmbed({ vec: [1, 2, 3, 4] }),
+      metrics,
+      { provider: "ollama", purpose: "embed", model: "bge-m3" },
+      (info) =>
+        calls.push({
+          success: info.success,
+          model: info.model,
+          latencyMs: info.latencyMs,
+        }),
+    );
+    const result = await wrapped.embed(["a", "b"]);
+    expect(result).toEqual([
+      [1, 2, 3, 4],
+      [1, 2, 3, 4],
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ success: true, model: "bge-m3" });
+    expect(calls[0]!.latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("onComplete success=false + errorKind при ошибке embed", async () => {
+    const metrics = makePlatformMetrics();
+    const calls: Array<{ success: boolean; model?: string; errorKind?: string }> = [];
+    const wrapped = wrapEmbeddingClient(
+      fakeEmbed({ throwError: new RangeError("embed down") }),
+      metrics,
+      { provider: "ollama", purpose: "embed", model: "bge-m3" },
+      (info) =>
+        calls.push({
+          success: info.success,
+          model: info.model,
+          errorKind: info.errorKind,
+        }),
+    );
+    await expect(wrapped.embed(["x"])).rejects.toThrow("embed down");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      success: false,
+      model: "bge-m3",
+      errorKind: "RangeError",
+    });
+  });
+
+  it("onComplete без model label не добавляет поле model", async () => {
+    const metrics = makePlatformMetrics();
+    const calls: Array<Record<string, unknown>> = [];
+    const wrapped = wrapEmbeddingClient(
+      fakeEmbed(),
+      metrics,
+      { provider: "openai", purpose: "embed" },
+      (info) => calls.push(info as unknown as Record<string, unknown>),
+    );
+    await wrapped.embed(["x"]);
+    expect(calls).toHaveLength(1);
+    expect("model" in calls[0]!).toBe(false);
+  });
 });
 
 // ── completeWithTools / completeStructured / stream (optional methods) ────────

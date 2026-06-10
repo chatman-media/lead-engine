@@ -1030,4 +1030,120 @@ describe("service catalog runtime", () => {
 			requestType: "transfer",
 		});
 	});
+
+	it("LLM вернул мусор с фигурными скобками → heuristic fallback", async () => {
+		if (!sql) return;
+		const app = new Hono();
+		// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic in test harness
+		app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+		const res = await app.request("/api/auth/signup", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				email: `service-runtime-garbage-${Date.now()}@demo.io`,
+				password: "strong-pwd-12345",
+			}),
+		});
+		const body = (await res.json()) as { admin: { tenantId: number } };
+		const garbageTenantId = body.admin.tenantId;
+		const [contact] = await withTenant(db as Db, garbageTenantId, async (tx) => {
+			const [insertedContact] = await tx
+				.insert(contacts)
+				.values({
+					tenantId: garbageTenantId,
+					displayName: "Garbage LLM",
+					createdAt: 1_800_000_600,
+					updatedAt: 1_800_000_600,
+				})
+				.returning({ id: contacts.id });
+			await tx.insert(serviceCatalogItems).values({
+				tenantId: garbageTenantId,
+				slug: "garbage_transfer",
+				name: "Трансфер из аэропорта",
+				category: "Трансфер",
+				routeType: "manual",
+				metadataJson: "{}",
+				isActive: true,
+				sortOrder: 1,
+				createdAt: 1_800_000_600,
+				updatedAt: 1_800_000_600,
+			});
+			return [expectInserted(insertedContact, "garbage llm contact")];
+		});
+		const runtime = makeServiceCatalogRuntime({
+			now: () => 1_800_000_601,
+			resolveChat: () =>
+				({
+					// Прямой JSON.parse падает (префикс), вложенный {…} тоже не JSON →
+					// parseJsonObject отдаёт null, матчи берутся из эвристики.
+					complete: async () => "Ответ модели: {oops, not: json}",
+				}) as never,
+		});
+		const result = await runtime.extract({
+			db: db as Db,
+			tenantId: garbageTenantId,
+			contactId: contact.id,
+			text: "нужен трансфер из аэропорта",
+		});
+		expect(result.created.map((item) => item.serviceSlug)).toEqual([
+			"garbage_transfer",
+		]);
+		expect(result.created[0]?.routeType).toBe("manual");
+	});
+
+	it("неизвестный route_type фильтруется при загрузке каталога", async () => {
+		if (!sql) return;
+		const app = new Hono();
+		// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic in test harness
+		app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+		const res = await app.request("/api/auth/signup", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				email: `service-runtime-badroute-${Date.now()}@demo.io`,
+				password: "strong-pwd-12345",
+			}),
+		});
+		const body = (await res.json()) as { admin: { tenantId: number } };
+		const badRouteTenantId = body.admin.tenantId;
+		// Снимаем CHECK в изолированной тест-БД, чтобы смоделировать
+		// legacy/будущее значение route_type, которое рантайм должен игнорировать.
+		if (!sql) return;
+		await sql`ALTER TABLE service_catalog_items DROP CONSTRAINT IF EXISTS service_catalog_route_type_check`;
+		const [contact] = await withTenant(db as Db, badRouteTenantId, async (tx) => {
+			const [insertedContact] = await tx
+				.insert(contacts)
+				.values({
+					tenantId: badRouteTenantId,
+					displayName: "Bad Route",
+					createdAt: 1_800_000_700,
+					updatedAt: 1_800_000_700,
+				})
+				.returning({ id: contacts.id });
+			await tx.insert(serviceCatalogItems).values({
+				tenantId: badRouteTenantId,
+				slug: "mystery_transfer",
+				name: "Трансфер призрак",
+				category: "Трансфер",
+				routeType: "mystery",
+				metadataJson: "{}",
+				isActive: true,
+				sortOrder: 1,
+				createdAt: 1_800_000_700,
+				updatedAt: 1_800_000_700,
+			});
+			return [expectInserted(insertedContact, "bad route contact")];
+		});
+
+		const runtime = makeServiceCatalogRuntime({ now: () => 1_800_000_701 });
+		// Единственный item отфильтрован по route_type → каталог пуст → no-op.
+		await expect(
+			runtime.extract({
+				db: db as Db,
+				tenantId: badRouteTenantId,
+				contactId: contact.id,
+				text: "нужен трансфер в аэропорт",
+			}),
+		).resolves.toEqual({ created: [], skipped: [] });
+	});
 });
