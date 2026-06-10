@@ -36,6 +36,9 @@ export function LeadKbGuidanceCard({
 }: LeadKbGuidanceCardProps) {
   const totalRequired = guidance?.requiredFields.length ?? 0;
   const filledRequired = guidance?.requiredFields.filter((field) => field.filled).length ?? 0;
+  const requiredKbMaterials = guidance?.kbRequirements.filter((req) => req.required) ?? [];
+  const coveredRequiredKbMaterials = requiredKbMaterials.filter((req) => req.covered).length;
+  const missingRequiredKbMaterials = requiredKbMaterials.filter((req) => !req.covered);
   const firstHits = guidance?.hits.slice(0, 3) ?? [];
   const Wrapper = variant === "card" ? Card : "section";
 
@@ -97,6 +100,44 @@ export function LeadKbGuidanceCard({
                 </p>
               )}
             </div>
+
+            {requiredKbMaterials.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">Материалы БЗ</span>
+                  <Badge
+                    variant={
+                      coveredRequiredKbMaterials === requiredKbMaterials.length
+                        ? "secondary"
+                        : "outline"
+                    }
+                  >
+                    {coveredRequiredKbMaterials}/{requiredKbMaterials.length}
+                  </Badge>
+                </div>
+                {missingRequiredKbMaterials.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {missingRequiredKbMaterials.slice(0, 4).map((req) => (
+                      <div key={req.key} className="rounded-md border border-dashed px-2 py-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge variant="outline" className="text-[10px]">
+                            {req.scopeType === "stage" ? "стадия" : "воронка"}
+                          </Badge>
+                          <span className="text-xs font-medium">{req.title}</span>
+                        </div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                          {req.description}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Обязательные материалы для текущего контекста покрыты
+                  </p>
+                )}
+              </div>
+            )}
 
             {guidance.warning && (
               <div className="rounded-md border border-amber-400/30 bg-amber-400/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-300">

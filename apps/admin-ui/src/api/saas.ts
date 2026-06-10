@@ -905,6 +905,7 @@ export interface LeadKbGuidance {
     fieldType: FieldType;
     filled: boolean;
   }>;
+  kbRequirements: KbRequirement[];
   nextActions: string[];
   hits: Array<{
     rank: number;

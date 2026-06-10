@@ -510,6 +510,7 @@ describe("GET /api/admin/leads/:id/kb-guidance", () => {
       kbAvailable: boolean;
       requiredFields: Array<{ id: number; displayName: string; filled: boolean }>;
       missingRequiredFields: Array<{ id: number; displayName: string; filled: boolean }>;
+      kbRequirements: Array<{ key: string; title: string; required: boolean; covered: boolean }>;
       nextActions: string[];
       hits: Array<{ title: string; scopeType: string; stageSlug: string | null }>;
     };
@@ -519,7 +520,10 @@ describe("GET /api/admin/leads/:id/kb-guidance", () => {
     expect(body.kbAvailable).toBe(true);
     expect(body.requiredFields.find((item) => item.id === field!.id)?.filled).toBe(false);
     expect(body.missingRequiredFields.map((item) => item.displayName)).toContain("Client budget");
+    expect(body.kbRequirements.find((item) => item.key === "business_overview")?.covered).toBe(false);
+    expect(body.kbRequirements.find((item) => item.key === "process_and_sla")?.required).toBe(true);
     expect(body.nextActions.some((action) => action.includes("Client budget"))).toBe(true);
+    expect(body.nextActions.some((action) => action.includes("материалы БЗ"))).toBe(true);
     expect(body.hits.some((hit) => hit.title === "Intake rules")).toBe(true);
     expect(
       body.hits.every((hit) => hit.scopeType === "stage" && hit.stageSlug === "intake_pending"),

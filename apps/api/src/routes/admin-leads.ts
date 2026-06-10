@@ -11,6 +11,7 @@ import {
   contacts,
   conversations,
   exchangeOrders,
+  funnels,
   kbDocuments,
   leadEvents,
   leadFieldValues,
@@ -26,16 +27,21 @@ import {
 } from "@chatman-media/storage";
 import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { recordAudit } from "../lib/audit.ts";
-import { canAddLead } from "../lib/quota.ts";
-import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webhooks.ts";
 import { adminEventBus } from "../lib/admin-event-bus.ts";
 import { advanceLead } from "../lib/advance-lead.ts";
+import { recordAudit } from "../lib/audit.ts";
+import {
+  buildKbRequirementDrafts,
+  coverKbRequirements,
+  type KbRequirement,
+} from "../lib/kb-requirements.ts";
+import { canAddLead } from "../lib/quota.ts";
 import {
   dispatchWorkflowEffects,
   handleFieldUpdatedInTx,
   handleOperatorSentOfferInTx,
 } from "../lib/workflow-runtime.ts";
+import { fireStageWebhooks, type StageChangedPayload } from "./admin-stage-webhooks.ts";
 
 /**
  * Lead pipeline API.
@@ -152,6 +158,7 @@ function stageTypeAction(stageType: string): string | null {
 
 function buildLeadKbNextActions(input: {
   missingRequiredFields: Array<{ displayName: string }>;
+  missingKbRequirements: Array<{ title: string }>;
   stage: { stageType: string; guidance: string | null };
   hits: Array<{ title: string; scopeType: string }>;
 }): string[] {
@@ -160,6 +167,14 @@ function buildLeadKbNextActions(input: {
     actions.push(
       `Заполнить обязательные поля: ${input.missingRequiredFields
         .map((field) => field.displayName)
+        .join(", ")}`,
+    );
+  }
+  if (input.missingKbRequirements.length > 0) {
+    actions.push(
+      `Проверить/добавить материалы БЗ: ${input.missingKbRequirements
+        .map((req) => req.title)
+        .slice(0, 3)
         .join(", ")}`,
     );
   }
@@ -742,7 +757,19 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
             .from(stageFields)
             .where(and(eq(stageFields.tenantId, tenantId), eq(stageFields.stageId, stageDef.id)))
             .orderBy(stageFields.position)
-        : [];
+          : [];
+
+      const [funnel] = stageDef
+        ? await tx
+            .select({
+              id: funnels.id,
+              slug: funnels.slug,
+              verticalTemplateId: funnels.verticalTemplateId,
+            })
+            .from(funnels)
+            .where(and(eq(funnels.tenantId, tenantId), eq(funnels.id, stageDef.funnelId)))
+            .limit(1)
+        : [null];
 
       const values =
         fields.length > 0
@@ -769,7 +796,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
         .where(and(eq(contacts.id, lead.userId), eq(contacts.tenantId, tenantId)))
         .limit(1);
 
-      return { lead, stageDef, fields, values, contact: contact ?? null };
+      return { lead, stageDef, funnel: funnel ?? null, fields, values, contact: contact ?? null };
     });
 
     if (!context) return c.json({ error: "lead not found" }, 404);
@@ -803,6 +830,7 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       funnelId: number | null;
       stageSlug: string | null;
     }> = [];
+    let kbRequirements: KbRequirement[] = [];
 
     if (stage) {
       query = buildLeadKbGuidanceQuery({
@@ -893,6 +921,35 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
           stageSlug: doc?.stageSlug ?? null,
         };
       });
+
+      if (context.funnel) {
+        const drafts = buildKbRequirementDrafts({
+          funnel: context.funnel,
+          stages: [
+            {
+              slug: stage.slug,
+              displayName: stage.displayName,
+              stageType: stage.stageType,
+              fields: context.fields.map((field) => ({
+                fieldType: field.fieldType,
+                required: field.required,
+              })),
+            },
+          ],
+        });
+        const docs = await withTenant(opts.db, tenantId, (tx) =>
+          tx
+            .select({
+              topic: kbDocuments.topic,
+              scopeType: kbDocuments.scopeType,
+              funnelId: kbDocuments.funnelId,
+              stageSlug: kbDocuments.stageSlug,
+            })
+            .from(kbDocuments)
+            .where(eq(kbDocuments.tenantId, tenantId)),
+        );
+        kbRequirements = coverKbRequirements(drafts, docs);
+      }
     }
 
     return c.json({
@@ -915,9 +972,11 @@ export function makeAdminLeadsRoutes(opts: AdminLeadsRoutesOpts): Hono {
       warning,
       requiredFields,
       missingRequiredFields,
+      kbRequirements,
       nextActions: stage
         ? buildLeadKbNextActions({
             missingRequiredFields,
+            missingKbRequirements: kbRequirements.filter((req) => req.required && !req.covered),
             stage,
             hits,
           })
