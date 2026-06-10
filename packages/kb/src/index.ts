@@ -79,6 +79,25 @@ export {
   parseRagGoldenJudgeResult,
   parseRagGoldenJsonl,
 } from "./golden-eval.ts";
+export type {
+  ParsedToolCallRegressionJsonlLine,
+  ToolCallRegressionCaseLabel,
+  ToolCallRegressionCaseRecord,
+  ToolCallRegressionCaseResult,
+  ToolCallRegressionCaseResultStatus,
+  ToolCallRegressionCaseStatus,
+  ToolCallRegressionFailure,
+  ToolCallRegressionReport,
+  ToolCallRegressionRunInput,
+  ToolCallRegressionSummary,
+} from "./tool-regression-eval.ts";
+export {
+  formatToolCallRegressionFailures,
+  parseToolCallRegressionJsonl,
+  runToolCallRegressionCases,
+  TOOL_CALL_REGRESSION_RECORD_TYPE,
+  toolCallRegressionExitCode,
+} from "./tool-regression-eval.ts";
 export type { ExtractFactsInput } from "./extract-user-facts.ts";
 // ── Memory & conversation management ─────────────────────────────────────────
 export { extractUserFacts, parseFactsFromLlmOutput } from "./extract-user-facts.ts";
