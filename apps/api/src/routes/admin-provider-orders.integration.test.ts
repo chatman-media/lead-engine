@@ -4,6 +4,7 @@ import {
 	schema,
 	tryConnectToPg,
 } from "@chatman-media/storage";
+import { withTenant } from "@chatman-media/conversation-engine";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -16,6 +17,8 @@ import { makeAuthRoutes } from "./auth.ts";
 
 const ownerUrl = process.env.DATABASE_URL;
 const dbName = `lead_engine_provider_orders_${Math.random().toString(36).slice(2, 10)}`;
+const appRoleName = `app_provider_orders_${Math.random().toString(36).slice(2, 8)}`;
+const appRolePass = "test-pass-provider-orders";
 const migrationsDir = resolve(
 	__dirname,
 	"..",
@@ -29,7 +32,9 @@ const migrationsDir = resolve(
 const SECRET = "test-secret-provider-orders-12345";
 
 let sql: Sql | null = null;
+let appSql: Sql | null = null;
 let db: PostgresJsDatabase<typeof schema>;
+let rlsApp: Hono;
 let app: Hono;
 let token = "";
 let tenantId = 0;
@@ -52,13 +57,29 @@ beforeAll(async () => {
 	const testUrl = await createIsolatedDb({ ownerUrl, testDbName: dbName });
 	sql = postgres(testUrl, { max: 2, onnotice: () => {} });
 	await applyAllMigrations(sql, migrationsDir);
+	await sql.unsafe(`
+		CREATE ROLE "${appRoleName}" LOGIN PASSWORD '${appRolePass}' NOSUPERUSER NOBYPASSRLS;
+		GRANT USAGE ON SCHEMA public TO "${appRoleName}";
+		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${appRoleName}";
+		GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${appRoleName}";
+	`);
 	db = drizzle(sql, { schema });
+
+	const parsed = new URL(testUrl);
+	parsed.username = appRoleName;
+	parsed.password = appRolePass;
+	appSql = postgres(parsed.toString(), { max: 2, onnotice: () => {} });
+	const appDb = drizzle(appSql, { schema });
 
 	app = new Hono();
 	// biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
 	app.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
 	app.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
 	app.route("/", makeAdminProviderOrdersRoutes({ db }));
+
+	rlsApp = new Hono();
+	rlsApp.use("/api/admin/*", makeRequireAuth({ db: appDb as never, secret: SECRET }));
+	rlsApp.route("/", makeAdminProviderOrdersRoutes({ db: appDb as never }));
 
 	const signup = await app.request("/api/auth/signup", {
 		method: "POST",
@@ -87,7 +108,14 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
+	if (appSql) {
+		await appSql.end({ timeout: 0 }).catch(() => {});
+		appSql = null;
+	}
 	if (sql) {
+		await sql
+			.unsafe(`DROP OWNED BY "${appRoleName}"; DROP ROLE IF EXISTS "${appRoleName}"`)
+			.catch(() => {});
 		await sql.end({ timeout: 0 }).catch(() => {});
 		sql = null;
 	}
@@ -95,6 +123,16 @@ afterAll(async () => {
 
 async function authReq(path: string, init: RequestInit = {}): Promise<Response> {
 	return app.request(path, {
+		...init,
+		headers: {
+			...(init.headers ?? {}),
+			Authorization: `Bearer ${token}`,
+		},
+	});
+}
+
+async function rlsAuthReq(path: string, init: RequestInit = {}): Promise<Response> {
+	return rlsApp.request(path, {
 		...init,
 		headers: {
 			...(init.headers ?? {}),
@@ -460,6 +498,43 @@ describe("admin provider orders", () => {
 			body: JSON.stringify({ enabled: true }),
 		});
 		expect(enableRes.status).toBe(200);
+		const [flag] = await db
+			.select({
+				featureKey: schema.tenantFeatureFlags.featureKey,
+				enabled: schema.tenantFeatureFlags.enabled,
+			})
+			.from(schema.tenantFeatureFlags)
+			.where(eq(schema.tenantFeatureFlags.tenantId, tenantId));
+		expect(flag).toMatchObject({ featureKey: "provider_relay", enabled: true });
+	});
+
+	it("persists provider order audit rows under non-bypass RLS role", async () => {
+		if (!sql || !appSql) return;
+
+		const assignRes = await rlsAuthReq(
+			`/api/admin/provider-orders/${orderId}/assign-provider`,
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ providerId }),
+			},
+		);
+		expect(assignRes.status).toBe(200);
+
+		const appDb = drizzle(appSql, { schema });
+		const auditRows = await withTenant(appDb, tenantId, (tx) =>
+			tx
+				.select({
+					action: schema.auditLog.action,
+					targetId: schema.auditLog.targetId,
+					detailsJson: schema.auditLog.detailsJson,
+				})
+				.from(schema.auditLog)
+				.where(eq(schema.auditLog.action, "provider_order.assign_provider")),
+		);
+		const row = auditRows.find((item) => item.targetId === String(orderId));
+		expect(row).toBeTruthy();
+		expect(JSON.parse(row?.detailsJson ?? "{}")).toMatchObject({ providerId });
 	});
 
 	it("lists order SLA columns and loads detail visibility sections", async () => {

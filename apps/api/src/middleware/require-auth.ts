@@ -1,3 +1,4 @@
+import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import { admins } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -53,10 +54,12 @@ export function makeRequireAuth(opts: RequireAuthOpts) {
     // Double-check admin still exists (handles admin-deletion / tenant-revocation
     // scenario без token-blacklist — extra DB-roundtrip но per-request
     // freshness важна для admin-API).
-    const [adminRow] = await opts.db
-      .select()
-      .from(admins)
-      .where(and(eq(admins.id, claims.adminId), eq(admins.tenantId, claims.tenantId)));
+    const [adminRow] = await withTenant(opts.db as unknown as Db, claims.tenantId, (tx) =>
+      tx
+        .select()
+        .from(admins)
+        .where(and(eq(admins.id, claims.adminId), eq(admins.tenantId, claims.tenantId))),
+    );
     if (!adminRow) {
       return c.json({ error: "admin not found" }, 401);
     }
