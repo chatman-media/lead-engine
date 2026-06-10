@@ -32,7 +32,9 @@ describe("guardExchangePolicy", () => {
 		});
 
 		expect(result.ok).toBe(false);
+		expect(result.action).toBe("escalate");
 		expect(result.reason).toBe("kyc_auto_verified");
+		expect(result.requiredFixes[0]).toContain("KYC operator handoff");
 		expect(result.text).toBe(EXCHANGE_KYC_FALLBACK);
 	});
 
@@ -98,6 +100,7 @@ describe("guardExchangePolicy", () => {
 		});
 
 		expect(result.ok).toBe(false);
+		expect(result.action).toBe("escalate");
 		expect(result.reason).toBe("payment_auto_verified");
 		expect(result.text).toBe(EXCHANGE_PAYMENT_FALLBACK);
 	});
@@ -128,6 +131,7 @@ describe("guardExchangePolicy", () => {
 		});
 
 		expect(result.ok).toBe(false);
+		expect(result.action).toBe("escalate");
 		expect(result.reason).toBe("payout_auto_completed");
 		expect(result.text).toBe(EXCHANGE_PAYOUT_FALLBACK);
 	});

@@ -9,9 +9,14 @@ export {
 } from "./rag-reply.ts";
 export {
   EXCHANGE_SAFE_FALLBACK,
+  exchangeGuardFindingFromResult,
   guardExchangeReply,
   type ExchangeReplyGuardInput,
+  type ExchangeReplyGuardReason,
   type ExchangeReplyGuardResult,
+  type ExchangeResponseGuardAction,
+  type ExchangeResponseGuardFinding,
+  type ExchangeResponseGuardResult,
 } from "./exchange-reply-guard.ts";
 export {
   EXCHANGE_KYC_FALLBACK,
@@ -20,6 +25,7 @@ export {
   guardExchangePolicy,
   type ExchangeOrderPolicyState,
   type ExchangePolicyGuardInput,
+  type ExchangePolicyGuardReason,
   type ExchangePolicyGuardResult,
   type ExchangePolicyState,
   type ExchangeVerificationPolicyState,

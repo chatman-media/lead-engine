@@ -14,11 +14,15 @@ import {
   LLM_REPLY_BASE_SYSTEM_PROMPT,
   LLM_REPLY_TOOLS_SYSTEM_FRAGMENT,
 } from "../prompts/llm-reply.ts";
+import { buildExchangeOperatorHandoff } from "./exchange-operator-handoff.ts";
 import {
   type ExchangePolicyState,
   guardExchangePolicy,
 } from "./exchange-policy-guard.ts";
-import { buildExchangeOperatorHandoff } from "./exchange-operator-handoff.ts";
+import {
+	type ExchangeResponseGuardFinding,
+	exchangeGuardFindingFromResult,
+} from "./exchange-reply-guard.ts";
 
 /**
  * Минимальный LLM-based ReplyStrategy. Шаги на каждый inbound:
@@ -65,7 +69,10 @@ export interface LlmReplyStrategyOpts {
    */
   resolveChat: (tenantId: number) => ChatClient;
   /** Если возвращает true — стадия лида помечена supportMode, бот молчит. */
-  resolveIsSupport?: (input: { tenantId: number; contactId: number }) => Promise<boolean>;
+	resolveIsSupport?: (input: {
+		tenantId: number;
+		contactId: number;
+	}) => Promise<boolean>;
   /**
    * Optional factual brokered-order context for the current customer. This is
    * prompt-only grounding; order status changes are handled by deterministic
@@ -85,6 +92,12 @@ export interface LlmReplyStrategyOpts {
     conversationId: number;
     contactId: number;
   }) => Promise<ExchangePolicyState | null> | ExchangePolicyState | null;
+	/** false → exchange response guard bypassed for this tenant. Default: true. */
+	resolveExchangeResponseGuardEnabled?: (input: {
+		tenantId: number;
+		conversationId: number;
+		contactId: number;
+	}) => Promise<boolean> | boolean;
   /**
    * Опциональный резолвер agentic-инструментов (напр. расчёт курса обмена).
    * Если задан и вернул непустой список, а ChatClient умеет completeWithTools —
@@ -107,6 +120,7 @@ export interface LlmReplyStrategyOpts {
     userMessageText: string;
     assistantText: string;
     toolCalls: readonly ToolCallRecord[];
+		guardFindings?: readonly ExchangeResponseGuardFinding[];
   }) => Promise<void> | void;
 }
 
@@ -172,7 +186,9 @@ function assetMentionRe(asset: string): RegExp {
 
 function amountCandidates(text: string, asset: string): AmountCandidate[] {
   const assetRe = assetMentionRe(asset);
-  const matches = [...text.matchAll(/\d+(?:[ \u00a0]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?/g)];
+	const matches = [
+		...text.matchAll(/\d+(?:[ \u00a0]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?/g),
+	];
   const candidates: AmountCandidate[] = [];
   for (const match of matches) {
     const raw = match[0];
@@ -203,7 +219,8 @@ function hasExchangeStartIntent(text: string): boolean {
 function parseExchangeQuoteArgs(text: string): ExchangeQuoteArgs | null {
   const quoteIntent = EXCHANGE_QUOTE_INTENT_RE.test(text);
   const confirmationIntent =
-    EXCHANGE_CONFIRMATION_RE.test(text) && EXCHANGE_OUTPUT_CURRENCY_RE.test(text);
+		EXCHANGE_CONFIRMATION_RE.test(text) &&
+		EXCHANGE_OUTPUT_CURRENCY_RE.test(text);
   const strongIntent = quoteIntent || confirmationIntent;
   if (!strongIntent && !hasExchangeStartIntent(text)) return null;
   if (EXCHANGE_KYC_TOPIC_RE.test(text) && !strongIntent) return null;
@@ -215,8 +232,7 @@ function parseExchangeQuoteArgs(text: string): ExchangeQuoteArgs | null {
     return null;
   }
   const lower = text.toLowerCase();
-  const asset =
-    /\busdt\b|юсдт/.test(lower)
+	const asset = /\busdt\b|юсдт/.test(lower)
       ? "USDT"
       : /\bbtc\b|битк/.test(lower)
         ? "BTC"
@@ -232,11 +248,12 @@ function parseExchangeQuoteArgs(text: string): ExchangeQuoteArgs | null {
   if (!asset) return null;
 
   const candidates = amountCandidates(text, asset);
-  const best = candidates.sort((a, b) => b.score - a.score || a.start - b.start)[0];
+	const best = candidates.sort(
+		(a, b) => b.score - a.score || a.start - b.start,
+	)[0];
   if (!best) return null;
 
-  const network =
-    /trc[\s-]?20|tron/i.test(text)
+	const network = /trc[\s-]?20|tron/i.test(text)
       ? "TRC20"
       : /erc[\s-]?20/i.test(text)
         ? "ERC20"
@@ -247,7 +264,12 @@ function parseExchangeQuoteArgs(text: string): ExchangeQuoteArgs | null {
 }
 
 function numberLike(value: unknown): number | null {
-  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+	const n =
+		typeof value === "number"
+			? value
+			: typeof value === "string"
+				? Number(value)
+				: NaN;
   return Number.isFinite(n) ? n : null;
 }
 
@@ -259,8 +281,10 @@ function forcedExchangeQuoteText(result: unknown): string | null {
   const rate = numberLike(row.rate);
   const amountFrom = numberLike(row.amountFrom);
   const amountToThb = numberLike(row.amountToThb);
-  const network = typeof row.network === "string" && row.network ? row.network : null;
-  if (!asset || rate === null || amountFrom === null || amountToThb === null) return null;
+	const network =
+		typeof row.network === "string" && row.network ? row.network : null;
+	if (!asset || rate === null || amountFrom === null || amountToThb === null)
+		return null;
   const networkLabel = network ? ` (${network})` : "";
   return [
     `Курс: ${rate}.`,
@@ -273,7 +297,9 @@ async function maybeForceExchangeQuoteReply(
   userMessageText: string,
   tools: AnyRagTool[],
 ): Promise<ExchangeForcedReply | null> {
-  const quoteTool = tools.find((tool) => tool.name === "compute_exchange_quote");
+	const quoteTool = tools.find(
+		(tool) => tool.name === "compute_exchange_quote",
+	);
   if (!quoteTool) return null;
   const args = parseExchangeQuoteArgs(userMessageText);
   if (!args) return null;
@@ -286,7 +312,9 @@ async function maybeForceExchangeQuoteReply(
   };
 }
 
-function maybeForceExchangeKycReply(userMessageText: string): ExchangeForcedReply | null {
+function maybeForceExchangeKycReply(
+	userMessageText: string,
+): ExchangeForcedReply | null {
   if (!EXCHANGE_KYC_TOPIC_RE.test(userMessageText)) return null;
   if (EXCHANGE_KYC_MATERIAL_SENT_RE.test(userMessageText)) return null;
   return { text: EXCHANGE_KYC_HANDOFF_TEXT, toolCalls: [] };
@@ -308,7 +336,8 @@ export class LlmReplyStrategy implements ReplyStrategy {
   }): Promise<OutboundEnvelope[] | null> {
     if (input.userMessageText.length === 0) return null;
     const tenantId = input.tenant.tenantId;
-    const template = this.opts.resolveTemplate?.(tenantId) ?? this.opts.template;
+		const template =
+			this.opts.resolveTemplate?.(tenantId) ?? this.opts.template;
 
     if (this.opts.resolveIsSupport) {
       const isSupport = await this.opts.resolveIsSupport({
@@ -319,7 +348,10 @@ export class LlmReplyStrategy implements ReplyStrategy {
     }
 
     const messages = this.messagesRepoFor(tenantId);
-    const history = await messages.recent(input.conversationId, this.opts.historyLimit ?? 20);
+		const history = await messages.recent(
+			input.conversationId,
+			this.opts.historyLimit ?? 20,
+		);
     const historyMessages = messagesToChatHistory(history);
 
     const chat = this.opts.resolveChat(tenantId);
@@ -342,7 +374,8 @@ export class LlmReplyStrategy implements ReplyStrategy {
         tools = [];
       }
     }
-    const toolsActive = tools.length > 0 && typeof chat.completeWithTools === "function";
+		const toolsActive =
+			tools.length > 0 && typeof chat.completeWithTools === "function";
     const serviceOrderContext = this.opts.resolveServiceOrderContext
       ? await Promise.resolve(
           this.opts.resolveServiceOrderContext({
@@ -367,20 +400,53 @@ export class LlmReplyStrategy implements ReplyStrategy {
               contactId: input.contactId,
             }),
           ).catch((err) => {
-            console.warn("[llm-reply] failed to resolve exchange policy state:", err);
+						console.warn(
+							"[llm-reply] failed to resolve exchange policy state:",
+							err,
+						);
             return null;
           })
       : null;
+		const exchangeGuardEnabled =
+			isExchange && this.opts.resolveExchangeResponseGuardEnabled
+				? await Promise.resolve(
+						this.opts.resolveExchangeResponseGuardEnabled({
+							tenantId,
+							conversationId: input.conversationId,
+							contactId: input.contactId,
+						}),
+					).catch((err) => {
+						console.warn(
+							"[llm-reply] failed to resolve exchange response guard flag:",
+							err,
+						);
+						return true;
+					})
+				: true;
 
     if (forcedExchangeReply) {
       const telemetry = buildToolTelemetry(forcedExchangeReply.toolCalls);
-      const guarded = guardExchangePolicy({
+			const guarded = exchangeGuardEnabled
+				? guardExchangePolicy({
         text: forcedExchangeReply.text,
         telemetry,
         history,
         state: exchangePolicyState,
-      });
-      if (this.opts.recordToolCalls && forcedExchangeReply.toolCalls.length > 0) {
+					})
+				: {
+						ok: true,
+						action: "pass" as const,
+						text: forcedExchangeReply.text,
+						reasons: [],
+						requiredFixes: [],
+					};
+			const guardFinding = exchangeGuardEnabled
+				? exchangeGuardFindingFromResult(guarded)
+				: null;
+			if (
+				this.opts.recordToolCalls &&
+				(forcedExchangeReply.toolCalls.length > 0 || guardFinding)
+			) {
         try {
           await this.opts.recordToolCalls({
             tenantId,
@@ -389,9 +455,13 @@ export class LlmReplyStrategy implements ReplyStrategy {
             userMessageText: input.userMessageText,
             assistantText: guarded.text,
             toolCalls: forcedExchangeReply.toolCalls,
+						...(guardFinding ? { guardFindings: [guardFinding] } : {}),
           });
         } catch (err) {
-          console.warn("[llm-reply] failed to record forced exchange tool call:", err);
+					console.warn(
+						"[llm-reply] failed to record forced exchange tool call:",
+						err,
+					);
         }
       }
       const operatorHandoff = buildExchangeOperatorHandoff({
@@ -442,20 +512,31 @@ export class LlmReplyStrategy implements ReplyStrategy {
     }
 
     if (reply.trim().length === 0) return null;
-    const guarded = isExchange
+		const guarded =
+			isExchange && exchangeGuardEnabled
       ? guardExchangePolicy({
           text: reply,
           telemetry: buildToolTelemetry(toolCalls),
           history,
           state: exchangePolicyState,
         })
-      : { ok: true, text: reply };
+				: {
+						ok: true,
+						action: "pass" as const,
+						text: reply,
+						reasons: [],
+						requiredFixes: [],
+					};
+		const guardFinding =
+			isExchange && exchangeGuardEnabled
+				? exchangeGuardFindingFromResult(guarded)
+				: null;
     if (!guarded.ok) {
       console.warn(
         `[exchange-policy-guard] tenant=${tenantId} conversation=${input.conversationId} reason=${guarded.reason ?? "unknown"}`,
       );
     }
-    if (this.opts.recordToolCalls && toolCalls.length > 0) {
+		if (this.opts.recordToolCalls && (toolCalls.length > 0 || guardFinding)) {
       try {
         await this.opts.recordToolCalls({
           tenantId,
@@ -464,6 +545,7 @@ export class LlmReplyStrategy implements ReplyStrategy {
           userMessageText: input.userMessageText,
           assistantText: guarded.text,
           toolCalls,
+					...(guardFinding ? { guardFindings: [guardFinding] } : {}),
         });
       } catch (err) {
         console.warn("[llm-reply] failed to record tool calls:", err);
