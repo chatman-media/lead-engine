@@ -105,10 +105,10 @@ sudo systemctl status lead-engine-worker --no-pager
 curl -fsS "$PLATFORM_PUBLIC_URL/healthz"
 ```
 
-## 6. Provider relay rollout и инциденты
+## 6. Provider relay: feature flag и SQL-диагностика
 
 Provider relay fail-closed: tenant не создаёт provider outreach, пока флаг
-`provider_relay` явно не включён.
+`provider_relay` явно не включён. (Диагностика через ops-эндпоинт — раздел 9.)
 
 Включить/выключить для tenant:
 
@@ -265,11 +265,12 @@ curl -fsS "$PLATFORM_PUBLIC_URL/api/admin/funnel" \
 
 Если `workflowStage` не виден, проверить, что UI был пересобран и задеплоен.
 
-## 8. Provider relay: rollout и инциденты
+## 9. Provider relay: ops-эндпоинт и инциденты
 
 Provider relay управляет заказами, где клиент пишет в один канал, оператор
 матчит провайдера, а провайдер получает запрос в своём канале. На alpha это
-включается tenant-by-tenant через feature flag.
+включается tenant-by-tenant через feature flag (см. раздел 6 — включение флага
+и SQL-диагностика).
 
 Проверить флаг и операционные метрики:
 
