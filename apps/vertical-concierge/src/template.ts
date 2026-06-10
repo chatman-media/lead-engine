@@ -14,7 +14,7 @@ import { CONCIERGE_INTAKE } from "./intake.ts";
  * ЖЁСТКОЕ ПРАВИЛО: бот не выдумывает цены, курсы и сроки — только из
  * инструментов / настроек / от оператора.
  *
- * См. docs/CONCIERGE_VERTICAL.md и эпик #175.
+ * См. docs/archive/CONCIERGE_VERTICAL.md и эпик #175.
  */
 export const CONCIERGE_V1: VerticalTemplate = {
   slug: "concierge_v1",
