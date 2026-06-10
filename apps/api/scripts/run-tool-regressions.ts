@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { resolve } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import {
 	formatToolCallRegressionFailures,
 	runToolCallRegressionCases,
@@ -30,6 +31,9 @@ export interface CliArgs {
 	includeArchived: boolean;
 	skipUnsupported: boolean;
 	json: boolean;
+	outJsonPath?: string;
+	outJunitPath?: string;
+	outMdPath?: string;
 	help: boolean;
 }
 
@@ -54,6 +58,9 @@ export function parseArgs(
 		json: false,
 		help: false,
 	};
+	let outJsonPath: string | undefined;
+	let outJunitPath: string | undefined;
+	let outMdPath: string | undefined;
 	let filePath = defaultFilePath;
 	let fileExplicit = false;
 	let apiBase: string | undefined;
@@ -68,7 +75,28 @@ export function parseArgs(
 
 		if (raw === "--help" || raw === "-h") args.help = true;
 		else if (raw === "--json") args.json = true;
-		else if (raw === "--include-archived") args.includeArchived = true;
+		else if (raw === "--out-json") {
+			const next = argv[index + 1];
+			if (!next) return { error: "--out-json requires a path" };
+			outJsonPath = resolve(next);
+			index += 1;
+		} else if (raw.startsWith("--out-json=")) {
+			outJsonPath = resolve(raw.slice("--out-json=".length));
+		} else if (raw === "--out-junit") {
+			const next = argv[index + 1];
+			if (!next) return { error: "--out-junit requires a path" };
+			outJunitPath = resolve(next);
+			index += 1;
+		} else if (raw.startsWith("--out-junit=")) {
+			outJunitPath = resolve(raw.slice("--out-junit=".length));
+		} else if (raw === "--out-md") {
+			const next = argv[index + 1];
+			if (!next) return { error: "--out-md requires a path" };
+			outMdPath = resolve(next);
+			index += 1;
+		} else if (raw.startsWith("--out-md=")) {
+			outMdPath = resolve(raw.slice("--out-md=".length));
+		} else if (raw === "--include-archived") args.includeArchived = true;
 		else if (raw === "--skip-unsupported") args.skipUnsupported = true;
 		else if (raw === "--file") {
 			const next = argv[index + 1];
@@ -144,8 +172,11 @@ export function parseArgs(
 		}
 	}
 
-	if (args.help) return { ...args, source: { kind: "file", filePath } };
-	if (!apiBase) return { ...args, source: { kind: "file", filePath } };
+	const outputArgs = { outJsonPath, outJunitPath, outMdPath };
+	if (args.help)
+		return { ...args, ...outputArgs, source: { kind: "file", filePath } };
+	if (!apiBase)
+		return { ...args, ...outputArgs, source: { kind: "file", filePath } };
 	if (fileExplicit)
 		return { error: "--file and --api-base cannot be used together" };
 	if (!isValidUrl(apiBase)) return { error: "--api-base must be a valid URL" };
@@ -156,6 +187,7 @@ export function parseArgs(
 
 	return {
 		...args,
+		...outputArgs,
 		source: {
 			kind: "api",
 			apiBase,
@@ -187,6 +219,9 @@ Options:
   --token-env <name>        Env var for API token. Default: ${defaultTokenEnv}.
   --status <value>          API export status: active, archived, or all. Default: active.
   --limit <n>               API export limit, 1-${maxApiLimit}. Default: ${defaultApiLimit}.
+  --out-json <path>         Write the JSON report to a file.
+  --out-junit <path>        Write a JUnit XML report for CI test report viewers.
+  --out-md <path>           Write a Markdown summary for GitHub Step Summary.
   --tool <name>             Supported tool name. Can be repeated.
   --tools <a,b,c>           Supported tool names as a comma-separated list.
   --include-archived        Validate archived cases too. By default they are skipped and counted.
@@ -269,6 +304,8 @@ export async function main() {
 		},
 	});
 
+	await writeReportOutputs(report, args);
+
 	if (args.json) {
 		console.log(JSON.stringify(report, null, 2));
 	} else {
@@ -281,6 +318,132 @@ export async function main() {
 	}
 
 	process.exitCode = toolCallRegressionExitCode(report);
+}
+
+export async function writeReportOutputs(
+	report: ToolCallRegressionReport,
+	args: CliArgs,
+) {
+	if (args.outJsonPath) {
+		await writeTextFile(
+			args.outJsonPath,
+			`${JSON.stringify(report, null, 2)}\n`,
+		);
+	}
+	if (args.outJunitPath) {
+		await writeTextFile(args.outJunitPath, renderToolRegressionJunit(report));
+	}
+	if (args.outMdPath) {
+		await writeTextFile(args.outMdPath, renderToolRegressionMarkdown(report));
+	}
+}
+
+export function renderToolRegressionJunit(
+	report: ToolCallRegressionReport,
+): string {
+	const tests = report.summary.total;
+	const failures = report.summary.failed;
+	const skipped = report.summary.skipped;
+	const cases = report.results.map((result) => {
+		const name = [
+			`line ${result.line}`,
+			result.caseId ? `case ${result.caseId}` : "case unknown",
+			result.toolName ?? "tool unknown",
+		].join(" - ");
+		const attrs = [
+			'classname="tool-call-regression"',
+			`name="${xmlEscape(name)}"`,
+			'time="0"',
+		].join(" ");
+		if (result.status === "passed") return `    <testcase ${attrs}/>`;
+		if (result.status === "skipped") {
+			return [
+				`    <testcase ${attrs}>`,
+				`      <skipped message="${xmlEscape(result.skipReason ?? "skipped")}"/>`,
+				"    </testcase>",
+			].join("\n");
+		}
+		const message = `${result.failures.length} validation failure${
+			result.failures.length === 1 ? "" : "s"
+		}`;
+		return [
+			`    <testcase ${attrs}>`,
+			`      <failure message="${xmlEscape(message)}">`,
+			xmlEscape(formatCaseFailures(result.failures))
+				.split("\n")
+				.map((line) => `        ${line}`)
+				.join("\n"),
+			"      </failure>",
+			"    </testcase>",
+		].join("\n");
+	});
+
+	return [
+		'<?xml version="1.0" encoding="UTF-8"?>',
+		`<testsuite name="tool-call-regressions" tests="${tests}" failures="${failures}" skipped="${skipped}" time="0">`,
+		...cases,
+		"</testsuite>",
+		"",
+	].join("\n");
+}
+
+export function renderToolRegressionMarkdown(
+	report: ToolCallRegressionReport,
+): string {
+	const lines = [
+		"## Tool-call Regression Report",
+		"",
+		`Generated: ${report.generatedAt}`,
+		"",
+		"| Metric | Count |",
+		"|---|---:|",
+		`| Total | ${report.summary.total} |`,
+		`| Passed | ${report.summary.passed} |`,
+		`| Failed | ${report.summary.failed} |`,
+		`| Skipped | ${report.summary.skipped} |`,
+		`| Active | ${report.summary.active} |`,
+		`| Archived | ${report.summary.archived} |`,
+		`| Unsupported | ${report.summary.unsupported} |`,
+		"",
+	];
+
+	const skipReasons = Object.entries(report.summary.skipReasons);
+	if (skipReasons.length > 0) {
+		lines.push("Skipped by reason:", "");
+		for (const [reason, count] of skipReasons) {
+			lines.push(`- ${reason}: ${count}`);
+		}
+		lines.push("");
+	}
+
+	const failures = report.results.filter(
+		(result) => result.status === "failed",
+	);
+	if (failures.length === 0) {
+		lines.push("No regression failures.");
+		return `${lines.join("\n")}\n`;
+	}
+
+	lines.push("### Failures", "");
+	for (const result of failures.slice(0, 20)) {
+		lines.push(
+			`- line ${result.line}, case ${result.caseId ?? "unknown"}, tool ${
+				result.toolName ?? "unknown"
+			}`,
+		);
+		for (const failure of result.failures) {
+			lines.push(
+				`  - ${failure.path}: expected ${failure.expected}; actual ${failure.actual}`,
+			);
+		}
+	}
+	if (failures.length > 20) {
+		lines.push(
+			`- ${failures.length - 20} more failed cases omitted from summary.`,
+		);
+	}
+
+	return `${lines.join("\n")}\n`;
 }
 
 function printSummary(report: ToolCallRegressionReport) {
@@ -303,6 +466,37 @@ function printSummary(report: ToolCallRegressionReport) {
 				.join(" ")}`,
 		);
 	}
+}
+
+async function writeTextFile(path: string, content: string) {
+	await mkdir(dirname(path), { recursive: true });
+	await Bun.write(path, content);
+}
+
+function formatCaseFailures(
+	failures: ToolCallRegressionReport["results"][number]["failures"],
+) {
+	return failures
+		.map((failure) =>
+			[
+				`line=${failure.line}`,
+				`case=${failure.caseId ?? "unknown"}`,
+				`tool=${failure.toolName ?? "unknown"}`,
+				`path=${failure.path}`,
+				`expected=${failure.expected}`,
+				`actual=${failure.actual}`,
+			].join("\n"),
+		)
+		.join("\n\n");
+}
+
+function xmlEscape(value: string): string {
+	return value
+		.replaceAll("&", "&amp;")
+		.replaceAll("<", "&lt;")
+		.replaceAll(">", "&gt;")
+		.replaceAll('"', "&quot;")
+		.replaceAll("'", "&apos;");
 }
 
 function parseApiStatus(value: string): ApiStatus | null {

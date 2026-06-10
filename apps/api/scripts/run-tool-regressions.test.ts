@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { loadRegressionCorpus, parseArgs } from "./run-tool-regressions.ts";
+import { runToolCallRegressionCases } from "@chatman-media/kb";
+import {
+	loadRegressionCorpus,
+	parseArgs,
+	writeReportOutputs,
+} from "./run-tool-regressions.ts";
 
 const servers: Bun.Server[] = [];
 
@@ -36,6 +41,21 @@ describe("run-tool-regressions CLI source handling", () => {
 			"create_exchange_order",
 		]);
 		expect(args.skipUnsupported).toBe(true);
+	});
+
+	test("parses report output paths", () => {
+		const args = parseArgs([
+			"--file=cases.jsonl",
+			"--out-json=artifacts/report.json",
+			"--out-junit=artifacts/report.xml",
+			"--out-md=artifacts/report.md",
+		]);
+
+		expect("error" in args).toBe(false);
+		if ("error" in args) return;
+		expect(args.outJsonPath?.endsWith("/artifacts/report.json")).toBe(true);
+		expect(args.outJunitPath?.endsWith("/artifacts/report.xml")).toBe(true);
+		expect(args.outMdPath?.endsWith("/artifacts/report.md")).toBe(true);
 	});
 
 	test("rejects ambiguous and invalid API arguments", () => {
@@ -150,4 +170,104 @@ describe("run-tool-regressions CLI source handling", () => {
 		);
 		await expect(loadRegressionCorpus(args)).rejects.toThrow("unauthorized");
 	});
+
+	test("writes JSON, JUnit, and Markdown report outputs", async () => {
+		const outputDir = `/tmp/tool-regression-reports-${crypto.randomUUID()}`;
+		const escapedToolName = "quote<&>\"'tool";
+		const report = runToolCallRegressionCases({
+			raw: jsonl(
+				validRecord({
+					id: 1,
+					toolName: escapedToolName,
+					input: {
+						source: "rag_reply",
+						toolName: escapedToolName,
+						args: { quoteId: "q1" },
+						feedback: { label: "bad_args", note: null },
+					},
+				}),
+				validRecord({ id: 2, status: "archived", expected: {} }),
+				validRecord({ id: 3, expected: {} }),
+			),
+		});
+		const args = parseArgs([
+			"--file=cases.jsonl",
+			"--out-json",
+			`${outputDir}/report.json`,
+			"--out-junit",
+			`${outputDir}/report.xml`,
+			"--out-md",
+			`${outputDir}/report.md`,
+		]);
+		expect("error" in args).toBe(false);
+		if ("error" in args) return;
+
+		await writeReportOutputs(report, args);
+
+		const json = JSON.parse(
+			await Bun.file(`${outputDir}/report.json`).text(),
+		) as {
+			summary: { passed: number; failed: number; skipped: number };
+		};
+		const junit = await Bun.file(`${outputDir}/report.xml`).text();
+		const md = await Bun.file(`${outputDir}/report.md`).text();
+
+		expect(json.summary).toEqual(
+			expect.objectContaining({ passed: 1, failed: 1, skipped: 1 }),
+		);
+		expect(junit).toContain(
+			'<testsuite name="tool-call-regressions" tests="3" failures="1" skipped="1"',
+		);
+		expect(junit).toContain("quote&lt;&amp;&gt;&quot;&apos;tool");
+		expect(junit).toContain("<skipped");
+		expect(junit).toContain("<failure");
+		expect(md).toContain("| Failed | 1 |");
+		expect(md).toContain("expected.behavior");
+	});
 });
+
+function validRecord(
+	over: Record<string, unknown> = {},
+): Record<string, unknown> {
+	return {
+		recordType: "tool_call_regression_case",
+		id: 17,
+		proposalId: 5,
+		toolCallId: 11,
+		source: "tool_call_feedback",
+		toolName: "create_exchange_order",
+		label: "bad_args",
+		title: "REG: order requires verified quote",
+		input: {
+			source: "rag_reply",
+			toolName: "create_exchange_order",
+			args: { quoteId: "q1" },
+			feedback: { label: "bad_args", note: "accepted an unverified quote" },
+		},
+		expected: {
+			behavior:
+				"The agent must require a verified quote before order creation.",
+			proposalKind: "schema_fix",
+			actionItems: ["Reject unverified quote IDs."],
+		},
+		context: {
+			toolCall: {
+				id: 11,
+				result: { orderId: "ord_1" },
+				error: false,
+				cycle: 0,
+				toolCallIndex: 0,
+				latencyMs: 42,
+			},
+		},
+		status: "active",
+		createdByAdminId: 3,
+		createdAt: 1781077061,
+		updatedAt: 1781077061,
+		...over,
+	};
+}
+
+function jsonl(...records: Record<string, unknown>[]): string {
+	return `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
+}
