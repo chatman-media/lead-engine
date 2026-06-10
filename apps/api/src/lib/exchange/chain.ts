@@ -12,6 +12,7 @@
 const USDT_TRC20_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 const TRONSCAN_TX_API = "https://apilist.tronscanapi.com/api/transaction-info";
 const DEFAULT_TIMEOUT_MS = 12_000;
+export const DEFAULT_TX_MAX_AGE_SECONDS = 24 * 60 * 60;
 
 export interface VerifyResult {
   ok: boolean;
@@ -23,6 +24,7 @@ export interface VerifyResult {
   amount?: number;
   symbol?: string;
   network?: string;
+  confirmedAt?: number;
   reason?: string;
 }
 
@@ -36,6 +38,8 @@ interface TronTxInfo {
   confirmed?: boolean;
   contractRet?: string;
   contract_ret?: string;
+  timestamp?: number;
+  block_ts?: number;
   trc20TransferInfo?: Array<{
     to_address?: string;
     from_address?: string;
@@ -43,7 +47,23 @@ interface TronTxInfo {
     symbol?: string;
     decimals?: number;
     contract_address?: string;
+    block_ts?: number;
   }>;
+}
+
+function toEpochSeconds(raw: number | null | undefined): number | null {
+  if (!Number.isFinite(raw ?? Number.NaN)) return null;
+  const value = Number(raw);
+  if (value <= 0) return null;
+  return value > 10_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
+}
+
+function resolveConfirmedAt(info: TronTxInfo): number | null {
+  return (
+    toEpochSeconds(info.timestamp) ??
+    toEpochSeconds(info.block_ts) ??
+    toEpochSeconds(info.trc20TransferInfo?.[0]?.block_ts)
+  );
 }
 
 async function fetchJson(url: string, timeoutMs: number): Promise<unknown> {
@@ -69,6 +89,9 @@ export async function verifyTronUsdt(opts: {
   expectedAmount: number;
   /** допуск недостачи (комиссия сети), доля. Default 0.02 (2%). */
   tolerance?: number;
+  /** максимальный возраст транзакции. Default 24h. */
+  maxAgeSeconds?: number;
+  nowEpoch?: number;
   timeoutMs?: number;
 }): Promise<VerifyResult> {
   const txHash = opts.txHash.toLowerCase();
@@ -95,6 +118,29 @@ export async function verifyTronUsdt(opts: {
   }
   if (info.confirmed === false) {
     return { ok: false, txHash, network: "TRC20", reason: "Транзакция ещё не подтверждена в сети." };
+  }
+
+  const confirmedAt = resolveConfirmedAt(info);
+  const maxAgeSeconds = opts.maxAgeSeconds ?? DEFAULT_TX_MAX_AGE_SECONDS;
+  if (!confirmedAt) {
+    return {
+      ok: false,
+      needsOperator: true,
+      txHash,
+      network: "TRC20",
+      reason: "Не удалось определить время транзакции — проверит оператор.",
+    };
+  }
+  const nowEpoch = opts.nowEpoch ?? Math.floor(Date.now() / 1000);
+  if (nowEpoch - confirmedAt > maxAgeSeconds) {
+    return {
+      ok: false,
+      needsOperator: true,
+      txHash,
+      network: "TRC20",
+      confirmedAt,
+      reason: `Транзакция старше ${Math.round(maxAgeSeconds / 3600)} часов — проверит оператор.`,
+    };
   }
 
   const transfers = info.trc20TransferInfo ?? [];
@@ -125,6 +171,7 @@ export async function verifyTronUsdt(opts: {
       amount,
       symbol: "USDT",
       network: "TRC20",
+      confirmedAt,
       reason: `Сумма ${amount} USDT меньше ожидаемой ${opts.expectedAmount} USDT.`,
     };
   }
@@ -137,5 +184,6 @@ export async function verifyTronUsdt(opts: {
     amount,
     symbol: "USDT",
     network: "TRC20",
+    confirmedAt,
   };
 }

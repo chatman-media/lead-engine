@@ -16,11 +16,12 @@ import type { AnyRagTool } from "@chatman-media/kb";
 import { exchangeRates } from "@chatman-media/storage";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { extractTxHash, verifyTronUsdt } from "./chain.ts";
+import { DEFAULT_TX_MAX_AGE_SECONDS, extractTxHash, verifyTronUsdt } from "./chain.ts";
 import {
   createOrderIdempotent,
   findActiveOrder,
   getOrderByIdempotencyKey,
+  markOrderPaidWithUniqueTxHash,
   resolveConversationParties,
   updateOrder,
 } from "./orders.ts";
@@ -57,6 +58,12 @@ function compactInfoLines(lines: Array<string | null | undefined>): string | nul
     .map((line) => line?.trim())
     .filter((line): line is string => Boolean(line));
   return out.length > 0 ? out.join("\n") : null;
+}
+
+function resolveTxMaxAgeSeconds(): number {
+  const raw = process.env.EXCHANGE_TX_MAX_AGE_SECONDS;
+  const parsed = raw ? Number(raw) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_TX_MAX_AGE_SECONDS;
 }
 
 /** Событие срабатывания guardrail курса — уходит владельцу (A4 / #145). */
@@ -545,8 +552,8 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
       if (!txHash) {
         return { ok: false, error: "Пришлите, пожалуйста, tx hash транзакции или ссылку на неё." };
       }
-      let toAddress: string | undefined;
-      toAddress = typeof issuedRequisites?.address === "string" ? issuedRequisites.address : undefined;
+      const toAddress =
+        typeof issuedRequisites?.address === "string" ? issuedRequisites.address : undefined;
       if (!toAddress) {
         return {
           ok: false,
@@ -569,23 +576,44 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
         txHash,
         toAddress,
         expectedAmount: order.amountFrom,
-      });
-
-      // Зафиксировать пруф (включая from_address — п.16).
-      await updateOrder(db, tenantId, order.id, {
-        proofJson: JSON.stringify({
-          txHash: res.txHash,
-          fromAddress: res.fromAddress,
-          toAddress: res.toAddress,
-          amount: res.amount,
-          symbol: res.symbol,
-          network: res.network,
-          verifiedOk: res.ok,
-        }),
-        ...(res.ok ? { status: "paid" } : {}),
+        maxAgeSeconds: resolveTxMaxAgeSeconds(),
       });
 
       if (res.ok) {
+        const mark = await markOrderPaidWithUniqueTxHash(db, tenantId, order.id, {
+          txHash: res.txHash ?? txHash,
+          fromAddress: res.fromAddress ?? null,
+          toAddress: res.toAddress ?? null,
+          amount: res.amount ?? null,
+          symbol: res.symbol ?? null,
+          network: res.network ?? network,
+          confirmedAt: res.confirmedAt ?? null,
+          verifiedOk: true,
+        });
+        if (!mark.ok) {
+          await updateOrder(db, tenantId, order.id, {
+            proofJson: JSON.stringify({
+              txHash: res.txHash ?? txHash,
+              fromAddress: res.fromAddress,
+              toAddress: res.toAddress,
+              amount: res.amount,
+              symbol: res.symbol,
+              network: res.network,
+              confirmedAt: res.confirmedAt,
+              verifiedOk: false,
+              needsOperator: true,
+              duplicateOrderId: mark.duplicateOrderId,
+              reason: "tx_hash_replay",
+            }),
+          });
+          return {
+            orderId: order.id,
+            ok: false,
+            needsOperator: true,
+            duplicateOrderId: mark.duplicateOrderId,
+            reason: "Этот tx hash уже использован в другой заявке — нужна проверка оператора.",
+          };
+        }
         return {
           orderId: order.id,
           ok: true,
@@ -594,6 +622,20 @@ export function makeExchangeTools(deps: ExchangeToolsDeps): AnyRagTool[] {
           note: "Оплата поступила. Можно готовить выдачу.",
         };
       }
+      await updateOrder(db, tenantId, order.id, {
+        proofJson: JSON.stringify({
+          txHash: res.txHash ?? txHash,
+          fromAddress: res.fromAddress,
+          toAddress: res.toAddress,
+          amount: res.amount,
+          symbol: res.symbol,
+          network: res.network ?? network,
+          confirmedAt: res.confirmedAt,
+          verifiedOk: false,
+          needsOperator: res.needsOperator ?? false,
+          reason: res.reason,
+        }),
+      });
       return {
         orderId: order.id,
         ok: false,

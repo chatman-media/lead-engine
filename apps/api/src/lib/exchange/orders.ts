@@ -5,7 +5,7 @@
 
 import { type Db, withTenant } from "@chatman-media/conversation-engine";
 import { channelIdentities, conversations, exchangeOrders } from "@chatman-media/storage";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 const OPEN_STATUSES = ["quote", "awaiting_payment", "paid", "payout"] as const;
 
@@ -291,5 +291,69 @@ export async function updateOrder(
       .update(exchangeOrders)
       .set({ ...patch, updatedAt: now })
       .where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, orderId)));
+  });
+}
+
+export interface CryptoPaymentProof {
+  txHash: string;
+  fromAddress?: string | null;
+  toAddress?: string | null;
+  amount?: number | null;
+  symbol?: string | null;
+  network?: string | null;
+  confirmedAt?: number | null;
+  verifiedOk: boolean;
+}
+
+function extractProofTxHash(proofJson: string | null): string | null {
+  if (!proofJson) return null;
+  try {
+    const parsed = JSON.parse(proofJson) as { txHash?: unknown; verifiedOk?: unknown };
+    if (typeof parsed.txHash !== "string") return null;
+    if (parsed.verifiedOk === false) return null;
+    return parsed.txHash.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Атомарно помечает крипто-оплату как paid только если txHash ещё не привязан
+ * к другой заявке tenant'а. Advisory lock закрывает гонку двух verify одного
+ * hash на разных заказах без отдельной миграции.
+ */
+export async function markOrderPaidWithUniqueTxHash(
+  db: Db,
+  tenantId: number,
+  orderId: number,
+  proof: CryptoPaymentProof,
+): Promise<{ ok: true } | { ok: false; duplicateOrderId: number }> {
+  const now = Math.floor(Date.now() / 1000);
+  const txHash = proof.txHash.toLowerCase();
+  return withTenant(db, tenantId, async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${tenantId}, hashtext(${txHash}))`);
+
+    const rows = await tx
+      .select({ id: exchangeOrders.id, proofJson: exchangeOrders.proofJson })
+      .from(exchangeOrders)
+      .where(eq(exchangeOrders.tenantId, tenantId));
+
+    for (const row of rows) {
+      if (row.id === orderId) continue;
+      if (extractProofTxHash(row.proofJson) === txHash) {
+        return { ok: false, duplicateOrderId: row.id };
+      }
+    }
+
+    await tx
+      .update(exchangeOrders)
+      .set({
+        status: "paid",
+        proofJson: JSON.stringify({ ...proof, txHash, verifiedOk: true }),
+        updatedAt: now,
+      })
+      .where(and(eq(exchangeOrders.tenantId, tenantId), eq(exchangeOrders.id, orderId)));
+
+    return { ok: true };
   });
 }
