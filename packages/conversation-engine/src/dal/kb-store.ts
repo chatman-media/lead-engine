@@ -250,13 +250,10 @@ export class DrizzleKbStore implements IKbStore {
 		const scopeType = scope?.scopeType ?? "global";
 		const funnelId = scope?.funnelId ?? null;
 		const stageSlug = scope?.stageSlug ?? null;
-		// UNIQUE на (source, content_hash) — БЕЗ tenant_id в схеме (legacy);
-		// на cross-tenant конфликт rely'ем что source включает tenant_slug
-		// (recommended convention) либо контентом dedup'имся в seed-скрипте.
 		const rows = (await this.ctx.db.execute(sql`
       INSERT INTO kb_documents (tenant_id, source, title, content_hash, topic, scope_type, funnel_id, stage_slug)
       VALUES (${t}, ${input.source}, ${input.title}, ${input.contentHash}, ${topic}, ${scopeType}, ${funnelId}, ${stageSlug})
-      ON CONFLICT (source, content_hash) DO UPDATE SET
+      ON CONFLICT (tenant_id, source, content_hash) DO UPDATE SET
         title = EXCLUDED.title,
         topic = EXCLUDED.topic,
         scope_type = EXCLUDED.scope_type,
