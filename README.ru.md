@@ -23,6 +23,8 @@
 
 Telegram Bot + Userbot · WhatsApp · Facebook Messenger · VK · MAX · Web Widget · BYOK LLM · RAG · операторский handoff · marketplace провайдеров
 
+**🟢 Live: [exchanges.agency](https://exchanges.agency)** &nbsp;·&nbsp; [админка](https://client.exchanges.agency) &nbsp;·&nbsp; [dev](https://dev.exchanges.agency)
+
 🌐 [🇬🇧 English](README.md) &nbsp;·&nbsp; 🇷🇺 **Русский** &nbsp;·&nbsp; [🇨🇳 中文](README.zh.md)
 
 </div>
