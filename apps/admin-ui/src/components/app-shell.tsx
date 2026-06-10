@@ -552,13 +552,34 @@ async function getExchangeNavState(): Promise<{
   return { hasExchangeWorkflow, isExchangeTenant };
 }
 
-// Страницы без max-width кап-а контента — занимают всю ширину области <main>.
-const FULL_WIDTH_PATHS = new Set(["/faq"]);
+// Операционные экраны без max-width капа: таблицы, рабочие панели и 3-колоночные консоли.
+const FULL_WIDTH_PATHS = new Set([
+  "/audit",
+  "/dashboard",
+  "/exchange",
+  "/faq",
+  "/funnel",
+  "/leads",
+  "/orders",
+  "/partners",
+  "/providers",
+  "/quality",
+  "/services",
+  "/superadmin",
+]);
+const FULL_WIDTH_PREFIXES = ["/conversations", "/leads/"];
+
+function isFullWidthPath(pathname: string): boolean {
+  return (
+    FULL_WIDTH_PATHS.has(pathname) ||
+    FULL_WIDTH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  );
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const fullWidth = FULL_WIDTH_PATHS.has(pathname);
+  const fullWidth = isFullWidthPath(pathname);
   const [admin, setAdmin] = useState<Admin | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [hasExchangeWorkflow, setHasExchangeWorkflow] = useState(false);

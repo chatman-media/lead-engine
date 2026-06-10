@@ -677,7 +677,7 @@ export function SaasConversations() {
         </p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[300px_1fr_300px]">
+      <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)_300px]">
         {/* Список */}
         <Card className="flex max-h-[72vh] flex-col gap-0 overflow-hidden py-0">
           <div className="border-b">

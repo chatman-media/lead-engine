@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import type { FunnelListItem, KbRequirement, StageDefinition } from "../api/saas.ts";
 import {
   ApiError,
@@ -653,7 +654,12 @@ export function SaasFaq() {
         </p>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+      <div
+        className={cn(
+          "grid gap-6",
+          suggestions.length > 0 && "xl:grid-cols-[minmax(0,1fr)_360px]",
+        )}
+      >
         <div className="space-y-6">
           <Card>
             <CardHeader>
