@@ -1,3 +1,10 @@
+# [@chatman-media/kb-v1.13.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.12.0...@chatman-media/kb-v1.13.0) (2026-06-10)
+
+
+### Features
+
+* **quality:** live-замер вклада LLM-шагов answerWithRag ([#515](https://github.com/chatman-media/lead-engine/issues/515)) ([#521](https://github.com/chatman-media/lead-engine/issues/521)) ([117d242](https://github.com/chatman-media/lead-engine/commit/117d242d3feaf06cb0f3d3c74d3c1903dbe63505))
+
 # [@chatman-media/kb-v1.12.0](https://github.com/chatman-media/lead-engine/compare/@chatman-media/kb-v1.11.0...@chatman-media/kb-v1.12.0) (2026-06-10)
 
 
