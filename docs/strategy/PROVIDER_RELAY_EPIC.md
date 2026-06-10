@@ -57,6 +57,125 @@ Success criteria:
 6. Commission is recorded as platform revenue on the order. Payout can stay manual
    in MVP.
 
+## BPR-0 approved MVP policy
+
+This section is the product and compliance source of truth for the first provider
+relay implementation.
+
+### MVP service category
+
+The first slice is **massage booking** only:
+
+- allowed: mobile or salon massage/spa booking, including Thai, oil, deep tissue,
+  foot, couples, and similar wellness services;
+- allowed request fields: massage type, duration, number of guests, preferred
+  time window, approximate area, hotel/villa area without room or exact address,
+  language preference, and non-sensitive notes;
+- excluded from MVP: medical treatment, adult/sexual services, escort services,
+  alcohol/drug-related services, childcare, transport, housing, exchange, and any
+  regulated or high-liability service category.
+
+Other marketplace categories remain useful catalog examples, but provider relay
+automation must not use them until a separate category policy is approved.
+
+### Customer data sharing before payment
+
+Provider outreach before payment must be need-to-know and redacted.
+
+| Data | Before payment | After payment and confirmation |
+|---|---|---|
+| Order identifier | Share internal order code only. | Same. |
+| Customer name | Do not share full name. Use "client" or a short display label. | Share only if needed for venue entry or provider policy. |
+| Messenger handle, phone, email | Do not share. | Share only by operator action when direct contact is required. |
+| Exact address, room, villa number | Do not share. Share area/neighborhood only. | Share after paid order is confirmed and provider needs arrival details. |
+| Date/time window | Share requested window or preferred slot. | Share final confirmed slot. |
+| Service preferences | Share relevant massage type, duration, guest count, pressure/gender preferences. | Same, plus final agreed details. |
+| Customer notes/media | Share only operator-approved redacted summary. | Share raw media only if explicitly approved and necessary. |
+| Payment details, passport/KYC, documents | Never share with providers. | Never share with providers. |
+
+The customer-facing offer can include provider display name, service summary,
+price, time, and area. It must not include provider phone, private messenger
+identity, or staff personal contacts before payment.
+
+### Provider opt-in and onboarding copy
+
+Provider outreach is allowed only when the provider has an active opt-in record
+for the channel and category. The opt-in record must include:
+
+- provider contact and channel identity;
+- opted-in service categories, starting with `massage`;
+- opt-in source, timestamp, locale, and operator/admin who recorded it;
+- allowed message channel and WhatsApp template categories if WhatsApp is used;
+- provider ability to pause or revoke opt-in.
+
+Default onboarding copy:
+
+```text
+Lead Engine can send you massage booking requests from our tenants in <area> via
+<channel>. Requests may include an anonymized customer label, requested time,
+approximate area, guest count, duration, massage preferences, and redacted notes.
+Do not contact the customer directly until the platform confirms the paid order.
+Reply with available slot, provider price, and any cancellation constraint. Your
+reply is stored in the order audit trail. Reply PAUSE/STOP to opt out.
+```
+
+Russian operator-facing variant:
+
+```text
+Lead Engine может присылать вам заявки на массаж от клиентов tenant'ов в <area>
+через <channel>. До оплаты вы видите только обезличенную заявку: время, район,
+количество гостей, длительность, пожелания и отредактированные заметки. Не
+связывайтесь с клиентом напрямую до подтверждения оплаченного заказа. Ответьте
+доступным временем, ценой провайдера и условиями отмены. Ответ хранится в аудите
+заказа. Напишите PAUSE/STOP, чтобы отключить заявки.
+```
+
+### Cancellation and refund rules
+
+- Before customer payment: customer can cancel for free; no provider contact
+  details are released.
+- If no provider can confirm within the quote TTL, the order moves to
+  `failed`/`cancelled`; any captured payment is fully refunded.
+- After payment but before provider confirmation: if the provider cannot fulfill
+  the offer, the customer gets replacement options or a full refund.
+- After paid provider confirmation: customer can cancel for a full refund until
+  two hours before the confirmed appointment, excluding non-refundable payment
+  processor fees when applicable.
+- Inside the two-hour window, after provider dispatch, customer no-show, or after
+  service start: refund is operator-mediated and must record a reason in
+  `order_events`.
+- Provider cancellation or no-show: customer gets replacement options or a full
+  refund, and the provider event is recorded for routing quality.
+
+Any stricter provider-specific cancellation policy must be shown to the customer
+before payment and approved by an operator in MVP.
+
+### Counter-offers
+
+Providers may counter-offer time and price. The platform must treat provider
+messages as raw input, not customer-visible text:
+
+- provider can reply with one or more available slots and provider-side price;
+- system may parse clear time/price replies into `provider_requests`;
+- ambiguous replies, policy exceptions, or sensitive text require operator
+  review;
+- customer sees only a normalized offer approved by policy or operator;
+- provider quote TTL defaults to 15 minutes, and customer offer TTL defaults to
+  30 minutes unless the operator overrides it.
+
+### Commission model
+
+MVP supports both percentage commission and an optional fixed fee:
+
+- default massage policy: `15%` platform commission on the provider quote;
+- optional fixed service fee may be added per tenant/service and defaults to `0`;
+- customer payable amount = provider quote + percentage commission + fixed fee +
+  configured payment processing fee;
+- provider payout amount = provider quote unless an operator records an adjusted
+  settlement;
+- payout stays manual in MVP, while order events and ledger fields store gross,
+  commission, fixed fee, currency, payment state, and settlement status.
+
 ## Proposed data model
 
 New tenant-scoped tables:
@@ -119,12 +238,13 @@ Candidate provider request statuses:
 
 Acceptance criteria:
 
-- Define which service categories are in MVP. Proposed first slice: massage.
-- Define exactly what customer data can be shared with providers before payment.
-- Define provider opt-in requirements and onboarding copy.
-- Define cancellation/refund rules for MVP.
-- Define whether providers can counter-offer price/time.
-- Define commission model: fixed, percentage, or both.
+- [x] Define which service categories are in MVP. Proposed first slice: massage.
+- [x] Define exactly what customer data can be shared with providers before
+  payment.
+- [x] Define provider opt-in requirements and onboarding copy.
+- [x] Define cancellation/refund rules for MVP.
+- [x] Define whether providers can counter-offer price/time.
+- [x] Define commission model: fixed, percentage, or both.
 
 Dependencies: none.
 
