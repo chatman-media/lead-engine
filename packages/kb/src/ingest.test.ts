@@ -20,6 +20,7 @@ import type { IKbStore } from "./types.ts";
 interface FakeStoreState {
   docs: Map<string, { id: number; content_hash: string; chunkCount: number }>;
   inserted: number;
+  insertedEmbeddings: Array<number[] | null>;
   deleted: number[];
   nextId: number;
 }
@@ -46,14 +47,17 @@ function fakeStore(state: FakeStoreState): IKbStore {
       state.docs.set(input.source, { id, content_hash: input.contentHash, chunkCount: 0 });
       return { id };
     },
-    insertChunkWithEmbedding: async () => {
+    insertChunkWithEmbedding: async (
+      input: Parameters<IKbStore["insertChunkWithEmbedding"]>[0],
+    ) => {
       state.inserted++;
+      state.insertedEmbeddings.push(input.embedding);
     },
   } as unknown as IKbStore;
 }
 
 function newState(): FakeStoreState {
-  return { docs: new Map(), inserted: 0, deleted: [], nextId: 1 };
+  return { docs: new Map(), inserted: 0, insertedEmbeddings: [], deleted: [], nextId: 1 };
 }
 
 const embedder: EmbeddingClient = {
@@ -108,6 +112,18 @@ describe("ingestText", () => {
     const r = await ingestText({ title: "  ", body: "" }, { kb: fakeStore(state), embedder });
     expect(r.chunks).toBe(0);
     expect(state.inserted).toBe(0);
+  });
+
+  it("без embedder создаёт text-only чанки", async () => {
+    const state = newState();
+    const r = await ingestText(
+      { title: "Text-only Doc", body: "обязательные правила для текстового поиска" },
+      { kb: fakeStore(state) },
+    );
+    expect(r.created).toBe(true);
+    expect(r.chunks).toBeGreaterThan(0);
+    expect(state.inserted).toBe(r.chunks);
+    expect(state.insertedEmbeddings.every((embedding) => embedding === null)).toBe(true);
   });
 
   it("повторная загрузка идентичного контента → dedup (created:false)", async () => {

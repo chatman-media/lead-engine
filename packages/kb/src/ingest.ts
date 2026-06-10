@@ -10,7 +10,7 @@ const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf"]);
 
 export interface IngestDeps {
   kb: IKbStore;
-  embedder: EmbeddingClient;
+  embedder?: EmbeddingClient | null;
   chunk?: Partial<ChunkOptions>;
   topic?: string | null;
   scope?: KbScope | null;
@@ -65,10 +65,10 @@ export async function ingestFile(path: string, deps: IngestDeps): Promise<Ingest
     return { source, documentId: doc.id, chunks: 0, created: true };
   }
 
-  const vectors = await deps.embedder.embed(chunks.map((c) => c.text));
+  const vectors = deps.embedder ? await deps.embedder.embed(chunks.map((c) => c.text)) : [];
   for (const [i, chunk] of chunks.entries()) {
-    const vec = vectors[i];
-    if (!vec) throw new Error(`embedder returned no vector for chunk ${i}`);
+    const vec = deps.embedder ? (vectors[i] ?? null) : null;
+    if (deps.embedder && !vec) throw new Error(`embedder returned no vector for chunk ${i}`);
     await deps.kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: chunk.index,
@@ -120,10 +120,10 @@ export async function ingestText(
     return { source, documentId: doc.id, chunks: 0, created: true };
   }
 
-  const vectors = await deps.embedder.embed(chunks.map((c) => c.text));
+  const vectors = deps.embedder ? await deps.embedder.embed(chunks.map((c) => c.text)) : [];
   for (const [i, chunk] of chunks.entries()) {
-    const vec = vectors[i];
-    if (!vec) throw new Error(`embedder returned no vector for chunk ${i}`);
+    const vec = deps.embedder ? (vectors[i] ?? null) : null;
+    if (deps.embedder && !vec) throw new Error(`embedder returned no vector for chunk ${i}`);
     await deps.kb.insertChunkWithEmbedding({
       documentId: doc.id,
       chunkIndex: chunk.index,

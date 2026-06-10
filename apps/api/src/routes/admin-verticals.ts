@@ -163,40 +163,42 @@ export function makeAdminVerticalsRoutes(opts: AdminVerticalsRoutesOpts): Hono {
       report.styles = { created: stylesCreated, updated: stylesUpdated };
     }
 
-    // 4. KB documents ingest (только если embedder доступен)
+    // 4. KB documents ingest. Если embedder недоступен, сохраняем text-only
+    // chunks: они участвуют в BM25/text fallback, но не в vector search.
     if (tpl.kbDocuments && tpl.kbDocuments.length > 0) {
-      if (!opts.resolveEmbedder) {
-        report.kbDocuments = { skipped: true, reason: "no embedder resolver configured" };
-      } else {
-        let embedder: EmbeddingClient;
+      let embedder: EmbeddingClient | null = null;
+      if (opts.resolveEmbedder) {
         try {
           embedder = opts.resolveEmbedder(tenantId);
         } catch {
-          report.kbDocuments = { skipped: true, reason: "embedder not configured for tenant" };
-          embedder = null as unknown as EmbeddingClient;
-        }
-
-        if (embedder) {
-          let docsIngested = 0;
-          for (const doc of tpl.kbDocuments) {
-            const scope = resolveVerticalKbDocScope(doc.scope, installedFunnelId);
-            await withTenant(opts.db, tenantId, async (tx) => {
-              const kb = new DrizzleKbStore({ db: tx, tenantId });
-              await ingestText(
-                { title: doc.title, body: doc.body },
-                {
-                  kb,
-                  embedder: embedder as unknown as Parameters<typeof ingestText>[1]["embedder"],
-                  ...(doc.topic ? { topic: doc.topic } : {}),
-                  ...(scope ? { scope } : {}),
-                },
-              );
-            });
-            docsIngested++;
-          }
-          report.kbDocuments = { ingested: docsIngested };
+          embedder = null;
         }
       }
+
+      let docsIngested = 0;
+      for (const doc of tpl.kbDocuments) {
+        const scope = resolveVerticalKbDocScope(doc.scope, installedFunnelId);
+        await withTenant(opts.db, tenantId, async (tx) => {
+          const kb = new DrizzleKbStore({ db: tx, tenantId });
+          await ingestText(
+            { title: doc.title, body: doc.body },
+            {
+              kb,
+              ...(embedder
+                ? { embedder: embedder as unknown as Parameters<typeof ingestText>[1]["embedder"] }
+                : {}),
+              ...(doc.topic ? { topic: doc.topic } : {}),
+              ...(scope ? { scope } : {}),
+            },
+          );
+        });
+        docsIngested++;
+      }
+      report.kbDocuments = {
+        ingested: docsIngested,
+        mode: embedder ? "embedded" : "text_only",
+        ...(embedder ? {} : { warning: "embedder unavailable; stored text-only KB chunks" }),
+      };
     }
 
     await recordAudit(opts.db, {

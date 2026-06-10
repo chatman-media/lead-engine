@@ -9,6 +9,7 @@ import {
   applyAllMigrations,
   createIsolatedDb,
   funnels,
+  kbChunks,
   kbDocuments,
   schema,
   styles as stylesTable,
@@ -22,7 +23,7 @@ import { EXCHANGE_V1 } from "@chatman-media/vertical-exchange";
 import { REAL_ESTATE_STYLES } from "@chatman-media/vertical-real-estate";
 import { NullEmbeddingClient } from "@chatman-media/llm-router";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Hono } from "hono";
 import { resolve } from "node:path";
@@ -143,10 +144,11 @@ describe("admin-verticals install → vertical_template_id", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       funnel?: { funnelId: number };
-      kbDocuments?: { ingested?: number };
+      kbDocuments?: { ingested?: number; mode?: string };
     };
     const expectedDocs = EXCHANGE_V1.kbDocuments?.length ?? 0;
     expect(body.kbDocuments?.ingested).toBe(expectedDocs);
+    expect(body.kbDocuments?.mode).toBe("embedded");
 
     const rows = await db
       .select({
@@ -164,6 +166,66 @@ describe("admin-verticals install → vertical_template_id", () => {
     const stageDoc = seeded.find((row) => row.scopeType === "stage");
     expect(stageDoc?.funnelId).toBe(body.funnel?.funnelId);
     expect(stageDoc?.stageSlug).toBe("quote_calculated");
+  });
+
+  it("install exchange_v1 сидит text-only KB docs без embedder", async () => {
+    if (!sql) return;
+    const noEmbedApp = new Hono();
+    // biome-ignore lint/suspicious/noExplicitAny: Drizzle generic
+    noEmbedApp.route("/", makeAuthRoutes({ db: db as any, secret: SECRET }));
+    noEmbedApp.use("/api/admin/*", makeRequireAuth({ db: db as never, secret: SECRET }));
+    noEmbedApp.route("/", makeAdminVerticalsRoutes({ db }));
+
+    const signup = await noEmbedApp.request("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "vert-no-embed@demo.io", password: "strong-pwd-12345" }),
+    });
+    expect(signup.status).toBe(200);
+    const signupBody = (await signup.json()) as { token: string; admin: { tenantId: number } };
+
+    const res = await noEmbedApp.request("/api/admin/verticals/exchange_v1/install", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${signupBody.token}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      funnel?: { funnelId: number };
+      kbDocuments?: { ingested?: number; mode?: string };
+    };
+    const expectedDocs = EXCHANGE_V1.kbDocuments?.length ?? 0;
+    expect(body.kbDocuments?.ingested).toBe(expectedDocs);
+    expect(body.kbDocuments?.mode).toBe("text_only");
+
+    const docs = await db
+      .select({
+        id: kbDocuments.id,
+        title: kbDocuments.title,
+        scopeType: kbDocuments.scopeType,
+        funnelId: kbDocuments.funnelId,
+        stageSlug: kbDocuments.stageSlug,
+      })
+      .from(kbDocuments)
+      .where(eq(kbDocuments.tenantId, signupBody.admin.tenantId));
+    const seededTitles = new Set(EXCHANGE_V1.kbDocuments?.map((doc) => doc.title) ?? []);
+    const seeded = docs.filter((doc) => seededTitles.has(doc.title));
+    expect(seeded.length).toBe(expectedDocs);
+    expect(seeded.find((doc) => doc.scopeType === "stage")?.stageSlug).toBe("quote_calculated");
+
+    const chunks = await db
+      .select({ id: kbChunks.id, embedding: kbChunks.embedding })
+      .from(kbChunks)
+      .where(
+        and(
+          eq(kbChunks.tenantId, signupBody.admin.tenantId),
+          inArray(
+            kbChunks.documentId,
+            seeded.map((doc) => doc.id),
+          ),
+        ),
+      );
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks.every((chunk) => chunk.embedding === null)).toBe(true);
   });
 
   it("повторная установка (existing funnel) не теряет vertical_template_id", async () => {

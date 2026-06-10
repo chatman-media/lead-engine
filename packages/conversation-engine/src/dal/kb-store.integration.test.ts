@@ -237,6 +237,28 @@ describe("DrizzleKbStore — search", () => {
     expect(Array.isArray(hits)).toBe(true);
   });
 
+  it("textSearch находит text-only chunk без embedding", async () => {
+    if (!enabled) return;
+    const doc = await store.upsertDocument({
+      source: "inline:text-only",
+      title: "Text-only rules",
+      contentHash: "hash-text-only",
+    });
+    await store.insertChunkWithEmbedding({
+      documentId: doc.id,
+      chunkIndex: 0,
+      text: "Текстовый поиск должен находить документ без embedding vector",
+      tokenCount: 8,
+      embedding: null,
+    });
+
+    const textHits = await store.textSearch("текстовый", 5);
+    expect(textHits.some((hit) => hit.document_id === doc.id)).toBe(true);
+
+    const vectorHits = await store.search(vec(0), 20);
+    expect(vectorHits.some((hit) => hit.document_id === doc.id)).toBe(false);
+  });
+
   it("textSearch пустой/мусорный query → []", async () => {
     if (!enabled) return;
     expect(await store.textSearch("   ", 5)).toEqual([]);
