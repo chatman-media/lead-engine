@@ -123,6 +123,137 @@ describe("parseUpdate", () => {
     expect(inbound?.externalUserId).toBe("500");
   });
 
+  it("парсит video с caption", () => {
+    const update: TgUpdate = {
+      update_id: 10,
+      message: {
+        message_id: 11,
+        chat: { id: 600, type: "private" },
+        from: { id: 600 },
+        date: 1700000000,
+        caption: "watch",
+        video: {
+          file_id: "vid1",
+          file_unique_id: "vu1",
+          width: 640,
+          height: 480,
+          duration: 30,
+          mime_type: "video/mp4",
+        },
+      },
+    };
+    const inbound = parseUpdate(CH, update);
+    expect(inbound?.parts).toEqual([
+      {
+        kind: "video",
+        mediaRef: { channelId: CH, externalRef: "vid1" },
+        caption: "watch",
+      },
+    ]);
+  });
+
+  it("парсит video без caption — нет caption-поля", () => {
+    const update: TgUpdate = {
+      update_id: 11,
+      message: {
+        message_id: 12,
+        chat: { id: 600, type: "private" },
+        from: { id: 600 },
+        date: 1700000000,
+        video: { file_id: "vid2", file_unique_id: "vu2", width: 1, height: 1, duration: 2 },
+      },
+    };
+    expect(parseUpdate(CH, update)?.parts).toEqual([
+      { kind: "video", mediaRef: { channelId: CH, externalRef: "vid2" } },
+    ]);
+  });
+
+  it("парсит video_note («кружок») с durationSec", () => {
+    const update: TgUpdate = {
+      update_id: 12,
+      message: {
+        message_id: 13,
+        chat: { id: 700, type: "private" },
+        from: { id: 700 },
+        date: 1700000000,
+        video_note: { file_id: "vn1", file_unique_id: "vnu1", length: 240, duration: 14 },
+      },
+    };
+    expect(parseUpdate(CH, update)?.parts).toEqual([
+      {
+        kind: "video_note",
+        mediaRef: { channelId: CH, externalRef: "vn1" },
+        durationSec: 14,
+      },
+    ]);
+  });
+
+  it("парсит video_note с duration=0 — durationSec опущен", () => {
+    const update: TgUpdate = {
+      update_id: 13,
+      message: {
+        message_id: 14,
+        chat: { id: 700, type: "private" },
+        from: { id: 700 },
+        date: 1700000000,
+        video_note: { file_id: "vn2", file_unique_id: "vnu2", length: 240, duration: 0 },
+      },
+    };
+    expect(parseUpdate(CH, update)?.parts).toEqual([
+      { kind: "video_note", mediaRef: { channelId: CH, externalRef: "vn2" } },
+    ]);
+  });
+
+  it("caption без media и без text → трактуется как text", () => {
+    const update: TgUpdate = {
+      update_id: 14,
+      message: {
+        message_id: 15,
+        chat: { id: 800, type: "private" },
+        from: { id: 800 },
+        date: 1700000000,
+        caption: "stray caption",
+      },
+    };
+    expect(parseUpdate(CH, update)?.parts).toEqual([{ kind: "text", text: "stray caption" }]);
+  });
+
+  it("edited_message парсится как обычное сообщение", () => {
+    const update: TgUpdate = {
+      update_id: 15,
+      edited_message: {
+        message_id: 16,
+        chat: { id: 900, type: "private" },
+        from: { id: 900 },
+        date: 1700000001,
+        text: "fixed typo",
+      },
+    };
+    const inbound = parseUpdate(CH, update);
+    expect(inbound?.externalMessageId).toBe("16");
+    expect(inbound?.parts).toEqual([{ kind: "text", text: "fixed typo" }]);
+  });
+
+  it("callback_query без data → null", () => {
+    const update: TgUpdate = {
+      update_id: 16,
+      callback_query: {
+        id: "cb-1",
+        from: { id: 1 },
+        message: { message_id: 5, chat: { id: 1, type: "private" }, date: 0 },
+      },
+    };
+    expect(parseUpdate(CH, update)).toBeNull();
+  });
+
+  it("callback_query без message → null", () => {
+    const update: TgUpdate = {
+      update_id: 17,
+      callback_query: { id: "cb-2", from: { id: 1 }, data: "x" },
+    };
+    expect(parseUpdate(CH, update)).toBeNull();
+  });
+
   it("возвращает null для пустого update без message/callback", () => {
     expect(parseUpdate(CH, { update_id: 6 })).toBeNull();
   });

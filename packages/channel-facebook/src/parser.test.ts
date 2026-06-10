@@ -41,6 +41,16 @@ describe("parseWebhookPayload (Messenger)", () => {
     ]);
   });
 
+  it("video attachment → video InboundPart", () => {
+    const out = parseWebhookPayload(
+      CH,
+      page([ev({ message: { mid: "m.MV", attachments: [{ type: "video", payload: { url: "https://cdn/v.mp4" } }] } })]),
+    );
+    expect(out[0]?.parts).toEqual([
+      { kind: "video", mediaRef: { channelId: CH, externalRef: "https://cdn/v.mp4" } },
+    ]);
+  });
+
   it("audio → voice, file → document", () => {
     const audio = parseWebhookPayload(
       CH,
@@ -96,6 +106,14 @@ describe("parseWebhookPayload (Messenger)", () => {
     const out = parseWebhookPayload(
       CH,
       page([ev({ delivery: { mids: ["m.x"] } }), ev({ read: { watermark: 1 } })]),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("attachment неизвестного типа (location) → skip", () => {
+    const out = parseWebhookPayload(
+      CH,
+      page([ev({ message: { mid: "m.L", attachments: [{ type: "location", payload: { url: "u-l" } }] } })]),
     );
     expect(out).toEqual([]);
   });

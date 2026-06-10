@@ -98,4 +98,103 @@ describe("VkClient", () => {
 		});
 		await expect(c.getGroupInfo("1")).rejects.toThrow(VkApiError);
 	});
+
+	it("sendText без randomId генерит random_id сам", async () => {
+		const calls: MockCall[] = [];
+		const c = new VkClient({
+			accessToken: "tok",
+			fetch: mockFetch(() => ({ body: { response: 1 } }), calls),
+		});
+		await c.sendText({ peerId: 42, text: "hi" });
+		const body = calls[0]?.init?.body as URLSearchParams;
+		const randomId = Number(body.get("random_id"));
+		expect(Number.isInteger(randomId)).toBe(true);
+		expect(randomId).toBeGreaterThanOrEqual(0);
+	});
+
+	it("markAsRead вызывает messages.markAsRead с peer_id", async () => {
+		const calls: MockCall[] = [];
+		const c = new VkClient({
+			accessToken: "tok",
+			fetch: mockFetch(() => ({ body: { response: 1 } }), calls),
+		});
+		await c.markAsRead(555);
+		expect(calls[0]?.url).toBe("https://api.vk.com/method/messages.markAsRead");
+		const body = calls[0]?.init?.body as URLSearchParams;
+		expect(body.get("peer_id")).toBe("555");
+	});
+
+	it("downloadMedia: ok → отдаёт Response как есть", async () => {
+		const calls: MockCall[] = [];
+		const c = new VkClient({
+			accessToken: "tok",
+			fetch: mockFetch(() => ({ text: "BYTES" }), calls),
+		});
+		const res = await c.downloadMedia("https://cdn.vk.com/doc.pdf");
+		expect(await res.text()).toBe("BYTES");
+		expect(calls[0]?.url).toBe("https://cdn.vk.com/doc.pdf");
+	});
+
+	it("downloadMedia: non-ok → VkApiError с телом ответа", async () => {
+		const c = new VkClient({
+			accessToken: "tok",
+			fetch: mockFetch(() => ({ status: 404, text: "not found" })),
+		});
+		await expect(c.downloadMedia("https://cdn.vk.com/x")).rejects.toThrow(
+			/downloadMedia failed \(404\): not found/,
+		);
+	});
+
+	it("невалидный JSON в ответе → VkApiError invalid json", async () => {
+		const c = new VkClient({
+			accessToken: "tok",
+			fetch: mockFetch(() => ({ text: "<html>oops</html>" })),
+		});
+		await expect(c.getGroupInfo("1")).rejects.toThrow(VkApiError);
+	});
+
+	it("пустое тело → '{}' → нет response → VkApiError no response", async () => {
+		const c = new VkClient({
+			accessToken: "tok",
+			fetch: mockFetch(() => ({ text: "" })),
+		});
+		await expect(c.getGroupInfo("1")).rejects.toThrow(/no response in body/);
+	});
+
+	it("HTTP non-ok с валидным JSON → VkApiError со статусом", async () => {
+		const c = new VkClient({
+			accessToken: "tok",
+			fetch: mockFetch(() => ({ status: 500, body: { response: 1 } })),
+		});
+		await expect(c.getGroupInfo("1")).rejects.toThrow(/failed \(500\)/);
+	});
+
+	it("getGroupInfo: пустой массив групп → group not found", async () => {
+		const c = new VkClient({
+			accessToken: "tok",
+			fetch: mockFetch(() => ({ body: { response: [] } })),
+		});
+		await expect(c.getGroupInfo("1")).rejects.toThrow(/group not found/);
+	});
+
+	it("getGroupInfo: object-shape без groups → group not found", async () => {
+		const c = new VkClient({
+			accessToken: "tok",
+			fetch: mockFetch(() => ({ body: { response: {} } })),
+		});
+		await expect(c.getGroupInfo("1")).rejects.toThrow(/group not found/);
+	});
+
+	it("baseUrl с trailing slash нормализуется", async () => {
+		const calls: MockCall[] = [];
+		const c = new VkClient({
+			accessToken: "tok",
+			baseUrl: "https://proxy.example/method/",
+			fetch: mockFetch(() => ({ body: { response: 1 } }), calls),
+		});
+		await c.markAsRead(1);
+		expect(calls[0]?.url).toBe(
+			"https://proxy.example/method/messages.markAsRead",
+		);
+	});
 });

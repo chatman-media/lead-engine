@@ -119,6 +119,94 @@ describe("parseWebhookPayload", () => {
     ]);
   });
 
+  it("video с caption → video InboundPart", () => {
+    const out = parseWebhookPayload(
+      CH,
+      envelope([
+        {
+          from: "79161234567",
+          id: "wa.MV",
+          timestamp: "1700000005",
+          type: "video",
+          video: { id: "media-VID-1", mime_type: "video/mp4", caption: "clip" },
+        },
+      ]),
+    );
+    expect(out[0]?.parts).toEqual([
+      {
+        kind: "video",
+        mediaRef: { channelId: CH, externalRef: "media-VID-1" },
+        caption: "clip",
+      },
+    ]);
+  });
+
+  it("video без caption → нет caption-поля", () => {
+    const out = parseWebhookPayload(
+      CH,
+      envelope([
+        {
+          from: "79161234567",
+          id: "wa.MV2",
+          timestamp: "1700000006",
+          type: "video",
+          video: { id: "media-VID-2" },
+        },
+      ]),
+    );
+    expect(out[0]?.parts).toEqual([
+      { kind: "video", mediaRef: { channelId: CH, externalRef: "media-VID-2" } },
+    ]);
+  });
+
+  it("audio (не voice) → voice InboundPart", () => {
+    const out = parseWebhookPayload(
+      CH,
+      envelope([
+        {
+          from: "79161234567",
+          id: "wa.MA",
+          timestamp: "1700000007",
+          type: "audio",
+          audio: { id: "media-AUD-1", mime_type: "audio/mpeg" },
+        },
+      ]),
+    );
+    expect(out[0]?.parts).toEqual([
+      { kind: "voice", mediaRef: { channelId: CH, externalRef: "media-AUD-1" } },
+    ]);
+  });
+
+  it("payload без entry → пусто", () => {
+    expect(
+      parseWebhookPayload(CH, { object: "whatsapp_business_account" } as never),
+    ).toEqual([]);
+    expect(
+      parseWebhookPayload(CH, {
+        object: "whatsapp_business_account",
+        entry: "garbage",
+      } as never),
+    ).toEqual([]);
+  });
+
+  it("change.field != messages → skip", () => {
+    const payload = {
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "biz-1",
+          changes: [
+            {
+              field: "message_template_status_update",
+              value: { messaging_product: "whatsapp" },
+            },
+          ],
+        },
+      ],
+    } as never;
+    expect(parseWebhookPayload(CH, payload)).toEqual([]);
+  });
+
   it("batch — два сообщения в одном webhook", () => {
     const out = parseWebhookPayload(
       CH,

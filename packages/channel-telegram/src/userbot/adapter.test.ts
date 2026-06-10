@@ -242,6 +242,30 @@ describe("connect() (через clientFactory)", () => {
     await expect(a.connect()).rejects.toThrow("connect failed");
   });
 
+  it("дефолтная фабрика (без clientFactory) строит реальный gramjs-клиент: патченный connect → auth-throw", async () => {
+    // defaultGramjsClientFactory — production-путь. Сам конструктор gramjs
+    // оффлайновый; сетевой connect() патчим на прототипе, чтобы покрыть
+    // фабрику без живого MTProto.
+    const { TelegramClient: RealGramjs } = await import("telegram");
+    const orig = RealGramjs.prototype.connect;
+    RealGramjs.prototype.connect = async function patched() {
+      throw new Error("AUTH_KEY_DUPLICATED");
+    };
+    try {
+      const a = new TelegramUserbotAdapter({
+        id: "ub1",
+        apiId: 1,
+        apiHash: "h",
+        sessionString: "",
+        connectionRetries: 1,
+        retryDelayMs: 0,
+      });
+      await expect(a.connect()).rejects.toThrow("auth key revoked");
+    } finally {
+      RealGramjs.prototype.connect = orig;
+    }
+  });
+
   it("идемпотентность: уже connected → фабрика не зовётся", async () => {
     const a = new TelegramUserbotAdapter({
       id: "ub1", apiId: 1, apiHash: "h", sessionString: "",

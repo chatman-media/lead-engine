@@ -115,6 +115,107 @@ describe("MessengerAdapter", () => {
     ).rejects.toThrow(/Messenger sendText failed \(401\)/);
   });
 
+  it("rawClient отдаёт нижележащий MessengerClient", () => {
+    const a = adapter(((async () => new Response("{}")) as unknown as typeof fetch));
+    expect(a.rawClient).toBeDefined();
+    expect(typeof a.rawClient.sendText).toBe("function");
+  });
+
+  it("send video и document parts → attachment video / file", async () => {
+    const { fetch, calls } = fakeFetch([
+      { status: 200, body: { message_id: "m.VID" } },
+      { status: 200, body: { message_id: "m.DOC" } },
+    ]);
+    const a = adapter(fetch);
+    const sent = await a.send({
+      channelId: "fb1",
+      externalUserId: "PSID",
+      parts: [
+        { kind: "video", mediaRef: { channelId: "fb1", externalRef: "https://cdn/v.mp4" } },
+        { kind: "document", mediaRef: { channelId: "fb1", externalRef: "https://cdn/d.pdf" } },
+      ],
+    });
+    expect(sent.externalMessageId).toBe("m.VID");
+    expect(calls[0]?.body).toMatchObject({
+      message: { attachment: { type: "video", payload: { url: "https://cdn/v.mp4" } } },
+    });
+    expect(calls[1]?.body).toMatchObject({
+      message: { attachment: { type: "file", payload: { url: "https://cdn/d.pdf" } } },
+    });
+  });
+
+  it("edit/delete → not supported", async () => {
+    const a = adapter(((async () => new Response("{}")) as unknown as typeof fetch));
+    await expect(
+      a.edit({ channelId: "fb1", externalUserId: "1", externalMessageId: "2", text: "x" }),
+    ).rejects.toThrow(/edit not supported/);
+    await expect(
+      a.delete({ channelId: "fb1", externalUserId: "1", externalMessageId: "2" }),
+    ).rejects.toThrow(/delete not supported/);
+  });
+
+  it("downloadMedia: ok → Response; non-ok → MessengerApiError", async () => {
+    const okFetch = (async () => new Response("BYTES", { status: 200 })) as unknown as typeof fetch;
+    const res = await adapter(okFetch).downloadMedia({
+      channelId: "fb1",
+      externalRef: "https://cdn/i.jpg",
+    });
+    expect(await res.text()).toBe("BYTES");
+
+    const badFetch = (async () => new Response("gone", { status: 404 })) as unknown as typeof fetch;
+    await expect(
+      adapter(badFetch).downloadMedia({ channelId: "fb1", externalRef: "https://cdn/x" }),
+    ).rejects.toThrow(/downloadMedia failed \(404\)/);
+  });
+
+  it("pushUpdate при ожидающем receive() резолвит waiter напрямую", async () => {
+    const a = adapter(((async () => new Response("{}")) as unknown as typeof fetch));
+    const iter = a.receive()[Symbol.asyncIterator]();
+    const pending = iter.next();
+    a.pushUpdate({
+      object: "page",
+      entry: [
+        {
+          id: "PAGE-1",
+          time: 1_700_000_000_000,
+          messaging: [
+            {
+              sender: { id: "PSID" },
+              recipient: { id: "PAGE-1" },
+              timestamp: 1_700_000_000_000,
+              message: { mid: "m.W1", text: "ждали" },
+            },
+          ],
+        },
+      ],
+    });
+    const next = await pending;
+    expect(next.done).toBe(false);
+    expect(next.value.parts).toEqual([{ kind: "text", text: "ждали" }]);
+  });
+
+  it("receive: уже aborted signal → done; abort во время ожидания → done", async () => {
+    const a = adapter(((async () => new Response("{}")) as unknown as typeof fetch));
+    const aborted = new AbortController();
+    aborted.abort();
+    expect((await a.receive(aborted.signal)[Symbol.asyncIterator]().next()).done).toBe(true);
+
+    const ctrl = new AbortController();
+    const iter = a.receive(ctrl.signal)[Symbol.asyncIterator]();
+    const pending = iter.next();
+    ctrl.abort();
+    expect((await pending).done).toBe(true);
+  });
+
+  it("close() при ожидающем receive() → done; после close receive сразу done", async () => {
+    const a = adapter(((async () => new Response("{}")) as unknown as typeof fetch));
+    const iter = a.receive()[Symbol.asyncIterator]();
+    const pending = iter.next();
+    a.close();
+    expect((await pending).done).toBe(true);
+    expect((await iter.next()).done).toBe(true);
+  });
+
   it("pushUpdate + receive() даёт Inbound", async () => {
     const a = adapter(((async () => new Response("{}", { status: 200 })) as unknown as typeof fetch));
     const payload: FbWebhookPayload = {
@@ -179,5 +280,16 @@ describe("verifyWebhookSubscription (Messenger)", () => {
     expect(
       verifyWebhookSubscription({ mode: "x", token: "s", challenge: "c", expectedVerifyToken: "s" }).status,
     ).toBe(400);
+  });
+
+  it("missing challenge → 400", () => {
+    const r = verifyWebhookSubscription({
+      mode: "subscribe",
+      token: "secret",
+      challenge: null,
+      expectedVerifyToken: "secret",
+    });
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(400);
   });
 });
