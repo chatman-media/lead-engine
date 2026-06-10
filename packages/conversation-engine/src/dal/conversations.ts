@@ -1,11 +1,12 @@
 import { conversations as conversationsTable } from "@chatman-media/storage";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { RepoCtx } from "./types.ts";
 
 export interface ConversationRow {
   id: number;
   tenantId: number;
   userId: number;
+  channelId: number | null;
   source: string;
   mode: "ai" | "queued" | "human";
   status: "open" | "pending" | "resolved";
@@ -29,16 +30,17 @@ export interface ConversationRow {
  * После Этапа 8 (миграция users → contacts) переименуем колонку в
  * contact_id.
  *
- * `source` — legacy enum 'bot|userbot|self_play'. В будущей миграции
- * заменяется на channel_id напрямую (FK на channels). Сейчас contactId
- * прокидывается дополнительно — каждая conversation per (contact_id, source).
+ * `source` is the legacy 'bot|userbot|self_play' enum for older inbox/query
+ * paths. New channel-aware conversations use channelId and are unique per
+ * (contact_id, channel_id); legacy rows without channelId stay unique per
+ * (contact_id, source).
  */
 export class ConversationsRepo {
   constructor(private readonly ctx: RepoCtx) {}
 
   /**
-   * Найти существующую conversation per (contactId, source). UNIQUE
-   * uniq_conversations_user_source гарантирует одну строку.
+   * Find the legacy conversation per (contactId, source). The partial
+   * uniq_conversations_user_source index only covers channel_id IS NULL rows.
    */
   async findByContactAndSource(contactId: number, source: string): Promise<ConversationRow | null> {
     const [row] = await this.ctx.db
@@ -49,6 +51,22 @@ export class ConversationsRepo {
           eq(conversationsTable.tenantId, this.ctx.tenantId),
           eq(conversationsTable.userId, contactId),
           eq(conversationsTable.source, source),
+          isNull(conversationsTable.channelId),
+        ),
+      );
+    return (row as ConversationRow) ?? null;
+  }
+
+  /** Find a channel-aware conversation per (contactId, channelId). */
+  async findByContactAndChannel(contactId: number, channelId: number): Promise<ConversationRow | null> {
+    const [row] = await this.ctx.db
+      .select()
+      .from(conversationsTable)
+      .where(
+        and(
+          eq(conversationsTable.tenantId, this.ctx.tenantId),
+          eq(conversationsTable.userId, contactId),
+          eq(conversationsTable.channelId, channelId),
         ),
       );
     return (row as ConversationRow) ?? null;
@@ -57,6 +75,7 @@ export class ConversationsRepo {
   async create(opts: {
     contactId: number;
     source: string;
+    channelId?: number | null;
     mode?: "ai" | "queued" | "human";
     styleId?: number | null;
     experimentId?: number | null;
@@ -68,6 +87,7 @@ export class ConversationsRepo {
         tenantId: this.ctx.tenantId,
         userId: opts.contactId,
         source: opts.source,
+        ...(opts.channelId !== undefined ? { channelId: opts.channelId } : {}),
         ...(opts.mode ? { mode: opts.mode } : {}),
         ...(opts.styleId !== undefined ? { styleId: opts.styleId } : {}),
         ...(opts.experimentId !== undefined ? { experimentId: opts.experimentId } : {}),

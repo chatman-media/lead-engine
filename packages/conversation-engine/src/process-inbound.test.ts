@@ -3,8 +3,8 @@ import type { Inbound, OutboundEnvelope } from "@chatman-media/channel-core";
 import type { ContactsRepo } from "./dal/index.ts";
 import {
 	processInbound,
-	transcribeInboundVoice,
 	type ReplyStrategy,
+	transcribeInboundVoice,
 } from "./process-inbound.ts";
 import {
 	FakeChannelIdentitiesRepo,
@@ -45,7 +45,10 @@ function textInbound(opts: {
 	};
 }
 
-function makeDeps(reply: ReplyStrategy | null = null) {
+function makeDeps(
+	reply: ReplyStrategy | null = null,
+	channel: ChannelContext = CHANNEL,
+) {
 	const contacts = new FakeContactsRepo(TENANT.tenantId);
 	const identities = new FakeChannelIdentitiesRepo();
 	const conversations = new FakeConversationsRepo(TENANT.tenantId);
@@ -53,8 +56,8 @@ function makeDeps(reply: ReplyStrategy | null = null) {
 	const outbound = new FakeOutboundQueueRepo(TENANT.tenantId);
 	return {
 		tenant: TENANT,
-		channel: CHANNEL,
-		channelDbId: 10,
+		channel,
+		channelDbId: channel.channelId,
 		contacts: contacts as unknown as ContactsRepo,
 		identities: identities as unknown as Parameters<
 			typeof processInbound
@@ -113,6 +116,48 @@ describe("processInbound", () => {
 		expect(deps._fakes.contacts.all()).toHaveLength(1);
 		expect(deps._fakes.conversations.all()).toHaveLength(1);
 		expect(deps._fakes.messages.all()).toHaveLength(2);
+	});
+
+	it("same contact can keep separate conversations per real channel", async () => {
+		const contact = await deps._fakes.contacts.create({ displayName: "Multi" });
+		await deps._fakes.identities.create({
+			contactId: contact.id,
+			channelId: 10,
+			externalUserId: "u1",
+		});
+		await deps._fakes.identities.create({
+			contactId: contact.id,
+			channelId: 20,
+			externalUserId: "u1",
+		});
+
+		await processInbound(
+			textInbound({ extUserId: "u1", extMessageId: "100", text: "tg" }),
+			deps,
+		);
+		const whatsappDeps = {
+			...deps,
+			channel: {
+				channelId: 20,
+				kind: "whatsapp" as const,
+				externalId: "wa",
+			},
+			channelDbId: 20,
+		};
+		await processInbound(
+			textInbound({ extUserId: "u1", extMessageId: "200", text: "wa" }),
+			whatsappDeps,
+		);
+
+		expect(deps._fakes.contacts.all()).toHaveLength(1);
+		expect(deps._fakes.conversations.all()).toHaveLength(2);
+		expect(deps._fakes.conversations.all().map((row) => row.channelId)).toEqual(
+			[10, 20],
+		);
+		expect(deps._fakes.conversations.all().map((row) => row.source)).toEqual([
+			"bot",
+			"bot",
+		]);
 	});
 
 	it("дедупает повторный inbound с тем же external_message_id (Telegram retry webhook)", async () => {

@@ -205,10 +205,11 @@ Candidate provider request statuses:
 - `outbound_queue` remains the only dispatch path.
 - `ChannelAdapter` remains transport-only. Order orchestration should live above
   channel adapters.
-- The current `conversations.source` compatibility shim maps non-Telegram
-  channels to `bot`. This is acceptable for simple inbound support, but not for a
-  real cross-channel provider relay. The epic should include migration toward a
-  real `conversations.channel_id` or equivalent relation.
+- `conversations.channel_id` is the first-class channel relation for new inbound
+  conversations. The legacy `conversations.source` field remains as a
+  compatibility/inbox field (`bot`, `userbot`, `self_play`), but WhatsApp, web,
+  Facebook, VK, Max, and Telegram bot conversations are no longer distinguished
+  by `source` alone.
 - WhatsApp proactive messages need a template-aware send path and provider opt-in
   records. Free-form WhatsApp provider messaging should only happen when the
   service window allows it.
@@ -270,11 +271,14 @@ Dependencies: BPR-0.
 Acceptance criteria:
 
 - Add a first-class `channel_id` relation to conversations, or an equivalent
-  mapping that distinguishes Telegram, WhatsApp, web, Facebook, VK, and self-play.
-- Migrate existing `source` behavior without breaking current inbox queries.
+  mapping that distinguishes Telegram, WhatsApp, web, Facebook, VK, Max, and
+  self-play.
+- Migrate existing `source` behavior without breaking current inbox queries:
+  legacy rows with `channel_id IS NULL` continue to be unique by `(user_id,
+  source)`, while new rows are unique by `(user_id, channel_id)`.
 - Update `resolveConversation` so WhatsApp/web conversations no longer collapse
   into `source='bot'`.
-- Update route and worker tests for Telegram, WhatsApp, and web.
+- Update pipeline and migration tests for Telegram, WhatsApp, and web.
 
 Dependencies: BPR-1 can run in parallel, but relay runtime depends on this.
 

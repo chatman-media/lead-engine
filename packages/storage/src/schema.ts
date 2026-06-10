@@ -112,6 +112,7 @@ export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
   tenantId: integer("tenant_id").notNull().default(1).references(() => tenants.id, { onDelete: "cascade" }),
   userId: integer("user_id").notNull().references((): import("drizzle-orm/pg-core").AnyPgColumn => contacts.id, { onDelete: "cascade" }),
+  channelId: integer("channel_id").references((): import("drizzle-orm/pg-core").AnyPgColumn => channels.id, { onDelete: "set null" }),
   // Канал входа: bot (BotAPI, для тестов), userbot (MTProto, реальные лиды),
   // self_play (синтетические диалоги). Тот же кандидат, пишущий в bot и
   // userbot, получает два независимых conversation.
@@ -133,7 +134,9 @@ export const conversations = pgTable("conversations", {
   check("conversations_source_check", sql`${t.source} IN ('bot', 'userbot', 'self_play')`),
   check("conversations_mode_check", sql`${t.mode} IN ('ai', 'queued', 'human')`),
   check("conversations_status_check", sql`${t.status} IN ('open', 'pending', 'resolved')`),
-  uniqueIndex("uniq_conversations_user_source").on(t.userId, t.source),
+  uniqueIndex("uniq_conversations_user_source").on(t.userId, t.source).where(sql`${t.channelId} IS NULL`),
+  uniqueIndex("uniq_conversations_user_channel").on(t.userId, t.channelId).where(sql`${t.channelId} IS NOT NULL`),
+  index("idx_conversations_channel").on(t.channelId).where(sql`${t.channelId} IS NOT NULL`),
   index("idx_conv_mode_last").on(t.mode, sql`${t.lastMessageAt} DESC NULLS LAST`),
   index("idx_conv_status_last").on(t.status, sql`${t.lastMessageAt} DESC NULLS LAST`),
   index("idx_conv_assignee_last").on(t.assignedAdminId, sql`${t.lastMessageAt} DESC NULLS LAST`),

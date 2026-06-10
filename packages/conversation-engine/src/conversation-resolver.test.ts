@@ -2,46 +2,167 @@ import { describe, expect, it } from "bun:test";
 import { resolveConversation } from "./conversation-resolver.ts";
 import type { ConversationsRepo } from "./dal/index.ts";
 
-function repo(existing?: unknown) {
-  const created: Array<Record<string, unknown>> = [];
-  const conversations = {
-    findByContactAndSource: async () => existing,
-    create: async (data: Record<string, unknown>) => {
-      const c = { id: 100, ...data };
-      created.push(c);
-      return c;
-    },
-  } as unknown as ConversationsRepo;
-  return { conversations, created };
+function repo(existing?: unknown | unknown[]) {
+	const created: Array<Record<string, unknown>> = [];
+	const rows = Array.isArray(existing)
+		? (existing as Record<string, unknown>[])
+		: existing
+			? [existing as Record<string, unknown>]
+			: [];
+	let nextId = 100;
+	const conversations = {
+		findByContactAndSource: async (contactId: number, source: string) =>
+			rows.find(
+				(row) =>
+					row.userId === contactId &&
+					row.source === source &&
+					row.channelId === null,
+			) ?? null,
+		findByContactAndChannel: async (contactId: number, channelId: number) =>
+			rows.find(
+				(row) => row.userId === contactId && row.channelId === channelId,
+			) ?? null,
+		create: async (data: Record<string, unknown>) => {
+			const c = { id: nextId++, ...data };
+			created.push(c);
+			rows.push({ userId: data.contactId, ...c });
+			return c;
+		},
+	} as unknown as ConversationsRepo;
+	return { conversations, created };
 }
 
 describe("resolveConversation", () => {
-  it("существующий диалог → created:false, без создания", async () => {
-    const { conversations, created } = repo({ id: 7, source: "bot" });
-    const res = await resolveConversation({ contactId: 1, channelKind: "telegram_bot", conversations, nowEpoch: 0 });
-    expect(res.created).toBe(false);
-    expect(res.conversation.id).toBe(7);
-    expect(created).toHaveLength(0);
-  });
+	it("существующий диалог → created:false, без создания", async () => {
+		const { conversations, created } = repo({
+			id: 7,
+			userId: 1,
+			channelId: 10,
+			source: "bot",
+		});
+		const res = await resolveConversation({
+			contactId: 1,
+			channelId: 10,
+			channelKind: "telegram_bot",
+			conversations,
+			nowEpoch: 0,
+		});
+		expect(res.created).toBe(false);
+		expect(res.conversation.id).toBe(7);
+		expect(created).toHaveLength(0);
+	});
 
-  it("нет диалога → создаёт ai-mode, created:true", async () => {
-    const { conversations, created } = repo(undefined);
-    const res = await resolveConversation({ contactId: 1, channelKind: "telegram_bot", conversations, nowEpoch: 111 });
-    expect(res.created).toBe(true);
-    expect(created[0]).toMatchObject({ contactId: 1, mode: "ai", source: "bot", nowEpoch: 111 });
-  });
+	it("нет диалога → создаёт ai-mode, created:true", async () => {
+		const { conversations, created } = repo(undefined);
+		const res = await resolveConversation({
+			contactId: 1,
+			channelId: 10,
+			channelKind: "telegram_bot",
+			conversations,
+			nowEpoch: 111,
+		});
+		expect(res.created).toBe(true);
+		expect(created[0]).toMatchObject({
+			contactId: 1,
+			channelId: 10,
+			mode: "ai",
+			source: "bot",
+			nowEpoch: 111,
+		});
+	});
 
-  it("маппинг kind → source", async () => {
-    const cases: Array<[string, string]> = [
-      ["telegram_bot", "bot"],
-      ["telegram_userbot", "userbot"],
-      ["whatsapp", "bot"], // fallback
-      ["web", "bot"], // fallback
-    ];
-    for (const [kind, source] of cases) {
-      const { conversations, created } = repo(undefined);
-      await resolveConversation({ contactId: 1, channelKind: kind, conversations, nowEpoch: 0 });
-      expect(created[0]!.source).toBe(source);
-    }
-  });
+	it("маппинг kind → source", async () => {
+		const cases: Array<[string, string]> = [
+			["telegram_bot", "bot"],
+			["telegram_userbot", "userbot"],
+			["whatsapp", "bot"], // fallback
+			["web", "bot"], // fallback
+		];
+		for (const [kind, source] of cases) {
+			const { conversations, created } = repo(undefined);
+			await resolveConversation({
+				contactId: 1,
+				channelId: 10,
+				channelKind: kind,
+				conversations,
+				nowEpoch: 0,
+			});
+			expect(created[0]?.source).toBe(source);
+		}
+	});
+
+	it("channelId separates non-telegram conversations even when legacy source is bot", async () => {
+		const { conversations, created } = repo(undefined);
+		const whatsapp = await resolveConversation({
+			contactId: 1,
+			channelId: 20,
+			channelKind: "whatsapp",
+			conversations,
+			nowEpoch: 10,
+		});
+		const web = await resolveConversation({
+			contactId: 1,
+			channelId: 30,
+			channelKind: "web",
+			conversations,
+			nowEpoch: 20,
+		});
+		const whatsappAgain = await resolveConversation({
+			contactId: 1,
+			channelId: 20,
+			channelKind: "whatsapp",
+			conversations,
+			nowEpoch: 30,
+		});
+
+		expect(whatsapp.created).toBe(true);
+		expect(web.created).toBe(true);
+		expect(whatsappAgain.created).toBe(false);
+		expect(whatsappAgain.conversation.id).toBe(whatsapp.conversation.id);
+		expect(web.conversation.id).not.toBe(whatsapp.conversation.id);
+		expect(created).toHaveLength(2);
+		expect(created.map((row) => row.channelId)).toEqual([20, 30]);
+		expect(created.every((row) => row.source === "bot")).toBe(true);
+	});
+
+	it("without channelId keeps legacy source lookup", async () => {
+		const { conversations, created } = repo({
+			id: 7,
+			userId: 1,
+			channelId: null,
+			source: "bot",
+		});
+		const res = await resolveConversation({
+			contactId: 1,
+			channelKind: "whatsapp",
+			conversations,
+			nowEpoch: 0,
+		});
+		expect(res.created).toBe(false);
+		expect(res.conversation.id).toBe(7);
+		expect(created).toHaveLength(0);
+	});
+
+	it("legacy source lookup ignores channel-specific rows", async () => {
+		const { conversations, created } = repo({
+			id: 7,
+			userId: 1,
+			channelId: 20,
+			source: "bot",
+		});
+		const res = await resolveConversation({
+			contactId: 1,
+			channelKind: "whatsapp",
+			conversations,
+			nowEpoch: 0,
+		});
+
+		expect(res.created).toBe(true);
+		expect(res.conversation.id).not.toBe(7);
+		expect(created[0]).toMatchObject({
+			contactId: 1,
+			channelId: null,
+			source: "bot",
+		});
+	});
 });
