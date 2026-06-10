@@ -1,6 +1,7 @@
 import {
   CheckCircle2Icon,
   ClipboardListIcon,
+  PowerIcon,
   RefreshCwIcon,
   SendIcon,
   UserPlusIcon,
@@ -9,11 +10,13 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
+  ApiError,
   type ProviderOrderDetail,
   type ProviderOrderListItem,
   type ProviderOrderProviderOption,
   type ProviderOrderStatus,
   type ProviderRequestStatus,
+  type ProviderRelayOps,
   saas,
 } from "@/api/saas";
 import { PageHeader } from "@/components/page-header";
@@ -36,6 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
@@ -110,17 +114,31 @@ function providerLabel(provider: ProviderOrderProviderOption): string {
   return [provider.name, service?.name, area].filter(Boolean).join(" · ");
 }
 
+function relaySourceLabel(source: ProviderRelayOps["settings"]["source"]): string {
+  return source === "flag" ? "tenant flag" : "default";
+}
+
+function actionErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.errorCode === "provider_relay_disabled") {
+    return "Provider relay выключен. Включите его в блоке «Provider relay» выше.";
+  }
+  return err instanceof Error ? err.message : "Действие не выполнено";
+}
+
 export function SaasProviderOrders() {
   const [orders, setOrders] = useState<ProviderOrderListItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<ProviderOrderDetail | null>(null);
   const [providers, setProviders] = useState<ProviderOrderProviderOption[]>([]);
+  const [ops, setOps] = useState<ProviderRelayOps | null>(null);
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [providerMessage, setProviderMessage] = useState("");
   const [offerText, setOfferText] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [opsLoading, setOpsLoading] = useState(true);
+  const [opsUpdating, setOpsUpdating] = useState(false);
   const [action, setAction] = useState<string | null>(null);
 
   const selectedOrder = useMemo(
@@ -138,6 +156,18 @@ export function SaasProviderOrders() {
       toast.error(err instanceof Error ? err.message : "Не удалось загрузить заказы");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const loadOps = useCallback(async () => {
+    setOpsLoading(true);
+    try {
+      setOps(await saas.getProviderOrderOps());
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось загрузить rollout status");
+      setOps(null);
+    } finally {
+      setOpsLoading(false);
     }
   }, []);
 
@@ -162,11 +192,15 @@ export function SaasProviderOrders() {
   }, [loadOrders]);
 
   useEffect(() => {
+    void loadOps();
+  }, [loadOps]);
+
+  useEffect(() => {
     if (selectedId) void loadDetail(selectedId);
   }, [selectedId, loadDetail]);
 
   async function refreshCurrent() {
-    await loadOrders();
+    await Promise.all([loadOrders(), loadOps()]);
     if (selectedId) await loadDetail(selectedId);
   }
 
@@ -176,9 +210,47 @@ export function SaasProviderOrders() {
       await fn();
       await refreshCurrent();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Действие не выполнено");
+      if (err instanceof ApiError && err.errorCode === "provider_relay_disabled") {
+        void loadOps();
+      }
+      toast.error(actionErrorMessage(err));
     } finally {
       setAction(null);
+    }
+  }
+
+  async function toggleProviderRelay(enabled: boolean) {
+    setOpsUpdating(true);
+    try {
+      const res = await saas.updateProviderOrderOpsSettings(enabled);
+      setOps((current) =>
+        current
+          ? { ...current, settings: res.settings }
+          : {
+              settings: res.settings,
+              metrics: {
+                generatedAt: 0,
+                ordersCreated: 0,
+                ordersByStatus: {},
+                providerRequestsSent: 0,
+                providerRequestsByStatus: {},
+                providerResponseRatePct: null,
+                avgTimeToQuoteSec: null,
+                paidOrders: 0,
+                commissionAmountTotal: 0,
+                paidCommissionAmount: 0,
+                failuresByChannel: {},
+                failedDispatches: 0,
+                stuckOrders: { count: 0, items: [] },
+              },
+            },
+      );
+      toast.success(enabled ? "Provider relay включён" : "Provider relay выключен");
+      await refreshCurrent();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось обновить provider relay");
+    } finally {
+      setOpsUpdating(false);
     }
   }
 
@@ -187,6 +259,8 @@ export function SaasProviderOrders() {
   );
   const latestRequest = detail?.providerRequests[0] ?? null;
   const providerId = selectedProviderId ? Number(selectedProviderId) : null;
+  const relayDisabled = ops?.settings.enabled === false;
+  const relayActionsDisabled = relayDisabled || action !== null;
 
   return (
     <div className="space-y-6">
@@ -200,6 +274,56 @@ export function SaasProviderOrders() {
           </Button>
         }
       />
+
+      <Card className={cn(relayDisabled && "border-warning/50 bg-warning/5")}>
+        <CardHeader className="flex flex-row items-start justify-between gap-4">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <PowerIcon className="size-4 text-muted-foreground" />
+              Provider relay
+              {ops && (
+                <Badge variant={ops.settings.enabled ? "success" : "warning"}>
+                  {ops.settings.enabled ? "включён" : "выключен"}
+                </Badge>
+              )}
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Управляет отправкой запросов провайдерам, офферами клиентам и статусными
+              переходами брокерских заказов.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {opsLoading ? "загрузка" : ops?.settings.enabled ? "on" : "off"}
+            </span>
+            <Switch
+              checked={ops?.settings.enabled ?? false}
+              disabled={opsLoading || opsUpdating}
+              onCheckedChange={(checked) => void toggleProviderRelay(checked)}
+              aria-label="Provider relay rollout"
+            />
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm sm:grid-cols-4">
+          <Metric label="Источник" value={ops ? relaySourceLabel(ops.settings.source) : "—"} />
+          <Metric label="Запросов" value={String(ops?.metrics.providerRequestsSent ?? "—")} />
+          <Metric
+            label="Ответы"
+            value={
+              ops?.metrics.providerResponseRatePct !== null &&
+              ops?.metrics.providerResponseRatePct !== undefined
+                ? `${ops.metrics.providerResponseRatePct}%`
+                : "—"
+            }
+          />
+          <Metric label="Зависшие" value={String(ops?.metrics.stuckOrders.count ?? "—")} />
+          {relayDisabled && (
+            <div className="rounded-md border border-warning/50 bg-background px-3 py-2 text-xs text-muted-foreground sm:col-span-4">
+              Provider relay выключен: действия с заказами недоступны до включения rollout.
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(380px,0.9fr)]">
         <Card className="min-w-0">
@@ -345,7 +469,7 @@ export function SaasProviderOrders() {
                   <div className="grid gap-2 sm:grid-cols-2">
                     <Button
                       variant="outline"
-                      disabled={!providerId || action !== null}
+                      disabled={!providerId || relayActionsDisabled}
                       onClick={() =>
                         void runAction("assign", async () => {
                           if (!selectedId || !providerId) return;
@@ -358,7 +482,7 @@ export function SaasProviderOrders() {
                       Назначить
                     </Button>
                     <Button
-                      disabled={!selectedId || action !== null}
+                      disabled={!selectedId || relayActionsDisabled}
                       onClick={() =>
                         void runAction("send-provider", async () => {
                           if (!selectedId) return;
@@ -376,7 +500,7 @@ export function SaasProviderOrders() {
                     </Button>
                     <Button
                       variant="outline"
-                      disabled={!selectedId || !activeQuote || action !== null}
+                      disabled={!selectedId || !activeQuote || relayActionsDisabled}
                       onClick={() =>
                         void runAction("approve", async () => {
                           if (!selectedId || !activeQuote) return;
@@ -390,7 +514,7 @@ export function SaasProviderOrders() {
                     </Button>
                     <Button
                       variant="outline"
-                      disabled={!selectedId || !activeQuote || action !== null}
+                      disabled={!selectedId || !activeQuote || relayActionsDisabled}
                       onClick={() =>
                         void runAction("offer", async () => {
                           if (!selectedId) return;
@@ -407,7 +531,7 @@ export function SaasProviderOrders() {
                     </Button>
                     <Button
                       variant="outline"
-                      disabled={!selectedId || action !== null}
+                      disabled={!selectedId || relayActionsDisabled}
                       onClick={() =>
                         void runAction("fulfilled", async () => {
                           if (!selectedId) return;
@@ -422,7 +546,7 @@ export function SaasProviderOrders() {
                     <Button
                       variant="outline"
                       className="text-destructive hover:text-destructive"
-                      disabled={!selectedId || action !== null}
+                      disabled={!selectedId || relayActionsDisabled}
                       onClick={() =>
                         void runAction("cancel", async () => {
                           if (!selectedId) return;
