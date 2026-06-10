@@ -326,7 +326,13 @@ export function SaasTestBot() {
       }
       if (abortRef.current) break;
 
-      await sendMessage({ text: step.text, hint: step.hint });
+      await sendMessage({
+        text: step.text ?? "",
+        mediaUrl: step.mediaUrl,
+        mediaType: step.mediaType,
+        caption: step.caption,
+        hint: step.hint,
+      });
 
       // Wait for bot response before next step
       await new Promise((r) => setTimeout(r, 800));
@@ -423,9 +429,9 @@ export function SaasTestBot() {
               <span
                 key={i}
                 className="rounded-full bg-muted border px-2 py-0.5 text-[10px] text-muted-foreground"
-                title={step.text}
+                title={step.text ?? step.caption ?? step.mediaUrl}
               >
-                {i + 1}. {step.hint ?? step.text.slice(0, 20)}
+                {i + 1}. {step.hint ?? (step.text ?? step.caption ?? "[медиа]").slice(0, 20)}
               </span>
             ))}
           </div>

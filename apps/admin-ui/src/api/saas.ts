@@ -2029,7 +2029,11 @@ export interface StageWebhook {
 // ── Bot Tester ─────────────────────────────────────────────────────────────
 
 export interface TestScenarioStep {
-  text: string;
+  text?: string;
+  /** `asset:<file>` — встроенный тестовый файл на стороне API, либо http(s)-URL. */
+  mediaUrl?: string;
+  mediaType?: "photo" | "video";
+  caption?: string;
   hint?: string;
 }
 
