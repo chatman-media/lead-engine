@@ -232,9 +232,9 @@ jobs:
           host: ${{ secrets.DEPLOY_SSH_HOST }}
           username: ${{ secrets.DEPLOY_SSH_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          # deploy.sh внутри сам с `set -euo pipefail`; script_stop ловит обрыв
-          # ещё на `cd`, если каталога нет. Любой ненулевой код — красный job.
-          script_stop: true
+          # deploy.sh внутри сам с `set -euo pipefail`; ssh-action@v1 всегда
+          # останавливает скрипт на первой ошибке (бывший script_stop теперь
+          # встроен). Любой ненулевой код — красный job.
           # install + миграции + сборка ui/landing/widget/пакетов бывает долгой.
           command_timeout: 18m
           script: |
@@ -277,7 +277,6 @@ jobs:
           host: ${{ secrets.DEPLOY_SSH_HOST }}
           username: ${{ secrets.DEPLOY_SSH_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script_stop: true
           command_timeout: 18m
           script: |
             export BUN_INSTALL="$HOME/.bun"
